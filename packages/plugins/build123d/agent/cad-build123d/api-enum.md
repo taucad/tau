@@ -11,7 +11,9 @@ IntEnum
 // Instances are replaced with an appropriate value in Enum class suites
 auto
 
+  // enum.auto.__init__ (constructor)
   auto(value = _auto_null)
 
 // Class decorator for enumerations ensuring unique member values
+// enum.unique (function)
 unique(enumeration)

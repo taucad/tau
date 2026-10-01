@@ -3,6 +3,7 @@
 52 top-level symbols. Signatures are verbatim kcl.
 
 // Start a new 2-dimensional sketch on a specific plane or face
+// std.sketch.startSketchOn (function)
 startSketchOn(
   @planeOrSolid: Solid | Plane,
   face?: TaggedFace,
@@ -17,6 +18,7 @@ startSketchOn(
 //   normalOffset: Offset the sketch plane along its normal by the given amount
 
 // Start a new profile at a given point
+// std.sketch.startProfile (function)
 startProfile(
   @startProfileOn: Plane | Face,
   at: Point2d,
@@ -27,6 +29,7 @@ startProfile(
 //   tag: Tag this first starting point
 
 // Sketch a rectangle
+// std.sketch.rectangle (function)
 rectangle(
   @sketchOrSurface: Sketch | Plane | Face,
   width: number(Length),
@@ -41,6 +44,7 @@ rectangle(
 //   corner: The corner of the rectangle
 
 // Construct a 2-dimensional circle, of the specified radius, centered at the provided (x, y) origin point
+// std.sketch.circle (function)
 circle(
   @sketchOrSurface: Sketch | Plane | Face,
   center?: Point2d,
@@ -56,6 +60,7 @@ circle(
 
 // Construct a 2-dimensional ellipse, of the specified major/minor radius, centered at the provided (x, y) point
 // EXPERIMENTAL
+// std.sketch.ellipse (function)
 ellipse(
   @sketchOrSurface: Sketch | Plane | Face,
   center: Point2d,
@@ -72,6 +77,7 @@ ellipse(
 //   tag: Create a new tag which refers to this ellipse
 
 // Extend a 2-dimensional sketch through a third dimension in order to create new 3-dimensional volume, or if extruded into an existing volume, cut into an existing solid
+// std.sketch.extrude (function)
 extrude(
   @sketches: [Sketch; 1+],
   length?: number(Length),
@@ -98,6 +104,7 @@ extrude(
 //   method: The method used during extrusion, either `NEW` or `MERGE`
 
 // Rotate a sketch around some provided axis, creating a solid from its extent
+// std.sketch.revolve (function)
 revolve(
   @sketches: [Sketch; 1+],
   axis: Axis2d | Edge,
@@ -118,6 +125,7 @@ revolve(
 //   tagEnd: A named tag for the face at the end of the revolve
 
 // Just like `patternTransform`, but works on 2D sketches not 3D solids
+// std.sketch.patternTransform2d (function)
 patternTransform2d(
   @sketches: [Sketch; 1+],
   instances: number(_),
@@ -130,22 +138,27 @@ patternTransform2d(
 //   useOriginal: If the target was sketched on an extrusion, setting this will use the original sketch as the target, not the entire joined solid
 
 // Get the opposite edge to the edge given
+// std.sketch.getOppositeEdge (function)
 getOppositeEdge(@edge: TaggedEdge): Edge
 //   @edge: The tag of the edge you want to find the opposite edge of
 
 // Get the next adjacent edge to the edge given
+// std.sketch.getNextAdjacentEdge (function)
 getNextAdjacentEdge(@edge: TaggedEdge): Edge
 //   @edge: The tag of the edge you want to find the next adjacent edge of
 
 // Get the previous adjacent edge to the edge given
+// std.sketch.getPreviousAdjacentEdge (function)
 getPreviousAdjacentEdge(@edge: TaggedEdge): Edge
 //   @edge: The tag of the edge you want to find the previous adjacent edge of
 
 // Get the shared edge between two faces
+// std.sketch.getCommonEdge (function)
 getCommonEdge(faces: [TaggedFace; 2]): Edge
 //   faces: The tags of the faces you want to find the common edge between
 
 // Construct a circle derived from 3 points
+// std.sketch.circleThreePoint (function)
 circleThreePoint(
   @sketchOrSurface: Sketch | Plane | Face,
   p1: Point2d,
@@ -160,6 +173,7 @@ circleThreePoint(
 //   tag: Identifier for the circle to reference elsewhere
 
 // Create a regular polygon with the specified number of sides that is either inscribed or circumscribed around a circle of the specified radius
+// std.sketch.polygon (function)
 polygon(
   @sketchOrSurface: Sketch | Plane | Face,
   radius: number(Length),
@@ -174,6 +188,7 @@ polygon(
 //   inscribed: Whether the polygon is inscribed (true, the default) or circumscribed (false) about a circle with the specified radius
 
 // Extrude a sketch along a path
+// std.sketch.sweep (function)
 sweep(
   @sketches: [Sketch; 1+],
   path: Sketch | Helix,
@@ -192,6 +207,7 @@ sweep(
 //   tagEnd: A named tag for the face at the end of the sweep
 
 // Create a 3D surface or solid by interpolating between two or more sketches
+// std.sketch.loft (function)
 loft(
   @sketches: [Sketch; 2+],
   vDegree?: number(_),
@@ -210,6 +226,7 @@ loft(
 //   tagEnd: A named tag for the face at the end of the loft
 
 // Repeat a 2-dimensional sketch along some dimension, with a dynamic amount of distance between each repetition, some specified number of times
+// std.sketch.patternLinear2d (function)
 patternLinear2d(
   @sketches: [Sketch; 1+],
   instances: number(_),
@@ -224,6 +241,7 @@ patternLinear2d(
 //   useOriginal: If the target was sketched on an extrusion, setting this will use the original sketch as the target, not the entire joined solid
 
 // Repeat a 2-dimensional sketch some number of times along a partial or complete circle some specified number of times
+// std.sketch.patternCircular2d (function)
 patternCircular2d(
   @sketches: [Sketch; 1+],
   instances: number(_),
@@ -240,62 +258,77 @@ patternCircular2d(
 //   useOriginal: If the target was sketched on an extrusion, setting this will use the original sketch as the target, not the entire joined solid
 
 // Compute the ending point of the provided line segment
+// std.sketch.segEnd (function)
 segEnd(@tag: TaggedEdge): Point2d
 //   @tag: The line segment being queried by its tag
 
 // Compute the ending point of the provided line segment along the 'x' axis
+// std.sketch.segEndX (function)
 segEndX(@tag: TaggedEdge): number(Length)
 //   @tag: The line segment being queried by its tag
 
 // Compute the ending point of the provided line segment along the 'y' axis
+// std.sketch.segEndY (function)
 segEndY(@tag: TaggedEdge): number(Length)
 //   @tag: The line segment being queried by its tag
 
 // Compute the starting point of the provided line segment
+// std.sketch.segStart (function)
 segStart(@tag: TaggedEdge): Point2d
 //   @tag: The line segment being queried by its tag
 
 // Compute the starting point of the provided line segment along the 'x' axis
+// std.sketch.segStartX (function)
 segStartX(@tag: TaggedEdge): number(Length)
 //   @tag: The line segment being queried by its tag
 
 // Compute the starting point of the provided line segment along the 'y' axis
+// std.sketch.segStartY (function)
 segStartY(@tag: TaggedEdge): number(Length)
 //   @tag: The line segment being queried by its tag
 
 // Extract the 'x' axis value of the last line segment in the provided 2-d sketch
+// std.sketch.lastSegX (function)
 lastSegX(@sketch: Sketch): number(Length)
 //   @sketch: The sketch whose line segment is being queried
 
 // Extract the 'y' axis value of the last line segment in the provided 2-d sketch
+// std.sketch.lastSegY (function)
 lastSegY(@sketch: Sketch): number(Length)
 //   @sketch: The sketch whose line segment is being queried
 
 // Compute the length of the provided line segment
+// std.sketch.segLen (function)
 segLen(@tag: TaggedEdge): number(Length)
 //   @tag: The line segment being queried by its tag
 
 // Compute the angle (in degrees) of the provided line segment
+// std.sketch.segAng (function)
 segAng(@tag: TaggedEdge): number(Angle)
 //   @tag: The line segment being queried by its tag
 
 // Returns the angle coming out of the end of the segment in degrees
+// std.sketch.tangentToEnd (function)
 tangentToEnd(@tag: TaggedEdge): number(Angle)
 //   @tag: The line segment being queried by its tag
 
 // Extract the provided 2-dimensional sketch's profile's origin value
+// std.sketch.profileStart (function)
 profileStart(@profile: Sketch): Point2d
 //   @profile: Profile whose start is being used
 
 // Extract the provided 2-dimensional sketch's profile's origin's 'x' value
+// std.sketch.profileStartX (function)
 profileStartX(@profile: Sketch): number(Length)
 //   @profile: Profile whose start is being used
 
 // Extract the provided 2-dimensional sketch's profile's origin's 'y' value
+// std.sketch.profileStartY (function)
 profileStartY(@profile: Sketch): number(Length)
 //   @profile: Profile whose start is being used
 
 // Extend the current sketch with a new involute circular curve
+// std.sketch.involuteCircular (function)
 involuteCircular(
   @sketch: Sketch,
   angle: number(Angle),
@@ -316,6 +349,7 @@ involuteCircular(
 //   tag: Create a new tag which refers to this line
 
 // Extend the current sketch with a new straight line
+// std.sketch.line (function)
 line(
   @sketch: Sketch,
   endAbsolute?: Point2d,
@@ -328,6 +362,7 @@ line(
 //   tag: Create a new tag which refers to this line
 
 // Draw a line relative to the current origin to a specified distance away from the current position along the 'x' axis
+// std.sketch.xLine (function)
 xLine(
   @sketch: Sketch,
   length?: number(Length),
@@ -340,6 +375,7 @@ xLine(
 //   tag: Create a new tag which refers to this line
 
 // Draw a line relative to the current origin to a specified distance away from the current position along the 'y' axis
+// std.sketch.yLine (function)
 yLine(
   @sketch: Sketch,
   length?: number(Length),
@@ -352,6 +388,7 @@ yLine(
 //   tag: Create a new tag which refers to this line
 
 // Draw a line segment relative to the current origin using the polar measure of some angle and distance
+// std.sketch.angledLine (function)
 angledLine(
   @sketch: Sketch,
   angle: number(Angle),
@@ -372,6 +409,7 @@ angledLine(
 //   tag: Create a new tag which refers to this line
 
 // Draw an angled line from the current origin, constructing a line segment such that the newly created line intersects the desired target line segment
+// std.sketch.angledLineThatIntersects (function)
 angledLineThatIntersects(
   @sketch: Sketch,
   angle: number(Angle),
@@ -386,6 +424,7 @@ angledLineThatIntersects(
 //   tag: Create a new tag which refers to this line
 
 // Construct a line segment from the current origin back to the profile's origin, ensuring the resulting 2-dimensional sketch is not open-ended
+// std.sketch.close (function)
 close(
   @sketch: Sketch,
   tag?: TagDecl,
@@ -394,6 +433,7 @@ close(
 //   tag: Create a new tag which refers to this line
 
 // Draw a curved line segment along an imaginary circle
+// std.sketch.arc (function)
 arc(
   @sketch: Sketch,
   angleStart?: number(Angle),
@@ -414,6 +454,7 @@ arc(
 //   tag: Create a new tag which refers to this arc
 
 // Starting at the current sketch's origin, draw a curved line segment along some part of an imaginary circle until it reaches the desired (x, y) coordinates
+// std.sketch.tangentialArc (function)
 tangentialArc(
   @sketch: Sketch,
   endAbsolute?: Point2d,
@@ -432,6 +473,7 @@ tangentialArc(
 //   tag: Create a new tag which refers to this arc
 
 // Draw a smooth, continuous, curved line segment from the current origin to the desired (x, y), using a number of control points to shape the curve's shape
+// std.sketch.bezierCurve (function)
 bezierCurve(
   @sketch: Sketch,
   control1?: Point2d,
@@ -452,6 +494,7 @@ bezierCurve(
 //   tag: Create a new tag which refers to this line
 
 // Use a 2-dimensional sketch to cut a hole in another 2-dimensional sketch
+// std.sketch.subtract2d (function)
 subtract2d(
   @sketch: Sketch,
   tool: [Sketch; 1+],
@@ -461,6 +504,7 @@ subtract2d(
 
 // Add a conic section to an existing sketch
 // EXPERIMENTAL
+// std.sketch.conic (function)
 conic(
   @sketch: Sketch,
   interiorAbsolute?: Point2d,
@@ -484,6 +528,7 @@ conic(
 
 // Add a parabolic segment to an existing sketch
 // EXPERIMENTAL
+// std.sketch.parabolic (function)
 parabolic(
   @sketch: Sketch,
   end: Point2d,
@@ -502,6 +547,7 @@ parabolic(
 //   tag: Create a new tag which refers to this segment
 
 // Calculate the point (x, y) on a parabola given x or y and the coefficients [a, b, c] of the parabola
+// std.sketch.parabolicPoint (function)
 parabolicPoint(
   coefficients: [number; 3],
   x?: number(Length),
@@ -513,6 +559,7 @@ parabolicPoint(
 
 // Add a hyperbolic section to an existing sketch
 // EXPERIMENTAL
+// std.sketch.hyperbolic (function)
 hyperbolic(
   @sketch: Sketch,
   semiMajor: number(Length),
@@ -533,6 +580,7 @@ hyperbolic(
 //   tag: Create a new tag which refers to this arc
 
 // Calculate the point (x, y) on a hyperbola given x or y and the semi major/minor values of the hyperbolic
+// std.sketch.hyperbolicPoint (function)
 hyperbolicPoint(
   semiMajor: number,
   semiMinor: number,
@@ -546,6 +594,7 @@ hyperbolicPoint(
 
 // Add an elliptic section to an existing sketch
 // EXPERIMENTAL
+// std.sketch.elliptic (function)
 elliptic(
   @sketch: Sketch,
   center: Point2d,
@@ -566,6 +615,7 @@ elliptic(
 //   tag: Create a new tag which refers to this arc
 
 // Calculate the point (x, y) on an ellipse given x or y and the center and major/minor radii of the ellipse
+// std.sketch.ellipticPoint (function)
 ellipticPoint(
   majorRadius: number,
   minorRadius: number,
@@ -578,6 +628,7 @@ ellipticPoint(
 //   y: The y value
 
 // Find the plane a face lies on
+// std.sketch.planeOf (function)
 planeOf(
   @solid: Solid,
   face: TaggedFace,

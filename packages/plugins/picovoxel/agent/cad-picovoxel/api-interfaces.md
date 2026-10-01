@@ -72,14 +72,17 @@ FromStlOptions: interface FromStlOptions
 
 Lattice: interface Lattice
 
+  // Lattice.addSphere (method)
   addSphere(options: {
       center: Vec3;
       radius: number;
     }): void;
 
+  // Lattice.addBeam (method)
   addBeam(options: AddBeamOptions): void;
 
   // Renders the lattice into a fresh voxel field
+  // Lattice.toVoxels (method)
   toVoxels(): Voxels;
 
   memUsage: number
@@ -88,8 +91,10 @@ Lattice: interface Lattice
   handle: bigint
 
   // Optional
+  // Lattice.dispose (method)
   dispose(): void;
 
+  // Lattice.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MemoryUsage: interface MemoryUsage
@@ -125,38 +130,47 @@ Mesh: interface Mesh
   triangleCount: number
 
   // Bounding box
+  // Mesh.bounds (method)
   bounds(): Bounds;
 
   // Enclosed volume (mm³) and surface area (mm²) from the triangles
+  // Mesh.measure (method)
   measure(): {
       volume: number;
       area: number;
     };
 
   // Pure transformed copy
+  // Mesh.transform (method)
   transform(options: TransformOptions): Mesh;
 
   // Pure mirrored copy across the plane through `point` with `normal`
+  // Mesh.mirror (method)
   mirror(options: {
       point: Vec3;
       normal: Vec3;
     }): Mesh;
 
   // Pure concatenation — no dedup, no boolean (as upstream Append documents)
+  // Mesh.merged (method)
   merged(other: Mesh): Mesh;
 
   // Voxelizes the (closed) mesh
+  // Mesh.toVoxels (method)
   toVoxels(): Voxels;
 
   // Offset in ALL directions from a not-necessarily-closed mesh
+  // Mesh.shellVoxels (method)
   shellVoxels(options: {
       radius: number;
     }): Voxels;
 
   // Binary STL bytes with the UNITS= header convention
+  // Mesh.toStl (method)
   toStl(options?: ToStlOptions): Uint8Array;
 
   // GLB container (positions + indices)
+  // Mesh.toGlb (method)
   toGlb(options?: {
       acceptLane?: 'fast';
     }): Uint8Array;
@@ -168,8 +182,10 @@ Mesh: interface Mesh
   handle: bigint
 
   // Optional
+  // Mesh.dispose (method)
   dispose(): void;
 
+  // Mesh.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 Metadata: interface Metadata
@@ -178,25 +194,32 @@ Metadata: interface Metadata
   count: number
 
   // Every entry name, index order
+  // Metadata.names (method)
   names(): string[];
 
+  // Metadata.typeOf (method)
   typeOf(name: string): MetadataType;
 
   // Typed read
+  // Metadata.get (method)
   get(name: string): MetadataValue | undefined;
 
   // Reserved names (`PicoGK.*`, `PicoVoxel.*`, `class`, `name`, `file_*`) throw
+  // Metadata.set (method)
   set(name: string, value: MetadataValue): void;
 
   // The reserved-name guard applies here too
+  // Metadata.remove (method)
   remove(name: string): void;
 
   // Raw ABI handle — escape hatch
   handle: bigint
 
   // Optional
+  // Metadata.dispose (method)
   dispose(): void;
 
+  // Metadata.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 Pico: interface Pico
@@ -213,42 +236,55 @@ Pico: interface Pico
   buildInfo: string
 
   // Convert voxel-index coordinates to world millimetres
+  // Pico.voxelToMm (method)
   voxelToMm(voxel: Vec3): Vec3;
 
   // Convert world millimetres to integer voxel indices (upstream `MmToVoxels` converts the wrong way)
+  // Pico.mmToVoxel (method)
   mmToVoxel(mm: Vec3): Vec3;
 
+  // Pico.createVoxels (method)
   createVoxels(options: CreateVoxelsOptions): Voxels;
 
   // Builds a mesh from vertex/triangle data via the bulk imports (two crossings)
+  // Pico.createMesh (method)
   createMesh(options: {
       vertices: ArrayLike<number>;
       triangles: ArrayLike<number>;
     }): Mesh;
 
+  // Pico.createLattice (method)
   createLattice(): Lattice;
 
+  // Pico.createPolyLine (method)
   createPolyLine(options?: {
       color?: Color;
     }): PolyLine;
 
+  // Pico.createScalarField (method)
   createScalarField(options?: CreateScalarFieldOptions): ScalarField;
 
+  // Pico.createVectorField (method)
   createVectorField(options?: CreateVectorFieldOptions): VectorField;
 
   // An empty writable .vdb container
+  // Pico.createVdb (method)
   createVdb(): VdbFile;
 
   // Opens .vdb bytes as a container for field-level access
+  // Pico.openVdb (method)
   openVdb(bytes: Uint8Array): VdbFile;
 
   // The voxel-size handshake — the voxel size recorded in .vdb bytes (mm), 0 when the file carries no PicoGK metadata
+  // Pico.vdbVoxelSize (method)
   vdbVoxelSize(bytes: Uint8Array): number;
 
   // The first GRID_LEVEL_SET field wins
+  // Pico.voxelsFromVdb (method)
   voxelsFromVdb(bytes: Uint8Array): Voxels;
 
   // Binary STL bytes to a mesh (UNITS= header honoured on 'auto')
+  // Pico.meshFromStl (method)
   meshFromStl(bytes: Uint8Array, options?: FromStlOptions): Mesh;
 
   // PicoGK-side memory usage in bytes, per object type
@@ -264,19 +300,24 @@ Pico: interface Pico
   handle: bigint
 
   // Deterministic teardown
+  // Pico.dispose (method)
   dispose(): void;
 
+  // Pico.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 // One instantiated wasm module — plus, on `picovoxel/multi`, its warm pthread pool — that any number of sessions share
 PicoRuntime: interface PicoRuntime
 
   // Opens a session on this runtime
+  // PicoRuntime.createPico (method)
   createPico(options?: CreatePicoSessionOptions): Promise<Pico>;
 
   // Disposes every open session, then terminates the pthread pool
+  // PicoRuntime.dispose (method)
   dispose(): void;
 
+  // PicoRuntime.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 // The Emscripten Module overrides picovoxel forwards to its glue
@@ -297,9 +338,11 @@ PicoWasmOverrides: interface PicoWasmOverrides
 PolyLine: interface PolyLine
 
   // Appends one vertex
+  // PolyLine.addVertex (method)
   addVertex(position: Vec3): number;
 
   // Appends many vertices
+  // PolyLine.addVertices (method)
   addVertices(positions: readonly Vec3[]): void;
 
   // All vertices, index order
@@ -310,6 +353,7 @@ PolyLine: interface PolyLine
   // RGBA, each 0..1, as the line was created
   color: readonly [number, number, number, number]
 
+  // PolyLine.bounds (method)
   bounds(): {
       min: Vec3;
       max: Vec3;
@@ -321,40 +365,51 @@ PolyLine: interface PolyLine
   handle: bigint
 
   // Optional
+  // PolyLine.dispose (method)
   dispose(): void;
 
+  // PolyLine.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 ScalarField: interface ScalarField extends FieldBase
 
   // Sets (and activates) the value at a position in mm
+  // ScalarField.set (method)
   set(position: Vec3, value: number): void;
 
   // Value at the position, or null when the position holds no value
+  // ScalarField.get (method)
   get(position: Vec3): number | null;
 
+  // ScalarField.remove (method)
   remove(position: Vec3): void;
 
   // Visits every active value
+  // ScalarField.traverse (method)
   traverse(callback: (x: number, y: number, z: number, value: number) => void): void;
 
   // Field extent in discrete voxel units
+  // ScalarField.dimensions (method)
   dimensions(): {
       origin: Vec3;
       size: Vec3;
     };
 
   // One Z slice of raw field values
+  // ScalarField.getSlice (method)
   getSlice(options: {
       index: number;
     }): ScalarFieldSlice;
 
   // Bounding box of active voxels in mm (dims × voxel size, as C# does)
+  // ScalarField.bounds (method)
   bounds(): Bounds;
 
   // Stored values are voxel-unit signed distance
+  // ScalarField.signedDistanceAt (method)
   signedDistanceAt(position: Vec3): number | null;
 
+  // ScalarField.clone (method)
   clone(): ScalarField;
 
 ScalarFieldSlice: interface ScalarFieldSlice
@@ -411,21 +466,27 @@ VdbFile: interface VdbFile
   fieldCount: number
 
   // Name + type of every field, index order
+  // VdbFile.fields (method)
   fields(): Array<{
       name: string;
       type: VdbFieldType;
     }>;
 
   // Adds a field under `name`
+  // VdbFile.add (method)
   add(field: Voxels | ScalarField | VectorField, name?: string): number;
 
+  // VdbFile.getVoxels (method)
   getVoxels(indexOrName: number | string): Voxels;
 
+  // VdbFile.getScalarField (method)
   getScalarField(indexOrName: number | string): ScalarField;
 
+  // VdbFile.getVectorField (method)
   getVectorField(indexOrName: number | string): VectorField;
 
   // Serialises the container to .vdb bytes
+  // VdbFile.toBytes (method)
   toBytes(options?: {
       acceptLane?: 'fast';
     }): Uint8Array;
@@ -434,21 +495,28 @@ VdbFile: interface VdbFile
   handle: bigint
 
   // Optional
+  // VdbFile.dispose (method)
   dispose(): void;
 
+  // VdbFile.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 VectorField: interface VectorField extends FieldBase
 
+  // VectorField.set (method)
   set(position: Vec3, value: Vec3): void;
 
+  // VectorField.get (method)
   get(position: Vec3): Vec3 | null;
 
+  // VectorField.remove (method)
   remove(position: Vec3): void;
 
   // Visits every active value
+  // VectorField.traverse (method)
   traverse(callback: (x: number, y: number, z: number, vx: number, vy: number, vz: number) => void): void;
 
+  // VectorField.clone (method)
   clone(): VectorField;
 
 VoxelSlice: interface VoxelSlice
@@ -466,30 +534,37 @@ VoxelSlice: interface VoxelSlice
 Voxels: interface Voxels
 
   // An independent copy of this field
+  // Voxels.clone (method)
   clone(): Voxels;
 
   // Pure union
+  // Voxels.union (method)
   union(...others: Voxels[]): Voxels;
 
   // Pure subtraction of every operand
+  // Voxels.subtract (method)
   subtract(...others: Voxels[]): Voxels;
 
   // Pure intersection
+  // Voxels.intersect (method)
   intersect(other: Voxels): Voxels;
 
   // Content equality
+  // Voxels.equals (method)
   equals(other: Voxels): boolean;
 
   // THE emptiness oracle
   isEmpty: boolean
 
   // Pure surface offset
+  // Voxels.offset (method)
   offset(options: {
       distance: number;
       fastRenorm?: boolean;
     }): Voxels;
 
   // Two offsets in sequence (closing/opening when signs differ)
+  // Voxels.doubleOffset (method)
   doubleOffset(options: {
       first: number;
       second: number;
@@ -497,12 +572,14 @@ Voxels: interface Voxels
     }): Voxels;
 
   // In, 2× out, in again
+  // Voxels.smoothen (method)
   smoothen(options: {
       distance: number;
       fastRenorm?: boolean;
     }): Voxels;
 
   // Over-offset composition
+  // Voxels.fillet (method)
   fillet(options: {
       rounding: number;
       finalSurfaceDistance?: number;
@@ -510,24 +587,30 @@ Voxels: interface Voxels
     }): Voxels;
 
   // Shell
+  // Voxels.shell (method)
   shell(options: ShellOptions): Voxels;
 
   // Everything outside the box is trimmed away (cube-mesh intersect, as C#)
+  // Voxels.trim (method)
   trim(bounds: Bounds): Voxels;
 
   // Projects the slice at startZ through endZ (mm)
+  // Voxels.projectZSlice (method)
   projectZSlice(options: {
       startZ: number;
       endZ: number;
     }): Voxels;
 
   // Pure
+  // Voxels.withMesh (method)
   withMesh(mesh: Mesh): Voxels;
 
   // Pure
+  // Voxels.withLattice (method)
   withLattice(lattice: Lattice): Voxels;
 
   // Pure
+  // Voxels.withImplicit (method)
   withImplicit(options: {
       sdf: SdfFunction | SdfExpression;
       boundsMin: Vec3;
@@ -535,6 +618,7 @@ Voxels: interface Voxels
     }): Voxels;
 
   // The gyroid-in-sphere idiom
+  // Voxels.maskedByImplicit (method)
   maskedByImplicit(options: {
       sdf: SdfFunction | SdfExpression;
     }): Voxels;
@@ -543,6 +627,7 @@ Voxels: interface Voxels
   volume: number
 
   // Volume (mm³), surface area (mm²) and bounds free of boolean residue, from one native traversal of the mesh → fresh-voxels round-trip (src/pico-props.cpp)
+  // Voxels.properties (method)
   properties(): {
       volume: number;
       area: number;
@@ -550,6 +635,7 @@ Voxels: interface Voxels
     };
 
   // The canonical grid hash
+  // Voxels.gridHash (method)
   gridHash(): {
       hash: string;
       activeVoxels: number;
@@ -558,24 +644,31 @@ Voxels: interface Voxels
     };
 
   // Oracle test tooling
+  // Voxels.densifyInterior (method)
   densifyInterior(): void;
 
   // Bounding box via the intermediate mesh (the only accurate way)
+  // Voxels.bounds (method)
   bounds(): Bounds;
 
   // True if the point is at or below the surface
+  // Voxels.isInside (method)
   isInside(position: Vec3): boolean;
 
   // Surface normal at a point on the surface (use after closest/raycast)
+  // Voxels.surfaceNormal (method)
   surfaceNormal(surfacePoint: Vec3): Vec3;
 
   // Closest surface point, or null when the field is empty
+  // Voxels.closestPointOnSurface (method)
   closestPointOnSurface(position: Vec3): Vec3 | null;
 
   // Ray-surface intersection, or null on a miss
+  // Voxels.raycastToSurface (method)
   raycastToSurface(position: Vec3, direction: Vec3): Vec3 | null;
 
   // N rays over ONE cached intersector and one ABI crossing
+  // Voxels.raycastBatch (method)
   raycastBatch(options: {
       origins: ArrayLike<number>;
       directions: ArrayLike<number>;
@@ -585,6 +678,7 @@ Voxels: interface Voxels
     };
 
   // N closest-surface-point queries over one index build (openvdb ClosestSurfacePoint)
+  // Voxels.closestPointsOnSurface (method)
   closestPointsOnSurface(options: {
       points: ArrayLike<number>;
     }): {
@@ -593,6 +687,7 @@ Voxels: interface Voxels
     };
 
   // Field extent in discrete voxel units
+  // Voxels.dimensions (method)
   dimensions(): {
       origin: Vec3;
       size: Vec3;
@@ -602,13 +697,17 @@ Voxels: interface Voxels
   sliceCount: number
 
   // Real-world origin of slice `index` in mm
+  // Voxels.sliceOrigin (method)
   sliceOrigin(index?: number): Vec3;
 
   // One slice image
+  // Voxels.getSlice (method)
   getSlice(options: GetSliceOptions): VoxelSlice;
 
+  // Voxels.toMesh (method)
   toMesh(): Mesh;
 
+  // Voxels.toScalarField (method)
   toScalarField(): ScalarField;
 
   metadata: Metadata
@@ -622,51 +721,64 @@ Voxels: interface Voxels
   handle: bigint
 
   // Optional
+  // Voxels.dispose (method)
   dispose(): void;
 
+  // Voxels.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 // Beam thickness for a given point in space (C# `IBeamThickness`)
 BeamThickness: interface BeamThickness
 
+  // BeamThickness.beamThickness (method)
   beamThickness(pt: Vec3): number;
 
+  // BeamThickness.updateCell (method)
   updateCell(cell: UnitCell): void;
 
+  // BeamThickness.setBoundingVoxels (method)
   setBoundingVoxels(voxels: Voxels): void;
 
 // A collection of unit cells (C# `ICellArray`)
 CellArray: interface CellArray
 
+  // CellArray.unitCells (method)
   unitCells(): readonly UnitCell[];
 
 // Coordinate transformation ahead of a raw TPMS lookup (C# `ICoordinateTrafo`)
 CoordinateTrafo: interface CoordinateTrafo
 
+  // CoordinateTrafo.apply (method)
   apply(pt: Vec3): Vec3;
 
 // Beam-connecting logic for one unit cell (C# `ILatticeType`)
 LatticeType: interface LatticeType
 
+  // LatticeType.addCell (method)
   addCell(lattice: Lattice, cell: UnitCell, beamThickness: BeamThickness, subSamples?: number): void;
 
 // Raw TPMS surface equation (C# `IRawTPMSPattern`)
 RawTpmsPattern: interface RawTpmsPattern
 
+  // RawTpmsPattern.signedDistance (method)
   signedDistance(x: number, y: number, z: number): number;
 
 // Turns a raw signed distance + wall thickness into the final field (C# `ISplittingLogic`)
 SplittingLogic: interface SplittingLogic
 
+  // SplittingLogic.advancedSignedDistance (method)
   advancedSignedDistance(signedDistance: number, wallThickness: number): number;
 
 // A lattice unit cell (C# `IUnitCell`, preview dropped)
 UnitCell: interface UnitCell
 
+  // UnitCell.cornerPoints (method)
   cornerPoints(): readonly Vec3[];
 
+  // UnitCell.cellCentre (method)
   cellCentre(): Vec3;
 
+  // UnitCell.cellBounding (method)
   cellBounding(): Bounds;
 
 // A cylindrical coordinate (C# `Cylindrical`)
@@ -720,6 +832,7 @@ Implicit: interface Implicit
 // C# `ILatticeBaseShape`
 LatticeBaseShape: interface LatticeBaseShape
 
+  // LatticeBaseShape.latConstruct (method)
   latConstruct(pk: Pico): Lattice;
 
 LatticeManifoldOptions: interface LatticeManifoldOptions
@@ -741,6 +854,7 @@ LatticeManifoldOptions: interface LatticeManifoldOptions
 // C# `IMeshBaseShape`
 MeshBaseShape: interface MeshBaseShape
 
+  // MeshBaseShape.mshConstruct (method)
   mshConstruct(pk: Pico): Mesh;
 
 PipeSegmentOptions: interface PipeSegmentOptions
@@ -763,16 +877,19 @@ PipeSegmentOptions: interface PipeSegmentOptions
 // C# `ISpineBaseShape`
 SpineBaseShape: interface SpineBaseShape
 
+  // SpineBaseShape.spinePoint (method)
   spinePoint(ratio1: number): Vec3;
 
 // ShapeKernel `ISpline`
 Spline: interface Spline
 
+  // Spline.points (method)
   points(samples?: number): Vec3[];
 
 // C# `ISurfaceBaseShape`
 SurfaceBaseShape: interface SurfaceBaseShape
 
+  // SurfaceBaseShape.surfacePoint (method)
   surfacePoint(ratio1: number, ratio2: number, ratio3: number): Vec3;
 
 TangentOptions: interface TangentOptions

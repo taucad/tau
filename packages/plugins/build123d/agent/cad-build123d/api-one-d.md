@@ -6,6 +6,7 @@
 Edge
 
   // Build an Edge from an OCCT TopoDS_Shape/TopoDS_Edge
+  // build123d.topology.one_d.Edge.__init__ (constructor)
   Edge(obj: TopoDS_Edge | Axis | None | None = None, label: str = '', color: Color | None = None, parent: Compound | None = None)
   //   obj: OCCT Edge or Axis
   //   label: Defaults to ''
@@ -16,15 +17,18 @@ Edge
   arc_center: Vector
 
   // extrude
+  // build123d.topology.one_d.Edge.extrude (method)
   extrude(obj: Vertex, direction: VectorLike) -> Edge
   //   direction: direction and magnitude of extrusion
 
   // make_bezier
+  // build123d.topology.one_d.Edge.make_bezier (method)
   make_bezier(*cntl_pnts: VectorLike, weights: list[float] | None = None) -> Edge
   //   cntl_pnts: points defining the curve
   //   weights: control point weights list
 
   // make circle
+  // build123d.topology.one_d.Edge.make_circle (method)
   make_circle(radius: float, plane: Plane = Plane.XY, start_angle: float = 360.0, end_angle: float = 360, angular_direction: AngularDirection = AngularDirection.COUNTER_CLOCKWISE) -> Edge
   //   radius: circle radius
   //   plane: base plane
@@ -32,12 +36,15 @@ Edge
   //   end_angle: end of arc angle
   //   angular_direction: arc direction
 
+  // build123d.topology.one_d.Edge.make_constrained_arcs (method)
   make_constrained_arcs(*args, sagitta: Sagitta = Sagitta.SHORT, **kwargs) -> ShapeList[Edge]
 
   // Create planar line(s) on XY subject to tangency/contact constraints
+  // build123d.topology.one_d.Edge.make_constrained_lines (method)
   make_constrained_lines(*args, **kwargs) -> ShapeList[Edge]
 
   // make ellipse
+  // build123d.topology.one_d.Edge.make_ellipse (method)
   make_ellipse(x_radius: float, y_radius: float, plane: Plane = Plane.XY, start_angle: float = 360.0, end_angle: float = 360.0, angular_direction: AngularDirection = AngularDirection.COUNTER_CLOCKWISE) -> Edge
   //   x_radius: x radius of the ellipse (along the x-axis of plane)
   //   y_radius: y radius of the ellipse (along the y-axis of plane)
@@ -47,6 +54,7 @@ Edge
   //   angular_direction: arc direction
 
   // make parabola
+  // build123d.topology.one_d.Edge.make_parabola (method)
   make_parabola(focal_length: float, plane: Plane = Plane.XY, start_angle: float = 0.0, end_angle: float = 90.0, angular_direction: AngularDirection = AngularDirection.COUNTER_CLOCKWISE) -> Edge
   //   focal_length: focal length the parabola (distance from the vertex to focus along the x-axis of plane)
   //   plane: base plane
@@ -55,6 +63,7 @@ Edge
   //   angular_direction: arc direction
 
   // make hyperbola
+  // build123d.topology.one_d.Edge.make_hyperbola (method)
   make_hyperbola(x_radius: float, y_radius: float, plane: Plane = Plane.XY, start_angle: float = 360.0, end_angle: float = 360.0, angular_direction: AngularDirection = AngularDirection.COUNTER_CLOCKWISE) -> Edge
   //   x_radius: x radius of the hyperbola (along the x-axis of plane)
   //   y_radius: y radius of the hyperbola (along the y-axis of plane)
@@ -64,6 +73,7 @@ Edge
   //   angular_direction: arc direction
 
   // make_helix
+  // build123d.topology.one_d.Edge.make_helix (method)
   make_helix(pitch: float, height: float, radius: float, center: VectorLike = (0, 0, 0), normal: VectorLike = (0, 0, 1), angle: float = 0.0, lefthand: bool = False) -> Wire
   //   pitch: distance per revolution along normal
   //   height: total height
@@ -73,17 +83,20 @@ Edge
   //   lefthand: Defaults to False
 
   // Create a line between two points
+  // build123d.topology.one_d.Edge.make_line (method)
   make_line(point1: VectorLike, point2: VectorLike) -> Edge
   //   point1: VectorLike
   //   point2: VectorLike
 
   // make line between edges
+  // build123d.topology.one_d.Edge.make_mid_way (method)
   make_mid_way(first: Edge, second: Edge, middle: float = 0.5) -> Edge
   //   first: first reference Edge
   //   second: second reference Edge
   //   middle: factional distance between Edges
 
   // Spline
+  // build123d.topology.one_d.Edge.make_spline (method)
   make_spline(points: list[VectorLike], tangents: list[VectorLike] | None = None, periodic: bool = False, parameters: list[float] | None = None, scale: bool = True, tol: float = 1e-06) -> Edge
   //   points: the points defining the spline
   //   tangents: start and finish tangent
@@ -93,6 +106,7 @@ Edge
   //   tol: tolerance of the algorithm (consult OCC documentation)
 
   // Create an exact B-spline edge from control points and knot data
+  // build123d.topology.one_d.Edge.make_bspline (method)
   make_bspline(control_points: Iterable[VectorLike], knots: Iterable[float], degree: int, weights: Iterable[float] | None = None, periodic: bool = False) -> Edge
   //   control_points: Control points (poles) defining the spline shape
   //   knots: Knot sequence for the spline
@@ -101,6 +115,7 @@ Edge
   //   periodic: Whether to create a periodic spline
 
   // make_spline_approx
+  // build123d.topology.one_d.Edge.make_spline_approx (method)
   make_spline_approx(points: list[VectorLike], tol: float = 0.001, smoothing: tuple[float, float, float] | None = None, min_deg: int = 1, max_deg: int = 6) -> Edge
   //   tol: tolerance of the algorithm
   //   smoothing: optional tuple of 3 weights use for variational smoothing
@@ -108,21 +123,25 @@ Edge
   //   max_deg: maximum spline degree
 
   // Tangent Arc
+  // build123d.topology.one_d.Edge.make_tangent_arc (method)
   make_tangent_arc(start: VectorLike, tangent: VectorLike, end: VectorLike) -> Edge
   //   start: start point
   //   tangent: start tangent
   //   end: end point
 
   // Three Point Arc
+  // build123d.topology.one_d.Edge.make_three_point_arc (method)
   make_three_point_arc(point1: VectorLike, point2: VectorLike, point3: VectorLike) -> Edge
   //   point1: start point
   //   point2: middle point
   //   point3: end point
 
   // Close an Edge
+  // build123d.topology.one_d.Edge.close (method)
   close() -> Edge | Wire
 
   // Distribute Locations
+  // build123d.topology.one_d.Edge.distribute_locations (method)
   distribute_locations(count: int, start: float = 0.0, stop: float = 1.0, positions_only: bool = False) -> list[Location]
   //   count: Number of locations to generate
   //   start: position along Edge|Wire to start
@@ -130,68 +149,83 @@ Edge
   //   positions_only: only generate position not orientation
 
   // find_intersection_points
+  // build123d.topology.one_d.Edge.find_intersection_points (method)
   find_intersection_points(other: Axis | Edge | None = None, tolerance: float = TOLERANCE) -> ShapeList[Vector]
   //   other: curve to compare with
   //   tolerance: the precision of computing the intersection points
 
   // find_tangent
+  // build123d.topology.one_d.Edge.find_tangent (method)
   find_tangent(angle: float) -> list[float]
   //   angle: target angle in degrees
 
   // Return the Geom Curve from this Edge
+  // build123d.topology.one_d.Edge.geom_adaptor (method)
   geom_adaptor() -> BRepAdaptor_Curve
 
   // Compare two edges for geometric equality within tolerance
+  // build123d.topology.one_d.Edge.geom_equal (method)
   geom_equal(other: Edge, tol: float = 1e-06, num_interpolation_points: int = 5) -> bool
   //   other: Edge to compare with
   //   tol: Tolerance for numeric comparisons
   //   num_interpolation_points: Number of points to sample for unknown curve types
 
   // Map a normalized arc-length position to the underlying OCCT parameter
+  // build123d.topology.one_d.Edge.param_at (method)
   param_at(position: float) -> float
   //   position: Normalized arc-length position along the shape, where `0.0` is the start and `1.0` is the end
 
   // Return the normalized parameter (∈ [0.0, 1.0]) of the location on this edge
+  // build123d.topology.one_d.Edge.param_at_point (method)
   param_at_point(point: VectorLike) -> float
   //   point: A point expected to lie on this edge (within tolerance)
 
   // Project Edge
+  // build123d.topology.one_d.Edge.project_to_shape (method)
   project_to_shape(target_object: Shape, direction: VectorLike | None = None, center: VectorLike | None = None) -> ShapeList[Edge]
   //   target_object: Shape
   //   direction: VectorLike
   //   center: VectorLike
 
   // reversed
+  // build123d.topology.one_d.Edge.reversed (method)
   reversed(reconstruct: bool = False) -> Edge
   //   reconstruct: rebuild edge instead of setting OCCT flag
 
   // Translate a linear Edge to an Axis
+  // build123d.topology.one_d.Edge.to_axis (method)
   to_axis() -> Axis
 
   // Edge as Wire
+  // build123d.topology.one_d.Edge.to_wire (method)
   to_wire() -> Wire
 
   // trim
+  // build123d.topology.one_d.Edge.trim (method)
   trim(start: float | VectorLike, end: float | VectorLike) -> Edge
   //   start: 0.0 <= start < 1.0 or point on edge
   //   end: 0.0 < end <= 1.0 or point on edge
 
   // trim_to_length
+  // build123d.topology.one_d.Edge.trim_to_length (method)
   trim_to_length(start: float | VectorLike, length: float) -> Edge
 
   // Return the shortest Edge of self trimmed by other or None if they don't intersect
+  // build123d.topology.one_d.Edge.trim_to_other (method)
   trim_to_other(other: Shape | Axis | Location | Plane | VectorLike) -> Edge | None
 
   // Check if edge is infinite (LINE with length > 1e100)
   is_infinite: bool
 
   // Trim an infinite line edge to a finite length
+  // build123d.topology.one_d.Edge.trim_infinite (method)
   trim_infinite(half_length: float) -> Edge
   //   half_length: Half-length of the resulting edge
 
 // A Wire in build123d is a topological entity representing a connected sequence
 Wire
 
+  // build123d.topology.one_d.Wire.__init__ (constructor)
   Wire(obj: TopoDS_Wire, label: str = '', color: Color | None = None, parent: Compound | None = None)
   Wire(edge: Edge, label: str = '', color: Color | None = None, parent: Compound | None = None)
   Wire(wire: Wire, label: str = '', color: Color | None = None, parent: Compound | None = None)
@@ -203,24 +237,29 @@ Wire
   //   parent: assembly parent
 
   // combine
+  // build123d.topology.one_d.Wire.combine (method)
   combine(wires: Iterable[Wire | Edge], tol: float = 1e-09) -> ShapeList[Wire]
   //   wires: unsorted
   //   tol: tolerance
 
   // extrude - invalid operation for Wire
+  // build123d.topology.one_d.Wire.extrude (method)
   extrude(obj: Shape, direction: VectorLike) -> Wire
 
   // make_circle
+  // build123d.topology.one_d.Wire.make_circle (method)
   make_circle(radius: float, plane: Plane = Plane.XY) -> Wire
   //   radius: circle radius
   //   plane: base plane
 
   // make_convex_hull
+  // build123d.topology.one_d.Wire.make_convex_hull (method)
   make_convex_hull(edges: Iterable[Edge], tolerance: float = 0.001) -> Wire
   //   edges: edges defining the convex hull
   //   tolerance: allowable error as a fraction of each edge length
 
   // make ellipse
+  // build123d.topology.one_d.Wire.make_ellipse (method)
   make_ellipse(x_radius: float, y_radius: float, plane: Plane = Plane.XY, start_angle: float = 360.0, end_angle: float = 360.0, angular_direction: AngularDirection = AngularDirection.COUNTER_CLOCKWISE, closed: bool = True) -> Wire
   //   x_radius: x radius of the ellipse (along the x-axis of plane)
   //   y_radius: y radius of the ellipse (along the y-axis of plane)
@@ -231,19 +270,23 @@ Wire
   //   closed: close the arc
 
   // make_polygon
+  // build123d.topology.one_d.Wire.make_polygon (method)
   make_polygon(vertices: Iterable[VectorLike], close: bool = True) -> Wire
   //   close: close the polygon
 
   // Make Rectangle
+  // build123d.topology.one_d.Wire.make_rect (method)
   make_rect(width: float, height: float, plane: Plane = Plane.XY) -> Wire
   //   width: width (local x)
   //   height: height (local y)
   //   plane: plane containing rectangle
 
   // Order the edges of a chamfer relative to a reference Edge
+  // build123d.topology.one_d.Wire.order_chamfer_edges (method)
   order_chamfer_edges(reference_edge: Edge | None, edges: tuple[Edge, Edge]) -> tuple[Edge, Edge]
 
   // chamfer_2d
+  // build123d.topology.one_d.Wire.chamfer_2d (method)
   chamfer_2d(distance: float, distance2: float, vertices: Iterable[Vertex], edge: Edge | None = None) -> Wire
   //   distance: chamfer length
   //   distance2: chamfer length
@@ -251,69 +294,86 @@ Wire
   //   edge: identifies the side where length is measured
 
   // Close a Wire
+  // build123d.topology.one_d.Wire.close (method)
   close() -> Wire
 
   // edges - all the edges in this Shape
+  // build123d.topology.one_d.Wire.edges (method)
   edges() -> ShapeList[Edge]
 
   // fillet_2d
+  // build123d.topology.one_d.Wire.fillet_2d (method)
   fillet_2d(radius: float, vertices: Iterable[Vertex]) -> Wire
   //   vertices: vertices to fillet
 
   // fix_degenerate_edges
+  // build123d.topology.one_d.Wire.fix_degenerate_edges (method)
   fix_degenerate_edges(precision: float) -> Wire
   //   precision: minimum value edge length
 
   // Return the Geom Comp Curve for this Wire
+  // build123d.topology.one_d.Wire.geom_adaptor (method)
   geom_adaptor() -> BRepAdaptor_CompCurve
 
   // Return the edges in self ordered by wire direction and orientation
+  // build123d.topology.one_d.Wire.order_edges (method)
   order_edges() -> ShapeList[Edge]
 
   // Compare two wires for geometric equality within tolerance
+  // build123d.topology.one_d.Wire.geom_equal (method)
   geom_equal(other: Wire, tol: float = 1e-06, num_interpolation_points: int = 5) -> bool
   //   other: Wire to compare with
   //   tol: Tolerance for numeric comparisons
   //   num_interpolation_points: Number of points to sample for unknown curve types
 
   // Return the OCCT comp-curve parameter corresponding to the given wire position
+  // build123d.topology.one_d.Wire.param_at (method)
   param_at(position: float) -> float
 
   // Return the normalized wire parameter for the point closest to this wire
+  // build123d.topology.one_d.Wire.param_at_point (method)
   param_at_point(point: VectorLike) -> float
   //   point: The point to project onto the wire
 
   // Project Wire
+  // build123d.topology.one_d.Wire.project_to_shape (method)
   project_to_shape(target_object: Shape, direction: VectorLike | None = None, center: VectorLike | None = None) -> ShapeList[Wire]
   //   target_object: Shape
   //   direction: VectorLike
   //   center: VectorLike
 
   // Attempt to stitch wires
+  // build123d.topology.one_d.Wire.stitch (method)
   stitch(other: Wire) -> Wire
   //   other: wire to combine
 
   // Return Wire - used as a pair with Edge.to_wire when self is Wire | Edge
+  // build123d.topology.one_d.Wire.to_wire (method)
   to_wire() -> Wire
 
   // Trim a wire between [start, end] normalized over total length
+  // build123d.topology.one_d.Wire.trim (method)
   trim(start: float | VectorLike, end: float | VectorLike) -> Wire
   //   start: normalized start position (0.0 to <1.0) or point
   //   end: normalized end position (>0.0 to 1.0) or point
 
 // Convert edges to a list of wires
+// build123d.topology.one_d.edges_to_wires (function)
 edges_to_wires(edges: Iterable[Edge], tol: float = 1e-06) -> ShapeList[Wire]
 //   edges: Iterable[Edge]
 //   tol: float
 
 // Offset a topods_face
+// build123d.topology.one_d.offset_topods_face (function)
 offset_topods_face(face: TopoDS_Face, amount: float) -> TopoDS_Shape
 
 // Find edges connected to the given edge with at least the requested continuity
+// build123d.topology.one_d.topo_explore_connected_edges (function)
 topo_explore_connected_edges(edge: Edge, parent: Shape | None = None, continuity: ContinuityLevel = ContinuityLevel.C0) -> ShapeList[Edge]
 //   edge: The reference edge to explore from
 //   parent: Optional parent Shape
 //   continuity: Minimum required continuity (C0/G0, C1/G1, C2/G2)
 
 // Given an edge extracted from a Shape, return the topods_faces connected to it
+// build123d.topology.one_d.topo_explore_connected_faces (function)
 topo_explore_connected_faces(edge: Edge, parent: Shape | None = None) -> list[TopoDS_Face]

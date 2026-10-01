@@ -9,3 +9,13 @@ InitOpenCascadeOptions: {
   print?: (text: string) => void;
   printErr?: (text: string) => void;
 }
+
+  locateFile: (path: string, scriptDirectory: string) => string
+
+  wasmBinary: ArrayBuffer | Uint8Array
+
+  wasmMemory: WebAssembly.Memory
+
+  print: (text: string) => void
+
+  printErr: (text: string) => void

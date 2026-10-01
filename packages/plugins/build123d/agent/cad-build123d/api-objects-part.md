@@ -5,6 +5,7 @@
 // BasePartObject
 BasePartObject
 
+  // build123d.objects_part.BasePartObject.__init__ (constructor)
   BasePartObject(part: Part | Solid, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] | None = None, mode: Mode = Mode.ADD)
   //   rotation: angles to rotate about axes
   //   align: align MIN, CENTER, or MAX of object
@@ -13,6 +14,7 @@ BasePartObject
 // Part Object
 Box
 
+  // build123d.objects_part.Box.__init__ (constructor)
   Box(length: float, width: float, height: float, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
   //   length: box length
   //   width: box width
@@ -24,6 +26,7 @@ Box
 // Part Object
 Cone
 
+  // build123d.objects_part.Cone.__init__ (constructor)
   Cone(bottom_radius: float, top_radius: float, height: float, arc_size: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
   //   bottom_radius: bottom radius
   //   top_radius: top radius, may be zero
@@ -36,6 +39,7 @@ Cone
 // Part Object
 ConvexPolyhedron
 
+  // build123d.objects_part.ConvexPolyhedron.__init__ (constructor)
   ConvexPolyhedron(points: Iterable[VectorLike], rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] | None = Align.NONE, mode: Mode = Mode.ADD)
   //   points: vertices of the polyhedron
   //   rotation: angles to rotate about axes
@@ -45,6 +49,7 @@ ConvexPolyhedron
 // Part Operation
 CounterBoreHole
 
+  // build123d.objects_part.CounterBoreHole.__init__ (constructor)
   CounterBoreHole(radius: float, counter_bore_radius: float, counter_bore_depth: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
   //   radius: hole radius
   //   counter_bore_radius: counter bore radius
@@ -55,6 +60,7 @@ CounterBoreHole
 // Part Operation
 CounterSinkHole
 
+  // build123d.objects_part.CounterSinkHole.__init__ (constructor)
   CounterSinkHole(radius: float, counter_sink_radius: float, depth: float | None = None, counter_sink_angle: float = 82, mode: Mode = Mode.SUBTRACT)
   //   radius: hole radius
   //   counter_sink_radius: countersink radius
@@ -65,6 +71,7 @@ CounterSinkHole
 // Part Object
 Cylinder
 
+  // build123d.objects_part.Cylinder.__init__ (constructor)
   Cylinder(radius: float, height: float, arc_size: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
   //   radius: cylinder radius
   //   height: cylinder height
@@ -76,6 +83,7 @@ Cylinder
 // Part Operation
 Hole
 
+  // build123d.objects_part.Hole.__init__ (constructor)
   Hole(radius: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
   //   radius: hole radius
   //   depth: hole depth, through part if None
@@ -84,6 +92,7 @@ Hole
 // Part Object
 Sphere
 
+  // build123d.objects_part.Sphere.__init__ (constructor)
   Sphere(radius: float, arc_size1: float = -90, arc_size2: float = 90, arc_size3: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
   //   radius: sphere radius
   //   arc_size1: angular size of bottom hemisphere
@@ -96,6 +105,7 @@ Sphere
 // Part Object
 Torus
 
+  // build123d.objects_part.Torus.__init__ (constructor)
   Torus(major_radius: float, minor_radius: float, minor_start_angle: float = 0, minor_end_angle: float = 360, major_angle: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
   //   major_radius: major torus radius
   //   minor_radius: minor torus radius
@@ -109,6 +119,7 @@ Torus
 // Part Object
 Wedge
 
+  // build123d.objects_part.Wedge.__init__ (constructor)
   Wedge(xsize: float, ysize: float, zsize: float, xmin: float, zmin: float, xmax: float, zmax: float, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
   //   xsize: length of near face along x-axis
   //   ysize: length of part along y-axis

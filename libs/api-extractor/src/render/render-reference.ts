@@ -35,14 +35,15 @@ const indexSummary = (entry: ApiEntry): string => {
 const memberCount = (entry: ApiEntry): number => (entry.members ?? []).length;
 
 /** One entry's index lines: the symbol, then each of its members indented. */
-const indexLines = (entry: ApiEntry): readonly string[] => {
+const indexLines = (entry: ApiEntry, parentPath?: string): readonly string[] => {
   const summary = indexSummary(entry);
   const members = memberCount(entry);
   const suffix = members === 0 ? '' : ` [${members} members]`;
-  const lines = [`${entry.name} (${entry.kind})${suffix}${summary === '' ? '' : ` — ${summary}`}`];
+  const path = entry.path ?? parentPath;
+  const name = path === undefined ? entry.name : `${path}.${entry.name}`;
+  const lines = [`${name} (${entry.kind})${suffix}${summary === '' ? '' : ` — ${summary}`}`];
   for (const member of entry.members ?? []) {
-    const memberSummary = indexSummary(member);
-    lines.push(`  ${entry.name}.${member.name} (${member.kind})${memberSummary === '' ? '' : ` — ${memberSummary}`}`);
+    lines.push(...indexLines(member, name).map((line) => `  ${line}`));
   }
   return lines;
 };
@@ -124,6 +125,8 @@ const renderEntryBody = (entry: ApiEntry, depth: number): readonly string[] => {
     const rendered = `${entry.name}${entry.type === undefined ? '' : `: ${entry.type.text}`}`;
     lines.push(...sourceLines(rendered, indent));
   } else {
+    const name = entry.path === undefined ? entry.name : `${entry.path}.${entry.name}`;
+    lines.push(`${indent}// ${name} (${entry.kind})`);
     for (const signature of entry.signatures) {
       lines.push(...sourceLines(signature.text, indent));
     }

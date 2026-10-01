@@ -3,4 +3,5 @@
 1 top-level symbols. Signatures are verbatim python.
 
 // Detect analytic primitives in a mesh and return faces, leftovers, and code
+// build123d.brep_from_stl.detect_primitives (function)
 detect_primitives(mesh: Shape) -> tuple[ShapeList[Face], ShapeList[Face], list[str]]

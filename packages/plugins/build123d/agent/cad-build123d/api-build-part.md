@@ -5,6 +5,7 @@
 // BuildPart
 BuildPart
 
+  // build123d.build_part.BuildPart.__init__ (constructor)
   BuildPart(*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)
   //   workplanes: initial plane to work on
   //   mode: combination mode

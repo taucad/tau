@@ -3,6 +3,7 @@
 7 top-level symbols. Signatures are verbatim kcl.
 
 // Apply a function to every element of a list
+// std.array.map (function)
 map(
   @array: [any],
   f: fn(any): any,
@@ -11,6 +12,7 @@ map(
 //   f: A function
 
 // Take a starting value
+// std.array.reduce (function)
 reduce(
   @array: [any],
   initial: any,
@@ -21,6 +23,7 @@ reduce(
 //   f: Run once per item in the input `array`
 
 // Append an element to the end of an array
+// std.array.push (function)
 push(
   @array: [any],
   item: any,
@@ -29,10 +32,12 @@ push(
 //   item: The new item to add to the array
 
 // Remove the last element from an array
+// std.array.pop (function)
 pop(@array: [any; 1+]): [any]
 //   @array: The array to pop from
 
 // Combine two arrays into one by concatenating them
+// std.array.concat (function)
 concat(
   @array: [any],
   items: [any],
@@ -41,6 +46,7 @@ concat(
 //   items: The array of ending elements
 
 // Find the number of elements in an array
+// std.array.count (function)
 count(@array: [any]): number
 //   @array: The array whose length will be returned
 

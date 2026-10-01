@@ -3,15 +3,18 @@
 10 top-level symbols. Signatures are verbatim python.
 
 // Generic Object
+// build123d.operations_generic.add (function)
 add(objects: AddType | Iterable[AddType], rotation: float | RotationLike | None = None, clean: bool = True, mode: Mode = Mode.ADD) -> Compound
 //   mode: combine mode
 
 // Generic Operation
+// build123d.operations_generic.bounding_box (function)
 bounding_box(objects: Shape | Iterable[Shape] | None = None, mode: Mode = Mode.PRIVATE) -> Sketch | Part
 //   objects: objects to create bbox for
 //   mode: combination mode
 
 // Generic Operation
+// build123d.operations_generic.chamfer (function)
 chamfer(objects: ChamferFilletType | Iterable[ChamferFilletType], length: float, length2: float | None = None, angle: float | None = None, reference: Edge | Face | None = None) -> Sketch | Part
 //   objects: edges or vertices to chamfer
 //   length: chamfer size
@@ -20,17 +23,20 @@ chamfer(objects: ChamferFilletType | Iterable[ChamferFilletType], length: float,
 //   reference: identifies the side where length is measured
 
 // Generic Operation
+// build123d.operations_generic.fillet (function)
 fillet(objects: ChamferFilletType | Iterable[ChamferFilletType], radius: float) -> Sketch | Part | Curve
 //   objects: edges or vertices to fillet
 //   radius: fillet size - must be less than 1/2 local width
 
 // Generic Operation
+// build123d.operations_generic.mirror (function)
 mirror(objects: MirrorType | Iterable[MirrorType] | None = None, about: Plane = Plane.XZ, mode: Mode = Mode.ADD) -> Curve | Sketch | Part | Compound
 //   objects: objects to mirror
 //   about: reference plane
 //   mode: combination mode
 
 // Generic Operation
+// build123d.operations_generic.offset (function)
 offset(objects: OffsetType | Iterable[OffsetType] | None = None, amount: float = 0, openings: Face | list[Face] | None = None, kind: Kind = Kind.ARC, side: Side = Side.BOTH, closed: bool = True, min_edge_length: float | None = None, mode: Mode = Mode.REPLACE) -> Curve | Sketch | Part | Compound
 //   objects: objects to offset
 //   amount: positive values external, negative internal openings (list[Face], optional), sequence of faces to open in part
@@ -41,12 +47,14 @@ offset(objects: OffsetType | Iterable[OffsetType] | None = None, amount: float =
 //   mode: combination mode
 
 // Generic Operation
+// build123d.operations_generic.project (function)
 project(objects: ProjectType | Iterable[ProjectType] | None = None, workplane: Plane | None = None, target: Solid | Compound | Part | None = None, mode: Mode = Mode.ADD) -> Curve | Sketch | Compound | ShapeList[Vector]
 //   objects: objects or points to project
 //   workplane: screen workplane
 //   mode: combination mode
 
 // Generic Operation
+// build123d.operations_generic.scale (function)
 scale(objects: Shape | Iterable[Shape] | None = None, by: float | tuple[float, float, float] = 1, about: VectorLike | None = None, mode: Mode = Mode.REPLACE) -> Curve | Sketch | Part | Compound
 //   objects: objects to scale
 //   by: scale factor
@@ -54,12 +62,14 @@ scale(objects: Shape | Iterable[Shape] | None = None, by: float | tuple[float, f
 //   mode: combination mode
 
 // Generic Operation
+// build123d.operations_generic.split (function)
 split(objects: SplitType | Iterable[SplitType] | None = None, bisect_by: Plane | Face | Shell = Plane.XZ, keep: Keep = Keep.TOP, mode: Mode = Mode.REPLACE)
 //   bisect_by: plane to segment part
 //   keep: selector for which segment to keep
 //   mode: combination mode
 
 // Generic Operation
+// build123d.operations_generic.sweep (function)
 sweep(sections: SweepType | Iterable[SweepType] | None = None, path: Curve | Edge | Wire | Iterable[Edge] | None = None, multisection: bool = False, is_frenet: bool = False, transition: Transition = Transition.TRANSFORMED, normal: VectorLike | None = None, binormal: Edge | Wire | None = None, clean: bool = True, mode: Mode = Mode.ADD) -> Part | Sketch
 //   sections: cross sections to sweep into object
 //   path: path to follow

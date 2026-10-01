@@ -6,2021 +6,2223 @@ Every symbol appears here exactly once. The heading above each block names the f
 
 ## PicoGK — `api-picogk.md`
 
-ActiveVoxelCounterScalar (class) [4 members]
-  ActiveVoxelCounterScalar.nCount (method)
-  ActiveVoxelCounterScalar.ActiveVoxelCounterScalar (constructor)
-  ActiveVoxelCounterScalar.Run (method)
-  ActiveVoxelCounterScalar.InformActiveValue (method)
-AddVectorFieldToViewer (class) [4 members]
-  AddVectorFieldToViewer.AddToViewer (method)
-  AddVectorFieldToViewer.AddVectorFieldToViewer (constructor)
-  AddVectorFieldToViewer.Run (method)
-  AddVectorFieldToViewer.InformActiveValue (method)
-Animation (class) [5 members]
-  Animation.IAction (interface)
-  Animation.EType (enum)
-  Animation.Animation (constructor)
-  Animation.End (method)
-  Animation.bAnimate (method)
-AnimationQueue (class) [5 members]
-  AnimationQueue.AnimationQueue (constructor)
-  AnimationQueue.Clear (method)
-  AnimationQueue.bPulse (method)
-  AnimationQueue.bIsIdle (method)
-  AnimationQueue.Add (method)
-BBox2 (struct) [10 members] — 2D Bounding Box object
-  BBox2.vecMin (field) — Minimum coordinate of the bounding box
-  BBox2.vecMax (field) — Maximum coordinate of the bounding box
-  BBox2.BBox2 (constructor) — Creates an empty Bounding Box
-  BBox2.bIsEmpty (method) — Is the BoundingBox empty?
-  BBox2.bContains (method) — Checks whether point is inside the bounding box
-  BBox2.Include (method) — Include the specified vector in the bounding box
-  BBox2.Grow (method) — Grows the bounding box by the specified value on each…
-  BBox2.vecSize (method) — Returns the size of the Bounding Box
-  BBox2.vecCenter (method) — Center point of the bounding box
-  BBox2.ToString (method) — A string representation of the Bounding Box
-BBox3 (struct) [13 members] — 3D bounding box
-  BBox3.vecMin (field) — Minimum coordinate of the bounding box
-  BBox3.vecMax (field) — Maximum coordinate of the bounding box
-  BBox3.BBox3 (constructor) — Create an empty Bounding Box
-  BBox3.vecSize (method) — Size of the Bounding Box
-  BBox3.bIsEmpty (method) — Is the Bounding Box empty>
-  BBox3.bContains (method) — Checks whether the specified point is inside the bounding box
-  BBox3.Include (method) — Include the specified vector in the Bounding Box
-  BBox3.Grow (method) — Grows the bounding box by the specified value on each…
-  BBox3.vecCenter (method) — Return the center of the Bounding Box
-  BBox3.oFitInto (method) — Fit the specified Bounding Box into this box, returning Scale…
-  BBox3.vecRandomVectorInside (method) — A function to return a random point in a Bounding…
-  BBox3.oAsBoundingBox2 (method) — Return the 2D extent of this Bounding Box
-  BBox3.ToString (method) — Return the Bounding Box as string
-CliIo (class) [4 members] — ASCII CLI (Common Layer Interface) I/O based on https://www.hmilch.net/downloads/cli_format.html#:~:text=CLI%20is%20intended%20as%20a,data%20structure%20of%20the%20machine
-  CliIo.EFormat (enum) — Format options for CLI writer
-  CliIo.Result (class) — Result of a CLI import
-  CliIo.WriteSlicesToCliFile (method) — Write a stack of PolySlices to a CLI file
-  CliIo.oSlicesFromCliFile (method) — Read PolySlice objects from a CLI file
-ColorBgr24 (struct) [5 members] — BGR 24 bit color value
-  ColorBgr24.B (field) — Blue value (0..255)
-  ColorBgr24.G (field) — Green value (0..255)
-  ColorBgr24.R (field) — Red value (0..255)
-  ColorBgr24.ColorBgr24 (constructor) — Construct a BGR value from 3 bytes
-  ColorBgr24.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
-ColorBgra32 (struct) [6 members] — BGRA 32 bit color value
-  ColorBgra32.B (field) — Blue value (0..255)
-  ColorBgra32.G (field) — Green value (0..255)
-  ColorBgra32.R (field) — Red value (0..255)
-  ColorBgra32.A (field) — Alpha value (0..255)
-  ColorBgra32.ColorBgra32 (constructor) — Construct a 32 bit BGRA color value from 4 bytes
-  ColorBgra32.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
-ColorFloat (struct) [11 members] — A floating point color value with R,G,B,A values
-  ColorFloat.R (field) — Red value (1 is full color)
-  ColorFloat.G (field) — Green value (1 is full color)
-  ColorFloat.B (field) — Blue value (1 is full color)
-  ColorFloat.A (field) — Alpha value (1 is opaque, 0 is transparent)
-  ColorFloat.ColorFloat (constructor) — Create a color from a hex string #FF0000 is red,…
-  ColorFloat.op_Implicit (method) — Allows you to pass a hex string to any function…
-  ColorFloat.strAsHexCode (method) — Returns the color as a hex code such as "FF"…
-  ColorFloat.strAsABGRHexCode (method) — Returns the color value as an ABGR hex code (always…
-  ColorFloat.ToString (method) — Returns the color as hex string
-  ColorFloat.clrWeighted (method) — Weighted linear interpolation between two colors
-  ColorFloat.clrRandom (method) — Return a random color
-ColorHLS (struct) [5 members] — A color value in HSV space
-  ColorHLS.H (field) — Hue value (0..360º)
-  ColorHLS.L (field) — Lightness value (0..1)
-  ColorHLS.S (field) — Saturation value (0..1)
-  ColorHLS.ColorHLS (constructor) — Create an HLS color from its three components
-  ColorHLS.op_Implicit (method) — Implicit conversion from ColorFloat to ColorHLS
-ColorHSV (struct) [5 members] — Hue Saturation Value (HSV) color
-  ColorHSV.H (field) — Hue (0..360º)
-  ColorHSV.S (field) — Saturation (0..1)
-  ColorHSV.V (field) — Value component
-  ColorHSV.ColorHSV (constructor) — Create an HSV value from its three components
-  ColorHSV.op_Implicit (method) — Implicit conversion that allows you to pass a ColorFloat to…
-ColorRgb24 (struct) [5 members] — 24 bit RGB color
-  ColorRgb24.R (field) — Red value (0..255)
-  ColorRgb24.G (field) — Green value (0..255)
-  ColorRgb24.B (field) — Blue value (0..255)
-  ColorRgb24.ColorRgb24 (constructor) — Construct a 24 bit RGB value from 3 byes
-  ColorRgb24.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
-ColorRgba32 (struct) [6 members] — 32 bit RGBA color
-  ColorRgba32.R (field) — Red value (0..255)
-  ColorRgba32.G (field) — Green value (0..255)
-  ColorRgba32.B (field) — Blue value (0..255)
-  ColorRgba32.A (field) — Alpha value 0..255 (255 is opaque)
-  ColorRgba32.ColorRgba32 (constructor) — Create a color from 3 or 4 bytes
-  ColorRgba32.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
-Config (class) [1 members]
-  Config.strPicoGKLib (constant)
-Coord (struct) [4 members]
-  Coord.X (field)
-  Coord.Y (field)
-  Coord.Z (field)
-  Coord.Coord (constructor)
-CsvTable (class) [11 members]
-  CsvTable.CsvTable (constructor)
-  CsvTable.Save (method)
-  CsvTable.nRowCount (method)
-  CsvTable.nMaxColumnCount (method)
-  CsvTable.strGetAt (method)
-  CsvTable.SetKeyColumn (method)
-  CsvTable.bGetAt (method)
-  CsvTable.bFindColumn (method)
-  CsvTable.strColumnId (method)
-  CsvTable.SetColumnIds (method)
-  CsvTable.AddRow (method)
-Easing (class) [11 members] — Easing functions — they take a float value from 0..1…
-  Easing.EEasing (enum)
-  Easing.fEaseSineIn (method)
-  Easing.fEaseSineOut (method)
-  Easing.fEaseSineInOut (method)
-  Easing.fEaseQuadIn (method)
-  Easing.fEaseQuadOut (method)
-  Easing.fEaseQuadInOut (method)
-  Easing.fEaseCubicIn (method)
-  Easing.fEaseCubicOut (method)
-  Easing.fEaseCubicInOut (method)
-  Easing.fEasingFunction (method)
-FieldMetadata (class) [14 members] — Metadata table containing parameters associated with field types like Voxels,…
-  FieldMetadata.EType (enum) — Type of the data items in the metadata table
-  FieldMetadata.lib (field)
-  FieldMetadata.nCount (method) — Number of items in the metadata table
-  FieldMetadata.bGetNameAt (method) — Attempts to retrieve the name of the parameter at the…
-  FieldMetadata.eTypeAt (method) — Returns the type of the value with the specified name
-  FieldMetadata.strTypeAt (method) — Returns the human readable type of the parameter with the…
-  FieldMetadata.strTypeName (method) — Translate the type enum to a string
-  FieldMetadata.bGetValueAt (method) — Try to get the value of a parameter
-  FieldMetadata.SetValue (method) — Set string value in the metadata table
-  FieldMetadata.RemoveValue (method) — Remove a value from the metadata table
-  FieldMetadata.ToString (method) — Converts the contents of the metadata table to a string
-  FieldMetadata.FieldMetadata (constructor) — Internal constructor used by the Voxels, ScalarField and VectorField accessor…
-  FieldMetadata.GuardInternalFields (method) — This function tests whether you are attempting to set internal…
-  FieldMetadata.Dispose (method)
-GpuTexHandle (struct) [2 members]
-  GpuTexHandle.Value (property)
-  GpuTexHandle.GpuTexHandle (constructor)
-GuiSideBarHandle (struct) [2 members]
-  GuiSideBarHandle.Value (property)
-  GuiSideBarHandle.GuiSideBarHandle (constructor)
-IBoundedImplicit (interface) [1 members] — Interface for a bounded implicit function
-  IBoundedImplicit.oBounds (property) — Access the bounding box of the implicit function
-IDataTable (interface) [7 members]
-  IDataTable.nMaxColumnCount (method)
-  IDataTable.strColumnId (method)
-  IDataTable.bFindColumn (method)
-  IDataTable.nRowCount (method)
-  IDataTable.strGetAt (method)
-  IDataTable.SetColumnIds (method)
-  IDataTable.AddRow (method)
-IFieldWithMetadata (interface) [1 members]
-  IFieldWithMetadata.oMetaData (method)
-IImplicit (interface) [1 members] — Function signature for signed distance implicts
-  IImplicit.fSignedDistance (method) — Return the signed distance to the iso surface
-ILibraryHost (interface) [2 members] — Host for the process-global lifecycle established by PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String)
-  ILibraryHost.DefaultLogFilePath (property) — Log path used when callers keep PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String) 's default
-  ILibraryHost.Run (method) — Run one PicoGK task with the arguments supplied to PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String)
-ILog (interface) [1 members] — Logging interface which allows you to output diagnostics
-  ILog.Log (method) — This function allows you to output information using the standard…
-IProgress (interface) [1 members] — A generic progress reporting interface
-  IProgress.Progress (method) — Report progress from 0..1
-ITraverseScalarField (interface) [1 members] — An interface used to traverse the active values of a…
-  ITraverseScalarField.InformActiveValue (method) — Called for every active value in the ScalarField object
-ITraverseVectorField (interface) [1 members] — An interface to allow traversal of all active values in…
-  ITraverseVectorField.InformActiveValue (method) — Called for every active value in the VectorField object
-IViewerBackend (interface) [21 members] — Backend for embedding PicoGK's concrete PicoGK.Viewer API without a native…
-  IViewerBackend.IsIdle (property)
-  IViewerBackend.Orientation (property)
-  IViewerBackend.Poll (method)
-  IViewerBackend.RequestUpdate (method)
-  IViewerBackend.LoadLightSetup (method)
-  IViewerBackend.SetBackgroundColor (method)
-  IViewerBackend.SetFieldOfView (method)
-  IViewerBackend.ZoomToFit (method)
-  IViewerBackend.Add (method)
-  IViewerBackend.Remove (method)
-  IViewerBackend.SetObjectMatrix (method)
-  IViewerBackend.RemoveAllObjects (method)
-  IViewerBackend.SetMechanism (method)
-  IViewerBackend.RequestScreenShot (method)
-  IViewerBackend.EnableExperimental (method)
-  IViewerBackend.SetGroupVisible (method)
-  IViewerBackend.SetGroupMaterial (method)
-  IViewerBackend.SetGroupMatrix (method)
-  IViewerBackend.EnableOverhangWarning (method)
-  IViewerBackend.DisableOverhangWarning (method)
-  IViewerBackend.GetBoundingBox (method)
-Image (class) [26 members]
-  Image.EType (enum)
-  Image.nWidth (field)
-  Image.nHeight (field)
-  Image.eType (field)
-  Image.clrValue (method)
-  Image.fValue (method)
-  Image.bValue (method)
-  Image.SetValue (method)
-  Image.byGetValue (method)
-  Image.sGetBgr24 (method)
-  Image.SetBgr24 (method)
-  Image.sGetBgra32 (method)
-  Image.SetBgra32 (method)
-  Image.sGetRgb24 (method)
-  Image.sGetRgba32 (method)
-  Image.SetRgb24 (method)
-  Image.SetRgba32 (method)
-  Image.clrGetAtNormalized (method) — Returns the interpolated color value at a normalized coordinate going…
-  Image.DrawLine (method)
-  Image.Image (constructor)
-  Image.imgFromSKBitmap (method)
-  Image.op_Implicit (method)
-  Image.SavePng (method)
-  Image.SaveJpg (method)
-  Image.SaveTga (method)
-  Image.imgLoadFromFile (method)
-ImageBWAbstract (class) [4 members]
-  ImageBWAbstract.ImageBWAbstract (constructor)
-  ImageBWAbstract.fValue (method)
-  ImageBWAbstract.clrValue (method)
-  ImageBWAbstract.SetValue (method)
-ImageColor (class) [3 members]
-  ImageColor.ImageColor (constructor)
-  ImageColor.SetValue (method)
-  ImageColor.clrValue (method)
-ImageColorAbstract (class) [4 members]
-  ImageColorAbstract.ImageColorAbstract (constructor)
-  ImageColorAbstract.fValue (method)
-  ImageColorAbstract.bValue (method)
-  ImageColorAbstract.SetValue (method)
-ImageGrayScale (class) [6 members]
-  ImageGrayScale.m_afValues (field)
-  ImageGrayScale.ImageGrayScale (constructor)
-  ImageGrayScale.SetValue (method)
-  ImageGrayScale.fValue (method)
-  ImageGrayScale.imgGetColorCodedSDF (method)
-  ImageGrayScale.imgGetInterpolated (method)
-ImageGrayscaleAbstract (class) [5 members]
-  ImageGrayscaleAbstract.ImageGrayscaleAbstract (constructor)
-  ImageGrayscaleAbstract.clrValue (method)
-  ImageGrayscaleAbstract.bValue (method)
-  ImageGrayscaleAbstract.SetValue (method)
-  ImageGrayscaleAbstract.bContainsActivePixels (method) — Returns whether the image has any pixels set to a…
-ImageRgb24 (class) [5 members]
-  ImageRgb24.ImageRgb24 (constructor)
-  ImageRgb24.clrValue (method)
-  ImageRgb24.SetValue (method)
-  ImageRgb24.SetRgb24 (method)
-  ImageRgb24.sGetRgb24 (method)
-ImageRgba32 (class) [5 members]
-  ImageRgba32.ImageRgba32 (constructor)
-  ImageRgba32.clrValue (method)
-  ImageRgba32.SetValue (method)
-  ImageRgba32.SetRgba32 (method)
-  ImageRgba32.sGetRgba32 (method)
-LatHandle (struct) [2 members]
-  LatHandle.Value (property)
-  LatHandle.LatHandle (constructor)
-Lattice (class) [5 members] — A lattice of beams (and spheres)
-  Lattice.lib (field)
-  Lattice.Lattice (constructor) — Creates a new empty Lattice, using the global library instance
-  Lattice.AddSphere (method) — Add a sphere to the lattice
-  Lattice.AddBeam (method) — Add a beam to the lattice
-  Lattice.Dispose (method)
-LibHandle (struct) [2 members]
-  LibHandle.Value (property)
-  LibHandle.LibHandle (constructor)
+PicoGK.ActiveVoxelCounterScalar (class) [4 members]
+  PicoGK.ActiveVoxelCounterScalar.nCount (method)
+  PicoGK.ActiveVoxelCounterScalar.ActiveVoxelCounterScalar (constructor)
+  PicoGK.ActiveVoxelCounterScalar.Run (method)
+  PicoGK.ActiveVoxelCounterScalar.InformActiveValue (method)
+PicoGK.AddVectorFieldToViewer (class) [4 members]
+  PicoGK.AddVectorFieldToViewer.AddToViewer (method)
+  PicoGK.AddVectorFieldToViewer.AddVectorFieldToViewer (constructor)
+  PicoGK.AddVectorFieldToViewer.Run (method)
+  PicoGK.AddVectorFieldToViewer.InformActiveValue (method)
+PicoGK.Animation (class) [5 members]
+  PicoGK.Animation.IAction (interface) [1 members]
+    PicoGK.Animation.IAction.Do (method)
+  PicoGK.Animation.EType (enum) [3 members]
+    PicoGK.Animation.EType.Once (enumMember)
+    PicoGK.Animation.EType.Repeat (enumMember)
+    PicoGK.Animation.EType.Wiggle (enumMember)
+  PicoGK.Animation.Animation (constructor)
+  PicoGK.Animation.End (method)
+  PicoGK.Animation.bAnimate (method)
+PicoGK.AnimationQueue (class) [5 members]
+  PicoGK.AnimationQueue.AnimationQueue (constructor)
+  PicoGK.AnimationQueue.Clear (method)
+  PicoGK.AnimationQueue.bPulse (method)
+  PicoGK.AnimationQueue.bIsIdle (method)
+  PicoGK.AnimationQueue.Add (method)
+PicoGK.BBox2 (struct) [10 members] — 2D Bounding Box object
+  PicoGK.BBox2.vecMin (field) — Minimum coordinate of the bounding box
+  PicoGK.BBox2.vecMax (field) — Maximum coordinate of the bounding box
+  PicoGK.BBox2.BBox2 (constructor) — Creates an empty Bounding Box
+  PicoGK.BBox2.bIsEmpty (method) — Is the BoundingBox empty?
+  PicoGK.BBox2.bContains (method) — Checks whether point is inside the bounding box
+  PicoGK.BBox2.Include (method) — Include the specified vector in the bounding box
+  PicoGK.BBox2.Grow (method) — Grows the bounding box by the specified value on each…
+  PicoGK.BBox2.vecSize (method) — Returns the size of the Bounding Box
+  PicoGK.BBox2.vecCenter (method) — Center point of the bounding box
+  PicoGK.BBox2.ToString (method) — A string representation of the Bounding Box
+PicoGK.BBox3 (struct) [13 members] — 3D bounding box
+  PicoGK.BBox3.vecMin (field) — Minimum coordinate of the bounding box
+  PicoGK.BBox3.vecMax (field) — Maximum coordinate of the bounding box
+  PicoGK.BBox3.BBox3 (constructor) — Create an empty Bounding Box
+  PicoGK.BBox3.vecSize (method) — Size of the Bounding Box
+  PicoGK.BBox3.bIsEmpty (method) — Is the Bounding Box empty>
+  PicoGK.BBox3.bContains (method) — Checks whether the specified point is inside the bounding box
+  PicoGK.BBox3.Include (method) — Include the specified vector in the Bounding Box
+  PicoGK.BBox3.Grow (method) — Grows the bounding box by the specified value on each…
+  PicoGK.BBox3.vecCenter (method) — Return the center of the Bounding Box
+  PicoGK.BBox3.oFitInto (method) — Fit the specified Bounding Box into this box, returning Scale…
+  PicoGK.BBox3.vecRandomVectorInside (method) — A function to return a random point in a Bounding…
+  PicoGK.BBox3.oAsBoundingBox2 (method) — Return the 2D extent of this Bounding Box
+  PicoGK.BBox3.ToString (method) — Return the Bounding Box as string
+PicoGK.CliIo (class) [4 members] — ASCII CLI (Common Layer Interface) I/O based on https://www.hmilch.net/downloads/cli_format.html#:~:text=CLI%20is%20intended%20as%20a,data%20structure%20of%20the%20machine
+  PicoGK.CliIo.EFormat (enum) [2 members] — Format options for CLI writer
+    PicoGK.CliIo.EFormat.UseEmptyFirstLayer (enumMember) — Uses an intentionally-empty first layer to allow the CLI reader…
+    PicoGK.CliIo.EFormat.FirstLayerWithContent (enumMember) — The first layer contains outlines (default)
+  PicoGK.CliIo.Result (class) [9 members] — Result of a CLI import
+    PicoGK.CliIo.Result.oSlices (field) — The stack of slices that were imported
+    PicoGK.CliIo.Result.oBBoxFile (field) — The bounding box of the slices contained in the file
+    PicoGK.CliIo.Result.bBinary (field) — Was the file binary?
+    PicoGK.CliIo.Result.fUnitsHeader (field) — Units used in the header
+    PicoGK.CliIo.Result.b32BitAlign (field) — Was the file aligned at 32 bit boundaries?
+    PicoGK.CliIo.Result.nVersion (field) — Version number of the CLI export
+    PicoGK.CliIo.Result.strHeaderDate (field) — Date string read from the header
+    PicoGK.CliIo.Result.nLayers (field) — Number of layers in the file
+    PicoGK.CliIo.Result.strWarnings (field) — Warnings that were encountered during the file reading
+  PicoGK.CliIo.WriteSlicesToCliFile (method) — Write a stack of PolySlices to a CLI file
+  PicoGK.CliIo.oSlicesFromCliFile (method) — Read PolySlice objects from a CLI file
+PicoGK.ColorBgr24 (struct) [5 members] — BGR 24 bit color value
+  PicoGK.ColorBgr24.B (field) — Blue value (0..255)
+  PicoGK.ColorBgr24.G (field) — Green value (0..255)
+  PicoGK.ColorBgr24.R (field) — Red value (0..255)
+  PicoGK.ColorBgr24.ColorBgr24 (constructor) — Construct a BGR value from 3 bytes
+  PicoGK.ColorBgr24.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
+PicoGK.ColorBgra32 (struct) [6 members] — BGRA 32 bit color value
+  PicoGK.ColorBgra32.B (field) — Blue value (0..255)
+  PicoGK.ColorBgra32.G (field) — Green value (0..255)
+  PicoGK.ColorBgra32.R (field) — Red value (0..255)
+  PicoGK.ColorBgra32.A (field) — Alpha value (0..255)
+  PicoGK.ColorBgra32.ColorBgra32 (constructor) — Construct a 32 bit BGRA color value from 4 bytes
+  PicoGK.ColorBgra32.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
+PicoGK.ColorFloat (struct) [11 members] — A floating point color value with R,G,B,A values
+  PicoGK.ColorFloat.R (field) — Red value (1 is full color)
+  PicoGK.ColorFloat.G (field) — Green value (1 is full color)
+  PicoGK.ColorFloat.B (field) — Blue value (1 is full color)
+  PicoGK.ColorFloat.A (field) — Alpha value (1 is opaque, 0 is transparent)
+  PicoGK.ColorFloat.ColorFloat (constructor) — Create a color from a hex string #FF0000 is red,…
+  PicoGK.ColorFloat.op_Implicit (method) — Allows you to pass a hex string to any function…
+  PicoGK.ColorFloat.strAsHexCode (method) — Returns the color as a hex code such as "FF"…
+  PicoGK.ColorFloat.strAsABGRHexCode (method) — Returns the color value as an ABGR hex code (always…
+  PicoGK.ColorFloat.ToString (method) — Returns the color as hex string
+  PicoGK.ColorFloat.clrWeighted (method) — Weighted linear interpolation between two colors
+  PicoGK.ColorFloat.clrRandom (method) — Return a random color
+PicoGK.ColorHLS (struct) [5 members] — A color value in HSV space
+  PicoGK.ColorHLS.H (field) — Hue value (0..360º)
+  PicoGK.ColorHLS.L (field) — Lightness value (0..1)
+  PicoGK.ColorHLS.S (field) — Saturation value (0..1)
+  PicoGK.ColorHLS.ColorHLS (constructor) — Create an HLS color from its three components
+  PicoGK.ColorHLS.op_Implicit (method) — Implicit conversion from ColorFloat to ColorHLS
+PicoGK.ColorHSV (struct) [5 members] — Hue Saturation Value (HSV) color
+  PicoGK.ColorHSV.H (field) — Hue (0..360º)
+  PicoGK.ColorHSV.S (field) — Saturation (0..1)
+  PicoGK.ColorHSV.V (field) — Value component
+  PicoGK.ColorHSV.ColorHSV (constructor) — Create an HSV value from its three components
+  PicoGK.ColorHSV.op_Implicit (method) — Implicit conversion that allows you to pass a ColorFloat to…
+PicoGK.ColorRgb24 (struct) [5 members] — 24 bit RGB color
+  PicoGK.ColorRgb24.R (field) — Red value (0..255)
+  PicoGK.ColorRgb24.G (field) — Green value (0..255)
+  PicoGK.ColorRgb24.B (field) — Blue value (0..255)
+  PicoGK.ColorRgb24.ColorRgb24 (constructor) — Construct a 24 bit RGB value from 3 byes
+  PicoGK.ColorRgb24.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
+PicoGK.ColorRgba32 (struct) [6 members] — 32 bit RGBA color
+  PicoGK.ColorRgba32.R (field) — Red value (0..255)
+  PicoGK.ColorRgba32.G (field) — Green value (0..255)
+  PicoGK.ColorRgba32.B (field) — Blue value (0..255)
+  PicoGK.ColorRgba32.A (field) — Alpha value 0..255 (255 is opaque)
+  PicoGK.ColorRgba32.ColorRgba32 (constructor) — Create a color from 3 or 4 bytes
+  PicoGK.ColorRgba32.op_Implicit (method) — Allows you to pass a ColorFloat to any function that…
+PicoGK.Config (class) [1 members]
+  PicoGK.Config.strPicoGKLib (constant)
+PicoGK.Coord (struct) [4 members]
+  PicoGK.Coord.X (field)
+  PicoGK.Coord.Y (field)
+  PicoGK.Coord.Z (field)
+  PicoGK.Coord.Coord (constructor)
+PicoGK.CsvTable (class) [11 members]
+  PicoGK.CsvTable.CsvTable (constructor)
+  PicoGK.CsvTable.Save (method)
+  PicoGK.CsvTable.nRowCount (method)
+  PicoGK.CsvTable.nMaxColumnCount (method)
+  PicoGK.CsvTable.strGetAt (method)
+  PicoGK.CsvTable.SetKeyColumn (method)
+  PicoGK.CsvTable.bGetAt (method)
+  PicoGK.CsvTable.bFindColumn (method)
+  PicoGK.CsvTable.strColumnId (method)
+  PicoGK.CsvTable.SetColumnIds (method)
+  PicoGK.CsvTable.AddRow (method)
+PicoGK.Easing (class) [11 members] — Easing functions — they take a float value from 0..1…
+  PicoGK.Easing.EEasing (enum) [10 members]
+    PicoGK.Easing.EEasing.LINEAR (enumMember)
+    PicoGK.Easing.EEasing.SINE_IN (enumMember)
+    PicoGK.Easing.EEasing.SINE_OUT (enumMember)
+    PicoGK.Easing.EEasing.SINE_INOUT (enumMember)
+    PicoGK.Easing.EEasing.QUAD_IN (enumMember)
+    PicoGK.Easing.EEasing.QUAD_OUT (enumMember)
+    PicoGK.Easing.EEasing.QUAD_INOUT (enumMember)
+    PicoGK.Easing.EEasing.CUBIC_IN (enumMember)
+    PicoGK.Easing.EEasing.CUBIC_OUT (enumMember)
+    PicoGK.Easing.EEasing.CUBIC_INOUT (enumMember)
+  PicoGK.Easing.fEaseSineIn (method)
+  PicoGK.Easing.fEaseSineOut (method)
+  PicoGK.Easing.fEaseSineInOut (method)
+  PicoGK.Easing.fEaseQuadIn (method)
+  PicoGK.Easing.fEaseQuadOut (method)
+  PicoGK.Easing.fEaseQuadInOut (method)
+  PicoGK.Easing.fEaseCubicIn (method)
+  PicoGK.Easing.fEaseCubicOut (method)
+  PicoGK.Easing.fEaseCubicInOut (method)
+  PicoGK.Easing.fEasingFunction (method)
+PicoGK.FieldMetadata (class) [14 members] — Metadata table containing parameters associated with field types like Voxels,…
+  PicoGK.FieldMetadata.EType (enum) [4 members] — Type of the data items in the metadata table
+    PicoGK.FieldMetadata.EType.UNKNOWN (enumMember)
+    PicoGK.FieldMetadata.EType.STRING (enumMember)
+    PicoGK.FieldMetadata.EType.FLOAT (enumMember)
+    PicoGK.FieldMetadata.EType.VECTOR (enumMember)
+  PicoGK.FieldMetadata.lib (field)
+  PicoGK.FieldMetadata.nCount (method) — Number of items in the metadata table
+  PicoGK.FieldMetadata.bGetNameAt (method) — Attempts to retrieve the name of the parameter at the…
+  PicoGK.FieldMetadata.eTypeAt (method) — Returns the type of the value with the specified name
+  PicoGK.FieldMetadata.strTypeAt (method) — Returns the human readable type of the parameter with the…
+  PicoGK.FieldMetadata.strTypeName (method) — Translate the type enum to a string
+  PicoGK.FieldMetadata.bGetValueAt (method) — Try to get the value of a parameter
+  PicoGK.FieldMetadata.SetValue (method) — Set string value in the metadata table
+  PicoGK.FieldMetadata.RemoveValue (method) — Remove a value from the metadata table
+  PicoGK.FieldMetadata.ToString (method) — Converts the contents of the metadata table to a string
+  PicoGK.FieldMetadata.FieldMetadata (constructor) — Internal constructor used by the Voxels, ScalarField and VectorField accessor…
+  PicoGK.FieldMetadata.GuardInternalFields (method) — This function tests whether you are attempting to set internal…
+  PicoGK.FieldMetadata.Dispose (method)
+PicoGK.GpuTexHandle (struct) [2 members]
+  PicoGK.GpuTexHandle.Value (property)
+  PicoGK.GpuTexHandle.GpuTexHandle (constructor)
+PicoGK.GuiSideBarHandle (struct) [2 members]
+  PicoGK.GuiSideBarHandle.Value (property)
+  PicoGK.GuiSideBarHandle.GuiSideBarHandle (constructor)
+PicoGK.IBoundedImplicit (interface) [1 members] — Interface for a bounded implicit function
+  PicoGK.IBoundedImplicit.oBounds (property) — Access the bounding box of the implicit function
+PicoGK.IDataTable (interface) [7 members]
+  PicoGK.IDataTable.nMaxColumnCount (method)
+  PicoGK.IDataTable.strColumnId (method)
+  PicoGK.IDataTable.bFindColumn (method)
+  PicoGK.IDataTable.nRowCount (method)
+  PicoGK.IDataTable.strGetAt (method)
+  PicoGK.IDataTable.SetColumnIds (method)
+  PicoGK.IDataTable.AddRow (method)
+PicoGK.IFieldWithMetadata (interface) [1 members]
+  PicoGK.IFieldWithMetadata.oMetaData (method)
+PicoGK.IImplicit (interface) [1 members] — Function signature for signed distance implicts
+  PicoGK.IImplicit.fSignedDistance (method) — Return the signed distance to the iso surface
+PicoGK.ILibraryHost (interface) [2 members] — Host for the process-global lifecycle established by PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String)
+  PicoGK.ILibraryHost.DefaultLogFilePath (property) — Log path used when callers keep PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String) 's default
+  PicoGK.ILibraryHost.Run (method) — Run one PicoGK task with the arguments supplied to PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String)
+PicoGK.ILog (interface) [1 members] — Logging interface which allows you to output diagnostics
+  PicoGK.ILog.Log (method) — This function allows you to output information using the standard…
+PicoGK.IProgress (interface) [1 members] — A generic progress reporting interface
+  PicoGK.IProgress.Progress (method) — Report progress from 0..1
+PicoGK.ITraverseScalarField (interface) [1 members] — An interface used to traverse the active values of a…
+  PicoGK.ITraverseScalarField.InformActiveValue (method) — Called for every active value in the ScalarField object
+PicoGK.ITraverseVectorField (interface) [1 members] — An interface to allow traversal of all active values in…
+  PicoGK.ITraverseVectorField.InformActiveValue (method) — Called for every active value in the VectorField object
+PicoGK.IViewerBackend (interface) [21 members] — Backend for embedding PicoGK's concrete PicoGK.Viewer API without a native…
+  PicoGK.IViewerBackend.IsIdle (property)
+  PicoGK.IViewerBackend.Orientation (property)
+  PicoGK.IViewerBackend.Poll (method)
+  PicoGK.IViewerBackend.RequestUpdate (method)
+  PicoGK.IViewerBackend.LoadLightSetup (method)
+  PicoGK.IViewerBackend.SetBackgroundColor (method)
+  PicoGK.IViewerBackend.SetFieldOfView (method)
+  PicoGK.IViewerBackend.ZoomToFit (method)
+  PicoGK.IViewerBackend.Add (method)
+  PicoGK.IViewerBackend.Remove (method)
+  PicoGK.IViewerBackend.SetObjectMatrix (method)
+  PicoGK.IViewerBackend.RemoveAllObjects (method)
+  PicoGK.IViewerBackend.SetMechanism (method)
+  PicoGK.IViewerBackend.RequestScreenShot (method)
+  PicoGK.IViewerBackend.EnableExperimental (method)
+  PicoGK.IViewerBackend.SetGroupVisible (method)
+  PicoGK.IViewerBackend.SetGroupMaterial (method)
+  PicoGK.IViewerBackend.SetGroupMatrix (method)
+  PicoGK.IViewerBackend.EnableOverhangWarning (method)
+  PicoGK.IViewerBackend.DisableOverhangWarning (method)
+  PicoGK.IViewerBackend.GetBoundingBox (method)
+PicoGK.Image (class) [26 members]
+  PicoGK.Image.EType (enum) [3 members]
+    PicoGK.Image.EType.BW (enumMember)
+    PicoGK.Image.EType.GRAY (enumMember)
+    PicoGK.Image.EType.COLOR (enumMember)
+  PicoGK.Image.nWidth (field)
+  PicoGK.Image.nHeight (field)
+  PicoGK.Image.eType (field)
+  PicoGK.Image.clrValue (method)
+  PicoGK.Image.fValue (method)
+  PicoGK.Image.bValue (method)
+  PicoGK.Image.SetValue (method)
+  PicoGK.Image.byGetValue (method)
+  PicoGK.Image.sGetBgr24 (method)
+  PicoGK.Image.SetBgr24 (method)
+  PicoGK.Image.sGetBgra32 (method)
+  PicoGK.Image.SetBgra32 (method)
+  PicoGK.Image.sGetRgb24 (method)
+  PicoGK.Image.sGetRgba32 (method)
+  PicoGK.Image.SetRgb24 (method)
+  PicoGK.Image.SetRgba32 (method)
+  PicoGK.Image.clrGetAtNormalized (method) — Returns the interpolated color value at a normalized coordinate going…
+  PicoGK.Image.DrawLine (method)
+  PicoGK.Image.Image (constructor)
+  PicoGK.Image.imgFromSKBitmap (method)
+  PicoGK.Image.op_Implicit (method)
+  PicoGK.Image.SavePng (method)
+  PicoGK.Image.SaveJpg (method)
+  PicoGK.Image.SaveTga (method)
+  PicoGK.Image.imgLoadFromFile (method)
+PicoGK.ImageBWAbstract (class) [4 members]
+  PicoGK.ImageBWAbstract.ImageBWAbstract (constructor)
+  PicoGK.ImageBWAbstract.fValue (method)
+  PicoGK.ImageBWAbstract.clrValue (method)
+  PicoGK.ImageBWAbstract.SetValue (method)
+PicoGK.ImageColor (class) [3 members]
+  PicoGK.ImageColor.ImageColor (constructor)
+  PicoGK.ImageColor.SetValue (method)
+  PicoGK.ImageColor.clrValue (method)
+PicoGK.ImageColorAbstract (class) [4 members]
+  PicoGK.ImageColorAbstract.ImageColorAbstract (constructor)
+  PicoGK.ImageColorAbstract.fValue (method)
+  PicoGK.ImageColorAbstract.bValue (method)
+  PicoGK.ImageColorAbstract.SetValue (method)
+PicoGK.ImageGrayScale (class) [6 members]
+  PicoGK.ImageGrayScale.m_afValues (field)
+  PicoGK.ImageGrayScale.ImageGrayScale (constructor)
+  PicoGK.ImageGrayScale.SetValue (method)
+  PicoGK.ImageGrayScale.fValue (method)
+  PicoGK.ImageGrayScale.imgGetColorCodedSDF (method)
+  PicoGK.ImageGrayScale.imgGetInterpolated (method)
+PicoGK.ImageGrayscaleAbstract (class) [5 members]
+  PicoGK.ImageGrayscaleAbstract.ImageGrayscaleAbstract (constructor)
+  PicoGK.ImageGrayscaleAbstract.clrValue (method)
+  PicoGK.ImageGrayscaleAbstract.bValue (method)
+  PicoGK.ImageGrayscaleAbstract.SetValue (method)
+  PicoGK.ImageGrayscaleAbstract.bContainsActivePixels (method) — Returns whether the image has any pixels set to a…
+PicoGK.ImageRgb24 (class) [5 members]
+  PicoGK.ImageRgb24.ImageRgb24 (constructor)
+  PicoGK.ImageRgb24.clrValue (method)
+  PicoGK.ImageRgb24.SetValue (method)
+  PicoGK.ImageRgb24.SetRgb24 (method)
+  PicoGK.ImageRgb24.sGetRgb24 (method)
+PicoGK.ImageRgba32 (class) [5 members]
+  PicoGK.ImageRgba32.ImageRgba32 (constructor)
+  PicoGK.ImageRgba32.clrValue (method)
+  PicoGK.ImageRgba32.SetValue (method)
+  PicoGK.ImageRgba32.SetRgba32 (method)
+  PicoGK.ImageRgba32.sGetRgba32 (method)
+PicoGK.LatHandle (struct) [2 members]
+  PicoGK.LatHandle.Value (property)
+  PicoGK.LatHandle.LatHandle (constructor)
+PicoGK.Lattice (class) [5 members] — A lattice of beams (and spheres)
+  PicoGK.Lattice.lib (field)
+  PicoGK.Lattice.Lattice (constructor) — Creates a new empty Lattice, using the global library instance
+  PicoGK.Lattice.AddSphere (method) — Add a sphere to the lattice
+  PicoGK.Lattice.AddBeam (method) — Add a beam to the lattice
+  PicoGK.Lattice.Dispose (method)
+PicoGK.LibHandle (struct) [2 members]
+  PicoGK.LibHandle.Value (property)
+  PicoGK.LibHandle.LibHandle (constructor)
 
 ## PicoGK (2) — `api-picogk-2.md`
 
-Library (class) [45 members] — The Library object encapsulates an instance of a PicoGK library…
-  Library.nStringLength (constant)
-  Library.fVoxelSize (field) — Voxel size in millimeters
-  Library.GlobalInstance (class)
-  Library.fVoxelSizeMM (property)
-  Library.strLogFolder (property)
-  Library.Library (constructor) — Create a new Library instance, using the specified voxel size…
-  Library.nTotalMemUsage (method) — Return the total memory usage of all objects created with…
-  Library.nMeshesMemUsage (method) — Returns the total memory usage of all Mesh objects created…
-  Library.nLatticesMemUsage (method) — Returns the total memory usage of all Lattice objects created…
-  Library.nPolyLinesMemUsage (method) — Returns the total memory usage of all PolyLine objects created…
-  Library.nVoxelsMemUsage (method) — Returns the total memory usage of all Voxels objects created…
-  Library.nVdbFilesMemUsage (method) — Returns the total memory usage of all VdbFile objects created…
-  Library.nScalarFieldsMemUsage (method) — Returns the total memory usage of all ScalarField objects created…
-  Library.nVectorFieldsMemUsage (method) — Returns the total memory usage of all VectorField objects created…
-  Library.nVdbMetasMemUsage (method) — Returns the total memory usage of all VdbFile metadata objects…
-  Library.nMeshesAllocated (method) — Returns the number of Mesh objects created with this Library…
-  Library.nLatticesAllocated (method) — Returns the number of Lattice objects created with this Library…
-  Library.nPolyLinesAllocated (method) — Returns the number of PolyLine objects created with this Library…
-  Library.nVoxelsAllocated (method) — Returns the number of Voxels objects created with this Library…
-  Library.nVdbFilesAllocated (method) — Returns the number of VdbFile objects created with this Library…
-  Library.nScalarFieldsAllocated (method) — Returns the number of ScalarField objects created with this Library…
-  Library.nVectorFieldsAllocated (method) — Returns the number of VectorField objects created with this Library…
-  Library.nVdbMetasAllocated (method) — Returns the number of VdbFile metadata objects created with this…
-  Library.vecVoxelsToMm (method) — Convert voxel index coordinates to world coordinates in millimeters
-  Library.MmToVoxels (method) — Convert world (millimeter) units to voxel units
-  Library.Dispose (method) — The Library implements the Dispose pattern, so you can use…
-  Library.oLibrary (method)
-  Library.RegisterGlobalLibrary (method)
-  Library.UnregisterGlobalLibrary (method)
-  Library.oViewer (method)
-  Library.RegisterGlobalViewer (method)
-  Library.UnregisterGlobalViewer (method)
-  Library.xLog (method)
-  Library.RegisterGlobalLog (method)
-  Library.UnregisterGlobalLog (method)
-  Library.Go (method) — This is the one library function that you call to…
-  Library.Log (method)
-  Library.bContinueTask (method) — Checks whether the task started using Go() should continue, and…
-  Library.EndTask (method) — Requests the task started by the Go() function to end
-  Library.CancelEndTaskRequest (method) — Cancels any pending request to end the task
-  Library.strFindLightSetupFile (method)
-  Library.UseHost (method) — Temporarily route PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String) through a host supplied by an embedding…
-  Library.strName (method) — Returns the library name (from the C++ side)
-  Library.strVersion (method) — Returns the library version (from the C++ side)
-  Library.strBuildInfo (method) — Returns internal build info, such as build date/time of the…
-LogConsole (class) [1 members] — A simple logging class which outputs to the console
-  LogConsole.Log (method) — Implementation of a simple logging class that outputs to the…
-LogFile (class) [4 members]
-  LogFile.LogFile (constructor)
-  LogFile.Log (method)
-  LogFile.LogTime (method)
-  LogFile.Dispose (method)
-LogProgress (class) [3 members] — A progress reporting class that outputs to a log interface
-  LogProgress.LogProgress (constructor) — Initialize a new progress reporting object
-  LogProgress.Progress (method) — Report progress from 0..1
-  LogProgress.Dispose (method) — Cleanup (just reports that the task is finished)
-Material (class) [26 members] — Typed Material appearance
-  Material.Name (property)
-  Material.Color (property)
-  Material.Metallic (property)
-  Material.Roughness (property)
-  Material.ColorTexture (property)
-  Material.MetallicRoughnessTexture (property)
-  Material.NormalTexture (property)
-  Material.NormalScale (property)
-  Material.OcclusionTexture (property)
-  Material.OcclusionStrength (property)
-  Material.Emissive (property)
-  Material.EmissiveStrength (property)
-  Material.EmissiveTexture (property)
-  Material.AlphaMode (property)
-  Material.AlphaCutoff (property)
-  Material.DoubleSided (property)
-  Material.Unlit (property)
-  Material.Ior (property)
-  Material.Dispersion (property)
-  Material.Anisotropy (property)
-  Material.Clearcoat (property)
-  Material.Iridescence (property)
-  Material.Sheen (property)
-  Material.Specular (property)
-  Material.Transmission (property)
-  Material.Volume (property)
-MaterialAlphaMode (enum) [3 members] — Typed MaterialAlphaMode appearance
-  MaterialAlphaMode.Opaque (enumMember)
-  MaterialAlphaMode.Mask (enumMember)
-  MaterialAlphaMode.Blend (enumMember)
-MaterialAnisotropy (class) [3 members] — Typed MaterialAnisotropy appearance
-  MaterialAnisotropy.Strength (property)
-  MaterialAnisotropy.Rotation (property)
-  MaterialAnisotropy.Texture (property)
-MaterialClearcoat (class) [6 members] — Typed MaterialClearcoat appearance
-  MaterialClearcoat.Factor (property)
-  MaterialClearcoat.Roughness (property)
-  MaterialClearcoat.Texture (property)
-  MaterialClearcoat.RoughnessTexture (property)
-  MaterialClearcoat.NormalTexture (property)
-  MaterialClearcoat.NormalScale (property)
-MaterialImage (class) [3 members] — Typed MaterialImage appearance
-  MaterialImage.Data (property)
-  MaterialImage.Format (property)
-  MaterialImage.Name (property)
-MaterialImageFormat (enum) [3 members] — Typed MaterialImageFormat appearance
-  MaterialImageFormat.Png (enumMember)
-  MaterialImageFormat.Jpeg (enumMember)
-  MaterialImageFormat.WebP (enumMember)
-MaterialIridescence (class) [6 members] — Typed MaterialIridescence appearance
-  MaterialIridescence.Factor (property)
-  MaterialIridescence.Ior (property)
-  MaterialIridescence.ThicknessMinimum (property)
-  MaterialIridescence.ThicknessMaximum (property)
-  MaterialIridescence.Texture (property)
-  MaterialIridescence.ThicknessTexture (property)
-MaterialMagFilter (enum) [2 members] — Typed MaterialMagFilter appearance
-  MaterialMagFilter.Nearest (enumMember)
-  MaterialMagFilter.Linear (enumMember)
-MaterialMinFilter (enum) [6 members] — Typed MaterialMinFilter appearance
-  MaterialMinFilter.Nearest (enumMember)
-  MaterialMinFilter.Linear (enumMember)
-  MaterialMinFilter.NearestMipmapNearest (enumMember)
-  MaterialMinFilter.LinearMipmapNearest (enumMember)
-  MaterialMinFilter.NearestMipmapLinear (enumMember)
-  MaterialMinFilter.LinearMipmapLinear (enumMember)
-MaterialSampler (class) [4 members] — Typed MaterialSampler appearance
-  MaterialSampler.WrapS (property)
-  MaterialSampler.WrapT (property)
-  MaterialSampler.MagFilter (property)
-  MaterialSampler.MinFilter (property)
-MaterialSheen (class) [4 members] — Typed MaterialSheen appearance
-  MaterialSheen.Color (property)
-  MaterialSheen.Roughness (property)
-  MaterialSheen.ColorTexture (property)
-  MaterialSheen.RoughnessTexture (property)
-MaterialSpecular (class) [4 members] — Typed MaterialSpecular appearance
-  MaterialSpecular.Factor (property)
-  MaterialSpecular.Color (property)
-  MaterialSpecular.Texture (property)
-  MaterialSpecular.ColorTexture (property)
-MaterialTexture (class) [3 members] — Typed MaterialTexture appearance
-  MaterialTexture.Image (property)
-  MaterialTexture.Sampler (property)
-  MaterialTexture.Transform (property)
-MaterialTextureTransform (class) [3 members] — Typed MaterialTextureTransform appearance
-  MaterialTextureTransform.Offset (property)
-  MaterialTextureTransform.Scale (property)
-  MaterialTextureTransform.Rotation (property)
-MaterialTransmission (class) [2 members] — Typed MaterialTransmission appearance
-  MaterialTransmission.Factor (property)
-  MaterialTransmission.Texture (property)
-MaterialVolume (class) [4 members] — Typed MaterialVolume appearance
-  MaterialVolume.Thickness (property)
-  MaterialVolume.AttenuationDistance (property)
-  MaterialVolume.AttenuationColor (property)
-  MaterialVolume.ThicknessTexture (property)
-MaterialWrap (enum) [3 members] — Typed MaterialWrap appearance
-  MaterialWrap.ClampToEdge (enumMember)
-  MaterialWrap.MirroredRepeat (enumMember)
-  MaterialWrap.Repeat (enumMember)
-Mesh (class) [23 members] — A triangle mesh
-  Mesh.EStlUnit (enum)
-  Mesh.m_strLoadHeaderData (field)
-  Mesh.m_eLoadUnits (field)
-  Mesh.lib (field)
-  Mesh.Mesh (constructor) — Creates a new empty Mesh, using the global library instance
-  Mesh.mshCreateTransformed (method) — Create a transformed mesh by offsetting and scaling it
-  Mesh.mshCreateMirrored (method) — Mirrors a mesh at the specified plane
-  Mesh.nAddVertex (method) — Add a new vertex to the mesh so that it…
-  Mesh.AddVertices (method)
-  Mesh.vecVertexAt (method) — Get the vertex at the specified index
-  Mesh.nVertexCount (method) — Get the number of vertices in the mesh
-  Mesh.nAddTriangle (method) — Add a triangle to the mesh with the specified vertex…
-  Mesh.nTriangleCount (method) — Return number of triangles in the mesh
-  Mesh.AddQuad (method) — Adds a quad, defined by four corner vertices Helper function,…
-  Mesh.oTriangleAt (method) — Get the triangle with the specified index
-  Mesh.GetTriangle (method) — Get the triangle with the specified index
-  Mesh.Append (method) — Append one mesh to another Note, no deduplication is done…
-  Mesh.oBoundingBox (method) — Return the BoundingBox of the Mesh
-  Mesh.mshFromStlFile (method) — Loads a mesh from an STL file By default, it…
-  Mesh.SaveToStlFile (method) — Saves a Mesh to STL file If eUnit is auto,…
-  Mesh.Dispose (method)
-  Mesh.bFindTriangleFromSurfacePoint (method)
-  Mesh.bPointLiesOnTriangle (method)
-MshHandle (struct) [2 members]
-  MshHandle.Value (property)
-  MshHandle.MshHandle (constructor)
-OpenVdbFile (class) [18 members] — OpenVdbFile handles the creation, loading and saving of openvdb .VDB…
-  OpenVdbFile.EFieldType (enum) — Types of fields in .VDB files
-  OpenVdbFile.lib (field)
-  OpenVdbFile.OpenVdbFile (constructor) — Create an empty openvdb file object
-  OpenVdbFile.libCreateCompatibleLibraryFor (method) — Create a PicoGK library object that is compatible with the…
-  OpenVdbFile.SaveToFile (method) — Saves the current object with all of its attached fields…
-  OpenVdbFile.voxGet (method) — Get the Voxels at the index specified
-  OpenVdbFile.nAdd (method) — Adds a copy of the specified Voxels to the VdbFile…
-  OpenVdbFile.oGetScalarField (method) — Get the ScalarField at the index specified
-  OpenVdbFile.oGetVectorField (method) — Get the VectorField at the index specified
-  OpenVdbFile.nFieldCount (method) — Number of fields stored in the VdbFile container
-  OpenVdbFile.strFieldName (method) — Returns the name of the field (if specified) at the…
-  OpenVdbFile.eFieldType (method) — Returns the type of the field at the given field…
-  OpenVdbFile.strFieldType (method) — Returns the field type at the given index as string
-  OpenVdbFile.xField (method)
-  OpenVdbFile.bIsPicoGKCompatible (method)
-  OpenVdbFile.fPicoGKVoxelSizeMM (method)
-  OpenVdbFile._hCreate (method)
-  OpenVdbFile.Dispose (method)
-PicoGKAllocException (class) [1 members]
-  PicoGKAllocException.PicoGKAllocException (constructor)
-PicoGKLibraryMismatchException (class) [1 members]
-  PicoGKLibraryMismatchException.PicoGKLibraryMismatchException (constructor)
-PolyContour (class) [14 members]
-  PolyContour.EWinding (enum)
-  PolyContour.strWindingAsString (method)
-  PolyContour.eDetectWinding (method)
-  PolyContour.PolyContour (constructor)
-  PolyContour.AddVertex (method)
-  PolyContour.DetectWinding (method)
-  PolyContour.eWinding (method)
-  PolyContour.oVertices (method)
-  PolyContour.Close (method) — Makes sure that the last coordinate is identical to the…
-  PolyContour.AsSvgPolyline (method)
-  PolyContour.AsSvgPath (method)
-  PolyContour.oBBox (method)
-  PolyContour.nCount (method)
-  PolyContour.vecVertex (method)
-PolyHandle (struct) [2 members]
-  PolyHandle.Value (property)
-  PolyHandle.PolyHandle (constructor)
-PolyLine (class) [12 members] — A colored 3D polyline for use in the viewer
-  PolyLine.lib (field)
-  PolyLine.PolyLine (constructor) — Creates a new empty PolyLine, using the global library instance
-  PolyLine.nAddVertex (method) — Add a vertex to the polyline
-  PolyLine.Add (method) — Adds all vertices from a container
-  PolyLine.nVertexCount (method) — Return number of vertices in the PolyLine
-  PolyLine.vecVertexAt (method) — Get the vertex in the polyline at the specified vertex…
-  PolyLine.GetColor (method) — Return the color of the PolyLine
-  PolyLine.oBoundingBox (method) — Return BoundingBox of PolyLine
-  PolyLine.AddArrow (method) — Adds an arrow to the tip of the current polyline…
-  PolyLine.AddCross (method) — Add a cross at the end of a polyline
-  PolyLine._hCreate (method)
-  PolyLine.Dispose (method)
-PolySlice (class) [10 members]
-  PolySlice.PolySlice (constructor)
-  PolySlice.AddContour (method)
-  PolySlice.bIsEmpty (method)
-  PolySlice.Close (method)
-  PolySlice.SaveToSvgFile (method)
-  PolySlice.oFromSdf (method)
-  PolySlice.fZPos (method)
-  PolySlice.oBBox (method)
-  PolySlice.nContours (method)
-  PolySlice.oContourAt (method)
-PolySliceStack (class) [6 members]
-  PolySliceStack.PolySliceStack (constructor)
-  PolySliceStack.AddSlices (method)
-  PolySliceStack.AddToViewer (method)
-  PolySliceStack.nCount (method)
-  PolySliceStack.oSliceAt (method)
-  PolySliceStack.oBBox (method)
-ProgressCounter (class) [3 members] — A progress counting class for counting up items to 100%
-  ProgressCounter.ProgressCounter (constructor) — Create a new progress counter object
-  ProgressCounter.SetItem (method) — Set the item (nItemCount == 100%)
-  ProgressCounter.op_Increment (method) — Allow you to use ++ to count up to the…
-ProgressNoop (class) [1 members] — A progress reporting class that does nothing (can be used…
-  ProgressNoop.Progress (method) — Progress from 0..1
-QuadHandle (struct) [2 members]
-  QuadHandle.Value (property)
-  QuadHandle.QuadHandle (constructor)
-SKHelpers (class) [2 members]
-  SKHelpers.oAsSkColor (method)
-  SKHelpers.clrAsColorRgba32 (method)
-ScalarField (class) [17 members] — A field of scalar floating point values
-  ScalarField.m_oMetadata (field) — Field metadata
-  ScalarField.lib (field)
-  ScalarField.oMetaData (method)
-  ScalarField.ScalarField (constructor) — Create an empty scalar field object
-  ScalarField.SetValue (method) — Sets the value at the specified position in mm When…
-  ScalarField.bGetValue (method) — Get the value at the specified position If the specified…
-  ScalarField.RemoveValue (method) — Removes the value at the specified position
-  ScalarField.GetVoxelDimensions (method) — Returns the dimensions of the field in discrete voxels
-  ScalarField.GetVoxelSlice (method) — Returns a signed distance-field-encoded slice of the voxel field To…
-  ScalarField.TraverseActive (method) — Visit each active value in the vector field and call…
-  ScalarField.fSignedDistance (method) — Return the scalar value at the specified position as as…
-  ScalarField.oBoundingBox (method) — Returns the bounding box of all active voxels in mm…
-  ScalarField._hCreate (method)
-  ScalarField._hCreateCopy (method)
-  ScalarField._hCreateFromVoxels (method)
-  ScalarField._hBuildFromVoxels (method)
-  ScalarField.Dispose (method)
-ScalarFieldHandle (struct) [2 members]
-  ScalarFieldHandle.Value (property)
-  ScalarFieldHandle.ScalarFieldHandle (constructor)
+PicoGK.Library (class) [45 members] — The Library object encapsulates an instance of a PicoGK library…
+  PicoGK.Library.nStringLength (constant)
+  PicoGK.Library.fVoxelSize (field) — Voxel size in millimeters
+  PicoGK.Library.GlobalInstance (class) [5 members]
+    PicoGK.Library.GlobalInstance.oViewer (property)
+    PicoGK.Library.GlobalInstance.oLibrary (property)
+    PicoGK.Library.GlobalInstance.xLog (property)
+    PicoGK.Library.GlobalInstance.GlobalInstance (constructor)
+    PicoGK.Library.GlobalInstance.Dispose (method)
+  PicoGK.Library.fVoxelSizeMM (property)
+  PicoGK.Library.strLogFolder (property)
+  PicoGK.Library.Library (constructor) — Create a new Library instance, using the specified voxel size…
+  PicoGK.Library.nTotalMemUsage (method) — Return the total memory usage of all objects created with…
+  PicoGK.Library.nMeshesMemUsage (method) — Returns the total memory usage of all Mesh objects created…
+  PicoGK.Library.nLatticesMemUsage (method) — Returns the total memory usage of all Lattice objects created…
+  PicoGK.Library.nPolyLinesMemUsage (method) — Returns the total memory usage of all PolyLine objects created…
+  PicoGK.Library.nVoxelsMemUsage (method) — Returns the total memory usage of all Voxels objects created…
+  PicoGK.Library.nVdbFilesMemUsage (method) — Returns the total memory usage of all VdbFile objects created…
+  PicoGK.Library.nScalarFieldsMemUsage (method) — Returns the total memory usage of all ScalarField objects created…
+  PicoGK.Library.nVectorFieldsMemUsage (method) — Returns the total memory usage of all VectorField objects created…
+  PicoGK.Library.nVdbMetasMemUsage (method) — Returns the total memory usage of all VdbFile metadata objects…
+  PicoGK.Library.nMeshesAllocated (method) — Returns the number of Mesh objects created with this Library…
+  PicoGK.Library.nLatticesAllocated (method) — Returns the number of Lattice objects created with this Library…
+  PicoGK.Library.nPolyLinesAllocated (method) — Returns the number of PolyLine objects created with this Library…
+  PicoGK.Library.nVoxelsAllocated (method) — Returns the number of Voxels objects created with this Library…
+  PicoGK.Library.nVdbFilesAllocated (method) — Returns the number of VdbFile objects created with this Library…
+  PicoGK.Library.nScalarFieldsAllocated (method) — Returns the number of ScalarField objects created with this Library…
+  PicoGK.Library.nVectorFieldsAllocated (method) — Returns the number of VectorField objects created with this Library…
+  PicoGK.Library.nVdbMetasAllocated (method) — Returns the number of VdbFile metadata objects created with this…
+  PicoGK.Library.vecVoxelsToMm (method) — Convert voxel index coordinates to world coordinates in millimeters
+  PicoGK.Library.MmToVoxels (method) — Convert world (millimeter) units to voxel units
+  PicoGK.Library.Dispose (method) — The Library implements the Dispose pattern, so you can use…
+  PicoGK.Library.oLibrary (method)
+  PicoGK.Library.RegisterGlobalLibrary (method)
+  PicoGK.Library.UnregisterGlobalLibrary (method)
+  PicoGK.Library.oViewer (method)
+  PicoGK.Library.RegisterGlobalViewer (method)
+  PicoGK.Library.UnregisterGlobalViewer (method)
+  PicoGK.Library.xLog (method)
+  PicoGK.Library.RegisterGlobalLog (method)
+  PicoGK.Library.UnregisterGlobalLog (method)
+  PicoGK.Library.Go (method) — This is the one library function that you call to…
+  PicoGK.Library.Log (method)
+  PicoGK.Library.bContinueTask (method) — Checks whether the task started using Go() should continue, and…
+  PicoGK.Library.EndTask (method) — Requests the task started by the Go() function to end
+  PicoGK.Library.CancelEndTaskRequest (method) — Cancels any pending request to end the task
+  PicoGK.Library.strFindLightSetupFile (method)
+  PicoGK.Library.UseHost (method) — Temporarily route PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String) through a host supplied by an embedding…
+  PicoGK.Library.strName (method) — Returns the library name (from the C++ side)
+  PicoGK.Library.strVersion (method) — Returns the library version (from the C++ side)
+  PicoGK.Library.strBuildInfo (method) — Returns internal build info, such as build date/time of the…
+PicoGK.LogConsole (class) [1 members] — A simple logging class which outputs to the console
+  PicoGK.LogConsole.Log (method) — Implementation of a simple logging class that outputs to the…
+PicoGK.LogFile (class) [4 members]
+  PicoGK.LogFile.LogFile (constructor)
+  PicoGK.LogFile.Log (method)
+  PicoGK.LogFile.LogTime (method)
+  PicoGK.LogFile.Dispose (method)
+PicoGK.LogProgress (class) [3 members] — A progress reporting class that outputs to a log interface
+  PicoGK.LogProgress.LogProgress (constructor) — Initialize a new progress reporting object
+  PicoGK.LogProgress.Progress (method) — Report progress from 0..1
+  PicoGK.LogProgress.Dispose (method) — Cleanup (just reports that the task is finished)
+PicoGK.Material (class) [26 members] — Typed Material appearance
+  PicoGK.Material.Name (property)
+  PicoGK.Material.Color (property)
+  PicoGK.Material.Metallic (property)
+  PicoGK.Material.Roughness (property)
+  PicoGK.Material.ColorTexture (property)
+  PicoGK.Material.MetallicRoughnessTexture (property)
+  PicoGK.Material.NormalTexture (property)
+  PicoGK.Material.NormalScale (property)
+  PicoGK.Material.OcclusionTexture (property)
+  PicoGK.Material.OcclusionStrength (property)
+  PicoGK.Material.Emissive (property)
+  PicoGK.Material.EmissiveStrength (property)
+  PicoGK.Material.EmissiveTexture (property)
+  PicoGK.Material.AlphaMode (property)
+  PicoGK.Material.AlphaCutoff (property)
+  PicoGK.Material.DoubleSided (property)
+  PicoGK.Material.Unlit (property)
+  PicoGK.Material.Ior (property)
+  PicoGK.Material.Dispersion (property)
+  PicoGK.Material.Anisotropy (property)
+  PicoGK.Material.Clearcoat (property)
+  PicoGK.Material.Iridescence (property)
+  PicoGK.Material.Sheen (property)
+  PicoGK.Material.Specular (property)
+  PicoGK.Material.Transmission (property)
+  PicoGK.Material.Volume (property)
+PicoGK.MaterialAlphaMode (enum) [3 members] — Typed MaterialAlphaMode appearance
+  PicoGK.MaterialAlphaMode.Opaque (enumMember)
+  PicoGK.MaterialAlphaMode.Mask (enumMember)
+  PicoGK.MaterialAlphaMode.Blend (enumMember)
+PicoGK.MaterialAnisotropy (class) [3 members] — Typed MaterialAnisotropy appearance
+  PicoGK.MaterialAnisotropy.Strength (property)
+  PicoGK.MaterialAnisotropy.Rotation (property)
+  PicoGK.MaterialAnisotropy.Texture (property)
+PicoGK.MaterialClearcoat (class) [6 members] — Typed MaterialClearcoat appearance
+  PicoGK.MaterialClearcoat.Factor (property)
+  PicoGK.MaterialClearcoat.Roughness (property)
+  PicoGK.MaterialClearcoat.Texture (property)
+  PicoGK.MaterialClearcoat.RoughnessTexture (property)
+  PicoGK.MaterialClearcoat.NormalTexture (property)
+  PicoGK.MaterialClearcoat.NormalScale (property)
+PicoGK.MaterialImage (class) [3 members] — Typed MaterialImage appearance
+  PicoGK.MaterialImage.Data (property)
+  PicoGK.MaterialImage.Format (property)
+  PicoGK.MaterialImage.Name (property)
+PicoGK.MaterialImageFormat (enum) [3 members] — Typed MaterialImageFormat appearance
+  PicoGK.MaterialImageFormat.Png (enumMember)
+  PicoGK.MaterialImageFormat.Jpeg (enumMember)
+  PicoGK.MaterialImageFormat.WebP (enumMember)
+PicoGK.MaterialIridescence (class) [6 members] — Typed MaterialIridescence appearance
+  PicoGK.MaterialIridescence.Factor (property)
+  PicoGK.MaterialIridescence.Ior (property)
+  PicoGK.MaterialIridescence.ThicknessMinimum (property)
+  PicoGK.MaterialIridescence.ThicknessMaximum (property)
+  PicoGK.MaterialIridescence.Texture (property)
+  PicoGK.MaterialIridescence.ThicknessTexture (property)
+PicoGK.MaterialMagFilter (enum) [2 members] — Typed MaterialMagFilter appearance
+  PicoGK.MaterialMagFilter.Nearest (enumMember)
+  PicoGK.MaterialMagFilter.Linear (enumMember)
+PicoGK.MaterialMinFilter (enum) [6 members] — Typed MaterialMinFilter appearance
+  PicoGK.MaterialMinFilter.Nearest (enumMember)
+  PicoGK.MaterialMinFilter.Linear (enumMember)
+  PicoGK.MaterialMinFilter.NearestMipmapNearest (enumMember)
+  PicoGK.MaterialMinFilter.LinearMipmapNearest (enumMember)
+  PicoGK.MaterialMinFilter.NearestMipmapLinear (enumMember)
+  PicoGK.MaterialMinFilter.LinearMipmapLinear (enumMember)
+PicoGK.MaterialSampler (class) [4 members] — Typed MaterialSampler appearance
+  PicoGK.MaterialSampler.WrapS (property)
+  PicoGK.MaterialSampler.WrapT (property)
+  PicoGK.MaterialSampler.MagFilter (property)
+  PicoGK.MaterialSampler.MinFilter (property)
+PicoGK.MaterialSheen (class) [4 members] — Typed MaterialSheen appearance
+  PicoGK.MaterialSheen.Color (property)
+  PicoGK.MaterialSheen.Roughness (property)
+  PicoGK.MaterialSheen.ColorTexture (property)
+  PicoGK.MaterialSheen.RoughnessTexture (property)
+PicoGK.MaterialSpecular (class) [4 members] — Typed MaterialSpecular appearance
+  PicoGK.MaterialSpecular.Factor (property)
+  PicoGK.MaterialSpecular.Color (property)
+  PicoGK.MaterialSpecular.Texture (property)
+  PicoGK.MaterialSpecular.ColorTexture (property)
+PicoGK.MaterialTexture (class) [3 members] — Typed MaterialTexture appearance
+  PicoGK.MaterialTexture.Image (property)
+  PicoGK.MaterialTexture.Sampler (property)
+  PicoGK.MaterialTexture.Transform (property)
+PicoGK.MaterialTextureTransform (class) [3 members] — Typed MaterialTextureTransform appearance
+  PicoGK.MaterialTextureTransform.Offset (property)
+  PicoGK.MaterialTextureTransform.Scale (property)
+  PicoGK.MaterialTextureTransform.Rotation (property)
+PicoGK.MaterialTransmission (class) [2 members] — Typed MaterialTransmission appearance
+  PicoGK.MaterialTransmission.Factor (property)
+  PicoGK.MaterialTransmission.Texture (property)
+PicoGK.MaterialVolume (class) [4 members] — Typed MaterialVolume appearance
+  PicoGK.MaterialVolume.Thickness (property)
+  PicoGK.MaterialVolume.AttenuationDistance (property)
+  PicoGK.MaterialVolume.AttenuationColor (property)
+  PicoGK.MaterialVolume.ThicknessTexture (property)
+PicoGK.MaterialWrap (enum) [3 members] — Typed MaterialWrap appearance
+  PicoGK.MaterialWrap.ClampToEdge (enumMember)
+  PicoGK.MaterialWrap.MirroredRepeat (enumMember)
+  PicoGK.MaterialWrap.Repeat (enumMember)
+PicoGK.Mesh (class) [23 members] — A triangle mesh
+  PicoGK.Mesh.EStlUnit (enum) [6 members]
+    PicoGK.Mesh.EStlUnit.AUTO (enumMember)
+    PicoGK.Mesh.EStlUnit.MM (enumMember)
+    PicoGK.Mesh.EStlUnit.CM (enumMember)
+    PicoGK.Mesh.EStlUnit.M (enumMember)
+    PicoGK.Mesh.EStlUnit.FT (enumMember)
+    PicoGK.Mesh.EStlUnit.IN (enumMember)
+  PicoGK.Mesh.m_strLoadHeaderData (field)
+  PicoGK.Mesh.m_eLoadUnits (field)
+  PicoGK.Mesh.lib (field)
+  PicoGK.Mesh.Mesh (constructor) — Creates a new empty Mesh, using the global library instance
+  PicoGK.Mesh.mshCreateTransformed (method) — Create a transformed mesh by offsetting and scaling it
+  PicoGK.Mesh.mshCreateMirrored (method) — Mirrors a mesh at the specified plane
+  PicoGK.Mesh.nAddVertex (method) — Add a new vertex to the mesh so that it…
+  PicoGK.Mesh.AddVertices (method)
+  PicoGK.Mesh.vecVertexAt (method) — Get the vertex at the specified index
+  PicoGK.Mesh.nVertexCount (method) — Get the number of vertices in the mesh
+  PicoGK.Mesh.nAddTriangle (method) — Add a triangle to the mesh with the specified vertex…
+  PicoGK.Mesh.nTriangleCount (method) — Return number of triangles in the mesh
+  PicoGK.Mesh.AddQuad (method) — Adds a quad, defined by four corner vertices Helper function,…
+  PicoGK.Mesh.oTriangleAt (method) — Get the triangle with the specified index
+  PicoGK.Mesh.GetTriangle (method) — Get the triangle with the specified index
+  PicoGK.Mesh.Append (method) — Append one mesh to another Note, no deduplication is done…
+  PicoGK.Mesh.oBoundingBox (method) — Return the BoundingBox of the Mesh
+  PicoGK.Mesh.mshFromStlFile (method) — Loads a mesh from an STL file By default, it…
+  PicoGK.Mesh.SaveToStlFile (method) — Saves a Mesh to STL file If eUnit is auto,…
+  PicoGK.Mesh.Dispose (method)
+  PicoGK.Mesh.bFindTriangleFromSurfacePoint (method)
+  PicoGK.Mesh.bPointLiesOnTriangle (method)
+PicoGK.MshHandle (struct) [2 members]
+  PicoGK.MshHandle.Value (property)
+  PicoGK.MshHandle.MshHandle (constructor)
+PicoGK.OpenVdbFile (class) [18 members] — OpenVdbFile handles the creation, loading and saving of openvdb .VDB…
+  PicoGK.OpenVdbFile.EFieldType (enum) [4 members] — Types of fields in .VDB files
+    PicoGK.OpenVdbFile.EFieldType.Unsupported (enumMember) — Unsupported data type (for example FOG)
+    PicoGK.OpenVdbFile.EFieldType.Voxels (enumMember) — PicoGK.Voxels field
+    PicoGK.OpenVdbFile.EFieldType.ScalarField (enumMember) — PicoGK.ScalarField type
+    PicoGK.OpenVdbFile.EFieldType.VectorField (enumMember) — PicoGK.ScalerField type
+  PicoGK.OpenVdbFile.lib (field)
+  PicoGK.OpenVdbFile.OpenVdbFile (constructor) — Create an empty openvdb file object
+  PicoGK.OpenVdbFile.libCreateCompatibleLibraryFor (method) — Create a PicoGK library object that is compatible with the…
+  PicoGK.OpenVdbFile.SaveToFile (method) — Saves the current object with all of its attached fields…
+  PicoGK.OpenVdbFile.voxGet (method) — Get the Voxels at the index specified
+  PicoGK.OpenVdbFile.nAdd (method) — Adds a copy of the specified Voxels to the VdbFile…
+  PicoGK.OpenVdbFile.oGetScalarField (method) — Get the ScalarField at the index specified
+  PicoGK.OpenVdbFile.oGetVectorField (method) — Get the VectorField at the index specified
+  PicoGK.OpenVdbFile.nFieldCount (method) — Number of fields stored in the VdbFile container
+  PicoGK.OpenVdbFile.strFieldName (method) — Returns the name of the field (if specified) at the…
+  PicoGK.OpenVdbFile.eFieldType (method) — Returns the type of the field at the given field…
+  PicoGK.OpenVdbFile.strFieldType (method) — Returns the field type at the given index as string
+  PicoGK.OpenVdbFile.xField (method)
+  PicoGK.OpenVdbFile.bIsPicoGKCompatible (method)
+  PicoGK.OpenVdbFile.fPicoGKVoxelSizeMM (method)
+  PicoGK.OpenVdbFile._hCreate (method)
+  PicoGK.OpenVdbFile.Dispose (method)
+PicoGK.PicoGKAllocException (class) [1 members]
+  PicoGK.PicoGKAllocException.PicoGKAllocException (constructor)
+PicoGK.PicoGKLibraryMismatchException (class) [1 members]
+  PicoGK.PicoGKLibraryMismatchException.PicoGKLibraryMismatchException (constructor)
+PicoGK.PolyContour (class) [14 members]
+  PicoGK.PolyContour.EWinding (enum) [3 members]
+    PicoGK.PolyContour.EWinding.UNKNOWN (enumMember)
+    PicoGK.PolyContour.EWinding.CLOCKWISE (enumMember)
+    PicoGK.PolyContour.EWinding.COUNTERCLOCKWISE (enumMember)
+  PicoGK.PolyContour.strWindingAsString (method)
+  PicoGK.PolyContour.eDetectWinding (method)
+  PicoGK.PolyContour.PolyContour (constructor)
+  PicoGK.PolyContour.AddVertex (method)
+  PicoGK.PolyContour.DetectWinding (method)
+  PicoGK.PolyContour.eWinding (method)
+  PicoGK.PolyContour.oVertices (method)
+  PicoGK.PolyContour.Close (method) — Makes sure that the last coordinate is identical to the…
+  PicoGK.PolyContour.AsSvgPolyline (method)
+  PicoGK.PolyContour.AsSvgPath (method)
+  PicoGK.PolyContour.oBBox (method)
+  PicoGK.PolyContour.nCount (method)
+  PicoGK.PolyContour.vecVertex (method)
+PicoGK.PolyHandle (struct) [2 members]
+  PicoGK.PolyHandle.Value (property)
+  PicoGK.PolyHandle.PolyHandle (constructor)
+PicoGK.PolyLine (class) [12 members] — A colored 3D polyline for use in the viewer
+  PicoGK.PolyLine.lib (field)
+  PicoGK.PolyLine.PolyLine (constructor) — Creates a new empty PolyLine, using the global library instance
+  PicoGK.PolyLine.nAddVertex (method) — Add a vertex to the polyline
+  PicoGK.PolyLine.Add (method) — Adds all vertices from a container
+  PicoGK.PolyLine.nVertexCount (method) — Return number of vertices in the PolyLine
+  PicoGK.PolyLine.vecVertexAt (method) — Get the vertex in the polyline at the specified vertex…
+  PicoGK.PolyLine.GetColor (method) — Return the color of the PolyLine
+  PicoGK.PolyLine.oBoundingBox (method) — Return BoundingBox of PolyLine
+  PicoGK.PolyLine.AddArrow (method) — Adds an arrow to the tip of the current polyline…
+  PicoGK.PolyLine.AddCross (method) — Add a cross at the end of a polyline
+  PicoGK.PolyLine._hCreate (method)
+  PicoGK.PolyLine.Dispose (method)
+PicoGK.PolySlice (class) [10 members]
+  PicoGK.PolySlice.PolySlice (constructor)
+  PicoGK.PolySlice.AddContour (method)
+  PicoGK.PolySlice.bIsEmpty (method)
+  PicoGK.PolySlice.Close (method)
+  PicoGK.PolySlice.SaveToSvgFile (method)
+  PicoGK.PolySlice.oFromSdf (method)
+  PicoGK.PolySlice.fZPos (method)
+  PicoGK.PolySlice.oBBox (method)
+  PicoGK.PolySlice.nContours (method)
+  PicoGK.PolySlice.oContourAt (method)
+PicoGK.PolySliceStack (class) [6 members]
+  PicoGK.PolySliceStack.PolySliceStack (constructor)
+  PicoGK.PolySliceStack.AddSlices (method)
+  PicoGK.PolySliceStack.AddToViewer (method)
+  PicoGK.PolySliceStack.nCount (method)
+  PicoGK.PolySliceStack.oSliceAt (method)
+  PicoGK.PolySliceStack.oBBox (method)
+PicoGK.ProgressCounter (class) [3 members] — A progress counting class for counting up items to 100%
+  PicoGK.ProgressCounter.ProgressCounter (constructor) — Create a new progress counter object
+  PicoGK.ProgressCounter.SetItem (method) — Set the item (nItemCount == 100%)
+  PicoGK.ProgressCounter.op_Increment (method) — Allow you to use ++ to count up to the…
+PicoGK.ProgressNoop (class) [1 members] — A progress reporting class that does nothing (can be used…
+  PicoGK.ProgressNoop.Progress (method) — Progress from 0..1
+PicoGK.QuadHandle (struct) [2 members]
+  PicoGK.QuadHandle.Value (property)
+  PicoGK.QuadHandle.QuadHandle (constructor)
+PicoGK.SKHelpers (class) [2 members]
+  PicoGK.SKHelpers.oAsSkColor (method)
+  PicoGK.SKHelpers.clrAsColorRgba32 (method)
+PicoGK.ScalarField (class) [17 members] — A field of scalar floating point values
+  PicoGK.ScalarField.m_oMetadata (field) — Field metadata
+  PicoGK.ScalarField.lib (field)
+  PicoGK.ScalarField.oMetaData (method)
+  PicoGK.ScalarField.ScalarField (constructor) — Create an empty scalar field object
+  PicoGK.ScalarField.SetValue (method) — Sets the value at the specified position in mm When…
+  PicoGK.ScalarField.bGetValue (method) — Get the value at the specified position If the specified…
+  PicoGK.ScalarField.RemoveValue (method) — Removes the value at the specified position
+  PicoGK.ScalarField.GetVoxelDimensions (method) — Returns the dimensions of the field in discrete voxels
+  PicoGK.ScalarField.GetVoxelSlice (method) — Returns a signed distance-field-encoded slice of the voxel field To…
+  PicoGK.ScalarField.TraverseActive (method) — Visit each active value in the vector field and call…
+  PicoGK.ScalarField.fSignedDistance (method) — Return the scalar value at the specified position as as…
+  PicoGK.ScalarField.oBoundingBox (method) — Returns the bounding box of all active voxels in mm…
+  PicoGK.ScalarField._hCreate (method)
+  PicoGK.ScalarField._hCreateCopy (method)
+  PicoGK.ScalarField._hCreateFromVoxels (method)
+  PicoGK.ScalarField._hBuildFromVoxels (method)
+  PicoGK.ScalarField.Dispose (method)
+PicoGK.ScalarFieldHandle (struct) [2 members]
+  PicoGK.ScalarFieldHandle.Value (property)
+  PicoGK.ScalarFieldHandle.ScalarFieldHandle (constructor)
 
 ## PicoGK (3) — `api-picogk-3.md`
 
-SdfVisualizer (class) [3 members]
-  SdfVisualizer.imgEncodeFromSdf (method) — Create a color image which encodes the signed distance values…
-  SdfVisualizer.bDoesSliceContainDefect (method) — Checks if the scalar field slice contains a defective voxel
-  SdfVisualizer.bVisualizeSdfSlicesAsTgaStack (method) — Saves a stack of TGA files, visualizing the signed distance…
-SliceViz (class) [4 members]
-  SliceViz.nSliceCount (property) — The number of slices in this voxel field
-  SliceViz.SliceViz (constructor)
-  SliceViz.Visualize (method) — Visualize the slice in the viewer using a normalized parameter…
-  SliceViz.Dispose (method) — Dispose the object (IDispose)
-SplitProgress (class) [3 members] — This class allows you to split progress reporting into multiple…
-  SplitProgress.SplitProgress (constructor) — Create a new SplitProgress object
-  SplitProgress.Progress (method) — Report progress from 0..1 - this function automatically scales the…
-  SplitProgress.op_Increment (method) — Allow you to use ++ to count up to the…
-SurfaceNormalFieldExtractor (class) [4 members]
-  SurfaceNormalFieldExtractor.oExtract (method)
-  SurfaceNormalFieldExtractor.SurfaceNormalFieldExtractor (constructor)
-  SurfaceNormalFieldExtractor.Run (method)
-  SurfaceNormalFieldExtractor.InformActiveValue (method)
-Text (class) [2 members]
-  Text.oDefaultTypeface (property)
-  Text.imgRenderText (method)
-TgaIo (class) [3 members]
-  TgaIo.SaveTga (method)
-  TgaIo.GetFileInfo (method)
-  TgaIo.LoadTga (method)
-Triangle (struct) [4 members]
-  Triangle.A (field)
-  Triangle.B (field)
-  Triangle.C (field)
-  Triangle.Triangle (constructor)
-Utils (class) [12 members]
-  Utils.TempFolder (class) — Creates a temporary folder with an arbitrary filename in the…
-  Utils.mshCreateCube (method) — Helper function to create simple box mesh from a bounding…
-  Utils.strStripQuotesFromPath (method) — Strip quotes of a quoted path like "/usr/lib/" -> /usr/lib/
-  Utils.strStripExtension (method) — Strips the extension from a filename
-  Utils.bWaitForFileExistence (method) — Wait for a file's creation
-  Utils.strHomeFolder (method) — Returns the path to the home folder (cross platform compatible)
-  Utils.strDocumentsFolder (method) — Returns the path to the documents folder (cross platform compatible)
-  Utils.strProjectRootFolder (method) — Returns the path to the source folder of your project,…
-  Utils.strPicoGKSourceCodeFolder (method) — Returns the path to the source folder of PicoGK, making…
-  Utils.strExecutableFolder (method) — Returns the path in which your current executable resides
-  Utils.strDateTimeFilename (method) — Returns a file name in the form 20230930_134500 to be…
-  Utils.strShorten (method) — Shorted a string, IF it is too long
-Vdb2Cli (class) [1 members] — Helper class to save a voxel field contained in a…
-  Vdb2Cli.Convert (method) — Convert a voxel field to a CLI slice file
-VdbHandle (struct) [2 members]
-  VdbHandle.Value (property)
-  VdbHandle.VdbHandle (constructor)
-VdbMetaHandle (struct) [2 members]
-  VdbMetaHandle.Value (property)
-  VdbMetaHandle.VdbMetaHandle (constructor)
-VectorField (class) [13 members] — A Field of 3D floating point vectors
-  VectorField.m_oMetadata (field) — VectorField metadata
-  VectorField.lib (field)
-  VectorField.oMetaData (method)
-  VectorField.VectorField (constructor) — Create an empty VectorField object
-  VectorField.SetValue (method) — Sets the value at the specified position in mm When…
-  VectorField.bGetValue (method) — Get the value at the specified position If the specified…
-  VectorField.RemoveValue (method) — Removes the value at the specified position
-  VectorField.TraverseActive (method) — Visit each active value in the vector field and call…
-  VectorField._hCreate (method)
-  VectorField._hCreateCopy (method)
-  VectorField._hCreateFromVoxels (method)
-  VectorField._hBuildFromVoxels (method)
-  VectorField.Dispose (method)
-VectorFieldHandle (struct) [2 members]
-  VectorFieldHandle.Value (property)
-  VectorFieldHandle.VectorFieldHandle (constructor)
-VectorFieldMerge (class) [4 members]
-  VectorFieldMerge.Merge (method)
-  VectorFieldMerge.VectorFieldMerge (constructor)
-  VectorFieldMerge.Run (method)
-  VectorFieldMerge.InformActiveValue (method)
-Viewer (class) [62 members] — PicoGK viewer
-  Viewer.InfoCallback (type)
-  Viewer.UpdateCallback (type)
-  Viewer.KeyPressedCallback (type)
-  Viewer.MouseMovedCallback (type)
-  Viewer.MouseButtonCallback (type)
-  Viewer.ScrollWheelCallback (type)
-  Viewer.WindowSizelCallback (type)
-  Viewer.GpuTex (class)
-  Viewer.ImageQuad (class)
-  Viewer.SideBar (class)
-  Viewer.bIsHosted (property) — True when viewer operations are delegated to an embedding backend
-  Viewer.qOrientation (property) — Access to the rotational component (orientation) of the viewer
-  Viewer.qOrientationHome (field)
-  Viewer.qOrientationTop (field)
-  Viewer.qOrientationBottom (field)
-  Viewer.qOrientationFront (field)
-  Viewer.qOrientationLeft (field)
-  Viewer.qOrientationBack (field)
-  Viewer.qOrientationRight (field)
-  Viewer.IViewerAction (interface) — An abstract interface for viewer actions
-  Viewer.AnimGroupMatrixRotate (class)
-  Viewer.AnimViewRotate (class) — Animate view rotation
-  Viewer.Camera (class) — Abstract camera class to interact with the view
-  Viewer.CamPerspectiveArcball (class)
-  Viewer.IKeyHandler (interface)
-  Viewer.EKeys (enum)
-  Viewer.KeyAction (class)
-  Viewer.KeyHandler (class)
-  Viewer._hCreate (method)
-  Viewer.Dispose (method)
-  Viewer.Viewer (constructor) — Initialize a hosted Viewer that delegates display operations without creating…
-  Viewer.SetMechanism (method) — Capture an application-defined mechanism on a hosted viewer
-  Viewer.bPoll (method) — Run this function in your main thread while it returns…
-  Viewer.RequestUpdate (method) — Request a refresh of the viewer
-  Viewer.LoadLightSetup (method) — Load the IBL light setup from the specified ZIP file
-  Viewer.Add (method) — Add the object to the viewer, using the specified viewer…
-  Viewer.Remove (method) — Removes the object from the viewer
-  Viewer.SetObjectMatrix (method) — Set the transformation matrix for the specified object
-  Viewer.RemoveAllObjects (method) — Remove all objects from the viewer
-  Viewer.RequestScreenShot (method) — Request screenshot (TGA), which will be saved to the the…
-  Viewer.EnableExperimental (method) — Enable/disable experimental rendering features
-  Viewer.SetGroupVisible (method) — Enable or disable the display of a viewer group
-  Viewer.SetGroupMaterial (method) — Assign a typed physical material to every object in the…
-  Viewer.SetGroupMatrix (method) — Set the group's transformation matrix
-  Viewer.EnableOverhangWarning (method) — Enables overhang severity visualization for the specified viewer group
-  Viewer.DisableOverhangWarning (method) — Disables the overhang angle warning of the specified group
-  Viewer.oBBox (method) — Returns the bounding box of all elements inside the view
-  Viewer.SetBackgroundColor (method) — Sets the background color of the viewer
-  Viewer.ZoomToFit (method) — Zoom to fit the contents of the viewer
-  Viewer.SetFov (method) — Set Vertical Field of View in radians (i.e
-  Viewer.bIsIdle (method) — Allows you to query if all viewer actions are complete
-  Viewer.AddAnimation (method)
-  Viewer.RemoveAllAnimations (method)
-  Viewer.AddKeyHandler (method)
-  Viewer.StartTimeLapse (method)
-  Viewer.PauseTimeLapse (method)
-  Viewer.ResumeTimeLapse (method)
-  Viewer.StopTimeLapse (method)
-  Viewer.AddCross (method) — Marks the supplied coordinate with a cross-shaped polyline
-  Viewer.AddArrow (method) — Adds an line ending in an arrow to the viewer
-  Viewer.oCreateSideBarLeft (method)
-  Viewer.oCreateSideBarRight (method)
-VoxCutViz (class) [4 members] — Visualizes the result of a voxel filed cut along an…
-  VoxCutViz.nSliceCount (property) — Number of slices in the voxel field
-  VoxCutViz.VoxCutViz (constructor) — Initializes a new VoxCutViz object with the specified Viewer and…
-  VoxCutViz.Cut (method) — Cut the voxel field along the two normalized values (0…
-  VoxCutViz.Dispose (method) — Call to stop the visualization (or let the object go…
-VoxHandle (struct) [2 members]
-  VoxHandle.Value (property)
-  VoxHandle.VoxHandle (constructor)
+PicoGK.SdfVisualizer (class) [3 members]
+  PicoGK.SdfVisualizer.imgEncodeFromSdf (method) — Create a color image which encodes the signed distance values…
+  PicoGK.SdfVisualizer.bDoesSliceContainDefect (method) — Checks if the scalar field slice contains a defective voxel
+  PicoGK.SdfVisualizer.bVisualizeSdfSlicesAsTgaStack (method) — Saves a stack of TGA files, visualizing the signed distance…
+PicoGK.SliceViz (class) [4 members]
+  PicoGK.SliceViz.nSliceCount (property) — The number of slices in this voxel field
+  PicoGK.SliceViz.SliceViz (constructor)
+  PicoGK.SliceViz.Visualize (method) — Visualize the slice in the viewer using a normalized parameter…
+  PicoGK.SliceViz.Dispose (method) — Dispose the object (IDispose)
+PicoGK.SplitProgress (class) [3 members] — This class allows you to split progress reporting into multiple…
+  PicoGK.SplitProgress.SplitProgress (constructor) — Create a new SplitProgress object
+  PicoGK.SplitProgress.Progress (method) — Report progress from 0..1 - this function automatically scales the…
+  PicoGK.SplitProgress.op_Increment (method) — Allow you to use ++ to count up to the…
+PicoGK.SurfaceNormalFieldExtractor (class) [4 members]
+  PicoGK.SurfaceNormalFieldExtractor.oExtract (method)
+  PicoGK.SurfaceNormalFieldExtractor.SurfaceNormalFieldExtractor (constructor)
+  PicoGK.SurfaceNormalFieldExtractor.Run (method)
+  PicoGK.SurfaceNormalFieldExtractor.InformActiveValue (method)
+PicoGK.Text (class) [2 members]
+  PicoGK.Text.oDefaultTypeface (property)
+  PicoGK.Text.imgRenderText (method)
+PicoGK.TgaIo (class) [3 members]
+  PicoGK.TgaIo.SaveTga (method)
+  PicoGK.TgaIo.GetFileInfo (method)
+  PicoGK.TgaIo.LoadTga (method)
+PicoGK.Triangle (struct) [4 members]
+  PicoGK.Triangle.A (field)
+  PicoGK.Triangle.B (field)
+  PicoGK.Triangle.C (field)
+  PicoGK.Triangle.Triangle (constructor)
+PicoGK.Utils (class) [12 members]
+  PicoGK.Utils.TempFolder (class) [3 members] — Creates a temporary folder with an arbitrary filename in the…
+    PicoGK.Utils.TempFolder.strFolder (field)
+    PicoGK.Utils.TempFolder.TempFolder (constructor)
+    PicoGK.Utils.TempFolder.Dispose (method)
+  PicoGK.Utils.mshCreateCube (method) — Helper function to create simple box mesh from a bounding…
+  PicoGK.Utils.strStripQuotesFromPath (method) — Strip quotes of a quoted path like "/usr/lib/" -> /usr/lib/
+  PicoGK.Utils.strStripExtension (method) — Strips the extension from a filename
+  PicoGK.Utils.bWaitForFileExistence (method) — Wait for a file's creation
+  PicoGK.Utils.strHomeFolder (method) — Returns the path to the home folder (cross platform compatible)
+  PicoGK.Utils.strDocumentsFolder (method) — Returns the path to the documents folder (cross platform compatible)
+  PicoGK.Utils.strProjectRootFolder (method) — Returns the path to the source folder of your project,…
+  PicoGK.Utils.strPicoGKSourceCodeFolder (method) — Returns the path to the source folder of PicoGK, making…
+  PicoGK.Utils.strExecutableFolder (method) — Returns the path in which your current executable resides
+  PicoGK.Utils.strDateTimeFilename (method) — Returns a file name in the form 20230930_134500 to be…
+  PicoGK.Utils.strShorten (method) — Shorted a string, IF it is too long
+PicoGK.Vdb2Cli (class) [1 members] — Helper class to save a voxel field contained in a…
+  PicoGK.Vdb2Cli.Convert (method) — Convert a voxel field to a CLI slice file
+PicoGK.VdbHandle (struct) [2 members]
+  PicoGK.VdbHandle.Value (property)
+  PicoGK.VdbHandle.VdbHandle (constructor)
+PicoGK.VdbMetaHandle (struct) [2 members]
+  PicoGK.VdbMetaHandle.Value (property)
+  PicoGK.VdbMetaHandle.VdbMetaHandle (constructor)
+PicoGK.VectorField (class) [13 members] — A Field of 3D floating point vectors
+  PicoGK.VectorField.m_oMetadata (field) — VectorField metadata
+  PicoGK.VectorField.lib (field)
+  PicoGK.VectorField.oMetaData (method)
+  PicoGK.VectorField.VectorField (constructor) — Create an empty VectorField object
+  PicoGK.VectorField.SetValue (method) — Sets the value at the specified position in mm When…
+  PicoGK.VectorField.bGetValue (method) — Get the value at the specified position If the specified…
+  PicoGK.VectorField.RemoveValue (method) — Removes the value at the specified position
+  PicoGK.VectorField.TraverseActive (method) — Visit each active value in the vector field and call…
+  PicoGK.VectorField._hCreate (method)
+  PicoGK.VectorField._hCreateCopy (method)
+  PicoGK.VectorField._hCreateFromVoxels (method)
+  PicoGK.VectorField._hBuildFromVoxels (method)
+  PicoGK.VectorField.Dispose (method)
+PicoGK.VectorFieldHandle (struct) [2 members]
+  PicoGK.VectorFieldHandle.Value (property)
+  PicoGK.VectorFieldHandle.VectorFieldHandle (constructor)
+PicoGK.VectorFieldMerge (class) [4 members]
+  PicoGK.VectorFieldMerge.Merge (method)
+  PicoGK.VectorFieldMerge.VectorFieldMerge (constructor)
+  PicoGK.VectorFieldMerge.Run (method)
+  PicoGK.VectorFieldMerge.InformActiveValue (method)
+PicoGK.Viewer (class) [62 members] — PicoGK viewer
+  PicoGK.Viewer.InfoCallback (type)
+  PicoGK.Viewer.UpdateCallback (type)
+  PicoGK.Viewer.KeyPressedCallback (type)
+  PicoGK.Viewer.MouseMovedCallback (type)
+  PicoGK.Viewer.MouseButtonCallback (type)
+  PicoGK.Viewer.ScrollWheelCallback (type)
+  PicoGK.Viewer.WindowSizelCallback (type)
+  PicoGK.Viewer.GpuTex (class) [3 members]
+    PicoGK.Viewer.GpuTex.Dispose (method)
+    PicoGK.Viewer.GpuTex.GpuTex (constructor)
+    PicoGK.Viewer.GpuTex.ReplaceWith (method)
+  PicoGK.Viewer.ImageQuad (class) [4 members]
+    PicoGK.Viewer.ImageQuad.Dispose (method)
+    PicoGK.Viewer.ImageQuad.ImageQuad (constructor)
+    PicoGK.Viewer.ImageQuad.UpdateImage (method)
+    PicoGK.Viewer.ImageQuad.UpdateMatrix (method)
+  PicoGK.Viewer.SideBar (class) [2 members]
+    PicoGK.Viewer.SideBar.Dispose (method)
+    PicoGK.Viewer.SideBar.SideBar (constructor)
+  PicoGK.Viewer.bIsHosted (property) — True when viewer operations are delegated to an embedding backend
+  PicoGK.Viewer.qOrientation (property) — Access to the rotational component (orientation) of the viewer
+  PicoGK.Viewer.qOrientationHome (field)
+  PicoGK.Viewer.qOrientationTop (field)
+  PicoGK.Viewer.qOrientationBottom (field)
+  PicoGK.Viewer.qOrientationFront (field)
+  PicoGK.Viewer.qOrientationLeft (field)
+  PicoGK.Viewer.qOrientationBack (field)
+  PicoGK.Viewer.qOrientationRight (field)
+  PicoGK.Viewer.IViewerAction (interface) [1 members] — An abstract interface for viewer actions
+    PicoGK.Viewer.IViewerAction.Do (method) — Called from inside the main viewer thread to execute the…
+  PicoGK.Viewer.AnimGroupMatrixRotate (class) [2 members]
+    PicoGK.Viewer.AnimGroupMatrixRotate.AnimGroupMatrixRotate (constructor)
+    PicoGK.Viewer.AnimGroupMatrixRotate.Do (method)
+  PicoGK.Viewer.AnimViewRotate (class) [2 members] — Animate view rotation
+    PicoGK.Viewer.AnimViewRotate.AnimViewRotate (constructor) — Animate movement to a viewer orientation
+    PicoGK.Viewer.AnimViewRotate.Do (method)
+  PicoGK.Viewer.Camera (class) [9 members] — Abstract camera class to interact with the view
+    PicoGK.Viewer.Camera.EDragType (enum) [3 members] — Drag, Spin, Pan the camera
+      PicoGK.Viewer.Camera.EDragType.Rotate (enumMember) — Rotate the camera (up/down)
+      PicoGK.Viewer.Camera.EDragType.Spin (enumMember) — Spin the camera around the view vector
+      PicoGK.Viewer.Camera.EDragType.Pan (enumMember) — Move the camera up/down
+    PicoGK.Viewer.Camera.qOrientation (property)
+    PicoGK.Viewer.Camera.matVP (property)
+    PicoGK.Viewer.Camera.vecEye (property)
+    PicoGK.Viewer.Camera.SetViewPort (method)
+    PicoGK.Viewer.Camera.LookAt (method)
+    PicoGK.Viewer.Camera.ZoomToFit (method)
+    PicoGK.Viewer.Camera.Scroll (method)
+    PicoGK.Viewer.Camera.MouseDrag (method)
+  PicoGK.Viewer.CamPerspectiveArcball (class) [10 members]
+    PicoGK.Viewer.CamPerspectiveArcball.matVP (property)
+    PicoGK.Viewer.CamPerspectiveArcball.vecEye (property)
+    PicoGK.Viewer.CamPerspectiveArcball.qOrientation (property)
+    PicoGK.Viewer.CamPerspectiveArcball.CamPerspectiveArcball (constructor)
+    PicoGK.Viewer.CamPerspectiveArcball.SetVerticalFov (method)
+    PicoGK.Viewer.CamPerspectiveArcball.SetViewPort (method)
+    PicoGK.Viewer.CamPerspectiveArcball.LookAt (method)
+    PicoGK.Viewer.CamPerspectiveArcball.ZoomToFit (method)
+    PicoGK.Viewer.CamPerspectiveArcball.MouseDrag (method)
+    PicoGK.Viewer.CamPerspectiveArcball.Scroll (method)
+  PicoGK.Viewer.IKeyHandler (interface) [1 members]
+    PicoGK.Viewer.IKeyHandler.bHandleEvent (method)
+  PicoGK.Viewer.EKeys (enum) [63 members]
+    PicoGK.Viewer.EKeys.Key_Space (enumMember)
+    PicoGK.Viewer.EKeys.Key_0 (enumMember)
+    PicoGK.Viewer.EKeys.Key_1 (enumMember)
+    PicoGK.Viewer.EKeys.Key_2 (enumMember)
+    PicoGK.Viewer.EKeys.Key_3 (enumMember)
+    PicoGK.Viewer.EKeys.Key_4 (enumMember)
+    PicoGK.Viewer.EKeys.Key_5 (enumMember)
+    PicoGK.Viewer.EKeys.Key_6 (enumMember)
+    PicoGK.Viewer.EKeys.Key_7 (enumMember)
+    PicoGK.Viewer.EKeys.Key_8 (enumMember)
+    PicoGK.Viewer.EKeys.Key_9 (enumMember)
+    PicoGK.Viewer.EKeys.Key_A (enumMember)
+    PicoGK.Viewer.EKeys.Key_B (enumMember)
+    PicoGK.Viewer.EKeys.Key_C (enumMember)
+    PicoGK.Viewer.EKeys.Key_D (enumMember)
+    PicoGK.Viewer.EKeys.Key_E (enumMember)
+    PicoGK.Viewer.EKeys.Key_F (enumMember)
+    PicoGK.Viewer.EKeys.Key_G (enumMember)
+    PicoGK.Viewer.EKeys.Key_H (enumMember)
+    PicoGK.Viewer.EKeys.Key_I (enumMember)
+    PicoGK.Viewer.EKeys.Key_J (enumMember)
+    PicoGK.Viewer.EKeys.Key_K (enumMember)
+    PicoGK.Viewer.EKeys.Key_L (enumMember)
+    PicoGK.Viewer.EKeys.Key_M (enumMember)
+    PicoGK.Viewer.EKeys.Key_N (enumMember)
+    PicoGK.Viewer.EKeys.Key_O (enumMember)
+    PicoGK.Viewer.EKeys.Key_P (enumMember)
+    PicoGK.Viewer.EKeys.Key_Q (enumMember)
+    PicoGK.Viewer.EKeys.Key_R (enumMember)
+    PicoGK.Viewer.EKeys.Key_S (enumMember)
+    PicoGK.Viewer.EKeys.Key_T (enumMember)
+    PicoGK.Viewer.EKeys.Key_U (enumMember)
+    PicoGK.Viewer.EKeys.Key_V (enumMember)
+    PicoGK.Viewer.EKeys.Key_W (enumMember)
+    PicoGK.Viewer.EKeys.Key_X (enumMember)
+    PicoGK.Viewer.EKeys.Key_Y (enumMember)
+    PicoGK.Viewer.EKeys.Key_Z (enumMember)
+    PicoGK.Viewer.EKeys.Key_ESC (enumMember)
+    PicoGK.Viewer.EKeys.Key_Enter (enumMember)
+    PicoGK.Viewer.EKeys.Key_Tab (enumMember)
+    PicoGK.Viewer.EKeys.Key_Backspace (enumMember)
+    PicoGK.Viewer.EKeys.Key_Insert (enumMember)
+    PicoGK.Viewer.EKeys.Key_Delete (enumMember)
+    PicoGK.Viewer.EKeys.Key_Right (enumMember)
+    PicoGK.Viewer.EKeys.Key_Left (enumMember)
+    PicoGK.Viewer.EKeys.Key_Down (enumMember)
+    PicoGK.Viewer.EKeys.Key_Up (enumMember)
+    PicoGK.Viewer.EKeys.Key_PgUp (enumMember)
+    PicoGK.Viewer.EKeys.Key_PgDn (enumMember)
+    PicoGK.Viewer.EKeys.Key_Home (enumMember)
+    PicoGK.Viewer.EKeys.Key_End (enumMember)
+    PicoGK.Viewer.EKeys.Key_F1 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F2 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F3 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F4 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F5 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F6 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F7 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F8 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F9 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F10 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F11 (enumMember)
+    PicoGK.Viewer.EKeys.Key_F12 (enumMember)
+  PicoGK.Viewer.KeyAction (class) [3 members]
+    PicoGK.Viewer.KeyAction.KeyAction (constructor)
+    PicoGK.Viewer.KeyAction.bKeyEquals (method)
+    PicoGK.Viewer.KeyAction.Do (method)
+  PicoGK.Viewer.KeyHandler (class) [2 members]
+    PicoGK.Viewer.KeyHandler.AddAction (method)
+    PicoGK.Viewer.KeyHandler.bHandleEvent (method)
+  PicoGK.Viewer._hCreate (method)
+  PicoGK.Viewer.Dispose (method)
+  PicoGK.Viewer.Viewer (constructor) — Initialize a hosted Viewer that delegates display operations without creating…
+  PicoGK.Viewer.SetMechanism (method) — Capture an application-defined mechanism on a hosted viewer
+  PicoGK.Viewer.bPoll (method) — Run this function in your main thread while it returns…
+  PicoGK.Viewer.RequestUpdate (method) — Request a refresh of the viewer
+  PicoGK.Viewer.LoadLightSetup (method) — Load the IBL light setup from the specified ZIP file
+  PicoGK.Viewer.Add (method) — Add the object to the viewer, using the specified viewer…
+  PicoGK.Viewer.Remove (method) — Removes the object from the viewer
+  PicoGK.Viewer.SetObjectMatrix (method) — Set the transformation matrix for the specified object
+  PicoGK.Viewer.RemoveAllObjects (method) — Remove all objects from the viewer
+  PicoGK.Viewer.RequestScreenShot (method) — Request screenshot (TGA), which will be saved to the the…
+  PicoGK.Viewer.EnableExperimental (method) — Enable/disable experimental rendering features
+  PicoGK.Viewer.SetGroupVisible (method) — Enable or disable the display of a viewer group
+  PicoGK.Viewer.SetGroupMaterial (method) — Assign a typed physical material to every object in the…
+  PicoGK.Viewer.SetGroupMatrix (method) — Set the group's transformation matrix
+  PicoGK.Viewer.EnableOverhangWarning (method) — Enables overhang severity visualization for the specified viewer group
+  PicoGK.Viewer.DisableOverhangWarning (method) — Disables the overhang angle warning of the specified group
+  PicoGK.Viewer.oBBox (method) — Returns the bounding box of all elements inside the view
+  PicoGK.Viewer.SetBackgroundColor (method) — Sets the background color of the viewer
+  PicoGK.Viewer.ZoomToFit (method) — Zoom to fit the contents of the viewer
+  PicoGK.Viewer.SetFov (method) — Set Vertical Field of View in radians (i.e
+  PicoGK.Viewer.bIsIdle (method) — Allows you to query if all viewer actions are complete
+  PicoGK.Viewer.AddAnimation (method)
+  PicoGK.Viewer.RemoveAllAnimations (method)
+  PicoGK.Viewer.AddKeyHandler (method)
+  PicoGK.Viewer.StartTimeLapse (method)
+  PicoGK.Viewer.PauseTimeLapse (method)
+  PicoGK.Viewer.ResumeTimeLapse (method)
+  PicoGK.Viewer.StopTimeLapse (method)
+  PicoGK.Viewer.AddCross (method) — Marks the supplied coordinate with a cross-shaped polyline
+  PicoGK.Viewer.AddArrow (method) — Adds an line ending in an arrow to the viewer
+  PicoGK.Viewer.oCreateSideBarLeft (method)
+  PicoGK.Viewer.oCreateSideBarRight (method)
+PicoGK.VoxCutViz (class) [4 members] — Visualizes the result of a voxel filed cut along an…
+  PicoGK.VoxCutViz.nSliceCount (property) — Number of slices in the voxel field
+  PicoGK.VoxCutViz.VoxCutViz (constructor) — Initializes a new VoxCutViz object with the specified Viewer and…
+  PicoGK.VoxCutViz.Cut (method) — Cut the voxel field along the two normalized values (0…
+  PicoGK.VoxCutViz.Dispose (method) — Call to stop the visualization (or let the object go…
+PicoGK.VoxHandle (struct) [2 members]
+  PicoGK.VoxHandle.Value (property)
+  PicoGK.VoxHandle.VoxHandle (constructor)
 
 ## PicoGK (4) — `api-picogk-4.md`
 
-Voxels (class) [71 members]
-  Voxels.fVoxelSize (property) — Returns the voxel size in millimeters used in the voxel…
-  Voxels.ESliceMode (enum)
-  Voxels.ESliceAxis (enum)
-  Voxels.m_oMetadata (field)
-  Voxels.lib (field)
-  Voxels.oMetaData (method)
-  Voxels.Voxels (constructor) — Create a new empty voxels object, using the global library…
-  Voxels.voxSphere (method) — Create a new Voxels object using the global library instance,…
-  Voxels.voxLatticeBeam (method) — Returns a lattice beam with hemispherical ends internally uses an…
-  Voxels.voxMeshShell (method) — Creates a shelled (hollow) Voxels object from a mesh
-  Voxels.voxCombineAll (method) — Create a new Voxels object using the global library instance,…
-  Voxels.voxFromVdbFile (method) — Create Voxels from a OpenVDB file (.vdb) using the global…
-  Voxels.voxDuplicate (method) — Create a duplicate of the current voxel field
-  Voxels.mshAsMesh (method) — Return the current voxel field as a mesh
-  Voxels.bIsEmpty (method) — Checks whether this Voxels object is empty, i.e
-  Voxels.nMemUsage (method) — Returns the amount of memory in bytes used by this…
-  Voxels.BoolAdd (method) — Performs a boolean union between two voxel fields Our voxelfield…
-  Voxels.voxBoolAdd (method) — Performs a boolean union operation on a copy of the…
-  Voxels.BoolAddAll (method) — Performs a boolean union of all voxels supplied in the…
-  Voxels.voxBoolAddAll (method) — Performs a boolean union of all voxels supplied in the…
-  Voxels.voxCombine (method) — Combines two voxel fields and returns the result using BoolAdd
-  Voxels.BoolSubtract (method) — Performs a boolean difference between the two voxel fields Our…
-  Voxels.voxBoolSubtract (method) — Performs a boolean difference operation on a copy of the…
-  Voxels.BoolSubtractAll (method) — Subtracts on all voxels supplied in the container (List, Array,…
-  Voxels.voxBoolSubtractAll (method) — Subtracts on all voxels supplied in the container (List, Array,…
-  Voxels.BoolIntersect (method) — Performs a boolean intersection between two voxel fields
-  Voxels.voxBoolIntersect (method) — Performs a boolean intersection operation on a copy of the…
-  Voxels.op_Addition (method) — Overloaded operators allow you to do things like vox =…
-  Voxels.op_Subtraction (method) — Overloaded operators allow you to do things like vox =…
-  Voxels.op_BitwiseAnd (method) — Overloaded operator for intersect (boolean AND) vox = vox1 &…
-  Voxels.Trim (method) — Intersects the voxel field with the specified bounding box so…
-  Voxels.voxTrim (method) — Intersects a copy of the voxel field with the specified…
-  Voxels.Offset (method) — Offsets the voxel field by the specified distance
-  Voxels.voxOffset (method) — Offsets a copy of the voxel field by the specified…
-  Voxels.DoubleOffset (method) — Offsets the voxel field twice, by the specified distances Outwards…
-  Voxels.voxDoubleOffset (method) — Offsets a copy of the voxel field twice, by the…
-  Voxels.TripleOffset (method) — Offsets the voxel field three times by the specified distance
-  Voxels.voxTripleOffset (method) — Offsets a copy of the voxel field three times by…
-  Voxels.Smoothen (method) — Same as TripleOffset
-  Voxels.voxSmoothen (method) — Same as TripleOffset
-  Voxels.OverOffset (method) — Similar to DoubleOffset, but allows you to specify the offsetted…
-  Voxels.voxOverOffset (method) — Similar to DoubleOffset, but allows you to specify the offsetted…
-  Voxels.Fillet (method) — Creates a fillet-like effect
-  Voxels.voxFillet (method) — Creates a fillet-like effect
-  Voxels.voxShell (method) — Creates a shell of a voxel field
-  Voxels.RenderMesh (method) — Renders a mesh into the voxel field, combining it with…
-  Voxels.RenderImplicit (method) — Render an implicit signed distance function into the voxels overwriting…
-  Voxels.IntersectImplicit (method) — Render an implicit signed distance function into the voxels but…
-  Voxels.voxIntersectImplicit (method) — Same as IntersectImplicit, but uses a copy of the current…
-  Voxels.RenderLattice (method) — Renders a lattice into the voxel field, combining it with…
-  Voxels.ProjectZSlice (method) — Projects the slices at the start Z position upwards or…
-  Voxels.voxProjectZSlice (method) — Makes a copy of the voxel field and applies the…
-  Voxels.bIsEqual (method) — Returns true if the voxel fields contain the same content
-  Voxels.CalculateProperties (method) — This function evaluates the entire voxel field and returns the…
-  Voxels.oCalculateBoundingBox (method) — Calculates the bounding box of a voxel field Note
-  Voxels.bIsInside (method) — Returns whether the location specified lies inside the solid domain…
-  Voxels.vecSurfaceNormal (method) — Returns the normal of the surface found at the specified…
-  Voxels.bClosestPointOnSurface (method) — Returns the closest point from the search point on the…
-  Voxels.vecClosestPointOnSurface (method) — Returns the closest point from the search point on the…
-  Voxels.bRayCastToSurface (method) — Casts a ray to the surface of a voxel field…
-  Voxels.vecRayCastToSurface (method) — Casts a ray to the surface of a voxel field…
-  Voxels.GetVoxelDimensions (method) — Returns the dimensions of the voxel field in discrete voxels
-  Voxels.vecZSliceOrigin (method) — Query the real world origin of a voxel slice, which…
-  Voxels.nSliceCount (method) — Return the number of slices in this voxel field
-  Voxels.imgAllocateSlice (method) — Allocate a grayscale image that can hold a voxel slice
-  Voxels.GetVoxelSlice (method) — Returns a slice of the voxel field along the specified…
-  Voxels.GetInterpolatedVoxelSlice (method) — Returns a signed distance-field-encoded slice of the voxel field To…
-  Voxels.oVectorize (method) — Vectorize a Voxels object using Marching Squares
-  Voxels.SaveToCliFile (method) — Save the voxel field to a .cli file CLI is…
-  Voxels.SaveToVdbFile (method) — Creates a new .vdb file and saves the voxel field…
-  Voxels.Dispose (method)
+PicoGK.Voxels (class) [71 members]
+  PicoGK.Voxels.fVoxelSize (property) — Returns the voxel size in millimeters used in the voxel…
+  PicoGK.Voxels.ESliceMode (enum) [3 members]
+    PicoGK.Voxels.ESliceMode.SignedDistance (enumMember)
+    PicoGK.Voxels.ESliceMode.BlackWhite (enumMember)
+    PicoGK.Voxels.ESliceMode.Antialiased (enumMember)
+  PicoGK.Voxels.ESliceAxis (enum) [3 members]
+    PicoGK.Voxels.ESliceAxis.X (enumMember)
+    PicoGK.Voxels.ESliceAxis.Y (enumMember)
+    PicoGK.Voxels.ESliceAxis.Z (enumMember)
+  PicoGK.Voxels.m_oMetadata (field)
+  PicoGK.Voxels.lib (field)
+  PicoGK.Voxels.oMetaData (method)
+  PicoGK.Voxels.Voxels (constructor) — Create a new empty voxels object, using the global library…
+  PicoGK.Voxels.voxSphere (method) — Create a new Voxels object using the global library instance,…
+  PicoGK.Voxels.voxLatticeBeam (method) — Returns a lattice beam with hemispherical ends internally uses an…
+  PicoGK.Voxels.voxMeshShell (method) — Creates a shelled (hollow) Voxels object from a mesh
+  PicoGK.Voxels.voxCombineAll (method) — Create a new Voxels object using the global library instance,…
+  PicoGK.Voxels.voxFromVdbFile (method) — Create Voxels from a OpenVDB file (.vdb) using the global…
+  PicoGK.Voxels.voxDuplicate (method) — Create a duplicate of the current voxel field
+  PicoGK.Voxels.mshAsMesh (method) — Return the current voxel field as a mesh
+  PicoGK.Voxels.bIsEmpty (method) — Checks whether this Voxels object is empty, i.e
+  PicoGK.Voxels.nMemUsage (method) — Returns the amount of memory in bytes used by this…
+  PicoGK.Voxels.BoolAdd (method) — Performs a boolean union between two voxel fields Our voxelfield…
+  PicoGK.Voxels.voxBoolAdd (method) — Performs a boolean union operation on a copy of the…
+  PicoGK.Voxels.BoolAddAll (method) — Performs a boolean union of all voxels supplied in the…
+  PicoGK.Voxels.voxBoolAddAll (method) — Performs a boolean union of all voxels supplied in the…
+  PicoGK.Voxels.voxCombine (method) — Combines two voxel fields and returns the result using BoolAdd
+  PicoGK.Voxels.BoolSubtract (method) — Performs a boolean difference between the two voxel fields Our…
+  PicoGK.Voxels.voxBoolSubtract (method) — Performs a boolean difference operation on a copy of the…
+  PicoGK.Voxels.BoolSubtractAll (method) — Subtracts on all voxels supplied in the container (List, Array,…
+  PicoGK.Voxels.voxBoolSubtractAll (method) — Subtracts on all voxels supplied in the container (List, Array,…
+  PicoGK.Voxels.BoolIntersect (method) — Performs a boolean intersection between two voxel fields
+  PicoGK.Voxels.voxBoolIntersect (method) — Performs a boolean intersection operation on a copy of the…
+  PicoGK.Voxels.op_Addition (method) — Overloaded operators allow you to do things like vox =…
+  PicoGK.Voxels.op_Subtraction (method) — Overloaded operators allow you to do things like vox =…
+  PicoGK.Voxels.op_BitwiseAnd (method) — Overloaded operator for intersect (boolean AND) vox = vox1 &…
+  PicoGK.Voxels.Trim (method) — Intersects the voxel field with the specified bounding box so…
+  PicoGK.Voxels.voxTrim (method) — Intersects a copy of the voxel field with the specified…
+  PicoGK.Voxels.Offset (method) — Offsets the voxel field by the specified distance
+  PicoGK.Voxels.voxOffset (method) — Offsets a copy of the voxel field by the specified…
+  PicoGK.Voxels.DoubleOffset (method) — Offsets the voxel field twice, by the specified distances Outwards…
+  PicoGK.Voxels.voxDoubleOffset (method) — Offsets a copy of the voxel field twice, by the…
+  PicoGK.Voxels.TripleOffset (method) — Offsets the voxel field three times by the specified distance
+  PicoGK.Voxels.voxTripleOffset (method) — Offsets a copy of the voxel field three times by…
+  PicoGK.Voxels.Smoothen (method) — Same as TripleOffset
+  PicoGK.Voxels.voxSmoothen (method) — Same as TripleOffset
+  PicoGK.Voxels.OverOffset (method) — Similar to DoubleOffset, but allows you to specify the offsetted…
+  PicoGK.Voxels.voxOverOffset (method) — Similar to DoubleOffset, but allows you to specify the offsetted…
+  PicoGK.Voxels.Fillet (method) — Creates a fillet-like effect
+  PicoGK.Voxels.voxFillet (method) — Creates a fillet-like effect
+  PicoGK.Voxels.voxShell (method) — Creates a shell of a voxel field
+  PicoGK.Voxels.RenderMesh (method) — Renders a mesh into the voxel field, combining it with…
+  PicoGK.Voxels.RenderImplicit (method) — Render an implicit signed distance function into the voxels overwriting…
+  PicoGK.Voxels.IntersectImplicit (method) — Render an implicit signed distance function into the voxels but…
+  PicoGK.Voxels.voxIntersectImplicit (method) — Same as IntersectImplicit, but uses a copy of the current…
+  PicoGK.Voxels.RenderLattice (method) — Renders a lattice into the voxel field, combining it with…
+  PicoGK.Voxels.ProjectZSlice (method) — Projects the slices at the start Z position upwards or…
+  PicoGK.Voxels.voxProjectZSlice (method) — Makes a copy of the voxel field and applies the…
+  PicoGK.Voxels.bIsEqual (method) — Returns true if the voxel fields contain the same content
+  PicoGK.Voxels.CalculateProperties (method) — This function evaluates the entire voxel field and returns the…
+  PicoGK.Voxels.oCalculateBoundingBox (method) — Calculates the bounding box of a voxel field Note
+  PicoGK.Voxels.bIsInside (method) — Returns whether the location specified lies inside the solid domain…
+  PicoGK.Voxels.vecSurfaceNormal (method) — Returns the normal of the surface found at the specified…
+  PicoGK.Voxels.bClosestPointOnSurface (method) — Returns the closest point from the search point on the…
+  PicoGK.Voxels.vecClosestPointOnSurface (method) — Returns the closest point from the search point on the…
+  PicoGK.Voxels.bRayCastToSurface (method) — Casts a ray to the surface of a voxel field…
+  PicoGK.Voxels.vecRayCastToSurface (method) — Casts a ray to the surface of a voxel field…
+  PicoGK.Voxels.GetVoxelDimensions (method) — Returns the dimensions of the voxel field in discrete voxels
+  PicoGK.Voxels.vecZSliceOrigin (method) — Query the real world origin of a voxel slice, which…
+  PicoGK.Voxels.nSliceCount (method) — Return the number of slices in this voxel field
+  PicoGK.Voxels.imgAllocateSlice (method) — Allocate a grayscale image that can hold a voxel slice
+  PicoGK.Voxels.GetVoxelSlice (method) — Returns a slice of the voxel field along the specified…
+  PicoGK.Voxels.GetInterpolatedVoxelSlice (method) — Returns a signed distance-field-encoded slice of the voxel field To…
+  PicoGK.Voxels.oVectorize (method) — Vectorize a Voxels object using Marching Squares
+  PicoGK.Voxels.SaveToCliFile (method) — Save the voxel field to a .cli file CLI is…
+  PicoGK.Voxels.SaveToVdbFile (method) — Creates a new .vdb file and saves the voxel field…
+  PicoGK.Voxels.Dispose (method)
 
 ## PicoGK.Diagnostics — `api-picogk-diagnostics.md`
 
-TestCliOutput (class) [1 members]
-  TestCliOutput.Run (method) — Test function, generates a unique voxel object and tests vectorization…
-TestProgress (class) [1 members]
-  TestProgress.Test (method)
-TestVectorAndComparison (class) [1 members]
-  TestVectorAndComparison.Test (method)
+PicoGK.Diagnostics.TestCliOutput (class) [1 members]
+  PicoGK.Diagnostics.TestCliOutput.Run (method) — Test function, generates a unique voxel object and tests vectorization…
+PicoGK.Diagnostics.TestProgress (class) [1 members]
+  PicoGK.Diagnostics.TestProgress.Test (method)
+PicoGK.Diagnostics.TestVectorAndComparison (class) [1 members]
+  PicoGK.Diagnostics.TestVectorAndComparison.Test (method)
 
 ## PicoGK.Numerics — `api-picogk-numerics.md`
 
-ComparisonExtensions (class) [4 members] — Extensions that allow for fuzzy comparisons of types
-  ComparisonExtensions.bAlmostEqual (method) — Fuzzy comparison function to determine equality between two floats Can…
-  ComparisonExtensions.bAlmostLessOrEqual (method)
-  ComparisonExtensions.bAlmostMoreOrEqual (method)
-  ComparisonExtensions.bAlmostZero (method) — Fuzzy test for zero
-Cylindrical (struct) [7 members] — A coordinate in a cylindrical coordinate system
-  Cylindrical.R (field) — Distance from the cylinder's axis
-  Cylindrical.Phi (field) — Azimuth angle in the XY plane
-  Cylindrical.Z (field) — Position along the Z axis
-  Cylindrical.Cylindrical (constructor) — Initialize a new cylindrical coordinate
-  Cylindrical.vecAsCartesian (method) — Convert a cylindrical coordinate into a cartesian coordinate
-  Cylindrical.oLerp (method) — Linear interpolation between two Cylindrical coordinates (in Cylindrical coordinate space)
-  Cylindrical.ToString (method) — Convert the cylindrical coordinate to a string
-FloatExt (class) [1 members]
-  FloatExt.bIsFinite (method) — Checks whether the value is finite, i.e
-Overhang (struct) [23 members]
-  Overhang.uNone (property) — No overhang (0%)
-  Overhang.uFull (property) — Maximum overhang (100%)
-  Overhang.fNormalized (property) — Normalized overhang severity from 0..1 - 0.0
-  Overhang.fPercent (property) — Normalized overhang severity from 0..100% - 0
-  Overhang.fRad (property) — Overhang angle in radians - 0
-  Overhang.fDeg (property) — Overhang angle in degrees - 0
-  Overhang.fDegFromHorizontal (property) — Overhang angle in degrees, measured from the horizontal plane Used…
-  Overhang.uFromNormalized (method) — Create a new Overhang, using normalized overhang severity from 0..1…
-  Overhang.uFromPercent (method) — Create a new Overhang, based on percent value (0..100) -…
-  Overhang.uFromRad (method) — Create a new Overhang, based on radians value (0..Pi/2) -…
-  Overhang.uFromDeg (method) — Create a new Overhang, based on degrees value (0..90) -…
-  Overhang.uFromDegFromHorizontal (method) — Create a new Overhang from an angle in degrees, measured…
-  Overhang.bExceeds (method) — Allows you to write something like uOverhang.bExceeds(Overhang.uFromPercent(50)) You can also…
-  Overhang.ToString (method)
-  Overhang.CompareTo (method)
-  Overhang.Equals (method)
-  Overhang.GetHashCode (method)
-  Overhang.op_LessThan (method)
-  Overhang.op_GreaterThan (method)
-  Overhang.op_LessThanOrEqual (method)
-  Overhang.op_GreaterThanOrEqual (method)
-  Overhang.op_Equality (method)
-  Overhang.op_Inequality (method)
-Polar (struct) [6 members] — A polar coordinate
-  Polar.R (field) — Distance from the center of the coordinate system
-  Polar.Phi (field) — Azimuth angle in the XY plane
-  Polar.Polar (constructor) — Initialize a new polar coordinate
-  Polar.vecAsCartesian (method) — Return the polar coordinate as a cartesian coordinate
-  Polar.oLerp (method) — Linear interpolation between two polar coordinates (in Polar coordinate space)
-  Polar.ToString (method) — Convert the polar coordinate to a string
-Rad (struct) [48 members] — This type encapsulates an angle in Radians, with helper functions…
-  Rad.TwoPi (constant) — Defines 2*Pi, which is constantly being used in Rad angles
-  Rad.Zero (field) — Zero degrees angles
-  Rad.Full (field) — 360º angle
-  Rad.Half (field) — 180º angle
-  Rad.Quarter (field) — 90º angle
-  Rad.Deg0 (field) — 0º angle
-  Rad.Deg360 (field) — 360º angle
-  Rad.Deg180 (field) — 180º angle
-  Rad.Deg90 (field) — 90º angle
-  Rad.Deg45 (field) — 45º angle
-  Rad.fRad (property) — float value of the angle in radians
-  Rad.fDeg (property) — angle in degrees
-  Rad.Rad (constructor) — Initialize a new Rad value from a float radians angle
-  Rad.rFromRad (method) — Create new Rad value from a float radians angle
-  Rad.rFromDeg (method) — Create a new Rad value from a floating point angle…
-  Rad.rFromNormalized (method) — Create a new Rad value from a normalized value 0..1,…
-  Rad.rNormalizedSigned (method) — Return the angle normalized to the range -π .
-  Rad.rNormalizedPositive (method) — Return the angle normalized to the range [0, 2π)
-  Rad.op_Implicit (method) — Implicit conversion from a Rad value into float for seamless…
-  Rad.op_Explicit (method) — Explicit conversion from float to Rad value
-  Rad.bAlmostEqual (method) — Test for fuzzy equality
-  Rad.bAlmostEqualPeriodic (method) — Tests for fuzzy equality of the normalized angle (0º ==…
-  Rad.bIsFinite (method) — Checks whether the angle value is finite, i.e
-  Rad.fSin (method) — Returns the sine of the angle
-  Rad.fCos (method) — Returns the cosine of the angle
-  Rad.fTan (method) — Returns the tangent of the angle
-  Rad.rAtan2 (method) — Computes the angle of the vector from the positive X…
-  Rad.rAtan (method) — Computes the arc tangent of the value
-  Rad.rAcos (method) — Returns the arc cosine of the value and returns the…
-  Rad.rAcosClamped (method) — Returns the arc cosine of the value after clamping it…
-  Rad.rAsin (method) — Returns the arc sine of the value and returns the…
-  Rad.rAsinClamped (method) — Returns the arc cosine of the value after clamping it…
-  Rad.op_Addition (method)
-  Rad.op_Subtraction (method)
-  Rad.op_Multiply (method)
-  Rad.op_Division (method)
-  Rad.op_UnaryPlus (method)
-  Rad.op_UnaryNegation (method)
-  Rad.ToString (method)
-  Rad.CompareTo (method)
-  Rad.Equals (method)
-  Rad.GetHashCode (method)
-  Rad.op_LessThan (method)
-  Rad.op_GreaterThan (method)
-  Rad.op_LessThanOrEqual (method)
-  Rad.op_GreaterThanOrEqual (method)
-  Rad.op_Equality (method)
-  Rad.op_Inequality (method)
-Spherical (struct) [7 members]
-  Spherical.R (field) — Distance from the sphere center
-  Spherical.Phi (field) — Azimuth angle in the XY plane, measured from +X toward…
-  Spherical.Theta (field) — Polar angle measured from +Z toward the XY plane and…
-  Spherical.Spherical (constructor) — Initializes a new Spherical coordinate
-  Spherical.vecAsCartesian (method) — Convert the spherical coordinate to a cartesian coordinate
-  Spherical.oLerp (method) — Linear interpolation between two Spherical coordinates (in Spherical coordinate space)
-  Spherical.ToString (method) — Convert the spherical coordinate to a string
-Tolerances (class) [4 members] — Default tolerances for comparisons
-  Tolerances.fDef (constant) — Default tolerance for fuzzy comparisons
-  Tolerances.fDefSquared (constant) — Default squared tolerance for fuzzy comparisons
-  Tolerances.fZero (constant) — Default number regarded as zero for fuzzy zero check Chosen…
-  Tolerances.fZeroSquared (constant) — Default squared number regarded as zero for fuzzy zero check
-VectorExt (class) [11 members] — Extensions to the Vector2 and Vector3 System.Numerics types
-  VectorExt.vecNormalized (method) — Returns the normalized version of this vector (length 1) Can…
-  VectorExt.vecSafeNormalized (method) — Returns the normalized version of this vector (length 1) Returns…
-  VectorExt.vecStripZ (method) — Converts a Vector3 into a Vector2 by stripping the Z…
-  VectorExt.vecAsVector3 (method) — Converts a Vector2 into a Vector3 by adding a Z…
-  VectorExt.vecPtWorld (method) — Helper function to convert a point to world coordinates using…
-  VectorExt.vecDirWorld (method) — Helper function to convert a direction to world coordinates using…
-  VectorExt.vecPtLocal (method) — Helper function to convert a point to local coordinates using…
-  VectorExt.vecDirLocal (method) — Helper function to convert a direction to local coordinates using…
-  VectorExt.vecTransformed (method) — Returns a matrix-transformed version of the vector
-  VectorExt.vecMirrored (method) — Returns a mirrored version of the vector
-  VectorExt.bIsFinite (method) — Checks whether all vector coordinate values are finite, i.e
+PicoGK.Numerics.ComparisonExtensions (class) [4 members] — Extensions that allow for fuzzy comparisons of types
+  PicoGK.Numerics.ComparisonExtensions.bAlmostEqual (method) — Fuzzy comparison function to determine equality between two floats Can…
+  PicoGK.Numerics.ComparisonExtensions.bAlmostLessOrEqual (method)
+  PicoGK.Numerics.ComparisonExtensions.bAlmostMoreOrEqual (method)
+  PicoGK.Numerics.ComparisonExtensions.bAlmostZero (method) — Fuzzy test for zero
+PicoGK.Numerics.Cylindrical (struct) [7 members] — A coordinate in a cylindrical coordinate system
+  PicoGK.Numerics.Cylindrical.R (field) — Distance from the cylinder's axis
+  PicoGK.Numerics.Cylindrical.Phi (field) — Azimuth angle in the XY plane
+  PicoGK.Numerics.Cylindrical.Z (field) — Position along the Z axis
+  PicoGK.Numerics.Cylindrical.Cylindrical (constructor) — Initialize a new cylindrical coordinate
+  PicoGK.Numerics.Cylindrical.vecAsCartesian (method) — Convert a cylindrical coordinate into a cartesian coordinate
+  PicoGK.Numerics.Cylindrical.oLerp (method) — Linear interpolation between two Cylindrical coordinates (in Cylindrical coordinate space)
+  PicoGK.Numerics.Cylindrical.ToString (method) — Convert the cylindrical coordinate to a string
+PicoGK.Numerics.FloatExt (class) [1 members]
+  PicoGK.Numerics.FloatExt.bIsFinite (method) — Checks whether the value is finite, i.e
+PicoGK.Numerics.Overhang (struct) [23 members]
+  PicoGK.Numerics.Overhang.uNone (property) — No overhang (0%)
+  PicoGK.Numerics.Overhang.uFull (property) — Maximum overhang (100%)
+  PicoGK.Numerics.Overhang.fNormalized (property) — Normalized overhang severity from 0..1 - 0.0
+  PicoGK.Numerics.Overhang.fPercent (property) — Normalized overhang severity from 0..100% - 0
+  PicoGK.Numerics.Overhang.fRad (property) — Overhang angle in radians - 0
+  PicoGK.Numerics.Overhang.fDeg (property) — Overhang angle in degrees - 0
+  PicoGK.Numerics.Overhang.fDegFromHorizontal (property) — Overhang angle in degrees, measured from the horizontal plane Used…
+  PicoGK.Numerics.Overhang.uFromNormalized (method) — Create a new Overhang, using normalized overhang severity from 0..1…
+  PicoGK.Numerics.Overhang.uFromPercent (method) — Create a new Overhang, based on percent value (0..100) -…
+  PicoGK.Numerics.Overhang.uFromRad (method) — Create a new Overhang, based on radians value (0..Pi/2) -…
+  PicoGK.Numerics.Overhang.uFromDeg (method) — Create a new Overhang, based on degrees value (0..90) -…
+  PicoGK.Numerics.Overhang.uFromDegFromHorizontal (method) — Create a new Overhang from an angle in degrees, measured…
+  PicoGK.Numerics.Overhang.bExceeds (method) — Allows you to write something like uOverhang.bExceeds(Overhang.uFromPercent(50)) You can also…
+  PicoGK.Numerics.Overhang.ToString (method)
+  PicoGK.Numerics.Overhang.CompareTo (method)
+  PicoGK.Numerics.Overhang.Equals (method)
+  PicoGK.Numerics.Overhang.GetHashCode (method)
+  PicoGK.Numerics.Overhang.op_LessThan (method)
+  PicoGK.Numerics.Overhang.op_GreaterThan (method)
+  PicoGK.Numerics.Overhang.op_LessThanOrEqual (method)
+  PicoGK.Numerics.Overhang.op_GreaterThanOrEqual (method)
+  PicoGK.Numerics.Overhang.op_Equality (method)
+  PicoGK.Numerics.Overhang.op_Inequality (method)
+PicoGK.Numerics.Polar (struct) [6 members] — A polar coordinate
+  PicoGK.Numerics.Polar.R (field) — Distance from the center of the coordinate system
+  PicoGK.Numerics.Polar.Phi (field) — Azimuth angle in the XY plane
+  PicoGK.Numerics.Polar.Polar (constructor) — Initialize a new polar coordinate
+  PicoGK.Numerics.Polar.vecAsCartesian (method) — Return the polar coordinate as a cartesian coordinate
+  PicoGK.Numerics.Polar.oLerp (method) — Linear interpolation between two polar coordinates (in Polar coordinate space)
+  PicoGK.Numerics.Polar.ToString (method) — Convert the polar coordinate to a string
+PicoGK.Numerics.Rad (struct) [48 members] — This type encapsulates an angle in Radians, with helper functions…
+  PicoGK.Numerics.Rad.TwoPi (constant) — Defines 2*Pi, which is constantly being used in Rad angles
+  PicoGK.Numerics.Rad.Zero (field) — Zero degrees angles
+  PicoGK.Numerics.Rad.Full (field) — 360º angle
+  PicoGK.Numerics.Rad.Half (field) — 180º angle
+  PicoGK.Numerics.Rad.Quarter (field) — 90º angle
+  PicoGK.Numerics.Rad.Deg0 (field) — 0º angle
+  PicoGK.Numerics.Rad.Deg360 (field) — 360º angle
+  PicoGK.Numerics.Rad.Deg180 (field) — 180º angle
+  PicoGK.Numerics.Rad.Deg90 (field) — 90º angle
+  PicoGK.Numerics.Rad.Deg45 (field) — 45º angle
+  PicoGK.Numerics.Rad.fRad (property) — float value of the angle in radians
+  PicoGK.Numerics.Rad.fDeg (property) — angle in degrees
+  PicoGK.Numerics.Rad.Rad (constructor) — Initialize a new Rad value from a float radians angle
+  PicoGK.Numerics.Rad.rFromRad (method) — Create new Rad value from a float radians angle
+  PicoGK.Numerics.Rad.rFromDeg (method) — Create a new Rad value from a floating point angle…
+  PicoGK.Numerics.Rad.rFromNormalized (method) — Create a new Rad value from a normalized value 0..1,…
+  PicoGK.Numerics.Rad.rNormalizedSigned (method) — Return the angle normalized to the range -π .
+  PicoGK.Numerics.Rad.rNormalizedPositive (method) — Return the angle normalized to the range [0, 2π)
+  PicoGK.Numerics.Rad.op_Implicit (method) — Implicit conversion from a Rad value into float for seamless…
+  PicoGK.Numerics.Rad.op_Explicit (method) — Explicit conversion from float to Rad value
+  PicoGK.Numerics.Rad.bAlmostEqual (method) — Test for fuzzy equality
+  PicoGK.Numerics.Rad.bAlmostEqualPeriodic (method) — Tests for fuzzy equality of the normalized angle (0º ==…
+  PicoGK.Numerics.Rad.bIsFinite (method) — Checks whether the angle value is finite, i.e
+  PicoGK.Numerics.Rad.fSin (method) — Returns the sine of the angle
+  PicoGK.Numerics.Rad.fCos (method) — Returns the cosine of the angle
+  PicoGK.Numerics.Rad.fTan (method) — Returns the tangent of the angle
+  PicoGK.Numerics.Rad.rAtan2 (method) — Computes the angle of the vector from the positive X…
+  PicoGK.Numerics.Rad.rAtan (method) — Computes the arc tangent of the value
+  PicoGK.Numerics.Rad.rAcos (method) — Returns the arc cosine of the value and returns the…
+  PicoGK.Numerics.Rad.rAcosClamped (method) — Returns the arc cosine of the value after clamping it…
+  PicoGK.Numerics.Rad.rAsin (method) — Returns the arc sine of the value and returns the…
+  PicoGK.Numerics.Rad.rAsinClamped (method) — Returns the arc cosine of the value after clamping it…
+  PicoGK.Numerics.Rad.op_Addition (method)
+  PicoGK.Numerics.Rad.op_Subtraction (method)
+  PicoGK.Numerics.Rad.op_Multiply (method)
+  PicoGK.Numerics.Rad.op_Division (method)
+  PicoGK.Numerics.Rad.op_UnaryPlus (method)
+  PicoGK.Numerics.Rad.op_UnaryNegation (method)
+  PicoGK.Numerics.Rad.ToString (method)
+  PicoGK.Numerics.Rad.CompareTo (method)
+  PicoGK.Numerics.Rad.Equals (method)
+  PicoGK.Numerics.Rad.GetHashCode (method)
+  PicoGK.Numerics.Rad.op_LessThan (method)
+  PicoGK.Numerics.Rad.op_GreaterThan (method)
+  PicoGK.Numerics.Rad.op_LessThanOrEqual (method)
+  PicoGK.Numerics.Rad.op_GreaterThanOrEqual (method)
+  PicoGK.Numerics.Rad.op_Equality (method)
+  PicoGK.Numerics.Rad.op_Inequality (method)
+PicoGK.Numerics.Spherical (struct) [7 members]
+  PicoGK.Numerics.Spherical.R (field) — Distance from the sphere center
+  PicoGK.Numerics.Spherical.Phi (field) — Azimuth angle in the XY plane, measured from +X toward…
+  PicoGK.Numerics.Spherical.Theta (field) — Polar angle measured from +Z toward the XY plane and…
+  PicoGK.Numerics.Spherical.Spherical (constructor) — Initializes a new Spherical coordinate
+  PicoGK.Numerics.Spherical.vecAsCartesian (method) — Convert the spherical coordinate to a cartesian coordinate
+  PicoGK.Numerics.Spherical.oLerp (method) — Linear interpolation between two Spherical coordinates (in Spherical coordinate space)
+  PicoGK.Numerics.Spherical.ToString (method) — Convert the spherical coordinate to a string
+PicoGK.Numerics.Tolerances (class) [4 members] — Default tolerances for comparisons
+  PicoGK.Numerics.Tolerances.fDef (constant) — Default tolerance for fuzzy comparisons
+  PicoGK.Numerics.Tolerances.fDefSquared (constant) — Default squared tolerance for fuzzy comparisons
+  PicoGK.Numerics.Tolerances.fZero (constant) — Default number regarded as zero for fuzzy zero check Chosen…
+  PicoGK.Numerics.Tolerances.fZeroSquared (constant) — Default squared number regarded as zero for fuzzy zero check
+PicoGK.Numerics.VectorExt (class) [11 members] — Extensions to the Vector2 and Vector3 System.Numerics types
+  PicoGK.Numerics.VectorExt.vecNormalized (method) — Returns the normalized version of this vector (length 1) Can…
+  PicoGK.Numerics.VectorExt.vecSafeNormalized (method) — Returns the normalized version of this vector (length 1) Returns…
+  PicoGK.Numerics.VectorExt.vecStripZ (method) — Converts a Vector3 into a Vector2 by stripping the Z…
+  PicoGK.Numerics.VectorExt.vecAsVector3 (method) — Converts a Vector2 into a Vector3 by adding a Z…
+  PicoGK.Numerics.VectorExt.vecPtWorld (method) — Helper function to convert a point to world coordinates using…
+  PicoGK.Numerics.VectorExt.vecDirWorld (method) — Helper function to convert a direction to world coordinates using…
+  PicoGK.Numerics.VectorExt.vecPtLocal (method) — Helper function to convert a point to local coordinates using…
+  PicoGK.Numerics.VectorExt.vecDirLocal (method) — Helper function to convert a direction to local coordinates using…
+  PicoGK.Numerics.VectorExt.vecTransformed (method) — Returns a matrix-transformed version of the vector
+  PicoGK.Numerics.VectorExt.vecMirrored (method) — Returns a mirrored version of the vector
+  PicoGK.Numerics.VectorExt.bIsFinite (method) — Checks whether all vector coordinate values are finite, i.e
 
 ## PicoGK.Shapes — `api-picogk-shapes.md`
 
-Arc2d (struct) [8 members] — A circular arc in 2D space
-  Arc2d.vecStart (property) — Start coordinate
-  Arc2d.vecEnd (property) — End coordinate
-  Arc2d.vecCenter (property) — Center point
-  Arc2d.rAngle (property) — Angle in radians (positive is counter clockwise)
-  Arc2d.fRadius (property) — Radius of the arc
-  Arc2d.fLength (property)
-  Arc2d.Arc2d (constructor) — Construct a new 2D arc with the specified start point,…
-  Arc2d.vecPtAtT (method)
-Circle (struct) [5 members] — Class to represent an circle as a normalized path/contour
-  Circle.fR (property) — Radius of the circle
-  Circle.fLength (property)
-  Circle.Circle (constructor) — Create a Circle contour with radius fR
-  Circle.vecPtAtT (method)
-  Circle.PtAtT (method)
-ContourFromPath (class) [4 members] — This class allows you to use a closed path as…
-  ContourFromPath.fLength (property)
-  ContourFromPath.ContourFromPath (constructor) — Create a IContour2d-compatible contour from an existing closed path The…
-  ContourFromPath.vecPtAtT (method)
-  ContourFromPath.vecPtAtTLinear (method)
-ContourSampler2d (class) [4 members] — Implements a way to adaptively sample a contour to retrieve…
-  ContourSampler2d.ISampleable (interface) — This interface enables a contour to be sampled in linear…
-  ContourSampler2d.fTotalLength (property) — Return sum of all arc segement lengths
-  ContourSampler2d.ContourSampler2d (constructor) — Adaptively sample the contour to map the linear time to…
-  ContourSampler2d.fArcTFromLinearT (method) — Convert from linear t to arc-length t
-Ellipse (class) [8 members] — Class to represent an ellipse as a normalized path/contour
-  Ellipse.fPhi (property) — Rotation angle of the ellipse
-  Ellipse.rPhi (property) — Rotation angle of the ellipse
-  Ellipse.fA (property) — Half-length of the ellipse in A
-  Ellipse.fB (property) — Half-length of the ellipse in B
-  Ellipse.fLength (property)
-  Ellipse.Ellipse (constructor) — Constructor using axis A vector and axis B length
-  Ellipse.vecPtAtTLinear (method)
-  Ellipse.vecPtAtT (method)
-Frame3d (struct) [32 members] — The Frame3d object stores a local coordinate system, i.e
-  Frame3d.frmWorld (field) — Local frame representing the world coordinate system
-  Frame3d.vecPos (property) — Position of the origin of the Frame3d
-  Frame3d.vecLx (property) — Direction of the local X axis in world coordinates
-  Frame3d.vecLy (property) — Direction of the local Y axis in world coordinates
-  Frame3d.vecLz (property) — Direction of the local Z axis in world coordinates
-  Frame3d.frmFromPos (method) — Create a Frame3d at the specified position with axes aligned…
-  Frame3d.frmFromZX (method) — Create a Frame3d at the specified position with local axes…
-  Frame3d.Frame3d (constructor) — Creates a local coordinate system with world-aligned axes at the…
-  Frame3d.frmFromMatrix4x4 (method) — Creates a Frame3d from a System.Numerics row-vector rigid transform
-  Frame3d.vecPtToWorld (method) — Convert a local coordinate to world coordinates
-  Frame3d.vecDirToWorld (method) — Convert a local direction to a world direction
-  Frame3d.vecPtFromWorld (method) — Return local coordinate from world coordinates
-  Frame3d.vecDirFromWorld (method) — Return local direction from world direction
-  Frame3d.frmCompose (method) — Create a combined Frame3d from this frame and another
-  Frame3d.frmInverse (method) — Create an inverted Frame3d object
-  Frame3d.frmMovedLocal (method) — Move the origin of the Frame3d object by the specified…
-  Frame3d.frmMovedLocalX (method) — Move the Frame3d origin by the specified distance in X…
-  Frame3d.frmMovedLocalY (method) — Move the Frame3d origin by the specified distance in Y…
-  Frame3d.frmMovedLocalZ (method) — Move the Frame3d origin by the specified distance in Z…
-  Frame3d.frmRotatedWorld (method) — Rotate the Frame3d around an arbitrary (world-space) axis through the…
-  Frame3d.frmMovedWorld (method) — Move the origin of the Frame3d object by the specified…
-  Frame3d.frmMovedWorldX (method) — Move the Frame3d origin by the specified distance in X…
-  Frame3d.frmMovedWorldY (method) — Move the Frame3d origin by the specified distance in Y…
-  Frame3d.frmMovedWorldZ (method) — Move the Frame3d origin by the specified distance in Z…
-  Frame3d.matAsMatrix4x4 (method) — Convert the Frame3d transformation to an equivalent Matrix4x4 transform (basis…
-  Frame3d.frmRepositioned (method) — Return a frame which has been repositioned to the supplied…
-  Frame3d.AsRigid (method) — Return the transformation as Quaternion plus Origin
-  Frame3d.matComposeWithScale (method) — Helper function to drawing a scaled quad aligned to this…
-  Frame3d.op_Multiply (method) — Convert local point to a world coordinate (same as vecToWorld)…
-  Frame3d.frmInterpolate (method) — Interpolate between two Frame3d pos/orientations
-  Frame3d.Equals (method) — Test for equality (IEquatable)
-  Frame3d.GetHashCode (method) — Create hash code (IEquatable)
-IContour2d (interface) [2 members] — Interface to represent a normalized closed contour in 2D which…
-  IContour2d.PtAtT (method) — Function to return both point and normal at t
-  IContour2d.vecSampleNormalAt (method) — Sample the normal at fT Helper function used by PtAtT
-IContour3d (interface) [1 members] — A two dimensional closed contour aligned in a plane in…
-  IContour3d.PtAtT (method) — Returns the point and normal at position t (0..1) As…
-IPath2d (interface) [2 members] — Interface to represent a normalized path in 2D space which…
-  IPath2d.fLength (property) — Length of the entire contour
-  IPath2d.vecPtAtT (method) — Returns the point at position t (0..1) As t increases…
-IPath3d (interface) [2 members] — Interface to represent a normalized path in 2D space which…
-  IPath3d.fLength (property) — Length of the entire contour
-  IPath3d.vecPtAtT (method) — Returns the point at position t (0..1) As t increases…
-Line2d (struct) [5 members] — A 2d line
-  Line2d.vecA (property) — Start coordinate
-  Line2d.vecB (property) — End coordinate
-  Line2d.fLength (property)
-  Line2d.Line2d (constructor) — Construct a line with the specified start and end coordinates
-  Line2d.vecPtAtT (method)
-OrientedContour (class) [4 members] — Represents an oriented 2D contour placed in 3D space by…
-  OrientedContour.fLength (property)
-  OrientedContour.OrientedContour (constructor) — Create an oriented contour from a 2D contour and a…
-  OrientedContour.vecPtAtT (method)
-  OrientedContour.PtAtT (method)
-OrientedPath (class) [3 members] — Interface to represent a normalized 2D path oriented in space…
-  OrientedPath.fLength (property)
-  OrientedPath.OrientedPath (constructor)
-  OrientedPath.vecPtAtT (method)
-Path2d (class) [7 members] — A compound path which consists of a list of other…
-  Path2d.fLength (property)
-  Path2d.Add (method) — Add another path to the compound path Note, the start…
-  Path2d.AddLine (method) — Append a line to the specified coordinate
-  Path2d.AddLineRel (method) — Append a line relative to current end point
-  Path2d.AddArc (method) — Append an arc with the specified center and angle The…
-  Path2d.AddArcRel (method) — Add an arc with the specified center, relative to the…
-  Path2d.vecPtAtT (method)
-Supershape (class) [5 members] — Implements the supershape formula for interesting 2D contours
-  Supershape.fLength (property)
-  Supershape.oRoundedPolygon (method) — Helper function to create simple rounded polygons based on the…
-  Supershape.Supershape (constructor) — Constructor for a supershape with superformula parameters and rotation
-  Supershape.vecPtAtT (method)
-  Supershape.vecPtAtTLinear (method)
+PicoGK.Shapes.Arc2d (struct) [8 members] — A circular arc in 2D space
+  PicoGK.Shapes.Arc2d.vecStart (property) — Start coordinate
+  PicoGK.Shapes.Arc2d.vecEnd (property) — End coordinate
+  PicoGK.Shapes.Arc2d.vecCenter (property) — Center point
+  PicoGK.Shapes.Arc2d.rAngle (property) — Angle in radians (positive is counter clockwise)
+  PicoGK.Shapes.Arc2d.fRadius (property) — Radius of the arc
+  PicoGK.Shapes.Arc2d.fLength (property)
+  PicoGK.Shapes.Arc2d.Arc2d (constructor) — Construct a new 2D arc with the specified start point,…
+  PicoGK.Shapes.Arc2d.vecPtAtT (method)
+PicoGK.Shapes.Circle (struct) [5 members] — Class to represent an circle as a normalized path/contour
+  PicoGK.Shapes.Circle.fR (property) — Radius of the circle
+  PicoGK.Shapes.Circle.fLength (property)
+  PicoGK.Shapes.Circle.Circle (constructor) — Create a Circle contour with radius fR
+  PicoGK.Shapes.Circle.vecPtAtT (method)
+  PicoGK.Shapes.Circle.PtAtT (method)
+PicoGK.Shapes.ContourFromPath (class) [4 members] — This class allows you to use a closed path as…
+  PicoGK.Shapes.ContourFromPath.fLength (property)
+  PicoGK.Shapes.ContourFromPath.ContourFromPath (constructor) — Create a IContour2d-compatible contour from an existing closed path The…
+  PicoGK.Shapes.ContourFromPath.vecPtAtT (method)
+  PicoGK.Shapes.ContourFromPath.vecPtAtTLinear (method)
+PicoGK.Shapes.ContourSampler2d (class) [4 members] — Implements a way to adaptively sample a contour to retrieve…
+  PicoGK.Shapes.ContourSampler2d.ISampleable (interface) [1 members] — This interface enables a contour to be sampled in linear…
+    PicoGK.Shapes.ContourSampler2d.ISampleable.vecPtAtTLinear (method) — Return the uncorrected position at linear t (uncorrected)
+  PicoGK.Shapes.ContourSampler2d.fTotalLength (property) — Return sum of all arc segement lengths
+  PicoGK.Shapes.ContourSampler2d.ContourSampler2d (constructor) — Adaptively sample the contour to map the linear time to…
+  PicoGK.Shapes.ContourSampler2d.fArcTFromLinearT (method) — Convert from linear t to arc-length t
+PicoGK.Shapes.Ellipse (class) [8 members] — Class to represent an ellipse as a normalized path/contour
+  PicoGK.Shapes.Ellipse.fPhi (property) — Rotation angle of the ellipse
+  PicoGK.Shapes.Ellipse.rPhi (property) — Rotation angle of the ellipse
+  PicoGK.Shapes.Ellipse.fA (property) — Half-length of the ellipse in A
+  PicoGK.Shapes.Ellipse.fB (property) — Half-length of the ellipse in B
+  PicoGK.Shapes.Ellipse.fLength (property)
+  PicoGK.Shapes.Ellipse.Ellipse (constructor) — Constructor using axis A vector and axis B length
+  PicoGK.Shapes.Ellipse.vecPtAtTLinear (method)
+  PicoGK.Shapes.Ellipse.vecPtAtT (method)
+PicoGK.Shapes.Frame3d (struct) [32 members] — The Frame3d object stores a local coordinate system, i.e
+  PicoGK.Shapes.Frame3d.frmWorld (field) — Local frame representing the world coordinate system
+  PicoGK.Shapes.Frame3d.vecPos (property) — Position of the origin of the Frame3d
+  PicoGK.Shapes.Frame3d.vecLx (property) — Direction of the local X axis in world coordinates
+  PicoGK.Shapes.Frame3d.vecLy (property) — Direction of the local Y axis in world coordinates
+  PicoGK.Shapes.Frame3d.vecLz (property) — Direction of the local Z axis in world coordinates
+  PicoGK.Shapes.Frame3d.frmFromPos (method) — Create a Frame3d at the specified position with axes aligned…
+  PicoGK.Shapes.Frame3d.frmFromZX (method) — Create a Frame3d at the specified position with local axes…
+  PicoGK.Shapes.Frame3d.Frame3d (constructor) — Creates a local coordinate system with world-aligned axes at the…
+  PicoGK.Shapes.Frame3d.frmFromMatrix4x4 (method) — Creates a Frame3d from a System.Numerics row-vector rigid transform
+  PicoGK.Shapes.Frame3d.vecPtToWorld (method) — Convert a local coordinate to world coordinates
+  PicoGK.Shapes.Frame3d.vecDirToWorld (method) — Convert a local direction to a world direction
+  PicoGK.Shapes.Frame3d.vecPtFromWorld (method) — Return local coordinate from world coordinates
+  PicoGK.Shapes.Frame3d.vecDirFromWorld (method) — Return local direction from world direction
+  PicoGK.Shapes.Frame3d.frmCompose (method) — Create a combined Frame3d from this frame and another
+  PicoGK.Shapes.Frame3d.frmInverse (method) — Create an inverted Frame3d object
+  PicoGK.Shapes.Frame3d.frmMovedLocal (method) — Move the origin of the Frame3d object by the specified…
+  PicoGK.Shapes.Frame3d.frmMovedLocalX (method) — Move the Frame3d origin by the specified distance in X…
+  PicoGK.Shapes.Frame3d.frmMovedLocalY (method) — Move the Frame3d origin by the specified distance in Y…
+  PicoGK.Shapes.Frame3d.frmMovedLocalZ (method) — Move the Frame3d origin by the specified distance in Z…
+  PicoGK.Shapes.Frame3d.frmRotatedWorld (method) — Rotate the Frame3d around an arbitrary (world-space) axis through the…
+  PicoGK.Shapes.Frame3d.frmMovedWorld (method) — Move the origin of the Frame3d object by the specified…
+  PicoGK.Shapes.Frame3d.frmMovedWorldX (method) — Move the Frame3d origin by the specified distance in X…
+  PicoGK.Shapes.Frame3d.frmMovedWorldY (method) — Move the Frame3d origin by the specified distance in Y…
+  PicoGK.Shapes.Frame3d.frmMovedWorldZ (method) — Move the Frame3d origin by the specified distance in Z…
+  PicoGK.Shapes.Frame3d.matAsMatrix4x4 (method) — Convert the Frame3d transformation to an equivalent Matrix4x4 transform (basis…
+  PicoGK.Shapes.Frame3d.frmRepositioned (method) — Return a frame which has been repositioned to the supplied…
+  PicoGK.Shapes.Frame3d.AsRigid (method) — Return the transformation as Quaternion plus Origin
+  PicoGK.Shapes.Frame3d.matComposeWithScale (method) — Helper function to drawing a scaled quad aligned to this…
+  PicoGK.Shapes.Frame3d.op_Multiply (method) — Convert local point to a world coordinate (same as vecToWorld)…
+  PicoGK.Shapes.Frame3d.frmInterpolate (method) — Interpolate between two Frame3d pos/orientations
+  PicoGK.Shapes.Frame3d.Equals (method) — Test for equality (IEquatable)
+  PicoGK.Shapes.Frame3d.GetHashCode (method) — Create hash code (IEquatable)
+PicoGK.Shapes.IContour2d (interface) [2 members] — Interface to represent a normalized closed contour in 2D which…
+  PicoGK.Shapes.IContour2d.PtAtT (method) — Function to return both point and normal at t
+  PicoGK.Shapes.IContour2d.vecSampleNormalAt (method) — Sample the normal at fT Helper function used by PtAtT
+PicoGK.Shapes.IContour3d (interface) [1 members] — A two dimensional closed contour aligned in a plane in…
+  PicoGK.Shapes.IContour3d.PtAtT (method) — Returns the point and normal at position t (0..1) As…
+PicoGK.Shapes.IPath2d (interface) [2 members] — Interface to represent a normalized path in 2D space which…
+  PicoGK.Shapes.IPath2d.fLength (property) — Length of the entire contour
+  PicoGK.Shapes.IPath2d.vecPtAtT (method) — Returns the point at position t (0..1) As t increases…
+PicoGK.Shapes.IPath3d (interface) [2 members] — Interface to represent a normalized path in 2D space which…
+  PicoGK.Shapes.IPath3d.fLength (property) — Length of the entire contour
+  PicoGK.Shapes.IPath3d.vecPtAtT (method) — Returns the point at position t (0..1) As t increases…
+PicoGK.Shapes.Line2d (struct) [5 members] — A 2d line
+  PicoGK.Shapes.Line2d.vecA (property) — Start coordinate
+  PicoGK.Shapes.Line2d.vecB (property) — End coordinate
+  PicoGK.Shapes.Line2d.fLength (property)
+  PicoGK.Shapes.Line2d.Line2d (constructor) — Construct a line with the specified start and end coordinates
+  PicoGK.Shapes.Line2d.vecPtAtT (method)
+PicoGK.Shapes.OrientedContour (class) [4 members] — Represents an oriented 2D contour placed in 3D space by…
+  PicoGK.Shapes.OrientedContour.fLength (property)
+  PicoGK.Shapes.OrientedContour.OrientedContour (constructor) — Create an oriented contour from a 2D contour and a…
+  PicoGK.Shapes.OrientedContour.vecPtAtT (method)
+  PicoGK.Shapes.OrientedContour.PtAtT (method)
+PicoGK.Shapes.OrientedPath (class) [3 members] — Interface to represent a normalized 2D path oriented in space…
+  PicoGK.Shapes.OrientedPath.fLength (property)
+  PicoGK.Shapes.OrientedPath.OrientedPath (constructor)
+  PicoGK.Shapes.OrientedPath.vecPtAtT (method)
+PicoGK.Shapes.Path2d (class) [7 members] — A compound path which consists of a list of other…
+  PicoGK.Shapes.Path2d.fLength (property)
+  PicoGK.Shapes.Path2d.Add (method) — Add another path to the compound path Note, the start…
+  PicoGK.Shapes.Path2d.AddLine (method) — Append a line to the specified coordinate
+  PicoGK.Shapes.Path2d.AddLineRel (method) — Append a line relative to current end point
+  PicoGK.Shapes.Path2d.AddArc (method) — Append an arc with the specified center and angle The…
+  PicoGK.Shapes.Path2d.AddArcRel (method) — Add an arc with the specified center, relative to the…
+  PicoGK.Shapes.Path2d.vecPtAtT (method)
+PicoGK.Shapes.Supershape (class) [5 members] — Implements the supershape formula for interesting 2D contours
+  PicoGK.Shapes.Supershape.fLength (property)
+  PicoGK.Shapes.Supershape.oRoundedPolygon (method) — Helper function to create simple rounded polygons based on the…
+  PicoGK.Shapes.Supershape.Supershape (constructor) — Constructor for a supershape with superformula parameters and rotation
+  PicoGK.Shapes.Supershape.vecPtAtT (method)
+  PicoGK.Shapes.Supershape.vecPtAtTLinear (method)
 
 ## System — `api-system.md`
 
-Array (class) [41 members]
-  Array.Length (property)
-  Array.LongLength (property)
-  Array.Rank (property)
-  Array.SyncRoot (property)
-  Array.IsReadOnly (property)
-  Array.IsFixedSize (property)
-  Array.IsSynchronized (property)
-  Array.MaxLength (property)
-  Array.Initialize (method)
-  Array.AsReadOnly (method)
-  Array.Resize (method)
-  Array.CreateInstance (method)
-  Array.CreateInstanceFromArrayType (method)
-  Array.Copy (method)
-  Array.ConstrainedCopy (method)
-  Array.Clear (method)
-  Array.GetLength (method)
-  Array.GetUpperBound (method)
-  Array.GetLowerBound (method)
-  Array.GetValue (method)
-  Array.SetValue (method)
-  Array.GetLongLength (method)
-  Array.Clone (method)
-  Array.BinarySearch (method)
-  Array.ConvertAll (method)
-  Array.CopyTo (method)
-  Array.Empty (method)
-  Array.Exists (method)
-  Array.Fill (method)
-  Array.Find (method)
-  Array.FindAll (method)
-  Array.FindIndex (method)
-  Array.FindLast (method)
-  Array.FindLastIndex (method)
-  Array.ForEach (method)
-  Array.IndexOf (method)
-  Array.LastIndexOf (method)
-  Array.Reverse (method)
-  Array.Sort (method)
-  Array.TrueForAll (method)
-  Array.GetEnumerator (method)
-Console (class) [47 members]
-  Console.In (property)
-  Console.InputEncoding (property)
-  Console.OutputEncoding (property)
-  Console.KeyAvailable (property)
-  Console.Out (property)
-  Console.Error (property)
-  Console.IsInputRedirected (property)
-  Console.IsOutputRedirected (property)
-  Console.IsErrorRedirected (property)
-  Console.CursorSize (property)
-  Console.NumberLock (property)
-  Console.CapsLock (property)
-  Console.BackgroundColor (property)
-  Console.ForegroundColor (property)
-  Console.BufferWidth (property)
-  Console.BufferHeight (property)
-  Console.WindowLeft (property)
-  Console.WindowTop (property)
-  Console.WindowWidth (property)
-  Console.WindowHeight (property)
-  Console.LargestWindowWidth (property)
-  Console.LargestWindowHeight (property)
-  Console.CursorVisible (property)
-  Console.CursorLeft (property)
-  Console.CursorTop (property)
-  Console.Title (property)
-  Console.TreatControlCAsInput (property)
-  Console.ReadKey (method)
-  Console.ResetColor (method)
-  Console.SetBufferSize (method)
-  Console.SetWindowPosition (method)
-  Console.SetWindowSize (method)
-  Console.GetCursorPosition (method)
-  Console.Beep (method)
-  Console.MoveBufferArea (method)
-  Console.Clear (method)
-  Console.SetCursorPosition (method)
-  Console.OpenStandardInput (method)
-  Console.OpenStandardOutput (method)
-  Console.OpenStandardError (method)
-  Console.SetIn (method)
-  Console.SetOut (method)
-  Console.SetError (method)
-  Console.Read (method)
-  Console.ReadLine (method)
-  Console.WriteLine (method)
-  Console.Write (method)
-Convert (class) [31 members]
-  Convert.DBNull (field)
-  Convert.GetTypeCode (method)
-  Convert.IsDBNull (method)
-  Convert.ChangeType (method)
-  Convert.ToBoolean (method)
-  Convert.ToChar (method)
-  Convert.ToSByte (method)
-  Convert.ToByte (method)
-  Convert.ToInt16 (method)
-  Convert.ToUInt16 (method)
-  Convert.ToInt32 (method)
-  Convert.ToUInt32 (method)
-  Convert.ToInt64 (method)
-  Convert.ToUInt64 (method)
-  Convert.ToSingle (method)
-  Convert.ToDouble (method)
-  Convert.ToDecimal (method)
-  Convert.ToDateTime (method)
-  Convert.ToString (method)
-  Convert.ToBase64String (method)
-  Convert.ToBase64CharArray (method)
-  Convert.TryToBase64Chars (method)
-  Convert.FromBase64String (method)
-  Convert.TryFromBase64String (method)
-  Convert.TryFromBase64Chars (method)
-  Convert.FromBase64CharArray (method)
-  Convert.FromHexString (method)
-  Convert.ToHexString (method)
-  Convert.TryToHexString (method)
-  Convert.ToHexStringLower (method)
-  Convert.TryToHexStringLower (method)
+System.Array (class) [41 members]
+  System.Array.Length (property)
+  System.Array.LongLength (property)
+  System.Array.Rank (property)
+  System.Array.SyncRoot (property)
+  System.Array.IsReadOnly (property)
+  System.Array.IsFixedSize (property)
+  System.Array.IsSynchronized (property)
+  System.Array.MaxLength (property)
+  System.Array.Initialize (method)
+  System.Array.AsReadOnly (method)
+  System.Array.Resize (method)
+  System.Array.CreateInstance (method)
+  System.Array.CreateInstanceFromArrayType (method)
+  System.Array.Copy (method)
+  System.Array.ConstrainedCopy (method)
+  System.Array.Clear (method)
+  System.Array.GetLength (method)
+  System.Array.GetUpperBound (method)
+  System.Array.GetLowerBound (method)
+  System.Array.GetValue (method)
+  System.Array.SetValue (method)
+  System.Array.GetLongLength (method)
+  System.Array.Clone (method)
+  System.Array.BinarySearch (method)
+  System.Array.ConvertAll (method)
+  System.Array.CopyTo (method)
+  System.Array.Empty (method)
+  System.Array.Exists (method)
+  System.Array.Fill (method)
+  System.Array.Find (method)
+  System.Array.FindAll (method)
+  System.Array.FindIndex (method)
+  System.Array.FindLast (method)
+  System.Array.FindLastIndex (method)
+  System.Array.ForEach (method)
+  System.Array.IndexOf (method)
+  System.Array.LastIndexOf (method)
+  System.Array.Reverse (method)
+  System.Array.Sort (method)
+  System.Array.TrueForAll (method)
+  System.Array.GetEnumerator (method)
+System.Console (class) [47 members]
+  System.Console.In (property)
+  System.Console.InputEncoding (property)
+  System.Console.OutputEncoding (property)
+  System.Console.KeyAvailable (property)
+  System.Console.Out (property)
+  System.Console.Error (property)
+  System.Console.IsInputRedirected (property)
+  System.Console.IsOutputRedirected (property)
+  System.Console.IsErrorRedirected (property)
+  System.Console.CursorSize (property)
+  System.Console.NumberLock (property)
+  System.Console.CapsLock (property)
+  System.Console.BackgroundColor (property)
+  System.Console.ForegroundColor (property)
+  System.Console.BufferWidth (property)
+  System.Console.BufferHeight (property)
+  System.Console.WindowLeft (property)
+  System.Console.WindowTop (property)
+  System.Console.WindowWidth (property)
+  System.Console.WindowHeight (property)
+  System.Console.LargestWindowWidth (property)
+  System.Console.LargestWindowHeight (property)
+  System.Console.CursorVisible (property)
+  System.Console.CursorLeft (property)
+  System.Console.CursorTop (property)
+  System.Console.Title (property)
+  System.Console.TreatControlCAsInput (property)
+  System.Console.ReadKey (method)
+  System.Console.ResetColor (method)
+  System.Console.SetBufferSize (method)
+  System.Console.SetWindowPosition (method)
+  System.Console.SetWindowSize (method)
+  System.Console.GetCursorPosition (method)
+  System.Console.Beep (method)
+  System.Console.MoveBufferArea (method)
+  System.Console.Clear (method)
+  System.Console.SetCursorPosition (method)
+  System.Console.OpenStandardInput (method)
+  System.Console.OpenStandardOutput (method)
+  System.Console.OpenStandardError (method)
+  System.Console.SetIn (method)
+  System.Console.SetOut (method)
+  System.Console.SetError (method)
+  System.Console.Read (method)
+  System.Console.ReadLine (method)
+  System.Console.WriteLine (method)
+  System.Console.Write (method)
+System.Convert (class) [31 members]
+  System.Convert.DBNull (field)
+  System.Convert.GetTypeCode (method)
+  System.Convert.IsDBNull (method)
+  System.Convert.ChangeType (method)
+  System.Convert.ToBoolean (method)
+  System.Convert.ToChar (method)
+  System.Convert.ToSByte (method)
+  System.Convert.ToByte (method)
+  System.Convert.ToInt16 (method)
+  System.Convert.ToUInt16 (method)
+  System.Convert.ToInt32 (method)
+  System.Convert.ToUInt32 (method)
+  System.Convert.ToInt64 (method)
+  System.Convert.ToUInt64 (method)
+  System.Convert.ToSingle (method)
+  System.Convert.ToDouble (method)
+  System.Convert.ToDecimal (method)
+  System.Convert.ToDateTime (method)
+  System.Convert.ToString (method)
+  System.Convert.ToBase64String (method)
+  System.Convert.ToBase64CharArray (method)
+  System.Convert.TryToBase64Chars (method)
+  System.Convert.FromBase64String (method)
+  System.Convert.TryFromBase64String (method)
+  System.Convert.TryFromBase64Chars (method)
+  System.Convert.FromBase64CharArray (method)
+  System.Convert.FromHexString (method)
+  System.Convert.ToHexString (method)
+  System.Convert.TryToHexString (method)
+  System.Convert.ToHexStringLower (method)
+  System.Convert.TryToHexStringLower (method)
 
 ## System (2) — `api-system-2.md`
 
-Math (class) [46 members]
-  Math.E (constant)
-  Math.PI (constant)
-  Math.Tau (constant)
-  Math.Acos (method)
-  Math.Acosh (method)
-  Math.Asin (method)
-  Math.Asinh (method)
-  Math.Atan (method)
-  Math.Atanh (method)
-  Math.Atan2 (method)
-  Math.Cbrt (method)
-  Math.Ceiling (method)
-  Math.Cos (method)
-  Math.Cosh (method)
-  Math.Exp (method)
-  Math.Floor (method)
-  Math.FusedMultiplyAdd (method)
-  Math.Log (method)
-  Math.Log2 (method)
-  Math.Log10 (method)
-  Math.Pow (method)
-  Math.Sin (method)
-  Math.SinCos (method)
-  Math.Sinh (method)
-  Math.Sqrt (method)
-  Math.Tan (method)
-  Math.Tanh (method)
-  Math.Abs (method)
-  Math.BigMul (method)
-  Math.BitDecrement (method)
-  Math.BitIncrement (method)
-  Math.CopySign (method)
-  Math.DivRem (method)
-  Math.Clamp (method)
-  Math.IEEERemainder (method)
-  Math.ILogB (method)
-  Math.Max (method)
-  Math.MaxMagnitude (method)
-  Math.Min (method)
-  Math.MinMagnitude (method)
-  Math.ReciprocalEstimate (method)
-  Math.ReciprocalSqrtEstimate (method)
-  Math.Round (method)
-  Math.Sign (method)
-  Math.Truncate (method)
-  Math.ScaleB (method)
-MathF (class) [43 members]
-  MathF.E (constant)
-  MathF.PI (constant)
-  MathF.Tau (constant)
-  MathF.Acos (method)
-  MathF.Acosh (method)
-  MathF.Asin (method)
-  MathF.Asinh (method)
-  MathF.Atan (method)
-  MathF.Atanh (method)
-  MathF.Atan2 (method)
-  MathF.Cbrt (method)
-  MathF.Ceiling (method)
-  MathF.Cos (method)
-  MathF.Cosh (method)
-  MathF.Exp (method)
-  MathF.Floor (method)
-  MathF.FusedMultiplyAdd (method)
-  MathF.Log (method)
-  MathF.Log2 (method)
-  MathF.Log10 (method)
-  MathF.Pow (method)
-  MathF.Sin (method)
-  MathF.SinCos (method)
-  MathF.Sinh (method)
-  MathF.Sqrt (method)
-  MathF.Tan (method)
-  MathF.Tanh (method)
-  MathF.Abs (method)
-  MathF.BitDecrement (method)
-  MathF.BitIncrement (method)
-  MathF.CopySign (method)
-  MathF.IEEERemainder (method)
-  MathF.ILogB (method)
-  MathF.Max (method)
-  MathF.MaxMagnitude (method)
-  MathF.Min (method)
-  MathF.MinMagnitude (method)
-  MathF.ReciprocalEstimate (method)
-  MathF.ReciprocalSqrtEstimate (method)
-  MathF.Round (method)
-  MathF.Sign (method)
-  MathF.Truncate (method)
-  MathF.ScaleB (method)
-Random (class) [12 members]
-  Random.Shared (property)
-  Random.Random (constructor)
-  Random.Next (method)
-  Random.NextInt64 (method)
-  Random.NextSingle (method)
-  Random.NextDouble (method)
-  Random.NextBytes (method)
-  Random.GetItems (method)
-  Random.Shuffle (method)
-  Random.GetString (method)
-  Random.GetHexString (method)
-  Random.Sample (method)
-String (class) [54 members]
-  String.Empty (field)
-  String.this[] (property)
-  String.Length (property)
-  String.Intern (method)
-  String.IsInterned (method)
-  String.Compare (method)
-  String.CompareOrdinal (method)
-  String.CompareTo (method)
-  String.EndsWith (method)
-  String.Equals (method)
-  String.op_Equality (method)
-  String.op_Inequality (method)
-  String.GetHashCode (method)
-  String.StartsWith (method)
-  String.String (constructor)
-  String.Create (method)
-  String.op_Implicit (method)
-  String.Clone (method)
-  String.Copy (method)
-  String.CopyTo (method)
-  String.TryCopyTo (method)
-  String.ToCharArray (method)
-  String.IsNullOrEmpty (method)
-  String.IsNullOrWhiteSpace (method)
-  String.GetPinnableReference (method)
-  String.ToString (method)
-  String.GetEnumerator (method)
-  String.EnumerateRunes (method)
-  String.GetTypeCode (method)
-  String.IsNormalized (method)
-  String.Normalize (method)
-  String.Concat (method)
-  String.Format (method)
-  String.Insert (method)
-  String.Join (method)
-  String.PadLeft (method)
-  String.PadRight (method)
-  String.Remove (method)
-  String.Replace (method)
-  String.ReplaceLineEndings (method)
-  String.Split (method)
-  String.Substring (method)
-  String.ToLower (method)
-  String.ToLowerInvariant (method)
-  String.ToUpper (method)
-  String.ToUpperInvariant (method)
-  String.Trim (method)
-  String.TrimStart (method)
-  String.TrimEnd (method)
-  String.Contains (method)
-  String.IndexOf (method)
-  String.IndexOfAny (method)
-  String.LastIndexOf (method)
-  String.LastIndexOfAny (method)
+System.Math (class) [46 members]
+  System.Math.E (constant)
+  System.Math.PI (constant)
+  System.Math.Tau (constant)
+  System.Math.Acos (method)
+  System.Math.Acosh (method)
+  System.Math.Asin (method)
+  System.Math.Asinh (method)
+  System.Math.Atan (method)
+  System.Math.Atanh (method)
+  System.Math.Atan2 (method)
+  System.Math.Cbrt (method)
+  System.Math.Ceiling (method)
+  System.Math.Cos (method)
+  System.Math.Cosh (method)
+  System.Math.Exp (method)
+  System.Math.Floor (method)
+  System.Math.FusedMultiplyAdd (method)
+  System.Math.Log (method)
+  System.Math.Log2 (method)
+  System.Math.Log10 (method)
+  System.Math.Pow (method)
+  System.Math.Sin (method)
+  System.Math.SinCos (method)
+  System.Math.Sinh (method)
+  System.Math.Sqrt (method)
+  System.Math.Tan (method)
+  System.Math.Tanh (method)
+  System.Math.Abs (method)
+  System.Math.BigMul (method)
+  System.Math.BitDecrement (method)
+  System.Math.BitIncrement (method)
+  System.Math.CopySign (method)
+  System.Math.DivRem (method)
+  System.Math.Clamp (method)
+  System.Math.IEEERemainder (method)
+  System.Math.ILogB (method)
+  System.Math.Max (method)
+  System.Math.MaxMagnitude (method)
+  System.Math.Min (method)
+  System.Math.MinMagnitude (method)
+  System.Math.ReciprocalEstimate (method)
+  System.Math.ReciprocalSqrtEstimate (method)
+  System.Math.Round (method)
+  System.Math.Sign (method)
+  System.Math.Truncate (method)
+  System.Math.ScaleB (method)
+System.MathF (class) [43 members]
+  System.MathF.E (constant)
+  System.MathF.PI (constant)
+  System.MathF.Tau (constant)
+  System.MathF.Acos (method)
+  System.MathF.Acosh (method)
+  System.MathF.Asin (method)
+  System.MathF.Asinh (method)
+  System.MathF.Atan (method)
+  System.MathF.Atanh (method)
+  System.MathF.Atan2 (method)
+  System.MathF.Cbrt (method)
+  System.MathF.Ceiling (method)
+  System.MathF.Cos (method)
+  System.MathF.Cosh (method)
+  System.MathF.Exp (method)
+  System.MathF.Floor (method)
+  System.MathF.FusedMultiplyAdd (method)
+  System.MathF.Log (method)
+  System.MathF.Log2 (method)
+  System.MathF.Log10 (method)
+  System.MathF.Pow (method)
+  System.MathF.Sin (method)
+  System.MathF.SinCos (method)
+  System.MathF.Sinh (method)
+  System.MathF.Sqrt (method)
+  System.MathF.Tan (method)
+  System.MathF.Tanh (method)
+  System.MathF.Abs (method)
+  System.MathF.BitDecrement (method)
+  System.MathF.BitIncrement (method)
+  System.MathF.CopySign (method)
+  System.MathF.IEEERemainder (method)
+  System.MathF.ILogB (method)
+  System.MathF.Max (method)
+  System.MathF.MaxMagnitude (method)
+  System.MathF.Min (method)
+  System.MathF.MinMagnitude (method)
+  System.MathF.ReciprocalEstimate (method)
+  System.MathF.ReciprocalSqrtEstimate (method)
+  System.MathF.Round (method)
+  System.MathF.Sign (method)
+  System.MathF.Truncate (method)
+  System.MathF.ScaleB (method)
+System.Random (class) [12 members]
+  System.Random.Shared (property)
+  System.Random.Random (constructor)
+  System.Random.Next (method)
+  System.Random.NextInt64 (method)
+  System.Random.NextSingle (method)
+  System.Random.NextDouble (method)
+  System.Random.NextBytes (method)
+  System.Random.GetItems (method)
+  System.Random.Shuffle (method)
+  System.Random.GetString (method)
+  System.Random.GetHexString (method)
+  System.Random.Sample (method)
+System.String (class) [54 members]
+  System.String.Empty (field)
+  System.String.this[] (property)
+  System.String.Length (property)
+  System.String.Intern (method)
+  System.String.IsInterned (method)
+  System.String.Compare (method)
+  System.String.CompareOrdinal (method)
+  System.String.CompareTo (method)
+  System.String.EndsWith (method)
+  System.String.Equals (method)
+  System.String.op_Equality (method)
+  System.String.op_Inequality (method)
+  System.String.GetHashCode (method)
+  System.String.StartsWith (method)
+  System.String.String (constructor)
+  System.String.Create (method)
+  System.String.op_Implicit (method)
+  System.String.Clone (method)
+  System.String.Copy (method)
+  System.String.CopyTo (method)
+  System.String.TryCopyTo (method)
+  System.String.ToCharArray (method)
+  System.String.IsNullOrEmpty (method)
+  System.String.IsNullOrWhiteSpace (method)
+  System.String.GetPinnableReference (method)
+  System.String.ToString (method)
+  System.String.GetEnumerator (method)
+  System.String.EnumerateRunes (method)
+  System.String.GetTypeCode (method)
+  System.String.IsNormalized (method)
+  System.String.Normalize (method)
+  System.String.Concat (method)
+  System.String.Format (method)
+  System.String.Insert (method)
+  System.String.Join (method)
+  System.String.PadLeft (method)
+  System.String.PadRight (method)
+  System.String.Remove (method)
+  System.String.Replace (method)
+  System.String.ReplaceLineEndings (method)
+  System.String.Split (method)
+  System.String.Substring (method)
+  System.String.ToLower (method)
+  System.String.ToLowerInvariant (method)
+  System.String.ToUpper (method)
+  System.String.ToUpperInvariant (method)
+  System.String.Trim (method)
+  System.String.TrimStart (method)
+  System.String.TrimEnd (method)
+  System.String.Contains (method)
+  System.String.IndexOf (method)
+  System.String.IndexOfAny (method)
+  System.String.LastIndexOf (method)
+  System.String.LastIndexOfAny (method)
 
 ## System.Collections.Generic — `api-system-collections-generic.md`
 
-Dictionary (class) [25 members]
-  Dictionary.Comparer (property)
-  Dictionary.Count (property)
-  Dictionary.Capacity (property)
-  Dictionary.Keys (property)
-  Dictionary.Values (property)
-  Dictionary.this[] (property)
-  Dictionary.AlternateLookup (struct)
-  Dictionary.Enumerator (struct)
-  Dictionary.KeyCollection (class)
-  Dictionary.ValueCollection (class)
-  Dictionary.Dictionary (constructor)
-  Dictionary.Add (method)
-  Dictionary.Clear (method)
-  Dictionary.ContainsKey (method)
-  Dictionary.ContainsValue (method)
-  Dictionary.GetEnumerator (method)
-  Dictionary.GetObjectData (method)
-  Dictionary.GetAlternateLookup (method)
-  Dictionary.TryGetAlternateLookup (method)
-  Dictionary.OnDeserialization (method)
-  Dictionary.Remove (method)
-  Dictionary.TryGetValue (method)
-  Dictionary.TryAdd (method)
-  Dictionary.EnsureCapacity (method)
-  Dictionary.TrimExcess (method)
-HashSet (class) [31 members]
-  HashSet.Count (property)
-  HashSet.Capacity (property)
-  HashSet.Comparer (property)
-  HashSet.AlternateLookup (struct)
-  HashSet.Enumerator (struct)
-  HashSet.HashSet (constructor)
-  HashSet.Clear (method)
-  HashSet.Contains (method)
-  HashSet.Remove (method)
-  HashSet.GetAlternateLookup (method)
-  HashSet.TryGetAlternateLookup (method)
-  HashSet.GetEnumerator (method)
-  HashSet.GetObjectData (method)
-  HashSet.OnDeserialization (method)
-  HashSet.Add (method)
-  HashSet.TryGetValue (method)
-  HashSet.UnionWith (method)
-  HashSet.IntersectWith (method)
-  HashSet.ExceptWith (method)
-  HashSet.SymmetricExceptWith (method)
-  HashSet.IsSubsetOf (method)
-  HashSet.IsProperSubsetOf (method)
-  HashSet.IsSupersetOf (method)
-  HashSet.IsProperSupersetOf (method)
-  HashSet.Overlaps (method)
-  HashSet.SetEquals (method)
-  HashSet.CopyTo (method)
-  HashSet.RemoveWhere (method)
-  HashSet.EnsureCapacity (method)
-  HashSet.TrimExcess (method)
-  HashSet.CreateSetComparer (method)
-List (class) [37 members]
-  List.Capacity (property)
-  List.Count (property)
-  List.this[] (property)
-  List.Enumerator (struct)
-  List.List (constructor)
-  List.Add (method)
-  List.AddRange (method)
-  List.AsReadOnly (method)
-  List.BinarySearch (method)
-  List.Clear (method)
-  List.Contains (method)
-  List.ConvertAll (method)
-  List.CopyTo (method)
-  List.EnsureCapacity (method)
-  List.Exists (method)
-  List.Find (method)
-  List.FindAll (method)
-  List.FindIndex (method)
-  List.FindLast (method)
-  List.FindLastIndex (method)
-  List.ForEach (method)
-  List.GetEnumerator (method)
-  List.GetRange (method)
-  List.Slice (method)
-  List.IndexOf (method)
-  List.Insert (method)
-  List.InsertRange (method)
-  List.LastIndexOf (method)
-  List.Remove (method)
-  List.RemoveAll (method)
-  List.RemoveAt (method)
-  List.RemoveRange (method)
-  List.Reverse (method)
-  List.Sort (method)
-  List.ToArray (method)
-  List.TrimExcess (method)
-  List.TrueForAll (method)
+System.Collections.Generic.Dictionary (class) [25 members]
+  System.Collections.Generic.Dictionary.Comparer (property)
+  System.Collections.Generic.Dictionary.Count (property)
+  System.Collections.Generic.Dictionary.Capacity (property)
+  System.Collections.Generic.Dictionary.Keys (property)
+  System.Collections.Generic.Dictionary.Values (property)
+  System.Collections.Generic.Dictionary.this[] (property)
+  System.Collections.Generic.Dictionary.AlternateLookup (struct) [6 members]
+    System.Collections.Generic.Dictionary.AlternateLookup.Dictionary (property)
+    System.Collections.Generic.Dictionary.AlternateLookup.this[] (property)
+    System.Collections.Generic.Dictionary.AlternateLookup.TryGetValue (method)
+    System.Collections.Generic.Dictionary.AlternateLookup.ContainsKey (method)
+    System.Collections.Generic.Dictionary.AlternateLookup.Remove (method)
+    System.Collections.Generic.Dictionary.AlternateLookup.TryAdd (method)
+  System.Collections.Generic.Dictionary.Enumerator (struct) [3 members]
+    System.Collections.Generic.Dictionary.Enumerator.Current (property)
+    System.Collections.Generic.Dictionary.Enumerator.MoveNext (method)
+    System.Collections.Generic.Dictionary.Enumerator.Dispose (method)
+  System.Collections.Generic.Dictionary.KeyCollection (class) [6 members]
+    System.Collections.Generic.Dictionary.KeyCollection.Count (property)
+    System.Collections.Generic.Dictionary.KeyCollection.Enumerator (struct) [3 members]
+      System.Collections.Generic.Dictionary.KeyCollection.Enumerator.Current (property)
+      System.Collections.Generic.Dictionary.KeyCollection.Enumerator.Dispose (method)
+      System.Collections.Generic.Dictionary.KeyCollection.Enumerator.MoveNext (method)
+    System.Collections.Generic.Dictionary.KeyCollection.KeyCollection (constructor)
+    System.Collections.Generic.Dictionary.KeyCollection.GetEnumerator (method)
+    System.Collections.Generic.Dictionary.KeyCollection.CopyTo (method)
+    System.Collections.Generic.Dictionary.KeyCollection.Contains (method)
+  System.Collections.Generic.Dictionary.ValueCollection (class) [5 members]
+    System.Collections.Generic.Dictionary.ValueCollection.Count (property)
+    System.Collections.Generic.Dictionary.ValueCollection.Enumerator (struct) [3 members]
+      System.Collections.Generic.Dictionary.ValueCollection.Enumerator.Current (property)
+      System.Collections.Generic.Dictionary.ValueCollection.Enumerator.Dispose (method)
+      System.Collections.Generic.Dictionary.ValueCollection.Enumerator.MoveNext (method)
+    System.Collections.Generic.Dictionary.ValueCollection.ValueCollection (constructor)
+    System.Collections.Generic.Dictionary.ValueCollection.GetEnumerator (method)
+    System.Collections.Generic.Dictionary.ValueCollection.CopyTo (method)
+  System.Collections.Generic.Dictionary.Dictionary (constructor)
+  System.Collections.Generic.Dictionary.Add (method)
+  System.Collections.Generic.Dictionary.Clear (method)
+  System.Collections.Generic.Dictionary.ContainsKey (method)
+  System.Collections.Generic.Dictionary.ContainsValue (method)
+  System.Collections.Generic.Dictionary.GetEnumerator (method)
+  System.Collections.Generic.Dictionary.GetObjectData (method)
+  System.Collections.Generic.Dictionary.GetAlternateLookup (method)
+  System.Collections.Generic.Dictionary.TryGetAlternateLookup (method)
+  System.Collections.Generic.Dictionary.OnDeserialization (method)
+  System.Collections.Generic.Dictionary.Remove (method)
+  System.Collections.Generic.Dictionary.TryGetValue (method)
+  System.Collections.Generic.Dictionary.TryAdd (method)
+  System.Collections.Generic.Dictionary.EnsureCapacity (method)
+  System.Collections.Generic.Dictionary.TrimExcess (method)
+System.Collections.Generic.HashSet (class) [31 members]
+  System.Collections.Generic.HashSet.Count (property)
+  System.Collections.Generic.HashSet.Capacity (property)
+  System.Collections.Generic.HashSet.Comparer (property)
+  System.Collections.Generic.HashSet.AlternateLookup (struct) [5 members]
+    System.Collections.Generic.HashSet.AlternateLookup.Set (property)
+    System.Collections.Generic.HashSet.AlternateLookup.Add (method)
+    System.Collections.Generic.HashSet.AlternateLookup.Remove (method)
+    System.Collections.Generic.HashSet.AlternateLookup.Contains (method)
+    System.Collections.Generic.HashSet.AlternateLookup.TryGetValue (method)
+  System.Collections.Generic.HashSet.Enumerator (struct) [3 members]
+    System.Collections.Generic.HashSet.Enumerator.Current (property)
+    System.Collections.Generic.HashSet.Enumerator.MoveNext (method)
+    System.Collections.Generic.HashSet.Enumerator.Dispose (method)
+  System.Collections.Generic.HashSet.HashSet (constructor)
+  System.Collections.Generic.HashSet.Clear (method)
+  System.Collections.Generic.HashSet.Contains (method)
+  System.Collections.Generic.HashSet.Remove (method)
+  System.Collections.Generic.HashSet.GetAlternateLookup (method)
+  System.Collections.Generic.HashSet.TryGetAlternateLookup (method)
+  System.Collections.Generic.HashSet.GetEnumerator (method)
+  System.Collections.Generic.HashSet.GetObjectData (method)
+  System.Collections.Generic.HashSet.OnDeserialization (method)
+  System.Collections.Generic.HashSet.Add (method)
+  System.Collections.Generic.HashSet.TryGetValue (method)
+  System.Collections.Generic.HashSet.UnionWith (method)
+  System.Collections.Generic.HashSet.IntersectWith (method)
+  System.Collections.Generic.HashSet.ExceptWith (method)
+  System.Collections.Generic.HashSet.SymmetricExceptWith (method)
+  System.Collections.Generic.HashSet.IsSubsetOf (method)
+  System.Collections.Generic.HashSet.IsProperSubsetOf (method)
+  System.Collections.Generic.HashSet.IsSupersetOf (method)
+  System.Collections.Generic.HashSet.IsProperSupersetOf (method)
+  System.Collections.Generic.HashSet.Overlaps (method)
+  System.Collections.Generic.HashSet.SetEquals (method)
+  System.Collections.Generic.HashSet.CopyTo (method)
+  System.Collections.Generic.HashSet.RemoveWhere (method)
+  System.Collections.Generic.HashSet.EnsureCapacity (method)
+  System.Collections.Generic.HashSet.TrimExcess (method)
+  System.Collections.Generic.HashSet.CreateSetComparer (method)
+System.Collections.Generic.List (class) [37 members]
+  System.Collections.Generic.List.Capacity (property)
+  System.Collections.Generic.List.Count (property)
+  System.Collections.Generic.List.this[] (property)
+  System.Collections.Generic.List.Enumerator (struct) [3 members]
+    System.Collections.Generic.List.Enumerator.Current (property)
+    System.Collections.Generic.List.Enumerator.Dispose (method)
+    System.Collections.Generic.List.Enumerator.MoveNext (method)
+  System.Collections.Generic.List.List (constructor)
+  System.Collections.Generic.List.Add (method)
+  System.Collections.Generic.List.AddRange (method)
+  System.Collections.Generic.List.AsReadOnly (method)
+  System.Collections.Generic.List.BinarySearch (method)
+  System.Collections.Generic.List.Clear (method)
+  System.Collections.Generic.List.Contains (method)
+  System.Collections.Generic.List.ConvertAll (method)
+  System.Collections.Generic.List.CopyTo (method)
+  System.Collections.Generic.List.EnsureCapacity (method)
+  System.Collections.Generic.List.Exists (method)
+  System.Collections.Generic.List.Find (method)
+  System.Collections.Generic.List.FindAll (method)
+  System.Collections.Generic.List.FindIndex (method)
+  System.Collections.Generic.List.FindLast (method)
+  System.Collections.Generic.List.FindLastIndex (method)
+  System.Collections.Generic.List.ForEach (method)
+  System.Collections.Generic.List.GetEnumerator (method)
+  System.Collections.Generic.List.GetRange (method)
+  System.Collections.Generic.List.Slice (method)
+  System.Collections.Generic.List.IndexOf (method)
+  System.Collections.Generic.List.Insert (method)
+  System.Collections.Generic.List.InsertRange (method)
+  System.Collections.Generic.List.LastIndexOf (method)
+  System.Collections.Generic.List.Remove (method)
+  System.Collections.Generic.List.RemoveAll (method)
+  System.Collections.Generic.List.RemoveAt (method)
+  System.Collections.Generic.List.RemoveRange (method)
+  System.Collections.Generic.List.Reverse (method)
+  System.Collections.Generic.List.Sort (method)
+  System.Collections.Generic.List.ToArray (method)
+  System.Collections.Generic.List.TrimExcess (method)
+  System.Collections.Generic.List.TrueForAll (method)
 
 ## System.Numerics — `api-system-numerics.md`
 
-Matrix3x2 (struct) [40 members]
-  Matrix3x2.M11 (field)
-  Matrix3x2.M12 (field)
-  Matrix3x2.M21 (field)
-  Matrix3x2.M22 (field)
-  Matrix3x2.M31 (field)
-  Matrix3x2.M32 (field)
-  Matrix3x2.Identity (property)
-  Matrix3x2.IsIdentity (property)
-  Matrix3x2.Translation (property)
-  Matrix3x2.X (property)
-  Matrix3x2.Y (property)
-  Matrix3x2.Z (property)
-  Matrix3x2.this[] (property)
-  Matrix3x2.this[] (property)
-  Matrix3x2.Matrix3x2 (constructor)
-  Matrix3x2.op_Addition (method)
-  Matrix3x2.op_Equality (method)
-  Matrix3x2.op_Inequality (method)
-  Matrix3x2.op_Multiply (method)
-  Matrix3x2.op_Subtraction (method)
-  Matrix3x2.op_UnaryNegation (method)
-  Matrix3x2.Add (method)
-  Matrix3x2.Create (method)
-  Matrix3x2.CreateRotation (method)
-  Matrix3x2.CreateScale (method)
-  Matrix3x2.CreateSkew (method)
-  Matrix3x2.CreateTranslation (method)
-  Matrix3x2.Invert (method)
-  Matrix3x2.Lerp (method)
-  Matrix3x2.Multiply (method)
-  Matrix3x2.Negate (method)
-  Matrix3x2.Subtract (method)
-  Matrix3x2.Equals (method)
-  Matrix3x2.GetDeterminant (method)
-  Matrix3x2.GetElement (method)
-  Matrix3x2.GetRow (method)
-  Matrix3x2.GetHashCode (method)
-  Matrix3x2.ToString (method)
-  Matrix3x2.WithElement (method)
-  Matrix3x2.WithRow (method)
-Matrix4x4 (struct) [81 members]
-  Matrix4x4.M11 (field)
-  Matrix4x4.M12 (field)
-  Matrix4x4.M13 (field)
-  Matrix4x4.M14 (field)
-  Matrix4x4.M21 (field)
-  Matrix4x4.M22 (field)
-  Matrix4x4.M23 (field)
-  Matrix4x4.M24 (field)
-  Matrix4x4.M31 (field)
-  Matrix4x4.M32 (field)
-  Matrix4x4.M33 (field)
-  Matrix4x4.M34 (field)
-  Matrix4x4.M41 (field)
-  Matrix4x4.M42 (field)
-  Matrix4x4.M43 (field)
-  Matrix4x4.M44 (field)
-  Matrix4x4.Identity (property)
-  Matrix4x4.IsIdentity (property)
-  Matrix4x4.Translation (property)
-  Matrix4x4.X (property)
-  Matrix4x4.Y (property)
-  Matrix4x4.Z (property)
-  Matrix4x4.W (property)
-  Matrix4x4.this[] (property)
-  Matrix4x4.this[] (property)
-  Matrix4x4.Matrix4x4 (constructor)
-  Matrix4x4.op_Addition (method)
-  Matrix4x4.op_Equality (method)
-  Matrix4x4.op_Inequality (method)
-  Matrix4x4.op_Multiply (method)
-  Matrix4x4.op_Subtraction (method)
-  Matrix4x4.op_UnaryNegation (method)
-  Matrix4x4.Add (method)
-  Matrix4x4.Create (method)
-  Matrix4x4.CreateBillboard (method)
-  Matrix4x4.CreateBillboardLeftHanded (method)
-  Matrix4x4.CreateConstrainedBillboard (method)
-  Matrix4x4.CreateConstrainedBillboardLeftHanded (method)
-  Matrix4x4.CreateFromAxisAngle (method)
-  Matrix4x4.CreateFromQuaternion (method)
-  Matrix4x4.CreateFromYawPitchRoll (method)
-  Matrix4x4.CreateLookAt (method)
-  Matrix4x4.CreateLookAtLeftHanded (method)
-  Matrix4x4.CreateLookTo (method)
-  Matrix4x4.CreateLookToLeftHanded (method)
-  Matrix4x4.CreateOrthographic (method)
-  Matrix4x4.CreateOrthographicLeftHanded (method)
-  Matrix4x4.CreateOrthographicOffCenter (method)
-  Matrix4x4.CreateOrthographicOffCenterLeftHanded (method)
-  Matrix4x4.CreatePerspective (method)
-  Matrix4x4.CreatePerspectiveLeftHanded (method)
-  Matrix4x4.CreatePerspectiveFieldOfView (method)
-  Matrix4x4.CreatePerspectiveFieldOfViewLeftHanded (method)
-  Matrix4x4.CreatePerspectiveOffCenter (method)
-  Matrix4x4.CreatePerspectiveOffCenterLeftHanded (method)
-  Matrix4x4.CreateReflection (method)
-  Matrix4x4.CreateRotationX (method)
-  Matrix4x4.CreateRotationY (method)
-  Matrix4x4.CreateRotationZ (method)
-  Matrix4x4.CreateScale (method)
-  Matrix4x4.CreateShadow (method)
-  Matrix4x4.CreateTranslation (method)
-  Matrix4x4.CreateViewport (method)
-  Matrix4x4.CreateViewportLeftHanded (method)
-  Matrix4x4.CreateWorld (method)
-  Matrix4x4.Decompose (method)
-  Matrix4x4.Invert (method)
-  Matrix4x4.Lerp (method)
-  Matrix4x4.Multiply (method)
-  Matrix4x4.Negate (method)
-  Matrix4x4.Subtract (method)
-  Matrix4x4.Transform (method)
-  Matrix4x4.Transpose (method)
-  Matrix4x4.Equals (method)
-  Matrix4x4.GetDeterminant (method)
-  Matrix4x4.GetElement (method)
-  Matrix4x4.GetRow (method)
-  Matrix4x4.GetHashCode (method)
-  Matrix4x4.ToString (method)
-  Matrix4x4.WithElement (method)
-  Matrix4x4.WithRow (method)
-Plane (struct) [15 members]
-  Plane.Normal (field)
-  Plane.D (field)
-  Plane.Plane (constructor)
-  Plane.Create (method)
-  Plane.CreateFromVertices (method)
-  Plane.Dot (method)
-  Plane.DotCoordinate (method)
-  Plane.DotNormal (method)
-  Plane.Normalize (method)
-  Plane.Transform (method)
-  Plane.op_Equality (method)
-  Plane.op_Inequality (method)
-  Plane.Equals (method)
-  Plane.GetHashCode (method)
-  Plane.ToString (method)
-Quaternion (struct) [37 members]
-  Quaternion.X (field)
-  Quaternion.Y (field)
-  Quaternion.Z (field)
-  Quaternion.W (field)
-  Quaternion.Zero (property)
-  Quaternion.Identity (property)
-  Quaternion.this[] (property)
-  Quaternion.IsIdentity (property)
-  Quaternion.Quaternion (constructor)
-  Quaternion.op_Addition (method)
-  Quaternion.op_Division (method)
-  Quaternion.op_Equality (method)
-  Quaternion.op_Inequality (method)
-  Quaternion.op_Multiply (method)
-  Quaternion.op_Subtraction (method)
-  Quaternion.op_UnaryNegation (method)
-  Quaternion.Add (method)
-  Quaternion.Concatenate (method)
-  Quaternion.Conjugate (method)
-  Quaternion.Create (method)
-  Quaternion.CreateFromAxisAngle (method)
-  Quaternion.CreateFromRotationMatrix (method)
-  Quaternion.CreateFromYawPitchRoll (method)
-  Quaternion.Divide (method)
-  Quaternion.Dot (method)
-  Quaternion.Inverse (method)
-  Quaternion.Lerp (method)
-  Quaternion.Multiply (method)
-  Quaternion.Negate (method)
-  Quaternion.Normalize (method)
-  Quaternion.Slerp (method)
-  Quaternion.Subtract (method)
-  Quaternion.Equals (method)
-  Quaternion.GetHashCode (method)
-  Quaternion.Length (method)
-  Quaternion.LengthSquared (method)
-  Quaternion.ToString (method)
-Vector2 (struct) [135 members]
-  Vector2.X (field)
-  Vector2.Y (field)
-  Vector2.AllBitsSet (property)
-  Vector2.E (property)
-  Vector2.Epsilon (property)
-  Vector2.NaN (property)
-  Vector2.NegativeInfinity (property)
-  Vector2.NegativeZero (property)
-  Vector2.One (property)
-  Vector2.Pi (property)
-  Vector2.PositiveInfinity (property)
-  Vector2.Tau (property)
-  Vector2.UnitX (property)
-  Vector2.UnitY (property)
-  Vector2.Zero (property)
-  Vector2.this[] (property)
-  Vector2.Vector2 (constructor)
-  Vector2.op_Addition (method)
-  Vector2.op_Division (method)
-  Vector2.op_Equality (method)
-  Vector2.op_Inequality (method)
-  Vector2.op_Multiply (method)
-  Vector2.op_Subtraction (method)
-  Vector2.op_UnaryNegation (method)
-  Vector2.op_BitwiseAnd (method)
-  Vector2.op_BitwiseOr (method)
-  Vector2.op_ExclusiveOr (method)
-  Vector2.op_LeftShift (method)
-  Vector2.op_OnesComplement (method)
-  Vector2.op_RightShift (method)
-  Vector2.op_UnaryPlus (method)
-  Vector2.op_UnsignedRightShift (method)
-  Vector2.Abs (method)
-  Vector2.Add (method)
-  Vector2.All (method)
-  Vector2.AllWhereAllBitsSet (method)
-  Vector2.AndNot (method)
-  Vector2.Any (method)
-  Vector2.AnyWhereAllBitsSet (method)
-  Vector2.BitwiseAnd (method)
-  Vector2.BitwiseOr (method)
-  Vector2.Clamp (method)
-  Vector2.ClampNative (method)
-  Vector2.ConditionalSelect (method)
-  Vector2.CopySign (method)
-  Vector2.Cos (method)
-  Vector2.Count (method)
-  Vector2.CountWhereAllBitsSet (method)
-  Vector2.Create (method)
-  Vector2.CreateScalar (method)
-  Vector2.CreateScalarUnsafe (method)
-  Vector2.Cross (method)
-  Vector2.DegreesToRadians (method)
-  Vector2.Distance (method)
-  Vector2.DistanceSquared (method)
-  Vector2.Divide (method)
-  Vector2.Dot (method)
-  Vector2.Exp (method)
-  Vector2.Equals (method)
-  Vector2.EqualsAll (method)
-  Vector2.EqualsAny (method)
-  Vector2.FusedMultiplyAdd (method)
-  Vector2.GreaterThan (method)
-  Vector2.GreaterThanAll (method)
-  Vector2.GreaterThanAny (method)
-  Vector2.GreaterThanOrEqual (method)
-  Vector2.GreaterThanOrEqualAll (method)
-  Vector2.GreaterThanOrEqualAny (method)
-  Vector2.Hypot (method)
-  Vector2.IndexOf (method)
-  Vector2.IndexOfWhereAllBitsSet (method)
-  Vector2.IsEvenInteger (method)
-  Vector2.IsFinite (method)
-  Vector2.IsInfinity (method)
-  Vector2.IsInteger (method)
-  Vector2.IsNaN (method)
-  Vector2.IsNegative (method)
-  Vector2.IsNegativeInfinity (method)
-  Vector2.IsNormal (method)
-  Vector2.IsOddInteger (method)
-  Vector2.IsPositive (method)
-  Vector2.IsPositiveInfinity (method)
-  Vector2.IsSubnormal (method)
-  Vector2.IsZero (method)
-  Vector2.LastIndexOf (method)
-  Vector2.LastIndexOfWhereAllBitsSet (method)
-  Vector2.Lerp (method)
-  Vector2.LessThan (method)
-  Vector2.LessThanAll (method)
-  Vector2.LessThanAny (method)
-  Vector2.LessThanOrEqual (method)
-  Vector2.LessThanOrEqualAll (method)
-  Vector2.LessThanOrEqualAny (method)
-  Vector2.Load (method)
-  Vector2.LoadAligned (method)
-  Vector2.LoadAlignedNonTemporal (method)
-  Vector2.LoadUnsafe (method)
-  Vector2.Log (method)
-  Vector2.Log2 (method)
-  Vector2.Max (method)
-  Vector2.MaxMagnitude (method)
-  Vector2.MaxMagnitudeNumber (method)
-  Vector2.MaxNative (method)
-  Vector2.MaxNumber (method)
-  Vector2.Min (method)
-  Vector2.MinMagnitude (method)
-  Vector2.MinMagnitudeNumber (method)
-  Vector2.MinNative (method)
-  Vector2.MinNumber (method)
-  Vector2.Multiply (method)
-  Vector2.MultiplyAddEstimate (method)
-  Vector2.Negate (method)
-  Vector2.None (method)
-  Vector2.NoneWhereAllBitsSet (method)
-  Vector2.Normalize (method)
-  Vector2.OnesComplement (method)
-  Vector2.RadiansToDegrees (method)
-  Vector2.Reflect (method)
-  Vector2.Round (method)
-  Vector2.Shuffle (method)
-  Vector2.Sin (method)
-  Vector2.SinCos (method)
-  Vector2.SquareRoot (method)
-  Vector2.Subtract (method)
-  Vector2.Sum (method)
-  Vector2.Transform (method)
-  Vector2.TransformNormal (method)
-  Vector2.Truncate (method)
-  Vector2.Xor (method)
-  Vector2.CopyTo (method)
-  Vector2.TryCopyTo (method)
-  Vector2.GetHashCode (method)
-  Vector2.Length (method)
-  Vector2.LengthSquared (method)
-  Vector2.ToString (method)
+System.Numerics.Matrix3x2 (struct) [40 members]
+  System.Numerics.Matrix3x2.M11 (field)
+  System.Numerics.Matrix3x2.M12 (field)
+  System.Numerics.Matrix3x2.M21 (field)
+  System.Numerics.Matrix3x2.M22 (field)
+  System.Numerics.Matrix3x2.M31 (field)
+  System.Numerics.Matrix3x2.M32 (field)
+  System.Numerics.Matrix3x2.Identity (property)
+  System.Numerics.Matrix3x2.IsIdentity (property)
+  System.Numerics.Matrix3x2.Translation (property)
+  System.Numerics.Matrix3x2.X (property)
+  System.Numerics.Matrix3x2.Y (property)
+  System.Numerics.Matrix3x2.Z (property)
+  System.Numerics.Matrix3x2.this[] (property)
+  System.Numerics.Matrix3x2.this[] (property)
+  System.Numerics.Matrix3x2.Matrix3x2 (constructor)
+  System.Numerics.Matrix3x2.op_Addition (method)
+  System.Numerics.Matrix3x2.op_Equality (method)
+  System.Numerics.Matrix3x2.op_Inequality (method)
+  System.Numerics.Matrix3x2.op_Multiply (method)
+  System.Numerics.Matrix3x2.op_Subtraction (method)
+  System.Numerics.Matrix3x2.op_UnaryNegation (method)
+  System.Numerics.Matrix3x2.Add (method)
+  System.Numerics.Matrix3x2.Create (method)
+  System.Numerics.Matrix3x2.CreateRotation (method)
+  System.Numerics.Matrix3x2.CreateScale (method)
+  System.Numerics.Matrix3x2.CreateSkew (method)
+  System.Numerics.Matrix3x2.CreateTranslation (method)
+  System.Numerics.Matrix3x2.Invert (method)
+  System.Numerics.Matrix3x2.Lerp (method)
+  System.Numerics.Matrix3x2.Multiply (method)
+  System.Numerics.Matrix3x2.Negate (method)
+  System.Numerics.Matrix3x2.Subtract (method)
+  System.Numerics.Matrix3x2.Equals (method)
+  System.Numerics.Matrix3x2.GetDeterminant (method)
+  System.Numerics.Matrix3x2.GetElement (method)
+  System.Numerics.Matrix3x2.GetRow (method)
+  System.Numerics.Matrix3x2.GetHashCode (method)
+  System.Numerics.Matrix3x2.ToString (method)
+  System.Numerics.Matrix3x2.WithElement (method)
+  System.Numerics.Matrix3x2.WithRow (method)
+System.Numerics.Matrix4x4 (struct) [81 members]
+  System.Numerics.Matrix4x4.M11 (field)
+  System.Numerics.Matrix4x4.M12 (field)
+  System.Numerics.Matrix4x4.M13 (field)
+  System.Numerics.Matrix4x4.M14 (field)
+  System.Numerics.Matrix4x4.M21 (field)
+  System.Numerics.Matrix4x4.M22 (field)
+  System.Numerics.Matrix4x4.M23 (field)
+  System.Numerics.Matrix4x4.M24 (field)
+  System.Numerics.Matrix4x4.M31 (field)
+  System.Numerics.Matrix4x4.M32 (field)
+  System.Numerics.Matrix4x4.M33 (field)
+  System.Numerics.Matrix4x4.M34 (field)
+  System.Numerics.Matrix4x4.M41 (field)
+  System.Numerics.Matrix4x4.M42 (field)
+  System.Numerics.Matrix4x4.M43 (field)
+  System.Numerics.Matrix4x4.M44 (field)
+  System.Numerics.Matrix4x4.Identity (property)
+  System.Numerics.Matrix4x4.IsIdentity (property)
+  System.Numerics.Matrix4x4.Translation (property)
+  System.Numerics.Matrix4x4.X (property)
+  System.Numerics.Matrix4x4.Y (property)
+  System.Numerics.Matrix4x4.Z (property)
+  System.Numerics.Matrix4x4.W (property)
+  System.Numerics.Matrix4x4.this[] (property)
+  System.Numerics.Matrix4x4.this[] (property)
+  System.Numerics.Matrix4x4.Matrix4x4 (constructor)
+  System.Numerics.Matrix4x4.op_Addition (method)
+  System.Numerics.Matrix4x4.op_Equality (method)
+  System.Numerics.Matrix4x4.op_Inequality (method)
+  System.Numerics.Matrix4x4.op_Multiply (method)
+  System.Numerics.Matrix4x4.op_Subtraction (method)
+  System.Numerics.Matrix4x4.op_UnaryNegation (method)
+  System.Numerics.Matrix4x4.Add (method)
+  System.Numerics.Matrix4x4.Create (method)
+  System.Numerics.Matrix4x4.CreateBillboard (method)
+  System.Numerics.Matrix4x4.CreateBillboardLeftHanded (method)
+  System.Numerics.Matrix4x4.CreateConstrainedBillboard (method)
+  System.Numerics.Matrix4x4.CreateConstrainedBillboardLeftHanded (method)
+  System.Numerics.Matrix4x4.CreateFromAxisAngle (method)
+  System.Numerics.Matrix4x4.CreateFromQuaternion (method)
+  System.Numerics.Matrix4x4.CreateFromYawPitchRoll (method)
+  System.Numerics.Matrix4x4.CreateLookAt (method)
+  System.Numerics.Matrix4x4.CreateLookAtLeftHanded (method)
+  System.Numerics.Matrix4x4.CreateLookTo (method)
+  System.Numerics.Matrix4x4.CreateLookToLeftHanded (method)
+  System.Numerics.Matrix4x4.CreateOrthographic (method)
+  System.Numerics.Matrix4x4.CreateOrthographicLeftHanded (method)
+  System.Numerics.Matrix4x4.CreateOrthographicOffCenter (method)
+  System.Numerics.Matrix4x4.CreateOrthographicOffCenterLeftHanded (method)
+  System.Numerics.Matrix4x4.CreatePerspective (method)
+  System.Numerics.Matrix4x4.CreatePerspectiveLeftHanded (method)
+  System.Numerics.Matrix4x4.CreatePerspectiveFieldOfView (method)
+  System.Numerics.Matrix4x4.CreatePerspectiveFieldOfViewLeftHanded (method)
+  System.Numerics.Matrix4x4.CreatePerspectiveOffCenter (method)
+  System.Numerics.Matrix4x4.CreatePerspectiveOffCenterLeftHanded (method)
+  System.Numerics.Matrix4x4.CreateReflection (method)
+  System.Numerics.Matrix4x4.CreateRotationX (method)
+  System.Numerics.Matrix4x4.CreateRotationY (method)
+  System.Numerics.Matrix4x4.CreateRotationZ (method)
+  System.Numerics.Matrix4x4.CreateScale (method)
+  System.Numerics.Matrix4x4.CreateShadow (method)
+  System.Numerics.Matrix4x4.CreateTranslation (method)
+  System.Numerics.Matrix4x4.CreateViewport (method)
+  System.Numerics.Matrix4x4.CreateViewportLeftHanded (method)
+  System.Numerics.Matrix4x4.CreateWorld (method)
+  System.Numerics.Matrix4x4.Decompose (method)
+  System.Numerics.Matrix4x4.Invert (method)
+  System.Numerics.Matrix4x4.Lerp (method)
+  System.Numerics.Matrix4x4.Multiply (method)
+  System.Numerics.Matrix4x4.Negate (method)
+  System.Numerics.Matrix4x4.Subtract (method)
+  System.Numerics.Matrix4x4.Transform (method)
+  System.Numerics.Matrix4x4.Transpose (method)
+  System.Numerics.Matrix4x4.Equals (method)
+  System.Numerics.Matrix4x4.GetDeterminant (method)
+  System.Numerics.Matrix4x4.GetElement (method)
+  System.Numerics.Matrix4x4.GetRow (method)
+  System.Numerics.Matrix4x4.GetHashCode (method)
+  System.Numerics.Matrix4x4.ToString (method)
+  System.Numerics.Matrix4x4.WithElement (method)
+  System.Numerics.Matrix4x4.WithRow (method)
+System.Numerics.Plane (struct) [15 members]
+  System.Numerics.Plane.Normal (field)
+  System.Numerics.Plane.D (field)
+  System.Numerics.Plane.Plane (constructor)
+  System.Numerics.Plane.Create (method)
+  System.Numerics.Plane.CreateFromVertices (method)
+  System.Numerics.Plane.Dot (method)
+  System.Numerics.Plane.DotCoordinate (method)
+  System.Numerics.Plane.DotNormal (method)
+  System.Numerics.Plane.Normalize (method)
+  System.Numerics.Plane.Transform (method)
+  System.Numerics.Plane.op_Equality (method)
+  System.Numerics.Plane.op_Inequality (method)
+  System.Numerics.Plane.Equals (method)
+  System.Numerics.Plane.GetHashCode (method)
+  System.Numerics.Plane.ToString (method)
+System.Numerics.Quaternion (struct) [37 members]
+  System.Numerics.Quaternion.X (field)
+  System.Numerics.Quaternion.Y (field)
+  System.Numerics.Quaternion.Z (field)
+  System.Numerics.Quaternion.W (field)
+  System.Numerics.Quaternion.Zero (property)
+  System.Numerics.Quaternion.Identity (property)
+  System.Numerics.Quaternion.this[] (property)
+  System.Numerics.Quaternion.IsIdentity (property)
+  System.Numerics.Quaternion.Quaternion (constructor)
+  System.Numerics.Quaternion.op_Addition (method)
+  System.Numerics.Quaternion.op_Division (method)
+  System.Numerics.Quaternion.op_Equality (method)
+  System.Numerics.Quaternion.op_Inequality (method)
+  System.Numerics.Quaternion.op_Multiply (method)
+  System.Numerics.Quaternion.op_Subtraction (method)
+  System.Numerics.Quaternion.op_UnaryNegation (method)
+  System.Numerics.Quaternion.Add (method)
+  System.Numerics.Quaternion.Concatenate (method)
+  System.Numerics.Quaternion.Conjugate (method)
+  System.Numerics.Quaternion.Create (method)
+  System.Numerics.Quaternion.CreateFromAxisAngle (method)
+  System.Numerics.Quaternion.CreateFromRotationMatrix (method)
+  System.Numerics.Quaternion.CreateFromYawPitchRoll (method)
+  System.Numerics.Quaternion.Divide (method)
+  System.Numerics.Quaternion.Dot (method)
+  System.Numerics.Quaternion.Inverse (method)
+  System.Numerics.Quaternion.Lerp (method)
+  System.Numerics.Quaternion.Multiply (method)
+  System.Numerics.Quaternion.Negate (method)
+  System.Numerics.Quaternion.Normalize (method)
+  System.Numerics.Quaternion.Slerp (method)
+  System.Numerics.Quaternion.Subtract (method)
+  System.Numerics.Quaternion.Equals (method)
+  System.Numerics.Quaternion.GetHashCode (method)
+  System.Numerics.Quaternion.Length (method)
+  System.Numerics.Quaternion.LengthSquared (method)
+  System.Numerics.Quaternion.ToString (method)
+System.Numerics.Vector2 (struct) [135 members]
+  System.Numerics.Vector2.X (field)
+  System.Numerics.Vector2.Y (field)
+  System.Numerics.Vector2.AllBitsSet (property)
+  System.Numerics.Vector2.E (property)
+  System.Numerics.Vector2.Epsilon (property)
+  System.Numerics.Vector2.NaN (property)
+  System.Numerics.Vector2.NegativeInfinity (property)
+  System.Numerics.Vector2.NegativeZero (property)
+  System.Numerics.Vector2.One (property)
+  System.Numerics.Vector2.Pi (property)
+  System.Numerics.Vector2.PositiveInfinity (property)
+  System.Numerics.Vector2.Tau (property)
+  System.Numerics.Vector2.UnitX (property)
+  System.Numerics.Vector2.UnitY (property)
+  System.Numerics.Vector2.Zero (property)
+  System.Numerics.Vector2.this[] (property)
+  System.Numerics.Vector2.Vector2 (constructor)
+  System.Numerics.Vector2.op_Addition (method)
+  System.Numerics.Vector2.op_Division (method)
+  System.Numerics.Vector2.op_Equality (method)
+  System.Numerics.Vector2.op_Inequality (method)
+  System.Numerics.Vector2.op_Multiply (method)
+  System.Numerics.Vector2.op_Subtraction (method)
+  System.Numerics.Vector2.op_UnaryNegation (method)
+  System.Numerics.Vector2.op_BitwiseAnd (method)
+  System.Numerics.Vector2.op_BitwiseOr (method)
+  System.Numerics.Vector2.op_ExclusiveOr (method)
+  System.Numerics.Vector2.op_LeftShift (method)
+  System.Numerics.Vector2.op_OnesComplement (method)
+  System.Numerics.Vector2.op_RightShift (method)
+  System.Numerics.Vector2.op_UnaryPlus (method)
+  System.Numerics.Vector2.op_UnsignedRightShift (method)
+  System.Numerics.Vector2.Abs (method)
+  System.Numerics.Vector2.Add (method)
+  System.Numerics.Vector2.All (method)
+  System.Numerics.Vector2.AllWhereAllBitsSet (method)
+  System.Numerics.Vector2.AndNot (method)
+  System.Numerics.Vector2.Any (method)
+  System.Numerics.Vector2.AnyWhereAllBitsSet (method)
+  System.Numerics.Vector2.BitwiseAnd (method)
+  System.Numerics.Vector2.BitwiseOr (method)
+  System.Numerics.Vector2.Clamp (method)
+  System.Numerics.Vector2.ClampNative (method)
+  System.Numerics.Vector2.ConditionalSelect (method)
+  System.Numerics.Vector2.CopySign (method)
+  System.Numerics.Vector2.Cos (method)
+  System.Numerics.Vector2.Count (method)
+  System.Numerics.Vector2.CountWhereAllBitsSet (method)
+  System.Numerics.Vector2.Create (method)
+  System.Numerics.Vector2.CreateScalar (method)
+  System.Numerics.Vector2.CreateScalarUnsafe (method)
+  System.Numerics.Vector2.Cross (method)
+  System.Numerics.Vector2.DegreesToRadians (method)
+  System.Numerics.Vector2.Distance (method)
+  System.Numerics.Vector2.DistanceSquared (method)
+  System.Numerics.Vector2.Divide (method)
+  System.Numerics.Vector2.Dot (method)
+  System.Numerics.Vector2.Exp (method)
+  System.Numerics.Vector2.Equals (method)
+  System.Numerics.Vector2.EqualsAll (method)
+  System.Numerics.Vector2.EqualsAny (method)
+  System.Numerics.Vector2.FusedMultiplyAdd (method)
+  System.Numerics.Vector2.GreaterThan (method)
+  System.Numerics.Vector2.GreaterThanAll (method)
+  System.Numerics.Vector2.GreaterThanAny (method)
+  System.Numerics.Vector2.GreaterThanOrEqual (method)
+  System.Numerics.Vector2.GreaterThanOrEqualAll (method)
+  System.Numerics.Vector2.GreaterThanOrEqualAny (method)
+  System.Numerics.Vector2.Hypot (method)
+  System.Numerics.Vector2.IndexOf (method)
+  System.Numerics.Vector2.IndexOfWhereAllBitsSet (method)
+  System.Numerics.Vector2.IsEvenInteger (method)
+  System.Numerics.Vector2.IsFinite (method)
+  System.Numerics.Vector2.IsInfinity (method)
+  System.Numerics.Vector2.IsInteger (method)
+  System.Numerics.Vector2.IsNaN (method)
+  System.Numerics.Vector2.IsNegative (method)
+  System.Numerics.Vector2.IsNegativeInfinity (method)
+  System.Numerics.Vector2.IsNormal (method)
+  System.Numerics.Vector2.IsOddInteger (method)
+  System.Numerics.Vector2.IsPositive (method)
+  System.Numerics.Vector2.IsPositiveInfinity (method)
+  System.Numerics.Vector2.IsSubnormal (method)
+  System.Numerics.Vector2.IsZero (method)
+  System.Numerics.Vector2.LastIndexOf (method)
+  System.Numerics.Vector2.LastIndexOfWhereAllBitsSet (method)
+  System.Numerics.Vector2.Lerp (method)
+  System.Numerics.Vector2.LessThan (method)
+  System.Numerics.Vector2.LessThanAll (method)
+  System.Numerics.Vector2.LessThanAny (method)
+  System.Numerics.Vector2.LessThanOrEqual (method)
+  System.Numerics.Vector2.LessThanOrEqualAll (method)
+  System.Numerics.Vector2.LessThanOrEqualAny (method)
+  System.Numerics.Vector2.Load (method)
+  System.Numerics.Vector2.LoadAligned (method)
+  System.Numerics.Vector2.LoadAlignedNonTemporal (method)
+  System.Numerics.Vector2.LoadUnsafe (method)
+  System.Numerics.Vector2.Log (method)
+  System.Numerics.Vector2.Log2 (method)
+  System.Numerics.Vector2.Max (method)
+  System.Numerics.Vector2.MaxMagnitude (method)
+  System.Numerics.Vector2.MaxMagnitudeNumber (method)
+  System.Numerics.Vector2.MaxNative (method)
+  System.Numerics.Vector2.MaxNumber (method)
+  System.Numerics.Vector2.Min (method)
+  System.Numerics.Vector2.MinMagnitude (method)
+  System.Numerics.Vector2.MinMagnitudeNumber (method)
+  System.Numerics.Vector2.MinNative (method)
+  System.Numerics.Vector2.MinNumber (method)
+  System.Numerics.Vector2.Multiply (method)
+  System.Numerics.Vector2.MultiplyAddEstimate (method)
+  System.Numerics.Vector2.Negate (method)
+  System.Numerics.Vector2.None (method)
+  System.Numerics.Vector2.NoneWhereAllBitsSet (method)
+  System.Numerics.Vector2.Normalize (method)
+  System.Numerics.Vector2.OnesComplement (method)
+  System.Numerics.Vector2.RadiansToDegrees (method)
+  System.Numerics.Vector2.Reflect (method)
+  System.Numerics.Vector2.Round (method)
+  System.Numerics.Vector2.Shuffle (method)
+  System.Numerics.Vector2.Sin (method)
+  System.Numerics.Vector2.SinCos (method)
+  System.Numerics.Vector2.SquareRoot (method)
+  System.Numerics.Vector2.Subtract (method)
+  System.Numerics.Vector2.Sum (method)
+  System.Numerics.Vector2.Transform (method)
+  System.Numerics.Vector2.TransformNormal (method)
+  System.Numerics.Vector2.Truncate (method)
+  System.Numerics.Vector2.Xor (method)
+  System.Numerics.Vector2.CopyTo (method)
+  System.Numerics.Vector2.TryCopyTo (method)
+  System.Numerics.Vector2.GetHashCode (method)
+  System.Numerics.Vector2.Length (method)
+  System.Numerics.Vector2.LengthSquared (method)
+  System.Numerics.Vector2.ToString (method)
 
 ## System.Numerics (2) — `api-system-numerics-2.md`
 
-Vector3 (struct) [137 members]
-  Vector3.X (field)
-  Vector3.Y (field)
-  Vector3.Z (field)
-  Vector3.AllBitsSet (property)
-  Vector3.E (property)
-  Vector3.Epsilon (property)
-  Vector3.NaN (property)
-  Vector3.NegativeInfinity (property)
-  Vector3.NegativeZero (property)
-  Vector3.One (property)
-  Vector3.Pi (property)
-  Vector3.PositiveInfinity (property)
-  Vector3.Tau (property)
-  Vector3.UnitX (property)
-  Vector3.UnitY (property)
-  Vector3.UnitZ (property)
-  Vector3.Zero (property)
-  Vector3.this[] (property)
-  Vector3.Vector3 (constructor)
-  Vector3.op_Addition (method)
-  Vector3.op_Division (method)
-  Vector3.op_Equality (method)
-  Vector3.op_Inequality (method)
-  Vector3.op_Multiply (method)
-  Vector3.op_Subtraction (method)
-  Vector3.op_UnaryNegation (method)
-  Vector3.op_BitwiseAnd (method)
-  Vector3.op_BitwiseOr (method)
-  Vector3.op_ExclusiveOr (method)
-  Vector3.op_LeftShift (method)
-  Vector3.op_OnesComplement (method)
-  Vector3.op_RightShift (method)
-  Vector3.op_UnaryPlus (method)
-  Vector3.op_UnsignedRightShift (method)
-  Vector3.Abs (method)
-  Vector3.Add (method)
-  Vector3.All (method)
-  Vector3.AllWhereAllBitsSet (method)
-  Vector3.AndNot (method)
-  Vector3.Any (method)
-  Vector3.AnyWhereAllBitsSet (method)
-  Vector3.BitwiseAnd (method)
-  Vector3.BitwiseOr (method)
-  Vector3.Clamp (method)
-  Vector3.ClampNative (method)
-  Vector3.ConditionalSelect (method)
-  Vector3.CopySign (method)
-  Vector3.Cos (method)
-  Vector3.Count (method)
-  Vector3.CountWhereAllBitsSet (method)
-  Vector3.Create (method)
-  Vector3.CreateScalar (method)
-  Vector3.CreateScalarUnsafe (method)
-  Vector3.Cross (method)
-  Vector3.DegreesToRadians (method)
-  Vector3.Distance (method)
-  Vector3.DistanceSquared (method)
-  Vector3.Divide (method)
-  Vector3.Dot (method)
-  Vector3.Exp (method)
-  Vector3.Equals (method)
-  Vector3.EqualsAll (method)
-  Vector3.EqualsAny (method)
-  Vector3.FusedMultiplyAdd (method)
-  Vector3.GreaterThan (method)
-  Vector3.GreaterThanAll (method)
-  Vector3.GreaterThanAny (method)
-  Vector3.GreaterThanOrEqual (method)
-  Vector3.GreaterThanOrEqualAll (method)
-  Vector3.GreaterThanOrEqualAny (method)
-  Vector3.Hypot (method)
-  Vector3.IndexOf (method)
-  Vector3.IndexOfWhereAllBitsSet (method)
-  Vector3.IsEvenInteger (method)
-  Vector3.IsFinite (method)
-  Vector3.IsInfinity (method)
-  Vector3.IsInteger (method)
-  Vector3.IsNaN (method)
-  Vector3.IsNegative (method)
-  Vector3.IsNegativeInfinity (method)
-  Vector3.IsNormal (method)
-  Vector3.IsOddInteger (method)
-  Vector3.IsPositive (method)
-  Vector3.IsPositiveInfinity (method)
-  Vector3.IsSubnormal (method)
-  Vector3.IsZero (method)
-  Vector3.LastIndexOf (method)
-  Vector3.LastIndexOfWhereAllBitsSet (method)
-  Vector3.Lerp (method)
-  Vector3.LessThan (method)
-  Vector3.LessThanAll (method)
-  Vector3.LessThanAny (method)
-  Vector3.LessThanOrEqual (method)
-  Vector3.LessThanOrEqualAll (method)
-  Vector3.LessThanOrEqualAny (method)
-  Vector3.Load (method)
-  Vector3.LoadAligned (method)
-  Vector3.LoadAlignedNonTemporal (method)
-  Vector3.LoadUnsafe (method)
-  Vector3.Log (method)
-  Vector3.Log2 (method)
-  Vector3.Max (method)
-  Vector3.MaxMagnitude (method)
-  Vector3.MaxMagnitudeNumber (method)
-  Vector3.MaxNative (method)
-  Vector3.MaxNumber (method)
-  Vector3.Min (method)
-  Vector3.MinMagnitude (method)
-  Vector3.MinMagnitudeNumber (method)
-  Vector3.MinNative (method)
-  Vector3.MinNumber (method)
-  Vector3.Multiply (method)
-  Vector3.MultiplyAddEstimate (method)
-  Vector3.Negate (method)
-  Vector3.None (method)
-  Vector3.NoneWhereAllBitsSet (method)
-  Vector3.Normalize (method)
-  Vector3.OnesComplement (method)
-  Vector3.RadiansToDegrees (method)
-  Vector3.Reflect (method)
-  Vector3.Round (method)
-  Vector3.Shuffle (method)
-  Vector3.Sin (method)
-  Vector3.SinCos (method)
-  Vector3.SquareRoot (method)
-  Vector3.Subtract (method)
-  Vector3.Sum (method)
-  Vector3.Transform (method)
-  Vector3.TransformNormal (method)
-  Vector3.Truncate (method)
-  Vector3.Xor (method)
-  Vector3.CopyTo (method)
-  Vector3.TryCopyTo (method)
-  Vector3.GetHashCode (method)
-  Vector3.Length (method)
-  Vector3.LengthSquared (method)
-  Vector3.ToString (method)
-Vector4 (struct) [137 members]
-  Vector4.X (field)
-  Vector4.Y (field)
-  Vector4.Z (field)
-  Vector4.W (field)
-  Vector4.AllBitsSet (property)
-  Vector4.E (property)
-  Vector4.Epsilon (property)
-  Vector4.NaN (property)
-  Vector4.NegativeInfinity (property)
-  Vector4.NegativeZero (property)
-  Vector4.One (property)
-  Vector4.Pi (property)
-  Vector4.PositiveInfinity (property)
-  Vector4.Tau (property)
-  Vector4.UnitX (property)
-  Vector4.UnitY (property)
-  Vector4.UnitZ (property)
-  Vector4.UnitW (property)
-  Vector4.Zero (property)
-  Vector4.this[] (property)
-  Vector4.Vector4 (constructor)
-  Vector4.op_Addition (method)
-  Vector4.op_Division (method)
-  Vector4.op_Equality (method)
-  Vector4.op_Inequality (method)
-  Vector4.op_Multiply (method)
-  Vector4.op_Subtraction (method)
-  Vector4.op_UnaryNegation (method)
-  Vector4.op_BitwiseAnd (method)
-  Vector4.op_BitwiseOr (method)
-  Vector4.op_ExclusiveOr (method)
-  Vector4.op_LeftShift (method)
-  Vector4.op_OnesComplement (method)
-  Vector4.op_RightShift (method)
-  Vector4.op_UnaryPlus (method)
-  Vector4.op_UnsignedRightShift (method)
-  Vector4.Abs (method)
-  Vector4.Add (method)
-  Vector4.All (method)
-  Vector4.AllWhereAllBitsSet (method)
-  Vector4.AndNot (method)
-  Vector4.Any (method)
-  Vector4.AnyWhereAllBitsSet (method)
-  Vector4.BitwiseAnd (method)
-  Vector4.BitwiseOr (method)
-  Vector4.Clamp (method)
-  Vector4.ClampNative (method)
-  Vector4.ConditionalSelect (method)
-  Vector4.CopySign (method)
-  Vector4.Cos (method)
-  Vector4.Count (method)
-  Vector4.CountWhereAllBitsSet (method)
-  Vector4.Create (method)
-  Vector4.CreateScalar (method)
-  Vector4.CreateScalarUnsafe (method)
-  Vector4.Cross (method)
-  Vector4.DegreesToRadians (method)
-  Vector4.Distance (method)
-  Vector4.DistanceSquared (method)
-  Vector4.Divide (method)
-  Vector4.Dot (method)
-  Vector4.Exp (method)
-  Vector4.Equals (method)
-  Vector4.EqualsAll (method)
-  Vector4.EqualsAny (method)
-  Vector4.FusedMultiplyAdd (method)
-  Vector4.GreaterThan (method)
-  Vector4.GreaterThanAll (method)
-  Vector4.GreaterThanAny (method)
-  Vector4.GreaterThanOrEqual (method)
-  Vector4.GreaterThanOrEqualAll (method)
-  Vector4.GreaterThanOrEqualAny (method)
-  Vector4.Hypot (method)
-  Vector4.IndexOf (method)
-  Vector4.IndexOfWhereAllBitsSet (method)
-  Vector4.IsEvenInteger (method)
-  Vector4.IsFinite (method)
-  Vector4.IsInfinity (method)
-  Vector4.IsInteger (method)
-  Vector4.IsNaN (method)
-  Vector4.IsNegative (method)
-  Vector4.IsNegativeInfinity (method)
-  Vector4.IsNormal (method)
-  Vector4.IsOddInteger (method)
-  Vector4.IsPositive (method)
-  Vector4.IsPositiveInfinity (method)
-  Vector4.IsSubnormal (method)
-  Vector4.IsZero (method)
-  Vector4.LastIndexOf (method)
-  Vector4.LastIndexOfWhereAllBitsSet (method)
-  Vector4.Lerp (method)
-  Vector4.LessThan (method)
-  Vector4.LessThanAll (method)
-  Vector4.LessThanAny (method)
-  Vector4.LessThanOrEqual (method)
-  Vector4.LessThanOrEqualAll (method)
-  Vector4.LessThanOrEqualAny (method)
-  Vector4.Load (method)
-  Vector4.LoadAligned (method)
-  Vector4.LoadAlignedNonTemporal (method)
-  Vector4.LoadUnsafe (method)
-  Vector4.Log (method)
-  Vector4.Log2 (method)
-  Vector4.Max (method)
-  Vector4.MaxMagnitude (method)
-  Vector4.MaxMagnitudeNumber (method)
-  Vector4.MaxNative (method)
-  Vector4.MaxNumber (method)
-  Vector4.Min (method)
-  Vector4.MinMagnitude (method)
-  Vector4.MinMagnitudeNumber (method)
-  Vector4.MinNative (method)
-  Vector4.MinNumber (method)
-  Vector4.Multiply (method)
-  Vector4.MultiplyAddEstimate (method)
-  Vector4.Negate (method)
-  Vector4.None (method)
-  Vector4.NoneWhereAllBitsSet (method)
-  Vector4.Normalize (method)
-  Vector4.OnesComplement (method)
-  Vector4.RadiansToDegrees (method)
-  Vector4.Round (method)
-  Vector4.Shuffle (method)
-  Vector4.Sin (method)
-  Vector4.SinCos (method)
-  Vector4.SquareRoot (method)
-  Vector4.Subtract (method)
-  Vector4.Sum (method)
-  Vector4.Transform (method)
-  Vector4.Truncate (method)
-  Vector4.Xor (method)
-  Vector4.CopyTo (method)
-  Vector4.TryCopyTo (method)
-  Vector4.GetHashCode (method)
-  Vector4.Length (method)
-  Vector4.LengthSquared (method)
-  Vector4.ToString (method)
+System.Numerics.Vector3 (struct) [137 members]
+  System.Numerics.Vector3.X (field)
+  System.Numerics.Vector3.Y (field)
+  System.Numerics.Vector3.Z (field)
+  System.Numerics.Vector3.AllBitsSet (property)
+  System.Numerics.Vector3.E (property)
+  System.Numerics.Vector3.Epsilon (property)
+  System.Numerics.Vector3.NaN (property)
+  System.Numerics.Vector3.NegativeInfinity (property)
+  System.Numerics.Vector3.NegativeZero (property)
+  System.Numerics.Vector3.One (property)
+  System.Numerics.Vector3.Pi (property)
+  System.Numerics.Vector3.PositiveInfinity (property)
+  System.Numerics.Vector3.Tau (property)
+  System.Numerics.Vector3.UnitX (property)
+  System.Numerics.Vector3.UnitY (property)
+  System.Numerics.Vector3.UnitZ (property)
+  System.Numerics.Vector3.Zero (property)
+  System.Numerics.Vector3.this[] (property)
+  System.Numerics.Vector3.Vector3 (constructor)
+  System.Numerics.Vector3.op_Addition (method)
+  System.Numerics.Vector3.op_Division (method)
+  System.Numerics.Vector3.op_Equality (method)
+  System.Numerics.Vector3.op_Inequality (method)
+  System.Numerics.Vector3.op_Multiply (method)
+  System.Numerics.Vector3.op_Subtraction (method)
+  System.Numerics.Vector3.op_UnaryNegation (method)
+  System.Numerics.Vector3.op_BitwiseAnd (method)
+  System.Numerics.Vector3.op_BitwiseOr (method)
+  System.Numerics.Vector3.op_ExclusiveOr (method)
+  System.Numerics.Vector3.op_LeftShift (method)
+  System.Numerics.Vector3.op_OnesComplement (method)
+  System.Numerics.Vector3.op_RightShift (method)
+  System.Numerics.Vector3.op_UnaryPlus (method)
+  System.Numerics.Vector3.op_UnsignedRightShift (method)
+  System.Numerics.Vector3.Abs (method)
+  System.Numerics.Vector3.Add (method)
+  System.Numerics.Vector3.All (method)
+  System.Numerics.Vector3.AllWhereAllBitsSet (method)
+  System.Numerics.Vector3.AndNot (method)
+  System.Numerics.Vector3.Any (method)
+  System.Numerics.Vector3.AnyWhereAllBitsSet (method)
+  System.Numerics.Vector3.BitwiseAnd (method)
+  System.Numerics.Vector3.BitwiseOr (method)
+  System.Numerics.Vector3.Clamp (method)
+  System.Numerics.Vector3.ClampNative (method)
+  System.Numerics.Vector3.ConditionalSelect (method)
+  System.Numerics.Vector3.CopySign (method)
+  System.Numerics.Vector3.Cos (method)
+  System.Numerics.Vector3.Count (method)
+  System.Numerics.Vector3.CountWhereAllBitsSet (method)
+  System.Numerics.Vector3.Create (method)
+  System.Numerics.Vector3.CreateScalar (method)
+  System.Numerics.Vector3.CreateScalarUnsafe (method)
+  System.Numerics.Vector3.Cross (method)
+  System.Numerics.Vector3.DegreesToRadians (method)
+  System.Numerics.Vector3.Distance (method)
+  System.Numerics.Vector3.DistanceSquared (method)
+  System.Numerics.Vector3.Divide (method)
+  System.Numerics.Vector3.Dot (method)
+  System.Numerics.Vector3.Exp (method)
+  System.Numerics.Vector3.Equals (method)
+  System.Numerics.Vector3.EqualsAll (method)
+  System.Numerics.Vector3.EqualsAny (method)
+  System.Numerics.Vector3.FusedMultiplyAdd (method)
+  System.Numerics.Vector3.GreaterThan (method)
+  System.Numerics.Vector3.GreaterThanAll (method)
+  System.Numerics.Vector3.GreaterThanAny (method)
+  System.Numerics.Vector3.GreaterThanOrEqual (method)
+  System.Numerics.Vector3.GreaterThanOrEqualAll (method)
+  System.Numerics.Vector3.GreaterThanOrEqualAny (method)
+  System.Numerics.Vector3.Hypot (method)
+  System.Numerics.Vector3.IndexOf (method)
+  System.Numerics.Vector3.IndexOfWhereAllBitsSet (method)
+  System.Numerics.Vector3.IsEvenInteger (method)
+  System.Numerics.Vector3.IsFinite (method)
+  System.Numerics.Vector3.IsInfinity (method)
+  System.Numerics.Vector3.IsInteger (method)
+  System.Numerics.Vector3.IsNaN (method)
+  System.Numerics.Vector3.IsNegative (method)
+  System.Numerics.Vector3.IsNegativeInfinity (method)
+  System.Numerics.Vector3.IsNormal (method)
+  System.Numerics.Vector3.IsOddInteger (method)
+  System.Numerics.Vector3.IsPositive (method)
+  System.Numerics.Vector3.IsPositiveInfinity (method)
+  System.Numerics.Vector3.IsSubnormal (method)
+  System.Numerics.Vector3.IsZero (method)
+  System.Numerics.Vector3.LastIndexOf (method)
+  System.Numerics.Vector3.LastIndexOfWhereAllBitsSet (method)
+  System.Numerics.Vector3.Lerp (method)
+  System.Numerics.Vector3.LessThan (method)
+  System.Numerics.Vector3.LessThanAll (method)
+  System.Numerics.Vector3.LessThanAny (method)
+  System.Numerics.Vector3.LessThanOrEqual (method)
+  System.Numerics.Vector3.LessThanOrEqualAll (method)
+  System.Numerics.Vector3.LessThanOrEqualAny (method)
+  System.Numerics.Vector3.Load (method)
+  System.Numerics.Vector3.LoadAligned (method)
+  System.Numerics.Vector3.LoadAlignedNonTemporal (method)
+  System.Numerics.Vector3.LoadUnsafe (method)
+  System.Numerics.Vector3.Log (method)
+  System.Numerics.Vector3.Log2 (method)
+  System.Numerics.Vector3.Max (method)
+  System.Numerics.Vector3.MaxMagnitude (method)
+  System.Numerics.Vector3.MaxMagnitudeNumber (method)
+  System.Numerics.Vector3.MaxNative (method)
+  System.Numerics.Vector3.MaxNumber (method)
+  System.Numerics.Vector3.Min (method)
+  System.Numerics.Vector3.MinMagnitude (method)
+  System.Numerics.Vector3.MinMagnitudeNumber (method)
+  System.Numerics.Vector3.MinNative (method)
+  System.Numerics.Vector3.MinNumber (method)
+  System.Numerics.Vector3.Multiply (method)
+  System.Numerics.Vector3.MultiplyAddEstimate (method)
+  System.Numerics.Vector3.Negate (method)
+  System.Numerics.Vector3.None (method)
+  System.Numerics.Vector3.NoneWhereAllBitsSet (method)
+  System.Numerics.Vector3.Normalize (method)
+  System.Numerics.Vector3.OnesComplement (method)
+  System.Numerics.Vector3.RadiansToDegrees (method)
+  System.Numerics.Vector3.Reflect (method)
+  System.Numerics.Vector3.Round (method)
+  System.Numerics.Vector3.Shuffle (method)
+  System.Numerics.Vector3.Sin (method)
+  System.Numerics.Vector3.SinCos (method)
+  System.Numerics.Vector3.SquareRoot (method)
+  System.Numerics.Vector3.Subtract (method)
+  System.Numerics.Vector3.Sum (method)
+  System.Numerics.Vector3.Transform (method)
+  System.Numerics.Vector3.TransformNormal (method)
+  System.Numerics.Vector3.Truncate (method)
+  System.Numerics.Vector3.Xor (method)
+  System.Numerics.Vector3.CopyTo (method)
+  System.Numerics.Vector3.TryCopyTo (method)
+  System.Numerics.Vector3.GetHashCode (method)
+  System.Numerics.Vector3.Length (method)
+  System.Numerics.Vector3.LengthSquared (method)
+  System.Numerics.Vector3.ToString (method)
+System.Numerics.Vector4 (struct) [137 members]
+  System.Numerics.Vector4.X (field)
+  System.Numerics.Vector4.Y (field)
+  System.Numerics.Vector4.Z (field)
+  System.Numerics.Vector4.W (field)
+  System.Numerics.Vector4.AllBitsSet (property)
+  System.Numerics.Vector4.E (property)
+  System.Numerics.Vector4.Epsilon (property)
+  System.Numerics.Vector4.NaN (property)
+  System.Numerics.Vector4.NegativeInfinity (property)
+  System.Numerics.Vector4.NegativeZero (property)
+  System.Numerics.Vector4.One (property)
+  System.Numerics.Vector4.Pi (property)
+  System.Numerics.Vector4.PositiveInfinity (property)
+  System.Numerics.Vector4.Tau (property)
+  System.Numerics.Vector4.UnitX (property)
+  System.Numerics.Vector4.UnitY (property)
+  System.Numerics.Vector4.UnitZ (property)
+  System.Numerics.Vector4.UnitW (property)
+  System.Numerics.Vector4.Zero (property)
+  System.Numerics.Vector4.this[] (property)
+  System.Numerics.Vector4.Vector4 (constructor)
+  System.Numerics.Vector4.op_Addition (method)
+  System.Numerics.Vector4.op_Division (method)
+  System.Numerics.Vector4.op_Equality (method)
+  System.Numerics.Vector4.op_Inequality (method)
+  System.Numerics.Vector4.op_Multiply (method)
+  System.Numerics.Vector4.op_Subtraction (method)
+  System.Numerics.Vector4.op_UnaryNegation (method)
+  System.Numerics.Vector4.op_BitwiseAnd (method)
+  System.Numerics.Vector4.op_BitwiseOr (method)
+  System.Numerics.Vector4.op_ExclusiveOr (method)
+  System.Numerics.Vector4.op_LeftShift (method)
+  System.Numerics.Vector4.op_OnesComplement (method)
+  System.Numerics.Vector4.op_RightShift (method)
+  System.Numerics.Vector4.op_UnaryPlus (method)
+  System.Numerics.Vector4.op_UnsignedRightShift (method)
+  System.Numerics.Vector4.Abs (method)
+  System.Numerics.Vector4.Add (method)
+  System.Numerics.Vector4.All (method)
+  System.Numerics.Vector4.AllWhereAllBitsSet (method)
+  System.Numerics.Vector4.AndNot (method)
+  System.Numerics.Vector4.Any (method)
+  System.Numerics.Vector4.AnyWhereAllBitsSet (method)
+  System.Numerics.Vector4.BitwiseAnd (method)
+  System.Numerics.Vector4.BitwiseOr (method)
+  System.Numerics.Vector4.Clamp (method)
+  System.Numerics.Vector4.ClampNative (method)
+  System.Numerics.Vector4.ConditionalSelect (method)
+  System.Numerics.Vector4.CopySign (method)
+  System.Numerics.Vector4.Cos (method)
+  System.Numerics.Vector4.Count (method)
+  System.Numerics.Vector4.CountWhereAllBitsSet (method)
+  System.Numerics.Vector4.Create (method)
+  System.Numerics.Vector4.CreateScalar (method)
+  System.Numerics.Vector4.CreateScalarUnsafe (method)
+  System.Numerics.Vector4.Cross (method)
+  System.Numerics.Vector4.DegreesToRadians (method)
+  System.Numerics.Vector4.Distance (method)
+  System.Numerics.Vector4.DistanceSquared (method)
+  System.Numerics.Vector4.Divide (method)
+  System.Numerics.Vector4.Dot (method)
+  System.Numerics.Vector4.Exp (method)
+  System.Numerics.Vector4.Equals (method)
+  System.Numerics.Vector4.EqualsAll (method)
+  System.Numerics.Vector4.EqualsAny (method)
+  System.Numerics.Vector4.FusedMultiplyAdd (method)
+  System.Numerics.Vector4.GreaterThan (method)
+  System.Numerics.Vector4.GreaterThanAll (method)
+  System.Numerics.Vector4.GreaterThanAny (method)
+  System.Numerics.Vector4.GreaterThanOrEqual (method)
+  System.Numerics.Vector4.GreaterThanOrEqualAll (method)
+  System.Numerics.Vector4.GreaterThanOrEqualAny (method)
+  System.Numerics.Vector4.Hypot (method)
+  System.Numerics.Vector4.IndexOf (method)
+  System.Numerics.Vector4.IndexOfWhereAllBitsSet (method)
+  System.Numerics.Vector4.IsEvenInteger (method)
+  System.Numerics.Vector4.IsFinite (method)
+  System.Numerics.Vector4.IsInfinity (method)
+  System.Numerics.Vector4.IsInteger (method)
+  System.Numerics.Vector4.IsNaN (method)
+  System.Numerics.Vector4.IsNegative (method)
+  System.Numerics.Vector4.IsNegativeInfinity (method)
+  System.Numerics.Vector4.IsNormal (method)
+  System.Numerics.Vector4.IsOddInteger (method)
+  System.Numerics.Vector4.IsPositive (method)
+  System.Numerics.Vector4.IsPositiveInfinity (method)
+  System.Numerics.Vector4.IsSubnormal (method)
+  System.Numerics.Vector4.IsZero (method)
+  System.Numerics.Vector4.LastIndexOf (method)
+  System.Numerics.Vector4.LastIndexOfWhereAllBitsSet (method)
+  System.Numerics.Vector4.Lerp (method)
+  System.Numerics.Vector4.LessThan (method)
+  System.Numerics.Vector4.LessThanAll (method)
+  System.Numerics.Vector4.LessThanAny (method)
+  System.Numerics.Vector4.LessThanOrEqual (method)
+  System.Numerics.Vector4.LessThanOrEqualAll (method)
+  System.Numerics.Vector4.LessThanOrEqualAny (method)
+  System.Numerics.Vector4.Load (method)
+  System.Numerics.Vector4.LoadAligned (method)
+  System.Numerics.Vector4.LoadAlignedNonTemporal (method)
+  System.Numerics.Vector4.LoadUnsafe (method)
+  System.Numerics.Vector4.Log (method)
+  System.Numerics.Vector4.Log2 (method)
+  System.Numerics.Vector4.Max (method)
+  System.Numerics.Vector4.MaxMagnitude (method)
+  System.Numerics.Vector4.MaxMagnitudeNumber (method)
+  System.Numerics.Vector4.MaxNative (method)
+  System.Numerics.Vector4.MaxNumber (method)
+  System.Numerics.Vector4.Min (method)
+  System.Numerics.Vector4.MinMagnitude (method)
+  System.Numerics.Vector4.MinMagnitudeNumber (method)
+  System.Numerics.Vector4.MinNative (method)
+  System.Numerics.Vector4.MinNumber (method)
+  System.Numerics.Vector4.Multiply (method)
+  System.Numerics.Vector4.MultiplyAddEstimate (method)
+  System.Numerics.Vector4.Negate (method)
+  System.Numerics.Vector4.None (method)
+  System.Numerics.Vector4.NoneWhereAllBitsSet (method)
+  System.Numerics.Vector4.Normalize (method)
+  System.Numerics.Vector4.OnesComplement (method)
+  System.Numerics.Vector4.RadiansToDegrees (method)
+  System.Numerics.Vector4.Round (method)
+  System.Numerics.Vector4.Shuffle (method)
+  System.Numerics.Vector4.Sin (method)
+  System.Numerics.Vector4.SinCos (method)
+  System.Numerics.Vector4.SquareRoot (method)
+  System.Numerics.Vector4.Subtract (method)
+  System.Numerics.Vector4.Sum (method)
+  System.Numerics.Vector4.Transform (method)
+  System.Numerics.Vector4.Truncate (method)
+  System.Numerics.Vector4.Xor (method)
+  System.Numerics.Vector4.CopyTo (method)
+  System.Numerics.Vector4.TryCopyTo (method)
+  System.Numerics.Vector4.GetHashCode (method)
+  System.Numerics.Vector4.Length (method)
+  System.Numerics.Vector4.LengthSquared (method)
+  System.Numerics.Vector4.ToString (method)

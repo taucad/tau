@@ -6,4 +6,5 @@
 PathLike
 
 // Decode filename (an os.PathLike, bytes, or str) from the filesystem
+// os.fsdecode (function)
 fsdecode(filename)

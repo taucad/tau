@@ -4,6 +4,22 @@
 
 AllocatedCounts: Omit<MemoryUsage, 'total'>
 
+  voxels: number
+
+  meshes: number
+
+  lattices: number
+
+  polyLines: number
+
+  scalarFields: number
+
+  vectorFields: number
+
+  vdbFiles: number
+
+  metadata: number
+
 // RGBA color, each channel 0..1
 Color: readonly [number, number, number] | readonly [number, number, number, number]
 
@@ -13,11 +29,23 @@ CreateScalarFieldOptions: {
   sdThreshold?: number;
 } | Record<string, never>
 
+  from: Voxels
+
+  value: number
+
+  sdThreshold: number
+
 CreateVectorFieldOptions: {
   from: Voxels;
   value?: Vec3;
   sdThreshold?: number;
 } | Record<string, never>
+
+  from: Voxels
+
+  value: Vec3
+
+  sdThreshold: number
 
 CreateVoxelsOptions: {
   shape: 'empty';
@@ -55,6 +83,8 @@ CreateVoxelsOptions: {
   sdf: SdfFunction | SdfExpression;
 }
 
+  shape: 'empty'
+
 GetSliceOptions: {
   index: number;
   axis?: SliceAxis;
@@ -64,6 +94,8 @@ GetSliceOptions: {
   interpolated: true;
   mode?: SliceMode;
 }
+
+  mode: SliceMode
 
 // 4x4 transform, column-major in System.Numerics order (row-vector convention
 Mat4: Float32Array | readonly number[]
@@ -106,6 +138,8 @@ Overhang: number & {
   readonly [overhangBrand]: true;
 }
 
+  [overhangBrand]: true
+
 // A rotation quaternion as [x, y, z, w] (System.Numerics `Quaternion` analog)
 Quat: readonly [number, number, number, number]
 
@@ -113,6 +147,8 @@ Quat: readonly [number, number, number, number]
 Rad: number & {
   readonly [radBrand]: true;
 }
+
+  [radBrand]: true
 
 // A 2D vector as an immutable tuple (System.Numerics `Vector2` analog)
 Vec2: readonly [number, number]

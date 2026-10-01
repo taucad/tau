@@ -224,6 +224,30 @@ export const scale: {
   (factor: number): string;
   (x: number, y: number): string;
 } = (() => '') as never;
+
+export declare const suite: {
+  <T>(name: string, callback: () => T): T;
+  skip(name: string, callback?: () => void): void;
+  only(name: string, callback: () => void): void;
+};
+export type Matcher = {
+  toMatch(expected: string): boolean;
+  toMatch(expected: number): boolean;
+};
+export declare class Failure extends Error {
+  constructor(message: string);
+  constructor(code: number, message: string);
+}
+export declare function task<T>(callback: () => T): T;
+export declare namespace task {
+  function skip(callback?: () => void): void;
+  function only(callback: () => void): void;
+}
+export { task as first, task as second };
+export declare namespace cyclic {
+  export import self = cyclic;
+  export function read(): string;
+}
 `,
   );
 
@@ -272,5 +296,54 @@ export const scale: {
     const scale = corpus.entries.find((entry) => entry.name === 'scale');
     expect(scale?.kind).toBe('function');
     expect(scale?.signatures).toHaveLength(2);
+  });
+
+  it('should preserve generic callable members', () => {
+    const suite = corpus.entries.find((entry) => entry.name === 'suite');
+    expect(suite?.signatures?.[0]?.typeParameters).toEqual(['T']);
+    expect(suite?.signatures?.[0]?.returnType?.text).toBe('T');
+    expect(suite?.members?.map((member) => member.name)).toEqual(['skip', 'only']);
+    expect(suite?.members?.[0]?.id).toBe('typescript:suite.skip');
+    expect(suite?.members?.[0]?.signatures?.[0]?.parameters[1]?.optional).toBe(true);
+  });
+
+  it('should preserve addressable matcher overloads', () => {
+    const matcher = corpus.entries.find((entry) => entry.name === 'Matcher');
+    expect(matcher?.members?.[0]?.id).toBe('typescript:Matcher.toMatch');
+    expect(matcher?.members?.[0]?.kind).toBe('method');
+    expect(matcher?.members?.[0]?.signatures).toHaveLength(2);
+  });
+
+  it('should retain constructor overload parameters and constructed return type', () => {
+    const constructor = corpus.entries.find((entry) => entry.name === 'Failure')?.members?.[0];
+    expect(constructor?.kind).toBe('constructor');
+    expect(constructor?.signatures).toHaveLength(2);
+    expect(
+      constructor?.signatures?.map((signature) => signature.parameters.map((parameter) => parameter.name)),
+    ).toEqual([['message'], ['code', 'message']]);
+    expect(constructor?.signatures?.every((signature) => signature.returnType?.text === 'Failure')).toBe(true);
+  });
+
+  it('should preserve merged callable namespaces without losing their generic call', () => {
+    const task = corpus.entries.find((entry) => entry.name === 'task');
+    expect(task?.kind).toBe('function');
+    expect(task?.signatures?.[0]?.typeParameters).toEqual(['T']);
+    expect(task?.members?.map((member) => member.id)).toEqual(['typescript:task.skip', 'typescript:task.only']);
+  });
+
+  it('should retain members for each exported callable namespace alias', () => {
+    for (const name of ['first', 'second']) {
+      const entry = corpus.entries.find((candidate) => candidate.name === name);
+      expect(entry?.signatures?.[0]?.typeParameters).toEqual(['T']);
+      expect(entry?.members?.map((member) => member.id)).toEqual([
+        `typescript:${name}.skip`,
+        `typescript:${name}.only`,
+      ]);
+    }
+  });
+
+  it('should terminate namespace cycles while retaining noncyclic members', () => {
+    const cyclic = corpus.entries.find((entry) => entry.name === 'cyclic');
+    expect(cyclic?.members?.map((member) => member.id)).toEqual(['typescript:cyclic.read']);
   });
 });

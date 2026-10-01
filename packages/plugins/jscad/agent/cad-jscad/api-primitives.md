@@ -4,6 +4,7 @@
 
 primitives
 
+  // primitives.arc (function)
   declare function arc(options?: ArcOptions): Path2
 
   ArcOptions: export interface ArcOptions
@@ -20,6 +21,7 @@ primitives
 
     makeTangent: boolean
 
+  // primitives.circle (function)
   declare function circle(options?: CircleOptions): Geom2
 
   CircleOptions: export interface CircleOptions
@@ -34,6 +36,7 @@ primitives
 
     segments: number
 
+  // primitives.cube (function)
   declare function cube(options?: CubeOptions): Geom3
 
   CubeOptions: export interface CubeOptions
@@ -42,6 +45,7 @@ primitives
 
     size: number
 
+  // primitives.cuboid (function)
   declare function cuboid(options?: CuboidOptions): Geom3
 
   CuboidOptions: export interface CuboidOptions
@@ -50,6 +54,7 @@ primitives
 
     size: Vec3
 
+  // primitives.cylinder (function)
   declare function cylinder(options?: CylinderOptions): Geom3
 
   CylinderOptions: export interface CylinderOptions
@@ -62,6 +67,7 @@ primitives
 
     segments: number
 
+  // primitives.cylinderElliptic (function)
   declare function cylinderElliptic(options?: CylinderEllipticOptions): Geom3
 
   CylinderEllipticOptions: export interface CylinderEllipticOptions
@@ -80,6 +86,7 @@ primitives
 
     segments: number
 
+  // primitives.ellipse (function)
   declare function ellipse(options?: EllipseOptions): Geom2
 
   EllipseOptions: export interface EllipseOptions
@@ -94,6 +101,7 @@ primitives
 
     segments: number
 
+  // primitives.ellipsoid (function)
   declare function ellipsoid(options?: EllipsoidOptions): Geom3
 
   EllipsoidOptions: export interface EllipsoidOptions
@@ -106,6 +114,7 @@ primitives
 
     axes: Vec3
 
+  // primitives.geodesicSphere (function)
   declare function geodesicSphere(options?: GeodesicSphereOptions): Geom3
 
   GeodesicSphereOptions: export interface GeodesicSphereOptions
@@ -114,8 +123,10 @@ primitives
 
     frequency: number
 
+  // primitives.line (function)
   declare function line(points: Array<Vec2>): Path2
 
+  // primitives.polygon (function)
   declare function polygon(options: PolygonOptions): Geom2
 
   PolygonOptions: export interface PolygonOptions
@@ -126,6 +137,7 @@ primitives
 
     orientation: 'counterclockwise' | 'clockwise'
 
+  // primitives.polyhedron (function)
   declare function polyhedron(options: PolyhedronOptions): Geom3
 
   PolyhedronOptions: export interface PolyhedronOptions
@@ -138,6 +150,7 @@ primitives
 
     orientation: 'outward' | 'inward'
 
+  // primitives.rectangle (function)
   declare function rectangle(options?: RectangleOptions): Geom2
 
   RectangleOptions: export interface RectangleOptions
@@ -146,6 +159,7 @@ primitives
 
     size: Vec2
 
+  // primitives.roundedCuboid (function)
   declare function roundedCuboid(options?: RoundedCuboidOptions): Geom3
 
   RoundedCuboidOptions: export interface RoundedCuboidOptions
@@ -158,6 +172,7 @@ primitives
 
     segments: number
 
+  // primitives.roundedCylinder (function)
   declare function roundedCylinder(options?: RoundedCylinderOptions): Geom3
 
   RoundedCylinderOptions: export interface RoundedCylinderOptions
@@ -172,6 +187,7 @@ primitives
 
     segments: number
 
+  // primitives.roundedRectangle (function)
   declare function roundedRectangle(options?: RoundedRectangleOptions): Geom2
 
   RoundedRectangleOptions: export interface RoundedRectangleOptions
@@ -184,6 +200,7 @@ primitives
 
     segments: number
 
+  // primitives.sphere (function)
   declare function sphere(options?: SphereOptions): Geom3
 
   SphereOptions: export interface SphereOptions
@@ -196,6 +213,7 @@ primitives
 
     axes: Vec3
 
+  // primitives.square (function)
   declare function square(options?: SquareOptions): Geom2
 
   SquareOptions: export interface SquareOptions
@@ -204,6 +222,7 @@ primitives
 
     size: number
 
+  // primitives.star (function)
   declare function star(options?: StarOptions): Geom2
 
   StarOptions: export interface StarOptions
@@ -220,6 +239,7 @@ primitives
 
     startAngle: number
 
+  // primitives.torus (function)
   declare function torus(options?: TorusOptions): Geom3
 
   TorusOptions: export interface TorusOptions
@@ -238,6 +258,7 @@ primitives
 
     startAngle: number
 
+  // primitives.triangle (function)
   declare function triangle(options?: TriangleOptions): Geom2
 
   TriangleOptions: export interface TriangleOptions

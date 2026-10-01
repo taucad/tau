@@ -1,6 +1,6 @@
 # manifold-3d API index
 
-manifold-3d 3.4.1 · 160 symbols · extracted by TypeScript 5.9.3.
+manifold-3d 3.4.1 · 166 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -16,20 +16,26 @@ default (function)
 
 ## Types — `api-types.md`
 
-Box (type) — A three dimensional box, aligned to the coordinate system
+Box (type) [2 members] — A three dimensional box, aligned to the coordinate system
+  Box.min (property)
+  Box.max (property)
 ErrorStatus (type)
 FillRule (type)
 JoinType (type)
 Mat3 (type) — 3x3 matrix stored in column-major order
 Mat4 (type) — 4x4 matrix stored in column-major order
 Polygons (type)
-Rect (type) — A two dimensional rectangle, aligned to the coordinate system
+Rect (type) [2 members] — A two dimensional rectangle, aligned to the coordinate system
+  Rect.min (property)
+  Rect.max (property)
 SimplePolygon (type)
-Smoothness (type)
+Smoothness (type) [2 members]
+  Smoothness.halfedge (property)
+  Smoothness.smoothness (property)
 Vec2 (type) — A vector in two dimensional space
 Vec3 (type) — A vector in three dimensional space
 
-## Classs — `api-classs.md`
+## Classes — `api-classes.md`
 
 CrossSection (class) [30 members] — Two-dimensional cross sections guaranteed to be without self-intersections, or overlaps…
   CrossSection.constructor (constructor)

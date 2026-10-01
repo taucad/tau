@@ -6,6 +6,7 @@
 IFSelect_ReturnStatus
 
   // __init__(self
+  // OCP.OCP.IFSelect.IFSelect_ReturnStatus.__init__ (constructor)
   __init__(self: OCP.OCP.IFSelect.IFSelect_ReturnStatus, value: int) -> None
 
   // name(self

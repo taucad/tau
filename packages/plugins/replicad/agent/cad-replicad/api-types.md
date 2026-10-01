@@ -20,6 +20,12 @@ Corner: {
     point: Point2D;
 }
 
+  firstCurve: Curve2D
+
+  secondCurve: Curve2D
+
+  point: Point2D
+
 CubeFace: "front" | "back" | "top" | "bottom" | "left" | "right"
 
 CurveType: "LINE" | "CIRCLE" | "ELLIPSE" | "HYPERBOLA" | "PARABOLA" | "BEZIER_CURVE" | "BSPLINE_CURVE" | "OFFSET_CURVE" | "OTHER_CURVE"
@@ -31,7 +37,15 @@ FilterFcn: {
     normal: Vector | null;
 }
 
+  element: Type
+
+  normal: Vector | null
+
 ManifoldBox: Box
+
+  min: Vec3
+
+  max: Vec3
 
 ManifoldInstance: Manifold
 
@@ -74,6 +88,22 @@ ShapeConfig: {
     roughness?: number;
     density?: number;
 }
+
+  shape: AnyShape
+
+  color: string
+
+  alpha: number
+
+  name: string
+
+  // PBR metalness factor (0 = dielectric, 1 = metal)
+  metalness: number
+
+  // PBR roughness factor — threaded to GLTF only (not STEP
+  roughness: number
+
+  density: number
 
 SimplePoint: [number, number, number]
 

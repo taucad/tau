@@ -1,23 +1,29 @@
-# manifold-3d — Classs
+# manifold-3d — Classes
 
 3 top-level symbols. Signatures are verbatim typescript.
 
 // Two-dimensional cross sections guaranteed to be without self-intersections, or overlaps between polygons (from construction onwards)
 CrossSection: export declare class CrossSection
 
-  constructor
+  // CrossSection.constructor (constructor)
+  constructor(contours: Polygons, fillRule?: FillRule);
+  //   contours: A set of closed paths describing zero or more complex polygons
+  //   fillRule: The filling rule used to interpret polygon sub-regions in contours
 
   // Constructs a square with the given XY dimensions
+  // CrossSection.square (method)
   static square(size?: Readonly<Vec2>|number, center?: boolean): CrossSection;
   //   size: The X, and Y dimensions of the square
   //   center: Set to true to shift the center to the origin
 
   // Constructs a circle of a given radius
+  // CrossSection.circle (method)
   static circle(radius: number, circularSegments?: number): CrossSection;
   //   radius: Radius of the circle
   //   circularSegments: Number of segments along its diameter
 
   // Constructs a manifold by extruding the cross-section along Z-axis
+  // CrossSection.extrude (method)
   extrude(
       height: number, nDivisions?: number, twistDegrees?: number,
       scaleTop?: Readonly<Vec2>|number, center?: boolean): Manifold;
@@ -28,37 +34,43 @@ CrossSection: export declare class CrossSection
   //   center: If true, the extrusion is centered on the z-axis through the origin as opposed to resting on the XY plane as is default
 
   // Constructs a manifold by revolving this cross-section around its Y-axis and then setting this as the Z-axis of the resulting manifold
+  // CrossSection.revolve (method)
   revolve(circularSegments?: number, revolveDegrees?: number): Manifold;
   //   circularSegments: Number of segments along its diameter
 
   // Transform this CrossSection in space
+  // CrossSection.transform (method)
   transform(m: Mat3): CrossSection;
   //   m: The affine transformation matrix to apply to all the vertices
 
   // Move this CrossSection in space
-  translate(v: Readonly<Vec2>): CrossSection;
-  translate(x: number, y?: number): CrossSection;
+  // CrossSection.translate (method)
   translate(v: Readonly<Vec2>): CrossSection;
   translate(x: number, y?: number): CrossSection;
   //   v: The vector to add to every vertex
 
   // Applies a (Z-axis) rotation to the CrossSection, in degrees
+  // CrossSection.rotate (method)
   rotate(degrees: number): CrossSection;
   //   degrees: degrees about the Z-axis to rotate
 
   // Scale this CrossSection in space
+  // CrossSection.scale (method)
   scale(v: Readonly<Vec2>|number): CrossSection;
   //   v: The vector to multiply every vertex by per component
 
   // Mirror this CrossSection over the arbitrary axis described by the unit form of the given vector
+  // CrossSection.mirror (method)
   mirror(ax: Readonly<Vec2>): CrossSection;
   //   ax: the axis to be mirrored over
 
   // Move the vertices of this CrossSection (creating a new one) according to any arbitrary input function, followed by a union operation (with a Positive fill rule) that ensures any introduced intersections are not included in the result
+  // CrossSection.warp (method)
   warp(warpFunc: (vert: Vec2) => void): CrossSection;
   //   warpFunc: A function that modifies a given vertex position
 
   // Inflate the contours in CrossSection by the specified delta, handling corners according to the given JoinType
+  // CrossSection.offset (method)
   offset(
       delta: number, joinType?: JoinType, miterLimit?: number,
       circularSegments?: number): CrossSection;
@@ -68,94 +80,106 @@ CrossSection: export declare class CrossSection
   //   circularSegments: Number of segments per 360 degrees of <B>JoinType::Round</B> corners (roughly, the number of vertices that will be added to each contour)
 
   // Remove vertices from the contours in this CrossSection that are less than the specified distance epsilon from an imaginary line that passes through its two adjacent vertices
+  // CrossSection.simplify (method)
   simplify(epsilon?: number): CrossSection;
   //   epsilon: minimum distance vertices must diverge from the hypothetical outline without them in order to be included in the output (default 1e-6)
 
   // Boolean union
+  // CrossSection.add (method)
   add(other: CrossSection|Polygons): CrossSection;
 
   // Boolean difference
+  // CrossSection.subtract (method)
   subtract(other: CrossSection|Polygons): CrossSection;
 
   // Boolean intersection
+  // CrossSection.intersect (method)
   intersect(other: CrossSection|Polygons): CrossSection;
 
   // Boolean union of the cross-sections a and b Boolean union of a list of cross-sections
-  static union(a: CrossSection|Polygons, b: CrossSection|Polygons):
-      CrossSection;
-  static union(polygons: readonly(CrossSection|Polygons)[]): CrossSection;
+  // CrossSection.union (method)
   static union(a: CrossSection|Polygons, b: CrossSection|Polygons):
       CrossSection;
   static union(polygons: readonly(CrossSection|Polygons)[]): CrossSection;
 
   // Boolean difference of the cross-section b from the cross-section a Boolean difference of the tail of a list of cross-sections from its head
-  static difference(a: CrossSection|Polygons, b: CrossSection|Polygons):
-      CrossSection;
-  static difference(polygons: readonly(CrossSection|Polygons)[]): CrossSection;
+  // CrossSection.difference (method)
   static difference(a: CrossSection|Polygons, b: CrossSection|Polygons):
       CrossSection;
   static difference(polygons: readonly(CrossSection|Polygons)[]): CrossSection;
 
   // Boolean intersection of the cross-sections a and b Boolean intersection of a list of cross-sections
-  static intersection(a: CrossSection|Polygons, b: CrossSection|Polygons):
-      CrossSection;
-  static intersection(polygons: readonly(CrossSection|Polygons)[]):
-      CrossSection;
+  // CrossSection.intersection (method)
   static intersection(a: CrossSection|Polygons, b: CrossSection|Polygons):
       CrossSection;
   static intersection(polygons: readonly(CrossSection|Polygons)[]):
       CrossSection;
 
   // Compute the convex hull of the contours in this CrossSection
+  // CrossSection.hull (method)
   hull(): CrossSection;
   static hull(polygons: readonly(CrossSection|Polygons)[]): CrossSection;
 
   // Construct a CrossSection from a vector of other Polygons (batch boolean union)
+  // CrossSection.compose (method)
   static compose(polygons: readonly(CrossSection|Polygons)[]): CrossSection;
 
   // This operation returns a vector of CrossSections that are topologically disconnected, each containing one outline contour with zero or more holes
+  // CrossSection.decompose (method)
   decompose(): CrossSection[];
 
   // Create a 2d cross-section from a set of contours (complex polygons)
+  // CrossSection.ofPolygons (method)
   static ofPolygons(contours: Polygons, fillRule?: FillRule): CrossSection;
   //   contours: A set of closed paths describing zero or more complex polygons
   //   fillRule: The filling rule used to interpret polygon sub-regions in contours
 
   // Return the contours of this CrossSection as a list of simple polygons
+  // CrossSection.toPolygons (method)
   toPolygons(): SimplePolygon[];
 
   // Return the total area covered by complex polygons making up the CrossSection
+  // CrossSection.area (method)
   area(): number;
 
   // Does the CrossSection (not) have any contours?
+  // CrossSection.isEmpty (method)
   isEmpty(): boolean;
 
   // The number of vertices in the CrossSection
+  // CrossSection.numVert (method)
   numVert(): number;
 
   // The number of contours in the CrossSection
+  // CrossSection.numContour (method)
   numContour(): number;
 
   // Returns the axis-aligned bounding rectangle of all the CrossSection's vertices
+  // CrossSection.bounds (method)
   bounds(): Rect;
 
   // Frees the WASM memory of this CrossSection, since these cannot be garbage-collected automatically
+  // CrossSection.delete (method)
   delete(): void;
 
 // This library's internal representation of an oriented, 2-manifold, triangle mesh - a simple boundary-representation of a solid object
 Manifold: export declare class Manifold
 
-  constructor
+  // Manifold.constructor (constructor)
+  constructor(mesh: Mesh);
 
   // Constructs a tetrahedron centered at the origin with one vertex at (1,1,1) and the rest at similarly symmetric points
+  // Manifold.tetrahedron (method)
   static tetrahedron(): Manifold;
 
   // Constructs a unit cube (edge lengths all one), by default in the first octant, touching the origin
+  // Manifold.cube (method)
   static cube(size?: Readonly<Vec3>|number, center?: boolean): Manifold;
   //   size: The X, Y, and Z dimensions of the box
   //   center: Set to true to shift the center to the origin
 
   // A convenience constructor for the common case of extruding a circle
+  // Manifold.cylinder (method)
   static cylinder(
       height: number, radiusLow: number, radiusHigh?: number,
       circularSegments?: number, center?: boolean): Manifold;
@@ -166,11 +190,13 @@ Manifold: export declare class Manifold
   //   center: Set to true to shift the center to the origin
 
   // Constructs a geodesic sphere of a given radius
+  // Manifold.sphere (method)
   static sphere(radius: number, circularSegments?: number): Manifold;
   //   radius: Radius of the sphere
   //   circularSegments: Number of segments along its diameter
 
   // Constructs a manifold from a set of polygons/cross-section by extruding them along the Z-axis
+  // Manifold.extrude (method)
   static extrude(
       polygons: CrossSection|Polygons, height: number, nDivisions?: number,
       twistDegrees?: number, scaleTop?: Readonly<Vec2>|number,
@@ -183,6 +209,7 @@ Manifold: export declare class Manifold
   //   center: If true, the extrusion is centered on the z-axis through the origin as opposed to resting on the XY plane as is default
 
   // Constructs a manifold from a set of polygons/cross-section by revolving them around the Y-axis and then setting this as the Z-axis of the resulting manifold
+  // Manifold.revolve (method)
   static revolve(
       polygons: CrossSection|Polygons, circularSegments?: number,
       revolveDegrees?: number): Manifold;
@@ -191,14 +218,17 @@ Manifold: export declare class Manifold
   //   revolveDegrees: Number of degrees to revolve
 
   // Convert a Mesh into a Manifold, retaining its properties and merging only the positions according to the merge vectors
+  // Manifold.ofMesh (method)
   static ofMesh(mesh: Mesh): Manifold;
 
   // Constructs a smooth version of the input mesh by creating tangents
+  // Manifold.smooth (method)
   static smooth(mesh: Mesh, sharpenedEdges?: readonly Smoothness[]): Manifold;
   //   mesh: input Mesh
   //   sharpenedEdges: If desired, you can supply a vector of sharpened halfedges, which should in general be a small subset of all halfedges
 
   // Constructs a level-set Mesh from the input Signed-Distance Function (SDF)
+  // Manifold.levelSet (method)
   static levelSet(
       sdf: (point: Vec3) => number, bounds: Box, edgeLength: number,
       level?: number, tolerance?: number): Manifold;
@@ -209,57 +239,65 @@ Manifold: export declare class Manifold
   //   tolerance: Ensure each vertex is within this distance of the true surface
 
   // Transform this Manifold in space
+  // Manifold.transform (method)
   transform(m: Mat4): Manifold;
   //   m: The affine transformation matrix to apply to all the vertices
 
   // Move this Manifold in space
-  translate(v: Readonly<Vec3>): Manifold;
-  translate(x: number, y?: number, z?: number): Manifold;
+  // Manifold.translate (method)
   translate(v: Readonly<Vec3>): Manifold;
   translate(x: number, y?: number, z?: number): Manifold;
   //   v: The vector to add to every vertex
 
   // Applies an Euler or Tait-Bryan angle rotation to the manifold
-  rotate(v: Readonly<Vec3>): Manifold;
-  rotate(x: number, y?: number, z?: number): Manifold;
+  // Manifold.rotate (method)
   rotate(v: Readonly<Vec3>): Manifold;
   rotate(x: number, y?: number, z?: number): Manifold;
   //   v: [X, Y, Z] rotation in degrees
 
   // Scale this Manifold in space
+  // Manifold.scale (method)
   scale(v: Readonly<Vec3>|number): Manifold;
   //   v: The vector to multiply every vertex by per component
 
   // Mirror this Manifold over the plane described by the unit form of the given normal vector
+  // Manifold.mirror (method)
   mirror(normal: Readonly<Vec3>): Manifold;
   //   normal: The normal vector of the plane to be mirrored over
 
   // This function does not change the topology, but allows the vertices to be moved according to any arbitrary input function
+  // Manifold.warp (method)
   warp(warpFunc: (vert: Vec3) => void): Manifold;
   //   warpFunc: A function that modifies a given vertex position
 
   // Smooths out the Manifold by filling in the halfedgeTangent vectors
+  // Manifold.smoothByNormals (method)
   smoothByNormals(normalIdx: number): Manifold;
   //   normalIdx: The first property channel of the normals
 
   // Smooths out the Manifold by filling in the halfedgeTangent vectors
+  // Manifold.smoothOut (method)
   smoothOut(minSharpAngle?: number, minSmoothness?: number): Manifold;
   //   minSharpAngle: degrees, default 60
   //   minSmoothness: range
 
   // Increase the density of the mesh by splitting every edge into n pieces
+  // Manifold.refine (method)
   refine(n: number): Manifold;
   //   n: The number of pieces to split every edge into
 
   // Increase the density of the mesh by splitting each edge into pieces of roughly the input length
+  // Manifold.refineToLength (method)
   refineToLength(length: number): Manifold;
   //   length: The length that edges will be broken down to
 
   // Increase the density of the mesh by splitting each edge into pieces such that any point on the resulting triangles is roughly within tolerance of the smoothly curved surface defined by the tangent vectors
+  // Manifold.refineToTolerance (method)
   refineToTolerance(tolerance: number): Manifold;
   //   tolerance: The desired maximum distance between the faceted mesh produced and the exact smoothly curving surface
 
   // Create a new copy of this manifold with updated vertex properties by supplying a function that takes the existing position and properties as input
+  // Manifold.setProperties (method)
   setProperties(
       numProp: number,
       propFunc: (newProp: number[], position: Vec3, oldProp: number[]) => void):
@@ -268,149 +306,182 @@ Manifold: export declare class Manifold
   //   propFunc: A function that modifies the properties of a given vertex
 
   // Curvature is the inverse of the radius of curvature, and signed such that positive is convex and negative is concave
+  // Manifold.calculateCurvature (method)
   calculateCurvature(gaussianIdx: number, meanIdx: number): Manifold;
   //   gaussianIdx: The property channel index in which to store the Gaussian curvature
   //   meanIdx: The property channel index in which to store the mean curvature
 
   // Fills in vertex properties for normal vectors, calculated from the mesh geometry
+  // Manifold.calculateNormals (method)
   calculateNormals(normalIdx: number, minSharpAngle?: number): Manifold;
   //   normalIdx: The property channel in which to store the X values of the normals
   //   minSharpAngle: Any edges with angles greater than this value will remain sharp, getting different normal vector properties on each side of the edge
 
   // Boolean union
+  // Manifold.add (method)
   add(other: Manifold): Manifold;
 
   // Boolean difference
+  // Manifold.subtract (method)
   subtract(other: Manifold): Manifold;
 
   // Boolean intersection
+  // Manifold.intersect (method)
   intersect(other: Manifold): Manifold;
 
   // Boolean union of the manifolds a and b Boolean union of a list of manifolds
-  static union(a: Manifold, b: Manifold): Manifold;
-  static union(manifolds: readonly Manifold[]): Manifold;
+  // Manifold.union (method)
   static union(a: Manifold, b: Manifold): Manifold;
   static union(manifolds: readonly Manifold[]): Manifold;
 
   // Boolean difference of the manifold b from the manifold a Boolean difference of the tail of a list of manifolds from its head
-  static difference(a: Manifold, b: Manifold): Manifold;
-  static difference(manifolds: readonly Manifold[]): Manifold;
+  // Manifold.difference (method)
   static difference(a: Manifold, b: Manifold): Manifold;
   static difference(manifolds: readonly Manifold[]): Manifold;
 
   // Boolean intersection of the manifolds a and b Boolean intersection of a list of manifolds
-  static intersection(a: Manifold, b: Manifold): Manifold;
-  static intersection(manifolds: readonly Manifold[]): Manifold;
+  // Manifold.intersection (method)
   static intersection(a: Manifold, b: Manifold): Manifold;
   static intersection(manifolds: readonly Manifold[]): Manifold;
 
   // Split cuts this manifold in two using the cutter manifold
+  // Manifold.split (method)
   split(cutter: Manifold): [Manifold, Manifold];
 
   // Convenient version of Split() for a half-space
+  // Manifold.splitByPlane (method)
   splitByPlane(normal: Readonly<Vec3>, originOffset: number):
       [Manifold, Manifold];
   //   normal: This vector is normal to the cutting plane and its length does not matter
   //   originOffset: The distance of the plane from the origin in the direction of the normal vector
 
   // Removes everything behind the given half-space plane
+  // Manifold.trimByPlane (method)
   trimByPlane(normal: Readonly<Vec3>, originOffset: number): Manifold;
   //   normal: This vector is normal to the cutting plane and its length does not matter
   //   originOffset: The distance of the plane from the origin in the direction of the normal vector
 
   // Compute the minkowski sum of this manifold with another
+  // Manifold.minkowskiSum (method)
   minkowskiSum(other: Manifold): Manifold;
   //   other: The other manifold to minkowski sum to this one
 
   // Subtract the sweep of the other manifold across this manifold's surface
+  // Manifold.minkowskiDifference (method)
   minkowskiDifference(other: Manifold): Manifold;
   //   other: The other manifold to minkowski subtract from this one
 
   // Returns the cross section of this object parallel to the X-Y plane at the specified height
+  // Manifold.slice (method)
   slice(height: number): CrossSection;
   //   height: Z-level of slice
 
   // Returns a cross section representing the projected outline of this object onto the X-Y plane
+  // Manifold.project (method)
   project(): CrossSection;
 
   // Compute the convex hull of all points in this Manifold
+  // Manifold.hull (method)
   hull(): Manifold;
   static hull(points: readonly(Manifold|Vec3)[]): Manifold;
 
   // Constructs a new manifold from a list of other manifolds
   // DEPRECATED: Please use {@link add} or {@link union} instead.
+  // Manifold.compose (method)
   static compose(manifolds: readonly Manifold[]): Manifold;
   //   manifolds: A list of Manifolds to lazy-union together
 
   // This operation returns a vector of Manifolds that are topologically disconnected
+  // Manifold.decompose (method)
   decompose(): Manifold[];
 
   // Does the Manifold have any triangles?
+  // Manifold.isEmpty (method)
   isEmpty(): boolean;
 
   // The number of vertices in the Manifold
+  // Manifold.numVert (method)
   numVert(): number;
 
   // The number of triangles in the Manifold
+  // Manifold.numTri (method)
   numTri(): number;
 
   // The number of edges in the Manifold
+  // Manifold.numEdge (method)
   numEdge(): number;
 
   // The number of properties per vertex in the Manifold
+  // Manifold.numProp (method)
   numProp(): number;
 
   // The number of property vertices in the Manifold
+  // Manifold.numPropVert (method)
   numPropVert(): number
 
   // Returns the axis-aligned bounding box of all the Manifold's vertices
+  // Manifold.boundingBox (method)
   boundingBox(): Box;
 
   // Returns the tolerance of this Manifold's vertices, which tracks the approximate rounding error over all the transforms and operations that have led to this state
+  // Manifold.tolerance (method)
   tolerance(): number;
 
   // Return a copy of the manifold with the set tolerance value
+  // Manifold.setTolerance (method)
   setTolerance(tolerance: number): Manifold;
 
   // Return a copy of the manifold simplified to the given tolerance, but with its actual tolerance value unchanged
+  // Manifold.simplify (method)
   simplify(tolerance?: number): Manifold;
   //   tolerance: The maximum distance between the original and simplified meshes
 
   // The genus is a topological property of the manifold, representing the number of "handles"
+  // Manifold.genus (method)
   genus(): number;
 
   // Returns the surface area of the manifold
+  // Manifold.surfaceArea (method)
   surfaceArea(): number;
 
   // Returns the volume of the manifold
+  // Manifold.volume (method)
   volume(): number;
 
   // Returns the minimum gap between two manifolds
+  // Manifold.minGap (method)
   minGap(other: Manifold, searchLength: number): number;
 
   // Returns the reason for an input Mesh producing an empty Manifold
+  // Manifold.status (method)
   status(): ErrorStatus;
 
   // Returns a Mesh that is designed to easily push into a renderer, including all interleaved vertex properties that may have been input
+  // Manifold.getMesh (method)
   getMesh(normalIdx?: number): Mesh;
   //   normalIdx: If the original MeshGL inputs that formed this manifold had properties corresponding to normal vectors, you can specify the first of the three consecutive property channels forming the (x, y, z) normals, which will cause this output MeshGL to automatically update these normals according to the applied transforms and front/back side
 
   // If you copy a manifold, but you want this new copy to have new properties (e.g
+  // Manifold.asOriginal (method)
   asOriginal(): Manifold;
 
   // If this mesh is an original, this returns its ID that can be referenced by product manifolds
+  // Manifold.originalID (method)
   originalID(): number;
 
   // Returns the first of n sequential new unique mesh IDs for marking sets of triangles that can be looked up after further operations
+  // Manifold.reserveIDs (method)
   static reserveIDs(count: number): number;
 
   // Frees the WASM memory of this Manifold, since these cannot be garbage-collected automatically
+  // Manifold.delete (method)
   delete(): void;
 
 // An alternative to Mesh for output suitable for pushing into graphics libraries directly
 Mesh: export declare class Mesh
 
-  constructor
+  // Mesh.constructor (constructor)
+  constructor(options: MeshOptions);
 
   // Number of properties per vertex, always >= 3
   numProp: number
@@ -455,24 +526,30 @@ Mesh: export declare class Mesh
   numRun
 
   // Updates the mergeFromVert and mergeToVert vectors in order to create a manifold solid
+  // Mesh.merge (method)
   merge(): boolean;
 
   // Gets the three vertex indices of this triangle in CCW order
+  // Mesh.verts (method)
   verts(tri: number): SealedUint32Array<3>;
   //   tri: triangle index
 
   // Gets the x, y, z position of this vertex
+  // Mesh.position (method)
   position(vert: number): SealedFloat32Array<3>;
   //   vert: vertex index
 
   // Gets any other properties associated with this vertex
+  // Mesh.extras (method)
   extras(vert: number): Float32Array;
   //   vert: vertex index
 
   // Gets the tangent vector starting at verts(tri)[j] pointing to the next Bezier point along the CCW edge
+  // Mesh.tangent (method)
   tangent(halfedge: number): SealedFloat32Array<4>;
   //   halfedge: halfedge index
 
   // Gets the column-major 4x4 matrix transform from the original mesh to these related triangles
+  // Mesh.transform (method)
   transform(run: number): Mat4;
   //   run: triangle run index

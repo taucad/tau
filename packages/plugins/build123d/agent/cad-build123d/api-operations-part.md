@@ -3,12 +3,14 @@
 8 top-level symbols. Signatures are verbatim python.
 
 // Part Operation
+// build123d.operations_part.draft (function)
 draft(faces: Face | Iterable[Face], neutral_plane: Plane, angle: float) -> Part
 //   faces: Faces to which the draft should be applied
 //   neutral_plane: Plane defining the neutral direction and position
 //   angle: Draft angle in degrees
 
 // Part Operation
+// build123d.operations_part.extrude (function)
 extrude(to_extrude: Face | Sketch | None = None, amount: float | None = None, dir: VectorLike | None = None, until: Until | None = None, target: Compound | Solid | None = None, both: bool = False, taper: float = 0.0, clean: bool = True, mode: Mode = Mode.ADD) -> Part
 //   to_extrude: object to extrude
 //   amount: distance to extrude, sign controls direction
@@ -21,6 +23,7 @@ extrude(to_extrude: Face | Sketch | None = None, amount: float | None = None, di
 //   mode: combination mode
 
 // Part Operation
+// build123d.operations_part.loft (function)
 loft(sections: Face | Sketch | Iterable[Vertex | Face | Sketch] | None = None, ruled: bool = False, clean: bool = True, mode: Mode = Mode.ADD) -> Part
 //   sections: slices to loft into object
 //   ruled: discontiguous layer tangents
@@ -28,6 +31,7 @@ loft(sections: Face | Sketch | Iterable[Vertex | Face | Sketch] | None = None, r
 //   mode: combination mode
 
 // make_brake_formed
+// build123d.operations_part.make_brake_formed (function)
 make_brake_formed(thickness: float, station_widths: float | Iterable[float], line: Edge | Wire | Curve | None = None, side: Side = Side.LEFT, kind: Kind = Kind.ARC, clean: bool = True, mode: Mode = Mode.ADD) -> Part
 //   thickness: sheet metal thickness
 //   station_widths: width of part at each vertex or a single value
@@ -38,6 +42,7 @@ make_brake_formed(thickness: float, station_widths: float | Iterable[float], lin
 //   mode: combination mode
 
 // Part Operation
+// build123d.operations_part.project_workplane (function)
 project_workplane(origin: VectorLike | Vertex, x_dir: VectorLike | Vertex, projection_dir: VectorLike, distance: float) -> Plane
 //   origin: origin in 3D space
 //   x_dir: x direction in 3D space
@@ -45,6 +50,7 @@ project_workplane(origin: VectorLike | Vertex, x_dir: VectorLike | Vertex, proje
 //   distance: distance from origin to workplane
 
 // Part Operation
+// build123d.operations_part.revolve (function)
 revolve(profiles: Face | Iterable[Face] | None = None, axis: Axis = Axis.Z, revolution_arc: float = 360.0, clean: bool = True, mode: Mode = Mode.ADD) -> Part
 //   profiles: 2D profile(s) to revolve
 //   axis: axis of rotation
@@ -53,6 +59,7 @@ revolve(profiles: Face | Iterable[Face] | None = None, axis: Axis = Axis.Z, revo
 //   mode: combination mode
 
 // Part Operation
+// build123d.operations_part.section (function)
 section(obj: Part | None = None, section_by: Plane | Iterable[Plane] = Plane.XZ, height: float = 0.0, clean: bool = True, mode: Mode = Mode.PRIVATE) -> Sketch
 //   obj: object to section
 //   section_by: plane(s) to section object
@@ -61,6 +68,7 @@ section(obj: Part | None = None, section_by: Plane | Iterable[Plane] = Plane.XZ,
 //   mode: combination mode
 
 // Part Operation
+// build123d.operations_part.thicken (function)
 thicken(to_thicken: Face | Sketch | None = None, amount: float | None = None, normal_override: VectorLike | None = None, both: bool = False, clean: bool = True, mode: Mode = Mode.ADD) -> Part
 //   to_thicken: object to thicken
 //   amount: distance to extrude, sign controls direction

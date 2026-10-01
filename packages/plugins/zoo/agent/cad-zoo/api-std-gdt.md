@@ -4,6 +4,7 @@
 
 // GD&T datum feature
 // EXPERIMENTAL
+// std.gdt.gdt::datum (function)
 gdt::datum(
   face: TaggedFace,
   name: string,
@@ -21,6 +22,7 @@ gdt::datum(
 
 // GD&T annotation specifying how flat faces should be
 // EXPERIMENTAL
+// std.gdt.gdt::flatness (function)
 gdt::flatness(
   faces: [TaggedFace; 1+],
   tolerance: number(Length),

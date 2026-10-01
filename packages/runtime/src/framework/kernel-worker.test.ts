@@ -4,8 +4,9 @@
  */
 
 import { describe, it, expect, vi, afterEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import { z } from 'zod';
-import { logLevels } from '@taucad/types/constants';
+import { kernelConfigurations, logLevels } from '@taucad/types/constants';
 import { coordinateSystemSchema, unitSchema } from '#types/export-option-schemas.js';
 import type { OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
@@ -1141,7 +1142,9 @@ describe('KernelWorker lifecycle', () => {
         await worker.reconcileWatchSet(new Map([['main.ts', 50]]));
         settled = true;
       })();
-      await flushMicrotasks();
+      await vi.waitFor(() => {
+        expect(inlineFileSystem.watchReady).toHaveBeenCalledOnce();
+      });
 
       expect(settled).toBe(false);
       expect(inlineFileSystem.watchReady).toHaveBeenCalledOnce();
@@ -1214,6 +1217,130 @@ describe('KernelWorker lifecycle', () => {
       await worker.cleanup();
     });
 
+    it('should publish only fresh source when the first operation mirror changes during dependency discovery', async () => {
+      const starter = new TextEncoder().encode(kernelConfigurations[0].emptyCode);
+      const authored = new TextEncoder().encode(`using System.ComponentModel.DataAnnotations;
+using System.Numerics;
+using PicoGK;
+Library.Go(Params.VoxelSizeMm, () =>
+{
+    var radius = Params.RadiusMm;
+    Library.oViewer().SetGroupMaterial(0, "3159cf", 0f, 0.7f);
+    Library.oViewer().SetGroupMaterial(1, "f2b134", 0f, 0.7f);
+    Library.oViewer().Add(Utils.mshCreateCube(new Vector3(radius, radius * 0.5f, radius * 0.25f)), 0);
+    Library.oViewer().Add(Voxels.voxSphere(new Vector3(radius * 2f, 0, 0), radius * 0.5f), 1);
+});
+
+public static class Params
+{
+    [Range(0.05, 5.0)]
+    [Display(Name = "Voxel size", Order = 0)]
+    public static float VoxelSizeMm { get; set; } = 1f;
+
+    [Range(1.0, 100.0)]
+    [Display(Name = "Radius", Order = 1)]
+    public static float RadiusMm { get; set; } = 12f;
+}
+`);
+      const sourceHash = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
+      expect(starter.byteLength).toBe(313);
+      expect(authored.byteLength).toBe(761);
+      expect(sourceHash(starter)).toBe('76af0745e78534f33045a8ba17f071d02a578e185405c129f1679cfae2e02ea2');
+      expect(sourceHash(authored)).toBe('7ff51d066da3d5abf7401ab0451d768daebaef0827a3e41c3ed9a4d3db8d1068');
+      let authoritativeBytes = starter;
+      const filesystem = createMockFileSystem({ readFileResult: () => authoritativeBytes });
+      filesystem.mocks.readFiles.mockImplementation(async () => ({ 'main.cs': authoritativeBytes }));
+      filesystem.mocks.writeFile.mockImplementation(async (_path: string, bytes: Uint8Array<ArrayBuffer>) => {
+        authoritativeBytes = bytes;
+      });
+      let deliverWatchEvent!: (event: WatchEvent) => void;
+      const inlineFileSystem = Object.assign(filesystem, {
+        watch: vi.fn(() => vi.fn()),
+        watchReady: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          deliverWatchEvent = handler;
+          return {
+            unsubscribe: vi.fn(),
+            ready: Promise.resolve(),
+            closed: new Promise<void>(() => {
+              // The controlled subscription stays open until worker cleanup.
+            }),
+          };
+        }),
+      });
+      const mirrored = Promise.withResolvers<void>();
+      const releaseDiscovery = Promise.withResolvers<void>();
+      const snapshots = new Map<number, Uint8Array<ArrayBuffer>>();
+      const builds: Array<{ operationId: number; hash: string }> = [];
+      class MirroredKernelWorker extends MockKernelWorker {
+        protected override async onGetDependencies(
+          { entryPath }: GetDependenciesInput,
+          runtime: KernelRuntime,
+        ): Promise<GetDependenciesResult> {
+          if (runtime.operationId === undefined) {
+            throw new Error('The controlled kernel has no operation identity.');
+          }
+
+          if (!snapshots.has(runtime.operationId)) {
+            snapshots.set(runtime.operationId, await runtime.filesystem.readFile(entryPath));
+          }
+          if (snapshots.size === 1) {
+            mirrored.resolve();
+            await releaseDiscovery.promise;
+          }
+          return { resolved: [entryPath], unresolved: [] };
+        }
+
+        protected override async onCreateGeometry(
+          _input: CreateGeometryInput,
+          runtime: KernelRuntime,
+        ): Promise<CreateGeometryResult> {
+          const bytes = runtime.operationId === undefined ? undefined : snapshots.get(runtime.operationId);
+          if (bytes === undefined || runtime.operationId === undefined) {
+            throw new Error('The geometry operation has no admitted mirror.');
+          }
+
+          builds.push({ operationId: runtime.operationId, hash: sourceHash(bytes) });
+          return { success: true, data: { format: 'gltf', content: bytes }, issues: [] };
+        }
+      }
+
+      const worker = new MirroredKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+      const observed = observePreview(worker);
+      try {
+        worker.handleOpenFile({ renderId: previewId(206), file: createGeometryFile('main.cs'), parameters: {} });
+        await mirrored.promise;
+        const [initialOperation] = snapshots.keys();
+        expect(initialOperation).toBeDefined();
+        await filesystem.writeFile('main.cs', authored);
+        deliverWatchEvent({ type: 'change', path: 'main.cs' });
+        releaseDiscovery.resolve();
+        await vi.waitFor(() => {
+          expect(
+            builds.map(({ hash }) => hash),
+            JSON.stringify({ builds, published: observed.geometries }),
+          ).toContain(sourceHash(authored));
+          expect(builds.some((build) => build.operationId !== initialOperation)).toBe(true);
+          expect(observed.geometries).toHaveLength(1);
+          expect(observed.geometries[0]?.renderId).not.toBe(previewId(206));
+        });
+        expect(observed.errors).toEqual([]);
+        for (const { result } of observed.geometries) {
+          if (!result.success) {
+            expect.fail('The selected preview did not publish successful geometry.');
+          }
+          if (result.data.format !== 'gltf') {
+            expect.fail('The controlled kernel did not publish its glTF payload.');
+          }
+          expect(result.data.content).toEqual(authored);
+          expect(sourceHash(result.data.content)).toBe(sourceHash(authored));
+        }
+      } finally {
+        releaseDiscovery.resolve();
+        await worker.cleanup();
+      }
+    });
+
     it('publishes the arming render when a newly watched path replays identical content', async () => {
       const entryBytes = new Uint8Array([1, 2, 3]);
       const filesystem = createMockFileSystem();
@@ -1255,6 +1382,83 @@ describe('KernelWorker lifecycle', () => {
       expect(observed.geometries.map((entry) => entry.renderId)).toEqual([renderId]);
       await worker.cleanup();
     });
+
+    it.each(['missing', 'io-error'] as const)(
+      'should distinguish %s while baselining an unknown watch path',
+      async (kind) => {
+        const failure = Object.assign(new Error(kind === 'missing' ? 'Missing entry' : 'Entry read refused'), {
+          code: kind === 'missing' ? 'ENOENT' : 'EIO',
+        });
+        const filesystem = createMockFileSystem();
+        filesystem.mocks.readFile.mockRejectedValue(failure);
+        const watch = vi.fn(() => vi.fn());
+        const inlineFileSystem = Object.assign(filesystem, { watch });
+        const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+        await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+        try {
+          // @ts-expect-error -- exercise the owning watch handoff without invoking a kernel on unreadable source.
+          const reconciliation = worker.reconcileWatchSet(new Map([['main.cs', 50]]));
+          if (kind === 'missing') {
+            await expect(reconciliation).resolves.toBe(true);
+            expect(watch).toHaveBeenCalledOnce();
+            expect(worker.getWatchedPaths()).toEqual(new Set(['main.cs']));
+            // @ts-expect-error -- inspect the existing revision ledger's absence sentinel, not a new cache owner.
+            expect(worker.fileHashCache.get('main.cs')).toBe('missing');
+          } else {
+            await expect(reconciliation).rejects.toBe(failure);
+            expect(watch).not.toHaveBeenCalled();
+            expect(worker.getWatchedPaths()).toEqual(new Set());
+          }
+        } finally {
+          await worker.cleanup();
+        }
+      },
+    );
+
+    it.each(['cleanup', 'supersession'] as const)(
+      'should refuse a pending unknown-path baseline after %s',
+      async (kind) => {
+        const reading = Promise.withResolvers<void>();
+        const releaseRead = Promise.withResolvers<void>();
+        const filesystem = createMockFileSystem();
+        filesystem.mocks.readFile.mockImplementation(async () => {
+          reading.resolve();
+          await releaseRead.promise;
+          return new Uint8Array([1, 2, 3]);
+        });
+        const watch = vi.fn(() => vi.fn());
+        const inlineFileSystem = Object.assign(filesystem, { watch });
+        const worker = new MockKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+        await worker.initialize({ callbacks: { onLog: noopLog }, transferables: { inlineFileSystem }, options: {} });
+        const signalView = new Int32Array(new SharedArrayBuffer(signalBufferByteLength));
+        worker.setSignalBuffer(signalView.buffer);
+        const candidate = {
+          generation: 0,
+          paths: new Map([['main.cs', 50]]),
+          middlewarePaths: new Map<string, number>(),
+          coherent: true,
+        };
+        try {
+          // @ts-expect-error -- hold the existing watch handoff before any subscription is installed.
+          const reconciliation = worker.reconcileWatchSet(candidate.paths, candidate);
+          await reading.promise;
+          const cleanup = kind === 'cleanup' ? worker.cleanup() : undefined;
+          if (kind === 'supersession') {
+            Atomics.add(signalView, signalSlot.abortGeneration, 1);
+          }
+          releaseRead.resolve();
+          await expect(reconciliation).resolves.toBe(false);
+          await cleanup;
+          expect(watch).not.toHaveBeenCalled();
+          expect(worker.getWatchedPaths()).toEqual(new Set());
+          // @ts-expect-error -- stale bytes must not enter the existing revision ledger after the admission fence.
+          expect(worker.fileHashCache.has('main.cs')).toBe(false);
+        } finally {
+          releaseRead.resolve();
+          await worker.cleanup();
+        }
+      },
+    );
 
     it('stops replacement validation when cleanup closes admission during an identical replay', async () => {
       const entryBytes = new Uint8Array([1, 2, 3]);
@@ -1434,7 +1638,7 @@ describe('KernelWorker lifecycle', () => {
     });
 
     it('should invalidate changed dependencies and schedule one recovery for reset', async () => {
-      const filesystem = createMockFileSystem();
+      const filesystem = createMockFileSystem({ readFileResult: new Uint8Array([1, 2, 3]) });
       filesystem.mocks.readFiles.mockResolvedValue({
         'main.ts': new Uint8Array([1, 2, 3]),
       });
@@ -1467,6 +1671,7 @@ describe('KernelWorker lifecycle', () => {
         const states: string[] = [];
         worker.onStateChanged = ({ state }) => states.push(state);
 
+        filesystem.mocks.readFile.mockResolvedValue(new Uint8Array());
         watchHandler!({ type: 'reset' });
         await vi.waitFor(() => {
           expect(states).toEqual(['buffering']);
@@ -1498,6 +1703,7 @@ describe('KernelWorker lifecycle', () => {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
         const states: string[] = [];
         worker.onStateChanged = ({ state }) => states.push(state);
+        filesystem.mocks.readFile.mockClear();
         watchHandler!({ type: 'change', path: 'main.ts' });
         watchHandler!({ type: 'reset' });
         await vi.waitFor(() => {
@@ -1513,7 +1719,7 @@ describe('KernelWorker lifecycle', () => {
     it('should collapse duplicate watch records for one changed revision', async () => {
       const initial = new Uint8Array([1]);
       const changed = new Uint8Array([2]);
-      const filesystem = createMockFileSystem({ readFileResult: changed });
+      const filesystem = createMockFileSystem({ readFileResult: initial });
       filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': initial });
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
@@ -1528,6 +1734,8 @@ describe('KernelWorker lifecycle', () => {
 
       try {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        filesystem.mocks.readFile.mockClear();
+        filesystem.mocks.readFile.mockResolvedValue(changed);
         watchHandler!({ type: 'change', path: 'main.ts' });
         watchHandler!({ type: 'change', path: 'main.ts' });
         await vi.waitFor(() => {
@@ -1544,9 +1752,8 @@ describe('KernelWorker lifecycle', () => {
     });
 
     it('should conservatively render after an observer read failure', async () => {
-      const filesystem = createMockFileSystem();
+      const filesystem = createMockFileSystem({ readFileResult: new Uint8Array([1]) });
       filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1]) });
-      filesystem.mocks.readFile.mockRejectedValue(new Error('read failed'));
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
         watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
@@ -1560,6 +1767,7 @@ describe('KernelWorker lifecycle', () => {
 
       try {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        filesystem.mocks.readFile.mockRejectedValue(new Error('read failed'));
         watchHandler!({ type: 'change', path: 'main.ts' });
         await vi.waitFor(() => {
           expect(worker.createGeometryCalls).toBe(2);
@@ -1615,12 +1823,8 @@ describe('KernelWorker lifecycle', () => {
       const initial = new Uint8Array([1]);
       const local = new Uint8Array([2]);
       const external = new Uint8Array([3]);
-      const filesystem = createMockFileSystem();
+      const filesystem = createMockFileSystem({ readFileResult: initial });
       filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': initial });
-      filesystem.mocks.readFile
-        .mockResolvedValueOnce(local)
-        .mockResolvedValueOnce(external)
-        .mockResolvedValueOnce(external);
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
         watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
@@ -1634,6 +1838,10 @@ describe('KernelWorker lifecycle', () => {
 
       try {
         await openAndWaitForRender(worker, createGeometryFile('main.ts'));
+        filesystem.mocks.readFile
+          .mockResolvedValueOnce(local)
+          .mockResolvedValueOnce(external)
+          .mockResolvedValueOnce(external);
         watchHandler!({ type: 'change', path: 'main.ts' });
         watchHandler!({ type: 'change', path: 'main.ts' });
         watchHandler!({ type: 'change', path: 'main.ts' });
@@ -2409,7 +2617,7 @@ describe('KernelWorker lifecycle', () => {
         }
       }
 
-      const filesystem = createMockFileSystem();
+      const filesystem = createMockFileSystem({ readFileResult: new Uint8Array([1, 2, 3]) });
       filesystem.mocks.readFiles.mockResolvedValue({
         'main.ts': new Uint8Array([1, 2, 3]),
       });
@@ -2440,6 +2648,7 @@ describe('KernelWorker lifecycle', () => {
         throw new Error('Expected the entry watch to be installed before geometry creation');
       }
 
+      filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([4]));
       watchHandler({ type: 'change', path: 'main.ts' });
       await renderAborted.promise;
 
@@ -2515,9 +2724,8 @@ describe('KernelWorker lifecycle', () => {
         }
       }
 
-      const filesystem = createMockFileSystem();
+      const filesystem = createMockFileSystem({ readFileResult: new Uint8Array([1, 2, 3]) });
       filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
-      filesystem.mocks.readFile.mockResolvedValueOnce(new Uint8Array([4])).mockResolvedValueOnce(new Uint8Array([5]));
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
         watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
@@ -2540,6 +2748,7 @@ describe('KernelWorker lifecycle', () => {
         throw new Error('Expected the entry watch to be installed');
       }
 
+      filesystem.mocks.readFile.mockResolvedValueOnce(new Uint8Array([4])).mockResolvedValueOnce(new Uint8Array([5]));
       watchHandler({ type: 'change', path: 'main.ts' });
       watchHandler({ type: 'change', path: 'main.ts' });
       gate.resolve();
@@ -2555,9 +2764,8 @@ describe('KernelWorker lifecycle', () => {
     });
 
     it('should acknowledge a buffered timeout without entering geometry', async () => {
-      const filesystem = createMockFileSystem();
+      const filesystem = createMockFileSystem({ readFileResult: new Uint8Array([1, 2, 3]) });
       filesystem.mocks.readFiles.mockResolvedValue({ 'main.ts': new Uint8Array([1, 2, 3]) });
-      filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([4]));
       let watchHandler: ((event: WatchEvent) => void) | undefined;
       Object.assign(filesystem, {
         watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
@@ -2588,6 +2796,7 @@ describe('KernelWorker lifecycle', () => {
         throw new Error('Expected the entry watch to be installed');
       }
 
+      filesystem.mocks.readFile.mockResolvedValue(new Uint8Array([4]));
       watchHandler({ type: 'change', path: 'main.ts' });
       await vi.waitFor(() => {
         expect(states.at(-1)?.state).toBe('buffering');

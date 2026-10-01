@@ -2784,6 +2784,34 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const oldPaths = this.watchedPaths;
     const addedPaths = [...desiredSet].filter((path) => !oldPaths.has(path));
+    const unknownPaths = addedPaths.filter((path) => !this.fileHashCache.has(path));
+    if (unknownPaths.length > 0) {
+      const stagedWrite = this.stagedWritePublication;
+      if (stagedWrite && unknownPaths.some((path) => stagedWrite.paths.has(path))) {
+        return false;
+      }
+      // Establish the entry's revision before a kernel can retain an operation-local mirror.
+      // A later watch echo is harmless only if it agrees with these already-observed bytes.
+      const baselines = await Promise.all(
+        unknownPaths.map(async (path) => ({ path, revision: await this.readObservedRevision(path) })),
+      );
+      if (
+        !this.operationAdmissionOpen ||
+        (candidate !== undefined && candidate.generation !== this.currentRenderGeneration()) ||
+        this.stagedWritePublication !== stagedWrite ||
+        unknownPaths.some((path) => this.fileHashCache.has(path))
+      ) {
+        return false;
+      }
+      for (const { path, revision } of baselines) {
+        this.fileHashCache.set(path, revision.hash);
+        if (revision.content === undefined) {
+          this.fileContentCache.delete(path);
+        } else {
+          this.fileContentCache.set(path, revision.content);
+        }
+      }
+    }
     const addedSet = new Set(addedPaths);
     const armingEvents = { resetObserved: false, addedPathRevision: 0 };
     const handler = (event: WatchEvent): void => {

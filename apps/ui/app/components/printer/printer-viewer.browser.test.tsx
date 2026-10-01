@@ -569,18 +569,18 @@ describe('Printer viewer framing', () => {
         'G90',
         'M83',
         'M104 S220',
+        'G92 X0 Y0 Z0.2 E0',
         ';LAYER_CHANGE',
         ';Z:0.2',
         ';TYPE:Outer wall',
-        'G1 X0 Y0 Z0.2 E1 F600',
-        ';LAYER_CHANGE',
-        `;Z:${extent / 2}`,
-        `G1 X${extent} Y0 Z${extent / 2} E1 F600`,
+        `G1 X${extent} Y0 Z0.2 E1 F60`,
         ';LAYER_CHANGE',
         `;Z:${extent}`,
         `G1 X${extent} Y${extent} Z${extent} E1 F600`,
       ].join('\n');
       const motion = parseGcode(gcode);
+      expect(motion.segmentCount).toBe(2);
+      expect(motion.times[1]).toBeCloseTo(extent, 3);
       const file: PrinterFile = {
         name: 'mechanical-travel.gcode',
         kind: 'gcode',
@@ -592,8 +592,15 @@ describe('Printer viewer framing', () => {
         await chooseFromMore(frame, 'menuitemcheckbox', 'Show enclosure');
       }
       const time = within(frame).getByRole('slider', { name: 'Time' });
+      // Times are [start, end] pairs, not one boundary per segment. The first X move
+      // takes approximately integer seconds; range rounding stays within 0.001 mm of its endpoint.
+      const poses = [0, Math.round(motion.times[1]!), Math.ceil(motion.duration)];
       for (const [index, label] of ['home', 'x-limit', 'yz-limit'].entries()) {
-        fireEvent.change(time, { target: { value: String(motion.times[index + 1]!) } });
+        fireEvent.change(time, { target: { value: String(poses[index]!) } });
+        // oxlint-disable-next-line no-await-in-loop -- assert each seek before recording the pose
+        await waitFor(() => {
+          expect(time).toHaveAttribute('value', String(Math.floor(Math.min(poses[index]!, motion.duration))));
+        });
         // oxlint-disable-next-line no-await-in-loop -- each pose must settle before its evidence capture
         await nextFrames(60);
         // oxlint-disable-next-line no-await-in-loop -- preserve each distinct mechanical pose

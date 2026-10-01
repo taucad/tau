@@ -3,7 +3,7 @@ import type { ReactNode, RefObject } from 'react';
 import { useThree } from '@react-three/fiber';
 import CameraControlsImpl from 'camera-controls';
 import { OrthographicCamera, Vector3 } from 'three';
-import { perspectiveVerticalSpan } from '@taucad/camera';
+import { perspectiveVerticalSpan, resolveCameraState } from '@taucad/camera';
 import { selectCameraDriverSnapshot } from '@taucad/camera/machine';
 import type { CameraDriverSnapshot } from '@taucad/camera/machine';
 import { resolveMetersPerRenderUnit, shouldRebaseRenderFrame, shouldRescaleRenderFrame } from '@taucad/spatial';
@@ -78,6 +78,17 @@ export function ActorBridge(): ReactNode {
       synchronizingControlsRef.current = true;
       try {
         if (currentControls instanceof CameraControlsImpl) {
+          if (previous?.controls !== currentControls) {
+            // A newly mounted controls instance can write its constructor pose before this bridge runs.
+            const canonical = resolveCameraState({
+              view: snapshot.view,
+              verticalFieldOfView:
+                snapshot.projection.kind === 'orthographic' ? 0 : snapshot.perspectiveVerticalFieldOfView,
+            });
+            camera.position.copy(toThreeRenderPoint({ renderFrame: rig.renderFrame, pointMeters: canonical.position }));
+            camera.zoom = canonical.projection.zoom;
+            camera.updateProjectionMatrix();
+          }
           retargetCameraControls({ controls: currentControls, camera });
           const [targetX, targetY, targetZ] = snapshot.view.target;
           syncControlsLookAt({

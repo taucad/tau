@@ -23,13 +23,14 @@ const mockConsumersRef = {
 const mockRenderFrame = { anchorFrameId: 'test-root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 } as const;
 const mockSetRenderFrame = vi.fn();
 let mockRig: ThreeCameraRig;
+let mockPerspectiveZoom = 1;
 
 const createDriverSnapshot = (projection: CameraProjection, revision: number): CameraDriverSnapshot => ({
   projection,
   view: createCameraView({
     frameId: 'test-root',
     requestedVerticalFieldOfView: projection.kind === 'orthographic' ? 0 : projection.verticalFieldOfView,
-    perspectiveZoom: 1,
+    perspectiveZoom: mockPerspectiveZoom,
     target: [0, 0, 0],
     direction: [1, -1, 0.7],
     up: [0, 0, 1],
@@ -60,6 +61,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
 
 describe('ActorBridge', () => {
   beforeEach(() => {
+    mockPerspectiveZoom = 1;
     const perspectiveCamera = new PerspectiveCamera();
     const orthographicCamera = new OrthographicCamera();
     mockRig = {
@@ -71,12 +73,7 @@ describe('ActorBridge', () => {
       actorRef: {
         getSnapshot: () => ({
           context: {
-            view: {
-              requestedVerticalFieldOfView: 60,
-              target: [0, 0, 0],
-              verticalSpan: 10,
-              viewport: { width: 800, height: 600, pixelRatio: 1 },
-            },
+            view: createDriverSnapshot({ kind: 'perspective', verticalFieldOfView: 60 }, 0).view,
             lastPerspectiveVerticalFieldOfView: 60,
             pixelBudget: 0.25,
             revision: 0,
@@ -217,6 +214,7 @@ describe('ActorBridge', () => {
   });
 
   it('synchronizes late controls with an already published fitted camera', () => {
+    mockPerspectiveZoom = 1.625;
     CameraControlsImpl.install({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- upstream install shape.
       THREE,
@@ -231,8 +229,14 @@ describe('ActorBridge', () => {
     mockUseThree.mockReturnValue({ ...state, ...binding });
     const { rerender } = render(<ActorBridge />);
     state.controls = controls;
+    // Simulate a controls frame restoring its constructor pose after the actor fitted the model.
+    camera.position.set(1, -1, 1);
+    camera.zoom = 1;
     mockUseThree.mockReturnValue({ ...state, ...binding });
     rerender(<ActorBridge />);
+    controls.update(0);
+    expect(camera.zoom).toBe(1.625);
+    expect(camera.position.length()).toBeGreaterThan(10);
     void controls.setLookAt(8, -6, 5, 0, 0, 0, false);
     controls.update(0);
     expect(camera.zoom).toBe(1.625);
@@ -240,6 +244,7 @@ describe('ActorBridge', () => {
   });
 
   it('round-trips observed perspective zoom from CameraControls', () => {
+    mockPerspectiveZoom = 1.75;
     CameraControlsImpl.install({
       // eslint-disable-next-line @typescript-eslint/naming-convention -- `camera-controls` requires this exact install shape.
       THREE,

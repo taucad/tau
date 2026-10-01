@@ -26,7 +26,10 @@ import { createMeasurementFeatureWorkerClient } from '#components/geometry/graph
 import type { MeasurementFeatureWorkerClient } from '#components/geometry/graphics/three/utils/measurement-features-worker-client.js';
 import type { MeasurementAnchor, MeasurementRecord } from '#constants/measurement.types.js';
 import { computeAxisRotationForCamera } from '#components/geometry/graphics/three/utils/rotation.utils.js';
-import { matcapMaterial } from '#components/geometry/graphics/three/materials/matcap-material.js';
+import {
+  matcapMaterial,
+  subscribeToMatcapLoad,
+} from '#components/geometry/graphics/three/materials/matcap-material.js';
 import {
   sceneTag,
   sceneTagData,
@@ -224,6 +227,7 @@ type MeasurePointerSnapshot = {
 
 export function MeasureTool(): React.JSX.Element {
   const { camera, gl, scene, invalidate } = useThree();
+  useEffect(() => subscribeToMatcapLoad(invalidate), [invalidate]);
   const events = useThree((state) => state.events) as EventManager<HTMLElement>;
   // R3F binds pointer events to `eventSource` (the viewer region div), which covers the canvas.
   // Listening on `gl.domElement` would never fire; see `tau-camera-controls.tsx` for the same
@@ -258,6 +262,7 @@ export function MeasureTool(): React.JSX.Element {
   const lengthSymbol = useGraphicsSelector((state) => state.context.displayUnits.length.symbol);
   const hoveredMeasurementId = useGraphicsSelector((state) => state.context.hoveredMeasurementId);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
+  const wasMeasureActiveRef = useRef(isMeasureActive);
   // A press alone raises `cameraInteracting`; only actual camera movement steals a measure gesture.
   const cameraMoving = useGraphicsSelector((state) => state.context.cameraInteractionHadMovement);
 
@@ -1015,7 +1020,9 @@ export function MeasureTool(): React.JSX.Element {
   }, [updatePointerSnapshot]);
 
   useEffect(() => {
-    if (!isMeasureActive) {
+    const wasActive = wasMeasureActiveRef.current;
+    wasMeasureActiveRef.current = isMeasureActive;
+    if (!isMeasureActive && wasActive) {
       exactAbortRef.current?.abort();
       exactRequestRef.current++;
       graphicsActor.send({
@@ -1048,10 +1055,13 @@ export function MeasureTool(): React.JSX.Element {
         return;
       }
       revision = snapshot.context.revision;
+      graphicsActor.send({ type: 'measurementPoseChanged', revision });
+      if (!isMeasureActive) {
+        return;
+      }
       exactAbortRef.current?.abort();
       exactRequestRef.current++;
       setPoseRevision(revision);
-      graphicsActor.send({ type: 'measurementPoseChanged', revision });
       graphicsActor.send({ type: 'cancelCurrentMeasurement' });
       selectedTargetRef.current = undefined;
       catalogVersionRef.current++;
@@ -1063,7 +1073,7 @@ export function MeasureTool(): React.JSX.Element {
     return () => {
       subscription.unsubscribe();
     };
-  }, [graphicsActor, kinematicsRef]);
+  }, [graphicsActor, isMeasureActive, kinematicsRef]);
 
   useEffect(() => {
     const previous = candidateSourceRef.current;
@@ -1094,6 +1104,9 @@ export function MeasureTool(): React.JSX.Element {
       return;
     }
     const { context } = graphicsActor.getSnapshot();
+    if (previous && context.measureMessage === 'Preparing measurement features…') {
+      graphicsActor.send({ type: 'setMeasureMessage' });
+    }
     if (catalogReferences.current.size === 0 && !context.measureChosenCandidateId && !context.measureLockedTargetId) {
       return;
     }

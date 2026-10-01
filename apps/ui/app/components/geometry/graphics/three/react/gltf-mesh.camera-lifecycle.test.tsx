@@ -28,8 +28,8 @@ import {
 import type { Material, Object3D } from 'three';
 import { GLTFLoader } from 'three/addons';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
+import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
-import * as inPlaceGeometry from '#components/geometry/graphics/three/utils/in-place-geometry-update.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import { setModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
@@ -164,39 +164,52 @@ vi.mock('#components/geometry/graphics/three/react/kinematics-viewer.js', () => 
 }));
 
 vi.mock('#components/geometry/graphics/metadata/gltf-component-manifest.js', () => ({
-  buildGltfMeasurementFeatures: () => new Map(),
-  buildGltfComponentManifest: () => ({
-    capabilities: {
-      canAdjustOpacity: false,
-      canFocus: false,
-      canHide: false,
-      canIsolate: false,
-      exports: [],
-      hasDrawings: false,
-      hasPreciseTopology: false,
-    },
-    nodeOrder: ['root'],
-    nodesById: {
-      root: {
-        childIds: [],
-        depth: 0,
-        id: 'root',
-        kind: 'model',
-        materialIndices: [],
-        meshNodeIndices: [],
-        name: 'Model',
-        path: ['Model'],
-        primitiveIndices: [],
-        selector: 'root',
-        bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+  gltfPrimitiveOccurrenceKey: ({
+    nodeIndex,
+    meshIndex,
+    primitiveIndex,
+  }: {
+    nodeIndex: number;
+    meshIndex: number;
+    primitiveIndex: number;
+  }) => `${nodeIndex}/${meshIndex}/${primitiveIndex}`,
+  prepareGltfMetadata: () => ({
+    parsed: { json: {}, bin: undefined },
+    getMeasurementFeatures: () => new Map(),
+    manifest: {
+      capabilities: {
+        canAdjustOpacity: false,
+        canFocus: false,
+        canHide: false,
+        canIsolate: false,
+        exports: [],
+        hasDrawings: false,
+        hasPreciseTopology: false,
       },
+      nodeOrder: ['root'],
+      nodesById: {
+        root: {
+          childIds: [],
+          depth: 0,
+          id: 'root',
+          kind: 'model',
+          materialIndices: [],
+          meshNodeIndices: [],
+          name: 'Model',
+          path: ['Model'],
+          primitiveIndices: [],
+          selector: 'root',
+          bounds: { min: [-1, -1, -1], max: [1, 1, 1] },
+        },
+      },
+      rootId: 'root',
+      schemaVersion: 1,
     },
-    rootId: 'root',
-    schemaVersion: 1,
   }),
 }));
 
-const { GltfMesh } = await import('#components/geometry/graphics/three/react/gltf-mesh.js');
+const { GltfMesh, collectModelPickableSurfaceMeshes } =
+  await import('#components/geometry/graphics/three/react/gltf-mesh.js');
 
 /** A raycast clip that removes the points past the plane through `point`, along `normal`. */
 const clipBeyond = (normal: Vector3, point: Vector3): RaycastClipState => {
@@ -274,6 +287,7 @@ const recordClipAtCommit = (gltfs: readonly GLTF[], clip: SectionClip): Map<numb
 describe('GltfMesh camera lifecycle', () => {
   beforeEach(() => {
     presentOn('webgl');
+    clearRendererSpans();
   });
 
   afterEach(() => {
@@ -298,30 +312,20 @@ describe('GltfMesh camera lifecycle', () => {
     mocks.raycastClipState = undefined;
   });
 
-  it('warms the parsed model for both persistent endpoint cameras exactly once', async () => {
+  it('should commit the active scene without compiling a detached context or inactive projection', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
-    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
-    parseAsync.mockResolvedValue(createGltf());
-    const compileAsync = vi.fn(async (_scene: unknown, _camera: unknown, _targetScene?: unknown) => undefined);
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(createGltf());
+    const compileAsync = vi.fn();
     mocks.gl.compileAsync = compileAsync;
-    mocks.gl.coordinateSystem = 2001;
     const gltfFile = new Uint8Array([1, 2, 3]);
-    const view = render(<GltfMesh gltfFile={gltfFile} geometryHash='camera-warmup' enableMatcap={false} />);
-
+    const view = render(<GltfMesh gltfFile={gltfFile} geometryHash='active' enableMatcap={false} />);
     await waitFor(() => {
-      expect(compileAsync).toHaveBeenCalledTimes(2);
+      expect(view.container.querySelector('primitive')).not.toBeNull();
     });
-    expect(compileAsync.mock.calls.map((call) => call[1])).toEqual([
-      mocks.cameraRig.perspectiveCamera,
-      mocks.cameraRig.orthographicCamera,
-    ]);
-    expect(compileAsync.mock.calls.map((call) => call[2])).toEqual([mocks.rootScene, mocks.rootScene]);
-    expect(mocks.cameraRig.perspectiveCamera.coordinateSystem).toBe(2001);
-    expect(mocks.cameraRig.orthographicCamera.coordinateSystem).toBe(2001);
-
     mocks.camera = { name: 'orthographic' };
-    view.rerender(<GltfMesh gltfFile={gltfFile} geometryHash='camera-warmup' enableMatcap={false} />);
-    expect(compileAsync).toHaveBeenCalledTimes(2);
+    view.rerender(<GltfMesh gltfFile={gltfFile} geometryHash='active' enableMatcap={false} />);
+    expect(parseAsync).toHaveBeenCalledTimes(1);
+    expect(compileAsync).not.toHaveBeenCalled();
   });
 
   it('frames physical component bounds transiently and restores scene bounds when focus clears', async () => {
@@ -527,6 +531,54 @@ describe('GltfMesh camera lifecycle', () => {
     expect(telemetryEvents).toHaveLength(1);
   });
 
+  it('records deferred Section timings without duplicating first-frame telemetry', async () => {
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(createGltf());
+    const analyze = vi
+      .spyOn(sectionTopology, 'registerGltfSectionSurfaceSources')
+      .mockImplementation(async (options) => {
+        options.onTiming?.({
+          submitMilliseconds: 3,
+          packMilliseconds: 2,
+          workerMilliseconds: 7,
+          hydrateMilliseconds: 1,
+          resolveMilliseconds: 10,
+        });
+        return [];
+      });
+    const content = new Uint8Array([1]);
+    const view = render(
+      <GltfMesh gltfFile={content} geometryHash='deferred' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(view.container.querySelector('primitive')).not.toBeNull();
+    });
+    mocks.frameCallback?.();
+    expect(analyze).not.toHaveBeenCalled();
+    mocks.sectionView = { isActive: true };
+    view.rerender(
+      <GltfMesh gltfFile={content} geometryHash='deferred' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      const analysisSpans = rendererSpans().filter((span) => span.name === 'renderer.section-topology');
+      expect(analysisSpans).toHaveLength(1);
+      expect(analysisSpans[0]?.detail).toMatchObject({
+        key: 'deferred',
+        revision: 1,
+        backend: 'webgl',
+        packMilliseconds: 2,
+        workerMilliseconds: 7,
+        resolveMilliseconds: 10,
+      });
+    });
+    expect(
+      mocks.graphicsActor.send.mock.calls.filter(
+        ([event]) => (event as { type?: string }).type === 'gltfPresentationMeasured',
+      ),
+    ).toHaveLength(1);
+    expect(analyze).toHaveBeenCalledTimes(1);
+  });
+
   it('retires shared scene resources exactly once after B commits', async () => {
     vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const first = createGltf();
@@ -669,6 +721,10 @@ describe('GltfMesh camera lifecycle', () => {
     }
     gltf.scene.updateMatrixWorld(true);
     const raycaster = new Raycaster(new Vector3(), new Vector3(0, 0, -1));
+    expect(collectModelPickableSurfaceMeshes(gltf.scene)).toContain(near);
+    expect(near.visible).toBe(true);
+    expect(gltf.scene.visible).toBe(true);
+    expect(bvhRaycast.raycastFirstVisibleMeshHit({ raycaster, meshes: [near, far] })?.object).toBe(near);
     const hits = raycaster.intersectObject(gltf.scene, true);
     expect(hits.length).toBe(1);
     expect(hits[0]?.object).toBe(near);
@@ -840,7 +896,7 @@ describe('GltfMesh camera lifecycle', () => {
     const materialDispose = vi.spyOn(material, 'dispose');
     const textureDispose = vi.spyOn(texture, 'dispose');
     vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
-    vi.spyOn(inPlaceGeometry, 'captureInPlaceGeometryTargets').mockImplementation(() => {
+    vi.spyOn(material, 'clone').mockImplementation(() => {
       throw new Error('presentation preparation failed');
     });
     render(<GltfMesh gltfFile={new Uint8Array([1])} enableMatcap={false} />);
@@ -1014,9 +1070,7 @@ describe('GltfMesh camera lifecycle', () => {
     view.rerender(
       <GltfMesh gltfFile={new Uint8Array([3])} geometryHash='c' presentationRevision={3} enableMatcap={false} />,
     );
-    await waitFor(() => {
-      expect(parseAsync).toHaveBeenCalledTimes(3);
-    });
+    expect(parseAsync).toHaveBeenCalledTimes(2);
     finishSecond?.();
 
     await waitFor(() => {
@@ -1031,22 +1085,18 @@ describe('GltfMesh camera lifecycle', () => {
   });
 
   it.each(['webgl', 'webgpu'] as const)(
-    'should warm a model whose surfaces, edges, line strips and points already carry the section clip on %s',
+    'should install section clipping on every demanded primitive before committing on %s',
     async (backend) => {
       const clip = presentOn(backend);
       const gltf = createClippableGltf();
       vi.spyOn(GLTFLoader.prototype, 'parseAsync').mockResolvedValue(gltf);
-      const warmed: Array<Record<string, boolean>> = [];
-      mocks.gl.compileAsync = vi.fn(async (scene: Object3D) => {
-        warmed.push(clipByKind(scene, clip));
-      });
-
-      render(<GltfMesh gltfFile={new Uint8Array([1])} geometryHash='warm' enableMatcap={false} />);
-
+      mocks.gl.compileAsync = vi.fn();
+      const view = render(<GltfMesh gltfFile={new Uint8Array([1])} geometryHash='clip' enableMatcap={false} />);
       await waitFor(() => {
-        expect(warmed).toHaveLength(2);
+        expect(view.container.querySelector('primitive')).not.toBeNull();
       });
-      expect(warmed).toEqual([clippedKinds, clippedKinds]);
+      expect(clipByKind(gltf.scene, clip)).toEqual(clippedKinds);
+      expect(mocks.gl.compileAsync).not.toHaveBeenCalled();
     },
   );
 

@@ -27,6 +27,7 @@ import type { SectionCapWorkerRequest } from '#components/geometry/graphics/thre
 import { sectionCapPerformanceDebugUserDataKey } from '#components/geometry/graphics/three/utils/section-cap-performance-debug.js';
 import type { SectionCapPerformanceDebugSummary } from '#components/geometry/graphics/three/utils/section-cap-performance-debug.js';
 import type * as SurfaceTopologyModule from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import { setGltfSectionSurfaceRegistrationState } from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 import { createSectionViewSafeSnapshotStore } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import type { SectionCutSet } from '#components/geometry/graphics/three/utils/section-view-safe-snapshot.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
@@ -355,6 +356,14 @@ describe('SectionContourFills frame', () => {
     harness.frame();
     return harness;
   };
+
+  it('does not certify pending geometry as an empty section', async () => {
+    harness = await mountFills();
+    setGltfSectionSurfaceRegistrationState(harness.owned.parent as THREE.Group, 'pending');
+    harness.frame();
+    expect(mocks.certifications).toEqual([]);
+    expect(harness.snapshotStore.committed).toBeUndefined();
+  });
 
   it.each([
     ['one plane', cutSetOf(xyCut(0))],

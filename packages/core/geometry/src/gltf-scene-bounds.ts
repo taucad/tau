@@ -1,6 +1,7 @@
 import type { CoordinateConvention, SpatialBounds, SpatialMatrix, SpatialVector } from '@taucad/spatial';
 import { resolveCoordinateTransform } from '@taucad/spatial';
-import { createNodeIo } from '#gltf.utils.js';
+import { WebIO } from '@gltf-transform/core';
+import { allExtensions } from '#gltf.extensions.js';
 
 const canonicalGltfWorld: CoordinateConvention = { up: '+y', forward: '+z', metersPerUnit: 1 };
 
@@ -50,7 +51,7 @@ export const readGltfSceneBounds = async ({
   bytes,
   targetWorld,
 }: ReadGltfSceneBoundsOptions): Promise<SpatialBounds> => {
-  const io = await createNodeIo();
+  const io = new WebIO().registerExtensions(allExtensions);
   const document = await io.readBinary(bytes);
   const scene = document.getRoot().getDefaultScene() ?? document.getRoot().listScenes()[0];
   const bounds: MutableBounds = {

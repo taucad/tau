@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/consistent-type-specifier-style -- a separate type import trips import/no-duplicates.
-import { Primitive, type Document } from '@gltf-transform/core';
+import { Primitive, WebIO, type Document } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
-import { createNodeIo, detectEdges } from '@taucad/geometry-core';
+import { allExtensions, detectEdges } from '@taucad/geometry-core';
 import { cadEdgeOverlayMaterialDefaults } from '@taucad/runtime/types';
 import type { RenderResult, RuntimeLogger } from '@taucad/runtime/types';
 
@@ -155,7 +155,7 @@ async function addEdgePrimitivesToGltf(
   content: Uint8Array<ArrayBuffer>,
   thresholdDegrees: number,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const io = await createNodeIo();
+  const io = new WebIO().registerExtensions(allExtensions);
   io.registerExtensions([KHRMaterialsUnlit]);
 
   const document = await io.readBinary(content);

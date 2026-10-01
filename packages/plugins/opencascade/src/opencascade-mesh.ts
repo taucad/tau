@@ -6,7 +6,7 @@
  * directly, eliminating manual vertex extraction and the gltf-transform dependency.
  */
 
-import { Accessor, NodeIO, Primitive } from '@gltf-transform/core';
+import { Accessor, WebIO, Primitive } from '@gltf-transform/core';
 import { compactTriangleIndices, normalizeGltfGeometryNames, srgbHexToLinearTuple } from '@taucad/geometry-core';
 import { cadMaterialDefaults } from '@taucad/runtime/types';
 import type { OpenCascadeInstance } from 'libcascade/init';
@@ -37,7 +37,7 @@ const tagGlbMeshAndNodesFromShapeEntries = async (
   glb: Uint8Array<ArrayBuffer>,
   entries: ShapeEntry[],
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const io = new NodeIO();
+  const io = new WebIO();
   const document = await io.readBinary(glb);
   const meshes = document.getRoot().listMeshes();
   for (const mesh of meshes) {

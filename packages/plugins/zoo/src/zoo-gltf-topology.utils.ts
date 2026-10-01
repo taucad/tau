@@ -1,4 +1,4 @@
-import { NodeIO } from '@gltf-transform/core';
+import { WebIO } from '@gltf-transform/core';
 import type { Document, JSONDocument, Mesh as GltfTransformMesh } from '@gltf-transform/core';
 
 import { embedGltfResources, registerTauGltfExtensions, TauCadTopology } from '@taucad/geometry-core';
@@ -411,7 +411,7 @@ export async function enrichZooGltfTopology(
   bytes: Uint8Array<ArrayBuffer>,
   options: EnrichZooGltfTopologyOptions,
 ): Promise<Uint8Array<ArrayBuffer>> {
-  const io = registerTauGltfExtensions(new NodeIO());
+  const io = registerTauGltfExtensions(new WebIO());
   const document =
     options.format === 'glb'
       ? await io.readBinary(bytes)

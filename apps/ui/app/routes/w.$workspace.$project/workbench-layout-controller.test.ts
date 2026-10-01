@@ -685,13 +685,12 @@ describe('workbench layout checked store', () => {
       expect(await store.edit(desired)).toBe(false);
       expect(memory.writes).not.toHaveBeenCalled();
       failRead = false;
-      for (let attempt = 0; attempt < 4 && memory.writes.mock.calls.length === 0; attempt++) {
-        await vi.runOnlyPendingTimersAsync();
-      }
-      expect(failWrite).toBe(false);
-      expect(memory.writes).toHaveBeenCalledTimes(1);
-      expect(workbenchRecords.layout.read(memory.get()!)).toMatchObject({ status: 'current', record: desired });
-      expect(errors).toHaveBeenCalled();
+      await vi.waitFor(() => {
+        expect(failWrite).toBe(false);
+        expect(memory.writes).toHaveBeenCalledTimes(1);
+        expect(workbenchRecords.layout.read(memory.get()!)).toMatchObject({ status: 'current', record: desired });
+        expect(errors).toHaveBeenCalled();
+      });
       store.dispose();
     } finally {
       vi.useRealTimers();

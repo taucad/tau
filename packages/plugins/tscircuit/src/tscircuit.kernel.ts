@@ -395,13 +395,14 @@ const circuitJsonToGlb = async (
 ): Promise<{ content: Uint8Array<ArrayBuffer>; issues: KernelIssue[] }> => {
   const { convertCircuitJsonToGltf } = await import('#engine/gltf.js');
   // The converter's browser worker path uses resvg-wasm for board layers.
-  const { value: glb, issues } = await withOfflineFetch(async () =>
-    convertCircuitJsonToGltf(asCircuitJson(circuitJson), { format: 'glb' }),
-  );
-  if (!(glb instanceof ArrayBuffer)) {
-    throw new TypeError('circuit-json-to-gltf did not return binary GLB bytes.');
-  }
-  return { content: await applyGlbConvention(new Uint8Array(glb), convention), issues };
+  const { value: content, issues } = await withOfflineFetch(async () => {
+    const glb = await convertCircuitJsonToGltf(asCircuitJson(circuitJson), { format: 'glb' });
+    if (!(glb instanceof ArrayBuffer)) {
+      throw new TypeError('circuit-json-to-gltf did not return binary GLB bytes.');
+    }
+    return applyGlbConvention(new Uint8Array(glb), convention);
+  });
+  return { content, issues };
 };
 
 const textExportFile = (format: 'csv' | 'txt' | 'json', name: string, text: string) =>

@@ -8,11 +8,13 @@
  * entry (serialized handle) and the mesh cache carries the display artifact.
  */
 
-import { describe, it, expect, beforeEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { z } from 'zod';
 import { createExportFile } from '@taucad/types/constants';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
-import type { AnyKernelDefinitionV2, KernelOffers, ResolveInput } from '#types/runtime-kernel-v2.types.js';
+import type { AnyKernelDefinitionV2, ResolveInput } from '#types/runtime-kernel-v2.types.js';
+import type { RuntimeContentInput } from '#types/runtime-content.types.js';
+import type { Rendering } from '#client/runtime-document.types.js';
 import type { KernelIssue } from '#types/runtime.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
@@ -27,7 +29,7 @@ import type { MiddlewarePlugin } from '#plugins/plugin-types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { NativeBuildInput, OperationOwner } from '#framework/render-artifact.js';
+import type { NativeBuildInput } from '#framework/render-artifact.js';
 
 type PhaseCounters = {
   create: number;
@@ -35,6 +37,13 @@ type PhaseCounters = {
   export: number;
   lastMeshedHandle?: unknown;
 };
+
+const workers: KernelRuntimeWorker[] = [];
+const documents = new Map<
+  KernelRuntimeWorker,
+  { documentId: string; parameters: Record<string, unknown>; intent: number }
+>();
+let requestSequence = 0;
 
 const displayBytes = new Uint8Array([9, 9, 9]);
 
@@ -96,12 +105,95 @@ async function createWorker(
   });
   const worker = new KernelRuntimeWorker({ runtime });
   await initializeWorkerForTesting(worker);
+  workers.push(worker);
   return worker;
 }
 
 const modelFile = () => createGeometryFile('model.mock');
 
+const openDocument = async (
+  worker: KernelRuntimeWorker,
+  input: { parameters?: Record<string, unknown>; evaluateOptions?: Record<string, unknown> } = {},
+): Promise<string> => {
+  const previous = documents.get(worker);
+  if (previous) {
+    return previous.documentId;
+  }
+  const documentId = `phase-document-${++requestSequence}`;
+  const parameters = input.parameters ?? {};
+  const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+  worker.onEvaluated = (event) => {
+    evaluated.push(event);
+  };
+  documents.set(worker, { documentId, parameters, intent: 1 });
+  worker.handleOpenDocument({
+    documentId,
+    intent: 1,
+    file: modelFile(),
+    parameters,
+    evaluateOptions: input.evaluateOptions,
+    watch: false,
+  });
+  await vi.waitFor(
+    () => {
+      expect(evaluated).toHaveLength(1);
+    },
+    { timeout: 10_000 },
+  );
+  return documentId;
+};
+
+const renderView = async (
+  worker: KernelRuntimeWorker,
+  input: { parameters?: Record<string, unknown>; view?: string; content?: RuntimeContentInput } = {},
+): Promise<Rendering> => {
+  const documentId = await openDocument(worker, { parameters: input.parameters });
+  const record = documents.get(worker)!;
+  if (input.parameters && JSON.stringify(input.parameters) !== JSON.stringify(record.parameters)) {
+    record.parameters = input.parameters;
+    record.intent++;
+    worker.handleUpdateDocument({ documentId, intent: record.intent, parameters: input.parameters });
+  }
+  const rendered: Rendering[] = [];
+  const subscriptionId = `phase-view-${++requestSequence}`;
+  worker.onRendered = (event) => {
+    if (event.subscriptionId === subscriptionId) {
+      rendered.push(event);
+    }
+  };
+  worker.handleOpenView({
+    documentId,
+    subscriptionId,
+    requestId: subscriptionId,
+    view: input.view,
+    content: input.content,
+  });
+  await vi.waitFor(
+    () => {
+      expect(rendered).toHaveLength(1);
+    },
+    { timeout: 10_000 },
+  );
+  worker.handleCloseView({ subscriptionId });
+  return rendered[0]!;
+};
+
+const exportViewDocument = async (worker: KernelRuntimeWorker, input: { options?: Record<string, unknown> } = {}) => {
+  const documentId = await openDocument(worker);
+  return worker.exportDocument({
+    documentId,
+    operationId: `phase-export-${++requestSequence}`,
+    target: 'step',
+    ...input,
+  });
+};
+
 describe('mesh/build/export phase separation', () => {
+  afterEach(async () => {
+    await Promise.all(workers.splice(0).map(async (worker) => worker.cleanup()));
+    documents.clear();
+  });
+
   beforeEach(async () => {
     await seedTestFileSystem({ 'model.mock': 'mock-model' });
   });
@@ -109,16 +201,6 @@ describe('mesh/build/export phase separation', () => {
   it('reuses one evaluation across A, B, A views without compute middleware and isolates render warnings', async () => {
     const rendered: string[] = [];
     let evaluations = 0;
-    class SelectingWorker extends KernelRuntimeWorker {
-      public selectedView: 'a' | 'b' = 'a';
-
-      protected override selectDefaultViewForOwner(
-        _owner: OperationOwner,
-        _offers: KernelOffers,
-      ): { view: string; mimeType: 'model/gltf-binary' } {
-        return { view: this.selectedView, mimeType: 'model/gltf-binary' };
-      }
-    }
     const definition = createDeferredKernel(
       { create: 0, mesh: 0, export: 0 },
       {
@@ -147,17 +229,20 @@ describe('mesh/build/export phase separation', () => {
       middleware: [],
       transcoders: [],
     });
-    const worker = new SelectingWorker({ runtime });
+    const worker = new KernelRuntimeWorker({ runtime });
     await initializeWorkerForTesting(worker);
+    workers.push(worker);
     try {
-      const a1 = await worker.createGeometry({ file: modelFile(), parameters: {} });
-      worker.selectedView = 'b';
-      const b = await worker.createGeometry({ file: modelFile(), parameters: {} });
-      worker.selectedView = 'a';
-      const a2 = await worker.createGeometry({ file: modelFile(), parameters: {} });
+      const a1 = await renderView(worker, { view: 'a' });
+      const b = await renderView(worker, { view: 'b' });
+      const a2 = await renderView(worker, { view: 'a' });
       expect([a1, b, a2].every((result) => result.success)).toBe(true);
       expect(evaluations).toBe(1);
-      expect(rendered).toEqual(['a', 'b', 'a']);
+      expect(rendered).toEqual(['a', 'b']);
+      if (a1.success && a2.success) {
+        expect(a2.artifact).toEqual(a1.artifact);
+        expect(a2.evaluationId).toBe(a1.evaluationId);
+      }
       expect(a1.issues).toEqual([]);
       expect(b.issues.map((issue) => issue.message)).toContain('B only');
       expect(a2.issues).toEqual([]);
@@ -196,8 +281,11 @@ describe('mesh/build/export phase separation', () => {
     });
     const worker = await createWorker(definition, [narrowing()]);
     try {
-      const first = await worker.createGeometry({ file: modelFile(), parameters: {} });
-      const second = await worker.createGeometry({ file: modelFile(), parameters: {} });
+      const first = await renderView(worker);
+      const record = documents.get(worker)!;
+      record.intent++;
+      worker.handleUpdateDocument({ documentId: record.documentId, intent: record.intent });
+      const second = await renderView(worker);
       expect(first.success && second.success).toBe(true);
       expect(evaluations).toBe(1);
       expect(rendered).toEqual(['b', 'b']);
@@ -235,15 +323,15 @@ describe('mesh/build/export phase separation', () => {
     );
     const worker = await createWorker(definition);
     try {
-      const first = await worker.createGeometry({ file: modelFile(), parameters: { revision: 1 } });
-      const second = await worker.createGeometry({ file: modelFile(), parameters: { revision: 2 } });
+      const first = await renderView(worker, { parameters: { revision: 1 } });
+      const second = await renderView(worker, { parameters: { revision: 2 } });
       expect(first.success).toBe(true);
       expect(second.success).toBe(false);
       expect(released).toEqual([{ revision: 1 }]);
-      const exported = await worker.exportGeometry('step');
+      const exported = await exportViewDocument(worker);
       expect(exported.success).toBe(true);
       if (exported.success) {
-        expect(exported.data[0]?.bytes).toEqual(new Uint8Array([2]));
+        expect(exported.files[0].bytes).toEqual(new Uint8Array([2]));
       }
       expect(evaluations).toBe(2);
     } finally {
@@ -256,18 +344,15 @@ describe('mesh/build/export phase separation', () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const worker = await createWorker(createDeferredKernel(counters));
 
-    const result = await worker.createGeometry({
-      file: modelFile(),
-      parameters: {},
-    });
+    const result = await renderView(worker);
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data.format).toBe('gltf');
-      if (result.data.format === 'gltf') {
-        expect(result.data.content).toEqual(displayBytes);
+      expect(result.artifact.mimeType).toBe('model/gltf-binary');
+      if (result.artifact.mimeType === 'model/gltf-binary') {
+        expect(result.artifact.content).toEqual(displayBytes);
       }
-      expect(result.data.hash).toBeTruthy();
+      expect(result.hash).toBeTruthy();
     }
     expect(counters.create).toBe(1);
     expect(counters.mesh).toBe(1);
@@ -303,10 +388,7 @@ describe('mesh/build/export phase separation', () => {
     });
     const worker = await createWorker(createDeferredKernel(counters), [create(), mesh(), exportOnly()]);
 
-    const result = await worker.createGeometry({
-      file: modelFile(),
-      parameters: {},
-    });
+    const result = await renderView(worker);
     expect(result.success).toBe(true);
 
     expect(createDependencies.filter((dependency) => dependency.type === 'middleware')).toEqual([
@@ -340,11 +422,7 @@ describe('mesh/build/export phase separation', () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const worker = await createWorker(createDeferredKernel(counters));
 
-    const result = await worker.exportModel({
-      format: 'step',
-      file: modelFile(),
-      parameters: {},
-    });
+    const result = await exportViewDocument(worker);
 
     expect(result.success).toBe(true);
     expect(counters.create).toBe(1);
@@ -404,11 +482,9 @@ describe('mesh/build/export phase separation', () => {
     );
 
     try {
-      const exported = await worker.exportModel({
-        format: 'step',
-        file: modelFile(),
-        parameters: {},
-        exportOptions: {
+      await openDocument(worker, { evaluateOptions: { tessellation: { segments: 64, samples: [9] } } });
+      const exported = await exportViewDocument(worker, {
+        options: {
           tessellation: { segments: 64, samples: [9] },
           coordinateSystem: 'z-up',
         },
@@ -425,10 +501,9 @@ describe('mesh/build/export phase separation', () => {
       expect('operation' in createInputs[0]!).toBe(false);
       expect(counters).toMatchObject({ create: 1, mesh: 0, export: 1 });
 
-      const displayed = await worker.createGeometry({
-        file: modelFile(),
-        parameters: {},
-      });
+      worker.handleCloseDocument({ documentId: documents.get(worker)!.documentId });
+      documents.delete(worker);
+      const displayed = await renderView(worker);
       expect(displayed.success).toBe(true);
       expect(createInputs[1]).toEqual({
         entryPath: 'model.mock',
@@ -448,10 +523,7 @@ describe('mesh/build/export phase separation', () => {
     const counters: PhaseCounters = { create: 0, mesh: 0, export: 0 };
     const worker = await createWorker(createDeferredKernel(counters, { render: undefined }));
 
-    const result = await worker.createGeometry({
-      file: modelFile(),
-      parameters: {},
-    });
+    const result = await renderView(worker);
 
     expect(result.success).toBe(false);
     if (!result.success) {
@@ -477,14 +549,11 @@ describe('mesh/build/export phase separation', () => {
       }),
     );
 
-    const result = await worker.createGeometry({
-      file: modelFile(),
-      parameters: {},
-    });
+    const result = await renderView(worker);
 
     expect(result.success).toBe(true);
-    if (result.success && result.data.format === 'gltf') {
-      expect(result.data.content).toEqual(inlineBytes);
+    if (result.success && result.artifact.mimeType === 'model/gltf-binary') {
+      expect(result.artifact.content).toEqual(inlineBytes);
     }
     expect(counters.create).toBe(1);
     expect(counters.mesh).toBe(1);
@@ -530,16 +599,8 @@ describe('mesh/build/export phase separation', () => {
     );
 
     try {
-      const deferredResult = await deferred.createGeometry({
-        file: modelFile(),
-        parameters: {},
-        content: { includeEdges: true },
-      });
-      const inlineResult = await inline.createGeometry({
-        file: modelFile(),
-        parameters: {},
-        content: { includeEdges: true },
-      });
+      const deferredResult = await renderView(deferred, { content: { includeEdges: true } });
+      const inlineResult = await renderView(inline, { content: { includeEdges: true } });
       expect(deferredResult.success).toBe(true);
       expect(inlineResult.success).toBe(true);
       expect(deferredCalls).toEqual({ create: 1, mesh: 1 });

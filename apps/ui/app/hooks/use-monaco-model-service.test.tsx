@@ -74,7 +74,6 @@ const capabilities: AppCapabilitiesManifest = {
   ],
   routes: [],
   renderCapabilities: {},
-  autonomousRenderLoop: true,
   transport: createMockRuntimeClient().transport,
 };
 

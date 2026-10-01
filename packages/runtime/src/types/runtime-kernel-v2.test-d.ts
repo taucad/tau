@@ -1,7 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
 import { defineKernelV2, nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
-import type { ExportDeclaration, ExportFile, ViewDeclaration } from '#types/runtime-kernel-v2.types.js';
+import type { DescribeResult, ExportDeclaration, ExportFile, ViewDeclaration } from '#types/runtime-kernel-v2.types.js';
 import { definePlugin } from '#plugins/plugin.js';
 import type { KernelRenderContentFor } from '#plugins/plugin-types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
@@ -12,7 +12,10 @@ const definition = defineKernelV2({
   extensions: ['tsx', 'jsx'],
   name: 'Typed',
   version: '1',
-  optionsSchema: z.object({ endpoint: z.string(), retry: z.number().default(1) }),
+  optionsSchema: z.object({
+    endpoint: z.string(),
+    retry: z.number().default(1),
+  }),
   evaluateOptionsSchema: z.object({ density: z.number().default(2) }),
   views: {
     board: { title: 'Board', mimeType: 'model/gltf-binary' },
@@ -22,7 +25,11 @@ const definition = defineKernelV2({
       optionsSchema: z.object({ pins: z.boolean().default(false) }),
       content: ['includeEdges'],
     },
-    schematic: { title: 'Schematic', mimeType: 'image/svg+xml', instances: true },
+    schematic: {
+      title: 'Schematic',
+      mimeType: 'image/svg+xml',
+      instances: true,
+    },
   },
   exports: {
     bom: { title: 'BOM', mimeType: 'text/csv', extension: 'csv' },
@@ -80,7 +87,9 @@ const definition = defineKernelV2({
       // @ts-expect-error -- BOM has no board options.
       void input.options.scale;
     }
-    return { files: [{ name: 'bom.csv', mimeType: 'text/csv', bytes: new Uint8Array([1]) }] };
+    return {
+      files: [{ name: 'bom.csv', mimeType: 'text/csv', bytes: new Uint8Array([1]) }],
+    };
   },
   serializeHandle: ({ handle }) => JSON.stringify(handle),
   deserializeHandle: ({ serialized }) => {
@@ -106,6 +115,56 @@ describe('v2 kernel authoring', () => {
     } satisfies ExportDeclaration;
     void scalarView;
     void scalarExport;
+    const emptyContent = {
+      title: 'Empty',
+      mimeType: 'text/plain',
+      // @ts-expect-error -- native content declarations are positive and nonempty.
+      content: [],
+    } satisfies ViewDeclaration;
+    const unknownContent = {
+      title: 'Unknown',
+      mimeType: 'text/plain',
+      // @ts-expect-error -- only canonical framework content keys are accepted.
+      content: ['includeSketches'],
+    } satisfies ViewDeclaration;
+    void emptyContent;
+    void unknownContent;
+  });
+
+  it('rejects non-object evaluation options and one-sided handle snapshots', () => {
+    const sourceOnly = {
+      id: 'source-only',
+      extensions: ['src'],
+      name: 'Source only',
+      version: '1',
+      views: {},
+      exports: {},
+      async initialize() {
+        return {};
+      },
+      async resolve() {
+        return { resolved: [], unresolved: [] };
+      },
+      async describe() {
+        return { success: false, issues: [] } satisfies DescribeResult;
+      },
+      async evaluate(input: { entryPath: string }) {
+        return { handle: { source: input.entryPath } };
+      },
+    };
+    defineKernelV2(sourceOnly);
+    defineKernelV2({
+      ...sourceOnly,
+      // @ts-expect-error -- evaluation options must be an object schema.
+      evaluateOptionsSchema: z.string(),
+    });
+    // @ts-expect-error -- durable handle snapshots require both serializer and deserializer.
+    defineKernelV2({
+      ...sourceOnly,
+      serializeHandle({ handle }: { handle: { source: string } }) {
+        return handle.source;
+      },
+    });
   });
   it('preserves the real factory through selected plugin presets and runtime registries', () => {
     const toolkit = definePlugin({
@@ -117,7 +176,10 @@ describe('v2 kernel authoring', () => {
     expectTypeOf(selected.capabilities.kernels[0].id).toEqualTypeOf<'typed'>();
     expectTypeOf(selected.capabilities.kernels[0].extensions).toEqualTypeOf<readonly ['tsx', 'jsx']>();
     expectTypeOf(selected.capabilities.kernels[0].views.pcb.mimeType).toEqualTypeOf<'image/svg+xml'>();
-    const runtime = defineRuntime({ plugins: [selected], kernels: [definition({ endpoint: 'direct' })] });
+    const runtime = defineRuntime({
+      plugins: [selected],
+      kernels: [definition({ endpoint: 'direct' })],
+    });
     expectTypeOf<RuntimeKernels<typeof runtime>[0]['id']>().toEqualTypeOf<'typed'>();
     expectTypeOf<KernelRenderContentFor<RuntimeKernels<typeof runtime>, 'typed'>>().toEqualTypeOf<'includeEdges'>();
     expectTypeOf<RuntimeKernels<typeof runtime>[1]['exports']['board']['extension']>().toEqualTypeOf<'glb'>();
@@ -144,14 +206,19 @@ describe('v2 kernel authoring', () => {
   });
 
   it('requires render and write only for declared maps', () => {
-    const hoistedView = { title: 'Board', mimeType: 'model/gltf-binary' } satisfies ViewDeclaration;
+    const hoistedView = {
+      title: 'Board',
+      mimeType: 'model/gltf-binary',
+    } satisfies ViewDeclaration;
     defineKernelV2({
       id: 'export-only',
       extensions: ['data'],
       name: 'Export only',
       version: '1',
       views: {},
-      exports: { data: { title: 'Data', mimeType: 'text/plain', extension: 'txt' } },
+      exports: {
+        data: { title: 'Data', mimeType: 'text/plain', extension: 'txt' },
+      },
       async initialize() {
         return { id: 1 };
       },

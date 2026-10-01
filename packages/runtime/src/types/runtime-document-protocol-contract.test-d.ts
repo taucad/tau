@@ -71,12 +71,12 @@ describe('document protocol type contract', () => {
         ...Array<{ readonly name: string; readonly mimeType: string; readonly bytes: BinaryContentDelivery }>,
       ]
     >();
-    // @ts-expect-error A pooled wire key has not yet been materialized to public bytes.
-    expectTypeOf<Extract<WireExport, { success: true }>['files'][number]['bytes']>().toExtend<
+    // A pooled wire key has not yet been materialized to public bytes.
+    expectTypeOf<Extract<WireExport, { success: true }>['files'][number]['bytes']>().not.toExtend<
       Uint8Array<ArrayBuffer>
     >();
-    // @ts-expect-error A wire artifact may still contain an inline/pooled delivery wrapper.
-    expectTypeOf<Extract<WireRendered, { success: true }>['artifact']>().toExtend<
+    // A wire artifact may still contain an inline/pooled delivery wrapper.
+    expectTypeOf<Extract<WireRendered, { success: true }>['artifact']>().not.toExtend<
       Extract<WireRendering, { success: true }>['artifact'] & { content: Uint8Array<ArrayBuffer> | string }
     >();
   });

@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MockInstance } from 'vitest';
 import { RuntimeTracer } from '#framework/runtime-tracer.js';
-import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
+import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 
 describe('RuntimeTracer', () => {
   let measureSpy: MockInstance<typeof performance.measure>;

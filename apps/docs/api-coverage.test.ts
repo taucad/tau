@@ -120,8 +120,6 @@ const pendingApiReference: ReadonlySet<string> = new Set([
   'LruMap',
   'MaterializedRender',
   'MergeExportMap',
-  'MeshGeometryInput',
-  'MeshGeometryOutput',
   'MiddlewareRegistration',
   'MiddlewareRegistrations',
   'MimeType',

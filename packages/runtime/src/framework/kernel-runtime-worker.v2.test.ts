@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
+import { digestContent } from '@taucad/cache-core';
 import { createKernelSuccess } from '#kernels/kernel-helpers.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { sourceRevisionFileDigest } from '#framework/kernel-worker.js';
@@ -8,7 +9,7 @@ import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
-import { abortReason } from '#types/runtime-protocol.types.js';
+import { abortReason } from '#types/runtime-wire.types.js';
 import { runtimeDocumentProtocolSchemas } from '#types/runtime-document-protocol.schemas.js';
 import { checkAbort } from '#framework/cooperative-abort.js';
 import { signalDocumentAbort } from '#transport/_internal/abort-channel.js';
@@ -45,7 +46,9 @@ describe('v2 kernel boundary with the current client', () => {
         return {};
       },
       async resolve() {
-        throw new Error('Bridge proxy closed');
+        throw Object.assign(new Error('Bridge proxy closed'), {
+          issues: [{ path: ['bridge', 'metadata'], code: 'custom', message: 'Expected record' }],
+        });
       },
       async describe() {
         return createKernelSuccess({ parameters });
@@ -78,6 +81,9 @@ describe('v2 kernel boundary with the current client', () => {
       });
       expect(rendered[0]?.success).toBe(false);
       expect(Object.hasOwn(rendered[0] ?? {}, 'sourceRevision')).toBe(false);
+      expect(rendered[0]?.issues).toEqual([
+        expect.objectContaining({ code: 'RUNTIME', severity: 'error', message: 'Bridge proxy closed' }),
+      ]);
       const decoded = msgpackCodec.decode(msgpackCodec.encode(rendered[0]));
       expect(runtimeDocumentProtocolSchemas.notifies.rendered.safeParse(decoded).success).toBe(true);
     } finally {
@@ -89,6 +95,79 @@ describe('v2 kernel boundary with the current client', () => {
     const path = '.tau/parameters/model.circuit.json';
     expect(sourceRevisionFileDigest('missing', path)).toBe('missing');
     expect(sourceRevisionFileDigest('a'.repeat(64), path)).toBe(`sha256:${'a'.repeat(64)}`);
+  });
+
+  it('names the exact entry digest on evaluated and exported results after a staged rewrite', async () => {
+    const kernel = defineKernelV2({
+      id: 'revision-provenance',
+      extensions: ['circuit'] as const,
+      name: 'Revision provenance',
+      version: '1.0.0',
+      views: {},
+      exports: { text: { title: 'Text', mimeType: 'text/plain', extension: 'txt' } },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return createKernelSuccess({ parameters });
+      },
+      async evaluate({ entryPath }, services) {
+        const source = await services.filesystem.readFile(entryPath, 'utf8');
+        return { handle: source, views: [] as const, exports: ['text'] as const };
+      },
+      async write({ handle }) {
+        return {
+          files: [{ name: 'source.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(handle) }] as const,
+        };
+      },
+    })();
+    await seedTestFileSystem({ 'model.circuit': 'first' });
+    const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
+    await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    try {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      const first = await worker.exportDocument({ documentId: 'doc', operationId: 'first', target: 'text' });
+      worker.handleUpdateDocument({
+        documentId: 'doc',
+        intent: 2,
+        stage: { 'model.circuit': new TextEncoder().encode('second') },
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(2);
+      });
+      const second = await worker.exportDocument({ documentId: 'doc', operationId: 'second', target: 'text' });
+      expect(first.success).toBe(true);
+      expect(second.success).toBe(true);
+      const digests = await Promise.all(
+        ['first', 'second'].map(async (source) => digestContent({ bytes: new TextEncoder().encode(source) })),
+      );
+      for (const [index, source, result] of [
+        [0, 'first', first],
+        [1, 'second', second],
+      ] as const) {
+        expect(evaluated[index]?.sourceRevision?.files['model.circuit']).toBe(digests[index]);
+        expect(result.sourceRevision).toEqual(evaluated[index]?.sourceRevision);
+        expect(result.success && new TextDecoder().decode(result.files[0].bytes)).toBe(source);
+      }
+    } finally {
+      await worker.cleanup();
+    }
   });
 
   it('preserves a model dependency named __proto__ as an own source-revision key', async () => {
@@ -153,7 +232,7 @@ describe('v2 kernel boundary with the current client', () => {
       version: '1.0.0',
       views: {
         ['__proto__']: { title: 'Prototype', mimeType: 'image/svg+xml', instances: true },
-        constructor: { title: 'Constructor', mimeType: 'image/svg+xml' },
+        constructor: { title: 'Constructor', mimeType: 'image/svg+xml', instances: true },
       },
       exports: {},
       async initialize() {
@@ -170,7 +249,10 @@ describe('v2 kernel boundary with the current client', () => {
           handle: {},
           views: ['__proto__', 'constructor'] as const,
           exports: [] as const,
-          instances: { ['__proto__']: [{ id: 'part', title: 'Part' }], constructor: undefined },
+          instances: {
+            ['__proto__']: [{ id: 'part', title: 'Part' }],
+            constructor: [{ id: 'other', title: 'Other' }],
+          },
         };
       },
       async render() {
@@ -199,10 +281,11 @@ describe('v2 kernel boundary with the current client', () => {
       await vi.waitFor(() => {
         expect(evaluated).toHaveLength(1);
       });
-      expect(evaluated[0]?.success).toBe(true);
+      expect(evaluated[0]?.success, JSON.stringify(evaluated[0]?.issues)).toBe(true);
       if (evaluated[0]?.success) {
         expect(evaluated[0].views.map((view) => view.id)).toEqual(['__proto__', 'constructor']);
         expect(evaluated[0].views[0]?.instances).toEqual([{ id: 'part', title: 'Part' }]);
+        expect(evaluated[0].views[1]?.instances).toEqual([{ id: 'other', title: 'Other' }]);
       }
       worker.handleOpenView({
         documentId: 'special',
@@ -453,7 +536,7 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const signalBuffer = new SharedArrayBuffer(16);
+    const signalBuffer = new SharedArrayBuffer(8);
     worker.setSignalBuffer(signalBuffer);
     let oldGeneration: number | undefined;
     const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
@@ -531,7 +614,7 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
-    const buffer = new SharedArrayBuffer(16);
+    const buffer = new SharedArrayBuffer(8);
     worker.setSignalBuffer(buffer);
     const phases: string[] = [];
     worker.onDocumentProgressUpdate = (event) => {
@@ -1054,19 +1137,24 @@ describe('v2 kernel boundary with the current client', () => {
       async describe() {
         return createKernelSuccess({ parameters });
       },
-      async evaluate({ parameters: input }) {
+      async evaluate({ entryPath, parameters: input }, services) {
+        const source = await services.filesystem.readFile(entryPath, 'utf8');
         const version = Number(input['version']);
         if (version === 1) {
           entered.resolve();
           await release.promise;
         }
-        return { handle: { version }, views: [] as const, exports: ['bom'] as const };
+        return { handle: { version, source }, views: [] as const, exports: ['bom'] as const };
       },
       async write({ handle }) {
         writes.push(handle.version);
         return {
           files: [
-            { name: 'bom.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(String(handle.version)) },
+            {
+              name: 'bom.txt',
+              mimeType: 'text/plain',
+              bytes: new TextEncoder().encode(`${handle.version}:${handle.source}`),
+            },
           ] as const,
         };
       },
@@ -1088,17 +1176,33 @@ describe('v2 kernel boundary with the current client', () => {
       });
       await entered.promise;
       const pinned = worker.exportDocument({ documentId: 'doc', operationId: 'pinned', target: 'bom' });
-      worker.handleUpdateDocument({ documentId: 'doc', intent: 2, parameters: { version: 2 } });
+      worker.handleUpdateDocument({
+        documentId: 'doc',
+        intent: 2,
+        parameters: { version: 2 },
+        stage: { 'model.circuit': new TextEncoder().encode('board-two') },
+      });
       release.resolve();
       const old = await pinned;
       expect(old.success).toBe(true);
       if (old.success) {
-        expect(new TextDecoder().decode(old.files[0].bytes)).toBe('1');
+        expect(new TextDecoder().decode(old.files[0].bytes)).toBe('1:board');
+        expect(old.sourceRevision?.files['model.circuit']).toBe(
+          await digestContent({ bytes: new TextEncoder().encode('board') }),
+        );
       }
       await vi.waitFor(() => {
         expect(evaluated.at(-1)?.intent).toBe(2);
       });
-      expect(writes).toEqual([1]);
+      const latest = await worker.exportDocument({ documentId: 'doc', operationId: 'latest', target: 'bom' });
+      expect(latest.success).toBe(true);
+      if (latest.success) {
+        expect(new TextDecoder().decode(latest.files[0].bytes)).toBe('2:board-two');
+        expect(latest.sourceRevision?.files['model.circuit']).toBe(
+          await digestContent({ bytes: new TextEncoder().encode('board-two') }),
+        );
+      }
+      expect(writes).toEqual([1, 2]);
     } finally {
       release.resolve();
       await worker.cleanup();
@@ -1235,12 +1339,26 @@ describe('v2 kernel boundary with the current client', () => {
       runtime: defineRuntime({ kernels: [kernel], transcoders: [transcoder] }),
     });
     await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
     try {
-      const result = await worker.exportModel({
+      worker.handleOpenDocument({
+        documentId: 'routed-doc',
+        intent: 1,
         file: createGeometryFile('model.circuit'),
         parameters: {},
-        format: 'csv',
-        exportOptions: { source: 'ok', edge: true },
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      const result = await worker.exportDocument({
+        documentId: 'routed-doc',
+        operationId: 'routed-valid',
+        target: 'csv',
+        options: { source: 'ok', edge: true },
       });
       expect(result.success, JSON.stringify(result.issues)).toBe(true);
       expect(write).toHaveBeenCalledWith(
@@ -1249,11 +1367,11 @@ describe('v2 kernel boundary with the current client', () => {
         expect.any(Object),
       );
       expect(transcode).toHaveBeenCalledOnce();
-      const invalid = await worker.exportModel({
-        file: createGeometryFile('model.circuit'),
-        parameters: {},
-        format: 'csv',
-        exportOptions: { source: 1, edge: true },
+      const invalid = await worker.exportDocument({
+        documentId: 'routed-doc',
+        operationId: 'routed-invalid',
+        target: 'csv',
+        options: { source: 1, edge: true },
       });
       expect(invalid.success).toBe(false);
       expect(invalid.issues[0]?.code).toBe('EXPORT_OPTIONS_INVALID');
@@ -1314,12 +1432,35 @@ describe('v2 kernel boundary with the current client', () => {
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
     try {
-      const result = await worker.createGeometry({
+      const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+      const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+      worker.onEvaluated = (event) => {
+        evaluated.push(event);
+      };
+      worker.onRendered = (event) => {
+        rendered.push(event);
+      };
+      worker.handleOpenDocument({
+        documentId: 'transform-doc',
+        intent: 1,
         file: createGeometryFile('model.circuit'),
         parameters: {},
-        options: { build: '5', scale: '6' },
+        evaluateOptions: { build: '5' },
+        watch: false,
       });
-      expect(result.success, JSON.stringify(result.issues)).toBe(true);
+      worker.handleOpenView({
+        documentId: 'transform-doc',
+        subscriptionId: 'transform-view',
+        requestId: 'transform-render',
+        view: 'view',
+        options: { scale: '6' },
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+        expect(rendered).toHaveLength(1);
+      });
+      expect(evaluated[0]?.success).toBe(true);
+      expect(rendered[0]?.success).toBe(true);
       expect(worker.capabilitiesManifest.renderCapabilities['v2-transforms']?.renderOptions.defaults).toEqual({
         scale: '3',
       });
@@ -1336,7 +1477,12 @@ describe('v2 kernel boundary with the current client', () => {
         expect.any(Object),
         expect.any(Object),
       );
-      const exported = await worker.exportGeometry('csv', { count: '7' });
+      const exported = await worker.exportDocument({
+        documentId: 'transform-doc',
+        operationId: 'transform-write',
+        target: 'data',
+        options: { count: '7' },
+      });
       expect(exported.success, JSON.stringify(exported.issues)).toBe(true);
       expect(write).toHaveBeenCalledWith(
         expect.objectContaining({ options: { count: 7 } }),
@@ -1406,12 +1552,27 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
     try {
-      const result = await worker.createGeometry({ file: createGeometryFile('model.circuit'), parameters: {} });
-      expect(result.success).toBe(false);
-      expect(result.issues[0]?.message).toContain(message);
+      worker.handleOpenDocument({
+        documentId: 'invalid-offers-doc',
+        intent: 1,
+        file: createGeometryFile('model.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(evaluated[0]?.success).toBe(false);
+      expect(evaluated[0]?.issues[0]?.message).toContain(message);
       expect(render).not.toHaveBeenCalled();
-      expect(releaseHandle).toHaveBeenCalledOnce();
+      await vi.waitFor(() => {
+        expect(releaseHandle).toHaveBeenCalledOnce();
+      });
     } finally {
       await worker.cleanup();
     }
@@ -1496,35 +1657,15 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel], middleware: [middleware] }) });
     await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
     try {
-      const result = await worker.createGeometry({
-        file: createGeometryFile('model.circuit'),
-        parameters: {},
-        options: { labels: true },
-        content: { includeEdges: true, includeTopology: true },
-      });
-      expect(result.success).toBe(true);
-      if (result.success) {
-        expect(result.data.format).toBe('svg');
-        if (result.data.format === 'svg') {
-          expect(result.data.content).toContain('schematic:true:true');
-        }
-      }
-      expect(evaluate).toHaveBeenCalledTimes(1);
-      expect(render).toHaveBeenCalledTimes(1);
-      const exported = await worker.exportGeometry('csv', undefined, { includeTopology: true });
-      expect(exported.success, JSON.stringify(exported.issues)).toBe(true);
-      if (exported.success) {
-        expect(exported.data).toHaveLength(1);
-      }
-      expect(write).toHaveBeenCalledTimes(1);
-      expect(phases).toContain('evaluate:model.circuit');
-      expect(phases).toContain('render:schematic:image/svg+xml:true');
-      expect(phases).toContain('write:bom:text/csv:csv:true');
-      const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
-      worker.onEvaluated = (event) => {
-        evaluated.push(event);
-      };
       worker.handleOpenDocument({
         documentId: 'content-doc',
         intent: 1,
@@ -1532,17 +1673,39 @@ describe('v2 kernel boundary with the current client', () => {
         parameters: {},
         watch: false,
       });
+      worker.handleOpenView({
+        documentId: 'content-doc',
+        subscriptionId: 'content-view',
+        requestId: 'content-render',
+        view: 'schematic',
+        options: { labels: true },
+        content: { includeEdges: true, includeTopology: true },
+      });
       await vi.waitFor(() => {
         expect(evaluated).toHaveLength(1);
+        expect(rendered).toHaveLength(1);
       });
-      const documentExport = await worker.exportDocument({
+      expect(rendered[0]?.success).toBe(true);
+      if (rendered[0]?.success && rendered[0].artifact.mimeType === 'image/svg+xml') {
+        expect(rendered[0].artifact.content).toContain('schematic:true:true');
+      }
+      expect(evaluate).toHaveBeenCalledTimes(1);
+      expect(render).toHaveBeenCalledTimes(1);
+      const exported = await worker.exportDocument({
         documentId: 'content-doc',
         operationId: 'content-export',
         target: 'bom',
         content: { includeTopology: true },
       });
-      expect(documentExport.success, JSON.stringify(documentExport.issues)).toBe(true);
-      expect(phases.filter((phase) => phase === 'write:bom:text/csv:csv:true')).toHaveLength(2);
+      expect(exported.success, JSON.stringify(exported.issues)).toBe(true);
+      if (exported.success) {
+        expect(exported.files).toHaveLength(1);
+      }
+      expect(write).toHaveBeenCalledTimes(1);
+      expect(phases).toContain('evaluate:model.circuit');
+      expect(phases).toContain('render:schematic:image/svg+xml:true');
+      expect(phases).toContain('write:bom:text/csv:csv:true');
+      expect(phases.filter((phase) => phase === 'write:bom:text/csv:csv:true')).toHaveLength(1);
     } finally {
       await worker.cleanup();
     }
@@ -1580,21 +1743,62 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'first.circuit': 'first', 'empty.circuit': 'empty' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
     try {
-      const first = await worker.createGeometry({ file: createGeometryFile('first.circuit'), parameters: {} });
-      expect(first.success).toBe(true);
-      if (first.success && first.data.format === 'svg') {
-        expect(first.data.content).toContain('b');
-      }
-      const unsupported = await worker.createGeometry({
+      worker.handleOpenDocument({
+        documentId: 'first-doc',
+        intent: 1,
         file: createGeometryFile('first.circuit'),
         parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({
+        documentId: 'first-doc',
+        subscriptionId: 'first-view',
+        requestId: 'first-render',
+        options: {},
+      });
+      await vi.waitFor(() => {
+        expect(
+          rendered.some((event) => event.subscriptionId === 'first-view' && event.requestId === 'first-render'),
+        ).toBe(true);
+      });
+      const first = rendered.find((event) => event.requestId === 'first-render');
+      expect(first?.success).toBe(true);
+      if (first?.success && first.artifact.mimeType === 'image/svg+xml') {
+        expect(first.artifact.content).toContain('b');
+      }
+      worker.handleUpdateView({
+        subscriptionId: 'first-view',
+        requestId: 'unsupported-render',
         content: { includeEdges: true },
       });
-      expect(unsupported.success).toBe(false);
-      expect(unsupported.issues[0]?.code).toBe('RUNTIME_CONTENT_UNSUPPORTED');
-      const empty = await worker.createGeometry({ file: createGeometryFile('empty.circuit'), parameters: {} });
-      expect(empty.success).toBe(false);
+      await vi.waitFor(() => {
+        expect(rendered.some((event) => event.requestId === 'unsupported-render')).toBe(true);
+      });
+      const unsupported = rendered.find((event) => event.requestId === 'unsupported-render');
+      expect(unsupported?.success).toBe(false);
+      expect(unsupported?.issues[0]?.code).toBe('RUNTIME_CONTENT_UNSUPPORTED');
+      worker.handleOpenDocument({
+        documentId: 'empty-doc',
+        intent: 1,
+        file: createGeometryFile('empty.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({
+        documentId: 'empty-doc',
+        subscriptionId: 'empty-view',
+        requestId: 'empty-render',
+        options: {},
+      });
+      await vi.waitFor(() => {
+        expect(rendered.some((event) => event.requestId === 'empty-render')).toBe(true);
+      });
+      expect(rendered.find((event) => event.requestId === 'empty-render')?.success).toBe(false);
       expect(render).toHaveBeenCalledTimes(1);
     } finally {
       await worker.cleanup();
@@ -1641,21 +1845,62 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'first.circuit': 'first', 'second.circuit': 'second' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
+    const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
     try {
-      const first = await worker.createGeometry({ file: createGeometryFile('first.circuit'), parameters: {} });
-      expect(first.success).toBe(true);
-      if (first.success && first.data.format === 'svg') {
-        expect(first.data.content).toContain('a');
+      worker.handleOpenDocument({
+        documentId: 'first-offers-doc',
+        intent: 1,
+        file: createGeometryFile('first.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({
+        documentId: 'first-offers-doc',
+        subscriptionId: 'first-offers-view',
+        requestId: 'first-offers-render',
+        options: {},
+      });
+      worker.handleOpenDocument({
+        documentId: 'second-offers-doc',
+        intent: 1,
+        file: createGeometryFile('second.circuit'),
+        parameters: {},
+        watch: false,
+      });
+      worker.handleOpenView({
+        documentId: 'second-offers-doc',
+        subscriptionId: 'second-offers-view',
+        requestId: 'second-offers-render',
+        options: {},
+      });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(2);
+      });
+      const first = rendered.find((event) => event.requestId === 'first-offers-render');
+      const second = rendered.find((event) => event.requestId === 'second-offers-render');
+      expect(first?.success).toBe(true);
+      expect(second?.success).toBe(true);
+      if (first?.success && first.artifact.mimeType === 'image/svg+xml') {
+        expect(first.artifact.content).toContain('a');
       }
-      const second = await worker.createGeometry({ file: createGeometryFile('second.circuit'), parameters: {} });
-      expect(second.success).toBe(true);
-      if (second.success && second.data.format === 'svg') {
-        expect(second.data.content).toContain('b');
+      if (second?.success && second.artifact.mimeType === 'image/svg+xml') {
+        expect(second.artifact.content).toContain('b');
       }
-      const unavailable = await worker.exportGeometry('txt');
+      const unavailable = await worker.exportDocument({
+        documentId: 'second-offers-doc',
+        operationId: 'unavailable-first-export',
+        target: 'first',
+      });
       expect(unavailable.success).toBe(false);
       expect(unavailable.issues[0]?.code).toBe('EXPORT_UNKNOWN');
-      const available = await worker.exportGeometry('csv');
+      const available = await worker.exportDocument({
+        documentId: 'second-offers-doc',
+        operationId: 'available-second-export',
+        target: 'second',
+      });
       expect(available.success, JSON.stringify(available.issues)).toBe(true);
       expect(write).toHaveBeenCalledOnce();
       expect(write).toHaveBeenCalledWith(
@@ -1697,11 +1942,26 @@ describe('v2 kernel boundary with the current client', () => {
     await seedTestFileSystem({ 'export.circuit': 'export only' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
     await initializeWorkerForTesting(worker);
+    const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
     try {
-      const result = await worker.exportModel({
+      worker.handleOpenDocument({
+        documentId: 'export-only-doc',
+        intent: 1,
         file: createGeometryFile('export.circuit'),
         parameters: {},
-        format: 'csv',
+        watch: false,
+      });
+      await vi.waitFor(() => {
+        expect(evaluated).toHaveLength(1);
+      });
+      expect(evaluated[0]?.success).toBe(true);
+      const result = await worker.exportDocument({
+        documentId: 'export-only-doc',
+        operationId: 'export-only-write',
+        target: 'bom',
       });
       expect(result.success, JSON.stringify(result.issues)).toBe(true);
       expect(write).toHaveBeenCalledOnce();

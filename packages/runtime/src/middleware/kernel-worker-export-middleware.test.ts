@@ -52,6 +52,48 @@ const imageEdgeSchemas = {
   ]),
 } as const;
 
+let documentSequence = 0;
+const openDocument = async (
+  worker: MockKernelWorker,
+  input: {
+    filename?: string;
+    parameters?: Record<string, unknown>;
+    evaluateOptions?: Record<string, unknown>;
+  } = {},
+): Promise<string> => {
+  const documentId = `export-middleware-${++documentSequence}`;
+  const evaluated: Array<Parameters<NonNullable<MockKernelWorker['onEvaluated']>>[0]> = [];
+  worker.onEvaluated = (event) => {
+    if (event.documentId === documentId) {
+      evaluated.push(event);
+    }
+  };
+  worker.handleOpenDocument({
+    documentId,
+    intent: 1,
+    file: createGeometryFile(input.filename ?? 'main.ts'),
+    parameters: input.parameters ?? {},
+    evaluateOptions: input.evaluateOptions,
+    watch: false,
+  });
+  await vi.waitFor(() => {
+    expect(evaluated).toHaveLength(1);
+  });
+  return documentId;
+};
+
+const exportDocument = async (
+  worker: MockKernelWorker,
+  documentId: string,
+  request: { target?: string; options?: Record<string, unknown> } = {},
+) =>
+  worker.exportDocument({
+    documentId,
+    operationId: `export-${++documentSequence}`,
+    target: request.target ?? 'gltf',
+    options: request.options,
+  });
+
 describe('kernel-worker wrapWrite middleware', () => {
   function spyOnExportGeometry(worker: MockKernelWorker) {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- keyof MockKernelWorker not assignable to vi.spyOn; use as unknown as to spy on protected method
@@ -99,8 +141,8 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    await worker.runExportGeometry('gltf');
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId);
 
     expect(wrapWrite).toHaveBeenCalledTimes(1);
   });
@@ -130,8 +172,8 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    await worker.runExportGeometry('gltf');
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId);
 
     expect(capturedInput).toBeDefined();
     expect(capturedInput!.exportId).toBe('gltf');
@@ -174,12 +216,12 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    const result = await worker.runExportGeometry();
+    const documentId = await openDocument(worker);
+    const result = await exportDocument(worker, documentId);
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data[0]?.bytes).toBe(modifiedData);
+      expect(result.files[0].bytes).toBe(modifiedData);
     }
   });
 
@@ -230,9 +272,9 @@ describe('kernel-worker wrapWrite middleware', () => {
       return defaultExportResult;
     });
 
-    await worker.runCreateGeometry('main.ts', {});
+    const documentId = await openDocument(worker);
     executionOrder.length = 0;
-    await worker.runExportGeometry();
+    await exportDocument(worker, documentId);
 
     expect(executionOrder).toEqual(['M1-before', 'M2-before', 'M3-before', 'main', 'M3-after', 'M2-after', 'M1-after']);
 
@@ -268,13 +310,13 @@ describe('kernel-worker wrapWrite middleware', () => {
 
     const exportSpy = spyOnExportGeometry(worker);
 
-    await worker.runCreateGeometry('main.ts', {});
-    const result = await worker.runExportGeometry();
+    const documentId = await openDocument(worker);
+    const result = await exportDocument(worker, documentId);
 
     expect(exportSpy).not.toHaveBeenCalled();
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data[0]?.name).toBe('cached.stl');
+      expect(result.files[0].name).toBe('cached.stl');
     }
 
     exportSpy.mockRestore();
@@ -307,9 +349,9 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
+    const documentId = await openDocument(worker);
     executionOrder.length = 0;
-    await worker.runExportGeometry();
+    await exportDocument(worker, documentId);
 
     expect(executionOrder).toEqual(['WithHook']);
   });
@@ -329,8 +371,8 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    const result = await worker.runExportGeometry();
+    const documentId = await openDocument(worker);
+    const result = await exportDocument(worker, documentId);
 
     expect(result.success).toBe(false);
     if (!result.success && result.issues[0]) {
@@ -367,8 +409,8 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    await worker.runExportGeometry();
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId);
 
     expect(executionOrder).toEqual(['enabled']);
   });
@@ -397,10 +439,10 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', { height: 10 });
-    await worker.runExportGeometry('step');
-    await worker.runCreateGeometry('main.ts', { height: 20 });
-    await worker.runExportGeometry('step');
+    const firstDocument = await openDocument(worker, { parameters: { height: 10 } });
+    await exportDocument(worker, firstDocument, { target: 'step' });
+    const secondDocument = await openDocument(worker, { parameters: { height: 20 } });
+    await exportDocument(worker, secondDocument, { target: 'step' });
 
     expect(captures).toHaveLength(2);
     expect(captures[0]!.hash).not.toBe(captures[1]!.hash);
@@ -414,12 +456,12 @@ describe('kernel-worker wrapWrite middleware', () => {
     });
   });
 
-  it('should keep render-only options out of native-build identity while retaining them in export identity', async () => {
+  it('should keep view options out of native-build identity while retaining them in view identity', async () => {
     const createCaptures: Array<{
       hash: string;
       dependencies: readonly Dependency[];
     }> = [];
-    const exportCaptures: Array<{
+    const viewCaptures: Array<{
       hash: string;
       dependencies: readonly Dependency[];
     }> = [];
@@ -433,8 +475,8 @@ describe('kernel-worker wrapWrite middleware', () => {
         });
         return handler(input);
       },
-      async wrapWrite(input, handler, runtime) {
-        exportCaptures.push({
+      async wrapRender(input, handler, runtime) {
+        viewCaptures.push({
           hash: runtime.dependencyHash,
           dependencies: runtime.dependencies,
         });
@@ -449,23 +491,40 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {}, { quality: 'coarse' });
-    await worker.runExportGeometry('step');
-    await worker.runCreateGeometry('main.ts', {}, { quality: 'fine' });
-    await worker.runExportGeometry('step');
+    const documentId = await openDocument(worker);
+    const rendered: Array<Parameters<NonNullable<MockKernelWorker['onRendered']>>[0]> = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    worker.handleOpenView({
+      documentId,
+      subscriptionId: 'coarse',
+      requestId: 'coarse',
+      view: 'model',
+      options: { quality: 'coarse' },
+    });
+    worker.handleOpenView({
+      documentId,
+      subscriptionId: 'fine',
+      requestId: 'fine',
+      view: 'model',
+      options: { quality: 'fine' },
+    });
+    await vi.waitFor(() => {
+      expect(rendered).toHaveLength(2);
+    });
 
-    expect(createCaptures).toHaveLength(2);
-    expect(createCaptures[0]!.hash).toBe(createCaptures[1]!.hash);
+    expect(createCaptures).toHaveLength(1);
     for (const capture of createCaptures) {
       expect(capture.dependencies.some((dependency) => dependency.type === 'render-options')).toBe(false);
     }
-    expect(exportCaptures).toHaveLength(2);
-    expect(exportCaptures[0]!.hash).not.toBe(exportCaptures[1]!.hash);
-    expect(exportCaptures[0]!.dependencies).toContainEqual({
+    expect(viewCaptures).toHaveLength(2);
+    expect(viewCaptures[0]!.hash).not.toBe(viewCaptures[1]!.hash);
+    expect(viewCaptures[0]!.dependencies).toContainEqual({
       type: 'render-options',
       options: { quality: 'coarse' },
     });
-    expect(exportCaptures[1]!.dependencies).toContainEqual({
+    expect(viewCaptures[1]!.dependencies).toContainEqual({
       type: 'render-options',
       options: { quality: 'fine' },
     });
@@ -498,10 +557,10 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', { height: 10 });
-    await worker.runExportGeometry('step', { unit: 'mm' });
-    await worker.runExportGeometry('step', { unit: 'cm' });
-    await worker.runExportGeometry('stl', { unit: 'mm' });
+    const documentId = await openDocument(worker, { parameters: { height: 10 } });
+    await exportDocument(worker, documentId, { target: 'step', options: { unit: 'mm' } });
+    await exportDocument(worker, documentId, { target: 'step', options: { unit: 'cm' } });
+    await exportDocument(worker, documentId, { target: 'stl', options: { unit: 'mm' } });
 
     expect(captures).toHaveLength(3);
     expect(new Set(captures.map((capture) => capture.hash)).size).toBe(3);
@@ -620,10 +679,10 @@ describe('kernel-worker wrapWrite middleware', () => {
       transferables: {},
       options: {},
     });
-    await worker.runCreateGeometry('main.ts', {});
+    const documentId = await openDocument(worker);
     for (const request of requests) {
       // oxlint-disable-next-line no-await-in-loop -- each request contributes one ordered identity observation.
-      const result = await worker.runExportGeometry('webp', request);
+      const result = await exportDocument(worker, documentId, { target: 'webp', options: request });
       expect(result.success).toBe(true);
     }
 
@@ -682,8 +741,8 @@ describe('kernel-worker wrapWrite middleware', () => {
         transferables: {},
         options: {},
       });
-      await worker.runCreateGeometry('main.ts', {});
-      const result = await worker.runExportGeometry('webp');
+      const documentId = await openDocument(worker);
+      const result = await exportDocument(worker, documentId, { target: 'webp' });
       expect(result.success).toBe(true);
       return { dependencyHash, dependencies };
     };
@@ -721,11 +780,8 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.exportModel({
-      format: 'step',
-      file: createGeometryFile('main.ts'),
-      parameters: {},
-    });
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId, { target: 'step' });
 
     expect(capturedDependencies).toContainEqual({
       type: 'kernel',
@@ -773,11 +829,8 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.exportModel({
-      format: 'step',
-      file: createGeometryFile('main.ts'),
-      parameters: {},
-    });
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId, { target: 'step' });
 
     expect(capturedDependencies.filter((dependency) => dependency.type === 'middleware')).toEqual([
       { type: 'middleware', id: 'Create', version: '1', index: 0, options: {} },
@@ -801,8 +854,8 @@ describe('kernel-worker wrapWrite middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    const result = await worker.runExportGeometry('step', { unexpected: true });
+    const documentId = await openDocument(worker);
+    const result = await exportDocument(worker, documentId, { target: 'step', options: { unexpected: true } });
 
     expect(result.success).toBe(false);
     expect(wrapWrite).not.toHaveBeenCalled();

@@ -27,13 +27,13 @@ describe('HostInitializeBindings is generic (C13)', () => {
   it('extends with TExtra fields without losing the core shape', () => {
     type WebWorkerExtra = {
       readonly geometryPool: { readonly bytes: number };
-      readonly signalSlot: { readonly buffer: SharedArrayBuffer };
+      readonly signalBuffer: SharedArrayBuffer;
     };
     type WebWorkerBindings = HostInitializeBindings<WebWorkerExtra>;
 
     expectTypeOf<WebWorkerBindings>().toMatchTypeOf<HostInitializeBindingsCore>();
     expectTypeOf<WebWorkerBindings>().toHaveProperty('geometryPool');
-    expectTypeOf<WebWorkerBindings>().toHaveProperty('signalSlot');
+    expectTypeOf<WebWorkerBindings>().toHaveProperty('signalBuffer');
   });
 
   it('HostBinaryDeliveryBinding.publishBytes returns EncodedBinary', () => {

@@ -5,8 +5,8 @@ import {
   runtimeContentSchema,
   RuntimeContentUnsupportedError,
 } from '#types/runtime-content.types.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
+import { defineMiddleware } from '#plugins/middleware-entry.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { z } from 'zod';
 
@@ -30,9 +30,11 @@ describe('runtime content', () => {
   });
 
   it('rejects a known property that the concrete route does not own', () => {
-    expect(() => normalizeRuntimeContent('export', ['includeEdges'], { includeTopology: false })).toThrow(
-      RuntimeContentUnsupportedError,
-    );
+    expect(() =>
+      normalizeRuntimeContent('export', ['includeEdges'], {
+        includeTopology: false,
+      }),
+    ).toThrow(RuntimeContentUnsupportedError);
   });
 
   it('tolerates unknown additive properties at the wire boundary', () => {
@@ -43,7 +45,7 @@ describe('runtime content', () => {
   });
 });
 
-const callDefineKernel = defineKernel as unknown as (definition: Record<string, unknown>) => unknown;
+const callDefineKernel = defineKernelV2 as unknown as (definition: Record<string, unknown>) => unknown;
 const callDefineMiddleware = defineMiddleware as unknown as (definition: Record<string, unknown>) => unknown;
 const callDefineTranscoder = defineTranscoder as unknown as (definition: Record<string, unknown>) => unknown;
 
@@ -52,25 +54,12 @@ const kernelBase = (id: string) => ({
   extensions: ['test'],
   name: id,
   version: '1.0.0',
-  exportFormats: {},
+  views: {},
+  exports: {},
   initialize: async () => ({}),
-  getDependencies: async () => ({ resolved: [], unresolved: [] }),
-  getParameters: async () => ({
-    success: true,
-    data: {
-      schema: {
-        $schema: 'https://json-structure.org/meta/extended/v0/#',
-        $id: `urn:taucad:test:${id}`,
-        $uses: ['JSONSchemaUnits'],
-        name: `${id}Parameters`,
-        type: 'object',
-      },
-      defaults: {},
-    },
-    issues: [],
-  }),
-  createGeometry: async () => ({ nativeHandle: {}, geometry: { format: 'gltf', content: new Uint8Array() } }),
-  exportGeometry: async () => ({ success: true, data: [], issues: [] }),
+  resolve: async () => ({ resolved: [], unresolved: [] }),
+  describe: async () => ({ success: false, issues: [] }),
+  evaluate: async () => ({ handle: {} }),
 });
 
 type DeclarationBoundary = {
@@ -82,41 +71,63 @@ type DeclarationBoundary = {
 const declarationBoundaries: readonly DeclarationBoundary[] = [
   {
     id: 'kernel-render-validation',
-    path: 'render.content',
+    path: 'views.model.content',
     define: (value) =>
       callDefineKernel({
         ...kernelBase('kernel-render-validation'),
-        render: value === undefined ? {} : { content: value },
-        meshGeometry: async () => ({ geometry: { format: 'gltf', content: new Uint8Array() } }),
+        views: {
+          model: {
+            title: 'Model',
+            mimeType: 'model/gltf+json',
+            ...(value === undefined ? {} : { content: value }),
+          },
+        },
+        render: async () => ({ content: new Uint8Array() }),
       }),
   },
   {
     id: 'kernel-export-validation',
-    path: 'exportFormats.glb.content',
+    path: 'exports.glb.content',
     define: (value) =>
       callDefineKernel({
         ...kernelBase('kernel-export-validation'),
-        exportFormats: { glb: { optionsSchema: z.object({}), ...(value === undefined ? {} : { content: value }) } },
+        exports: {
+          glb: {
+            title: 'GLB',
+            mimeType: 'model/gltf-binary',
+            extension: 'glb',
+            ...(value === undefined ? {} : { content: value }),
+          },
+        },
+        write: async () => ({
+          files: [
+            {
+              name: 'part.glb',
+              mimeType: 'model/gltf-binary',
+              bytes: new Uint8Array(),
+            },
+          ],
+        }),
       }),
   },
   {
     id: 'middleware-render-validation',
-    path: 'content.render',
+    path: 'content.views.image/svg+xml',
     define: (value) =>
       callDefineMiddleware({
         id: 'middleware-render-validation',
         name: 'middleware-render-validation',
-        content: value === undefined ? {} : { render: value },
+        content: { views: value === undefined ? {} : { 'image/svg+xml': value } },
       }),
   },
   {
     id: 'middleware-export-validation',
-    path: 'content.exportFormats.glb',
+    path: 'content.exports.glb',
     define: (value) =>
       callDefineMiddleware({
         id: 'middleware-export-validation',
         name: 'middleware-export-validation',
-        content: { exportFormats: value === undefined ? {} : { glb: value } },
+        content: { exports: value === undefined ? {} : { glb: value } },
       }),
   },
   {
@@ -127,9 +138,20 @@ const declarationBoundaries: readonly DeclarationBoundary[] = [
         id: 'transcoder-edge-validation',
         name: 'transcoder-edge-validation',
         version: '1.0.0',
-        edges: [{ from: 'glb', to: 'stl', fidelity: 'mesh', ...(value === undefined ? {} : { content: value }) }],
+        edges: [
+          {
+            from: 'glb',
+            to: 'stl',
+            fidelity: 'mesh',
+            ...(value === undefined ? {} : { content: value }),
+          },
+        ],
         initialize: async () => ({}),
-        transcode: async (input: { files: unknown[] }) => ({ success: true, data: input.files, issues: [] }),
+        transcode: async (input: { files: unknown[] }) => ({
+          success: true,
+          data: input.files,
+          issues: [],
+        }),
         cleanup: async () => undefined,
       }),
   },
@@ -159,28 +181,36 @@ describe.each(declarationBoundaries)('$id declaration validation', ({ define, id
 });
 
 describe('kernel definition invariants', () => {
-  it('rejects native render content without meshGeometry', () => {
+  it('requires a render hook for declared views', () => {
     expect(() =>
       callDefineKernel({
-        ...kernelBase('render-without-mesh'),
-        render: { content: ['includeEdges'] },
+        ...kernelBase('render-without-hook'),
+        views: { model: { title: 'Model', mimeType: 'model/gltf+json' } },
       }),
-    ).toThrow('Kernel "render-without-mesh" render.content requires meshGeometry.');
+    ).toThrow('Kernel "render-without-hook" render hook must exist exactly when views are declared.');
   });
 
-  it('allows an inline kernel with omitted render metadata', () => {
-    expect(() => callDefineKernel(kernelBase('inline-without-render'))).not.toThrow();
+  it('allows a kernel with no declared views or exports', () => {
+    expect(() => callDefineKernel(kernelBase('no-artifacts'))).not.toThrow();
   });
 
-  it('rejects a type-erased non-object create options schema before initialization', () => {
+  it('rejects overlapping evaluate and view option keys before initialization', () => {
     const initialize = vi.fn(async () => ({}));
     expect(() =>
       callDefineKernel({
-        ...kernelBase('invalid-create-schema'),
+        ...kernelBase('overlap-options'),
         initialize,
-        createOptionsSchema: z.string(),
+        evaluateOptionsSchema: z.object({ detail: z.number() }),
+        views: {
+          model: {
+            title: 'Model',
+            mimeType: 'model/gltf+json',
+            optionsSchema: z.object({ detail: z.number() }),
+          },
+        },
+        render: async () => ({ content: new Uint8Array() }),
       }),
-    ).toThrow('Kernel "invalid-create-schema" createOptionsSchema must be a Zod object schema.');
+    ).toThrow('Kernel "overlap-options" evaluate and view "model" both declare option "detail".');
     expect(initialize).not.toHaveBeenCalled();
   });
 });

@@ -251,7 +251,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return { resolved: [input.entryPath], unresolved: [] };
     }
 
-    return kernel.definition.resolve(input, this.forKernel(kernel, runtime), kernel.ctx);
+    return kernel.definition.resolve(input, runtime, kernel.ctx);
   }
 
   protected override async onGetParameters(
@@ -287,7 +287,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       ]);
     }
 
-    const result = await kernel.definition.describe(input, this.forKernel(kernel, runtime), kernel.ctx);
+    const result = await kernel.definition.describe(input, runtime, kernel.ctx);
     return result.success ? { success: true, data: result.data.parameters, issues: result.issues } : result;
   }
 
@@ -349,7 +349,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
 
     try {
-      const kernelRuntime = this.forKernel(kernel, runtime);
+      const kernelRuntime = runtime;
       const output = await kernel.definition.evaluate(
         { entryPath: input.entryPath, parameters: input.parameters, options: input.options ?? {} },
         kernelRuntime,
@@ -401,9 +401,11 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           `Kernel ${kernel.entry.id} default view ${firstView}`,
           'VIEW_OPTIONS_INVALID',
         );
-        if (!defaultOptions.success) return createKernelError(defaultOptions.issues);
+        if (!defaultOptions.success) {
+          return createKernelError(defaultOptions.issues);
+        }
       }
-      const instances: Record<string, readonly ViewInstance[]> = Object.create(null);
+      const instanceEntries: Array<[string, readonly ViewInstance[]]> = [];
       for (const [id, value] of Object.entries(output.instances ?? {})) {
         const candidate: unknown = value;
         if (
@@ -421,8 +423,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         if (new Set(candidate.map((item: ViewInstance) => item.id)).size !== candidate.length) {
           throw new TypeError(`Kernel ${kernel.entry.id} offered duplicate instance IDs for view ${id}.`);
         }
-        instances[id] = candidate.filter((item: unknown) => isViewInstance(item));
+        instanceEntries.push([id, candidate.filter((item: unknown) => isViewInstance(item))]);
       }
+      const instances = Object.fromEntries(instanceEntries);
       const offers = {
         ...(output.views === undefined ? {} : { views: output.views }),
         ...(output.exports === undefined ? {} : { exports: output.exports }),
@@ -513,7 +516,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
   protected override getDocumentViewOffers(owner: OperationOwner, offers?: KernelOffers): readonly ViewOffer[] {
     const kernel = this.getKernelForOwner(owner);
-    if (!kernel) return [];
+    if (!kernel) {
+      return [];
+    }
     return (offers?.views ?? Object.keys(kernel.definition.views)).map((id) => {
       const declaration = Object.hasOwn(kernel.definition.views, id) ? kernel.definition.views[id] : undefined;
       if (!declaration) {
@@ -533,7 +538,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
   protected override getDocumentExportOffers(owner: OperationOwner, offers?: KernelOffers): readonly ExportOffer[] {
     const kernel = this.getKernelForOwner(owner);
-    if (!kernel) return [];
+    if (!kernel) {
+      return [];
+    }
     return (offers?.exports ?? Object.keys(kernel.definition.exports)).map((id) => {
       const declaration = kernel.definition.exports[id]!;
       return {
@@ -570,7 +577,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
     const exports = this.getDocumentExportOffers(owner, offers);
     const direct = exports.filter((item) => item.extension === target);
-    if (direct.length === 1) return { success: true, format: target, exportId: direct[0]!.id };
+    if (direct.length === 1) {
+      return { success: true, format: target, exportId: direct[0]!.id };
+    }
     if (direct.length > 1) {
       return createKernelError([
         {
@@ -586,7 +595,9 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     );
     if (route) {
       const source = exports.filter((item) => item.extension === route.sourceFormat);
-      if (source.length === 1) return { success: true, format: target, exportId: source[0]!.id };
+      if (source.length === 1) {
+        return { success: true, format: target, exportId: source[0]!.id };
+      }
       if (source.length > 1) {
         return createKernelError([
           {
@@ -624,14 +635,18 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   protected override getNativeRenderContentKeys(owner: OperationOwner, view?: string): readonly RuntimeContentKey[] {
-    if (!view) return super.getNativeRenderContentKeys(owner);
+    if (!view) {
+      return super.getNativeRenderContentKeys(owner);
+    }
     return this.getKernelForOwner(owner)?.definition.views[view]?.content ?? [];
   }
 
+  // oxlint-disable-next-line max-params -- Implements the base owner-bound view selection hook.
   protected override selectDocumentView(
     owner: OperationOwner,
     offers: KernelOffers | undefined,
     requested: string | undefined,
+    // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Null explicitly clears a selected instance on the wire.
     instance: string | null | undefined,
   ):
     | { success: true; selection: { view: string; mimeType: Artifact['mimeType']; instance?: string } }
@@ -756,7 +771,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           ...(input.instance === undefined ? {} : { instance: input.instance }),
           ...(input.content === undefined ? {} : { content: input.content }),
         },
-        this.forKernel(kernel, runtime),
+        runtime,
         kernel.ctx,
       );
       return {
@@ -843,7 +858,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return undefined;
     }
 
-    return kernel.definition.isHandleValid({ handle: nativeHandle }, this.forKernel(kernel, runtime), kernel.ctx);
+    return kernel.definition.isHandleValid({ handle: nativeHandle }, runtime, kernel.ctx);
   }
 
   // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
@@ -858,11 +873,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       return undefined;
     }
 
-    const handle = kernel.definition.deserializeHandle(
-      { serialized: serializedNativeHandle },
-      this.forKernel(kernel, runtime),
-      kernel.ctx,
-    );
+    const handle = kernel.definition.deserializeHandle({ serialized: serializedNativeHandle }, runtime, kernel.ctx);
     return handle;
   }
 
@@ -875,7 +886,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   ): void {
     const kernel = this.getKernelForOwner(owner);
     if (kernel) {
-      kernel.definition.releaseHandle?.({ handle: nativeHandle }, this.forKernel(kernel, runtime), kernel.ctx);
+      kernel.definition.releaseHandle?.({ handle: nativeHandle }, runtime, kernel.ctx);
     }
   }
 
@@ -916,7 +927,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
 
     this.activeKernelId = nextKernelId;
-    this.onActiveKernelChanged?.({ kernelId: nextKernelId, renderId: this.activeRenderId });
   }
 
   protected override getActiveKernelId(): string | undefined {
@@ -933,18 +943,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
   protected override onFileChanged(_changedPaths: readonly string[]): void {
     this.clearFileDerivedKernelState();
-  }
-
-  protected override onVolatileFileCachesCleared(): void {
-    this.clearFileDerivedKernelState();
-  }
-
-  protected override onPublishedArtifactInvalidated(): void {
-    if (this.activeKernelId === undefined) {
-      return;
-    }
-    this.activeKernelId = undefined;
-    this.onActiveKernelChanged?.({ renderId: this.activeRenderId });
   }
 
   /** Map the current client's extension route to the v2 export declaration. */
@@ -1014,7 +1012,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
           options: { ...resolvedOptions },
           ...(input.content ? { content: input.content } : {}),
         },
-        this.forKernel(kernel, runtime),
+        runtime,
         kernel.ctx,
       );
       if (output.files.length === 0) {
@@ -1179,21 +1177,6 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     return loaded;
   }
 
-  private forKernel(kernel: LoadedKernel, runtime: KernelRuntime): KernelRuntime {
-    return {
-      ...runtime,
-      emitEvent: (type, payload) => {
-        const renderId = this.activeRenderId;
-        this.onKernelEvent?.({
-          kernelId: kernel.entry.id,
-          type,
-          ...(renderId === undefined ? {} : { renderId }),
-          payload,
-        });
-      },
-    };
-  }
-
   private async ensureKernelInitialized(kernel: LoadedKernel, runtime: KernelRuntime): Promise<void> {
     if (kernel.initialized) {
       return;
@@ -1201,7 +1184,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
 
     this.logger.trace(`Initializing kernel: ${kernel.entry.id}`);
 
-    kernel.ctx = await kernel.definition.initialize(kernel.options, this.forKernel(kernel, runtime));
+    kernel.ctx = await kernel.definition.initialize(kernel.options, runtime);
     kernel.initialized = true;
   }
 

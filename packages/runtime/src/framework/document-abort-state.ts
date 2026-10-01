@@ -1,4 +1,4 @@
-/** Atomic document-operation abort state in the upper eight bytes of the shared signal buffer. @internal */
+/** Atomic document-operation abort state in the shared signal buffer. @internal */
 
 const generationModulo = 1_073_741_824n;
 const maxEvaluationSequence = 4_294_967_295;
@@ -26,9 +26,9 @@ export const documentAbortGeneration = (state: bigint): number => Number((unsign
 /** Exact abort reason published with the ownership transition. @internal */
 export const documentAbortReason = (state: bigint): number => Number(unsigned(state) % 4n);
 
-/** View the document word only when the transport allocated the full signal buffer. @internal */
+/** View the document word only when the transport allocated its eight-byte buffer. @internal */
 export const documentAbortView = (buffer: SharedArrayBuffer | undefined): BigInt64Array | undefined =>
-  buffer && buffer.byteLength >= 16 ? new BigInt64Array(buffer, 8, 1) : undefined;
+  buffer && buffer.byteLength >= 8 ? new BigInt64Array(buffer, 0, 1) : undefined;
 
 /** Publish a native operation after the preceding one has left the serial worker lane. @internal */
 export const beginDocumentAbort = (view: BigInt64Array, sequence: number): bigint => {

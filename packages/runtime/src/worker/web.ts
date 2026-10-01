@@ -37,7 +37,6 @@ import '#framework/worker-preload-polyfill.js';
 import { webWorkerHost } from '#transport/web-worker-host.js';
 import { createRuntimeWorker } from '#worker/index.js';
 import type { TransportHostReady } from '#transport/runtime-transport.types.js';
-import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
 /**
@@ -60,9 +59,7 @@ export type ServeWebWorkerRuntimeOptions = {
  * @returns The opened host snapshot.
  * @public
  */
-export async function serveWebWorkerRuntime(
-  options: ServeWebWorkerRuntimeOptions,
-): Promise<TransportHostReady<RuntimeDocumentProtocol>> {
+export async function serveWebWorkerRuntime(options: ServeWebWorkerRuntimeOptions): Promise<TransportHostReady> {
   const worker = createRuntimeWorker({ runtime: options.runtime });
   return webWorkerHost({ worker }).open();
 }

@@ -7,11 +7,10 @@ import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { named, preserveMethodNames } from '#framework/named.js';
 import { admitKernelOptions } from '#framework/kernel-option-admission.js';
 import { getIsolationStatus } from '#cross-origin-isolation/headers.js';
-import type { FileExtension, FileStat, GeometryResponse, MediaType, OnWorkerLog } from '@taucad/types';
+import type { FileExtension, FileStat, MediaType, OnWorkerLog } from '@taucad/types';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
 import type { MessagePortLike } from '@taucad/rpc';
 import type {
-  HashedGeometryResult,
   CreateGeometryResult,
   ExportGeometryResult,
   GetParameterDeclarationsResult,
@@ -32,6 +31,7 @@ import type {
   GetParametersInput,
   GetDependenciesInput,
   ExportGeometryInput,
+  ExportGeometryRequest,
   KernelExportGeometryInput,
   RuntimeImplementationAsset,
 } from '#types/runtime-kernel.types.js';
@@ -45,7 +45,7 @@ import type {
   Rendering,
   ViewOffer,
 } from '#client/runtime-document.types.js';
-import type { KernelMiddlewareRuntime, MiddlewareExportGeometryRequest } from '#types/runtime-middleware.types.js';
+import type { KernelMiddlewareRuntime } from '#types/runtime-middleware.types.js';
 import type { BundlerDefinition } from '#types/runtime-bundler.types.js';
 import type {
   KernelBundler,
@@ -67,33 +67,18 @@ import type {
   AssetDependency,
   GetDependenciesResult,
 } from '#types/runtime-dependency.types.js';
-import type {
-  TelemetryEntry,
-  RenderPhase,
-  RuntimeExportModelArgs,
-  RuntimeEvaluateModelArgs,
-  RuntimeSourceSnapshotArgs,
-  RuntimeTranscodeArgs,
-  RuntimePreviewIdentity,
-  RuntimeOpenFileArgs,
-  RuntimeStageAndRenderArgs,
-  RuntimeUpdateParametersArgs,
-  RuntimeSetOptionsArgs,
-  RuntimeStateChangedArgs,
-  RuntimeProgressArgs,
-  RuntimeParametersResolvedArgs,
-  RuntimeErrorEventArgs,
-  RuntimeProtocol,
-  WireAbortReasonCode,
-  WorkerState,
-} from '#types/runtime-protocol.types.js';
+import type { TelemetryEntry, RuntimeSourceSnapshotArgs, RuntimeTranscodeArgs } from '#types/runtime-wire.types.js';
 import type {
   RuntimeSourceSnapshotFileRole,
   RuntimeSourceSnapshotResult,
 } from '#types/runtime-source-snapshot.types.js';
-import { signalSlot, abortReason as abortReasonEnum } from '#types/runtime-protocol.types.js';
-import type { TranscoderDefinition, TranscoderEdge, TranscoderRuntime } from '#types/runtime-transcoder.types.js';
-import { isRenderAbortedError, renderTimeoutIssue, RenderAbortedError } from '#framework/runtime-operation-errors.js';
+import { abortReason as abortReasonEnum } from '#types/runtime-wire.types.js';
+import type {
+  TranscodeResult,
+  TranscoderDefinition,
+  TranscoderEdge,
+  TranscoderRuntime,
+} from '#types/runtime-transcoder.types.js';
 import { setAbortContext, clearAbortContext } from '#framework/cooperative-abort.js';
 import {
   beginDocumentAbort,
@@ -107,8 +92,7 @@ import { createComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import type { ComputeCapabilityHost } from '#cache/kernel-compute-runtime.js';
 import { toJSONSchema, z } from 'zod';
 import { createKernelError } from '#kernels/kernel-helpers.js';
-import { cooperativeYield, scheduleMacrotask } from '#framework/async-polyfills.js';
-import { parameterDebounce, fileChangeDebounce } from '#framework/runtime-framework.constants.js';
+import { fileChangeDebounce } from '#framework/runtime-framework.constants.js';
 import { canonicalJson, sha256Bytes, sha256String } from '@taucad/utils/hash';
 import { contentDigest } from '@taucad/cache-core';
 import type { ContentDigest } from '@taucad/cache-core';
@@ -126,7 +110,6 @@ import type {
 import { nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
 import { asKnownArtifact } from '#types/runtime-artifact.js';
 import type {
-  Artifact,
   DescribeInput,
   DescribeResult,
   EvaluateResult,
@@ -176,11 +159,7 @@ import type {
   RenderIdentity,
   SerializedNativeHandleSlot,
 } from '#framework/render-artifact.js';
-import {
-  createNativeHandleIdentityKey,
-  createRenderIdentityKey,
-  nativeBuildInputSymbol,
-} from '#framework/render-artifact.js';
+import { createNativeHandleIdentityKey, nativeBuildInputSymbol } from '#framework/render-artifact.js';
 import { finalizeExportArtifactSet } from '#framework/export-artifact-finalizer.js';
 import { isNotFoundError } from '#filesystem/filesystem-errors.js';
 import { loadWasmBinary } from '#framework/wasm-loader.js';
@@ -197,14 +176,6 @@ type ObservedFileRevision = {
 type DependencyPaths = {
   readonly paths: ReadonlySet<string>;
   readonly affectsParameters: boolean;
-};
-
-type RenderCancellationRecord = {
-  readonly renderId: string;
-  readonly generation: number;
-  readonly controller: AbortController;
-  reason?: 'superseded' | 'timeout';
-  executing: boolean;
 };
 
 type DocumentInput = RuntimeDocumentProtocol['notifies']['open']['args'];
@@ -248,6 +219,7 @@ type ViewRecord = {
   readonly id: string;
   requestId: string;
   view?: string;
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Null explicitly clears an instance on view update.
   instance?: string | null;
   options: Record<string, unknown>;
   content?: RuntimeContentInput;
@@ -258,7 +230,10 @@ type ViewRecord = {
 export const sourceRevisionFileDigest = (contentHash: string, path: string): ContentDigest | 'missing' =>
   contentHash === 'missing'
     ? 'missing'
-    : contentDigest({ value: `sha256:${contentHash}`, name: `document evaluation ${path}` });
+    : contentDigest({
+        value: `sha256:${contentHash}`,
+        name: `document evaluation ${path}`,
+      });
 
 const sourceRevisionForArtifact = (artifact: MaterializedRender, fallback?: SourceRevision): SourceRevision => {
   const entry = assertRootedPath(joinRelativePath(artifact.identity.file.path, artifact.identity.file.filename));
@@ -284,7 +259,12 @@ const neverAbortedSignal = new AbortController().signal;
  * strictly more informative than no issue at all.
  */
 const kernelIssuesSchema = z
-  .array(z.looseObject({ message: z.string(), severity: z.enum(['error', 'warning', 'info']) }))
+  .array(
+    z.looseObject({
+      message: z.string(),
+      severity: z.enum(['error', 'warning', 'info']),
+    }),
+  )
   .min(1);
 
 /** Joined issue messages for a terminal state's `detail`, or nothing to say. */
@@ -387,8 +367,7 @@ const unitlessTextParameter = (
 type TranscoderPluginEntry = TranscoderPlugin<Record<string, unknown>> &
   RuntimePluginDefinitionCarrier<TranscoderDefinition>;
 
-/**
- */
+/** Runtime plugins and host services available to one worker. */
 export type KernelWorkerOptions = {
   readonly kernels?: ReadonlyArray<KernelPlugin<Record<string, unknown>, unknown>>;
   readonly middleware?: readonly MiddlewarePlugin[];
@@ -407,8 +386,7 @@ type LoadedTranscoder = {
   implementationAssets: readonly RuntimeImplementationAsset[];
 };
 
-/**
- */
+/** Identity retained for the last settled render. */
 export type LastSettledRenderIdentity = RenderIdentity;
 
 type OwnerBoundExportRoute =
@@ -436,7 +414,7 @@ type OwnerBoundExportPlan =
   | {
       success: true;
       owner: OperationOwner;
-      input: MiddlewareExportGeometryRequest;
+      input: ExportPipelineRequest;
       route: OwnerBoundExportRoute;
       dependency: ExportDependency;
     }
@@ -444,6 +422,8 @@ type OwnerBoundExportPlan =
       success: false;
       result: ExportGeometryResult;
     };
+
+type ExportPipelineRequest = ExportGeometryRequest & { readonly content?: RuntimeContentInput };
 
 /* TR16 fast-path adapter — wraps an inline `RuntimeFileSystemBase` as a
  * `FileSystemProxy` so the kernel-worker boundary remains uniform whether
@@ -509,16 +489,6 @@ function setsEqual<T>(a: Set<T>, b: Set<T>): boolean {
   return true;
 }
 
-/** Presentation bridge for the current client; W3 consumes Artifact directly. */
-function toLegacyGeometry(artifact: Artifact): GeometryResponse {
-  if (artifact.mimeType === 'image/svg+xml' && typeof artifact.content === 'string') {
-    return { format: 'svg', content: artifact.content, ...(artifact.units ? { units: artifact.units } : {}) };
-  }
-  if (artifact.mimeType === 'model/gltf-binary' && artifact.content instanceof Uint8Array) {
-    return { format: 'gltf', content: artifact.content };
-  }
-  throw new TypeError(`The current runtime client cannot display ${artifact.mimeType}; W3 adds open-media delivery.`);
-}
 /**
  * A resolved middleware instance paired with its parsed options.
  * @public
@@ -529,6 +499,7 @@ type RuntimeMiddlewareDefinition = KernelMiddlewareV2<
   MiddlewareContent | undefined
 >;
 
+/** A middleware definition paired with its admitted runtime options. */
 export type ResolvedMiddleware = {
   middleware: RuntimeMiddlewareDefinition;
   options: Record<string, unknown>;
@@ -568,51 +539,20 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return lastSlashIndex === -1 ? filename : filename.slice(lastSlashIndex + 1);
   }
 
-  /** Callback for pushing one fully identified state change to the dispatcher. */
-  public onStateChanged?: (event: RuntimeStateChangedArgs) => void;
-
-  /**
-   * Callback for pushing geometry results to the dispatcher. The internal
-   * generation supports cooperative SAB polling; `renderId` is the opaque
-   * preview identity used for downstream frame correlation.
-   */
-  public onGeometryComputed?: (event: { readonly result: HashedGeometryResult; readonly renderId: string }) => void;
-
-  /**
-   * Callback for pushing parameter results to the dispatcher. `renderId`
-   * correlates the schema with its preview; generation remains internal
-   * cooperative-cancellation state.
-   */
-  public onParametersResolved?: (event: RuntimeParametersResolvedArgs) => void;
-
-  /**
-   * Callback for pushing progress updates to the dispatcher. The admission
-   * lets the consumer discard frames from superseded renders.
-   */
-  public onProgressUpdate?: (event: RuntimeProgressArgs) => void;
-
-  /**
-   * Callback for pushing errors to the dispatcher. `renderId` is supplied
-   * for render-scoped failures and omitted for connection-scoped
-   * issues (e.g. handshake failure, transcoder load).
-   */
-  public onError?: (event: RuntimeErrorEventArgs) => void;
-
-  /** Callback for pushing active kernel changes to the dispatcher. */
-  public onActiveKernelChanged?: (event: RuntimeProtocol['notifies']['activeKernelChanged']['args']) => void;
-
   /** Callback for pushing updated capabilities manifest to the dispatcher. */
   public onCapabilitiesUpdated?: (capabilities: CapabilitiesManifest) => void;
-
-  /** Callback for pushing kernel-authored events to the dispatcher. */
-  public onKernelEvent?: (event: RuntimeProtocol['notifies']['kernelEvent']['args']) => void;
 
   /** Document notifications are public values; the dispatcher owns binary encoding. */
   public onDescribed?: (event: RuntimeDocumentProtocol['notifies']['described']['args']) => void;
   public onEvaluating?: (event: RuntimeDocumentProtocol['notifies']['evaluating']['args']) => void;
   public onEvaluated?: (event: RuntimeDocumentProtocol['notifies']['evaluated']['args']) => void;
   public onRendering?: (event: RuntimeDocumentProtocol['notifies']['rendering']['args']) => void;
-  public onRendered?: (event: { readonly subscriptionId: string; readonly intent: number } & Rendering) => void;
+  public onRendered?: (
+    event: {
+      readonly subscriptionId: string;
+      readonly intent: number;
+    } & Rendering,
+  ) => void;
   public onDocumentProgressUpdate?: (event: RuntimeDocumentProtocol['notifies']['progress']['args']) => void;
   public onDocumentError?: (event: RuntimeDocumentProtocol['notifies']['errorEvent']['args']) => void;
   public onDocumentStateChanged?: (event: RuntimeDocumentProtocol['notifies']['stateChanged']['args']) => void;
@@ -764,7 +704,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private bundlerFilesystemView: KernelFileSystem | undefined;
   private readonly compiledWasmModules = new Map<string, WebAssembly.Module>();
   private parameterResultCache:
-    | { readonly key: string; readonly result: Extract<GetParametersResult, { success: true }> }
+    | {
+        readonly key: string;
+        readonly result: Extract<GetParametersResult, { success: true }>;
+      }
     | undefined;
   /** The last effective manifest this worker admitted, keyed by its revision and trusted execution context. */
   private admittedManifest: { readonly key: string; readonly manifest: ParameterManifest } | undefined;
@@ -802,29 +745,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private readonly tracer = new RuntimeTracer();
 
   /** Progress callback set during render, used by entry methods to emit phase transitions */
-  private onProgress?: (phase: RenderPhase, detail?: Readonly<Record<string, unknown>>) => void;
+  private onProgress?: (phase: string, detail?: Readonly<Record<string, unknown>>) => void;
 
   /** Bundle result cache keyed by entry path. Selectively invalidated when dependencies change; fully cleared on reset. */
   private readonly bundleResultCache = new Map<string, BundleResult>();
-
-  /** Paths which may schedule the current autonomous preview. */
-  /** A transient render displays its result without publishing it as the artifact (D2). */
-  private currentRenderTransient = false;
-  private currentPreviewWatchPaths = new Map<string, number>();
-
-  /** Middleware declarations owned by the current preview, retained for diagnostics/tests. */
-  private currentPreviewMiddlewarePaths = new Map<string, number>();
-
-  /** Generation-local preview dependency candidate assembled during discovery. */
-  private previewWatchCandidate:
-    | {
-        readonly generation: number;
-        readonly paths: Map<string, number>;
-        readonly middlewarePaths: Map<string, number>;
-        coherent: boolean;
-        watchCommitRejected?: boolean;
-      }
-    | undefined;
 
   /** Currently watched dependency paths. Used for incremental watch-set diffing. */
   private watchedPaths = new Set<string>();
@@ -834,6 +758,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** One serialized lane for kernel/cache/watch/native state. */
   private operationTail: Promise<void> = Promise.resolve();
+  private readonly documentTasks = new Set<Promise<void>>();
   /** Serializes authoritative watch rereads before they enter the operation lane. */
   private watchReconciliationTail: Promise<void> = Promise.resolve();
   /** Holds same-path watch echoes until staged bytes and their cache revision publish together. */
@@ -847,14 +772,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private operationAdmissionOpen = true;
   private cleanupPromise: Promise<void> | undefined;
 
-  private readonly renderCancellationRecords = new Map<string, RenderCancellationRecord>();
   private readonly documents = new Map<string, DocumentRecord>();
   private readonly documentViews = new Map<string, ViewRecord>();
   private readonly documentOperations = new Map<string, AbortController>();
   private readonly committedAdmissions = new Set<CommittedAdmission>();
   private readonly pinnedDocumentEvaluations = new Map<DocumentEvaluation, number>();
   private documentEvaluationSequence = 0;
-  private activeRenderRecord: RenderCancellationRecord | undefined;
   private operationSignal: AbortSignal | undefined;
   private activeDocumentEvaluationController: AbortController | undefined;
   private activeDocumentEvaluationSequence = 0;
@@ -865,8 +788,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     | undefined;
 
-  /** SharedArrayBuffer signal channel for bidirectional abort/state signaling. */
-  private signalView: Int32Array | undefined;
+  /** SharedArrayBuffer signal channel for document cancellation. */
   private documentSignalView: BigInt64Array | undefined;
 
   /** Loaded transcoder instances keyed by plugin id. */
@@ -887,58 +809,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return this._capabilitiesManifest;
   }
 
-  /** Render identity currently owning preview publication. */
-  protected get activeRenderId(): string | undefined {
-    return this.activeRenderRecord?.renderId;
-  }
-
-  /** Current render generation for abort detection. */
-  private renderGeneration = 0;
-
   /** Last issued `KernelRuntime.operationId`. */
   private operationSequence = 0;
 
   /** `KernelRuntime.operationId` shared by every kernel call inside the running operation. */
   private currentOperationId: number | undefined;
-
-  /** Current file for autonomous render loop. */
-  private currentFile: RuntimeFileLocator | undefined;
-
-  /** An admitted open-file command that has not yet retargeted {@link currentFile}. */
-  private pendingOpenFileRecord: RenderCancellationRecord | undefined;
-
-  /** Current parameters for autonomous render loop. */
-  private currentParameters: Record<string, unknown> = {};
-
-  /** The parameters of the last non-transient request, which an autonomous render restores after a drag. */
-  private committedParameters: Record<string, unknown> = {};
-
-  /** Exact artifact identity for the currently published preview render. */
-  private currentPublishedRender: MaterializedRender | undefined;
-  /** Newest evaluated build, even when its display projection failed or was request-scoped. */
-  private latestEvaluationArtifact: MaterializedRender | undefined;
-  private latestEvaluationSettled = false;
-
-  /** Current render options for autonomous render loop. */
-  private currentRenderOptions: Record<string, unknown> | undefined;
-
-  /** Framework-owned content requirements retained across autonomous rerenders. */
-  private currentRenderContent: RuntimeContentInput | undefined;
-
-  /** Cancels the render {@link scheduleRender} has pending, whether it waits on a timer or a macrotask. */
-  private pendingRenderCancel: (() => void) | undefined;
-
-  /** Last state pushed via `pushState`, used to deduplicate repeated emissions. */
-  private lastPushedState?: { readonly renderId: string; readonly state: WorkerState; readonly detail?: string };
-
-  /**
-   * Whether a render is currently in progress. Exposed for export-during-render decisions.
-   *
-   * @returns True if a render is in progress, false otherwise.
-   */
-  public get isRendering(): boolean {
-    return [...this.renderCancellationRecords.values()].some((record) => record.executing);
-  }
 
   /** Pending module registrations queued before the bundler is loaded */
   private readonly pendingModuleRegistrations = new Map<string, BuiltinModule>();
@@ -988,7 +863,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public async initialize(input: {
     callbacks: { onLog: OnWorkerLog };
-    transferables: { fileSystemPort?: MessagePortLike; inlineFileSystem?: RuntimeFileSystemBase };
+    transferables: {
+      fileSystemPort?: MessagePortLike;
+      inlineFileSystem?: RuntimeFileSystemBase;
+    };
     options?: Options;
     config?: unknown;
   }): Promise<void> {
@@ -1066,7 +944,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /** Install host-compiled modules before kernel initialization. */
   public setCompiledWasmModules(
-    modules: ReadonlyArray<{ readonly url: string; readonly module: WebAssembly.Module }>,
+    modules: ReadonlyArray<{
+      readonly url: string;
+      readonly module: WebAssembly.Module;
+    }>,
   ): void {
     this.compiledWasmModules.clear();
     for (const entry of modules) {
@@ -1088,7 +969,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const module = this.compiledWasmModules.get(url);
     if (module === undefined && this.compiledWasmModules.size > 0) {
       this.logger.warn(`No host-compiled WebAssembly module matches '${url}'; the kernel will compile its own.`, {
-        data: { requested: url, supplied: [...this.compiledWasmModules.keys()] },
+        data: {
+          requested: url,
+          supplied: [...this.compiledWasmModules.keys()],
+        },
       });
     }
     return module;
@@ -1106,13 +990,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * @param buffer - SharedArrayBuffer for the signal channel.
    */
   public setSignalBuffer(buffer: SharedArrayBuffer): void {
-    this.signalView = new Int32Array(buffer);
     this.documentSignalView = documentAbortView(buffer);
   }
 
   /** Admit one live document and start its first evaluation. */
   public handleOpenDocument(input: DocumentInput): void {
-    if (this.documents.has(input.documentId)) throw new Error(`Document ${input.documentId} is already open.`);
+    if (this.documents.has(input.documentId)) {
+      throw new Error(`Document ${input.documentId} is already open.`);
+    }
     const file = this.canonicalGeometryFile(input.file);
     const record: DocumentRecord = {
       id: input.documentId,
@@ -1135,13 +1020,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Update document inputs without changing any view request. */
   public handleUpdateDocument(input: DocumentUpdateInput): void {
     const record = this.documents.get(input.documentId);
-    if (!record || record.closed) return;
-    if (input.intent <= record.intent) return;
+    if (!record || record.closed) {
+      return;
+    }
+    if (input.intent <= record.intent) {
+      return;
+    }
     record.intent = input.intent;
     const baseParameters = input.transient ? record.parameters : record.committedParameters;
     const baseEvaluateOptions = input.transient ? record.evaluateOptions : record.committedEvaluateOptions;
     record.parameters = { ...(input.parameters ?? baseParameters) };
-    record.evaluateOptions = { ...(input.evaluateOptions ?? baseEvaluateOptions) };
+    record.evaluateOptions = {
+      ...(input.evaluateOptions ?? baseEvaluateOptions),
+    };
     if (!input.transient) {
       record.committedParameters = { ...record.parameters };
       record.committedEvaluateOptions = { ...record.evaluateOptions };
@@ -1152,15 +1043,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Close one document and its subscriptions before any queued result can publish. */
   public handleCloseDocument(input: { readonly documentId: string }): void {
     const record = this.documents.get(input.documentId);
-    if (!record) return;
+    if (!record) {
+      return;
+    }
     record.closed = true;
     this.documents.delete(record.id);
-    for (const view of record.views.values()) this.documentViews.delete(view.id);
+    for (const view of record.views.values()) {
+      this.documentViews.delete(view.id);
+    }
     record.views.clear();
     record.watchPaths.clear();
-    for (const controller of record.operations) controller.abort();
+    for (const controller of record.operations) {
+      controller.abort();
+    }
     record.pendingCommitted?.completion.reject(new Error(`Document ${record.id} closed.`));
-    void this.enqueueOperation(async () => {
+    const pending = this.enqueueOperation(async () => {
       await this.reconcileObservedPaths();
       const closedSlotId =
         record.current?.artifact?.evaluationSlot?.id ?? record.committed?.artifact?.evaluationSlot?.id;
@@ -1174,16 +1071,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         ![...this.pinnedDocumentEvaluations.keys()].some(
           (evaluation) => evaluation.artifact?.evaluationSlot?.id === closedSlotId,
         ) &&
-        this.currentPublishedRender?.evaluationSlot?.id !== closedSlotId
+        this.retainedEvaluation?.id === closedSlotId
       ) {
-        if (this.retainedEvaluation?.id === closedSlotId) this.retainedEvaluation = undefined;
-        if (this.latestEvaluationArtifact?.evaluationSlot?.id === closedSlotId)
-          this.latestEvaluationArtifact = undefined;
+        this.retainedEvaluation = undefined;
       }
       this.disposeUnreachableNativeHandles();
-    }).catch((error: unknown) => {
+    });
+    this.trackDocumentTask(pending, (error: unknown) => {
       this.logger.warn('Failed to reconcile watched paths after document close', {
-        data: { error: error instanceof Error ? error.message : String(error) },
+        data: {
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
     });
   }
@@ -1191,7 +1089,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   /** Subscribe one view to the document's current and future evaluations. */
   public handleOpenView(input: ViewOpenInput): void {
     const document = this.documents.get(input.documentId);
-    if (!document || document.closed || this.documentViews.has(input.subscriptionId)) return;
+    if (!document || document.closed || this.documentViews.has(input.subscriptionId)) {
+      return;
+    }
     const view: ViewRecord = {
       document,
       id: input.subscriptionId,
@@ -1204,27 +1104,43 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
     document.views.set(view.id, view);
     this.documentViews.set(view.id, view);
-    if (document.current) this.scheduleDocumentView(view, document.current);
+    if (document.current) {
+      this.scheduleDocumentView(view, document.current);
+    }
   }
 
   /** Replace one view request without evaluating its document again. */
   public handleUpdateView(input: ViewUpdateInput): void {
     const view = this.documentViews.get(input.subscriptionId);
-    if (!view) return;
+    if (!view) {
+      return;
+    }
     view.requestId = input.requestId;
-    if (input.instance !== undefined) view.instance = input.instance;
-    if (input.options !== undefined) view.options = { ...input.options };
-    if (input.content !== undefined) view.content = input.content;
-    if (view.document.current) this.scheduleDocumentView(view, view.document.current);
+    if (input.instance !== undefined) {
+      view.instance = input.instance;
+    }
+    if (input.options !== undefined) {
+      view.options = { ...input.options };
+    }
+    if (input.content !== undefined) {
+      view.content = input.content;
+    }
+    if (view.document.current) {
+      this.scheduleDocumentView(view, view.document.current);
+    }
   }
 
   /** Stop one view's projections while leaving the document live. */
   public handleCloseView(input: { readonly subscriptionId: string }): void {
     const view = this.documentViews.get(input.subscriptionId);
-    if (!view) return;
+    if (!view) {
+      return;
+    }
     this.documentViews.delete(view.id);
     view.document.views.delete(view.id);
-    for (const controller of view.operations) controller.abort();
+    for (const controller of view.operations) {
+      controller.abort();
+    }
   }
 
   /** Abort one request-owned waiter or queued operation. */
@@ -1239,15 +1155,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): Promise<Description> {
     return this.enqueueOperation(async () => {
       signal?.throwIfAborted();
-      if (input.stage) await this.writeFilesAndInvalidate(input.stage);
+      if (input.stage) {
+        await this.writeFilesAndInvalidate(input.stage);
+      }
       signal?.throwIfAborted();
       await this.revalidateRetainedFiles();
       const owner = await this.createOperationOwner(input.file, 'request');
-      const result = await this.getParametersInLane(input.file, { owner, resolution: input.resolution });
+      const result = await this.getParametersInLane(input.file, {
+        owner,
+        resolution: input.resolution,
+      });
       await this.reconcileObservedPaths();
       return result.success
-        ? { success: true, kernelId: owner.binding?.kernelId, parameters: result.data, issues: result.issues }
-        : { success: false, kernelId: owner.binding?.kernelId, issues: result.issues };
+        ? {
+            success: true,
+            kernelId: owner.binding?.kernelId,
+            parameters: result.data,
+            issues: result.issues,
+          }
+        : {
+            success: false,
+            kernelId: owner.binding?.kernelId,
+            issues: result.issues,
+          };
     }, signal);
   }
 
@@ -1257,9 +1187,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     signal?: AbortSignal,
   ): Promise<ExportResult> {
     const document = this.documents.get(input.documentId);
-    if (!document || document.closed) throw new Error(`Document ${input.documentId} is closed.`);
+    if (!document || document.closed) {
+      throw new Error(`Document ${input.documentId} is closed.`);
+    }
     const pending = document.pendingCommitted;
-    if (pending) pending.pins++;
+    if (pending) {
+      pending.pins++;
+    }
     const committedAtAdmission = document.committed;
     const pinned = pending?.completion.promise ?? Promise.resolve(committedAtAdmission);
     if (!pending && committedAtAdmission) {
@@ -1273,7 +1207,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       controller.abort(signal?.reason);
     };
     signal?.addEventListener('abort', abortFromCall, { once: true });
-    if (signal?.aborted) abortFromCall();
+    if (signal?.aborted) {
+      abortFromCall();
+    }
     document.operations.add(controller);
     this.documentOperations.set(input.operationId, controller);
     try {
@@ -1301,7 +1237,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
           };
         }
-        const artifact = evaluation.artifact;
+        const { artifact } = evaluation;
         const target = this.resolveDocumentExportTarget(artifact.owner, artifact.evaluationSlot?.offers, input.target);
         if (!target.success) {
           return {
@@ -1323,6 +1259,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
           };
         }
+        // A pinned evaluation stays fixed, while write-only dependencies must use bytes current at this export.
+        await this.revalidateRetainedFiles();
+        controller.signal.throwIfAborted();
         this.onDocumentProgressUpdate?.({
           documentId: document.id,
           intent: evaluation.intent,
@@ -1340,7 +1279,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               evaluationId: evaluation.id,
               operationId: input.operationId,
               phase,
-              detail: { abortSequence: sequence, ...(generation === undefined ? {} : { abortGeneration: generation }) },
+              detail: {
+                abortSequence: sequence,
+                ...(generation === undefined ? {} : { abortGeneration: generation }),
+              },
             });
           },
         };
@@ -1361,12 +1303,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           this.activeDocumentNativeOperation = undefined;
         }
         controller.signal.throwIfAborted();
-        if (!result.success)
+        if (!result.success) {
           return {
             success: false,
             issues: result.issues,
             ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
           };
+        }
         const files = nonemptyExportFiles(result.data);
         return {
           success: true,
@@ -1392,16 +1335,24 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       throw error;
     } finally {
       signal?.removeEventListener('abort', abortFromCall);
-      if (pending) pending.pins--;
-      if (pending?.pins === 0) this.committedAdmissions.delete(pending);
+      if (pending) {
+        pending.pins--;
+      }
+      if (pending?.pins === 0) {
+        this.committedAdmissions.delete(pending);
+      }
       if (!pending && committedAtAdmission) {
         const remaining = (this.pinnedDocumentEvaluations.get(committedAtAdmission) ?? 1) - 1;
-        if (remaining > 0) this.pinnedDocumentEvaluations.set(committedAtAdmission, remaining);
-        else this.pinnedDocumentEvaluations.delete(committedAtAdmission);
+        if (remaining > 0) {
+          this.pinnedDocumentEvaluations.set(committedAtAdmission, remaining);
+        } else {
+          this.pinnedDocumentEvaluations.delete(committedAtAdmission);
+        }
       }
       document.operations.delete(controller);
-      if (this.documentOperations.get(input.operationId) === controller)
+      if (this.documentOperations.get(input.operationId) === controller) {
         this.documentOperations.delete(input.operationId);
+      }
     }
   }
 
@@ -1418,7 +1369,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   protected getDocumentExportDeclaration(
     _owner: OperationOwner,
     _exportId: string,
-  ): { extension: string; mimeType: string; schema?: z.ZodType; content: readonly RuntimeContentKey[] } | undefined {
+  ):
+    | {
+        extension: string;
+        mimeType: string;
+        schema?: z.ZodType;
+        content: readonly RuntimeContentKey[];
+      }
+    | undefined {
     return undefined;
   }
 
@@ -1428,9 +1386,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         // oxlint-disable-next-line no-await-in-loop -- one committed source closure is checked in path order.
         const bytes = await this.filesystem.readFile(path);
         // oxlint-disable-next-line no-await-in-loop -- hash each path before making a source-correct write.
-        if (`sha256:${await this.hashContent(bytes)}` !== expected) return false;
+        if (`sha256:${await this.hashContent(bytes)}` !== expected) {
+          return false;
+        }
       } catch (error) {
-        if (expected !== 'missing' || !isNotFoundError(error)) return false;
+        if (expected !== 'missing' || !isNotFoundError(error)) {
+          return false;
+        }
       }
     }
     return true;
@@ -1447,6 +1409,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     ]);
   }
 
+  // oxlint-disable-next-line max-params -- A document admission carries its intent, transient flag and optional staged files.
   private scheduleDocumentEvaluation(
     document: DocumentRecord,
     intent: number,
@@ -1474,17 +1437,30 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           completion: Promise.withResolvers<DocumentEvaluation>(),
           pins: 0,
         };
-    // An unobserved committed admission may be superseded or closed before an export pins it.
-    void pendingCommitted?.completion.promise.catch(() => undefined);
+    // Observe a committed admission even if no export pins it before supersession.
+    if (pendingCommitted) {
+      this.trackDocumentTask(pendingCommitted.completion.promise, () => undefined);
+    }
     if (pendingCommitted) {
       document.pendingCommitted = pendingCommitted;
       this.committedAdmissions.add(pendingCommitted);
     }
     const parameters = { ...document.parameters };
     const evaluateOptions = { ...document.evaluateOptions };
-    const file = document.file;
-    this.onEvaluating?.({ documentId: document.id, intent, evaluationId, transient });
-    this.onDocumentProgressUpdate?.({ documentId: document.id, intent, evaluationId, operationId, phase: 'queued' });
+    const { file } = document;
+    this.onEvaluating?.({
+      documentId: document.id,
+      intent,
+      evaluationId,
+      transient,
+    });
+    this.onDocumentProgressUpdate?.({
+      documentId: document.id,
+      intent,
+      evaluationId,
+      operationId,
+      phase: 'queued',
+    });
     this.onDocumentStateChanged?.({ state: 'busy' });
     const pending = this.enqueueOperation(async () => {
       const previousProgress = this.onProgress;
@@ -1505,19 +1481,38 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           this.abandonDocumentEvaluation(pendingCommitted);
           return;
         }
-        if (stage) await this.writeFilesAndInvalidate(stage, document.id);
+        if (stage) {
+          await this.writeFilesAndInvalidate(stage, document.id);
+        }
         await this.revalidateRetainedFiles();
         const dependencyContext: DependencyResolutionContext = {};
         const owner = await this.createOperationOwner(file, 'request');
-        const described = await this.getParametersInLane(file, { dependencyContext, owner });
+        const described = await this.getParametersInLane(file, {
+          dependencyContext,
+          owner,
+        });
         const description: Description = described.success
-          ? { success: true, kernelId: owner.binding?.kernelId, parameters: described.data, issues: described.issues }
-          : { success: false, kernelId: owner.binding?.kernelId, issues: described.issues };
+          ? {
+              success: true,
+              kernelId: owner.binding?.kernelId,
+              parameters: described.data,
+              issues: described.issues,
+            }
+          : {
+              success: false,
+              kernelId: owner.binding?.kernelId,
+              issues: described.issues,
+            };
         if (!this.shouldContinueDocumentEvaluation(document, controller, intent, pendingCommitted)) {
           this.abandonDocumentEvaluation(pendingCommitted);
           return;
         }
-        this.onDescribed?.({ documentId: document.id, intent, evaluationId, ...description });
+        this.onDescribed?.({
+          documentId: document.id,
+          intent,
+          evaluationId,
+          ...description,
+        });
         let evaluation: DocumentEvaluation;
         const legacyProjection = described.success ? described.data.legacyProjection : undefined;
         if (!described.success || legacyProjection?.status !== 'usable') {
@@ -1535,7 +1530,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             id: evaluationId,
             intent,
             transient,
-            result: { success: false, id: evaluationId, transient, issues, sourceRevision: described.sourceRevision },
+            result: {
+              success: false,
+              id: evaluationId,
+              transient,
+              issues,
+              sourceRevision: described.sourceRevision,
+            },
           };
         } else {
           const manifest = described.data;
@@ -1549,9 +1550,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               parameterSchema: legacyProjection.schema,
               options: evaluateOptions,
             },
-            { dependencyContext, owner, display: false, publish: false },
+            { dependencyContext, owner },
           );
-          const result = artifact.result;
+          const { result } = artifact;
           evaluation = result.success
             ? {
                 id: evaluationId,
@@ -1582,7 +1583,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
               };
         }
         if (document.watch) {
+          for (const [path, digest] of Object.entries(evaluation.result.sourceRevision?.files ?? {})) {
+            if (!this.fileHashCache.has(path)) {
+              this.fileHashCache.set(path, digest === 'missing' ? digest : digest.slice('sha256:'.length));
+            }
+          }
           document.watchPaths = new Set([
+            assertRootedPath(joinRelativePath(document.file.path, document.file.filename)),
             ...Object.keys(evaluation.result.sourceRevision?.files ?? {}),
             ...(evaluation.artifact?.identity.dependencies.flatMap((dependency) =>
               dependency.type === 'file' ? [dependency.path] : [],
@@ -1599,26 +1606,43 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         if (pendingCommitted) {
           pendingCommitted.evaluation = evaluation;
           pendingCommitted.completion.resolve(evaluation);
-          if (pendingCommitted.pins === 0) this.committedAdmissions.delete(pendingCommitted);
+          if (pendingCommitted.pins === 0) {
+            this.committedAdmissions.delete(pendingCommitted);
+          }
         }
-        if (!this.shouldPublishDocumentEvaluation(document, controller, intent)) return;
+        if (!this.shouldPublishDocumentEvaluation(document, controller, intent)) {
+          return;
+        }
         document.current = evaluation;
         if (!transient) {
           document.committed = evaluation;
-          if (document.pendingCommitted === pendingCommitted) document.pendingCommitted = undefined;
+          if (document.pendingCommitted === pendingCommitted) {
+            document.pendingCommitted = undefined;
+          }
         }
-        this.onEvaluated?.({ documentId: document.id, intent, ...evaluation.result });
-        this.onDocumentStateChanged?.({ state: evaluation.result.success ? 'idle' : 'error' });
-        for (const view of document.views.values()) this.scheduleDocumentView(view, evaluation);
-        if (!document.watch) await this.reconcileObservedPaths();
+        this.onEvaluated?.({
+          documentId: document.id,
+          intent,
+          ...evaluation.result,
+        });
+        this.onDocumentStateChanged?.({
+          state: evaluation.result.success ? 'idle' : 'error',
+        });
+        for (const view of document.views.values()) {
+          this.scheduleDocumentView(view, evaluation);
+        }
+        if (!document.watch) {
+          await this.reconcileObservedPaths();
+        }
       } finally {
         this.activeDocumentEvaluationController = undefined;
         this.activeDocumentEvaluationSequence = 0;
         this.onProgress = previousProgress;
       }
     }, controller.signal);
-    void pending
-      .catch((error: unknown) => {
+    this.trackDocumentTask(
+      pending,
+      async (error: unknown) => {
         if (controller.signal.aborted && controller.signal.reason === abortReasonEnum.timeout) {
           this.onDocumentError?.({
             scope: 'operation',
@@ -1632,30 +1656,61 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           });
         }
         const issues = this.errorToRuntimeIssues(error);
-        const result: Evaluation = { success: false, id: evaluationId, transient, issues };
-        const evaluation: DocumentEvaluation = { id: evaluationId, intent, transient, result };
+        const result: Evaluation = {
+          success: false,
+          id: evaluationId,
+          transient,
+          issues,
+        };
+        const evaluation: DocumentEvaluation = {
+          id: evaluationId,
+          intent,
+          transient,
+          result,
+        };
+        if (document.watch && !controller.signal.aborted && !document.closed && document.intent === intent) {
+          document.watchPaths.add(assertRootedPath(joinRelativePath(document.file.path, document.file.filename)));
+          await this.reconcileObservedPaths();
+        }
         if (pendingCommitted) {
-          if (controller.signal.aborted || document.closed) pendingCommitted.completion.reject(error);
-          else {
+          if (controller.signal.aborted || document.closed) {
+            pendingCommitted.completion.reject(error);
+          } else {
             pendingCommitted.evaluation = evaluation;
             pendingCommitted.completion.resolve(evaluation);
           }
-          if (pendingCommitted.pins === 0) this.committedAdmissions.delete(pendingCommitted);
+          if (pendingCommitted.pins === 0) {
+            this.committedAdmissions.delete(pendingCommitted);
+          }
         }
         if (!controller.signal.aborted && !document.closed && document.intent === intent) {
           document.current = evaluation;
-          if (!transient) document.committed = evaluation;
+          if (!transient) {
+            document.committed = evaluation;
+          }
           this.onEvaluated?.({ documentId: document.id, intent, ...result });
-          this.onDocumentStateChanged?.({ state: 'error', detail: issueDetail(issues) });
-          for (const view of document.views.values()) this.scheduleDocumentView(view, evaluation);
+          this.onDocumentStateChanged?.({
+            state: 'error',
+            detail: issueDetail(issues),
+          });
+          for (const view of document.views.values()) {
+            this.scheduleDocumentView(view, evaluation);
+          }
         }
-      })
-      .finally(() => {
-        if (document.evaluationController === controller) document.evaluationController = undefined;
-        if (this.documentOperations.get(operationId) === controller) this.documentOperations.delete(operationId);
-        if (this.documentOperations.get(admissionAlias) === controller) this.documentOperations.delete(admissionAlias);
+      },
+      () => {
+        if (document.evaluationController === controller) {
+          document.evaluationController = undefined;
+        }
+        if (this.documentOperations.get(operationId) === controller) {
+          this.documentOperations.delete(operationId);
+        }
+        if (this.documentOperations.get(admissionAlias) === controller) {
+          this.documentOperations.delete(admissionAlias);
+        }
         document.operations.delete(controller);
-      });
+      },
+    );
   }
 
   /** Metadata for the selected kernel's offered views. */
@@ -1669,29 +1724,44 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /** Select and validate an offered view, including its media type and instance. */
+  // oxlint-disable-next-line max-params -- The subclass hook selects an owner-bound offered view and optional instance.
   protected selectDocumentView(
     _owner: OperationOwner,
     _offers: KernelOffers | undefined,
     _view: string | undefined,
+    // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- The wire uses null to clear a selected instance.
     _instance: string | null | undefined,
   ):
-    | { success: true; selection: { view: string; mimeType: MediaType; instance?: string } }
+    | {
+        success: true;
+        selection: { view: string; mimeType: MediaType; instance?: string };
+      }
     | { success: false; issues: KernelIssue[] } {
     return createKernelError([
-      { code: 'VIEW_UNAVAILABLE', message: 'No view is available.', type: 'kernel', severity: 'error' },
+      {
+        code: 'VIEW_UNAVAILABLE',
+        message: 'No view is available.',
+        type: 'kernel',
+        severity: 'error',
+      },
     ]);
   }
 
   private scheduleDocumentView(view: ViewRecord, evaluation: DocumentEvaluation): void {
     const { document } = view;
-    const requestId = view.requestId;
+    const { requestId } = view;
     const operationId = `render:${view.id}:${evaluation.id}:${requestId}`;
     const controller = new AbortController();
     this.documentOperations.set(operationId, controller);
     this.documentOperations.set(requestId, controller);
     document.operations.add(controller);
     view.operations.add(controller);
-    this.onRendering?.({ subscriptionId: view.id, requestId, evaluationId: evaluation.id, intent: evaluation.intent });
+    this.onRendering?.({
+      subscriptionId: view.id,
+      requestId,
+      evaluationId: evaluation.id,
+      intent: evaluation.intent,
+    });
     this.onDocumentProgressUpdate?.({
       documentId: document.id,
       intent: evaluation.intent,
@@ -1706,9 +1776,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         document.closed ||
         document.current !== evaluation ||
         view.requestId !== requestId
-      )
+      ) {
         return;
-      const artifact = evaluation.artifact;
+      }
+      const { artifact } = evaluation;
       let result: Rendering;
       if (!artifact || !evaluation.result.success) {
         result = {
@@ -1726,21 +1797,41 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           view.view,
           view.instance,
         );
-        if (!selected.success) {
-          result = {
-            success: false,
-            view: view.view,
-            requestId,
-            evaluationId: evaluation.id,
-            transient: evaluation.transient,
-            issues: selected.issues,
-            ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
-          };
-        } else {
-          const selection = selected.selection;
+        if (selected.success) {
+          const { selection } = selected;
           const key = canonicalJson([selection, view.options, view.content]);
+          const meshMiddleware = this.getMeshExecutionList(artifact.owner, view.content ?? {});
+          const dependencies = await this.computeDependencies({
+            operations: ['evaluate', 'render'],
+            parameters: artifact.identity.parameters,
+            renderOptions: view.options,
+            content: view.content ?? {},
+            resolvedMiddleware: this.mergeExecutionLists(
+              this.getCreateExecutionList(artifact.owner, artifact.identity.content, false),
+              meshMiddleware,
+            ),
+            owner: artifact.owner,
+          });
+          if (document.watch) {
+            const watched = new Set(document.watchPaths);
+            for (const dependency of dependencies) {
+              if (dependency.type === 'file') {
+                watched.add(dependency.path);
+              }
+            }
+            if (watched.size !== document.watchPaths.size) {
+              document.watchPaths = watched;
+              if (!(await this.reconcileObservedPaths())) {
+                this.scheduleDocumentEvaluation(document, document.intent, evaluation.transient);
+                return;
+              }
+            }
+          }
+          const projectionHash = await sha256String(
+            canonicalJson([await this.computeDependencyHash(dependencies), key]),
+          );
           evaluation.projections ??= new Map();
-          let projected = evaluation.projections.get(key);
+          let projected = evaluation.projections.get(projectionHash);
           if (!projected) {
             this.onDocumentProgressUpdate?.({
               documentId: document.id,
@@ -1752,7 +1843,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             });
             const identity = {
               ...artifact.identity,
-              dependencyHash: await sha256String(canonicalJson([artifact.identity.dependencyHash, key])),
+              dependencies,
+              dependencyHash: projectionHash,
             };
             this.activeDocumentNativeOperation = {
               controller,
@@ -1778,8 +1870,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 selection,
                 renderOptions: view.options,
                 requestedContent: view.content,
-                resolvedMiddleware: this.getMeshExecutionList(artifact.owner, view.content ?? {}),
-                createResult: { success: true, data: undefined, issues: [...evaluation.result.issues] },
+                resolvedMiddleware: meshMiddleware,
+                createResult: {
+                  success: true,
+                  data: undefined,
+                  issues: [...evaluation.result.issues],
+                },
                 renderArtifact: artifact,
               });
             } finally {
@@ -1787,7 +1883,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             }
             if (projected.success) {
               try {
-                projected = { ...projected, data: asKnownArtifact(projected.data) ?? projected.data };
+                projected = {
+                  ...projected,
+                  data: asKnownArtifact(projected.data) ?? projected.data,
+                };
               } catch (error) {
                 projected = createKernelError([
                   {
@@ -1799,14 +1898,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 ]);
               }
             }
-            evaluation.projections.set(key, projected);
+            evaluation.projections.set(projectionHash, projected);
           }
           result = projected.success
             ? {
                 success: true,
                 view: selection.view,
                 artifact: projected.data,
-                hash: await sha256String(canonicalJson([artifact.identity.dependencyHash, key])),
+                hash: projectionHash,
                 requestId,
                 evaluationId: evaluation.id,
                 ...(selection.instance === undefined ? {} : { instance: selection.instance }),
@@ -1824,14 +1923,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 issues: projected.issues,
                 ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
               };
+        } else {
+          result = {
+            success: false,
+            view: view.view,
+            requestId,
+            evaluationId: evaluation.id,
+            transient: evaluation.transient,
+            issues: selected.issues,
+            ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
+          };
         }
       }
       if (this.isCurrentViewRequest(view, evaluation, requestId, controller)) {
-        this.onRendered?.({ subscriptionId: view.id, intent: evaluation.intent, ...result });
+        this.onRendered?.({
+          subscriptionId: view.id,
+          intent: evaluation.intent,
+          ...result,
+        });
       }
     }, controller.signal);
-    void pending
-      .catch((error: unknown) => {
+    this.trackDocumentTask(
+      pending,
+      (error: unknown) => {
         if (controller.signal.aborted && controller.signal.reason === abortReasonEnum.timeout) {
           this.onDocumentError?.({
             scope: 'operation',
@@ -1861,17 +1975,27 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             issues: this.errorToRuntimeIssues(error),
             ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
           };
-          this.onRendered?.({ subscriptionId: view.id, intent: evaluation.intent, ...result });
+          this.onRendered?.({
+            subscriptionId: view.id,
+            intent: evaluation.intent,
+            ...result,
+          });
         }
-      })
-      .finally(() => {
-        if (this.documentOperations.get(operationId) === controller) this.documentOperations.delete(operationId);
-        if (this.documentOperations.get(requestId) === controller) this.documentOperations.delete(requestId);
+      },
+      () => {
+        if (this.documentOperations.get(operationId) === controller) {
+          this.documentOperations.delete(operationId);
+        }
+        if (this.documentOperations.get(requestId) === controller) {
+          this.documentOperations.delete(requestId);
+        }
         document.operations.delete(controller);
         view.operations.delete(controller);
-      });
+      },
+    );
   }
 
+  // oxlint-disable-next-line max-params -- The current controller, intent and export pin are checked together.
   private shouldContinueDocumentEvaluation(
     document: DocumentRecord,
     controller: AbortController,
@@ -1884,9 +2008,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private abandonDocumentEvaluation(pendingCommitted?: CommittedAdmission): void {
-    if (!pendingCommitted) return;
+    if (!pendingCommitted) {
+      return;
+    }
     pendingCommitted.completion.reject(new Error('Document evaluation was superseded or closed.'));
-    if (pendingCommitted.pins === 0) this.committedAdmissions.delete(pendingCommitted);
+    if (pendingCommitted.pins === 0) {
+      this.committedAdmissions.delete(pendingCommitted);
+    }
   }
 
   private shouldPublishDocumentEvaluation(
@@ -1897,6 +2025,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return !controller.signal.aborted && !document.closed && document.intent === intent;
   }
 
+  // oxlint-disable-next-line max-params -- The four request identities must be compared atomically before publication.
   private isCurrentViewRequest(
     view: ViewRecord,
     evaluation: DocumentEvaluation,
@@ -1912,161 +2041,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     );
   }
 
-  /**
-   * Targeted wire timeout entry point used by every isolated transport.
-   * Supersession is represented by admitting a newer preview, not by this
-   * command. Unknown and inactive targets are ignored.
-   *
-   * @param input - Opaque preview target and the only valid wire reason.
-   */
-  public handleWireAbort(input: { readonly renderId: string; readonly reason: WireAbortReasonCode }): void {
-    const record = this.renderCancellationRecords.get(input.renderId);
-    if (!record || record !== this.activeRenderRecord) {
-      return;
-    }
-    this.abortRenderRecord(record, 'timeout');
-    if (!this.signalView) {
-      this.renderGeneration = (this.renderGeneration + 1) >>> 0;
-    }
-  }
-
-  /**
-   * Stage byte payloads onto the worker-side {@link RuntimeFileSystem} and
-   * render the supplied entry under the transported preview admission.
-   *
-   * @param request - Stage map plus the entry to open after staging completes.
-   */
-  public async handleStageAndOpenFile(request: RuntimeStageAndRenderArgs): Promise<void> {
-    const file = this.canonicalGeometryFile(request.file);
-    const stage = this.canonicalStage(request.stage);
-    const record = this.admitTransportPreview(request);
-    if (!record) {
-      return;
-    }
-    this.pendingOpenFileRecord = record;
-    await this.runQueuedCommand(record, async () => {
-      if (Object.keys(stage).length > 0) {
-        await this.writeFilesAndInvalidate(stage);
-      }
-      await this.applyOpenFileIntent({
-        record,
-        file,
-        parameters: request.parameters,
-        operation: { options: request.options, content: request.content },
-      });
-    });
-  }
-
-  /**
-   */
-  public handleOpenFile(request: RuntimeOpenFileArgs): void {
-    const file = this.canonicalGeometryFile(request.file);
-    const record = this.admitTransportPreview(request);
-    if (!record) {
-      return;
-    }
-    this.pendingOpenFileRecord = record;
-    void this.runQueuedCommand(record, async () =>
-      this.applyOpenFileIntent({
-        record,
-        file,
-        parameters: request.parameters,
-        transient: request.transient,
-        operation: { options: request.options, content: request.content },
-      }),
-    );
-  }
-
-  /**
-   * Handle a setParameters command from the main thread.
-   * Stores the parameters, aborts any in-progress render, and schedules a
-   * render after the {@link parameterDebounce} window (configured in
-   * `runtime-framework.constants`).
-   *
-   * @param request - Identified parameter update.
-   */
-  public handleUpdateParameters(request: RuntimeUpdateParametersArgs): void {
-    const record = this.admitTransportPreview(request);
-    if (!record) {
-      return;
-    }
-    void this.runQueuedCommand(record, async () => {
-      if (!this.currentFile) {
-        this.failUnscheduledPreview(record, 'Cannot update parameters before opening a runtime file');
-        return;
-      }
-      this.currentParameters = request.parameters;
-      if (!this.currentRenderTransient) {
-        this.committedParameters = request.parameters;
-      }
-      this.scheduleRender(parameterDebounce, record);
-    });
-  }
-
-  /**
-   * Handle a setOptions command from the main thread.
-   * Replaces the current per-render kernel options, aborts any in-progress
-   * render, and schedules an immediate re-render against the active file
-   * with the existing parameters.
-   *
-   * @param request - Identified replacement render options.
-   */
-  public handleSetOptions(request: RuntimeSetOptionsArgs): void {
-    const record = this.admitTransportPreview(request);
-    if (!record) {
-      return;
-    }
-    void this.runQueuedCommand(record, async () => {
-      if (!this.currentFile) {
-        this.failUnscheduledPreview(record, 'Cannot set render options before opening a runtime file');
-        return;
-      }
-      this.currentRenderOptions = request.options;
-      this.clearScheduledRender();
-      await this.executeRender(record);
-    });
-  }
-
-  private async applyOpenFileIntent(input: {
-    readonly record: RenderCancellationRecord;
-    readonly file: RuntimeFileLocator;
-    readonly parameters?: Record<string, unknown>;
-    readonly transient?: boolean;
-    readonly operation?: { readonly options?: Record<string, unknown>; readonly content?: RuntimeContentInput };
-  }): Promise<void> {
-    const { record, file, parameters, operation } = input;
-    if (this.pendingOpenFileRecord === record) {
-      this.pendingOpenFileRecord = undefined;
-    }
-    if (record !== this.activeRenderRecord || record.controller.signal.aborted) {
-      return;
-    }
-    const canonicalFile = this.canonicalGeometryFile(file);
-    this.currentFile = canonicalFile;
-    this.currentParameters = parameters ?? {};
-    this.currentRenderOptions = operation?.options;
-    this.currentRenderContent = operation?.content;
-    this.currentRenderTransient = input.transient === true;
-    if (!this.currentRenderTransient) {
-      this.committedParameters = this.currentParameters;
-    }
-    this.clearScheduledRender();
-
-    this.setActiveFile(canonicalFile);
-    const entryCandidate = {
-      generation: record.generation,
-      paths: new Map([[this.activeFilePath, fileChangeDebounce]]),
-      middlewarePaths: new Map<string, number>(),
-      coherent: true,
-    };
-    await this.reconcileObservedPaths(entryCandidate);
-    if (record === this.activeRenderRecord) {
-      // An abandoned reservation is terminalized by the render's own entry guard rather
-      // than dropped here, which would leave the record without a terminal state.
-      await this.executeRender(record);
-    }
-  }
-
   private canonicalGeometryFile(file: RuntimeFileLocator): RuntimeFileLocator {
     assertRootedPath(file.path);
     if (file.filename.length === 0 || file.filename.includes('/') || file.filename.includes('\\')) {
@@ -2074,127 +2048,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
     const filePath = assertRootedPath(joinRelativePath(file.path, file.filename));
     const separator = filePath.lastIndexOf('/');
-    return { path: separator === -1 ? '' : filePath.slice(0, separator), filename: KernelWorker.getBasename(filePath) };
-  }
-
-  private canonicalStage(stage: Record<string, Uint8Array<ArrayBuffer>>): Record<string, Uint8Array<ArrayBuffer>> {
-    const canonical: Record<string, Uint8Array<ArrayBuffer>> = {};
-    for (const [path, bytes] of Object.entries(stage)) {
-      const resolved = assertRootedPath(path);
-      if (resolved in canonical) {
-        throw new TypeError('Staged runtime paths must be unique after canonicalization');
-      }
-      canonical[resolved] = bytes;
-    }
-    return canonical;
-  }
-
-  private admitTransportPreview(identity: RuntimePreviewIdentity): RenderCancellationRecord | undefined {
-    if (this.renderCancellationRecords.has(identity.renderId)) {
-      throw new TypeError(`Duplicate live preview renderId: ${identity.renderId}`);
-    }
-    let generation: number;
-    if (this.signalView) {
-      if (identity.abortGeneration === undefined) {
-        throw new TypeError('SAB-backed preview commands require abortGeneration');
-      }
-      generation = identity.abortGeneration >>> 0;
-      const current = Atomics.load(this.signalView, signalSlot.abortGeneration) >>> 0;
-      if (generation !== current) {
-        const activeRecord = this.activeRenderRecord;
-        const activeState = this.lastPushedState;
-        if (activeState?.renderId === identity.renderId) {
-          this.lastPushedState = undefined;
-        }
-        this.pushState('idle', {
-          renderId: identity.renderId,
-          generation,
-          controller: new AbortController(),
-          executing: false,
-          reason: 'superseded',
-        });
-        // Only a genuinely active phase is adoptable by a client whose selection the
-        // stale terminal just settled. Replaying a terminal state of a completed but
-        // unreleased successor publishes a frame nobody can adopt.
-        if (
-          activeRecord &&
-          activeRecord === this.activeRenderRecord &&
-          activeState?.renderId === activeRecord.renderId &&
-          (activeState.state === 'buffering' || activeState.state === 'rendering')
-        ) {
-          this.pushState(activeState.state, activeRecord, activeState.detail);
-        }
-        return undefined;
-      }
-    } else {
-      if (identity.abortGeneration !== undefined) {
-        throw new TypeError('Wire-only preview commands must omit abortGeneration');
-      }
-      generation = (this.renderGeneration + 1) >>> 0;
-    }
-    this.renderGeneration = generation;
-    return this.createRenderRecord(identity.renderId, generation);
-  }
-
-  private createAutonomousPreviewRecord(): RenderCancellationRecord {
-    const generation = this.reserveGeneration();
-    return this.createRenderRecord(randomUuid(), generation);
-  }
-
-  private reserveGeneration(): number {
-    if (this.signalView) {
-      this.renderGeneration = (Atomics.add(this.signalView, signalSlot.abortGeneration, 1) + 1) >>> 0;
-      Atomics.notify(this.signalView, signalSlot.abortGeneration);
-    } else {
-      this.renderGeneration = (this.renderGeneration + 1) >>> 0;
-    }
-    return this.renderGeneration;
-  }
-
-  private createRenderRecord(renderId: string, generation: number): RenderCancellationRecord {
-    if (this.renderCancellationRecords.has(renderId)) {
-      throw new TypeError(`Duplicate live preview renderId: ${renderId}`);
-    }
-    if (this.activeRenderRecord) {
-      this.abortRenderRecord(this.activeRenderRecord, 'superseded');
-    }
-    if (this.lastPushedState?.renderId === renderId) {
-      this.lastPushedState = undefined;
-    }
-    const record = {
-      renderId,
-      generation,
-      controller: new AbortController(),
-      executing: false,
-    } satisfies RenderCancellationRecord;
-    this.renderCancellationRecords.set(renderId, record);
-    this.activeRenderRecord = record;
-    return record;
-  }
-
-  private abortRenderRecord(record: RenderCancellationRecord, reason: 'superseded' | 'timeout'): void {
-    if (record.reason) {
-      return;
-    }
-    record.reason = reason;
-    record.controller.abort(new RenderAbortedError());
-    if (record.executing) {
-      return;
-    }
-
-    if (reason === 'timeout') {
-      this.failRender(record, [renderTimeoutIssue()]);
-    } else {
-      this.pushState('idle', record);
-    }
-    this.releaseRenderRecord(record);
-  }
-
-  private releaseRenderRecord(record: RenderCancellationRecord): void {
-    this.renderCancellationRecords.delete(record.renderId);
-    if (this.activeRenderRecord === record) {
-      this.activeRenderRecord = undefined;
-    }
+    return {
+      path: separator === -1 ? '' : filePath.slice(0, separator),
+      filename: KernelWorker.getBasename(filePath),
+    };
   }
 
   private async enqueueOperation<T>(operation: () => Promise<T>, signal = neverAbortedSignal): Promise<T> {
@@ -2226,26 +2083,41 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
-  private async runQueuedCommand(record: RenderCancellationRecord, operation: () => Promise<void>): Promise<void> {
-    try {
-      await this.enqueueOperation(async () => {
-        if (record.controller.signal.aborted || !this.renderCancellationRecords.has(record.renderId)) {
-          return;
+  /** Retain notification continuations until the serialized worker has drained. */
+  private trackDocumentTask(
+    pending: Promise<unknown>,
+    onError: (error: unknown) => void | Promise<void>,
+    onFinally?: () => void,
+  ): void {
+    const observe = async (): Promise<void> => {
+      try {
+        await pending;
+      } catch (error) {
+        try {
+          await onError(error);
+        } catch (reportingError) {
+          this.logger.warn('Failed to report a document operation error', {
+            data: {
+              error: reportingError instanceof Error ? reportingError.message : String(reportingError),
+            },
+          });
         }
-        await operation();
-      }, record.controller.signal);
-    } catch (error) {
-      if (!this.operationAdmissionOpen || record.controller.signal.aborted || isRenderAbortedError(error)) {
-        return;
+      } finally {
+        try {
+          onFinally?.();
+        } catch (cleanupError) {
+          this.logger.warn('Failed to release a document operation', {
+            data: {
+              error: cleanupError instanceof Error ? cleanupError.message : String(cleanupError),
+            },
+          });
+        } finally {
+          this.documentTasks.delete(observed);
+        }
       }
-      this.failRender(record, this.errorToRuntimeIssues(error));
-      this.releaseRenderRecord(record);
-    }
-  }
-
-  private failUnscheduledPreview(record: RenderCancellationRecord, message: string): void {
-    this.failRender(record, [{ message, code: 'RUNTIME', type: 'runtime', severity: 'error' }]);
-    this.releaseRenderRecord(record);
+    };
+    const observed = observe();
+    this.documentTasks.add(observed);
   }
 
   /**
@@ -2282,34 +2154,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     ];
   }
 
-  /**
-   * Report a failed render on both of its channels at once.
-   *
-   * The `errorEvent` carries the issues; the terminal `error` state carries
-   * their joined messages as its `detail`, so a client that never saw the
-   * error event still settles the render with a real reason instead of
-   * inventing one (`runtime-client-core.ts`, `detail ?? 'Runtime render
-   * failed'`).
-   *
-   * @param record - The admitted render being failed.
-   * @param issues - The issues explaining the failure.
-   */
-  private failRender(record: RenderCancellationRecord, issues: readonly KernelIssue[]): void {
-    this.onError?.({ issues: [...issues], renderId: record.renderId });
-    this.pushState('error', record, issueDetail(issues));
+  private createExportRenderIdentityMissingResult(): ExportGeometryResult {
+    return createKernelError([
+      {
+        message:
+          'Export cache lookup requires a settled render identity. Render the model first or use request-scoped export with file and parameters.',
+        code: 'HANDLE_MISSING',
+        type: 'runtime',
+        severity: 'error',
+      },
+    ]);
   }
 
   /**
    * Every path a volatile cache is currently standing behind.
    *
-   * The same union `reconcileObservedPaths` arms, minus the preview's own
-   * paths: what is retained is what has to be proven current.
-   *
-   * The union with the bundle results is load-bearing only for
-   * `hasCommittedObservation`, which asks whether a subscription covers
-   * everything reuse would ride on. `revalidateRetainedFiles` skips every path
-   * with no `fileHashCache` entry, so for that caller the extra dependencies
-   * and unresolved paths are inert.
+   * The union with bundle results includes paths that have not yet entered
+   * `fileHashCache`; `revalidateRetainedFiles` skips those unobserved paths.
    *
    * @returns Retained rooted paths, deduplicated.
    */
@@ -2360,9 +2221,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Prove the retained closure is current, and invalidate whatever is not (I1/I3).
    *
    * This is the freshness evidence a request-scoped operation answers from, and it is the
-   * same on every adapter (EQ7): a watch is an optimisation for the preview loop, never the
-   * thing correctness rides on. Before this, `evaluateModel`, `getParameters`,
-   * `snapshotSource` and `exportModel` kept whatever the first call read for as long as the
+   * same on every adapter (EQ7): a watch is an optimisation, never the
+   * thing correctness rides on. Before this, evaluation, parameter resolution,
+   * source snapshot and export kept whatever the first call read for as long as the
    * filesystem merely *could* watch, so the agent's kernel answered every later tool call
    * with the verdict for bytes the person had already replaced
    * (`docs/research/agent-stale-kernel-result-elimination-blueprint.md`).
@@ -2446,12 +2307,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (revisions.size === 0) {
       return;
     }
-    /* This records the new hash, so the OS watch event racing the same edit arrives with
-     * nothing to say and `_applyObservedRevisions` drops it. A preview sharing this runtime
-     * would therefore keep its pre-edit geometry until the *next* edit, since the event that
-     * would have re-rendered it was spent here. Out of scope: no host today shares one
-     * runtime between the preview loop and the agent. Give this lane a render trigger, not a
-     * second observation, if one ever does. */
+    /* Record the new hash so a watch echo for the same edit is deduplicated.
+     * Explicit document operations and watched documents share this observer. */
     const divergent = [...revisions.keys()];
     this._applyObservedRevisions(divergent, revisions);
   }
@@ -2474,67 +2331,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     }
   }
 
-  /**
-   * Whether a live subscription is currently committed over everything retained (I2).
-   *
-   * "The filesystem can watch" was the old evidence, and it is not evidence at all: a
-   * rejected or never-installed arm leaves `watchUnsubscribe` undefined while the volatile
-   * caches keep standing behind bytes nobody observes. `reconcileWatchSet` drops
-   * `.tau/cache` from everything it arms, so a retained entry there is never covered and is
-   * excluded here for the same reason.
-   *
-   * Request-scoped lanes do not consult this: they revalidate the retained closure instead,
-   * which is stronger evidence than a subscription — bytes, not delivery.
-   *
-   * @returns True when every retained path is covered by a committed subscription.
-   */
-  private hasCommittedObservation(): boolean {
-    if (this.watchUnsubscribe === undefined) {
-      return false;
-    }
-    return this.retainedObservedPaths().every(
-      (path) => path === '.tau/cache' || path.startsWith('.tau/cache/') || this.watchedPaths.has(path),
-    );
-  }
-
-  /**
-   * Drop everything the preview loop would otherwise reuse without an observation (I2).
-   *
-   * Only the preview-owning lanes (`executeRender`, `createGeometry`) call this: they
-   * publish an artifact and do not revalidate, so reuse has to be justified by a committed
-   * subscription. Request-scoped lanes took the same clear until Q5/EQ7 collapsed the dual
-   * path — they revalidate instead, which both proves freshness on a watcherless adapter and
-   * stops the browser re-bundling on every call.
-   */
-  private prepareUnobservedFileSystem(): void {
-    if (this.hasCommittedObservation()) {
-      return;
-    }
-    this.clearVolatileFileCaches();
-    this.invalidatePublishedArtifactState();
-  }
-
-  private clearVolatileFileCaches(): void {
-    this.fileHashCache.clear();
-    this.fileContentCache.clear();
-    this.commonDependencyCache.clear();
-    this.middlewareDependencyCache.clear();
-    this.parameterResultCache = undefined;
-    this.bundleResultCache.clear();
-    this.clearBundlerExecutionCaches();
-    this.onVolatileFileCachesCleared();
-  }
-
-  private invalidatePublishedArtifactState(): void {
-    this.currentPublishedRender = undefined;
-    this.latestEvaluationArtifact = undefined;
-    this.latestEvaluationSettled = false;
-    this.pendingNativeHandle = undefined;
-    this.onPublishedArtifactInvalidated();
-  }
-
   /** Stop admission, drain accepted work, and clean up exactly once. */
-  // oxlint-disable-next-line promise-function-async -- repeated cleanup calls must receive the same drain promise by identity.
   // oxlint-disable-next-line typescript/promise-function-async -- cleanup is idempotent and returns one shared promise identity.
   public cleanup(): Promise<void> {
     if (this.cleanupPromise) {
@@ -2543,13 +2340,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.operationAdmissionOpen = false;
     for (const document of this.documents.values()) {
       document.closed = true;
-      for (const controller of document.operations) controller.abort();
+      for (const controller of document.operations) {
+        controller.abort();
+      }
       document.pendingCommitted?.completion.reject(new Error(`Document ${document.id} closed.`));
     }
-    if (this.activeRenderRecord) {
-      this.abortRenderRecord(this.activeRenderRecord, 'superseded');
-    }
-    this.clearScheduledRender();
     this.cleanupPromise = this.drainAndCleanup();
     return this.cleanupPromise;
   }
@@ -2557,6 +2352,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private async drainAndCleanup(): Promise<void> {
     await this.watchReconciliationTail;
     await this.operationTail;
+    await Promise.allSettled(this.documentTasks);
     await this.performCleanup();
   }
 
@@ -2574,15 +2370,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     this.commonDependencyCache.clear();
     this.middlewareDependencyCache.clear();
     this.compiledWasmModules.clear();
-    this.currentPreviewWatchPaths.clear();
-    this.currentPreviewMiddlewarePaths.clear();
     this.watchedPaths.clear();
     this.pendingNativeHandle = undefined;
-    this.currentPublishedRender = undefined;
-    this.latestEvaluationArtifact = undefined;
-    this.latestEvaluationSettled = false;
     this.retainedEvaluation = undefined;
-    this.currentFile = undefined;
     // Nothing references the handles now — release them before onCleanup tears
     // down the kernel that owns their memory.
     this.disposeUnreachableNativeHandles();
@@ -2599,7 +2389,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         // oxlint-disable-next-line no-await-in-loop -- Release distinct bundlers in initialization order.
         await bundler.definition.onDispose?.(bundler.ctx);
       } catch (error) {
-        this.logger.warn('Bundler disposal failed', { data: { error: String(error) } });
+        this.logger.warn('Bundler disposal failed', {
+          data: { error: String(error) },
+        });
       }
     }
     this.loadedBundlers.clear();
@@ -2612,7 +2404,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         // oxlint-disable-next-line no-await-in-loop -- Sequential to preserve cleanup order
         await transcoder.definition.onDispose?.(transcoder.context);
       } catch (error) {
-        this.logger.warn('Transcoder disposal failed', { data: { error: String(error) } });
+        this.logger.warn('Transcoder disposal failed', {
+          data: { error: String(error) },
+        });
       }
     }
     this.loadedTranscoders.clear();
@@ -2675,9 +2469,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ({ enabled, middleware }) => enabled && Boolean(middleware.wrapDescribe ?? middleware.resolve),
     );
 
-    if (operationOwner.kind === 'render-artifact') {
-      this.onProgress?.('resolvingDeps');
-    }
     const depsSpan = this.tracer.startSpan('kernel.resolve-deps', {
       phase: 'resolvingDeps',
     });
@@ -2708,9 +2499,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       dependencyHash,
       canonicalJson(resolution),
     ].join('|');
-    if (operationOwner.kind === 'render-artifact') {
-      this.onProgress?.('extractingParams');
-    }
     const cached = this.parameterResultCache;
     if (cached?.key === parameterCacheKey) {
       // The manifest and source revision are frozen; only the issue list is the caller's to change.
@@ -2749,7 +2537,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ),
     );
     const parameterIdentity = {
-      dependency: contentDigest({ value: `sha256:${dependencyHash}`, name: 'parameter dependency hash' }),
+      dependency: contentDigest({
+        value: `sha256:${dependencyHash}`,
+        name: 'parameter dependency hash',
+      }),
       middleware: contentDigest({
         value: `sha256:${await sha256String(parameterMiddlewareKey)}`,
         name: 'parameter middleware identity',
@@ -2913,9 +2704,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
        * cache is written, so a cache hit replays the revision it was computed from. */
       result = {
         ...result,
-        sourceRevision: Object.freeze({ entry: entryPath, files: Object.freeze(parameterSourceFiles) }),
+        sourceRevision: Object.freeze({
+          entry: entryPath,
+          files: Object.freeze(parameterSourceFiles),
+        }),
       };
-      this.parameterResultCache = { key: parameterCacheKey, result: { ...result, issues: [...result.issues] } };
+      this.parameterResultCache = {
+        key: parameterCacheKey,
+        result: { ...result, issues: [...result.issues] },
+      };
     }
 
     this.logger.debug('getParameters completed', {
@@ -2947,173 +2744,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const manifest = await admitParameterManifest(candidate, expectation);
     this.admittedManifest = { key, manifest };
     return manifest;
-  }
-
-  /**
-   * Entry point for computing geometry from a file.
-   * Handles base path setup, timing, and middleware application using onion model.
-   *
-   * Middleware wraps around each other (onion model), so:
-   * - Code before handler() runs on the "request journey" (outside-in)
-   * - Code after handler() runs on the "response journey" (inside-out)
-   * - Short-circuited results still flow through upstream middleware post-processing
-   *
-   * @param entry - The geometry entry containing file, parameters, and optional render options
-   * @param entry.file - The geometry file to compute geometry from
-   * @param entry.parameters - The parameters to use when computing geometry
-   * @param entry.options - Optional kernel-specific render options
-   * @returns The computed geometry.
-   */
-  public async createGeometry(entry: {
-    file: RuntimeFileLocator;
-    parameters: Record<string, unknown>;
-    options?: Record<string, unknown>;
-    content?: RuntimeContentInput;
-  }): Promise<HashedGeometryResult> {
-    return this.enqueueOperation(async () => {
-      this.prepareUnobservedFileSystem();
-      const dependencyContext: DependencyResolutionContext = {};
-      const owner = await this.createOperationOwner(entry.file, 'render-artifact');
-      const parametersResult = await this.getParametersInLane(entry.file, { dependencyContext, owner });
-      if (!parametersResult.success) {
-        return parametersResult;
-      }
-      const extracted = parametersResult.data;
-      if (extracted.legacyProjection.status !== 'usable') {
-        return createKernelError([
-          {
-            message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
-            code: 'RUNTIME',
-            type: 'kernel',
-            severity: 'error',
-            details: extracted.legacyProjection.diagnostics,
-          },
-        ]);
-      }
-      const parameterSchema = extracted.legacyProjection.schema;
-      return this.createGeometryInLane(
-        {
-          ...entry,
-          parameters: mergeParameterDefaults({}, entry.parameters, parameterSchema),
-          parameterDefaults: extracted.defaults,
-          parameterManifest: extracted,
-          parameterSchema,
-        },
-        { dependencyContext, owner },
-      );
-    });
-  }
-
-  private async createGeometryInLane(
-    entry: {
-      file: RuntimeFileLocator;
-      parameters: Record<string, unknown>;
-      parameterDefaults: Record<string, unknown>;
-      parameterManifest: ParameterManifest;
-      parameterSchema: JSONSchema7;
-      options?: Record<string, unknown>;
-      content?: RuntimeContentInput;
-    },
-    lane: { dependencyContext?: DependencyResolutionContext; owner?: OperationOwner; publish?: boolean } = {},
-  ): Promise<HashedGeometryResult> {
-    const { dependencyContext, owner, publish = true } = lane;
-    const { artifact } = await this.materializeRender(entry, {
-      dependencyContext,
-      owner,
-      display: true,
-      publish,
-    });
-    const { result } = artifact;
-    if (!result.success) {
-      return result;
-    }
-    if (result.data === undefined) {
-      // Display-path invariant: a publish materialization either fills data via
-      // the mesh phase or fails inside it — this branch is defensive.
-      return createKernelError([
-        {
-          message: 'Kernel produced no display artifact for a publish render.',
-          code: 'KERNEL_CAPABILITY_MISSING',
-          type: 'kernel',
-          severity: 'error',
-        },
-      ]);
-    }
-    return { ...result, data: result.data };
-  }
-
-  /**
-   * Entry point for exporting geometry.
-   * Handles timing and middleware application using onion model.
-   *
-   * Middleware wraps around each other (onion model), so:
-   * - Code before handler() runs on the "request journey" (outside-in)
-   * - Code after handler() runs on the "response journey" (inside-out)
-   * - Short-circuited results still flow through upstream middleware post-processing
-   *
-   * @param format - The export format identifier (e.g. 'stl', 'step', 'glb').
-   * @param options - Format-specific export options. Validated against Zod schema when available.
-   * @param content - Optional request-scoped content input.
-   * @param signal - Per-call cancellation, observed at the operation's existing abort checkpoints.
-   * @returns The exported geometry.
-   */
-  // oxlint-disable-next-line max-params -- mirrors the fixed `export` protocol call shape (format, options, content, signal).
-  public async exportGeometry(
-    format: string,
-    options?: Record<string, unknown>,
-    content?: RuntimeContentInput,
-    signal?: AbortSignal,
-  ): Promise<ExportGeometryResult> {
-    return this.enqueueOperation(async () => this.exportGeometryInLane(format, options, content), signal);
-  }
-
-  private async exportGeometryInLane(
-    format: string,
-    options?: Record<string, unknown>,
-    content?: RuntimeContentInput,
-  ): Promise<ExportGeometryResult> {
-    const exportSpan = this.tracer.startSpan('kernel.export', {
-      format,
-    });
-
-    const currentRender = this.latestEvaluationSettled ? this.latestEvaluationArtifact : this.currentPublishedRender;
-    if (!currentRender) {
-      exportSpan.end();
-      return this.createExportRenderIdentityMissingResult();
-    }
-
-    const plan = this.createExportRequestPlan(currentRender.owner, { format, options, content });
-    if (!plan.success) {
-      exportSpan.end();
-      return plan.result;
-    }
-
-    const activeMiddleware = this.getOuterExportExecutionList(plan);
-
-    const result =
-      activeMiddleware.length === 0
-        ? await this.executeExportRequest(plan, currentRender)
-        : await this.runExportMiddlewarePipeline({
-            plan,
-            renderIdentity: currentRender.identity,
-            renderArtifact: currentRender,
-            activeMiddleware,
-          });
-
-    exportSpan.end();
-
-    return finalizeExportArtifactSet(result);
-  }
-
-  /**
-   * Export an exact render request without publishing it to the autonomous preview loop.
-   *
-   * @param request - Request-scoped render/export input from the runtime protocol.
-   * @param signal - Per-call cancellation, observed at the operation's existing abort checkpoints.
-   * @returns Exported files or structured runtime issues.
-   */
-  public async exportModel(request: RuntimeExportModelArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
-    return this.enqueueOperation(async () => this.exportModelInLane(request), signal);
   }
 
   /**
@@ -3224,7 +2854,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       // oxlint-disable-next-line no-await-in-loop -- file order and hash publication remain deterministic.
       const sha256 = await this.hashContent(content);
       hashesByPath.set(path, sha256);
-      files.push({ path, content: new Uint8Array(content), sha256, role: roles.get(path)! });
+      files.push({
+        path,
+        content: new Uint8Array(content),
+        sha256,
+        role: roles.get(path)!,
+      });
     }
 
     const revalidated = await discover();
@@ -3312,7 +2947,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         files: Object.fromEntries<ContentDigest | 'missing'>([
           ...[...hashesByPath].map(
             ([path, sha256]) =>
-              [path, contentDigest({ value: `sha256:${sha256}`, name: `source snapshot ${path}` })] as const,
+              [
+                path,
+                contentDigest({
+                  value: `sha256:${sha256}`,
+                  name: `source snapshot ${path}`,
+                }),
+              ] as const,
           ),
           ...unresolvedPaths.map((path) => [path, 'missing'] as const),
         ]),
@@ -3355,156 +2996,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return [...new Set(paths)].sort();
   }
 
-  private async exportModelInLane(request: RuntimeExportModelArgs): Promise<ExportGeometryResult> {
-    const exportSpan = this.tracer.startSpan('kernel.export-model', {
-      format: request.format,
-      file: request.file.filename,
-    });
-
-    try {
-      /* R4/I5: the lane's provenance is fixed once parameters resolve, and is carried onto the
-       * artifact set — success or failure — rather than onto one branch of it. */
-      let sourceRevision: SourceRevision | undefined;
-      const exported = finalizeExportArtifactSet(
-        await (async (): Promise<ExportGeometryResult> => {
-          const dependencyContext: DependencyResolutionContext = {};
-          if (request.stage) {
-            await this.writeFilesAndInvalidate(request.stage);
-          }
-          await this.revalidateRetainedFiles();
-
-          const owner = await this.createOperationOwner(request.file, 'request');
-
-          const plan = this.createExportRequestPlan(owner, {
-            format: request.format,
-            options: request.exportOptions,
-            content: request.content,
-          });
-          if (!plan.success) {
-            return plan.result;
-          }
-
-          const parametersResult = await this.getParametersInLane(request.file, { dependencyContext, owner });
-          if (!parametersResult.success) {
-            return parametersResult;
-          }
-          sourceRevision = parametersResult.sourceRevision;
-          const extracted = parametersResult.data;
-          if (extracted.legacyProjection.status !== 'usable') {
-            return createKernelError([
-              {
-                message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
-                code: 'RUNTIME',
-                type: 'kernel',
-                severity: 'error',
-                details: extracted.legacyProjection.diagnostics,
-              },
-            ]);
-          }
-          const parameterSchema = extracted.legacyProjection.schema;
-          const callerParameters = mergeParameterDefaults({}, request.parameters, parameterSchema);
-
-          const renderOptionsResult = this.validateRenderOptions(request.options, owner);
-          if (!renderOptionsResult.success) {
-            return createKernelError(renderOptionsResult.issues);
-          }
-          const sourceExport =
-            plan.route.kind === 'direct'
-              ? { format: plan.route.targetFormat, options: plan.route.options }
-              : { format: plan.route.sourceFormat, options: plan.route.sourceOptions };
-          const createOptionsResult = this.resolveCreateOptions(
-            renderOptionsResult.options,
-            sourceExport.options,
-            owner,
-          );
-          if (!createOptionsResult.success) {
-            return createKernelError(createOptionsResult.issues);
-          }
-          const resolvedArray = this.getExportExecutionList(plan);
-          const dependencies = await this.computeDependencies({
-            operations: ['evaluate', 'write'],
-            parameters: callerParameters,
-            renderOptions: renderOptionsResult.options,
-            content: plan.route.content,
-            exportDependency: plan.dependency,
-            resolvedMiddleware: resolvedArray,
-            dependencyContext,
-            owner,
-          });
-          const renderIdentity = this.createRenderIdentity({
-            file: request.file,
-            parameters: callerParameters,
-            renderOptions: renderOptionsResult.options,
-            content: plan.route.content,
-            dependencies,
-            dependencyHash: await this.computeDependencyHash(dependencies),
-            owner,
-          });
-
-          const activeMiddleware = this.getOuterExportExecutionList(plan);
-          const renderExactRequest = async (
-            handlerInput: MiddlewareExportGeometryRequest,
-          ): Promise<ExportGeometryResult> => {
-            let renderArtifact = this.getPublishedRenderForIdentity(renderIdentity);
-            if (!renderArtifact) {
-              const materialized = await this.materializeRender(
-                {
-                  file: request.file,
-                  parameters: callerParameters,
-                  parameterDefaults: extracted.defaults,
-                  parameterManifest: extracted,
-                  parameterSchema,
-                  options: renderOptionsResult.options,
-                  content: plan.route.content,
-                  export: {
-                    ...sourceExport,
-                    dependency: plan.dependency,
-                  },
-                },
-                {
-                  dependencyContext,
-                  owner,
-                  display: false,
-                  publish: false,
-                },
-              );
-              renderArtifact = materialized.artifact;
-              if (!renderArtifact.result.success) {
-                return { success: false, issues: renderArtifact.result.issues };
-              }
-            }
-            return this.executeExportRequest({ ...plan, input: handlerInput }, renderArtifact);
-          };
-
-          if (activeMiddleware.length === 0) {
-            return renderExactRequest(plan.input);
-          }
-
-          return this.runExportMiddlewarePipeline({
-            plan,
-            renderIdentity,
-            renderArtifact: this.getPublishedRenderForIdentity(renderIdentity),
-            activeMiddleware,
-            onCacheMiss: renderExactRequest,
-          });
-        })(),
-      );
-      return sourceRevision === undefined ? exported : { ...exported, sourceRevision };
-    } finally {
-      await this.reconcileObservedPaths();
-      exportSpan.end();
-    }
-  }
-
   /** Runs a registered transcoder directly, without a kernel render or filesystem. */
-  public async transcode(request: RuntimeTranscodeArgs, signal?: AbortSignal): Promise<ExportGeometryResult> {
+  public async transcode(request: RuntimeTranscodeArgs, signal?: AbortSignal): Promise<TranscodeResult> {
     return this.enqueueOperation(async () => {
       signal?.throwIfAborted();
       return this.transcodeInLane(request);
     }, signal);
   }
 
-  private async transcodeInLane(request: RuntimeTranscodeArgs): Promise<ExportGeometryResult> {
+  private async transcodeInLane(request: RuntimeTranscodeArgs): Promise<TranscodeResult> {
     const transcoder = [...this.loadedTranscoders.values()].find(({ edges }) =>
       edges.some(({ from, to }) => from === request.from && to === request.to),
     );
@@ -3536,7 +3036,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       span.end({ success: false });
       return createKernelError(admittedOptions.issues);
     }
-    const options = admittedOptions.options;
+    const { options } = admittedOptions;
 
     let context: unknown;
     try {
@@ -3594,111 +3094,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   /**
-   * Request-scoped compatibility entry point for model evaluation.
-   *
-   * @param input - Model source, parameters, and optional render options.
-   * @returns Display geometry materialized without preview publication.
-   */
-  public async render(input: {
-    file: RuntimeFileLocator;
-    parameters: Record<string, unknown>;
-    options?: Record<string, unknown>;
-  }): Promise<HashedGeometryResult> {
-    return this.evaluateModel(input);
-  }
-
-  /**
-   * Evaluate one model without changing autonomous preview ownership or publishing preview events.
-   *
-   * @param input - Request-owned source, parameters, staged files, and render inputs.
-   * @param signal - Per-call cancellation observed by the existing worker operation lane.
-   * @returns Display geometry materialized for this request only.
-   */
-  public async evaluateModel(input: RuntimeEvaluateModelArgs, signal?: AbortSignal): Promise<HashedGeometryResult> {
-    const file = this.canonicalGeometryFile(input.file);
-    return this.enqueueOperation(async () => {
-      const result = await this.evaluateModelInLane({ ...input, file });
-      /* I4, R8 parity with the export lane: an operation that kept volatile entries leaves
-       * the watch covering them. A lane that threw kept nothing worth watching, and the
-       * preview watch set is not the place to record its failure. */
-      await this.reconcileObservedPaths();
-      return result;
-    }, signal);
-  }
-
-  private async evaluateModelInLane(input: RuntimeEvaluateModelArgs): Promise<HashedGeometryResult> {
-    const renderSpan = this.tracer.startSpan('kernel.evaluate-model', {
-      file: input.file.filename,
-    });
-    const dependencyContext: DependencyResolutionContext = {};
-
-    try {
-      if (input.stage) {
-        await this.writeFilesAndInvalidate(input.stage);
-      }
-      await this.revalidateRetainedFiles();
-      const owner = await this.createOperationOwner(input.file, 'request');
-      const parametersResult = await this.getParametersInLane(input.file, { dependencyContext, owner });
-      if (!parametersResult.success) {
-        return parametersResult;
-      }
-
-      const extracted = parametersResult.data;
-      // R4/I5: everything this lane returns from here on was computed from that source revision,
-      // failures included — a render that failed against replaced bytes must not read as current.
-      const { sourceRevision } = parametersResult;
-      if (extracted.legacyProjection.status !== 'usable') {
-        return {
-          ...createKernelError([
-            {
-              message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
-              code: 'RUNTIME',
-              type: 'kernel',
-              severity: 'error',
-              details: extracted.legacyProjection.diagnostics,
-            },
-          ]),
-          sourceRevision,
-        };
-      }
-      const callerParameters = mergeParameterDefaults({}, input.parameters, extracted.legacyProjection.schema);
-
-      const { artifact } = await this.materializeRender(
-        {
-          file: input.file,
-          parameters: callerParameters,
-          parameterDefaults: extracted.defaults,
-          parameterManifest: extracted,
-          parameterSchema: extracted.legacyProjection.schema,
-          options: input.options,
-          content: input.content,
-        },
-        { dependencyContext, owner, display: true, publish: false },
-      );
-      const { result } = artifact;
-      if (!result.success) {
-        return { ...result, sourceRevision };
-      }
-      if (result.data === undefined) {
-        return {
-          ...createKernelError([
-            {
-              message: 'Kernel produced no display artifact for model evaluation.',
-              code: 'KERNEL_CAPABILITY_MISSING',
-              type: 'kernel',
-              severity: 'error',
-            },
-          ]),
-          sourceRevision,
-        };
-      }
-      return { ...result, data: result.data, sourceRevision };
-    } finally {
-      renderSpan.end();
-    }
-  }
-
-  /**
    * Selectively invalidate file caches for changed paths.
    * Called by the kernel machine before render operations when files have changed.
    *
@@ -3706,16 +3101,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    */
   public async notifyFileChanged(changedPaths: readonly string[]): Promise<void> {
     const paths = [...new Set(changedPaths.map((path) => assertRootedPath(path)))];
-    const record = this.shouldScheduleExactPreview(paths) ? this.createAutonomousPreviewRecord() : undefined;
-    try {
-      await this.enqueueOperation(async () => this.routeExactChangedPaths(paths, record), record?.controller.signal);
-    } catch (error) {
-      // Admission can close between the record and the lane it never reached.
-      if (record) {
-        this.abortRenderRecord(record, 'superseded');
-      }
-      throw error;
-    }
+    await this.enqueueOperation(async () => this.routeExactChangedPaths(paths));
   }
 
   /**
@@ -3727,28 +3113,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return new Set(this.watchedPaths);
   }
 
-  /**
-   * Get the current middleware-registered watch paths and their debounce tiers.
-   * Primarily for test assertions.
-   * @returns A copy of the internal middleware watch paths map.
-   */
-  public getMiddlewareWatchPaths(): Map<string, number> {
-    return new Map(this.currentPreviewMiddlewarePaths);
-  }
-
-  private async reconcileWatchSet(
-    desiredPaths: Map<string, number>,
-    candidate?: typeof this.previewWatchCandidate,
-  ): Promise<boolean> {
+  private async reconcileWatchSet(desiredPaths: Map<string, number>): Promise<boolean> {
     const desired = new Map(
       [...desiredPaths].filter(([path]) => path !== '.tau/cache' && !path.startsWith('.tau/cache/')),
     );
     const desiredSet = new Set(desired.keys());
     if (setsEqual(this.watchedPaths, desiredSet)) {
-      if (candidate && candidate.generation === this.currentRenderGeneration()) {
-        this.currentPreviewWatchPaths = new Map(candidate.paths);
-        this.currentPreviewMiddlewarePaths = new Map(candidate.middlewarePaths);
-      }
       return true;
     }
 
@@ -3756,10 +3126,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const previous = this.watchUnsubscribe;
       this.watchedPaths = desiredSet;
       this.watchUnsubscribe = undefined;
-      if (candidate && candidate.generation === this.currentRenderGeneration()) {
-        this.currentPreviewWatchPaths = new Map(candidate.paths);
-        this.currentPreviewMiddlewarePaths = new Map(candidate.middlewarePaths);
-      }
       previous?.();
       return true;
     }
@@ -3777,10 +3143,21 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       void this.routeWatchEvent(event);
     };
     const replacement = this.fileSystem.watchReady
-      ? this.fileSystem.watchReady({ paths: [...desiredSet], recursive: false, excludes: ['.tau/cache/**'] }, handler)
+      ? this.fileSystem.watchReady(
+          {
+            paths: [...desiredSet],
+            recursive: false,
+            excludes: ['.tau/cache/**'],
+          },
+          handler,
+        )
       : {
           unsubscribe: this.fileSystem.watch(
-            { paths: [...desiredSet], recursive: false, excludes: ['.tau/cache/**'] },
+            {
+              paths: [...desiredSet],
+              recursive: false,
+              excludes: ['.tau/cache/**'],
+            },
             handler,
           ),
           ready: Promise.resolve(),
@@ -3801,8 +3178,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
          * last *observed* rather than the one this comparison just read:
          * `readChangedObservedRevisions` treats a path with no retained hash as never
          * observed and swallows its event as a baseline read, so deleting the hash here
-         * would drop the very change event that refused this arm and leave the preview on
-         * the superseded geometry. The next reader — that event, or
+         * would drop the very change event that refused this arm. The next reader — that event, or
          * `revalidateRetainedFiles` — compares against the stale hash, finds the same
          * divergence, and records the new revision then. */
         if (divergent.length > 0) {
@@ -3814,12 +3190,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           }
           this._invalidateBundleCachesForPaths(divergent);
         }
-        if (
-          !this.operationAdmissionOpen ||
-          armingEvents.resetObserved ||
-          divergent.length > 0 ||
-          (candidate && candidate.generation !== this.currentRenderGeneration())
-        ) {
+        if (!this.operationAdmissionOpen || armingEvents.resetObserved || divergent.length > 0) {
           replacement.unsubscribe();
           return false;
         }
@@ -3828,10 +3199,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const previous = this.watchUnsubscribe;
       this.watchUnsubscribe = replacement.unsubscribe;
       this.watchedPaths = desiredSet;
-      if (candidate) {
-        this.currentPreviewWatchPaths = new Map(candidate.paths);
-        this.currentPreviewMiddlewarePaths = new Map(candidate.middlewarePaths);
-      }
       previous?.();
       return true;
     } catch (error) {
@@ -3891,26 +3258,14 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     options: {
       dependencyContext?: DependencyResolutionContext;
       owner?: OperationOwner;
-      display: boolean;
-      publish: boolean;
     },
   ): Promise<{ artifact: MaterializedRender }> {
-    const owner =
-      options.owner ?? (await this.createOperationOwner(entry.file, options.publish ? 'render-artifact' : 'request'));
-    if (options.publish) {
-      this.setActiveFile(owner.file);
-    }
+    const owner = options.owner ?? (await this.createOperationOwner(entry.file, 'request'));
     const ownerFilePath = assertRootedPath(joinRelativePath(owner.file.path, owner.file.filename));
     const start = performance.now();
 
     const renderOptionsResult = this.validateRenderOptions(entry.options, owner);
     if (!renderOptionsResult.success) {
-      if (options.publish) {
-        this.latestEvaluationSettled = true;
-        this.latestEvaluationArtifact = undefined;
-        this.currentPublishedRender = undefined;
-        this.retainedEvaluation = undefined;
-      }
       return {
         artifact: {
           identity: this.createRenderIdentity({
@@ -3930,12 +3285,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const createOptionsResult = this.resolveCreateOptions(renderOptionsResult.options, entry.export?.options, owner);
     if (!createOptionsResult.success) {
-      if (options.publish) {
-        this.latestEvaluationSettled = true;
-        this.latestEvaluationArtifact = undefined;
-        this.currentPublishedRender = undefined;
-        this.retainedEvaluation = undefined;
-      }
       return {
         artifact: {
           identity: this.createRenderIdentity({
@@ -3959,12 +3308,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       ? { success: true, content: entry.content ?? {} }
       : this.validateRuntimeContent('render', this.getRenderContentKeys(owner), entry.content);
     if (!renderContentResult.success) {
-      if (options.publish) {
-        this.latestEvaluationSettled = true;
-        this.latestEvaluationArtifact = undefined;
-        this.currentPublishedRender = undefined;
-        this.retainedEvaluation = undefined;
-      }
       return {
         artifact: {
           identity: this.createRenderIdentity({
@@ -3989,21 +3332,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
 
     const createMiddleware = this.getCreateExecutionList(owner, renderContentResult.content, Boolean(entry.export));
-    const meshMiddleware =
-      options.display && this.kernelHasMeshPhaseForOwner(owner)
-        ? this.getMeshExecutionList(owner, renderContentResult.content)
-        : [];
-    const resolvedArray = this.mergeExecutionLists(createMiddleware, meshMiddleware);
+    const resolvedArray = createMiddleware;
 
     const geoDepsSpan = this.tracer.startSpan('kernel.resolve-deps', {
       phase: 'resolvingDeps',
     });
     const dependencies = await this.computeDependencies({
-      operations: [
-        'evaluate',
-        ...(meshMiddleware.length === 0 ? [] : (['render'] as const)),
-        ...(entry.export ? (['write'] as const) : []),
-      ],
+      operations: ['evaluate', ...(entry.export ? (['write'] as const) : [])],
       parameters: entry.parameters,
       renderOptions: renderOptionsResult.options,
       content: renderContentResult.content,
@@ -4059,9 +3394,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
 
-    if (options.publish) {
-      this.onProgress?.('computingGeometry');
-    }
     const { tracer } = this;
     let chain: (input: EvaluateRequest) => Promise<EvaluateResult> = named(
       'kernelHandler',
@@ -4147,20 +3479,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           computeSpan.end();
           return {
             success: true,
-            data: retained.offers ?? {},
-            issues: retained.issues ?? [],
+            data: retained.terminalOffers ?? {},
+            issues: retained.terminalIssues ?? [],
             [nativeBuildInputSymbol]: retained.nativeBuildInput,
           };
         }
         evaluationSlot.nativeBuildInput = kernelInput;
         const documentController = this.activeDocumentEvaluationController;
-        const documentSignalView = !options.publish && documentController ? this.documentSignalView : undefined;
+        const documentSignalView = documentController ? this.documentSignalView : undefined;
         const sequence = this.activeDocumentEvaluationSequence;
         const documentState = documentSignalView ? beginDocumentAbort(documentSignalView, sequence) : undefined;
         if (documentController) {
           setAbortContext({
             signal: documentController.signal,
-            generation: 0,
             ...(documentSignalView && documentState !== undefined
               ? { documentSignalView, documentSignalState: documentState }
               : {}),
@@ -4170,19 +3501,23 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           });
           this.onProgress?.(
             'evaluate',
-            documentState !== undefined ? { abortGeneration: documentAbortGeneration(documentState) } : undefined,
+            documentState === undefined ? undefined : { abortGeneration: documentAbortGeneration(documentState) },
           );
         }
         let result: EvaluateResult;
         try {
           result = await this.onEvaluateForOwner(owner, kernelInput, this.createRuntime(), evaluationSlot);
+          if (result.success) {
+            evaluationSlot.terminalOffers = result.data;
+            evaluationSlot.terminalIssues = [...result.issues];
+          }
         } finally {
-          if (documentController) clearAbortContext();
-          if (documentSignalView) endDocumentAbort(documentSignalView, sequence);
-        }
-        if (result.success) {
-          evaluationSlot.offers = result.data;
-          evaluationSlot.issues = result.issues;
+          if (documentController) {
+            clearAbortContext();
+          }
+          if (documentSignalView) {
+            endDocumentAbort(documentSignalView, sequence);
+          }
         }
         computeSpan.end();
         return { ...result, [nativeBuildInputSymbol]: kernelInput };
@@ -4232,18 +3567,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     } finally {
       this.activeEvaluationSlot = undefined;
     }
+    evaluationSlot.offers = evaluated.success ? evaluated.data : undefined;
+    if (evaluated.success) {
+      evaluationSlot.issues = evaluated.issues;
+    }
     if (evaluated.success && evaluationSlot.hasHandle && evaluationSlot.nativeBuildInput) {
-      // A finished evaluation remains reusable even if its preview was superseded before projection.
+      // A finished evaluation remains reusable even if its view was superseded before projection.
       this.retainedEvaluation = evaluationSlot;
     }
     this.operationSignal?.throwIfAborted();
-    if (options.publish) {
-      this.latestEvaluationSettled = true;
-      if (!evaluated.success) {
-        this.latestEvaluationArtifact = undefined;
-        this.retainedEvaluation = undefined;
-      }
-    }
     if (evaluated.success && evaluationSlot.hasHandle) {
       evaluationSlot.nativeBuildInput ??= evaluated[nativeBuildInputSymbol];
     }
@@ -4255,7 +3587,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           ...(evaluated.serializedHandle === undefined ? {} : { serializedNativeHandle: evaluated.serializedHandle }),
           ...(evaluated.serializeHandleSnapshot === undefined
             ? {}
-            : { serializeNativeHandleSnapshot: evaluated.serializeHandleSnapshot }),
+            : {
+                serializeNativeHandleSnapshot: evaluated.serializeHandleSnapshot,
+              }),
           [nativeBuildInputSymbol]: evaluated[nativeBuildInputSymbol],
         }
       : evaluated;
@@ -4272,20 +3606,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       owner,
     });
 
-    // Dependency discovery defines the filesystem snapshot represented by a
-    // preview. Observe and revalidate every newly-added path before binding or
-    // publishing its native/display state. A dirty or superseded replacement
-    // leaves the previous complete watch live and forces the queued change to
-    // produce a fresh render instead of briefly publishing stale geometry.
-    const previewCandidate = this.previewWatchCandidate;
-    if (options.publish && previewCandidate?.coherent) {
-      const committed = await this.reconcileObservedPaths(previewCandidate);
-      if (!committed) {
-        previewCandidate.watchCommitRejected = true;
-        throw new RenderAbortedError();
-      }
-    }
-
     // Bind native-handle slots before the mesh phase so the mesh boundary can
     // materialize the handle through the same live/serialized/reheat machinery
     // exports use.
@@ -4298,66 +3618,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       serializeNativeHandleSnapshot: internalResult.success ? internalResult.serializeNativeHandleSnapshot : undefined,
     });
 
-    // Mesh phase — display path only. Kernels that defer their display artifact
-    // (BRep kernels) return no geometry from createGeometry. Request-owned
-    // evaluations materialize display geometry; export materializations do not.
-    let displayResult = internalResult;
-    if (options.display && internalResult.success && internalResult.data === undefined) {
-      const projection = await this.runMeshPhase({
-        owner,
-        identity,
-        selection: evaluated.success ? this.selectDefaultViewForOwner(owner, evaluated.data) : undefined,
-        renderOptions: renderOptionsResult.options,
-        requestedContent: entry.content,
-        resolvedMiddleware: resolvedArray,
-        createResult: internalResult,
-        renderArtifact: {
-          identity,
-          owner,
-          evaluationSlot,
-          result: {
-            success: true,
-            data: undefined,
-            issues: internalResult.issues,
-            serializedNativeHandle: internalResult.serializedNativeHandle,
-          },
-          liveNativeHandleSlot,
-          serializedNativeHandleSlot,
-        },
-      });
-      displayResult = projection.success
-        ? { success: true, data: toLegacyGeometry(projection.data), issues: projection.issues }
-        : projection;
-    }
-
-    if (options.publish) {
-      this.onProgress?.('postProcessing');
-    }
-    /* The durable snapshot is an export artifact held by `serializedNativeHandleSlot`,
-     * not render output. Leaving it on the published result shipped it to the client
-     * on every display render through `toTransportResult` — 11 kB for a small
-     * Replicad model and 617 kB for the stress model, ~0.4x the GLB beside it — and
-     * msgpack-encoded it into the mesh cache entry a second time. */
-    const {
-      [nativeBuildInputSymbol]: _nativeBuildInput,
-      serializedNativeHandle: _serializedNativeHandle,
-      serializeNativeHandleSnapshot: _serializeNativeHandleSnapshot,
-      ...publicDisplayResult
-    } = displayResult as CreateGeometryResult &
-      NativeBuildInputCarrier & { serializedNativeHandle?: unknown; serializeNativeHandleSnapshot?: () => unknown };
-    // One render request produces one public geometry artifact.
-    const result: MaterializedRenderResult = publicDisplayResult.success
-      ? {
-          ...publicDisplayResult,
-          data:
-            publicDisplayResult.data === undefined
-              ? undefined
-              : {
-                  ...publicDisplayResult.data,
-                  hash: dependencyHash,
-                },
-        }
-      : publicDisplayResult;
+    // Evaluation retains the native handle and its snapshot for views and exports.
+    // Public view artifacts are produced by the separate render operation.
+    const result: MaterializedRenderResult = internalResult.success
+      ? { success: true, data: undefined, issues: internalResult.issues }
+      : internalResult;
 
     const artifact: MaterializedRender = {
       identity,
@@ -4367,20 +3632,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       liveNativeHandleSlot,
       serializedNativeHandleSlot,
     };
-    if (options.publish && evaluated.success) {
-      this.latestEvaluationArtifact = artifact;
-    }
-    if (options.publish && result.success) {
-      this.publishCurrentRender(artifact);
-    } else if (options.publish) {
-      this.currentPublishedRender = undefined;
-    }
-
-    this.logger.debug('createGeometry completed', {
+    this.logger.debug('Document evaluation completed', {
       data: {
         ms: performance.now() - start,
-        display: options.display,
-        publish: options.publish,
         dependencyHash,
       },
     });
@@ -4452,15 +3706,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private dropEvaluationHandle(slot: EvaluationSlot): void {
-    const live = slot.liveNativeHandleSlot;
     slot.liveNativeHandleSlot = undefined;
     slot.hasHandle = false;
     slot.handle = undefined;
-    for (const artifact of [this.currentPublishedRender, this.latestEvaluationArtifact]) {
-      if (artifact && artifact.liveNativeHandleSlot === live) {
-        artifact.liveNativeHandleSlot = undefined;
-      }
-    }
     const owned = this.ownedNativeHandles.get(slot.id);
     if (owned) {
       this.ownedNativeHandles.delete(slot.id);
@@ -4486,8 +3734,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       [
         this.activeEvaluationSlot?.id,
         this.retainedEvaluation?.id,
-        this.latestEvaluationArtifact?.evaluationSlot?.id,
-        this.currentPublishedRender?.evaluationSlot?.id,
         ...[...this.documents.values()].flatMap((document) => [
           document.current?.artifact?.evaluationSlot?.id,
           document.committed?.artifact?.evaluationSlot?.id,
@@ -4563,7 +3809,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const hasSnapshot = serializedNativeHandle !== undefined && serializedNativeHandle !== null;
     if (!success || (!hasSnapshot && serializeNativeHandleSnapshot === undefined)) {
-      return { liveNativeHandleSlot, serializedNativeHandleSlot: slot.serializedNativeHandleSlot };
+      return {
+        liveNativeHandleSlot,
+        serializedNativeHandleSlot: slot.serializedNativeHandleSlot,
+      };
     }
 
     const serializedNativeHandleSlot: SerializedNativeHandleSlot = {
@@ -4584,7 +3833,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       configurable: true,
       enumerable: true,
       get: () => {
-        resolved ??= { value: this.isEvaluationSlotLive(slot) ? serializeNativeHandleSnapshot!() : undefined };
+        resolved ??= {
+          value: this.isEvaluationSlotLive(slot) ? serializeNativeHandleSnapshot!() : undefined,
+        };
         return resolved.value;
       },
       set: (value: unknown) => {
@@ -4594,32 +3845,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     slot.serializedNativeHandleSlot = serializedNativeHandleSlot;
     return { liveNativeHandleSlot, serializedNativeHandleSlot };
-  }
-
-  protected publishCurrentRender(artifact: MaterializedRender): void {
-    const candidate = this.previewWatchCandidate;
-    if (candidate && candidate.generation !== this.renderGeneration) {
-      return;
-    }
-    if (this.currentFile) {
-      const currentPath = assertRootedPath(joinRelativePath(this.currentFile.path, this.currentFile.filename));
-      const artifactPath = assertRootedPath(
-        joinRelativePath(artifact.identity.file.path, artifact.identity.file.filename),
-      );
-      if (currentPath !== artifactPath) {
-        return;
-      }
-    }
-    this.currentPublishedRender = artifact;
-    this.publishOperationOwner(artifact.owner);
-  }
-
-  protected getPublishedRenderForIdentity(identity: RenderIdentity): MaterializedRender | undefined {
-    const current = this.currentPublishedRender;
-    if (!current) {
-      return undefined;
-    }
-    return createRenderIdentityKey(current.identity) === createRenderIdentityKey(identity) ? current : undefined;
   }
 
   protected getNativeHandleSlotForIdentity(
@@ -4820,16 +4045,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     // Default: no-op. KernelRuntimeWorker overrides to clear selectionCache.
   }
 
-  /** Clear subclass caches whose values derive from project file bytes. */
-  protected onVolatileFileCachesCleared(): void {
-    // Default: no-op. KernelRuntimeWorker clears kernel-selection caches.
-  }
-
-  /** Clear subclass state that identifies the currently published artifact. */
-  protected onPublishedArtifactInvalidated(): void {
-    // Default: no-op. KernelRuntimeWorker clears the visible active kernel.
-  }
-
   /**
    * Override to add kernel-specific initialization. Common framework
    * initialization runs separately.
@@ -4930,7 +4145,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const state = view ? beginDocumentAbort(view, sequence) : undefined;
     setAbortContext({
       signal: active.controller.signal,
-      generation: 0,
       ...(view && state !== undefined ? { documentSignalView: view, documentSignalState: state } : {}),
       onSharedAbort: (reason) => {
         active.controller.abort(reason);
@@ -5193,29 +4407,15 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
       }
     }
-    // The current client serializes global content defaults even when the caller
-    // did not request them. Drop unsupported default-valued flags for this
-    // selected view; retain nondefault requests for strict admission.
-    const selectedRequest = { ...requestedContent };
-    if (
-      !selectedKeys.has('includeEdges') &&
-      selectedRequest.includeEdges === contentDefault('render', 'includeEdges')
-    ) {
-      delete selectedRequest.includeEdges;
-    }
-    if (
-      !selectedKeys.has('includeTopology') &&
-      selectedRequest.includeTopology === contentDefault('render', 'includeTopology')
-    ) {
-      delete selectedRequest.includeTopology;
-    }
-    const selectedContentResult = this.validateRuntimeContent('render', [...selectedKeys], selectedRequest);
+    const selectedContentResult = this.validateRuntimeContent('render', [...selectedKeys], requestedContent);
     if (!selectedContentResult.success) {
       return createKernelError(selectedContentResult.issues);
     }
     const selectedContent = selectedContentResult.content;
 
-    const meshSpan = this.tracer.startSpan('kernel.mesh', { phase: 'computingGeometry' });
+    const meshSpan = this.tracer.startSpan('kernel.mesh', {
+      phase: 'computingGeometry',
+    });
     try {
       const runtime = this.createRuntime();
       const computeMesh = async (handlerInput: RenderRequest): Promise<RenderResult> => {
@@ -5332,7 +4532,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const selectedOptions = Object.fromEntries(
         Object.entries(renderOptions).filter(([key]) => !evaluateKeys.includes(key)),
       );
-      const meshResult = await chain({ ...selection, options: selectedOptions });
+      const meshResult = await chain({
+        ...selection,
+        options: selectedOptions,
+      });
       if (!meshResult.success) {
         return meshResult;
       }
@@ -5340,7 +4543,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       // Compose the display result: mesh-phase artifact plus create-phase warnings.
       // The durable handle snapshot stays in `serializedNativeHandleSlot`, which the
       // export path reads; a display result never carries it.
-      return { ...meshResult, issues: [...createResult.issues, ...meshResult.issues] };
+      return {
+        ...meshResult,
+        issues: [...createResult.issues, ...meshResult.issues],
+      };
     } finally {
       meshSpan.end();
     }
@@ -5348,6 +4554,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   private async createOperationOwner(file: RuntimeFileLocator, kind: OperationOwner['kind']): Promise<OperationOwner> {
     const canonicalFile = this.canonicalGeometryFile(file);
+    this.setActiveFile(canonicalFile);
     const entryPath = assertRootedPath(joinRelativePath(canonicalFile.path, canonicalFile.filename));
     const binding = await this.resolveKernelBinding({ entryPath }, this.createRuntime());
     return {
@@ -5393,8 +4600,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
         changedPaths.push(rootedPath);
         if (this.fileHashCache.has(rootedPath) || this.watchedPaths.has(rootedPath)) {
-          // oxlint-disable-next-line no-await-in-loop -- staging order and cache publication stay deterministic
-          revisions.set(rootedPath, { hash: await this.hashContent(bytes), content: bytes });
+          revisions.set(rootedPath, {
+            // eslint-disable-next-line no-await-in-loop -- staging order and cache publication stay deterministic
+            hash: await this.hashContent(bytes),
+            content: bytes,
+          });
         }
       }
       if (changedPaths.length > 0) {
@@ -5473,7 +4683,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         content,
       );
       if (!contentResult.success) {
-        return { success: false, result: createKernelError(contentResult.issues) };
+        return {
+          success: false,
+          result: createKernelError(contentResult.issues),
+        };
       }
       const parsedOptions: unknown = admitted.options;
       if (typeof parsedOptions !== 'object' || parsedOptions === null || Array.isArray(parsedOptions)) {
@@ -5494,7 +4707,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       return {
         success: true,
         owner,
-        input: { format, options: validatedOptions, content: contentResult.content },
+        input: {
+          format,
+          options: validatedOptions,
+          content: contentResult.content,
+        },
         route: {
           kind: 'direct',
           kernelId: ownerKernelId,
@@ -5536,7 +4753,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           content,
         );
         if (!contentResult.success) {
-          return { success: false, result: createKernelError(contentResult.issues) };
+          return {
+            success: false,
+            result: createKernelError(contentResult.issues),
+          };
         }
       }
       const declared = zodSchemas ? Object.keys(zodSchemas).join(', ') : '';
@@ -5627,7 +4847,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         'EXPORT_OPTIONS_INVALID',
       );
       if (!admittedSource.success) {
-        return { success: false, result: createKernelError(admittedSource.issues) };
+        return {
+          success: false,
+          result: createKernelError(admittedSource.issues),
+        };
       }
       sourceOptions = admittedSource.options;
     }
@@ -5637,7 +4860,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const routeContentKeys = sourceContentKeys.filter((key) => edgeContentKeys.has(key));
     const contentResult = this.validateRuntimeContent('export', routeContentKeys, content);
     if (!contentResult.success) {
-      return { success: false, result: createKernelError(contentResult.issues) };
+      return {
+        success: false,
+        result: createKernelError(contentResult.issues),
+      };
     }
     const admittedEdge = admitKernelOptions(
       matchingEdge?.optionsSchema,
@@ -5645,7 +4871,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       `Transcoder edge ${transcoderRoute.sourceFormat} → ${format}`,
       'TRANSCODER_OPTIONS_INVALID',
     );
-    if (!admittedEdge.success) return { success: false, result: createKernelError(admittedEdge.issues) };
+    if (!admittedEdge.success) {
+      return { success: false, result: createKernelError(admittedEdge.issues) };
+    }
     edgeOptions = admittedEdge.options;
     sourceOptions = { ...sourceOptions, ...matchingEdge?.sourceOptions };
     const contentContributors = this.describeContentContributors(
@@ -5704,7 +4932,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const liveSlot = this.getNativeHandleSlotForIdentity(identity, renderArtifact);
     if (this.isLiveNativeHandleSlotUsableForOwner(liveSlot, owner)) {
-      const validity = await this.validateNativeHandleSlot({ owner, renderArtifact, slot: liveSlot, runtime });
+      const validity = await this.validateNativeHandleSlot({
+        owner,
+        renderArtifact,
+        slot: liveSlot,
+        runtime,
+      });
       if (validity) {
         return { success: true, handle: liveSlot.handle };
       }
@@ -5778,7 +5011,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     } catch (error) {
       this.clearLiveNativeHandleSlot(renderArtifact, slot);
       this.logger.warn('Native-handle validity check failed; export will reheat', {
-        data: { error: error instanceof Error ? error.message : String(error) },
+        data: {
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
       return false;
     }
@@ -5823,7 +5058,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     } catch (error) {
       this.clearSerializedNativeHandleSlot(renderArtifact, slot);
       this.logger.warn('Native-handle snapshot restore failed; export will reheat', {
-        data: { error: error instanceof Error ? error.message : String(error) },
+        data: {
+          error: error instanceof Error ? error.message : String(error),
+        },
       });
       return { success: false };
     }
@@ -5892,7 +5129,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     renderIdentity: LastSettledRenderIdentity | undefined;
     renderArtifact?: MaterializedRender;
     activeMiddleware: ResolvedMiddleware[];
-    onCacheMiss?: (input: MiddlewareExportGeometryRequest) => Promise<ExportGeometryResult>;
+    onCacheMiss?: (input: ExportPipelineRequest) => Promise<ExportGeometryResult>;
     pinnedSourceRevision?: SourceRevision;
   }): Promise<ExportGeometryResult> {
     if (!options.renderIdentity) {
@@ -5951,7 +5188,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     };
     const computeExport =
       onCacheMiss ??
-      (async (handlerInput: MiddlewareExportGeometryRequest): Promise<ExportGeometryResult> => {
+      (async (handlerInput: ExportPipelineRequest): Promise<ExportGeometryResult> => {
         if (!renderArtifact) {
           return this.createExportRenderIdentityMissingResult();
         }
@@ -5982,13 +5219,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             },
           ]);
         }
-        const exportResult = await computeExport({ format: targetFormat, options: handlerInput.options });
+        const exportResult = await computeExport({
+          format: targetFormat,
+          options: handlerInput.options,
+        });
         computeSpan.end();
         if (!exportResult.success) {
           return exportResult;
         }
         try {
-          return { ...exportResult, data: nonemptyExportFiles(exportResult.data) };
+          return {
+            ...exportResult,
+            data: nonemptyExportFiles(exportResult.data),
+          };
         } catch (error) {
           return createKernelError([
             {
@@ -6055,7 +5298,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const exportMaterialization =
       plan.route.kind === 'direct'
         ? { format: plan.route.targetFormat, options: plan.route.options }
-        : { format: plan.route.sourceFormat, options: plan.route.sourceOptions };
+        : {
+            format: plan.route.sourceFormat,
+            options: plan.route.sourceOptions,
+          };
     const desiredNativeHandleKey = await this.computeNativeHandleKey({
       owner: plan.owner,
       parameters: renderArtifact.identity.parameters,
@@ -6097,7 +5343,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           content: plan.route.content,
           export: { ...exportMaterialization, dependency: plan.dependency },
         },
-        { owner: plan.owner, display: false, publish: false },
+        { owner: plan.owner },
       );
       if (!materialized.artifact.result.success) {
         return createKernelError(materialized.artifact.result.issues);
@@ -6151,274 +5397,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         nativeHandle: nativeHandle.handle,
       },
     };
-  }
-
-  private createExportRenderIdentityMissingResult(): ExportGeometryResult {
-    return createKernelError([
-      {
-        message:
-          'Export cache lookup requires a settled render identity. Render the model first or use request-scoped export with file and parameters.',
-        code: 'HANDLE_MISSING',
-        type: 'runtime',
-        severity: 'error',
-      },
-    ]);
-  }
-
-  /**
-   * Emit a worker state transition to the main thread via the single
-   * ordered `postMessage` channel. Deduplicates repeated emissions so
-   * consumers observe one event per logical transition.
-   *
-   * @param state - The worker state to emit.
-   */
-  private pushState(state: WorkerState, record: RenderCancellationRecord, detail?: string): void {
-    if (
-      this.lastPushedState !== undefined &&
-      this.lastPushedState.renderId === record.renderId &&
-      this.lastPushedState.state === state &&
-      this.lastPushedState.detail === detail
-    ) {
-      return;
-    }
-    this.lastPushedState = { renderId: record.renderId, state, ...(detail === undefined ? {} : { detail }) };
-    this.onStateChanged?.({
-      renderId: record.renderId,
-      abortGeneration: record.generation,
-      state,
-      ...(detail === undefined ? {} : { detail }),
-    });
-  }
-
-  /**
-   * Check if the current render has been aborted by a newer generation.
-   *
-   * @param record - The admitted render record to check.
-   * @returns True if aborted, false otherwise.
-   */
-  private isAborted(record: RenderCancellationRecord): boolean {
-    return record.controller.signal.aborted || record.generation !== this.currentRenderGeneration();
-  }
-
-  /**
-   * The transport-authoritative render generation: the shared atomic when the client can
-   * reserve generations itself, the local mirror otherwise. `renderGeneration` alone is
-   * stale under SAB, where client reservations never reach it.
-   *
-   * @returns The current generation every render-currency check must compare against.
-   */
-  private currentRenderGeneration(): number {
-    return this.signalView ? Atomics.load(this.signalView, signalSlot.abortGeneration) >>> 0 : this.renderGeneration;
-  }
-
-  /** Drop the render {@link scheduleRender} has pending, if any. */
-  private clearScheduledRender(): void {
-    this.pendingRenderCancel?.();
-    this.pendingRenderCancel = undefined;
-  }
-
-  /**
-   * Schedule a render after a debounce delay. Clears any existing schedule.
-   *
-   * A zero delay means "next task", not "one clamped timer from now": a
-   * committed parameter edit is debounced by `parameterDebounce = 0` and used to
-   * pay `setTimeout`'s ~1.4 ms Node clamp on top of the render lane's own
-   * cooperative yield. The buffering turn itself is kept — it is what lets a
-   * superseding command or an abandoned client generation reservation settle the
-   * record before any work starts.
-   *
-   * @param renderDelay - Debounce delay before render fires. Milliseconds.
-   */
-  private scheduleRender(renderDelay: number, record: RenderCancellationRecord): void {
-    this.clearScheduledRender();
-    this.pushState('buffering', record);
-    const startRender = (): void => {
-      this.pendingRenderCancel = undefined;
-      if (!this.operationAdmissionOpen) {
-        return;
-      }
-      void this.runQueuedCommand(record, async () => this.executeRender(record));
-    };
-    if (renderDelay <= 0) {
-      let cancelled = false;
-      this.pendingRenderCancel = () => {
-        cancelled = true;
-      };
-      scheduleMacrotask(() => {
-        if (!cancelled) {
-          startRender();
-        }
-      });
-      return;
-    }
-    const timer = setTimeout(startRender, renderDelay);
-    this.pendingRenderCancel = () => {
-      clearTimeout(timer);
-    };
-  }
-
-  /**
-   * Execute an autonomous render cycle. Handles the full pipeline:
-   * increment generation, bundle, execute, compute geometry, push results.
-   * Checks abort at each async boundary.
-   */
-  private async executeRender(record: RenderCancellationRecord): Promise<void> {
-    if (!this.currentFile || record !== this.activeRenderRecord || this.isAborted(record)) {
-      // A record that lost ownership was terminalized by whatever replaced it; one that
-      // still owns the lane (an abandoned client reservation, a file-less schedule) has
-      // no other terminal boundary and would otherwise leak.
-      if (record === this.activeRenderRecord) {
-        this.abortRenderRecord(record, 'superseded');
-      }
-      return;
-    }
-    const { generation } = record;
-    record.executing = true;
-
-    this.prepareUnobservedFileSystem();
-
-    setAbortContext({
-      signal: record.controller.signal,
-      ...(this.signalView === undefined ? {} : { signalView: this.signalView }),
-      generation,
-      onSharedAbort: (reason) => {
-        this.abortRenderRecord(record, reason === abortReasonEnum.timeout ? 'timeout' : 'superseded');
-      },
-    });
-
-    this.pushState('rendering', record);
-    this.tracer.reset();
-    const renderSpan = this.tracer.startSpan('kernel.render', {
-      file: this.currentFile.filename,
-    });
-    let renderSpanEnded = false;
-    const flushRenderTelemetry = (): void => {
-      if (!renderSpanEnded) {
-        renderSpan.end();
-        renderSpanEnded = true;
-      }
-      this.flushTelemetry();
-    };
-
-    try {
-      this.onProgress = (phase: RenderPhase) => {
-        this.onProgressUpdate?.({ phase, renderId: record.renderId });
-      };
-      const dependencyContext: DependencyResolutionContext = {};
-      this.setActiveFile(this.currentFile);
-      this.previewWatchCandidate = {
-        generation,
-        paths: new Map(this.currentPreviewWatchPaths),
-        middlewarePaths: new Map(this.currentPreviewMiddlewarePaths),
-        coherent: false,
-      };
-      this.previewWatchCandidate.paths.set(this.activeFilePath, fileChangeDebounce);
-      const owner = await this.createOperationOwner(this.currentFile, 'render-artifact');
-
-      if (this.isAborted(record)) {
-        throw new RenderAbortedError();
-      }
-
-      const contentResult = this.validateRuntimeContent(
-        'render',
-        this.getRenderContentKeys(owner),
-        this.currentRenderContent,
-      );
-      if (!contentResult.success) {
-        const result = createKernelError(contentResult.issues);
-        flushRenderTelemetry();
-        this.onGeometryComputed?.({ result, renderId: record.renderId });
-        this.permitComputePublication();
-        this.failRender(record, contentResult.issues);
-        return;
-      }
-
-      const renderWork = async (): Promise<HashedGeometryResult> => {
-        const parametersResult = await this.getParametersInLane(this.currentFile!, { dependencyContext, owner });
-        if (this.isAborted(record)) {
-          throw new RenderAbortedError();
-        }
-        this.onParametersResolved?.({ result: parametersResult, renderId: record.renderId });
-        if (!parametersResult.success) {
-          return parametersResult;
-        }
-
-        const extracted = parametersResult.data;
-        if (extracted.legacyProjection.status !== 'usable') {
-          return createKernelError([
-            {
-              message: 'Parameter schema cannot be represented by the active Draft-7 execution path',
-              code: 'RUNTIME',
-              type: 'kernel',
-              severity: 'error',
-              details: extracted.legacyProjection.diagnostics,
-            },
-          ]);
-        }
-        const callerParameters = mergeParameterDefaults({}, this.currentParameters, extracted.legacyProjection.schema);
-
-        await cooperativeYield();
-        if (this.isAborted(record)) {
-          throw new RenderAbortedError();
-        }
-
-        const geometryResult = await this.createGeometryInLane(
-          {
-            file: this.currentFile!,
-            parameters: callerParameters,
-            parameterDefaults: extracted.defaults,
-            parameterManifest: extracted,
-            parameterSchema: extracted.legacyProjection.schema,
-            options: this.currentRenderOptions,
-            content: contentResult.content,
-          },
-          { dependencyContext, owner, publish: !this.currentRenderTransient },
-        );
-
-        if (this.isAborted(record)) {
-          throw new RenderAbortedError();
-        }
-
-        return geometryResult;
-      };
-
-      const result = await renderWork();
-      this.onProgress = undefined;
-
-      flushRenderTelemetry();
-      this.onGeometryComputed?.({ result, renderId: record.renderId });
-      this.permitComputePublication();
-      this.pushState('idle', record);
-    } catch (error) {
-      this.onProgress = undefined;
-      flushRenderTelemetry();
-      if (isRenderAbortedError(error) || this.isAborted(record)) {
-        const { reason } = record;
-
-        if (reason === 'timeout') {
-          this.failRender(record, [renderTimeoutIssue()]);
-        } else {
-          this.pushState('idle', record);
-        }
-        return;
-      }
-
-      this.failRender(record, this.errorToRuntimeIssues(error));
-    } finally {
-      clearAbortContext();
-      record.executing = false;
-      const candidate = this.previewWatchCandidate;
-      if (candidate?.generation === generation && candidate.coherent && generation === this.currentRenderGeneration()) {
-        await this.reconcileObservedPaths(candidate);
-      } else if (!candidate?.watchCommitRejected) {
-        await this.reconcileObservedPaths();
-      }
-      if (this.previewWatchCandidate?.generation === generation) {
-        this.previewWatchCandidate = undefined;
-      }
-      this.releaseRenderRecord(record);
-      flushRenderTelemetry();
-    }
   }
 
   /**
@@ -6488,7 +5466,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
   /**
    * Invalidate file-level caches for the given changed paths.
-   * Shared by both `notifyFileChanged` (command-driven) and the watch handler (autonomous).
+   * Shared by explicit `notifyFileChanged` calls and the watch handler.
    * @param changedPaths - Root-relative paths of files that changed.
    */
   private _invalidateCachesForPaths(changedPaths: readonly string[]): void {
@@ -6561,7 +5539,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     if (!this.operationAdmissionOpen) {
       return;
     }
-    let record: RenderCancellationRecord | undefined;
     try {
       await this.enqueueWatchReconciliation(async () => {
         const paths = event.type === 'reset' ? [...this.watchedPaths] : this.exactWatchEventPaths(event);
@@ -6585,11 +5562,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           return;
         }
         const changedPaths = [...revisions.keys()];
-        record = this.shouldScheduleExactPreview(changedPaths) ? this.createAutonomousPreviewRecord() : undefined;
-        await this.enqueueOperation(async () => this.routeExactChangedPaths(changedPaths, record, revisions));
+        await this.enqueueOperation(async () => this.routeExactChangedPaths(changedPaths, revisions));
       });
     } catch (error) {
-      this.reportWatchRoutingError(error, record);
+      this.reportWatchRoutingError(error);
     }
   }
 
@@ -6620,8 +5596,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       try {
         // oxlint-disable-next-line no-await-in-loop -- serialized reads preserve the observer's revision order
         const content = await fileSystem.readFile(path);
-        // oxlint-disable-next-line no-await-in-loop -- serialized hashes preserve the observer's revision order
-        revision = { hash: await this.hashContent(content), content, expectedPrior };
+        revision = {
+          // eslint-disable-next-line no-await-in-loop -- serialized hashes preserve the observer's revision order
+          hash: await this.hashContent(content),
+          content,
+          expectedPrior,
+        };
       } catch (error) {
         if (isNotFoundError(error)) {
           revision = { hash: 'missing', expectedPrior };
@@ -6636,8 +5616,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
          * `'missing'`) by the time it enters the watch set. So this read is the
          * path's baseline, not evidence of a change: an OS that replays the
          * write predating the arm (macOS does, milliseconds later) would
-         * otherwise schedule an autonomous re-render that aborts the very
-         * render doing the arming, which then settles as `{ superseded: true }`. */
+         * otherwise schedule an evaluation that supersedes the one arming the watch. */
         this.fileHashCache.set(path, revision.hash);
         if (revision.content !== undefined) {
           this.fileContentCache.set(path, revision.content);
@@ -6651,36 +5630,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return changed;
   }
 
-  private reportWatchRoutingError(error: unknown, record: RenderCancellationRecord | undefined): void {
+  private reportWatchRoutingError(error: unknown): void {
     const issues = this.errorToRuntimeIssues(error);
     if (this.operationAdmissionOpen) {
-      this.onError?.({ issues, ...(record === undefined ? {} : { renderId: record.renderId }) });
+      this.logger.warn('Failed to route a watched file change', {
+        data: { issues },
+      });
     }
-    // A closing worker still owes every admitted record its terminal state and release.
-    if (record) {
-      /* The state carries the reason even when admission is shut and no error
-       * event went out — that is precisely when a client has nothing else. */
-      this.pushState('error', record, issueDetail(issues));
-      this.releaseRenderRecord(record);
-    }
-  }
-
-  private shouldScheduleExactPreview(paths: readonly string[]): boolean {
-    /* A pending open retargets the preview, so a change to the file it replaces (a rename or
-     * delete) must not supersede it and rerender the stale file. The lane judges the change
-     * again once the open has applied — see routeExactChangedPaths. */
-    if (this.activeRenderRecord !== undefined && this.activeRenderRecord === this.pendingOpenFileRecord) {
-      return false;
-    }
-    const candidate = this.previewWatchCandidate;
-    const previewPaths =
-      candidate?.generation === this.currentRenderGeneration() ? candidate.paths : this.currentPreviewWatchPaths;
-    return Boolean(this.currentFile && paths.some((path) => previewPaths.has(path)));
   }
 
   private async routeExactChangedPaths(
     paths: readonly string[],
-    record?: RenderCancellationRecord,
     revisions?: ReadonlyMap<string, ObservedFileRevision | undefined>,
   ): Promise<void> {
     if (revisions && [...revisions.values()].some((revision) => revision === undefined)) {
@@ -6692,26 +5652,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     } else {
       this._invalidateCachesForPaths(paths);
     }
-    const preview =
-      record ??
-      (this.activeRenderRecord === undefined && this.shouldScheduleExactPreview(paths)
-        ? this.createAutonomousPreviewRecord()
-        : undefined);
     this.scheduleWatchedDocuments(paths);
-    if (preview === undefined || preview !== this.activeRenderRecord || !this.currentFile) {
-      return;
-    }
-    this.invalidatePublishedArtifactState();
-    // A render nobody requested publishes what the host last committed, never a drag sample.
-    if (this.currentRenderTransient) {
-      this.currentRenderTransient = false;
-      this.currentParameters = this.committedParameters;
-    }
-    let renderDebounce = fileChangeDebounce;
-    for (const path of paths) {
-      renderDebounce = Math.min(renderDebounce, this.currentPreviewWatchPaths.get(path) ?? fileChangeDebounce);
-    }
-    this.scheduleRender(renderDebounce, preview);
   }
 
   private scheduleWatchedDocuments(paths: readonly string[], sourceDocumentId?: string): void {
@@ -6721,8 +5662,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         !document.watch ||
         document.closed ||
         !paths.some((path) => document.watchPaths.has(path))
-      )
+      ) {
         continue;
+      }
       document.parameters = { ...document.committedParameters };
       document.evaluateOptions = { ...document.committedEvaluateOptions };
       this.scheduleDocumentEvaluation(document, document.intent, false);
@@ -6733,12 +5675,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    * Derive the full set of watched dependencies from all active caches
    * and update the filesystem watch subscription.
    */
-  private async reconcileObservedPaths(candidate?: typeof this.previewWatchCandidate): Promise<boolean> {
-    const previewPaths = candidate?.paths ?? this.currentPreviewWatchPaths;
-    const allDeps = new Map(previewPaths);
+  private async reconcileObservedPaths(): Promise<boolean> {
+    const allDeps = new Map<string, number>();
     for (const document of this.documents.values()) {
       if (document.watch && !document.closed) {
-        for (const path of document.watchPaths) allDeps.set(path, fileChangeDebounce);
+        for (const path of document.watchPaths) {
+          allDeps.set(path, fileChangeDebounce);
+        }
       }
     }
     for (const result of this.bundleResultCache.values()) {
@@ -6750,9 +5693,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
     for (const path of this.fileHashCache.keys()) {
-      allDeps.set(assertRootedPath(path), previewPaths.get(path) ?? fileChangeDebounce);
+      allDeps.set(assertRootedPath(path), fileChangeDebounce);
     }
-    return this.reconcileWatchSet(allDeps, candidate);
+    return this.reconcileWatchSet(allDeps);
   }
 
   /**
@@ -6774,7 +5717,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const rawOptions = bundlerOptions ?? {};
       const validatedOptions = definition.optionsSchema ? definition.optionsSchema.parse(rawOptions) : rawOptions;
 
-      const context = await definition.initialize(validatedOptions, { filesystem: this.bundlerFilesystem });
+      const context = await definition.initialize(validatedOptions, {
+        filesystem: this.bundlerFilesystem,
+      });
       const loaded = { definition, ctx: context };
 
       for (const extension of extensions) {
@@ -6934,7 +5879,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }) as JSONSchema7;
       schema = plain;
     } catch (error) {
-      throw new Error(`Failed to derive JSON Schema for ${label}.`, { cause: error });
+      throw new Error(`Failed to derive JSON Schema for ${label}.`, {
+        cause: error,
+      });
     }
 
     const defaults = inputDefaults(schema);
@@ -6974,7 +5921,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
       for (const format of formats) {
         const zodSchema = zodSchemas[format];
-        const empty: { schema: JSONSchema7; defaults: Record<string, unknown> } = { schema: {}, defaults: {} };
+        const empty: {
+          schema: JSONSchema7;
+          defaults: Record<string, unknown>;
+        } = { schema: {}, defaults: {} };
         const { schema, defaults } = zodSchema ? this.deriveJsonSchema(zodSchema, `${kernelId}:${format}`) : empty;
 
         const contentKeys = new Set(this.kernelExportContentMap.get(kernelId)?.[format] ?? []);
@@ -6987,7 +5937,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         }
         const content = this.buildContentCapability('export', [...contentKeys]);
 
-        kernelExports.push({ kernelId, format, schema, defaults, contentKeys: [...contentKeys] });
+        kernelExports.push({
+          kernelId,
+          format,
+          schema,
+          defaults,
+          contentKeys: [...contentKeys],
+        });
 
         routes.push({
           targetFormat: format,
@@ -7000,7 +5956,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       }
     }
 
-    const emptyEdgeSchemas: { schema: JSONSchema7; defaults: Record<string, unknown> } = { schema: {}, defaults: {} };
+    const emptyEdgeSchemas: {
+      schema: JSONSchema7;
+      defaults: Record<string, unknown>;
+    } = { schema: {}, defaults: {} };
     for (const transcoder of this.loadedTranscoders.values()) {
       for (const edge of transcoder.edges) {
         const edgeSchemas = edge.optionsSchema
@@ -7050,7 +6009,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const renderCapabilities: Record<
       string,
       {
-        renderOptions: { schema: JSONSchema7; defaults: Record<string, unknown> };
+        renderOptions: {
+          schema: JSONSchema7;
+          defaults: Record<string, unknown>;
+        };
         content?: { schema: JSONSchema7; defaults: RuntimeContentInput };
         cancellation?: 'cooperative';
       }
@@ -7556,7 +6518,11 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       operations: input.operations,
       middleware: executionList
         .filter(({ enabled }) => enabled)
-        .map(({ id, middleware, options }) => ({ id, version: middleware.version, options })),
+        .map(({ id, middleware, options }) => ({
+          id,
+          version: middleware.version,
+          options,
+        })),
     });
     let commonDependencies = input.dependencyContext?.commonDependencies;
     if (!commonDependencies) {
@@ -7609,14 +6575,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
      * cached, and a render that answers from that cache still reads those paths and still has to
      * watch them. Registering only on a miss made a re-opened entry deaf to an external edit of
      * the paths its middleware declared. */
-    const previewCandidate = input.owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
-    if (previewCandidate) {
-      for (const [path, watchDebounce] of phase.watchPaths) {
-        previewCandidate.paths.set(path, watchDebounce);
-        previewCandidate.middlewarePaths.set(path, watchDebounce);
-      }
-      previewCandidate.coherent = true;
-    }
     const runtimeDeps: Dependency[] = [
       ...common.fileDependencies,
       ...phase.dependencies,
@@ -7688,19 +6646,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const depsResult = await this.onGetDependenciesForOwner(owner, discoverInput, this.createRuntime());
     const unresolvedPaths = [...new Set(depsResult.unresolved.map((path) => assertRootedPath(path)))];
     const rootedPaths = [...new Set(depsResult.resolved.map((path) => assertRootedPath(path)))];
-    const previewCandidate = owner.kind === 'render-artifact' ? this.previewWatchCandidate : undefined;
-    // Every render observes the paths its entry needs, including the ones that are missing;
-    // only an admitted preview also carries them in its watch candidate.
-    if (owner.kind === 'render-artifact') {
-      for (const path of rootedPaths) {
-        previewCandidate?.paths.set(path, fileChangeDebounce);
-      }
-      for (const path of unresolvedPaths) {
-        previewCandidate?.paths.set(path, fileChangeDebounce);
-      }
-    }
     /* Absence is an observation: a request-scoped operation that retained "this import does
-     * not resolve" has to notice the file appearing, exactly as a preview does. */
+     * not resolve" has to notice the file appearing. */
     for (const path of unresolvedPaths) {
       this.fileHashCache.set(path, 'missing');
     }
@@ -7811,7 +6758,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         declarations.push(
           ...resolved
             .filter((declaration) => declaration.affects.some((operation) => operations.includes(operation)))
-            .map((declaration) => ({ ...declaration, path: assertRootedPath(declaration.path) })),
+            .map((declaration) => ({
+              ...declaration,
+              path: assertRootedPath(declaration.path),
+            })),
         );
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -7861,7 +6811,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         index,
         options,
       }));
-    return { dependencies: [...fileDependencies, ...signatureDependencies], watchPaths };
+    return {
+      dependencies: [...fileDependencies, ...signatureDependencies],
+      watchPaths,
+    };
   }
 
   /**
@@ -7966,11 +6919,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       resolveDependencies: async (entryPath: string): Promise<GetDependenciesResult> => {
         const cached = this.bundleResultCache.get(entryPath);
         if (cached) {
-          return { resolved: cached.dependencies, unresolved: cached.unresolvedPaths };
+          return {
+            resolved: cached.dependencies,
+            unresolved: cached.unresolvedPaths,
+          };
         }
 
         const result = await facade.bundle(entryPath);
-        return { resolved: result.dependencies, unresolved: result.unresolvedPaths };
+        return {
+          resolved: result.dependencies,
+          unresolved: result.unresolvedPaths,
+        };
       },
       registerModule: (name: string, entry: BuiltinModule): void => {
         if (this.loadedBundlers.size > 0) {
@@ -8004,7 +6963,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
       },
     });
-    const operationId = this.activeRenderId ?? randomUuid();
+    const operationId = randomUuid();
     return this.computeHost.capability(signal, operationId);
   }
 
@@ -8022,9 +6981,8 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
    *
    * Invoked only after a result has actually been delivered to the client, so
    * disposable export and encode work cannot precede or starve delivery. The
-   * render path calls it after `onGeometryComputed`; the transport calls it on
-   * the return path of every `call`, so a non-render operation's tail is not
-   * starved until the next render (N6).
+   * The document dispatcher calls it after result delivery and on the return
+   * path of every `call`, so publication tails cannot starve (N6).
    */
   public permitComputePublication(): void {
     this.computeHost?.permitPublication();
@@ -8062,9 +7020,6 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       tracer: this.tracer,
       compute: this.createComputeRuntime(signal),
       getCompiledWasmModule: (url) => this.getCompiledWasmModule(url),
-      emitEvent: () => {
-        throw new Error('Kernel events require a selected kernel runtime.');
-      },
     };
   }
 
@@ -8167,7 +7122,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     exportOptions: Record<string, unknown> | undefined,
     owner: OperationOwner,
   ):
-    | { success: true; input: Pick<NativeBuildInput, 'options'> | Record<never, never> }
+    | {
+        success: true;
+        input: Pick<NativeBuildInput, 'options'> | Record<never, never>;
+      }
     | { success: false; issues: KernelIssue[] } {
     const kernelId = owner.binding?.kernelId;
     const createSchema = kernelId ? this.kernelCreateOptionsZodSchemaMap.get(kernelId) : undefined;
@@ -8218,9 +7176,16 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       owner: input.owner,
     });
     if ('options' in createOptions.input) {
-      dependencies.push({ type: 'option', key: 'native-build-options', value: createOptions.input.options });
+      dependencies.push({
+        type: 'option',
+        key: 'native-build-options',
+        value: createOptions.input.options,
+      });
     }
-    return { success: true, key: await this.computeDependencyHash(dependencies) };
+    return {
+      success: true,
+      key: await this.computeDependencyHash(dependencies),
+    };
   }
 
   private artifactMatchesNativeBuild(
@@ -8290,7 +7255,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     format: string,
     exportId?: string,
   ): readonly RuntimeContentKey[] {
-    if (exportId) return this.getDocumentExportDeclaration(owner, exportId)?.content ?? [];
+    if (exportId) {
+      return this.getDocumentExportDeclaration(owner, exportId)?.content ?? [];
+    }
     return owner.binding?.kernelId ? (this.kernelExportContentMap.get(owner.binding.kernelId)?.[format] ?? []) : [];
   }
 
@@ -8312,7 +7279,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     content: RuntimeContentInput | undefined,
   ): { success: true; content: RuntimeContentInput } | { success: false; issues: KernelIssue[] } {
     try {
-      return { success: true, content: normalizeRuntimeContent(operation, supported, content) };
+      return {
+        success: true,
+        content: normalizeRuntimeContent(operation, supported, content),
+      };
     } catch (error) {
       if (!(error instanceof RuntimeContentUnsupportedError)) {
         throw error;
@@ -8339,7 +7309,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 
   private withoutRuntimeContent<Input extends Record<PropertyKey, unknown>>(input: Input): Omit<Input, 'content'> {
-    const { content: _content, ...rest } = input as Input & { readonly content?: RuntimeContentInput };
+    const { content: _content, ...rest } = input as Input & {
+      readonly content?: RuntimeContentInput;
+    };
     return rest;
   }
 
@@ -8349,7 +7321,12 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     keys: readonly RuntimeContentKey[],
   ): Omit<Input, 'content'> & { readonly content?: RuntimeContentInput } {
     const rest = this.withoutRuntimeContent(input);
-    return keys.length === 0 ? rest : { ...rest, content: this.projectRuntimeContent(canonicalContent, keys) };
+    return keys.length === 0
+      ? rest
+      : {
+          ...rest,
+          content: this.projectRuntimeContent(canonicalContent, keys),
+        };
   }
 
   private getCreateExecutionList(
@@ -8385,6 +7362,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return this.getMiddleware().filter(({ id }) => ids.has(id));
   }
 
+  // oxlint-disable-next-line max-params -- The selected view, owner and content jointly determine middleware ownership.
   private middlewareRunsForRender(
     resolved: ResolvedMiddleware,
     owner: OperationOwner,
@@ -8426,6 +7404,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     return this.getContentContributors(owner, route.sourceFormat, route.content, route.exportId);
   }
 
+  // oxlint-disable-next-line max-params -- The source export ID disambiguates same-extension content contributors.
   private getContentContributors(
     owner: OperationOwner,
     format: string,
@@ -8441,6 +7420,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     });
   }
 
+  // oxlint-disable-next-line max-params -- Mirrors contributor selection while retaining route provenance.
   private describeContentContributors(
     owner: OperationOwner,
     format: string,
@@ -8464,7 +7444,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   }
 }
 
-preserveMethodNames(KernelWorker, ['render', 'evaluateModel', 'createGeometry', 'exportGeometry', 'getParameters']);
+preserveMethodNames(KernelWorker, ['getParameters']);
 
 /**
  * Merge two pre-resolved JSON Schema objects by combining their `properties`,

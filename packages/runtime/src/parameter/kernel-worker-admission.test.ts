@@ -1122,10 +1122,21 @@ describe('parameter admission in the kernel worker', () => {
       { properties: { count: { type: 'integer', ucumUnit: '1' } }, required: ['count'] },
     );
 
-    const result = await worker.evaluateModel({
+    const evaluated: Array<Parameters<NonNullable<CountingParameterWorker['onEvaluated']>>[0]> = [];
+    worker.onEvaluated = (event) => {
+      evaluated.push(event);
+    };
+    worker.handleOpenDocument({
+      documentId: 'unsafe-integer',
+      intent: 1,
       file: createGeometryFile('main.ts'),
       parameters: { count: 2 ** 53 },
+      watch: false,
     });
+    await vi.waitFor(() => {
+      expect(evaluated).toHaveLength(1);
+    });
+    const result = evaluated[0];
 
     expect(result).toMatchObject({
       success: false,

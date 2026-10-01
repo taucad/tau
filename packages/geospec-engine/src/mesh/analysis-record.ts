@@ -113,19 +113,16 @@ const primitivePositions = (attribute: Accessor, node: Node, scale: number): { p
  * @public
  */
 export const buildMeshAnalysisRecord = (document: Document, scale = 1): MeshAnalysisRecord => {
-  const names = buildMeshNodeNameMap(document);
   const positions: number[] = [];
   const triangles: number[] = [];
   const trianglePrimitives: number[] = [];
   const primitives: MeshAnalysisRecord['primitives'] = [];
-  for (const node of document.getRoot().listNodes()) {
+  for (const [nodeIndex, node] of document.getRoot().listNodes().entries()) {
     const mesh = node.getMesh();
     if (!mesh) {
       continue;
     }
-    // `buildMeshNodeNameMap` walks the same node list, so every mesh reached
-    // here is already named.
-    const name = names.get(mesh)!;
+    const name = node.getName() || mesh.getName() || `Shape ${nodeIndex + 1}`;
     const positionSegments = new Map<Accessor, { vertexStart: number; vertexCount: number }>();
     for (const [index, primitive] of mesh.listPrimitives().entries()) {
       if (primitive.getMode() !== trianglesMode) {

@@ -136,7 +136,7 @@ export const isRendererExecutionModule = (moduleId: string): boolean => {
     return false;
   }
   if (
-    /packages\/runtime\/src\/(?:client\/runtime-document-client-core|framework\/runtime-framework\.constants|plugins\/plugin-types)\.ts$/u.test(
+    /packages\/runtime\/src\/(?:client\/runtime-document-client-core|framework\/(?:runtime-framework\.constants|runtime-operation-errors)|plugins\/plugin-types)\.ts$/u.test(
       path,
     )
   ) {

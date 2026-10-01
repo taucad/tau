@@ -34,6 +34,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { bundledLibraries, publishable, publishableClosure, publishWaves, workspace } from '@taucad/nx';
 import { chromium } from 'playwright';
 import type { Page } from 'playwright';
+import ts from 'typescript';
 
 type Dependencies = Record<string, string>;
 
@@ -240,11 +241,12 @@ const assertSingleZodInstance = (appRoot: string): void => {
   type Node = {
     readonly path?: string;
     readonly dependencies?: Record<string, Node>;
+    readonly problems?: readonly string[];
   };
   // `--long` carries each node's install `path`: `--all` lists the same hoisted
   // copy once per dependent, so paths — not node counts — say how many copies
-  // exist. `npm ls` exits non-zero on any tree advisory, so the JSON is read
-  // regardless of status.
+  // exist. npm may exit non-zero while still returning a useful structured
+  // dependency tree; its reported problems must still fail admission.
   const listing = spawnSync('npm', ['ls', 'zod', '--json', '--all', '--long'], {
     cwd: appRoot,
     encoding: 'utf8',
@@ -261,7 +263,19 @@ const assertSingleZodInstance = (appRoot: string): void => {
       }
     }
   };
-  walk(JSON.parse(listing.stdout || '{}') as Node);
+  invariant(!listing.error, `Cannot inspect installed Zod: ${listing.error?.message}`);
+  let tree: Node;
+  try {
+    tree = JSON.parse(listing.stdout) as Node;
+  } catch {
+    throw new Error(`Cannot parse npm ls Zod tree (status ${String(listing.status)}): ${listing.stderr}`);
+  }
+  invariant(
+    tree.problems?.length === undefined || tree.problems.length === 0,
+    `npm reports invalid Zod dependencies: ${tree.problems?.join('; ')}`,
+  );
+  invariant(listing.status === 0, `npm ls Zod failed (${String(listing.status)}): ${listing.stderr}`);
+  walk(tree);
   invariant(installs.size === 1, `npm resolved ${String(installs.size)} zod copies: ${[...installs].join(', ')}`);
   console.log(`zod: one instance in the installed tree (${[...installs][0]!}).`);
 };
@@ -287,6 +301,9 @@ const assertTscircuitInstallShape = (appRoot: string): void => {
     'circuit-json',
     'circuit-json-to-gltf',
     'graphics-debug',
+    '@taucad/replicad',
+    'replicad',
+    'replicad-opencascadejs',
   ]);
   const found = new Set<string>();
   const walk = (node: Node): void => {
@@ -600,6 +617,273 @@ const runInstalledReactRuntime = async (appRoot: string): Promise<void> => {
   console.log('Packed React/runtime Chromium lifecycle: current → stale → current.');
 };
 
+/** Compile and query real installed declarations, including a schema-rich public factory. */
+export const installedTypeSource = `
+import { createRuntimeClient, defineKernel, defineRuntime, fromMemoryFs, defineTranscoder } from '@taucad/runtime';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { esbuildBundler } from '@taucad/esbuild';
+import { tscircuit } from '@taucad/tscircuit';
+import { useRuntime } from '@taucad/react';
+import type { RuntimeClient } from '@taucad/runtime';
+import { z } from 'zod';
+
+const strictKernel = defineKernel({
+  id: 'type-probe', name: 'Type probe', version: '1', extensions: ['tsx'],
+  evaluateOptionsSchema: z.object({ required: z.number(), defaulted: z.string().default('ready'), transformed: z.string().transform(Number) }),
+  views: {
+    required: { title: 'Required', mimeType: 'image/svg+xml', optionsSchema: z.object({ scale: z.number() }) },
+    defaulted: { title: 'Defaulted', mimeType: 'image/svg+xml', optionsSchema: z.object({ pins: z.boolean().default(false) }) },
+    union: { title: 'Union', mimeType: 'image/svg+xml', optionsSchema: z.union([z.object({ kind: z.literal('single'), camera: z.string() }), z.object({ kind: z.literal('batch'), views: z.array(z.string()).nonempty() })]) },
+    loose: { title: 'Loose', mimeType: 'image/svg+xml', optionsSchema: z.looseObject({ label: z.string() }) },
+    empty: { title: 'Empty', mimeType: 'image/svg+xml' },
+  },
+  exports: {
+    data: { title: 'Data', mimeType: 'application/json', extension: 'json', optionsSchema: z.object({ count: z.number() }) },
+  },
+  async initialize() { return {}; },
+  async resolve() { return { resolved: [], unresolved: [] }; },
+  async describe() { return { success: false, issues: [] }; },
+  async evaluate(input) {
+    const required: number = input.options.required;
+    const defaulted: string = input.options.defaulted;
+    const transformed: number = input.options.transformed;
+    // @ts-expect-error The kernel hook receives parsed transform output.
+    const wrong: string = input.options.transformed;
+    void [required, defaulted, transformed, wrong];
+    return { handle: {} };
+  },
+  async render(input) {
+    if (input.view === 'defaulted') {
+      const pins: boolean = input.options.pins;
+      void pins;
+    }
+    return { content: '<svg/>' };
+  },
+  async write() { return { files: [{ name: 'data.json', mimeType: 'application/json', bytes: new Uint8Array([1]) }] }; },
+});
+const route = defineTranscoder({
+  id: 'type-route', name: 'Type route', version: '1',
+  edges: [{ from: 'json', to: 'txt', fidelity: 'mesh', optionsSchema: z.object({ separator: z.string() }) }] as const,
+  async initialize() { return {}; },
+  async transcode(input) { return { success: true, data: input.files, issues: [] }; },
+});
+const runtime = defineRuntime({ kernels: [strictKernel()], plugins: [tscircuit()], bundlers: [esbuildBundler()], transcoders: [route()] });
+const client = createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }) });
+const strictRuntime = defineRuntime({ kernels: [strictKernel()], transcoders: [route()] });
+const strictTransport = inProcessTransport({ runtime: strictRuntime, fileSystem: fromMemoryFs() });
+const strictClient = createRuntimeClient({ transport: strictTransport });
+const doc = strictClient.open({ source: { files: { 'main.tsx': '', 'other.tsx': '' }, entry: 'main.tsx' }, evaluateOptions: { required: 1, transformed: '2' } });
+const circuitDoc = client.open({ source: { path: 'main.tsx' } });
+circuitDoc.view('board');
+circuitDoc.view('pcb', { options: { pinNumbers: true } });
+doc.view('required', { options: { scale: 2 } });
+doc.view('defaulted');
+doc.view('union', { options: { kind: 'single', camera: 'front' } });
+doc.view('union', { options: { kind: 'batch', views: ['front'] } });
+doc.view('loose', { options: { label: 'open', other: true } });
+doc.view('empty');
+void circuitDoc.export('board');
+void doc.export('data', { options: { count: 1 } });
+void strictClient.transcode({ from: 'json', to: 'txt', files: [], options: { separator: ',' } });
+void doc.update({ evaluateOptions: { required: 2, transformed: '3' } });
+defineRuntime({ kernels: [] });
+defineRuntime({ kernels: [strictKernel()] });
+declare const wideClient: RuntimeClient;
+wideClient.open({ source: { path: 'wide.ts' } }).view('anything');
+const hook = useRuntime({ clientOptions: { transport: strictTransport }, source: { path: 'main.tsx' }, evaluateOptions: { required: 1, transformed: '2' }, view: { id: 'required', options: { scale: 1 } } });
+void hook.exportModel('data', { options: { count: 1 } });
+// @ts-expect-error The packed React hook retains the selected view's required options.
+useRuntime({ clientOptions: { transport: strictTransport }, source: { path: 'main.tsx' }, evaluateOptions: { required: 1, transformed: '2' }, view: { id: 'required' } });
+// @ts-expect-error Required evaluation option cannot be omitted.
+strictClient.open({ source: { path: 'main.tsx' } });
+// @ts-expect-error Entry must be a member of the inline file map.
+strictClient.open({ source: { files: { 'main.tsx': '' }, entry: 'missing.tsx' }, evaluateOptions: { required: 1, transformed: '2' } });
+// @ts-expect-error A required view option cannot be omitted.
+doc.view('required');
+// @ts-expect-error Selected view option types remain narrow.
+circuitDoc.view('pcb', { options: { pinNumbers: 'yes' } });
+// @ts-expect-error Union branches cannot mix single camera and batch views.
+doc.view('union', { options: { kind: 'single', views: ['front'] } });
+// @ts-expect-error Required export options cannot be omitted.
+void doc.export('data');
+// @ts-expect-error Route options remain required.
+void strictClient.transcode({ from: 'json', to: 'txt', files: [], options: {} });
+// @ts-expect-error Unknown export IDs are rejected.
+void doc.export('step');
+`;
+
+export const installedEditorSource = `${installedTypeSource}
+circuitDoc.view('/*view*/');
+void circuitDoc.export('/*export*/');
+circuitDoc.view('pcb', { options: { /*selectedViewOptions*/ } });
+strictClient.open({ source: { files: { 'main.tsx': '', 'other.tsx': '' }, entry: '/*entry*/' }, evaluateOptions: { required: 1, transformed: '2' } });
+strictClient.open({ source: { path: 'main.tsx' }, evaluateOptions: { required: 1, transformed: '2', /*evaluateOptions*/ } });
+void strictClient.transcode({ from: '/*routeFrom*/', to: 'txt', files: [], options: { separator: ',' } });
+void strictClient.transcode({ from: 'json', to: '/*routeTo*/', files: [], options: { separator: ',' } });
+`;
+
+/** The compiler is the workspace tool, but all resolved public declarations come from the installed app. */
+const checkInstalledTypes = (appRoot: string): void => {
+  const consumer = join(appRoot, 'consumer.ts');
+  const editor = join(appRoot, 'editor.ts');
+  writeFileSync(consumer, installedTypeSource);
+  writeFileSync(editor, installedEditorSource);
+  const options: ts.CompilerOptions = {
+    target: ts.ScriptTarget.ESNext,
+    module: ts.ModuleKind.ESNext,
+    moduleResolution: ts.ModuleResolutionKind.Bundler,
+    strict: true,
+    skipLibCheck: false,
+    noEmit: true,
+    types: [],
+    lib: ['lib.esnext.d.ts', 'lib.dom.d.ts'],
+  };
+  for (const moduleResolution of [ts.ModuleResolutionKind.Bundler, ts.ModuleResolutionKind.NodeNext]) {
+    const compilerOptions: ts.CompilerOptions = {
+      ...options,
+      module: moduleResolution === ts.ModuleResolutionKind.NodeNext ? ts.ModuleKind.NodeNext : ts.ModuleKind.ESNext,
+      moduleResolution,
+    };
+    const program = ts.createProgram([consumer], compilerOptions);
+    const diagnostics = ts.getPreEmitDiagnostics(program);
+    invariant(
+      diagnostics.length === 0,
+      `Packed TypeScript consumer failed (${ts.ModuleResolutionKind[moduleResolution]}):\n${ts.formatDiagnosticsWithColorAndContext(
+        diagnostics,
+        {
+          getCanonicalFileName: (file) => file,
+          getCurrentDirectory: () => appRoot,
+          getNewLine: () => '\n',
+        },
+      )}`,
+    );
+  }
+  const host: ts.LanguageServiceHost = {
+    getScriptFileNames: () => [editor],
+    getScriptVersion: () => '1',
+    getScriptSnapshot: (file) => {
+      const source = file === editor ? installedEditorSource : ts.sys.readFile(file);
+      return source === undefined ? undefined : ts.ScriptSnapshot.fromString(source);
+    },
+    getCurrentDirectory: () => appRoot,
+    getCompilationSettings: () => options,
+    getDefaultLibFileName: ts.getDefaultLibFilePath,
+    fileExists: (file) => file === editor || ts.sys.fileExists(file),
+    readFile: (file) => (file === editor ? installedEditorSource : ts.sys.readFile(file)),
+    readDirectory: ts.sys.readDirectory,
+    directoryExists: ts.sys.directoryExists,
+    getDirectories: ts.sys.getDirectories,
+  };
+  const service = ts.createLanguageService(host);
+  try {
+    const expected: Record<string, readonly string[]> = {
+      view: ['board', 'schematic', 'pcb'],
+      export: ['board', 'bom', 'netlist', 'circuit'],
+      selectedViewOptions: ['pinNumbers'],
+      entry: ['main.tsx', 'other.tsx'],
+      evaluateOptions: ['required', 'defaulted', 'transformed'],
+      routeFrom: ['json'],
+      routeTo: ['txt'],
+    };
+    for (const [marker, wanted] of Object.entries(expected)) {
+      const position = installedEditorSource.indexOf(`/*${marker}*/`);
+      invariant(position !== -1, `Missing installed editor marker ${marker}.`);
+      const completion = service.getCompletionsAtPosition(editor, position, { includeCompletionsWithInsertText: true });
+      const names = new Set(completion?.entries.map((entry) => entry.name) ?? []);
+      invariant(
+        wanted.every((name) => names.has(name)),
+        `Packed ${marker} completions omitted ${wanted.filter((name) => !names.has(name)).join(', ')}; got ${[...names].join(', ')}.`,
+      );
+    }
+  } finally {
+    service.dispose();
+  }
+  console.log(`Packed TypeScript ${ts.version}: strict consumer and view/export/option/file-entry completions passed.`);
+};
+
+/** Exercise Zod 4.0.0 through public runtime admission, not a local schema-only parse. */
+export const installedZodFloorSource = `
+import { createRequire } from 'node:module';
+import { createRuntimeClient, defineKernel, defineRuntime, fromMemoryFs } from '@taucad/runtime';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { z } from 'zod';
+const requireFromRuntime = createRequire(import.meta.resolve('@taucad/runtime'));
+const runtimeZod = requireFromRuntime('zod');
+if (runtimeZod.ZodType !== z.ZodType) throw new Error('Runtime and consumer resolved different Zod instances.');
+const version = requireFromRuntime('zod/package.json').version;
+if (version !== '4.0.0') throw new Error('Declared Zod floor was not installed: ' + version);
+const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const kernel = defineKernel({
+  id: 'zod-floor', name: 'Zod floor', version: '1', extensions: ['ts'],
+  evaluateOptionsSchema: z.object({ required: z.number(), size: z.string().default('2').transform(Number) }),
+  views: {
+    union: { title: 'Union', mimeType: 'image/svg+xml', optionsSchema: z.union([
+      z.object({ mode: z.literal('single'), camera: z.string() }),
+      z.object({ mode: z.literal('batch'), views: z.array(z.string()).nonempty() }),
+    ]) },
+    discriminated: { title: 'Discriminated', mimeType: 'image/svg+xml', optionsSchema: z.discriminatedUnion('kind', [
+      z.object({ kind: z.literal('a'), a: z.number() }),
+      z.object({ kind: z.literal('b'), b: z.number() }),
+    ]) },
+    required: { title: 'Required', mimeType: 'image/svg+xml', optionsSchema: z.object({ scale: z.number() }) },
+    defaulted: { title: 'Defaulted', mimeType: 'image/svg+xml', optionsSchema: z.object({ size: z.string().default('3').transform(Number) }) },
+    nested: { title: 'Nested', mimeType: 'image/svg+xml', optionsSchema: z.object({ rows: z.tuple([z.object({ known: z.string() })]) }) },
+    loose: { title: 'Loose', mimeType: 'image/svg+xml', optionsSchema: z.looseObject({ known: z.string() }) },
+    schemaless: { title: 'Schemaless', mimeType: 'image/svg+xml' },
+  },
+  exports: { data: { title: 'Data', mimeType: 'application/json', extension: 'json', optionsSchema: z.object({ count: z.number() }) } },
+  async initialize() { return {}; },
+  async resolve() { return { resolved: [], unresolved: [] }; },
+  async describe() { return { success: false, issues: [] }; },
+  async evaluate(input) {
+    assert(input.options.required === 1 && input.options.size === 2, 'Evaluate required/default/transform admission changed.');
+    return { handle: {} };
+  },
+  async render(input) {
+    if (input.view === 'defaulted') assert(input.options.size === 3, 'View default/transform admission changed.');
+    if (input.view === 'loose') assert(input.options.extra === true, 'Loose view option was stripped.');
+    return { content: '<svg/>' };
+  },
+  async write(input) {
+    assert(input.options.count === 4, 'Required export option changed.');
+    return { files: [{ name: 'data.json', mimeType: 'application/json', bytes: new Uint8Array([1]) }] };
+  },
+});
+const runtime = defineRuntime({ kernels: [kernel()] });
+const client = createRuntimeClient({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }) });
+const doc = client.open({ source: { files: { 'main.ts': '' } }, evaluateOptions: { required: 1 } });
+const outcome = await doc.evaluation();
+assert(!outcome.superseded && outcome.evaluation.success, 'Zod floor evaluation failed: ' + JSON.stringify(outcome));
+const view = async (id, options, expected) => {
+  const opened = doc.view(id, options === undefined ? undefined : { options });
+  try {
+    const result = await opened.rendering();
+    assert(!result.superseded && result.rendering.success === expected, id + ' admission mismatch: ' + JSON.stringify(result));
+  } finally { opened.close(); }
+};
+try {
+  await view('union', { mode: 'single', camera: 'front' }, true);
+  await view('union', { mode: 'batch', views: ['front'] }, true);
+  await view('union', { mode: 'single', camera: 'front', views: ['stripped'] }, false);
+  await view('discriminated', { kind: 'a', a: 1 }, true);
+  await view('discriminated', { kind: 'b', b: 2 }, true);
+  await view('discriminated', { kind: 'a', a: 1, b: 2 }, false);
+  await view('required', { scale: 1 }, true);
+  await view('required', {}, false);
+  await view('defaulted', {}, true);
+  await view('nested', { rows: [{ known: 'yes' }] }, true);
+  await view('nested', { rows: [{ known: 'yes', extra: true }] }, false);
+  await view('loose', { known: 'yes', extra: true }, true);
+  await view('schemaless', undefined, true);
+  await view('schemaless', { extra: true }, false);
+  const exported = await doc.export('data', { options: { count: 4 } });
+  assert(exported.success, 'Required export option was rejected: ' + JSON.stringify(exported.issues));
+  const missing = await doc.export('data', { options: {} });
+  assert(!missing.success, 'Missing required export option was admitted.');
+} finally { doc.close(); await client.shutdown(); }
+console.log('Installed Zod 4.0.0 union/discriminated/default/transform/required/strict/loose/schemaless and identity passed.');
+`;
+
 const installedTscircuitSource = `
 import { createRuntimeClient, defineRuntime, fromMemoryFs } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
@@ -637,6 +921,9 @@ try {
 const runInstalledTscircuit = async (appRoot: string): Promise<void> => {
   const source = join(appRoot, 'tscircuit-render.mjs');
   const bundle = join(appRoot, 'tscircuit-render.browser.mjs');
+  checkInstalledTypes(appRoot);
+  writeFileSync(join(appRoot, 'tscircuit-zod-floor.mjs'), installedZodFloorSource);
+  run(process.execPath, ['tscircuit-zod-floor.mjs'], appRoot);
   writeFileSync(source, installedTscircuitSource);
   run(process.execPath, [source], appRoot);
   const esbuildRoot = dirname(createRequire(import.meta.url).resolve('esbuild/package.json'));
@@ -707,12 +994,13 @@ const main = async (): Promise<void> => {
   const requested = process.argv.slice(2);
   // The runtime README quick start imports these plugins, so a subset that packs the runtime must
   // pack them and everything they publishably depend on, or the install 404s against the registry.
-  const quickStartDirectories = requested.includes('packages/runtime')
-    ? publishableClosure(resolved, ['esbuild', 'replicad']).flatMap((name) => {
-        const root = projectByName.get(name)?.root;
-        return root === undefined || requested.includes(root) ? [] : [root];
-      })
-    : [];
+  const quickStartDirectories =
+    requested.includes('packages/runtime') && !requested.includes('packages/plugins/tscircuit')
+      ? publishableClosure(resolved, ['esbuild', 'replicad']).flatMap((name) => {
+          const root = projectByName.get(name)?.root;
+          return root === undefined || requested.includes(root) ? [] : [root];
+        })
+      : [];
   const tscircuitDirectories = requested.includes('packages/plugins/tscircuit')
     ? publishableClosure(resolved, ['tscircuit', 'esbuild']).flatMap((name) => {
         const root = projectByName.get(name)?.root;
@@ -760,7 +1048,7 @@ const main = async (): Promise<void> => {
         {
           private: true,
           type: 'module',
-          dependencies: { react: '19.2.7', 'react-dom': '19.2.7', zod: '^4.0.0' },
+          dependencies: { react: '19.2.7', 'react-dom': '19.2.7', zod: '4.0.0' },
         },
         undefined,
         2,
@@ -848,7 +1136,9 @@ const main = async (): Promise<void> => {
     }
     const runtimeRoot = join(appRoot, 'node_modules/@taucad/runtime');
     if (existsSync(runtimeRoot)) {
-      runRuntimeQuickStart(appRoot, runtimeRoot);
+      if (existsSync(join(appRoot, 'node_modules/@taucad/replicad'))) {
+        runRuntimeQuickStart(appRoot, runtimeRoot);
+      }
       await runRuntimeParameterOperation(appRoot);
       if (existsSync(join(appRoot, 'node_modules/@taucad/react'))) {
         await runInstalledReactRuntime(appRoot);

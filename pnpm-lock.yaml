@@ -3394,10 +3394,16 @@ importers:
       es-module-lexer:
         specifier: 'catalog:'
         version: 2.3.2
+      semver:
+        specifier: 'catalog:'
+        version: 7.8.5
     devDependencies:
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../runtime
+      '@types/semver':
+        specifier: 'catalog:'
+        version: 7.5.8
 
   packages/core/cache: {}
 

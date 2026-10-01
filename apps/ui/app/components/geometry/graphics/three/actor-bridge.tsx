@@ -55,9 +55,9 @@ export function ActorBridge(): ReactNode {
   const renderFrame = useRenderFrame();
   const setRenderFrame = useSetRenderFrame();
   const synchronizingControlsRef = useRef(false);
-  const lastPublicationRef = useRef<{ camera: ThreeCamera; revision: number; near: number; far: number } | undefined>(
-    undefined,
-  );
+  const lastPublicationRef = useRef<
+    { camera: ThreeCamera; controls: unknown; revision: number; near: number; far: number } | undefined
+  >(undefined);
 
   useLayoutEffect(() => {
     Reflect.set(rig.perspectiveCamera, 'manual', true);
@@ -65,15 +65,16 @@ export function ActorBridge(): ReactNode {
 
     const publish = (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
       const previous = lastPublicationRef.current;
+      const currentControls = get().controls;
       if (
         previous?.camera === camera &&
+        previous.controls === currentControls &&
         previous.revision === snapshot.revision &&
         previous.near === camera.near &&
         previous.far === camera.far
       ) {
         return;
       }
-      const currentControls = get().controls;
       synchronizingControlsRef.current = true;
       try {
         if (currentControls instanceof CameraControlsImpl) {
@@ -101,7 +102,13 @@ export function ActorBridge(): ReactNode {
       if (state.camera !== camera) {
         set({ camera });
       }
-      lastPublicationRef.current = { camera, revision: snapshot.revision, near: camera.near, far: camera.far };
+      lastPublicationRef.current = {
+        camera,
+        controls: currentControls,
+        revision: snapshot.revision,
+        near: camera.near,
+        far: camera.far,
+      };
       invalidate();
     };
 
@@ -112,15 +119,20 @@ export function ActorBridge(): ReactNode {
         setCameraConnector(connectorRef, undefined);
       }
     };
-  }, [connectorRef, consumersRef, get, graphicsActor, invalidate, rig, set]);
+  }, [connectorRef, consumersRef, controls, get, graphicsActor, invalidate, rig, set]);
 
   useLayoutEffect(() => {
     if (size.width <= 0 || size.height <= 0) {
       return;
     }
+    const { viewport } = rig.actorRef.getSnapshot().context.view;
+    const pixelRatio = getPixelRatio();
+    if (viewport.width === size.width && viewport.height === size.height && viewport.pixelRatio === pixelRatio) {
+      return;
+    }
     rig.actorRef.send({
       type: 'setViewport',
-      viewport: { width: size.width, height: size.height, pixelRatio: getPixelRatio() },
+      viewport: { width: size.width, height: size.height, pixelRatio },
     });
   }, [rig, size.height, size.width]);
 

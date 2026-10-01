@@ -12,6 +12,7 @@ import { ActorBridge } from '#components/geometry/graphics/three/actor-bridge.js
 
 const mockUseThree = vi.fn();
 const mockGraphicsSend = vi.fn();
+const mockGraphicsActor = { send: mockGraphicsSend };
 const mockCameraSend = vi.fn();
 const mockConnectorRef: { current: ((camera: ThreeCamera, snapshot: CameraDriverSnapshot) => void) | undefined } = {
   current: undefined,
@@ -49,7 +50,7 @@ vi.mock('#components/geometry/graphics/three/controls-listener-bridge.js', () =>
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({
-  useGraphics: () => ({ send: mockGraphicsSend }),
+  useGraphics: () => mockGraphicsActor,
   useCameraRig: () => mockRig,
   useCameraConnectorRef: () => mockConnectorRef,
   useCameraConsumersRef: () => mockConsumersRef,
@@ -213,6 +214,29 @@ describe('ActorBridge', () => {
 
     expect(state.raycaster).toEqual({ near: 0.01, far: 1_000_000 });
     expect(invalidate).toHaveBeenCalledOnce();
+  });
+
+  it('synchronizes late controls with an already published fitted camera', () => {
+    CameraControlsImpl.install({
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- upstream install shape.
+      THREE,
+    });
+    const camera = mockRig.perspectiveCamera;
+    camera.position.set(8, -6, 4);
+    const controls = new CameraControlsImpl(camera, document.createElement('div'));
+    camera.zoom = 1.625;
+    camera.updateProjectionMatrix();
+    const state = { camera, controls: undefined as CameraControlsImpl | undefined, raycaster: { near: 0, far: 0 } };
+    const binding = { get: () => state, invalidate: vi.fn(), set: vi.fn(), size: { width: 800, height: 600 } };
+    mockUseThree.mockReturnValue({ ...state, ...binding });
+    const { rerender } = render(<ActorBridge />);
+    state.controls = controls;
+    mockUseThree.mockReturnValue({ ...state, ...binding });
+    rerender(<ActorBridge />);
+    void controls.setLookAt(8, -6, 5, 0, 0, 0, false);
+    controls.update(0);
+    expect(camera.zoom).toBe(1.625);
+    controls.dispose();
   });
 
   it('round-trips observed perspective zoom from CameraControls', () => {

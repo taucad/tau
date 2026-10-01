@@ -1,0 +1,36 @@
+diff --git a/build/three.webgpu.js b/build/three.webgpu.js
+index da6128d25f3443904c6be038b761365b7c884168..97abb05f8cd074a487a9f3a24512bb52926cdb24 100644
+--- a/build/three.webgpu.js
++++ b/build/three.webgpu.js
+@@ -155,6 +155,7 @@ class NodeMaterialObserver {
+ 		if ( hasInitialized === false ) {
+ 
+ 			this.getRenderObjectData( renderObject );
++			this.getMaterialData( renderObject.material );
+ 
+ 			return true;
+ 
+diff --git a/build/three.webgpu.nodes.js b/build/three.webgpu.nodes.js
+index 6834eb44a42521d85dd0da42bc84c09f286c9d3b..aea22ae871f5b4d64c950cec0711716730f9af7d 100644
+--- a/build/three.webgpu.nodes.js
++++ b/build/three.webgpu.nodes.js
+@@ -155,6 +155,7 @@ class NodeMaterialObserver {
+ 		if ( hasInitialized === false ) {
+ 
+ 			this.getRenderObjectData( renderObject );
++			this.getMaterialData( renderObject.material );
+ 
+ 			return true;
+ 
+diff --git a/src/materials/nodes/manager/NodeMaterialObserver.js b/src/materials/nodes/manager/NodeMaterialObserver.js
+index 29e26ebd184194778f88326ca6a3d47da3b94c8d..02134aa617c39918887b387c800bbfe26728b405 100644
+--- a/src/materials/nodes/manager/NodeMaterialObserver.js
++++ b/src/materials/nodes/manager/NodeMaterialObserver.js
+@@ -147,6 +147,7 @@ class NodeMaterialObserver {
+ 		if ( hasInitialized === false ) {
+ 
+ 			this.getRenderObjectData( renderObject );
++			this.getMaterialData( renderObject.material );
+ 
+ 			return true;
+ 

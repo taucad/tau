@@ -817,6 +817,41 @@ describe('desktop main deep links', () => {
   const listener = (event: string): ((...args: unknown[]) => void) => state.appListeners.get(event)!.at(-1)!;
 
   it(
+    'waits for the packaged Playwright bridge before creating the first window',
+    async () => {
+      const previous = process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'];
+      const previousRelease = Object.getOwnPropertyDescriptor(globalThis, '__playwright_run');
+      process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] = '1';
+      try {
+        await boot();
+        const release: unknown = Reflect.get(globalThis, '__playwright_run');
+        await app.whenReady();
+        expect(fakeWindow.loadURL).not.toHaveBeenCalled();
+        const isRelease = (value: unknown): value is () => void => typeof value === 'function';
+        if (!isRelease(release)) {
+          throw new TypeError('Packaged Playwright readiness callback was not installed');
+        }
+        release();
+        await vi.waitFor(() => {
+          expect(fakeWindow.loadURL).toHaveBeenCalledWith('app://tau/');
+        });
+      } finally {
+        if (previous === undefined) {
+          delete process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'];
+        } else {
+          process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] = previous;
+        }
+        if (previousRelease) {
+          Object.defineProperty(globalThis, '__playwright_run', previousRelease);
+        } else {
+          Reflect.deleteProperty(globalThis, '__playwright_run');
+        }
+      }
+    },
+    bootMilliseconds,
+  );
+
+  it(
     'registers the app as the tau scheme handler',
     async () => {
       await bootAndWait();

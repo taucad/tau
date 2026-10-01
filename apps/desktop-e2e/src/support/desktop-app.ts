@@ -235,6 +235,7 @@ export const launchDesktopApp = async (options: {
       TAU_CONFIG_DIR: join(userData, 'config'),
       ...options.env,
       TAU_E2E_HIDE_WINDOW: '1',
+      ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
     },
   });
   const child = application.process();

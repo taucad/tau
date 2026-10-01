@@ -39,14 +39,14 @@ const observation = session.complete();
 
 ## API
 
-| Export                           | Purpose                                                        |
-| -------------------------------- | -------------------------------------------------------------- |
-| `createBundlerSourceHost`        | rooted project, built-in, URL, and package source sessions     |
-| `PackageArtifactCache`           | exact, content-addressed self-contained package artifact cache |
-| `updatePackageManifest`         | resolve, verify and commit exact project package selections    |
-| `createPackageManifestCommit`   | publish through the existing filesystem checked-write authority |
-| `normalizeAssetImportAttributes` | length-preserving normalization for supported asset imports    |
-| `resolveAssetIntent`             | compiler-neutral query/attribute loader intent                 |
+| Export                           | Purpose                                                         |
+| -------------------------------- | --------------------------------------------------------------- |
+| `createBundlerSourceHost`        | rooted project, built-in, URL, and package source sessions      |
+| `PackageArtifactCache`           | exact, content-addressed self-contained package artifact cache  |
+| `updatePackageManifest`          | resolve, verify and commit exact project package selections     |
+| `createPackageManifestCommit`    | publish through the existing filesystem checked-write authority |
+| `normalizeAssetImportAttributes` | length-preserving normalization for supported asset imports     |
+| `resolveAssetIntent`             | compiler-neutral query/attribute loader intent                  |
 
 ## Deterministic project packages
 

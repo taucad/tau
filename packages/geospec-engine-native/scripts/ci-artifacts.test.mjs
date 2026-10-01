@@ -40,6 +40,19 @@ void test('malformed process listings cannot prove a producer group exited', (co
   assert.throws(() => darwinGroupAlive(123), /Could not prove GeoSpec producer group exit/);
 });
 
+void test('should report only live members of the owned producer group', (context) => {
+  const listing = context.mock.method(childProcess, 'spawnSync', () => ({
+    status: 0,
+    stdout: ' 123 Z+\n 456 S\n',
+  }));
+  assert.equal(darwinGroupAlive(123), false);
+  assert.equal(darwinGroupAlive(456), true);
+  listing.mock.mockImplementation(() => ({ status: 0, stdout: '123 Z\n123 S+\n456 R\n' }));
+  assert.equal(darwinGroupAlive(123), true);
+  listing.mock.mockImplementation(() => ({ status: 0, stdout: '\n' }));
+  assert.equal(darwinGroupAlive(123), false);
+});
+
 void test('cache key follows source and selected toolchain without generated outputs', (context) => {
   const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
   mkdirSync(scratch, { recursive: true });

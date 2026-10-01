@@ -57,6 +57,7 @@ type AssimpLifecycleState = {
   view: AssimpView;
   first: ReturnType<AssimpView['rendering']>;
   second?: ReturnType<AssimpView['rendering']>;
+  utilityPids: Set<number>;
 };
 
 const materialSource = `newmtl TauBlue
@@ -393,20 +394,28 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
             context: { definition: 'default', projectRoot },
           }) as () => Promise<unknown>;
           const client = createRuntimeClient(await provideClientOptions()) as RuntimeClient;
+          const utilityPids = new Set<number>();
+          client.on('telemetry', ({ origin }) => {
+            const match = origin.label === 'utility' ? /^pid-(\d+)-/u.exec(origin.instance) : null;
+            const pid = match?.[1] === undefined ? undefined : Number(match[1]);
+            if (pid !== undefined && Number.isSafeInteger(pid) && pid > 0) {
+              utilityPids.add(pid);
+            }
+          });
           const state = globalThis as typeof globalThis & {
             __tauAssimpLifecycle?: AssimpLifecycleState;
           };
           const document = client.open({ source: { path: entryPath }, watch: false });
           const view = document.view('model');
-          state.__tauAssimpLifecycle = { client, document, view, first: view.rendering() };
+          state.__tauAssimpLifecycle = { client, document, view, first: view.rendering(), utilityPids };
         },
         { clientUrl, entryPath: lifecycleModelEntry, projectRoot, rendererUrl },
       );
-      let lifecyclePid: number | undefined;
+      let replacementSparePid: number | undefined;
       await expect
         .poll(async () => {
           const added = [...(await utilityProcesses(session!))].filter((pid) => !utilitiesBefore.has(pid));
-          lifecyclePid = added.length === 1 ? added[0] : undefined;
+          replacementSparePid = added.length === 1 ? added[0] : undefined;
           return added.length;
         })
         .toBe(1);
@@ -476,6 +485,7 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
             magic: header.getUint32(0, true),
             version: header.getUint32(4, true),
             declaredLength: header.getUint32(8, true),
+            utilityPids: [...state.utilityPids],
           };
         } finally {
           state.view.close();
@@ -487,7 +497,11 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       expect(second.hash).toMatch(/^[a-f0-9]{64}$/u);
       expect(second.byteLength).toBeGreaterThan(0);
       expect(second.declaredLength).toBe(second.byteLength);
+      expect(second.utilityPids).toHaveLength(1);
+      const lifecyclePid = second.utilityPids?.[0];
       expect(lifecyclePid).toBeDefined();
+      expect(utilitiesBefore.has(lifecyclePid!)).toBe(true);
+      expect(lifecyclePid).not.toBe(replacementSparePid);
       await expect
         .poll(
           async () => {
@@ -497,6 +511,8 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
           { timeout: 30_000 },
         )
         .toBe(false);
+      const utilitiesAfterTermination = await utilityProcesses(session);
+      expect(utilitiesAfterTermination.has(replacementSparePid!)).toBe(true);
 
       await openInViewer(page, modelEntry);
       // A nonblocking FIFO writer succeeds only after Tau's Node filesystem has

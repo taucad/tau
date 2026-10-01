@@ -53,6 +53,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
 
         <Drawer
           handleOnly
+          modal={false}
           open={drawerOpen}
           snapPoints={snapPoints}
           activeSnapPoint={activeSnapPoint}
@@ -66,7 +67,7 @@ export const ChatInterfaceMobile = memo(function (): React.JSX.Element {
             Chat Interface - use navigation tabs to switch between panels
           </DrawerDescription>
 
-          {/* Unmount on close so Radix releases the viewer from its modal aria-hidden tree immediately. */}
+          {/* This docked panel shares interaction with the viewer and persistent navigation. */}
           {drawerOpen ? (
             <DrawerContent
               aria-labelledby='drawer-title'

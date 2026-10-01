@@ -134,7 +134,12 @@ describe('RevisionRow', () => {
 
   it('opens to its files, each row opening the shared comparison in its path’s language (S38)', async () => {
     const user = userEvent.setup();
-    revisionStatusHarness.comparison = { original: 'cube(1);', modified: 'cube(2);' };
+    revisionStatusHarness.comparison = {
+      original: 'cube(1);',
+      modified: 'cube(2);',
+      originalBytes: { digest: 'original', byteLength: 8 },
+      modifiedBytes: { digest: 'modified', byteLength: 8 },
+    };
     renderRow();
     await openRow(user);
 
@@ -143,6 +148,27 @@ describe('RevisionRow', () => {
     await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
     expect(await screen.findByTestId('diff')).toHaveAttribute('data-language', 'openscad');
     expect(screen.getByTestId('diff')).toHaveTextContent('cube(1);|cube(2);');
+  });
+
+  it('should show raw byte identities even when both sides decode to empty text', async () => {
+    const user = userEvent.setup();
+    revisionStatusHarness.comparison = {
+      original: '',
+      modified: '',
+      originalBytes: { digest: 'missing', byteLength: null },
+      modifiedBytes: {
+        digest: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
+        byteLength: 0,
+      },
+    };
+    renderRow();
+    await openRow(user);
+    await user.click(screen.getByRole('button', { name: 'Compare bracket.scad' }));
+    const comparison = await screen.findByRole('region', { name: 'Comparison for bracket.scad' });
+    expect(within(comparison).getByText('Original bytes')).toBeVisible();
+    expect(within(comparison).getByText('missing · missing')).toBeVisible();
+    expect(within(comparison).getByText(/sha256:e3b0.* · 0 bytes/u)).toBeVisible();
+    expect(screen.queryByText('No changes in this file.')).not.toBeInTheDocument();
   });
 
   it('should show three files first and toggle the complete file list', async () => {
@@ -201,7 +227,12 @@ describe('RevisionRow', () => {
       'Could not compare main.geospec.ts. Tree is unavailable',
     );
     revisionStatusHarness.comparisonError = undefined;
-    revisionStatusHarness.comparison = { original: 'a', modified: 'b' };
+    revisionStatusHarness.comparison = {
+      original: 'a',
+      modified: 'b',
+      originalBytes: { digest: 'original', byteLength: 1 },
+      modifiedBytes: { digest: 'modified', byteLength: 1 },
+    };
     await user.click(screen.getByRole('button', { name: 'Retry' }));
     expect(await screen.findByTestId('diff')).toHaveTextContent('a|b');
   });
@@ -311,7 +342,12 @@ describe('RevisionRow', () => {
   it('compares the whole revision with the current files from More, and returns to its own changes', async () => {
     const user = userEvent.setup();
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-5' };
-    revisionStatusHarness.comparison = { original: 'cube(1);', modified: 'cube(5);' };
+    revisionStatusHarness.comparison = {
+      original: 'cube(1);',
+      modified: 'cube(5);',
+      originalBytes: { digest: 'original', byteLength: 8 },
+      modifiedBytes: { digest: 'modified', byteLength: 8 },
+    };
     renderRow();
     await openRow(user);
     await user.click(screen.getByRole('button', { name: 'More actions for Rev 2' }));

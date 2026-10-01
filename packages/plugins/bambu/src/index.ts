@@ -6,3 +6,5 @@ export { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
 export { bambuA1MiniManifest, bambuX1cManifest } from '#bambu.manifest.js';
 
 export { bambuSimulatorMachine } from '#bambu.simulator.js';
+
+export { bambuSettingsConfiguration } from '#bambu.settings.js';

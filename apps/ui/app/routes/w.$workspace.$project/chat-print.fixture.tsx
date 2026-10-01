@@ -39,7 +39,7 @@ import type { PendingAgentHostApproval } from '#components/chat/chat-approval-ba
 import type { DesktopBambuStudio } from '#filesystem/desktop-bridge.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { SlicedArtifact } from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import type { SliceSummary } from '#routes/w.$workspace.$project/chat-print-summary.js';
+import type { SliceSummary } from '#components/printer/printer-summary.js';
 
 export const timestamp = '2026-09-24T02:00:00.000Z';
 export const later = '2026-09-24T02:00:05.000Z';
@@ -363,8 +363,14 @@ export const parametersMock = (actual: typeof ParametersModule): typeof Paramete
 const millimetres = (value: number) => ({ value, unit: 'mm' });
 const celsius = (value: number) => ({ value, unit: 'Cel' });
 export const manifest = parseMachineManifest({
-  version: 1,
-  identity: { vendor: 'Bambu Lab', model: 'x1c', displayName: 'X1 Carbon', qualifiedFirmware: ['01.08.02.00'] },
+  version: 2,
+  identity: {
+    typeId: 'bambu.x1c',
+    vendor: 'Bambu Lab',
+    model: 'x1c',
+    displayName: 'X1 Carbon',
+    qualifiedFirmware: ['01.08.02.00'],
+  },
   technology: 'additive.fff',
   geometry: {
     unit: 'mm',

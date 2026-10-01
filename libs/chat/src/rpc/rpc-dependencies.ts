@@ -9,6 +9,7 @@
  */
 import type { RevisionChangeOutput, RevisionRowOutput } from '#schemas/tools/revisions.tool.schema.js';
 import type { SourceRevisionOutput } from '#schemas/tools/source-revision.schema.js';
+import type { DeterministicEditFileInput } from '#schemas/tools/edit-file.tool.schema.js';
 import type {
   CaptureImagesRpcResult,
   CaptureImagesRpcInput,
@@ -90,6 +91,8 @@ export type RpcFileSystem = {
    * pattern — never call `readFile` on agent-supplied paths without bounds.
    */
   readFile(path: string): Promise<string>;
+  /** Exact owned bytes from a canonical rooted path; refuses files above 256 MiB. */
+  readBinaryFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   writeFile(path: string, content: string): Promise<void>;
   writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
   deleteFileChecked(input: {
@@ -101,12 +104,7 @@ export type RpcFileSystem = {
   readdir(path: string): Promise<RpcDirectoryEntry[]>;
   exists(path: string): Promise<boolean>;
   appendFile(path: string, content: string): Promise<void>;
-  editFile(
-    path: string,
-    oldString: string,
-    newString: string,
-    replaceAll?: boolean,
-  ): Promise<{
+  editFile(input: DeterministicEditFileInput): Promise<{
     occurrences: number;
     staleRecovered?: true;
     diffStats: DiffStatsWithContent;

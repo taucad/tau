@@ -20,6 +20,7 @@ let snapshotEntryPath: string | undefined = sourceEntryPath;
 const getSnapshot = vi.fn(() => ({
   context: {
     entryPath: snapshotEntryPath,
+    openAttempt: 0,
     rendering: {
       success: true,
       requestId: 'request-1',
@@ -35,17 +36,25 @@ const getSnapshot = vi.fn(() => ({
     },
     evaluation: undefined,
   },
+  matches: () => false,
 }));
-let renderingListener: ((event: { rendering: { success: true; transient: false; hash: string } }) => void) | undefined;
+type RenderEvent = {
+  rendering: {
+    success: true;
+    transient: false;
+    hash: string;
+    evaluationId: string;
+    artifact: ReturnType<typeof getSnapshot>['context']['rendering']['artifact'];
+  };
+};
+let renderingListener: ((event: RenderEvent) => void) | undefined;
 const unsubscribe = vi.fn();
 const unsubscribeSnapshots = vi.fn();
 const subscribe = vi.fn(() => ({ unsubscribe: unsubscribeSnapshots }));
-const on = vi.fn(
-  (_event: string, listener: (event: { rendering: { success: true; transient: false; hash: string } }) => void) => {
-    renderingListener = listener;
-    return { unsubscribe };
-  },
-);
+const on = vi.fn((_event: string, listener: (event: RenderEvent) => void) => {
+  renderingListener = listener;
+  return { unsubscribe };
+});
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
@@ -242,7 +251,15 @@ describe('useThumbnailGenerator', () => {
   it('should include the render recipe in the settled thumbnail identity', () => {
     renderHook(() => useThumbnailGenerator());
 
-    renderingListener?.({ rendering: { success: true, transient: false, hash: 'geometry-hash' } });
+    renderingListener?.({
+      rendering: {
+        success: true,
+        transient: false,
+        hash: 'geometry-hash',
+        evaluationId: 'evaluation-1',
+        artifact: getSnapshot().context.rendering.artifact,
+      },
+    });
 
     const event = send.mock.calls.at(-1)?.[0];
     expect(event?.type).toBe('settled');

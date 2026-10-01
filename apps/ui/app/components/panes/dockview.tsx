@@ -7,6 +7,8 @@ import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/pane
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isDesktopTarget } from '#lib/build-target.js';
+import { useResizeHandles } from '#components/panes/use-resize-handles.js';
+import { dockviewResizeHandle } from '#components/panes/resize-handle.js';
 
 /**
  * Custom Dockview theme. The `dockview-theme-tau` class is applied to the root
@@ -54,9 +56,7 @@ export const dockviewStyleOverrides = cn(
   '[&_.dv-drop-target-selection]:[border-radius:var(--dv-tab-border-radius)]',
   // ── Sash (resize handles) ──
   '[--dv-sash-color:transparent]',
-  '[--dv-active-sash-color:var(--primary)]',
-  '[--dv-active-sash-transition-duration:0.1s]',
-  '[--dv-active-sash-transition-delay:0.5s]',
+  '[--dv-active-sash-color:transparent]',
   // ── Sash cursor: col-resize / row-resize (adds the bar between arrows) ──
   '[&_.dv-split-view-container.dv-horizontal_>_.dv-sash-container_>_.dv-sash.dv-enabled]:!cursor-col-resize',
   '[&_.dv-split-view-container.dv-horizontal_>_.dv-sash-container_>_.dv-sash.dv-maximum]:!cursor-col-resize',
@@ -359,11 +359,9 @@ function useRevealActiveTabOnResize(group: IDockviewHeaderActionsProps['group'])
  * Themed Dockview wrapper.
  *
  * Renders `DockviewReact` with the `tauDockviewTheme` applied automatically.
- * All theme styling -- CSS variable declarations, tab states, action button
- * visibility, shell overlays, containment overrides
- * -- is expressed as Tailwind className selectors in `dockviewStyleOverrides`
- * above, keeping everything co-located with the component and in sync with the
- * Tailwind theme.
+ * CSS variables, tab states, actions, shell overlays and containment overrides
+ * live in `dockviewStyleOverrides`. Native resize feedback is shared with the
+ * other pane engines in `pane-resize.css`.
  *
  * Dockview v4.13+ defaults to `'onlyWhenVisible'` rendering, which appends
  * panel content directly into `.dv-content-container` (a child of
@@ -383,7 +381,9 @@ export function Dockview({
   tabLeadingIcon,
   ...properties
 }: DockviewProperties): React.JSX.Element {
+  const resizeRootRef = useRef<HTMLDivElement>(null);
   const apiRef = useRef<DockviewApi | undefined>(undefined);
+  useResizeHandles(resizeRootRef, (sash) => dockviewResizeHandle(apiRef.current, sash));
   const disposableRef = useRef<{ dispose(): void } | undefined>(undefined);
   const RightHeaderActions = useMemo<FunctionComponent<IDockviewHeaderActionsProps>>(() => {
     const CallerActions = rightHeaderActionsComponent;
@@ -431,7 +431,9 @@ export function Dockview({
 
   return (
     <OmniScroller
-      className={cn('size-full', dockviewStyleOverrides, desktopDockviewStyleOverrides)}
+      ref={resizeRootRef}
+      data-resize-owner
+      className={cn('pane-resize size-full', dockviewStyleOverrides, desktopDockviewStyleOverrides)}
       viewportSelector='.dv-tabs-container'
       onClickCapture={handleTabClick}
     >

@@ -1,13 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import {
-  createGeoSpec,
-  describe as geoDescribe,
-  expectGeo,
-  expectNativeGeo,
-  geoSpecMatcherNames,
-  it as geoIt,
-  test,
-} from '#index.js';
+import { createGeoSpec, describe as geoDescribe, expectGeo, geoSpecMatcherNames, it as geoIt, test } from '#index.js';
 import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 import { decodeGeoSpecCanonicalJson, geoSpecEngineProtocolVersion, toGeoSpecProtocolJson } from '#engine/protocol.js';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
@@ -15,6 +7,9 @@ import { createTestGeoSpecEngineProtocol } from '#engine/protocol.test-support.j
 import type { GeoSpecSubmitClaimsRequest, GeoSpecSubmitClaimsResult } from '#engine/protocol.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
+import { bindGeoSpecSubject } from '#model/subject.js';
+import { createGeoSpecAssertionClient } from '#assertion-client/index.js';
+import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
 
 import {
   clearCollectorGlobals,
@@ -26,6 +21,64 @@ import {
 } from '#runner/collector.js';
 
 const failure: GeometryDiagnostic = { code: 'FIXTURE_FAIL', severity: 'error', message: 'nope' };
+
+describe('compiled report outcome accounting', () => {
+  it.each([
+    ['passed', 'passed'],
+    ['failed', 'failed'],
+    ['unsupported', 'unsupported'],
+    ['refused', 'inconclusive'],
+    ['cancelled', 'inconclusive'],
+    ['invalid', 'failed'],
+    ['engine-error', 'failed'],
+  ])('should retain core %s as test %s without changing canonical bytes', async (status, expected) => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    let canonicalResult: Uint8Array<ArrayBuffer> | undefined;
+    const engine: GeoSpecAssertionClientOptions['engine'] = {
+      processRequest: (input) => input,
+      evaluateClaim: (input) => {
+        const envelope = JSON.parse(new TextDecoder().decode(input)) as {
+          plan: { claims: Array<{ claimId: string }> };
+        };
+        canonicalResult = encode({ results: [{ claimId: envelope.plan.claims[0]?.claimId, status, diagnostics: [] }] });
+        return {
+          canonicalClaim: encode(envelope.plan.claims[0]),
+          canonicalPlan: encode(envelope.plan),
+          canonicalResult,
+        };
+      },
+    };
+    const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 1000 });
+    const admitted = bindGeoSpecSubject({
+      engine,
+      client,
+      identity: { subjectHash: 'a'.repeat(64) },
+      load: {
+        loadId: 'part-load',
+        status: 'complete',
+        format: 'gsm1',
+        parameters: {},
+        ingestOptions: {},
+        artifacts: [{ name: 'part.gsm1', byteLength: 1, sha256: 'a'.repeat(64) }],
+      },
+      isLive: () => true,
+    });
+    const collector = createCollector({ nativeAssertions: { engine, workUnitLimit: 1000 } });
+    collector.it('claim', () => {
+      try {
+        collector.expectGeo(admitted).not.toBeWatertight();
+      } catch {
+        /* Caught non-pass is still recorded. */
+      }
+    });
+    await collector.waitForCompletion();
+    expect(collector.tests[0]?.status).toBe(expected);
+    expect(collector.tests[0]?.assertions[0]?.report?.status).toBe(status);
+    expect(collector.tests[0]?.assertions[0]?.report?.polarity).toBe('negative');
+    expect(collector.tests[0]?.assertions[0]?.report?.canonicalResult).toBe(canonicalResult);
+    expect(collector.tests[0]?.assertions[0]?.loadId).toBe('part-load');
+  });
+});
 
 const subject = { kind: 'geometry-subject-reference', subjectId: 'subject-1', contentHash: 'sha256:test' };
 
@@ -259,7 +312,7 @@ describe('expectGeo proxy', () => {
   it('should expose every registry matcher name in registry order', () => {
     const matcher = createCollector().expectGeo(undefined);
 
-    expect(Object.keys(matcher)).toStrictEqual(Object.keys(geoSpecMatcherDescriptors));
+    expect(Object.keys(matcher)).toStrictEqual([...Object.keys(geoSpecMatcherDescriptors), 'not']);
     expect(geoSpecMatcherNames).toStrictEqual(Object.keys(geoSpecMatcherDescriptors));
   });
 
@@ -423,15 +476,14 @@ describe('expectGeo proxy', () => {
 });
 
 describe('authoring helpers', () => {
-  it('should reject the native helper when the active collector is legacy', () => {
+  it('should reject forged root subjects independently of an installed reference collector', () => {
     installCollector(createCollector());
 
-    expect(() => expectNativeGeo({ contentHash: 'sha256:test' })).toThrow(
-      'Native expectGeo requires a collector configured with nativeAssertions.',
-    );
+    // @ts-expect-error -- The public trust boundary refuses hash bags.
+    expect(() => expectGeo({ contentHash: 'sha256:test' })).toThrow('not admitted');
   });
 
-  it('should reject the legacy helper while retaining native suite registration', async () => {
+  it('should retain suite registration while rejecting unadmitted root subjects', async () => {
     const passthrough = (input: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer> => input;
     const collector = createCollector({
       nativeAssertions: {
@@ -446,10 +498,9 @@ describe('authoring helpers', () => {
     geoDescribe('native helpers', () => {
       geoIt('registers', () => undefined);
     });
-    expect(() => expectGeo('legacy subject')).toThrow(
-      'Legacy expectGeo is unavailable in native mode. Import expectNativeGeo from geospec.',
-    );
-    expect(expectNativeGeo({ subjectHash: 'a'.repeat(64) })).toHaveProperty('toBeWatertight');
+    // @ts-expect-error -- A string is not an admitted subject.
+    expect(() => expectGeo('legacy subject')).toThrow('not admitted');
+    expect(collector.expectGeo({ subjectHash: 'a'.repeat(64) })).toHaveProperty('toBeWatertight');
 
     await collector.waitForCompletion();
     expect(collector.tests.map(({ name, status }) => ({ name, status }))).toStrictEqual([
@@ -463,7 +514,7 @@ describe('authoring helpers', () => {
 
     geoDescribe('helpers', () => {
       geoIt('runs', () => {
-        expect(expectGeo('subject')).toHaveProperty('toBeWatertight');
+        expect(collector.expectGeo('subject')).toHaveProperty('toBeWatertight');
       });
       test('aliased', () => undefined);
       geoIt.skip('skipped test');

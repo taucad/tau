@@ -301,7 +301,15 @@ export const initializeMixedWasm = async (input?: WasmInput, execution?: WasmExe
     loadedModule = await (binding.default as ModuleFactory)(await moduleOptions(input));
     return loadedModule;
   })();
-  await modulePromise;
+  const pending = modulePromise;
+  try {
+    await pending;
+  } catch (error) {
+    if (modulePromise === pending) {
+      modulePromise = undefined;
+    }
+    throw error;
+  }
 };
 
 const initializedModule = (execution?: WasmExecution): MixedWasmModule => {

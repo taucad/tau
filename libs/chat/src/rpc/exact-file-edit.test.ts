@@ -56,15 +56,64 @@ const fileSystemFor = (
 
 const apply = async (
   state: ReturnType<typeof fileSystemFor>,
-  input: { oldString: string; newString: string; replaceAll?: boolean },
+  input: { oldString: string; newString: string; replaceAll?: boolean; expectedDigest?: string },
 ) =>
   applyClientTextMutation({
     targetFile: 'main.scad',
     fileSystem: state.fileSystem,
     plan: createExactReplacementPlan(input),
+    ...('expectedDigest' in input ? { expectedDigest: input.expectedDigest } : {}),
   });
 
 describe('deterministic exact file edit', () => {
+  it('accepts only a lowercase content digest, never missing or uppercase', () => {
+    const input = { targetFile: 'main.ts', oldString: 'a', newString: 'b' };
+    expect(editFileInputSchema.parse({ ...input, expectedDigest: `sha256:${'a'.repeat(64)}` })).toHaveProperty(
+      'expectedDigest',
+    );
+    for (const expectedDigest of ['missing', `sha256:${'A'.repeat(64)}`, 'sha256:abc']) {
+      expect(editFileInputSchema.safeParse({ ...input, expectedDigest }).success).toBe(false);
+    }
+  });
+
+  it('fences reviewed bytes before no-op planning and never rebases a conflict', async () => {
+    const expectedDigest = `sha256:${createHash('sha256').update(bytes('alpha')).digest('hex')}`;
+    const drift = fileSystemFor(bytes('beta'));
+    await expect(apply(drift, { oldString: 'beta', newString: 'beta', expectedDigest })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'EDIT_CONFLICT',
+    });
+    expect(drift.writeFileIfUnchanged).not.toHaveBeenCalled();
+    const conflict = fileSystemFor(bytes('alpha'), { conflictOnce: bytes('prefix alpha') });
+    await expect(apply(conflict, { oldString: 'alpha', newString: 'gamma', expectedDigest })).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'EDIT_CONFLICT',
+    });
+    expect(conflict.writeFileIfUnchanged).toHaveBeenCalledTimes(1);
+  });
+
+  it('uses one CAS for reviewed no-op and preserves literal replacement EOL and BOM', async () => {
+    const initial = withBom('alpha\r\nbeta\r\n');
+    const expectedDigest = `sha256:${createHash('sha256').update(initial).digest('hex')}`;
+    const unchanged = fileSystemFor(initial);
+    await expect(apply(unchanged, { oldString: 'alpha', newString: 'alpha', expectedDigest })).resolves.toMatchObject({
+      ok: true,
+    });
+    expect(unchanged.writeFileIfUnchanged).toHaveBeenCalledTimes(1);
+    const state = fileSystemFor(initial);
+    await expect(
+      apply(state, { oldString: 'alpha\r\nbeta', newString: 'gamma\ndelta', expectedDigest }),
+    ).resolves.toMatchObject({ ok: true });
+    expect(state.read()).toEqual(withBom('gamma\ndelta\r\n'));
+    const folded = fileSystemFor(initial);
+    await expect(
+      apply(folded, { oldString: 'alpha\nbeta', newString: 'gamma', expectedDigest }),
+    ).resolves.toMatchObject({
+      ok: false,
+      errorCode: 'EDIT_CONFLICT',
+    });
+    expect(folded.writeFileIfUnchanged).not.toHaveBeenCalled();
+  });
   it('applies one exact match literally', async () => {
     const state = fileSystemFor(bytes('price = "$&";\n'));
 

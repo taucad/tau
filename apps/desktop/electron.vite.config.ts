@@ -16,6 +16,7 @@ const bundledWorkspaceDependencies = [
   '@taucad/brep',
   '@taucad/build123d',
   '@taucad/esbuild',
+  '@taucad/events',
   '@taucad/filesystem',
   '@taucad/geospec-engine',
   '@taucad/gltf',

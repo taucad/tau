@@ -140,7 +140,6 @@ export type AgentHostClientOptions = {
   /** Absent while the model catalog is unavailable; see `AgentHostWorkerInitializeRequest.model`. */
   readonly model?: AgentHostModel | undefined;
   readonly runtimeConfig: UiRuntimeConfigInput;
-  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
   readonly testingEnabled?: boolean | undefined;
   /** The worker factory, for tests; the document's resident worker otherwise. */
   readonly createWorker?: (() => Worker) | undefined;
@@ -621,7 +620,6 @@ const createResidentAgentWorker = (createWorker: () => Worker): ResidentAgentWor
           systemPromptBlocks: options.systemPromptBlocks,
           model: options.model,
           runtimeConfig: options.runtimeConfig,
-          geoSpecEngine: options.geoSpecEngine,
           testingEnabled: options.testingEnabled,
           ...(principal === undefined ? {} : { principal }),
         },

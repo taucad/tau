@@ -1,3 +1,4 @@
+/* oxlint-disable no-bitwise -- The additive confidence byte uses documented independent flags. */
 /**
  * Toolpath program: the parsed, timed form of one G-code file.
  *
@@ -23,6 +24,9 @@ export const toolpathSegmentKinds = [
   'retract',
   'wipe',
   'unknown',
+  'bridge',
+  'ironing',
+  'support-interface',
 ] as const;
 
 /** One segment kind. @public */
@@ -70,9 +74,29 @@ export type ToolpathCoverage = Readonly<{
   complete: boolean;
 }>;
 
+/** Dimensional deposition, independent of motion and raw E. @public */
+export type ToolpathDeposition = Readonly<{
+  /** Slicer-intended width per segment, millimetres; zero means no supported bead. */
+  widths: Float32Array<ArrayBuffer>;
+  /** Bead height per segment, millimetres. The bead top is the commanded Z. */
+  heights: Float32Array<ArrayBuffer>;
+  /** Commanded deposited volume per segment, cubic millimetres, after recovery. */
+  volumes: Float32Array<ArrayBuffer>;
+  /** Fraction of the move spent recovering a retraction, before deposition starts. */
+  starts: Float32Array<ArrayBuffer>;
+  /** Bit flags: width tag 1, height tag 2, file settings 4, inferred 8, assumed 16, unsupported 32, nonplanar 64, contradictory wipe 128. */
+  confidence: Uint8Array<ArrayBuffer>;
+  /** Recorded diameter per tool, millimetres; an absent value defaults to 1.75 with assumed confidence. */
+  filamentDiameters: readonly number[];
+  /** Distinct qualifications; not a command-coverage or printing-safety verdict. */
+  warnings: readonly string[];
+}>;
+
 /** Parsed and timed toolpath. @public */
 export type ToolpathProgram = Readonly<{
   version: 1;
+  /** Present on dimension-aware parser results; older producers may supply motion only. */
+  deposition?: ToolpathDeposition;
   source: Readonly<{ digest: string; parser: Readonly<{ id: string; version: string }> }>;
   units: 'mm';
   /** Whether the first motion started from a homed origin or an unknown pose. */
@@ -186,14 +210,15 @@ export class ToolpathParseError extends Error {
   }
 }
 
-const parserIdentity = Object.freeze({ id: 'tau.slicer.toolpath', version: '4' });
+const parserIdentity = Object.freeze({ id: 'tau.slicer.toolpath', version: '5' });
 const defaultAcceleration = Object.freeze({ print: 10_000, travel: 20_000, extruder: 5000 });
 const defaultMaximumFeedrate = 500;
-// The two ceilings that stay bound memory: a 64 MiB Bambu Studio plate holds about 1.9 million segments, and each
-// costs 46 bytes of columns here and about 80 more in the viewer. A line costs a byte at least, so no line limit.
+// Bound source bytes, segment columns and event/layer objects independently: short non-motion records
+// can otherwise allocate millions of objects while staying below the source and segment ceilings.
 // ponytail: larger plates are refused, not previewed; a decimated preview (far layers, travel) if they must show.
 const defaultMaximumBytes = 64 * 1024 * 1024;
 const maximumSegments = 2_000_000;
+const maximumTimelineRecords = 250_000;
 const tooLargeToPreview =
   'This G-code is too large to preview. The printer can still print it as it is; to preview it, slice a smaller ' +
   'model or with a larger layer height.';
@@ -244,7 +269,16 @@ const typeKind = (label: string): ToolpathSegmentKind => {
   if (value === 'inner wall' || value === 'overhang wall' || value === 'floating vertical shell') {
     return 'inner-wall';
   }
-  if (value.includes('infill') || value.includes('surface') || value === 'bridge' || value === 'ironing') {
+  if (value.includes('bridge')) {
+    return 'bridge';
+  }
+  if (value === 'ironing') {
+    return 'ironing';
+  }
+  if (value === 'support interface') {
+    return 'support-interface';
+  }
+  if (value.includes('infill') || value.includes('surface')) {
     return 'infill';
   }
   if (value.startsWith('support')) {
@@ -267,6 +301,11 @@ type Columns = {
   extrusion: Float32Array<ArrayBuffer>;
   feedrates: Float32Array<ArrayBuffer>;
   tools: Uint8Array<ArrayBuffer>;
+  widths: Float32Array<ArrayBuffer>;
+  heights: Float32Array<ArrayBuffer>;
+  volumes: Float32Array<ArrayBuffer>;
+  starts: Float32Array<ArrayBuffer>;
+  confidence: Uint8Array<ArrayBuffer>;
 };
 
 const createColumns = (capacity: number): Columns => ({
@@ -277,6 +316,11 @@ const createColumns = (capacity: number): Columns => ({
   extrusion: new Float32Array(capacity),
   feedrates: new Float32Array(capacity),
   tools: new Uint8Array(capacity),
+  widths: new Float32Array(capacity),
+  heights: new Float32Array(capacity),
+  volumes: new Float32Array(capacity),
+  starts: new Float32Array(capacity),
+  confidence: new Uint8Array(capacity),
 });
 
 const copyInto = <T extends Float32Array<ArrayBuffer> | Uint8Array<ArrayBuffer> | Uint32Array<ArrayBuffer>>(
@@ -297,6 +341,11 @@ const growColumns = (columns: Columns, capacity: number): Columns => {
     extrusion: copyInto(next.extrusion, columns.extrusion),
     feedrates: copyInto(next.feedrates, columns.feedrates),
     tools: copyInto(next.tools, columns.tools),
+    widths: copyInto(next.widths, columns.widths),
+    heights: copyInto(next.heights, columns.heights),
+    volumes: copyInto(next.volumes, columns.volumes),
+    starts: copyInto(next.starts, columns.starts),
+    confidence: copyInto(next.confidence, columns.confidence),
   };
 };
 
@@ -400,6 +449,28 @@ export const parseGcode = (
   const text = typeof source === 'string' ? source : new TextDecoder().decode(bytes);
   const digest = `sha256:${sha256Hex(bytes)}`;
 
+  // Configuration is bounded to the two ends; Orca appends it, Bambu writes it first.
+  const config = text.slice(0, 65_536) + '\n' + text.slice(Math.max(65_536, text.length - 65_536));
+  const setting = (name: string): number[] => {
+    const value = new RegExp(`^;\\s*${name}\\s*=\\s*(.+?)\\s*$`, 'mu').exec(config)?.[1];
+    const values = value?.split(';').map(Number) ?? [];
+    return values.length <= maximumFilaments && values.every((number) => Number.isFinite(number) && number > 0)
+      ? values
+      : [];
+  };
+  const recordedDiameters = setting('filament_diameter');
+  const filamentDiameters = recordedDiameters.length > 0 ? recordedDiameters : [1.75];
+  const configuredHeight = setting('layer_height')[0];
+  const configuredFirstHeight = setting('initial_layer_print_height')[0] ?? setting('first_layer_height')[0];
+  const configuredWidth = setting('line_width')[0] ?? setting('extrusion_width')[0];
+  let annotatedWidth: number | undefined;
+  let annotatedHeight: number | undefined;
+  let priorPrintedZ = 0;
+  let inferredHeight = 0.2;
+  const recovery = new Float64Array(maximumFilaments);
+  const warnings = new Set<string>();
+  let unsupportedExtrusion = false;
+  let flowOverride = false;
   let columns = createColumns(1024);
   let segmentCount = 0;
   const layerTable: MutableLayer[] = [];
@@ -453,6 +524,20 @@ export const parseGcode = (
   };
 
   const annotate = (comment: string): void => {
+    const dimension = /^\s*(LINE_WIDTH|WIDTH|LAYER_HEIGHT|HEIGHT):\s*([-+]?\d*\.?\d+)\s*$/u.exec(comment);
+    if (dimension) {
+      const value = Number(dimension[2]);
+      if (Number.isFinite(value) && value > 0 && value <= 5) {
+        if (dimension[1] === 'LINE_WIDTH' || dimension[1] === 'WIDTH') {
+          annotatedWidth = value;
+        } else {
+          annotatedHeight = value;
+        }
+      } else {
+        warnings.add('Invalid bead dimensions were ignored.');
+      }
+      return;
+    }
     if (layerChangePattern.test(comment)) {
       startLayer(undefined);
       return;
@@ -525,8 +610,13 @@ export const parseGcode = (
     if (distance > 0 && speed > 0) {
       duration = distance >= (speed * speed) / rate ? distance / speed + speed / rate : 2 * Math.sqrt(distance / rate);
     }
+    const debt = recovery[tool]!;
+    const recovered = extrusion > 0 ? Math.min(extrusion, debt) : 0;
+    recovery[tool] = extrusion < 0 ? debt - extrusion : Math.max(0, debt - extrusion);
+    const deposited = Math.max(0, extrusion - recovered);
+    const planar = Math.abs(to[2]! - from[2]!) <= 0.00001;
     const kind: ToolpathSegmentKind =
-      length === 0 ? 'retract' : wiping ? 'wipe' : extrusion > 0 ? currentKind : 'travel';
+      length === 0 ? 'retract' : wiping ? 'wipe' : deposited > 0 ? currentKind : 'travel';
     const layer = layerTable.at(-1)!;
     layer.z ??= to[2]!;
     const index = segmentCount;
@@ -538,6 +628,69 @@ export const parseGcode = (
     columns.extrusion[index] = extrusion;
     columns.feedrates[index] = speed;
     columns.tools[index] = tool;
+    let confidence = 0;
+    if (wiping && extrusion > 0) {
+      confidence |= 128;
+      warnings.add('Positive extrusion in a wipe is not rendered as filament.');
+    }
+    if (unsupportedExtrusion || flowOverride) {
+      confidence |= 32;
+    }
+    if (deposited > 0 && length > 0 && !wiping && !unsupportedExtrusion && planar) {
+      const rise = to[2]! - priorPrintedZ;
+      if (rise > 0.00001 && rise <= 1) {
+        inferredHeight = rise;
+        priorPrintedZ = to[2]!;
+      }
+      let height =
+        annotatedHeight ??
+        (layer.index === 0 ? configuredFirstHeight : undefined) ??
+        configuredHeight ??
+        inferredHeight;
+      confidence |=
+        annotatedHeight === undefined
+          ? configuredHeight !== undefined || configuredFirstHeight !== undefined
+            ? 4
+            : 8
+          : 2;
+      if (annotatedHeight === undefined && configuredHeight === undefined && configuredFirstHeight === undefined) {
+        warnings.add('Layer height is inferred from depositing Z levels; hops do not set it.');
+      }
+      if (currentKind === 'ironing' && annotatedHeight === undefined) {
+        height = Math.min(height, 0.04);
+        warnings.add('Unannotated ironing uses an assumed thin bead height.');
+        confidence |= 16;
+      }
+      const diameter = filamentDiameters[tool] ?? filamentDiameters[0]!;
+      if (recordedDiameters[tool] === undefined && !(recordedDiameters.length === 1)) {
+        confidence |= 16;
+        warnings.add('Missing filament diameters assume 1.75 mm or the file’s first recorded diameter.');
+      }
+      const volume = deposited * Math.PI * (diameter / 2) ** 2;
+      const start = extrusion > 0 ? recovered / extrusion : 0;
+      const depositedLength = length * (1 - start);
+      const area = volume / depositedLength;
+      let width = annotatedWidth ?? configuredWidth;
+      confidence |= annotatedWidth === undefined ? (configuredWidth === undefined ? 8 : 4) : 1;
+      width ??= currentKind === 'bridge' ? Math.sqrt((4 * area) / Math.PI) : area / height + height * (1 - Math.PI / 4);
+      if (currentKind === 'bridge') {
+        height = width;
+        warnings.add('Bridges use a circular, unsagged commanded-strand profile.');
+      }
+      if (width >= 0.01 && width <= 5 && height >= 0.001 && height <= 5) {
+        columns.widths[index] = width;
+        columns.heights[index] = height;
+        columns.volumes[index] = volume;
+        columns.starts[index] = start;
+      } else {
+        confidence |= 32;
+        warnings.add('Implausible inferred dimensions are not rendered as filament.');
+      }
+    } else if (deposited > 0 && length > 0 && !planar) {
+      confidence |= 64;
+      warnings.add('Nonplanar deposition is retained as motion; its bead profile is unsupported.');
+    }
+    columns.confidence[index] = confidence;
     for (const point of [from, to]) {
       for (let axis = 0; axis < 3; axis += 1) {
         bounds.min[axis] = Math.min(bounds.min[axis]!, point[axis]!);
@@ -869,7 +1022,38 @@ export const parseGcode = (
         }
       },
     ],
-    ['M221', inert],
+    [
+      'M221',
+      (words) => {
+        if (words.get('S') !== undefined && words.get('S') !== 100) {
+          flowOverride = true;
+          warnings.add(
+            'M221 firmware flow overrides are dialect-dependent; volumes show file E without a second multiplier.',
+          );
+        }
+      },
+    ],
+    [
+      'M200',
+      (words) => {
+        unsupportedExtrusion = (words.get('D') ?? 0) !== 0;
+        warnings.add('M200 volumetric extrusion is unsupported; affected moves have no filament geometry.');
+      },
+    ],
+    [
+      'G10',
+      () => {
+        unsupportedExtrusion = true;
+        warnings.add('Firmware retraction is unsupported; affected moves have no filament geometry.');
+      },
+    ],
+    [
+      'G11',
+      () => {
+        unsupportedExtrusion = true;
+        warnings.add('Firmware recovery is unsupported; affected moves have no filament geometry.');
+      },
+    ],
   ]);
 
   const execute = (executable: string, record: number): void => {
@@ -926,6 +1110,9 @@ export const parseGcode = (
     if (executable !== '') {
       execute(executable, record);
     }
+    if (events.length > maximumTimelineRecords || layerTable.length > maximumTimelineRecords) {
+      throw new ToolpathParseError('TOOLPATH_RECORD_LIMIT', tooLargeToPreview, record);
+    }
     if (lineEnd === text.length) {
       break;
     }
@@ -934,6 +1121,15 @@ export const parseGcode = (
   const finite = segmentCount > 0;
   return {
     version: 1,
+    deposition: {
+      widths: columns.widths.slice(0, segmentCount),
+      heights: columns.heights.slice(0, segmentCount),
+      volumes: columns.volumes.slice(0, segmentCount),
+      starts: columns.starts.slice(0, segmentCount),
+      confidence: columns.confidence.slice(0, segmentCount),
+      filamentDiameters,
+      warnings: [...warnings],
+    },
     source: { digest, parser: parserIdentity },
     units: 'mm',
     initialPosition,

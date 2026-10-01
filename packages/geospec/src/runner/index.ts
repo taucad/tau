@@ -46,7 +46,6 @@ export type {
   GeoSpecFilletFeatureExpectation,
   GeoSpecMassExpectation,
   GeoSpecMatcher,
-  GeoSpecNativeRunnerMatcher,
   GeoSpecMeshIntegrityExpectation,
   GeoSpecMinimumWallThicknessExpectation,
   GeoSpecModuleBundleCache,

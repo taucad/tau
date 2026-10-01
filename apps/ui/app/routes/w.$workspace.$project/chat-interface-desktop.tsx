@@ -1,5 +1,6 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { Allotment, LayoutPriority } from 'allotment';
+import { LayoutPriority } from 'allotment';
+import { Allotment } from '#components/panes/allotment.js';
 import { useSelector } from '@xstate/react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
@@ -98,11 +99,12 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
           <ChatInterfaceSessionGate fallback={<WorkspaceSkeleton />}>
             {isClient && isEditorReady ? (
               <Allotment
+                paneLabels={['Chat', 'Viewer', 'Workbench']}
                 separator={false}
                 proportionalLayout={false}
                 /* The lanes land rather than snap in: the skeleton they replace holds the same
                    background, so a short fade reads as the workspace resolving (soft land). */
-                className='size-full animate-in duration-200 fade-in-50 [--focus-border:var(--primary)] [--sash-hover-transition-duration:0.1s] motion-reduce:animate-none [&_.sash:before]:[transition-delay:0.5s] [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
+                className='size-full animate-in duration-200 fade-in-50 motion-reduce:animate-none [&_.split-view-view:not(:last-child)]:border-r [&_.split-view-view:not(:last-child)]:border-border'
                 onDragEnd={persistWidths}
               >
                 <Allotment.Pane

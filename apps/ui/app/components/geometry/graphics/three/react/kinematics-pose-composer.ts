@@ -21,7 +21,7 @@
  * Only the top-most object owning a linked component is posed; its primitives follow as children. Objects
  * of components outside every link are never touched.
  */
-import { useEffect } from 'react';
+import { useLayoutEffect } from 'react';
 import { Matrix4 } from 'three';
 import type { Object3D } from 'three';
 import { useThree } from '@react-three/fiber';
@@ -150,7 +150,7 @@ export function useKinematicsPoseComposer(unitId: string, scene: Object3D | unde
   const kinematicsRef = useKinematicsRef();
   const invalidate = useThree((state) => state.invalidate);
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!scene) {
       return undefined;
     }

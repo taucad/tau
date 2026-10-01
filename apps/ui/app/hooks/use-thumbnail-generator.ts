@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef } from 'react';
+import { awaitGeometryPresentation } from '#components/geometry/graphics/three/utils/geometry-presentation-admission.js';
 import { useActorRef } from '@xstate/react';
 import { asKnownArtifact } from '@taucad/runtime';
 import { useProject } from '#hooks/use-project.js';
@@ -56,7 +57,7 @@ const locatorIdentity = (config: ProjectFileSystemConfig | undefined): string =>
  * Keep the project's `thumbnail.webp` fresh from the main file's geometry.
  *
  * Mounts the {@link thumbnailMachine} and subscribes to the main geometry
- * unit's `geometryEvaluated` events, debouncing + deduping regeneration off the
+ * unit's `defaultRendered` events, debouncing + deduping regeneration off the
  * main thread. The shared headless image service owns the lazy runtime worker,
  * and the bytes are written to the project filesystem.
  *
@@ -96,12 +97,18 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
           !rendering?.success ||
           rendering.transient ||
           !artifact ||
-          (snapshot.context.evaluation?.success && snapshot.context.evaluation.views.length === 0) ||
+          (snapshot.context.evaluation?.success === true && snapshot.context.evaluation.views.length === 0) ||
           (artifact.mimeType === 'model/gltf-binary' && isEmptyGlb(artifact.content))
         ) {
           throw new Error('source-unavailable: committed rendering not ready');
         }
         const generation = generationRef.current;
+        if (request.kind === 'automatic-thumbnail' && artifact.mimeType === 'model/gltf-binary') {
+          await awaitGeometryPresentation(artifact.content, request.signal);
+          if (generation !== generationRef.current) {
+            throw new DOMException('Thumbnail source was superseded.', 'AbortError');
+          }
+        }
         const renderedLocatorIdentity = locatorIdentity(await getProjectFileSystemConfig(projectId));
         const files = await imageService.export(
           artifact.mimeType === 'image/svg+xml'
@@ -228,11 +235,25 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
         clearThumbnail(event.rendering.evaluationId);
         return;
       }
-      generationRef.current += 1;
-      identityRef.current = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q0.9:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
+      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q0.9:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
+      if (identityRef.current !== identity) {
+        generationRef.current += 1;
+        identityRef.current = identity;
+      }
+
       thumbnailActor.send({ type: 'settled', hash: identityRef.current });
     });
+    const initialSnapshot = mainCadActor.getSnapshot();
+    let requestId = initialSnapshot.context.openAttempt;
+    let rendering = initialSnapshot.matches('rendering');
     const requests = mainCadActor.subscribe((snapshot) => {
+      const nextRendering = snapshot.matches('rendering');
+      if (snapshot.context.openAttempt !== requestId || (nextRendering && !rendering)) {
+        requestId = snapshot.context.openAttempt;
+        generationRef.current += 1;
+        thumbnailActor.send({ type: 'renderRequested' });
+      }
+      rendering = nextRendering;
       const { evaluation } = snapshot.context;
       if (evaluation?.success && evaluation.views.length === 0) {
         clearThumbnail(evaluation.id);

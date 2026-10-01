@@ -34,6 +34,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { projectToManifest } from '@taucad/types';
 import type { ProjectRouteAccess } from '#hooks/use-project-manager.js';
+import { workbenchRecords } from '@taucad/workbench';
+import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 
 import { SessionsProvider } from '#hooks/use-sessions.js';
 import { createSessionsActor } from '#services/sessions-store.js';
@@ -1462,6 +1464,100 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     vi.unstubAllEnvs();
     delete (globalThis as { tau?: unknown }).tau;
     flushProducers.mockReset();
+  });
+
+  it('should refuse quit for blocked workbench intent and wait for its repaired checked write', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    const asks: Array<() => void> = [];
+    const answers: string[] = [];
+    (globalThis as { tau?: unknown }).tau = {
+      quit: {
+        onAsk: (handler: () => void) => {
+          asks.push(handler);
+          return () => undefined;
+        },
+        reportQuiesced: () => answers.push('quiesced'),
+      },
+    };
+    const encoder = new TextEncoder();
+    const initial = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'main.ts' });
+    const valid = encoder.encode(workbenchRecords.view.serialize(initial));
+    let bytes = valid;
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const record = createWorkbenchViewStore({
+      root: '/projects/quit-record',
+      viewId: 'accepted-view',
+      files: {
+        exists: async () => true,
+        readFile: async () => bytes,
+        writeFileChecked: async ({ data, preconditions }) => {
+          const expected = preconditions[0]?.expected;
+          if (expected?.length !== bytes.length || !expected.every((value, index) => value === bytes[index])) {
+            return { status: 'conflict', conflicts: [{ path: 'view', actual: bytes }] };
+          }
+          entered.resolve();
+          await release.promise;
+          bytes = encoder.encode(data);
+          return { status: 'applied', content: bytes };
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await record.read();
+      bytes = encoder.encode('{broken');
+      expect(await record.edit({ ...initial, name: 'Accepted intent' })).toBe(false);
+      flushProducers.mockImplementation(async () => {
+        if (!(await record.flush())) {
+          throw new Error('Workbench records could not be saved.');
+        }
+      });
+      vi.resetModules();
+      const freshSessions = await import('#hooks/use-sessions.js');
+      const freshStore = await import('#services/sessions-store.js');
+      const freshActor = freshStore.createSessionsActor().start();
+      const view = render(
+        <QueryClientProvider client={queryClient}>
+          <freshSessions.SessionsProvider actor={freshActor}>
+            <span>app</span>
+          </freshSessions.SessionsProvider>
+        </QueryClientProvider>,
+      );
+      await settle();
+      await act(async () => {
+        asks[0]?.();
+        await Promise.resolve();
+      });
+      await settle();
+      expect(view.getByRole('status')).toHaveTextContent('Workbench records could not be saved.');
+      expect(freshActor.getSnapshot().matches('ready')).toBe(true);
+      expect(answers).toEqual([]);
+      bytes = valid;
+      await record.read();
+      await act(async () => {
+        view.getByRole('button', { name: 'Try again' }).click();
+        await entered.promise;
+      });
+      expect(answers).toEqual([]);
+      expect(freshActor.getSnapshot().matches('quiesced')).toBe(false);
+      await act(async () => {
+        release.resolve();
+        await Promise.resolve();
+      });
+      await settle();
+      expect(workbenchRecords.view.read(bytes)).toMatchObject({
+        status: 'current',
+        record: { name: 'Accepted intent' },
+      });
+      expect(answers).toEqual(['quiesced']);
+      expect(freshActor.getSnapshot().matches('quiesced')).toBe(true);
+      view.unmount();
+    } finally {
+      release.resolve();
+      record.dispose();
+    }
   });
 
   /*

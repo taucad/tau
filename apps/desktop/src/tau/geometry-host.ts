@@ -1,7 +1,7 @@
 /** Exclusive geometry utility entry. Main owns admission, cancellation and exit. */
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { electronUtilityMainTransport } from '@taucad/runtime/electron/renderer';
-import { createHostGeoSpecRunner, createHostNativeGeoSpecRunner } from '@taucad/host/agent-tools';
+import { createHostGeoSpecRunner } from '@taucad/host/agent-tools';
 import { queryDirectAp242MinimumDistance } from '@taucad/agent-tools/geospec';
 import { Engine } from '@taucad/geospec-engine-native/node';
 import type { HostGeoSpecRuntimeClient } from '@taucad/host/agent-tools';
@@ -40,14 +40,13 @@ const host = createGeometryHost({
     }
   },
   performance: runGeoSpecPerformanceInput,
-  createRunner: async ({ root, engine, runtimePort, runtimeConfig }) => {
+  createRunner: async ({ root, runtimePort, runtimeConfig }) => {
     const client = createRuntimeClient<DesktopRuntime>({
       transport: electronUtilityMainTransport({ port: runtimePort, release: () => undefined }),
       config: runtimeConfig,
     });
     try {
-      const factory = engine === 'native' ? createHostNativeGeoSpecRunner : createHostGeoSpecRunner;
-      const runner = await factory(root, client as unknown as HostGeoSpecRuntimeClient);
+      const runner = await createHostGeoSpecRunner(root, client as unknown as HostGeoSpecRuntimeClient);
       return {
         ...runner,
         async close() {

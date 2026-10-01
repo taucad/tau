@@ -15,7 +15,7 @@ internal sealed class MaterialResources
     private readonly Dictionary<string, int> textures = [];
     private readonly Dictionary<string, int> samplers = [];
 
-    internal Dictionary<string, object?> Texture(MaterialTexture texture, string path)
+    internal Dictionary<string, object?> Texture(MaterialTexture texture, string path, Dictionary<byte[], string>? digests = null)
     {
         var image = texture.Image ?? throw MaterialCapture.Invalid(path + ".Image", "is required");
         var mime = image.Format switch
@@ -33,7 +33,12 @@ internal sealed class MaterialResources
                 ? data.AsSpan().StartsWith(new byte[] { 255, 216, 255 })
                 : data.Length >= 12 && data.AsSpan(0, 4).SequenceEqual("RIFF"u8) && data.AsSpan(8, 4).SequenceEqual("WEBP"u8);
         if (!signature) throw MaterialCapture.Invalid(path + ".Image.Data", "does not match its encoded image format");
-        var imageKey = mime + ":" + image.Name + ":" + Convert.ToHexString(SHA256.HashData(data));
+        if (digests is null || !digests.TryGetValue(data, out var digest))
+        {
+            digest = Convert.ToHexString(SHA256.HashData(data));
+            digests?.Add(data, digest);
+        }
+        var imageKey = mime + ":" + image.Name + ":" + digest;
         if (!images.TryGetValue(imageKey, out var imageIndex))
         {
             imageIndex = Images.Count;
@@ -111,18 +116,24 @@ internal static class MaterialCapture
         return alpha ? [.. result, Number(value.A, path + ".A", 0, 1)] : result;
     }
 
-    private static MaterialTexture? Copy(MaterialTexture? texture)
-    {
-        if (texture is null) return null;
-        var image = texture.Image ?? throw Invalid("Texture.Image", "is required");
-        return texture with { Image = image with { Data = image.Data?.ToArray() ?? throw Invalid("Texture.Image.Data", "is required") } };
-    }
-
     internal static Material Snapshot(Material material, int group)
     {
         try
         {
             ArgumentNullException.ThrowIfNull(material);
+            var ownedImages = new Dictionary<byte[], byte[]>(ReferenceEqualityComparer.Instance);
+            MaterialTexture? Copy(MaterialTexture? texture)
+            {
+                if (texture is null) return null;
+                var image = texture.Image ?? throw Invalid("Texture.Image", "is required");
+                var data = image.Data ?? throw Invalid("Texture.Image.Data", "is required");
+                if (!ownedImages.TryGetValue(data, out var owned))
+                {
+                    owned = data.ToArray();
+                    ownedImages.Add(data, owned);
+                }
+                return texture with { Image = image with { Data = owned } };
+            }
             var copy = material with
             {
                 ColorTexture = Copy(material.ColorTexture), MetallicRoughnessTexture = Copy(material.MetallicRoughnessTexture),
@@ -155,6 +166,8 @@ internal static class MaterialCapture
 
     internal static JsonElement Project(Material material, MaterialResources resources)
     {
+        // A projection is synchronous; no digest survives a setter or export boundary.
+        var digests = new Dictionary<byte[], string>(ReferenceEqualityComparer.Instance);
         var extensions = new Dictionary<string, object?>();
         var pbr = new Dictionary<string, object?>
         {
@@ -165,7 +178,7 @@ internal static class MaterialCapture
         void Map(Dictionary<string, object?> owner, string key, MaterialTexture? texture, string path, float? modifier = null, string modifierKey = "scale")
         {
             if (texture is null) return;
-            var info = resources.Texture(texture, path);
+            var info = resources.Texture(texture, path, digests);
             if (modifier is { } number) info[modifierKey] = number;
             owner[key] = info;
         }

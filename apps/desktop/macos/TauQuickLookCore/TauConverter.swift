@@ -96,11 +96,17 @@ private final class BundleSchemeHandler: NSObject, WKURLSchemeHandler {
 final class TauConverter: NSObject, WKNavigationDelegate, WKScriptMessageHandler {
   private let schemeHandler = BundleSchemeHandler()
   private let requestID = UUID().uuidString
+  private let temporaryRoot: URL
   private var completion: ((Result<URL, Error>) -> Void)?
   private var request: ConversionRequest?
   private var temporaryDirectory: URL?
   private var timeout: DispatchWorkItem?
   private var webView: WKWebView?
+
+  init(temporaryRoot: URL = FileManager.default.temporaryDirectory) {
+    self.temporaryRoot = temporaryRoot
+    super.init()
+  }
 
   func convert(
     _ sourceURL: URL,
@@ -248,7 +254,7 @@ final class TauConverter: NSObject, WKNavigationDelegate, WKScriptMessageHandler
       return
     }
     do {
-      let directory = FileManager.default.temporaryDirectory
+      let directory = temporaryRoot
         .appendingPathComponent("tau-quick-look", isDirectory: true)
         .appendingPathComponent(requestID, isDirectory: true)
       try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)

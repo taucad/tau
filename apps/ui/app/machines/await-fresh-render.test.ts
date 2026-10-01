@@ -72,7 +72,9 @@ describe('awaitFreshRender document settlement', () => {
     actor.send({ type: 'open', document: runtime.document, view: runtime.view });
 
     const pending = awaitFreshRender(asCadActor, { awaitTimeout: 1000 });
-    await vi.waitFor(() => expect(runtime.document.evaluation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      expect(runtime.document.evaluation).toHaveBeenCalledOnce();
+    });
     expect(runtime.view.rendering).not.toHaveBeenCalled();
     resolveEvaluation?.({ superseded: false, evaluation: runtime.evaluation });
     const settled = await pending;
@@ -164,7 +166,9 @@ describe('awaitFreshRender document settlement', () => {
     actor.send({ type: 'open', document: first.document, view: first.view });
 
     const pending = awaitFreshRender(asCadActor, { awaitTimeout: 1000 });
-    await vi.waitFor(() => expect(first.document.evaluation).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      expect(first.document.evaluation).toHaveBeenCalledOnce();
+    });
     actor.send({ type: 'open', document: second.document, view: second.view });
     resolveFirst?.({ superseded: false, evaluation: first.evaluation });
     const settled = await pending;

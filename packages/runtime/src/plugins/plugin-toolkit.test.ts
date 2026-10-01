@@ -126,7 +126,7 @@ const hostToolkit = definePlugin({
 });
 
 describe('definePlugin', () => {
-  it('expands mixed CAD, job, and machine capabilities through ABI 3', async () => {
+  it('expands mixed CAD, job, and machine capabilities through ABI 4', async () => {
     const selected = hostToolkit();
 
     expect(selected.capabilities.kernels.map(({ id }) => id)).toEqual(['alpha']);

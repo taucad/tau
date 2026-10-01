@@ -1,10 +1,97 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { HostGeoSpecRunner } from '@taucad/host/agent-tools';
+import type { GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geospec/runner/worker';
 import type { UtilityPort } from '#tau/services-host.impl.js';
 import { createGeometryHost } from '#tau/geometry-host.impl.js';
 
 describe('geometry utility dispatcher', () => {
+  it('sends complete reports once through the final-result boundary, not progress', async () => {
+    const result: GeoSpecRunnerResult = {
+      success: false,
+      passed: 0,
+      failed: 1,
+      selectedTests: 0,
+      files: [
+        {
+          file: 'model.test.ts',
+          result: {
+            success: false,
+            issues: [],
+            bundle: {
+              code: 'x'.repeat(70_000),
+              issues: [],
+              success: true,
+              dependencies: ['model.test.ts'],
+              unresolvedPaths: [],
+            },
+          },
+        },
+      ],
+    };
+    const listeners = new Set<(event: GeoSpecRunnerEvent) => void>();
+    const runner = mock<HostGeoSpecRunner>();
+    runner.on.mockImplementation((type, handler) => {
+      const listener = (event: GeoSpecRunnerEvent): void => {
+        if (event.type === type) {
+          handler(event);
+        }
+      };
+      listeners.add(listener);
+      return () => {
+        listeners.delete(listener);
+      };
+    });
+    runner.run.mockImplementation(async () => {
+      for (const event of [
+        { type: 'file-start', file: 'model.test.ts' },
+        { type: 'file-complete', ...result.files[0]! },
+        { type: 'run-complete', result },
+      ] satisfies GeoSpecRunnerEvent[]) {
+        for (const listener of listeners) {
+          listener(event);
+        }
+      }
+      return result;
+    });
+    const post = vi.fn<(frame: unknown) => void>();
+    const host = createGeometryHost({ post, measure: vi.fn(), performance: vi.fn(), createRunner: async () => runner });
+    host.handle({
+      data: {
+        type: 'geometry-run',
+        generation: 1,
+        requestId: 1,
+        kind: 'suite',
+        root: '/project',
+        runtimeConfig: { tauApiUrl: 'http://localhost', tauWebSocketUrl: 'ws://localhost' },
+        input: { type: 'run', options: { files: ['model.test.ts'] } },
+      },
+      ports: [mock<UtilityPort>()],
+    });
+    await vi.waitFor(() => {
+      expect(runner.close).toHaveBeenCalledOnce();
+    });
+    const frames = post.mock.calls.map(([frame]) => frame);
+    const progress = frames.filter(
+      (frame) => frame !== null && typeof frame === 'object' && 'type' in frame && frame.type === 'geometry-event',
+    );
+    expect(progress.every((frame) => Buffer.byteLength(JSON.stringify(frame)) <= 64 * 1024)).toBe(true);
+    expect(progress).toEqual([
+      { type: 'geometry-event', generation: 1, requestId: 1, event: { type: 'file-start', file: 'model.test.ts' } },
+      {
+        type: 'geometry-event',
+        generation: 1,
+        requestId: 1,
+        event: { type: 'file-progress', file: 'model.test.ts', durationMs: undefined },
+      },
+    ]);
+    expect(
+      frames.filter(
+        (frame) => frame !== null && typeof frame === 'object' && 'type' in frame && frame.type === 'geometry-result',
+      ),
+    ).toEqual([{ type: 'geometry-result', generation: 1, requestId: 1, value: { type: 'result', result } }]);
+    expect(listeners.size).toBe(0);
+  });
   it('runs a diagnostic through the process-local evaluator and preserves its request id', async () => {
     const post = vi.fn();
     const performance = vi.fn(async () => ({ backend: 'native', samples: [1] }));
@@ -51,7 +138,6 @@ describe('geometry utility dispatcher', () => {
         requestId: 7,
         kind: 'suite',
         root: '/project',
-        engine: 'native',
         runtimeConfig: { tauApiUrl: 'http://localhost', tauWebSocketUrl: 'ws://localhost' },
         input: { type: 'run', options: { files: ['model.test.ts'] } },
       },

@@ -285,6 +285,10 @@ describe('Desktop renderer ownership', () => {
               'packages/runtime/src/framework/runtime-framework.constants.ts',
               'packages/runtime/src/plugins/plugin-types.ts',
               'packages/plugins/future-kernel/src/index.ts',
+              'packages/plugins/bambu/src/bambu.settings.ts',
+              'packages/plugins/slicer/src/preferences.ts',
+              'packages/plugins/bambu/src/bambu.machine.ts',
+              'packages/plugins/slicer/src/slicer.transcoder.ts',
               'libs/chat/src/schemas/rpc.schema.ts',
               'node_modules/nanoraster/dist/options.mjs',
               'node_modules/nanoraster/dist/render-error.mjs',
@@ -300,6 +304,8 @@ describe('Desktop renderer ownership', () => {
         'Renderer execution module in renamed.js: node_modules/nanoraster/dist/render.mjs',
         'Renderer execution module in renamed.js: packages/runtime/src/framework/kernel-worker.ts',
         'Renderer execution module in renamed.js: packages/plugins/future-kernel/src/index.ts',
+        'Renderer execution module in renamed.js: packages/plugins/bambu/src/bambu.machine.ts',
+        'Renderer execution module in renamed.js: packages/plugins/slicer/src/slicer.transcoder.ts',
       ].sort(),
     );
   });

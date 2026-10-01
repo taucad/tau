@@ -204,6 +204,23 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
   };
 
   return {
+    async readBinaryFile(path: string): Promise<Uint8Array<ArrayBuffer>> {
+      const rootedPath = assertRootedPath(path);
+      const maximumReadBytes = 256 * 1024 * 1024;
+      const metadata = await fileManager.stat(rootedPath);
+      if (metadata.type === 'dir' || metadata.size > maximumReadBytes) {
+        throw Object.assign(new Error(`File '${path}' exceeds the binary read limit or is a directory.`), {
+          code: rpcClientErrorCode.resultTooLarge,
+        });
+      }
+      const data = await readFileBytes(rootedPath);
+      if (data.byteLength > maximumReadBytes) {
+        throw Object.assign(new Error(`File '${path}' exceeds the binary read limit.`), {
+          code: rpcClientErrorCode.resultTooLarge,
+        });
+      }
+      return data;
+    },
     async readFile(path: string): Promise<string> {
       const data = await fileManager.readFile(path);
       try {
@@ -300,12 +317,32 @@ function createBrowserRpcFileSystem(fileManager: RpcHandlerDependencies['fileMan
         });
       });
     },
-    // oxlint-disable-next-line max-params -- list of args is consistent with other file operations
-    async editFile(path: string, oldString: string, newString: string, replaceAll?: boolean) {
+    async editFile({ targetFile: path, oldString, newString, replaceAll, expectedDigest }) {
       const result = await applyClientTextMutation({
         targetFile: path,
-        fileSystem: { stat, readFileBytes, writeFileIfUnchanged },
-        plan: createExactReplacementPlan({ oldString, newString, replaceAll }),
+        expectedDigest,
+        fileSystem: {
+          stat,
+          readFileBytes,
+          writeFileIfUnchanged:
+            expectedDigest === undefined
+              ? writeFileIfUnchanged
+              : async (target, expected, replacement) => {
+                  const committed = await fileManager.workbenchFiles.writeFileChecked({
+                    path: absolute(target),
+                    data: replacement,
+                    preconditions: [{ path: absolute(target), expected }],
+                  });
+                  if (committed.status === 'conflict') {
+                    throw Object.assign(
+                      new Error('Reviewed bytes changed before commit. Read and review the file again.'),
+                      { code: rpcClientErrorCode.editConflict },
+                    );
+                  }
+                  return { status: 'committed', committedBytes: new Uint8Array(committed.content) };
+                },
+        },
+        plan: createExactReplacementPlan({ oldString, newString, replaceAll, expectedDigest }),
       });
       if (!result.ok) {
         throw Object.assign(new Error(result.message), { code: result.errorCode });

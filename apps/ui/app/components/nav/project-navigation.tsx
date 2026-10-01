@@ -451,7 +451,7 @@ function ProjectNavigationItem({
         row={row}
         name={project.name}
         closePlan={closePlan}
-        beforeDelete
+        isBeforeDelete
         isOpen={askingToDelete}
         onOpenChange={setAskingToDelete}
         onConfirm={() => {

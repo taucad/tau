@@ -79,6 +79,51 @@ async function expectProjectCardParity(name: string): Promise<void> {
     )
     .toBeGreaterThan(100);
 
+  // First pixels can precede camera/layout settling; compare the final view, not an intermediate fit.
+  await expect
+    .poll(
+      async () =>
+        target.evaluate(
+          async () => {
+            const bridge = (globalThis as { __TAU_SECTION_VIEW_TEST__?: { getRendererIdentity(): { frame: number } } })
+              .__TAU_SECTION_VIEW_TEST__;
+            if (!bridge) {
+              return false;
+            }
+            const before = bridge.getRendererIdentity().frame;
+            await new Promise<void>((resolve) => {
+              setTimeout(resolve, 500);
+            });
+            return bridge.getRendererIdentity().frame === before;
+          },
+          undefined,
+          'secondary',
+        ),
+      { timeout: 10_000 },
+    )
+    .toBe(true);
+  previewForeground = await measureProjectCardForeground(activeMedia, 'secondary');
+  const camera = await target.evaluate(
+    () => {
+      const bridge = (
+        globalThis as { __TAU_SECTION_VIEW_TEST__?: { getCamera(): unknown; getSectionState(): unknown } }
+      ).__TAU_SECTION_VIEW_TEST__;
+      return {
+        camera: bridge?.getCamera(),
+        section: bridge?.getSectionState(),
+        canvases: [...document.querySelectorAll('canvas')].map((canvas) => ({
+          width: canvas.clientWidth,
+          height: canvas.clientHeight,
+        })),
+      };
+    },
+    undefined,
+    'secondary',
+  );
+  await target.writeArtifact(
+    `project-card-parity-${name}.json`,
+    JSON.stringify({ thumbnailForeground, previewForeground, camera }, null, 2),
+  );
   expect(thumbnailForeground).toBeDefined();
   expect(previewForeground).toBeDefined();
   expect(Math.abs(previewForeground!.centerX - thumbnailForeground!.centerX)).toBeLessThanOrEqual(3);
@@ -94,7 +139,7 @@ async function expectProjectCardParity(name: string): Promise<void> {
 
 test('user project thumbnails follow settled sources, persist, and match the live card preview', async () => {
   await target.navigate('/__e2e/user-project-thumbnail-generation');
-  await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu$/u, 60_000);
+  await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu(?:&[^#]*)?$/u, 60_000);
   await target.click(selectors.getByRole('button', { name: 'Search', exact: true }));
   await target.fill(selectors.getByPlaceholder('Search projects, chats, and actions…'), 'Open parameters');
   await target.click(selectors.getByText('Open parameters', { exact: true }));
@@ -179,7 +224,7 @@ test('user project thumbnails follow settled sources, persist, and match the liv
 
 test('curved user project thumbnail matches the live AABB-framed card preview', async () => {
   await target.navigate('/__e2e/user-project-thumbnail-generation?fixture=curved');
-  await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu$/u, 60_000);
+  await target.expectUrl(/\/w\/[^/]+\/[^/?]+\?graphicsBackend=webgpu(?:&[^#]*)?$/u, 60_000);
   await target.expectVisible(selectors.getByTestId('cad-viewer-canvas-region').getByCss('canvas').first(), 60_000);
   await target.expectGraphicsBackend('webgpu');
   await target.openSecondary('/projects');

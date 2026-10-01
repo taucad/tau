@@ -8,10 +8,13 @@ import { sha256String } from '@taucad/utils/hash';
 export async function handleEditFile(input: EditFileRpcInput, fileSystem: RpcFileSystem): Promise<EditFileRpcResult> {
   try {
     const targetFile = assertRootedPath(input.targetFile);
-    const result = await fileSystem.editFile(targetFile, input.oldString, input.newString, input.replaceAll);
+    const result = await fileSystem.editFile({ ...input, targetFile });
     const { diffStats } = result as Partial<typeof result>;
     if (!diffStats) {
       throw new Error('Deterministic editFile implementations must return diffStats.');
+    }
+    if (input.expectedDigest !== undefined && result.digest === undefined) {
+      throw new Error('Reviewed editFile implementations must prove the committed byte digest.');
     }
 
     return {
@@ -27,6 +30,6 @@ export async function handleEditFile(input: EditFileRpcInput, fileSystem: RpcFil
       },
     };
   } catch (error) {
-    return { ...toRpcError(error), retryable: true };
+    return input.expectedDigest === undefined ? { ...toRpcError(error), retryable: true } : toRpcError(error);
   }
 }

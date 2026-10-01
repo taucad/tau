@@ -8,6 +8,8 @@ const geometryContent = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
 let geometryBytes: Uint8Array<ArrayBuffer> = geometryContent;
 let geometryFormat: 'gltf' | 'svg' = 'gltf';
 let emptyEvaluationId: string | undefined;
+let renderingNow = false;
+let openAttempt = 0;
 const currentArtifact = ():
   | { mimeType: 'model/gltf-binary'; content: Uint8Array<ArrayBuffer> }
   | { mimeType: 'image/svg+xml'; content: string } =>
@@ -17,6 +19,7 @@ const currentArtifact = ():
 const getSnapshot = vi.fn(() => ({
   context: {
     entryPath: sourceEntryPath,
+    openAttempt,
     rendering: {
       success: true,
       requestId: 'request-1',
@@ -39,6 +42,7 @@ const getSnapshot = vi.fn(() => ({
             issues: [],
           },
   },
+  matches: (state: string) => state === 'rendering' && renderingNow,
 }));
 type RenderEvent = {
   rendering:
@@ -141,6 +145,8 @@ describe('useThumbnailGenerator integration', () => {
     geometryFormat = 'gltf';
     geometryBytes = geometryContent;
     emptyEvaluationId = undefined;
+    renderingNow = false;
+    openAttempt = 0;
     getProjectFileSystemConfig.mockResolvedValue(locator);
     exportImage.mockResolvedValue(webpFile(1));
     writeFile.mockResolvedValue(undefined);
@@ -230,6 +236,19 @@ describe('useThumbnailGenerator integration', () => {
     expect(exportImage).toHaveBeenCalledOnce();
   });
 
+  it('should retain an in-flight artifact when the same identity settles again', async () => {
+    const result = deferred<ReturnType<typeof webpFile>>();
+    exportImage.mockImplementationOnce(async () => result.promise);
+    renderHook(() => useThumbnailGenerator());
+    settle('geometry-hash');
+    await advance(2000);
+    settle('geometry-hash');
+    result.resolve(webpFile(3));
+    await advance(2000);
+    expect(exportImage).toHaveBeenCalledOnce();
+    expect(writeFile).toHaveBeenCalledExactlyOnceWith('thumbnail.webp', webpBytes(3), { source: 'machine' });
+  });
+
   it('should discard a late artifact after a newer settlement and persist only the latest bytes', async () => {
     const first = deferred<ReturnType<typeof webpFile>>();
     exportImage.mockImplementationOnce(async () => first.promise).mockResolvedValueOnce(webpFile(2));
@@ -249,6 +268,28 @@ describe('useThumbnailGenerator integration', () => {
     expect(exportImage).toHaveBeenCalledTimes(2);
     expect(writeFile).toHaveBeenCalledOnce();
     expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', webpBytes(2), { source: 'machine' });
+  });
+
+  it('should discard an in-flight artifact when a watched document starts another render', async () => {
+    const first = deferred<ReturnType<typeof webpFile>>();
+    exportImage.mockImplementationOnce(async () => first.promise).mockResolvedValueOnce(webpFile(2));
+    renderHook(() => useThumbnailGenerator());
+
+    settle('geometry-hash-1');
+    await advance(2000);
+    expect(exportImage).toHaveBeenCalledOnce();
+
+    act(() => {
+      renderingNow = true;
+      snapshotListener?.(getSnapshot());
+    });
+    first.resolve(webpFile(1));
+    await advance(0);
+    expect(writeFile).not.toHaveBeenCalled();
+
+    settle('geometry-hash-2');
+    await advance(2000);
+    expect(writeFile).toHaveBeenCalledExactlyOnceWith('thumbnail.webp', webpBytes(2), { source: 'machine' });
   });
 
   it('should recover from a failed request on a newer settlement without writing failed bytes', async () => {

@@ -12,6 +12,8 @@
 
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
 
+import type { MachineSettingsProvenance } from '#machines/settings.js';
+
 import type { MachineArtifactReference } from '#machines/machine.js';
 
 /** Durable preparation identity bound to one machine, artifact, setup and the remote object one upload will create. @public */
@@ -108,6 +110,8 @@ export type PrintRequester = Readonly<{
 /** Summary facts a surface shows before approval; derived from the artifact, never authoritative. @public */
 export type PrintRequestSummary = Readonly<{
   fileName: string;
+  /** Saved preferences captured when this request was prepared. */
+  preferences?: MachineSettingsProvenance;
   layers?: number;
   /** Seconds. */
   estimatedDuration?: number;

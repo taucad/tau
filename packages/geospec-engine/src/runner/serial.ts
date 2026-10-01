@@ -7,15 +7,10 @@
  * across worker boundaries ({@link import('#runner/pool/pool.js')}), where the
  * only channel between workers is the content-addressed evidence cache.
  *
- * Two things the shell owns for a whole run, and only once (D-S3, and the R9
- * affinity payoff):
- *
- * - **one resource scope** — every subject a load resolves is tracked in it,
- *   and it disposes once at the end. A per-file scope would delete an
- *   Emscripten handle a later file still reads through the model-load cache;
- * - **one cached model loader** — identical `loadModel(...)` calls across the
- *   selected files resolve to one load. Its first cache key per file is the
- *   affinity telemetry the pool schedules on.
+ * One resource scope owns run cleanup. Canonical model loaders retain their
+ * own opaque subjects and read every requested source afresh; the shell must
+ * neither project those subjects into reference-engine handles nor memoize
+ * authored source loads across files.
  *
  * @module
  */
@@ -32,14 +27,11 @@ import type {
   GeoSpecRunnerRunOptions,
 } from 'geospec/runner/worker';
 import type { GeoSpecRunResult, GeoSpecTestCase } from '#runner/types.js';
-import { createCachedModelLoader } from '#runner/model-load-cache.js';
 import { createRunnerEventChannel } from '#runner/events.js';
-import { setModelLoaderForensicSink } from '#model/load-model.js';
 import { forensicSpanAsync, forwardProtocolForensicMeasurement } from '#runner/forensic.js';
 import type { ForensicSink } from '#runner/forensic.js';
 import { createGeoSpecResourceScope } from '#runner/resource-scope.js';
 import type { GeoSpecResourceScope } from '#runner/resource-scope.js';
-import { resolvePublicEngineSubject } from '#engine/subject-store.js';
 import { clearOccurrenceSolidCache } from '#proofs/occurrence-solids.js';
 
 /** A run-level issue: the substrate's `VmIssue` shape, declared structurally. */
@@ -50,6 +42,24 @@ const runnerIssue = (code: string, message: string): RunnerIssue => ({
   message,
   severity: 'error',
   type: 'runtime',
+});
+
+const emptyAccounting = (files: readonly string[]): NonNullable<GeoSpecRunnerResult['accounting']> => ({
+  requestedFiles: [...files],
+  completedFiles: [],
+  notRunFiles: [...files],
+  discoveryComplete: false,
+  discovered: 0,
+  selected: 0,
+  completed: 0,
+  passed: 0,
+  failed: 0,
+  unsupported: 0,
+  inconclusive: 0,
+  skipped: 0,
+  notRun: 0,
+  cancelled: false,
+  bailed: false,
 });
 
 /**
@@ -63,12 +73,9 @@ export const countRunnerTests = (tests: readonly GeoSpecTestCase[]): { passed: n
   let passed = 0;
   let failed = 0;
   for (const test of tests) {
-    if (test.status === 'skipped') {
-      continue;
-    }
     if (test.status === 'failed') {
       failed += 1;
-    } else {
+    } else if (test.status === 'passed') {
       passed += 1;
     }
   }
@@ -101,28 +108,17 @@ export const accumulateFileResult = (
 };
 
 /**
- * The run-wide singletons a serial shell owns: one scope, one cached loader,
- * and the per-file affinity key the loader observes.
- *
- * The pool worker host builds one of these per WORKER LIFETIME rather than per
- * run — that is the whole point of affinity scheduling — so it is a separate
- * factory from {@link createSerialGeoSpecRunner}.
+ * A serial shell's resource scope and caller-owned canonical loader.
  *
  * @public
  */
 export type SerialRunContext = {
   resourceScope: GeoSpecResourceScope;
   modelLoader: GeoSpecRunnerOptions['modelLoader'];
-  /** Start observing a new file; clears the recorded affinity key. */
-  beginFile(): void;
-  /** The first deterministic model-load key observed since `beginFile`. */
-  fileLoadKey(): string | undefined;
-  /** Route runtime tracer measures for the active run/shard. */
-  setForensicSink(sink?: ForensicSink): void;
 };
 
 /**
- * Build the run-wide scope and cached loader.
+ * Build the run-wide cleanup scope without wrapping model loads.
  *
  * @param options - The runner's loader and profile counters.
  * @returns The shared context.
@@ -135,46 +131,14 @@ export const createSerialRunContext = (
     options.internalProfile?.resourceScope === undefined ? {} : { profile: options.internalProfile.resourceScope },
   );
   resourceScope.register(clearOccurrenceSolidCache);
-  const managedLoader = options.modelLoader as
-    | (NonNullable<GeoSpecRunnerOptions['modelLoader']> & {
-        dispose?: () => void | Promise<void>;
-      })
-    | undefined;
-  if (managedLoader?.dispose !== undefined) {
-    resourceScope.register((): void | Promise<void> => managedLoader.dispose?.());
+  const managedLoader = options.modelLoader;
+  if (managedLoader !== undefined && 'dispose' in managedLoader && typeof managedLoader.dispose === 'function') {
+    const { dispose } = managedLoader;
+    resourceScope.register(async () => {
+      await dispose.call(managedLoader);
+    });
   }
-  let currentFileLoadKey: string | undefined;
-  const modelLoader =
-    createCachedModelLoader(options.modelLoader, {
-      ...(options.internalProfile ? { stats: options.internalProfile.aggregateModelLoadCache } : {}),
-      onLoadResolved: (subject) => {
-        const retained = resolvePublicEngineSubject(subject);
-        if (retained === undefined) {
-          throw new TypeError('GeoSpec runners require model loaders to return an ingested subject reference.');
-        }
-        resourceScope.trackSubject(retained);
-      },
-      onCacheKey: (key) => {
-        currentFileLoadKey ??= key;
-      },
-    }) ?? options.modelLoader;
-  let clearForensicSink = (): void => undefined;
-  resourceScope.register(() => {
-    clearForensicSink();
-  });
-
-  return {
-    resourceScope,
-    modelLoader,
-    beginFile() {
-      currentFileLoadKey = undefined;
-    },
-    fileLoadKey: () => currentFileLoadKey,
-    setForensicSink(sink) {
-      clearForensicSink();
-      clearForensicSink = setModelLoaderForensicSink(options.modelLoader, sink);
-    },
-  };
+  return { resourceScope, modelLoader: managedLoader };
 };
 
 /**
@@ -242,6 +206,19 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
 
   return {
     async run(runOptions: GeoSpecRunnerRunOptions): Promise<GeoSpecRunnerResult> {
+      const initialAccounting = emptyAccounting(runOptions.files);
+      if (new Set(runOptions.files).size !== runOptions.files.length) {
+        return {
+          success: false,
+          passed: 0,
+          failed: 1,
+          selectedTests: 0,
+          files: [],
+          accounting: initialAccounting,
+          lineageStatus: 'unavailable',
+          issues: [runnerIssue('GEOSPEC_DUPLICATE_FILES', 'GeoSpec requested files must be unique.')],
+        };
+      }
       if (state.closed) {
         return {
           success: false,
@@ -249,6 +226,8 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           failed: 1,
           selectedTests: 0,
           files: [],
+          accounting: initialAccounting,
+          lineageStatus: 'unavailable',
           issues: [runnerIssue('GEOSPEC_RUNNER_CLOSED', 'GeoSpec runner is closed.')],
         };
       }
@@ -261,6 +240,7 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
       const totals = { passed: 0, failed: 0, selectedTests: 0 };
       const fileResults: GeoSpecRunnerResult['files'] = [];
       const issues: RunnerIssue[] = [];
+      let complete = true;
       const context = createSerialRunContext(options);
       const forensicSink: ForensicSink | undefined =
         runOptions.forensic === true
@@ -268,7 +248,6 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
               events.emit({ type: 'forensic', name, value, unit });
             }
           : undefined;
-      context.setForensicSink(forensicSink);
       if (runOptions.forensic === true) {
         const unsubscribe = getGeoSpecEngineProtocol()?.on('forensic-span', (event) => {
           forwardProtocolForensicMeasurement(event.payload, ({ name, value, unit }) => {
@@ -296,7 +275,6 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           }
 
           events.emit({ type: 'file-start', file });
-          context.beginFile();
           const fileStartedAt = performance.now();
           // oxlint-disable-next-line no-await-in-loop -- Within one isolate CAD files run serially: the OCCT module is a shared heap. The pool (R3) parallelizes across workers.
           const result = await executeGeoSpecFile({
@@ -313,19 +291,18 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
             bundleCache,
           });
           const durationMs = performance.now() - fileStartedAt;
-          const primaryLoadKey = context.fileLoadKey();
 
           events.emit({
             type: 'file-complete',
             file,
             result,
             durationMs,
-            ...(primaryLoadKey ? { primaryLoadKey } : {}),
           });
-          fileResults.push({ file, result, durationMs, ...(primaryLoadKey ? { primaryLoadKey } : {}) });
+          fileResults.push({ file, result, durationMs });
           accumulateFileResult(totals, result);
 
-          if (runOptions.bail === true && totals.failed > 0) {
+          complete &&= result.success && result.passed;
+          if (runOptions.bail === true && (!complete || totals.failed > 0)) {
             issues.push(
               runnerIssue(
                 'GEOSPEC_RUNNER_BAILED',
@@ -336,7 +313,18 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
           }
         }
       } finally {
-        await context.resourceScope.dispose();
+        try {
+          await context.resourceScope.dispose();
+        } finally {
+          try {
+            await options.nativeModelLoader?.releaseAll();
+          } catch (error) {
+            complete = false;
+            issues.push(
+              runnerIssue('GEOSPEC_NATIVE_CLEANUP_FAILED', error instanceof Error ? error.message : String(error)),
+            );
+          }
+        }
       }
 
       if (totals.selectedTests === 0 && totals.failed === 0) {
@@ -344,14 +332,86 @@ export const createSerialGeoSpecRunner = (options: GeoSpecRunnerOptions): GeoSpe
         totals.failed += 1;
       }
 
+      const accounting: NonNullable<GeoSpecRunnerResult['accounting']> = {
+        requestedFiles: files,
+        completedFiles: fileResults.map((entry) => entry.file),
+        notRunFiles: files.slice(fileResults.length),
+        discoveryComplete:
+          fileResults.length === files.length &&
+          fileResults.every((entry) => entry.result.success && entry.result.accounting !== undefined),
+        discovered: 0,
+        selected: 0,
+        completed: 0,
+        passed: 0,
+        failed: 0,
+        unsupported: 0,
+        inconclusive: 0,
+        skipped: 0,
+        notRun: 0,
+        cancelled: issues.some((issue) => issue.code === 'GEOSPEC_RUNNER_ABORTED'),
+        bailed: issues.some((issue) => issue.code === 'GEOSPEC_RUNNER_BAILED'),
+      };
+      let lineageStatus: NonNullable<GeoSpecRunnerResult['lineageStatus']> = 'complete';
+      const sourceFiles = new Map<string, string>();
+      for (const { result } of fileResults) {
+        if (result.accounting !== undefined) {
+          for (const key of [
+            'discovered',
+            'selected',
+            'completed',
+            'passed',
+            'failed',
+            'unsupported',
+            'inconclusive',
+            'skipped',
+            'notRun',
+          ] as const) {
+            accounting[key] += result.accounting[key];
+          }
+        }
+        if (result.lineage?.status === 'mixed') {
+          lineageStatus = 'mixed';
+        } else if (result.lineage?.status !== 'complete' && lineageStatus !== 'mixed') {
+          lineageStatus = 'unavailable';
+        }
+        const directGraphs =
+          result.lineage?.loads.flatMap(({ evidence }) => {
+            const primary = evidence?.artifacts[0];
+            if (evidence?.exportOptions !== undefined) {
+              return [];
+            }
+            return [
+              ...(evidence?.artifacts ?? []).flatMap((artifact) =>
+                artifact.sourcePath === undefined ? [] : [{ [artifact.sourcePath]: `sha256:${artifact.sha256}` }],
+              ),
+              ...(evidence?.sourcePath === undefined || primary === undefined
+                ? []
+                : [{ [evidence.sourcePath]: `sha256:${primary.sha256}` }]),
+            ];
+          }) ?? [];
+        for (const graph of [
+          ...(result.lineage?.modules.map((module_) => module_.files) ?? []),
+          ...directGraphs,
+          ...(result.lineage?.loads.map((load) => load.evidence?.sourceRevision?.files ?? {}) ?? []),
+        ]) {
+          for (const [path, digest] of Object.entries(graph)) {
+            if (sourceFiles.has(path) && sourceFiles.get(path) !== digest) {
+              lineageStatus = 'mixed';
+            }
+            sourceFiles.set(path, digest);
+          }
+        }
+      }
       const aggregate: GeoSpecRunnerResult = {
-        success: totals.failed === 0 && issues.length === 0,
+        success: complete && lineageStatus === 'complete' && totals.failed === 0 && issues.length === 0,
         passed: totals.passed,
         failed: totals.failed,
         selectedTests: totals.selectedTests,
         files: fileResults,
         ...(issues.length > 0 ? { issues } : {}),
         durationMs: performance.now() - runStartedAt,
+        accounting,
+        lineageStatus,
       };
       events.emit({ type: 'run-complete', result: aggregate });
       return aggregate;

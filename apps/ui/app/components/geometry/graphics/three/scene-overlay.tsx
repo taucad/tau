@@ -12,7 +12,7 @@ import { createPortal, useFrame, useThree } from '@react-three/fiber';
  * its own target — asks the owner to stamp it rather than re-rasterising the scene.
  */
 export type DepthRestore = (target?: WebGLRenderTarget) => void;
-type DepthRestoreReference = RefObject<DepthRestore | undefined>;
+type DepthRestoreReference = RefObject<{ restore?: DepthRestore; canvasRestored: boolean }>;
 
 const OverlayDepthContext = createContext<DepthRestoreReference | undefined>(undefined);
 const overlayScenesByRoot = new WeakMap<THREE.Scene, Set<THREE.Scene>>();
@@ -25,7 +25,10 @@ export const getSceneRenderRoots = (rootScene: THREE.Scene): readonly THREE.Scen
 
 /** Owns the one depth bridge shared by the priority-1 post owner and priority-2 overlays. */
 export function OverlayDepthProvider({ children }: { readonly children: ReactNode }): JSX.Element {
-  const restoreRef = useRef<DepthRestore | undefined>(undefined);
+  const restoreRef = useRef<{ restore?: DepthRestore; canvasRestored: boolean }>({ canvasRestored: false });
+  useFrame(() => {
+    restoreRef.current.canvasRestored = false;
+  }, 0);
   return <OverlayDepthContext.Provider value={restoreRef}>{children}</OverlayDepthContext.Provider>;
 }
 
@@ -36,10 +39,12 @@ export const useOverlayDepthRestore = (restore: DepthRestore | undefined): void 
     if (!restoreRef) {
       return undefined;
     }
-    restoreRef.current = restore;
+    restoreRef.current.restore = restore;
+    restoreRef.current.canvasRestored = false;
     return () => {
-      if (restoreRef.current === restore) {
-        restoreRef.current = undefined;
+      if (restoreRef.current.restore === restore) {
+        restoreRef.current.restore = undefined;
+        restoreRef.current.canvasRestored = false;
       }
     };
   }, [restore, restoreRef]);
@@ -55,7 +60,14 @@ export function useOverlayDepthRestorer(): DepthRestore {
   const restoreRef = useContext(OverlayDepthContext);
   return useCallback(
     (target?: WebGLRenderTarget): void => {
-      restoreRef?.current?.(target);
+      const depth = restoreRef?.current;
+      if (!depth?.restore || (!target && depth.canvasRestored)) {
+        return;
+      }
+      depth.restore(target);
+      if (!target && restoreRef) {
+        restoreRef.current.canvasRestored = true;
+      }
     },
     [restoreRef],
   );
@@ -71,6 +83,7 @@ function SceneOverlayFrameLoop({
   readonly renderPriority: number;
 }): ReactNode {
   const restoreDepth = useOverlayDepthRestorer();
+  const restoreRef = useContext(OverlayDepthContext);
 
   useFrame((state) => {
     const { gl, camera } = state;
@@ -79,6 +92,9 @@ function SceneOverlayFrameLoop({
     try {
       if (shouldClearDepth) {
         gl.clearDepth();
+        if (restoreRef) {
+          restoreRef.current.canvasRestored = false;
+        }
       } else {
         // Post-processing renders colour through an offscreen target. Its owner restores
         // that frame's encoded depth directly; without post, the main pass already left

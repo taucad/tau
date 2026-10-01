@@ -54,14 +54,43 @@ describe('runGeoSpecTests', () => {
       files: { 'cube.ts': `sha256:${'a'.repeat(64)}` },
     } as unknown as SourceRevision;
 
+    const secondRevision = { ...revision, files: { ...revision.files } };
+    const runner = passingRunner();
+    const result = await runner.run({ files: ['cube.geospec.ts'] });
+    const fileResult = result.files[0];
+    if (fileResult === undefined) {
+      throw new Error('Expected the fixture module');
+    }
+    fileResult.result.lineage = {
+      status: 'mixed',
+      modules: [],
+      loads: [revision, secondRevision].map((sourceRevision, index) => ({
+        loadId: `load-${index}`,
+        status: 'complete',
+        evidence: {
+          loadId: `load-${index}`,
+          status: 'complete',
+          format: 'step',
+          parameters: { width: index + 1 },
+          ingestOptions: {},
+          sourceRevision,
+          artifacts: [{ name: 'cube.step', sha256: String(index).repeat(64), byteLength: 1 }],
+        },
+      })),
+    };
+    runner.run.mockResolvedValue(result);
     const output = await runGeoSpecTests({
       discovery: discoveryOver({ '': ['cube.geospec.ts'] }),
-      runner: passingRunner(),
+      runner,
       args: {},
-      sourceRevisions: () => [revision],
     });
 
-    expect(output.sourceRevisions).toEqual([revision]);
+    expect(output.sourceRevisions).toEqual([revision, secondRevision]);
+    expect(output.lineage?.[0]?.lineage.loads.map(({ evidence }) => evidence?.parameters)).toEqual([
+      { width: 1 },
+      { width: 2 },
+    ]);
+    expect(output.runStatus).toBe('inconclusive');
   });
 
   it('omits provenance entirely for a run that loaded no model through the runtime', async () => {
@@ -69,10 +98,10 @@ describe('runGeoSpecTests', () => {
       discovery: discoveryOver({ '': ['cube.geospec.ts'] }),
       runner: passingRunner(),
       args: {},
-      sourceRevisions: () => [],
     });
 
     expect(output).not.toHaveProperty('sourceRevisions');
+    expect(output.lineageStatus).toBe('unavailable');
   });
 
   it('never runs, and names the missing-file failure, when nothing is discovered', async () => {

@@ -32,9 +32,9 @@ export function bestRouteForActiveKernel(
  * dynamic form values whose schema is discovered at runtime.
  */
 export type RuntimeValidatedExportInput = {
+  readonly signal?: AbortSignal;
   readonly content?: RuntimeContentInput;
   readonly options?: Record<string, unknown>;
-  readonly signal?: AbortSignal;
 };
 
 export async function exportDocumentWithValidatedInput(

@@ -39,6 +39,7 @@ export { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
 export { handleEvaluateModel } from '#rpc/handlers/handle-evaluate-model.js';
 export { handleCaptureImages } from '#rpc/handlers/handle-capture-images.js';
 export { handleRunGeoSpecTests } from '#rpc/handlers/handle-run-geospec-tests.js';
+export { writeArtifactSet, type WrittenArtifactFile } from '#rpc/handlers/write-artifact.js';
 export { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 export { handleReadRevisions } from '#rpc/handlers/handle-read-revisions.js';
 export { handleApplyParameterOperation, handleGetParameters } from '#rpc/handlers/handle-parameters.js';

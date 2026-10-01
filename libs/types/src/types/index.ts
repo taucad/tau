@@ -51,3 +51,5 @@ export {
   parametersDirectory,
 } from '#schemas/file-parameter-entry.schema.js';
 export type { FileParameterEntry, ParameterGroup } from '#schemas/file-parameter-entry.schema.js';
+
+export type * from '#types/machine-settings.types.js';

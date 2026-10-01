@@ -101,11 +101,14 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     const cadRef = createActor(
       cadMachine.provide({
         actors: {
-          connectKernelActor: fromSafeAsync(async () => ({
-            type: 'kernelConnected' as const,
-            client: mockClient,
-            cleanups: [] as Array<() => void>,
-          })),
+          connectKernelActor: fromSafeAsync(
+            async () =>
+              ({
+                type: 'kernelConnected',
+                client: mockClient,
+                cleanups: [] as Array<() => void>,
+              }) as const,
+          ),
         },
       }),
       {
@@ -124,9 +127,13 @@ describe('cadPreviewMachine + cadMachine integration', () => {
     previewRef.start();
     previewRef.send({ type: 'start' });
     await waitFor(previewRef, (state) => state.value === 'active');
-    await vi.waitFor(() => expect(mockClient.open).toHaveBeenCalledOnce());
+    await vi.waitFor(() => {
+      expect(mockClient.open).toHaveBeenCalledOnce();
+    });
     previewRef.send({ type: 'setParameters', parameters: { width: 42 } });
-    await vi.waitFor(() => expect(runtime.document.update).toHaveBeenCalledWith({ parameters: { width: 42 } }));
+    await vi.waitFor(() => {
+      expect(runtime.document.update).toHaveBeenCalledWith({ parameters: { width: 42 } });
+    });
     expect(mockClient.open).toHaveBeenCalledOnce();
     expect(previewRef.getSnapshot().context.parameters).toEqual({ width: 42 });
     cadRef.stop();

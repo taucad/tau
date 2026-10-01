@@ -25,6 +25,7 @@ import { jsonValueSchema } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
 import type { AgentChannelRevisionEvent } from '@taucad/agent-host/wire';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { sha256Bytes } from '@taucad/utils/hash';
 import { classify } from '@taucad/filesystem/path-registry';
 import { revisionId } from '@taucad/revisions/algorithms';
 import {
@@ -1264,6 +1265,23 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
       case 'compare': {
         const requestedRevision = text('revisionId');
         const path = text('path');
+        const compareBytes = async (
+          original: Uint8Array<ArrayBuffer> | undefined,
+          modified: Uint8Array<ArrayBuffer> | undefined,
+        ): Promise<JsonValue> => {
+          const metadata = async (bytes: Uint8Array<ArrayBuffer> | undefined) =>
+            bytes === undefined
+              ? { digest: 'missing', byteLength: null }
+              : { digest: `sha256:${await sha256Bytes(bytes)}`, byteLength: bytes.byteLength };
+          const [originalBytes, modifiedBytes] = await Promise.all([metadata(original), metadata(modified)]);
+          const decoder = new TextDecoder();
+          return revisionJson({
+            original: original === undefined ? '' : decoder.decode(original),
+            modified: modified === undefined ? '' : decoder.decode(modified),
+            originalBytes,
+            modifiedBytes,
+          });
+        };
         if (request['against'] === 'checkout') {
           const snapshot = actor.getSnapshot();
           const checkout = snapshot.context.checkouts.find(
@@ -1283,29 +1301,39 @@ export const createProjectRevisions = (options: ProjectRevisionsOptions): Projec
                     checkout.headRevisionId === undefined ? undefined : revisionId(checkout.headRevisionId),
                 }),
           ]);
-          const decoder = new TextDecoder();
-          let working = '';
-          try {
-            working = filesystem === undefined ? '' : decoder.decode(await filesystem.readFile(path));
-          } catch {
-            // Missing on the right means deleted since the selected revision.
+          if (tree === undefined || filesystem === undefined) {
+            throw new Error('The selected revision or checkout is unavailable.');
           }
-          return revisionJson({
-            original: tree?.get(path) === undefined ? '' : decoder.decode(tree.get(path)),
-            modified: working,
-          });
+          let working: Uint8Array<ArrayBuffer> | undefined;
+          try {
+            working = await filesystem.readFile(path);
+          } catch (error) {
+            if (
+              !(
+                typeof error === 'object' &&
+                error !== null &&
+                (('code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) ||
+                  ('name' in error && error.name === 'NotFoundError'))
+              )
+            ) {
+              throw error;
+            }
+          }
+          return compareBytes(tree.get(path), working);
         }
         const record = await port.readRevision(revisionId(requestedRevision));
-        const base = optionalText(request, 'from') ?? record?.parents[0];
+        if (record === undefined) {
+          throw new Error('The selected revision is unavailable.');
+        }
+        const base = optionalText(request, 'from') ?? record.parents[0];
         const [before, after] = await Promise.all([
           base === undefined ? undefined : port.readTree(revisionId(base)),
           port.readTree(revisionId(requestedRevision)),
         ]);
-        const decoder = new TextDecoder();
-        return revisionJson({
-          original: before?.get(path) === undefined ? '' : decoder.decode(before.get(path)),
-          modified: after?.get(path) === undefined ? '' : decoder.decode(after.get(path)),
-        });
+        if (after === undefined || (base !== undefined && before === undefined)) {
+          throw new Error('The selected revision tree is unavailable.');
+        }
+        return compareBytes(before?.get(path), after.get(path));
       }
       case 'restore':
         actor.getSnapshot().children.restore?.send({

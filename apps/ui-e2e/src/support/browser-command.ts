@@ -1849,13 +1849,12 @@ export const uiCloseSecondaryTarget: BrowserCommand = async (commandContext) => 
 };
 
 /**
- * The dedicated workers the target page is running right now (V21, S48(16)).
+ * The dedicated workers exposed for the target page by Playwright (V21, S48(16)).
  *
- * Uninstrumented on purpose: a page cannot enumerate its own dedicated workers,
- * and the alternative was a counter in product code behind a debug flag — which
- * would make the measurement a thing the app has to keep true rather than a
- * thing the browser already knows. Playwright's `page.workers()` is what
- * Chrome's own task manager lists.
+ * Uses the provider's page-scoped observation without product instrumentation.
+ * The selected WebKit provider does not recursively enumerate workers created
+ * inside workers. An empty listing therefore cannot establish their absence or
+ * qualify nested-worker cardinality.
  *
  * @param commandContext - The Vitest browser command context.
  * @param urlSubstring - Keep only workers whose script URL contains this.

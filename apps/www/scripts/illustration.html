@@ -1,0 +1,102 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <style>
+      html,
+      body {
+        margin: 0;
+        width: 100%;
+        height: 100%;
+        overflow: hidden;
+        background: #f6f6f6;
+      }
+      canvas {
+        display: block;
+      }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "/node_modules/three/build/three.module.js",
+          "three/addons/": "/node_modules/three/examples/jsm/"
+        }
+      }
+    </script>
+  </head>
+  <body>
+    <script type="module">
+      import * as THREE from 'three';
+      import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
+      const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false, preserveDrawingBuffer: true });
+      renderer.setSize(1000, 1000);
+      renderer.setPixelRatio(1);
+      renderer.setClearColor(0xf6f6f6);
+      renderer.outputColorSpace = THREE.SRGBColorSpace;
+      renderer.toneMapping = THREE.ACESFilmicToneMapping;
+      renderer.toneMappingExposure = 1.05;
+      renderer.shadowMap.enabled = true;
+      renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+      document.body.append(renderer.domElement);
+      const scene = new THREE.Scene();
+      scene.environment = new THREE.PMREMGenerator(renderer).fromScene(new RoomEnvironment(), 0.04).texture;
+      const root = new THREE.Group();
+      root.rotation.x = -Math.PI / 2;
+      root.rotation.z = -0.28;
+      scene.add(root);
+      const model = await fetch('/model.json').then((r) => r.json());
+      for (const p of model) {
+        const geo = new THREE.BufferGeometry();
+        geo.setAttribute('position', new THREE.Float32BufferAttribute(p.vertices, 3));
+        geo.setAttribute('normal', new THREE.Float32BufferAttribute(p.normals, 3));
+        geo.setIndex(p.triangles);
+        const mesh = new THREE.Mesh(
+          geo,
+          new THREE.MeshStandardMaterial({ color: p.color || '#87939e', metalness: 0.72, roughness: 0.28 }),
+        );
+        mesh.name = p.name;
+        mesh.castShadow = true;
+        mesh.receiveShadow = true;
+        root.add(mesh);
+      }
+      const light = new THREE.DirectionalLight(0xffffff, 3.5);
+      light.position.set(-150, 300, 140);
+      scene.add(light);
+      const fill = new THREE.DirectionalLight(0xffffff, 1.5);
+      fill.position.set(120, 80, -140);
+      scene.add(fill);
+      scene.add(new THREE.AmbientLight(0xffffff, 0.5));
+      const camera = new THREE.PerspectiveCamera(31, 1, 0.1, 3000);
+      camera.position.set(245, 225, 285);
+      camera.lookAt(0, 8, 0);
+      window.renderView = (view) => {
+        for (const mesh of root.children) {
+          const n = mesh.name;
+          let lift = 0;
+          if (view === 'exploded') {
+            if (n.includes('Front Socket')) lift = 95;
+            else if (n.includes('Front Screw')) lift = 87;
+            else if (n.includes('Carrier Front')) lift = 72;
+            else if (n.includes('Front Thrust')) lift = 48;
+            else if (n.includes('Thrust Washer')) lift = 35;
+            else if (n.includes('Planet Gear')) lift = 25;
+            else if (n.includes('Flanged Bushing')) lift = 17;
+            else if (n.includes('Sun Gear')) lift = 20;
+            else if (n.includes('Carrier Rear')) lift = -30;
+            else if (n.includes('Rear')) lift = -48;
+            else if (n.includes('Planet Pin')) lift = 5;
+          }
+          mesh.position.z = lift;
+        }
+        const box = new THREE.Box3().setFromObject(root);
+        const center = box.getCenter(new THREE.Vector3());
+        const span = box.getSize(new THREE.Vector3()).length();
+        camera.position.copy(center).add(new THREE.Vector3(0.75, 0.7, 0.95).normalize().multiplyScalar(span * 1.4));
+        camera.lookAt(center);
+        renderer.render(scene, camera);
+      };
+      window.renderView('assembly');
+      window.ready = true;
+    </script>
+  </body>
+</html>

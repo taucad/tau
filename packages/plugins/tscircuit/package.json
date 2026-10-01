@@ -54,11 +54,10 @@
       "./package.json": "./package.json"
     },
     "imports": {
-      "#engine/*.js": "./dist/engine/*.mjs"
+      "#*.js": "./dist/*.mjs"
     }
   },
   "imports": {
-    "#engine/*.js": "./src/engine/*.ts",
     "#*.js": "./src/*.ts",
     "#*": "./src/*"
   },

@@ -1,5 +1,5 @@
 import type { IdPrefix } from '@taucad/types';
-import { idPrefix } from '@taucad/types/constants';
+import { idPrefix } from '@taucad/types/constants/id';
 import { customAlphabet } from 'nanoid';
 
 const idLength = 21;

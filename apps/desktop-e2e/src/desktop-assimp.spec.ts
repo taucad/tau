@@ -19,6 +19,8 @@ import type { Page } from 'playwright';
 import { afterEach, expect, test } from 'vitest';
 import type { RuntimeClient } from '@taucad/runtime';
 import { getBoundingBoxFromInspect, getInspectReport, glbToDocument, validateGlbData } from '@taucad/runtime-testing';
+import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
+import type { ViewerNode } from '@taucad/workbench';
 
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
@@ -569,6 +571,31 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       const beforePlyOpen = await renderCycleCount(page);
       await openInViewer(page, 'exports/result.ply');
       await expectRenderCycleSince(page, beforePlyOpen);
+      const hasDurablePlyView = (node: ViewerNode): boolean => {
+        if (node.kind === 'split') {
+          return node.children.some(hasDurablePlyView);
+        }
+        const active = node.tabs[node.active ?? node.tabs.length - 1];
+        if (!active) {
+          return false;
+        }
+        const viewPath = join(projectRoot, workbenchPaths.view(active.view));
+        if (!existsSync(viewPath)) {
+          return false;
+        }
+        const view = workbenchRecords.view.read(new Uint8Array(readFileSync(viewPath)));
+        return view.status === 'current' && view.record.entryPath === 'exports/result.ply';
+      };
+      await expect
+        .poll(() => {
+          const layoutPath = join(projectRoot, workbenchPaths.layout);
+          if (!existsSync(layoutPath)) {
+            return false;
+          }
+          const layout = workbenchRecords.layout.read(new Uint8Array(readFileSync(layoutPath)));
+          return layout.status === 'current' && hasDurablePlyView(layout.record.viewer);
+        })
+        .toBe(true);
       await page.reload();
       await expectVisible(page.locator('.dv-tab[aria-label="exports/result.ply"]'), 60_000);
       await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas').first(), 120_000);

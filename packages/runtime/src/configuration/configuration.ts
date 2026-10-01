@@ -706,12 +706,15 @@ export const defineConfiguration = <Schema extends StandardSchemaV1>(
   const canonicalManifest = canonicalizeCacheValue({
     value: asCacheValue(manifest),
   });
+  const manifestDigest = digestContent({
+    bytes: new TextEncoder().encode(canonicalManifest),
+  });
   return Object.freeze({
     manifest,
     diagnostics: admission.diagnostics,
     canonicalManifest,
     schema: trustedSchema,
-    manifestDigest: async () => digestContent({ bytes: new TextEncoder().encode(canonicalManifest) }),
+    manifestDigest: async () => manifestDigest,
   });
 };
 

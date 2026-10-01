@@ -1,3 +1,6 @@
+import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
+import { machineSettingsPath } from '@taucad/runtime/machine/settings';
+import type { FileSystemBridgeRootedProxy, RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { ReactNode } from 'react';
 import { createContext, useContext, useMemo, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { useActorRef, useSelector } from '@xstate/react';
@@ -31,7 +34,6 @@ import {
   updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
 import type { HomeStorageBackend, WorkspaceEntry } from '#filesystem/handle-store.js';
-import type { RootedBridgeConsumer } from '@taucad/fs-bridge';
 import type { WorkspaceUnavailableReason } from '#machines/file-manager.machine.js';
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -355,6 +357,7 @@ type FileManagerContextType = {
    * parameter set's target moves — never a batch and never a listing.
    */
   parameterFiles: ParameterFilesClient;
+  machineSettings: MachineSettingsStore;
   workbenchFiles: WorkbenchFilesClient;
   /**
    * The ephemeral preview mount's slice (`use-cad-preview.tsx`).
@@ -845,6 +848,29 @@ export function FileManagerProvider({
       return opener(root, consumer);
     },
     [fileManagerRef],
+  );
+
+  const machineSettings = useMemo(() => {
+    const connection: { proxy?: FileSystemBridgeRootedProxy } = {};
+    const service = async (): Promise<FileSystemBridgeRootedProxy> => {
+      await whenServicesReady();
+      const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
+      const proxy = createFileSystemBridgeProxy(openRootedFileSystemBridge(rootDirectory, 'user'));
+      connection.proxy = proxy;
+      await proxy.ready;
+      return proxy;
+    };
+    return new MachineSettingsStore(
+      service,
+      (typeId, refresh) => contentService?.subscribe(machineSettingsPath({ typeId }), refresh) ?? (() => undefined),
+      () => connection.proxy?.dispose(),
+    );
+  }, [bridgeOpener, rootDirectory, openRootedFileSystemBridge, whenServicesReady, contentService]);
+  useEffect(
+    () => () => {
+      machineSettings.dispose();
+    },
+    [machineSettings],
   );
 
   /*
@@ -1362,6 +1388,7 @@ export function FileManagerProvider({
   const value = useMemo<FileManagerContextType>(
     () => ({
       fileManagerRef,
+      machineSettings,
       backendType,
       contentService,
       treeService,
@@ -1404,6 +1431,7 @@ export function FileManagerProvider({
     }),
     [
       fileManagerRef,
+      machineSettings,
       backendType,
       contentService,
       treeService,

@@ -21,14 +21,14 @@ import { z } from 'zod';
 
 import type { MachinePrintPlanner } from '#registry/machine-tool-registry.js';
 import {
-  applyPrintIntent,
+  applyMachinePreferences,
   bambuHints,
   defaultBambuStudioEngine,
   isBambuProvider,
   loadedMaterial,
-  printIntentHint,
+  machinePreferencesHint,
 } from '#registry/print-profiles.js';
-import type { BambuStudioEngine, PrintChoices } from '#registry/print-profiles.js';
+import type { BambuStudioEngine, PrintChoices, ResolvedMachinePreferences } from '#registry/print-profiles.js';
 
 /** The export target every print goes through (blueprint D3). */
 const printFormat = 'gcode.3mf';
@@ -211,7 +211,7 @@ const resolvePlate = (
  *
  * @param provider - The provider that manufactured the descriptor.
  * @param machine - The machine as the directory currently observes it.
- * @param requestedPlate - The plate the agent named, if any.
+ * @param preferences - The requested plate and captured saved settings.
  * @returns The provider's submission configuration for the loaded slot a
  *   one-filament print uses, the same configuration for other filament
  *   slots, the plate it expects and that loaded slot.
@@ -220,7 +220,10 @@ const resolvePlate = (
 const expectedSetup = (
   provider: MachineProvider,
   machine: MachineDirectoryEntry,
-  requestedPlate: string | undefined,
+  {
+    requestedPlate,
+    preferences,
+  }: Readonly<{ requestedPlate: string | undefined; preferences: ResolvedMachinePreferences['machine'] | undefined }>,
 ): Readonly<{
   configuration: PrintRequest['configuration'];
   configure: (
@@ -229,7 +232,13 @@ const expectedSetup = (
   plate: string;
   loaded: Readonly<{ slot: number; materialId: string }>;
 }> => {
-  const tray = loadedMaterial(machine);
+  const slot = preferences?.material?.defaultSlot;
+  const tray =
+    slot === undefined
+      ? loadedMaterial(machine)
+      : machine.snapshot.setup.materials.find(
+          (value) => value.slot === slot && value.state === 'loaded' && value.materialId !== undefined,
+        );
   if (tray?.materialId === undefined) {
     throw new Error(`No material is loaded in ${machine.descriptor.name}; load one, then ask again.`);
   }
@@ -239,6 +248,9 @@ const expectedSetup = (
   // ponytail: named keys are the Bambu submission vocabulary; a second provider gets its own mapping here.
   /* One material per filament, in filament order; the mapping names each one's slot. */
   const configure = (materials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>) => ({
+    ...(preferences?.bedLeveling === undefined ? {} : { bedLeveling: preferences.bedLeveling }),
+    ...(preferences?.flowCalibration === undefined ? {} : { flowCalibration: preferences.flowCalibration }),
+    ...(preferences?.timelapse === undefined ? {} : { timelapse: preferences.timelapse }),
     expectedModel: machine.descriptor.model,
     expectedBedType: plate.id,
     ...(plate.observed ? {} : { operatorConfirmedBedType: plate.id }),
@@ -351,7 +363,7 @@ type Slice = Readonly<{
 const exportSlice = async (
   deps: MachinePrintPlannerDependencies,
   input: PlanInput,
-  options: Readonly<{ exportOptions: JsonObject; printIntent: JsonObject | undefined }>,
+  options: Readonly<{ exportOptions: JsonObject; machinePreferences: JsonObject | undefined }>,
 ): Promise<Slice> => {
   const result = await deps.exportGeometry({
     toolCallId: input.toolCallId,
@@ -364,7 +376,9 @@ const exportSlice = async (
   const file = success?.files[0];
   if (file === undefined) {
     const reason = failure.safeParse(result.content).data?.message ?? 'no artifact was produced';
-    throw new Error(`Slicing ${input.targetFile} failed: ${reason}${printIntentHint(options.printIntent)}`);
+    throw new Error(
+      `Slicing ${input.targetFile} failed: ${reason}${machinePreferencesHint(options.machinePreferences)}`,
+    );
   }
   const bytes = await deps.readArtifact({ path: file.artifactPath, signal: input.signal });
   return { file, bytes, warnings: success?.warnings ?? [] };
@@ -392,46 +406,72 @@ const colorsOf = (bytes: Uint8Array<ArrayBuffer>): readonly string[] => {
 const mapFilaments = (
   colors: readonly string[],
   machine: MachineDirectoryEntry,
-  print: Readonly<{ materialId: string; externalSpoolSlot: number | undefined }>,
+  print: Readonly<{
+    materialId: string;
+    externalSpoolSlot: number | undefined;
+    slotsByColor?: Readonly<Record<string, number>>;
+  }>,
 ): ReadonlyArray<Readonly<{ slot: number; materialId: string }>> => {
   const { materials } = machine.snapshot.setup;
-  const trays = materials.filter((tray) => tray.slot !== print.externalSpoolSlot);
-  const slots = defaultFilamentSlots(colors, trays, print.materialId);
-  const missing = colors.filter((_color, index) => slots[index] === undefined);
-  if (missing.length > 0) {
-    const named = `${missing.length === 1 ? 'colour' : 'colours'} ${missing.join(' and ')}`;
+  const selected = colors.map((color) => {
+    const slot = print.slotsByColor?.[color.toLowerCase()];
+    if (slot === undefined) {
+      return undefined;
+    }
+    const material = materials.find(
+      (value) => value.slot === slot && value.state === 'loaded' && value.materialId !== undefined,
+    );
+    if (!material?.materialId || slot === print.externalSpoolSlot) {
+      throw new Error(`Saved material slot ${slot} is unavailable for this multi-filament print.`);
+    }
+    return { slot, materialId: material.materialId };
+  });
+  const reserved = selected.flatMap((value) => (value ? [value.slot] : []));
+  if (new Set(reserved).size !== reserved.length) {
+    throw new Error('Saved material mapping repeats a slot. Choose a distinct loaded slot for each filament.');
+  }
+  const missing = colors.filter((_color, index) => selected[index] === undefined);
+  const trays = materials.filter((tray) => tray.slot !== print.externalSpoolSlot && !reserved.includes(tray.slot));
+  const slots = defaultFilamentSlots(missing, trays, print.materialId);
+  const unavailable = missing.filter((_color, index) => slots[index] === undefined);
+  if (unavailable.length > 0) {
+    const named = `${unavailable.length === 1 ? 'colour' : 'colours'} ${unavailable.join(' and ')}`;
     throw new Error(
       `No free ${print.materialId} slot in ${machine.descriptor.name} for the model's ${named}; load one for each, then ask again.`,
     );
   }
-  return slots
-    .filter((slot) => slot !== undefined)
-    .map((slot) => ({
+  let fallbackIndex = 0;
+  return selected.map((value) => {
+    if (value) {
+      return value;
+    }
+    const slot = slots[fallbackIndex++]!;
+    return {
       slot,
-      /* The tray's own spelling, which the machine compares. */
       materialId: materials.find((tray) => tray.slot === slot)?.materialId ?? print.materialId,
-    }));
+    };
+  });
 };
 
 /**
  * What the print intent contributed, with its filaments replaced by those it
  * supplied to the model's filaments.
  *
- * @param printIntent - The report `applyPrintIntent` made for a one-filament print.
+ * @param machinePreferences - The report `applyMachinePreferences` made for a one-filament print.
  * @param supplied - The file's filament presets, by slot, that this print uses.
  * @returns The report; unchanged when the file was ignored or absent.
  */
 const withSuppliedFilaments = (
-  printIntent: JsonObject | undefined,
+  machinePreferences: JsonObject | undefined,
   supplied: Readonly<Record<string, string>>,
 ): JsonObject | undefined => {
-  const applied = printIntent?.['applied'];
-  if (printIntent === undefined || typeof applied !== 'object' || applied === null || Array.isArray(applied)) {
-    return printIntent;
+  const applied = machinePreferences?.['applied'];
+  if (machinePreferences === undefined || typeof applied !== 'object' || applied === null || Array.isArray(applied)) {
+    return machinePreferences;
   }
   const rest = Object.fromEntries(Object.entries(applied).filter(([key]) => key !== 'filaments'));
   return {
-    ...printIntent,
+    ...machinePreferences,
     applied: { ...rest, ...(Object.keys(supplied).length === 0 ? {} : { filaments: { ...supplied } }) },
   };
 };
@@ -456,18 +496,22 @@ const filamentPresets = async (
     provider: MachineProvider;
     input: PlanInput;
     plate: string;
-    printIntent: JsonObject | undefined;
+    machinePreferences: JsonObject | undefined;
     sliced: number;
     slots: readonly number[];
   }>,
-): Promise<Readonly<{ sliced: string; filaments: readonly string[]; printIntent: JsonObject | undefined }>> => {
+): Promise<Readonly<{ sliced: string; filaments: readonly string[]; machinePreferences: JsonObject | undefined }>> => {
   const { provider, input, plate } = context;
   const { machine } = input;
   const fromSlot = (slot: number) => {
     /* The machine as a one-filament print from this slot sees it. */
     const materials = machine.snapshot.setup.materials.filter((tray) => tray.slot === slot);
     const view = { ...machine, snapshot: { ...machine.snapshot, setup: { ...machine.snapshot.setup, materials } } };
-    const { choices } = applyPrintIntent(input.intentFile, { provider, machine: view, bambuStudio: true }, input);
+    const { choices } = applyMachinePreferences(
+      input.preferences,
+      { provider, machine: view, bambuStudio: true },
+      input,
+    );
     return { choices, hints: bambuHints(provider, view, { preset: choices.preset, plate }) };
   };
   const sliced = fromSlot(context.sliced);
@@ -479,7 +523,7 @@ const filamentPresets = async (
       return name === undefined ? [] : [[String(slot), name]];
     }),
   );
-  const printIntent = withSuppliedFilaments(context.printIntent, supplied);
+  const machinePreferences = withSuppliedFilaments(context.machinePreferences, supplied);
   const { printer } = sliced.choices.profiles ?? {};
   const { model, nozzleDiameter } = sliced.hints;
   const catalog = await engine.loadBambuStudioCatalog(
@@ -489,11 +533,14 @@ const filamentPresets = async (
   const presetOf = ({ choices, hints }: ReturnType<typeof fromSlot>): string =>
     resolveBambuStudioSelection(catalog, hints, choices.profiles).filaments[0]!;
   try {
-    return { sliced: presetOf(sliced), filaments: perSlot.map((slot) => presetOf(slot)), printIntent };
+    return { sliced: presetOf(sliced), filaments: perSlot.map((slot) => presetOf(slot)), machinePreferences };
   } catch (error) {
-    throw new Error(`${error instanceof Error ? error.message : String(error)}${printIntentHint(printIntent)}`, {
-      cause: error,
-    });
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}${machinePreferencesHint(machinePreferences)}`,
+      {
+        cause: error,
+      },
+    );
   }
 };
 
@@ -527,21 +574,30 @@ export const createMachinePrintPlanner =
     const install = isBambuProvider(provider) ? await engine.findBambuStudio() : undefined;
     const bambuStudio = install !== undefined;
     /* The call's own choices over the project's print intent, over the defaults. */
-    const intent = applyPrintIntent(input.intentFile, { provider, machine, bambuStudio }, input);
+    const intent = applyMachinePreferences(input.preferences, { provider, machine, bambuStudio }, input);
     const { choices } = intent;
-    const { configuration: oneFilament, configure, plate, loaded } = expectedSetup(provider, machine, choices.plate);
-    const slice = async (profiles: PrintChoices['profiles'], printIntent: JsonObject | undefined): Promise<Slice> =>
+    const {
+      configuration: oneFilament,
+      configure,
+      plate,
+      loaded,
+    } = expectedSetup(provider, machine, { requestedPlate: choices.plate, preferences: input.preferences?.machine });
+    const slice = async (
+      profiles: PrintChoices['profiles'],
+      machinePreferences: JsonObject | undefined,
+    ): Promise<Slice> =>
       exportSlice(deps, input, {
         exportOptions: sliceOptions(provider, { ...choices, profiles, machine, plate }, bambuStudio),
-        printIntent,
+        machinePreferences,
       });
-    const first = await slice(choices.profiles, intent.printIntent);
+    const first = await slice(choices.profiles, intent.machinePreferences);
     const colors = colorsOf(first.bytes);
     const filaments =
       colors.length > 1
         ? mapFilaments(colors, machine, {
             materialId: loaded.materialId,
             externalSpoolSlot: provider.manifest.materialSystem.externalSpoolSlot,
+            slotsByColor: input.preferences?.machine.material?.slotsByColor,
           })
         : undefined;
     /* A call naming its own filaments keeps them, as it does for one filament. */
@@ -551,15 +607,15 @@ export const createMachinePrintPlanner =
             provider,
             input,
             plate,
-            printIntent: intent.printIntent,
+            machinePreferences: intent.machinePreferences,
             sliced: loaded.slot,
             slots: filaments.map(({ slot }) => slot),
           })
         : undefined;
-    const printIntent = presets?.printIntent ?? intent.printIntent;
+    const machinePreferences = presets?.machinePreferences ?? intent.machinePreferences;
     const { file, bytes, warnings } =
       presets?.filaments.some((name) => name !== presets.sliced) === true
-        ? await slice({ ...choices.profiles, filaments: [...presets.filaments] }, printIntent)
+        ? await slice({ ...choices.profiles, filaments: [...presets.filaments] }, machinePreferences)
         : first;
     const configuration = filaments === undefined ? oneFilament : configure(filaments);
     // SAFETY: sha256Bytes returns the lowercase hex the digest brand describes.
@@ -582,8 +638,24 @@ export const createMachinePrintPlanner =
         selectedMember: accepted.requiredMembers[0] ?? bambuPlateMember,
       },
       configuration,
-      summary: summarize(bytes),
-      ...(printIntent === undefined ? {} : { printIntent }),
+      summary: {
+        ...summarize(bytes),
+        ...(input.preferences
+          ? {
+              preferences: {
+                scope: 'project',
+                typeId: provider.manifest.identity.typeId,
+                profileId: input.preferences.profileId,
+                configurationVersions: Object.fromEntries(
+                  Object.entries(
+                    input.preferences.record.profiles[input.preferences.profileId]?.configurations ?? {},
+                  ).flatMap(([id, block]) => (block ? [[id, block.version]] : [])),
+                ),
+              },
+            }
+          : {}),
+      },
+      ...(machinePreferences === undefined ? {} : { machinePreferences }),
       ...(warnings.length === 0 ? {} : { warnings }),
     };
   };

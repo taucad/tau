@@ -2,8 +2,14 @@ import { parseMachineManifest } from '#machines/machine-manifest.js';
 
 /** Smallest manifest the schema admits; shared by runtime machine fixtures. @internal */
 export const machineManifestFixture = parseMachineManifest({
-  version: 1,
-  identity: { vendor: 'fixture', model: 'fixture-printer', displayName: 'Fixture printer', qualifiedFirmware: [] },
+  version: 2,
+  identity: {
+    typeId: 'fixture.fff',
+    vendor: 'fixture',
+    model: 'fixture-printer',
+    displayName: 'Fixture printer',
+    qualifiedFirmware: [],
+  },
   technology: 'additive.fff',
   geometry: {
     unit: 'mm',

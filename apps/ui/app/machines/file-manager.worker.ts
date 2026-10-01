@@ -22,10 +22,11 @@ import {
 } from '@taucad/revisions';
 import type { PushRecorder } from '@taucad/revisions';
 import { serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
-import { createIndexedDbComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
-
-import type { WorkspaceScope } from '@taucad/filesystem';
+import { createIndexedDbComputeEngine, exposeComputeStoreChannel, MachineSettingsOwner } from '@taucad/runtime/host';
+import { slicingPreferences } from '@taucad/slicer/preferences';
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import {
+  RootedFileSystemError,
   ChangeEventBus,
   EventCoalescer,
   MountTable,
@@ -33,6 +34,9 @@ import {
   ResourceQueue,
   WorkspaceFileService,
 } from '@taucad/filesystem';
+import type { MountEntry, WorkspaceScope } from '@taucad/filesystem';
+import type { MachineSettingsService } from '@taucad/types';
+
 import { SharedPool } from '@taucad/memory';
 import type { kernelTypePackageMaps as KernelTypePackageMaps } from '@taucad/api-extractor/kernel-types';
 import type { authoringTypeMaps as AuthoringTypeMaps } from '@taucad/api-extractor/authoring-types';
@@ -288,6 +292,59 @@ const installBundledTypes = async (): Promise<void> => {
 };
 const withLazyBundledTypesReads = createLazyBundledTypesReads(installBundledTypes);
 
+/* The exact mount entry is the authority generation; a replaced route never reuses this cache. */
+const settingsOwners = new Map<MountEntry, Map<string, MachineSettingsOwner>>();
+const settingsForRoot = (root: string, policy: typeof tauPathPolicy): MachineSettingsService => {
+  for (const [generation, roots] of settingsOwners) {
+    if (mountTable.resolve(generation.prefix).entry !== generation) {
+      for (const owner of roots.values()) {
+        owner.dispose();
+      }
+      settingsOwners.delete(generation);
+    }
+  }
+  const { entry } = mountTable.resolve(root);
+  if (!entry) {
+    throw new Error('Machine settings root has no admitted mount.');
+  }
+  let roots = settingsOwners.get(entry);
+  if (!roots) {
+    roots = new Map();
+    settingsOwners.set(entry, roots);
+  }
+  const key = root;
+  let owner = roots.get(key);
+  if (!owner) {
+    const filesystem = fileService.createRootedFileSystem(root, {
+      originClientId: `machine-settings:${key}`,
+    });
+    // Settings are authored, read-write paths for every consumer, with no overlays.
+    // One least-privilege agent view owns their bytes across UI and agent connections.
+    const view = composeView({ filesystem }, { consumer: 'agent', policy });
+    owner = new MachineSettingsOwner({
+      filesystem: view,
+      definitions: [bambuSettingsConfiguration, slicingPreferences],
+    });
+    roots.set(key, owner);
+  }
+  const captured = owner;
+  return {
+    readMachineSettings: async (typeId) => {
+      if (mountTable.resolve(root).entry !== entry) {
+        throw new RootedFileSystemError('ESTALE');
+      }
+      return captured.read({ typeId });
+    },
+    editMachineSettings: async (input) => {
+      if (mountTable.resolve(root).entry !== entry) {
+        throw new RootedFileSystemError('ESTALE');
+      }
+      return captured.edit(input);
+    },
+    machineSettingsSettlement: async (operationId) => captured.settlement(operationId),
+  };
+};
+
 exposeFileSystem(workspaceBridgeService(fileService), {
   /*
    * Every rooted connection names the surface it reads (architecture L4, W2):
@@ -313,7 +370,9 @@ exposeFileSystem(workspaceBridgeService(fileService), {
      * batch and the view mask-checks before any provider I/O (D4).
      */
     const handlers = withReadContentOps(view, policy);
-    return root === dependencyMountRoot ? withLazyBundledTypesReads(handlers) : handlers;
+    return root === dependencyMountRoot
+      ? withLazyBundledTypesReads(handlers)
+      : Object.assign(handlers, settingsForRoot(root, policy));
   },
   /* The same layout the views above enforce, so a masked connection is not told
    * about a path it may not read (CI1). */
@@ -548,6 +607,14 @@ self.addEventListener(
       if (typeof data.projectId === 'string' && data.projectId.length > 0) {
         admittedComputeProjectIds.delete(data.projectId);
         disposeComputeChannels(data.projectId, 'project closed');
+        for (const [generation, roots] of settingsOwners) {
+          if (generation.routeId === data.projectId) {
+            for (const owner of roots.values()) {
+              owner.dispose();
+            }
+            settingsOwners.delete(generation);
+          }
+        }
       }
       return;
     }

@@ -6,6 +6,11 @@
  * @module
  */
 
+import { MachineSettingsOwner } from '@taucad/runtime/host';
+import { machineSettingsPath } from '@taucad/runtime/machine/settings';
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
+import { slicingPreferences } from '@taucad/slicer/preferences';
+import { MachineSettingsStore } from '#components/print/machine-settings-store.js';
 import { Topic } from '@taucad/events';
 import type { CheckedFileWrite, CheckedFileWriteResult, FileWritePrecondition } from '@taucad/types';
 
@@ -16,6 +21,7 @@ export type ProjectFiles = Readonly<{
   root: string;
   /** What `useFileManager` hands the print intent. */
   fileManager: Readonly<{
+    machineSettings: MachineSettingsStore;
     fileManagerRef: Readonly<{
       getSnapshot: () => Readonly<{ context: Readonly<{ rootDirectory: string }> }>;
       subscribe: () => Readonly<{ unsubscribe: () => void }>;
@@ -74,47 +80,98 @@ export const createProjectFiles = (root = '/projects/project-1'): ProjectFiles =
     notify(path);
   };
 
+  const fileManager: Omit<ProjectFiles['fileManager'], 'machineSettings'> = {
+    fileManagerRef: {
+      getSnapshot: () => ({ context: { rootDirectory: root } }),
+      subscribe: () => ({
+        unsubscribe: () => undefined,
+      }),
+    },
+    contentService: {
+      subscribe: (path, listener) =>
+        changes.subscribe({ handler: listener, interestedIn: (changed) => changed === path }),
+    },
+    parameterFiles: {
+      exists: async (path) => files.has(relative(path)),
+      readFile: async (path) => {
+        const bytes = files.get(relative(path));
+        if (bytes === undefined) {
+          throw new Error(`ENOENT: no such file, ${path}`);
+        }
+        return bytes;
+      },
+      writeFileChecked: async (checked) => {
+        writes.push(checked);
+        const path = relative(checked.path);
+        const race = races.shift();
+        if (race !== undefined) {
+          write(path, race);
+        }
+        const actual = files.get(path);
+        if (!checked.preconditions.every((precondition) => holds(actual, precondition.expected))) {
+          return { status: 'conflict', conflicts: [{ path, actual: actual ?? null }] };
+        }
+        const content = typeof checked.data === 'string' ? encoder.encode(checked.data) : checked.data;
+        files.set(path, content);
+        // The captured authority suppresses its own origin; the checked receipt supplies the bytes.
+        return { status: 'applied', content };
+      },
+    },
+  };
+  const createSettings = (): { owner: MachineSettingsOwner; settings: MachineSettingsStore } => {
+    const owner = new MachineSettingsOwner({
+      definitions: [slicingPreferences, bambuSettingsConfiguration],
+      filesystem: {
+        readFileStream: (path) =>
+          new ReadableStream({
+            start(controller) {
+              const value = files.get(relative(path));
+              if (value) {
+                controller.enqueue(value);
+                controller.close();
+              } else {
+                controller.error(
+                  Object.assign(new Error('Missing settings'), {
+                    code: 'ENOENT',
+                  }),
+                );
+              }
+            },
+          }),
+        writeFileChecked: fileManager.parameterFiles.writeFileChecked,
+        watch: (request, handler) =>
+          changes.subscribe({
+            interestedIn: (path) => request.paths.includes(path),
+            handler: () => {
+              handler({ type: 'change', path: '' });
+            },
+          }),
+      },
+    });
+    const captured = owner;
+    const settings = new MachineSettingsStore(
+      Promise.resolve({
+        readMachineSettings: async (typeId) => captured.read({ typeId }),
+        editMachineSettings: async (input) => captured.edit(input),
+        machineSettingsSettlement: async (id) => captured.settlement(id),
+      }),
+      (typeId, listener) => fileManager.contentService.subscribe(machineSettingsPath({ typeId }), listener),
+      () => undefined,
+    );
+    return { owner, settings };
+  };
+  let state = createSettings();
+  const resetSettings = (): void => {
+    state.settings.dispose();
+    state.owner.dispose();
+    state = createSettings();
+  };
   return {
     root,
     fileManager: {
-      fileManagerRef: {
-        getSnapshot: () => ({ context: { rootDirectory: root } }),
-        subscribe: () => ({
-          unsubscribe: () => undefined,
-        }),
-      },
-      contentService: {
-        subscribe: (path, listener) =>
-          changes.subscribe({ handler: listener, interestedIn: (changed) => changed === path }),
-      },
-      parameterFiles: {
-        exists: async (path) => files.has(relative(path)),
-        readFile: async (path) => {
-          const bytes = files.get(relative(path));
-          if (bytes === undefined) {
-            throw new Error(`ENOENT: no such file, ${path}`);
-          }
-          return bytes;
-        },
-        writeFileChecked: async (checked) => {
-          writes.push(checked);
-          const path = relative(checked.path);
-          const race = races.shift();
-          if (race !== undefined) {
-            write(path, race);
-          }
-          const actual = files.get(path);
-          if (!checked.preconditions.every((precondition) => holds(actual, precondition.expected))) {
-            return { status: 'conflict', conflicts: [{ path, actual: actual ?? null }] };
-          }
-          const content = typeof checked.data === 'string' ? encoder.encode(checked.data) : checked.data;
-          files.set(path, content);
-          // The watch reports a write after the write has answered, as the content service's does.
-          setTimeout(() => {
-            notify(path);
-          }, 0);
-          return { status: 'applied', content };
-        },
+      ...fileManager,
+      get machineSettings() {
+        return state.settings;
       },
     },
     writes,
@@ -130,6 +187,7 @@ export const createProjectFiles = (root = '/projects/project-1'): ProjectFiles =
       files.clear();
       writes.length = 0;
       races.length = 0;
+      resetSettings();
     },
   };
 };

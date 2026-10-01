@@ -12,6 +12,8 @@ import type { ContentDigest } from '@taucad/cache-core';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
 
+import { machineSettingsProvenanceSchema } from '#machines/settings.js';
+
 import { cloneBoundedJson } from '@taucad/parameters/json';
 import type {
   AdmittedHostOperation,
@@ -271,6 +273,7 @@ const configurationSchema = z.unknown().transform((value) => cloneBoundedJson(va
 const requesterSchema = z.strictObject({ kind: z.enum(['user', 'agent']), id: identitySchema, label: identitySchema });
 const requestSummarySchema = z.strictObject({
   fileName: identitySchema,
+  preferences: machineSettingsProvenanceSchema.optional(),
   layers: z.number().int().nonnegative().optional(),
   estimatedDuration: z.number().nonnegative().optional(),
   filamentLength: z.number().nonnegative().optional(),

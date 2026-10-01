@@ -1,4 +1,4 @@
-/** Deterministic caller-inclusive permits for an opt-in native worker pool. @module */
+/** Deterministic caller-inclusive permits for the host-composed compiled worker pool. @module */
 
 /**
  * Assign a bounded CPU budget across already-selected worker isolates.

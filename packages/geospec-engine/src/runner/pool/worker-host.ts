@@ -1,15 +1,9 @@
 /**
  * The code that runs INSIDE a pool worker.
  *
- * One resource scope and one cached model loader per **worker lifetime**, not
- * per shard — that is the entire payoff of affinity scheduling. A worker that
- * already loaded `housing.step` for shard 3 answers shard 11's identical
- * `loadModel(...)` from memory; the pool sends it shard 11 precisely because
- * it reported that load key.
- *
- * The scope disposes once, on shutdown. Disposing per shard would delete an
- * Emscripten handle the very next shard is about to reuse through the loader
- * cache — the D-10 double-delete that aborts the whole wasm instance.
+ * One resource scope owns worker cleanup on shutdown. Authored model loads
+ * are never memoized across shards: every load retains its own fresh source,
+ * variant and opaque subject through the canonical loader owner.
  *
  * Native subjects are the exception: every shard and collection pass releases
  * them before it settles (per-load freshness), because the engine retains at
@@ -182,14 +176,12 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
 
     const { shard } = message;
     options.postMessage({ type: 'file-start', shardId: shard.id, file: shard.file });
-    context.beginFile();
     const forensicSink: ForensicSink | undefined =
       message.forensic === true
         ? ({ name, value, unit }) => {
             options.postMessage({ type: 'forensic', shardId: shard.id, name, value, unit });
           }
         : undefined;
-    context.setForensicSink(forensicSink);
     const startedAt = performance.now();
     const unsubscribe =
       message.forensic === true
@@ -228,7 +220,6 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
           }),
         forensicSink,
       );
-      const primaryLoadKey = context.fileLoadKey();
       const workerMemoryBytes = options.measureMemoryBytes?.();
       reply = {
         type: 'shard-complete',
@@ -236,14 +227,12 @@ export const startGeoSpecPoolWorkerHost = (options: GeoSpecPoolWorkerHostOptions
         file: shard.file,
         result: sanitizePoolResult(result),
         durationMs: performance.now() - startedAt,
-        ...(primaryLoadKey === undefined ? {} : { primaryLoadKey }),
         ...(workerMemoryBytes === undefined ? {} : { workerMemoryBytes }),
       };
     } catch (error) {
       reply = shardFailed(error);
     } finally {
       unsubscribe?.();
-      context.setForensicSink();
     }
     await releaseAndSettle(reply, shardFailed);
   };

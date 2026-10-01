@@ -776,10 +776,13 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     put(coordinatorFile, coordinatorBytes);
     const originalDelivery = /** @type {{archives: {path: string, sha256: string}[]}} */ (inventory.delivery);
     const oldArchives = originalDelivery.archives.map((archive) => fileRecordForTest(join(producer, archive.path)));
+    const originalCacheKey = deliveryCacheKey(producer);
     revision = 'b'.repeat(40);
     for (const path of sourceOnlyPaths) {
       put(join(producer, path), `current source-kit input ${path}`);
     }
+    const sourceKitCacheKey = deliveryCacheKey(producer);
+    assert.notEqual(sourceKitCacheKey, originalCacheKey, 'a source-kit-only edit must invalidate the Nx cache key');
     const legacy = { ...inventory, schema: 'geospec-ci-artifacts-v2' };
     delete legacy.producerSource;
     put(inventoryFile, JSON.stringify(legacy));
@@ -791,6 +794,7 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     process.env['GITHUB_RUN_ATTEMPT'] = '2';
     const renewed = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
     assert.equal(renewed.schema, 'geospec-ci-artifacts-v3');
+    assert.equal(deliveryCacheKey(producer), sourceKitCacheKey, 'assembly must not change the current Nx cache key');
     assert.equal(renewed.source.revision, revision, 'source kit records the current checkout revision');
     assert.equal(
       renewed.producerSource.revision,
@@ -827,12 +831,16 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     }
     let priorArchives = renewedDelivery.archives;
     for (const [index, path] of sourceOnlyPaths.entries()) {
+      const previousCacheKey = deliveryCacheKey(producer);
       put(join(producer, path), `second source-only edit ${path}`);
+      const currentCacheKey = deliveryCacheKey(producer);
+      assert.notEqual(currentCacheKey, previousCacheKey, `source-only edit ${path} invalidates the Nx cache key`);
       assert.deepEqual(verifyArtifacts(producer).artifacts, inventory.artifacts);
       assert.throws(() => verifyDelivery(producer), /source kit differs/);
       process.env['GITHUB_RUN_ID'] = 'assembly-C';
       process.env['GITHUB_RUN_ATTEMPT'] = '3';
       const second = withProducerMarker(producer, () => ensureDelivery(producer), { pgid: process.pid });
+      assert.equal(deliveryCacheKey(producer), currentCacheKey, `assembly retains the Nx cache key after ${path}`);
       assert.deepEqual(second.artifacts, inventory.artifacts);
       assert.deepEqual(
         second.producerSource,
@@ -849,6 +857,8 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
         `all three archives renew after source-only edit ${path}`,
       );
       priorArchives = archives;
+      assert.deepEqual(ensureDelivery(producer), second, `warm delivery reuses the selected trio after ${path}`);
+      assert.equal(deliveryCacheKey(producer), currentCacheKey, `warm reuse retains the Nx cache key after ${path}`);
       assert.deepEqual(targets, [...builtTargets, ...Array.from({ length: index + 2 }, () => 'assemble-package')]);
     }
     for (const [path, value] of [

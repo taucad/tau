@@ -64,6 +64,164 @@ const store = (m: ReturnType<typeof memory>) =>
   });
 
 describe('workbench entries checked store', () => {
+  it('should keep invalid bytes preservable when an unchanged edit owes no fields', async () => {
+    const data = memory();
+    const entries = store(data);
+    try {
+      await entries.read();
+      const invalid = encoder.encode('{broken');
+      data.setBytes(invalid);
+      await entries.read();
+      expect(await entries.edit('a.ts', seed().entries['a.ts']!)).toBe(false);
+      expect(await entries.flush()).toBe(true);
+      expect(data.get()).toEqual(invalid);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('should hold an accepted edit and flush until its first record read settles', async () => {
+    const data = memory();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: {
+        ...data.files,
+        readFile: async () => {
+          entered.resolve();
+          await release.promise;
+          return data.files.readFile();
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      const hydration = entries.read();
+      await entered.promise;
+      const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+      let settled = false;
+      const drained = (async () => {
+        const saved = await entries.flush();
+        settled = true;
+        return saved;
+      })();
+      await Promise.resolve();
+      await Promise.resolve();
+      expect(settled).toBe(false);
+      expect(data.writes).not.toHaveBeenCalled();
+      release.resolve();
+      await hydration;
+      expect(await edited).toBe(true);
+      expect(await drained).toBe(true);
+      expect(workbenchRecords.entries.read(data.get()!)).toMatchObject({
+        status: 'current',
+        record: { entries: { 'a.ts': { renderTimeout: 240_000 } } },
+      });
+    } finally {
+      release.resolve();
+      entries.dispose();
+    }
+  });
+
+  it.each(['{broken', '{"version":2}'])(
+    'should retain blocked entry intent through flush and repair (%s)',
+    async (invalid) => {
+      const data = memory();
+      const entries = store(data);
+      try {
+        await entries.read();
+        const release = data.delay();
+        const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+        await vi.waitFor(() => {
+          expect(data.writes).toHaveBeenCalledOnce();
+        });
+        const foreign = encoder.encode(invalid);
+        data.setBytes(foreign);
+        release();
+        expect(await edited).toBe(false);
+        expect(await entries.flush()).toBe(false);
+        expect(data.get()).toEqual(foreign);
+        data.setBytes(encoder.encode(workbenchRecords.entries.serialize(seed())));
+        await entries.read();
+        expect(await entries.flush()).toBe(true);
+        expect(workbenchRecords.entries.read(data.get()!)).toMatchObject({
+          status: 'current',
+          record: { entries: { 'a.ts': { renderTimeout: 240_000 } } },
+        });
+      } finally {
+        entries.dispose();
+      }
+    },
+  );
+
+  it('should preserve invalid entry bytes on a clean flush', async () => {
+    const data = memory();
+    const foreign = encoder.encode('{broken');
+    data.setBytes(foreign);
+    const entries = store(data);
+    try {
+      await entries.read();
+      expect(await entries.flush()).toBe(true);
+      expect(data.get()).toEqual(foreign);
+      expect(data.writes).not.toHaveBeenCalled();
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('should resolve blocked entry intent only after an explicit checked Reset', async () => {
+    const data = memory();
+    const entries = store(data);
+    try {
+      await entries.read();
+      data.setBytes(encoder.encode('{broken'));
+      await entries.read();
+      expect(await entries.edit('a.ts', { renderTimeout: 240_000 })).toBe(false);
+      expect(await entries.flush()).toBe(false);
+      expect(await entries.reset(seed())).toBe(true);
+      expect(await entries.flush()).toBe(true);
+      expect(workbenchRecords.entries.read(data.get()!)).toEqual({ status: 'current', record: seed() });
+    } finally {
+      entries.dispose();
+    }
+  });
+
+  it('should retire a disposed entry owner before a late write failure can retry', async () => {
+    vi.useFakeTimers();
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const data = memory();
+    const writeFileChecked = vi.fn(async (): Promise<CheckedFileWriteResult> => {
+      entered.resolve();
+      await release.promise;
+      throw new Error('offline');
+    });
+    const entries = createWorkbenchEntriesStore({
+      root: '/root',
+      files: { ...data.files, writeFileChecked },
+      onChange: () => undefined,
+      onError: vi.fn(),
+    });
+    try {
+      await entries.read();
+      const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+      await entered.promise;
+      entries.dispose();
+      release.resolve();
+      expect(await edited).toBe(false);
+      await vi.runOnlyPendingTimersAsync();
+      expect(writeFileChecked).toHaveBeenCalledOnce();
+      expect(await entries.edit('a.ts', { renderTimeout: 300_000 })).toBe(false);
+      expect(writeFileChecked).toHaveBeenCalledOnce();
+    } finally {
+      release.resolve();
+      entries.dispose();
+      vi.useRealTimers();
+    }
+  });
   it('marks only exact in-flight entry patch fields on a matching watch read', async () => {
     const data = memory();
     const committed = Promise.withResolvers<void>();

@@ -1,7 +1,6 @@
-import { expectNativeGeo, it } from 'geospec';
+import { it } from 'geospec';
+import { loadModel } from 'geospec/model';
 
-it('requires explicit native runner mode', () => {
-  void expectNativeGeo({
-    subjectHash: '0000000000000000000000000000000000000000000000000000000000000000',
-  }).toBeWatertight();
+it('requires explicit native runner mode', async () => {
+  await loadModel({ source: 'baseline.step', format: 'step' });
 });

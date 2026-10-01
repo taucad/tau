@@ -234,6 +234,8 @@ export const refusals = {
   ENGINE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },
   INVALID_REPOSITORY: { owner: 'revisions', retry: 'never' },
   INVALID_TRANSPORT: { owner: 'revisions', retry: 'never' },
+  /** The remote transfer exceeded its byte bound; change the requested scope before retrying. */
+  FETCH_LIMIT_EXCEEDED: { owner: 'revisions', retry: 'never' },
   LFS_REMOTE_UNSUPPORTED: { owner: 'revisions', retry: 'never' },
   MISSING_LARGE_OBJECT: { owner: 'revisions', retry: 'never' },
   /** The remote's copy is damaged: terminal after one attempt (D22). */
@@ -251,7 +253,6 @@ export const refusals = {
   UNKNOWN_REVISION: { owner: 'revisions', retry: 'never' },
   UNSUPPORTED_OPERATION: { owner: 'revisions', retry: 'never' },
   BASE_CUT_FAILED: { owner: 'revisions', retry: 'never' },
-  FETCH_LIMIT_EXCEEDED: { owner: 'revisions', retry: 'never' },
   /** A lost compare-and-swap on the head; the checkout re-reads and retries. */
   CAS_LOST: { owner: 'revisions', retry: 'wait' },
   LEASE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },

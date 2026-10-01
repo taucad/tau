@@ -1861,6 +1861,9 @@ importers:
         specifier: 'catalog:'
         version: 4.4.3(patch_hash=d7585ce5c65a536c3bc4dc9d847622bd10ceed46b28fde35ddc0ff952b48e315)
     devDependencies:
+      '@gltf-transform/core':
+        specifier: 'catalog:'
+        version: 4.4.0
       '@taucad/agent-host':
         specifier: workspace:*
         version: link:../../packages/agent-host
@@ -1870,6 +1873,9 @@ importers:
       '@taucad/geospec-engine':
         specifier: workspace:*
         version: link:../../packages/geospec-engine
+      '@taucad/geospec-engine-native':
+        specifier: workspace:*
+        version: link:../../packages/geospec-engine-native
       '@taucad/runtime':
         specifier: workspace:*
         version: link:../../packages/runtime
@@ -1921,6 +1927,9 @@ importers:
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../../packages/plugins/esbuild
+      '@taucad/events':
+        specifier: workspace:*
+        version: link:../../libs/events
       '@taucad/filesystem':
         specifier: workspace:*
         version: link:../../packages/filesystem
@@ -3587,6 +3596,9 @@ importers:
       '@taucad/opencascade':
         specifier: workspace:*
         version: link:../plugins/opencascade
+      '@taucad/openrscad':
+        specifier: workspace:*
+        version: link:../plugins/openrscad
       '@taucad/picovoxel':
         specifier: workspace:*
         version: link:../plugins/picovoxel
@@ -3612,9 +3624,9 @@ importers:
       '@libcascade/toolchain':
         specifier: 'catalog:'
         version: 3.0.2
-      '@taucad/openrscad':
-        specifier: workspace:*
-        version: link:../plugins/openrscad
+      '@taucad/picogk':
+        specifier: workspace:^
+        version: link:../plugins/picogk
       '@taucad/tau-examples':
         specifier: workspace:*
         version: link:../../libs/tau-examples

@@ -118,11 +118,8 @@ function FileComparison({
   readonly n: number | undefined;
   // oxlint-disable-next-line typescript/no-restricted-types -- required by React
 }): React.JSX.Element | null {
-  const { original, modified, isLoading, isLoaded, error, retry } = useRevisionFileComparison(
-    revisionId,
-    path,
-    compareAgainst === 'checkout' ? 'checkout' : undefined,
-  );
+  const { original, modified, originalBytes, modifiedBytes, isLoading, isLoaded, error, retry } =
+    useRevisionFileComparison(revisionId, path, compareAgainst === 'checkout' ? 'checkout' : undefined);
   const label = `Comparison for ${path}`;
   if (isLoading) {
     return (
@@ -150,16 +147,35 @@ function FileComparison({
       </div>
     );
   }
-  if (!isLoaded) {
+  if (!isLoaded || originalBytes === undefined || modifiedBytes === undefined) {
     return null;
   }
-  if (original === modified) {
+  const metadata = (
+    <dl className='grid gap-1 px-2 py-1.5 text-xs'>
+      <div>
+        <dt>Original bytes</dt>
+        <dd className='font-mono wrap-anywhere'>
+          {originalBytes.digest} · {originalBytes.byteLength === null ? 'missing' : `${originalBytes.byteLength} bytes`}
+        </dd>
+      </div>
+      <div>
+        <dt>Current bytes</dt>
+        <dd className='font-mono wrap-anywhere'>
+          {modifiedBytes.digest} · {modifiedBytes.byteLength === null ? 'missing' : `${modifiedBytes.byteLength} bytes`}
+        </dd>
+      </div>
+    </dl>
+  );
+  if (originalBytes.digest === modifiedBytes.digest) {
     return (
-      <p id={id} role='note' aria-label={label} className='border-t px-2 py-1.5 text-xs text-muted-foreground'>
-        {compareAgainst === 'checkout'
-          ? `No changes since ${revisionName(n) ?? 'this revision'}.`
-          : 'No changes in this file.'}
-      </p>
+      <div id={id} className='border-t'>
+        {metadata}
+        <p role='note' aria-label={label} className='px-2 py-1.5 text-xs text-muted-foreground'>
+          {compareAgainst === 'checkout'
+            ? `No changes since ${revisionName(n) ?? 'this revision'}.`
+            : 'No changes in this file.'}
+        </p>
+      </div>
     );
   }
   return (
@@ -173,6 +189,7 @@ function FileComparison({
       /* An empty Shiki line keeps its height, and the hidden-lines label keeps the 12 px floor (round 5). */
       className='[scrollbar-width:thin] overflow-x-auto border-t bg-background focus-visible:focus-outline [&_.line:empty]:min-h-[1.6em] [&_.whitespace-nowrap]:text-xs'
     >
+      {metadata}
       <DiffViewer
         originalContent={original}
         modifiedContent={modified}

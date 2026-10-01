@@ -170,7 +170,7 @@ describe('desktopBridge', () => {
     });
   });
 
-  it.each(['legacy', 'native'] as const)('should forward the explicit GeoSpec engine %s', async (geoSpecEngine) => {
+  it('should connect the default compiled host without an engine choice', async () => {
     const { port, requestServicesPort } = installShellGlobal();
     const { desktopBridge } = await loadBridge();
 
@@ -179,14 +179,12 @@ describe('desktopBridge', () => {
         workspaceRoot: '/Users/tester/Projects/widget',
         projectId: 'proj_widget',
         computeMode: 'durable',
-        geoSpecEngine,
       }),
     ).resolves.toBe(port);
     expect(requestServicesPort).toHaveBeenCalledExactlyOnceWith(expect.any(String), 'agentHost', {
       workspaceRoot: '/Users/tester/Projects/widget',
       projectId: 'proj_widget',
       computeMode: 'durable',
-      geoSpecEngine,
     });
   });
 

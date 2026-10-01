@@ -21,11 +21,10 @@
 import { toGeoSpecProtocolJson } from 'geospec/engine';
 import { GeoSpecModelLoadError, resolveRuntimeExportIntent } from 'geospec/model';
 import type { KernelIssue } from '@taucad/runtime/types';
+import type { GeometrySubject as PublicGeometrySubject } from 'geospec/mesh';
 import type {
   CreateModelLoaderOptions,
   GeoSpecModelFormat,
-  GeoSpecModelLoader,
-  ManagedGeoSpecModelLoader,
   GeoSpecRuntimeClient,
   GeoSpecRuntimeSourceAdapter,
   LoadModelOptions,
@@ -45,6 +44,11 @@ export const invalidLoadModelOptionsCode = 'GEOSPEC_INVALID_LOAD_MODEL_OPTIONS';
 export const forbiddenRuntimeOptionKeys = ['sourceUnit', 'unit', 'scale', 'coordinateSystem'] as const;
 
 const stepFormats = new Set<GeoSpecModelFormat>(['step', 'stp']);
+
+type ReferenceModelLoader = <Code extends Record<string, string> = Record<string, string>>(
+  options: LoadModelOptions<Code>,
+) => Promise<PublicGeometrySubject>;
+type ManagedReferenceModelLoader = ReferenceModelLoader & { dispose(): Promise<void> };
 
 type SourceOptions = Extract<LoadModelOptions, { source: unknown }>;
 type RuntimeOptions = Exclude<LoadModelOptions, SourceOptions>;
@@ -337,11 +341,11 @@ export const loadModel = async <Code extends Record<string, string> = Record<str
 ): Promise<GeometrySubject> =>
   isSourceOptions(options) ? loadDirectSource(options) : loadFromRuntime(options as RuntimeOptions);
 
-const configureForensics = new WeakMap<GeoSpecModelLoader, (sink?: ForensicSink) => void>();
+const configureForensics = new WeakMap<ReferenceModelLoader, (sink?: ForensicSink) => void>();
 
 /** Attach a run-scoped forensic sink to an engine-owned model loader. */
 export const setModelLoaderForensicSink = (
-  loader: GeoSpecModelLoader | undefined,
+  loader: ReferenceModelLoader | undefined,
   sink?: ForensicSink,
 ): (() => void) => {
   const configure = loader === undefined ? undefined : configureForensics.get(loader);
@@ -356,7 +360,7 @@ export const setModelLoaderForensicSink = (
  * @returns The configured loader.
  * @public
  */
-export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): ManagedGeoSpecModelLoader => {
+export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): ManagedReferenceModelLoader => {
   let sharedRuntime: Promise<GeoSpecRuntimeClient> | undefined;
   let disposed = false;
   let forensicSink: ForensicSink | undefined;
@@ -391,7 +395,7 @@ export const createModelLoader = (defaults: CreateModelLoaderOptions = {}): Mana
     return runtime;
   };
 
-  const loader: GeoSpecModelLoader = async (options) => {
+  const loader: ReferenceModelLoader = async (options) => {
     if (isSourceOptions(options)) {
       const merged: SourceOptions = { ...defaults, ...options };
       return exposeEngineSubject(await loadDirectSource(merged, undefined, forensicSink));

@@ -29,7 +29,7 @@ describe('desktop GeoSpec engine selection', () => {
     desktop.open.mockResolvedValue({ execute: desktop.execute, close: desktop.close });
   });
 
-  it.each([false, true])('should use the same opt-in %s for registration and turn dialing', async (enabled) => {
+  it.each([false, true])('should ignore the stale opt-in %s for registration and turn dialing', async (enabled) => {
     desktop.enabled = enabled;
     const registration = await registerProjectAgentHost('project-widget', 'window-1');
     await dialAgentHost('desktop', 'project-widget');
@@ -41,7 +41,6 @@ describe('desktop GeoSpec engine selection', () => {
         {
           workspaceRoot: '/projects/widget',
           projectId: 'project-widget',
-          geoSpecEngine: enabled ? 'native' : 'legacy',
         },
       ]);
     }

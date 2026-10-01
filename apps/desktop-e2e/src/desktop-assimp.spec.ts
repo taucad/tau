@@ -17,6 +17,7 @@ import { basename, dirname, join, resolve as resolvePath } from 'node:path';
 import process from 'node:process';
 import type { Page } from 'playwright';
 import { afterEach, expect, test } from 'vitest';
+import type { RuntimeClient } from '@taucad/runtime';
 import { getBoundingBoxFromInspect, getInspectReport, glbToDocument, validateGlbData } from '@taucad/runtime-testing';
 
 import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
@@ -47,6 +48,16 @@ const lifecycleBlockedMaterialEntry = 'materials/lifecycle-blocked.mtl';
 const recoveredMaterialEntry = 'materials/recovered.mtl';
 const finalMaterialEntry = 'materials/final.mtl';
 const nativeBackendLog = 'libassimp backend=native addon=darwin-arm64-napi8';
+
+type AssimpDocument = ReturnType<RuntimeClient['open']>;
+type AssimpView = ReturnType<AssimpDocument['view']>;
+type AssimpLifecycleState = {
+  client: RuntimeClient;
+  document: AssimpDocument;
+  view: AssimpView;
+  first: ReturnType<AssimpView['rendering']>;
+  second?: ReturnType<AssimpView['rendering']>;
+};
 
 const materialSource = `newmtl TauBlue
 Ka 0 0 0
@@ -326,7 +337,7 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       expect(lifecycleFifo.status, lifecycleFifo.stderr).toBe(0);
       writeFileSync(lifecycleModelPath, objectSource(1, lifecycleBlockedMaterialEntry), 'utf8');
 
-      // Retain the original public render Promise in the packaged renderer.
+      // Retain the original public view rendering Promise in the packaged renderer.
       // Its preload bridge reaches main's registered broker and a separate
       // kernel utility, so the page remains responsive while Assimp blocks.
       const app = resolvePath(dirname(desktopE2EPackagedExecutable()), '../..');
@@ -340,10 +351,6 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       await page.evaluate(
         async ({ clientUrl, entryPath, projectRoot, rendererUrl }) => {
           type Callable = (...arguments_: unknown[]) => unknown;
-          type RuntimeClient = {
-            render(input: { source: { path: string } }): Promise<unknown>;
-            terminate(): void;
-          };
           // Keep this import page-native: Vitest rewrites syntactic dynamic imports
           // to its SSR helper, which does not exist in the packaged renderer.
           // oxlint-disable-next-line eslint/no-new-func -- The string keeps import() native to the packaged page.
@@ -387,9 +394,11 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
           }) as () => Promise<unknown>;
           const client = createRuntimeClient(await provideClientOptions()) as RuntimeClient;
           const state = globalThis as typeof globalThis & {
-            __tauAssimpLifecycle?: { client: RuntimeClient; first: Promise<unknown>; second?: Promise<unknown> };
+            __tauAssimpLifecycle?: AssimpLifecycleState;
           };
-          state.__tauAssimpLifecycle = { client, first: client.render({ source: { path: entryPath } }) };
+          const document = client.open({ source: { path: entryPath }, watch: false });
+          const view = document.view('model');
+          state.__tauAssimpLifecycle = { client, document, view, first: view.rendering() };
         },
         { clientUrl, entryPath: lifecycleModelEntry, projectRoot, rendererUrl },
       );
@@ -404,20 +413,18 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
 
       fifoWriter = await openPendingFifoWriter(lifecycleBlockedMaterialPath);
       writeFileSync(lifecycleModelPath, objectSource(2, recoveredMaterialEntry), 'utf8');
-      const first = await page.evaluate(async (entryPath) => {
+      const first = await page.evaluate(async () => {
         const state = (
           globalThis as typeof globalThis & {
-            __tauAssimpLifecycle?: {
-              client: { render(input: { source: { path: string } }): Promise<unknown> };
-              first: Promise<unknown>;
-              second?: Promise<unknown>;
-            };
+            __tauAssimpLifecycle?: AssimpLifecycleState;
           }
         ).__tauAssimpLifecycle;
         if (!state) {
           throw new Error('Packaged Assimp lifecycle client is unavailable');
         }
-        state.second = state.client.render({ source: { path: entryPath } });
+        state.second = state.document
+          .update({})
+          .then(async (outcome) => (outcome.superseded ? { superseded: true } : state.view.rendering()));
         return Promise.race([
           state.first,
           new Promise((_resolve, reject) => {
@@ -426,7 +433,7 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
             }, 10_000);
           }),
         ]);
-      }, lifecycleModelEntry);
+      });
       expect(first).toEqual({ superseded: true });
 
       closeFifoWriter();
@@ -434,41 +441,52 @@ test.skipIf(process.platform !== 'darwin' || process.arch !== 'arm64')(
       const second = await page.evaluate(async () => {
         const state = (
           globalThis as typeof globalThis & {
-            __tauAssimpLifecycle?: {
-              client: { terminate(): void };
-              second?: Promise<{
-                superseded: boolean;
-                geometry?: {
-                  success: boolean;
-                  data?: { content?: { byteLength?: number }; format?: string; hash?: string };
-                };
-              }>;
-            };
+            __tauAssimpLifecycle?: AssimpLifecycleState;
           }
         ).__tauAssimpLifecycle;
         if (!state?.second) {
           throw new Error('Packaged Assimp successor render is unavailable');
         }
-        const outcome = await Promise.race([
-          state.second,
-          new Promise<never>((_resolve, reject) => {
-            setTimeout(() => {
-              reject(new Error('Successor render did not settle'));
-            }, 120_000);
-          }),
-        ]);
-        const { geometry } = outcome;
-        state.client.terminate();
-        return {
-          format: geometry?.success ? geometry.data?.format : undefined,
-          hash: geometry?.success ? geometry.data?.hash : undefined,
-          byteLength: geometry?.success ? geometry.data?.content?.byteLength : undefined,
-          success: !outcome.superseded && geometry?.success === true,
-        };
+        try {
+          const outcome = await Promise.race([
+            state.second,
+            new Promise<never>((_resolve, reject) => {
+              setTimeout(() => {
+                reject(new Error('Successor render did not settle'));
+              }, 120_000);
+            }),
+          ]);
+          if (outcome.superseded || !outcome.rendering.success) {
+            return { success: false, issues: outcome.superseded ? [] : outcome.rendering.issues };
+          }
+          const { artifact, hash } = outcome.rendering;
+          if (artifact.mimeType !== 'model/gltf-binary' || !(artifact.content instanceof Uint8Array)) {
+            return { success: false, mimeType: artifact.mimeType };
+          }
+          const header = new DataView(
+            artifact.content.buffer,
+            artifact.content.byteOffset,
+            artifact.content.byteLength,
+          );
+          return {
+            success: true,
+            mimeType: artifact.mimeType,
+            hash,
+            byteLength: artifact.content.byteLength,
+            magic: header.getUint32(0, true),
+            version: header.getUint32(4, true),
+            declaredLength: header.getUint32(8, true),
+          };
+        } finally {
+          state.view.close();
+          state.document.close();
+          state.client.terminate();
+        }
       });
-      expect(second).toMatchObject({ format: 'gltf', success: true });
+      expect(second).toMatchObject({ mimeType: 'model/gltf-binary', success: true, magic: 0x46_54_6c_67, version: 2 });
       expect(second.hash).toMatch(/^[a-f0-9]{64}$/u);
       expect(second.byteLength).toBeGreaterThan(0);
+      expect(second.declaredLength).toBe(second.byteLength);
       expect(lifecyclePid).toBeDefined();
       await expect
         .poll(

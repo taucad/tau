@@ -1,5 +1,4 @@
-import type { RemoteKind } from '#remotes.js';
-import type { RemoteStorageRefusal } from '#revision-port.js';
+import type { RemoteKind, RemoteStorageRefusal } from '#revision-port.js';
 import type { SyncFailureReason } from '#sync.types.js';
 
 /**

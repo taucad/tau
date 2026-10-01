@@ -16,7 +16,7 @@ import { pathToFileURL } from 'node:url';
 import { parseArgs } from 'node:util';
 /* oxlint-disable no-restricted-imports -- Private lab reads the frozen native catalog and source receipts without publishing them. */
 import manifest from '../../../geospec-engine-native/bench/fixtures/performance-lab/manifest.json' with { type: 'json' };
-import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
+import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v6.json' with { type: 'json' };
 import {
   classifyPerformanceLabDifference,
   performanceLabCases,
@@ -341,9 +341,26 @@ const approvedPublicContract = {
   id: 'public-contract',
   path: 'packages/geospec/src/runner/types.ts',
   frozenSha256: '20303ca36a5ae9531cdd035c10e108e92b70aec76bba1aca849306dbe3eed82d',
-  currentSha256: '1ff1809df5e0e2142aca7d7117794b9994866311dba185df449edbf0875df974',
+  currentSha256: '2fbb333f95044d45bf63b6fbab86e94018eb2455fba05fffda73459edc6e7e15',
 } as const;
 export const verifySourceAuthority = async (observe: typeof hashPath = hashPath): Promise<void> => {
+  const overlayPath = resolvePath(
+    root,
+    'packages/geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v6.json',
+  );
+  const predecessorPath = resolvePath(
+    root,
+    'packages/geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json',
+  );
+  const overlay = await observe(overlayPath);
+  const predecessor = await observe(predecessorPath);
+  if (
+    overlay.sha256 !== 'bc258a7989947e1abce12b62dd1a79919c06a104c52312e41b7797a99fdffa8a' ||
+    predecessor.sha256 !== currentAuthority.predecessorSha256 ||
+    currentAuthority.predecessorSha256 !== 'd44d66f6f921727ac2c91645ec9c04d18c13cc14ac806d9aad50903b96b8fbcd'
+  ) {
+    throw new Error('Performance-lab successor authority differs from its immutable predecessor.');
+  }
   const manifestPath = resolvePath(root, 'packages/geospec-engine-native/bench/fixtures/performance-lab/manifest.json');
   const manifestHash = await observe(manifestPath);
   const native = manifest.analyticAuthority.sources.filter(({ id }) => id === 'native-contract');
@@ -366,6 +383,9 @@ export const verifySourceAuthority = async (observe: typeof hashPath = hashPath)
     .sort();
   if (
     currentAuthority.schemaVersion !== 1 ||
+    currentAuthority.id !== 'n8-current-source-v6-a1' ||
+    currentAuthority.nativeContract.currentSha256 !==
+      '5c0cc1737815c2295e2801d991d20891db53a1caa213630ea2671da6523c696b' ||
     currentAuthority.frozenManifestSha256 !== manifestHash.sha256 ||
     currentAuthority.nativeContract.sourceId !== 'native-contract' ||
     native.length !== 1 ||
@@ -377,11 +397,17 @@ export const verifySourceAuthority = async (observe: typeof hashPath = hashPath)
   ) {
     throw new Error('Performance-lab current-source overlay does not match its frozen authority.');
   }
-  const numericProfile = await readFile(
-    resolvePath(root, 'packages/geospec-engine-native/rust/tests/fixtures/current-profile-v5/numeric-profile.txt'),
-    'utf8',
-  );
-  if (numericProfile !== currentAuthority.approvedNumericProfile) {
+  const numericProfilePath =
+    'packages/geospec-engine-native/rust/tests/fixtures/current-profile-v6/numeric-profile.txt';
+  const numericProfile = await readFile(resolvePath(root, numericProfilePath));
+  if (
+    currentAuthority.approvedNumericProfile !== 'geospec-demand-v6' ||
+    currentAuthority.numericProfileSource.path !== numericProfilePath ||
+    currentAuthority.numericProfileSource.sha256 !==
+      'c36f2296878e3daa57cc0cdfe8c86dac3b77ed80d6ddbd60de68b31a64bba5f7' ||
+    createHash('sha256').update(numericProfile).digest('hex') !== currentAuthority.numericProfileSource.sha256 ||
+    numericProfile.toString('utf8') !== `${currentAuthority.approvedNumericProfile}\n`
+  ) {
     throw new Error('Performance-lab current-source numeric profile changed.');
   }
   const sources = [
@@ -671,6 +697,7 @@ const runParent = async (options: Options): Promise<void> => {
     '../../../geospec-engine-native/bench/fixtures/performance-lab/authority-queries.json',
     '../../../geospec-engine-native/bench/fixtures/performance-lab/analytic-cases.json',
     '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json',
+    '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v6.json',
   ];
   const sources = await Promise.all(sourcePaths.map(async (path) => hashPath(resolvePath(import.meta.dirname, path))));
   await mkdir(dirname(options.outputDir), { recursive: true });

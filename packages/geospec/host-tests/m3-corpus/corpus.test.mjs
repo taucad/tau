@@ -4,10 +4,107 @@ import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { test } from 'node:test';
-import { loadCurrentM3Campaign, loadM3Corpus } from './corpus.mjs';
-import { fixtureWorkspaceRoot } from '../fixtures/read-fixture.mjs';
+import { loadCurrentM3Campaign, loadM3Corpus, projectCurrentM3Campaign } from './corpus.mjs';
+import { fixtureWorkspaceRoot, readFixture } from '../fixtures/read-fixture.mjs';
+import { loadAuthority } from '../f1-public-a1/authority.mjs';
 
 const sha256 = (bytes) => createHash('sha256').update(bytes).digest('hex');
+
+void test('should bind the existing F1 authority to the exact current profile and independently verified definition', () => {
+  const authority = loadAuthority();
+  const original = JSON.parse(
+    readFixture(
+      'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/revisions/metadata-a2/fullwire-results.json',
+    ),
+  );
+  assert.equal(authority.rows.length, 12);
+  assert.equal(authority.admissions.size, 6);
+  for (const [index, row] of authority.rows.entries()) {
+    const prior = original[index];
+    assert.equal(row.id, prior.id);
+    assert.equal(JSON.parse(row.canonicalPlanUtf8).numericProfile, 'geospec-demand-v6');
+    assert.equal(
+      row.canonicalPlanUtf8,
+      prior.canonicalPlanUtf8
+        .replace('"numericProfile":"geospec-st-logical-requests-v2"', '"numericProfile":"geospec-demand-v6"')
+        .replace('"registryVersion":4', '"registryVersion":5'),
+    );
+    assert.ok(
+      row.claimResult.canonicalUtf8.includes('d0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350'),
+    );
+    assert.ok(
+      row.neutralResult.canonicalUtf8.includes('d0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350'),
+    );
+    assert.ok(row.claimResult.canonicalUtf8.includes(sha256(row.canonicalPlanUtf8)));
+    for (const key of ['claimResult', 'neutralResult']) {
+      let restored = row[key].canonicalUtf8
+        .replace(sha256(row.canonicalPlanUtf8), sha256(prior.canonicalPlanUtf8))
+        .replace(
+          'd0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350',
+          'cbf1df63a329f71fdc772938eb3a8a16f42d52983f82ccaf6966ea4182f4542c',
+        );
+      if (key === 'neutralResult') {
+        restored = restored.replace(
+          '"numericProfile":"geospec-demand-v6"',
+          '"numericProfile":"geospec-st-logical-requests-v2"',
+        );
+      }
+      assert.equal(restored, prior[key].canonicalUtf8);
+    }
+  }
+});
+
+void test('should preserve every frozen M3 declaration with only exact profile and F1 definition identities projected', () => {
+  const original = JSON.parse(readFixture('packages/geospec/host-tests/m3-corpus/current-authority-v5.json'));
+  const before = JSON.stringify(original);
+  const current = projectCurrentM3Campaign(original);
+  assert.equal(JSON.stringify(original), before);
+  for (const [index, row] of current.rows.entries()) {
+    const prior = original.rows[index];
+    const key = prior.expected.canonicalPlan.canonicalUtf8 === undefined ? 'derivationUtf8' : 'canonicalUtf8';
+    assert.deepEqual(row, {
+      ...prior,
+      expected: {
+        ...prior.expected,
+        canonicalPlan: {
+          ...prior.expected.canonicalPlan,
+          [key]: prior.expected.canonicalPlan[key].replace(
+            '"numericProfile":"geospec-demand-v5"',
+            '"numericProfile":"geospec-demand-v6"',
+          ),
+        },
+        ...(row.capability === 'toSatisfyRationalPlate'
+          ? { verifierSourceHash: 'd0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350' }
+          : {}),
+      },
+    });
+  }
+  for (const change of [
+    (value) => {
+      value.numericProfile = 'wrong';
+    },
+    (value) => {
+      value.definitions.f1.sha256 = '0'.repeat(64);
+    },
+    (value) => {
+      value.rows[0].expected.canonicalPlan.canonicalUtf8 = '{}';
+    },
+    (value) => {
+      value.rows[0].expected.canonicalPlan.canonicalUtf8 =
+        String(value.rows[0].expected.canonicalPlan.canonicalUtf8) + '"numericProfile":"geospec-demand-v5"';
+    },
+    (value) => {
+      value.rows[0].expected.canonicalResultUtf8 = '{}';
+    },
+    (value) => {
+      value.rows[0].id = value.rows[1].id;
+    },
+  ]) {
+    const changed = structuredClone(original);
+    change(changed);
+    assert.throws(() => projectCurrentM3Campaign(changed), assert.AssertionError);
+  }
+});
 
 void test('should assemble the frozen M3 corpus without crossing acceptance tracks', () => {
   const corpus = loadM3Corpus();
@@ -128,7 +225,12 @@ void test('should preserve approved request/plan bytes, identities and budgets w
   const pmi = [];
   for (const row of campaign.rows) {
     const planUtf8 = row.expected.canonicalPlan.canonicalUtf8 ?? row.expected.canonicalPlan.derivationUtf8;
-    contracts.push(`${row.id}\0${sha256(row.authoredRequestUtf8)}\0${sha256(planUtf8)}`);
+    assert.equal(planUtf8.split('"numericProfile":"geospec-demand-v6"').length, 2);
+    const historicalPlan = planUtf8.replace(
+      '"numericProfile":"geospec-demand-v6"',
+      '"numericProfile":"geospec-demand-v5"',
+    );
+    contracts.push(`${row.id}\0${sha256(row.authoredRequestUtf8)}\0${sha256(historicalPlan)}`);
     const authored = JSON.parse(row.authoredRequestUtf8);
     const canonical = JSON.parse(planUtf8);
     const ingest = JSON.parse(row.sourceRow.transport.ingestRequestUtf8);
@@ -137,7 +239,7 @@ void test('should preserve approved request/plan bytes, identities and budgets w
       assert.equal(request.registryVersion, 5);
       assert.equal(request.canonicalProfile, 'geospec-jcs-v1');
     }
-    assert.equal(canonical.numericProfile, 'geospec-demand-v5');
+    assert.equal(canonical.numericProfile, 'geospec-demand-v6');
     for (const request of [authored, canonical]) {
       const claim = request.plan.claims[0];
       assert.equal(claim.claimId, row.claimId);
@@ -172,7 +274,7 @@ void test('should resolve all 70 exact assets through the existing fixture closu
   assert.deepEqual(campaign.definitions, {
     f1: {
       path: 'packages/geospec-engine-native/rust/src/certificates/definition.rs',
-      sha256: '96b287ff9299888859c4338e9d7b05093dafed7fdfcade9811c7c1c4c9bcadd2',
+      sha256: 'd0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350',
     },
     f2: {
       path: 'packages/geospec-engine-native/rust/src/certificates/parallel_plane_definition.rs',

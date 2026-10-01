@@ -10,7 +10,7 @@
 
 import type { ContentDigest } from '@taucad/cache-core';
 import type { backendProviders, kernelProviders } from '@taucad/types/constants';
-import type { ExportFidelity, ExportFile, Geometry, GeometryResponse } from '@taucad/types';
+import type { ExportFidelity, ExportFile } from '@taucad/types';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterDeclaration, ParameterManifest } from '@taucad/parameters';
 import type {
@@ -303,27 +303,8 @@ export type BundlerRegistrations = BundlerRegistration[];
 // Operation Result Types
 // =============================================================================
 
-/**
- * Result type for createGeometry.
- * Used by kernel workers and middleware - geometry doesn't have hash yet.
- * The hash is added by kernel-worker.ts after the middleware chain.
- *
- * `data` is `undefined` when the kernel deferred its display artifact to the
- * `meshGeometry` phase (BRep kernels) — the orchestrator runs the mesh phase
- * on the display path and never on the export path.
- * @public
- */
-export type CreateGeometryResult = KernelResult<GeometryResponse | undefined>;
-
-/** Result of the display-only mesh phase. Successful results always carry geometry. @public */
-export type MeshGeometryResult = KernelResult<GeometryResponse>;
-
-/**
- * Completed result type for createGeometry.
- * Returned to consumers - geometry has hash for React keys and caching.
- * @public
- */
-export type HashedGeometryResult = KernelResult<Geometry>;
+/** Internal result of replaying evaluation to restore a native handle. @public */
+export type CreateGeometryResult = KernelResult<undefined>;
 
 /**
  * Outcome of extracting customizer parameters from a CAD script, used to render the parameter editor UI.
@@ -516,25 +497,9 @@ export type TransportCapabilities = {
 };
 
 /**
- * The single rolled-up capabilities surface exposed at
- * {@link RuntimeClient.capabilities}. Layers kernel-derived information
- * (every field of {@link CapabilitiesManifest}) under the same object as
- * transport-derived information (`autonomousRenderLoop`, `transport.*`)
- * so consumers reach for one property instead of branching between
- * `capabilities` and a separate `transportCapabilities`.
- *
- * - `autonomousRenderLoop` reflects whether the active transport drives
- *   its own render loop. `false` on no-worker hostings (browser main
- *   thread, edge worker) where consumers must call `client.render(...)`
- *   explicitly; `true` for in-process and worker transports. It does not
- *   imply filesystem reactivity — whether an external edit rerenders
- *   depends on the supplied filesystem adapter exposing `watch`.
- * - `transport.descriptor` is diagnostic only — `RuntimeClient` does not
- *   branch on transport identity.
- *
- * Both `Kernels` and `Transcoders` flow through from
- * {@link CapabilitiesManifest} so route narrowing carries over to the
- * rolled-up surface.
+ * Kernel-derived capabilities and diagnostic transport descriptor exposed at
+ * {@link RuntimeClient.capabilities}. Whether external file edits trigger a
+ * document evaluation depends on the filesystem adapter's `watch` support.
  *
  * @template Kernels - Tuple of registered `KernelPlugin`s
  * @template Transcoders - Tuple of registered `TranscoderPlugin`s
@@ -546,7 +511,6 @@ export type RuntimeCapabilities<
   Middleware extends ReadonlyArray<MiddlewarePlugin<any, any, any>> = MiddlewarePlugin[],
   Transcoders extends ReadonlyArray<TranscoderPlugin<any, any, any, any, any>> = TranscoderPlugin[],
 > = CapabilitiesManifest<Kernels, Middleware, Transcoders> & {
-  readonly autonomousRenderLoop: boolean;
   readonly transport: TransportCapabilities;
 };
 // oxlint-enable @typescript-eslint/no-explicit-any

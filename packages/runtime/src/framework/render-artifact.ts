@@ -1,4 +1,3 @@
-import type { Geometry } from '@taucad/types';
 import type { Dependency } from '#types/runtime-dependency.types.js';
 import type { KernelIssue, KernelResult } from '#types/runtime.types.js';
 import type { KernelOffers } from '#types/runtime-kernel-v2.types.js';
@@ -55,7 +54,7 @@ export type KernelBinding<KernelHandle = unknown> = {
  * @public
  */
 export type OperationOwner<KernelHandle = unknown> = {
-  kind: 'render-artifact' | 'request';
+  kind: 'request';
   file: RuntimeFileLocator;
   binding?: KernelBinding<KernelHandle>;
 };
@@ -94,6 +93,9 @@ export type EvaluationSlot = {
   nativeBuildInput?: NativeBuildInput;
   offers?: KernelOffers;
   issues?: KernelIssue[];
+  /** Terminal kernel output retained before response middleware transforms it. */
+  terminalOffers?: KernelOffers;
+  terminalIssues?: KernelIssue[];
   hasHandle: boolean;
   handle: unknown;
   liveNativeHandleSlot?: NativeHandleSlot;
@@ -101,19 +103,14 @@ export type EvaluationSlot = {
 };
 
 /**
- * Render result held by a materialized render artifact.
- *
- * `data` is `undefined` only for export-scoped materializations (`publish: false`)
- * of kernels that defer their display artifact to the `meshGeometry` phase — the
- * export path consumes the native-handle slots, never the display geometry.
- * Published (display) artifacts always carry `data`; the orchestrator enforces
- * the display-path invariant before publishing.
+ * Evaluation result held beside native-handle slots. View artifacts are
+ * produced separately by the selected view render operation.
  * @public
  */
-export type MaterializedRenderResult = KernelResult<Geometry | undefined>;
+export type MaterializedRenderResult = KernelResult<undefined>;
 
 /**
- * Materialized render output plus any native export artifacts available for the same identity.
+ * Materialized evaluation plus native handles available for views and exports.
  * @public
  */
 export type MaterializedRender = {

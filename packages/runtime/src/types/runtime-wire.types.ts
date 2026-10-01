@@ -58,12 +58,6 @@ export type TelemetrySpanRecord = TelemetryEntry & {
   readonly epoch: number;
 };
 
-/** Legacy preview signal slots still used by worker-local cooperative checks. @internal */
-export const signalSlot = {
-  abortGeneration: 0,
-  abortReason: 1,
-} as const;
-
 /** Numeric reasons shared by worker and transport abort channels. @internal */
 export const abortReason = {
   none: 0,

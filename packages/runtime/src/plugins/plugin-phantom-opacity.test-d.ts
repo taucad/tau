@@ -73,12 +73,12 @@ describe('plugin phantom opacity', () => {
   });
 
   it('keeps source ownership when source and edge declare the same key', () => {
-    type Source = KernelPlugin<{ csv: { owner: string; pinned: string } }, {}, 'source'>;
+    type Source = KernelPlugin<{ csv: { owner: string; pinned: string } }, Record<never, never>, 'source'>;
     type Edge = TranscoderPlugin<
       { pdf: TranscoderEdgeType<'csv', { owner: number; layout: boolean }> },
       'csv',
       'pdf',
-      {},
+      Record<never, never>,
       { pdf: 'pinned' }
     >;
     expectTypeOf<ExportOptionsFor<readonly [Source], readonly [Edge], 'pdf'>>().toEqualTypeOf<

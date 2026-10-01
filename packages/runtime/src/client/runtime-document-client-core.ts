@@ -63,7 +63,11 @@ type ClientTranscoders<R> = [AnyRuntimeDefinition] extends [R]
     : readonly TranscoderPlugin[];
 type RuntimeTranscodeInput<Transcoders extends readonly TranscoderPlugin[]> =
   CollectTranscodeRoutes<Transcoders> extends infer Route
-    ? Route extends { readonly from: infer From; readonly to: infer To; readonly options: infer Options }
+    ? Route extends {
+        readonly from: infer From;
+        readonly to: infer To;
+        readonly options: infer Options;
+      }
       ? {
           readonly from: Extract<From, string>;
           readonly to: Extract<To, string>;
@@ -109,9 +113,10 @@ type ClientEventHandlers<
 export type RuntimeClientOptionsWithTransport<
   Runtime extends AnyRuntimeDefinition | undefined = undefined,
   Transport extends AnyTransportPlugin = AnyTransportPlugin,
-> = { readonly transport: Transport; readonly operationTimeout?: number } & RuntimeConfigOption<
-  RuntimeForClient<Runtime, Transport>
->;
+> = {
+  readonly transport: Transport;
+  readonly operationTimeout?: number;
+} & RuntimeConfigOption<RuntimeForClient<Runtime, Transport>>;
 /** Runtime client options, including the selected transport. @public */
 export type RuntimeClientOptions<
   Runtime extends AnyRuntimeDefinition | undefined = undefined,
@@ -146,7 +151,10 @@ export type RuntimeClient<
 > = Readonly<{
   machines: RuntimeTransportFacet<MachineClient>;
   jobs: RuntimeTransportFacet<never>;
-  transport: { id: TransportId<Transport>; descriptor: TransportDescriptor<TransportId<Transport>> };
+  transport: {
+    id: TransportId<Transport>;
+    descriptor: TransportDescriptor<TransportId<Transport>>;
+  };
   capabilities:
     | RuntimeCapabilities<ClientKernels<Runtime>, ClientMiddleware<Runtime>, ClientTranscoders<Runtime>>
     | undefined;
@@ -234,7 +242,10 @@ export function createRuntimeClient(options: {
     available: false,
     reason: 'unsupported',
   };
-  const jobs: RuntimeTransportFacet<never> = { available: false, reason: 'unsupported' };
+  const jobs: RuntimeTransportFacet<never> = {
+    available: false,
+    reason: 'unsupported',
+  };
   const topics = {
     capabilities: new Topic<CapabilitiesManifest>(),
     state: new Topic<{ state: 'idle' | 'busy' | 'error'; detail?: string }>(),
@@ -420,7 +431,6 @@ export function createRuntimeClient(options: {
       }
       return {
         ...capabilities,
-        autonomousRenderLoop: true,
         transport: { descriptor: transport.describe() },
       };
     },

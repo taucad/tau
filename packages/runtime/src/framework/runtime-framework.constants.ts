@@ -27,8 +27,8 @@ export const defaultTranscodeTimeout = 60_000;
 /** Grace allowed for a transcoder to observe cancellation before its isolated host is terminated. Milliseconds. */
 export const transcodeTimeoutRecoveryGrace = 1000;
 
-/** Byte length of the shared signal channel: two legacy Int32 slots and one atomic document BigInt64 word. */
-export const signalBufferByteLength = 16;
+/** Byte length of the shared signal channel: one atomic document BigInt64 word. */
+export const signalBufferByteLength = 8;
 
 /** Maximum byte length the growable SharedArrayBuffer can expand to. */
-export const signalBufferMaxByteLength = 16;
+export const signalBufferMaxByteLength = 8;

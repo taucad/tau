@@ -10,11 +10,11 @@ import {
 } from '#framework/document-abort-state.js';
 import { checkAbort, clearAbortContext, setAbortContext } from '#framework/cooperative-abort.js';
 import { signalDocumentAbort } from '#transport/_internal/abort-channel.js';
-import { abortReason } from '#types/runtime-protocol.types.js';
+import { abortReason } from '#types/runtime-wire.types.js';
 
 describe('atomic document abort state', () => {
   it('publishes exact timeout reason with the target transition, including signed sequence values', () => {
-    const buffer = new SharedArrayBuffer(16);
+    const buffer = new SharedArrayBuffer(8);
     const view = documentAbortView(buffer);
     if (!view) {
       throw new Error('Expected the document signal view.');
@@ -24,7 +24,6 @@ describe('atomic document abort state', () => {
     const onSharedAbort = vi.fn();
     setAbortContext({
       signal: new AbortController().signal,
-      generation: 0,
       documentSignalView: view,
       documentSignalState: initial,
       onSharedAbort,
@@ -43,7 +42,7 @@ describe('atomic document abort state', () => {
   });
 
   it('rejects an old document during completion and successor admission', () => {
-    const buffer = new SharedArrayBuffer(16);
+    const buffer = new SharedArrayBuffer(8);
     const view = documentAbortView(buffer);
     if (!view) {
       throw new Error('Expected the document signal view.');
@@ -64,7 +63,7 @@ describe('atomic document abort state', () => {
     [abortReason.timeout, abortReason.superseded],
     [abortReason.superseded, abortReason.timeout],
   ])('keeps the first admitted abort reason %i when a later %i arrives', (first, second) => {
-    const buffer = new SharedArrayBuffer(16);
+    const buffer = new SharedArrayBuffer(8);
     const view = documentAbortView(buffer);
     if (!view) {
       throw new Error('Expected the document signal view.');
@@ -80,7 +79,7 @@ describe('atomic document abort state', () => {
   it('never mints a colliding 32-bit sequence or admits its alias', () => {
     expect(nextDocumentAbortSequence(4_294_967_294)).toBe(4_294_967_295);
     expect(() => nextDocumentAbortSequence(4_294_967_295)).toThrow(RangeError);
-    const buffer = new SharedArrayBuffer(16);
+    const buffer = new SharedArrayBuffer(8);
     const view = documentAbortView(buffer);
     if (!view) {
       throw new Error('Expected the document signal view.');

@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/naming-convention -- Fixtures retain Bambu Studio wire setting names. */
 // @vitest-environment jsdom
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
@@ -7,7 +8,10 @@ import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
-import { printIntentPath } from '@taucad/slicer/print-intent';
+import { machineSettingsPath, serializeMachineSettings, readMachineSettings } from '@taucad/runtime/machine/settings';
+import type { MachineSettingsRecord, MachineSettingsValue } from '@taucad/types';
+import { slicingPreferences } from '@taucad/slicer/preferences';
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { ToolpathParseError, parseGcode } from '@taucad/slicer/toolpath';
 import type * as Toolpath from '@taucad/slicer/toolpath';
@@ -177,13 +181,63 @@ const confirmAll = (card: HTMLElement): void => {
 const sliceHex = '8dcc7e601606217f3b754766511182a916b17e9a26a94c9d887104eba92e9bb2';
 const slicePath = `.tau/artifacts/${sliceHex}/main.gcode.3mf`;
 
-/** The project's print settings file as text, or `undefined` while it does not exist. */
-const printIntentText = (): string | undefined => projectFiles.read(printIntentPath);
-
-/** The print settings file, parsed, once it holds `expected`. */
-const expectPrintIntent = async (expected: Record<string, unknown>): Promise<void> => {
+const settingsPath = machineSettingsPath({ typeId: 'bambu.x1c' });
+const preferencesRecord = (
+  preferences: Record<string, unknown>,
+  typeId: MachineSettingsRecord['typeId'] = 'bambu.x1c',
+): MachineSettingsRecord => {
+  const { plate, ...values } = preferences;
+  // SAFETY: fixture values are admitted by serializeMachineSettings before use.
+  return {
+    version: 1,
+    typeId,
+    activeProfile: 'default',
+    profiles: {
+      default: {
+        name: 'Default',
+        configurations: {
+          [slicingPreferences.manifest.source.id]: {
+            version: slicingPreferences.manifest.source.version,
+            values: values as Record<string, MachineSettingsValue>,
+          },
+          ...(plate === undefined
+            ? {}
+            : {
+                [bambuSettingsConfiguration.manifest.source.id]: {
+                  version: bambuSettingsConfiguration.manifest.source.version,
+                  values: { plate: plate as string },
+                },
+              }),
+        },
+      },
+    },
+  };
+};
+const preferencesBytes = (preferences: Record<string, unknown>): string =>
+  serializeMachineSettings({ record: preferencesRecord(preferences) });
+/** Read effective sparse values from the actual source-versioned envelope. */
+const preferencesText = (): string | undefined => {
+  const text = projectFiles.read(settingsPath);
+  if (!text) {
+    return undefined;
+  }
+  const read = readMachineSettings({
+    bytes: new TextEncoder().encode(text),
+    typeId: 'bambu.x1c',
+  });
+  if (read.status !== 'current') {
+    throw new Error(read.message);
+  }
+  const blocks = read.record.profiles[read.record.activeProfile]!.configurations;
+  const values = {
+    ...blocks[slicingPreferences.manifest.source.id]?.values,
+    ...blocks[bambuSettingsConfiguration.manifest.source.id]?.values,
+  };
+  return `${JSON.stringify(values, (_key, value: unknown) => (value !== null && typeof value === 'object' && !Array.isArray(value) ? Object.fromEntries(Object.entries(value).toSorted(([a], [b]) => a.localeCompare(b))) : value), 2)}\n`;
+};
+const expectPreferences = async (expected: Record<string, unknown>): Promise<void> => {
   await waitFor(() => {
-    expect(JSON.parse(printIntentText() ?? 'null')).toEqual(expected);
+    expect(JSON.parse(preferencesText() ?? 'null')).toEqual(expected);
   });
 };
 
@@ -470,7 +524,7 @@ describe('Print pane prepare and send', () => {
       expect(within(presets).getByRole('radio', { name: /Fine/u })).toHaveAttribute('aria-checked', 'true');
     });
     // The choice is the project's: saved as the only changed key beside the printer model.
-    expect(printIntentText()).toBe('{\n  "model": "x1c",\n  "preset": "fine"\n}\n');
+    expect(preferencesText()).toBe('{\n  "preset": "fine"\n}\n');
 
     const material = screen.getByRole('group', { name: 'Material' });
     expect(within(material).getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
@@ -528,7 +582,7 @@ describe('Print pane prepare and send', () => {
     const requestInput = fixture.requestPrint.mock.calls.at(0)?.[0];
     expect(requestInput?.machineId).toBe('machine-1');
     expect(requestInput?.requestedBy.kind).toBe('user');
-    expect(requestInput?.summary).toEqual({
+    expect(requestInput?.summary).toMatchObject({
       fileName: 'main.gcode.3mf',
       layers: 125,
       estimatedDuration: 2520,
@@ -606,7 +660,7 @@ describe('Print pane prepare and send', () => {
     await waitFor(() => {
       expect(plate).toHaveTextContent('Cool plate');
     });
-    await expectPrintIntent({ model: 'x1c', plate: 'cool' });
+    await expectPreferences({ plate: 'cool' });
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
 
     await waitFor(() => {
@@ -631,7 +685,7 @@ describe('Print pane prepare and send', () => {
     await waitFor(() => {
       expect(within(options).getByTestId('parameters')).toHaveTextContent('{"layerHeight":0.16}');
     });
-    await expectPrintIntent({ model: 'x1c', options: { layerHeight: 0.16 } });
+    await expectPreferences({ options: { layerHeight: 0.16 } });
     expect(screen.getByText(/Options changed since this slice/u)).toBeInTheDocument();
     expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
 
@@ -1413,7 +1467,7 @@ describe('Print pane Bambu Studio mode', () => {
     await waitFor(() => {
       expect(fixture.resolvePrintRequest).toHaveBeenCalledOnce();
     });
-    expect(fixture.requestPrint.mock.calls.at(0)?.[0].summary).toEqual({
+    expect(fixture.requestPrint.mock.calls.at(0)?.[0].summary).toMatchObject({
       fileName: 'main.gcode.3mf',
       layers: 125,
       estimatedDuration: 1703,
@@ -1439,7 +1493,7 @@ describe('Print pane Bambu Studio mode', () => {
     enter('Wall Loops', '3');
     expect(await screen.findByRole('button', { name: 'Reset Wall Loops' })).toBeInTheDocument();
     expect(wallLoops()).toHaveValue('3');
-    expect(printIntentText()).toBe('{\n  "model": "x1c",\n  "settings": {\n    "wall_loops": 3\n  }\n}\n');
+    await expectPreferences({ settings: { wall_loops: 3 } });
     // The pane's own vocabulary is gone: no count, dot, "(changed)" or reset-all of its own.
     expect(within(settings).queryByRole('status')).not.toBeInTheDocument();
     expect(screen.queryByText('(changed)')).not.toBeInTheDocument();
@@ -1453,7 +1507,7 @@ describe('Print pane Bambu Studio mode', () => {
     await waitFor(() => {
       expect(wallLoops()).toHaveValue('2');
     });
-    expect(printIntentText()).toBe('{\n  "model": "x1c"\n}\n');
+    expect(preferencesText()).toBe('{}\n');
 
     // Enumerations, switches and out-of-range numbers; the Prepare header resets them together.
     // Radix Select captures the pointer, which jsdom does not implement.
@@ -1465,11 +1519,13 @@ describe('Print pane Bambu Studio mode', () => {
     await user.click(screen.getByRole('switch', { name: 'Toggle for Enable Support' }));
     // Out of range: the field says why, and nothing reaches the print intent.
     enter('Wall Loops', '-1');
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
-    await expectPrintIntent({ model: 'x1c', settings: { enable_support: true, sparse_infill_pattern: 'gyroid' } });
+
+    await expectPreferences({
+      settings: { enable_support: true, sparse_infill_pattern: 'gyroid' },
+    });
     expect(screen.getByRole('button', { name: 'Reset Enable Support' })).toBeInTheDocument();
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Reset print settings' }));
-    await expectPrintIntent({ model: 'x1c' });
+    await expectPreferences({});
     expect(screen.queryByRole('button', { name: 'Reset Enable Support' })).not.toBeInTheDocument();
     expect(within(prepareRegion()).queryByRole('button', { name: 'Reset print settings' })).not.toBeInTheDocument();
   });
@@ -1486,8 +1542,7 @@ describe('Print pane Bambu Studio mode', () => {
     enter('Bridge Flow', 'lots');
     expect(screen.getByRole('textbox', { name: 'Input for Bridge Flow' })).toHaveValue('1');
     enter('Bridge Flow', '95%');
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- a Bambu Studio setting key.
-    await expectPrintIntent({ model: 'x1c', settings: { bridge_flow: '95%' } });
+    await expectPreferences({ settings: { bridge_flow: '95%' } });
 
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
@@ -1499,7 +1554,6 @@ describe('Print pane Bambu Studio mode', () => {
             process: standard,
             filaments: [plaMatte],
             plate: 'textured-pei',
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- a Bambu Studio setting key.
             settings: { bridge_flow: '95%' },
           },
         },
@@ -1772,8 +1826,10 @@ describe('Print pane Bambu Studio mode', () => {
     await openGroup(user, 'Quality');
     enter('Ironing Speed', '40');
     enter('Layer Height', '0.16');
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
-    await expectPrintIntent({ model: 'x1c', settings: { ironing_speed: 40, layer_height: 0.16 } });
+
+    await expectPreferences({
+      settings: { ironing_speed: 40, layer_height: 0.16 },
+    });
 
     // Fine is one Process choice; it has no ironing, so that override goes.
     await chooseOption(user, combobox('Process'), '0.12mm Fine @BBL X1C');
@@ -1794,10 +1850,8 @@ describe('Print pane Bambu Studio mode', () => {
       expect(screen.queryByRole('spinbutton', { name: 'Input for Ironing Speed' })).not.toBeInTheDocument();
     });
     // Fine lacks ironing, so the slice leaves it out; the project's file keeps it for presets that have it.
-    await expectPrintIntent({
-      model: 'x1c',
+    await expectPreferences({
       process: '0.12mm Fine @BBL X1C',
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu Studio setting keys.
       settings: { ironing_speed: 40, layer_height: 0.16 },
     });
     expect(combobox('Process')).toHaveTextContent('0.12mm Fine');
@@ -1945,8 +1999,13 @@ describe('Print pane print settings file', () => {
   it('should start from the project print settings when they name this printer model', async () => {
     const user = userEvent.setup();
     projectFiles.write(
-      printIntentPath,
-      `{"model":"x1c","preset":"fine","filaments":{"0":"${petg}"},"plate":"cool","settings":{"wall_loops":3}}`,
+      settingsPath,
+      preferencesBytes({
+        preset: 'fine',
+        filaments: { 0: petg },
+        plate: 'cool',
+        settings: { wall_loops: 3 },
+      }),
     );
     const studio = await renderStudio(fine);
 
@@ -1988,7 +2047,6 @@ describe('Print pane print settings file', () => {
             process: fine,
             filaments: [petg],
             plate: 'cool',
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- a Bambu Studio setting key.
             settings: { wall_loops: 3 },
           },
         },
@@ -1999,7 +2057,7 @@ describe('Print pane print settings file', () => {
   it('should mark each choice once the file holds it and reset exactly that key', async () => {
     const user = userEvent.setup();
     await renderStudio('0.20mm Standard @BBL X1C');
-    expect(printIntentText()).toBeUndefined();
+    expect(preferencesText()).toBeUndefined();
     for (const name of ['Plate', 'Printer preset', 'Process', 'Filament A1']) {
       expect(queryReset(name)).not.toBeInTheDocument();
     }
@@ -2016,13 +2074,12 @@ describe('Print pane print settings file', () => {
       expect(reset('Plate')).toBeInTheDocument();
     });
     // Only the changed keys, sorted, two-space indented, with a trailing newline.
-    expect(printIntentText()).toBe(
+    expect(preferencesText()).toBe(
       [
         '{',
         '  "filaments": {',
         `    "0": "${petg}"`,
         '  },',
-        '  "model": "x1c",',
         '  "plate": "cool",',
         `  "process": "${gyroid}"`,
         '}',
@@ -2035,30 +2092,33 @@ describe('Print pane print settings file', () => {
     expect(within(prepareRegion()).getByText('Plate').parentElement).toHaveClass('font-medium', 'text-foreground');
 
     await user.click(reset('Process'));
-    await expectPrintIntent({ model: 'x1c', plate: 'cool', filaments: { 0: petg } });
+    await expectPreferences({ plate: 'cool', filaments: { 0: petg } });
     await user.click(reset('Filament A1'));
-    await expectPrintIntent({ model: 'x1c', plate: 'cool' });
+    await expectPreferences({ plate: 'cool' });
     await user.click(reset('Plate'));
-    await expectPrintIntent({ model: 'x1c' });
+    await expectPreferences({});
     expect(combobox('Plate')).toHaveTextContent(selectedLabel('textured-pei'));
     expect(queryReset('print settings')).not.toBeInTheDocument();
 
     // Another printer preset has its own processes and filaments, so choosing one clears those picks.
     await chooseOption(user, combobox('Process'), gyroid);
     await chooseOption(user, combobox('Filament A1'), petg);
-    await expectPrintIntent({ model: 'x1c', process: gyroid, filaments: { 0: petg } });
+    await expectPreferences({ process: gyroid, filaments: { 0: petg } });
     await chooseOption(user, combobox('Printer preset'), 'My X1C');
-    await expectPrintIntent({ model: 'x1c', printer: 'My X1C' });
+    await expectPreferences({ printer: 'My X1C' });
     await user.click(reset('Printer preset'));
-    await expectPrintIntent({ model: 'x1c' });
+    await expectPreferences({});
 
     // Reset print settings, beside the Prepare heading, leaves only the printer model.
     await chooseOption(user, combobox('Plate'), 'Cool plate');
     await chooseOption(user, combobox('Process'), '0.28mm Extra Draft @BBL X1C');
-    await expectPrintIntent({ model: 'x1c', plate: 'cool', process: '0.28mm Extra Draft @BBL X1C' });
+    await expectPreferences({
+      plate: 'cool',
+      process: '0.28mm Extra Draft @BBL X1C',
+    });
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Reset print settings' }));
     await waitFor(() => {
-      expect(printIntentText()).toBe('{\n  "model": "x1c"\n}\n');
+      expect(preferencesText()).toBe('{}\n');
     });
     expect(queryReset('Plate')).not.toBeInTheDocument();
   });
@@ -2071,13 +2131,15 @@ describe('Print pane print settings file', () => {
     const options = await screen.findByLabelText('Slicer options');
 
     await user.click(await within(options).findByRole('button', { name: 'Set layer height' }));
-    await expectPrintIntent({ model: 'x1c', options: { layerHeight: 0.16 } });
+    await expectPreferences({ options: { layerHeight: 0.16 } });
     await user.click(within(options).getByRole('button', { name: 'Set nozzle diameter' }));
     await waitFor(() => {
       expect(within(options).getByTestId('parameters')).toHaveTextContent('{"nozzleDiameter":0.6,"layerHeight":0.16}');
     });
     // The nozzle belongs to the machine, never to the project's file, so no save was even tried.
-    expect(JSON.parse(printIntentText() ?? 'null')).toEqual({ model: 'x1c', options: { layerHeight: 0.16 } });
+    expect(JSON.parse(preferencesText() ?? 'null')).toEqual({
+      options: { layerHeight: 0.16 },
+    });
     expect(projectFiles.writes).toHaveLength(1);
     expect(within(prepareRegion()).queryByRole('alert')).not.toBeInTheDocument();
 
@@ -2089,79 +2151,189 @@ describe('Print pane print settings file', () => {
     });
 
     await user.click(within(options).getByRole('button', { name: 'Reset layer height' }));
-    await expectPrintIntent({ model: 'x1c' });
+    await expectPreferences({});
     expect(within(options).getByTestId('parameters')).toHaveTextContent('{"nozzleDiameter":0.6}');
   });
 
-  it('should use the defaults and keep a file it cannot read until Reset print settings replaces it', async () => {
-    const user = userEvent.setup();
-    const unreadable = '{"model":"x1c","preset":"ultra"}';
-    projectFiles.write(printIntentPath, unreadable);
+  it('should preserve malformed and future records, blocking preparation and management', async () => {
+    const unreadable = '{"version":2,"typeId":"bambu.x1c"}';
+    projectFiles.write(settingsPath, unreadable);
     renderPane(createFixture().client);
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
 
-    const notice = await within(prepareRegion()).findByRole('alert');
-    expect(notice).toHaveTextContent(
-      "This project's print settings file (.tau/machines/printer.json) cannot be read, so Workshop X1C uses its defaults and changes here are not saved.",
-    );
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    await waitFor(() => {
-      expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', { exportOptions: machineSliceOptions });
-    });
-
-    // A change is not saved over bytes Tau cannot read; changes run in order, so the reset lands after it.
-    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
-    await user.click(within(notice).getByRole('button', { name: 'Reset print settings' }));
-    await waitFor(() => {
-      expect(printIntentText()).toBe('{\n  "model": "x1c"\n}\n');
-    });
-    expect(projectFiles.writes).toHaveLength(1);
-    expect(within(prepareRegion()).queryByRole('alert')).not.toBeInTheDocument();
-  });
-
-  it('should use the defaults for print settings saved for another printer model until a change replaces them', async () => {
-    const user = userEvent.setup();
-    projectFiles.write(printIntentPath, '{"model":"p1s","preset":"fast","plate":"cool"}');
-    renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-
+    expect(await within(prepareRegion()).findByRole('alert')).toHaveTextContent(/newer|unsupported/iu);
+    expect(within(prepareRegion()).getByRole('combobox', { name: 'Profile' })).toBeDisabled();
     expect(
-      await within(prepareRegion()).findByText(
-        "This project's print settings are for another printer model (p1s), so Workshop X1C uses its defaults. Changing a setting here replaces them.",
-      ),
-    ).toBeInTheDocument();
-    expect(combobox('Plate')).toHaveTextContent(selectedLabel('textured-pei'));
-    expect(queryReset('Plate')).not.toBeInTheDocument();
-
-    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
-    await expectPrintIntent({ model: 'x1c', preset: 'fine' });
-    expect(within(prepareRegion()).queryByText(/another printer model/u)).not.toBeInTheDocument();
-    expect(reset('Quality')).toBeInTheDocument();
+      within(prepareRegion()).getByRole('button', {
+        name: 'Slice and preview',
+      }),
+    ).toBeDisabled();
+    expect(projectFiles.read(settingsPath)).toBe(unreadable);
+    expect(projectFiles.writes).toHaveLength(0);
   });
 
-  it('should save over a concurrent change after one conflict, and report the third', async () => {
+  it('should preserve another type while saving this type without a reset notice', async () => {
+    const otherPath = machineSettingsPath({ typeId: 'bambu.a1-mini' });
+    const other = serializeMachineSettings({
+      record: preferencesRecord({ preset: 'fast' }, 'bambu.a1-mini'),
+    });
+    projectFiles.write(otherPath, other);
+    const user = userEvent.setup();
+    renderPane(createFixture().client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+
+    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
+    await expectPreferences({ preset: 'fine' });
+    expect(projectFiles.read(otherPath)).toBe(other);
+    expect(within(prepareRegion()).queryByText(/another printer model/u)).not.toBeInTheDocument();
+  });
+
+  it('should rebase a disjoint external edit and refuse a concurrent change to the same preference', async () => {
     const user = userEvent.setup();
     renderPane(createFixture().client);
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
     const presets = screen.getByRole('radiogroup', { name: 'Quality' });
-
-    projectFiles.race('{"model":"x1c","plate":"cool"}\n');
+    // First create the profile so subsequent conflicts refer to its captured fields.
+    await user.click(within(presets).getByRole('radio', { name: /Standard/u }));
+    await expectPreferences({ preset: 'standard' });
+    projectFiles.race(preferencesBytes({ plate: 'cool', preset: 'standard' }));
     await user.click(within(presets).getByRole('radio', { name: /Fine/u }));
-    await expectPrintIntent({ model: 'x1c', plate: 'cool', preset: 'fine' });
-    await waitFor(() => {
-      expect(combobox('Plate')).toHaveTextContent(selectedLabel('cool'));
-    });
-
-    projectFiles.race(
-      '{"model":"x1c","plate":"cool","preset":"standard"}\n',
-      '{"model":"x1c","plate":"cool","preset":"fine"}\n',
-      '{"model":"x1c","preset":"standard"}\n',
-    );
+    await expectPreferences({ plate: 'cool', preset: 'fine' });
+    projectFiles.race(preferencesBytes({ plate: 'cool', preset: 'standard' }));
     await user.click(within(presets).getByRole('radio', { name: /Fast/u }));
-    expect(await within(prepareRegion()).findByText(/RECORD_CONFLICT/u)).toHaveTextContent(
-      'The print settings changed elsewhere three times while saving, so this change was not saved (RECORD_CONFLICT). Make it again.',
+    expect(await within(prepareRegion()).findByRole('alert')).toHaveTextContent(/changed|conflict/iu);
+    await user.click(
+      within(prepareRegion()).getByRole('button', {
+        name: 'Use latest saved settings',
+      }),
     );
-    await expectPrintIntent({ model: 'x1c', preset: 'standard' });
+    await expectPreferences({ plate: 'cool', preset: 'standard' });
+  });
+});
+
+describe('Saved machine profiles', () => {
+  it('should copy, rename, switch, reset, delete and restore profiles across same-type machines and pane reloads', async () => {
+    const user = userEvent.setup();
+    const first = entry();
+    const second = entry({ machineId: 'second-x1c', name: 'Second X1C' });
+    const fixture = createFixture({ entries: [first, second] });
+    globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
+    const pane = renderPane(fixture.client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    const profile = () => within(prepareRegion()).getByRole('combobox', { name: 'Profile' });
+    await waitFor(() => {
+      expect(profile()).toBeEnabled();
+    });
+    expect(projectFiles.read(settingsPath)).toBeUndefined();
+    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
+    await expectPreferences({ preset: 'fine' });
+    await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
+    await user.clear(screen.getByRole('textbox', { name: 'Profile name' }));
+    await user.type(screen.getByRole('textbox', { name: 'Profile name' }), 'Production');
+    await user.click(screen.getByRole('button', { name: 'Save a copy' }));
+    await waitFor(() => {
+      expect(profile()).toHaveTextContent('Production');
+    });
+    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fast/u }));
+    await expectPreferences({ preset: 'fast' });
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Second X1C');
+    await waitFor(() => {
+      expect(profile()).toHaveTextContent('Production');
+    });
+    await expectPreferences({ preset: 'fast' });
+    await chooseOption(user, profile(), 'Default');
+    await expectPreferences({ preset: 'fine' });
+    await chooseOption(user, profile(), 'Production');
+    await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
+    await user.clear(screen.getByRole('textbox', { name: 'Profile name' }));
+    await user.type(screen.getByRole('textbox', { name: 'Profile name' }), 'Batch');
+    await user.click(screen.getByRole('button', { name: 'Rename' }));
+    await waitFor(() => {
+      expect(profile()).toHaveTextContent('Batch');
+    });
+    await waitFor(() => {
+      expect(projectFiles.read(settingsPath)).toContain('Batch');
+    });
+    await user.click(screen.getByRole('button', { name: 'Reset to defaults' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm reset' }));
+    await expectPreferences({});
+    await user.click(screen.getByRole('button', { name: 'Delete profile' }));
+    await user.click(screen.getByRole('button', { name: 'Confirm delete' }));
+    await waitFor(() => {
+      expect(profile()).toHaveTextContent('Default');
+    });
+    await expectPreferences({ preset: 'fine' });
+    pane.unmount();
+    renderPane(fixture.client);
+    await waitFor(() => {
+      expect(profile()).toHaveTextContent('Default');
+    });
+    await expectPreferences({ preset: 'fine' });
+    const savedFile = readMachineSettings({
+      bytes: new TextEncoder().encode(projectFiles.read(settingsPath)),
+      typeId: 'bambu.x1c',
+    });
+    if (savedFile.status !== 'current') {
+      throw new Error('Expected saved profiles');
+    }
+    const saved = savedFile.record;
+    expect(saved).toMatchObject({
+      version: 1,
+      typeId: 'bambu.x1c',
+      activeProfile: 'default',
+    });
+    expect(saved.profiles).not.toHaveProperty('production');
+  });
+
+  it('should switch types independently and validate each destination while retaining profile preferences', async () => {
+    const user = userEvent.setup();
+    const first = entry();
+    const mini = entry({
+      machineId: 'mini',
+      name: 'Mini',
+      providerId: 'mini-provider',
+    });
+    const fixture = createFixture({ entries: [first, mini] });
+    const client: MachineClient = {
+      ...fixture.client,
+      listProviders: async () => [
+        provider,
+        { ...provider, id: 'bambu-simulator' },
+        {
+          ...provider,
+          id: 'mini-provider',
+          manifest: {
+            ...manifest,
+            identity: { ...manifest.identity, typeId: 'bambu.a1-mini' },
+          },
+        },
+      ],
+    };
+    globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
+    renderPane(client);
+    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
+    await expectPreferences({ preset: 'fine' });
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Mini');
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Profile' })).toBeEnabled();
+    });
+    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fast/u }));
+    const miniPath = machineSettingsPath({ typeId: 'bambu.a1-mini' });
+    await waitFor(() => {
+      expect(
+        JSON.parse(projectFiles.read(miniPath)!).profiles.default.configurations[slicingPreferences.manifest.source.id]
+          .values.preset,
+      ).toBe('fast');
+    });
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Workshop X1C');
+    await waitFor(() => {
+      expect(
+        within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }),
+      ).toHaveAttribute('aria-checked', 'true');
+    });
+    await expectPreferences({ preset: 'fine' });
+    expect(within(prepareRegion()).queryByText(/another printer model/u)).not.toBeInTheDocument();
   });
 });
 

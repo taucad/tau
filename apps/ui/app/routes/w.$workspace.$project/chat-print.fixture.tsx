@@ -355,8 +355,14 @@ export const parametersMock = (actual: typeof ParametersModule): typeof Paramete
 const millimetres = (value: number) => ({ value, unit: 'mm' });
 const celsius = (value: number) => ({ value, unit: 'Cel' });
 export const manifest = parseMachineManifest({
-  version: 1,
-  identity: { vendor: 'Bambu Lab', model: 'x1c', displayName: 'X1 Carbon', qualifiedFirmware: ['01.08.02.00'] },
+  version: 2,
+  identity: {
+    typeId: 'bambu.x1c',
+    vendor: 'Bambu Lab',
+    model: 'x1c',
+    displayName: 'X1 Carbon',
+    qualifiedFirmware: ['01.08.02.00'],
+  },
   technology: 'additive.fff',
   geometry: {
     unit: 'mm',

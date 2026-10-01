@@ -274,6 +274,10 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       candidate.submissionConfiguration === null ||
       typeof candidate.submissionConfiguration !== 'object' ||
       !('schema' in candidate.submissionConfiguration) ||
+      ('settingsConfiguration' in candidate &&
+        (candidate.settingsConfiguration === null ||
+          typeof candidate.settingsConfiguration !== 'object' ||
+          !('schema' in candidate.settingsConfiguration))) ||
       typeof Reflect.get(candidate, 'discover') !== 'function' ||
       typeof Reflect.get(candidate, 'connect') !== 'function'
     ) {

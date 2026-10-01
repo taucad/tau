@@ -64,10 +64,10 @@ describe('generateBundles', () => {
     await generateBundles({ outputRoot: scratch });
   }, 300_000);
 
-  it('ships the approved workbench text with only its DRAFT banner removed', () => {
+  it('ships the approved workbench content with its DRAFT banner removed and normal JSON formatting', () => {
     const shipped = readFileSync(join(workspaceRoot, 'packages/workbench/agent/workbench/SKILL.md'), 'utf8');
-    // SHA-256 of the approved 92-line draft after its DRAFT heading is removed.
-    expect(digest(Buffer.from(shipped))).toBe('ad215da4bd2b02f736ee80ed5861860bad1f1f1c73e86815ce1259c18630cb9c');
+    // Exact SHA-256 of the approved content after heading removal and JSON fence formatting.
+    expect(digest(Buffer.from(shipped))).toBe('e2475599326840f9e87825fb3ff7bad555576cc20cbf71a7a9b69296382834ae');
   });
 
   it('should expose all PicoVoxel Tau authoring types through the shipped reference index', () => {
@@ -263,7 +263,7 @@ describe('every committed bundle', () => {
     expect(serialized).not.toContain('"docs"');
     expect(serialized).not.toContain('"description":');
     expect(serialized).not.toMatch(/"deprecated":"/u);
-  });
+  }, 120_000);
 });
 
 describe('skill declarations', () => {

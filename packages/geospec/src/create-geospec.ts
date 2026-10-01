@@ -4,14 +4,12 @@
  * @module
  */
 
-import { createCollector, getCollector, getLegacyCollector, getNativeCollector } from '#runner/collector.js';
+import { getCollector } from '#runner/collector.js';
 import type { AnalyzeMeshOptions, AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
-import type { GeoSpecNativeSubject } from '#assertion-client/index.js';
-import type { GeoSpecMatcher, GeoSpecNativeRunnerMatcher } from '#runner/types.js';
-
-/** Native subject identity accepted by the authored native assertion helper. @public */
-export type GeoSpecNativeAuthoringSubject = GeoSpecNativeSubject &
-  ({ readonly contentHash: string } | { readonly subjectHash: string });
+import type { GeoSpecMatcher } from '#runner/types.js';
+import { expectGeoSubject } from '#model/subject-assertions.js';
+import type { GeoSpecSubject } from '#model/subject.js';
+import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 
 /**
  * Stateful GeoSpec API created by {@link createGeoSpec}.
@@ -103,20 +101,8 @@ export const test = it;
  * @returns GeoSpec geometry matchers.
  * @public
  */
-export function expectGeo(subject: unknown): GeoSpecMatcher {
-  return getLegacyCollector().expectGeo(subject);
-}
-
-/**
- * Start a native geometry assertion chain through an explicitly native collector.
- *
- * @param subject - Content-addressed native subject under test.
- * @returns Awaitable native GeoSpec matchers.
- * @throws When the active collector was not configured for native assertions.
- * @public
- */
-export function expectNativeGeo(subject: GeoSpecNativeAuthoringSubject): GeoSpecNativeRunnerMatcher {
-  return getNativeCollector().expectGeo(subject);
+export function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher {
+  return expectGeoSubject(subject);
 }
 
 /**
@@ -127,6 +113,4 @@ export function expectNativeGeo(subject: GeoSpecNativeAuthoringSubject): GeoSpec
  *
  * @public
  */
-export const geoSpecMatcherNames: readonly string[] = Object.freeze(
-  Object.keys(createCollector().expectGeo(undefined)),
-);
+export const geoSpecMatcherNames: readonly string[] = Object.freeze(Object.keys(geoSpecMatcherDescriptors));

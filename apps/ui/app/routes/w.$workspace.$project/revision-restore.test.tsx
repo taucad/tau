@@ -48,6 +48,27 @@ beforeEach(() => {
 });
 
 describe('RevisionRestore', () => {
+  it('should name a connection failure as history attachment without claiming a failed save', () => {
+    render(<RevisionRestore />);
+    for (const listener of revisionStatusHarness.toasts) {
+      listener({
+        type: 'error',
+        subject: 'connection',
+        code: 'HOST_CONFIGURATION_MISMATCH',
+        message: 'The host refused this revision connection.',
+        generation: 1,
+        connectionOperation: 'status',
+      });
+    }
+    expect(toastError).toHaveBeenCalledOnce();
+    expect(toastError.mock.calls[0]?.[0]).toBe('History could not connect');
+    expect(capture).toHaveBeenCalledWith(
+      'revision_connection_failed',
+      expect.objectContaining({ code: 'HOST_CONFIGURATION_MISMATCH', generation: 1, operation: 'status' }),
+    );
+    expect(toastSuccess).not.toHaveBeenCalled();
+  });
+
   it('names the deletions the plan found, not a page-side guess', () => {
     plan({ asking: true, removedPathCount: 2 });
 

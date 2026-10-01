@@ -1,7 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { analyzeMesh, loadMesh } from 'geospec/mesh';
 import type { AnalyzeMeshOptions, MeshBufferSource } from 'geospec/mesh';
-import { createGeoSpec } from 'geospec';
 import { createCollector, runGeoSpecModule } from 'geospec/runner';
 import { clearGeoSpecEngine, isGeoSpecJsonValue, registerGeoSpecEngine } from 'geospec/engine';
 import { geoSpecEngineImplementation } from '#register.js';
@@ -104,6 +103,7 @@ describe('public full mesh analysis', () => {
     expect(watertight).not.toHaveBeenCalled();
     quality.mockRestore();
     watertight.mockRestore();
+    const { createGeoSpec } = await import('geospec');
     const analysis = await createGeoSpec().analyzeMesh({ subject: loaded.subject });
     if (!analysis.success) {
       throw new Error(JSON.stringify(analysis.diagnostics));
@@ -224,18 +224,18 @@ describe('public full mesh analysis', () => {
     const entryPath = 'analysis.geospec.ts';
     const result = await runGeoSpecModule({
       entryPath,
-      modelLoader: async () => loaded.subject,
       filesystem: memoryFileSystem({
         [entryPath]: `
         import { it } from 'geospec';
-        import { loadModel } from 'geospec/model';
         import { analyzeMesh } from 'geospec/mesh';
         it('source and subject', async () => {
           for (const invalid of [null, undefined, [], {}]) {
             const failure = await analyzeMesh(invalid);
             if (failure.success || failure.diagnostics.length === 0) throw new Error('invalid input was accepted');
           }
-          const subject = await loadModel({ file: 'model.ts' });
+          const loaded = await analyzeMesh({ source: ${JSON.stringify(source)} });
+          if (!loaded.success) throw new Error('VM mesh load failed');
+          const subject = loaded.subject;
           const retained = await analyzeMesh({ subject });
           const direct = await analyzeMesh({ source: ${JSON.stringify(source)} });
           if (!retained.success || !direct.success || JSON.stringify(retained.stats) !== JSON.stringify(direct.stats)) throw new Error('analysis mismatch');
@@ -243,9 +243,18 @@ describe('public full mesh analysis', () => {
       `,
       }),
     });
-    expect(result.success && result.passed).toBe(true);
-    expect(release).toHaveBeenCalledTimes(1);
-    expect(resolveEngineSubject(release.mock.calls[0]![0].subjectId)).toBeUndefined();
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error('VM low-level analysis failed');
+    }
+    expect(result.tests.map(({ status }) => status)).toEqual(['passed']);
+    expect(result.passed).toBe(true);
+    expect(result.lineage?.loads).toEqual([]);
+    expect(result.tests[0]?.assertions).toEqual([]);
+    expect(release).toHaveBeenCalledTimes(2);
+    for (const [request] of release.mock.calls) {
+      expect(resolveEngineSubject(request.subjectId)).toBeUndefined();
+    }
     expect(resolveEngineSubject(loaded.subject.subjectId)).toBeDefined();
   });
 

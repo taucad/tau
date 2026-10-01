@@ -84,6 +84,15 @@ def load_current_corpus(binding_profile="core-only"):
             joined["expectedUtf8"] = joined["expectedUtf8"].replace(
                 core_backends, '"backends":{"brep":true,"csg":true}'
             )
+            capability_end = '],"configuration":'
+            minimum_capability = '{"implementation":"implemented","name":"minimumDistance","profile":"geospec-minimum-distance-v1","qualification":"unqualified","registryVersion":5,"scope":"declared-subject-profile"}'
+            capabilities = json.loads(joined["expectedUtf8"])["result"]["capabilities"]
+            assert joined["expectedUtf8"].count(capability_end) == 1
+            assert capabilities[-1]["name"] == "queryPmi"
+            assert all(capability["name"] != "minimumDistance" for capability in capabilities)
+            joined["expectedUtf8"] = joined["expectedUtf8"].replace(
+                capability_end, ',' + minimum_capability + capability_end
+            )
         # Same fresh-admission rule as rust/tests/plan_conformance.rs.
         if not record["ingest"] and record["operation"] in ("evaluatePlan", "processRequest") and (
             "expectedUtf8" in record or record["id"] == "plan/unavailable/analyzeBrep/evaluatePlan"
@@ -95,6 +104,36 @@ def load_current_corpus(binding_profile="core-only"):
 
 CORPUS = load_current_corpus("full-backend")
 MESHES = {mesh["id"]: mesh for mesh in CORPUS["meshes"]}
+
+
+def test_full_backend_binding_preserves_every_other_frozen_expectation():
+    core = load_current_corpus("core-only")
+    full = load_current_corpus("full-backend")
+    assert full["meshes"] == core["meshes"]
+    assert full["equivalentCanonicalGroups"] == core["equivalentCanonicalGroups"]
+    assert len(full["records"]) == len(core["records"]) == 320
+    changed = 0
+    for baseline, row in zip(core["records"], full["records"], strict=True):
+        if row["id"] != "a1/raw/initialize":
+            assert row == baseline
+            continue
+        changed += 1
+        expected = json.loads(row["expectedUtf8"])
+        capability = expected["result"]["capabilities"][-1]
+        assert capability == {
+            "implementation": "implemented", "name": "minimumDistance",
+            "profile": "geospec-minimum-distance-v1", "qualification": "unqualified",
+            "registryVersion": 5, "scope": "declared-subject-profile",
+        }
+        assert sum(item["name"] == "minimumDistance" for item in expected["result"]["capabilities"]) == 1
+        restored = row["expectedUtf8"].replace(
+            ',' + json.dumps(capability, separators=(',', ':')), ''
+        ).replace('"backends":{"brep":true,"csg":true}', '"backends":{"brep":false,"csg":false}')
+        assert restored == baseline["expectedUtf8"]
+        assert {**row, "expectedUtf8": restored} == baseline
+    assert changed == 1
+    assert hashlib.sha256(CORPUS_BYTES).hexdigest() == "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a82de83ea729476"
+    assert hashlib.sha256(PROFILE_BYTES).hexdigest() == "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d"
 
 
 def input_bytes(record):

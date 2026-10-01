@@ -3,7 +3,7 @@
 export { createNativeGeoSpecRunner } from '#runner/native/native-serial-runner.js';
 export { allocateNativePoolGrants } from '#runner/native/native-pool-grants.js';
 export type { GeoSpecNativeRunnerAssertions, GeoSpecNativeRunnerOptions } from '#runner/native/native-serial-runner.js';
-export { createGeoSpecNativeModelLoader, loadNativeModel } from '#model/native-model-loader.js';
+export { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 export type {
   CreateGeoSpecNativeModelLoaderOptions,
   GeoSpecNativeLoadModelOptions,

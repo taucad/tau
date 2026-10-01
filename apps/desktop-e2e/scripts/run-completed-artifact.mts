@@ -323,6 +323,8 @@ const main = async (): Promise<void> => {
         'src/desktop-ephemeral-isolation.spec.ts',
         'src/desktop-image-geospec.spec.ts',
         'src/desktop-geometry-host.spec.ts',
+        'src/desktop-chat-replay.spec.ts',
+        'src/desktop-chat-in-project.spec.ts',
         'src/desktop-measurement-exact.spec.ts',
         'src/desktop-thumbnail-lifecycle.spec.ts',
         'src/desktop-native-payload.spec.ts',

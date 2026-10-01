@@ -126,7 +126,7 @@
         "parallel": false,
         "commands": [
           "./scripts/ensure-services.sh",
-          "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts src/desktop-main-editor-kernels.spec.ts src/desktop-converter.spec.ts src/desktop-ephemeral-isolation.spec.ts src/desktop-image-geospec.spec.ts src/desktop-geometry-host.spec.ts src/desktop-measurement-exact.spec.ts src/desktop-thumbnail-lifecycle.spec.ts src/desktop-native-payload.spec.ts src/desktop-community-preview.spec.ts"
+          "TAU_E2E_DESKTOP_EXECUTABLE=\"$PWD/../desktop/package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau\" ../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-build123d.spec.ts src/desktop-assimp.spec.ts src/desktop-main-editor-kernels.spec.ts src/desktop-converter.spec.ts src/desktop-ephemeral-isolation.spec.ts src/desktop-image-geospec.spec.ts src/desktop-geometry-host.spec.ts src/desktop-chat-replay.spec.ts src/desktop-chat-in-project.spec.ts src/desktop-measurement-exact.spec.ts src/desktop-thumbnail-lifecycle.spec.ts src/desktop-native-payload.spec.ts src/desktop-community-preview.spec.ts"
         ],
         "env": {
           "TAU_E2E_API_URL": "http://localhost:4014"

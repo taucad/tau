@@ -41,7 +41,7 @@ describe('createNodeGeoSpecCliHost', () => {
     expect(await filesystem.stat(join(root, 'a.geospec.ts'))).toStrictEqual({ kind: 'file' });
   });
 
-  it('should build a serial runner that executes a real project file', async () => {
+  it('should build a compiled one-worker runner that executes a real project file', async () => {
     const root = await project();
     const runner = createNodeGeoSpecCliHost().createRunner({
       projectPath: root,
@@ -55,7 +55,7 @@ describe('createNodeGeoSpecCliHost', () => {
     expect(result.success).toBe(true);
   });
 
-  it('should pass explicit cache controls to serial and pooled runners', async () => {
+  it('should accept disabled caching and reject unsupported persistent cache controls', async () => {
     const root = await project();
     const host = createNodeGeoSpecCliHost({ reportStream: () => undefined });
     const serial = host.createRunner({ projectPath: root, workers: undefined, shardTimeout: undefined, cache: false });
@@ -63,24 +63,26 @@ describe('createNodeGeoSpecCliHost', () => {
     expect(serialResult.success).toBe(true);
     await serial.close();
 
-    const cached = host.createRunner({
-      projectPath: root,
-      workers: undefined,
-      shardTimeout: undefined,
-      cacheDirectory: join(tmpdir(), 'geospec-node-host-serial-cache'),
-    });
-    const cachedResult = await cached.run({ files: ['a.geospec.ts'] });
-    expect(cachedResult.success).toBe(true);
-    await cached.close();
+    expect(() =>
+      host.createRunner({
+        projectPath: root,
+        workers: undefined,
+        shardTimeout: undefined,
+        cacheDirectory: join(tmpdir(), 'geospec-node-host-serial-cache'),
+      }),
+    ).toThrow('does not support persistent evidence cache');
 
-    expect(
-      typeof host.createRunner({
+    expect(() =>
+      host.createRunner({
         projectPath: root,
         workers: 1,
         shardTimeout: undefined,
         cacheDirectory: join(tmpdir(), 'geospec-node-host-cache'),
-      }).run,
-    ).toBe('function');
+      }),
+    ).toThrow('does not support persistent evidence cache');
+    expect(() => host.createRunner({ projectPath: root, workers: 1, shardTimeout: undefined, cache: true })).toThrow(
+      'does not support persistent evidence cache',
+    );
     expect(typeof host.createRunner({ projectPath: root, workers: 1, shardTimeout: undefined, cache: false }).run).toBe(
       'function',
     );

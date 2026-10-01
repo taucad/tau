@@ -1,6 +1,6 @@
 # geospec API index
 
-geospec 0.1.0-beta.1 · 367 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.1 · 361 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -9,7 +9,6 @@ Every symbol appears here exactly once. The heading above each block names the f
 createGeoSpec (function) — Create a GeoSpec instance
 describe (function) — GeoSpec suite helper used inside VM-executed test modules
 expectGeo (function) — Start a geometry assertion chain
-expectNativeGeo (function) — Start a native geometry assertion chain through an explicitly native…
 it (function) — GeoSpec test helper used inside VM-executed test modules
 test (function) — Alias for {@link it}
 analyzeBrep (function) — Read BRep evidence from a loaded GeoSpec subject
@@ -45,10 +44,9 @@ matchesGeoSpecTestName (function) — Return true when a collected GeoSpec test 
 discoverGeoSpecFiles (function) — Discover GeoSpec test files from exact files or directory roots
 isGeoSpecTestFile (function) — Return true when a project-relative path names a GeoSpec test…
 runGeoSpecModule (function) — Execute an ESM GeoSpec module using the shared Tau VM…
-createNativeGeoSpecRunner (function) — Create an opt-in native runner using the SDK's existing serial…
+createNativeGeoSpecRunner (function) — Compose compiled assertion and model bindings with the SDK's serial…
 allocateNativePoolGrants (function) — Assign a bounded CPU budget across already-selected worker isolates
 createGeoSpecNativeModelLoader (function) — Create a native model loader that admits actual STEP/GLB bytes…
-loadNativeModel (function) — Load a model through the active native runner VM binding
 createGeoSpecNodeRunner (function) — Create a GeoSpec runner for Node.js and CLI environments
 createGeoSpecNodePoolRunner (function) — Create a worker-pool GeoSpec runner for Node.js
 createNodeVmFileSystem (function) — Create a Node `VmFileSystem` rooted at `root`
@@ -72,7 +70,6 @@ loadStep (function) — Load STEP/XDE/BRep evidence into a GeoSpec geometry subj
 parseXdeReadResultJson (function) — Parse the native reader's JSON payload into a structured XDE…
 createGeoSpecAssertionClient (function) — Create a standalone native GeoSpec assertion client
 createGeoSpecMatcherMethods (function) — Create the one registry-derived matcher surface used by every JavaScript…
-createGeoSpecNativeMatcherMethods (function) — Create the native matcher surface from the legacy methods plus…
 evaluateGeoSpecNativeQuery (function) — Submit an ancillary query with positive polarity through the native…
 createGeoSpecVitestAdapter (function) — Create Vitest matchers over an existing runner-independent client
 installGeoSpecVitest (function) — Register GeoSpec matchers and their settlement hook in the active…
@@ -83,7 +80,7 @@ loadGeoSpecConfig (function) — Load one trusted project config using Node's na
 ## Constants — `api-constants.md`
 
 geoSpecMatcherNames (constant) — Every matcher name exposed by {@link expectGeo}, derived from the…
-geoSpecMatcherDescriptors (constant) — The 24-entry matcher registry
+geoSpecMatcherDescriptors (constant) — The 26-entry matcher registry
 geoSpecEngineProtocolVersion (constant) — Contract-B protocol version spoken by this substrate
 geoSpecMatcherRegistryVersion (constant) — Registry version consumed by the Wave-1 matcher vocabulary
 geoSpecEngineGlobalKey (constant)
@@ -94,12 +91,11 @@ defaultGeoSpecInclude (constant) — Default file globs used by GeoSpec test dis
 storedNamePattern (constant) — Full-name regex for stored interface names per the profile
 defaultSelectorTolerances (constant) — Default selector tolerances
 selectorDiagnosticCodes (constant) — Diagnostic codes emitted by selector resolution
-geoSpecNativeMatcherDescriptors (constant) — Native matcher view derived from the legacy 24 entries plus…
 
 ## Types — `api-types.md`
 
 GeoSpec (type) — Stateful GeoSpec API created by {@link createGeoSpec}
-GeoSpecNativeAuthoringSubject (type) — Native subject identity accepted by the authored native assertion helper
+GeoSpecSubject (type) — A model admitted by one live GeoSpec host scope
 GeoSpecUnit (type) — Geometry units accepted at GeoSpec evidence-loading boundaries
 GeoSpecAssertion (type) — Geometry assertion collected from a GeoSpec test module
 GeoSpecAssemblyOccurrenceExpectation (type) — Assembly occurrence rule accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)`
@@ -116,7 +112,6 @@ GeoSpecComponentInterferencePairExpectation (type) — A pair-specific component
 GeoSpecConnectedComponentsExpectation (type) — Connected-components expectation accepted by `expectGeo(...).toHaveConnectedComponents(...)`
 GeoSpecGeometrySelector (type) — Geometry selector used by inspection and spatial relationship matchers
 GeoSpecMatcher (type) — Assertion chain returned by `expectGeo(subject)`
-GeoSpecNativeRunnerMatcher (type) — Native runner assertions are awaitable and also tracked when left…
 GeoSpecMassExpectation (type) — Mass expectation accepted by `expectGeo(...).toHaveMass(...)`
 GeoSpecMeshIntegrityExpectation (type) — Mesh integrity expectation accepted by `expectGeo(...).toHaveMeshIntegrity(...)`
 GeoSpecNoDiagnosticsExpectation (type) — Diagnostic severities rejected by `expectGeo(...).toHaveNoDiagnostics(...)`
@@ -341,11 +336,11 @@ GeoSpecAssertionClient (type) — Runner-independent native assertion client
 GeoSpecAssertionClientOptions (type) — Flat construction options for a runner-independent native assertion client
 GeoSpecAssertionMatchers (type) — Standalone native matcher chain, including core-owned negation
 GeoSpecAuthoringInvocation (type) — One authored call shared by the collector and native assertion…
-GeoSpecFixedNativeAuthoringInvocation (type) — Fixed-contract native authoring call with no user arguments
 GeoSpecMatcherMethods (type) — Matcher methods derived mechanically from the existing GeoSpec registry
-GeoSpecNativeAuthoringInvocation (type) — One authored call accepted by a native matcher client
-GeoSpecNativeMatcherMethods (type) — Native matcher methods extend the legacy surface with fixed nullary…
 GeoSpecQueryOptions (type) — One positive-only ancillary query
+MinimumDistanceFact (type) — Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
+MinimumDistanceQuery (type) — Complete AP242 minimum over two subject-bound occurrence paths
+MinimumDistanceResult (type) — Geometry refusal and infrastructure interruption never masquerade as facts
 GeoSpecNativeQueryOptions (type) — Flat native query transport options
 GeoSpecQueryCapability (type) — Existing positive-only ancillary operations owned by the native core
 GeoSpecPmiField (type) — Explicit support state for one source-attributed inventory field
@@ -363,8 +358,7 @@ GeoSpecNativeClaimEvaluation (type) — Exact core bytes of one claim evaluated 
 GeoSpecNativeEngine (type) — Byte-only engine surface consumed by the runner-independent assertion client
 GeoSpecNativeEvidenceProfile (type) — Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
 GeoSpecNativeSubject (type) — Content-addressed subject accepted by a protocol-3 assertion plan
-GeoSpecFixedNativeMatcherDescriptor (type) — A fixed-contract matcher available only through native clients
-GeoSpecNativeMatcherName (type) — Every matcher name exposed by a native `expectGeo(...)` client
+GeoSpecFixedMatcherDescriptor (type) — A canonical fixed-contract matcher
 GeoSpecVitestAdapter (type) — Installed Vitest matcher map and lifecycle settlement hook
 ExportTauProjectArtifactOptions (type) — Input for exporting one validated Tau project descriptor
 GeoSpecTauProjectArtifact (type) — Finalized geometry bytes and the exact source/export metadata that produced…

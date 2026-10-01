@@ -81,5 +81,9 @@ export const sanitizePoolResult = (result: GeoSpecRunResult): GeoSpecRunResult =
   if (result.success) {
     return { ...result, tests: result.tests.map((test) => sanitizeTest(test)), bundle: elide(result.bundle) };
   }
-  return { ...result, ...(result.bundle === undefined ? {} : { bundle: elide(result.bundle) }) };
+  return {
+    ...result,
+    ...(result.tests === undefined ? {} : { tests: result.tests.map((test) => sanitizeTest(test)) }),
+    ...(result.bundle === undefined ? {} : { bundle: elide(result.bundle) }),
+  };
 };

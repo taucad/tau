@@ -12,10 +12,10 @@
  * @module
  */
 
-import { rpcClientErrorCode } from '@taucad/chat';
+import { rpcClientErrorCode, testModelOutputSchema } from '@taucad/chat';
 import type { RpcCall, RpcName } from '@taucad/chat';
 import { mutatingRpcNames, rpcName, toolDescriptions, toolMode, toolName } from '@taucad/chat/constants';
-import { createRpcDispatcher } from '@taucad/chat/rpc';
+import { createRpcDispatcher, writeArtifactSet } from '@taucad/chat/rpc';
 import type {
   RpcFileSystem,
   RpcGeoSpecClient,
@@ -28,9 +28,10 @@ import type {
   RpcSkillResolver,
 } from '@taucad/chat/rpc';
 import { getProviderFacingToolInputSchemas, toProviderToolJsonSchema } from '@taucad/chat/schemas';
+import { geoSpecRunLineageSchema } from '@taucad/chat/schemas/tools/test-model';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
-import { sha256String } from '@taucad/utils/hash';
+import { sha256Bytes, sha256String } from '@taucad/utils/hash';
 import { z } from 'zod';
 
 import type {
@@ -95,12 +96,8 @@ const rpcForTool: Readonly<
   [toolName.arrangeWorkbench]: { rpc: rpcName.arrangeWorkbench, needs: 'workbench' },
 };
 
-const geospecAuthoringRecipes = {
-  legacy:
-    "Selected GeoSpec API: legacy. Import describe, it, and expectGeo from 'geospec'; import loadModel from 'geospec/model'. Load with await loadModel({ file: 'main.ts' }) and assert with expectGeo(model).",
-  native:
-    "Selected GeoSpec API: native. Import describe, it, and expectNativeGeo from 'geospec'; import loadNativeModel from 'geospec/runner/native'. Load with await loadNativeModel({ file: 'main.ts' }) and await every expectNativeGeo(model) assertion.",
-} as const;
+const geospecAuthoringRecipe =
+  "Selected GeoSpec API: canonical. Import describe, it, and expectGeo from 'geospec'; import loadModel from 'geospec/model'. Load with await loadModel({ file: 'main.ts' }) and assert with expectGeo(model). Assertions complete before returning.";
 
 /**
  * Records Tau writes on the agent's behalf. The agent's own composed view keeps
@@ -131,23 +128,23 @@ const closureSchema = z.object({ files: z.record(z.string(), z.string()) });
 const provenanceSchema = z.object({
   sourceRevision: closureSchema.optional(),
   sourceRevisions: z.array(closureSchema).optional(),
+  lineage: z.array(z.object({ lineage: geoSpecRunLineageSchema })).optional(),
 });
-const writeResultSchema = z.object({ revision: z.object({ path: z.string(), digest: z.string() }) });
 
-/** One path whose evaluated digest disagrees with the digest the run wrote there. */
+/** One path whose evaluated digest disagrees with the current filesystem bytes. */
 type RevisionMismatch = {
   readonly expected: { readonly path: string; readonly digest: string };
   readonly actual: { readonly path: string; readonly digest: string };
 };
 
 /**
- * Compare a verdict's source closure with the digests this run has written.
+ * Compare consumed source graphs with the filesystem selected by this invocation.
  *
  * @param result - Raw RPC result the dispatcher returned.
- * @param written - Latest digest this registry wrote per rooted path.
+ * @param fileSystem - The host's existing rooted filesystem authority.
  * @returns Every path they disagree on, one entry per path.
  */
-const revisionMismatches = (result: unknown, written: ReadonlyMap<string, string>): RevisionMismatch[] => {
+const revisionMismatches = async (result: unknown, fileSystem: RpcFileSystem): Promise<RevisionMismatch[]> => {
   const provenance = provenanceSchema.safeParse(result).data;
   if (!provenance) {
     return [];
@@ -155,12 +152,40 @@ const revisionMismatches = (result: unknown, written: ReadonlyMap<string, string
   const closures = [
     ...(provenance.sourceRevision ? [provenance.sourceRevision] : []),
     ...(provenance.sourceRevisions ?? []),
+    ...(provenance.lineage ?? []).flatMap(({ lineage }) => [
+      ...lineage.modules,
+      ...lineage.loads.flatMap(({ evidence }) => {
+        const primary = evidence?.artifacts[0];
+        return [
+          ...(evidence?.sourceRevision ? [evidence.sourceRevision] : []),
+          ...(evidence?.exportOptions === undefined
+            ? (evidence?.artifacts ?? []).flatMap((artifact) =>
+                artifact.sourcePath === undefined
+                  ? []
+                  : [{ files: { [artifact.sourcePath]: `sha256:${artifact.sha256}` } }],
+              )
+            : []),
+          ...(evidence?.sourcePath !== undefined && evidence.exportOptions === undefined && primary !== undefined
+            ? [{ files: { [evidence.sourcePath]: `sha256:${primary.sha256}` } }]
+            : []),
+        ];
+      }),
+    ]),
   ];
+  const current = new Map<string, string>();
+  for (const path of new Set(closures.flatMap((closure) => Object.keys(closure.files)))) {
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- Hold at most one potentially large source artifact while hashing.
+      current.set(path, `sha256:${await sha256Bytes(await fileSystem.readBinaryFile(path))}`);
+    } catch (error) {
+      current.set(path, errorCode(error) === 'ENOENT' ? 'missing' : 'unavailable');
+    }
+  }
   const mismatches = new Map<string, RevisionMismatch>();
   for (const closure of closures) {
     for (const [path, digest] of Object.entries(closure.files)) {
-      const expected = written.get(path);
-      if (expected !== undefined && expected !== digest) {
+      const expected = current.get(path)!;
+      if (expected !== digest) {
         mismatches.set(path, { expected: { path, digest: expected }, actual: { path, digest } });
       }
     }
@@ -251,8 +276,6 @@ export type ChatToolRegistryOptions = {
   readonly images?: RpcImageClient | undefined;
   /** Backs `test_model`. */
   readonly geospec?: RpcGeoSpecClient | undefined;
-  /** Authoring API served by `geospec`; the caller pairs it with the selected runner. Defaults to legacy. */
-  readonly geospecAuthoringMode?: 'legacy' | 'native' | undefined;
   /** Backs `use_skill`. */
   readonly skillResolver?: RpcSkillResolver | undefined;
   /** Backs the read-only `revisions` tool; a host without a revision graph omits it. */
@@ -313,22 +336,12 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     name: entry.toolName,
     description:
       entry.toolName === toolName.testModel
-        ? `${toolDescriptions[toolName.testModel]}\n\n${geospecAuthoringRecipes[options.geospecAuthoringMode ?? 'legacy']}`
+        ? `${toolDescriptions[toolName.testModel]}\n\n${geospecAuthoringRecipe}`
         : toolDescriptions[entry.toolName as keyof typeof toolDescriptions],
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- draft-7 JSON Schema is JSON by construction.
     inputSchema: toProviderToolJsonSchema(entry.schema) as JsonObject,
     ...(rpcForTool[entry.toolName]?.sequential === true ? { executionMode: 'sequential' } : {}),
   }));
-
-  /* The digest this registry last wrote per rooted path, for the life of the
-   * registry: one per browser worker session, one per live checkout on the
-   * daemon and desktop (`createHostToolRegistry` memoizes by root), and the
-   * same instance the MCP server dispatches through. It is a hint, not the
-   * authority: an edit made outside these tools — a person typing in the
-   * editor, a peer run, a `git checkout` — leaves an entry naming bytes that
-   * are gone, so a disagreeing verdict is checked against the bytes on disk
-   * before it is refused (`reconcile`). */
-  const written = new Map<string, string>();
 
   /**
    * One chat RPC tool call: validate the input against the tool's own schema,
@@ -425,52 +438,13 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         }
       };
       /**
-       * Drop the disagreements the bytes on disk settle.
+       * Settle one dispatched result against this invocation's filesystem.
        *
-       * `written` remembers only this registry's own writes, so anything that
-       * edits the checkout outside the tools leaves it naming bytes that no
-       * longer exist and would wedge every later verdict. The file itself is
-       * the authority: a verdict whose closure matches what is at the path
-       * now describes current reality whatever the memory says, and the
-       * memory is corrected to it.
-       *
-       * ponytail: re-reads the disagreeing paths (only ever paths this run
-       * wrote, so text and bounded by `edit_file`'s limit) rather than
-       * stamping size/mtime beside every write. A file whose bytes the disk
-       * read cannot reproduce exactly — today, a UTF-8 BOM, which
-       * `RpcFileSystem.readFile` decodes away while the kernel hashes it —
-       * simply fails to reconcile and takes the refusing path.
-       *
-       * @param mismatches - Every path this verdict and the memory disagree on.
-       * @returns The first disagreement the disk did not settle.
-       */
-      const reconcile = async (mismatches: readonly RevisionMismatch[]): Promise<RevisionMismatch | undefined> => {
-        const onDisk = await Promise.all(
-          mismatches.map(async ({ actual }): Promise<string> => {
-            try {
-              return `sha256:${await sha256String(await fileSystem.readFile(actual.path))}`;
-            } catch {
-              /* Gone, or unreadable as text: either way not the verdict's bytes. */
-              return 'missing';
-            }
-          }),
-        );
-        for (const [index, mismatch] of mismatches.entries()) {
-          if (onDisk[index] === mismatch.actual.digest) {
-            written.set(mismatch.actual.path, mismatch.actual.digest);
-          }
-        }
-        return mismatches.find((mismatch, index) => onDisk[index] !== mismatch.actual.digest);
-      };
-      /**
-       * Settle one dispatched result under the freshness gate (R5).
-       *
-       * A verdict that names bytes this run has replaced gets exactly one
-       * more chance — the second call runs against the same clients, so a
-       * host that revalidates its retained closure (R1) answers freshly here.
-       * A second disagreement is a host failure rather than geometry, so it
-       * leaves as a typed error and never as a verdict the agent would act on
-       * (charter Q2).
+       * A consumed graph that no longer matches the selected checkout gets
+       * one retry through the same clients. A second mismatch or unreadable
+       * input cannot certify the current files, even when an immutable
+       * admitted snapshot retains valid geometry evidence for older bytes.
+       * Refuse before persistence or publication of a current verdict.
        *
        * @param first - Result the first dispatch returned.
        * @returns The tool result the agent sees.
@@ -479,30 +453,105 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
         first: Awaited<ReturnType<typeof dispatcher.dispatch>>,
       ): Promise<Awaited<ReturnType<ToolRegistry['invoke']>>> => {
         let result = first;
-        if (!verdictRpcNames.has(mapped.rpc)) {
-          /* Only the three write tools carry a top-level `revision`; the
-           * parameter operation's revision is nested under its outcome. */
-          const revision = writeResultSchema.safeParse(result).data?.revision;
-          if (revision && result.success) {
-            written.set(revision.path, revision.digest);
-          }
-        } else if (await reconcile(revisionMismatches(result, written))) {
+        const mismatches = verdictRpcNames.has(mapped.rpc) ? await revisionMismatches(result, fileSystem) : [];
+        if (verdictRpcNames.has(mapped.rpc)) {
+          assertNotAborted(invocation.signal);
+        }
+        if (mismatches.length > 0) {
           result = await dispatchOnce();
           assertNotAborted(invocation.signal);
-          const mismatch = await reconcile(revisionMismatches(result, written));
+          const [mismatch] = await revisionMismatches(result, fileSystem);
+          assertNotAborted(invocation.signal);
           if (mismatch) {
             return {
               content: {
                 errorCode: 'STALE_EVALUATION',
                 message:
                   `${invocation.toolName} answered for ${mismatch.actual.path} at ${mismatch.actual.digest}, ` +
-                  `but this run last wrote ${mismatch.expected.digest} there. Re-running returned the same ` +
-                  'revision, so the answer describes bytes that no longer exist.',
+                  `but the current filesystem has ${mismatch.expected.digest} there. Re-running did not ` +
+                  'establish a current answer. Consumed snapshot evidence cannot certify the current files.',
                 expected: mismatch.expected,
                 actual: mismatch.actual,
               },
               isError: true,
             };
+          }
+        }
+        if (mapped.rpc === rpcName.runGeoSpecTests && result.success) {
+          const verdict = testModelOutputSchema.parse(result);
+          const full = JSON.stringify(result);
+          const bytes = new TextEncoder().encode(full);
+          const oversized = bytes.byteLength > 128 * 1024;
+          const hasCanonical = [...verdict.failures, ...verdict.passes].some((row) =>
+            row.reports?.some((report) => report.canonical !== undefined),
+          );
+          if (hasCanonical || oversized) {
+            const recordFileSystem = (options.recordFileSystemFor ?? options.fileSystemFor)(invocation.signal);
+            const [artifact] =
+              (await writeArtifactSet(
+                {
+                  toolCallId: invocation.toolCallId,
+                  targetFile: 'geospec-run',
+                  format: 'json',
+                  files: [{ name: 'result.json', mimeType: 'application/json', bytes }],
+                },
+                recordFileSystem,
+              )) ?? [];
+            assertNotAborted(invocation.signal);
+            if (artifact === undefined || artifact.byteLength !== bytes.byteLength) {
+              return {
+                content: {
+                  errorCode: rpcClientErrorCode.ioError,
+                  message: 'Failed to persist complete GeoSpec evidence to the project record filesystem.',
+                },
+                isError: true,
+              };
+            }
+            const fullResult = {
+              path: artifact.artifactPath,
+              mimeType: 'application/json',
+              byteLength: bytes.byteLength,
+              sha256: await sha256String(full),
+            } satisfies NonNullable<typeof verdict.fullResult>;
+            assertNotAborted(invocation.signal);
+            const compactReports = (reports: NonNullable<(typeof verdict.passes)[number]['reports']>) =>
+              reports.map(({ canonical: _canonical, ...report }) => report);
+            const { failures, passes, sourceRevisions, tests, lineage, ...summary } = verdict;
+            const compact = oversized
+              ? {
+                  ...summary,
+                  failures: failures.slice(0, 20).map(({ id, requirement, reason, suggestion, targetFile }) => ({
+                    id: id.slice(0, 512),
+                    requirement: requirement.slice(0, 512),
+                    reason: reason.slice(0, 512),
+                    suggestion: suggestion.slice(0, 512),
+                    targetFile,
+                  })),
+                  passes: [],
+                  omittedFailures: failures.length - Math.min(failures.length, 20),
+                  omittedPasses: passes.length,
+                  omittedSourceRevisions: sourceRevisions?.length ?? 0,
+                  omittedTests: tests?.length ?? 0,
+                  omittedLineage: lineage?.length ?? 0,
+                  fullResult,
+                }
+              : {
+                  ...summary,
+                  ...(sourceRevisions === undefined ? {} : { sourceRevisions }),
+                  ...(tests === undefined ? {} : { tests }),
+                  ...(lineage === undefined ? {} : { lineage }),
+                  failures: failures.map((row) => ({
+                    ...row,
+                    ...(row.reports === undefined ? {} : { reports: compactReports(row.reports) }),
+                  })),
+                  passes: passes.map((row) => ({
+                    ...row,
+                    ...(row.reports === undefined ? {} : { reports: compactReports(row.reports) }),
+                  })),
+                  fullResult,
+                };
+            // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- The validated RPC payload was successfully serialized as JSON before compact projection.
+            return { content: structuredClone({ success: true, ...compact }) as JsonValue, isError: false };
           }
         }
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- RPC results are JSON by construction.

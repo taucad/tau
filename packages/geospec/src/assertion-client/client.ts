@@ -15,13 +15,11 @@ import type {
   GeoSpecNativeSubject,
   GeoSpecQueryCapability,
 } from '#engine/client.js';
-import {
-  geoSpecMatcherDescriptors,
-  geoSpecNativeMatcherDescriptors,
-  normalizeGeoSpecExpected,
-} from '#engine/matchers.js';
-import type { GeoSpecFixedNativeMatcherName, GeoSpecMatcherName, GeoSpecNativeMatcherName } from '#engine/matchers.js';
+import { geoSpecMatcherDescriptors, normalizeGeoSpecExpected } from '#engine/matchers.js';
+import type { GeoSpecMatcherName } from '#engine/matchers.js';
 import type { GeoSpecAssertion, GeoSpecMatcher } from '#runner/types.js';
+import { resolveGeoSpecSubject } from '#model/subject.js';
+import type { GeoSpecSubject } from '#model/subject.js';
 
 /** One authored call shared by the collector and native assertion client. @public */
 export type GeoSpecAuthoringInvocation = {
@@ -33,35 +31,19 @@ export type GeoSpecAuthoringInvocation = {
   readonly subject: unknown;
 };
 
-/** Fixed-contract native authoring call with no user arguments. @public */
-export type GeoSpecFixedNativeAuthoringInvocation = {
-  readonly arguments: readonly never[];
-  readonly expected: true;
-  readonly matcher: GeoSpecFixedNativeMatcherName;
-  readonly polarity: GeoSpecClaimPolarity;
-  readonly subject: unknown;
-};
-
-/** One authored call accepted by a native matcher client. @public */
-export type GeoSpecNativeAuthoringInvocation = GeoSpecAuthoringInvocation | GeoSpecFixedNativeAuthoringInvocation;
-
 /** Matcher methods derived mechanically from the existing GeoSpec registry. @public */
 export type GeoSpecMatcherMethods<Result> = {
   [Name in GeoSpecMatcherName]: (...arguments_: Parameters<GeoSpecMatcher[Name]>) => Result;
 };
 
-/** Native matcher methods extend the legacy surface with fixed nullary calls. @public */
-export type GeoSpecNativeMatcherMethods<Result> = GeoSpecMatcherMethods<Result> &
-  Record<GeoSpecFixedNativeMatcherName, () => Result>;
-
 /** Standalone native matcher chain, including core-owned negation. @public */
-export type GeoSpecAssertionMatchers = GeoSpecNativeMatcherMethods<Promise<GeoSpecCanonicalClaimReport>> & {
-  readonly not: GeoSpecNativeMatcherMethods<Promise<GeoSpecCanonicalClaimReport>>;
+export type GeoSpecAssertionMatchers = GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport> & {
+  readonly not: GeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>;
 };
 
 /** Runner-independent native assertion client. @public */
 export type GeoSpecAssertionClient = {
-  expectGeo(subject: GeoSpecNativeSubject): GeoSpecAssertionMatchers;
+  expectGeo(subject: GeoSpecNativeSubject | GeoSpecSubject): GeoSpecAssertionMatchers;
   query(options: MinimumDistanceQuery): Promise<MinimumDistanceResult>;
   query(options: GeoSpecQueryOptions): Promise<GeoSpecCanonicalClaimReport>;
 };
@@ -71,10 +53,7 @@ export type MinimumDistanceQuery = {
   readonly capability: 'minimumDistance';
   readonly subject: GeoSpecNativeSubject;
   readonly payload: {
-    readonly pair: readonly [
-      { readonly occurrencePath: string },
-      { readonly occurrencePath: string },
-    ];
+    readonly pair: readonly [{ readonly occurrencePath: string }, { readonly occurrencePath: string }];
   };
 };
 
@@ -94,8 +73,16 @@ export type MinimumDistanceFact = {
 /** Geometry refusal and infrastructure interruption never masquerade as facts. @public */
 export type MinimumDistanceResult =
   | { readonly status: 'complete'; readonly fact: MinimumDistanceFact }
-  | { readonly status: 'refused'; readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit'; readonly message: string }
-  | { readonly status: 'interrupted'; readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error'; readonly message: string };
+  | {
+      readonly status: 'refused';
+      readonly code: 'unsupported-evidence' | 'invalid-selection' | 'work-limit';
+      readonly message: string;
+    }
+  | {
+      readonly status: 'interrupted';
+      readonly code: 'cancelled' | 'executor-exited' | 'deadline' | 'engine-error';
+      readonly message: string;
+    };
 
 /**
  * One positive-only ancillary query. analyzeMesh/analyzeBrep use null payloads;
@@ -118,7 +105,7 @@ export type GeoSpecQueryOptions = {
 
 /** Flat construction options for a runner-independent native assertion client. @public */
 export type GeoSpecAssertionClientOptions = {
-  readonly claimId?: (matcher: GeoSpecNativeMatcherName, sequence: number) => string;
+  readonly claimId?: (matcher: GeoSpecMatcherName, sequence: number) => string;
   readonly engine: GeoSpecNativeEngine;
   /** Success-evidence profile of every claim and query; omitted means `complete`. */
   readonly evidenceProfile?: GeoSpecNativeEvidenceProfile;
@@ -126,7 +113,10 @@ export type GeoSpecAssertionClientOptions = {
   readonly workUnitLimit?: number;
 };
 
-const minimumDistanceFact = (value: JSONValue | undefined, query: MinimumDistanceQuery): MinimumDistanceFact | undefined => {
+const minimumDistanceFact = (
+  value: JSONValue | undefined,
+  query: MinimumDistanceQuery,
+): MinimumDistanceFact | undefined => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
     return undefined;
   }
@@ -136,40 +126,70 @@ const minimumDistanceFact = (value: JSONValue | undefined, query: MinimumDistanc
   }
   const { distance, points, occurrences, subjectHash } = fact;
   const finitePoint = (point: JSONValue): point is [number, number, number] =>
-    Array.isArray(point) && point.length === 3 && point.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate));
+    Array.isArray(point) &&
+    point.length === 3 &&
+    point.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate));
   if (
     value['profile'] !== 'geospec-minimum-distance-v1' ||
-    fact['source'] !== 'ap242' || fact['assurance'] !== 'exact-brep' || fact['unit'] !== 'mm' ||
-    fact['coordinateSystem'] !== 'z-up' || fact['algorithmProfile'] !== 'geospec-minimum-distance-v1' ||
-    typeof subjectHash !== 'string' || !/^[0-9a-f]{64}$/u.test(subjectHash) ||
+    fact['source'] !== 'ap242' ||
+    fact['assurance'] !== 'exact-brep' ||
+    fact['unit'] !== 'mm' ||
+    fact['coordinateSystem'] !== 'z-up' ||
+    fact['algorithmProfile'] !== 'geospec-minimum-distance-v1' ||
+    typeof subjectHash !== 'string' ||
+    !/^[0-9a-f]{64}$/u.test(subjectHash) ||
     subjectHash !== (query.subject.subjectHash ?? query.subject.contentHash) ||
-    typeof distance !== 'number' || !Number.isFinite(distance) || distance < 0 ||
-    !Array.isArray(occurrences) || occurrences.length !== 2 ||
+    typeof distance !== 'number' ||
+    !Number.isFinite(distance) ||
+    distance < 0 ||
+    !Array.isArray(occurrences) ||
+    occurrences.length !== 2 ||
     occurrences[0] !== query.payload.pair[0].occurrencePath ||
     occurrences[1] !== query.payload.pair[1].occurrencePath ||
-    !Array.isArray(points) || points.length !== 2 || !finitePoint(points[0]!) || !finitePoint(points[1]!)
+    !Array.isArray(points) ||
+    points.length !== 2 ||
+    !finitePoint(points[0]!) ||
+    !finitePoint(points[1]!)
   ) {
     return undefined;
   }
   return {
-    source: 'ap242', assurance: 'exact-brep', unit: 'mm', coordinateSystem: 'z-up',
-    subjectHash, algorithmProfile: 'geospec-minimum-distance-v1',
+    source: 'ap242',
+    assurance: 'exact-brep',
+    unit: 'mm',
+    coordinateSystem: 'z-up',
+    subjectHash,
+    algorithmProfile: 'geospec-minimum-distance-v1',
     occurrences: [occurrences[0], occurrences[1]],
-    distance, points: [points[0], points[1]],
+    distance,
+    points: [points[0], points[1]],
   };
 };
 
-const minimumDistanceOutcome = (report: GeoSpecCanonicalClaimReport, query: MinimumDistanceQuery): MinimumDistanceResult => {
+const minimumDistanceOutcome = (
+  report: GeoSpecCanonicalClaimReport,
+  query: MinimumDistanceQuery,
+): MinimumDistanceResult => {
   if (report.status === 'passed') {
     const fact = minimumDistanceFact(report.evidence, query);
     return fact === undefined
       ? { status: 'interrupted', code: 'engine-error', message: 'Native minimum returned malformed evidence.' }
       : { status: 'complete', fact };
   }
-  const diagnostic = report.diagnostics.find((value) => value !== null && typeof value === 'object' && !Array.isArray(value));
-  const code = diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic) ? diagnostic['code'] : undefined;
-  const message = diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic) && typeof diagnostic['message'] === 'string'
-    ? diagnostic['message'] : 'Native minimum is unavailable.';
+  const diagnostic = report.diagnostics.find(
+    (value) => value !== null && typeof value === 'object' && !Array.isArray(value),
+  );
+  const code =
+    diagnostic !== null && typeof diagnostic === 'object' && !Array.isArray(diagnostic)
+      ? diagnostic['code']
+      : undefined;
+  const message =
+    diagnostic !== null &&
+    typeof diagnostic === 'object' &&
+    !Array.isArray(diagnostic) &&
+    typeof diagnostic['message'] === 'string'
+      ? diagnostic['message']
+      : 'Native minimum is unavailable.';
   if (code === 'GEOSPEC_INVALID_SELECTION') {
     return { status: 'refused', code: 'invalid-selection', message };
   }
@@ -216,7 +236,7 @@ export class GeoSpecAssertionError extends Error {
  * Create the one registry-derived matcher surface used by every JavaScript host.
  *
  * @param options - Subject, polarity and host invocation function.
- * @returns All 24 matcher methods in registry order.
+ * @returns All 26 matcher methods in registry order.
  * @public
  */
 export const createGeoSpecMatcherMethods = <Result>(options: {
@@ -227,8 +247,11 @@ export const createGeoSpecMatcherMethods = <Result>(options: {
   const methods: Partial<Record<GeoSpecMatcherName, unknown>> = {};
   for (const matcher of Object.keys(geoSpecMatcherDescriptors) as GeoSpecMatcherName[]) {
     const descriptor = geoSpecMatcherDescriptors[matcher];
-    methods[matcher] = (...arguments_: readonly unknown[]): Result =>
-      options.invoke({
+    methods[matcher] = (...arguments_: readonly unknown[]): Result => {
+      if (descriptor.expected === 'true' && arguments_.length > 0) {
+        throw new TypeError(`GeoSpec matcher ${matcher} does not accept arguments.`);
+      }
+      return options.invoke({
         arguments: arguments_,
         expected: normalizeGeoSpecExpected(descriptor.expected, arguments_),
         kind: descriptor.kind,
@@ -236,47 +259,9 @@ export const createGeoSpecMatcherMethods = <Result>(options: {
         polarity: options.polarity,
         subject: options.subject,
       });
-  }
-  return methods as GeoSpecMatcherMethods<Result>;
-};
-
-/**
- * Create the native matcher surface from the legacy methods plus its
- * fixed-contract extensions.
- *
- * @param options - Subject, polarity and native invocation function.
- * @returns All native matcher methods in registry order.
- * @public
- */
-export const createGeoSpecNativeMatcherMethods = <Result>(options: {
-  readonly invoke: (invocation: GeoSpecNativeAuthoringInvocation) => Result;
-  readonly polarity: GeoSpecClaimPolarity;
-  readonly subject: unknown;
-}): GeoSpecNativeMatcherMethods<Result> => {
-  const methods = createGeoSpecMatcherMethods<Result>({
-    ...options,
-    invoke: (invocation) => options.invoke(invocation),
-  });
-  const fixedMethods: Partial<Record<GeoSpecFixedNativeMatcherName, () => Result>> = {};
-  const fixedMatchers = (Object.keys(geoSpecNativeMatcherDescriptors) as GeoSpecNativeMatcherName[]).filter(
-    (matcher): matcher is GeoSpecFixedNativeMatcherName => !(matcher in geoSpecMatcherDescriptors),
-  );
-  for (const matcher of fixedMatchers) {
-    const descriptor = geoSpecNativeMatcherDescriptors[matcher];
-    fixedMethods[matcher] = (...arguments_: readonly unknown[]): Result => {
-      if (arguments_.length > 0) {
-        throw new TypeError(`GeoSpec matcher ${matcher} does not accept arguments.`);
-      }
-      return options.invoke({
-        arguments: [],
-        expected: normalizeGeoSpecExpected(descriptor.expected, arguments_) as true,
-        matcher,
-        polarity: options.polarity,
-        subject: options.subject,
-      });
     };
   }
-  return Object.assign(methods, fixedMethods) as GeoSpecNativeMatcherMethods<Result>;
+  return methods as GeoSpecMatcherMethods<Result>;
 };
 
 /**
@@ -294,11 +279,12 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
     workUnitLimit ??= resolveGeoSpecNativeWorkUnitLimit(options.engine, options.workUnitLimit);
     return workUnitLimit;
   };
-  const methods = (subject: GeoSpecNativeSubject, polarity: GeoSpecClaimPolarity) =>
-    createGeoSpecNativeMatcherMethods<Promise<GeoSpecCanonicalClaimReport>>({
+  const methods = (subject: GeoSpecNativeSubject, polarity: GeoSpecClaimPolarity, validate: () => void) =>
+    createGeoSpecMatcherMethods<GeoSpecCanonicalClaimReport>({
       subject,
       polarity,
-      invoke: async (invocation) => {
+      invoke: (invocation) => {
+        validate();
         sequence += 1;
         const claimId = options.claimId?.(invocation.matcher, sequence) ?? `geospec-claim-${sequence}`;
         const context = {
@@ -310,16 +296,12 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
           subjectSlot,
           workUnitLimit: resolveWorkUnitLimit(),
         };
-        const report = evaluateGeoSpecNativeClaim(
-          'kind' in invocation
-            ? {
-                ...context,
-                arguments: invocation.arguments,
-                capability: invocation.matcher,
-                kind: invocation.kind,
-              }
-            : { ...context, arguments: invocation.arguments, capability: invocation.matcher },
-        );
+        const report = evaluateGeoSpecNativeClaim({
+          ...context,
+          arguments: invocation.arguments,
+          capability: invocation.matcher,
+          kind: invocation.kind,
+        });
         if (report.status !== 'passed') {
           throw new GeoSpecAssertionError(report);
         }
@@ -329,26 +311,48 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
 
   async function query(query: MinimumDistanceQuery): Promise<MinimumDistanceResult>;
   async function query(query: GeoSpecQueryOptions): Promise<GeoSpecCanonicalClaimReport>;
-  async function query(query: MinimumDistanceQuery | GeoSpecQueryOptions): Promise<MinimumDistanceResult | GeoSpecCanonicalClaimReport> {
-    const claimId = 'claimId' in query ? query.claimId ?? `geospec-claim-${++sequence}` : `geospec-claim-${++sequence}`;
+  async function query(
+    query: MinimumDistanceQuery | GeoSpecQueryOptions,
+  ): Promise<MinimumDistanceResult | GeoSpecCanonicalClaimReport> {
+    const claimId =
+      'claimId' in query ? (query.claimId ?? `geospec-claim-${++sequence}`) : `geospec-claim-${++sequence}`;
     if (query.capability === 'minimumDistance') {
       const pair: unknown = (query as { payload?: { pair?: unknown } }).payload?.pair;
       const path = (item: unknown): string | undefined => {
         if (item === null || typeof item !== 'object' || !('occurrencePath' in item)) {
           return undefined;
         }
-        return typeof item.occurrencePath === 'string' && item.occurrencePath.length > 0 ? item.occurrencePath : undefined;
+        return typeof item.occurrencePath === 'string' && item.occurrencePath.length > 0
+          ? item.occurrencePath
+          : undefined;
       };
-      if (!Array.isArray(pair) || pair.length !== 2 || path(pair[0]) === undefined ||
-        path(pair[1]) === undefined || path(pair[0]) === path(pair[1])) {
-        return { status: 'refused', code: 'invalid-selection', message: 'Select two distinct resolved AP242 occurrence paths.' };
+      if (
+        !Array.isArray(pair) ||
+        pair.length !== 2 ||
+        path(pair[0]) === undefined ||
+        path(pair[1]) === undefined ||
+        path(pair[0]) === path(pair[1])
+      ) {
+        return {
+          status: 'refused',
+          code: 'invalid-selection',
+          message: 'Select two distinct resolved AP242 occurrence paths.',
+        };
       }
       try {
         if (!supportsGeoSpecNativeMinimumDistance(options.engine)) {
-          return { status: 'refused', code: 'unsupported-evidence', message: 'This native engine does not advertise the complete minimum-distance profile.' };
+          return {
+            status: 'refused',
+            code: 'unsupported-evidence',
+            message: 'This native engine does not advertise the complete minimum-distance profile.',
+          };
         }
       } catch {
-        return { status: 'refused', code: 'unsupported-evidence', message: 'This native engine cannot negotiate the complete minimum-distance profile.' };
+        return {
+          status: 'refused',
+          code: 'unsupported-evidence',
+          message: 'This native engine cannot negotiate the complete minimum-distance profile.',
+        };
       }
     }
     try {
@@ -367,15 +371,26 @@ export const createGeoSpecAssertionClient = (options: GeoSpecAssertionClientOpti
       if (query.capability !== 'minimumDistance') {
         throw error;
       }
-      return { status: 'interrupted', code: 'engine-error', message: error instanceof Error ? error.message : 'Native minimum query failed.' };
+      return {
+        status: 'interrupted',
+        code: 'engine-error',
+        message: error instanceof Error ? error.message : 'Native minimum query failed.',
+      };
     }
   }
 
   return {
     query,
     expectGeo(subject) {
-      const positive = methods(subject, 'positive');
-      return Object.assign(positive, { not: methods(subject, 'negative') });
+      const raw = 'subjectHash' in subject || 'contentHash' in subject;
+      const identity = raw ? subject : resolveGeoSpecSubject(subject, options.engine).identity;
+      const validate = (): void => {
+        if (!raw) {
+          resolveGeoSpecSubject(subject, options.engine);
+        }
+      };
+      const positive = methods(identity, 'positive', validate);
+      return Object.assign(positive, { not: methods(identity, 'negative', validate) });
     },
   };
 };

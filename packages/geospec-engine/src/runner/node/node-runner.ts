@@ -12,22 +12,11 @@
  * @module
  */
 
-import { availableParallelism, totalmem } from 'node:os';
-import { Worker } from 'node:worker_threads';
-import type {
-  GeoSpecPoolHostMessage,
-  GeoSpecPoolWorkerHandle,
-  GeoSpecPoolWorkerMessage,
-  GeoSpecRunner,
-} from 'geospec/runner/worker';
+import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { GeoSpecNodePoolRunnerOptions, GeoSpecNodeRunnerOptions } from 'geospec/runner/node';
-import { openShardTimings } from '#cache/timings.js';
 import { installNodeEvidenceStore } from '#cache/node-evidence-store.js';
-import { autoWorkerCount } from '#runner/pool/shard-planner.js';
-import { createGeoSpecPoolRunner } from '#runner/pool/pool.js';
 import { createSerialGeoSpecRunner } from '#runner/serial.js';
-import { compileWasmStreaming } from '@taucad/runtime/kernel';
-import { openCascadeWasmUrl } from '#native/opencascade-wasm.js';
+import { createGeoSpecNativeNodePoolRunner } from '#runner/node/native-pool-runner.js';
 
 /**
  * Create a serial GeoSpec runner for Node.
@@ -42,67 +31,10 @@ export const createGeoSpecNodeRunner = (options: GeoSpecNodeRunnerOptions): GeoS
 };
 
 /**
- * The slice of `node:worker_threads`' `Worker` the pool drives.
- *
- * Declared structurally so the adapter can be exercised against a stub as well
- * as against a real thread (D-8: vitest cannot host a TypeScript worker).
- *
- * @public
- */
-export type NodeWorkerLike = {
-  postMessage(value: unknown): void;
-  on(event: 'message', listener: (value: GeoSpecPoolWorkerMessage) => void): void;
-  on(event: 'exit', listener: (code: number) => void): void;
-  on(event: 'error', listener: (error: Error) => void): void;
-  terminate(): Promise<number> | number;
-};
-
-/**
- * Adapt a Node worker thread to the pool's host-agnostic handle.
- *
- * @param worker - The spawned worker.
- * @returns The pool handle.
- * @public
- */
-export const createNodeWorkerHandle = (worker: NodeWorkerLike): GeoSpecPoolWorkerHandle => {
-  let shuttingDown = false;
-  let lastError: string | undefined;
-  return {
-    postMessage(message: GeoSpecPoolHostMessage) {
-      if (message.type === 'shutdown') {
-        shuttingDown = true;
-      }
-      worker.postMessage(message);
-    },
-    onMessage(listener) {
-      worker.on('message', listener);
-    },
-    onExit(listener) {
-      worker.on('error', (error: Error) => {
-        lastError = error.message;
-      });
-      worker.on('exit', (code: number) => {
-        // An exit during shutdown is the expected end of a worker's life; an
-        // exit at any other time killed a shard, and the pool must hear about
-        // it rather than wait forever for a reply that will not come.
-        listener({
-          unexpected: !shuttingDown && code !== 0,
-          ...(lastError === undefined ? {} : { message: lastError }),
-        });
-      });
-    },
-    async terminate() {
-      shuttingDown = true;
-      await worker.terminate();
-    },
-  };
-};
-
-/**
  * Where the pool worker's entry module lives.
  *
  * A worker thread loads a URL, not a module graph, so the entry must be a real
- * sibling file. In the published package that is `pool-worker-entry.mjs`; in
+ * sibling file. In the published package that is `native-pool-worker-entry.mjs`; in
  * the source tree it is the `.ts` beside this module, which only a host with a
  * TypeScript loader can run.
  *
@@ -123,7 +55,7 @@ export const poolWorkerEntryUrl = (): URL => new URL(poolWorkerEntryName(import.
  * @public
  */
 export const poolWorkerEntryName = (moduleUrl: string): string =>
-  moduleUrl.endsWith('.ts') ? './pool-worker-entry.ts' : './pool-worker-entry.mjs';
+  moduleUrl.endsWith('.ts') ? './native-pool-worker-entry.ts' : './native-pool-worker-entry.mjs';
 
 /**
  * Create a worker-pool GeoSpec runner for Node.
@@ -133,33 +65,15 @@ export const poolWorkerEntryName = (moduleUrl: string): string =>
  * @public
  */
 export const createGeoSpecNodePoolRunner = (options: GeoSpecNodePoolRunnerOptions): GeoSpecRunner => {
-  const cacheRoot = installNodeEvidenceStore(options);
-  const timings = openShardTimings(cacheRoot);
-  const workers =
-    options.workers ??
-    autoWorkerCount({ shards: availableParallelism(), cpus: availableParallelism(), totalMemoryBytes: totalmem() });
-  let compiledModule: Promise<WebAssembly.Module> | undefined;
-  const prepareModule = async (): Promise<WebAssembly.Module> => {
-    compiledModule ??= compileWasmStreaming(openCascadeWasmUrl);
-    return compiledModule;
-  };
-  return createGeoSpecPoolRunner({
-    createWorker: async () =>
-      createNodeWorkerHandle(
-        new Worker(poolWorkerEntryUrl(), {
-          workerData: {
-            projectPath: options.projectPath,
-            cache: options.cache ?? true,
-            ...(options.cacheDirectory === undefined ? {} : { cacheDirectory: options.cacheDirectory }),
-            ...(options.runtimeFactoryModule === undefined
-              ? {}
-              : { runtimeFactoryModule: options.runtimeFactoryModule }),
-            compiledWasmModule: await prepareModule(),
-          },
-        }) as NodeWorkerLike,
-      ),
-    workers,
-    timings,
+  if (options.cache === true || options.cacheDirectory !== undefined) {
+    throw new TypeError('Persistent reference-engine evidence caching is not supported by the compiled GeoSpec pool.');
+  }
+  if (options.runtimeFactoryModule !== undefined) {
+    throw new TypeError('Custom reference-engine runtime factories are not supported by the compiled GeoSpec pool.');
+  }
+  return createGeoSpecNativeNodePoolRunner({
+    projectPath: options.projectPath,
+    ...(options.workers === undefined ? {} : { workers: options.workers }),
     ...(options.shardTimeout === undefined ? {} : { shardTimeout: options.shardTimeout }),
   });
 };

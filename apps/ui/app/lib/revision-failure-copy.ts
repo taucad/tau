@@ -24,6 +24,7 @@ export type RevisionFailureSubject =
   | 'restore'
   | 'branch'
   | 'save'
+  | 'connection'
   | 'turn'
   | 'backup'
   | 'removeName'
@@ -65,6 +66,11 @@ export const revisionFailureCopy: Readonly<
     }>
   >
 > = {
+  connection: {
+    title: 'History could not connect',
+    fallback: 'Tau could not connect to this project’s history. Reload the page and try again.',
+    codes: new Map(engineCopy),
+  },
   restore: {
     title: 'Restore failed',
     fallback: 'Tau could not restore that revision. Reload the page and try again.',

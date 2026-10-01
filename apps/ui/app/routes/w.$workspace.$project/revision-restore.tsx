@@ -48,6 +48,7 @@ const revisionFailureEvent: Readonly<Record<RevisionFailureSubject, string>> = {
   restore: 'revision_restore_failed',
   branch: 'revision_branch_failed',
   save: 'revision_save_failed',
+  connection: 'revision_connection_failed',
   /* Not raised here: a turn announces its own failure through `turn.failed`,
    * which `revision-outcomes.tsx` phrases from the same table (W9). */
   turn: 'revision_turn_failed',
@@ -88,7 +89,13 @@ export function RevisionRestore(): React.JSX.Element {
          * sentence naming a checkout — goes where someone can act on it, which
          * is not a toast (E5). */
         const copy = describeRevisionFailure(entry.subject, entry.code, { revisionNumber: entry.revisionNumber });
-        analytics.capture(revisionFailureEvent[entry.subject], { message: entry.message, code: entry.code });
+        analytics.capture(revisionFailureEvent[entry.subject], {
+          message: entry.message,
+          code: entry.code,
+          ...(entry.subject === 'connection'
+            ? { generation: entry.generation, operation: entry.connectionOperation }
+            : {}),
+        });
         console.error('[revisions]', entry.subject, entry.code, entry.message);
         /* W0 N1, M1, D15: files that are back, and an undo with nothing here to undo, lost nothing; they are not failures. */
         if (

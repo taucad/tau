@@ -1,4 +1,4 @@
-import type { GeoSpecRunResult, RunGeoSpecModuleOptions } from '#runner/types.js';
+import type { GeoSpecRunResult, RunGeoSpecModuleOptions, GeoSpecTestAccounting } from '#runner/types.js';
 import type { GeoSpecRunProfile } from '#runner/profile.js';
 import type { ManagedGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { VmFileSystem, VmIssue } from '@taucad/esbuild/vm';
@@ -41,6 +41,20 @@ export type GeoSpecRunnerResult = {
   issues?: VmIssue[];
   /** Wall-clock cost of the whole run, in milliseconds (R1). */
   durationMs?: number;
+  /** Complete requested-file accounting; discovery may remain unknown in unstarted or broken modules. */
+  accounting?: GeoSpecRunnerAccounting;
+  /** Coherence of the consumed source graphs, not a geometry verdict. */
+  lineageStatus?: 'complete' | 'unavailable' | 'mixed';
+};
+
+/** File and observed-test accounting for a worker run. @public */
+export type GeoSpecRunnerAccounting = GeoSpecTestAccounting & {
+  requestedFiles: readonly string[];
+  completedFiles: readonly string[];
+  notRunFiles: readonly string[];
+  discoveryComplete: boolean;
+  cancelled: boolean;
+  bailed: boolean;
 };
 
 /**

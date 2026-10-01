@@ -5,6 +5,7 @@ import { clearGeoSpecEngine, registerGeoSpecEngine } from '#engine/seam.js';
 import { createTestGeoSpecEngineProtocol } from '#engine/protocol.test-support.js';
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import type { GeometrySubject } from '#mesh/types.js';
+import type { GeoSpecSubject } from '#model/subject.js';
 import type { GeoSpecRunProfile } from '#runner/profile.js';
 import { GeoSpecModelLoadError } from '#model/errors.js';
 import { createCollector, GeoSpecAssertionError } from '#runner/collector.js';
@@ -305,7 +306,7 @@ describe('serial runner edges', () => {
 
     const runner = createSerialGeoSpecRunner({
       filesystem,
-      modelLoader: async () => subject,
+      modelLoader: async () => mock<GeoSpecSubject>(),
       stepLoader: async () => subject,
       builtinModules: { extra: { version: '1', code: 'export const x = 1;' } },
       internalProfile: mock<GeoSpecRunProfile>(),

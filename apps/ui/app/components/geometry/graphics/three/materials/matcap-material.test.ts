@@ -18,9 +18,13 @@ it('should repaint current consumers once the shared matcap loads and release re
       public load = load;
     },
   }));
+  const logError = vi.spyOn(console, 'error').mockImplementation(() => undefined);
   try {
     const { matcapMaterial, subscribeToMatcapLoad } =
       await import('#components/geometry/graphics/three/materials/matcap-material.js');
+    subscribeToMatcapLoad(() => {
+      throw new Error('Disposed canvas');
+    });
     const current = vi.fn();
     const removed = vi.fn();
     const release = subscribeToMatcapLoad(removed);
@@ -33,10 +37,12 @@ it('should repaint current consumers once the shared matcap loads and release re
     expect(current).not.toHaveBeenCalled();
     loaded?.();
     expect(current).toHaveBeenCalledOnce();
+    expect(logError).toHaveBeenCalledOnce();
     expect(removed).not.toHaveBeenCalled();
     subscribeToMatcapLoad(current);
     expect(current).toHaveBeenCalledOnce();
   } finally {
+    logError.mockRestore();
     vi.doUnmock('three');
   }
 });

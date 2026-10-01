@@ -16,18 +16,24 @@ type Admission = {
   readonly isLive: () => boolean;
   readonly load?: GeoSpecModelLoadEvidence;
   readonly ensureResident?: () => void;
+  readonly lease?: { dispose(): void };
 };
 
-const rawResidency = new WeakMap<GeoSpecNativeSubject, () => void>();
+const rawResidency = new WeakMap<GeoSpecNativeSubject, { ensureResident(): void; dispose(): void }>();
+const residencyLeases = new WeakMap<() => void, { dispose(): void }>();
 
 /**
  * Associate the final raw load wrapper with its private residency owner.
  * @internal
  * @param subject - The final wrapper returned by the native model loader.
- * @param ensureResident - Synchronous restoration under the loader's live scope.
+ * @param residency - Restoration and ownership of this genuine load.
  */
-export const bindRawSubjectResidency = (subject: GeoSpecNativeSubject, ensureResident: () => void): void => {
-  rawResidency.set(subject, ensureResident);
+export const bindRawSubjectResidency = (
+  subject: GeoSpecNativeSubject,
+  residency: { ensureResident(): void; dispose(): void },
+): void => {
+  rawResidency.set(subject, residency);
+  residencyLeases.set(residency.ensureResident, residency);
 };
 
 /**
@@ -37,7 +43,7 @@ export const bindRawSubjectResidency = (subject: GeoSpecNativeSubject, ensureRes
  * @returns Its private restoration callback, when owned by a native loader.
  */
 export const rawSubjectResidency = (subject: GeoSpecNativeSubject): (() => void) | undefined =>
-  rawResidency.get(subject);
+  rawResidency.get(subject)?.ensureResident;
 
 // oxlint-disable-next-line typescript/no-restricted-types -- WeakMap keys must accept arbitrary opaque objects without structural authority.
 const admissions = new WeakMap<object, Admission>();
@@ -64,6 +70,9 @@ export const bindGeoSpecSubject = (options: {
     isLive: options.isLive,
     ...(options.load === undefined ? {} : { load: options.load }),
     ...(options.ensureResident === undefined ? {} : { ensureResident: options.ensureResident }),
+    ...(options.ensureResident === undefined || !residencyLeases.has(options.ensureResident)
+      ? {}
+      : { lease: residencyLeases.get(options.ensureResident)! }),
   });
   // The brand has no runtime representation: only this private map establishes admission.
   return subject as GeoSpecSubject;

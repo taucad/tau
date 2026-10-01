@@ -312,12 +312,12 @@ export const createGeoSpecNativeModelLoader = (
 ): ManagedGeoSpecNativeModelLoader => {
   let requestSequence = 0;
   const admissions = new Map<string, ResidentInput>();
-  const owner = {};
+  const admissionOwners = new Map<ResidencyOwner, string>();
   let generation = 0;
   const pendingLoads = new Set<Promise<GeoSpecNativeModelSubject>>();
   const runtimeLoads = new Map<
     GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory,
-    Map<string, Promise<GeoSpecNativeModelSubject>>
+    Map<string, { pending: Promise<GeoSpecNativeModelSubject>; owners: Set<ResidencyOwner> }>
   >();
   const ownedRuntimes = new Set<GeoSpecRuntimeClient>();
   const runtimeFactories = new Map<GeoSpecRuntimeClientFactory, Promise<GeoSpecRuntimeClient>>();
@@ -387,14 +387,18 @@ export const createGeoSpecNativeModelLoader = (
     }
     input.cleanupPending?.();
     delete input.cleanupPending;
-    input.owners.delete(priorOwner);
-    if (input.owners.size > 0) {
+    if (!input.owners.has(priorOwner)) {
+      return;
+    }
+    if (input.owners.size > 1) {
+      input.owners.delete(priorOwner);
       return;
     }
     if (input.handle !== undefined) {
       release(input.handle);
       delete input.handle;
     }
+    input.owners.delete(priorOwner);
     residency.resident.delete(subjectHash);
     residency.inputs.delete(subjectHash);
     residency.binaryBytes -= input.resources.reduce((sum, bytes) => sum + bytes.byteLength, input.primary.byteLength);
@@ -417,14 +421,17 @@ export const createGeoSpecNativeModelLoader = (
   const staleCarried = (): Array<[string, unknown]> =>
     [...(defaults.carried ?? [])].filter(([subjectHash]) => !admissions.has(subjectHash));
 
-  const admit = (options: {
-    format: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>;
-    ingestOptions?: Readonly<Record<string, unknown>>;
-    primary: Uint8Array<ArrayBuffer>;
-    resources: ReadonlyArray<{ name: string; bytes: Uint8Array<ArrayBuffer> }>;
-    sourceUnit?: string;
-    diagnostics?: readonly GeometryDiagnostic[];
-  }): GeoSpecNativeModelSubject => {
+  const admit = (
+    options: {
+      format: Extract<GeoSpecModelFormat, 'glb' | 'step' | 'stp'>;
+      ingestOptions?: Readonly<Record<string, unknown>>;
+      primary: Uint8Array<ArrayBuffer>;
+      resources: ReadonlyArray<{ name: string; bytes: Uint8Array<ArrayBuffer> }>;
+      sourceUnit?: string;
+      diagnostics?: readonly GeometryDiagnostic[];
+    },
+    owners: ReadonlySet<ResidencyOwner>,
+  ): GeoSpecNativeModelSubject => {
     const format = options.format === 'stp' ? 'step' : options.format;
     const residency = residencyFor(defaults.engine);
     settleCleanup(residency);
@@ -556,7 +563,10 @@ export const createGeoSpecNativeModelLoader = (
       residency.binaryBytes += binaryBytes;
       residency.descriptorBytes += retained.request.byteLength;
     }
-    retained.owners.add(owner);
+    for (const owner of owners) {
+      retained.owners.add(owner);
+      admissionOwners.set(owner, subjectHash);
+    }
     retained.handle = handle;
     residency.resident.delete(subjectHash);
     residency.resident.set(subjectHash, retained);
@@ -640,7 +650,10 @@ export const createGeoSpecNativeModelLoader = (
     residency.resident.set(subjectHash, input);
   };
 
-  const loadDirect = async (options: Extract<GeoSpecNativeLoadModelOptions, { source: unknown }>) => {
+  const loadDirect = async (
+    options: Extract<GeoSpecNativeLoadModelOptions, { source: unknown }>,
+    owners: ReadonlySet<ResidencyOwner>,
+  ) => {
     const format = resolveFormat(options, defaults.format);
     const primary = await directBytes(options.source, defaults.readSource);
     const resources = await Promise.all(
@@ -665,13 +678,16 @@ export const createGeoSpecNativeModelLoader = (
         ...(sourcePath === undefined ? {} : { sourcePath }),
       })),
     );
-    const subject = admit({
-      format,
-      primary,
-      resources,
-      ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
-      ...(options.sourceUnit === undefined ? {} : { sourceUnit: options.sourceUnit }),
-    });
+    const subject = admit(
+      {
+        format,
+        primary,
+        resources,
+        ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
+        ...(options.sourceUnit === undefined ? {} : { sourceUnit: options.sourceUnit }),
+      },
+      owners,
+    );
     return {
       ...subject,
       load: {
@@ -686,7 +702,10 @@ export const createGeoSpecNativeModelLoader = (
     };
   };
 
-  const loadRuntime = async (options: RuntimeOptions & GeoSpecNativeLoadModelOptions) => {
+  const loadRuntime = async (
+    options: RuntimeOptions & GeoSpecNativeLoadModelOptions,
+    owners: ReadonlySet<ResidencyOwner>,
+  ) => {
     for (const key of ['sourceUnit', 'unit', 'scale', 'coordinateSystem'] as const) {
       if (key in options) {
         throw failure([
@@ -755,14 +774,17 @@ export const createGeoSpecNativeModelLoader = (
       Object.values(sourceRevision.files).every(
         (digest) => digest === 'missing' || /^sha256:[0-9a-f]{64}$/u.test(digest),
       );
-    const subject = admit({
-      format,
-      primary: primary.bytes,
-      resources,
-      sourceUnit: honored.sourceUnit,
-      diagnostics: exported.issues.map(runtimeIssueDiagnostic),
-      ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
-    });
+    const subject = admit(
+      {
+        format,
+        primary: primary.bytes,
+        resources,
+        sourceUnit: honored.sourceUnit,
+        diagnostics: exported.issues.map(runtimeIssueDiagnostic),
+        ...(options.ingestOptions === undefined ? {} : { ingestOptions: options.ingestOptions }),
+      },
+      owners,
+    );
     return {
       ...subject,
       load: {
@@ -778,7 +800,7 @@ export const createGeoSpecNativeModelLoader = (
     };
   };
 
-  const coalescedRuntime = async (options: RuntimeOptions & GeoSpecNativeLoadModelOptions) => {
+  const coalescedRuntime = async (options: RuntimeOptions & GeoSpecNativeLoadModelOptions, owner: ResidencyOwner) => {
     const configured = options.runtime ?? defaults.runtime;
     if (
       !('code' in options) ||
@@ -787,7 +809,7 @@ export const createGeoSpecNativeModelLoader = (
       options.ingestOptions !== undefined ||
       ['sourceUnit', 'unit', 'scale', 'coordinateSystem'].some((key) => key in options)
     ) {
-      return loadRuntime(options);
+      return loadRuntime(options, new Set([owner]));
     }
     const codePrototype: unknown = Object.getPrototypeOf(options.code);
     if (
@@ -796,7 +818,7 @@ export const createGeoSpecNativeModelLoader = (
         (descriptor) => !('value' in descriptor) || typeof descriptor.value !== 'string',
       )
     ) {
-      return loadRuntime(options);
+      return loadRuntime(options, new Set([owner]));
     }
     const files = Object.entries(options.code);
     const code = Object.fromEntries(files);
@@ -814,10 +836,12 @@ export const createGeoSpecNativeModelLoader = (
     }
     const existing = loads.get(key);
     if (existing !== undefined) {
-      return existing;
+      existing.owners.add(owner);
+      return existing.pending;
     }
-    const pending = loadRuntime({ ...options, code });
-    loads.set(key, pending);
+    const owners = new Set([owner]);
+    const pending = loadRuntime({ ...options, code }, owners);
+    loads.set(key, { pending, owners });
     const forget = (): void => {
       loads.delete(key);
       if (loads.size === 0) {
@@ -832,6 +856,7 @@ export const createGeoSpecNativeModelLoader = (
 
   // oxlint-disable-next-line typescript/promise-function-async -- Return the tracked admission promise unchanged to its author.
   const loader: GeoSpecNativeModelLoader = (options) => {
+    const owner = {};
     const loadId = nextRequestId('load');
     const snapshot = {
       ...options,
@@ -866,17 +891,35 @@ export const createGeoSpecNativeModelLoader = (
     }
     const admission =
       'source' in options
-        ? loadDirect(snapshot as Extract<GeoSpecNativeLoadModelOptions, { source: unknown }>)
-        : coalescedRuntime(snapshot as RuntimeOptions & GeoSpecNativeLoadModelOptions);
+        ? loadDirect(snapshot as Extract<GeoSpecNativeLoadModelOptions, { source: unknown }>, new Set([owner]))
+        : coalescedRuntime(snapshot as RuntimeOptions & GeoSpecNativeLoadModelOptions, owner);
     const pending = (async () => {
       const subject = await admission;
       const result = { ...subject, ...(subject.load === undefined ? {} : { load: { ...subject.load, loadId } }) };
       const current = generation;
-      bindRawSubjectResidency(result, () => {
-        if (current !== generation) {
-          throw new TypeError('This subject is not admitted by the active GeoSpec host.');
-        }
-        ensureResident(subject.subjectHash);
+      let disposing = false;
+      bindRawSubjectResidency(result, {
+        ensureResident() {
+          if (current !== generation || !admissionOwners.has(owner)) {
+            throw new TypeError('This subject is not admitted by the active GeoSpec host.');
+          }
+          ensureResident(subject.subjectHash);
+        },
+        dispose() {
+          if (disposing || !admissionOwners.has(owner)) {
+            return;
+          }
+          disposing = true;
+          try {
+            dropOwner(subject.subjectHash, owner);
+            admissionOwners.delete(owner);
+            if (![...admissionOwners.values()].includes(subject.subjectHash)) {
+              admissions.delete(subject.subjectHash);
+            }
+          } finally {
+            disposing = false;
+          }
+        },
       });
       return result;
     })();
@@ -920,10 +963,13 @@ export const createGeoSpecNativeModelLoader = (
           }
         }
       }
-      for (const subjectHash of [...admissions.keys()].reverse()) {
+      for (const [owner, subjectHash] of [...admissionOwners].reverse()) {
         try {
           dropOwner(subjectHash, owner);
-          admissions.delete(subjectHash);
+          admissionOwners.delete(owner);
+          if (![...admissionOwners.values()].includes(subjectHash)) {
+            admissions.delete(subjectHash);
+          }
         } catch (error) {
           errors.push(error);
         }

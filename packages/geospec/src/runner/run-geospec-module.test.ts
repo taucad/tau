@@ -1,7 +1,8 @@
 import type { VmFileSystem } from '@taucad/esbuild/vm';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { GeoSpecAssertionClientOptions } from '#assertion-client/index.js';
-import type { GeoSpecModelLoadEvidence } from '#model/native-model-loader.js';
+import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
+import type { GeoSpecModelLoadEvidence, GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 import { bindGeoSpecSubject } from '#model/subject.js';
 import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 import type { SourceRevision } from '@taucad/runtime/types';
@@ -83,6 +84,122 @@ afterEach(() => {
 });
 
 describe('runGeoSpecModule', () => {
+  it('should release an explicitly disposed child admission before admitting another bounded child', async () => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    const releaseSubject = vi.fn(() => encode({ result: {} }));
+    const engine: GeoSpecNativeModelEngine = {
+      ...nativeAssertions.engine,
+      processRequest: () =>
+        encode({
+          requestId: 'configuration',
+          result: {
+            canonicalProfile: 'geospec-jcs-v1',
+            protocolVersion: 3,
+            registryVersion: 5,
+            configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+          },
+        }),
+      ingestSubject: (_request, primary) =>
+        encode({ result: { subject: { subjectHash: String(primary[0]).repeat(64) } } }),
+      subjectHandle: () => encode({ result: { subjectHandle: 'owned' } }),
+      releaseSubject,
+    };
+    const nativeModelLoader = createGeoSpecNativeModelLoader({ engine });
+    try {
+      const result = await runModule(
+        [
+          [
+            'spec.geospec.ts',
+            `
+        import { it } from 'geospec';
+        import { createModelLoader } from 'geospec/model';
+        it('releases only the closed child', async () => {
+          const first = createModelLoader({ format: 'step' });
+          const bytes = new Uint8Array(800); bytes[0] = 1;
+          await first({ source: bytes });
+          await Promise.all([first.dispose(), first.dispose()]);
+          const second = createModelLoader({ format: 'step' });
+          bytes[0] = 2;
+          await second({ source: bytes });
+          await second.dispose();
+          await first({ source: bytes });
+          await first.dispose();
+        });
+      `,
+          ],
+        ],
+        { nativeAssertions: { engine }, nativeModelLoader },
+      );
+      expect(result.lineage?.loads.map(({ status, error }) => ({ status, error }))).toEqual([
+        { status: 'complete', error: undefined },
+        { status: 'complete', error: undefined },
+        { status: 'complete', error: undefined },
+      ]);
+      expect(result.success && result.tests[0]?.status).toBe('passed');
+      expect(releaseSubject).toHaveBeenCalledTimes(3);
+    } finally {
+      await nativeModelLoader.releaseAll();
+    }
+  });
+  it('should invalidate a child even when its genuine lease release fails and retain cleanup for retry', async () => {
+    const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
+    const evaluateClaim = vi.fn(nativeAssertions.engine.evaluateClaim);
+    const failure = new Error('Owned subject release refused.');
+    const releaseSubject = vi
+      .fn(() => encode({ result: {} }))
+      .mockImplementationOnce(() => {
+        throw failure;
+      });
+    const engine: GeoSpecNativeModelEngine = {
+      ...nativeAssertions.engine,
+      evaluateClaim,
+      processRequest: () =>
+        encode({
+          requestId: 'configuration',
+          result: {
+            canonicalProfile: 'geospec-jcs-v1',
+            protocolVersion: 3,
+            registryVersion: 5,
+            configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+          },
+        }),
+      ingestSubject: () => encode({ result: { subject: { subjectHash: '1'.repeat(64) } } }),
+      subjectHandle: () => encode({ result: { subjectHandle: 'owned' } }),
+      releaseSubject,
+    };
+    const nativeModelLoader = createGeoSpecNativeModelLoader({ engine });
+    try {
+      const result = await runModule(
+        [
+          [
+            'spec.geospec.ts',
+            `
+        import { it, expectGeo } from 'geospec';
+        import { createModelLoader } from 'geospec/model';
+        it('preserves caught expired-subject failure after cleanup refuses', async () => {
+          const load = createModelLoader({ format: 'step' });
+          const subject = await load({ source: Uint8Array.of(1) });
+          try { await load.dispose(); throw new Error('Expected disposal to refuse.'); }
+          catch (error) {
+            if (error.name !== 'AggregateError' || error.message !== 'GeoSpec model scope disposal failed.' ||
+                error.errors[0].message !== 'Owned subject release refused.') { throw error; }
+          }
+          try { expectGeo(subject).toBeWatertight(); } catch {}
+          await load.dispose();
+        });
+      `,
+          ],
+        ],
+        { nativeAssertions: { engine }, nativeModelLoader },
+      );
+      expect(result.success && result.tests[0]?.status).toBe('failed');
+      expect(result.success && result.tests[0]?.assertions[0]?.passed).toBe(false);
+      expect(evaluateClaim).not.toHaveBeenCalled();
+      expect(releaseSubject).toHaveBeenCalledTimes(2);
+    } finally {
+      await nativeModelLoader.releaseAll();
+    }
+  });
   it.each(['primary', 'resource'] as const)(
     'should detect edited %s bytes even when the host admits equal geometry',
     async (kind) => {

@@ -366,17 +366,22 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
     ...(trackedNativeModelLoader
       ? {
           createModelLoader: (defaults: CreateModelLoaderOptions): ManagedGeoSpecModelLoader => {
-            // VM subjects are released by the run's existing raw-loader owner. A
-            // managed child scope drains its loads and invalidates only its facades.
+            // The raw loader owns the Runtime; a managed child drains its loads,
+            // invalidates its facades and drops only those loads' private leases.
             if (defaults.engine !== undefined || defaults.readSource !== undefined) {
               throw new TypeError('Authored VM model defaults cannot replace the admitting host.');
             }
             let generation = 0;
             const loads = new Set<Promise<unknown>>();
+            const leases = new Set<NonNullable<ReturnType<typeof resolveGeoSpecSubject>['lease']>>();
+            let disposing: Promise<void> | undefined;
             const loader: GeoSpecModelLoader = async (input) => {
               const current = generation;
               const subject = await trackedNativeModelLoader({ ...defaults, ...input });
               const admission = resolveGeoSpecSubject(subject);
+              if (admission.lease !== undefined) {
+                leases.add(admission.lease);
+              }
               return bindGeoSpecSubject({
                 ...admission,
                 isLive: () => admission.isLive() && generation === current,
@@ -388,17 +393,37 @@ export async function runGeoSpecModule(options: RunGeoSpecModuleOptions): Promis
               loads.add(pending);
               return pending;
             };
+            const dispose = async (): Promise<void> => {
+              do {
+                const pending = [...loads];
+                // oxlint-disable-next-line no-await-in-loop -- Child-scope load callbacks may enqueue more admissions while draining.
+                await Promise.allSettled(pending);
+                for (const load of pending) {
+                  loads.delete(load);
+                }
+              } while (loads.size > 0);
+              generation += 1;
+              const errors: unknown[] = [];
+              for (const lease of leases) {
+                try {
+                  lease.dispose();
+                  leases.delete(lease);
+                } catch (error) {
+                  errors.push(error);
+                }
+              }
+              if (errors.length > 0) {
+                throw new AggregateError(errors, 'GeoSpec model scope disposal failed.');
+              }
+            };
             return Object.assign(tracked, {
-              async dispose() {
-                do {
-                  const pending = [...loads];
-                  // oxlint-disable-next-line no-await-in-loop -- Child-scope load callbacks may enqueue more admissions while draining.
-                  await Promise.allSettled(pending);
-                  for (const load of pending) {
-                    loads.delete(load);
-                  }
-                } while (loads.size > 0);
-                generation += 1;
+              // oxlint-disable-next-line typescript/promise-function-async -- Concurrent callers share one scope drain and invalidation.
+              dispose() {
+                // oxlint-disable-next-line promise/prefer-await-to-then -- Return one observed drain promise to every concurrent disposer.
+                disposing ??= dispose().finally(() => {
+                  disposing = undefined;
+                });
+                return disposing;
               },
             });
           },

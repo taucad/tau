@@ -13,7 +13,7 @@ const repositoryRoot = existsSync(join(process.cwd(), 'apps', 'ui'))
   ? process.cwd()
   : resolve(process.cwd(), '..', '..');
 const appRoot = join(repositoryRoot, 'apps', 'ui', 'app');
-const productionRoots = [join(appRoot, 'components', 'geometry')];
+const productionRoots = [join(appRoot, 'components', 'geometry'), join(appRoot, 'components', 'printer')];
 
 const productionFiles = productionRoots.flatMap((root) => {
   const files: string[] = [];

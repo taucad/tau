@@ -8,7 +8,6 @@ export {
   createMachinePrintPlanner,
   defaultFilamentSlots,
   machineSliceOptions,
-  slicedFilamentColors,
   type MachinePrintPlannerDependencies,
 } from '#registry/machine-print-planner.js';
 export type { BambuStudioEngine } from '#registry/print-profiles.js';
@@ -22,3 +21,4 @@ export type {
   SystemSkillBundle,
 } from '#registry/skill-overlay.js';
 export { maskedPathCode } from '@taucad/filesystem/composed-view';
+export { slicedFilamentColors } from '@taucad/slicer/container';

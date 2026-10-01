@@ -1,3 +1,4 @@
+import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { defaultFilamentSlots, machineSliceOptions } from '@taucad/agent-tools/registry';
@@ -62,9 +63,9 @@ import {
   formatQuantity,
   formatSize,
   materialSlotLabel,
-  summarizeGcodeContainer,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
-import type { PlateFit, SliceSummary } from '#routes/w.$workspace.$project/chat-print-summary.js';
+import type { PlateFit } from '#routes/w.$workspace.$project/chat-print-summary.js';
+import type { SliceSummary } from '#components/printer/printer-summary.js';
 import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
 
 /** The export target every print goes through (blueprint D3). */
@@ -378,6 +379,7 @@ export type PrintPrepare = Readonly<{
   isSlicing: boolean;
   sliceError: string | undefined;
   sliceNow: () => Promise<void>;
+  cancelSlice: () => void;
   openPreview: () => void;
   /** Open the one confirmation every start passes through. */
   confirmSend: () => void;
@@ -465,6 +467,18 @@ export const usePrintPrepare = ({
   const [submission, setSubmission] = useState<Record<string, unknown>>({});
   const [slice, setSlice] = useState<SlicedArtifact>();
   const [isSlicing, setIsSlicing] = useState(false);
+  const sliceController = useRef<AbortController | undefined>(undefined);
+  const cancelSlice = useCallback(() => {
+    sliceController.current?.abort();
+    sliceController.current = undefined;
+    setIsSlicing(false);
+  }, []);
+  useEffect(
+    () => () => {
+      sliceController.current?.abort();
+    },
+    [],
+  );
   /* Kept with the geometry it described, so a new render retires it (a failure on an empty model must not outlive it). */
   const [failedSlice, setFailedSlice] = useState<Readonly<{ message: string; geometry: unknown }>>();
   const sliceError = failedSlice !== undefined && failedSlice.geometry === geometry ? failedSlice.message : undefined;
@@ -590,6 +604,12 @@ export const usePrintPrepare = ({
     [bambuExportOptions, isBambuStudio, machineOptions, options],
   );
   const optionsKey = JSON.stringify([sliceOptions ?? null, submission]);
+  useEffect(
+    () => () => {
+      cancelSlice();
+    },
+    [entryPath, optionsKey, cancelSlice],
+  );
   const sliceBlocker = ((): string | undefined => {
     if (!isBambuStudio || sliceOptions !== undefined) {
       return undefined;
@@ -620,13 +640,28 @@ export const usePrintPrepare = ({
     if (!actor || !kernelClient || !route || sliceOptions === undefined) {
       return;
     }
+    sliceController.current?.abort();
+    const controller = new AbortController();
+    sliceController.current = controller;
+    const started = performance.now();
     const claimId = randomUuid();
     projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, renderTimeout });
     setIsSlicing(true);
     setFailedSlice(undefined);
     let sliceGeometry = geometry;
+    let releaseRenderWatch: (() => void) | undefined;
+    let stageStarted = started;
+    const recordStage = (stage: string): void => {
+      const end = performance.now();
+      const name = `tau.printer.slice.${stage}`;
+      performance.clearMeasures(name);
+      performance.measure(name, { start: stageStarted, end });
+      stageStarted = end;
+    };
     try {
-      const settled = await awaitFreshRender(actor);
+      const settled = await awaitFreshRender(actor, { signal: controller.signal });
+      controller.signal.throwIfAborted();
+      recordStage('fresh-render');
       const failedIssues = selectCadFailureIssues(settled);
       if (failedIssues) {
         throw new Error(failedIssues.map((issue) => issue.message).join('; ') || 'The selected CAD render failed');
@@ -635,6 +670,16 @@ export const usePrintPrepare = ({
         throw new Error(`No current successful geometry is available for ${entryPath}`);
       }
       sliceGeometry = settled.context.geometry;
+      const renderWatch = actor.subscribe({
+        next: () => {
+          if (actor.getSnapshot().context.lastRequestedRenderId > settled.context.lastSettledRenderId) {
+            controller.abort(new DOMException('The design changed during slicing.', 'AbortError'));
+          }
+        },
+      });
+      releaseRenderWatch = (): void => {
+        renderWatch.unsubscribe();
+      };
       const freshKernelClient = settled.context.kernelClient;
       const freshKernelId = settled.context.activeKernelId;
       const freshRoute = freshKernelClient
@@ -645,7 +690,9 @@ export const usePrintPrepare = ({
       }
       const result = await exportWithRuntimeValidatedInput(freshKernelClient, freshRoute, {
         exportOptions: sliceOptions,
+        signal: controller.signal,
       });
+      recordStage('export');
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('; ') || 'Slicing failed.');
       }
@@ -653,17 +700,44 @@ export const usePrintPrepare = ({
       if (!file) {
         throw new Error('The slicer produced no file.');
       }
+      controller.signal.throwIfAborted();
+      const freshRenderId = settled.context.lastSettledRenderId;
       const fileName = `${modelName(entryPath)}.gcode.3mf`;
       const hex = await sha256Bytes(file.bytes);
+      recordStage('hash');
       // SAFETY: sha256Bytes returns the lowercase hex the digest brand describes.
       const digest = `sha256:${hex}` as MachineArtifactReference['digest'];
       /* Named by its bytes, as job imports are (blueprint D5), so a later slice never rewrites what a request names. */
+      controller.signal.throwIfAborted();
       const path = `.tau/artifacts/${hex}/${fileName}`;
       const isHeld = (await fileManager.exists(path)) && (await sha256Bytes(await fileManager.readFile(path))) === hex;
+      controller.signal.throwIfAborted();
       if (!isHeld) {
         await fileManager.writeFiles({ [path]: { content: file.bytes } });
       }
-      const summary = summarizeGcodeContainer(file.bytes);
+      recordStage('artifact');
+      const prepared = await printerPreparation.prepare({
+        bytes: file.bytes,
+        kind: 'container',
+        signal: controller.signal,
+        retain: false,
+      });
+      recordStage('prepare');
+      const summary = prepared.kind === 'ready' ? prepared.value.summary : prepared.summary;
+      if (actor.getSnapshot().context.lastRequestedRenderId > freshRenderId) {
+        throw new Error('The design changed during slicing. Slice the current design again.');
+      }
+      controller.signal.throwIfAborted();
+      performance.clearMeasures('tau.printer.slice-to-summary');
+      performance.measure('tau.printer.slice-to-summary', {
+        start: started,
+        end: performance.now(),
+        detail: {
+          bytes: file.bytes.byteLength,
+          preparationDuration: prepared.preparationDuration,
+          stages: prepared.stageDurations,
+        },
+      });
       const warnings = result.issues.filter(({ severity }) => severity === 'warning').map(({ message }) => message);
       const defaults =
         provider && entry
@@ -709,9 +783,15 @@ export const usePrintPrepare = ({
         warnings,
       });
     } catch (error) {
-      setFailedSlice({ message: error instanceof Error ? error.message : String(error), geometry: sliceGeometry });
+      if (!controller.signal.aborted) {
+        setFailedSlice({ message: error instanceof Error ? error.message : String(error), geometry: sliceGeometry });
+      }
     } finally {
-      setIsSlicing(false);
+      releaseRenderWatch?.();
+      if (sliceController.current === controller) {
+        sliceController.current = undefined;
+        setIsSlicing(false);
+      }
       projectRef.send({ type: 'releaseGeometryUnit', claimId });
     }
   }, [
@@ -858,6 +938,7 @@ export const usePrintPrepare = ({
     isSlicing,
     sliceError,
     sliceNow,
+    cancelSlice,
     openPreview,
     confirmSend,
     cancelSend,
@@ -1289,6 +1370,11 @@ function SliceControls({ prepare }: { readonly prepare: PrintPrepare }): React.J
         )}
         {isSlicing ? 'Slicing…' : slice ? 'Slice again' : 'Slice and preview'}
       </Button>
+      {isSlicing ? (
+        <Button type='button' variant='ghost' size='sm' className='self-start' onClick={prepare.cancelSlice}>
+          Cancel slicing
+        </Button>
+      ) : null}
       {waiting === undefined ? null : (
         <p id='print-slice-blocker' role='status' aria-busy='true' className='text-xs text-muted-foreground'>
           {waiting}

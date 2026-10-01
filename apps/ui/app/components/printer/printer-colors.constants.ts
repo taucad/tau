@@ -16,6 +16,16 @@ export const printerBackground = { light: '#f5f5f5', dark: '#171717' } as const;
 /** Default filament when no loaded material reports a colour: the brand teal. */
 export const printerAccent = '#14b8a6';
 
+/** Physical hardware finishes, independent of the interface theme. */
+export const printerHardwareColors = {
+  aluminium: '#a8abae',
+  steel: '#888e93',
+  graphite: '#25282a',
+  carbon: '#303234',
+  miniHousing: '#dadbd7',
+  glass: '#647176',
+} as const;
+
 /** Machine body tints. */
 export const printerBody = {
   frame: { light: '#5b6470', dark: '#9aa3ad' },
@@ -26,14 +36,12 @@ export const printerBody = {
   rail: '#7c8792',
   beam: '#8d97a1',
   carriage: '#b3bcc6',
-  nozzle: '#d9c27a',
+  nozzle: '#bab5af',
   nozzleGlow: '#ff7a2a',
   /** The material unit sits at the top of the frame as context, so it stays close to the background. */
   materialUnit: { light: '#d8dde3', dark: '#2c3238' },
   spool: { light: '#b9c1ca', dark: '#3b424a' },
   chute: '#3f454d',
-  /** The print surface lifts toward this so the empty build area reads against the toolpath. */
-  plateSurfaceLift: '#ffffff',
   lightOn: '#fff2c4',
   lightOff: '#4a4f57',
 } as const;
@@ -45,14 +53,15 @@ export const printerToolpath = {
   brim: '#9aa3ad',
   /**
    * The start sequence and purge extrusion, at every height and on the active layer alike: a dark umber
-   * that keeps WCAG's 3:1 non-text contrast against every plate's lifted print surface, grey or gold.
+   * that contrasts with gold; dark coatings use the lighter umber below.
    */
   preparation: '#472a0d',
+  preparationOnDark: '#b58a61',
   travel: { light: '#c9ced6', dark: '#3a3f47' },
   unknown: '#b45fc9',
   /**
    * Layers below the active one drift toward this with depth. Both themes drift toward shade, which reads
-   * against the lifted plate surface: a light target washed the whole print out to pink on the light theme.
+   * against the plate surface: a light target washed the whole print out to pink on the light theme.
    */
   muted: { light: '#3b4048', dark: '#2a2f36' },
   /** The active layer and the fresh-filament trail brighten toward this. */

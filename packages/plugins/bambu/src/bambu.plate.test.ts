@@ -153,11 +153,11 @@ describe('A1 mini plate catalogue', () => {
 });
 
 // Inspect the actual surface triangles: bounds alone would accept a plain rectangle.
-it.each(bambuA1MiniPlates)('should pierce and shape the Mini $id sheet', async (plate) => {
+it.each([...bambuX1cPlates, ...bambuA1MiniPlates])('should pierce and shape the $printer $id sheet', async (plate) => {
   const gltf = await readGlb(plate.model);
   const bytes = await readFile(plate.model);
   const binary = 20 + bytes.readUInt32LE(12) + 8;
-  const primitive = gltf.meshes.find(({ name }) => name === 'surface')!.primitives[0]!;
+  const primitive = gltf.meshes.find(({ name }) => name === 'steel')!.primitives[0]!;
   const positions = gltf.accessors[primitive.attributes.POSITION]!;
   const indices = gltf.accessors[primitive.indices]!;
   expect(positions.componentType).toBe(5126);
@@ -175,7 +175,7 @@ it.each(bambuA1MiniPlates)('should pierce and shape the Mini $id sheet', async (
     for (let index = 0; index < indices.count; index += 3) {
       const offset = binary + gltf.bufferViews[indices.bufferView]!.byteOffset + (indices.byteOffset ?? 0) + index * 4;
       const [a, b, c] = [0, 4, 8].map((step) => vertex(bytes.readUInt32LE(offset + step)));
-      if ([a!, b!, c!].some((point) => Math.abs(point[2]) > 0.001)) {
+      if ([a!, b!, c!].some((point) => Math.abs(point[2] - positions.max[1]! * 1000) > 0.001)) {
         continue;
       }
       const cross = (p: readonly number[], q: readonly number[]): number =>
@@ -188,6 +188,15 @@ it.each(bambuA1MiniPlates)('should pierce and shape the Mini $id sheet', async (
     return false;
   };
   expect(covers(90, 90)).toBe(true);
+  if (plate.printer === 'x1c') {
+    expect(covers(128, 263)).toBe(true);
+    expect(covers(128, 257.7)).toBe(false);
+    expect(covers(230, -4)).toBe(false);
+    expect(covers(247, -4)).toBe(false);
+    expect(covers(20, -5)).toBe(false);
+    expect(covers(100, -5)).toBe(true);
+    return;
+  }
   expect(covers(49, 186)).toBe(true);
   expect(covers(131, 186)).toBe(true);
   expect(covers(90, 186)).toBe(false);

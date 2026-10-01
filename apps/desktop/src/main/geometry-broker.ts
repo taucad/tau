@@ -61,7 +61,11 @@ type Job = {
 export type GeometryBrokerOptions = {
   readonly utilityEntry: string;
   readonly env: NodeJS.ProcessEnv;
-  readonly fork: (entry: string, args: string[], options: { env: NodeJS.ProcessEnv; serviceName: string }) => UtilityProcess;
+  readonly fork: (
+    entry: string,
+    args: string[],
+    options: { env: NodeJS.ProcessEnv; serviceName: string },
+  ) => UtilityProcess;
   readonly createChannel: () => MessageChannelMain;
   readonly connectRuntime: (context: Readonly<Record<string, string>>) => RuntimeLease;
   readonly runtimeConfig?: Readonly<{ tauApiUrl: string; tauWebSocketUrl: string }>;
@@ -75,13 +79,20 @@ export type GeometryBrokerOptions = {
 export type GeometryBroker = {
   connectMeasurement(): MessagePortMain;
   connectPerformance(): MessagePortMain;
-  connectSuite(input: Readonly<{ root: string; context: Readonly<Record<string, string>>; engine: 'native' | 'legacy'; stillAuthorized: () => boolean }>): MessagePortMain;
+  connectSuite(
+    input: Readonly<{
+      root: string;
+      context: Readonly<Record<string, string>>;
+      engine: 'native' | 'legacy';
+      stillAuthorized: () => boolean;
+    }>,
+  ): MessagePortMain;
   revokeUnauthorized(): void;
   dispose(): Promise<void>;
 };
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
-  value !== null && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : undefined;
+  value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
 
 const validName = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 256 && !value.includes('\0');
@@ -91,29 +102,45 @@ const measurementRequest = (value: unknown): value is MeasurementRequest => {
   const source = record(frame?.['source']);
   const pair = frame?.['occurrences'];
   if (
-    frame === undefined || Object.keys(frame).sort().join(',') !== 'id,occurrences,source' ||
-    !Number.isSafeInteger(frame['id']) || (frame['id'] as number) < 0 ||
-    source === undefined || Object.keys(source).sort().join(',') !== 'bytes,coordinateSystem,format' ||
-    source['format'] !== 'ap242' || source['coordinateSystem'] !== 'y-up' ||
+    frame === undefined ||
+    Object.keys(frame).sort().join(',') !== 'id,occurrences,source' ||
+    !Number.isSafeInteger(frame['id']) ||
+    (frame['id'] as number) < 0 ||
+    source === undefined ||
+    Object.keys(source).sort().join(',') !== 'bytes,coordinateSystem,format' ||
+    source['format'] !== 'ap242' ||
+    source['coordinateSystem'] !== 'y-up' ||
     !(source['bytes'] instanceof Uint8Array) ||
-    source['bytes'].byteLength === 0 || source['bytes'].byteLength > maxStepBytes ||
-    !Array.isArray(pair) || pair.length !== 2
+    source['bytes'].byteLength === 0 ||
+    source['bytes'].byteLength > maxStepBytes ||
+    !Array.isArray(pair) ||
+    pair.length !== 2
   ) {
     return false;
   }
   const first = record(pair[0]);
   const second = record(pair[1]);
-  return first !== undefined && second !== undefined &&
-    Object.keys(first).join(',') === 'name' && Object.keys(second).join(',') === 'name' &&
-    validName(first['name']) && validName(second['name']) && first['name'] !== second['name'];
+  return (
+    first !== undefined &&
+    second !== undefined &&
+    Object.keys(first).join(',') === 'name' &&
+    Object.keys(second).join(',') === 'name' &&
+    validName(first['name']) &&
+    validName(second['name']) &&
+    first['name'] !== second['name']
+  );
 };
 
 const suiteRequest = (value: unknown): value is SuiteRequest => {
   const frame = record(value);
   const options = record(frame?.['options']);
-  if (frame?.['type'] !== 'run' || options === undefined ||
+  if (
+    frame?.['type'] !== 'run' ||
+    options === undefined ||
     Object.keys(frame).sort().join(',') !== 'options,type' ||
-    !Array.isArray(options['files']) || options['files'].length === 0 || options['files'].length > 256 ||
+    !Array.isArray(options['files']) ||
+    options['files'].length === 0 ||
+    options['files'].length > 256 ||
     !options['files'].every((file: unknown) => typeof file === 'string' && file.length > 0 && file.length <= 4096)
   ) {
     return false;
@@ -124,17 +151,29 @@ const suiteRequest = (value: unknown): value is SuiteRequest => {
   }
   const pattern = options['testNamePattern'];
   const { testTimeout, matcherWallBackstop } = options;
-  return (pattern === undefined || (typeof pattern === 'string' && pattern.length <= 1024) || pattern instanceof RegExp) &&
-    (testTimeout === undefined || (Number.isSafeInteger(testTimeout) && (testTimeout as number) > 0 && (testTimeout as number) <= suiteDeadlineMilliseconds)) &&
-    (matcherWallBackstop === undefined || (Number.isSafeInteger(matcherWallBackstop) && (matcherWallBackstop as number) > 0 && (matcherWallBackstop as number) <= suiteDeadlineMilliseconds)) &&
+  return (
+    (pattern === undefined || (typeof pattern === 'string' && pattern.length <= 1024) || pattern instanceof RegExp) &&
+    (testTimeout === undefined ||
+      (Number.isSafeInteger(testTimeout) &&
+        (testTimeout as number) > 0 &&
+        (testTimeout as number) <= suiteDeadlineMilliseconds)) &&
+    (matcherWallBackstop === undefined ||
+      (Number.isSafeInteger(matcherWallBackstop) &&
+        (matcherWallBackstop as number) > 0 &&
+        (matcherWallBackstop as number) <= suiteDeadlineMilliseconds)) &&
     (options['forensic'] === undefined || typeof options['forensic'] === 'boolean') &&
-    (options['bail'] === undefined || typeof options['bail'] === 'boolean');
+    (options['bail'] === undefined || typeof options['bail'] === 'boolean')
+  );
 };
 
 const performanceRequest = (value: unknown): value is PerformanceRequest => {
   const frame = record(value);
-  if (frame?.['type'] !== 'run' || !Number.isSafeInteger(frame['id']) ||
-    (frame['id'] as number) < 0 || Object.keys(frame).sort().join(',') !== 'id,input,type') {
+  if (
+    frame?.['type'] !== 'run' ||
+    !Number.isSafeInteger(frame['id']) ||
+    (frame['id'] as number) < 0 ||
+    Object.keys(frame).sort().join(',') !== 'id,input,type'
+  ) {
     return false;
   }
   try {
@@ -145,7 +184,9 @@ const performanceRequest = (value: unknown): value is PerformanceRequest => {
 };
 
 const finitePoint = (value: unknown): boolean =>
-  Array.isArray(value) && value.length === 3 && value.every((coordinate: unknown) => typeof coordinate === 'number' && Number.isFinite(coordinate));
+  Array.isArray(value) &&
+  value.length === 3 &&
+  value.every((coordinate: unknown) => typeof coordinate === 'number' && Number.isFinite(coordinate));
 
 const validMeasurementReply = (request: MeasurementRequest, value: unknown): boolean => {
   const frame = record(value);
@@ -154,21 +195,38 @@ const validMeasurementReply = (request: MeasurementRequest, value: unknown): boo
     return false;
   }
   if (result['status'] === 'refused' || result['status'] === 'interrupted') {
-    const codes = result['status'] === 'refused'
-      ? ['unsupported-evidence', 'invalid-selection', 'work-limit']
-      : ['cancelled', 'executor-exited', 'deadline', 'engine-error'];
-    return codes.includes(result['code'] as string) && typeof result['message'] === 'string' && result['message'].length <= 4096;
+    const codes =
+      result['status'] === 'refused'
+        ? ['unsupported-evidence', 'invalid-selection', 'work-limit']
+        : ['cancelled', 'executor-exited', 'deadline', 'engine-error'];
+    return (
+      codes.includes(result['code'] as string) &&
+      typeof result['message'] === 'string' &&
+      result['message'].length <= 4096
+    );
   }
   const fact = record(result['fact']);
   const points = fact?.['points'];
-  return result['status'] === 'complete' && fact?.['source'] === 'ap242' &&
-    fact['assurance'] === 'exact-brep' && fact['unit'] === 'mm' && fact['coordinateSystem'] === 'z-up' &&
+  return (
+    result['status'] === 'complete' &&
+    fact?.['source'] === 'ap242' &&
+    fact['assurance'] === 'exact-brep' &&
+    fact['unit'] === 'mm' &&
+    fact['coordinateSystem'] === 'z-up' &&
     fact['algorithmProfile'] === 'geospec-minimum-distance-v1' &&
-    typeof fact['subjectHash'] === 'string' && fact['subjectHash'].length > 0 && fact['subjectHash'].length <= 256 &&
-    Array.isArray(fact['occurrences']) && fact['occurrences'].length === 2 &&
+    typeof fact['subjectHash'] === 'string' &&
+    fact['subjectHash'].length > 0 &&
+    fact['subjectHash'].length <= 256 &&
+    Array.isArray(fact['occurrences']) &&
+    fact['occurrences'].length === 2 &&
     fact['occurrences'].every((path: unknown) => typeof path === 'string' && path.length > 0 && path.length <= 4096) &&
-    typeof fact['distance'] === 'number' && Number.isFinite(fact['distance']) && fact['distance'] >= 0 &&
-    Array.isArray(points) && points.length === 2 && points.every((point: unknown) => finitePoint(point));
+    typeof fact['distance'] === 'number' &&
+    Number.isFinite(fact['distance']) &&
+    fact['distance'] >= 0 &&
+    Array.isArray(points) &&
+    points.length === 2 &&
+    points.every((point: unknown) => finitePoint(point))
+  );
 };
 
 /** Create the exclusive, supervised geometry slot. */
@@ -192,11 +250,17 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
   const log = options.log ?? ((): void => undefined);
   const isIdle = (): boolean => active === undefined && queue.length === 0 && !stopping;
   const grantAllows = (grant: (() => boolean) | undefined): boolean => {
-    try { return grant?.() === true; } catch { return false; }
+    try {
+      return grant?.() === true;
+    } catch {
+      return false;
+    }
   };
   const residentGrantsAllow = (): boolean => {
     for (const grant of residentSuiteGrants) {
-      if (!grantAllows(grant)) { return false; }
+      if (!grantAllows(grant)) {
+        return false;
+      }
     }
     return true;
   };
@@ -207,7 +271,11 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
     }
     job.finished = true;
     clearTimeout(job.deadline);
-    try { job.port.postMessage(value); } catch { /* Caller has gone. */ }
+    try {
+      job.port.postMessage(value);
+    } catch {
+      /* Caller has gone. */
+    }
     job.port.close();
   };
   const unavailable = (
@@ -215,11 +283,14 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
     reason: string,
     code: 'cancelled' | 'deadline' | 'executor-exited' | 'engine-error' = 'engine-error',
   ): void => {
-    answer(job, job.kind === 'measurement'
-      ? { id: (job.input as MeasurementRequest).id, result: { status: 'interrupted', code, message: reason } }
-      : job.kind === 'performance'
-        ? { id: (job.input as PerformanceRequest).id, type: 'error', message: reason }
-        : { type: 'error', message: reason });
+    answer(
+      job,
+      job.kind === 'measurement'
+        ? { id: (job.input as MeasurementRequest).id, result: { status: 'interrupted', code, message: reason } }
+        : job.kind === 'performance'
+          ? { id: (job.input as PerformanceRequest).id, type: 'error', message: reason }
+          : { type: 'error', message: reason },
+    );
   };
   const release = (job: Job): void => {
     job.lease?.dispose();
@@ -256,22 +327,36 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
       }
       return;
     }
-    try { utility?.postMessage({ type: 'geometry-cancel', generation, requestId: job.id }); } catch { /* Kill below. */ }
-    cancelWatchdog = setTimeout(() => { killActiveSlot(reason); }, cancelGraceMilliseconds);
+    try {
+      utility?.postMessage({ type: 'geometry-cancel', generation, requestId: job.id });
+    } catch {
+      /* Kill below. */
+    }
+    cancelWatchdog = setTimeout(() => {
+      killActiveSlot(reason);
+    }, cancelGraceMilliseconds);
   };
   const pump = (): void => {
     if (!accepting || stopping || active !== undefined || queue.length === 0) {
       return;
     }
     const job = queue.shift()!;
-    if (job.canceled || job.finished) { pump(); return; }
+    if (job.canceled || job.finished) {
+      pump();
+      return;
+    }
     if (job.kind === 'suite' && !grantAllows(job.stillAuthorized)) {
       unavailable(job, 'The GeoSpec runner root grant expired before execution.');
       pump();
       return;
     }
-    if (utility && (!residentGrantsAllow() ||
-      (job.kind === 'suite' && !residentSuiteGrants.has(job.stillAuthorized!) && residentSuiteGrants.size >= maxResidentSuiteGrants))) {
+    if (
+      utility &&
+      (!residentGrantsAllow() ||
+        (job.kind === 'suite' &&
+          !residentSuiteGrants.has(job.stillAuthorized!) &&
+          residentSuiteGrants.size >= maxResidentSuiteGrants))
+    ) {
       queue.unshift(job);
       killActiveSlot('retained GeoSpec root grant expired or tracking bound reached');
       return;
@@ -288,7 +373,9 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
             return;
           }
           let bytes: number | undefined;
-          try { bytes = options.sampleResidentBytes(spawned); } catch (error) {
+          try {
+            bytes = options.sampleResidentBytes(spawned);
+          } catch (error) {
             log('geometry.slot-rss-sample-error', { generation, error });
           }
           if (bytes === undefined || !Number.isSafeInteger(bytes) || bytes < 0) {
@@ -348,15 +435,22 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
               if (Buffer.byteLength(JSON.stringify(frame['value'])) > maxReplyBytes) {
                 throw new Error('The geometry reply exceeded its limit.');
               }
-              if (finished.kind === 'measurement' && !validMeasurementReply(finished.input as MeasurementRequest, frame['value'])) {
+              if (
+                finished.kind === 'measurement' &&
+                !validMeasurementReply(finished.input as MeasurementRequest, frame['value'])
+              ) {
                 throw new Error('The geometry reply is malformed.');
               }
               answer(finished, frame['value']);
-            } catch { unavailable(finished, 'The geometry reply is malformed or exceeded its limit.'); }
+            } catch {
+              unavailable(finished, 'The geometry reply is malformed or exceeded its limit.');
+            }
           }
           pump();
           if (isIdle()) {
-            idleWatchdog = setTimeout(() => { killActiveSlot('idle memory retirement'); }, idleRetirementMilliseconds);
+            idleWatchdog = setTimeout(() => {
+              killActiveSlot('idle memory retirement');
+            }, idleRetirementMilliseconds);
           }
         });
         spawned.on('exit', () => {
@@ -388,7 +482,19 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
       if (job.kind === 'suite') {
         job.lease = options.connectRuntime(job.context!);
         residentSuiteGrants.add(job.stillAuthorized!);
-        utility.postMessage({ type: 'geometry-run', generation, requestId: job.id, kind: job.kind, root: job.root, engine: job.engine, input: job.input, runtimeConfig: options.runtimeConfig }, [job.lease.port]);
+        utility.postMessage(
+          {
+            type: 'geometry-run',
+            generation,
+            requestId: job.id,
+            kind: job.kind,
+            root: job.root,
+            engine: job.engine,
+            input: job.input,
+            runtimeConfig: options.runtimeConfig,
+          },
+          [job.lease.port],
+        );
       } else {
         utility.postMessage({ type: 'geometry-run', generation, requestId: job.id, kind: job.kind, input: job.input });
       }
@@ -405,9 +511,19 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
       }
     }
   };
-  const connect = (kind: Job['kind'], suite?: Readonly<{ root: string; context: Readonly<Record<string, string>>; engine: 'native' | 'legacy'; stillAuthorized: () => boolean }>): MessagePortMain => {
+  const connect = (
+    kind: Job['kind'],
+    suite?: Readonly<{
+      root: string;
+      context: Readonly<Record<string, string>>;
+      engine: 'native' | 'legacy';
+      stillAuthorized: () => boolean;
+    }>,
+  ): MessagePortMain => {
     if (!accepting || unhealthy) {
-      throw new Error(unhealthy ? 'The geometry process has not exited after termination.' : 'The geometry broker is shutting down.');
+      throw new Error(
+        unhealthy ? 'The geometry process has not exited after termination.' : 'The geometry broker is shutting down.',
+      );
     }
     if (unusedPorts.size >= maxQueue) {
       throw new Error('Too many unsubmitted geometry request ports.');
@@ -415,7 +531,9 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
     const channel = options.createChannel();
     const port = channel.port2;
     unusedPorts.add(port);
-    const admissionWatchdog = setTimeout(() => { port.close(); }, 10_000);
+    const admissionWatchdog = setTimeout(() => {
+      port.close();
+    }, 10_000);
     admissionWatchdog.unref();
     let submitted = false;
     port.on('message', (event: { data: unknown }) => {
@@ -433,32 +551,81 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
       unusedPorts.delete(port);
       if (!accepting || unhealthy) {
         const id = record(event.data)?.['id'];
-        try { port.postMessage(kind === 'measurement'
-          ? { id, result: { status: 'interrupted', code: 'executor-exited', message: 'The geometry broker is no longer accepting requests.' } }
-          : { id, type: 'error', message: 'The geometry broker is no longer accepting requests.' }); } catch { /* Caller has gone. */ }
+        try {
+          port.postMessage(
+            kind === 'measurement'
+              ? {
+                  id,
+                  result: {
+                    status: 'interrupted',
+                    code: 'executor-exited',
+                    message: 'The geometry broker is no longer accepting requests.',
+                  },
+                }
+              : { id, type: 'error', message: 'The geometry broker is no longer accepting requests.' },
+          );
+        } catch {
+          /* Caller has gone. */
+        }
         port.close();
         return;
       }
-      const input = kind === 'measurement'
-        ? (measurementRequest(event.data) ? event.data : undefined)
-        : kind === 'performance'
-          ? (performanceRequest(event.data) ? event.data : undefined)
-          : (suiteRequest(event.data) ? event.data : undefined);
-      if (!input || queue.length >= maxQueue) {
-        try { port.postMessage(kind === 'measurement'
-          ? { id: record(event.data)?.['id'], result: { status: 'interrupted', code: 'engine-error', message: input ? 'The geometry queue is full.' : 'Invalid or oversized exact measurement request.' } }
+      const input =
+        kind === 'measurement'
+          ? measurementRequest(event.data)
+            ? event.data
+            : undefined
           : kind === 'performance'
-            ? { id: record(event.data)?.['id'], type: 'error', message: input ? 'The geometry queue is full.' : 'Invalid GeoSpec performance request.' }
-            : { type: 'error', message: input ? 'The geometry queue is full.' : 'Invalid GeoSpec suite request.' }); } catch { /* Caller has gone. */ }
+            ? performanceRequest(event.data)
+              ? event.data
+              : undefined
+            : suiteRequest(event.data)
+              ? event.data
+              : undefined;
+      if (!input || queue.length >= maxQueue) {
+        try {
+          port.postMessage(
+            kind === 'measurement'
+              ? {
+                  id: record(event.data)?.['id'],
+                  result: {
+                    status: 'interrupted',
+                    code: 'engine-error',
+                    message: input ? 'The geometry queue is full.' : 'Invalid or oversized exact measurement request.',
+                  },
+                }
+              : kind === 'performance'
+                ? {
+                    id: record(event.data)?.['id'],
+                    type: 'error',
+                    message: input ? 'The geometry queue is full.' : 'Invalid GeoSpec performance request.',
+                  }
+                : { type: 'error', message: input ? 'The geometry queue is full.' : 'Invalid GeoSpec suite request.' },
+          );
+        } catch {
+          /* Caller has gone. */
+        }
         port.close();
         return;
       }
       const job: Job = {
-        id: ++nextId, kind, port, input, root: suite?.root, context: suite?.context, engine: suite?.engine, stillAuthorized: suite?.stillAuthorized,
-        canceled: false, finished: false,
+        id: ++nextId,
+        kind,
+        port,
+        input,
+        root: suite?.root,
+        context: suite?.context,
+        engine: suite?.engine,
+        stillAuthorized: suite?.stillAuthorized,
+        canceled: false,
+        finished: false,
       };
-      job.deadline = setTimeout(() => { cancel(job, 'The geometry request timed out.', 'deadline'); },
-        kind === 'measurement' ? measurementDeadlineMilliseconds : suiteDeadlineMilliseconds);
+      job.deadline = setTimeout(
+        () => {
+          cancel(job, 'The geometry request timed out.', 'deadline');
+        },
+        kind === 'measurement' ? measurementDeadlineMilliseconds : suiteDeadlineMilliseconds,
+      );
       queue.push(job);
       pump();
     });
@@ -510,14 +677,20 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
       }
       const spawned = utility;
       clearTimeout(idleWatchdog);
-      const exited = new Promise<void>((resolve) => { spawned.once('exit', () => { resolve(); }); });
+      const exited = new Promise<void>((resolve) => {
+        spawned.once('exit', () => {
+          resolve();
+        });
+      });
       killActiveSlot('shutdown');
       let geometryExitTimeout: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
           exited,
           new Promise<never>((_resolve, reject) => {
-            geometryExitTimeout = setTimeout(() => { reject(new Error('The geometry process did not exit on shutdown.')); }, exitDeadlineMilliseconds);
+            geometryExitTimeout = setTimeout(() => {
+              reject(new Error('The geometry process did not exit on shutdown.'));
+            }, exitDeadlineMilliseconds);
           }),
         ]);
       } finally {

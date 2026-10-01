@@ -48,11 +48,14 @@ const pendingRuntimePorts = new Map<
     }): void;
   }
 >();
-const pendingGeometryPorts = new Map<string, {
-  readonly geometryPortTimeout: ReturnType<typeof setTimeout>;
-  resolve(port: UtilityMessage['ports'][number]): void;
-  reject(error: Error): void;
-}>();
+const pendingGeometryPorts = new Map<
+  string,
+  {
+    readonly geometryPortTimeout: ReturnType<typeof setTimeout>;
+    resolve(port: UtilityMessage['ports'][number]): void;
+    reject(error: Error): void;
+  }
+>();
 const requestGeometryPort = async (
   workspaceRoot: string,
   engine: 'native' | 'legacy',

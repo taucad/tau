@@ -22,7 +22,11 @@ describe('native runner admission authority', () => {
 
   it('should allow only this run’s admitted hashes across module calls and clear after release', async () => {
     const engine = mock<GeoSpecNativeModelEngine>();
-    const result = { canonicalClaim: new Uint8Array(), canonicalPlan: new Uint8Array(), canonicalResult: new Uint8Array() };
+    const result = {
+      canonicalClaim: new Uint8Array(),
+      canonicalPlan: new Uint8Array(),
+      canonicalResult: new Uint8Array(),
+    };
     engine.evaluateClaim.mockReturnValue(result);
     const load = vi.fn(async () => ({ subjectHash: hashA }));
     const releaseAll = vi.fn(async () => undefined);
@@ -48,9 +52,14 @@ describe('native runner admission authority', () => {
     await scoped({ source: new Uint8Array([1]), format: 'step' });
     expect(assertions.evaluateClaim(request([{ slot: 'a', subjectHash: hashA }]))).toBe(result);
     expect(assertions.evaluateClaim(request([{ slot: 'a', contentHash: hashA }]))).toBe(result);
-    expect(() => assertions.evaluateClaim(request([
-      { slot: 'a', subjectHash: hashA }, { slot: 'b', subjectHash: hashB },
-    ]))).toThrow('not admitted');
+    expect(() =>
+      assertions.evaluateClaim(
+        request([
+          { slot: 'a', subjectHash: hashA },
+          { slot: 'b', subjectHash: hashB },
+        ]),
+      ),
+    ).toThrow('not admitted');
     expect(engine.evaluateClaim).toHaveBeenCalledTimes(2);
     await scoped.releaseAll();
     expect(releaseAll).toHaveBeenCalledOnce();
@@ -61,7 +70,10 @@ describe('native runner admission authority', () => {
 
   it('should fence direct submitClaims and clear a supplied loader on close', async () => {
     const engine = mock<GeoSpecNativeModelEngine>();
-    const loader = Object.assign(vi.fn(async () => ({ subjectHash: hashA })), { releaseAll: vi.fn(async () => undefined) });
+    const loader = Object.assign(
+      vi.fn(async () => ({ subjectHash: hashA })),
+      { releaseAll: vi.fn(async () => undefined) },
+    );
     owner.serial.mockReturnValue(mock<GeoSpecRunner>({ close: vi.fn(async () => undefined) }));
     const runner = createNativeGeoSpecRunner({
       filesystem: mock<GeoSpecRunnerOptions['filesystem']>(),

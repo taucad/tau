@@ -118,7 +118,13 @@ export const ChatErrorCredits = memo(function ({
             )}
           </ChatModelSelector>
           {resumable ? (
-            <Button variant='outline' size='xs' onClick={() => { continueChat(); }}>
+            <Button
+              variant='outline'
+              size='xs'
+              onClick={() => {
+                continueChat();
+              }}
+            >
               <Play className='size-3.5' />
               Resume
             </Button>

@@ -720,6 +720,23 @@
       "token": "server.dispose(reason.message)",
       "class": "Debounce",
       "owner": "machines"
+    },
+    {
+      "id": "G1",
+      "bound": "Geometry-runner port answer from main, 10 s",
+      "site": "apps/desktop/src/tau/services-host.ts",
+      "token": "geometryPortTimeout",
+      "class": "Peer",
+      "owner": "geospec-product-closeout",
+      "fixedBy": "outside this charter: the desktop geometry-runner port lifecycle owner"
+    },
+    {
+      "id": "G2",
+      "bound": "GeoSpec candidate fetch or publish, 15 s",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "candidateTimeout",
+      "class": "External edge",
+      "owner": "geospec-product-closeout"
     }
   ]
 }

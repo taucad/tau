@@ -22,3 +22,6 @@ export type {
   UpdatePackageManifestInput,
 } from '#package-manifest.js';
 export type { PackageRegistryResolution } from '#package-registry.js';
+
+export { createPackageManifestCommit } from '#package-manifest-commit.js';
+export type { PackageManifestAuthority } from '#package-manifest-commit.js';

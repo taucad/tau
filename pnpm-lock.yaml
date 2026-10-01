@@ -3388,6 +3388,9 @@ importers:
 
   packages/core/bundler:
     dependencies:
+      '@taucad/filesystem':
+        specifier: workspace:*
+        version: link:../../filesystem
       cdn-resolve:
         specifier: 'catalog:'
         version: 2.1.2

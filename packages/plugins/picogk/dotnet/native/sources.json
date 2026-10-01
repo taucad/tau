@@ -5,5 +5,51 @@
     "commit": "0f26321c18ed878a7820ef769c38fd5d49d39242",
     "url": "https://codeload.github.com/leap71/PicoGKRuntime/tar.gz/0f26321c18ed878a7820ef769c38fd5d49d39242",
     "sha256": "3ba621cd555751e073490cdace3319698888a79867a15773c9ee7b12225a7096"
+  },
+  {
+    "name": "openvdb",
+    "repository": "AcademySoftwareFoundation/openvdb",
+    "commit": "7c03e1f084873cd1b3422c7ff7aec6ee681b3b38",
+    "url": "https://codeload.github.com/AcademySoftwareFoundation/openvdb/tar.gz/7c03e1f084873cd1b3422c7ff7aec6ee681b3b38",
+    "sha256": "b3bbac7dd950d8d64f0fd0448dcc9efcd4e0e257c4a081fb606a00e1d75760d6",
+    "runtimeDirectory": "openvdb"
+  },
+  {
+    "name": "glfw",
+    "repository": "glfw/glfw",
+    "commit": "b00e6a8a88ad1b60c0a045e696301deb92c9a13e",
+    "url": "https://codeload.github.com/glfw/glfw/tar.gz/b00e6a8a88ad1b60c0a045e696301deb92c9a13e",
+    "sha256": "8fa014d55b086b397575481fed78dcb71c6ff9a65f3b38895c042ad083b78d4d",
+    "runtimeDirectory": "GLFW"
+  },
+  {
+    "name": "imgui",
+    "repository": "ocornut/imgui",
+    "commit": "960921f03a2bf628a802b4611af9fc3c3c9430fe",
+    "url": "https://codeload.github.com/ocornut/imgui/tar.gz/960921f03a2bf628a802b4611af9fc3c3c9430fe",
+    "sha256": "5e13606b19e4e96d6979ff3f2bc2e321e13e708ae847e10882be8e37a6cd8195",
+    "runtimeDirectory": "imgui"
+  },
+  {
+    "name": "tbb",
+    "repository": "uxlfoundation/oneTBB",
+    "commit": "3046c8b0c29df995980003ea24f4d78c80ec0c8d",
+    "url": "https://codeload.github.com/uxlfoundation/oneTBB/tar.gz/3046c8b0c29df995980003ea24f4d78c80ec0c8d",
+    "sha256": "44763279bb3ac76fb67572cc3336d7421521bc882e9fde484ea662389f4fda0b"
+  },
+  {
+    "name": "blosc",
+    "repository": "Blosc/c-blosc",
+    "commit": "616f4b7343a8479f7e71dd3d7025bd92c9a6bbd0",
+    "url": "https://codeload.github.com/Blosc/c-blosc/tar.gz/616f4b7343a8479f7e71dd3d7025bd92c9a6bbd0",
+    "sha256": "07471e2a569bc7f7dee0640bf4d48d944f9bf35fb2fca49ad9f0a2bfe060c382"
+  },
+  {
+    "name": "boost",
+    "repository": "boostorg/boost",
+    "commit": "afdfa32505af73e3d208144b3f623f0096cb62b6",
+    "version": "1.92.0",
+    "url": "https://archives.boost.io/release/1.92.0/source/boost_1_92_0.tar.gz",
+    "sha256": "c4a3b310ddd2472416e091067166b0713be97c63f38c212c484ada022fd296ce"
   }
 ]

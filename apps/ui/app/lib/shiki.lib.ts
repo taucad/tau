@@ -31,6 +31,7 @@ export const getHighlighter = async (): Promise<HighlighterCore> => {
         import('@shikijs/themes/github-dark-high-contrast'),
       ],
       langs: runtimeShikiLanguageLoaders,
+      langAlias: { typescriptreact: 'tsx', javascriptreact: 'jsx' },
       engine: createJavaScriptRawEngine(),
     });
   })();

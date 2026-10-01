@@ -1,7 +1,7 @@
 diff --git a/API/PicoGK.h b/API/PicoGK.h
 --- a/API/PicoGK.h
 +++ b/API/PicoGK.h
-@@ -747,6 +747,61 @@
+@@ -747,6 +747,69 @@
  PICOGK_API void             Viewer_SideBar_Destroy(         PKVIEWER            hThis,
                                                              PKGUI               hSideBar);
  
@@ -58,6 +58,14 @@ diff --git a/API/PicoGK.h b/API/PicoGK.h
 +PICOGK_API int32_t TauLattice_AddSphere(PKINSTANCE library, PKLATTICE lattice, const PKVector3* center, float radius) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauLattice_AddBeam(PKINSTANCE library, PKLATTICE lattice, const PKVector3* start, const PKVector3* end, float radiusStart, float radiusEnd, bool roundCap) TAU_NOEXCEPT;
 +PICOGK_API int32_t TauVoxels_RenderLattice(PKINSTANCE library, PKVOXELS voxels, PKLATTICE lattice) TAU_NOEXCEPT;
++
++// Private fixed-size surface-normal batch. Count is 1..256, XYZ are scalar floats.
++// .NET supplies exact filter/scale values and a 0/1 selection byte per normal.
++// Outputs transfer together only on success; -4 stops a failed managed batch.
++typedef int32_t (*TauSurfaceNormalsBatch)(uint32_t, const float*, float*, uint8_t*);
++PICOGK_API int32_t TauVectorField_CreateSurfaceNormals(PKINSTANCE, PKVOXELS, float,
++    TauSurfaceNormalsBatch, PKVECTORFIELD*, PKMETADATA*) TAU_NOEXCEPT;
++PICOGK_API int32_t TauScalarField_CountActiveValues(PKINSTANCE, PKSCALARFIELD, int32_t*) TAU_NOEXCEPT;
 +
 +#undef TAU_NOEXCEPT
 +
@@ -1166,7 +1174,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t Metadata_nCount( PKINSTANCE hLib,
-@@ -1796,3 +1800,355 @@
+@@ -1796,3 +1800,392 @@
      
      poThis->DestroySideBar(hSideBar);
  }
@@ -1520,6 +1528,43 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 +        auto target = owner->m_oVoxels.roGet(voxels);
 +        auto source = owner->m_oLattices.roGet(lattice);
 +        target->RenderLattice(*source);
++    });
++}
++
++PICOGK_API int32_t TauScalarField_CountActiveValues(PKINSTANCE library, PKSCALARFIELD field,
++    int32_t* count) noexcept {
++    if (!count) return -1;
++    *count = 0;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        *count = owner->m_oScalarFields.roGet(field)->TauCountActiveValues();
++    });
++}
++
++PICOGK_API int32_t TauVectorField_CreateSurfaceNormals(PKINSTANCE library, PKVOXELS voxels,
++    float threshold, TauSurfaceNormalsBatch callback, PKVECTORFIELD* output, PKMETADATA* metadata) noexcept {
++    if (output) *output = 0;
++    if (metadata) *metadata = 0;
++    if (!callback || !output || !metadata || output == metadata) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVoxels.roGet(voxels);
++        auto result = VectorField::TauCreateSurfaceNormals(*source, owner->fVoxelSizeMM(), threshold,
++            [&](uint32_t count, const float* normals, float* values, uint8_t* keep) {
++                if (callback(count, normals, values, keep)) throw TauCallbackStopped{};
++            });
++        auto grid = result->TauGrid();
++        grid->insertMeta("PicoGK.Class", openvdb::StringMetadata("VectorField"));
++        auto resultMetadata = std::make_shared<VdbMeta>(grid, result->TauState());
++        const auto fieldHandle = owner->m_oVectorFields.hAdd(result);
++        try {
++            const auto metadataHandle = owner->m_oVdbMetas.hAdd(std::move(resultMetadata));
++            *output = fieldHandle;
++            *metadata = metadataHandle;
++        } catch (...) {
++            owner->m_oVectorFields.bDestroy(fieldHandle);
++            throw;
++        }
 +    });
 +}
 diff --git a/Source/PicoGKLibraryMgr.h b/Source/PicoGKLibraryMgr.h
@@ -2201,15 +2246,19 @@ diff --git a/Source/PicoGKTypes.h b/Source/PicoGKTypes.h
 diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
 --- a/Source/PicoGKVdbField.h
 +++ b/Source/PicoGKVdbField.h
-@@ -38,6 +38,7 @@
+@@ -38,6 +38,11 @@
  
  #include <openvdb/openvdb.h>
  #include "PicoGKTypes.h"
 +#include "PicoGKGridState.h"
++#include <array>
++#include <bit>
++#include <cstdint>
++#include <limits>
  
  using namespace openvdb;
  
-@@ -53,33 +54,48 @@
+@@ -53,33 +58,48 @@
      {
          m_roGrid = TFieldType::create();
          m_roGrid->setTransform(openvdb::math::Transform::createLinearTransform(fVoxelSizeMM));
@@ -2266,7 +2315,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
      
      static bool bHasValidPicoGKTransform(const TFieldType::Ptr roGrid)
      {
-@@ -105,32 +121,41 @@
+@@ -105,32 +125,41 @@
      : Field(fVoxelSizeMM)
      {
          m_roGrid->setGridClass(GRID_FOG_VOLUME);
@@ -2318,7 +2367,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          
          for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
          for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
-@@ -148,6 +173,7 @@
+@@ -148,6 +177,7 @@
      void SetValue(  Vector3     vecPos,
                      float       fValue)
      {
@@ -2326,7 +2375,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -160,6 +186,7 @@
+@@ -160,6 +190,7 @@
      bool bGetValue( Vector3 vecPos,
                      float* pfValue)
      {
@@ -2334,7 +2383,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
-@@ -172,6 +199,7 @@
+@@ -172,6 +203,7 @@
      
      void RemoveValue(Vector3 vecPos)
      {
@@ -2342,7 +2391,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -188,6 +216,7 @@
+@@ -188,6 +220,7 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -2350,7 +2399,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          
          *pnXMin     = oBBox.min().x();
-@@ -201,6 +230,7 @@
+@@ -201,6 +234,7 @@
      void GetSlice( int32_t nZSlice,
                     float* pfBuffer)
      {
@@ -2358,8 +2407,18 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          CoordBBox oBBox = m_roGrid->evalActiveVoxelBoundingBox();
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
-@@ -217,21 +247,13 @@
+@@ -215,23 +249,23 @@
+         }
+     }
      
++    int32_t TauCountActiveValues() const {
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        uint32_t count = 0;
++        for (auto value = m_roGrid->cbeginValueOn(); value; ++value) ++count;
++        // Existing managed counter increments an unchecked int once per stored value.
++        return std::bit_cast<int32_t>(count);
++    }
++
      void TraverseActive(PKFnTraverseActiveS pfnCallback)
      {
 -        for (auto iter = m_roGrid->cbeginValueOn(); iter; ++iter)
@@ -2387,7 +2446,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
  };
  
  class VectorField : public Field<Vec3SGrid>
-@@ -242,20 +264,25 @@
+@@ -242,20 +276,91 @@
      VectorField(float fVoxelSizeMM)
      : Field(fVoxelSizeMM)
      {
@@ -2399,9 +2458,76 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
      : Field(roField)
      {
 -    }
+-    
 +            m_tauState = TauStateFor(m_roGrid);
 +}
-     
++
++    template<class TBatch>
++    static Ptr TauCreateSurfaceNormals(Voxels& voxels, float destinationSize, float threshold, TBatch batch) {
++        auto source = voxels.TauPinGrid();
++        std::lock_guard<std::recursive_mutex> state(source.state->gate);
++        const auto generation = source.state->generation->identity;
++        const auto voxelSize = source.grid->voxelSize();
++        if (!source.grid->transform().isLinear() || voxelSize.x() != voxelSize.y() || voxelSize.x() != voxelSize.z() ||
++            !std::isfinite(voxelSize.x()) || !std::isfinite(static_cast<float>(voxelSize.x())) || voxelSize.x() <= 0 ||
++            !std::isfinite(destinationSize) || destinationSize <= 0)
++            throw std::invalid_argument("invalid normal field voxel transform");
++        const VoxelSize sourceSize(static_cast<float>(voxelSize.x()));
++        const VoxelSize targetSize(destinationSize);
++        const auto coordinate = [](const Vector3& position, VoxelSize size, bool stencil) {
++            for (auto value : {position.X, position.Y, position.Z}) {
++                const double rounded = std::round(size.fToVoxels(value));
++                const double margin = stencil ? 1 : 0;
++                if (!std::isfinite(value) || !std::isfinite(rounded) ||
++                    rounded < double(std::numeric_limits<int32_t>::min()) + margin ||
++                    rounded > double(std::numeric_limits<int32_t>::max()) - margin)
++                    throw std::invalid_argument("normal field coordinate exceeds native range");
++            }
++            return size.xyzToVoxels(position);
++        };
++        auto result = std::make_shared<VectorField>(destinationSize);
++        auto output = result->m_roGrid->getAccessor();
++        math::GradStencil stencil(*source.grid);
++        constexpr uint32_t capacity = 256;
++        std::array<float, capacity * 3> positions{};
++        std::array<float, capacity * 3> normals{}, values{};
++        std::array<uint8_t, capacity> keep{};
++        uint32_t count = 0;
++        const auto flush = [&] {
++            if (count == 0) return;
++            batch(count, normals.data(), values.data(), keep.data());
++            if (source.state->generation->identity != generation)
++                throw std::invalid_argument("source changed during internal normal batch");
++            for (uint32_t i = 0; i < count; ++i) {
++                if (keep[i] > 1) throw std::invalid_argument("invalid normal batch selection");
++                if (!keep[i]) continue;
++                const auto xyz = coordinate(Vector3(positions[i * 3], positions[i * 3 + 1], positions[i * 3 + 2]), targetSize, false);
++                output.setValue(openvdb::Coord(xyz.X, xyz.Y, xyz.Z),
++                    openvdb::Vec3s(values[i * 3], values[i * 3 + 1], values[i * 3 + 2]));
++            }
++            count = 0;
++        };
++        for (auto value = source.grid->cbeginValueOn(); value; ++value) {
++            if (std::abs(value.getValue()) > threshold) continue;
++            const auto xyz = value.getCoord();
++            const Vector3 position = sourceSize.vecToMM(Coord(xyz.x(), xyz.y(), xyz.z()));
++            // Preserve the managed traversal -> mm -> native query roundtrip.
++            const auto query = coordinate(position, sourceSize, true);
++            stencil.moveTo(openvdb::Coord(query.X, query.Y, query.Z));
++            auto normal = stencil.gradient();
++            normal.normalize();
++            positions[count * 3] = position.X;
++            positions[count * 3 + 1] = position.Y;
++            positions[count * 3 + 2] = position.Z;
++            normals[count * 3] = normal.x();
++            normals[count * 3 + 1] = normal.y();
++            normals[count * 3 + 2] = normal.z();
++            if (++count == capacity) flush();
++        }
++        flush();
++        return result;
++    }
++
      void AddGradientFieldFrom(Voxels::Ptr roVoxels)
      {
 +        auto tauSource = roVoxels->TauPinGrid();
@@ -2419,7 +2545,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          
          for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
          for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
-@@ -276,9 +303,12 @@
+@@ -276,9 +381,12 @@
                              Vector3 vecValue,
                              float fThreshold)
      {
@@ -2434,7 +2560,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          
          openvdb::Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
          
-@@ -298,6 +328,7 @@
+@@ -298,6 +406,7 @@
      void SetValue(  Vector3 vecPos,
                      Vector3 vecValue)
      {
@@ -2442,7 +2568,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getAccessor();
          
          Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
-@@ -311,6 +342,7 @@
+@@ -311,6 +420,7 @@
      bool bGetValue( Vector3 vecPos,
                      Vector3* pvecValue)
      {
@@ -2450,7 +2576,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getConstAccessor();
      
          openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
-@@ -328,6 +360,7 @@
+@@ -328,6 +438,7 @@
      
      void RemoveValue(Vector3 vecPos)
      {
@@ -2458,7 +2584,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          auto oAccess = m_roGrid->getAccessor();
          
          openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
-@@ -339,21 +372,10 @@
+@@ -339,21 +450,10 @@
      
      void TraverseActive(PKFnTraverseActiveV pfnCallback)
      {

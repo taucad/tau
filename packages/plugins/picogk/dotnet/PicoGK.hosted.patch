@@ -271,6 +271,23 @@ diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
          }
  
          /// <summary>
+@@ -272,14 +272,14 @@
+         /// </summary>
+         /// <param name="vecPosition">Position to sample</param>
+         /// <returns>
+-        /// Distance to the surface - negative values are inside the object
++        /// Distance in millimeters to the surface - negative values are inside the object
+         /// positive values are outside the object, values of 0 are exactly
+         /// on the surface
+         /// </returns>
+         public float fSignedDistance(in Vector3 vecPosition)
+         {
+             bGetValue(vecPosition, out float fValue);
+-            return fValue * lib.fVoxelSize;
++            return fValue;
+         }
+ 
+         /// <summary>
 diff --git a/Base/VectorField.cs b/Base/VectorField.cs
 --- a/Base/VectorField.cs
 +++ b/Base/VectorField.cs
@@ -1539,6 +1556,143 @@ new file mode 100644
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_GetOwnedMemory")]
 +    private static extern int TauOwnedMemoryNative(LibHandle library, VoxHandle voxels, out long bytes);
 +}
+diff --git a/Library/SurfaceNormals.cs b/Library/SurfaceNormals.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/SurfaceNormals.cs
+@@ -0,0 +1,132 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Buffers;
++using System.Numerics;
++using System.Runtime.ExceptionServices;
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++public partial class VectorField
++{
++    private const int TauNormalBatchCapacity = 256;
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    private delegate int TauNormalBatch(uint count, IntPtr normals, IntPtr values, IntPtr keep);
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVectorField_CreateSurfaceNormals")]
++    private static extern int TauCreateNormalsNative(LibHandle library, VoxHandle voxels, float threshold,
++        TauNormalBatch callback, out VectorFieldHandle output, out VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
++    private static extern void TauDestroyNormalMetadata(LibHandle library, VdbMetaHandle metadata);
++
++    private VectorField(Library library, VectorFieldHandle handle, FieldMetadata metadata)
++    {
++        lib = library;
++        hThis = handle;
++        m_oMetadata = metadata;
++    }
++
++    internal static VectorField TauExtractSurfaceNormals(Voxels source, float threshold,
++        Vector3 direction, float tolerance, Vector3 scale)
++    {
++        ArgumentNullException.ThrowIfNull(source);
++        if (direction != Vector3.Zero) direction = Vector3.Normalize(direction);
++        var buffer = ArrayPool<float>.Shared.Rent(TauNormalBatchCapacity * 6);
++        byte[]? selectionBuffer = null;
++        try
++        {
++            var keep = selectionBuffer = ArrayPool<byte>.Shared.Rent(TauNormalBatchCapacity);
++            ExceptionDispatchInfo? failure = null;
++            TauNormalBatch callback = (count, normals, values, selection) =>
++            {
++                if (failure is not null) return 1;
++                try
++                {
++                    if (count == 0 || count > TauNormalBatchCapacity)
++                        throw new InvalidOperationException("Invalid internal surface-normal batch size.");
++                    var length = checked((int)count * 3);
++                    Marshal.Copy(normals, buffer, 0, length);
++                    for (var i = 0; i < count; ++i)
++                    {
++                        var offset = i * 3;
++                        var normal = new Vector3(buffer[offset], buffer[offset + 1], buffer[offset + 2]);
++                        keep[i] = 0;
++                        if (direction != Vector3.Zero && float.Abs(1 - Vector3.Dot(normal, direction)) > tolerance) continue;
++                        var value = normal * scale;
++                        buffer[TauNormalBatchCapacity * 3 + offset] = value.X;
++                        buffer[TauNormalBatchCapacity * 3 + offset + 1] = value.Y;
++                        buffer[TauNormalBatchCapacity * 3 + offset + 2] = value.Z;
++                        keep[i] = 1;
++                    }
++                    Marshal.Copy(buffer, TauNormalBatchCapacity * 3, values, length);
++                    Marshal.Copy(keep, 0, selection, (int)count);
++                    return 0;
++                }
++                catch (Exception error)
++                {
++                    failure = ExceptionDispatchInfo.Capture(error);
++                    return 1;
++                }
++            };
++            VectorFieldHandle handle = default;
++            VdbMetaHandle metadataHandle = default;
++            FieldMetadata? metadata = null;
++            try
++            {
++                var status = TauCreateNormalsNative(source.lib.hThis, source.hThis, threshold, callback,
++                    out handle, out metadataHandle);
++                TauCheckedCallbacks.Check(status, failure, source);
++                if (handle.Value == 0 || metadataHandle.Value == IntPtr.Zero)
++                    throw new InvalidOperationException("Surface-normal extraction returned incomplete ownership.");
++                metadata = new FieldMetadata(source.lib, metadataHandle);
++                return new VectorField(source.lib, handle, metadata);
++            }
++            catch (Exception error)
++            {
++                var original = ExceptionDispatchInfo.Capture(error);
++                try
++                {
++                    try
++                    {
++                        if (metadata is not null) metadata.Dispose();
++                        else if (metadataHandle.Value != IntPtr.Zero) TauDestroyNormalMetadata(source.lib.hThis, metadataHandle);
++                    }
++                    finally
++                    {
++                        if (handle.Value != 0) _Destroy(source.lib.hThis, handle);
++                    }
++                }
++                catch { /* Preserve the first failure while releasing both owners. */ }
++                original.Throw();
++                throw;
++            }
++            finally
++            {
++                GC.KeepAlive(callback);
++                GC.KeepAlive(source);
++            }
++        }
++        finally
++        {
++            ArrayPool<float>.Shared.Return(buffer, clearArray: true);
++            if (selectionBuffer is not null) ArrayPool<byte>.Shared.Return(selectionBuffer, clearArray: true);
++        }
++    }
++}
++
++public partial class ScalarField
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauScalarField_CountActiveValues")]
++    private static extern int TauCountActiveNative(LibHandle library, ScalarFieldHandle field, out int count);
++
++    internal int TauCountActiveValues()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauCountActiveNative(lib.hThis, hThis, out var count);
++            TauCheckedCallbacks.Check(status, null, this);
++            return count;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++}
 diff --git a/Library/VoxelsCsg.cs b/Library/VoxelsCsg.cs
 new file mode 100644
 --- /dev/null
@@ -1668,6 +1822,46 @@ new file mode 100644
 + public MaterialTransmission? Transmission { get; init; }
 + public MaterialVolume? Volume { get; init; }
 +}
+diff --git a/Utils/FieldUtils.cs b/Utils/FieldUtils.cs
+--- a/Utils/FieldUtils.cs
++++ b/Utils/FieldUtils.cs
+@@ -253,10 +253,7 @@
+     {
+         public static int nCount(ScalarField oField)
+         {
+-            ActiveVoxelCounterScalar oCounter = new(oField);
+-            oCounter.Run();
+-
+-            return oCounter.m_nCount;
++            return oField.TauCountActiveValues();
+         }
+ 
+         protected ActiveVoxelCounterScalar(ScalarField oField)
+@@ -286,22 +283,10 @@
+                                             float fDirectionFilterTolerance   = 0f,
+                                             Vector3? vecScaleBy               = null)
+         {
+-            VectorField oField = new(vox.lib);
+-
+             Debug.Assert(fDirectionFilterTolerance >= 0f);
+             Debug.Assert(fDirectionFilterTolerance <= 1f);
+-
+-            SurfaceNormalFieldExtractor oExtractor
+-                = new(  vox,
+-                        oField,
+-                        fSurfaceThresholdVx,
+-                        vecDirectionFilter ?? Vector3.Zero,
+-                        fDirectionFilterTolerance,
+-                        vecScaleBy ?? Vector3.One);
+-
+-            oExtractor.Run();
+-
+-            return oField;
++            return VectorField.TauExtractSurfaceNormals(vox, fSurfaceThresholdVx,
++                vecDirectionFilter ?? Vector3.Zero, fDirectionFilterTolerance, vecScaleBy ?? Vector3.One);
+         }
+ 
+         protected SurfaceNormalFieldExtractor(  Voxels voxSource,
 diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
 --- a/Viewer/Viewer.cs
 +++ b/Viewer/Viewer.cs

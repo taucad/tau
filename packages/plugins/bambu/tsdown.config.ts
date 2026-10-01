@@ -4,7 +4,7 @@ import type { UserConfig } from 'tsdown';
 const externalDependencies = [/^(?:@taucad\/(?:cache-core|filesystem|runtime|units)|basic-ftp|mqtt|zod)(?:\/|$)/u];
 
 const baseConfig: UserConfig = {
-  entry: ['src/index.ts', 'src/bambu.plate.ts'],
+  entry: ['src/index.ts', 'src/bambu.plate.ts', 'src/bambu.settings.ts'],
   sourcemap: false,
   clean: true,
   dts: true,

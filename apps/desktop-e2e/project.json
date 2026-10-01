@@ -256,6 +256,18 @@
           "TAU_FRONTEND_URL": "http://localhost:3000"
         }
       }
+    },
+    "test:e2e:machine-profiles": {
+      "executor": "nx:run-commands",
+      "parallelism": false,
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "command": "../../node_modules/.bin/vitest run --config vitest.machine-profiles.config.ts"
+      },
+      "cache": false,
+      "metadata": {
+        "description": "Offline production Electron profile CRUD, shared type settings, restart recovery, external record admission and limit/focus/performance checks. Build desktop and prepare its resources first; TAU_E2E_COMPLETED_ARTIFACT also runs this against a selected packaged executable."
+      }
     }
   }
 }

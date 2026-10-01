@@ -38,3 +38,6 @@ export type {
 export { connectComputeStoreChannel, exposeComputeStoreChannel } from '#transport/_internal/compute-store-channel.js';
 export { exposeMachineChannel } from '#machines/machine-channel.js';
 export type { MachineChannelHostOperations } from '#machines/machine-channel.js';
+
+export { MachineSettingsOwner } from '#host/machine-settings-owner.js';
+export type { MachineSettingsSnapshot, MachineSettingsEdit, MachineSettingsSave } from '@taucad/types';

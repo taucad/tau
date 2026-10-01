@@ -52,6 +52,7 @@ import { systemSkillsOverlay } from '#workers/system-skills-overlay.js';
 
 type ProjectFileSystemBridge = Pick<
   FileSystemBridgeProxy,
+  | 'readMachineSettings'
   | 'readFile'
   | 'writeFile'
   | 'writeFileChecked'
@@ -580,7 +581,10 @@ const composeProjectHost = async (
     parameterActorFor,
   });
   /* The registry over one filesystem: the project's own, or an attempt's checkout its placement granted (W8 G09). */
-  const toolRegistryOver = (provider: FileSystemProvider): ToolRegistry => {
+  const toolRegistryOver = (
+    provider: FileSystemProvider,
+    preferences: Pick<ProjectFileSystemBridge, 'readMachineSettings'>,
+  ): ToolRegistry => {
     const view = composeView(
       { filesystem: provider },
       { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
@@ -599,6 +603,7 @@ const composeProjectHost = async (
       parameters,
       geospec: geoSpecClient,
       machines: runtimeClient.machines,
+      machineSettings: preferences,
       print: {
         /* The `tau.json` id every print request from this project's agent names (blueprint D5). An attempt reads
          * its artifact from the checkout its placement granted. */
@@ -614,7 +619,7 @@ const composeProjectHost = async (
       testingEnabled: provide.testingEnabled ?? false,
     });
   };
-  const toolRegistry = toolRegistryOver(workspaceProvider);
+  const toolRegistry = toolRegistryOver(workspaceProvider, fileSystem);
   /* ponytail: an attempt's file tools read its checkout; the kernel, GeoSpec and parameter clients stay on the project
    * root until W8's candidate checkouts need them re-rooted. */
   const placedTools = (tools: TurnPlacementToolPort): ToolRegistry => {
@@ -623,7 +628,7 @@ const composeProjectHost = async (
     const opened = (async (): Promise<Readonly<{ registry: ToolRegistry } | { failure: unknown }>> => {
       try {
         const proxy = await createProjectFileSystemProxy(tools.port);
-        return { registry: toolRegistryOver(createRelayedFileSystemProvider(proxy)) };
+        return { registry: toolRegistryOver(createRelayedFileSystemProvider(proxy), proxy) };
       } catch (error) {
         return { failure: error };
       }

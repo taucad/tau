@@ -39,11 +39,11 @@ describe('head-only directory metadata', () => {
 /* A literal, so a bump is a deliberate edit to this line and not a silent one:
  * every other assertion in the suite now reads the constant (G0-11). */
 describe('filesystem bridge protocol version', () => {
-  it('should be 4', () => {
-    expect(fileSystemBridgeProtocolVersion).toBe(4);
+  it('should be 5', () => {
+    expect(fileSystemBridgeProtocolVersion).toBe(5);
   });
 
-  it('rejects a version 3 peer', () => {
+  it('rejects a version 4 peer', () => {
     expect(() =>
       fileSystemBridgeSchemas.hello.parse({
         ...createFileSystemBridgeHello({
@@ -51,7 +51,7 @@ describe('filesystem bridge protocol version', () => {
           capabilities: { persistent: false, writable: true, quotaBased: false },
           watchable: false,
         }),
-        v: 3,
+        v: 4,
       }),
     ).toThrow('protocol version mismatch');
   });
@@ -161,6 +161,41 @@ describe('filesystem bridge Zod schemas', () => {
     expect(parsed.success).toBe(true);
     if (parsed.success) {
       expect(parsed.data).toBe(contents);
+    }
+  });
+});
+
+describe('rooted machine settings wire records', () => {
+  const record = {
+    version: 1,
+    typeId: 'fixture.cnc',
+    activeProfile: 'roughing',
+    profiles: {
+      roughing: { name: 'Roughing', configurations: { 'fixture.toolpath': { version: '1.2', values: { feed: 600 } } } },
+    },
+  };
+  it('should carry captured versioned transitions and refuse unsafe JSON, identities and missing profiles', () => {
+    const call = fileSystemBridgeSchemas.calls.editMachineSettings;
+    expect(
+      call.args.safeParse([{ operationId: 'op-1', typeId: 'fixture.cnc', base: null, next: record }]).success,
+    ).toBe(true);
+    expect(fileSystemBridgeSchemas.calls.readMachineSettings.args.safeParse(['../escape']).success).toBe(false);
+    for (const invalid of [
+      { ...record, activeProfile: 'missing' },
+      { ...record, version: 2 },
+      {
+        ...record,
+        profiles: {
+          roughing: {
+            name: 'Roughing',
+            configurations: { 'fixture.toolpath': { version: '1', values: { feed: Infinity } } },
+          },
+        },
+      },
+    ]) {
+      expect(
+        call.args.safeParse([{ operationId: 'op-1', typeId: 'fixture.cnc', base: null, next: invalid }]).success,
+      ).toBe(false);
     }
   });
 });

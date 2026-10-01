@@ -1,3 +1,4 @@
+import { bambuSettingsConfiguration } from '#bambu.settings.js';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine } from '@taucad/runtime/machine';
 import type {
@@ -769,6 +770,7 @@ const defineSimulator = (input: Readonly<{ simulator?: BambuSimulator }>) =>
     manifest: { ...bambuX1cManifest, identity: { ...bambuX1cManifest.identity, displayName: 'Simulated X1C' } },
     bindingConfiguration: simulatorBindingConfiguration,
     submissionConfiguration: bambuSubmissionConfiguration,
+    settingsConfiguration: bambuSettingsConfiguration,
     async *discover(discoveryInput, runtime) {
       discoveryInput.signal.throwIfAborted();
       const observedAt = runtime.clock.now();

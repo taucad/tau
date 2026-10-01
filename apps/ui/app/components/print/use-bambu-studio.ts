@@ -2,7 +2,7 @@
  * Bambu Studio mode of the Print pane (blueprint U2, D9, D12): which presets
  * Bambu Studio offers for the bound printer, the settings they resolve to, and
  * the project's print intent on top: the presets the person picked and the
- * settings they changed, saved in `.tau/machines/printer.json`. Everything
+ * settings they changed, saved in the active profile in `.tau/machines/settings/<typeId>.json`. Everything
  * Bambu Studio answers is read through the desktop bridge. Slicing itself stays
  * on the export route; this hook only states the export options it would slice with.
  *
@@ -11,7 +11,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { MachineDirectoryEntry, MachineManifest, MachineProvider } from '@taucad/runtime/machine';
-import type { PrintIntent } from '@taucad/slicer/print-intent';
+import type { PrintPreferences, PrintPreferencesEdit } from '#components/print/use-machine-settings.js';
 import type {
   BambuMachineHints,
   BambuPlate,
@@ -20,7 +20,6 @@ import type {
   BambuStudioSelection,
   BambuStudioSettings,
 } from '@taucad/slicer/bambu-studio';
-import type { PrintIntentEdit } from '#components/print/use-print-intent.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 
 /** Providers whose printers slice with Bambu Studio when it is installed. */
@@ -130,10 +129,10 @@ type Loaded = Readonly<{
 }>;
 
 /** The presets the person picked; the rest are Bambu Studio's defaults. Filaments are keyed by slot. @public */
-export type BambuStudioChosen = Readonly<Pick<PrintIntent, 'printer' | 'process' | 'preset' | 'filaments'>>;
+export type BambuStudioChosen = Readonly<Pick<PrintPreferences, 'printer' | 'process' | 'preset' | 'filaments'>>;
 
 /** One Bambu Studio setting value a print intent may hold. */
-type SettingValue = NonNullable<PrintIntent['settings']>[string];
+type SettingValue = NonNullable<PrintPreferences['settings']>[string];
 
 const noSettings: Readonly<Record<string, SettingValue>> = {};
 const noChoices: BambuStudioChosen = {};
@@ -313,8 +312,8 @@ export const useBambuStudio = ({
   readonly plate: string | undefined;
   /** The slot each filament prints from, in filament order; `-1` for a filament given none yet. */
   readonly mapping: readonly number[];
-  readonly intent: PrintIntent | undefined;
-  readonly update: (edit: PrintIntentEdit) => void;
+  readonly intent: PrintPreferences | undefined;
+  readonly update: (edit: PrintPreferencesEdit) => void;
 }): BambuStudioMode => {
   // The shell is fixed for the page's life; `desktopBridge()` builds a new facade per call.
   const [studio] = useState(() => desktopBridge()?.slicers?.bambuStudio);

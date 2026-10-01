@@ -1,3 +1,4 @@
+import { machineSettingsProvenanceSchema } from '@taucad/runtime/machine/settings';
 import { z } from 'zod';
 import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
@@ -86,6 +87,13 @@ export const getMachineInputSchema = z.strictObject({
 
 /** @public */
 export const requestPrintInputSchema = z.strictObject({
+  profileId: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
+    .optional()
+    .describe('Saved preference profile for this request only; does not change the shared active profile.'),
   machineId: machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.'),
   targetFile: rootedFilePathSchema.max(512).describe('Project-relative CAD source file to slice and print.'),
   preset: z.enum(['fast', 'standard', 'fine']).optional(),
@@ -104,6 +112,13 @@ export const requestPrintInputSchema = z.strictObject({
 
 /** @public */
 export const getPrintProfilesInputSchema = z.strictObject({
+  profileId: z
+    .string()
+    .min(1)
+    .max(64)
+    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
+    .optional()
+    .describe('Saved preference profile to inspect; omit to use the shared active profile.'),
   machineId: machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.'),
   profiles: printProfilesSchema.optional(),
   keys: z
@@ -161,6 +176,7 @@ const printRequestRecordSchema = z.looseObject({
   state: printRequestStateSchema,
   summary: z.looseObject({
     fileName: z.string(),
+    preferences: machineSettingsProvenanceSchema.optional(),
     layers: z.number().optional(),
     estimatedDuration: z.number().optional().describe('Seconds.'),
     filamentLength: z.number().optional().describe('Millimetres of filament.'),
@@ -168,18 +184,15 @@ const printRequestRecordSchema = z.looseObject({
   failure: z.looseObject({ code: z.string(), message: z.string() }).optional(),
 });
 
-/**
- * What the project's print intent (`.tau/machines/printer.json`) contributed
- * to a print tool call; absent when the project has none.
- */
-const printIntentReportSchema = z
+/** Exact saved profile used by a print call; call arguments take precedence. */
+const machinePreferencesReportSchema = z
   .looseObject({
     path: z.string(),
-    applied: z
-      .record(z.string(), z.json())
-      .optional()
-      .describe("The file's values in effect; the call's own arguments win over them."),
-    ignored: z.string().optional().describe('Why none of its values apply.'),
+    typeId: z.string(),
+    profileId: z.string(),
+    profileName: z.string(),
+    configurationVersions: z.record(z.string(), z.string()),
+    applied: z.record(z.string(), z.json()).optional(),
   })
   .optional();
 
@@ -203,7 +216,7 @@ export const requestPrintOutputSchema = z.looseObject({
     .optional()
     .describe('How the person answered, when the call waited for them.'),
   nextStep: nextStepSchema,
-  printIntent: printIntentReportSchema,
+  machinePreferences: machinePreferencesReportSchema,
   warnings: z
     .array(kernelIssueSchema)
     .optional()
@@ -221,7 +234,7 @@ export const getPrintProfilesOutputSchema = z.looseObject({
     .looseObject({ printer: z.string(), process: z.string(), filaments: z.array(z.string()) })
     .optional()
     .describe('Presets request_print uses when profiles are omitted.'),
-  printIntent: printIntentReportSchema,
+  machinePreferences: machinePreferencesReportSchema,
 });
 
 /** @public */

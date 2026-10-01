@@ -11,6 +11,7 @@ import {
   bambuContainerMembers,
   bambuPlateMember,
   readBambuContainer,
+  readBambuPreview,
   readBambuContainerProducer,
   writeBambuContainer,
 } from '#container.js';
@@ -250,4 +251,49 @@ describe('filament colours', () => {
     expect(readBambuContainer(zippedPlate('; filament_colour = #FF0000;red\n')).filamentColors).toEqual([]);
     expect(readBambuContainer(zippedPlate('; filament_colour = #FF0000;\n')).filamentColors).toEqual([]);
   });
+});
+
+describe('selective preview extraction', () => {
+  it('should agree with the full reader without retaining unrelated members, and reject unsafe or corrupted archives', () => {
+    const source = writeBambuContainer({
+      gcode,
+      modelName: 'cube',
+      plate: 'textured-pei',
+      filamentColors: ['#ff0000'],
+    });
+    const full = readBambuContainer(source);
+    const preview = readBambuPreview(source);
+    expect(preview.gcode).toEqual(full.gcode);
+    expect(preview.bedType).toEqual(full.bedType);
+    expect(preview.filamentColors).toEqual(full.filamentColors);
+    expect(preview.md5Verified).toBe(true);
+    expect('members' in preview).toBe(false);
+    const members = unzipSync(source);
+    members['../unselected.png'] = new Uint8Array([1]);
+    expect(() => readBambuPreview(Uint8Array.from(zipSync(members)))).toThrow();
+    delete members['../unselected.png'];
+    members['Metadata/plate_1.gcode.md5'] = encoder.encode('0'.repeat(32));
+    expect(() => readBambuPreview(Uint8Array.from(zipSync(members)))).toThrow('SLICER_CONTAINER_CHECKSUM_INVALID');
+  });
+});
+
+it('should enforce actual selected output limits when ZIP directory sizes lie', () => {
+  const archive = Uint8Array.from(
+    zipSync({
+      'Metadata/plate_1.gcode': encoder.encode(gcode),
+      'Metadata/plate_1.gcode.md5': encoder.encode('0'.repeat(1024)),
+    }),
+  );
+  const directory = new DataView(archive.buffer);
+  for (let offset = 0; offset + 46 <= archive.byteLength; offset += 1) {
+    if (directory.getUint32(offset, true) !== 0x02_01_4b_50) {
+      continue;
+    }
+    const nameLength = directory.getUint16(offset + 28, true);
+    const name = new TextDecoder().decode(archive.subarray(offset + 46, offset + 46 + nameLength));
+    if (name.endsWith('.md5')) {
+      directory.setUint32(offset + 24, 32, true);
+    }
+  }
+  expect(() => readBambuPreview(archive)).toThrow('SLICER_CONTAINER_LIMIT');
 });

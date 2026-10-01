@@ -436,3 +436,157 @@ export const readBambuContainerProducer = (bytes: Uint8Array<ArrayBuffer>): Bamb
     return undefined;
   }
 };
+
+/** Preview payload and producer, without an all-member inventory. @public */
+export type BambuPreview = Omit<BambuContainer, 'members'> & Readonly<{ producer?: BambuContainerProducer }>;
+
+/**
+ * Extract only the plate and bounded preview metadata after validating the complete ZIP directory.
+ * The inventory reader retains its all-member contract. Unselected model/thumbnail bytes never inflate here.
+ *
+ * @param bytes - The sliced archive.
+ * @returns Verified plate bytes and recorded metadata.
+ * @throws TypeError - A `SLICER_CONTAINER_*` refusal for unsafe or malformed archives.
+ * @public
+ */
+export const readBambuPreview = (bytes: Uint8Array<ArrayBuffer>): BambuPreview => {
+  if (bytes.byteLength === 0 || bytes.byteLength > maximumArchiveBytes) {
+    throw new TypeError('SLICER_CONTAINER_LIMIT');
+  }
+  const names = new Set<string>();
+  const limits = new Map<string, number>([
+    [bambuPlateMember, maximumPlateBytes],
+    ['Metadata/plate_1.gcode.md5', 128],
+    [plateMetadataMember, maximumSliceInfoBytes],
+    [sliceInfoMember, maximumSliceInfoBytes],
+  ]);
+  let expanded = 0;
+  try {
+    // No member is materialized in this admission pass; even unselected members are validated.
+    unzipSync(bytes, {
+      filter(file) {
+        const isDirectory = file.name.endsWith('/');
+        const name = safeMemberName(isDirectory ? file.name.slice(0, -1) : file.name);
+        const key = name.toLowerCase();
+        expanded += file.originalSize;
+        if (names.has(key) || names.size >= maximumEntries || expanded > maximumExpandedBytes) {
+          throw new TypeError('SLICER_CONTAINER_LIMIT');
+        }
+        names.add(key);
+        const limit = limits.get(name);
+        if (
+          limit !== undefined &&
+          (file.originalSize > limit || (name === bambuPlateMember && file.originalSize === 0))
+        ) {
+          throw new TypeError('SLICER_CONTAINER_PLATE_INVALID');
+        }
+        return false;
+      },
+    });
+    const selected: Record<string, Uint8Array<ArrayBuffer>> = {};
+    const localNames = new Set<string>();
+    const unzip = new Unzip((file) => {
+      const name = safeMemberName(file.name.endsWith('/') ? file.name.slice(0, -1) : file.name);
+      if (!names.has(name.toLowerCase()) || localNames.has(name.toLowerCase())) {
+        throw new TypeError('SLICER_CONTAINER_INVALID');
+      }
+      localNames.add(name.toLowerCase());
+      const limit = limits.get(file.name);
+      if (limit === undefined) {
+        return;
+      }
+      const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+      let length = 0;
+      file.ondata = (error, data, final) => {
+        if (error) {
+          throw error;
+        }
+        length += data.byteLength;
+        if (length > limit) {
+          file.terminate();
+          throw new TypeError('SLICER_CONTAINER_LIMIT');
+        }
+        chunks.push(data);
+        if (final) {
+          const output = new Uint8Array(length);
+          let offset = 0;
+          for (const chunk of chunks) {
+            output.set(chunk, offset);
+            offset += chunk.byteLength;
+          }
+          chunks.length = 0;
+          selected[file.name] = output;
+        }
+      };
+      file.start();
+    });
+    unzip.register(UnzipInflate);
+    // Bound each inflater emission too: a lying directory cannot request an unbounded output allocation.
+    const pushBytes = 4096;
+    for (let offset = 0; offset < bytes.byteLength; offset += pushBytes) {
+      unzip.push(bytes.subarray(offset, offset + pushBytes), offset + pushBytes >= bytes.byteLength);
+    }
+    const plate = selected[bambuPlateMember];
+    if (!plate?.byteLength) {
+      throw new TypeError('SLICER_CONTAINER_PLATE_MISSING');
+    }
+    const gcode = plate;
+    const decoder = new TextDecoder();
+    const recorded = selected['Metadata/plate_1.gcode.md5'];
+    const recordedMd5 = recorded === undefined ? undefined : decoder.decode(recorded).trim().toLowerCase();
+    const md5Verified = recordedMd5 !== undefined && recordedMd5 === md5Hex(gcode);
+    if (recordedMd5 !== undefined && !md5Verified) {
+      throw new TypeError('SLICER_CONTAINER_CHECKSUM_INVALID');
+    }
+    const metadata = selected[plateMetadataMember];
+    const sliceInfo = selected[sliceInfoMember];
+    return {
+      gcode,
+      recordedMd5,
+      md5Verified,
+      bedType: readBedType(metadata === undefined ? undefined : decoder.decode(metadata)),
+      filamentColors: readFilamentColors(gcode),
+      producer: producerOf(
+        decoder.decode(gcode.subarray(0, producerScanBytes)),
+        sliceInfo === undefined ? '' : decoder.decode(sliceInfo),
+      ),
+    };
+  } catch (error) {
+    if (error instanceof TypeError && error.message.startsWith('SLICER_CONTAINER_')) {
+      throw error;
+    }
+    throw new TypeError('SLICER_CONTAINER_INVALID', { cause: error });
+  }
+};
+
+/** Bambu Studio's header names the filaments a plate prints, counted from 1: `; filament: 1,2`. */
+const printedFilaments = /^;\s*filament:\s*(\d+(?:\s*,\s*\d+)*)\s*$/mu;
+/** Bambu Studio writes that header first, so the reader looks no further. */
+const headerBytes = 65_536;
+const headerDecoder = new TextDecoder();
+
+/**
+ * The colours of the filaments a slice prints, in filament order: entry *i* is filament *i* + 1,
+ * which the plate prints with `T<i>`. Bambu Studio records a colour for every filament preset it
+ * loaded, and a one-part slice loads every preset it is given, so the list stops at the last
+ * filament its header says the plate prints. The planner and the Print pane's slice summary read
+ * a slice's filaments through it.
+ *
+ * @param container - The slice as `readBambuContainer` read it.
+ * @returns `#RRGGBB` per printed filament; empty when the slice records no colour.
+ * @public
+ */
+export const slicedFilamentColors = ({
+  gcode,
+  filamentColors,
+}: Pick<BambuContainer, 'gcode' | 'filamentColors'>): readonly string[] => {
+  const printed = printedFilaments.exec(headerDecoder.decode(gcode.subarray(0, headerBytes)))?.[1];
+  if (printed === undefined) {
+    return filamentColors;
+  }
+  let last = 0;
+  for (const id of printed.split(',')) {
+    last = Math.max(last, Number(id));
+  }
+  return filamentColors.slice(0, last);
+};

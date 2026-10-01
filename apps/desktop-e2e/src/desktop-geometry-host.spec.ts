@@ -84,8 +84,20 @@ const expectProjectRun = async (run: GeometryHostEvent | undefined, projectRoot:
 
 /** A quick claim completed through the packaged native-engine route. */
 const expectNativeQuick = async (desktop: DesktopSession, runIndex: number): Promise<void> => {
-  const initial = await geometryHostEvents(desktop);
-  expect(initial[runIndex]?.engine).toBe('native');
+  await expect
+    .poll(
+      async () => {
+        const events = await geometryHostEvents(desktop);
+        const run = events[runIndex];
+        return events
+          .slice(runIndex + 1)
+          .some(
+            (event) => event.pid === run?.pid && event.kind === 'native-entry' && event.capability === 'watertight',
+          );
+      },
+      { timeout: 90_000 },
+    )
+    .toBe(true);
   await expect
     .poll(
       async () => {
@@ -299,8 +311,22 @@ test('[native-geospec] keeps services responsive and exits the actual geometry u
   const activePid = beforeProbe[slowRunIndex]?.pid;
   expect(activePid).toBeTypeOf('number');
   expect(activePid).toBeGreaterThan(0);
-  expect(beforeProbe[slowRunIndex]?.engine).toBe('native');
   await expectProjectRun(beforeProbe[slowRunIndex], rootA);
+
+  await expect
+    .poll(
+      async () => {
+        const events = await geometryHostEvents(session!);
+        return events
+          .slice(slowRunIndex + 1)
+          .some(
+            (event) =>
+              event.pid === activePid && event.kind === 'native-entry' && event.capability === 'connectedComponents',
+          );
+      },
+      { timeout: 90_000 },
+    )
+    .toBe(true);
 
   /* The packaged utility must be actively computing this exact native-engine run,
    * not merely spawned or still bundling, before we probe the other host. */

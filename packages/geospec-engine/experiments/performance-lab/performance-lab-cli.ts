@@ -13,7 +13,7 @@ import { dirname, isAbsolute, resolve as resolvePath } from 'node:path';
 import { availableParallelism, freemem, loadavg } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { parseArgs } from 'node:util';
+import { isDeepStrictEqual, parseArgs } from 'node:util';
 /* oxlint-disable no-restricted-imports -- Private lab reads the frozen native catalog and source receipts without publishing them. */
 import manifest from '../../../geospec-engine-native/bench/fixtures/performance-lab/manifest.json' with { type: 'json' };
 import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v6.json' with { type: 'json' };
@@ -81,6 +81,22 @@ type ChildReport = {
     peakBytes: number;
     observed: string;
   };
+};
+type EvidenceArtifact = Artifact & { bytes: number; encoding: 'utf8' | 'json'; pointer?: string };
+type CaseReceipt = Omit<
+  PerformanceLabRunResult['perCase'][number],
+  'canonicalClaimUtf8' | 'canonicalResultUtf8' | 'result' | 'diagnostics'
+> & {
+  evidence: {
+    canonicalClaim: EvidenceArtifact | WireNull;
+    canonicalResult: EvidenceArtifact | WireNull;
+    result: EvidenceArtifact;
+    diagnostics: EvidenceArtifact;
+  };
+};
+type ChildReceipt = Omit<ChildReport, 'result'> & {
+  evidenceTransport: 'artifacts-v1';
+  result?: Omit<PerformanceLabRunResult, 'perCase'> & { perCase: CaseReceipt[] };
 };
 // oxlint-disable-next-line typescript/no-restricted-types -- Node exit receipts preserve explicit null for an absent exit code/signal.
 type WireNull = null;
@@ -440,6 +456,211 @@ const writeJson = async (path: string, value: unknown): Promise<void> => {
     flag: 'wx',
   });
 };
+// Bound individual output chunks, not geometry, evidence size or work budgets.
+const evidenceChunkSize = 64 * 1024;
+const textChunks = function* (text: string): Generator<string> {
+  for (let start = 0; start < text.length; ) {
+    let end = Math.min(start + evidenceChunkSize, text.length);
+    if (end < text.length && (text.codePointAt(end - 1) ?? 0) > 65_535) {
+      end += 1;
+    }
+    yield text.slice(start, end);
+    start = end;
+  }
+};
+// Only private decoded evidence uses JSON sidecars; canonical UTF8 never passes through this writer.
+const evidenceJsonChunks = function* (value: unknown): Generator<string> {
+  if (typeof value === 'string') {
+    yield '"';
+    for (const chunk of textChunks(value)) {
+      yield JSON.stringify(chunk).slice(1, -1);
+    }
+    yield '"';
+    return;
+  }
+  if (Array.isArray(value)) {
+    yield '[';
+    let separator = '';
+    for (const entry of value) {
+      yield separator;
+      yield* evidenceJsonChunks(entry);
+      separator = ',';
+    }
+    yield ']';
+    return;
+  }
+  if (value !== null && typeof value === 'object') {
+    yield '{';
+    let separator = '';
+    for (const [key, entry] of Object.entries(value)) {
+      yield separator;
+      yield* evidenceJsonChunks(key);
+      yield ':';
+      yield* evidenceJsonChunks(entry);
+      separator = ',';
+    }
+    yield '}';
+    return;
+  }
+  if (value === null || typeof value === 'boolean' || typeof value === 'number') {
+    yield JSON.stringify(value);
+    return;
+  }
+  throw new TypeError('Performance evidence must be a JSON value.');
+};
+const writeEvidence = async (
+  path: string,
+  chunks: Iterable<string>,
+  encoding: EvidenceArtifact['encoding'],
+): Promise<EvidenceArtifact> => {
+  const file = await open(path, 'wx');
+  const hash = createHash('sha256');
+  let bytes = 0;
+  let pending = '';
+  const flush = async (): Promise<void> => {
+    const buffer = Buffer.from(pending, 'utf8');
+    hash.update(buffer);
+    bytes += buffer.byteLength;
+    await file.writeFile(buffer);
+    pending = '';
+  };
+  try {
+    for (const chunk of chunks) {
+      pending += chunk;
+      if (pending.length >= evidenceChunkSize) {
+        // oxlint-disable-next-line no-await-in-loop -- Sequential chunks preserve exact evidence byte order.
+        await flush();
+      }
+    }
+    await flush();
+  } finally {
+    await file.close();
+  }
+  return { path, bytes, sha256: hash.digest('hex'), encoding };
+};
+/**
+ * Persist full evidence once, retaining compact private child accounting.
+ * @internal
+ * @param path - Create-once child receipt path.
+ * @param report - Complete child result and accounting.
+ * @returns Completion after artifacts and receipt are persisted.
+ */
+export const writeLabChildReport = async (path: string, report: ChildReport): Promise<void> => {
+  const { result: runResult, ...childMetadata } = report;
+  const perCase: CaseReceipt[] = [];
+  for (const [index, entry] of (report.result?.perCase ?? []).entries()) {
+    const { canonicalClaimUtf8, canonicalResultUtf8, result, diagnostics, ...metadata } = entry;
+    const prefix = resolvePath(dirname(path), `case-${index}`);
+    /* oxlint-disable no-await-in-loop -- Sequential create-once artifacts precede this case's compact receipt. */
+    const canonicalClaim =
+      canonicalClaimUtf8 === null
+        ? null
+        : await writeEvidence(`${prefix}-claim.utf8`, textChunks(canonicalClaimUtf8), 'utf8');
+    const canonicalResult =
+      canonicalResultUtf8 === null
+        ? null
+        : await writeEvidence(`${prefix}-result.utf8`, textChunks(canonicalResultUtf8), 'utf8');
+    if (canonicalResult !== null && canonicalResult.sha256 !== entry.canonicalResultSha256) {
+      throw new Error('Performance canonical result hash differs from its recorded bytes.');
+    }
+    const decoded: unknown = canonicalResultUtf8 === null ? undefined : JSON.parse(canonicalResultUtf8);
+    const candidate: unknown =
+      decoded !== null &&
+      typeof decoded === 'object' &&
+      'results' in decoded &&
+      Array.isArray(decoded.results) &&
+      decoded.results.length === 1
+        ? decoded.results[0]
+        : decoded;
+    const recoverable = canonicalResult !== null && isDeepStrictEqual(candidate, result);
+    const resultArtifact = recoverable
+      ? { ...canonicalResult, pointer: candidate === decoded ? '' : '/results/0' }
+      : await writeEvidence(`${prefix}-decoded.json`, evidenceJsonChunks(result), 'json');
+    const canonicalDiagnostics: unknown =
+      candidate !== null && typeof candidate === 'object' && 'diagnostics' in candidate
+        ? candidate.diagnostics
+        : undefined;
+    const diagnosticsArtifact =
+      recoverable && isDeepStrictEqual(canonicalDiagnostics, diagnostics)
+        ? { ...resultArtifact, pointer: `${resultArtifact.pointer}/diagnostics` }
+        : await writeEvidence(`${prefix}-diagnostics.json`, evidenceJsonChunks(diagnostics), 'json');
+    perCase.push({
+      ...metadata,
+      evidence: { canonicalClaim, canonicalResult, result: resultArtifact, diagnostics: diagnosticsArtifact },
+    });
+    /* oxlint-enable no-await-in-loop */
+  }
+  await writeJson(path, {
+    ...childMetadata,
+    evidenceTransport: 'artifacts-v1',
+    ...(runResult === undefined ? {} : { result: { ...runResult, perCase } }),
+  } satisfies ChildReceipt);
+};
+/**
+ * Verify full artifacts incrementally without reassembling large evidence in parent rows.
+ * @internal
+ * @param path - Compact child receipt path.
+ * @returns Verified compact accounting and artifact references.
+ */
+export const readLabChildReport = async (path: string): Promise<ChildReceipt> => {
+  const decoded: unknown = JSON.parse(await readFile(path, 'utf8'));
+  if (
+    decoded === null ||
+    typeof decoded !== 'object' ||
+    !('evidenceTransport' in decoded) ||
+    decoded.evidenceTransport !== 'artifacts-v1'
+  ) {
+    throw new Error('Performance child receipt requires artifact evidence transport.');
+  }
+  const receipt = decoded as ChildReceipt;
+  const seen = new Map<string, EvidenceArtifact>();
+  for (const entry of receipt.result?.perCase ?? []) {
+    for (const artifact of Object.values(entry.evidence)) {
+      if (artifact === null) {
+        continue;
+      }
+      if (
+        dirname(artifact.path) !== dirname(path) ||
+        !Number.isSafeInteger(artifact.bytes) ||
+        artifact.bytes < 0 ||
+        !/^[0-9a-f]{64}$/u.test(artifact.sha256)
+      ) {
+        throw new Error('Performance evidence artifact descriptor is invalid.');
+      }
+      const prior = seen.get(artifact.path);
+      if (prior !== undefined) {
+        if (prior.sha256 !== artifact.sha256 || prior.bytes !== artifact.bytes) {
+          throw new Error('Performance evidence references disagree.');
+        }
+        continue;
+      }
+      // oxlint-disable-next-line no-await-in-loop -- Each full artifact is verified once before any receipt is accepted.
+      const file = await open(artifact.path, 'r');
+      const buffer = Buffer.alloc(evidenceChunkSize);
+      const hash = createHash('sha256');
+      let bytes = 0;
+      try {
+        for (;;) {
+          // oxlint-disable-next-line no-await-in-loop -- Incremental reads avoid the whole-evidence JavaScript string ceiling.
+          const { bytesRead } = await file.read(buffer, 0, buffer.byteLength, null);
+          if (bytesRead === 0) {
+            break;
+          }
+          bytes += bytesRead;
+          hash.update(buffer.subarray(0, bytesRead));
+        }
+      } finally {
+        // oxlint-disable-next-line no-await-in-loop -- Close the exact verified artifact even when reading fails.
+        await file.close();
+      }
+      if (bytes !== artifact.bytes || hash.digest('hex') !== artifact.sha256) {
+        throw new Error(`Performance evidence artifact changed: ${artifact.path}`);
+      }
+      seen.set(artifact.path, artifact);
+    }
+  }
+  return receipt;
+};
 const errorRecord = (error: unknown): NonNullable<ChildReport['error']> =>
   error instanceof Error ? { message: error.message, stack: error.stack } : { message: String(error) };
 
@@ -604,7 +825,7 @@ const runChild = async (options: Options): Promise<void> => {
       observed: 'after runner cleanup or thrown error, before result serialization; includes hashing and host setup',
     },
   };
-  await writeJson(resolvePath(options.outputDir, 'result.json'), report);
+  await writeLabChildReport(resolvePath(options.outputDir, 'result.json'), report);
 };
 
 const invokeCell = async (cell: Cell, options: Options) => {
@@ -646,9 +867,9 @@ const invokeCell = async (cell: Cell, options: Options) => {
   }
   const processWall = performance.now() - started;
   await Promise.all([stdout.close(), stderr.close()]);
-  let report: ChildReport | undefined;
+  let report: ChildReceipt | undefined;
   try {
-    report = JSON.parse(await readFile(resolvePath(outputDirectory, 'result.json'), 'utf8')) as ChildReport;
+    report = await readLabChildReport(resolvePath(outputDirectory, 'result.json'));
   } catch (error) {
     failure ??= errorRecord(error);
   }

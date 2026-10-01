@@ -49,6 +49,7 @@ const rigCamera = new PerspectiveCamera();
 const orthographicCamera = new OrthographicCamera();
 const setClipPlanes = vi.fn();
 const cameraRig = { activeCamera: rigCamera, perspectiveCamera: rigCamera, orthographicCamera, setClipPlanes };
+const enabledFeatures = vi.hoisted(() => new Set<string>());
 
 vi.mock('#components/geometry/graphics/three/renderer.js', () => ({
   createRenderer: async () => ({ coordinateSystem: WebGLCoordinateSystem }),
@@ -148,7 +149,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
 });
 
 vi.mock('#flags/use-feature.js', () => ({
-  useFeature: () => false,
+  useFeature: (key: string) => enabledFeatures.has(key),
 }));
 
 vi.mock('#components/geometry/graphics/three/scene.js', () => ({
@@ -183,7 +184,7 @@ vi.mock('#components/geometry/graphics/three/grid.js', () => ({
 }));
 
 vi.mock('#components/geometry/graphics/three/webgpu-inspector-overlay.js', () => ({
-  WebGpuInspectorOverlay: () => null,
+  WebGpuInspectorOverlay: () => <div data-testid='gpu-inspector' />,
 }));
 
 vi.mock('#components/geometry/graphics/three/actor-bridge.js', () => ({
@@ -200,6 +201,7 @@ function KeyedThreeCanvas({ canvasKey }: { readonly canvasKey: string }) {
 
 describe('ThreeCanvasInstance', () => {
   beforeEach(() => {
+    enabledFeatures.clear();
     fireLatestWebGlContextLost = undefined;
     latestCanvasEventPrefix = undefined;
     latestCanvasEventSource = undefined;
@@ -209,6 +211,18 @@ describe('ThreeCanvasInstance', () => {
     latestCanvasState = undefined;
     stubRootCamera = new PerspectiveCamera();
     setClipPlanes.mockClear();
+  });
+
+  it('loads the inspector only on explicit demand while the lightweight debug bridge remains independent', async () => {
+    enabledFeatures.add('tauDebug');
+    const view = render(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
+    await waitFor(() => {
+      expect(screen.getByTestId('actor-bridge')).toBeInTheDocument();
+    });
+    expect(screen.queryByTestId('gpu-inspector')).not.toBeInTheDocument();
+    enabledFeatures.add('webGpuInspector');
+    view.rerender(<ThreeCanvasInstance graphicsBackend='webgpu' onRetry={() => undefined} />);
+    expect(screen.getByTestId('gpu-inspector')).toBeInTheDocument();
   });
 
   it('shows Graphics context lost fallback when WebGL fires context loss', async () => {

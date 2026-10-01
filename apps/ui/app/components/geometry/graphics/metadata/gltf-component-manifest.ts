@@ -273,7 +273,14 @@ export function buildGltfMeasurementFeatures(
   manifest: GeometryComponentManifest,
 ): ReadonlyMap<string, GltfMeasurementFeatures> {
   const { json, bin } = parseGltfBytes(content);
-  const topology = readTopologyPayload(json, bin);
+  return buildMeasurementFeatures(json, readTopologyPayload(json, bin), manifest);
+}
+
+function buildMeasurementFeatures(
+  json: GltfJson,
+  topology: TopologyPayload,
+  manifest: GeometryComponentManifest,
+): ReadonlyMap<string, GltfMeasurementFeatures> {
   const components = new Map(topology.components?.map((component) => [component.id, component]) ?? []);
   const result = new Map<string, GltfMeasurementFeatures>();
 
@@ -368,7 +375,7 @@ function readTopologyPayload(json: GltfJson, bin: Uint8Array<ArrayBuffer>): Topo
   }
 
   const start = bufferView.byteOffset ?? 0;
-  const payloadBytes = bin.slice(start, start + bufferView.byteLength);
+  const payloadBytes = bin.subarray(start, start + bufferView.byteLength);
   return JSON.parse(new TextDecoder().decode(payloadBytes)) as TopologyPayload;
 }
 
@@ -936,6 +943,31 @@ function createRootNode(childIds: string[], capabilities: GeometryComponentCapab
     primitiveIndices: [],
     materialIndices: [],
     capabilities,
+  };
+}
+
+/** Decode the candidate's metadata once for presentation and reuse admission. */
+export function prepareGltfMetadata(
+  content: Uint8Array<ArrayBuffer>,
+  options: { sourceFile?: string; geometryHash?: string } = {},
+): {
+  parsed: ParsedGltf;
+  manifest: GeometryComponentManifest;
+  getMeasurementFeatures: () => ReadonlyMap<string, GltfMeasurementFeatures>;
+} {
+  const parsed = parseGltfBytes(content);
+  const payload = readTopologyPayload(parsed.json, parsed.bin);
+  const componentManifest = buildComponentManifest(parsed.json, payload.components ?? [], options);
+  const mechanism = readMechanism(payload);
+  const manifest = mechanism ? { ...componentManifest, mechanism } : componentManifest;
+  let measurementFeatures: ReadonlyMap<string, GltfMeasurementFeatures> | undefined;
+  return {
+    parsed,
+    manifest,
+    getMeasurementFeatures: () => {
+      measurementFeatures ??= buildMeasurementFeatures(parsed.json, payload, manifest);
+      return measurementFeatures;
+    },
   };
 }
 

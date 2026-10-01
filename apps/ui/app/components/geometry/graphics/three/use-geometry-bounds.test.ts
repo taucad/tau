@@ -85,6 +85,16 @@ describe('useGeometryBounds', () => {
     mocks.kinematics?.stop();
   });
 
+  it('should measure a settled scene once rather than poll for convergence', () => {
+    const { innerRef, outerRef } = createSceneReferences(10);
+    const bounds = vi.spyOn(THREE.Box3.prototype, 'setFromObject');
+    renderHook(() => useGeometryBounds(innerRef, outerRef));
+    act(() => mocks.frame?.());
+    act(() => mocks.frame?.());
+    expect(bounds).toHaveBeenCalledOnce();
+    bounds.mockRestore();
+  });
+
   it('returns a cloned bounds snapshot with its center and sphere', () => {
     const { innerRef, outerRef } = createSceneReferences(10);
     const { result } = renderHook(() => useGeometryBounds(innerRef, outerRef));

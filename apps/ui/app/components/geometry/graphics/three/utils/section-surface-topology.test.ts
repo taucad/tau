@@ -96,6 +96,24 @@ const createBodyManifest = (bodyId: string, faceIds: readonly string[]): Geometr
 });
 
 describe('section surface topology', () => {
+  it('should update the whole root once when registering many surfaces', async () => {
+    const scene = new THREE.Group();
+    for (const offset of [0, 2, 4]) {
+      const mesh = new THREE.Mesh(cubeGeometry(), new THREE.MeshBasicMaterial());
+      mesh.position.x = offset;
+      scene.add(mesh);
+    }
+    const update = vi.spyOn(scene, 'updateWorldMatrix');
+    await registerGltfSectionSurfaceSources({
+      scene,
+      manifest,
+      unitId: 'unit',
+      parser: { json: {}, associations: new Map(), getDependency: async () => undefined },
+    });
+    expect(update).toHaveBeenCalledTimes(1);
+    expect(update).toHaveBeenCalledWith(true, true);
+  });
+
   afterEach(() => {
     vi.restoreAllMocks();
   });

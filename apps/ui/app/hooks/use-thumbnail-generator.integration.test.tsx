@@ -151,6 +151,19 @@ describe('useThumbnailGenerator integration', () => {
     expect(exportImage).toHaveBeenCalledOnce();
   });
 
+  it('should retain an in-flight artifact when the same identity settles again', async () => {
+    const result = deferred<ReturnType<typeof webpFile>>();
+    exportImage.mockImplementationOnce(async () => result.promise);
+    renderHook(() => useThumbnailGenerator());
+    settle('geometry-hash');
+    await advance(2000);
+    settle('geometry-hash');
+    result.resolve(webpFile(3));
+    await advance(2000);
+    expect(exportImage).toHaveBeenCalledOnce();
+    expect(writeFile).toHaveBeenCalledExactlyOnceWith('thumbnail.webp', webpBytes(3), { source: 'machine' });
+  });
+
   it('should discard a late artifact after a newer settlement and persist only the latest bytes', async () => {
     const first = deferred<ReturnType<typeof webpFile>>();
     exportImage.mockImplementationOnce(async () => first.promise).mockResolvedValueOnce(webpFile(2));

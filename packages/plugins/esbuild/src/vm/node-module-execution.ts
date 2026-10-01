@@ -7,7 +7,12 @@ import { nodeExecFilePrefix } from '#vm/esbuild.constants.js';
 
 let nodeExecuteCounter = 0;
 
-const importNodeBuiltin = async <T>(specifier: string): Promise<T> =>
+/**
+ * Keep Node-only modules opaque to browser bundlers until the Node branch runs.
+ * @param specifier - Node-only package or built-in module to load
+ * @returns The imported module in the Node host
+ */
+export const importNodeModule = async <T>(specifier: string): Promise<T> =>
   import(
     /* webpackIgnore: true */
     /* @vite-ignore */
@@ -34,11 +39,11 @@ const stripInlineSourceMap = (code: string): string => code.replace(/\/\/# sourc
  */
 export async function executeCodeInNode(code: string): Promise<{ value: unknown; entryUrl: string }> {
   const [fs, os, path, nodeProcess, url] = await Promise.all([
-    importNodeBuiltin<typeof NodeFs>('node:fs'),
-    importNodeBuiltin<typeof NodeOs>('node:os'),
-    importNodeBuiltin<typeof NodePath>('node:path'),
-    importNodeBuiltin<typeof NodeProcess>('node:process'),
-    importNodeBuiltin<typeof NodeUrl>('node:url'),
+    importNodeModule<typeof NodeFs>('node:fs'),
+    importNodeModule<typeof NodeOs>('node:os'),
+    importNodeModule<typeof NodePath>('node:path'),
+    importNodeModule<typeof NodeProcess>('node:process'),
+    importNodeModule<typeof NodeUrl>('node:url'),
   ]);
 
   // The name must be unique across WORKER THREADS, not just processes: pool

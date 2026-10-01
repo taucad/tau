@@ -19,6 +19,7 @@ it('should render file source in Geist Mono with distinct syntax colors', async 
   const { container } = render(
     <div style={{ position: 'fixed', top: 0, left: 0, width: 800, height: 300 }}>
       <CodeEditor
+        className='h-full bg-background'
         path='file:///main.tsx'
         defaultLanguage={getMonacoLanguage('main.tsx')}
         defaultValue='export default () => (<box name="example" />);'
@@ -28,6 +29,7 @@ it('should render file source in Geist Mono with distinct syntax colors', async 
   );
 
   await expect.poll(() => container.querySelector('.view-line')?.textContent, { timeout: 10_000 }).toContain('export');
+  await expect.poll(() => container.querySelector('.overflow-guard')?.getBoundingClientRect().height).toBe(300);
   const line = container.querySelector('.view-line')!;
   expect(line.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
   expect(line.getBoundingClientRect().bottom).toBeLessThanOrEqual(globalThis.innerHeight);

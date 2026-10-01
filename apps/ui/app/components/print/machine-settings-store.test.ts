@@ -140,4 +140,122 @@ describe('machine preference projections', () => {
     store.dispose();
     other.store.dispose();
   });
+  it('should discard a read reply overtaken by a saved selection', async () => {
+    const { store, service } = fixture();
+    await store.refresh(typeId);
+    const stale = deferred<Awaited<ReturnType<MachineSettingsService['readMachineSettings']>>>();
+    vi.mocked(service.readMachineSettings).mockImplementationOnce(async () => stale.promise);
+    const refresh = store.refresh(typeId);
+    await vi.waitFor(() => {
+      expect(service.readMachineSettings).toHaveBeenCalledTimes(2);
+    });
+    const saved = { ...record, activeProfile: 'fine' };
+    store.update(typeId, () => saved);
+    const flush = store.flush(typeId);
+    expect(store.record(typeId)?.activeProfile).toBe('fine');
+    vi.mocked(service.readMachineSettings).mockResolvedValue({ status: 'current', record: saved });
+    stale.resolve({ status: 'current', record });
+    await flush;
+    expect(store.record(typeId)?.activeProfile).toBe('fine');
+    await refresh;
+    expect(service.readMachineSettings).toHaveBeenCalledTimes(3);
+    store.dispose();
+  });
+  it('should acquire the current record after a pending save instead of replaying its delayed receipt', async () => {
+    const { store, service } = fixture();
+    await store.refresh(typeId);
+    const ack = deferred<MachineSettingsSave>();
+    vi.mocked(service.editMachineSettings).mockImplementationOnce(async () => ack.promise);
+    store.update(typeId, (base) => ({
+      ...base,
+      profiles: { ...base.profiles, default: { name: 'Renamed', configurations: {} } },
+    }));
+    await vi.waitFor(() => {
+      expect(service.editMachineSettings).toHaveBeenCalledOnce();
+    });
+    const actual = { ...record, activeProfile: 'fine', profiles: { fine: record.profiles['fine']! } };
+    vi.mocked(service.readMachineSettings).mockResolvedValue({ status: 'current', record: actual });
+    const refresh = store.refresh(typeId);
+    await Promise.resolve();
+    expect(service.readMachineSettings).toHaveBeenCalledOnce();
+    ack.resolve({ status: 'saved', record: vi.mocked(service.editMachineSettings).mock.calls[0]![0].next });
+    await store.flush(typeId);
+    expect(store.record(typeId)).toEqual(actual);
+    await refresh;
+    expect(store.record(typeId)?.profiles['default']).toBeUndefined();
+    store.dispose();
+  });
+  it.each(['flush', 'dispose'] as const)(
+    'should drain deferred saves admitted during settlement before %s completes',
+    async (action) => {
+      const { service } = fixture();
+      const dispose = vi.fn();
+      const store = new MachineSettingsStore(Promise.resolve(service), () => () => undefined, dispose);
+      await store.refresh(typeId);
+      vi.mocked(service.editMachineSettings).mockRejectedValueOnce(new Error('Reply lost'));
+      store.update(typeId, (base) => ({ ...base, activeProfile: 'fine' }));
+      store.update(typeId, (base) => ({
+        ...base,
+        profiles: { ...base.profiles, fine: { name: 'Captured B', configurations: {} } },
+      }));
+      await expect(store.flush(typeId)).rejects.toThrow('Reply lost');
+      const settlement = deferred<MachineSettingsSave>();
+      const savedB = deferred<MachineSettingsSave>();
+      vi.mocked(service.machineSettingsSettlement).mockImplementationOnce(async () => settlement.promise);
+      vi.mocked(service.editMachineSettings).mockImplementationOnce(async () => savedB.promise);
+      const check = store.checkSave(typeId);
+      let flushed = false;
+      const flush =
+        action === 'flush'
+          ? (async () => {
+              await store.flush(typeId);
+              flushed = true;
+            })()
+          : undefined;
+      if (action === 'dispose') {
+        store.dispose();
+      }
+      settlement.resolve({ status: 'saved', record: vi.mocked(service.editMachineSettings).mock.calls[0]![0].next });
+      await check;
+      await vi.waitFor(() => {
+        expect(service.editMachineSettings).toHaveBeenCalledTimes(2);
+      });
+      expect(flushed).toBe(false);
+      expect(dispose).not.toHaveBeenCalled();
+      const inputB = vi.mocked(service.editMachineSettings).mock.calls[1]![0];
+      expect(inputB.next.profiles['fine']?.name).toBe('Captured B');
+      savedB.resolve({ status: 'saved', record: inputB.next });
+      if (action === 'flush') {
+        await flush;
+        expect(store.record(typeId)).toEqual(inputB.next);
+        expect(store.get(typeId).pending).toBe(0);
+        store.dispose();
+      }
+      await vi.waitFor(() => {
+        expect(dispose).toHaveBeenCalledOnce();
+      });
+    },
+  );
+  it('should reconcile a terminal uncertain receipt against the current root snapshot', async () => {
+    const { store, service } = fixture();
+    await store.refresh(typeId);
+    vi.mocked(service.editMachineSettings).mockRejectedValueOnce(new Error('Reply lost'));
+    store.update(typeId, (base) => ({
+      ...base,
+      profiles: { ...base.profiles, default: { name: 'Renamed', configurations: {} } },
+    }));
+    await expect(store.flush(typeId)).rejects.toThrow('Reply lost');
+    const actual = { ...record, activeProfile: 'fine', profiles: { fine: record.profiles['fine']! } };
+    vi.mocked(service.readMachineSettings).mockResolvedValue({ status: 'current', record: actual });
+    await store.refresh(typeId);
+    vi.mocked(service.machineSettingsSettlement).mockResolvedValue({
+      status: 'saved',
+      record: vi.mocked(service.editMachineSettings).mock.calls[0]![0].next,
+    });
+    await store.checkSave(typeId);
+    await store.flush(typeId);
+    expect(store.record(typeId)).toEqual(actual);
+    expect(store.get(typeId).failure).toBeUndefined();
+    store.dispose();
+  });
 });

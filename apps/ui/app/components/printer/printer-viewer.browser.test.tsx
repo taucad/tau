@@ -1,10 +1,12 @@
 import '#styles/global.css';
+import { GLTFLoader } from 'three/addons';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { commands, page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useCallback } from 'react';
 import { mock } from 'vitest-mock-extended';
 import { writeBambuContainer } from '@taucad/slicer/container';
+import { parseGcode } from '@taucad/slicer/toolpath';
 import { bambuA1MiniManifest } from '@taucad/bambu';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
@@ -12,6 +14,7 @@ import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client'
 import { RefreshGenerationGuard } from '@taucad/fs-client/refresh-generation-guard';
 import { WorkerChangeChannel } from '@taucad/fs-client/worker-change-channel';
 import { WorkspacePathResolver } from '@taucad/fs-client/workspace-path-resolver';
+import { probeWebGpuSupport } from '#components/geometry/graphics/graphics-backend.js';
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
@@ -31,6 +34,7 @@ import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-v
 
 const mocks = vi.hoisted(() => ({
   theme: 'light' as 'light' | 'dark',
+  backend: 'webgl' as 'webgl' | 'webgpu',
   live: undefined as PrinterLiveState | undefined,
 }));
 const fileManager = vi.hoisted(() => ({ contentService: undefined as FileContentService | undefined }));
@@ -41,7 +45,7 @@ vi.mock('#hooks/use-file-manager.js', () => ({ useFileManager: () => fileManager
 
 const { PrinterViewer } = await import('#components/printer/printer-viewer.js');
 
-const evidenceDirectory = '../../../../../out/research/machines-production-readiness-blueprint/2026-09-27-execution/V';
+const evidenceDirectory = '../../../../../out/research/a1-mini-multi-machine/printer-fidelity';
 const name = 'bracket.gcode.3mf';
 // A 50 mm square tube, 24 mm tall: about the size of the dry run's pyramid.
 const container = writeBambuContainer({
@@ -210,7 +214,7 @@ const mount = async (
 ): Promise<{ frame: HTMLElement; scene: HTMLElement }> => {
   mocks.theme = theme;
   document.documentElement.classList.toggle('dark', theme === 'dark');
-  globalThis.history.replaceState(undefined, '', '?graphicsBackend=webgl');
+  globalThis.history.replaceState(undefined, '', `?graphicsBackend=${mocks.backend}`);
   await page.viewport(1320, 780);
   const { container: root } = render(
     <TooltipProvider>
@@ -270,6 +274,7 @@ const capture = async (frame: HTMLElement, file: string): Promise<void> => {
 afterEach(() => {
   cleanup();
   mocks.live = undefined;
+  mocks.backend = 'webgl';
   document.documentElement.classList.remove('dark');
 });
 
@@ -278,7 +283,7 @@ describe('Printer viewer framing', () => {
     mocks.theme = 'light';
     mocks.live = idleLive;
     document.documentElement.classList.remove('dark');
-    globalThis.history.replaceState(undefined, '', '?graphicsBackend=webgl');
+    globalThis.history.replaceState(undefined, '', `?graphicsBackend=${mocks.backend}`);
     await page.viewport(1320, 780);
     const proxy = mock<ComposedViewClient>({
       stat: vi.fn().mockResolvedValue({ size: container.byteLength }),
@@ -455,13 +460,166 @@ describe('Printer viewer framing', () => {
     expectFramed(await measurePrint(scene), 0.05);
   });
 
+  for (const theme of ['light', 'dark'] as const) {
+    for (const mini of [false, true]) {
+      it(`qualifies ${mini ? 'Mini' : 'X1C'} mechanical and part views in ${theme}`, async () => {
+        mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest } : idleLive;
+        const { frame, scene } = await mount(theme, [1280, 720]);
+        await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+        const printer = mini ? 'mini' : 'x1c';
+        await capture(frame, `${printer}-part-${theme}.png`);
+        await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
+        await capture(frame, `${printer}-mechanical-${theme}.png`);
+        if (mini) {
+          await userEvent.click(within(frame).getByRole('button', { name: 'More' }));
+          expect(screen.queryByRole('menuitemcheckbox', { name: 'Show enclosure' })).toBeNull();
+          await userEvent.keyboard('{Escape}');
+        } else {
+          await chooseFromMore(frame, 'menuitemcheckbox', 'Show enclosure');
+          await capture(frame, `${printer}-without-enclosure-${theme}.png`);
+        }
+        await chooseFromMore(frame, 'menuitemradio', mini ? 'Smooth PEI Plate' : 'High Temp Plate');
+        await capture(frame, `${printer}-smooth-mechanical-${theme}.png`);
+        await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
+        const { width, height } = scene.getBoundingClientRect();
+        await userEvent.dragAndDrop(scene, scene, {
+          sourcePosition: { x: width / 2, y: height * 0.9 },
+          targetPosition: { x: width / 2, y: height * 0.05 },
+        });
+        await nextFrames(60);
+        // The person deliberately orbits out of the automatic framing view; zoom out to keep the part whole.
+        const bounds = scene.getBoundingClientRect();
+        fireEvent.wheel(scene.querySelector('canvas')!, {
+          deltaY: 100,
+          clientX: bounds.left + bounds.width / 2,
+          clientY: bounds.top + bounds.height / 2,
+        });
+        await nextFrames(60);
+        await capture(frame, `${printer}-below-${theme}.png`);
+        expectFramed(await measurePrint(scene), 0.05);
+      });
+    }
+  }
+
+  for (const [mini, plate] of [
+    [true, 'Smooth PEI Plate'],
+    [false, 'Cool Plate'],
+    [false, 'Engineering Plate'],
+  ] as const) {
+    it(`announces an unavailable ${mini ? 'Mini' : 'X1C'} ${plate} and preserves its pierced stand-in`, async () => {
+      const failure = vi.spyOn(GLTFLoader.prototype, 'loadAsync').mockRejectedValue(new Error('Asset unavailable'));
+      try {
+        mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest } : idleLive;
+        const { frame } = await mount('light', [1280, 720]);
+        await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+        await chooseFromMore(frame, 'menuitemradio', plate);
+        await waitFor(() => {
+          expect(screen.getByRole('status', { name: 'Build plate preview' })).toHaveTextContent('schematic plate');
+        });
+        await capture(frame, `failed-${mini ? 'mini' : 'x1c'}-${plate.toLowerCase().replaceAll(' ', '-')}.png`);
+      } finally {
+        failure.mockRestore();
+      }
+    });
+  }
+
+  for (const mini of [false, true]) {
+    it(`renders ${mini ? 'Mini' : 'X1C'} grain and translucent hardware with WebGPU`, async () => {
+      expect(await probeWebGpuSupport(), 'WebGPU qualification requires an actual adapter').toBe(true);
+      mocks.backend = 'webgpu';
+      mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest } : idleLive;
+      const { frame, scene } = await mount('dark', [1280, 720]);
+      await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+      expect(scene.querySelector('[data-graphics-backend="webgpu"]')).not.toBeNull();
+      expectFramed(await measurePrint(scene), 0.1);
+      await capture(frame, `${mini ? 'mini' : 'x1c'}-part-webgpu.png`);
+      await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
+      await capture(frame, `${mini ? 'mini' : 'x1c'}-mechanical-webgpu.png`);
+      expectFramed(await measurePrint(scene), 0.035);
+    });
+  }
+
+  it('loads a fresh plate after switching Mini Smooth to Textured and back', async () => {
+    const loads = vi.spyOn(GLTFLoader.prototype, 'loadAsync');
+    try {
+      mocks.live = { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest };
+      const { frame, scene } = await mount('dark', [1280, 720]);
+      await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
+      await chooseFromMore(frame, 'menuitemradio', 'Smooth PEI Plate');
+      await chooseFromMore(frame, 'menuitemradio', 'Textured PEI Plate');
+      await chooseFromMore(frame, 'menuitemradio', 'Smooth PEI Plate');
+      await waitFor(() => {
+        expect(screen.queryByRole('status', { name: 'Build plate preview' })).toBeNull();
+      });
+      const smoothLoads = loads.mock.calls.filter(([url]) => url.includes('a1-mini-high-temperature'));
+      expect(smoothLoads).toHaveLength(2);
+      expectFramed(await measurePrint(scene), 0.1);
+      await capture(frame, 'mini-smooth-reselected.png');
+    } finally {
+      loads.mockRestore();
+    }
+  });
+
+  for (const mini of [false, true]) {
+    it(`captures ${mini ? 'Mini' : 'X1C'} mechanical travel limits and side views`, async () => {
+      mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest } : idleLive;
+      const extent = mini ? 180 : 256;
+      // Diagnostic motion only; this deliberately sparse fixture is never sent to a printer.
+      const gcode = [
+        'G90',
+        'M83',
+        'M104 S220',
+        ';LAYER_CHANGE',
+        ';Z:0.2',
+        ';TYPE:Outer wall',
+        'G1 X0 Y0 Z0.2 E1 F600',
+        ';LAYER_CHANGE',
+        `;Z:${extent / 2}`,
+        `G1 X${extent} Y0 Z${extent / 2} E1 F600`,
+        ';LAYER_CHANGE',
+        `;Z:${extent}`,
+        `G1 X${extent} Y${extent} Z${extent} E1 F600`,
+      ].join('\n');
+      const motion = parseGcode(gcode);
+      const file: PrinterFile = {
+        name: 'mechanical-travel.gcode',
+        kind: 'gcode',
+        readAll: async () => new TextEncoder().encode(gcode),
+      };
+      const { frame, scene } = await mount('light', [1280, 720], file);
+      await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
+      if (!mini) {
+        await chooseFromMore(frame, 'menuitemcheckbox', 'Show enclosure');
+      }
+      const time = within(frame).getByRole('slider', { name: 'Time' });
+      for (const [index, label] of ['home', 'x-limit', 'yz-limit'].entries()) {
+        fireEvent.change(time, { target: { value: String(motion.times[index + 1]!) } });
+        // oxlint-disable-next-line no-await-in-loop -- each pose must settle before its evidence capture
+        await nextFrames(60);
+        // oxlint-disable-next-line no-await-in-loop -- preserve each distinct mechanical pose
+        await capture(frame, `${mini ? 'mini' : 'x1c'}-travel-${label}.png`);
+      }
+      const { width, height } = scene.getBoundingClientRect();
+      await userEvent.dragAndDrop(scene, scene, {
+        sourcePosition: { x: width / 2, y: height / 2 },
+        targetPosition: { x: width * 0.66, y: height / 2 },
+      });
+      await nextFrames(60);
+      await capture(frame, `${mini ? 'mini' : 'x1c'}-side-light.png`);
+      expect(within(frame).getByRole('button', { name: 'Play' })).toBeVisible();
+    }, 60_000);
+  }
+
   it('shows the whole printer from the More menu', async () => {
     mocks.live = idleLive;
     const { frame, scene } = await mount('dark', [1280, 720]);
     await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
     await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
     await capture(frame, 'whole-printer-dark.png');
-    expectFramed(await measurePrint(scene), 0.05);
+    await chooseFromMore(frame, 'menuitemcheckbox', 'Show enclosure');
+    await capture(frame, 'x1c-mechanical-cutaway-dark.png');
+    // Whole-machine framing fits the full 457 mm chassis, rather than cropping to the sheet.
+    expectFramed(await measurePrint(scene), 0.035);
   });
 
   for (const plate of ['Cool Plate', 'Engineering Plate', 'High Temp Plate', 'Textured PEI Plate']) {
@@ -484,7 +642,7 @@ describe('Printer viewer framing', () => {
       await chooseFromMore(frame, 'menuitemradio', plate);
       await chooseFromMore(frame, 'menuitemcheckbox', 'Show the whole printer');
       await capture(frame, `preparation-${plate.toLowerCase().replaceAll(' ', '-')}-dark.png`);
-      expectFramed(await measurePrint(scene), 0.05);
+      expectFramed(await measurePrint(scene), 0.035);
     });
   }
 

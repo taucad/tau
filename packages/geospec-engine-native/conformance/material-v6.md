@@ -1,6 +1,6 @@
 # Material v6 portable controls
 
-This is a separately authored conformance authority, not a rebaseline of the immutable 320 early controls. `material-v6.json` is pinned by SHA-256 `39cd70e7c50eb981fbd5b3b94cfb289658801728a2a87d160388f35f691d6a39` and declares `geospec-demand-v6`. Its 20 admissions and 46 records comprise 22 material-component controls, 12 material-interference controls, ten invalid-premise/polarity controls and two below-demand budget controls.
+This is a separately authored conformance authority, not a rebaseline of the immutable 320 early controls. `material-v6.json` is pinned by SHA-256 `45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975` and declares `geospec-demand-v6`. Its 20 admissions and 46 records comprise 22 material-component controls, 12 material-interference controls, ten invalid-premise/polarity controls and two below-demand budget controls.
 
 All inputs are genuine glTF admissions through the existing `ingestSubject`/`ingest_subject` byte interface. Positions are exactly representable f32 dyadics; node translations are f64 dyadics. The `mesh.bin` resource, primary document, request and independently constructed subject descriptor have explicit raw byte lengths and SHA-256 identities. Tiny translations must not be routed through GSM1, whose existing decoder narrows positions to f32.
 

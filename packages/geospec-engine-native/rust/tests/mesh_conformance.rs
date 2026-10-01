@@ -9,7 +9,7 @@ const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97
 const CURRENT_NUMERIC_PROFILE: &str =
     include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
 const MATERIAL: &str = include_str!("../../conformance/material-v6.json");
-const MATERIAL_SHA256: &str = "39cd70e7c50eb981fbd5b3b94cfb289658801728a2a87d160388f35f691d6a39";
+const MATERIAL_SHA256: &str = "45b98aa9bdc83b0846e74837e5891f4d9c7c7a51b6488db2ae23e8ccbe833975";
 
 #[test]
 fn material_v6_portable_controls_bind_independent_inputs_and_full_cold_warm_results() {

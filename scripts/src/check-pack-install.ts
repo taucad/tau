@@ -816,6 +816,7 @@ import { realpathSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { createRuntimeClient, defineKernel, defineRuntime, fromMemoryFs } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { quantity } from '@taucad/runtime/configuration/zod';
 import { z } from 'zod';
 const requireFromRuntime = createRequire(import.meta.resolve('@taucad/runtime'));
 const requireFromConsumer = createRequire(import.meta.url);
@@ -823,6 +824,21 @@ if (realpathSync(requireFromRuntime.resolve('zod/package.json')) !== realpathSyn
 const version = requireFromRuntime('zod/package.json').version;
 if (version !== '4.0.0') throw new Error('Declared Zod floor was not installed: ' + version);
 const assert = (condition, message) => { if (!condition) throw new Error(message); };
+const quantitySchema = quantity({ unit: 'm', space: 'linear' }).positive().max(10).describe('Length').default(0.2);
+assert(quantitySchema.parse(undefined) === 0.2 && !quantitySchema.safeParse(0).success, 'Quantity default or refinement changed.');
+const integerQuantity = quantity({ unit: '1', space: 'linear', symbol: 'px' }).int().min(16).max(4096).default(768);
+assert(integerQuantity.parse(undefined) === 768 && !integerQuantity.safeParse(10).success && !integerQuantity.safeParse(17.5).success, 'Integer quantity default or bounds changed.');
+for (const io of ['input', 'output']) {
+  const schema = z.toJSONSchema(quantitySchema, { target: 'draft-7', io });
+  assert(schema['x-tau-unit'] === 'm' && schema['x-tau-space'] === 'linear' && schema.description === 'Length', 'Quantity annotation lost in ' + io + ' JSON schema.');
+  assert(schema.exclusiveMinimum === 0 && schema.maximum === 10 && schema.default === 0.2, 'Quantity constraints changed in ' + io + ' JSON schema.');
+  const wrapped = z.toJSONSchema(z.object({ length: quantitySchema.optional(), values: quantity({ unit: 'm' }).nullable().array() }), { target: 'draft-7', io });
+  assert(wrapped.properties.length['x-tau-unit'] === 'm', 'Optional quantity annotation lost in ' + io + ' JSON schema.');
+  assert(wrapped.properties.values.items.anyOf.some((item) => item['x-tau-unit'] === 'm'), 'Array quantity annotation lost in ' + io + ' JSON schema.');
+  const integerSchema = z.toJSONSchema(integerQuantity, { target: 'draft-7', io });
+  assert(integerSchema.type === 'integer' && integerSchema.minimum === 16 && integerSchema.maximum === 4096 && integerSchema.default === 768, 'Integer quantity JSON schema bounds changed in ' + io + '.');
+  assert(integerSchema['x-tau-unit'] === '1' && integerSchema['x-tau-space'] === 'linear' && integerSchema['x-tau-symbol'] === 'px', 'Integer quantity annotation lost in ' + io + '.');
+}
 const kernel = defineKernel({
   id: 'zod-floor', name: 'Zod floor', version: '1', extensions: ['ts'],
   evaluateOptionsSchema: z.object({ required: z.number(), size: z.string().default('2').transform(Number) }),

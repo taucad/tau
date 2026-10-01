@@ -1,3 +1,4 @@
+import { markGeometryReceipt } from '#lib/renderer-telemetry.js';
 import { setup, types, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { CodeIssue, LogLevel, LogOrigin } from '@taucad/types';
@@ -12,7 +13,7 @@ import type {
   ViewSubscription,
 } from '@taucad/runtime';
 import type { ParameterManifest } from '@taucad/parameters';
-import { isKernelIssueCode } from '@taucad/runtime/types';
+import { asKnownArtifact, isKernelIssueCode } from '@taucad/runtime/types';
 import { safeDispose } from '@taucad/utils/dispose';
 import type { LengthSymbol } from '#constants/length-units.js';
 import { defaultOperationTimeout } from '#constants/editor.constants.js';
@@ -384,6 +385,10 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
         input.machineRef.send({ type: 'documentStatusChanged', status });
       }),
       defaultView.on('rendered', (rendering) => {
+        const artifact = rendering.success ? asKnownArtifact(rendering.artifact) : undefined;
+        if (artifact?.mimeType === 'model/gltf-binary') {
+          markGeometryReceipt(artifact.content);
+        }
         input.machineRef.send({ type: 'defaultRendered', rendering });
       }),
       defaultView.on('status', (status) => {

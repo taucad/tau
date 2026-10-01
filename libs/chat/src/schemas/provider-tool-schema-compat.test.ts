@@ -264,6 +264,7 @@ describe('provider-facing tool schema compatibility', () => {
       'options',
       'plate',
       'preset',
+      'profileId',
       'profiles',
       'settings',
       'targetFile',
@@ -290,7 +291,7 @@ describe('provider-facing tool schema compatibility', () => {
   it('should offer get_print_profiles a machine, profiles and a bounded key filter', () => {
     const schema = providerSchemaFor(toolName.getPrintProfiles);
 
-    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['keys', 'machineId', 'profiles']);
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['keys', 'machineId', 'profileId', 'profiles']);
     expect(schema.required ?? []).toEqual([]);
     expect(getPrintProfilesInputSchema.safeParse({ keys: Array.from({ length: 65 }, (_, i) => `k${i}`) }).success).toBe(
       false,

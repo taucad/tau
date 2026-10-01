@@ -105,8 +105,14 @@ const fixtureMachine = defineMachine({
     },
   ],
   manifest: {
-    version: 1,
-    identity: { vendor: 'fixture', model: 'fixture-printer', displayName: 'Fixture printer', qualifiedFirmware: [] },
+    version: 2,
+    identity: {
+      typeId: 'fixture.printer',
+      vendor: 'fixture',
+      model: 'fixture-printer',
+      displayName: 'Fixture printer',
+      qualifiedFirmware: [],
+    },
     technology: 'additive.fff',
     geometry: {
       unit: 'mm',

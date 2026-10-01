@@ -6,6 +6,7 @@
 @import 'tw-animate-css';
 @import '@taucad/ui/styles/tokens.css';
 @import 'streamdown/styles.css';
+@import '../components/panes/pane-resize.css';
 
 /*
  * Keep source discovery explicit. The web and desktop Vite roots differ, and

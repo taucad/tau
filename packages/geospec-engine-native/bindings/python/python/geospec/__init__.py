@@ -16,6 +16,17 @@ from ._api import (
     expect_geo,
     query_geo,
 )
+from ._model import (
+    GeoSpecLoadModelOptions,
+    GeoSpecModelArtifact,
+    GeoSpecModelFormat,
+    GeoSpecModelLoader,
+    GeoSpecModelResource,
+    GeoSpecModelUnit,
+    load_model,
+)
+from ._typing import *
+from ._typing import __all__ as _matcher_exports
 
 __all__ = [
     "GeoSpecPmiField", "GeoSpecPmiRawEntity", "GeoSpecPmiNumber", "GeoSpecPmiFaceAssociation",
@@ -29,4 +40,12 @@ __all__ = [
     "evaluate_geo",
     "expect_geo",
     "query_geo",
+    "GeoSpecLoadModelOptions",
+    "GeoSpecModelArtifact",
+    "GeoSpecModelFormat",
+    "GeoSpecModelLoader",
+    "GeoSpecModelResource",
+    "GeoSpecModelUnit",
+    "load_model",
 ]
+__all__ += _matcher_exports

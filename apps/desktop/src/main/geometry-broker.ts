@@ -5,6 +5,7 @@ const maxStepBytes = 32 * 1024 * 1024;
 const maxQueue = 8;
 const maxResidentSuiteGrants = 64;
 const maxReplyBytes = 8 * 1024 * 1024;
+const maxEventBytes = 64 * 1024;
 const measurementDeadlineMilliseconds = 120_000;
 const suiteDeadlineMilliseconds = 10 * 60_000;
 const cancelGraceMilliseconds = 250;
@@ -49,7 +50,6 @@ type Job = {
   readonly input: MeasurementRequest | SuiteRequest | PerformanceRequest;
   readonly context?: Readonly<Record<string, string>>;
   readonly root?: string;
-  readonly engine?: 'native' | 'legacy';
   readonly stillAuthorized?: () => boolean;
   deadline?: ReturnType<typeof setTimeout>;
   canceled: boolean;
@@ -83,7 +83,6 @@ export type GeometryBroker = {
     input: Readonly<{
       root: string;
       context: Readonly<Record<string, string>>;
-      engine: 'native' | 'legacy';
       stillAuthorized: () => boolean;
     }>,
   ): MessagePortMain;
@@ -93,6 +92,31 @@ export type GeometryBroker = {
 
 const record = (value: unknown): Record<string, unknown> | undefined =>
   value !== null && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>) : undefined;
+
+type TransportFailure = Readonly<{
+  code: 'GEOSPEC_TRANSPORT_MALFORMED' | 'GEOSPEC_TRANSPORT_LIMIT';
+  phase: 'event' | 'result';
+  bytes?: number;
+  limitBytes: number;
+}>;
+
+const transportFailure = (
+  value: unknown,
+  phase: TransportFailure['phase'],
+  limitBytes: number,
+): TransportFailure | undefined => {
+  try {
+    const bytes = Buffer.byteLength(JSON.stringify(value));
+    return bytes > limitBytes ? { code: 'GEOSPEC_TRANSPORT_LIMIT', phase, bytes, limitBytes } : undefined;
+  } catch {
+    return { code: 'GEOSPEC_TRANSPORT_MALFORMED', phase, limitBytes };
+  }
+};
+
+const transportMessage = (failure: TransportFailure): string =>
+  failure.code === 'GEOSPEC_TRANSPORT_LIMIT'
+    ? `The geometry ${failure.phase} exceeded its limit (${failure.bytes} > ${failure.limitBytes} bytes).`
+    : `The geometry ${failure.phase} is malformed.`;
 
 const validName = (value: unknown): value is string =>
   typeof value === 'string' && value.length > 0 && value.length <= 256 && !value.includes('\0');
@@ -244,7 +268,7 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
   let cancelWatchdog: ReturnType<typeof setTimeout> | undefined;
   let idleWatchdog: ReturnType<typeof setTimeout> | undefined;
   let residentWatchdog: ReturnType<typeof setInterval> | undefined;
-  // A completed native suite can retain subjects even after a later legacy suite.
+  // A completed suite can retain native subjects until this slot exits.
   // Conservatively retain all suite grants until exit; rotate at this fixed ceiling.
   const residentSuiteGrants = new Set<() => boolean>();
   const log = options.log ?? ((): void => undefined);
@@ -281,15 +305,23 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
   const unavailable = (
     job: Job,
     reason: string,
-    code: 'cancelled' | 'deadline' | 'executor-exited' | 'engine-error' = 'engine-error',
+    {
+      code = 'engine-error',
+      transport,
+    }: { code?: 'cancelled' | 'deadline' | 'executor-exited' | 'engine-error'; transport?: TransportFailure } = {},
   ): void => {
     answer(
       job,
       job.kind === 'measurement'
         ? { id: (job.input as MeasurementRequest).id, result: { status: 'interrupted', code, message: reason } }
         : job.kind === 'performance'
-          ? { id: (job.input as PerformanceRequest).id, type: 'error', message: reason }
-          : { type: 'error', message: reason },
+          ? {
+              id: (job.input as PerformanceRequest).id,
+              type: 'error',
+              message: reason,
+              ...(transport === undefined ? {} : { transport }),
+            }
+          : { type: 'error', message: reason, ...(transport === undefined ? {} : { transport }) },
     );
   };
   const release = (job: Job): void => {
@@ -314,12 +346,16 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
     }, exitDeadlineMilliseconds);
     utility.kill();
   };
-  const cancel = (job: Job, reason: string, code: 'cancelled' | 'deadline' = 'cancelled'): void => {
+  const cancel = (
+    job: Job,
+    reason: string,
+    { code = 'cancelled', transport }: { code?: 'cancelled' | 'deadline'; transport?: TransportFailure } = {},
+  ): void => {
     if (job.canceled || job.finished) {
       return;
     }
     job.canceled = true;
-    unavailable(job, reason, code);
+    unavailable(job, reason, { code, transport });
     if (active !== job) {
       const index = queue.indexOf(job);
       if (index !== -1) {
@@ -412,13 +448,15 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
           }
           if (frame['type'] === 'geometry-event') {
             if (active.kind === 'suite' && !active.canceled) {
+              const refusal = transportFailure(frame['event'], 'event', maxEventBytes);
+              if (refusal !== undefined) {
+                cancel(active, transportMessage(refusal), { transport: refusal });
+                return;
+              }
               try {
-                if (Buffer.byteLength(JSON.stringify(frame['event'])) > 64 * 1024) {
-                  throw new Error('The geometry event exceeded its limit.');
-                }
                 active.port.postMessage({ type: 'event', event: frame['event'] });
               } catch {
-                cancel(active, 'The geometry event was malformed or exceeded its limit.');
+                cancel(active, 'The geometry requester disconnected while receiving progress.');
               }
             }
             return;
@@ -431,19 +469,16 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
           clearTimeout(cancelWatchdog);
           release(finished);
           if (!finished.canceled) {
-            try {
-              if (Buffer.byteLength(JSON.stringify(frame['value'])) > maxReplyBytes) {
-                throw new Error('The geometry reply exceeded its limit.');
-              }
-              if (
-                finished.kind === 'measurement' &&
-                !validMeasurementReply(finished.input as MeasurementRequest, frame['value'])
-              ) {
-                throw new Error('The geometry reply is malformed.');
-              }
+            const refusal = transportFailure(frame['value'], 'result', maxReplyBytes);
+            if (refusal !== undefined) {
+              unavailable(finished, transportMessage(refusal), { transport: refusal });
+            } else if (
+              finished.kind === 'measurement' &&
+              !validMeasurementReply(finished.input as MeasurementRequest, frame['value'])
+            ) {
+              unavailable(finished, 'The geometry reply is malformed.');
+            } else {
               answer(finished, frame['value']);
-            } catch {
-              unavailable(finished, 'The geometry reply is malformed or exceeded its limit.');
             }
           }
           pump();
@@ -470,7 +505,9 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
             const interrupted = active;
             active = undefined;
             release(interrupted);
-            unavailable(interrupted, 'The geometry process exited before completing the request.', 'executor-exited');
+            unavailable(interrupted, 'The geometry process exited before completing the request.', {
+              code: 'executor-exited',
+            });
           }
           log('geometry.slot-exited', { generation: thisGeneration });
           pump();
@@ -489,7 +526,6 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
             requestId: job.id,
             kind: job.kind,
             root: job.root,
-            engine: job.engine,
             input: job.input,
             runtimeConfig: options.runtimeConfig,
           },
@@ -516,7 +552,6 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
     suite?: Readonly<{
       root: string;
       context: Readonly<Record<string, string>>;
-      engine: 'native' | 'legacy';
       stillAuthorized: () => boolean;
     }>,
   ): MessagePortMain => {
@@ -615,14 +650,13 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
         input,
         root: suite?.root,
         context: suite?.context,
-        engine: suite?.engine,
         stillAuthorized: suite?.stillAuthorized,
         canceled: false,
         finished: false,
       };
       job.deadline = setTimeout(
         () => {
-          cancel(job, 'The geometry request timed out.', 'deadline');
+          cancel(job, 'The geometry request timed out.', { code: 'deadline' });
         },
         kind === 'measurement' ? measurementDeadlineMilliseconds : suiteDeadlineMilliseconds,
       );

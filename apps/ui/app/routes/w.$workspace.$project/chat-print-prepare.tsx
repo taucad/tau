@@ -1,3 +1,6 @@
+import type { MachineSettingsProvenance } from '@taucad/runtime/machine/settings';
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
+import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { defaultFilamentSlots, machineSliceOptions } from '@taucad/agent-tools/registry';
@@ -13,8 +16,9 @@ import type {
   MachineProvider,
   MachineRequestPrintInput,
 } from '@taucad/runtime/machine';
-import { printIntentPath, printIntentSchema } from '@taucad/slicer/print-intent';
-import type { PrintIntent } from '@taucad/slicer/print-intent';
+import { slicingPreferencesSchema } from '@taucad/slicer/preferences';
+import type { PrintPreferences, MachineSettingsHandle } from '#components/print/use-machine-settings.js';
+import { MachineProfiles } from '#components/print/machine-profiles.js';
 import type { FileExtension } from '@taucad/types';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Rendering } from '@taucad/runtime';
@@ -34,8 +38,7 @@ import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { SearchInput } from '#components/search-input.js';
 import { isRealBambuPrinter, useBambuStudio } from '#components/print/use-bambu-studio.js';
 import type { BambuQualityPreset, BambuStudioMode } from '#components/print/use-bambu-studio.js';
-import { usePrintIntent } from '#components/print/use-print-intent.js';
-import type { PrintIntentHandle } from '#components/print/use-print-intent.js';
+import { useMachineSettings } from '#components/print/use-machine-settings.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
@@ -64,9 +67,9 @@ import {
   formatQuantity,
   formatSize,
   materialSlotLabel,
-  summarizeGcodeContainer,
 } from '#routes/w.$workspace.$project/chat-print-summary.js';
-import type { PlateFit, SliceSummary } from '#routes/w.$workspace.$project/chat-print-summary.js';
+import type { PlateFit } from '#routes/w.$workspace.$project/chat-print-summary.js';
+import type { SliceSummary } from '#components/printer/printer-summary.js';
 import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
 
 /** The export target every print goes through (blueprint D3). */
@@ -82,7 +85,9 @@ const isRecordObject = (value: unknown): value is Record<string, unknown> =>
 const sameValue = (left: unknown, right: unknown): boolean => JSON.stringify(left) === JSON.stringify(right);
 
 /** The reference-slicer options a print intent may hold; the others describe the machine and stay on screen. */
-const intentOptionKeys: ReadonlySet<string> = new Set(Object.keys(printIntentSchema.shape.options.unwrap().shape));
+const intentOptionKeys: ReadonlySet<string> = new Set(
+  Object.keys(slicingPreferencesSchema.shape.options.unwrap().shape),
+);
 
 /**
  * Apply one Advanced form change to the print intent: `preset` and the reference options it may
@@ -95,10 +100,10 @@ const intentOptionKeys: ReadonlySet<string> = new Set(Object.keys(printIntentSch
  * @returns The next intent.
  */
 const withOptionChanges = (
-  intent: PrintIntent,
+  intent: PrintPreferences,
   next: Readonly<Record<string, unknown>>,
   keys: readonly string[],
-): PrintIntent => {
+): PrintPreferences => {
   const { preset, options, ...rest } = intent;
   const changed = Object.fromEntries(
     keys.filter((key) => key !== 'preset').map((key): [string, unknown] => [key, next[key]]),
@@ -107,9 +112,9 @@ const withOptionChanges = (
     Object.entries<unknown>({ ...options, ...changed }).filter(([, value]) => value !== undefined),
   );
   // SAFETY: the form checks each value against the slicer's schema, and the serializer validates it again.
-  const nextPreset = (keys.includes('preset') ? next['preset'] : preset) as PrintIntent['preset'];
+  const nextPreset = (keys.includes('preset') ? next['preset'] : preset) as PrintPreferences['preset'];
   // SAFETY: as above; only the keys `intentOptionKeys` names reach this record.
-  const nextOptions = merged as PrintIntent['options'];
+  const nextOptions = merged as PrintPreferences['options'];
   return {
     ...rest,
     ...(nextPreset === undefined ? {} : { preset: nextPreset }),
@@ -118,7 +123,7 @@ const withOptionChanges = (
 };
 
 /** Whether a print intent holds anything beyond its model. */
-const hasIntentChanges = (intent: PrintIntent | undefined): boolean =>
+const hasIntentChanges = (intent: PrintPreferences | undefined): boolean =>
   intent !== undefined && Object.keys(intent).some((key) => key !== 'model');
 
 const modelName = (entryPath: string): string => (entryPath.split('/').pop() ?? entryPath).replace(/\.[^.]+$/u, '');
@@ -360,8 +365,8 @@ export type PrintPrepare = Readonly<{
   selectFilamentSlot: (filament: number, slot: number) => void;
   /** Whether Bambu Studio slices, rather than the slicer route's own engine. */
   isBambuStudio: boolean;
-  /** The project's print settings in `.tau/machines/printer.json`. */
-  printIntent: PrintIntentHandle;
+  /** The project's print settings in `.tau/machines/settings/<typeId>.json`. */
+  machineSettings: MachineSettingsHandle;
   /** Why the slice button waits, when it does. */
   sliceBlocker: string | undefined;
   optionsSchema: ResolvedSchema | undefined;
@@ -380,6 +385,7 @@ export type PrintPrepare = Readonly<{
   isSlicing: boolean;
   sliceError: string | undefined;
   sliceNow: () => Promise<void>;
+  cancelSlice: () => void;
   openPreview: () => void;
   /** Open the one confirmation every start passes through. */
   confirmSend: () => void;
@@ -461,20 +467,33 @@ export const usePrintPrepare = ({
     };
   }, [provider]);
 
-  const printIntent = usePrintIntent(manifest?.identity.model);
-  const { intent, update: updateIntent } = printIntent;
+  const machineSettings = useMachineSettings(manifest);
+  const { intent, update: updateIntent } = machineSettings;
   /* Reference options no print intent may hold (the machine's nozzle, bed and plate, the engine) stay on screen. */
   const [screenOptions, setScreenOptions] = useState<Record<string, unknown>>({});
-  const [submission, setSubmission] = useState<Record<string, unknown>>({});
+  const [transientSubmission, setTransientSubmission] =
+    useState<Readonly<{ key: string; values: Record<string, unknown> }>>();
   const [slice, setSlice] = useState<SlicedArtifact>();
   const [isSlicing, setIsSlicing] = useState(false);
+  const sliceController = useRef<AbortController | undefined>(undefined);
+  const cancelSlice = useCallback(() => {
+    sliceController.current?.abort();
+    sliceController.current = undefined;
+    setIsSlicing(false);
+  }, []);
+  useEffect(
+    () => () => {
+      sliceController.current?.abort();
+    },
+    [],
+  );
   /* Kept with the geometry it described, so a new render retires it (a failure on an empty model must not outlive it). */
   const [failedSlice, setFailedSlice] = useState<Readonly<{ message: string; rendering: Rendering | undefined }>>();
   const sliceError = failedSlice !== undefined && failedSlice.rendering === rendering ? failedSlice.message : undefined;
   const [isSending, setIsSending] = useState(false);
   const [isConfirmingSend, setIsConfirmingSend] = useState(false);
   const [sendError, setSendError] = useState<string>();
-  const requestIdRef = useRef<{ readonly digest: string; readonly requestId: string }>(undefined);
+  const requestIdRef = useRef<{ readonly key: string; readonly requestId: string }>(undefined);
   const operationIdsRef = useRef(
     new Map<string, { readonly uploadOperationId: string; readonly startOperationId: string }>(),
   );
@@ -493,6 +512,88 @@ export const usePrintPrepare = ({
   }, [artifact]);
   const filamentColors =
     slice !== undefined && slice.rendering === rendering ? slice.summary.filamentColors : modelColors;
+  const preferenceKey = `${machineSettings.typeId ?? ''}:${machineSettings.record?.activeProfile ?? 'default'}:${entry?.machineId ?? ''}`;
+  const submission = useMemo<Record<string, unknown>>(() => {
+    const preferences = machineSettings.machine;
+    const { material, plate: _plate, ...flags } = preferences ?? {};
+    const fallback =
+      entry && provider ? mappingOf(submissionDefaults(provider, entry, { manifest, filamentColors })) : [];
+    const mapping =
+      filamentColors.length > 1
+        ? material?.slotsByColor
+          ? filamentColors.map((color, index) => material.slotsByColor?.[color.toLowerCase()] ?? fallback[index] ?? -1)
+          : undefined
+        : material?.defaultSlot === undefined
+          ? undefined
+          : [material.defaultSlot];
+    return {
+      ...flags,
+      ...(mapping
+        ? {
+            amsMapping: mapping,
+            ...(entry ? { expectedMaterials: expectedMaterialsFor(mapping, entry) } : {}),
+          }
+        : {}),
+      ...(transientSubmission?.key === preferenceKey ? transientSubmission.values : {}),
+    };
+  }, [machineSettings.machine, filamentColors, entry, provider, manifest, transientSubmission, preferenceKey]);
+  const setSubmission = useCallback(
+    (next: Record<string, unknown>): void => {
+      setTransientSubmission({
+        key: preferenceKey,
+        values: Object.fromEntries(
+          Object.entries(next).filter(
+            ([key]) =>
+              ![
+                'bedLeveling',
+                'flowCalibration',
+                'timelapse',
+                'amsMapping',
+                'expectedMaterials',
+                'expectedBedType',
+              ].includes(key),
+          ),
+        ),
+      });
+      machineSettings.updateMachine((prior) => {
+        const { material: _material, bedLeveling: _bed, flowCalibration: _flow, timelapse: _time, ...rest } = prior;
+        const flags = Object.fromEntries(
+          ['bedLeveling', 'flowCalibration', 'timelapse'].flatMap((key) =>
+            typeof next[key] === 'boolean' ? [[key, next[key]]] : [],
+          ),
+        );
+        const mapping = Array.isArray(next['amsMapping'])
+          ? next['amsMapping'].map((slot): number | undefined =>
+              typeof slot === 'number' && slot >= 0 ? slot : undefined,
+            )
+          : [];
+        const material = mapping.every((slot) => slot === undefined)
+          ? undefined
+          : filamentColors.length > 1
+            ? {
+                ...prior.material,
+                slotsByColor: {
+                  ...prior.material?.slotsByColor,
+                  ...Object.fromEntries(
+                    filamentColors.flatMap((color, index) =>
+                      mapping[index] === undefined ? [] : [[color.toLowerCase(), mapping[index]]],
+                    ),
+                  ),
+                },
+              }
+            : { ...prior.material, defaultSlot: mapping[0] };
+        const plate = typeof next['expectedBedType'] === 'string' ? next['expectedBedType'] : prior.plate;
+        return bambuSettingsConfiguration.schema.parse({
+          ...rest,
+          ...flags,
+          ...(plate ? { plate } : {}),
+          ...(material ? { material } : {}),
+        });
+      });
+    },
+    [machineSettings.updateMachine, preferenceKey, filamentColors],
+  );
+
   const effectiveSubmission = useMemo(() => {
     if (!provider || !entry) {
       return submission;
@@ -534,7 +635,7 @@ export const usePrintPrepare = ({
       const next = slots.map((current, index) => (index === filament ? slot : current === slot ? previous : current));
       setSubmission({ ...submission, amsMapping: next, expectedMaterials: expectedMaterialsFor(next, entry) });
     },
-    [entry, slots, submission],
+    [entry, slots, submission, setSubmission],
   );
   const isBambuStudio = studio.status === 'ready' || studio.status === 'checking';
   /* The machine's own slicer options under the person's, so the Advanced form and the slice agree. */
@@ -585,6 +686,12 @@ export const usePrintPrepare = ({
     [bambuExportOptions, isBambuStudio, machineOptions, options],
   );
   const optionsKey = JSON.stringify([sliceOptions ?? null, submission]);
+  useEffect(
+    () => () => {
+      cancelSlice();
+    },
+    [entryPath, optionsKey, cancelSlice],
+  );
   const sliceBlocker = ((): string | undefined => {
     if (!isBambuStudio || sliceOptions !== undefined) {
       return undefined;
@@ -615,13 +722,30 @@ export const usePrintPrepare = ({
     if (!actor || !kernelClient || !route || sliceOptions === undefined) {
       return;
     }
+    sliceController.current?.abort();
+    const controller = new AbortController();
+    sliceController.current = controller;
+    const started = performance.now();
     const claimId = randomUuid();
     projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, operationTimeout });
     setIsSlicing(true);
     setFailedSlice(undefined);
     let sliceRendering = rendering;
+    let releaseRenderWatch: (() => void) | undefined;
+    let stageStarted = started;
+    const recordStage = (stage: string): void => {
+      const end = performance.now();
+      const name = `tau.printer.slice.${stage}`;
+      performance.clearMeasures(name);
+      performance.measure(name, { start: stageStarted, end });
+      stageStarted = end;
+    };
+
     try {
-      const settled = await awaitFreshRender(actor);
+      await machineSettings.flush();
+      const settled = await awaitFreshRender(actor, { signal: controller.signal });
+      controller.signal.throwIfAborted();
+      recordStage('fresh-render');
       const failedIssues = selectCadFailureIssues(settled);
       if (failedIssues) {
         throw new Error(failedIssues.map((issue) => issue.message).join('; ') || 'The selected CAD render failed');
@@ -630,6 +754,17 @@ export const usePrintPrepare = ({
         throw new Error(`No current successful geometry is available for ${entryPath}`);
       }
       sliceRendering = settled.context.rendering;
+      const renderWatch = actor.subscribe({
+        next: () => {
+          if (actor.getSnapshot().context.openAttempt > settled.context.openAttempt) {
+            controller.abort(new DOMException('The design changed during slicing.', 'AbortError'));
+          }
+        },
+      });
+      releaseRenderWatch = (): void => {
+        renderWatch.unsubscribe();
+      };
+
       const freshKernelClient = settled.context.kernelClient;
       const freshDocument = settled.context.document;
       const freshKernelId = settled.context.activeKernelId;
@@ -641,22 +776,52 @@ export const usePrintPrepare = ({
       }
       const result = await exportDocumentWithValidatedInput(freshDocument, freshRoute, {
         options: sliceOptions,
+        signal: controller.signal,
       });
+      recordStage('export');
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('; ') || 'Slicing failed.');
       }
       const file = result.files[0];
+      controller.signal.throwIfAborted();
+      const freshRenderId = settled.context.openAttempt;
+
       const fileName = `${modelName(entryPath)}.gcode.3mf`;
       const hex = await sha256Bytes(file.bytes);
+      recordStage('hash');
       // SAFETY: sha256Bytes returns the lowercase hex the digest brand describes.
       const digest = `sha256:${hex}` as MachineArtifactReference['digest'];
       /* Named by its bytes, as job imports are (blueprint D5), so a later slice never rewrites what a request names. */
+      controller.signal.throwIfAborted();
       const path = `.tau/artifacts/${hex}/${fileName}`;
       const isHeld = (await fileManager.exists(path)) && (await sha256Bytes(await fileManager.readFile(path))) === hex;
+      controller.signal.throwIfAborted();
       if (!isHeld) {
         await fileManager.writeFiles({ [path]: { content: file.bytes } });
       }
-      const summary = summarizeGcodeContainer(file.bytes);
+      recordStage('artifact');
+      const prepared = await printerPreparation.prepare({
+        bytes: file.bytes,
+        kind: 'container',
+        signal: controller.signal,
+        retain: false,
+      });
+      recordStage('prepare');
+      const summary = prepared.kind === 'ready' ? prepared.value.summary : prepared.summary;
+      if (actor.getSnapshot().context.openAttempt > freshRenderId) {
+        throw new Error('The design changed during slicing. Slice the current design again.');
+      }
+      controller.signal.throwIfAborted();
+      performance.clearMeasures('tau.printer.slice-to-summary');
+      performance.measure('tau.printer.slice-to-summary', {
+        start: started,
+        end: performance.now(),
+        detail: {
+          bytes: file.bytes.byteLength,
+          preparationDuration: prepared.preparationDuration,
+          stages: prepared.stageDurations,
+        },
+      });
       const warnings = result.issues.filter(({ severity }) => severity === 'warning').map(({ message }) => message);
       const defaults =
         provider && entry
@@ -702,12 +867,19 @@ export const usePrintPrepare = ({
         warnings,
       });
     } catch (error) {
-      setFailedSlice({ message: error instanceof Error ? error.message : String(error), rendering: sliceRendering });
+      if (!controller.signal.aborted) {
+        setFailedSlice({ message: error instanceof Error ? error.message : String(error), rendering: sliceRendering });
+      }
     } finally {
-      setIsSlicing(false);
+      releaseRenderWatch?.();
+      if (sliceController.current === controller) {
+        sliceController.current = undefined;
+        setIsSlicing(false);
+      }
       projectRef.send({ type: 'releaseGeometryUnit', claimId });
     }
   }, [
+    machineSettings.flush,
     actor,
     entry,
     entryPath,
@@ -734,6 +906,9 @@ export const usePrintPrepare = ({
   const sendConfiguration = slice ? { ...effectiveSubmission, ...slice.materialConfiguration } : effectiveSubmission;
 
   const sendBlocker = ((): string | undefined => {
+    if (machineSettings.blocked) {
+      return machineSettings.error ?? 'Loading machine settings…';
+    }
     if (!entry || !provider) {
       return 'Choose a machine first.';
     }
@@ -764,6 +939,7 @@ export const usePrintPrepare = ({
     setIsSending(true);
     setSendError(undefined);
     try {
+      await machineSettings.flush();
       const accepted =
         provider.accepts.find((container) => container.mediaType === slice.mimeType) ?? provider.accepts[0];
       if (!accepted) {
@@ -779,8 +955,21 @@ export const usePrintPrepare = ({
         contract: accepted.contract,
         selectedMember: accepted.requiredMembers[0] ?? 'Metadata/plate_1.gcode',
       };
-      if (requestIdRef.current?.digest !== slice.digest) {
-        requestIdRef.current = { digest: slice.digest, requestId: randomUuid() };
+      const preferences: MachineSettingsProvenance | undefined = machineSettings.typeId
+        ? {
+            scope: 'project',
+            typeId: machineSettings.typeId,
+            profileId: machineSettings.record?.activeProfile ?? 'default',
+            configurationVersions: Object.fromEntries(
+              Object.entries(
+                machineSettings.record?.profiles[machineSettings.record.activeProfile]?.configurations ?? {},
+              ).flatMap(([id, block]) => (block ? [[id, block.version]] : [])),
+            ),
+          }
+        : undefined;
+      const key = JSON.stringify([slice.digest, entry.machineId, sendConfiguration, preferences]);
+      if (requestIdRef.current?.key !== key) {
+        requestIdRef.current = { key, requestId: randomUuid() };
       }
       const record = await client.requestPrint({
         machineId: entry.machineId,
@@ -789,6 +978,7 @@ export const usePrintPrepare = ({
         requestedBy: operator,
         summary: {
           fileName: slice.fileName,
+          ...(preferences ? { preferences } : {}),
           layers: slice.summary.layers,
           estimatedDuration: slice.summary.estimatedDuration,
           filamentLength: slice.summary.filamentLength,
@@ -815,7 +1005,7 @@ export const usePrintPrepare = ({
     } finally {
       setIsSending(false);
     }
-  }, [client, entry, projectId, provider, sendBlocker, sendConfiguration, slice]);
+  }, [client, entry, projectId, provider, sendBlocker, sendConfiguration, slice, machineSettings]);
 
   const confirmSend = useCallback(() => {
     setSendError(undefined);
@@ -835,7 +1025,7 @@ export const usePrintPrepare = ({
     filamentColors,
     selectFilamentSlot,
     isBambuStudio,
-    printIntent,
+    machineSettings,
     sliceBlocker,
     optionsSchema,
     options,
@@ -851,6 +1041,7 @@ export const usePrintPrepare = ({
     isSlicing,
     sliceError,
     sliceNow,
+    cancelSlice,
     openPreview,
     confirmSend,
     cancelSend,
@@ -1282,6 +1473,11 @@ function SliceControls({ prepare }: { readonly prepare: PrintPrepare }): React.J
         )}
         {isSlicing ? 'Slicing…' : slice ? 'Slice again' : 'Slice and preview'}
       </Button>
+      {isSlicing ? (
+        <Button type='button' variant='ghost' size='sm' className='self-start' onClick={prepare.cancelSlice}>
+          Cancel slicing
+        </Button>
+      ) : null}
       {waiting === undefined ? null : (
         <p id='print-slice-blocker' role='status' aria-busy='true' className='text-xs text-muted-foreground'>
           {waiting}
@@ -1456,38 +1652,6 @@ const qualityPresets: ReadonlySet<string> = new Set<BambuQualityPreset>(['fast',
  * @param properties - The print intent, the selected printer's model and its name.
  * @returns The notices; empty while the file applies or is absent and the last change saved.
  */
-function PrintIntentNotice({
-  printIntent,
-  model,
-  machineName,
-}: {
-  readonly printIntent: PrintIntentHandle;
-  readonly model: string | undefined;
-  readonly machineName: string;
-}): React.JSX.Element {
-  const { file, error, reset } = printIntent;
-  const isInvalid = file.status === 'invalid';
-  const otherModel = file.status === 'current' && file.intent.model !== model ? file.intent.model : undefined;
-  const isElsewhere = model !== undefined && (isInvalid || otherModel !== undefined);
-  return (
-    <>
-      {isElsewhere ? (
-        <PrintNotice tone={isInvalid ? 'warning' : 'neutral'} role={isInvalid ? 'alert' : 'status'}>
-          <p>
-            {isInvalid
-              ? `This project's print settings file (${printIntentPath}) cannot be read, so ${machineName} uses its defaults and changes here are not saved.`
-              : `This project's print settings are for another printer model (${String(otherModel)}), so ${machineName} uses its defaults. Changing a setting here replaces them.`}
-          </p>
-          <Button type='button' size='xs' variant='outline' className='mt-2' onClick={reset}>
-            Reset print settings
-          </Button>
-        </PrintNotice>
-      ) : null}
-      {error === undefined ? null : <PrintNotice tone='warning'>{error}</PrintNotice>}
-    </>
-  );
-}
-
 function EngineStatus({
   studio,
   provider,
@@ -1564,9 +1728,9 @@ export function PrepareSection({
     submission,
     setSubmission,
     effectiveSubmission,
-    printIntent,
+    machineSettings,
   } = prepare;
-  const { intent, update: updateIntent, reset: resetIntent } = printIntent;
+  const { intent, update: updateIntent, reset: resetIntent } = machineSettings;
   const providerKey = route
     ? route.transcoderId === undefined
       ? String(route.kernelId)
@@ -1615,7 +1779,7 @@ export function PrepareSection({
       const { expectedBedType: _advanced, ...rest } = submission;
       setSubmission(rest);
       // SAFETY: plate ids are the manifest's; the serializer refuses one Bambu Studio does not name.
-      updateIntent((current) => ({ ...current, plate: value as PrintIntent['plate'] }));
+      updateIntent((current) => ({ ...current, plate: value as PrintPreferences['plate'] }));
     },
     [setSubmission, submission, updateIntent],
   );
@@ -1636,124 +1800,131 @@ export function PrepareSection({
       title='Prepare'
       aside={
         /* Beside the heading, never inside a trigger: a reset is a button of its own. */
-        hasIntentChanges(intent) ? (
+        hasIntentChanges(intent) || Object.keys(machineSettings.machine ?? {}).length > 0 ? (
           <ModifiedIndicator onReset={resetIntent} tooltip='Reset print settings' />
         ) : undefined
       }
     >
       <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
       <EngineStatus studio={studio} provider={provider} />
-      <PrintIntentNotice printIntent={printIntent} model={manifest?.identity.model} machineName={entry.name} />
-      <PlateSelect
-        plates={plates}
-        selected={selectedPlate}
-        isModified={intent?.plate !== undefined}
-        onChange={selectPlate}
-        onReset={resetPlate}
-      />
-      <MaterialChoice
-        entry={entry}
-        manifest={manifest}
-        filamentColors={filamentColors}
-        submission={effectiveSubmission}
-        ownSubmission={submission}
-        onResetMaterial={() => {
-          setSubmission(
-            Object.fromEntries(
-              Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
-            ),
-          );
-        }}
-        onSelectMaterial={selectMaterial}
-        onSelectFilamentSlot={selectFilamentSlot}
-      />
-      {!isBambuStudio && manifest ? (
-        <QualityChoice
-          presets={manifest.slicing.presets}
-          options={presetState}
-          isModified={intent?.preset !== undefined}
-          onSelect={selectPreset}
-          onReset={resetPreset}
-        />
-      ) : null}
-      {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
-      <BeforeStarting prepare={prepare} />
-      <SliceControls prepare={prepare} />
-      <SliceResult prepare={prepare} entry={entry} manifest={manifest} />
-      <PrintDisclosure title='More settings'>
-        <SearchInput
-          aria-label='Filter settings'
-          placeholder='Filter settings'
-          value={moreSettingsFilter}
-          className='h-6 w-full bg-background text-sm'
-          onChange={(event) => {
-            setMoreSettingsFilter(event.target.value);
-          }}
-          onClear={() => {
-            setMoreSettingsFilter('');
-          }}
-        />
-        {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' /> : null}
-        {isBambuStudio ? (
-          <BambuStudioSettings studio={studio} filterTerm={moreSettingsFilter} />
-        ) : optionsSchema ? (
-          <div className='min-w-0' role='group' aria-label='Slicer options'>
-            {optionsManifest ? (
-              <Parameters
-                parameters={options}
-                defaultParameters={optionsSchema.defaults}
-                jsonSchema={optionsSchema.schema as RJSFSchema}
-                onParametersChange={setOptions}
-                enableSearch={false}
-                filterTerm={moreSettingsFilter}
-                presentation='embedded'
-                units={printUnits}
-                parameterManifest={optionsManifest}
-                parameterEdit={{ kind: 'transient' }}
-                emptyMessage='No slicer options'
-              />
-            ) : (
-              <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-                Preparing slicer options…
-              </p>
-            )}
-          </div>
-        ) : (
-          <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
-        )}
-        {submissionSchema && provider ? (
-          <div className='min-w-0' role='group' aria-label='Machine mapping'>
-            {submissionManifest ? (
-              <Parameters
-                parameters={advancedSubmissionValues(submission)}
-                defaultParameters={advancedSubmissionValues(
-                  submissionDefaults(provider, entry, { manifest, filamentColors }),
+      <MachineProfiles settings={machineSettings} studio={studio} />
+      {/* Keep disabled semantics without Chromium's fieldset anonymous layout box around query containers. */}
+      <fieldset disabled={machineSettings.blocked} className='contents'>
+        <div className='flex min-w-0 flex-col gap-3'>
+          <PlateSelect
+            plates={plates}
+            selected={selectedPlate}
+            isModified={intent?.plate !== undefined}
+            onChange={selectPlate}
+            onReset={resetPlate}
+          />
+          <MaterialChoice
+            entry={entry}
+            manifest={manifest}
+            filamentColors={filamentColors}
+            submission={effectiveSubmission}
+            ownSubmission={submission}
+            onResetMaterial={() => {
+              setSubmission(
+                Object.fromEntries(
+                  Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
+                ),
+              );
+            }}
+            onSelectMaterial={selectMaterial}
+            onSelectFilamentSlot={selectFilamentSlot}
+          />
+          {!isBambuStudio && manifest ? (
+            <QualityChoice
+              presets={manifest.slicing.presets}
+              options={presetState}
+              isModified={intent?.preset !== undefined}
+              onSelect={selectPreset}
+              onReset={resetPreset}
+            />
+          ) : null}
+          {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
+          <BeforeStarting prepare={prepare} />
+          <SliceControls prepare={prepare} />
+          <SliceResult prepare={prepare} entry={entry} manifest={manifest} />
+          <PrintDisclosure title='More settings'>
+            <SearchInput
+              aria-label='Filter settings'
+              placeholder='Filter settings'
+              value={moreSettingsFilter}
+              className='h-6 w-full bg-background text-sm'
+              onChange={(event) => {
+                setMoreSettingsFilter(event.target.value);
+              }}
+              onClear={() => {
+                setMoreSettingsFilter('');
+              }}
+            />
+            {isBambuStudio ? (
+              <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' />
+            ) : null}
+            {isBambuStudio ? (
+              <BambuStudioSettings studio={studio} filterTerm={moreSettingsFilter} />
+            ) : optionsSchema ? (
+              <div className='min-w-0' role='group' aria-label='Slicer options'>
+                {optionsManifest ? (
+                  <Parameters
+                    parameters={options}
+                    defaultParameters={optionsSchema.defaults}
+                    jsonSchema={optionsSchema.schema as RJSFSchema}
+                    onParametersChange={setOptions}
+                    enableSearch={false}
+                    filterTerm={moreSettingsFilter}
+                    presentation='embedded'
+                    units={printUnits}
+                    parameterManifest={optionsManifest}
+                    parameterEdit={{ kind: 'transient' }}
+                    emptyMessage='No slicer options'
+                  />
+                ) : (
+                  <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+                    Preparing slicer options…
+                  </p>
                 )}
-                jsonSchema={advancedSubmissionSchema}
-                onParametersChange={(changed) => {
-                  setSubmission({
-                    ...Object.fromEntries(
-                      Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
-                    ),
-                    ...changed,
-                  });
-                }}
-                enableSearch={false}
-                filterTerm={moreSettingsFilter}
-                presentation='embedded'
-                units={printUnits}
-                parameterManifest={submissionManifest}
-                parameterEdit={{ kind: 'transient' }}
-                emptyMessage='No machine mapping'
-              />
+              </div>
             ) : (
-              <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-                Preparing machine mapping…
-              </p>
+              <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
             )}
-          </div>
-        ) : null}
-      </PrintDisclosure>
+            {submissionSchema && provider ? (
+              <div className='min-w-0' role='group' aria-label='Machine mapping'>
+                {submissionManifest ? (
+                  <Parameters
+                    parameters={advancedSubmissionValues(submission)}
+                    defaultParameters={advancedSubmissionValues(
+                      submissionDefaults(provider, entry, { manifest, filamentColors }),
+                    )}
+                    jsonSchema={advancedSubmissionSchema}
+                    onParametersChange={(changed) => {
+                      setSubmission({
+                        ...Object.fromEntries(
+                          Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
+                        ),
+                        ...changed,
+                      });
+                    }}
+                    enableSearch={false}
+                    filterTerm={moreSettingsFilter}
+                    presentation='embedded'
+                    units={printUnits}
+                    parameterManifest={submissionManifest}
+                    parameterEdit={{ kind: 'transient' }}
+                    emptyMessage='No machine mapping'
+                  />
+                ) : (
+                  <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+                    Preparing machine mapping…
+                  </p>
+                )}
+              </div>
+            ) : null}
+          </PrintDisclosure>
+        </div>
+      </fieldset>
     </PrintSection>
   );
 }

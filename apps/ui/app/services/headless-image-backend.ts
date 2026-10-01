@@ -20,11 +20,11 @@ const automaticAdapterAvailable = async (): Promise<boolean> => {
     return false;
   }
   try {
-    const adapter = (await gpu.requestAdapter()) as AutomaticAdapter | null;
+    const adapter = ((await gpu.requestAdapter()) ?? undefined) as AutomaticAdapter | undefined;
     if (!adapter || adapter.isFallbackAdapter === true) {
       return false;
     }
-    const info = adapter.info;
+    const { info } = adapter;
     const identity = [info?.vendor, info?.architecture, info?.device, info?.description].join(' ').trim().toLowerCase();
     return identity.length > 0 && !/swiftshader|llvmpipe|software|cpu/u.test(identity);
   } catch {

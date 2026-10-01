@@ -25,7 +25,50 @@ import {
   performanceLabScaleQueries,
 } from '../../../geospec-engine-native/bench/performance-lab.ts';
 import currentAuthority from '../../../geospec-engine-native/bench/fixtures/performance-lab/current-source-authority-v5.json' with { type: 'json' };
+import manifest from '../../../geospec-engine-native/bench/fixtures/performance-lab/manifest.json' with { type: 'json' };
 /* oxlint-enable no-restricted-imports */
+
+void it('admits only the approved public contract transition without changing frozen expectations', async () => {
+  const frozen = JSON.stringify(manifest);
+  const overlay = JSON.stringify(currentAuthority);
+  await verifySourceAuthority();
+  for (const sha256 of ['0'.repeat(64), '20303ca36a5ae9531cdd035c10e108e92b70aec76bba1aca849306dbe3eed82d']) {
+    // oxlint-disable-next-line eslint/no-await-in-loop -- Each rejected observation is independently settled before the next control.
+    await assert.rejects(
+      verifySourceAuthority(async (path) => ({
+        path,
+        sha256: path.endsWith('/packages/geospec/src/runner/types.ts')
+          ? sha256
+          : createHash('sha256')
+              .update(await readFile(path))
+              .digest('hex'),
+      })),
+      /Performance-lab source authority changed: packages\/geospec\/src\/runner\/types\.ts/,
+    );
+  }
+  const { sources } = manifest.analyticAuthority;
+  const original = structuredClone(sources);
+  const index = sources.findIndex(({ id }) => id === 'public-contract');
+  assert.notEqual(index, -1);
+  const restore = () => sources.splice(0, sources.length, ...structuredClone(original));
+  try {
+    for (const field of ['id', 'path', 'sha256'] as const) {
+      sources[index]![field] = 'changed';
+      // oxlint-disable-next-line eslint/no-await-in-loop -- Shared fixture mutations must be restored sequentially.
+      await assert.rejects(verifySourceAuthority(), /Performance-lab public-contract transition differs/);
+      restore();
+    }
+    sources.push({ ...sources[index]! });
+    await assert.rejects(verifySourceAuthority(), /Performance-lab public-contract transition differs/);
+    restore();
+    sources.splice(index, 1);
+    await assert.rejects(verifySourceAuthority(), /Performance-lab public-contract transition differs/);
+  } finally {
+    restore();
+  }
+  assert.equal(JSON.stringify(manifest), frozen);
+  assert.equal(JSON.stringify(currentAuthority), overlay);
+});
 
 void it('counts known differences separately and preserves unsupported, unverified and unexpected statuses', () => {
   const legacyCases = ['toHaveBoundingBox', 'toHaveCenterOfMass', 'toHaveCircularHole', 'toHaveChamferFeature'].map(

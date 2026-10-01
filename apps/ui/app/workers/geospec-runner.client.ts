@@ -13,7 +13,6 @@ type CreateGeoSpecWorker = () => Worker;
 export type GeoSpecWorkerRpcClientOptions = {
   openFileSystemBridge: () => FileSystemBridgeConnection;
   runtimeConfig: UiRuntimeConfigInput;
-  geoSpecEngine?: 'legacy' | 'native' | undefined;
   /** Private optional Git candidate route; errors never change authored GeoSpec results. */
   candidateSync?: Readonly<{
     fetch: () => Promise<ReadonlyArray<Uint8Array<ArrayBuffer>>>;
@@ -266,7 +265,6 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
         requestId,
         sessionId: nextSessionId,
         runtimeConfig: options.runtimeConfig,
-        geoSpecEngine: options.geoSpecEngine ?? 'legacy',
         fileSystemPort: fileSystemBridge.port,
       };
       worker.postMessage(request, [fileSystemBridge.port]);
@@ -295,7 +293,6 @@ export const createGeoSpecWorkerRpcClient = (options: GeoSpecWorkerRpcClientOpti
       !closed &&
       !candidateFetchLimitReached &&
       candidateFetchInFlight === undefined &&
-      options.geoSpecEngine === 'native' &&
       options.candidateSync !== undefined
     ) {
       const sync = options.candidateSync;

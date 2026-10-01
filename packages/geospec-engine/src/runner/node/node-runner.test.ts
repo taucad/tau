@@ -3,23 +3,20 @@ import { existsSync } from 'node:fs';
 import { copyFile, mkdtemp, writeFile } from 'node:fs/promises';
 import { availableParallelism as nativeHostCap, tmpdir } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { Worker } from 'node:worker_threads';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { describe, expect, it, vi } from 'vitest';
-import * as runtimeKernel from '@taucad/runtime/kernel';
 import type { GeoSpecPoolHostMessage, GeoSpecPoolWorkerMessage } from 'geospec/runner/worker';
 import {
   createGeoSpecNodePoolRunner,
   createGeoSpecNodeRunner,
-  createNodeWorkerHandle,
   poolWorkerEntryName,
   poolWorkerEntryUrl,
 } from '#runner/node/node-runner.js';
-import type { NodeWorkerLike } from '#runner/node/node-runner.js';
-import { startNodePoolWorker } from '#runner/node/pool-worker-entry.js';
-import { createGeoSpecNativeNodePoolRunner } from '#runner/node/native-pool-runner.js';
+import type { NodeWorkerLike } from '#runner/node/native-pool-runner.js';
+import { createGeoSpecNativeNodePoolRunner, createNodeWorkerHandle } from '#runner/node/native-pool-runner.js';
 import { memoryFileSystem, passingSpec } from '#runner/testing/memory-filesystem.js';
 
 /** A worker stub that records what it was told and replays scripted events. */
@@ -140,7 +137,7 @@ describe('createGeoSpecNodePoolRunner', () => {
   it('should spawn a real worker thread that speaks the pool protocol', async () => {
     // D-8: a `.ts` entry cannot be loaded by a worker thread under vitest, so
     // the wire itself is proven here with an inline JavaScript worker; the real
-    // entry's body is covered by the `startNodePoolWorker` test below.
+    // entry's body is covered by the real compiled pool tests below.
     const worker = new Worker(
       `const { parentPort } = require('node:worker_threads');
        parentPort.postMessage({ type: 'ready' });
@@ -187,10 +184,11 @@ describe('createGeoSpecNodePoolRunner', () => {
         const file = `worker-${index}.geospec.ts`;
         await writeFile(
           join(root, file),
-          `import { it } from 'geospec';
+          `import { it, expectGeo } from 'geospec';
            import { loadModel } from 'geospec/model';
            it('loads-${index}', async () => {
-             await loadModel({ source: ${JSON.stringify(model)}, format: 'step', mesh: false });
+             const model = await loadModel({ source: 'model.step', format: 'step' });
+             expectGeo(model).toBeValidBrep({});
            });`,
           'utf8',
         );
@@ -205,286 +203,125 @@ describe('createGeoSpecNodePoolRunner', () => {
     expect(result).toMatchObject({ success: true, passed: 4, failed: 0, selectedTests: 4 });
   }, 120_000);
 
-  it('should compile once and instantiate one copy in each of four workers', async () => {
-    const compiled = new WebAssembly.Module(new Uint8Array([0, 97, 115, 109, 1, 0, 0, 0]));
-    const compileWasmStreaming = vi.fn(async () => compiled);
-    const receivedModules: WebAssembly.Module[] = [];
-    const instances: WebAssembly.Instance[] = [];
-    const completeWorkerMessage = (shardId: number, file: string): GeoSpecPoolWorkerMessage => ({
-      type: 'shard-complete',
-      shardId,
-      file,
-      result: {
-        success: true,
-        passed: true,
-        tests: [{ suite: [], name: 't', assertions: [], status: 'passed', diagnostics: [] }],
-        bundle: { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] },
-      },
-      durationMs: 1,
-    });
+  it('should create compiled workers with bounded grants and the existing initialization handshake', async () => {
+    const received: Array<{ url: URL; workerData: unknown }> = [];
     class FakeWorker {
-      private readonly listeners = new Map<string, Array<(value: never) => void>>();
-      public constructor(_url: URL, options: { workerData?: unknown }) {
-        const module_ = (options.workerData as { compiledWasmModule: WebAssembly.Module }).compiledWasmModule;
-        receivedModules.push(module_);
-        instances.push(new WebAssembly.Instance(module_));
+      private readonly listeners = new Map<string, Array<(value: unknown) => void>>();
+      public constructor(url: URL, options: { workerData: unknown }) {
+        received.push({ url, workerData: options.workerData });
       }
       public postMessage(message: GeoSpecPoolHostMessage): void {
-        if (message.type === 'shutdown') {
-          queueMicrotask(() => {
-            this.fire('exit', 0);
-          });
-        } else if (message.type === 'run-shard') {
-          queueMicrotask(() => {
-            this.fire('message', completeWorkerMessage(message.shard.id, message.shard.file));
-          });
-        }
+        queueMicrotask(() => {
+          if (message.type === 'initialize' || message.type === 'shutdown') {
+            this.fire({ type: 'initialized' });
+          } else if (message.type === 'run-shard') {
+            this.fire({
+              type: 'shard-complete',
+              shardId: message.shard.id,
+              file: message.shard.file,
+              result: {
+                success: true,
+                passed: true,
+                tests: [{ suite: [], name: 't', assertions: [], status: 'passed', diagnostics: [] }],
+                accounting: {
+                  discovered: 1,
+                  selected: 1,
+                  completed: 1,
+                  passed: 1,
+                  failed: 0,
+                  unsupported: 0,
+                  inconclusive: 0,
+                  skipped: 0,
+                  notRun: 0,
+                },
+                lineage: {
+                  status: 'complete',
+                  modules: [
+                    {
+                      entryPath: message.shard.file,
+                      bundleSha256: 'control',
+                      files: { [message.shard.file]: 'sha256:control' },
+                      consistent: true,
+                    },
+                  ],
+                  loads: [],
+                },
+                bundle: { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] },
+              },
+              durationMs: 1,
+            });
+          }
+        });
       }
-      public on(event: string, listener: (value: never) => void): void {
+      public on(event: string, listener: (value: unknown) => void): void {
         const listeners = this.listeners.get(event) ?? [];
         listeners.push(listener);
         this.listeners.set(event, listeners);
         if (event === 'message') {
           queueMicrotask(() => {
-            this.fire('message', { type: 'ready' });
+            this.fire({ type: 'ready' });
           });
         }
       }
       public terminate(): number {
         return 0;
       }
-      private fire(event: string, value: unknown): void {
-        for (const listener of this.listeners.get(event) ?? []) {
-          (listener as (next: unknown) => void)(value);
+      private fire(value: unknown): void {
+        for (const listener of this.listeners.get('message') ?? []) {
+          listener(value);
         }
       }
     }
     vi.doMock('node:worker_threads', () => ({ Worker: FakeWorker }));
-    vi.doMock('@taucad/runtime/kernel', () => ({
-      ...runtimeKernel,
-      compileWasmStreaming,
-    }));
     vi.resetModules();
     try {
       const { createGeoSpecNodePoolRunner: createMockedRunner } = await import('#runner/node/node-runner.js');
-      const runner = createMockedRunner({ projectPath: '/project', workers: 4, cache: false });
-      const result = await runner.run({ files: ['a.ts', 'b.ts', 'c.ts', 'd.ts'] });
+      const runner = createMockedRunner({ projectPath: '/project', workers: 2, cache: false });
+      expect(received).toHaveLength(0);
+      const result = await runner.run({ files: ['a.geospec.ts', 'b.geospec.ts'] });
       await runner.close();
-
       expect(result.success).toBe(true);
-      expect(compileWasmStreaming).toHaveBeenCalledTimes(1);
-      expect(receivedModules).toStrictEqual([compiled, compiled, compiled, compiled]);
-      expect(new Set(instances).size).toBe(4);
+      expect(received).toHaveLength(2);
+      for (const worker of received) {
+        expect(worker.url.pathname).toMatch(/native-pool-worker-entry\.ts$/u);
+        expect(worker.workerData).toEqual({ projectPath: '/project', grant: 1 });
+      }
     } finally {
-      vi.doUnmock('@taucad/runtime/kernel');
       vi.doUnmock('node:worker_threads');
       vi.resetModules();
     }
   });
 
-  it('should pass cache controls into the spawned pool worker', async () => {
-    const received: unknown[] = [];
-    class FakeWorker {
-      private readonly listeners = new Map<string, Array<(value: never) => void>>();
-      public constructor(_url: URL, options: { workerData?: unknown }) {
-        received.push(options.workerData);
-      }
-      public postMessage(message: GeoSpecPoolHostMessage): void {
-        if (message.type === 'shutdown') {
-          queueMicrotask(() => {
-            this.fire('exit', 0);
-          });
-          return;
-        }
-        if (message.type === 'run-shard') {
-          queueMicrotask(() => {
-            this.fire('message', completeWorkerMessage(message.shard.id, message.shard.file));
-          });
-        }
-      }
-      public on(event: string, listener: (value: never) => void): void {
-        const listeners = this.listeners.get(event) ?? [];
-        listeners.push(listener);
-        this.listeners.set(event, listeners);
-        if (event === 'message') {
-          queueMicrotask(() => {
-            this.fire('message', { type: 'ready' });
-          });
-        }
-      }
-      public terminate(): number {
-        return 0;
-      }
-      private fire(event: string, value: unknown): void {
-        for (const listener of this.listeners.get(event) ?? []) {
-          (listener as (next: unknown) => void)(value);
-        }
-      }
-    }
-    const completeWorkerMessage = (shardId: number, file: string): GeoSpecPoolWorkerMessage => ({
-      type: 'shard-complete',
-      shardId,
-      file,
-      result: {
-        success: true,
-        passed: true,
-        tests: [{ suite: [], name: 't', assertions: [], status: 'passed', diagnostics: [] }],
-        bundle: { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] },
-      },
-      durationMs: 1,
-    });
-    vi.doMock('node:worker_threads', () => ({ Worker: FakeWorker }));
-    vi.resetModules();
-    try {
-      const { createGeoSpecNodePoolRunner: createMockedRunner } = await import('#runner/node/node-runner.js');
-      const runner = createMockedRunner({
+  it('should refuse retired reference cache and runtime factory options before spawning', () => {
+    expect(() => createGeoSpecNodePoolRunner({ projectPath: '/project', cache: true })).toThrow(
+      /caching is not supported/u,
+    );
+    expect(() => createGeoSpecNodePoolRunner({ projectPath: '/project', cacheDirectory: '/tmp/cache' })).toThrow(
+      /caching is not supported/u,
+    );
+    expect(() =>
+      createGeoSpecNodePoolRunner({
         projectPath: '/project',
-        workers: 1,
-        cache: false,
-        cacheDirectory: undefined,
         runtimeFactoryModule: { specifier: 'file:///runtime.mjs', exportName: 'createRuntime' },
-      });
-      const result = await runner.run({ files: ['a.geospec.ts'] });
-      expect(result.success).toBe(true);
-      await runner.close();
-      const cached = createMockedRunner({
-        projectPath: '/project',
-        workers: 1,
-        cacheDirectory: '/tmp/geospec-node-runner-cache',
-      });
-      const cachedResult = await cached.run({ files: ['b.geospec.ts'] });
-      expect(cachedResult.success).toBe(true);
-      await cached.close();
-      expect(received).toHaveLength(2);
-      expect(received[0]).toMatchObject({
-        projectPath: '/project',
-        cache: false,
-        runtimeFactoryModule: { specifier: 'file:///runtime.mjs', exportName: 'createRuntime' },
-      });
-      expect(received[1]).toMatchObject({
-        projectPath: '/project',
-        cache: true,
-        cacheDirectory: '/tmp/geospec-node-runner-cache',
-      });
-      expect((received[0] as { compiledWasmModule: unknown }).compiledWasmModule).toBeInstanceOf(WebAssembly.Module);
-      expect((received[1] as { compiledWasmModule: unknown }).compiledWasmModule).toBeInstanceOf(WebAssembly.Module);
-      expect((received[0] as { compiledWasmModule: WebAssembly.Module }).compiledWasmModule).toBe(
-        (received[1] as { compiledWasmModule: WebAssembly.Module }).compiledWasmModule,
-      );
-    } finally {
-      vi.doUnmock('node:worker_threads');
-      vi.resetModules();
-    }
+      }),
+    ).toThrow(/factories are not supported/u);
   });
 });
 
 describe('the real Node pool wire', () => {
-  it('should auto-size the worker count when none is given', () => {
+  it('should default to one bounded compiled worker when none is given', () => {
     expect(typeof createGeoSpecNodePoolRunner({ projectPath: '/x' }).run).toBe('function');
-  });
-});
-
-describe('startNodePoolWorker', () => {
-  it('should serve shards over a worker port and report its own footprint', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'geospec-entry-'));
-    await writeFile(
-      join(root, 'a.geospec.ts'),
-      `import { describe, it } from 'geospec';
-       describe('entry', () => { it('runs', () => {}); });`,
-      'utf8',
-    );
-    const posted: GeoSpecPoolWorkerMessage[] = [];
-    let deliver: ((message: GeoSpecPoolHostMessage) => void) | undefined;
-
-    startNodePoolWorker(
-      {
-        postMessage: (message) => posted.push(message),
-        on: (_event, listener) => {
-          deliver = listener as (message: GeoSpecPoolHostMessage) => void;
-        },
-      },
-      { projectPath: root, cache: false },
-    );
-
-    expect(posted).toStrictEqual([{ type: 'ready' }]);
-
-    deliver?.({ type: 'run-shard', shard: { id: 0, file: 'a.geospec.ts' } });
-    await vi.waitFor(
-      () => {
-        expect(posted.some((message) => message.type === 'shard-complete')).toBe(true);
-      },
-      { timeout: 30_000 },
-    );
-    const done = posted.find((message) => message.type === 'shard-complete');
-    expect(done?.type === 'shard-complete' && done.result.success).toBe(true);
-    expect(done?.type === 'shard-complete' && (done.workerMemoryBytes ?? 0)).toBeGreaterThan(0);
-
-    const before = posted.length;
-    deliver?.({ type: 'shutdown' });
-    // Shutdown disposes the run scope and drains the write-behind overlay; both
-    // are async, and neither posts a reply, so the settle is a turn of the loop.
-    await new Promise((resolve) => {
-      setTimeout(resolve, 50);
-    });
-
-    expect(posted).toHaveLength(before);
-  });
-
-  it('should load the configured runtime factory inside the worker host', async () => {
-    const root = await mkdtemp(join(tmpdir(), 'geospec-runtime-factory-'));
-    const factory = join(root, 'runtime.mjs');
-    await writeFile(
-      factory,
-      `export const createRuntime = async (projectPath) => { throw new Error('custom runtime for ' + projectPath); };`,
-      'utf8',
-    );
-    await writeFile(
-      join(root, 'runtime.geospec.ts'),
-      `import { it } from 'geospec';
-       import { loadModel } from 'geospec/model';
-       it('uses custom runtime', async () => { await loadModel({ file: 'main.ts' }); });`,
-      'utf8',
-    );
-    const posted: GeoSpecPoolWorkerMessage[] = [];
-    let deliver: ((message: GeoSpecPoolHostMessage) => void) | undefined;
-
-    startNodePoolWorker(
-      {
-        postMessage: (message) => posted.push(message),
-        on: (_event, listener) => {
-          deliver = listener as (message: GeoSpecPoolHostMessage) => void;
-        },
-      },
-      {
-        projectPath: root,
-        cache: false,
-        runtimeFactoryModule: { specifier: pathToFileURL(factory).href, exportName: 'createRuntime' },
-      },
-    );
-    deliver?.({ type: 'run-shard', shard: { id: 0, file: 'runtime.geospec.ts' } });
-    await vi.waitFor(
-      () => {
-        expect(posted.some((message) => message.type === 'shard-complete')).toBe(true);
-      },
-      { timeout: 30_000 },
-    );
-
-    const done = posted.find((message) => message.type === 'shard-complete');
-    expect(done?.type === 'shard-complete' && done.result.success).toBe(true);
-    expect(done?.type === 'shard-complete' && done.result.success && done.result.tests[0]?.status).toBe('failed');
-    expect(JSON.stringify(done)).toContain(`custom runtime for ${root}`);
-    deliver?.({ type: 'shutdown' });
   });
 });
 
 describe('the remaining node legs', () => {
   it('should pick the entry sibling that matches its own module extension', () => {
-    expect(poolWorkerEntryName('file:///pkg/src/runner/node/node-runner.ts')).toBe('./pool-worker-entry.ts');
-    expect(poolWorkerEntryName('file:///pkg/dist/runner/node/node-runner.mjs')).toBe('./pool-worker-entry.mjs');
+    expect(poolWorkerEntryName('file:///pkg/src/runner/node/node-runner.ts')).toBe('./native-pool-worker-entry.ts');
+    expect(poolWorkerEntryName('file:///pkg/dist/runner/node/node-runner.mjs')).toBe('./native-pool-worker-entry.mjs');
   });
 
   it('should resolve the entry from the module URL', () => {
-    expect(poolWorkerEntryUrl().pathname.endsWith('pool-worker-entry.ts')).toBe(true);
+    expect(poolWorkerEntryUrl().pathname.endsWith('native-pool-worker-entry.ts')).toBe(true);
   });
 
   it('should expose the pool event subscription', () => {
@@ -503,16 +340,16 @@ const runRealNativePool = async (
   const spec =
     mode === 'watchdog'
       ? `import { it } from 'geospec';
-import { loadNativeModel } from 'geospec/runner/native';
+import { loadModel } from 'geospec/model';
 it('hangs after admission', async () => {
-  await loadNativeModel({ source: 'model.step', format: 'step' });
+  await loadModel({ source: 'model.step', format: 'step' });
   await new Promise(() => {});
 });`
-      : `import { it, expectNativeGeo } from 'geospec';
-import { loadNativeModel } from 'geospec/runner/native';
+      : `import { it, expectGeo } from 'geospec';
+import { loadModel } from 'geospec/model';
 it('valid', async () => {
-  const subject = await loadNativeModel({ source: 'model.step', format: 'step' });
-  expectNativeGeo(subject).toBeValidBrep({});
+  const subject = await loadModel({ source: 'model.step', format: 'step' });
+  expectGeo(subject).toBeValidBrep({});
 });`;
   const script = `(async()=>{
     const {mkdtemp,copyFile,writeFile,rm}=await import('node:fs/promises');

@@ -24,6 +24,7 @@ import { useRevisionSessionUser } from '#lib/revision-actor.js';
 import type { RevisionSessionUser } from '#lib/revision-actor.js';
 import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status.js';
 import type { RevisionClient } from '#hooks/use-revision-status.js';
+import type { RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 
 /** One revision, as every card and history row reads it. @public */
@@ -764,6 +765,8 @@ export function useRevisionFileComparison(
 ): Readonly<{
   original: string;
   modified: string;
+  originalBytes: RevisionFileComparison['originalBytes'] | undefined;
+  modifiedBytes: RevisionFileComparison['modifiedBytes'] | undefined;
   isLoading: boolean;
   isLoaded: boolean;
   error: string | undefined;
@@ -780,13 +783,12 @@ export function useRevisionFileComparison(
       against === 'checkout' ? (status?.headRevisionId ?? '') : '',
     ],
     enabled: client !== undefined && revisionId !== undefined && path !== undefined,
-    queryFn: async () =>
-      revisionId === undefined || path === undefined
-        ? { original: '', modified: '' }
-        : ((await client?.compare(revisionId, path, against === undefined ? undefined : { against })) ?? {
-            original: '',
-            modified: '',
-          }),
+    queryFn: async () => {
+      if (client === undefined || revisionId === undefined || path === undefined) {
+        throw new Error('The revision comparison is unavailable.');
+      }
+      return client.compare(revisionId, path, against === undefined ? undefined : { against });
+    },
     /* A revision against its own parent is immutable and cached for the
      * session; the working side is re-read every time it is opened. */
     staleTime: against === 'checkout' ? 0 : Number.POSITIVE_INFINITY,
@@ -794,6 +796,8 @@ export function useRevisionFileComparison(
   return {
     original: data?.original ?? '',
     modified: data?.modified ?? '',
+    originalBytes: data?.originalBytes,
+    modifiedBytes: data?.modifiedBytes,
     isLoading: isPending,
     isLoaded: data !== undefined,
     error: error instanceof Error ? error.message : undefined,

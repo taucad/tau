@@ -1,8 +1,101 @@
 diff --git a/Base/Mesh.cs b/Base/Mesh.cs
-index 8446ad225..eab75dd09 100644
 --- a/Base/Mesh.cs
 +++ b/Base/Mesh.cs
-@@ -152,7 +152,11 @@ namespace PicoGK
+@@ -34,6 +34,7 @@
+ //
+ 
+ using System.Numerics;
++using System.Runtime.InteropServices;
+ using PicoGK.Numerics;
+ 
+ namespace PicoGK
+@@ -75,26 +76,10 @@
+         public Mesh mshCreateTransformed(   Vector3 vecScale,
+                                             Vector3 vecOffset)
+         {
+-            Mesh mshTrans = new Mesh(lib);
+-            for (int n = 0; n < nTriangleCount(); n++)
+-            {
+-                GetTriangle(    n,
+-                                out Vector3 A,
+-                                out Vector3 B,
+-                                out Vector3 C);
+-
+-                A *= vecScale.X;
+-                B *= vecScale.Y;
+-                C *= vecScale.Z;
+-
+-                A += vecOffset;
+-                B += vecOffset;
+-                C += vecOffset;
+-
+-                mshTrans.nAddTriangle(A, B, C);
+-            }
+-
+-            return mshTrans;
++            TauRequireFinite(vecScale, nameof(vecScale));
++            TauRequireFinite(vecOffset, nameof(vecOffset));
++            return TauCreateTransformed(vec => vec * vecScale + vecOffset,
++                Matrix4x4.CreateScale(vecScale) * Matrix4x4.CreateTranslation(vecOffset));
+         }
+ 
+         /// <summary>
+@@ -104,20 +89,8 @@
+         /// <returns>A new mesh that has the transformation applied</returns>
+         public Mesh mshCreateTransformed(Matrix4x4 matTrans)
+         {
+-            Mesh mshTrans = new Mesh(lib);
+-            for (int n = 0; n < nTriangleCount(); n++)
+-            {
+-                GetTriangle(    n,
+-                                out Vector3 A,
+-                                out Vector3 B,
+-                                out Vector3 C);
+-
+-               mshTrans.nAddTriangle(   A.vecTransformed(matTrans),
+-                                        B.vecTransformed(matTrans),
+-                                        C.vecTransformed(matTrans));
+-            }
+-
+-            return mshTrans;
++            TauRequireFinite(matTrans, nameof(matTrans));
++            return TauCreateTransformed(vec => vec.vecTransformed(matTrans), matTrans, actualUsesMatrix: true);
+         }
+ 
+         /// <summary>
+@@ -126,24 +99,14 @@
+         /// <param name="vecPlanePoint">A point through which the mirror plane passes.</param>
+         /// <param name="vecPlaneNormal">The normal vector of the mirror plane.</param>
+         /// <returns>The mirrored mesh.</returns>
+-        public Mesh mshCreateMirrored(  Vector3 vecPlanePoint,
+-									    Vector3 vecPlaneNormal)
+-		{
+-			Mesh mshResult = new(lib);
+-
++        public Mesh mshCreateMirrored(Vector3 vecPlanePoint, Vector3 vecPlaneNormal)
++        {
++            TauRequireFinite(vecPlanePoint, nameof(vecPlanePoint));
++            TauRequireFinite(vecPlaneNormal, nameof(vecPlaneNormal));
+             vecPlaneNormal = vecPlaneNormal.vecNormalized();
+-
+-			for (int n=0; n<nTriangleCount();n++)
+-			{
+-				GetTriangle(n, out Vector3 vecA, out Vector3 vecB, out Vector3 vecC);
+-
+-				mshResult.nAddTriangle(	vecA.vecMirrored(vecPlanePoint, vecPlaneNormal),
+-										vecB.vecMirrored(vecPlanePoint, vecPlaneNormal),
+-										vecC.vecMirrored(vecPlanePoint, vecPlaneNormal));
+-			}
+-
+-			return mshResult;
+-		}
++            return TauCreateTransformed(vec => vec.vecMirrored(vecPlanePoint, vecPlaneNormal),
++                TauMirrorPlacement(vecPlanePoint, vecPlaneNormal.vecSafeNormalized()));
++        }
+ 
+         /// <summary>
+         /// Add a new vertex to the mesh so that it can be used in mesh triangles
+@@ -152,20 +115,69 @@
          /// <returns>The index of the vertex (to be used in triangles)</returns>
          public int nAddVertex(in Vector3 vec)
          {
@@ -15,7 +108,73 @@ index 8446ad225..eab75dd09 100644
          }
  
          public void AddVertices(    in  IEnumerable<Vector3> avecVertices,
-@@ -200,9 +204,11 @@ namespace PicoGK
+                                     out int[] anVertexIndex)
+         {
+-            int nVertexCount = avecVertices.Count();
+-            anVertexIndex = new int[nVertexCount];
+-            
+-            int n=0;
+-            foreach (Vector3 vec in avecVertices)
+-            {
+-                anVertexIndex[n] = nAddVertex(vec);
+-                n++;
++            ArgumentNullException.ThrowIfNull(avecVertices);
++            Vector3[]? vertices = avecVertices as Vector3[];
++            if (vertices is null && avecVertices.GetType() == typeof(List<Vector3>))
++                vertices = ((List<Vector3>)avecVertices).ToArray();
++            if (vertices is null)
++            {
++                // Arbitrary iterators may observe each native write before yielding the next vertex.
++                var indices = new List<int>();
++                foreach (Vector3 vertex in avecVertices) indices.Add(nAddVertex(vertex));
++                anVertexIndex = indices.ToArray();
++                return;
++            }
++            anVertexIndex = new int[vertices.Length];
++            if (vertices.Length == 0) return;
++            var positions = new float[checked(vertices.Length * 3)];
++            for (int index = 0; index < vertices.Length; index++)
++            {
++                positions[index * 3] = vertices[index].X;
++                positions[index * 3 + 1] = vertices[index].Y;
++                positions[index * 3 + 2] = vertices[index].Z;
++            }
++            lock (m_tauSnapshotGate)
++            {
++                ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                var first = _nVertexCount(lib.hThis, hThis);
++                for (int index = 0; index < vertices.Length; index++) anVertexIndex[index] = checked(first + index);
++                TauAppendIndexedArrays(positions, Array.Empty<uint>());
++            }
++        }
++
++
++        // Existing private indexed ABI; no temporary Mesh/native handle or per-vertex calls.
++        private void TauAppendIndexedArrays(float[] positions, uint[] indices)
++        {
++            GCHandle pinnedPositions = default;
++            GCHandle pinnedIndices = default;
++            try
++            {
++                pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++                pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++                lock (m_tauSnapshotGate)
++                {
++                    ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                    TauCheckMeshStatus(TauAppendIndexedNative(lib.hThis, hThis,
++                        pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                        pinnedIndices.AddrOfPinnedObject(), indices.Length));
++                }
++                GC.KeepAlive(this);
++            }
++            finally
++            {
++                if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++                if (pinnedPositions.IsAllocated) pinnedPositions.Free();
+             }
+         }
+ 
+@@ -200,9 +212,11 @@
          /// <returns>The triangle index of the added triangle</returns>
          public int nAddTriangle(in Triangle t)
          {
@@ -30,11 +189,249 @@ index 8446ad225..eab75dd09 100644
          }
  
          /// <summary>
+@@ -334,15 +348,7 @@
+         /// </summary>
+         public void Append(Mesh msh)
+         {
+-            for (int n=0; n<msh.nTriangleCount(); n++)
+-            {
+-                msh.GetTriangle(    n,
+-                                    out Vector3 vecA,
+-                                    out Vector3 vecB,
+-                                    out Vector3 vecC);
+-
+-                nAddTriangle(vecA, vecB, vecC);
+-            }
++            TauAppendIndexed(msh);
+         }
+ 
+         /// <summary>
+diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
+--- a/Base/ScalarField.cs
++++ b/Base/ScalarField.cs
+@@ -261,7 +261,7 @@
+         /// <param name="xTraverse">The interface containing the callback</param>
+         public void TraverseActive(ITraverseScalarField xTraverse)
+         {
+-            _TraverseActive(lib.hThis, hThis, xTraverse.InformActiveValue);
++            TauTraverseActive(xTraverse);
+         }
+ 
+         /// <summary>
+diff --git a/Base/VectorField.cs b/Base/VectorField.cs
+--- a/Base/VectorField.cs
++++ b/Base/VectorField.cs
+@@ -194,9 +194,7 @@
+         /// <param name="xTraverse">The interface containing the callback</param>
+         public void TraverseActive(ITraverseVectorField xTraverse)
+         {
+-            _TraverseActive(    lib.hThis, 
+-                                hThis, 
+-                                xTraverse.InformActiveValue);
++            TauTraverseActive(xTraverse);
+         }
+ 
+         /// <summary>
+diff --git a/Base/Voxels.cs b/Base/Voxels.cs
+--- a/Base/Voxels.cs
++++ b/Base/Voxels.cs
+@@ -257,7 +257,9 @@
+         /// <returns>Number of bytes allocated to this object</returns>
+         public long nMemUsage()
+         {
+-            return _nMemUsage(lib.hThis, hThis);
++            var status = TauOwnedMemoryNative(lib.hThis, hThis, out long bytes);
++            Library.TauCheckOwnedMemoryStatus(status, nameof(Voxels));
++            return bytes;
+         }
+ 
+         /// <summary>
+@@ -660,11 +662,20 @@
+         {
+             if (fOffset < 0)
+             {
+-                // Outside remains the same
+-                return voxBoolSubtract(voxOffset(fOffset));
+-            }
+-            
+-            return voxOffset(fOffset).voxBoolSubtract(this);
++                using Voxels inner = voxOffset(fOffset);
++                return voxBoolSubtract(inner);
++            }
++            Voxels outer = voxOffset(fOffset);
++            try
++            {
++                outer.BoolSubtract(this);
++                return outer;
++            }
++            catch
++            {
++                outer.Dispose();
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -688,15 +699,19 @@
+                 fPosOffsetMM    = fTemp;
+             }
+ 
+-            Voxels voxInner = voxOffset(fNegOffsetMM);
+-            
+-            if (fSmoothInnerMM > 0)
+-                voxInner.voxTripleOffset(fSmoothInnerMM);
+-            
++            using Voxels voxInner = voxOffset(fNegOffsetMM);
++            if (fSmoothInnerMM > 0) voxInner.TripleOffset(fSmoothInnerMM);
+             Voxels voxOuter = voxOffset(fPosOffsetMM);
+-            voxOuter.voxBoolSubtract(voxInner);
+-
+-            return voxOuter;
++            try
++            {
++                voxOuter.BoolSubtract(voxInner);
++                return voxOuter;
++            }
++            catch
++            {
++                voxOuter.Dispose();
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -722,7 +737,7 @@
+         /// <param name="oBounds">Bounding box in which to render the implicit</param>
+         public void RenderImplicit( in IImplicit xImp,
+                                     in BBox3 oBounds)
+-            => _RenderImplicit(lib.hThis, hThis, in oBounds, xImp.fSignedDistance);
++            => TauRenderImplicit(xImp, oBounds, false);
+ 
+         /// <summary>
+         /// Render an implicit signed distance function into the voxels
+@@ -736,7 +751,7 @@
+         /// </summary>
+         /// <param name="xImp">Implicit object with signed distance function</param>
+         public void IntersectImplicit(in IImplicit xImp)
+-            => _IntersectImplicit(lib.hThis, hThis, xImp.fSignedDistance);
++            => TauRenderImplicit(xImp, default, true);
+ 
+ 
+         /// <summary>
+diff --git a/IO/MeshIo.cs b/IO/MeshIo.cs
+--- a/IO/MeshIo.cs
++++ b/IO/MeshIo.cs
+@@ -132,7 +132,6 @@
+                     oFile.Seek(lPos, 0);
+                 }
+ 
+-                float fScale = 1.0f; // 1mm default
+ 
+                 if (eLoadUnit == EStlUnit.AUTO)
+                 {
+@@ -161,25 +160,33 @@
+                 oMesh.m_strLoadHeaderData = strOriginal;
+                 oMesh.m_eLoadUnits = eLoadUnit;
+ 
+-                if (bAscii)
+-                {
+-                    oMesh.DoReadMeshFromAsciiStl(   oReader,
+-                                                    eLoadUnit,
+-                                                    fPostScale,
+-                                                    vecOffset);
+-                }
+-                else
+-                {
+-                    oMesh.DoReadMeshFromBinaryStl(  oReader,
+-                                                    eLoadUnit,
+-                                                    fScale,
+-                                                    vecOffset);
+-                }
+-
+-                if (oMesh.nTriangleCount() == 0)
+-                    throw new Exception("Imported STL mesh is empty (zero triangles), failed to load");
+-
+-                return oMesh;
++                try
++                {
++                    if (bAscii)
++                    {
++                        oMesh.DoReadMeshFromAsciiStl(   oReader,
++                                                        eLoadUnit,
++                                                        fPostScale,
++                                                        vecOffset);
++                    }
++                    else
++                    {
++                        oMesh.DoReadMeshFromBinaryStl(  oReader,
++                                                        eLoadUnit,
++                                                        fPostScale,
++                                                        vecOffset);
++                    }
++
++                    if (oMesh.nTriangleCount() == 0)
++                        throw new Exception("Imported STL mesh is empty (zero triangles), failed to load");
++
++                    return oMesh;
++                }
++                catch
++                {
++                    oMesh.Dispose();
++                    throw;
++                }
+             }
+         }
+ 
+@@ -333,24 +340,31 @@
+         {
+             UInt32 nNumberOfTriangles = oReader.ReadUInt32();
+ 
++            const int maximumBatchTriangles = 1024;
+             SStlTriangle sTriangle = new SStlTriangle();
+             var oTriangleSpan = MemoryMarshal.CreateSpan(ref sTriangle, 1);
+-
+             while (nNumberOfTriangles > 0)
+             {
+-                oReader.Read(MemoryMarshal.AsBytes(oTriangleSpan));
+-
+-                Vector3 v1 = new Vector3(sTriangle.V1X, sTriangle.V1Y, sTriangle.V1Z);
+-                Vector3 v2 = new Vector3(sTriangle.V2X, sTriangle.V2Y, sTriangle.V2Z);
+-                Vector3 v3 = new Vector3(sTriangle.V3X, sTriangle.V3Y, sTriangle.V3Z);
+-
+-                TransformFromUnit(ref v1, eLoadUnit, fPostScale, vecPostOffsetMM);
+-                TransformFromUnit(ref v2, eLoadUnit, fPostScale, vecPostOffsetMM);
+-                TransformFromUnit(ref v3, eLoadUnit, fPostScale, vecPostOffsetMM);
+-
+-                nAddTriangle(v1, v2, v3);
+-
+-                nNumberOfTriangles--;
++                int count = (int)Math.Min(nNumberOfTriangles, maximumBatchTriangles);
++                var positions = new float[checked(count * 9)];
++                var indices = new uint[checked(count * 3)];
++                for (int triangle = 0; triangle < count; triangle++)
++                {
++                    oReader.BaseStream.ReadExactly(MemoryMarshal.AsBytes(oTriangleSpan));
++                    Vector3 v1 = new(sTriangle.V1X, sTriangle.V1Y, sTriangle.V1Z);
++                    Vector3 v2 = new(sTriangle.V2X, sTriangle.V2Y, sTriangle.V2Z);
++                    Vector3 v3 = new(sTriangle.V3X, sTriangle.V3Y, sTriangle.V3Z);
++                    TransformFromUnit(ref v1, eLoadUnit, fPostScale, vecPostOffsetMM);
++                    TransformFromUnit(ref v2, eLoadUnit, fPostScale, vecPostOffsetMM);
++                    TransformFromUnit(ref v3, eLoadUnit, fPostScale, vecPostOffsetMM);
++                    int offset = triangle * 9;
++                    positions[offset] = v1.X; positions[offset + 1] = v1.Y; positions[offset + 2] = v1.Z;
++                    positions[offset + 3] = v2.X; positions[offset + 4] = v2.Y; positions[offset + 5] = v2.Z;
++                    positions[offset + 6] = v3.X; positions[offset + 7] = v3.Y; positions[offset + 8] = v3.Z;
++                    for (int corner = 0; corner < 3; corner++) indices[triangle * 3 + corner] = (uint)(triangle * 3 + corner);
++                }
++                TauAppendIndexedArrays(positions, indices);
++                nNumberOfTriangles -= (uint)count;
+             }
+         }
+ 
 diff --git a/Internals/Interop.cs b/Internals/Interop.cs
-index 254cedbb8..458803130 100644
 --- a/Internals/Interop.cs
 +++ b/Internals/Interop.cs
-@@ -203,6 +203,8 @@ namespace PicoGK
+@@ -203,6 +203,8 @@
  
          protected virtual void Dispose(bool bDisposing)
          {
@@ -43,7 +440,7 @@ index 254cedbb8..458803130 100644
              if (m_bDisposed)
              {
                  return;
-@@ -216,6 +218,7 @@ namespace PicoGK
+@@ -216,6 +218,7 @@
  
              _Destroy(lib.hThis, hThis);
              m_bDisposed = true;
@@ -51,7 +448,7 @@ index 254cedbb8..458803130 100644
          }
  
          bool m_bDisposed = false;
-@@ -793,7 +796,10 @@ namespace PicoGK
+@@ -793,7 +796,10 @@
                  // Nothing to do in this class
              }
  
@@ -63,18 +460,385 @@ index 254cedbb8..458803130 100644
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1397,4 @@ namespace PicoGK
+@@ -1391,4 +1397,4 @@
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }
 -}
 \ No newline at end of file
 +}
+diff --git a/Library/CheckedCallbacks.cs b/Library/CheckedCallbacks.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/CheckedCallbacks.cs
+@@ -0,0 +1,103 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Numerics;
++using System.Runtime.ExceptionServices;
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++internal static class TauCheckedCallbacks
++{
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    internal delegate int Sdf(in Vector3 point, out float distance);
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    internal delegate int Scalar(in Vector3 point, float value);
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    internal delegate int Vector(in Vector3 point, in Vector3 value);
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_Voxels_RenderImplicitChecked")]
++    internal static extern int Render(LibHandle library, VoxHandle voxels, in BBox3 bounds, Sdf callback);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_Voxels_IntersectImplicitChecked")]
++    internal static extern int Intersect(LibHandle library, VoxHandle voxels, Sdf callback);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_TraverseActiveChecked")]
++    internal static extern int TraverseScalar(LibHandle library, ScalarFieldHandle field, Scalar callback);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_TraverseActiveChecked")]
++    internal static extern int TraverseVector(LibHandle library, VectorFieldHandle field, Vector callback);
++
++    internal static void Check(int status, ExceptionDispatchInfo? error, object owner)
++    {
++        // Never unwind a managed exception through OpenVDB/C++. Restore the exact first error here.
++        error?.Throw();
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(owner.GetType().Name);
++        if (status == -1) throw new ArgumentException("PicoGK callback operation received invalid bounds or input.");
++        throw new InvalidOperationException($"PicoGK callback operation failed with native status {status}.");
++    }
++}
++
++public partial class Voxels
++{
++    private void TauRenderImplicit(IImplicit implicitFunction, in BBox3 bounds, bool intersect)
++    {
++        ArgumentNullException.ThrowIfNull(implicitFunction);
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ExceptionDispatchInfo? failure = null;
++        TauCheckedCallbacks.Sdf callback = (in Vector3 point, out float distance) =>
++        {
++            distance = 0;
++            if (failure is not null) return 1;
++            try
++            {
++                distance = implicitFunction.fSignedDistance(point);
++                return 0;
++            }
++            catch (Exception error)
++            {
++                failure = ExceptionDispatchInfo.Capture(error);
++                return 1;
++            }
++        };
++        var status = intersect
++            ? TauCheckedCallbacks.Intersect(lib.hThis, hThis, callback)
++            : TauCheckedCallbacks.Render(lib.hThis, hThis, bounds, callback);
++        GC.KeepAlive(callback);
++        TauCheckedCallbacks.Check(status, failure, this);
++    }
++}
++
++public partial class ScalarField
++{
++    private void TauTraverseActive(ITraverseScalarField traversal)
++    {
++        ArgumentNullException.ThrowIfNull(traversal);
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ExceptionDispatchInfo? failure = null;
++        TauCheckedCallbacks.Scalar callback = (in Vector3 point, float value) =>
++        {
++            if (failure is not null) return 1;
++            try { traversal.InformActiveValue(point, value); return 0; }
++            catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); return 1; }
++        };
++        var status = TauCheckedCallbacks.TraverseScalar(lib.hThis, hThis, callback);
++        GC.KeepAlive(callback);
++        TauCheckedCallbacks.Check(status, failure, this);
++    }
++}
++
++public partial class VectorField
++{
++    private void TauTraverseActive(ITraverseVectorField traversal)
++    {
++        ArgumentNullException.ThrowIfNull(traversal);
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ExceptionDispatchInfo? failure = null;
++        TauCheckedCallbacks.Vector callback = (in Vector3 point, in Vector3 value) =>
++        {
++            if (failure is not null) return 1;
++            try { traversal.InformActiveValue(point, value); return 0; }
++            catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); return 1; }
++        };
++        var status = TauCheckedCallbacks.TraverseVector(lib.hThis, hThis, callback);
++        GC.KeepAlive(callback);
++        TauCheckedCallbacks.Check(status, failure, this);
++    }
++}
+diff --git a/Library/GeometryCapture.cs b/Library/GeometryCapture.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/GeometryCapture.cs
+@@ -0,0 +1,131 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++// Private host bridge. A lease pins one validated native generation, never the caller's mutable handle.
++internal sealed class TauGeometryCapture : IDisposable
++{
++    internal Library Library { get; }
++    internal ulong Generation { get; }
++    internal int PositionCount { get; }
++    internal int IndexCount { get; }
++    internal ColorFloat Color { get; }
++    internal ulong Snapshot { get { ObjectDisposedException.ThrowIf(snapshot == 0, this); return snapshot; } }
++    private ulong snapshot;
++
++    private TauGeometryCapture(Library library, ulong snapshot, ulong generation,
++        int positionCount, int indexCount, ColorFloat color)
++    {
++        Library = library;
++        this.snapshot = snapshot;
++        Generation = generation;
++        PositionCount = positionCount;
++        IndexCount = indexCount;
++        Color = color;
++    }
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_Acquire")]
++    private static extern int AcquireNative(LibHandle library, int kind, long source,
++        out ulong snapshot, out ulong generation, out int positions, out int indices, out ColorFloat color);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_Copy")]
++    private static extern int CopyNative(LibHandle library, ulong snapshot,
++        IntPtr positions, int positionCapacity, IntPtr indices, int indexCapacity);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_Release")]
++    private static extern int ReleaseNative(LibHandle library, ulong snapshot);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_Counters")]
++    private static extern int CountersNative(LibHandle library, [Out] ulong[] counters, int capacity);
++
++    internal static TauGeometryCapture Acquire(Library library, int kind, long source, object identity)
++    {
++        var status = AcquireNative(library.hThis, kind, source,
++            out var snapshot, out var generation, out var positions, out var indices, out var color);
++        GC.KeepAlive(identity);
++        Check(status, identity.GetType().Name);
++        try
++        {
++            if (snapshot == 0 || generation == 0 || positions < 0 || positions % 3 != 0 || indices < 0 ||
++                indices % (kind == 2 ? 2 : 3) != 0)
++                throw new InvalidOperationException("PicoGK returned invalid immutable capture metadata.");
++            return new TauGeometryCapture(library, snapshot, generation, positions, indices, color);
++        }
++        catch
++        {
++            _ = ReleaseNative(library.hThis, snapshot);
++            throw;
++        }
++    }
++
++    internal void Copy(float[] positions, uint[] indices)
++    {
++        ObjectDisposedException.ThrowIf(snapshot == 0, this);
++        if (positions.Length != PositionCount || indices.Length != IndexCount)
++            throw new ArgumentException("Capture buffers must match the immutable geometry counts.");
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            Check(CopyNative(Library.hThis, snapshot, pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                pinnedIndices.AddrOfPinnedObject(), indices.Length), nameof(TauGeometryCapture));
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    internal static ulong[] Counters(Library library)
++    {
++        var counters = new ulong[5];
++        Check(CountersNative(library.hThis, counters, counters.Length), nameof(Library));
++        return counters;
++    }
++
++    public void Dispose()
++    {
++        var handle = snapshot;
++        snapshot = 0;
++        if (handle == 0) return;
++        var status = ReleaseNative(Library.hThis, handle);
++        // Library teardown owns all remaining native leases; a late managed release is idempotent.
++        if (status != -3) Check(status, nameof(TauGeometryCapture));
++    }
++
++    private static void Check(int status, string owner)
++    {
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(owner);
++        if (status == -1) throw new ArgumentException("PicoGK immutable capture contains invalid geometry or counts.");
++        throw new InvalidOperationException($"PicoGK immutable capture failed with native status {status}.");
++    }
++}
++
++public partial class Mesh
++{
++    internal TauGeometryCapture TauAcquireGeometry()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        return TauGeometryCapture.Acquire(lib, 0, hThis.Value, this);
++    }
++}
++
++public partial class Voxels
++{
++    internal TauGeometryCapture TauAcquireGeometry()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        return TauGeometryCapture.Acquire(lib, 1, hThis.Value, this);
++    }
++}
++
++public partial class PolyLine
++{
++    internal TauGeometryCapture TauAcquireGeometry()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        return TauGeometryCapture.Acquire(lib, 2, hThis.Value, this);
++    }
++}
+diff --git a/Library/Library.cs b/Library/Library.cs
+--- a/Library/Library.cs
++++ b/Library/Library.cs
+@@ -51,6 +51,8 @@
+         /// <param name="fVoxelSizeMM">Voxel size in MM</param>
+         public Library(float fVoxelSizeMM)
+         {
++            if (!float.IsFinite(fVoxelSizeMM) || fVoxelSizeMM <= 0)
++                throw new ArgumentOutOfRangeException(nameof(fVoxelSizeMM), "Voxel size must be finite and greater than zero.");
+             hThis               = _hCreateInstance(fVoxelSizeMM);
+             fVoxelSize          = fVoxelSizeMM;
+             m_oTimerMemCheck    = new(_ => MonitorMemory(), null, m_oInterval, m_oInterval);
+@@ -87,12 +89,13 @@
+         }
+ 
+         /// <summary>
+-        /// Return the total memory usage of all objects created with this Library instance
++        /// Return deduplicated logical owned storage retained by this Library instance.
++        /// This excludes allocator overhead and is not physical memory or peak RSS.
+         /// </summary>
+         /// <returns>Memory usage in bytes</returns>
+         public long nTotalMemUsage()
+         {
+-            return _nTotalMemUsage(hThis);
++            return TauOwnedMemoryBytes(0);
+         }
+ 
+         /// <summary>
+@@ -101,7 +104,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nMeshesMemUsage()
+         {
+-            return _nMeshesMemUsage(hThis);
++            return TauOwnedMemoryBytes(1);
+         }
+ 
+          /// <summary>
+@@ -110,7 +113,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nLatticesMemUsage()
+         {
+-            return _nLatticesMemUsage(hThis);
++            return TauOwnedMemoryBytes(2);
+         }
+ 
+          /// <summary>
+@@ -119,7 +122,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nPolyLinesMemUsage()
+         {
+-            return _nPolyLinesMemUsage(hThis);
++            return TauOwnedMemoryBytes(3);
+         }
+ 
+          /// <summary>
+@@ -128,7 +131,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nVoxelsMemUsage()
+         {
+-            return _nVoxelsMemUsage(hThis);
++            return TauOwnedMemoryBytes(4);
+         }
+ 
+          /// <summary>
+@@ -137,7 +140,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nVdbFilesMemUsage()
+         {
+-            return _nVdbFilesMemUsage(hThis);
++            return TauOwnedMemoryBytes(5);
+         }
+ 
+          /// <summary>
+@@ -146,7 +149,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nScalarFieldsMemUsage()
+         {
+-            return _nScalarFieldsMemUsage(hThis);
++            return TauOwnedMemoryBytes(6);
+         }
+ 
+          /// <summary>
+@@ -155,7 +158,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nVectorFieldsMemUsage()
+         {
+-            return _nVectorFieldsMemUsage(hThis);
++            return TauOwnedMemoryBytes(7);
+         }
+ 
+          /// <summary>
+@@ -164,7 +167,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nVdbMetasMemUsage()
+         {
+-            return _nVdbMetasMemUsage(hThis);
++            return TauOwnedMemoryBytes(8);
+         }
+ 
+         /// <summary>
+@@ -277,9 +280,9 @@
+                             vecMm,
+                             ref vecResult);
+ 
+-            x = (int) (vecResult.X + 0.5f);
+-            y = (int) (vecResult.Y + 0.5f);
+-            z = (int) (vecResult.Z + 0.5f);
++            x = (int) vecResult.X;
++            y = (int) vecResult.Y;
++            z = (int) vecResult.Z;
+         }
+ 
+         /// <summary>
+@@ -363,7 +366,9 @@
+                 if (m_bDisposed)
+                     return;
+ 
+-                long nNew  = nTotalMemUsage();
++                // Keep the last known pressure if a metadata snapshot could not be allocated.
++                if (TauOwnedMemoryNative(hThis, 0, out long nNew) != 0)
++                    return;
+                 long nDiff = nNew - m_nUsedMemory;
+ 
+                 if (nDiff > 0)
 diff --git a/Library/LibraryGlobal.cs b/Library/LibraryGlobal.cs
-index 5fbe98389..870e4a66b 100644
 --- a/Library/LibraryGlobal.cs
 +++ b/Library/LibraryGlobal.cs
-@@ -373,11 +373,32 @@ namespace PicoGK
+@@ -373,10 +373,31 @@
              if (fVoxelSizeMM <= 0.0f)
                  throw new Exception("Voxel size needs to be larger than 0mm");
  
@@ -86,7 +850,7 @@ index 5fbe98389..870e4a66b 100644
 +                                ?? Path.Combine(Utils.strDocumentsFolder(), "PicoGK.log");
  
              m_strLogPath = Path.GetDirectoryName(strLogFilePath) ?? Utils.strDocumentsFolder();
- 
++
 +            if (xHost is not null)
 +            {
 +                try
@@ -104,11 +868,10 @@ index 5fbe98389..870e4a66b 100644
 +                }
 +                return;
 +            }
-+
+ 
              using (GlobalInstance oInstance = new(fVoxelSizeMM, strLogFilePath, strWindowTitle, strLightsFile))
              {
-                 Thread oThread = new Thread(fnTask);
-@@ -496,4 +517,4 @@ namespace PicoGK
+@@ -496,4 +517,4 @@
  
          #pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
      }
@@ -117,7 +880,6 @@ index 5fbe98389..870e4a66b 100644
 +}
 diff --git a/Library/LibraryHost.cs b/Library/LibraryHost.cs
 new file mode 100644
-index 000000000..6c0ed9460
 --- /dev/null
 +++ b/Library/LibraryHost.cs
 @@ -0,0 +1,68 @@
@@ -189,16 +951,284 @@ index 000000000..6c0ed9460
 +        static ILibraryHost? m_xLibraryHost;
 +    }
 +}
-diff --git a/Library/MeshReadback.cs b/Library/MeshReadback.cs
+diff --git a/Library/MeshIndexed.cs b/Library/MeshIndexed.cs
 new file mode 100644
-index 000000000..686b54008
 --- /dev/null
-+++ b/Library/MeshReadback.cs
-@@ -0,0 +1,75 @@
++++ b/Library/MeshIndexed.cs
+@@ -0,0 +1,122 @@
 +// SPDX-License-Identifier: Apache-2.0
 +using System.Numerics;
-+using System.Runtime.CompilerServices;
 +using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++public partial class Mesh
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_CreateIndexed")]
++    private static extern int TauCreateIndexedNative(LibHandle library,
++        IntPtr positions, int positionCount, IntPtr indices, int indexCount, out MshHandle output);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_CreateCopy")]
++    private static extern int TauCreateCopyNative(LibHandle library, ulong snapshot, out MshHandle output);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_AppendIndexed")]
++    private static extern int TauAppendIndexedNative(LibHandle library, MshHandle target,
++        IntPtr positions, int positionCount, IntPtr indices, int indexCount);
++
++    // Native success transfers exactly one already-created handle. No empty native object or validity lookup.
++    private Mesh(Library library, MshHandle mesh)
++    {
++        lib = library;
++        hThis = mesh;
++    }
++
++    private static Mesh TauAdoptResult(Library library, int status, MshHandle result)
++    {
++        try
++        {
++            TauCheckMeshStatus(status);
++            if (result.Value == 0)
++                throw new InvalidOperationException("PicoGK bulk mesh creation returned an empty handle.");
++            return new Mesh(library, result);
++        }
++        catch
++        {
++            if (result.Value != 0) _Destroy(library.hThis, result);
++            throw;
++        }
++    }
++
++    // Raw internal copy is distinct from authored arithmetic, including an authored identity matrix.
++    internal Mesh TauCreateCopy()
++    {
++        using var capture = TauAcquireGeometry();
++        var status = TauCreateCopyNative(capture.Library.hThis, capture.Snapshot, out var output);
++        GC.KeepAlive(capture);
++        return TauAdoptResult(capture.Library, status, output);
++    }
++
++    private static Mesh TauCreateIndexed(Library library, float[] positions, uint[] indices)
++    {
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            var status = TauCreateIndexedNative(library.hThis, pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                pinnedIndices.AddrOfPinnedObject(), indices.Length, out var output);
++            GC.KeepAlive(library);
++            return TauAdoptResult(library, status, output);
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    private void TauAppendIndexed(Mesh source)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        // Acquire/copy before the target gate: self-append is finite and opposite appends never nest owners.
++        using var capture = source.TauAcquireGeometry();
++        var positions = new float[capture.PositionCount];
++        var indices = new uint[capture.IndexCount];
++        capture.Copy(positions, indices);
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            lock (m_tauSnapshotGate)
++            {
++                ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                TauCheckMeshStatus(TauAppendIndexedNative(lib.hThis, hThis,
++                    pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                    pinnedIndices.AddrOfPinnedObject(), indices.Length));
++            }
++            GC.KeepAlive(this);
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    private static void TauCheckMeshStatus(int status)
++    {
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(nameof(Mesh));
++        if (status == -1) throw new ArgumentException("PicoGK bulk mesh contains invalid geometry or counts.");
++        throw new InvalidOperationException($"PicoGK bulk mesh failed with native status {status}.");
++    }
++
++    private static void TauRequireFinite(Vector3 point, string name)
++    {
++        if (!float.IsFinite(point.X) || !float.IsFinite(point.Y) || !float.IsFinite(point.Z))
++            throw new ArgumentException("PicoGK mesh transform requires finite values.", name);
++    }
++
++    private static void TauRequireFinite(Matrix4x4 matrix, string name)
++    {
++        if (!float.IsFinite(matrix.M11) || !float.IsFinite(matrix.M12) || !float.IsFinite(matrix.M13) || !float.IsFinite(matrix.M14) ||
++            !float.IsFinite(matrix.M21) || !float.IsFinite(matrix.M22) || !float.IsFinite(matrix.M23) || !float.IsFinite(matrix.M24) ||
++            !float.IsFinite(matrix.M31) || !float.IsFinite(matrix.M32) || !float.IsFinite(matrix.M33) || !float.IsFinite(matrix.M34) ||
++            !float.IsFinite(matrix.M41) || !float.IsFinite(matrix.M42) || !float.IsFinite(matrix.M43) || !float.IsFinite(matrix.M44))
++            throw new ArgumentException("PicoGK mesh transform requires finite values.", name);
++    }
++}
+diff --git a/Library/MeshPlacement.cs b/Library/MeshPlacement.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/MeshPlacement.cs
+@@ -0,0 +1,139 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Numerics;
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++internal readonly record struct TauMeshPlacement(ulong PrototypeGeneration, Matrix4x4 Matrix, bool IsPlaced, BBox3 Bounds);
++
++public partial class Mesh
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_GetPlacement")]
++    private static extern int TauGetPlacementNative(LibHandle library, ulong snapshot,
++        out ulong prototypeGeneration, out Matrix4x4 matrix, int matrixCapacity, out int placed, out BBox3 bounds);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_CopyPrototype")]
++    private static extern int TauCopyPrototypeNative(LibHandle library, ulong snapshot,
++        IntPtr positions, int positionCapacity, IntPtr indices, int indexCapacity);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_CreatePlacedIndexed")]
++    private static extern int TauCreatePlacedNative(LibHandle library, ulong snapshot,
++        in Matrix4x4 matrix, int matrixCount, IntPtr positions, int positionCount,
++        IntPtr indices, int indexCount, out MshHandle output);
++
++    // Read once from the live actual lease. Consumers key canonical source arrays by this root
++    // generation and keep capture.Generation separately for actual mutation/layout state.
++    internal static TauMeshPlacement TauReadPlacement(TauGeometryCapture capture)
++    {
++        TauCheckMeshStatus(TauGetPlacementNative(capture.Library.hThis, capture.Snapshot,
++            out var generation, out var matrix, 16, out var placed, out var bounds));
++        if (generation == 0 || (placed != 0 && placed != 1))
++            throw new InvalidOperationException("PicoGK returned invalid immutable placement metadata.");
++        if (!TauFinitePlacement(matrix))
++            throw new InvalidOperationException("PicoGK returned invalid immutable placement matrix.");
++        return new(generation, matrix, placed == 1, bounds);
++    }
++
++    // A null index buffer explicitly requests positions only during nested construction proof.
++    // Add-time admission requests both buffers only on a unique prototype cache miss.
++    internal static void TauCopyPrototype(TauGeometryCapture capture, float[] positions, uint[]? indices = null)
++    {
++        if (positions.Length != capture.PositionCount || (indices is not null && indices.Length != capture.IndexCount))
++            throw new ArgumentException("Prototype buffers must match the immutable geometry counts.");
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            if (indices is not null) pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            TauCheckMeshStatus(TauCopyPrototypeNative(capture.Library.hThis, capture.Snapshot,
++                pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                indices is null ? IntPtr.Zero : pinnedIndices.AddrOfPinnedObject(), indices?.Length ?? 0));
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    private Mesh TauCreateTransformed(Func<Vector3, Vector3> transform, Matrix4x4 step, bool actualUsesMatrix = false)
++    {
++        using var capture = TauAcquireGeometry();
++        var positions = new float[capture.PositionCount];
++        var indices = new uint[capture.IndexCount];
++        capture.Copy(positions, indices);
++        var placement = TauReadPlacement(capture);
++        // Vector3.Transform ignores these four homogeneous entries. Its actual XYZ arithmetic
++        // stays unchanged; placement expresses that same affine XYZ map.
++        step.M14 = 0; step.M24 = 0; step.M34 = 0; step.M44 = 1;
++        var rootMatrix = placement.IsPlaced ? placement.Matrix * step : step;
++        var eligible = TauFinitePlacement(rootMatrix);
++        float[]? rootPositions = null;
++        if (eligible && placement.IsPlaced)
++        {
++            rootPositions = new float[positions.Length];
++            TauCopyPrototype(capture, rootPositions);
++        }
++        for (var index = 0; index < positions.Length; index += 3)
++        {
++            var source = new Vector3(positions[index], positions[index + 1], positions[index + 2]);
++            var actual = transform(source);
++            if (!float.IsFinite(actual.X) || !float.IsFinite(actual.Y) || !float.IsFinite(actual.Z))
++                throw new ArgumentException("PicoGK mesh transform returned a nonfinite vertex.");
++            // A first matrix transform already evaluates the canonical map as its actual arithmetic.
++            if (eligible && (!actualUsesMatrix || placement.IsPlaced))
++            {
++                var root = rootPositions is null ? source :
++                    new Vector3(rootPositions[index], rootPositions[index + 1], rootPositions[index + 2]);
++                eligible = TauSameBits(actual, Vector3.Transform(root, rootMatrix));
++            }
++            positions[index] = actual.X;
++            positions[index + 1] = actual.Y;
++            positions[index + 2] = actual.Z;
++        }
++        // Qualification is conservative. A failed proof keeps every actual authored float and
++        // index, and simply becomes a new prototype; it never rejects valid authored geometry.
++        return eligible ? TauCreatePlaced(capture, rootMatrix, positions, indices) :
++            TauCreateIndexed(capture.Library, positions, indices);
++    }
++
++    private static Mesh TauCreatePlaced(TauGeometryCapture capture, Matrix4x4 matrix, float[] positions, uint[] indices)
++    {
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            var status = TauCreatePlacedNative(capture.Library.hThis, capture.Snapshot, matrix, 16,
++                pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                pinnedIndices.AddrOfPinnedObject(), indices.Length, out var output);
++            return TauAdoptResult(capture.Library, status, output);
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    private static bool TauSameBits(Vector3 a, Vector3 b) =>
++        BitConverter.SingleToInt32Bits(a.X) == BitConverter.SingleToInt32Bits(b.X) &&
++        BitConverter.SingleToInt32Bits(a.Y) == BitConverter.SingleToInt32Bits(b.Y) &&
++        BitConverter.SingleToInt32Bits(a.Z) == BitConverter.SingleToInt32Bits(b.Z);
++
++    private static bool TauFinitePlacement(Matrix4x4 matrix) =>
++        float.IsFinite(matrix.M11) && float.IsFinite(matrix.M12) && float.IsFinite(matrix.M13) && matrix.M14 == 0 &&
++        float.IsFinite(matrix.M21) && float.IsFinite(matrix.M22) && float.IsFinite(matrix.M23) && matrix.M24 == 0 &&
++        float.IsFinite(matrix.M31) && float.IsFinite(matrix.M32) && float.IsFinite(matrix.M33) && matrix.M34 == 0 &&
++        float.IsFinite(matrix.M41) && float.IsFinite(matrix.M42) && float.IsFinite(matrix.M43) && matrix.M44 == 1;
++
++    private static Matrix4x4 TauMirrorPlacement(Vector3 point, Vector3 normal)
++    {
++        var x = 2f * normal.X; var y = 2f * normal.Y; var z = 2f * normal.Z;
++        var distance = 2f * Vector3.Dot(point, normal);
++        return new(1f - x * normal.X, -x * normal.Y, -x * normal.Z, 0,
++            -y * normal.X, 1f - y * normal.Y, -y * normal.Z, 0,
++            -z * normal.X, -z * normal.Y, 1f - z * normal.Z, 0,
++            distance * normal.X, distance * normal.Y, distance * normal.Z, 1);
++    }
++}
+diff --git a/Library/MeshReadback.cs b/Library/MeshReadback.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/MeshReadback.cs
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.CompilerServices;
 +
 +[assembly: InternalsVisibleTo("Tau.PicoGK.Worker")]
 +[assembly: InternalsVisibleTo("Tau.PicoGK.Worker.Tests")]
@@ -208,71 +1238,52 @@ index 000000000..686b54008
 +public partial class Mesh
 +{
 +    private readonly object m_tauSnapshotGate = new();
-+    private static int m_tauBulkAvailable;
 +
-+    [DllImport("tau-picogk-readback", CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_GetVertices")]
-+    private static extern int TauGetVertices(LibHandle library, MshHandle mesh, IntPtr buffer, int capacity);
-+    [DllImport("tau-picogk-readback", CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_GetTriangles")]
-+    private static extern int TauGetTriangles(LibHandle library, MshHandle mesh, IntPtr buffer, int capacity);
-+
-+    // Private host integration: no new model-author API. Synchronizes with managed mesh mutation
-+    // and disposal for one consistent snapshot, including when an older library needs element reads.
-+    internal (float[] Positions, uint[] Indices) TauCopyGeometry(bool allowBulk = true)
++    // Every host read uses the same immutable, validated native generation.
++    internal (float[] Positions, uint[] Indices) TauCopyGeometry()
 +    {
-+        lock (m_tauSnapshotGate)
-+        {
-+            ObjectDisposedException.ThrowIf(m_bDisposed, this);
-+            var vertexCount = nVertexCount();
-+            var triangleCount = nTriangleCount();
-+            if (vertexCount < 0 || triangleCount < 0) throw new InvalidOperationException("PicoGK returned a negative mesh count.");
-+            var positions = new float[checked(vertexCount * 3)];
-+            var indices = new uint[checked(triangleCount * 3)];
-+            var copied = false;
-+            if (allowBulk && System.Threading.Volatile.Read(ref m_tauBulkAvailable) >= 0)
-+            {
-+                var verticesHandle = GCHandle.Alloc(positions, GCHandleType.Pinned);
-+                GCHandle trianglesHandle = default;
-+                try
-+                {
-+                    trianglesHandle = GCHandle.Alloc(indices, GCHandleType.Pinned);
-+                    if (TauGetVertices(lib.hThis, hThis, verticesHandle.AddrOfPinnedObject(), vertexCount) != vertexCount ||
-+                        TauGetTriangles(lib.hThis, hThis, trianglesHandle.AddrOfPinnedObject(), triangleCount) != triangleCount)
-+                        throw new InvalidOperationException("PicoGK bulk readback returned inconsistent mesh counts.");
-+                    System.Threading.Volatile.Write(ref m_tauBulkAvailable, 1);
-+                    copied = true;
-+                }
-+                catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
-+                {
-+                    System.Threading.Volatile.Write(ref m_tauBulkAvailable, -1);
-+                }
-+                finally { if (trianglesHandle.IsAllocated) trianglesHandle.Free(); verticesHandle.Free(); }
-+            }
-+            if (!copied)
-+            {
-+                for (var vertex = 0; vertex < vertexCount; vertex++)
-+                {
-+                    var value = vecVertexAt(vertex);
-+                    positions[vertex * 3] = value.X; positions[vertex * 3 + 1] = value.Y; positions[vertex * 3 + 2] = value.Z;
-+                }
-+                for (var triangle = 0; triangle < triangleCount; triangle++)
-+                {
-+                    var value = oTriangleAt(triangle);
-+                    indices[triangle * 3] = checked((uint)value.A);
-+                    indices[triangle * 3 + 1] = checked((uint)value.B);
-+                    indices[triangle * 3 + 2] = checked((uint)value.C);
-+                }
-+            }
-+            foreach (var index in indices)
-+                if (index >= vertexCount) throw new InvalidOperationException("PicoGK readback returned an out-of-range triangle index.");
-+            foreach (var value in positions)
-+                if (!float.IsFinite(value)) throw new InvalidOperationException("PicoGK readback returned a nonfinite vertex.");
-+            return (positions, indices);
-+        }
++        using var capture = TauAcquireGeometry();
++        var positions = new float[capture.PositionCount];
++        var indices = new uint[capture.IndexCount];
++        capture.Copy(positions, indices);
++        return (positions, indices);
 +    }
++}
+diff --git a/Library/OwnedMemory.cs b/Library/OwnedMemory.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/OwnedMemory.cs
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Library
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauLibrary_GetOwnedMemory")]
++    private static extern int TauOwnedMemoryNative(LibHandle library, int category, out long bytes);
++
++    private long TauOwnedMemoryBytes(int category)
++    {
++        var status = TauOwnedMemoryNative(hThis, category, out long bytes);
++        TauCheckOwnedMemoryStatus(status);
++        return bytes;
++    }
++
++    internal static void TauCheckOwnedMemoryStatus(int status, string owner = nameof(Library))
++    {
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(owner);
++        if (status == -1) throw new ArgumentException("Invalid owned-memory query or byte-count overflow.");
++        throw new InvalidOperationException($"Native owned-memory snapshot failed (status {status}).");
++    }
++}
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_GetOwnedMemory")]
++    private static extern int TauOwnedMemoryNative(LibHandle library, VoxHandle voxels, out long bytes);
 +}
 diff --git a/Material.cs b/Material.cs
 new file mode 100644
-index 000000000..d544bbb35
 --- /dev/null
 +++ b/Material.cs
 @@ -0,0 +1,66 @@
@@ -343,14 +1354,12 @@ index 000000000..d544bbb35
 + public MaterialVolume? Volume { get; init; }
 +}
 diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
-index fe3d87d5b..c5b029ce2 100644
 --- a/Viewer/Viewer.cs
 +++ b/Viewer/Viewer.cs
-@@ -45,6 +45,51 @@ namespace PicoGK
-     /// </summary>
+@@ -46,6 +46,51 @@
      public partial class Viewer
      {
-+        /// <summary>
+         /// <summary>
 +        /// Initialize a hosted Viewer that delegates display operations without creating a native window.
 +        /// </summary>
 +        public Viewer(IViewerBackend xBackend,
@@ -395,10 +1404,11 @@ index fe3d87d5b..c5b029ce2 100644
 +        /// <summary>True when viewer operations are delegated to an embedding backend.</summary>
 +        public bool bIsHosted => m_xBackend is not null;
 +
-         /// <summary>
++        /// <summary>
          /// Initialize a new Viewer
          /// </summary>
-@@ -195,6 +240,22 @@ namespace PicoGK
+         /// <param name="strTitle">Window title</param>
+@@ -195,6 +240,22 @@
          /// </summary>
          public bool bPoll()
          {
@@ -421,7 +1431,7 @@ index fe3d87d5b..c5b029ce2 100644
              Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
              // Call this function only from the main() thread of the application
  
-@@ -247,6 +308,11 @@ namespace PicoGK
+@@ -247,6 +308,11 @@
          /// </summary>
          public void RequestUpdate()
          {
@@ -433,7 +1443,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RequestUpdateAction());
-@@ -307,13 +373,18 @@ namespace PicoGK
+@@ -307,13 +373,18 @@
  
                      lock (m_oActions)
                      {
@@ -453,7 +1463,7 @@ index fe3d87d5b..c5b029ce2 100644
                  {
                      Console.WriteLine("Unable to load lights");
                  }
-@@ -323,9 +394,23 @@ namespace PicoGK
+@@ -323,9 +394,23 @@
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -477,7 +1487,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
-@@ -337,6 +422,11 @@ namespace PicoGK
+@@ -337,6 +422,11 @@
          /// </summary>
          public void Remove(Voxels vox)
          {
@@ -489,7 +1499,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RemoveVoxelsAction(vox));
-@@ -349,6 +439,11 @@ namespace PicoGK
+@@ -349,6 +439,11 @@
          public void SetObjectMatrix(    Voxels vox,
                                          in Matrix4x4 mat)
          {
@@ -501,7 +1511,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
-@@ -358,9 +453,23 @@ namespace PicoGK
+@@ -358,9 +453,23 @@
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -525,7 +1535,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
-@@ -372,6 +481,11 @@ namespace PicoGK
+@@ -372,6 +481,11 @@
          /// </summary>
          public void Remove(Mesh msh)
          {
@@ -537,7 +1547,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RemoveMeshAction(msh));
-@@ -384,6 +498,11 @@ namespace PicoGK
+@@ -384,6 +498,11 @@
          public void SetObjectMatrix(    Mesh msh,
                                          in Matrix4x4 mat)
          {
@@ -549,7 +1559,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
-@@ -393,9 +512,23 @@ namespace PicoGK
+@@ -393,9 +512,23 @@
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -573,7 +1583,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
-@@ -407,6 +540,11 @@ namespace PicoGK
+@@ -407,6 +540,11 @@
          /// </summary>
          public void Remove(PolyLine oPoly)
          {
@@ -585,7 +1595,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
-@@ -419,6 +557,11 @@ namespace PicoGK
+@@ -419,6 +557,11 @@
          public void SetObjectMatrix(    PolyLine poly,
                                          in Matrix4x4 mat)
          {
@@ -597,7 +1607,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
-@@ -430,6 +573,11 @@ namespace PicoGK
+@@ -430,6 +573,11 @@
          /// </summary>
          public void RemoveAllObjects()
          {
@@ -609,7 +1619,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RemoveAllObjectsAction());
-@@ -442,6 +590,11 @@ namespace PicoGK
+@@ -442,6 +590,11 @@
          /// </summary>
          public void RequestScreenShot(string strScreenShotPath)
          {
@@ -621,7 +1631,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
-@@ -453,6 +606,11 @@ namespace PicoGK
+@@ -453,6 +606,11 @@
          /// </summary>
          public void EnableExperimental(bool bEnable)
          {
@@ -633,7 +1643,7 @@ index fe3d87d5b..c5b029ce2 100644
              _EnableExperimental(hThis, bEnable);
          }
  
-@@ -462,12 +620,28 @@ namespace PicoGK
+@@ -462,10 +620,26 @@
          public void SetGroupVisible(int nGroupID,
                                          bool bVisible)
          {
@@ -646,8 +1656,8 @@ index fe3d87d5b..c5b029ce2 100644
              {
                  m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
              }
-         }
- 
++        }
++
 +        /// <summary>Assign a typed physical material to every object in the hosted group.</summary>
 +        /// <param name="groupId">Existing viewer group assignment.</param>
 +        /// <param name="material">Appearance and encoded textures, snapshotted synchronously.</param>
@@ -657,12 +1667,10 @@ index fe3d87d5b..c5b029ce2 100644
 +            if (m_xBackend is null)
 +                throw new NotSupportedException("Typed materials require the hosted PicoGK viewer backend");
 +            m_xBackend.SetGroupMaterial(groupId, material);
-+        }
-+
+         }
+ 
          /// <summary>
-         /// Set the material for this viewer group
-         /// </summary>
-@@ -480,6 +654,11 @@ namespace PicoGK
+@@ -480,6 +654,11 @@
                                          float       fMetallic,
                                          float       fRoughness)
          {
@@ -674,7 +1682,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
-@@ -495,6 +674,11 @@ namespace PicoGK
+@@ -495,6 +674,11 @@
          public void SetGroupMatrix( int nGroupID,
                                      Matrix4x4 mat)
          {
@@ -686,7 +1694,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
-@@ -512,6 +696,11 @@ namespace PicoGK
+@@ -512,6 +696,11 @@
                                              Overhang uWarning,
                                              Overhang uError)
          {
@@ -698,7 +1706,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
-@@ -542,6 +731,11 @@ namespace PicoGK
+@@ -542,6 +731,11 @@
          /// </summary>
          public void DisableOverhangWarning(int nGroupID)
          {
@@ -710,7 +1718,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
-@@ -553,6 +747,8 @@ namespace PicoGK
+@@ -553,6 +747,8 @@
          /// </summary>
          public BBox3 oBBox()
          {
@@ -719,7 +1727,7 @@ index fe3d87d5b..c5b029ce2 100644
              BBox3 oBBox = new();
              _GetBoundingBox(hThis, ref oBBox);
              return oBBox;
-@@ -563,6 +759,11 @@ namespace PicoGK
+@@ -563,6 +759,11 @@
          /// </summary>
          public void SetBackgroundColor(ColorFloat clr)
          {
@@ -731,7 +1739,7 @@ index fe3d87d5b..c5b029ce2 100644
              m_clrBackground = clr;
              RequestUpdate();
          }
-@@ -572,6 +773,11 @@ namespace PicoGK
+@@ -572,6 +773,11 @@
          /// </summary>
          public void ZoomToFit()
          {
@@ -743,7 +1751,7 @@ index fe3d87d5b..c5b029ce2 100644
              m_bForceZoomToFit = true;
              RequestUpdate();
          }
-@@ -581,6 +787,11 @@ namespace PicoGK
+@@ -581,6 +787,11 @@
          /// </summary>
          public void SetFov(float fAngle)
          {
@@ -755,7 +1763,7 @@ index fe3d87d5b..c5b029ce2 100644
              m_oCamera.SetVerticalFov(fAngle);
              RequestUpdate();
          }
-@@ -590,9 +801,14 @@ namespace PicoGK
+@@ -590,9 +801,14 @@
          /// </summary>
          public Quaternion qOrientation
          {
@@ -771,7 +1779,7 @@ index fe3d87d5b..c5b029ce2 100644
                  m_oCamera.qOrientation = value; 
                  RequestUpdate();
              }
-@@ -614,6 +830,8 @@ namespace PicoGK
+@@ -614,6 +830,8 @@
          /// false: Viewer actions still pending (busy)</returns>
          public bool bIsIdle()
          {
@@ -780,7 +1788,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  if (m_oActions.Count() > 0)
-@@ -625,11 +843,13 @@ namespace PicoGK
+@@ -625,11 +843,13 @@
  
          bool m_bIdle = false;
  
@@ -795,7 +1803,7 @@ index fe3d87d5b..c5b029ce2 100644
                 void DoRemove(Mesh msh)
          {
              _RemoveMesh(    msh.lib.hThis,
-@@ -822,4 +1042,3 @@ namespace PicoGK
+@@ -822,4 +1042,3 @@
          }
      }
  }
@@ -803,7 +1811,6 @@ index fe3d87d5b..c5b029ce2 100644
 \ No newline at end of file
 diff --git a/Viewer/ViewerBackend.cs b/Viewer/ViewerBackend.cs
 new file mode 100644
-index 000000000..e98439f9e
 --- /dev/null
 +++ b/Viewer/ViewerBackend.cs
 @@ -0,0 +1,47 @@
@@ -855,10 +1862,9 @@ index 000000000..e98439f9e
 +    }
 +}
 diff --git a/Viewer/ViewerGpuTex.cs b/Viewer/ViewerGpuTex.cs
-index 9b4213b90..6fee77a14 100644
 --- a/Viewer/ViewerGpuTex.cs
 +++ b/Viewer/ViewerGpuTex.cs
-@@ -47,6 +47,8 @@ namespace PicoGK
+@@ -47,6 +47,8 @@
              public GpuTex(  Viewer oSetViewer,
                              ImageRgba32 img)
              {
@@ -867,17 +1873,16 @@ index 9b4213b90..6fee77a14 100644
                  oViewer = oSetViewer;
  
                  GCHandle handle = GCHandle.Alloc(img.m_aclrValues, GCHandleType.Pinned);
-@@ -89,4 +91,3 @@ namespace PicoGK
+@@ -89,4 +91,3 @@
          } 
      }
  }
 -    
 \ No newline at end of file
 diff --git a/Viewer/ViewerImageQuad.cs b/Viewer/ViewerImageQuad.cs
-index 6bcf599e1..9b7336d4b 100644
 --- a/Viewer/ViewerImageQuad.cs
 +++ b/Viewer/ViewerImageQuad.cs
-@@ -53,6 +53,8 @@ namespace PicoGK
+@@ -53,6 +53,8 @@
                                  bool bFlipY,
                                  bool bDoubleSided)
              {
@@ -886,17 +1891,16 @@ index 6bcf599e1..9b7336d4b 100644
                  oViewer = oSetViewer;
                  m_oTex = new(oSetViewer, img);
  
-@@ -79,4 +81,3 @@ namespace PicoGK
+@@ -79,4 +81,3 @@
          } 
      }
  }
 -    
 \ No newline at end of file
 diff --git a/Viewer/Viewer_Gui.cs b/Viewer/Viewer_Gui.cs
-index b9692acc5..8386afa86 100644
 --- a/Viewer/Viewer_Gui.cs
 +++ b/Viewer/Viewer_Gui.cs
-@@ -45,6 +45,8 @@ namespace PicoGK
+@@ -45,6 +45,8 @@
                                              ColorFloat clrNormal,
                                              ColorFloat clrHovered)
          {
@@ -905,7 +1909,7 @@ index b9692acc5..8386afa86 100644
              if (m_oSideBarLeft is not null)
                  m_oSideBarLeft.Dispose();
  
-@@ -58,6 +60,8 @@ namespace PicoGK
+@@ -58,6 +60,8 @@
                                              ColorFloat clrNormal,
                                              ColorFloat clrHovered)
          {
@@ -914,7 +1918,7 @@ index b9692acc5..8386afa86 100644
              if (m_oSideBarRight is not null)
                  m_oSideBarRight.Dispose();
  
-@@ -91,4 +95,3 @@ namespace PicoGK
+@@ -91,4 +95,3 @@
          }
      }
  }

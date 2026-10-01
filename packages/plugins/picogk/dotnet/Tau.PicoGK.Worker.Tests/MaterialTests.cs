@@ -30,6 +30,58 @@ public sealed partial class WorkerTests
     };
 
     [Fact]
+    public void ImageOwnershipIsSharedWithinOneSnapshotAndFreshAcrossSetters()
+    {
+        var texture = Texture();
+        var material = RichMaterial(texture);
+        var first = MaterialCapture.Snapshot(material, 0);
+        Assert.NotSame(texture.Image.Data, first.ColorTexture!.Image.Data);
+        Assert.Same(first.ColorTexture.Image.Data, first.NormalTexture!.Image.Data);
+        Assert.Same(first.ColorTexture.Image.Data, first.Volume!.ThicknessTexture!.Image.Data);
+        var second = MaterialCapture.Snapshot(material, 0);
+        Assert.NotSame(first.ColorTexture.Image.Data, second.ColorTexture!.Image.Data);
+        texture.Image.Data[0] = 0;
+        Assert.Equal(MaterialPng, first.ColorTexture.Image.Data);
+        Assert.Equal(MaterialPng, second.ColorTexture.Image.Data);
+        var invalid = Assert.Throws<WorkerException>(() => MaterialCapture.Snapshot(material, 0));
+        Assert.Equal("CS_TAU_RUNTIME", Assert.Single(invalid.Issues).Code);
+        var resources = new MaterialResources();
+        var json = MaterialCapture.Project(first, resources);
+        Assert.Equal(.5f, json.GetProperty("normalTexture").GetProperty("scale").GetSingle());
+        Assert.Equal(.4f, json.GetProperty("occlusionTexture").GetProperty("strength").GetSingle());
+        Assert.Single(resources.Images);
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(2)]
+    [InlineData(100)]
+    [InlineData(1000)]
+    public void RepeatedOccurrencesShareOneMaterialProjectionWithinEachExport(int count)
+    {
+        using var library = new Library(1f);
+        using var mesh = new Mesh(library);
+        mesh.nAddTriangle(Vector3.Zero, Vector3.UnitX, Vector3.UnitY);
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "material-reuse"));
+        backend.SetGroupMaterial(0, RichMaterial(Texture()));
+        for (var index = 0; index < count; index++)
+        {
+            using var placed = mesh.mshCreateTransformed(Vector3.One, new Vector3(index * 2, 0, 0));
+            backend.Add(placed, $"Bolt/{index}", 0);
+        }
+        var first = backend.Extract();
+        Assert.Equal(count, first.Components.Count);
+        var projected = first.Components[0].Material;
+        Assert.NotNull(projected);
+        Assert.All(first.Components, component => Assert.Equal(projected, component.Material));
+        Assert.Single(first.Resources!.Images);
+        var second = backend.Extract();
+        Assert.NotEqual(projected, second.Components[0].Material);
+        Assert.Equal(projected.Value.GetRawText(), second.Components[0].Material!.Value.GetRawText());
+        Assert.Single(second.Resources!.Images);
+    }
+
+    [Fact]
     public void TypedMaterialsSnapshotEveryMapAndProjectCanonicalResources()
     {
         var texture = Texture(); var material = RichMaterial(texture);

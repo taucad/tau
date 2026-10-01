@@ -74,6 +74,7 @@ export type RemoveNodeMachineBindingInput = Readonly<{
 export type ExecutableMachineDefinition = Readonly<{
   bindingConfiguration: Readonly<{ schema: StandardSchemaV1 }>;
   submissionConfiguration: Readonly<{ schema: StandardSchemaV1 }>;
+  settingsConfiguration?: Readonly<{ schema: StandardSchemaV1 }>;
   discover(
     input: MachineDiscoveryInput<unknown>,
     runtime: MachineDiscoveryRuntime,

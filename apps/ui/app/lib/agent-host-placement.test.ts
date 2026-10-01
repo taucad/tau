@@ -441,38 +441,33 @@ const neverSettles = new Promise<MessagePort>(() => {
 });
 
 describe('launcher 2', () => {
-  it.each([undefined, 'legacy', 'native'] as const)(
-    'should forward the desktop engine choice %s while wrapping the brokered port',
-    async (geoSpecEngine) => {
-      const channel = new MessageChannel();
-      const connect = vi.fn(async () => channel.port1);
-      // Charter D3: the daemon is handed the user's reuse preference, never a
-      // literal — so this asserts a selected mode, not the default.
-      const previousMode = getComputeReuseMode();
-      setComputeReuseMode('memory');
+  it('should wrap the brokered desktop port without negotiating an engine choice', async () => {
+    const channel = new MessageChannel();
+    const connect = vi.fn(async () => channel.port1);
+    // Charter D3: the daemon is handed the user's reuse preference, never a
+    // literal — so this asserts a selected mode, not the default.
+    const previousMode = getComputeReuseMode();
+    setComputeReuseMode('memory');
 
-      try {
-        const client = await openAgentHostChannel('desktop', {
-          projectId: 'proj_widget',
-          geoSpecEngine,
-          workspaceRoot: '/Users/x/Library/Application Support/Tau/home/lamp',
-          bridge: () => ({ agentHost: { connect } }),
-        });
+    try {
+      const client = await openAgentHostChannel('desktop', {
+        projectId: 'proj_widget',
+        workspaceRoot: '/Users/x/Library/Application Support/Tau/home/lamp',
+        bridge: () => ({ agentHost: { connect } }),
+      });
 
-        expect(connect).toHaveBeenCalledWith({
-          workspaceRoot: '/Users/x/Library/Application Support/Tau/home/lamp',
-          projectId: 'proj_widget',
-          computeMode: 'memory',
-          geoSpecEngine,
-        });
-        expect(typeof client.execute).toBe('function');
-        client.close();
-        channel.port2.close();
-      } finally {
-        setComputeReuseMode(previousMode);
-      }
-    },
-  );
+      expect(connect).toHaveBeenCalledWith({
+        workspaceRoot: '/Users/x/Library/Application Support/Tau/home/lamp',
+        projectId: 'proj_widget',
+        computeMode: 'memory',
+      });
+      expect(typeof client.execute).toBe('function');
+      client.close();
+      channel.port2.close();
+    } finally {
+      setComputeReuseMode(previousMode);
+    }
+  });
 
   it('refuses an ungranted root after a bounded wait rather than hanging', async () => {
     await expect(

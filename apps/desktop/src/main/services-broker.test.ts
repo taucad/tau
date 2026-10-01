@@ -77,7 +77,6 @@ const brokerHarness = () => {
       _input: Readonly<{
         root: string;
         context: Readonly<Record<string, string>>;
-        engine: 'native' | 'legacy';
         stillAuthorized: () => boolean;
       }>,
     ) => ({ id: 'geometry' }),
@@ -135,24 +134,21 @@ describe('createServicesBroker', () => {
       type: 'geometry-port-request',
       requestId: 'wrong',
       workspaceRoot: '/projects/other',
-      engine: 'native',
     });
     expect(connectGeometry).not.toHaveBeenCalled();
     expect(utility.posted.at(-1)).toEqual({
       type: 'geometry-port-refused',
       requestId: 'wrong',
-      message: 'Main refused an unadmitted GeoSpec runner root or engine.',
+      message: 'Main refused an unadmitted GeoSpec runner root.',
     });
     utility.message({
       type: 'geometry-port-request',
       requestId: 'allowed',
       workspaceRoot: '/projects/widget',
-      engine: 'native',
     });
     expect(connectGeometry.mock.calls[0]?.[0]).toMatchObject({
       root: '/projects/widget',
       context: { projectRoot: '/projects/widget' },
-      engine: 'native',
     });
     expect(utility.postMessage).toHaveBeenLastCalledWith({ type: 'geometry-port', requestId: 'allowed' }, [
       expect.objectContaining({ id: 'geometry' }),
@@ -166,7 +162,6 @@ describe('createServicesBroker', () => {
       type: 'geometry-port-request',
       requestId: 'suite',
       workspaceRoot: '/home/widget',
-      engine: 'native',
     });
     const grant = connectGeometry.mock.calls[0]?.[0];
     expect(grant?.stillAuthorized()).toBe(true);
@@ -189,7 +184,6 @@ describe('createServicesBroker', () => {
       type: 'geometry-port-request',
       requestId: 'suite',
       workspaceRoot: '/home/widget',
-      engine: 'native',
     });
     const grant = connectGeometry.mock.calls[0]?.[0];
     revokeGeometry.mockClear();
@@ -207,7 +201,6 @@ describe('createServicesBroker', () => {
       type: 'geometry-port-request',
       requestId: 'suite',
       workspaceRoot: '/home/widget',
-      engine: 'native',
     });
     const grant = connectGeometry.mock.calls[0]?.[0];
     revokeGeometry.mockClear();
@@ -235,7 +228,6 @@ describe('createServicesBroker', () => {
       type: 'geometry-port-request',
       requestId: 'suite',
       workspaceRoot: checkout,
-      engine: 'native',
     });
     const grant = connectGeometry.mock.calls[0]?.[0];
     expect(grant?.stillAuthorized()).toBe(true);

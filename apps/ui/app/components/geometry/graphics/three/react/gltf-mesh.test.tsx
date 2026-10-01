@@ -736,6 +736,25 @@ describe('restoreOriginalMaterials', () => {
 });
 
 describe('applyModelComponentVisualStateToScene', () => {
+  it('should retain global surface and edge visibility for renderables without component ownership', () => {
+    const scene = new Group();
+    const mesh = buildMeshWithPositions([0, 0, 0, 1, 0, 0, 0, 1, 0]);
+    const line = buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]);
+    scene.add(mesh, line);
+    const options = {
+      scene,
+      componentManifest: createManifest(),
+      modelVisualState: createModelVisualState(),
+      inventory: [mesh, line],
+    };
+    applyModelComponentVisualStateToScene({ ...options, enableSurfaces: false, enableLines: true });
+    expect(mesh.visible).toBe(false);
+    expect(line.visible).toBe(true);
+    applyModelComponentVisualStateToScene({ ...options, enableSurfaces: true, enableLines: false });
+    expect(mesh.visible).toBe(true);
+    expect(line.visible).toBe(false);
+  });
+
   it('should carry the section clip to the emphasis material an edge swaps to, and keep it on the way back', () => {
     const scene = new Group();
     scene.add(buildLineSegmentsWithPositions([0, 0, 0, 1, 0, 0]));

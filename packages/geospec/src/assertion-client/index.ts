@@ -4,16 +4,12 @@
 export {
   createGeoSpecAssertionClient,
   createGeoSpecMatcherMethods,
-  createGeoSpecNativeMatcherMethods,
   GeoSpecAssertionError,
   type GeoSpecAssertionClient,
   type GeoSpecAssertionClientOptions,
   type GeoSpecAssertionMatchers,
   type GeoSpecAuthoringInvocation,
-  type GeoSpecFixedNativeAuthoringInvocation,
   type GeoSpecMatcherMethods,
-  type GeoSpecNativeAuthoringInvocation,
-  type GeoSpecNativeMatcherMethods,
   type GeoSpecQueryOptions,
   type MinimumDistanceFact,
   type MinimumDistanceQuery,
@@ -40,5 +36,5 @@ export type {
   GeoSpecNativeEvidenceProfile,
   GeoSpecNativeSubject,
 } from '#engine/client.js';
-export { geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';
-export type { GeoSpecFixedNativeMatcherDescriptor, GeoSpecNativeMatcherName } from '#engine/matchers.js';
+export { geoSpecMatcherDescriptors } from '#engine/matchers.js';
+export type { GeoSpecFixedMatcherDescriptor, GeoSpecMatcherName } from '#engine/matchers.js';

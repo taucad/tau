@@ -22,8 +22,9 @@ const celsius = (value: number) => ({ value, unit: 'Cel' });
 
 /** The X1 Carbon manifest, value for value. */
 export const x1cManifest: MachineManifest = parseMachineManifest({
-  version: 1,
+  version: 2,
   identity: {
+    typeId: 'bambu.x1c',
     vendor: 'Bambu Lab',
     model: 'x1c',
     displayName: 'X1 Carbon',

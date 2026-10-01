@@ -1,6 +1,7 @@
 // @vitest-environment node
 /* oxlint-disable max-lines -- RPC adapter coverage shares one typed actor/service fixture matrix. */
 import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { createHash } from 'node:crypto';
 import type * as ChatRpc from '@taucad/chat/rpc';
 import type * as AwaitFreshRender from '#machines/await-fresh-render.js';
 import { rpcClientErrorCodeSchema } from '@taucad/chat';
@@ -360,6 +361,23 @@ describe('rpc-handlers', () => {
       fileTree = new Map<string, FileEntry>();
       const deps = buildDeps({ fileManager: mockFm, fileTree });
       fileSystem = deps.fileSystem;
+    });
+
+    it('reads owned exact binary bytes without text decoding', async () => {
+      const bytes = new Uint8Array([0, 255, 239, 187, 191]);
+      mockFm.readFile.mockResolvedValue(bytes);
+      const result = await fileSystem.readBinaryFile('part.glb');
+      expect(result).toEqual(bytes);
+      result[0] = 42;
+      expect(bytes[0]).toBe(0);
+    });
+
+    it('rejects foreign paths and oversized binary reads before reading content', async () => {
+      await expect(fileSystem.readBinaryFile('../foreign.glb')).rejects.toThrow();
+      expect(mockFm.stat).not.toHaveBeenCalled();
+      mockFm.stat.mockResolvedValue(textFileStat(256 * 1024 * 1024 + 1));
+      await expect(fileSystem.readBinaryFile('part.glb')).rejects.toMatchObject({ code: 'RESULT_TOO_LARGE' });
+      expect(mockFm.readFile).not.toHaveBeenCalled();
     });
 
     it('routes checked mutations through the owning live root', async () => {
@@ -770,6 +788,107 @@ describe('rpc-handlers', () => {
     });
 
     describe('editFile', () => {
+      it.each(['ENOENT', 'EIO'])(
+        'retains reviewed CAS conflict rather than reading a missing/refused path (%s)',
+        async (code) => {
+          const original = new Uint8Array(new TextEncoder().encode('cube();\n'));
+          mockFm.readFile.mockResolvedValue(original);
+          mockFm.stat.mockResolvedValue(textFileStat(original.byteLength));
+          let readsAtConflict = 0;
+          mockFm.workbenchFiles.writeFileChecked.mockImplementation(async () => {
+            readsAtConflict = mockFm.readFile.mock.calls.length;
+            mockFm.readFile.mockRejectedValue(Object.assign(new Error('read refused after conflict'), { code }));
+            return { status: 'conflict', conflicts: [{ path: '/projects/proj-test/main.scad', actual: null }] };
+          });
+          const refusal = await actualChatRpc.handleEditFile(
+            {
+              targetFile: 'main.scad',
+              oldString: 'cube();',
+              newString: 'sphere();',
+              expectedDigest: `sha256:${createHash('sha256').update(original).digest('hex')}`,
+            },
+            fileSystem,
+          );
+          expect(refusal).toMatchObject({ success: false, errorCode: 'EDIT_CONFLICT' });
+          expect(refusal).not.toHaveProperty('retryable');
+          expect(mockFm.workbenchFiles.writeFileChecked).toHaveBeenCalledTimes(1);
+          expect(mockFm.readFile).toHaveBeenCalledTimes(readsAtConflict);
+          expect(mockFm.writeFile).not.toHaveBeenCalled();
+        },
+      );
+      it('uses the rooted owning checked write for reviewed no-op, never the ordinary write fallback', async () => {
+        const original = new Uint8Array(new TextEncoder().encode('cube();\r\n'));
+        mockFm.readFile.mockResolvedValue(original);
+        mockFm.stat.mockResolvedValue(textFileStat(original.byteLength));
+        mockFm.workbenchFiles.writeFileChecked.mockResolvedValue({ status: 'unchanged', content: original });
+        const input = {
+          targetFile: 'main.scad',
+          oldString: 'cube();',
+          newString: 'cube();',
+          expectedDigest: `sha256:${createHash('sha256').update(original).digest('hex')}`,
+        };
+        await expect(actualChatRpc.handleEditFile(input, fileSystem)).resolves.toMatchObject({
+          success: true,
+          revision: { digest: input.expectedDigest },
+        });
+        expect(mockFm.workbenchFiles.writeFileChecked).toHaveBeenCalledExactlyOnceWith({
+          path: '/projects/proj-test/main.scad',
+          data: original,
+          preconditions: [{ path: '/projects/proj-test/main.scad', expected: original }],
+        });
+        expect(mockFm.writeFile).not.toHaveBeenCalled();
+        mockFm.workbenchFiles.writeFileChecked.mockRejectedValue(
+          Object.assign(new Error('unsupported'), { code: 'CHECKED_WRITE_UNSUPPORTED' }),
+        );
+        const unsupported = await actualChatRpc.handleEditFile(input, fileSystem);
+        expect(unsupported).toMatchObject({
+          success: false,
+          errorCode: 'IO_ERROR',
+        });
+        expect(unsupported).not.toHaveProperty('retryable');
+        expect(mockFm.writeFile).not.toHaveBeenCalled();
+      });
+
+      it('refuses reviewed drift and false committed bytes without rebase or ordinary writes', async () => {
+        const original = new Uint8Array(new TextEncoder().encode('cube();\n'));
+        const changed = new Uint8Array(new TextEncoder().encode('// person\ncube();\n'));
+        const input = {
+          targetFile: 'main.scad',
+          oldString: 'cube();',
+          newString: 'sphere();',
+          expectedDigest: `sha256:${createHash('sha256').update(original).digest('hex')}`,
+        };
+        mockFm.stat.mockResolvedValue(textFileStat(original.byteLength));
+        mockFm.readFile.mockResolvedValue(changed);
+        const drift = await actualChatRpc.handleEditFile(input, fileSystem);
+        expect(drift).toMatchObject({
+          success: false,
+          errorCode: 'EDIT_CONFLICT',
+        });
+        expect(drift).not.toHaveProperty('retryable');
+        expect(mockFm.workbenchFiles.writeFileChecked).not.toHaveBeenCalled();
+        mockFm.readFile.mockResolvedValue(original);
+        mockFm.workbenchFiles.writeFileChecked.mockResolvedValue({
+          status: 'conflict',
+          conflicts: [{ path: '/projects/proj-test/main.scad', actual: changed }],
+        });
+        const conflict = await actualChatRpc.handleEditFile(input, fileSystem);
+        expect(conflict).toMatchObject({
+          success: false,
+          errorCode: 'EDIT_CONFLICT',
+        });
+        expect(conflict).not.toHaveProperty('retryable');
+        expect(mockFm.workbenchFiles.writeFileChecked).toHaveBeenCalledTimes(1);
+        mockFm.workbenchFiles.writeFileChecked.mockResolvedValue({ status: 'applied', content: changed });
+        const unproved = await actualChatRpc.handleEditFile(input, fileSystem);
+        expect(unproved).toMatchObject({
+          success: false,
+          errorCode: 'WRITE_VERIFICATION_FAILED',
+        });
+        expect(unproved).not.toHaveProperty('retryable');
+        expect(mockFm.workbenchFiles.writeFileChecked).toHaveBeenCalledTimes(2);
+        expect(mockFm.writeFile).not.toHaveBeenCalled();
+      });
       it('writes no bytes and returns AMBIGUOUS_MATCH when oldString occurs twice', async () => {
         mockFm.readFile.mockResolvedValue(new TextEncoder().encode('cube();\ncube();\n'));
 
@@ -847,8 +966,8 @@ describe('rpc-handlers', () => {
         const secondAdapter = capturedDeps!.fileSystem;
 
         const [first, second] = await Promise.all([
-          firstAdapter.editFile('main.ts', 'alpha = 1;', 'alpha = 2;'),
-          secondAdapter.editFile('main.ts', 'beta = 1;', 'beta = 2;'),
+          firstAdapter.editFile({ targetFile: 'main.ts', oldString: 'alpha = 1;', newString: 'alpha = 2;' }),
+          secondAdapter.editFile({ targetFile: 'main.ts', oldString: 'beta = 1;', newString: 'beta = 2;' }),
         ]);
 
         expect([first.staleRecovered, second.staleRecovered].filter(Boolean)).toHaveLength(1);

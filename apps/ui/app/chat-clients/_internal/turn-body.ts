@@ -9,7 +9,6 @@ import { createCachedSystemPromptBlocks } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host';
 import type { AgentHostClientOptions } from '#services/agent-host-client.js';
 import { desktopWorkspaceRoot, openAgentHostChannel } from '#lib/agent-host-placement.js';
-import { isFeatureEnabled } from '#flags/feature-flags.js';
 import type { ResolvedModel } from '#hooks/use-models.js';
 import { admittedReasoning } from '#utils/model-reasoning.js';
 import type {
@@ -296,6 +295,5 @@ export const dialAgentHost = async (hostId: TauAgentHostId, projectId: string): 
     ? openAgentHostChannel(hostId, {
         projectId,
         workspaceRoot: await desktopWorkspaceRoot(projectId),
-        geoSpecEngine: isFeatureEnabled('nativeGeoSpec') ? 'native' : 'legacy',
       })
     : openAgentHostChannel(hostId);

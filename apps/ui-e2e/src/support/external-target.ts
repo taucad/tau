@@ -63,6 +63,17 @@ export type TargetState = {
 };
 export type TargetWorker = Readonly<{ identity: string; url: string }>;
 export type TargetDiagnostics = {
+  readonly geospecFault?: { readonly kind: 'missing' | 'corrupt'; readonly url: string; readonly requests: number };
+  readonly geospecWasm?: {
+    readonly url: string;
+    readonly status: number;
+    readonly byteLength: number;
+    readonly sha256: string;
+    readonly sourceSha256: string;
+    readonly sourceByteLength: number;
+    readonly expectedSha256?: string;
+    readonly expectedByteLength?: number;
+  };
   readonly consoleMessages: ReadonlyArray<{
     readonly text: string;
     readonly type: string;
@@ -94,6 +105,8 @@ export type TargetTauBillingOperation = {
 export type TargetWebGpuProfile = 'disabled' | 'hardware' | 'software';
 /** What the scripted gateway fixture needs beyond its turn script. */
 export type AgentHostGatewayFixtureOptions = {
+  /** Fail the first ST initialization, including internal fetch retries, until its terminal chat turn. */
+  readonly geospecFault?: 'missing' | 'corrupt';
   /** Replaces the context window every catalog row advertises, so scripted usage can cross the compaction threshold. */
   readonly contextWindow?: number;
   /** Answers the host's compaction summary call (the one request it sends with no tools); `''` fails it. */
@@ -224,6 +237,8 @@ export type UiBrowserCommands = {
     readonly type?: string;
   }): Promise<void>;
   uiReadTargetEvents(): Promise<{
+    readonly geospecWasm?: TargetDiagnostics['geospecWasm'];
+    readonly geospecFault?: TargetDiagnostics['geospecFault'];
     readonly consoleMessages: ReadonlyArray<{
       readonly text: string;
       readonly type: string;
@@ -408,8 +423,9 @@ export const chooseFile = (
     readonly name: string;
   },
 ): Promise<void> => server.commands.uiChooseTargetFile(selectorFor(trigger), file);
-export const events = (): Promise<Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors'>> =>
-  server.commands.uiReadTargetEvents();
+export const events = (): Promise<
+  Pick<TargetDiagnostics, 'consoleMessages' | 'pageErrors' | 'geospecWasm' | 'geospecFault'>
+> => server.commands.uiReadTargetEvents();
 export const delay = (milliseconds: number): Promise<void> =>
   new Promise((resolve) => {
     setTimeout(resolve, milliseconds);

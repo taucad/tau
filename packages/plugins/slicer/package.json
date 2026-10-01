@@ -39,13 +39,13 @@
     ".": "./src/index.ts",
     "./toolpath": "./src/toolpath.ts",
     "./container": "./src/container.ts",
-    "./print-intent": "./src/print-intent.ts",
     "./bambu-studio": {
       "types": "./src/bambu-studio/engine.ts",
       "node": "./src/bambu-studio/engine.ts",
       "default": "./src/bambu-studio/engine.stub.ts"
     },
-    "./package.json": "./package.json"
+    "./package.json": "./package.json",
+    "./preferences": "./src/preferences.ts"
   },
   "publishConfig": {
     "access": "public",
@@ -65,17 +65,17 @@
         "import": "./dist/container.mjs",
         "default": "./dist/container.mjs"
       },
-      "./print-intent": {
-        "types": "./dist/print-intent.d.mts",
-        "import": "./dist/print-intent.mjs",
-        "default": "./dist/print-intent.mjs"
-      },
       "./bambu-studio": {
         "types": "./dist/bambu-studio/engine.d.mts",
         "node": "./dist/bambu-studio/engine.mjs",
         "default": "./dist/bambu-studio/engine.stub.mjs"
       },
-      "./package.json": "./package.json"
+      "./package.json": "./package.json",
+      "./preferences": {
+        "types": "./dist/preferences.d.mts",
+        "import": "./dist/preferences.mjs",
+        "default": "./dist/preferences.mjs"
+      }
     },
     "imports": {
       "#bambu-studio/engine.js": {

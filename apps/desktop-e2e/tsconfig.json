@@ -15,5 +15,12 @@
       "@taucad/workbench": ["../../packages/workbench/src/index.ts"]
     }
   },
-  "include": ["vitest.config.ts", "vitest.unit.config.ts", "global-setup.ts", "scripts/**/*.mts", "src/**/*.ts"]
+  "include": [
+    "vitest.config.ts",
+    "vitest.unit.config.ts",
+    "global-setup.ts",
+    "scripts/**/*.mts",
+    "src/**/*.ts",
+    "vitest.machine-profiles.config.ts"
+  ]
 }

@@ -8,8 +8,6 @@
     "./dist/register.mjs",
     "./src/cli/main.ts",
     "./dist/cli/main.mjs",
-    "./src/runner/node/pool-worker-entry.ts",
-    "./dist/runner/node/pool-worker-entry.mjs",
     "./src/runner/node/native-pool-worker-entry.ts",
     "./dist/runner/node/native-pool-worker-entry.mjs"
   ],
@@ -124,6 +122,7 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "@taucad/opencascade": "workspace:*",
+    "@taucad/openrscad": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
@@ -135,12 +134,20 @@
   },
   "devDependencies": {
     "@libcascade/toolchain": "catalog:",
-    "@taucad/openrscad": "workspace:*",
+    "@taucad/picogk": "workspace:^",
     "@taucad/tau-examples": "workspace:*",
     "@vitest/browser-playwright": "catalog:",
     "vitest": "catalog:"
   },
   "scripts": {
     "prepack": "node scripts/generate-provenance.mjs"
+  },
+  "peerDependencies": {
+    "@taucad/picogk": "workspace:^"
+  },
+  "peerDependenciesMeta": {
+    "@taucad/picogk": {
+      "optional": true
+    }
   }
 }

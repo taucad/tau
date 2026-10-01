@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useId, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import DOMPurify from 'dompurify';
-import type { ReactNode, RefObject } from 'react';
+import type { ReactNode, RefCallback, RefObject } from 'react';
 import type { PanzoomObject } from '@panzoom/panzoom';
 import type { KnownArtifact } from '@taucad/runtime';
 // @ts-expect-error - no types available for the ESM build.
@@ -493,8 +493,8 @@ type SvgViewerProps = {
 
 export function SvgViewer({ artifact, enableGrid = true, enableAxes = true, defaultColor }: SvgViewerProps): ReactNode {
   const svgRef = useRef<SVGSVGElement>(null);
-  const [shadowRoot, setShadowRoot] = useState<ShadowRoot | null>(null);
-  const attachHost = useCallback((host: HTMLDivElement | null): void => {
+  const [shadowRoot, setShadowRoot] = useState<ShadowRoot>();
+  const attachHost = useCallback<RefCallback<HTMLDivElement>>((host) => {
     if (host) {
       setShadowRoot(host.shadowRoot ?? host.attachShadow({ mode: 'open' }));
     }

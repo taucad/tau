@@ -29,6 +29,12 @@ import type {
   FileStat,
   FileStatEntry,
   ProjectManifestParseIssue,
+  MachineSettingsRecord,
+  MachineSettingsSnapshot,
+  MachineSettingsEdit,
+  MachineSettingsSave,
+  MachineSettingsService,
+  MachineSettingsValue,
 } from '@taucad/types';
 import { projectManifestSchema, projectManifestSchemaUrl } from '@taucad/types';
 import { filesystemBackends } from '@taucad/types/constants';
@@ -36,6 +42,7 @@ import type { BridgeProtocolSchemas } from '@taucad/rpc/bridge';
 import type { WireValidator } from '@taucad/rpc';
 import { assertRootedPath } from '@taucad/utils/path';
 import { z } from 'zod';
+import { cloneBoundedJson } from '@taucad/parameters/json';
 
 /**
  * Keep exact result branches while emitting a Zod 4.0-compatible union type.
@@ -56,7 +63,7 @@ const discriminatedResultUnion = <
  * Version 4 requires both checked deletion and head-only directory metadata.
  * @public
  */
-export const fileSystemBridgeProtocolVersion = 4;
+export const fileSystemBridgeProtocolVersion = 5;
 
 const unavailableCapabilities = null;
 
@@ -152,29 +159,30 @@ export type FileSystemBridgeWorkspaceService = Pick<WorkspaceFileService, Worksp
   FileSystemBridgeScopedReads;
 
 /** Rooted/runtime bridge calls, including watch registration that may cross an asynchronous authority boundary. @public */
-export type FileSystemBridgeRuntimeService = FileSystemProvider & {
-  watch?: (request: WatchRequest, handler: (event: WatchEvent) => void) => (() => void) | Promise<() => void>;
-  /*
-   * Read content operations are the composition site's to serve (charter D2):
-   * a host that hands over a bare provider has no composed view to inherit a
-   * mask from, so it offers neither.
-   */
-  archive?: (path: string, options?: ArchiveOptions) => Promise<Blob>;
-  contents?: (path: string, options?: ArchiveOptions) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
-  /*
-   * Search and recursive stat are the root's index, masked by the view above it
-   * (charter D3): a bare provider has no index and offers neither.
-   */
-  search?: (query: string, options?: SearchOptions) => Promise<FileStatEntry[]>;
-  statTree?: (path: string) => Promise<FileStatEntry[]>;
-  /*
-   * The mutating porcelain is the rooted surface's too (charter D4): one batch
-   * in the mutation pipeline, mask-checked by the composed view above it. A
-   * host that hands over a bare provider serves none of it, so every row is
-   * optional — and `copyTree`'s entry filter is the *view's* own, never a
-   * caller's, because a predicate does not cross a wire.
-   */
-} & Partial<RootedPorcelain>;
+export type FileSystemBridgeRuntimeService = FileSystemProvider &
+  Partial<MachineSettingsService> & {
+    watch?: (request: WatchRequest, handler: (event: WatchEvent) => void) => (() => void) | Promise<() => void>;
+    /*
+     * Read content operations are the composition site's to serve (charter D2):
+     * a host that hands over a bare provider has no composed view to inherit a
+     * mask from, so it offers neither.
+     */
+    archive?: (path: string, options?: ArchiveOptions) => Promise<Blob>;
+    contents?: (path: string, options?: ArchiveOptions) => Promise<Record<string, Uint8Array<ArrayBuffer>>>;
+    /*
+     * Search and recursive stat are the root's index, masked by the view above it
+     * (charter D3): a bare provider has no index and offers neither.
+     */
+    search?: (query: string, options?: SearchOptions) => Promise<FileStatEntry[]>;
+    statTree?: (path: string) => Promise<FileStatEntry[]>;
+    /*
+     * The mutating porcelain is the rooted surface's too (charter D4): one batch
+     * in the mutation pipeline, mask-checked by the composed view above it. A
+     * host that hands over a bare provider serves none of it, so every row is
+     * optional — and `copyTree`'s entry filter is the *view's* own, never a
+     * caller's, because a predicate does not cross a wire.
+     */
+  } & Partial<RootedPorcelain>;
 
 /**
  * Caller-owned filter on a read content operation.
@@ -250,7 +258,8 @@ type RootedBridgeContentMethodName =
  *
  * @public
  */
-export type FileSystemBridgeRootedCalls = Pick<RootedFileSystem, 'rename'> &
+export type FileSystemBridgeRootedCalls = MachineSettingsService &
+  Pick<RootedFileSystem, 'rename'> &
   Pick<WorkspaceFileService, RootedBridgeContentMethodName> &
   Pick<ComposedView, 'provenance' | 'readdirWithStats'> & {
     readFile: FileSystemBridgeReadFile;
@@ -752,7 +761,105 @@ const searchOptionsSchema = z.looseObject({
   includeDirectories: z.boolean().optional(),
 });
 
+const machineSettingsTypeIdSchema = z.custom<MachineSettingsRecord['typeId']>(
+  (value) =>
+    typeof value === 'string' && value.length <= 64 && /^[a-z0-9][a-z0-9_-]*(?:\.[a-z0-9][a-z0-9_-]*)+$/u.test(value),
+);
+const settingsJsonSchema = z.custom<MachineSettingsValue>((value) => {
+  try {
+    cloneBoundedJson(value, {
+      code: 'MACHINE_SETTINGS_WIRE',
+      maximumDepth: 24,
+      maximumNodes: 8192,
+      maximumCharacters: 262_144,
+    });
+    return true;
+  } catch {
+    return false;
+  }
+});
+const settingsKey = z
+  .string()
+  .min(1)
+  .max(128)
+  .refine((value) => !['__proto__', 'constructor', 'prototype'].includes(value));
+const machineSettingsRecordSchema: z.ZodType<MachineSettingsRecord> = z
+  .strictObject({
+    version: z.literal(1),
+    typeId: machineSettingsTypeIdSchema,
+    activeProfile: z.string().min(1).max(64),
+    profiles: z
+      .record(
+        settingsKey,
+        z.strictObject({
+          name: z.string().min(1).max(128),
+          configurations: z
+            .record(
+              settingsKey,
+              z.strictObject({
+                version: z.string().min(1).max(128),
+                values: z.record(settingsKey, settingsJsonSchema),
+              }),
+            )
+            .refine((value) => Object.keys(value).length <= 32),
+        }),
+      )
+      .refine((value) => Object.keys(value).length > 0 && Object.keys(value).length <= 16),
+  })
+  .refine((value) => Object.hasOwn(value.profiles, value.activeProfile));
+const machineSettingsSnapshotSchema: z.ZodType<MachineSettingsSnapshot> = z.discriminatedUnion('status', [
+  z.strictObject({
+    status: z.literal('current'),
+    record: machineSettingsRecordSchema,
+  }),
+  z.strictObject({ status: z.literal('absent') }),
+  z.strictObject({
+    status: z.literal('refused'),
+    code: z.enum(['INVALID_RECORD', 'NEWER_RECORD', 'MACHINE_TYPE_MISMATCH']),
+    message: z.string(),
+    pointer: z.string().optional(),
+  }),
+  z.strictObject({
+    status: z.literal('unavailable'),
+    code: z.literal('SETTINGS_UNAVAILABLE'),
+    message: z.string(),
+  }),
+]);
+const machineSettingsEditSchema: z.ZodType<MachineSettingsEdit> = z.strictObject({
+  operationId: z.string().min(1).max(128),
+  typeId: machineSettingsTypeIdSchema,
+  base: machineSettingsRecordSchema.nullable(),
+  next: machineSettingsRecordSchema,
+});
+const machineSettingsSaveSchema: z.ZodType<MachineSettingsSave> = z.union([
+  z.strictObject({
+    status: z.literal('saved'),
+    record: machineSettingsRecordSchema,
+  }),
+  z.strictObject({
+    status: z.literal('conflict'),
+    message: z.string(),
+    current: machineSettingsSnapshotSchema,
+  }),
+  z.strictObject({
+    status: z.enum(['refused', 'uncertain']),
+    message: z.string(),
+  }),
+]);
+
 const callSchemas = {
+  readMachineSettings: {
+    args: z.tuple([machineSettingsTypeIdSchema]),
+    result: machineSettingsSnapshotSchema,
+  },
+  editMachineSettings: {
+    args: z.tuple([machineSettingsEditSchema]),
+    result: machineSettingsSaveSchema,
+  },
+  machineSettingsSettlement: {
+    args: z.tuple([z.string().min(1).max(128)]),
+    result: machineSettingsSaveSchema,
+  },
   readFile: {
     args: z.tuple([z.string(), readFileOptionsSchema.optional()]),
     result: z.union([z.string(), bytesSchema]),

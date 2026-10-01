@@ -37,10 +37,15 @@ export const flagRegistry = {
     label: 'WebGPU rendering',
     description: 'Use the experimental WebGPU renderer when supported. Turn off to return to WebGL.',
   },
-  nativeGeoSpec: {
+  webGpuShaderStacks: {
     schema: z.boolean().default(false),
-    label: 'Native GeoSpec',
-    description: 'Use the native GeoSpec engine for new project hosts. Reload the project after changing.',
+    label: 'WebGPU shader stacks',
+    description: 'Capture shader source stacks for diagnostics. This slows large model loading substantially.',
+  },
+  webGpuInspector: {
+    schema: z.boolean().default(false),
+    label: 'WebGPU inspector',
+    description: 'Load the Three.js pipeline inspector for WebGPU diagnostics.',
   },
   planMode: {
     schema: z.boolean().default(false),

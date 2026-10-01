@@ -97,9 +97,10 @@ describe('fixed parallel-plane-distance public authoring', () => {
       const chain = createClient(engine, testCase.claimId).expectGeo({
         subjectHash: hash,
       });
-      const report = await (testCase.polarity === 'positive'
-        ? chain.toSatisfyParallelPlaneDistance()
-        : chain.not.toSatisfyParallelPlaneDistance());
+      const report =
+        testCase.polarity === 'positive'
+          ? chain.toSatisfyParallelPlaneDistance()
+          : chain.not.toSatisfyParallelPlaneDistance();
       const plan = record(engine.request?.['plan'] ?? null);
       const { claims } = plan;
 
@@ -145,7 +146,7 @@ describe('fixed parallel-plane-distance public authoring', () => {
     const engine = new ParallelPlaneDistanceEngine('failed');
 
     try {
-      await createClient(engine, () => 'f2-failed')
+      createClient(engine, () => 'f2-failed')
         .expectGeo({ subjectHash: hash })
         .toSatisfyParallelPlaneDistance();
       expect.fail('The failed core report should reject the assertion.');

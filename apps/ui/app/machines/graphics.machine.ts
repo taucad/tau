@@ -44,6 +44,20 @@ export type ModelPointerClickSuppressionReason = 'measureTool';
 
 export type GltfPresentationBarrier = 'display-ready' | 'analysis-ready';
 
+const markMeasurementsOutOfDate = (
+  measurements: MeasurementRecord[],
+  matches: (measurement: MeasurementRecord) => boolean,
+): MeasurementRecord[] => {
+  if (!measurements.some((measurement) => measurement.status !== 'out-of-date' && matches(measurement))) {
+    return measurements;
+  }
+  return measurements.map((measurement) =>
+    measurement.status !== 'out-of-date' && matches(measurement)
+      ? { ...measurement, status: 'out-of-date' }
+      : measurement,
+  );
+};
+
 export type GltfPresentationTelemetry = Readonly<{
   revision: number;
   key: string;
@@ -51,6 +65,8 @@ export type GltfPresentationTelemetry = Readonly<{
   barrier: GltfPresentationBarrier;
   outcome: 'presented' | 'failed' | 'cancelled' | 'stale';
   glbBytes: number;
+  /** Submission is a CPU boundary; pixels require browser or GPU evidence. */
+  renderBoundary?: 'submitted';
   meshCount: number;
   triangleCount: number;
   sourceLineCount: number;
@@ -58,6 +74,7 @@ export type GltfPresentationTelemetry = Readonly<{
   durations: Readonly<
     Partial<
       Record<
+        | 'receiptToPreparation'
         | 'parse'
         /** Present only when the result was written into the presented buffers in place (D22). */
         | 'inPlace'
@@ -65,7 +82,9 @@ export type GltfPresentationTelemetry = Readonly<{
         | 'annotation'
         | 'topologySubmit'
         | 'topologyWorker'
+        | 'topologyPack'
         | 'topologyHydrate'
+        | 'topologyResolve'
         | 'fatLines'
         | 'materials'
         | 'pipelineWarmup'
@@ -78,6 +97,11 @@ export type GltfPresentationTelemetry = Readonly<{
   modelEmptyFrames: number;
   committedBundleHighWaterMark: number;
   candidateBundleHighWaterMark: number;
+  /** Observed loader concurrency and work; cumulative for this viewer owner. */
+  activeParses?: number;
+  activeParseHighWaterMark?: number;
+  parsesStarted?: number;
+  parsesDiscarded?: number;
   topologyJobsStarted: number;
   topologyJobsDiscarded: number;
 }>;
@@ -1458,10 +1482,8 @@ export const graphicsMachine = setup({
               context.currentMeasurementAnchor?.geometryKey === event.geometryKey
                 ? context.currentMeasurementAnchor
                 : undefined,
-            measurements: context.measurements.map((measurement) =>
-              measurement.geometryKey && measurement.geometryKey !== event.geometryKey
-                ? { ...measurement, status: 'out-of-date' }
-                : measurement,
+            measurements: markMeasurementsOutOfDate(context.measurements, (measurement) =>
+              Boolean(measurement.geometryKey && measurement.geometryKey !== event.geometryKey),
             ),
           }),
         },
@@ -1469,10 +1491,9 @@ export const graphicsMachine = setup({
           context: ({ context, event }) => ({
             currentMeasurementStart: undefined,
             currentMeasurementAnchor: undefined,
-            measurements: context.measurements.map((measurement) =>
-              measurement.poseRevision !== undefined && measurement.poseRevision !== event.revision
-                ? { ...measurement, status: 'out-of-date' }
-                : measurement,
+            measurements: markMeasurementsOutOfDate(
+              context.measurements,
+              (measurement) => measurement.poseRevision !== undefined && measurement.poseRevision !== event.revision,
             ),
           }),
         },
@@ -1480,10 +1501,8 @@ export const graphicsMachine = setup({
           context: ({ context }) => ({
             currentMeasurementStart: undefined,
             currentMeasurementAnchor: undefined,
-            measurements: context.measurements.map((measurement) =>
-              measurement.anchors?.length && measurement.status !== 'snapshot'
-                ? { ...measurement, status: 'out-of-date' }
-                : measurement,
+            measurements: markMeasurementsOutOfDate(context.measurements, (measurement) =>
+              Boolean(measurement.anchors?.length && measurement.status !== 'snapshot'),
             ),
           }),
         },

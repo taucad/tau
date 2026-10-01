@@ -337,10 +337,27 @@ const hashPath = async (path: string): Promise<Artifact> => ({
     .update(await readFile(path))
     .digest('hex'),
 });
+const approvedPublicContract = {
+  id: 'public-contract',
+  path: 'packages/geospec/src/runner/types.ts',
+  frozenSha256: '20303ca36a5ae9531cdd035c10e108e92b70aec76bba1aca849306dbe3eed82d',
+  currentSha256: '1ff1809df5e0e2142aca7d7117794b9994866311dba185df449edbf0875df974',
+} as const;
 export const verifySourceAuthority = async (observe: typeof hashPath = hashPath): Promise<void> => {
   const manifestPath = resolvePath(root, 'packages/geospec-engine-native/bench/fixtures/performance-lab/manifest.json');
   const manifestHash = await observe(manifestPath);
   const native = manifest.analyticAuthority.sources.filter(({ id }) => id === 'native-contract');
+  const publicContract = manifest.analyticAuthority.sources.filter(
+    ({ id, path }) => id === approvedPublicContract.id || path === approvedPublicContract.path,
+  );
+  if (
+    publicContract.length !== 1 ||
+    publicContract[0]!.id !== approvedPublicContract.id ||
+    publicContract[0]!.path !== approvedPublicContract.path ||
+    publicContract[0]!.sha256 !== approvedPublicContract.frozenSha256
+  ) {
+    throw new Error('Performance-lab public-contract transition differs from its frozen authority.');
+  }
   const affected = performanceLabCases
     .filter(({ matcher }) =>
       ['toHaveStepUnits', 'toHaveProductStructure', 'toHaveAssemblyOccurrences'].includes(matcher),
@@ -384,7 +401,9 @@ export const verifySourceAuthority = async (observe: typeof hashPath = hashPath)
     const expected =
       source.path === currentAuthority.nativeContract.path
         ? currentAuthority.nativeContract.currentSha256
-        : source.sha256;
+        : source.path === approvedPublicContract.path
+          ? approvedPublicContract.currentSha256
+          : source.sha256;
     if (observed.sha256 !== expected) {
       throw new Error(`Performance-lab source authority changed: ${source.path}`);
     }

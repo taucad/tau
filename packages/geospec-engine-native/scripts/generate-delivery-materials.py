@@ -20,6 +20,7 @@ Exit: 0 success; 1 invalid/missing input or generation failure; 2 bad arguments.
 import argparse
 import gzip
 import hashlib
+import importlib.util
 import json
 import os
 from pathlib import Path
@@ -37,6 +38,9 @@ PACKAGE = Path(__file__).resolve().parents[1]
 ROOT = Path(__file__).resolve().parents[3]
 DEFAULT_DELIVERY_CACHE = ROOT / 'node_modules/.cache/geospec-engine-native/delivery-wasm-eh'
 DEFAULT_OCCT_PREFIX = ROOT / 'node_modules/.cache/geospec-engine-native/occt/install'
+prepare_spec = importlib.util.spec_from_file_location('prepare_delivery', PACKAGE / 'scripts/prepare-delivery.py')
+prepare = importlib.util.module_from_spec(prepare_spec)
+prepare_spec.loader.exec_module(prepare)
 TARGET = 'aarch64-apple-darwin'
 RUST_TOOLCHAIN = '1.88'
 SOURCE_RELINK_ASSET = 'geospec-engine-native-source-relink.tar.gz'
@@ -769,6 +773,38 @@ def verify_mixed_source_inputs(closure):
     return pins
 
 
+def verify_mixed_prefix(closure):
+    prefix = Path(closure['occtPrefix']).parent / 'prefix-receipt.json'
+    receipt = read_json(prefix)
+    require(receipt.get('recovery') is None, 'Raw mixed recovery is not admission evidence')
+    historical_builder = Path(closure['sourceRoot']) / 'packages/geospec-engine-native/native/occt/build-occt.sh'
+    selected_builder = Path(closure['prefixProducerBuilder'])
+    require(selected_builder.is_absolute() and selected_builder in
+            {Path(receipt['command'][1]), historical_builder}, 'Prefix producer selector changed')
+    selected_source = current_mixed_source(closure, selected_builder)
+    paths = {name: Path(path) for name, path in closure['tools'].items()}
+    context = prepare.prefix_context(paths, closure['environment'], ('mixed',))
+    prepare.verify_prefix(
+        prefix.parent,
+        prepare.prefix_contract('mixed', paths, closure['environment'], context,
+                                selected_source),
+        Path(closure['prefixProducerRecipe']), closure.get('prefixSupportMigration'),
+        producing_builder=Path(receipt['command'][1]))
+    current_builder = current_mixed_source(closure, historical_builder)
+    require(current_builder == prepare.PACKAGE / 'native/occt/build-occt.sh', 'Mixed builder source mapping differs')
+    historical = None
+    if receipt['command'][1] != str(historical_builder):
+        historical = {
+            'schema': 'geospec-prefix-relocation-v1',
+            'originalReceiptSha256': digest(prefix),
+            'originalBuilder': receipt['command'][1],
+            'currentBuilder': str(historical_builder),
+            'sourceFiles': len(prepare.builder_sources(current_builder)),
+        }
+    require(historical == closure['prefixRecovery']['mixed'], 'Mixed recovery differs')
+    return receipt
+
+
 def select_mixed_build():
     paths = {}
     for key in ['RECEIPT', 'COMMANDS', 'INPUTS']:
@@ -848,8 +884,7 @@ def select_mixed_build():
                 f'Current generated mixed artifact differs from receipt: {generated}')
         artifacts.append({**row, 'distPath': str(staged)})
     prefix = Path(closure['occtPrefix']).parent / 'prefix-receipt.json'
-    prefix_receipt = read_json(prefix)
-    require(prefix_receipt.get('recovery') == closure['prefixRecovery']['mixed'], 'Mixed recovery differs')
+    prefix_receipt = verify_mixed_prefix(closure)
     return {
         'paths': paths, 'closure': closure, 'commands': commands, 'receipt': receipt,
         'prefixReceipt': prefix, 'prefix': prefix_receipt,
@@ -1146,7 +1181,8 @@ def make_relink_material(output, delivery_cache, cohort, mixed=None):
     mixed_recipe = None
     if mixed:
         prefix_builders.append(copy_prefix_builder(
-            output, mixed['prefixReceipt'], mixed['closure']['prefixProducerBuilder'], 'mixed',
+            output, mixed['prefixReceipt'],
+            current_mixed_source(mixed['closure'], mixed['closure']['prefixProducerBuilder']), 'mixed',
         ))
         mixed_recipe = copy_mixed_material(output, mixed)
     write_json(output / 'receipts/occt-static-closure.json', closure)

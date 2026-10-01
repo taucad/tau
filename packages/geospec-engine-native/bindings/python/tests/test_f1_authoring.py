@@ -66,7 +66,7 @@ def facade():
         native_engine=native,
         native_module=SimpleNamespace(),
     )
-    return native, GeoSpecSubject(engine, "part", "subjectHash", "a" * 64)
+    return native, engine._subject({"result": {"subject": {"subjectHash": "a" * 64}}}, "part")
 
 
 class F1AuthoringTests(unittest.TestCase):

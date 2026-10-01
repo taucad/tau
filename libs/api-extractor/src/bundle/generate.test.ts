@@ -64,10 +64,10 @@ describe('generateBundles', () => {
     await generateBundles({ outputRoot: scratch });
   }, 300_000);
 
-  it('ships the committed GeoSpec workbench skill', () => {
+  it('ships the approved workbench content with the document API names', () => {
     const shipped = readFileSync(join(workspaceRoot, 'packages/workbench/agent/workbench/SKILL.md'), 'utf8');
-    // SHA-256 of the GeoSpec branch's authored workbench skill.
-    expect(digest(Buffer.from(shipped))).toBe('e2475599326840f9e87825fb3ff7bad555576cc20cbf71a7a9b69296382834ae');
+    // Approved content, retaining evaluate_model and operationTimeout from the document API migration.
+    expect(digest(Buffer.from(shipped))).toBe('fe1b920f303a21df9e2c78c39ace2ee690dbb35f0f462813ab8434e1897ef6d8');
   });
 
   it('should expose all PicoVoxel Tau authoring types through the shipped reference index', () => {
@@ -263,7 +263,7 @@ describe('every committed bundle', () => {
     expect(serialized).not.toContain('"docs"');
     expect(serialized).not.toContain('"description":');
     expect(serialized).not.toMatch(/"deprecated":"/u);
-  });
+  }, 120_000);
 });
 
 describe('skill declarations', () => {

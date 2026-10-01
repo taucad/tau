@@ -12,6 +12,7 @@ import type {
 } from '@taucad/chat/rpc';
 import type { JsonValue } from '@taucad/agent-host';
 import { toolDescriptions } from '@taucad/chat/constants';
+import { testModelOutputSchema } from '@taucad/chat';
 import { ResourceQueue } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -23,6 +24,7 @@ import type { ChatToolRegistryOptions } from '#registry/tool-registry.js';
 
 const emptyFileSystem = (): RpcFileSystem => ({
   readFile: async () => 'export const main = 1;\n',
+  readBinaryFile: async () => new TextEncoder().encode('export const main = 1;\n'),
   writeFile: async () => undefined,
   writeFileChecked: async () => {
     throw new Error('No checked authority in this fixture.');
@@ -94,25 +96,22 @@ describe('createChatToolRegistry listing', () => {
   it('offers arrange_workbench with only a filesystem', () => {
     expect(listOf()).toContain('arrange_workbench');
   });
-  it.each([undefined, 'legacy', 'native'] as const)(
-    'should advertise the selected %s authoring API before any tool invocation',
-    (geospecAuthoringMode) => {
-      const runTests = vi.fn();
-      const definitions = build({ geospec: { runTests }, geospecAuthoringMode }).list();
-      const description = definitions.find((tool) => tool.name === 'test_model')?.description;
-      const native = geospecAuthoringMode === 'native';
-      expect(description).toContain(native ? 'Selected GeoSpec API: native' : 'Selected GeoSpec API: legacy');
-      expect(description).toContain(native ? 'expectNativeGeo' : 'expectGeo');
-      expect(description).toContain(native ? 'loadNativeModel' : 'loadModel');
-      expect(description).toContain(native ? "'geospec/runner/native'" : "'geospec/model'");
-      expect(description).not.toContain(native ? 'expectGeo' : 'expectNativeGeo');
-      expect(description).not.toContain(native ? 'loadModel' : 'loadNativeModel');
-      for (const definition of definitions.filter((tool) => tool.name !== 'test_model')) {
-        expect(definition.description).toBe(toolDescriptions[definition.name as keyof typeof toolDescriptions]);
-      }
-      expect(runTests).not.toHaveBeenCalled();
-    },
-  );
+  it('should advertise only the canonical authoring API before any tool invocation', () => {
+    const runTests = vi.fn();
+    const definitions = build({ geospec: { runTests } }).list();
+    const description = definitions.find((tool) => tool.name === 'test_model')?.description;
+    expect(description).toContain('Selected GeoSpec API: canonical');
+    expect(description).toContain('expectGeo');
+    expect(description).toContain('loadModel');
+    expect(description).toContain("'geospec/model'");
+    expect(description).not.toContain('expectNativeGeo');
+    expect(description).not.toContain('loadNativeModel');
+    expect(description).not.toContain('legacy');
+    for (const definition of definitions.filter((tool) => tool.name !== 'test_model')) {
+      expect(definition.description).toBe(toolDescriptions[definition.name as keyof typeof toolDescriptions]);
+    }
+    expect(runTests).not.toHaveBeenCalled();
+  });
 
   it.each([
     {
@@ -524,6 +523,27 @@ describe('createChatToolRegistry invocation', () => {
     expect(JSON.stringify(result.content)).toContain('export const main');
   });
 
+  it('preserves reviewed digest input and non-retryable conflict through the normal tool wire', async () => {
+    const fileSystem = emptyFileSystem();
+    const editFile = vi.fn<RpcFileSystem['editFile']>(async () => {
+      throw Object.assign(new Error('Reviewed bytes changed'), { code: 'EDIT_CONFLICT' });
+    });
+    fileSystem.editFile = editFile;
+    const registry = build({ fileSystemFor: () => fileSystem });
+    const input = { targetFile: 'main.ts', oldString: '1', newString: '2', expectedDigest: `sha256:${'a'.repeat(64)}` };
+    const refusal = await invoke(registry, 'edit_file', { input });
+    expect(refusal).toMatchObject({
+      isError: true,
+      content: { errorCode: 'EDIT_CONFLICT' },
+    });
+    expect(refusal.content).not.toHaveProperty('retryable');
+    expect(editFile).toHaveBeenCalledExactlyOnceWith(input);
+    await expect(
+      invoke(registry, 'edit_file', { input: { ...input, expectedDigest: 'missing' } }),
+    ).resolves.toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+    expect(editFile).toHaveBeenCalledTimes(1);
+  });
+
   it('uses the trusted invocation ID for exported artifact paths', async () => {
     const exportModel = vi.fn<RpcGraphicsClient['exportModel']>(async () => ({
       success: true,
@@ -910,6 +930,13 @@ describe('createChatToolRegistry freshness gate', () => {
       }
       return content;
     },
+    readBinaryFile: async (path) => {
+      const content = store.get(path);
+      if (content === undefined) {
+        throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+      }
+      return new TextEncoder().encode(content);
+    },
     writeFile: async (path, content) => {
       store.set(path, content);
     },
@@ -1038,7 +1065,9 @@ describe('createChatToolRegistry freshness gate', () => {
       kernelVerdict({ entry: 'other.ts', files: { 'other.ts': digestOf('unrelated') } }),
     );
 
-    const verdict = await writeThenAsk(evaluateModel);
+    const verdict = await writeThenAsk(evaluateModel, 'repaired', (store) => {
+      store.set('other.ts', 'unrelated');
+    });
 
     expect(evaluateModel).toHaveBeenCalledOnce();
     expect(verdict).toMatchObject({ isError: false });
@@ -1069,5 +1098,547 @@ describe('createChatToolRegistry freshness gate', () => {
         actual: { path: 'main.ts', digest: digestOf('broken') },
       },
     });
+  });
+});
+describe('createChatToolRegistry GeoSpec evidence normalization', () => {
+  const verdict = (
+    seed: number,
+    sourceText?: string,
+  ): Extract<Awaited<ReturnType<RpcGeoSpecClient['runTests']>>, { success: true }> => ({
+    success: true,
+    ...testModelOutputSchema.parse({
+      passed: 1,
+      total: 1,
+      failures: [],
+      passes: [
+        {
+          id: 'main.geospec.ts:bounds',
+          requirement: 'bounds',
+          targetFile: 'main.geospec.ts',
+          reports: [
+            {
+              claimId: `claim-${seed}`,
+              loadId: `load-${seed}`,
+              status: 'passed',
+              polarity: 'positive',
+              claim: { seed },
+              result: { seed },
+              diagnostics: [],
+              canonical: { claim: [0, seed, 255], plan: [255, seed, 0], result: [seed, 254, 1] },
+            },
+          ],
+        },
+      ],
+      ...(sourceText === undefined
+        ? {}
+        : {
+            sourceRevisions: [
+              {
+                entry: 'main.ts',
+                files: { 'main.ts': `sha256:${createHash('sha256').update(sourceText).digest('hex')}` },
+              },
+            ],
+          }),
+    }),
+  });
+
+  it.each(['module', 'direct', 'resource'] as const)(
+    'should refuse externally replaced %s bytes with no remembered tool write',
+    async (kind) => {
+      const provider = new MemoryProvider();
+      const target = kind === 'module' ? 'lib/check.ts' : 'part.glb';
+      const before = Uint8Array.from(kind === 'module' ? [97] : [0, 255, 97]);
+      const after = Uint8Array.from(kind === 'module' ? [98] : [0, 254, 97]);
+      await provider.writeFile(target, before);
+      const digest = createHash('sha256').update(before).digest('hex');
+      const original = testModelOutputSchema.parse({
+        ...verdict(7),
+        lineage: [
+          {
+            file: 'main.geospec.ts',
+            lineage: {
+              status: 'complete',
+              modules:
+                kind === 'module'
+                  ? [
+                      {
+                        entryPath: 'main.geospec.ts',
+                        bundleSha256: digest,
+                        files: { [target]: `sha256:${digest}` },
+                        consistent: true,
+                      },
+                    ]
+                  : [],
+              loads:
+                kind === 'module'
+                  ? []
+                  : [
+                      {
+                        loadId: 'load-7',
+                        status: 'complete',
+                        evidence: {
+                          loadId: 'load-7',
+                          status: 'complete',
+                          format: 'glb',
+                          parameters: {},
+                          ingestOptions: {},
+                          ...(kind === 'direct' ? { sourcePath: target } : {}),
+                          artifacts: [
+                            { name: 'alias.bin', sourcePath: target, sha256: digest, byteLength: before.byteLength },
+                          ],
+                        },
+                      },
+                    ],
+            },
+          },
+        ],
+      });
+      const runTests = vi.fn<RpcGeoSpecClient['runTests']>(async () => {
+        await provider.writeFile(target, after);
+        return { success: true, ...original };
+      });
+      if (kind === 'resource') {
+        expect(original.lineage?.[0]?.lineage.loads[0]?.evidence?.artifacts[0]).toMatchObject({
+          name: 'alias.bin',
+          sourcePath: target,
+        });
+      }
+      const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+      const view = composeView({ filesystem: provider }, { consumer: 'agent', policy: tauPathPolicy });
+      const registry = build({
+        geospec: { runTests },
+        fileSystemFor: () => createProviderRpcFileSystem({ provider: view, mutations: new ResourceQueue() }),
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      });
+      expect(await invoke(registry, 'test_model', { input: {} })).toMatchObject({
+        isError: true,
+        content: { errorCode: 'STALE_EVALUATION', actual: { path: target, digest: `sha256:${digest}` } },
+      });
+      expect(runTests).toHaveBeenCalledTimes(2);
+      expect(recordWrite).not.toHaveBeenCalled();
+      expect(await provider.readFile(target)).toEqual(after);
+    },
+  );
+
+  it('should refuse an uncheckable module path without reading outside the rooted authority', async () => {
+    const provider = new MemoryProvider();
+    const stat = vi.spyOn(provider, 'stat');
+    const digest = createHash('sha256').update('foreign').digest('hex');
+    const original = testModelOutputSchema.parse({
+      ...verdict(8),
+      lineage: [
+        {
+          file: 'main.geospec.ts',
+          lineage: {
+            status: 'complete',
+            loads: [],
+            modules: [
+              {
+                entryPath: 'main.geospec.ts',
+                bundleSha256: digest,
+                files: { '/foreign/spec.ts': `sha256:${digest}` },
+                consistent: true,
+              },
+            ],
+          },
+        },
+      ],
+    });
+    const runTests = vi.fn<RpcGeoSpecClient['runTests']>(async () => ({ success: true, ...original }));
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const view = composeView({ filesystem: provider }, { consumer: 'agent', policy: tauPathPolicy });
+    const result = await invoke(
+      build({
+        geospec: { runTests },
+        fileSystemFor: () => createProviderRpcFileSystem({ provider: view, mutations: new ResourceQueue() }),
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    expect(result).toMatchObject({
+      isError: true,
+      content: {
+        errorCode: 'STALE_EVALUATION',
+        expected: { path: '/foreign/spec.ts', digest: 'unavailable' },
+      },
+    });
+    expect(runTests).toHaveBeenCalledTimes(2);
+    expect(stat).not.toHaveBeenCalled();
+    expect(recordWrite).not.toHaveBeenCalled();
+  });
+
+  it('should await the record owner and retain exact canonical bytes before compacting', async () => {
+    const original = verdict(1);
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<void>();
+    const stored = new Map<string, Uint8Array<ArrayBuffer>>();
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async (path, bytes) => {
+      stored.set(path, Uint8Array.from(bytes));
+      started.resolve();
+      await finish.promise;
+    });
+    const agentWrite = vi.fn<RpcFileSystem['writeBinaryFile']>();
+    const registry = build({
+      geospec: { runTests: async () => original },
+      fileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: agentWrite }),
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+    });
+    let completed = false;
+    const pending = invoke(registry, 'test_model', { input: {} });
+    const observed = (async () => {
+      await pending;
+      completed = true;
+    })();
+    try {
+      await Promise.race([started.promise, observed]);
+      expect(recordWrite).toHaveBeenCalledOnce();
+      expect(completed).toBe(false);
+    } finally {
+      finish.resolve();
+    }
+    const result = await pending;
+    expect(agentWrite).not.toHaveBeenCalled();
+    expect(result.isError).toBe(false);
+    const compact = testModelOutputSchema.parse(result.content);
+    expect(compact.passes[0]?.reports?.[0]).toMatchObject({ claimId: 'claim-1', loadId: 'load-1', status: 'passed' });
+    expect(compact.passes[0]?.reports?.[0]).not.toHaveProperty('canonical');
+    expect(compact.fullResult?.path).toMatch(/^\.tau\/artifacts\//u);
+    const bytes = stored.get(compact.fullResult!.path)!;
+    expect(compact.fullResult).toMatchObject({
+      byteLength: bytes.byteLength,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+      mimeType: 'application/json',
+    });
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(original);
+  });
+
+  it('should refuse when complete evidence cannot be persisted', async () => {
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
+      throw new Error('record authority unavailable');
+    });
+    const result = await invoke(
+      build({
+        geospec: { runTests: async () => verdict(2) },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    expect(recordWrite).toHaveBeenCalledOnce();
+    expect(result).toMatchObject({ isError: true, content: { errorCode: 'IO_ERROR' } });
+    expect(result.content).not.toHaveProperty('fullResult');
+    expect(result.content).not.toHaveProperty('passes');
+  });
+
+  it('should persist only the finalized fresh result after one stale retry', async () => {
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const runTests = vi
+      .fn<RpcGeoSpecClient['runTests']>()
+      .mockResolvedValueOnce(verdict(3, 'broken'))
+      .mockResolvedValueOnce(verdict(4, 'repaired'));
+    const registry = build({
+      geospec: { runTests },
+      fileSystemFor: () => ({ ...emptyFileSystem(), readBinaryFile: async () => new TextEncoder().encode('repaired') }),
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+    });
+    await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content: 'repaired' } });
+    const result = await invoke(registry, 'test_model', { input: {} });
+    expect(result.isError).toBe(false);
+    expect(runTests).toHaveBeenCalledTimes(2);
+    expect(recordWrite).toHaveBeenCalledOnce();
+    const bytes = recordWrite.mock.calls[0]![1];
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(verdict(4, 'repaired'));
+  });
+
+  it.each(['module', 'load', 'direct'] as const)(
+    'should refuse replaced %s lineage before retaining canonical evidence',
+    async (kind) => {
+      const digest = createHash('sha256').update('broken').digest('hex');
+      const original = {
+        ...verdict(3),
+        lineage: [
+          {
+            file: 'main.geospec.ts',
+            lineage: {
+              status: 'complete',
+              modules:
+                kind === 'module'
+                  ? [
+                      {
+                        entryPath: 'main.geospec.ts',
+                        bundleSha256: digest,
+                        files: { 'main.ts': `sha256:${digest}` },
+                        consistent: true,
+                      },
+                    ]
+                  : [],
+              loads:
+                kind === 'module'
+                  ? []
+                  : [
+                      {
+                        loadId: 'load-3',
+                        status: 'complete',
+                        evidence: {
+                          loadId: 'load-3',
+                          status: 'complete',
+                          format: 'glb',
+                          parameters: {},
+                          ingestOptions: {},
+                          ...(kind === 'direct'
+                            ? { sourcePath: 'main.ts' }
+                            : { sourceRevision: { entry: 'main.ts', files: { 'main.ts': `sha256:${digest}` } } }),
+                          artifacts: [{ name: 'main.glb', sha256: digest, byteLength: 6 }],
+                        },
+                      },
+                    ],
+            },
+          },
+        ],
+      };
+      const runTests = vi.fn<RpcGeoSpecClient['runTests']>(async () => ({
+        success: true,
+        ...testModelOutputSchema.parse(original),
+      }));
+      const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+      const registry = build({
+        geospec: { runTests },
+        fileSystemFor: () => ({
+          ...emptyFileSystem(),
+          readBinaryFile: async () => new TextEncoder().encode('repaired'),
+        }),
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      });
+      await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content: 'repaired' } });
+      expect(await invoke(registry, 'test_model', { input: {} })).toMatchObject({
+        isError: true,
+        content: { errorCode: 'STALE_EVALUATION' },
+      });
+      expect(runTests).toHaveBeenCalledTimes(2);
+      expect(recordWrite).not.toHaveBeenCalled();
+    },
+  );
+
+  it('should not persist a result that remains stale after retry', async () => {
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const runTests = vi.fn<RpcGeoSpecClient['runTests']>(async () => verdict(5, 'broken'));
+    const registry = build({
+      geospec: { runTests },
+      fileSystemFor: () => ({ ...emptyFileSystem(), readBinaryFile: async () => new TextEncoder().encode('repaired') }),
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+    });
+    await invoke(registry, 'create_file', { input: { targetFile: 'main.ts', content: 'repaired' } });
+    const result = await invoke(registry, 'test_model', { input: {} });
+    expect(result).toMatchObject({ isError: true, content: { errorCode: 'STALE_EVALUATION' } });
+    expect(runTests).toHaveBeenCalledTimes(2);
+    expect(recordWrite).not.toHaveBeenCalled();
+  });
+
+  it('should retain the full oversized result before limiting inline failure rows', async () => {
+    const original = {
+      ...verdict(6),
+      total: 26,
+      failures: Array.from({ length: 25 }, (_, index) => ({
+        id: `failure-${index}`,
+        requirement: `requirement-${index}`,
+        reason: 'x'.repeat(7000),
+        suggestion: 'Inspect complete evidence',
+        targetFile: 'main.geospec.ts',
+      })),
+    };
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const result = await invoke(
+      build({
+        geospec: { runTests: async () => original },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    const compact = testModelOutputSchema.parse(result.content);
+    expect(result.isError).toBe(false);
+    expect(compact).toMatchObject({ passed: 1, total: 26, omittedFailures: 5, omittedPasses: 1 });
+    expect(compact.failures).toHaveLength(20);
+    expect(compact.failures[0]?.reason).toHaveLength(512);
+    expect(compact.passes).toEqual([]);
+    expect(recordWrite).toHaveBeenCalledOnce();
+    expect(JSON.parse(new TextDecoder().decode(recordWrite.mock.calls[0]![1]))).toEqual(original);
+  });
+
+  it('should not publish a compact verdict when cancellation arrives during persistence', async () => {
+    const cancelled = new AbortController();
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => {
+      cancelled.abort(new Error('cancelled while recording evidence'));
+    });
+    const registry = build({
+      geospec: { runTests: async () => verdict(7) },
+      recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+    });
+    await expect(invoke(registry, 'test_model', { input: {}, signal: cancelled.signal })).rejects.toThrow(
+      'cancelled while recording evidence',
+    );
+    expect(recordWrite).toHaveBeenCalledOnce();
+  });
+
+  it.each(['mixed', 'unavailable'] as const)(
+    'should preserve final skipped/not-run accounting and %s lineage qualification',
+    async (lineageStatus) => {
+      const original: Extract<Awaited<ReturnType<RpcGeoSpecClient['runTests']>>, { success: true }> = {
+        ...verdict(8),
+        runStatus: 'not-run',
+        lineageStatus,
+        accounting: {
+          discovered: 3,
+          selected: 2,
+          completed: 1,
+          passed: 1,
+          failed: 0,
+          unsupported: 0,
+          inconclusive: 0,
+          skipped: 1,
+          notRun: 1,
+          requestedFiles: ['main.geospec.ts', 'later.geospec.ts'],
+          completedFiles: ['main.geospec.ts'],
+          notRunFiles: ['later.geospec.ts'],
+          discoveryComplete: false,
+          cancelled: false,
+          bailed: true,
+        },
+        tests: [
+          { id: 'passed', requirement: 'passed', targetFile: 'main.geospec.ts', status: 'passed' },
+          { id: 'skipped', requirement: 'skipped', targetFile: 'main.geospec.ts', status: 'skipped' },
+          { id: 'not-run', requirement: 'not-run', targetFile: 'main.geospec.ts', status: 'not-run' },
+        ],
+        lineage: [{ file: 'main.geospec.ts', lineage: { status: lineageStatus, modules: [], loads: [] } }],
+      };
+      const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+      const registry = build({
+        geospec: { runTests: async () => original },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      });
+      const result = await invoke(registry, 'test_model', { input: {} });
+      const compact = testModelOutputSchema.parse(result.content);
+      expect(compact).toMatchObject({
+        runStatus: 'not-run',
+        lineageStatus,
+        accounting: original.accounting,
+        tests: original.tests,
+        lineage: original.lineage,
+      });
+      expect(JSON.parse(new TextDecoder().decode(recordWrite.mock.calls[0]![1]))).toEqual(original);
+    },
+  );
+
+  it('should archive oversized lineage and tests without hiding final qualification or accounting', async () => {
+    const original = {
+      success: true,
+      ...testModelOutputSchema.parse({
+        passed: 0,
+        total: 1,
+        passes: [],
+        failures: [
+          {
+            id: 'not-run',
+            requirement: 'not-run',
+            reason: 'Not started',
+            suggestion: 'Retry',
+            targetFile: 'main.geospec.ts',
+          },
+        ],
+        runStatus: 'not-run',
+        lineageStatus: 'mixed',
+        accounting: {
+          discovered: 2,
+          selected: 1,
+          completed: 0,
+          passed: 0,
+          failed: 0,
+          unsupported: 0,
+          inconclusive: 0,
+          skipped: 1,
+          notRun: 1,
+          requestedFiles: ['main.geospec.ts'],
+          completedFiles: ['main.geospec.ts'],
+          notRunFiles: [],
+          discoveryComplete: true,
+          cancelled: false,
+          bailed: false,
+        },
+        tests: [
+          { id: 'skipped', requirement: 'skipped', targetFile: 'main.geospec.ts', status: 'skipped' },
+          { id: 'not-run', requirement: 'not-run', targetFile: 'main.geospec.ts', status: 'not-run' },
+        ],
+        lineage: [
+          {
+            file: 'main.geospec.ts',
+            lineage: {
+              status: 'mixed',
+              loads: [],
+              modules: [
+                {
+                  entryPath: 'main.geospec.ts',
+                  bundleSha256: 'a'.repeat(64),
+                  consistent: false,
+                  files: Object.fromEntries(
+                    Array.from({ length: 2000 }, (_, index) => [
+                      `dependency-${index}.ts`,
+                      `sha256:${createHash('sha256').update('export const main = 1;\n').digest('hex')}`,
+                    ]),
+                  ),
+                },
+              ],
+            },
+          },
+        ],
+      }),
+    } satisfies Extract<Awaited<ReturnType<RpcGeoSpecClient['runTests']>>, { success: true }>;
+    const recordWrite = vi.fn<RpcFileSystem['writeBinaryFile']>(async () => undefined);
+    const result = await invoke(
+      build({
+        geospec: { runTests: async () => original },
+        recordFileSystemFor: () => ({ ...emptyFileSystem(), writeBinaryFile: recordWrite }),
+      }),
+      'test_model',
+      { input: {} },
+    );
+    const compact = testModelOutputSchema.parse(result.content);
+    expect(compact).toMatchObject({
+      runStatus: 'not-run',
+      lineageStatus: 'mixed',
+      accounting: original.accounting,
+      omittedTests: 2,
+      omittedLineage: 1,
+    });
+    expect(compact).not.toHaveProperty('tests');
+    expect(compact).not.toHaveProperty('lineage');
+    expect(JSON.stringify(compact).length).toBeLessThan(128 * 1024);
+    expect(recordWrite).toHaveBeenCalledOnce();
+    expect(JSON.parse(new TextDecoder().decode(recordWrite.mock.calls[0]![1]))).toEqual(original);
+  });
+
+  it('should retain evidence through the composed record authority and refuse the agent-only view', async () => {
+    const checkout = new MemoryProvider();
+    const agentView = composeView({ filesystem: checkout }, { consumer: 'agent', policy: tauPathPolicy });
+    const recordView = composeView({ filesystem: checkout }, { consumer: 'user', policy: tauPathPolicy });
+    const mutations = new ResourceQueue();
+    const fileSystemFor = (signal: AbortSignal) =>
+      createProviderRpcFileSystem({ provider: agentView, mutations, signal });
+    const recordFileSystemFor = (signal: AbortSignal) =>
+      createProviderRpcFileSystem({ provider: recordView, mutations, signal });
+    const original = verdict(9);
+    const geospec = { runTests: async () => original };
+    const refused = await invoke(build({ geospec, fileSystemFor }), 'test_model', { input: {} });
+    expect(refused).toMatchObject({ isError: true, content: { errorCode: 'IO_ERROR' } });
+    expect(await checkout.exists('.tau/artifacts')).toBe(false);
+    const recorded = await invoke(build({ geospec, fileSystemFor, recordFileSystemFor }), 'test_model', { input: {} });
+    const compact = testModelOutputSchema.parse(recorded.content);
+    expect(recorded.isError).toBe(false);
+    const bytes = await checkout.readFile(compact.fullResult!.path);
+    expect(compact.fullResult).toMatchObject({
+      byteLength: bytes.byteLength,
+      sha256: createHash('sha256').update(bytes).digest('hex'),
+    });
+    expect(JSON.parse(new TextDecoder().decode(bytes))).toEqual(original);
   });
 });

@@ -183,6 +183,7 @@ describe('electron-vite main externalization', () => {
     const { isExternal, include } = await resolveMainExternals();
     expect(include).toContain('@taucad/geospec-engine-native');
     for (const id of [
+      '@taucad/events',
       '@taucad/openrscad',
       '@taucad/middleware',
       '@taucad/filesystem',

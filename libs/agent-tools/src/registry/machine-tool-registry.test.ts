@@ -1,3 +1,8 @@
+import type { MachineTypeId, MachineSettingsService } from '@taucad/types';
+import { MachineSettingsOwner } from '@taucad/runtime/host';
+import { machineSettingsPath } from '@taucad/runtime/machine/settings';
+import { slicingPreferences, slicingPreferencesSchema } from '@taucad/slicer/preferences';
+import { bambuSettingsConfiguration, bambuMachine } from '@taucad/bambu';
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio setting keys are its own wire vocabulary */
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -22,7 +27,7 @@ import type {
 } from '@taucad/runtime/machine';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { TranscoderServices } from '@taucad/runtime/types';
-import { printIntentPath, printIntentSchema, slicerOptionsSchema, slicerTranscoder } from '@taucad/slicer';
+import { slicerOptionsSchema, slicerTranscoder } from '@taucad/slicer';
 import { assertRootedPath } from '@taucad/utils/path';
 import {
   getPrintProfilesOutputSchema,
@@ -109,10 +114,76 @@ const agentProject = async (files: Readonly<Record<string, string>>, filesystem 
   return (signal: AbortSignal) => createProviderRpcFileSystem({ provider: view, mutations, signal });
 };
 
-/** A project's print intent file for the Bambu X1C manifest, whose model is `x1c`. */
-const printerFile = (intent: Readonly<Record<string, unknown>>) => ({
-  [printIntentPath]: JSON.stringify({ model: 'x1c', ...intent }),
+const settingsPath = machineSettingsPath({ typeId: 'bambu.x1c' });
+const printerRecord = (preferences: Readonly<Record<string, unknown>>) => {
+  const { plate, model: _model, ...values } = preferences;
+  return {
+    version: 1,
+    typeId: 'bambu.x1c',
+    activeProfile: 'default',
+    profiles: {
+      default: {
+        name: 'Default',
+        configurations: {
+          [slicingPreferences.manifest.source.id]: {
+            version: slicingPreferences.manifest.source.version,
+            values,
+          },
+          ...(plate === undefined
+            ? {}
+            : {
+                [bambuSettingsConfiguration.manifest.source.id]: {
+                  version: bambuSettingsConfiguration.manifest.source.version,
+                  values: { plate },
+                },
+              }),
+        },
+      },
+    },
+  };
+};
+const printerFile = (preferences: Readonly<Record<string, unknown>>) => ({
+  [settingsPath]: JSON.stringify(printerRecord(preferences)),
 });
+const emptySettings: Pick<MachineSettingsService, 'readMachineSettings'> = {
+  readMachineSettings: async () => ({ status: 'absent' }),
+};
+const agentSettings = async (files: Readonly<Record<string, string>>, filesystem = new MemoryProvider()) => {
+  await agentProject(files, filesystem);
+  const view = composeView({ filesystem }, { consumer: 'agent', policy: tauPathPolicy });
+  const owner = new MachineSettingsOwner({
+    filesystem: {
+      readFileStream: (path, options) =>
+        new ReadableStream({
+          async start(controller) {
+            try {
+              const bytes = await view.readFile(path);
+              controller.enqueue(bytes.slice(0, options?.length));
+              controller.close();
+            } catch (error) {
+              controller.error(error);
+            }
+          },
+        }),
+      writeFileChecked: async () => {
+        throw new Error('Read-only test owner');
+      },
+    },
+    definitions: [slicingPreferences, bambuSettingsConfiguration],
+  });
+  return {
+    readMachineSettings: async (typeId: MachineTypeId) => owner.read({ typeId }),
+  };
+};
+const reportedProfile = {
+  path: settingsPath,
+  typeId: 'bambu.x1c',
+  profileId: 'default',
+  profileName: 'Default',
+  configurationVersions: {
+    [slicingPreferences.manifest.source.id]: slicingPreferences.manifest.source.version,
+  },
+};
 
 const artifactFixture: MachineArtifactReference = {
   projectId,
@@ -197,7 +268,7 @@ const clientFixture = (input: { readonly entries?: readonly MachineDirectoryEntr
     expiresAt: '2026-09-14T00:00:15.000Z',
   }));
   const client: MachineClient = {
-    listProviders: async () => [],
+    listProviders: async () => [bambuMachine()],
     async *discover() {
       yield {
         type: 'found',
@@ -266,7 +337,7 @@ const run = async (
   client: MachineClient,
   call: { readonly toolName: string; readonly input: JsonValue; readonly approve?: HostToolInvocation['approve'] },
 ) =>
-  createMachineToolRegistry(client, { planPrint, projectId }).invoke({
+  createMachineToolRegistry(client, { planPrint, projectId, machineSettings: emptySettings }).invoke({
     toolCallId: 'call-1',
     signal: new AbortController().signal,
     ...call,
@@ -311,7 +382,11 @@ describe('machine tool registry', () => {
 
   it('offers request_print only with a planner, prepare_machine_print only with a project, and keeps every description short', () => {
     const { client } = clientFixture();
-    const withPlanner = createMachineToolRegistry(client, { planPrint, projectId }).list();
+    const withPlanner = createMachineToolRegistry(client, {
+      planPrint,
+      projectId,
+      machineSettings: emptySettings,
+    }).list();
     expect(withPlanner.map(({ name }) => name)).toEqual(machineToolNames);
     const bare = createMachineToolRegistry(client)
       .list()
@@ -344,7 +419,7 @@ describe('machine tool registry', () => {
 
   /* The file's reference options and the tool's are one list, owned twice: `@taucad/slicer` cannot import `@taucad/chat`. */
   it("should accept exactly the reference options a project's print intent may hold", () => {
-    expect(Object.keys(printIntentSchema.shape.options.unwrap().shape).toSorted()).toEqual(
+    expect(Object.keys(slicingPreferencesSchema.shape.options.unwrap().shape).toSorted()).toEqual(
       [...requestPrintOptionKeys].toSorted(),
     );
   });
@@ -524,23 +599,26 @@ describe('machine tool registry', () => {
 
     it("should read the project's print intent through the agent's view and hand it to the planner", async () => {
       planPrint.mockClear();
-      const fileSystemFor = await agentProject(printerFile({ preset: 'fine' }));
-      await createMachineToolRegistry(clientFixture().client, { planPrint, projectId, fileSystemFor }).invoke({
+      const machineSettings = await agentSettings(printerFile({ preset: 'fine' }));
+      await createMachineToolRegistry(clientFixture().client, { planPrint, projectId, machineSettings }).invoke({
         toolCallId: 'call-1',
         toolName: 'request_print',
         input: { targetFile: 'main.ts' },
         signal: new AbortController().signal,
       });
-      expect(planPrint.mock.calls[0]![0].intentFile).toEqual({
+      expect(planPrint.mock.calls[0]![0].preferences).toEqual({
         status: 'current',
-        intent: { model: 'x1c', preset: 'fine' },
+        preferences: { preset: 'fine' },
+        machine: {},
+        record: printerRecord({ preset: 'fine' }),
+        profileId: 'default',
       });
 
       /* No file in the project, or no project filesystem wired: nothing to apply. */
       await createMachineToolRegistry(clientFixture().client, {
         planPrint,
         projectId,
-        fileSystemFor: await agentProject({}),
+        machineSettings: await agentSettings({}),
       }).invoke({
         toolCallId: 'call-2',
         toolName: 'request_print',
@@ -548,27 +626,27 @@ describe('machine tool registry', () => {
         signal: new AbortController().signal,
       });
       await invoke(clientFixture().client, 'request_print', { targetFile: 'main.ts' });
-      expect(planPrint.mock.calls.slice(1).map(([call]) => call.intentFile)).toEqual([undefined, undefined]);
+      expect(planPrint.mock.calls.slice(1).map(([call]) => call.preferences)).toEqual([undefined, undefined]);
     });
 
     it.each(['approved', 'denied', 'cancelled'] as const)(
       'should pass on what the print intent contributed when the answer is %s',
       async (outcome) => {
-        const printIntent = {
-          path: printIntentPath,
+        const machinePreferences = {
+          ...reportedProfile,
           ignored: "It is for model X1C, not this printer's x1c, so none of its values apply.",
         };
         planPrint.mockResolvedValueOnce({
           artifact: artifactFixture,
           configuration: { expectedBedType: 'textured-pei' },
-          printIntent,
+          machinePreferences,
         });
         const result = await run(clientFixture().client, {
           toolName: 'request_print',
           input: { targetFile: 'main.ts' },
           approve: approveWith(outcome),
         });
-        expect(result).toMatchObject({ isError: false, content: { approval: outcome, printIntent } });
+        expect(result).toMatchObject({ isError: false, content: { approval: outcome, machinePreferences } });
       },
     );
 
@@ -676,7 +754,11 @@ describe('machine tool registry', () => {
       directory = await mkdtemp(join(tmpdir(), 'tau-request-print-'));
       const logPath = join(directory, 'events.jsonl');
       const fixture = clientFixture();
-      const registry = createMachineToolRegistry(fixture.client, { planPrint, projectId });
+      const registry = createMachineToolRegistry(fixture.client, {
+        planPrint,
+        projectId,
+        machineSettings: emptySettings,
+      });
       const transport = scriptedTransport([{ toolCalls: [printCall] }, ...continued]);
       let tick = 0;
       let id = 0;
@@ -907,7 +989,7 @@ describe('machine tool registry', () => {
       id: 'bambu',
       vendor: 'Bambu Lab',
       manifest: {
-        identity: { model: 'x1c' },
+        identity: { typeId: 'bambu.x1c', model: 'x1c' },
         toolhead: { nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }] },
       },
     } as unknown as MachineProvider;
@@ -1012,7 +1094,11 @@ describe('machine tool registry', () => {
       const { client } = clientFixture(entries === undefined ? {} : { entries });
       return createMachineToolRegistry(
         { ...client, listProviders: async () => [provider] },
-        { bambuStudio, ...(files === undefined ? {} : { fileSystemFor: await agentProject(files) }) },
+        {
+          bambuStudio,
+          machineSettings: emptySettings,
+          ...(files === undefined ? {} : { machineSettings: await agentSettings(files) }),
+        },
       ).invoke({
         toolCallId: 'call-1',
         toolName: 'get_print_profiles',
@@ -1029,6 +1115,12 @@ describe('machine tool registry', () => {
         content: {
           machineId: 'machine-1',
           engine: 'bambu-studio',
+          savedProfiles: {
+            typeId: 'bambu.x1c',
+            activeProfile: 'default',
+            selectedProfile: 'default',
+            profiles: [{ id: 'default', name: 'Default' }],
+          },
           version: '02.08.02.61',
           defaults: {
             printer: 'Bambu Lab X1 Carbon 0.4 nozzle',
@@ -1148,7 +1240,8 @@ describe('machine tool registry', () => {
           ],
         })),
       });
-      const printIntentOf = (content: JsonValue): JsonValue | undefined => (content as JsonObject)['printIntent'];
+      const machinePreferencesOf = (content: JsonValue): JsonValue | undefined =>
+        (content as JsonObject)['machinePreferences'];
 
       it("should default to the file's values under the call's own, and say which it used", async () => {
         const files = printerFile({ preset: 'fine', filaments: { '0': 'Generic PETG' }, settings: { wall_loops: 3 } });
@@ -1163,8 +1256,8 @@ describe('machine tool registry', () => {
           },
         });
         /* Read back through the tool's own output contract. */
-        expect(getPrintProfilesOutputSchema.parse(result.content).printIntent).toEqual({
-          path: printIntentPath,
+        expect(getPrintProfilesOutputSchema.parse(result.content).machinePreferences).toEqual({
+          ...reportedProfile,
           applied: { preset: 'fine', filaments: { '0': 'Generic PETG' }, settings: { wall_loops: 3 } },
         });
         expect(bambuStudio.describeBambuStudioSettings).toHaveBeenCalledWith(install, {
@@ -1179,33 +1272,30 @@ describe('machine tool registry', () => {
           { files },
         );
         expect(chosen.content).toMatchObject({ defaults: { filaments: ['Bambu PETG Basic @BBL X1C'] } });
-        expect(printIntentOf(chosen.content)).toEqual({
-          path: printIntentPath,
+        expect(machinePreferencesOf(chosen.content)).toEqual({
+          ...reportedProfile,
           applied: { preset: 'fine', settings: { wall_loops: 3 } },
         });
       });
 
-      const invalid =
-        'It is not a valid print intent (broken JSON, an unknown key or a bad value), so none of its values apply.';
-      it.each<readonly [string, Readonly<Record<string, string>>, string]>([
+      it.each([
+        ['broken JSON', { [settingsPath]: '{"version":1,' }],
+        ['a bad value', printerFile({ printer: 7 })],
         [
-          'a file for another model',
-          printerFile({ model: 'X1C', preset: 'fine' }),
-          "It is for model X1C, not this printer's x1c, so none of its values apply.",
+          'a future record',
+          {
+            [settingsPath]: JSON.stringify({
+              ...printerRecord({}),
+              version: 2,
+            }),
+          },
         ],
-        ['broken JSON', { [printIntentPath]: '{"model":"x1c",' }, invalid],
-        ['a bad value', printerFile({ settings: { wall_loops: 3 }, printer: 7 }), invalid],
-        ['a file over 64 KiB', printerFile({ settings: { note: 'x'.repeat(65_536) } }), invalid],
-      ])('should ignore %s, saying why, and answer as without a file', async (_case, files, ignored) => {
-        const plain = await profilesOf(engine(), {}, { files: {} });
-        expect(plain.content).not.toHaveProperty('printIntent');
+        ['a file over 256 KiB', printerFile({ settings: { note: 'x'.repeat(262_144) } })],
+      ])('should refuse %s without applying defaults', async (_case, files) => {
         const result = await profilesOf(engine(), {}, { files });
-        /* Everything else is exactly what the project without the file gets. */
-        const { printIntent: _report, ...rest } = result.content as JsonObject;
-        expect(rest).toEqual(plain.content);
-        expect(getPrintProfilesOutputSchema.parse(result.content).printIntent).toEqual({
-          path: printIntentPath,
-          ignored,
+        expect(result.isError).toBe(true);
+        expect(result.content).toMatchObject({
+          errorCode: 'MACHINE_TOOL_ERROR',
         });
       });
 
@@ -1219,8 +1309,8 @@ describe('machine tool registry', () => {
           },
         );
         expect(result.content).toMatchObject({ engine: 'reference' });
-        expect(printIntentOf(result.content)).toEqual({
-          path: printIntentPath,
+        expect(machinePreferencesOf(result.content)).toEqual({
+          ...reportedProfile,
           applied: { preset: 'fast', options: { walls: 3 } },
         });
       });
@@ -1232,7 +1322,7 @@ describe('machine tool registry', () => {
           isError: true,
           content: {
             errorCode: 'MACHINE_TOOL_ERROR',
-            message: `Bambu Studio has no process preset "0.12mm Old @BBL X1C". The project's ${printIntentPath} supplied process; edit it there, or pass your own.`,
+            message: `Bambu Studio has no process preset "0.12mm Old @BBL X1C". The project's ${settingsPath} supplied process; edit it there, or pass your own.`,
           },
         });
       });
@@ -1411,7 +1501,7 @@ describe('request_print slicer options through the chat registry', () => {
     id: 'bambu',
     name: 'Bambu Lab',
     manifest: {
-      identity: { model: 'x1c' },
+      identity: { typeId: 'bambu.x1c', model: 'x1c' },
       toolhead: {
         filamentDiameter: { value: 1.75, unit: 'mm' },
         nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }],
@@ -1448,6 +1538,7 @@ describe('request_print slicer options through the chat registry', () => {
     const mutations = new ResourceQueue();
     const registry = createChatToolRegistry({
       fileSystemFor: await agentProject(files, filesystem),
+      machineSettings: await agentSettings({}, filesystem),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       graphics: { exportModel },
       machines: { available: true, ...ledger.client, listProviders: async () => [provider] },
@@ -1524,7 +1615,7 @@ describe('request_print slicer options through the chat registry', () => {
     expect(result.isError).toBe(false);
     expect(requestPrintOutputSchema.parse(result.content)).toMatchObject({
       request: { state: 'awaiting-approval' },
-      printIntent: { path: printIntentPath, applied: { preset: 'fine', options: { infillPercent: 30 } } },
+      machinePreferences: { path: settingsPath, applied: { preset: 'fine', options: { infillPercent: 30 } } },
     });
     expect(host.exportModel.mock.calls[0]![0].options).toEqual({
       plate: 'textured-pei',
@@ -1568,3 +1659,5 @@ describe('request_print slicer options through the chat registry', () => {
     expect(host.ledger.requests.size).toBe(0);
   });
 });
+
+/* eslint-enable @typescript-eslint/naming-convention -- End Bambu wire-key fixtures. */

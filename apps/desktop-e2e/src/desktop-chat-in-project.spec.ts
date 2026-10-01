@@ -3,7 +3,8 @@ import { join } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
 import type { Page } from 'playwright';
-import { launchDesktopApp } from '#support/desktop-app.js';
+import { desktopE2ECompletedArtifact } from '#support/config.js';
+import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import {
   failedGatewayToolResults,
@@ -127,6 +128,9 @@ test('builds an openrscad model on disk from the project chat', async () => {
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
     await expectDesktopSurfaceBoundary(session);
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, token);
+    }
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');
@@ -241,6 +245,10 @@ test('says Save not confirmed when the gateway refuses the turn', async () => {
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, token);
+    }
+    await expectSignedIn(page);
     await selectKernel(page, 'OpenSCAD');
     await selectChatModel(page, gatewayFixtureModelName);
     await submitPrompt(page, prompt);

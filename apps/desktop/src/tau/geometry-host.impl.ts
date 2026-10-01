@@ -21,7 +21,6 @@ type RunFrame = Readonly<{
     | Readonly<{ type: 'run'; options: GeoSpecRunnerRunOptions }>
     | Readonly<{ type: 'run'; id: number; input: unknown }>;
   root?: string;
-  engine?: 'native' | 'legacy';
   runtimeConfig?: Readonly<{ tauApiUrl: string; tauWebSocketUrl: string }>;
 }>;
 
@@ -33,7 +32,6 @@ export type GeometryHostOptions = {
   readonly createRunner: (
     input: Readonly<{
       root: string;
-      engine: 'native' | 'legacy';
       runtimePort: UtilityPort;
       runtimeConfig: Readonly<{ tauApiUrl: string; tauWebSocketUrl: string }>;
     }>,
@@ -89,18 +87,15 @@ export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ han
           value = { id: diagnostic.id, type: 'result', result: await options.performance(diagnostic.input) };
         } else {
           const [runtimePort] = message.ports;
-          if (!runtimePort || !run.root || !run.runtimeConfig || !run.engine || !('options' in run.input)) {
+          if (!runtimePort || !run.root || !run.runtimeConfig || !('options' in run.input)) {
             throw new Error('The geometry suite has no authorized Runtime port or valid run options.');
           }
           current.runner = await options.createRunner({
             root: run.root,
-            engine: run.engine,
             runtimePort,
             runtimeConfig: run.runtimeConfig,
           });
-          const unsubscribers = (
-            ['run-start', 'file-start', 'file-complete', 'run-complete', 'forensic', 'abort', 'close'] as const
-          ).map((type) =>
+          const unsubscribers = (['run-start', 'file-start', 'forensic', 'abort', 'close'] as const).map((type) =>
             current.runner!.on(type, (event) => {
               options.post({
                 type: 'geometry-event',
@@ -110,13 +105,24 @@ export const createGeometryHost = (options: GeometryHostOptions): Readonly<{ han
               });
             }),
           );
+          // Full completion evidence belongs to the larger, single final-result boundary.
+          unsubscribers.push(
+            current.runner.on('file-complete', (event) => {
+              options.post({
+                type: 'geometry-event',
+                generation: current.generation,
+                requestId: current.requestId,
+                event: { type: 'file-progress', file: event.file, durationMs: event.durationMs },
+              });
+            }),
+          );
           try {
             if (current.cancelled) {
               current.runner.abort('The geometry requester cancelled.');
               throw new Error('The geometry requester cancelled before the GeoSpec suite started.');
             }
             const result = await current.runner.run(run.input.options);
-            value = { type: 'result', result, sourceRevisions: current.runner.sourceRevisions?.() ?? [] };
+            value = { type: 'result', result };
           } finally {
             for (const unsubscribe of unsubscribers) {
               unsubscribe();

@@ -6,6 +6,7 @@
 import { z } from 'zod';
 import { cloudClientEnvironmentKeys, cloudEnvironmentShape } from '#cloud/environment-billing.js';
 import type { CloudBillingEnvironment } from '#cloud/environment-billing.types.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 type RawEnvironment = Record<string, string | undefined>;
 
@@ -170,7 +171,9 @@ const resolveIsomorphicClientEnvironment = (): Partial<ClientEnvironment> => {
     return globalThis.window.ENV ?? {};
   }
 
-  /* A Web Worker has neither `window` nor `process`: it is a client without a
+  /* Desktop SPA generation runs in Node before preload injects window.ENV,
+   * but remains an unbootstrapped client, not a web server. A Web Worker has
+   * neither `window` nor `process`: it is a client without a
    * document, not a server. Treating "no window" as "node" dereferenced
    * `process.env` and threw, which is how one `ENV.TAU_DEBUG` read inside the
    * agent-host worker abandoned a queued capture job for 900 s
@@ -178,7 +181,7 @@ const resolveIsomorphicClientEnvironment = (): Partial<ClientEnvironment> => {
    * defect 1). A worker gets the same empty environment SSR would get from an
    * absent injection: `requireClientEnvironment` still names the missing key. */
   // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- globalThis.process is absent in a worker.
-  if (!globalThis.process) {
+  if (!globalThis.process || isDesktopTarget()) {
     return {};
   }
 

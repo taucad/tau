@@ -427,13 +427,8 @@ describe('paneviewStyleOverrides', () => {
     expect(paneviewStyleOverrides).toContain('--dv-sash-color:transparent');
   });
 
-  it('should set active sash color to primary', () => {
-    expect(paneviewStyleOverrides).toContain('--dv-active-sash-color:var(--primary)');
-  });
-
-  it('should include sash transition duration and delay', () => {
-    expect(paneviewStyleOverrides).toContain('--dv-active-sash-transition-duration:0.1s');
-    expect(paneviewStyleOverrides).toContain('--dv-active-sash-transition-delay:0.5s');
+  it('should leave active sash fill transparent for the shared pill paint', () => {
+    expect(paneviewStyleOverrides).toContain('--dv-active-sash-color:transparent');
   });
 
   it('should include h-full for container sizing', () => {

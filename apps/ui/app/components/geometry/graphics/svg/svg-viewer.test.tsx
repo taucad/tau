@@ -136,7 +136,9 @@ describe('SvgViewer', () => {
     };
     render(<SvgViewer artifact={styledArtifact} />);
 
-    await waitFor(() => expect(mocks.panzoom).toHaveBeenCalledOnce());
+    await waitFor(() => {
+      expect(mocks.panzoom).toHaveBeenCalledOnce();
+    });
     expect(viewerRoot().querySelector('style')?.textContent).toContain('path { stroke: blue }');
     expect(document.querySelector('style')).toBeNull();
     expect(viewerRoot().querySelector('path')).not.toBeNull();

@@ -19,6 +19,10 @@ const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockRe
 let mockKernelIssues = new Map<string, KernelIssue[]>();
 let mockLatestGeometryOutcome: 'success' | 'failure' | undefined;
 let mockCadTags = new Set<string>();
+let mockProjectRef = {};
+let mockCadParentRef = mockProjectRef;
+let mockCadId = 'cad-project_test-main.scad';
+let mockHasCadActor = true;
 let mockAgent: CadAgentConfigInput = {
   profile: 'cad',
   execution: { kind: 'tau', model: 'cookie-model' },
@@ -33,21 +37,25 @@ vi.mock('#hooks/use-project.js', () => ({
     getMainFilename: async () => 'main.scad',
     editorRef: { send: mockEditorSend },
     projectId: 'project_test',
+    projectRef: mockProjectRef,
     setFocusedChatId: mockSetFocusedChatId,
   }),
 }));
 
 vi.mock('#hooks/use-cad.js', () => ({
-  useCad: () => ({ id: 'cad-project_test-main.scad' }),
-  useCadSelector: <S,>(selector: (state: unknown) => S): S =>
-    selector({
-      context: {
-        entryPath: 'main.scad',
-        kernelIssues: mockKernelIssues,
-        latestGeometryOutcome: mockLatestGeometryOutcome,
-      },
-      hasTag: (tag: string) => mockCadTags.has(tag),
-    }),
+  useCad: () => (mockHasCadActor ? { id: mockCadId } : undefined),
+  useCadSelector: <S,>(selector: (state: unknown) => S, defaultValue: S): S =>
+    mockHasCadActor
+      ? selector({
+          context: {
+            parentRef: mockCadParentRef,
+            entryPath: 'main.scad',
+            kernelIssues: mockKernelIssues,
+            latestGeometryOutcome: mockLatestGeometryOutcome,
+          },
+          hasTag: (tag: string) => mockCadTags.has(tag),
+        })
+      : defaultValue,
 }));
 
 vi.mock('#hooks/use-chats.js', () => ({
@@ -147,11 +155,64 @@ const issue: KernelIssue = {
 };
 
 beforeEach(() => {
+  mockProjectRef = {};
+  mockCadParentRef = mockProjectRef;
+  mockCadId = 'cad-project_test-main.scad';
+  mockHasCadActor = true;
   mockLatestGeometryOutcome = undefined;
   mockCadTags = new Set();
 });
 
 describe('ChatStackTrace — canonical issue selection', () => {
+  const compileIssue: KernelIssue = {
+    message: "The name 'MissingPicoGkSymbol' does not exist in the current context",
+    code: 'RUNTIME',
+    severity: 'error',
+    type: 'compilation',
+    details: { workerCode: 'CS0103', workerType: 'syntax' },
+    location: { fileName: 'ShapeFactory.cs', startLineNumber: 14, startColumn: 80 },
+  };
+
+  it('shows the owned generated-ID CAD actor compilation issue and location', () => {
+    mockCadId = 'x:42';
+    mockKernelIssues = new Map([['main.scad', [compileIssue]]]);
+    mockLatestGeometryOutcome = 'failure';
+
+    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+
+    expect(screen.getByText(compileIssue.message)).toBeInTheDocument();
+    expect(screen.getByText('ShapeFactory.cs:14:80')).toBeInTheDocument();
+  });
+
+  it('hides a foreign parent even when the actor ID contains the current project ID', () => {
+    mockCadParentRef = {};
+    mockKernelIssues = new Map([['main.scad', [compileIssue]]]);
+
+    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+
+    expect(screen.queryByText(compileIssue.message)).not.toBeInTheDocument();
+  });
+
+  it('hides previous-project issues during a project transition', () => {
+    mockKernelIssues = new Map([['main.scad', [compileIssue]]]);
+    const { rerender } = render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+    expect(screen.getByText(compileIssue.message)).toBeInTheDocument();
+
+    mockProjectRef = {};
+    rerender(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+
+    expect(screen.queryByText(compileIssue.message)).not.toBeInTheDocument();
+  });
+
+  it('remains safe while the CAD actor is absent', () => {
+    mockHasCadActor = false;
+    mockKernelIssues = new Map([['main.scad', [compileIssue]]]);
+
+    render(<ChatStackTrace entryPath='main.scad' side='bottom' />);
+
+    expect(screen.queryByText(compileIssue.message)).not.toBeInTheDocument();
+  });
+
   it('shows connection failures selected by the CAD machine', () => {
     const connectionIssue = { ...issue, message: 'Desktop runtime connection failed' };
     mockKernelIssues = new Map([['__connection__', [connectionIssue]]]);

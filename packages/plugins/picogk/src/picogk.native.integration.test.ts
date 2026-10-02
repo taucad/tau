@@ -117,7 +117,10 @@ public static class ShapeFactory
 type ProgramFixture = {
   readonly name: string;
   readonly files: (helperScale?: number) => Record<string, string>;
-  readonly entries: ReadonlyArray<{ readonly path: string; readonly defaultSizeMm: number }>;
+  readonly entries: ReadonlyArray<{
+    readonly path: string;
+    readonly defaultSizeMm: number;
+  }>;
   readonly helper: string;
 };
 const sharedBox = (scale: number): string => `using System.Numerics;
@@ -259,7 +262,9 @@ describe('PicoGK native C# kernel', () => {
       files: { 'main.cs': parameterizedSphereSource },
     });
     try {
-      const description = await client.describe({ source: { path: 'main.cs' } });
+      const description = await client.describe({
+        source: { path: 'main.cs' },
+      });
       assert.ok(description.success);
       const manifest = description.parameters;
       const document = client.open({ source: { path: 'main.cs' } });
@@ -343,7 +348,9 @@ describe('PicoGK native C# kernel', () => {
       files: { 'main.cs': sphereSource() },
     });
     try {
-      const description = await client.describe({ source: { path: 'main.cs' } });
+      const description = await client.describe({
+        source: { path: 'main.cs' },
+      });
       assert.ok(description.success);
       const analyzed = description.parameters;
       const document = client.open({ source: { path: 'main.cs' } });
@@ -403,7 +410,9 @@ describe('PicoGK native C# kernel', () => {
         files: { 'roundtrip.stl': stl.files[0].bytes },
       });
       try {
-        const importedDocument = roundTrip.open({ source: { path: 'roundtrip.stl' } });
+        const importedDocument = roundTrip.open({
+          source: { path: 'roundtrip.stl' },
+        });
         const imported = await importedDocument.view('model').rendering();
         expect(imported.superseded).toBe(false);
         if (imported.superseded) {
@@ -492,7 +501,9 @@ describe('PicoGK native C# kernel', () => {
     };
     const client = createTestRuntimeClient({ runtime, files });
     const render = async (next: typeof files): Promise<Uint8Array<ArrayBuffer>> => {
-      const document = client.open({ source: { files: next, entry: 'main.cs' } });
+      const document = client.open({
+        source: { files: next, entry: 'main.cs' },
+      });
       try {
         const rendered = await document.view('model').rendering();
         expect(rendered.superseded).toBe(false);
@@ -633,7 +644,7 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       if (rendered.superseded) {
         throw new Error('RoverWheel render was unexpectedly superseded.');
       }
-      assert.ok(rendered.rendering.success);
+      assert.ok(rendered.rendering.success, JSON.stringify(rendered.rendering.issues));
       const glb = extractGltfFromResult(rendered.rendering);
       if (!glb) {
         throw new Error('Expected RoverWheel GLB geometry.');
@@ -655,7 +666,10 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       const client = createTestRuntimeClient({ runtime, files: files() });
       const open = (
         entry: string,
-        options: { readonly parameters?: Record<string, unknown>; readonly files?: Record<string, string> } = {},
+        options: {
+          readonly parameters?: Record<string, unknown>;
+          readonly files?: Record<string, string>;
+        } = {},
       ) =>
         client.open({
           source: { files: options.files ?? files(), entry },
@@ -709,14 +723,21 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
         await expect(widthMm(second.path, { files: files(2) })).resolves.toBeCloseTo(second.defaultSizeMm * 2, 1);
 
         // A syntax error in the other program leaves this one running, and is reported where it is.
-        const broken = { ...files(), [second.path]: `${files()[second.path]!}\nLibrary.Go(1f, () => {` };
+        const broken = {
+          ...files(),
+          [second.path]: `${files()[second.path]!}\nLibrary.Go(1f, () => {`,
+        };
         await expect(widthMm(first.path, { files: broken })).resolves.toBeCloseTo(first.defaultSizeMm, 1);
-        const brokenEvaluation = await evaluate(second.path, { files: broken });
+        const brokenEvaluation = await evaluate(second.path, {
+          files: broken,
+        });
         assert.ok(!brokenEvaluation.superseded);
         expect(brokenEvaluation.evaluation).toMatchObject({
           success: false,
           issues: expect.arrayContaining([
-            expect.objectContaining({ location: expect.objectContaining({ fileName: second.path }) }),
+            expect.objectContaining({
+              location: expect.objectContaining({ fileName: second.path }),
+            }),
           ]),
         });
 
@@ -725,7 +746,13 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
         assert.ok(!helperEvaluation.superseded);
         expect(helperEvaluation.evaluation).toMatchObject({
           success: false,
-          issues: [expect.objectContaining({ details: expect.objectContaining({ workerCode: 'CS_TAU_ENTRY' }) })],
+          issues: [
+            expect.objectContaining({
+              details: expect.objectContaining({
+                workerCode: 'CS_TAU_ENTRY',
+              }),
+            }),
+          ],
         });
       } finally {
         await client.shutdown();
@@ -741,8 +768,14 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       for (const [path, content] of Object.entries(files())) {
         write(path, content);
       }
-      const client = await createNodeClient({ runtime, projectPath: projectRoot });
-      const document = client.open({ source: { path: first.path }, watch: true });
+      const client = await createNodeClient({
+        runtime,
+        projectPath: projectRoot,
+      });
+      const document = client.open({
+        source: { path: first.path },
+        watch: true,
+      });
       const view = document.view('model');
       const renderings: unknown[] = [];
       const stopRendering = view.on('rendered', (rendering) => renderings.push(rendering));

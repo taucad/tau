@@ -26,8 +26,8 @@ public sealed partial class WorkerTests
             }
             var component = Assert.Single(backend.Extract().Components);
             Assert.Equal("Owned cube", component.Name);
-            Assert.Equal(9f, component.Positions.Where((_, index) => index % 3 == 0).Min());
-            Assert.Equal(11f, component.Positions.Where((_, index) => index % 3 == 0).Max());
+            Assert.Equal(9f, WorldPositions(component).Where((_, index) => index % 3 == 0).Min());
+            Assert.Equal(11f, WorldPositions(component).Where((_, index) => index % 3 == 0).Max());
             Assert.Equal(36, component.Indices.Length);
             Assert.Throws<ObjectDisposedException>(() => backend.Add(mesh, 0));
             backend.Remove(mesh);

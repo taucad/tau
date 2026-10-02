@@ -241,6 +241,16 @@ export class ExternalChangeIngest {
    */
   public async syncRoots(roots: readonly StagedDiscoveryRoot[]): Promise<void> {
     const retainedKeys = new Set(roots.map(({ storageRootKey }) => storageRootKey));
+    await Promise.all(
+      [...this._observedExternalRoots.values()]
+        .filter((state) => state.directoryHandle === undefined && !state.nativeActive)
+        .map(async (state) => {
+          await state.tail;
+          if (this._observedExternalRoots.get(state.storageRootKey) === state && !state.nativeActive) {
+            this.disconnectRoot(state.storageRootKey);
+          }
+        }),
+    );
     for (const storageRootKey of this._observedExternalRoots.keys()) {
       if (!retainedKeys.has(storageRootKey)) {
         this.disconnectRoot(storageRootKey);
@@ -258,6 +268,7 @@ export class ExternalChangeIngest {
           }
         }),
     );
+    const requiredAdmissions: Array<Promise<void>> = [];
     for (const addition of additions) {
       if (addition === undefined) {
         continue;
@@ -277,8 +288,12 @@ export class ExternalChangeIngest {
         tail: Promise.resolve(),
       };
       this._observedExternalRoots.set(storageRootKey, state);
-      this._armObservation(state);
+      const admission = this._armObservation(state);
+      if (directoryHandle === undefined) {
+        requiredAdmissions.push(admission);
+      }
     }
+    await Promise.all(requiredAdmissions);
   }
 
   /**
@@ -291,58 +306,73 @@ export class ExternalChangeIngest {
    *
    * @param state - The observed-root record this call owns.
    */
-  private _armObservation(state: ObservedExternalRoot): void {
+  private async _armObservation(state: ObservedExternalRoot): Promise<void> {
     const { storageRootKey, provider } = state;
     const { observe } = provider;
     if (observe === undefined) {
       return;
     }
     const pending: PathChangeFact[] = [];
-    // async-iife: bootstrap — arming may cross a process boundary; mounting must not block on it.
-    void (async () => {
-      try {
-        const unobserve = await observe.call(provider, (facts) => {
-          if (this._observedExternalRoots.get(storageRootKey) !== state) {
-            return;
-          }
-          if (facts.some(({ kind }) => kind === 'reset')) {
-            this._disableNativeObservation(state);
-            return;
-          }
-          const pathFacts = facts.filter((fact): fact is PathChangeFact => fact.kind !== 'reset');
-          if (!state.nativeActive) {
-            pending.push(...pathFacts);
-            return;
-          }
-          if (state.unobserve === undefined) {
-            return;
-          }
-          // async-iife: An observer callback cannot await its own serialization.
-          void this._handleExternalFacts(state, pathFacts);
-        });
-        if (unobserve === undefined) {
+    let pendingReset = false;
+    try {
+      const unobserve = await observe.call(provider, (facts) => {
+        if (this._observedExternalRoots.get(storageRootKey) !== state) {
           return;
         }
+        if (facts.some(({ kind }) => kind === 'reset')) {
+          if (state.nativeActive) {
+            this._disableNativeObservation(state);
+          } else {
+            pendingReset = true;
+          }
+          return;
+        }
+        const pathFacts = facts.filter((fact): fact is PathChangeFact => fact.kind !== 'reset');
+        if (!state.nativeActive) {
+          pending.push(...pathFacts);
+          return;
+        }
+        if (state.unobserve === undefined) {
+          return;
+        }
+        // async-iife: An observer callback cannot await its own serialization.
+        void this._handleExternalFacts(state, pathFacts);
+      });
+      if (unobserve === undefined) {
+        return;
+      }
+      if (this._observedExternalRoots.get(storageRootKey) !== state) {
+        unobserve();
+        return;
+      }
+      state.unobserve = unobserve;
+      await this._queueExternalRootOperation(state, async () => {
         if (this._observedExternalRoots.get(storageRootKey) !== state) {
           unobserve();
           return;
         }
-        state.unobserve = unobserve;
-        await this._queueExternalRootOperation(state, async () => {
-          if (this._observedExternalRoots.get(storageRootKey) !== state) {
-            unobserve();
-            return;
-          }
-          state.nativeActive = true;
-          if (pending.length > 0) {
-            await this._applyExternalFacts(state, pending.splice(0));
-          }
-        });
-        await this._pollExternalRoot(state);
-      } catch {
-        this._disableNativeObservation(state);
+        if (pendingReset) {
+          await state.provider.refresh?.();
+          this._invalidateExternalDerivatives();
+          this._emitExternalRootSummaries(state);
+          this._emitGlobalDiscoveryChange(state);
+        }
+        state.nativeActive = true;
+        if (pending.length > 0) {
+          await this._applyExternalFacts(state, pending.splice(0));
+        }
+      });
+      await this._pollExternalRoot(state);
+    } catch (error) {
+      this._disableNativeObservation(state);
+      if (state.directoryHandle === undefined) {
+        await state.tail;
+        if (this._observedExternalRoots.get(storageRootKey) === state) {
+          this.disconnectRoot(storageRootKey);
+        }
+        throw error;
       }
-    })();
+    }
   }
 
   private async _handleExternalFacts(state: ObservedExternalRoot, facts: readonly PathChangeFact[]): Promise<void> {

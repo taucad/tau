@@ -97,7 +97,7 @@ export type ComposedViewOverlay = Readonly<{
 
 /** Optional watch surface a rooted filesystem brings to the view. @public */
 type WatchableFileSystem = {
-  watch(request: WatchRequest, handler: (event: WatchEvent) => void): () => void;
+  watch(request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) | Promise<() => void>;
 };
 
 /**
@@ -921,7 +921,7 @@ export const composeView = (checkout: ComposedViewCheckout, options: ComposedVie
            * stream carries only what this view would serve. The base's own
            * disposer is returned as it is, so a `watch` that answers a promise of
            * one (`NodeFsProviderClient`) keeps working. */
-          watch: (request: WatchRequest, handler: (event: WatchEvent) => void) =>
+          watch: (request: WatchRequest, handler: (event: WatchEvent) => void): (() => void) | Promise<() => void> =>
             base.watch!(
               { ...request, paths: request.paths.map((path) => readablePath(canonical(path))) },
               (event: WatchEvent) => {

@@ -30,7 +30,7 @@ import fs from 'node:fs/promises';
 import { readdirSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
@@ -45,6 +45,7 @@ import { _fromMemoryFsHandle } from '#transport/_internal/from-memory-fs-handle.
 import { _fromNodeFsHandle } from '#transport/_internal/from-node-fs-handle.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
+import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { RuntimeFileSystemBase, RuntimeWatchEvent } from '#types/runtime-kernel.types.js';
 
 // ---------------------------------------------------------------------------
@@ -653,26 +654,37 @@ describe.each(rows.filter((row) => runs(row, 'watch')))('$name adapter watch con
         recursive: true,
       });
 
-      const unsubscribe = fileSystem.watch!(
+      const registration = (fileSystem as RuntimeFileSystemBase & WorkerFileSystemProxy).watchReady!(
         {
           paths: ['watched.txt', '.tau/cache/artifact.bin'],
           excludes: ['.tau/cache/**'],
         },
         (event) => events.push(event),
       );
+      await registration.ready;
+      const { unsubscribe } = registration;
 
       await fs.writeFile(path.join(directory, 'watched.txt'), 'two');
-      await settle();
-      expect(events.some((event) => event.type === 'change' && event.path === 'watched.txt')).toBe(true);
+      await vi.waitFor(
+        () => {
+          expect(events.some((event) => event.type === 'change' && event.path === 'watched.txt')).toBe(true);
+        },
+        { timeout: 9000 },
+      );
 
       events.length = 0;
       await fs.writeFile(path.join(directory, '.tau', 'cache', 'artifact.bin'), 'cached');
       await settle();
-      expect(events).toEqual([]);
+      // A delayed duplicate for watched.txt is allowed; an excluded path or reset is not.
+      expect(events.every((event) => event.type === 'change' && event.path === 'watched.txt')).toBe(true);
 
       await fs.rm(path.join(directory, 'watched.txt'));
-      await settle();
-      expect(events.some((event) => event.type === 'delete' && event.path === 'watched.txt')).toBe(true);
+      await vi.waitFor(
+        () => {
+          expect(events.some((event) => event.type === 'delete' && event.path === 'watched.txt')).toBe(true);
+        },
+        { timeout: 9000 },
+      );
 
       expect(() => {
         unsubscribe();

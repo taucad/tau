@@ -197,7 +197,7 @@ describe('masked path reachability through the authority-global surface', () => 
     vi.useFakeTimers();
     const received: WatchEvent[] = [];
     const view = projectView('agent');
-    const unsubscribe = view.watch!({ paths: [''], recursive: true }, (event) => {
+    const unsubscribe = await view.watch!({ paths: [''], recursive: true }, (event) => {
       received.push(event);
     });
 
@@ -212,9 +212,9 @@ describe('masked path reachability through the authority-global surface', () => 
     }
 
     expect(received).toEqual([{ type: 'change', path: 'src/main.ts' }]);
-    expect(() => view.watch!({ paths: ['.git'] }, () => undefined)).toThrow(
-      expect.objectContaining({ code: 'EPERM', reason: maskedPathCode }),
-    );
+    expect(() => {
+      void view.watch!({ paths: ['.git'] }, () => undefined);
+    }).toThrow(expect.objectContaining({ code: 'EPERM', reason: maskedPathCode }));
   });
 
   /* Flipped by W4: the search a consumer reaches is `search` on the rooted

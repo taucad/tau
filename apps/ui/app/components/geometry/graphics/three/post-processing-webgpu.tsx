@@ -279,9 +279,34 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
     };
   }, [gl, invalidate, scene, toneMapping, withAo]);
 
+  const updateAoSettings = useCallback(
+    (selected: PostProcessingPipelineResources): void => {
+      if (!selected.aoNode) {
+        return;
+      }
+      selected.aoNode.scale.value = gtaoIntensity;
+      selected.aoNode.distanceFallOff.value = gtaoDistanceFalloff;
+      selected.displayMode.value = aoDisplayModes[displayMode];
+      selected.compositeStage.value = aoCompositeStage === 'display' ? 1 : 0;
+      updateGtaoSpatialScale({
+        at: targetRef.current,
+        resources: [selected],
+        size,
+        viewport,
+        radiusCssPixels: resolveAoRadiusCssPixels(radiusCssPixels, { ...size, dpr: viewport.dpr }),
+      });
+      selected.updateAoCamera?.();
+    },
+    [aoCompositeStage, displayMode, gtaoDistanceFalloff, gtaoIntensity, radiusCssPixels, size, viewport],
+  );
+
   useLayoutEffect(() => {
+    const selected = resourcesRef.current.get(selectedCameraRef.current);
+    if (selected) {
+      updateAoSettings(selected);
+    }
     invalidate();
-  }, [aoCompositeStage, displayMode, gtaoDistanceFalloff, gtaoIntensity, invalidate, radiusCssPixels, size]);
+  }, [invalidate, updateAoSettings]);
 
   const retarget = useCallback(
     (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
@@ -326,20 +351,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
       });
       resourcesRef.current.set(camera, selected);
     }
-    if (selected.aoNode) {
-      selected.aoNode.scale.value = gtaoIntensity;
-      selected.aoNode.distanceFallOff.value = gtaoDistanceFalloff;
-      selected.displayMode.value = aoDisplayModes[displayMode];
-      selected.compositeStage.value = aoCompositeStage === 'display' ? 1 : 0;
-      updateGtaoSpatialScale({
-        at: targetRef.current,
-        resources: [selected],
-        size,
-        viewport,
-        radiusCssPixels: resolveAoRadiusCssPixels(radiusCssPixels, { ...size, dpr: viewport.dpr }),
-      });
-      selected.updateAoCamera?.();
-    }
+    updateAoSettings(selected);
     (selected.outputQuad ?? selected.outputQuadWithoutAo).render(state.gl as unknown as WebGPURenderer);
   }, 1);
   return null;

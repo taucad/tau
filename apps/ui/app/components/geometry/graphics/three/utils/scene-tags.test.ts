@@ -12,7 +12,8 @@ describe('scene-tags', () => {
     it('should expose all expected tag keys with stable string values', () => {
       expect(sceneTag.sectionViewHelper).toBe('isSectionViewHelper');
       expect(sceneTag.measurementUi).toBe('isMeasurementUi');
-      expect(Object.keys(sceneTag)).toHaveLength(2);
+      expect(sceneTag.gltfSurfacePresentation).toBe('isGltfSurfacePresentation');
+      expect(Object.keys(sceneTag)).toHaveLength(3);
     });
   });
 

@@ -342,6 +342,50 @@ describe('mesh measurement features', () => {
     expect(visibleSurface.mock.calls.length).toBeLessThanOrEqual(32);
   });
 
+  it('should read indexed source edges and invalidate changed index identity or version', () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([0, 0, 0, 1, 0, 0, 0, 2, 0], 3));
+    geometry.setIndex([0, 2]);
+    const line = new THREE.LineSegments(geometry);
+    line.userData['measurementFeatures'] = { kind: 'line', edges: [{ id: 'edge', start: 0, count: 2 }] };
+    const points = (graph: MeshFeatureGraph): number[][] => {
+      const edge = graph.features[0];
+      if (edge?.kind !== 'edge') {
+        throw new Error('Expected indexed edge');
+      }
+      return edge.points.map((point) => point.toArray());
+    };
+    const first = getLineMeasurementFeatures(line);
+    expect(points(first)).toEqual([
+      [0, 0, 0],
+      [0, 2, 0],
+    ]);
+    expect(getLineMeasurementFeatures(line)).toBe(first);
+    geometry.index!.setX(1, 1);
+    geometry.index!.needsUpdate = true;
+    const changed = getLineMeasurementFeatures(line);
+    expect(changed).not.toBe(first);
+    expect(points(changed)).toEqual([
+      [0, 0, 0],
+      [1, 0, 0],
+    ]);
+    geometry.setIndex([2, 0]);
+    expect(points(getLineMeasurementFeatures(line))).toEqual([
+      [0, 2, 0],
+      [0, 0, 0],
+    ]);
+    geometry.setIndex([0, 9]);
+    expect(getLineMeasurementFeatures(line).features).toEqual([]);
+    geometry.dispose();
+    if (Array.isArray(line.material)) {
+      for (const material of line.material) {
+        material.dispose();
+      }
+    } else {
+      line.material.dispose();
+    }
+  });
+
   it('should reconstruct a grouped CAD edge from fat-line source segments', () => {
     const geometry = new LineSegmentsGeometry().setPositions([0, 0, 0, 1, 0, 0, 1, 0, 0, 2, 0, 0]);
     const line = new LineSegments2(geometry);

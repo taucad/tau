@@ -63,7 +63,7 @@ vi.mock('#hooks/use-project.js', () => ({
     projectId: project.id,
     projectRef,
     editorRef,
-    entriesRecord: { version: 1, entries: { 'main.ts': { operationTimeout: 30_000 } } },
+    entriesRecord: { version: 1, entries: { 'main.ts': { renderTimeout: 30_000 } } },
   }),
 }));
 

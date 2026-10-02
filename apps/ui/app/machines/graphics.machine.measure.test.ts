@@ -15,6 +15,20 @@ const startMeasuring = () => {
 };
 
 describe('graphics machine measure', () => {
+  it('should invalidate pickable inventories on every line visibility transition', () => {
+    const actor = startMeasuring();
+    try {
+      const initial = actor.getSnapshot().context.pickableMeshesVersion;
+      for (const [offset, visible] of [false, true, false, true].entries()) {
+        actor.send({ type: 'setLinesVisibility', payload: visible });
+        expect(actor.getSnapshot().context.enableLines).toBe(visible);
+        expect(actor.getSnapshot().context.pickableMeshesVersion).toBe(initial + offset + 1);
+      }
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('should retain an empty measurement list through inactive invalidations', () => {
     const actor = startMeasuring();
     try {

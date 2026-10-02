@@ -171,7 +171,11 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
       expect(head.headers.get('etag')).toBe(etag);
       expect(head.headers.get('content-length')).toBe(String(statSync(sidecar).size));
 
-      const fresh = await fetch(url, { headers: { 'accept-encoding': 'br', 'if-none-match': etag } });
+      // Explicit revalidation avoids Fetch's default no-store request, which Express treats as a forced reload.
+      const fresh = await fetch(url, {
+        cache: 'no-cache',
+        headers: { 'accept-encoding': 'br', 'if-none-match': etag },
+      });
       expect(fresh.status).toBe(304);
       expect(fresh.headers.get('etag')).toBe(etag);
 

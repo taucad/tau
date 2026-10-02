@@ -1,8 +1,8 @@
 /** Exact document/view source revisions and separate pinned-export/export dependencies (R4/I5). */
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, it, expect, vi } from 'vitest';
-import { digestContent } from '@taucad/cache-core';
 import { z } from 'zod';
+import { digestContent } from '@taucad/cache-core';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
@@ -65,13 +65,13 @@ const createHarness = async (
     name: 'Provenance',
     version: '1.0.0',
     views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
-    evaluateOptionsSchema: options.construction ? z.object({ quality: z.number().default(1) }) : undefined,
+    evaluateOptionsSchema: z.object({ size: z.number().default(1), quality: z.number().default(1) }),
     exports: {
       text: {
         title: 'Text',
         mimeType: 'text/plain',
         extension: 'txt',
-        ...(options.construction ? { optionsSchema: z.object({ quality: z.number().default(1) }) } : {}),
+        optionsSchema: z.object({ size: z.number().optional(), quality: z.number().optional() }),
       },
     },
     async initialize() {
@@ -143,12 +143,15 @@ const createHarness = async (
   };
   const render = async () => {
     const events: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    const subscriptionId = `view-${intent}`;
     worker.onRendered = (event) => {
-      events.push(event);
+      if (event.subscriptionId === subscriptionId) {
+        events.push(event);
+      }
     };
     worker.handleOpenView({
       documentId: 'live',
-      subscriptionId: `view-${intent}`,
+      subscriptionId,
       requestId: `request-${intent}`,
       view: 'model',
     });
@@ -295,6 +298,77 @@ describe('document results name the source revision they evaluated (R4)', () => 
     expect(result).toMatchObject({ success: false, issues: [{ code: 'SOURCE_SNAPSHOT_CHANGED' }] });
     expect(counts.evaluations).toBe(1);
     expect(counts.writes).toBe(0);
+  });
+
+  it('keeps a live document export pinned after its source file changes', async () => {
+    const { worker, files, counts, evaluate, freshExport } = await createHarness({ 'main.ts': 'first' });
+    const committed = await evaluate();
+    const first = await worker.exportDocument({ documentId: 'live', operationId: 'first', target: 'text' });
+    files.set('main.ts', 'second');
+    const second = await worker.exportDocument({ documentId: 'live', operationId: 'second', target: 'text' });
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    if (!first.success || !second.success) {
+      throw new Error('Expected exports from the committed document');
+    }
+    expect(new TextDecoder().decode(second.files[0].bytes)).toBe('first');
+    expect(second.sourceRevision).toEqual(committed.sourceRevision);
+    expect(counts.evaluations).toBe(1);
+
+    const fresh = await freshExport();
+    expect(fresh.success).toBe(true);
+    if (!fresh.success) {
+      throw new Error('Expected a new document export');
+    }
+    expect(new TextDecoder().decode(fresh.files[0].bytes)).toBe('second');
+  });
+
+  it('restores a pinned serialized handle after its source file changes', async () => {
+    const { worker, files, counts, evaluate } = await createHarness({ 'main.ts': 'first' });
+    await evaluate();
+    // @ts-expect-error Runtime-private materialized artifact fixture.
+    const artifact: MaterializedRender = worker.documents.get('live')?.current?.artifact;
+    expect(artifact).toBeDefined();
+    artifact.liveNativeHandleSlot = undefined;
+    files.set('main.ts', 'second');
+
+    const result = await worker.exportDocument({ documentId: 'live', operationId: 'restored', target: 'text' });
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error('Expected export from the committed serialized handle');
+    }
+    expect(new TextDecoder().decode(result.files[0].bytes)).toBe('first');
+    expect(counts.evaluations).toBe(1);
+  });
+
+  it('refuses to rebuild a missing pinned handle after its source file changes', async () => {
+    const { worker, files, counts, evaluate } = await createHarness({ 'main.ts': 'first' });
+    await evaluate();
+    // @ts-expect-error Runtime-private materialized artifact fixture.
+    const artifact: MaterializedRender = worker.documents.get('live')?.current?.artifact;
+    expect(artifact).toBeDefined();
+    artifact.liveNativeHandleSlot = undefined;
+    artifact.serializedNativeHandleSlot = undefined;
+    files.set('main.ts', 'second');
+
+    const result = await worker.exportDocument({ documentId: 'live', operationId: 'missing-handle', target: 'text' });
+    expect(result).toMatchObject({ success: false, issues: [{ code: 'SOURCE_SNAPSHOT_CHANGED' }] });
+    expect(counts.evaluations).toBe(1);
+  });
+
+  it('refuses a changed native construction route after its source file changes', async () => {
+    const { worker, files, counts, evaluate } = await createHarness({ 'main.ts': 'first' });
+    await evaluate();
+    files.set('main.ts', 'second');
+
+    const result = await worker.exportDocument({
+      documentId: 'live',
+      operationId: 'changed-construction',
+      target: 'text',
+      options: { size: 2 },
+    });
+    expect(result).toMatchObject({ success: false, issues: [{ code: 'SOURCE_SNAPSHOT_CHANGED' }] });
+    expect(counts.evaluations).toBe(1);
   });
 
   it('measures scoped export admission and export freshness without treating evaluation provenance as the export key', async () => {

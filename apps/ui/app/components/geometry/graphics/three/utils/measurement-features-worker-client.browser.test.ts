@@ -68,7 +68,10 @@ describe('cold mesh measurement graph worker', () => {
     scanCanvas.width = 800;
     scanCanvas.height = 600;
     const sliceDurations: number[] = [];
-    for (let offset = 0; offset < 10_000; offset += 32) {
+    const scanBatch = async (offset: number): Promise<void> => {
+      if (offset >= 10_000) {
+        return;
+      }
       const scanStart = performance.now();
       listMeasurementTargets(
         { ...workerGraph!, features: workerGraph!.features.slice(offset, offset + 32) },
@@ -84,7 +87,9 @@ describe('cold mesh measurement graph worker', () => {
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 0);
       });
-    }
+      await scanBatch(offset + 32);
+    };
+    await scanBatch(0);
     const orderedSlices = sliceDurations.toSorted((a, b) => a - b);
     const sliceP95 = orderedSlices[Math.floor(orderedSlices.length * 0.95)]!;
     const largestSlice = orderedSlices.at(-1)!;

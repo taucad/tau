@@ -379,12 +379,7 @@ describe('section surface topology', () => {
   });
 
   it('closes every admitted cut in the reduced Racing Drone conformance fixture', async () => {
-    const bytes = await readFile(
-      resolve(
-        import.meta.dirname,
-        '../../../../../../../../repos/nanoraster/tests/fixtures/racing-drone-section-repro.glb',
-      ),
-    );
+    const bytes = await readFile(resolve(import.meta.dirname, './fixtures/racing-drone-section-repro.glb'));
     const gltf = await new GLTFLoader().parseAsync(Uint8Array.from(bytes).buffer, '');
     await registerGltfSectionSurfaceSources({
       scene: gltf.scene,

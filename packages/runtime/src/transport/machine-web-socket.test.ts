@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { WebSocketLike } from '@taucad/rpc';
 import { ChannelClosedError } from '@taucad/rpc';
+import type { WebSocketLike } from '@taucad/rpc';
 
 import { prepareMachineWebSocket } from '#transport/machine-web-socket.js';
 

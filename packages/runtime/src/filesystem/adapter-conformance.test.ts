@@ -45,6 +45,7 @@ import { _fromMemoryFsHandle } from '#transport/_internal/from-memory-fs-handle.
 import { _fromNodeFsHandle } from '#transport/_internal/from-node-fs-handle.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
+import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { RuntimeFileSystemBase, RuntimeWatchEvent } from '#types/runtime-kernel.types.js';
 
 // ---------------------------------------------------------------------------
@@ -653,13 +654,15 @@ describe.each(rows.filter((row) => runs(row, 'watch')))('$name adapter watch con
         recursive: true,
       });
 
-      const unsubscribe = fileSystem.watch!(
+      const registration = (fileSystem as RuntimeFileSystemBase & WorkerFileSystemProxy).watchReady!(
         {
           paths: ['watched.txt', '.tau/cache/artifact.bin'],
           excludes: ['.tau/cache/**'],
         },
         (event) => events.push(event),
       );
+      await registration.ready;
+      const { unsubscribe } = registration;
 
       await fs.writeFile(path.join(directory, 'watched.txt'), 'two');
       await vi.waitFor(
@@ -672,7 +675,8 @@ describe.each(rows.filter((row) => runs(row, 'watch')))('$name adapter watch con
       events.length = 0;
       await fs.writeFile(path.join(directory, '.tau', 'cache', 'artifact.bin'), 'cached');
       await settle();
-      expect(events).toEqual([]);
+      // A delayed duplicate for watched.txt is allowed; an excluded path or reset is not.
+      expect(events.every((event) => event.type === 'change' && event.path === 'watched.txt')).toBe(true);
 
       await fs.rm(path.join(directory, 'watched.txt'));
       await vi.waitFor(

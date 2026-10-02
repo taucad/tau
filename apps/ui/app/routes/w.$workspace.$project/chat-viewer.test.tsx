@@ -1,6 +1,6 @@
 import type { MockInstance } from 'vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
-import { act, render, screen, fireEvent } from '@testing-library/react';
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { Profiler, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { createActor, createAsyncLogic } from 'xstate';
@@ -17,6 +17,7 @@ import type { GraphicsViewSettings, PinnedMeasurement } from '#constants/editor.
 import type { cadMachine } from '#machines/cad.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { ModelInteractionContext } from '#machines/model-interaction.machine.js';
+import type { PartThumbnailService, PartThumbnailState } from '#services/part-thumbnail.service.js';
 const mockViewActions = vi.hoisted(() => ({
   edit: vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true),
   remove: vi.fn<(...args: unknown[]) => Promise<boolean>>(async () => true),
@@ -55,7 +56,14 @@ const subscribeGraphics = (listener: () => void): (() => void) => {
     mockGraphicsListeners.delete(listener);
   };
 };
-const mockGltfPresentation = { presentedKey: undefined };
+const mockGltfPresentation: { presentedKey: string | undefined } = { presentedKey: undefined };
+const presentPreviewSource = (artifact: Artifact, key: string): void => {
+  mockGraphicsProjection = { artifact, artifactKey: key };
+  mockGltfPresentation.presentedKey = key;
+  for (const listener of mockGraphicsListeners) {
+    listener();
+  }
+};
 let mockCaptureRendering: (() => Promise<Rendering>) | undefined;
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockViewSettings: Record<
@@ -70,7 +78,7 @@ let mockViewSettings: Record<
 let mockCameraSeed: unknown;
 /** A mounted provider is what acquires the view's camera session (R8). */
 let mockGraphicsProviderMounts = 0;
-let mockUnitSettings: Record<string, { operationTimeout: number }> = {};
+let mockUnitSettings: Record<string, { renderTimeout: number }> = {};
 let mockFileTree: Map<string, { type: 'file' | 'dir'; name: string }>;
 let mockFileContent: { kind: string; text?: string };
 let mockMainEntryPath = 'main.scad';
@@ -79,6 +87,8 @@ let mockSyncStatus: { readonly sync: { readonly state: 'checking' | 'backedUp' }
 };
 const mockSyncListeners = new Set<() => void>();
 let mockHoveredComponentId: string | undefined;
+let mockPreviewService: PartThumbnailService | undefined;
+let mockPreviewEnabled = false;
 let mockAreToolsRunning = false;
 let mockCadViewerSecondaryPointerMode: 'component-hit' | 'suppressed';
 let mockCadViewerProps:
@@ -163,6 +173,7 @@ function createManifest(): GeometryComponentManifest {
         meshNodeIndices: [0],
         primitiveIndices: [0],
         materialIndices: [0],
+        ...(mockPreviewEnabled ? { primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }] } : {}),
         capabilities: componentCapabilities,
       },
     },
@@ -338,6 +349,18 @@ vi.mock('#hooks/use-project.js', () => ({
   }),
 }));
 
+vi.mock('#providers/part-thumbnail-provider.js', () => ({
+  useOptionalPartThumbnailService: () => mockPreviewService,
+}));
+
+const mockCanonicalPartPreviews = vi.hoisted(() =>
+  vi.fn(async () => ({ previews: [{ key: 'preview-key' }], visualKey: 'preview-key' })),
+);
+vi.mock('#services/part-thumbnail-visual.js', () => ({
+  canonicalPartPreviews: mockCanonicalPartPreviews,
+  sourceGlbDigest: async () => 'sha256:viewer-preview',
+}));
+
 vi.mock('#hooks/use-revision-status.js', () => ({
   useRevisionStatus: () =>
     useSyncExternalStore(
@@ -490,6 +513,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockEditorSend.mockClear();
     mockGraphicsSend.mockClear();
     mockGraphicsProjection = { artifact: mockRendering.artifact, artifactKey: mockRendering.hash };
+    mockGltfPresentation.presentedKey = undefined;
     mockGraphicsSend.mockImplementation((event: { type: string; artifact?: Artifact; hash?: string }) => {
       if (event.type !== 'updateArtifact' && event.type !== 'clearArtifact') {
         return;
@@ -523,6 +547,13 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockSyncListeners.clear();
     mockUnitSettings = {};
     mockHoveredComponentId = undefined;
+    mockPreviewService = undefined;
+    mockPreviewEnabled = false;
+    mockCanonicalPartPreviews.mockReset();
+    mockCanonicalPartPreviews.mockImplementation(async () => ({
+      previews: [{ key: 'preview-key' }],
+      visualKey: 'preview-key',
+    }));
     mockAreToolsRunning = false;
     mockCadViewerSecondaryPointerMode = 'component-hit';
     mockCadViewerProps = undefined;
@@ -988,7 +1019,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
         graphicsSettings: { ...defaultGraphicsSettings },
       },
     };
-    mockUnitSettings = { [helperEntryPath]: { operationTimeout: 30_000 } };
+    mockUnitSettings = { [helperEntryPath]: { renderTimeout: 30_000 } };
     const cadActor = createMockCadActor();
     mockGeometryUnits.set(helperEntryPath, cadActor);
 
@@ -1309,6 +1340,144 @@ describe('ChatViewer reopen-renderer overlay', () => {
       entryPath: helperEntryPath,
       unitId: helperUnitId,
       componentId: rightRimComponentId,
+    });
+  });
+
+  it('submits one manual preview request for each completed retry in the viewer menu', async () => {
+    mockPreviewEnabled = true;
+    presentPreviewSource(mockRendering.artifact, mockRendering.hash);
+    const requestForOwner = vi.fn();
+    const failedSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map([
+      [rightRimComponentId, { status: 'failed' }],
+    ]);
+    mockPreviewService = {
+      subscribe: () => () => undefined,
+      snapshot: () => failedSnapshot,
+      announcePresentedSource: vi.fn(),
+      releaseOwner: vi.fn(),
+      requestForOwner,
+      dispose: vi.fn(),
+    } as unknown as PartThumbnailService;
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    const openMenu = (): void => {
+      const canvas = screen.getByTestId('cad-viewer-canvas');
+      fireCanvasPointerEvent(canvas, 'pointerdown', { button: 2, pointerId: 31, clientX: 150, clientY: 180 });
+      fireCanvasPointerEvent(canvas, 'pointerup', { button: 2, pointerId: 31, clientX: 151, clientY: 181 });
+    };
+    openMenu();
+    await waitFor(() => {
+      expect(requestForOwner).toHaveBeenCalled();
+    });
+    for (const count of [1, 2]) {
+      // oxlint-disable-next-line no-await-in-loop -- The previous failed manual preview must settle before retrying again.
+      fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
+      // oxlint-disable-next-line no-await-in-loop -- Count completed manual admissions in order.
+      await waitFor(() => {
+        expect(requestForOwner.mock.calls.filter((call) => call[3]?.manualPartId === rightRimComponentId)).toHaveLength(
+          count,
+        );
+      });
+      if (count === 1) {
+        openMenu();
+      }
+    }
+  });
+
+  it('resumes an unsubmitted retry for the same source and drops it after a source change', async () => {
+    mockPreviewEnabled = true;
+    presentPreviewSource(mockRendering.artifact, mockRendering.hash);
+    const requestForOwner = vi.fn();
+    const announcePresentedSource = vi.fn();
+    const failedSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map([
+      [rightRimComponentId, { status: 'failed' }],
+    ]);
+    mockPreviewService = {
+      subscribe: () => () => undefined,
+      snapshot: () => failedSnapshot,
+      announcePresentedSource,
+      releaseOwner: vi.fn(),
+      requestForOwner,
+      dispose: vi.fn(),
+    } as unknown as PartThumbnailService;
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor());
+    const tree = (profile: 'editor' | 'shared' = 'editor') => (
+      <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile={profile} />
+    );
+    const view = render(tree());
+    const openMenu = (): void => {
+      const canvas = screen.getByTestId('cad-viewer-canvas');
+      fireCanvasPointerEvent(canvas, 'pointerdown', { button: 2, pointerId: 32, clientX: 150, clientY: 180 });
+      fireCanvasPointerEvent(canvas, 'pointerup', { button: 2, pointerId: 32, clientX: 151, clientY: 181 });
+    };
+    const manualCalls = () =>
+      requestForOwner.mock.calls.filter((call) => call[3]?.manualPartId === rightRimComponentId);
+    openMenu();
+    await waitFor(() => {
+      expect(requestForOwner).toHaveBeenCalled();
+    });
+
+    const canceled = Promise.withResolvers<{ previews: Array<{ key: string }>; visualKey: string }>();
+    const beforeRetry = mockCanonicalPartPreviews.mock.calls.length;
+    mockCanonicalPartPreviews.mockImplementation(async () => canceled.promise);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
+    await waitFor(() => {
+      expect(mockCanonicalPartPreviews.mock.calls.length).toBeGreaterThan(beforeRetry);
+    });
+    mockCanonicalPartPreviews.mockImplementation(async () => ({
+      previews: [{ key: 'preview-key' }],
+      visualKey: 'preview-key',
+    }));
+    act(() => {
+      presentPreviewSource({ ...mockArtifact }, mockRendering.hash);
+    });
+    view.rerender(tree('shared'));
+    await waitFor(() => {
+      expect(manualCalls()).toHaveLength(1);
+    });
+    await act(async () => {
+      canceled.resolve({ previews: [{ key: 'preview-key' }], visualKey: 'preview-key' });
+      await canceled.promise;
+    });
+    expect(manualCalls()).toHaveLength(1);
+
+    openMenu();
+    const stale = Promise.withResolvers<{ previews: Array<{ key: string }>; visualKey: string }>();
+    const beforeStaleRetry = mockCanonicalPartPreviews.mock.calls.length;
+    mockCanonicalPartPreviews.mockImplementation(async () => stale.promise);
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
+    await waitFor(() => {
+      expect(mockCanonicalPartPreviews.mock.calls.length).toBeGreaterThan(beforeStaleRetry);
+    });
+    mockCanonicalPartPreviews.mockImplementation(async () => ({
+      previews: [{ key: 'preview-key' }],
+      visualKey: 'preview-key',
+    }));
+    act(() => {
+      presentPreviewSource({ ...mockArtifact }, 'new-source');
+    });
+    view.rerender(tree());
+    await act(async () => {
+      stale.resolve({ previews: [{ key: 'preview-key' }], visualKey: 'preview-key' });
+      await stale.promise;
+    });
+    expect(manualCalls()).toHaveLength(1);
+    view.rerender(tree());
+    expect(manualCalls()).toHaveLength(1);
+    const beforeReturn = announcePresentedSource.mock.calls.length;
+    act(() => {
+      presentPreviewSource({ ...mockArtifact }, mockRendering.hash);
+    });
+    view.rerender(tree('shared'));
+    await waitFor(() => {
+      expect(announcePresentedSource.mock.calls.length).toBeGreaterThan(beforeReturn);
+    });
+    expect(manualCalls()).toHaveLength(1);
+    openMenu();
+    fireEvent.click(await screen.findByRole('menuitem', { name: 'Retry preview' }));
+    await waitFor(() => {
+      expect(manualCalls()).toHaveLength(2);
     });
   });
 

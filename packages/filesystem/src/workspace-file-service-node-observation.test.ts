@@ -6,7 +6,7 @@
  * `FileSystemObserver` records take for webaccess roots.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -16,6 +16,7 @@ import { ProviderRegistry } from '#provider-registry.js';
 import { ResourceQueue } from '#resource-queue.js';
 import { WorkspaceFileService } from '#workspace-file-service.js';
 import { serveNodeFsProvider } from '#backend/node/host.js';
+import { NodeFsProvider } from '#backend/node/provider.js';
 import { tauPathPolicy } from '#path-registry.js';
 import type { ProjectRootConfiguration } from '#mount-table.js';
 import type { WatchEvent } from '#types.js';
@@ -29,22 +30,31 @@ const listProjectNames = async (service: WorkspaceFileService): Promise<string[]
 };
 const physicalRoot = 'alpha-project';
 
-const cleanups: Array<() => void> = [];
+const cleanups: Array<() => Promise<void>> = [];
 
-afterEach(() => {
+afterEach(async () => {
   for (const cleanup of cleanups.splice(0).reverse()) {
-    cleanup();
+    // oxlint-disable-next-line no-await-in-loop -- Each fixture owns its host and temporary root.
+    await cleanup();
   }
+  vi.restoreAllMocks();
 });
 
-const createNodeService = async (): Promise<{
+const createNodeService = async (options?: {
+  awaitConfigure?: boolean;
+  seedExtra?: boolean;
+}): Promise<{
   service: WorkspaceFileService;
   root: string;
   eventBus: ChangeEventBus;
+  configured: Promise<void>;
 }> => {
   const root = mkdtempSync(join(tmpdir(), 'tau-node-observe-'));
   mkdirSync(join(root, physicalRoot));
   writeFileSync(join(root, physicalRoot, 'main.ts'), 'before');
+  if (options?.seedExtra === true) {
+    writeFileSync(join(root, physicalRoot, 'extra.ts'), 'temporary');
+  }
   writeFileSync(
     join(root, physicalRoot, 'tau.json'),
     JSON.stringify({ $schema: 'https://tau.new/schemas/project.json', id: projectId, name: 'Alpha' }),
@@ -61,9 +71,9 @@ const createNodeService = async (): Promise<{
     eventBus,
     mountTable,
   });
-  cleanups.push(() => {
+  cleanups.push(async () => {
     service.dispose();
-    void stopHost();
+    await stopHost();
     port2.close();
     rmSync(root, { recursive: true, force: true });
   });
@@ -72,11 +82,99 @@ const createNodeService = async (): Promise<{
     projects: [{ backend: 'node', path: root, projectId, providerBasePath: physicalRoot }],
     roots: [{ backend: 'node', path: root }],
   };
-  await service.configureProjectRoots(configuration);
-  return { service, root, eventBus };
+  const configured = service.configureProjectRoots(configuration);
+  if (options?.awaitConfigure !== false) {
+    await configured;
+  }
+  return { service, root, eventBus, configured };
 };
 
 describe('WorkspaceFileService node root observation', () => {
+  it('waits for native admission before completing a snapshotless root configuration', async () => {
+    const admission = Promise.withResolvers<() => void>();
+    const watch = vi.spyOn(NodeFsProvider.prototype, 'watch').mockReturnValue(admission.promise);
+    try {
+      const { service, configured } = await createNodeService({ awaitConfigure: false });
+      let settled = false;
+      const markSettlement = async (): Promise<void> => {
+        await configured;
+        settled = true;
+      };
+      const completion = markSettlement();
+      await vi.waitFor(() => {
+        expect(watch).toHaveBeenCalledOnce();
+      });
+      await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).resolves.toBe('before');
+      expect(settled).toBe(false);
+      admission.resolve(() => undefined);
+      await completion;
+    } finally {
+      admission.resolve(() => undefined);
+      watch.mockRestore();
+    }
+  });
+
+  it('retries a snapshotless root after a failed native admission', async () => {
+    const nativeWatch = NodeFsProvider.prototype.watch;
+    const watch = vi
+      .spyOn(NodeFsProvider.prototype, 'watch')
+      .mockImplementationOnce(async () => {
+        throw new Error('native admission refused');
+      })
+      .mockImplementation(async function (this: NodeFsProvider, request, handler) {
+        return nativeWatch.call(this, request, handler);
+      });
+    const { service, root, configured } = await createNodeService({ awaitConfigure: false });
+    await expect(configured).rejects.toThrow('native admission refused');
+    await service.configureProjectRoots({
+      projects: [{ backend: 'node', path: root, projectId, providerBasePath: physicalRoot }],
+      roots: [{ backend: 'node', path: root }],
+    });
+    expect(watch).toHaveBeenCalledTimes(2);
+    await expect(service.pollExternalChanges(`/projects/${projectId}`)).resolves.toBe(true);
+  });
+
+  it('processes a startup reconciliation reset before claiming native readiness', async () => {
+    const nativeWatch = NodeFsProvider.prototype.watch;
+    const watch = vi
+      .spyOn(NodeFsProvider.prototype, 'watch')
+      .mockImplementation(async function (this: NodeFsProvider, request, handler) {
+        const stop = await nativeWatch.call(this, request, handler);
+        handler({ type: 'reset' });
+        return stop;
+      });
+    const { service, configured } = await createNodeService({ awaitConfigure: false });
+    await configured;
+    expect(watch).toHaveBeenCalledOnce();
+    await expect(service.pollExternalChanges(`/projects/${projectId}`)).resolves.toBe(true);
+    await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).resolves.toBe('before');
+  });
+
+  it('re-arms a snapshotless root on explicit configuration after stream loss', async () => {
+    const nativeWatch = NodeFsProvider.prototype.watch;
+    let handler: Parameters<NodeFsProvider['watch']>[1] | undefined;
+    const watch = vi
+      .spyOn(NodeFsProvider.prototype, 'watch')
+      .mockImplementationOnce(async (_request, callback) => {
+        handler = callback;
+        return () => undefined;
+      })
+      .mockImplementation(async function (this: NodeFsProvider, request, callback) {
+        return nativeWatch.call(this, request, callback);
+      });
+    const { service, root } = await createNodeService();
+    handler?.({ type: 'reset' });
+    await vi.waitFor(async () => {
+      expect(await service.pollExternalChanges(`/projects/${projectId}`)).toBe(false);
+    });
+    await service.configureProjectRoots({
+      projects: [{ backend: 'node', path: root, projectId, providerBasePath: physicalRoot }],
+      roots: [{ backend: 'node', path: root }],
+    });
+    expect(watch).toHaveBeenCalledTimes(2);
+    await expect(service.pollExternalChanges(`/projects/${projectId}`)).resolves.toBe(true);
+  });
+
   it('mounts a node project root through the provider port', async () => {
     const { service } = await createNodeService();
 
@@ -100,23 +198,13 @@ describe('WorkspaceFileService node root observation', () => {
       .createRootedFileSystem(`/projects/${projectId}`)
       .watch({ paths: ['main.ts'] }, (event) => events.push(event));
 
-    // The host arms its watcher asynchronously (the port is a process seam), so
-    // the write is repeated until it lands on an armed watcher.
-    await expect
-      .poll(
-        () => {
-          writeFileSync(join(root, physicalRoot, 'main.ts'), 'changed on disk');
-          return events;
-        },
-        { timeout: 15_000, interval: 200 },
-      )
-      .toContainEqual({ type: 'change', path: 'main.ts' });
+    writeFileSync(join(root, physicalRoot, 'main.ts'), 'changed on disk');
+    await expect.poll(() => events, { timeout: 15_000 }).toContainEqual({ type: 'change', path: 'main.ts' });
     await expect(service.readFile(`/projects/${projectId}/main.ts`, 'utf8')).resolves.toBe('changed on disk');
   }, 20_000);
 
   it('surfaces an external delete', async () => {
-    const { service, root } = await createNodeService();
-    writeFileSync(join(root, physicalRoot, 'extra.ts'), 'temporary');
+    const { service, root } = await createNodeService({ seedExtra: true });
     await expect.poll(async () => listProjectNames(service), { timeout: 5000 }).toContain('extra.ts');
     const events: WatchEvent[] = [];
     service

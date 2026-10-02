@@ -10,6 +10,8 @@ packages:
   - scripts
   - tools/*
 
+enableGlobalVirtualStore: false
+
 allowBuilds:
   '@datadog/pprof': false
   '@parcel/watcher': true
@@ -50,9 +52,9 @@ catalog:
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
   '@fastify/otel': ^0.17.1
-  '@gltf-transform/core': ^4.4.1
-  '@gltf-transform/extensions': ^4.4.1
-  '@gltf-transform/functions': ^4.4.1
+  '@gltf-transform/core': ^4.5.1
+  '@gltf-transform/extensions': ^4.5.1
+  '@gltf-transform/functions': ^4.5.1
   '@inkjs/ui': ^2.0.0
   '@jscad/modeling': ^2.13.0
   '@kittycad/lib': ^2.0.48
@@ -331,6 +333,7 @@ catalog:
   '@fastify/multipart': ^10.0.0
   '@typescript/vfs': ^1.6.4
   '@napi-rs/cli': 3.8.6
+  '@parcel/watcher': ^2.6.0
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

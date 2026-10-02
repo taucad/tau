@@ -56,29 +56,26 @@ buffer.
 
 ## Building the addon
 
-The addon links OCCT statically and is not built by `nx build`. Supply an OCCT
-install prefix through `OCCT_ROOT`:
+The addon links OCCT statically. From the workspace root, use the maintained
+Nx targets:
 
 ```sh
-# 1. OCCT 8.0.1 static, from the same commit libcascade pins (~12 min, 8 cores)
-cmake -G Ninja <tau>/repos/OCCT -B build \
-  -DCMAKE_BUILD_TYPE=Release -DBUILD_LIBRARY_TYPE=Static -DCMAKE_INSTALL_PREFIX=<prefix> \
-  -DUSE_FREETYPE=OFF -DUSE_FREEIMAGE=OFF -DUSE_OPENVR=OFF -DUSE_FFMPEG=OFF \
-  -DUSE_TBB=OFF -DUSE_VTK=OFF -DUSE_RAPIDJSON=OFF -DUSE_DRACO=OFF \
-  -DUSE_TK=OFF -DUSE_TCL=OFF -DUSE_XLIB=OFF -DUSE_OPENGL=OFF -DUSE_GLES2=OFF -DUSE_EGL=OFF -DUSE_D3D=OFF \
-  -DBUILD_MODULE_FoundationClasses=ON -DBUILD_MODULE_ModelingData=ON \
-  -DBUILD_MODULE_ModelingAlgorithms=ON -DBUILD_MODULE_DataExchange=ON \
-  -DBUILD_MODULE_Visualization=OFF -DBUILD_MODULE_ApplicationFramework=OFF \
-  -DBUILD_MODULE_Draw=OFF -DBUILD_DOC_Overview=OFF -DBUILD_DOC_RefMan=OFF \
-  -DBUILD_YACCLEX=OFF -DBUILD_RESOURCES=OFF -DBUILD_Inspector=OFF \
-  -DBUILD_ENABLE_FPE_SIGNAL_HANDLER=OFF
-cmake --build build --parallel && cmake --install build
-
-# 2. the addon
-export OCCT_ROOT=<prefix>
-cargo build --release --manifest-path rust/Cargo.toml
-cp rust/target/release/libtaucad_opencascade_native.dylib src/native/opencascade-native.node
+pnpm nx run opencascade-native:prepare-native
+pnpm nx test opencascade-native --watch=false
+pnpm nx build opencascade-native
 ```
+
+`test` and `build` depend on `prepare-native`, so either also works alone. The
+preparer requires Git, CMake, Ninja, a C++ toolchain, Rust/Cargo, Node, and
+access to the official OCCT repository on a cold checkout. It fetches pinned
+OCCT 8.0.1 source commit `b8f597c677811d1f9f4d8a97f5ae2825c0353a42`,
+builds a static prefix with four compile jobs, then builds and verifies the
+Rust addon. Source and compiler outputs stay under ignored
+`out/artifacts/opencascade-native`; the verified addon is installed at
+`src/native/opencascade-native.node` and copied into `dist/native` by the
+package build. Repeated runs reuse the incremental CMake and Cargo outputs.
+This preparation covers local host builds; release-platform binaries need
+their own qualification.
 
 Payload features (`rust/facade/Cargo.toml`): `modeling` adds fillet/chamfer/
 shell/extrude/loft/sweep, `step` adds STEP and BRep interchange. Both default

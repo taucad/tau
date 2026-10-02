@@ -1323,23 +1323,29 @@ describe('HostsService session outcome delivery', () => {
   };
 
   it('resolves an offer from the daemon answer, not from the next poll tick', async () => {
+    vi.useFakeTimers();
+    const offered = Promise.withResolvers<void>();
     const daemon: { service?: HostsService } = {};
     /* The daemon answers 5 ms after the offer reaches it — the measured shape. */
     const harness = outcomeHarness((sessionId) => {
+      offered.resolve();
       setTimeout(() => {
         void daemon.service?.handleControlMessage('device-1', JSON.stringify({ v: 1, type: 'accept', sessionId }));
       }, 5);
     });
     const service = new HostsService(harness.database, harness.redis, harness.config);
     daemon.service = service;
+    try {
+      const session = service.createSession({ deviceId: 'device-1', userId: 'owner-1', runtimeVersion: '1.0.0' });
+      await offered.promise;
+      await vi.advanceTimersByTimeAsync(10);
 
-    const started = performance.now();
-    const session = await service.createSession({ deviceId: 'device-1', userId: 'owner-1', runtimeVersion: '1.0.0' });
-    const elapsed = performance.now() - started;
-
-    expect(session.id).toMatch(/^as_/u);
-    expect(elapsed).toBeLessThan(60);
-    service.onModuleDestroy();
+      const resolved = await Promise.race([session, Promise.resolve(undefined)]);
+      expect(resolved?.id).toMatch(/^as_/u);
+    } finally {
+      service.onModuleDestroy();
+      vi.useRealTimers();
+    }
   });
 });
 

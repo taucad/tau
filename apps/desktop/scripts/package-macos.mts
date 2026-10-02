@@ -18,12 +18,10 @@ import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, openSync, readSync } from 'node:fs';
 import { cp, mkdir, open, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
-import { createRequire } from 'node:module';
 import { homedir, tmpdir } from 'node:os';
 import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { acpAgentProfiles } from '@taucad/host';
 import { notarize } from '@electron/notarize';
 import { sign } from '@electron/osx-sign';
 import { packager } from '@electron/packager';
@@ -31,13 +29,8 @@ import { packager } from '@electron/packager';
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
-import {
-  copyGeoSpecNative,
-  copyGeoSpecNativeAssembly,
-  copyGeoSpecSourceRelink,
-  copyRuntimeClosure,
-  copyTree,
-} from './runtime-closure.mjs';
+import { copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink, copyTree } from './runtime-closure.mjs';
+import { excludesBuildDiagnostics, resolveRuntimePackages, stageRuntimePackages } from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 type PackageMetadata = {
@@ -70,10 +63,6 @@ const extensionRoot = resolve(desktopRoot, 'macos/dist/extensions');
 const hostInfo = resolve(desktopRoot, 'macos/generated/TauHost-Info.plist');
 const extensionEntitlements = resolve(desktopRoot, 'macos/Config/TauQuickLook.entitlements');
 const uiClientRoot = resolve(workspaceRoot, 'apps/ui/desktop/build/client');
-const esbuildPluginModules = resolve(workspaceRoot, 'packages/plugins/esbuild/node_modules');
-const imagePluginModules = resolve(workspaceRoot, 'packages/plugins/image/node_modules');
-const openrscadPluginModules = resolve(workspaceRoot, 'packages/plugins/openrscad/node_modules');
-const assimpPluginModules = resolve(workspaceRoot, 'packages/plugins/assimp/node_modules');
 const pythonResourceRoot = resolve(desktopRoot, 'resources/python');
 const picoGkResourceRoot = resolve(desktopRoot, 'resources/picogk');
 /* The `git` this app records revisions with, prepared beside python and picogk
@@ -264,101 +253,10 @@ try {
     return identity;
   };
 
-  /* Bundler and declaration source maps are build diagnostics. Other `.map` files are payload:
-   * replicad's kernel loads its `replicad.js-<hash>.map` asset at run time to map library frames. */
-  const excludesBuildDiagnostics = (path: string): boolean =>
-    !/\.(?:[cm]?[jt]s|css)\.map$|^tau-module-graph.*\.json$/u.test(basename(path));
-
-  /**
-   * Stage one installed package without its sources, nested packages, build diagnostics or `unused` paths.
-   * @param name - Package name, which is also its directory under the staged `node_modules`.
-   * @param source - Installed package root.
-   * @param unused - Paths relative to `source` the packaged app never loads.
-   */
-  const copyRuntimePackage = async (name: string, source: string, unused: readonly string[] = []): Promise<void> => {
-    const excluded = new Set(unused.map((path) => resolve(source, path)));
-    await copyTree(
-      source,
-      resolve(stageRoot, 'node_modules', name),
-      (path) =>
-        !['node_modules', 'src'].includes(basename(path)) && excludesBuildDiagnostics(path) && !excluded.has(path),
-    );
-  };
-
-  const openrscadEngine = await realpath(resolve(openrscadPluginModules, '@taulabs/openrscad-engine'));
-  /* One engine package, two payloads: the addon ships in the platform package its
-   * `node` entry loads, exactly as libassimp does. Staging the engine without it
-   * would still run — through the WebAssembly fallback — which is precisely the
-   * silent downgrade `verify-macos-package.mts` refuses. */
-  const openrscadEngineDarwinArm64 = dirname(
-    createRequire(resolve(openrscadEngine, 'package.json')).resolve(
-      '@taulabs/openrscad-engine-darwin-arm64/package.json',
-    ),
-  );
-  const openrscadMetadata = await readJson<{ readonly version: string }>(resolve(openrscadEngine, 'package.json'));
-  const esbuild = await realpath(resolve(esbuildPluginModules, 'esbuild'));
-  const esbuildDarwinArm64 = dirname(
-    createRequire(resolve(esbuild, 'package.json')).resolve('@esbuild/darwin-arm64/package.json'),
-  );
-  const esbuildMetadata = await readJson<{ readonly version: string }>(resolve(esbuild, 'package.json'));
-  const libassimp = await realpath(resolve(assimpPluginModules, 'libassimp'));
-  const libassimpDarwinArm64 = dirname(
-    createRequire(resolve(libassimp, 'package.json')).resolve('libassimp-darwin-arm64/package.json'),
-  );
-  const libassimpMetadata = await readJson<{ readonly version: string }>(resolve(libassimp, 'package.json'));
-  const nanoraster = await realpath(resolve(imagePluginModules, 'nanoraster'));
-  const nanorasterDarwinArm64 = dirname(
-    createRequire(resolve(nanoraster, 'package.json')).resolve('nanoraster-darwin-arm64/package.json'),
-  );
-  const nanorasterMetadata = await readJson<{ readonly version: string }>(resolve(nanoraster, 'package.json'));
-  /* The ACP adapters are spawned as `node <modulePath>` from inside the packaged
-   * app, so they are staged with their runtime dependency closure and unpacked
-   * out of the ASAR — a module path inside `app.asar` is not a real file. A native
-   * ACP agent (Grok Build) is the user's installed CLI and has nothing to stage. */
-  const acpAdapters = await Promise.all(
-    acpAgentProfiles
-      .flatMap((profile) => (profile.package === undefined ? [] : [profile.package]))
-      .map(async (name) => {
-        const manifest = await readJson<{ readonly version: string }>(
-          resolve(desktopRoot, 'node_modules', name, 'package.json'),
-        );
-        return {
-          name,
-          source: await realpath(resolve(desktopRoot, 'node_modules', name)),
-          version: manifest.version,
-        };
-      }),
-  );
-
-  /* The sandbox runtime resolves its vendored helpers relative to its own module file
-   * and is spawned nowhere: it is staged with its runtime closure so the kernel utility
-   * can import it from a real directory, and stays inside the ASAR. */
-  const sandboxRuntime = await realpath(resolve(desktopRoot, 'node_modules/@anthropic-ai/sandbox-runtime'));
-  const sandboxRuntimeMetadata = await readJson<{ readonly version: string }>(resolve(sandboxRuntime, 'package.json'));
-  const bundledImports = await Promise.all(
-    ['@gltf-transform/core', '@gltf-transform/functions', 'fflate', 'uint8array-extras', 'xstate'].map(async (name) => {
-      const source = await realpath(resolve(desktopRoot, 'node_modules', name));
-      const { version } = await readJson<{ readonly version: string }>(resolve(source, 'package.json'));
-      return { name, source, version };
-    }),
-  );
-  const sharpRoot = dirname(
-    dirname(createRequire(resolve(bundledImports[1]!.source, 'package.json')).resolve('sharp')),
-  );
-  const sharpPlatformImports = await Promise.all(
-    ['@img/sharp-darwin-arm64', '@img/sharp-libvips-darwin-arm64'].map(async (name) => {
-      const source = await realpath(resolve(sharpRoot, '..', name));
-      const { version } = await readJson<{ readonly version: string }>(resolve(source, 'package.json'));
-      return { name, source, version };
-    }),
-  );
+  /* Every runtime package is resolved before the previous output is removed. */
+  const runtimePackages = await resolveRuntimePackages({ desktopRoot, workspaceRoot, target: 'darwin-arm64' });
 
   await rm(outputRoot, { recursive: true, force: true });
-  await Promise.all([
-    mkdir(resolve(stageRoot, 'dist'), { recursive: true }),
-    mkdir(resolve(stageRoot, 'node_modules/@taulabs'), { recursive: true }),
-    mkdir(resolve(stageRoot, 'node_modules/@esbuild'), { recursive: true }),
-  ]);
   const geospecNativeDependencies = await copyGeoSpecNativeAssembly(
     geospecAssemblyRoot,
     resolve(stageRoot, 'node_modules'),
@@ -372,72 +270,12 @@ try {
   const electron = await readJson<{ readonly version: string }>(
     resolve(desktopRoot, 'node_modules/electron/package.json'),
   );
-  await Promise.all([
-    copyTree(resolve(desktopRoot, 'dist/main'), resolve(stageRoot, 'dist/main'), excludesBuildDiagnostics),
-    copyTree(resolve(desktopRoot, 'dist/preload'), resolve(stageRoot, 'dist/preload'), excludesBuildDiagnostics),
-    /* The utilities import the engine through its `node` export (`dist/node.js`: addon, else `pkg/node`);
-     * only the `browser` export and the `./web` subpaths load `pkg/web`. */
-    copyRuntimePackage('@taulabs/openrscad-engine', openrscadEngine, ['pkg/web']),
-    copyRuntimePackage('@taulabs/openrscad-engine-darwin-arm64', openrscadEngineDarwinArm64),
-    /* `bin/esbuild` is install.js's copy of the platform binary for the CLI. The API in `lib/main.js`
-     * runs `ESBUILD_BINARY_PATH`, which the utilities point at the unpacked `@esbuild/darwin-arm64` binary. */
-    copyRuntimePackage('esbuild', esbuild, ['bin']),
-    copyRuntimePackage('@esbuild/darwin-arm64', esbuildDarwinArm64),
-    copyRuntimePackage('libassimp', libassimp),
-    copyRuntimePackage('libassimp-darwin-arm64', libassimpDarwinArm64),
-    copyRuntimePackage('nanoraster', nanoraster),
-    copyRuntimePackage('nanoraster-darwin-arm64', nanorasterDarwinArm64),
-    copyGeoSpecNative(
-      await realpath(resolve(desktopRoot, 'node_modules/@taucad/geospec-engine')),
-      resolve(stageRoot, 'node_modules'),
-    ),
-    writeFile(
-      resolve(stageRoot, 'package.json'),
-      `${JSON.stringify(
-        {
-          name: metadata.name,
-          productName: metadata.productName,
-          version: metadata.version,
-          main: metadata.main,
-          type: metadata.type,
-          dependencies: {
-            ...geospecNativeDependencies,
-            '@taulabs/openrscad-engine': openrscadMetadata.version,
-            '@taulabs/openrscad-engine-darwin-arm64': openrscadMetadata.version,
-            '@esbuild/darwin-arm64': esbuildMetadata.version,
-            esbuild: esbuildMetadata.version,
-            libassimp: libassimpMetadata.version,
-            'libassimp-darwin-arm64': libassimpMetadata.version,
-            nanoraster: nanorasterMetadata.version,
-            'nanoraster-darwin-arm64': nanorasterMetadata.version,
-            '@anthropic-ai/sandbox-runtime': sandboxRuntimeMetadata.version,
-            ...Object.fromEntries(bundledImports.map(({ name, version }) => [name, version])),
-            ...Object.fromEntries(sharpPlatformImports.map(({ name, version }) => [name, version])),
-            ...Object.fromEntries(acpAdapters.map(({ name, version }) => [name, version])),
-          },
-        },
-        undefined,
-        2,
-      )}\n`,
-    ),
-  ]);
-
-  for (const { name, source } of [
-    ...bundledImports,
-    ...sharpPlatformImports,
-    ...acpAdapters,
-    { name: '@anthropic-ai/sandbox-runtime', source: sandboxRuntime },
-  ]) {
-    /* Serial: the closure nests one package inside another, so two adapters
-     * racing on the same staged directories would make the layout undecidable. */
-    // oxlint-disable-next-line no-await-in-loop -- see above.
-    await copyRuntimeClosure({
-      name,
-      source,
-      modulesRoot: resolve(stageRoot, 'node_modules'),
-      filter: excludesBuildDiagnostics,
-    });
-  }
+  await stageRuntimePackages({
+    desktopRoot,
+    stageRoot,
+    packages: runtimePackages,
+    stagedDependencies: geospecNativeDependencies,
+  });
 
   const packagePaths = await packager({
     dir: stageRoot,

@@ -828,8 +828,28 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     ).not.toMatch(/PicoGK.*Viewer/u);
     expect(rendererErrors.some((message) => message.includes('unsafe-eval'))).toBe(false);
 
-    await session.capture('picogk-packaged-success');
-    const workers = ownedPicoGkWorkers(session.application.process().pid);
+    const captureDirectory = await session.capture('picogk-packaged-success');
+    const electronProcess = session.application.process();
+    const workers = ownedPicoGkWorkers(electronProcess.pid);
+    writeFileSync(
+      join(captureDirectory, 'picogk-shutdown-owners.json'),
+      JSON.stringify({ electronPid: electronProcess.pid, workers }, null, 2),
+    );
+    await expect
+      .poll(
+        async () =>
+          page.evaluate(() => {
+            const shell = globalThis as typeof globalThis & { tau?: { quit?: { isReady(): boolean } } };
+            return shell.tau?.quit?.isReady() ?? false;
+          }),
+        { timeout: 120_000 },
+      )
+      .toBe(true);
+    await session.application.evaluate(({ app }) => {
+      app.quit();
+    });
+    await expect.poll(() => electronProcess.exitCode, { timeout: 15_000 }).toBe(0);
+    expect(electronProcess.signalCode).toBeNull();
     await session.close();
     session = undefined;
     await expect

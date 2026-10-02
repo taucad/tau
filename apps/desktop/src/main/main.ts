@@ -13,6 +13,7 @@ import { Worker } from 'node:worker_threads';
 
 import {
   app,
+  autoUpdater,
   BrowserWindow,
   dialog,
   ipcMain,
@@ -84,6 +85,7 @@ import { createOpenFileQueue } from '#main/open-files.js';
 import { readGeneratedImage } from '#main/generated-image.js';
 import { createBambuStudioService } from '#main/bambu-studio-service.js';
 import { readWindowState, writeWindowState } from '#main/window-state.js';
+import { startDesktopUpdater } from '#main/updater.js';
 import {
   appIconThemeChannel,
   agentHostSessionChannels,
@@ -432,6 +434,38 @@ const bootstrapElectronApp = async (): Promise<void> => {
     allowedOrigins: authenticatedOrigins,
     token: () => auth.token(),
     clientHeader: `tau-desktop/${app.getVersion()}`,
+  });
+
+  /* Packaged releases follow the latest GitHub Release's update feed; see `updater.ts`. */
+  startDesktopUpdater({
+    platform: process.platform,
+    arch: process.arch,
+    currentVersion: app.getVersion(),
+    packaged: app.isPackaged,
+    environment,
+    autoUpdater,
+    fetchJson: async (url) => {
+      const response = await net.fetch(url);
+      if (!response.ok) {
+        throw new Error(`update feed answered ${response.status}`);
+      }
+      return response.json() as Promise<unknown>;
+    },
+    confirm: async ({ title, detail, accept }) => {
+      const { response } = await dialog.showMessageBox({
+        type: 'info',
+        message: title,
+        detail,
+        buttons: [accept, 'Later'],
+        defaultId: 0,
+        cancelId: 1,
+      });
+      return response === 0;
+    },
+    openExternal: async (url) => shell.openExternal(url),
+    log: (level, event, detail) => {
+      log.log(level, event, detail);
+    },
   });
 
   if (!isDevelopment) {

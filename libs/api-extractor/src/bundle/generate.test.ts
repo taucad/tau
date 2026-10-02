@@ -64,10 +64,21 @@ describe('generateBundles', () => {
     await generateBundles({ outputRoot: scratch });
   }, 300_000);
 
-  it('ships the approved workbench content with the document API names', () => {
+  it.each(bundleOwners.map((owner) => [owner.slug, owner.packageDirectory] as const))(
+    '%s publishes a standalone declaration for its JSON manifest',
+    (_slug, packageDirectory) => {
+      const declaration = readFileSync(join(scratch, packageDirectory, 'agent/skills.d.cts'), 'utf8');
+      expect(declaration).toContain('readonly bundles: ReadonlyArray<{');
+      expect(declaration).toContain('readonly body: string;');
+      expect(declaration).toContain('export = manifest;');
+      expect(declaration).not.toMatch(/\b(?:import|from)\b/u);
+    },
+  );
+
+  it('ships the approved workbench content with the document API names and canonical record field', () => {
     const shipped = readFileSync(join(workspaceRoot, 'packages/workbench/agent/workbench/SKILL.md'), 'utf8');
-    // Approved content, retaining evaluate_model and operationTimeout from the document API migration.
-    expect(digest(Buffer.from(shipped))).toBe('fe1b920f303a21df9e2c78c39ace2ee690dbb35f0f462813ab8434e1897ef6d8');
+    // The document API migration retains evaluate_model while durable records retain renderTimeout.
+    expect(digest(Buffer.from(shipped))).toBe('a0a51a310149ae11229b3e120dedf85f775bb269926b6f19c3b5de9b85941d88');
   });
 
   it('should expose all PicoVoxel Tau authoring types through the shipped reference index', () => {

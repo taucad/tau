@@ -691,17 +691,22 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       capture();
     });
     writeFileSync(sourcePath, multiStepPicogkSource, 'utf8');
-    /* The row's own observer is the barrier: the lifecycle it records is
-     * exactly the sequence asserted below, so no second witness is needed. */
+    /* Document evaluation and view rendering may each produce a cycle.
+     * The observer must retain only complete busy-to-ready cycles. */
     await expect
       .poll(
         async () =>
-          page.evaluate(
-            () => (globalThis as typeof globalThis & { __tauPicoGkStates?: string[] }).__tauPicoGkStates ?? [],
-          ),
+          page.evaluate(() => {
+            const states = (globalThis as typeof globalThis & { __tauPicoGkStates?: string[] }).__tauPicoGkStates ?? [];
+            return (
+              states.length >= 2 &&
+              states.at(-1) === 'idle' &&
+              states.every((state, index) => state === (index % 2 === 0 ? 'rendering...' : 'idle'))
+            );
+          }),
         { timeout: 120_000 },
       )
-      .toEqual(['buffering...', 'rendering...', 'idle']);
+      .toBe(true);
     const multiStepStates = await page.evaluate(() => {
       const target = globalThis as typeof globalThis & {
         __tauPicoGkStates?: string[];
@@ -710,7 +715,9 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       target.__tauPicoGkObserver?.disconnect();
       return target.__tauPicoGkStates ?? [];
     });
-    expect(multiStepStates).toEqual(['buffering...', 'rendering...', 'idle']);
+    expect(multiStepStates.length).toBeGreaterThanOrEqual(2);
+    expect(multiStepStates).toEqual(multiStepStates.map((_, index) => (index % 2 === 0 ? 'rendering...' : 'idle')));
+    expect(multiStepStates.at(-1)).toBe('idle');
 
     // Observe a fresh lifecycle before restoring bytes: the previous scene is
     // already idle, and its material remains visible while native work runs.

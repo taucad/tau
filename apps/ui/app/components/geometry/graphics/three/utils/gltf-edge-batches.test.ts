@@ -31,6 +31,17 @@ describe('edge occurrence semantics', () => {
       g.dispose();
     }
   });
+  it.each([8191, 8192])('should retain lossless index width for %s prototype segments', (segments) => {
+    const geometry = createEdgePrototypeGeometry(new Float32Array(segments * 6), 1);
+    try {
+      const indices = geometry.getIndex()!;
+      expect(indices.array).toBeInstanceOf(segments === 8191 ? Uint16Array : Uint32Array);
+      expect(indices.getX(indices.count - 2)).toBe(segments * 8 - 1);
+      expect(indices.count).toBe(segments * 18);
+    } finally {
+      geometry.dispose();
+    }
+  });
   it('should retain the stripped occurrence endpoint graph', () => {
     const m = createEdgeBatchMaterial('webgpu', new Vector2(128, 128), 0);
     try {

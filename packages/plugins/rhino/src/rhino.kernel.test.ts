@@ -37,12 +37,12 @@ describe('rhinoKernel', () => {
       const projected = await definition.render!({ handle, view: 'model', options: {} }, runtime, context);
       return projected.content;
     };
-    const write = async (
+    const exportModel = async (
       handle: typeof result.handle,
       coordinateSystem: 'y-up' | 'z-up',
       length: 'meter' | 'millimeter',
     ) => {
-      const projected = await definition.write!(
+      const projected = await definition.export!(
         { exportId: 'glb', handle, options: { coordinateSystem, unit: { length } } },
         runtime,
         context,
@@ -51,11 +51,11 @@ describe('rhinoKernel', () => {
     };
     const ordered = await expectKernelProjectionOrder({
       renderA: async () => render(result.handle),
-      renderB: async () => write(result.handle, 'y-up', 'meter'),
-      write: async () => write(result.handle, 'z-up', 'millimeter'),
+      renderB: async () => exportModel(result.handle, 'y-up', 'meter'),
+      export: async () => exportModel(result.handle, 'z-up', 'millimeter'),
       freshB: async () => {
         const fresh = definition.deserializeHandle!({ serialized: freshSnapshot }, runtime, context);
-        return write(fresh, 'y-up', 'meter');
+        return exportModel(fresh, 'y-up', 'meter');
       },
     });
     expect(ordered.first).toEqual(artifact.content);

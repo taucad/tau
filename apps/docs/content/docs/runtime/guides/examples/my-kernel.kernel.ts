@@ -38,7 +38,7 @@ export const myKernel = defineKernel({
   async render({ handle }) {
     return { content: toSvg(handle.source) };
   },
-  async write({ handle }) {
+  async export({ handle }) {
     return {
       files: nonemptyExportFiles([
         {

@@ -253,7 +253,7 @@ export const opencascadeNativeKernel = defineKernel({
     return { content: new Uint8Array(content) };
   },
 
-  async write({ exportId, handle, options }, _runtime, context) {
+  async export({ exportId, handle, options }, _runtime, context) {
     switch (exportId) {
       case 'glb': {
         // An empty render is a successful artifact with no scene nodes, not a

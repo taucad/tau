@@ -1,9 +1,9 @@
 /**
- * Integration tests for wrapWrite middleware execution.
+ * Integration tests for wrapExport middleware execution.
  *
  * Tests the onion chain execution model for exportGeometry using
  * MockKernelWorker to verify:
- * 1. wrapWrite hooks are called with correct input and runtime
+ * 1. wrapExport hooks are called with correct input and runtime
  * 2. Middleware can intercept and modify export results
  * 3. Multiple middleware hooks chain correctly in onion order
  * 4. Short-circuiting works correctly
@@ -13,9 +13,9 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { OnWorkerLog } from '@taucad/types';
 import { z } from 'zod';
 import type { ExportGeometryResult } from '#types/runtime.types.js';
-import type { WriteRequest, KernelMiddlewareServices } from '#types/runtime-middleware-v2.types.js';
+import type { ExportRequest, KernelMiddlewareServices } from '#types/runtime-middleware-v2.types.js';
 import { nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
-import type { WriteResult } from '#types/runtime-kernel-v2.types.js';
+import type { KernelExportResult } from '#types/runtime-kernel-v2.types.js';
 import type { Dependency, ExportDependency } from '#types/runtime-dependency.types.js';
 import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
@@ -94,7 +94,7 @@ const exportDocument = async (
     options: request.options,
   });
 
-describe('kernel-worker wrapWrite middleware', () => {
+describe('kernel-worker wrapExport middleware', () => {
   function spyOnExportGeometry(worker: MockKernelWorker) {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- keyof MockKernelWorker not assignable to vi.spyOn; use as unknown as to spy on protected method
     return vi.spyOn(
@@ -123,15 +123,15 @@ describe('kernel-worker wrapWrite middleware', () => {
     onLog = vi.fn();
   });
 
-  it('should call wrapWrite hook when middleware is registered', async () => {
-    const wrapWrite = vi.fn(async (input: WriteRequest, handler: (input: WriteRequest) => Promise<WriteResult>) =>
-      handler(input),
+  it('should call wrapExport hook when middleware is registered', async () => {
+    const wrapExport = vi.fn(
+      async (input: ExportRequest, handler: (input: ExportRequest) => Promise<KernelExportResult>) => handler(input),
     );
 
     const middleware = defineMiddlewareV2({
       id: 'TrackingMiddleware',
       name: 'TrackingMiddleware',
-      wrapWrite,
+      wrapExport,
     });
 
     const worker = new MockKernelWorker({
@@ -144,11 +144,11 @@ describe('kernel-worker wrapWrite middleware', () => {
     const documentId = await openDocument(worker);
     await exportDocument(worker, documentId);
 
-    expect(wrapWrite).toHaveBeenCalledTimes(1);
+    expect(wrapExport).toHaveBeenCalledTimes(1);
   });
 
   it('should receive correct export request and KernelMiddlewareServices', async () => {
-    let capturedInput: WriteRequest | undefined;
+    let capturedInput: ExportRequest | undefined;
     let capturedRuntime:
       | (Pick<KernelMiddlewareServices, 'logger' | 'filesystem'> & {
           state: unknown;
@@ -158,7 +158,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware = defineMiddlewareV2({
       id: 'InspectMiddleware',
       name: 'InspectMiddleware',
-      async wrapWrite(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         capturedInput = input;
         capturedRuntime = runtime;
         return handler(input);
@@ -192,7 +192,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware = defineMiddlewareV2({
       id: 'TransformMiddleware',
       name: 'TransformMiddleware',
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         const result = await handler(input);
         if (result.success) {
           return {
@@ -231,7 +231,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware1 = defineMiddlewareV2({
       id: 'M1',
       name: 'M1',
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('M1-before');
         const result = await handler(input);
         executionOrder.push('M1-after');
@@ -242,7 +242,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware2 = defineMiddlewareV2({
       id: 'M2',
       name: 'M2',
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('M2-before');
         const result = await handler(input);
         executionOrder.push('M2-after');
@@ -253,7 +253,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware3 = defineMiddlewareV2({
       id: 'M3',
       name: 'M3',
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('M3-before');
         const result = await handler(input);
         executionOrder.push('M3-after');
@@ -282,7 +282,7 @@ describe('kernel-worker wrapWrite middleware', () => {
   });
 
   it('should allow middleware to short-circuit by not calling handler', async () => {
-    const cachedResult: WriteResult = {
+    const cachedResult: KernelExportResult = {
       success: true,
       data: [
         {
@@ -297,7 +297,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const cacheMiddleware = defineMiddlewareV2({
       id: 'ExportCacheMiddleware',
       name: 'ExportCacheMiddleware',
-      async wrapWrite(_input, _handler) {
+      async wrapExport(_input, _handler) {
         return cachedResult;
       },
     });
@@ -322,13 +322,13 @@ describe('kernel-worker wrapWrite middleware', () => {
     exportSpy.mockRestore();
   });
 
-  it('should skip middleware without wrapWrite hooks', async () => {
+  it('should skip middleware without wrapExport hooks', async () => {
     const executionOrder: string[] = [];
 
     const withHook = defineMiddlewareV2({
       id: 'WithHook',
       name: 'WithHook',
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('WithHook');
         return handler(input);
       },
@@ -360,7 +360,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware = defineMiddlewareV2({
       id: 'FailingMiddleware',
       name: 'FailingMiddleware',
-      async wrapWrite(_input, _handler) {
+      async wrapExport(_input, _handler) {
         throw new Error('Export middleware failed');
       },
     });
@@ -387,7 +387,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const enabled = defineMiddlewareV2({
       id: 'Enabled',
       name: 'Enabled',
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('enabled');
         return handler(input);
       },
@@ -396,7 +396,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const disabled = defineMiddlewareV2({
       id: 'Disabled',
       name: 'Disabled',
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('disabled');
         return handler(input);
       },
@@ -423,7 +423,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware = defineMiddlewareV2({
       id: 'ParameterCapture',
       name: 'ParameterCapture',
-      async wrapWrite(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         captures.push({
           hash: runtime.dependencyHash,
           dependencies: runtime.dependencies,
@@ -538,7 +538,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware = defineMiddlewareV2({
       id: 'ExportDependencyCapture',
       name: 'ExportDependencyCapture',
-      async wrapWrite(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         captures.push({
           hash: runtime.dependencyHash,
           dependencies: runtime.dependencies,
@@ -592,7 +592,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const middleware = defineMiddlewareV2({
       id: 'ImageIdentityCapture',
       name: 'ImageIdentityCapture',
-      async wrapWrite(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         hashes.push(runtime.dependencyHash);
         return handler(input);
       },
@@ -697,7 +697,7 @@ describe('kernel-worker wrapWrite middleware', () => {
       const middleware = defineMiddlewareV2({
         id: `TranscoderCapture${version}`,
         name: `TranscoderCapture${version}`,
-        async wrapWrite(input, handler, runtime) {
+        async wrapExport(input, handler, runtime) {
           dependencyHash = runtime.dependencyHash;
           dependencies = runtime.dependencies;
           return handler(input);
@@ -766,7 +766,7 @@ describe('kernel-worker wrapWrite middleware', () => {
       id: 'DependencyCapture',
       name: 'DependencyCapture',
       version: '1.2.3',
-      async wrapWrite(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         capturedDependencies = runtime.dependencies;
         return handler(input);
       },
@@ -816,7 +816,7 @@ describe('kernel-worker wrapWrite middleware', () => {
     const exportMiddleware = defineMiddlewareV2({
       id: 'Export',
       name: 'Export',
-      async wrapWrite(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         capturedDependencies = runtime.dependencies;
         return handler(input);
       },
@@ -839,13 +839,13 @@ describe('kernel-worker wrapWrite middleware', () => {
   });
 
   it('should not invoke export middleware when export options fail validation', async () => {
-    const wrapWrite = vi.fn(async (input: WriteRequest, handler: (input: WriteRequest) => Promise<WriteResult>) =>
-      handler(input),
+    const wrapExport = vi.fn(
+      async (input: ExportRequest, handler: (input: ExportRequest) => Promise<KernelExportResult>) => handler(input),
     );
     const middleware = defineMiddlewareV2({
       id: 'ValidationMiddleware',
       name: 'ValidationMiddleware',
-      wrapWrite,
+      wrapExport,
     });
     const worker = new MockKernelWorker({
       middleware: [middleware],
@@ -858,6 +858,6 @@ describe('kernel-worker wrapWrite middleware', () => {
     const result = await exportDocument(worker, documentId, { target: 'step', options: { unexpected: true } });
 
     expect(result.success).toBe(false);
-    expect(wrapWrite).not.toHaveBeenCalled();
+    expect(wrapExport).not.toHaveBeenCalled();
   });
 });

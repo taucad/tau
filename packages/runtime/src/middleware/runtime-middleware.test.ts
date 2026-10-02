@@ -44,13 +44,13 @@ describe('defineMiddleware', () => {
   it('keeps V2 hooks private on a registration', async () => {
     const wrapEvaluate = vi.fn();
     const wrapRender = vi.fn();
-    const wrapWrite = vi.fn();
+    const wrapExport = vi.fn();
     const middleware = defineMiddleware({
       id: 'testMiddleware',
       name: 'TestMiddleware',
       wrapEvaluate,
       wrapRender,
-      wrapWrite,
+      wrapExport,
     });
     const plugin = middleware();
     expect(plugin).toEqual({ id: 'testMiddleware', options: undefined });
@@ -60,7 +60,7 @@ describe('defineMiddleware', () => {
       version: '1',
       wrapEvaluate,
       wrapRender,
-      wrapWrite,
+      wrapExport,
     });
   });
 

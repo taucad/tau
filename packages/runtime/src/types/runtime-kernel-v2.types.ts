@@ -123,8 +123,8 @@ export type RenderOutput = Readonly<{
   issues?: readonly KernelIssue[];
   mimeType?: never;
 }>;
-/** Per-export write input narrowed by the selected export identifier. @public */
-export type WriteInput<Handle, Exports> = {
+/** Export input narrowed by the selected export identifier. @public */
+export type ExportInput<Handle, Exports> = {
   [Id in keyof Exports]: Readonly<
     {
       handle: Handle;
@@ -133,12 +133,12 @@ export type WriteInput<Handle, Exports> = {
     } & ContentHookInputFor<ContentOf<Exports[Id]>>
   >;
 }[keyof Exports];
-/** At least one output file from a successful write. @public */
+/** At least one output file from a successful export. @public */
 export type NonemptyExportFiles = readonly [ExportFile, ...ExportFile[]];
-/** Kernel write output before runtime admission. @public */
-export type WriteOutput = Readonly<{ files: NonemptyExportFiles; issues?: readonly KernelIssue[] }>;
+/** Kernel export output before runtime admission. @public */
+export type ExportOutput = Readonly<{ files: NonemptyExportFiles; issues?: readonly KernelIssue[] }>;
 /**
- * Admit a dynamic writer's files once, at the export artifact boundary.
+ * Admit a dynamic exporter's files once, at the export artifact boundary.
  * @param files - Files to check.
  * @returns A nonempty tuple.
  * @public
@@ -166,8 +166,8 @@ type PipelineResult<Data> =
 export type EvaluateResult = PipelineResult<KernelOffers> & NativeBuildInputCarrier;
 /** Admitted render artifact envelope. @public */
 export type RenderResult = PipelineResult<Artifact>;
-/** Admitted nonempty write envelope. @public */
-export type WriteResult = PipelineResult<NonemptyExportFiles>;
+/** Admitted nonempty export envelope. @public */
+export type KernelExportResult = PipelineResult<NonemptyExportFiles>;
 
 type SnapshotHooks<Context, Handle, Serialized> =
   | {
@@ -180,7 +180,7 @@ type SnapshotHooks<Context, Handle, Serialized> =
     }
   | { serializeHandle?: never; deserializeHandle?: never };
 type RenderRequirement<Views> = [keyof Views] extends [never] ? { render?: never } : { render: unknown };
-type WriteRequirement<Exports> = [keyof Exports] extends [never] ? { write?: never } : { write: unknown };
+type ExportRequirement<Exports> = [keyof Exports] extends [never] ? { export?: never } : { export: unknown };
 
 /** Kernel authoring contract with exact per-view and per-export inference. @public */
 export type KernelDefinitionV2<
@@ -219,11 +219,11 @@ export type KernelDefinitionV2<
     services: KernelServices,
     context: NoInfer<Context>,
   ): Promise<RenderOutput>;
-  write?(
-    input: WriteInput<NoInfer<Handle>, NoInfer<Exports>>,
+  export?(
+    input: ExportInput<NoInfer<Handle>, NoInfer<Exports>>,
     services: KernelServices,
     context: NoInfer<Context>,
-  ): Promise<WriteOutput>;
+  ): Promise<ExportOutput>;
   isHandleValid?(
     input: Readonly<{ handle: Handle }>,
     services: KernelServices,
@@ -233,7 +233,7 @@ export type KernelDefinitionV2<
   onDispose?(context: Context): Promise<void>;
 } & SnapshotHooks<Context, Handle, Serialized> &
   RenderRequirement<Views> &
-  WriteRequirement<Exports>;
+  ExportRequirement<Exports>;
 
 /** Runtime storage erases concrete hook generics once; authoring and factory results retain them. @internal */
 // oxlint-disable-next-line @typescript-eslint/no-explicit-any -- A single private existential boundary for heterogeneous kernel definitions.
@@ -452,8 +452,8 @@ export function defineKernelV2<
   if (Object.keys(views).length > 0 !== (typeof definition.render === 'function')) {
     throw new TypeError(`Kernel "${id}" render hook must exist exactly when views are declared.`);
   }
-  if (Object.keys(exports).length > 0 !== (typeof definition.write === 'function')) {
-    throw new TypeError(`Kernel "${id}" write hook must exist exactly when exports are declared.`);
+  if (Object.keys(exports).length > 0 !== (typeof definition.export === 'function')) {
+    throw new TypeError(`Kernel "${id}" export hook must exist exactly when exports are declared.`);
   }
   if ((typeof definition.serializeHandle === 'function') !== (typeof definition.deserializeHandle === 'function')) {
     throw new TypeError(`Kernel "${id}" handle snapshots require both serializeHandle and deserializeHandle.`);

@@ -56,7 +56,7 @@ const kernel = defineKernel({
   async render({ handle }) {
     return { content: handle };
   },
-  async write({ handle }) {
+  async export({ handle }) {
     return { files: [createExportFile('glb', 'model.glb', handle)] };
   },
 });

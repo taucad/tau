@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { nativeBuildInputSymbol } from '@taucad/runtime/middleware';
 import type { NativeBuildInputCarrier } from '@taucad/runtime/middleware';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { Artifact, EvaluateResult, RenderResult, WriteResult } from '@taucad/runtime/types';
+import type { Artifact, EvaluateResult, RenderResult, KernelExportResult } from '@taucad/runtime/types';
 import { createErrorResult, createMockInput, createMockRuntime } from '@taucad/runtime-testing';
 import { geometryCache } from '#geometry-cache.middleware.js';
 
@@ -18,7 +18,7 @@ const reusableBuild = (serializedHandle = new Uint8Array([1, 2, 3])): EvaluateRe
 });
 
 const successfulRender = (data: Artifact): RenderResult => ({ success: true, data, issues: [] });
-const successfulExport = (bytes = new Uint8Array([4, 5, 6])): WriteResult => ({
+const successfulExport = (bytes = new Uint8Array([4, 5, 6])): KernelExportResult => ({
   success: true,
   data: [{ name: 'model.step', mimeType: 'application/step', bytes }],
   issues: [],
@@ -138,7 +138,7 @@ describe('geometryCache', () => {
   it('reuses exact export files with byte ownership', async () => {
     const runtime = createMockRuntime();
     const handler = vi.fn(async () => successfulExport());
-    const first = await middleware.wrapWrite!(
+    const first = await middleware.wrapExport!(
       { exportId: 'step', extension: 'step', mimeType: 'application/step', options: {} },
       handler,
       runtime,
@@ -146,7 +146,7 @@ describe('geometryCache', () => {
     if (first.success) {
       first.data[0].bytes[0] = 99;
     }
-    const second = await middleware.wrapWrite!(
+    const second = await middleware.wrapExport!(
       { exportId: 'step', extension: 'step', mimeType: 'application/step', options: {} },
       handler,
       runtime,
@@ -160,12 +160,12 @@ describe('geometryCache', () => {
   it.each([['failed', createErrorResult()]])('does not publish a %s export result', async (_name, result) => {
     const runtime = createMockRuntime();
     const handler = vi.fn(async () => result);
-    await middleware.wrapWrite!(
+    await middleware.wrapExport!(
       { exportId: 'step', extension: 'step', mimeType: 'application/step', options: {} },
       handler,
       runtime,
     );
-    await middleware.wrapWrite!(
+    await middleware.wrapExport!(
       { exportId: 'step', extension: 'step', mimeType: 'application/step', options: {} },
       handler,
       runtime,

@@ -40,7 +40,7 @@ const kernel = defineKernelV2({
   async evaluate() {
     return { handle: {} };
   },
-  async write() {
+  async export() {
     return { files: nonemptyExportFiles([{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }]) };
   },
 });

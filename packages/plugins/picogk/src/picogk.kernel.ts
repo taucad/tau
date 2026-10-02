@@ -210,7 +210,7 @@ export const picogkKernel = defineKernel({
     return { content: handle.glb };
   },
 
-  async write(input) {
+  async export(input) {
     try {
       const bytes = await transformGltfExportBytes(input.handle.glb, {
         format: 'glb',

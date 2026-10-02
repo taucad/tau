@@ -8,7 +8,7 @@ import { describe, it, expect, vi, beforeAll } from 'vitest';
 import { Document, NodeIO, Accessor } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { EXTManifold } from 'manifold-3d/manifold-gltf';
-import type { Artifact, RenderResult, WriteResult } from '@taucad/runtime/types';
+import type { Artifact, RenderResult, KernelExportResult } from '@taucad/runtime/types';
 import type { KernelMiddlewareServices } from '@taucad/runtime/middleware';
 
 import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
@@ -965,13 +965,13 @@ describe('gltfEdgeDetection', () => {
         { name: 'notes.txt', bytes: textBytes, mimeType: 'application/octet-stream' },
       ],
       issues: [],
-    } satisfies WriteResult;
+    } satisfies KernelExportResult;
     const runtime = createMockRuntime<Record<string, never>, EdgeDetectionOptions>({
       options: { thresholdDegrees: 30 },
     });
     const handler = vi.fn().mockResolvedValue(handlerResult);
 
-    const result = await gltfEdgeDetectionDefinition.wrapWrite!(
+    const result = await gltfEdgeDetectionDefinition.wrapExport!(
       {
         exportId: 'glb',
         extension: 'glb',
@@ -997,13 +997,13 @@ describe('gltfEdgeDetection', () => {
       success: true,
       data: [{ name: 'model.glb', bytes: malformed, mimeType: 'model/gltf-binary' }],
       issues: [],
-    } satisfies WriteResult;
+    } satisfies KernelExportResult;
     const runtime = createMockRuntime<Record<string, never>, EdgeDetectionOptions>({
       options: { thresholdDegrees: 30 },
     });
     const handler = vi.fn().mockResolvedValue(handlerResult);
 
-    const result = await gltfEdgeDetectionDefinition.wrapWrite!(
+    const result = await gltfEdgeDetectionDefinition.wrapExport!(
       {
         exportId: 'glb',
         extension: 'glb',

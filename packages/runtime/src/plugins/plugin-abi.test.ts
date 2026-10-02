@@ -134,7 +134,7 @@ const crossCopyInstance = () => {
 
 describe('runtime plugin ABI', () => {
   it('pins every registry key and the current ABI', () => {
-    expect(runtimePluginAbiVersion).toBe(4);
+    expect(runtimePluginAbiVersion).toBe(5);
     expect(Symbol.keyFor(runtimePluginDefinitionSymbol)).toBe('@taucad/runtime/plugin-definition');
     expect(Symbol.keyFor(runtimePluginFactoryAcceptsOptionsSymbol)).toBe(
       '@taucad/runtime/plugin-factory-accepts-options',
@@ -156,11 +156,13 @@ describe('runtime plugin ABI', () => {
     expect(isPluginInstance(fakeInstance(2))).toBe(false);
     expect(isPluginFactory(fakeFactory(3))).toBe(false);
     expect(isPluginInstance(fakeInstance(3))).toBe(false);
+    expect(isPluginFactory(fakeFactory(4))).toBe(false);
+    expect(isPluginInstance(fakeInstance(4))).toBe(false);
     expect(isPluginFactory(fakeFactory('1'))).toBe(false);
     expect(isPluginInstance(fakeInstance(true))).toBe(false);
   });
 
-  it('rejects incomplete ABI 4 instances without reading accessors', () => {
+  it('rejects incomplete ABI 5 instances without reading accessors', () => {
     const missingExpanded = stamp(
       {
         meta: { name: '@test/incomplete' },

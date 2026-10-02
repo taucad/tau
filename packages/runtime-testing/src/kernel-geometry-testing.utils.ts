@@ -8,7 +8,7 @@
 import type { InspectReport } from '@gltf-transform/functions';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { ExportResult, Rendering } from '@taucad/runtime/client';
-import type { Artifact, RenderResult, WriteResult } from '@taucad/runtime/types';
+import type { Artifact, RenderResult, KernelExportResult } from '@taucad/runtime/types';
 import { expect } from 'vitest';
 import {
   getBoundingBoxFromInspect,
@@ -19,7 +19,7 @@ import {
 } from '#gltf-inspection.utils.js';
 
 type RuntimeResult = RenderResult | Rendering;
-type ExportCandidate = WriteResult | ExportResult;
+type ExportCandidate = KernelExportResult | ExportResult;
 
 // =============================================================================
 // Types

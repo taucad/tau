@@ -1,4 +1,4 @@
-/** Exact document/view source revisions and separate pinned-export/write dependencies (R4/I5). */
+/** Exact document/view source revisions and separate pinned-export/export dependencies (R4/I5). */
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, it, expect, vi } from 'vitest';
 import { digestContent } from '@taucad/cache-core';
@@ -79,7 +79,7 @@ const createHarness = async (
     async render({ handle }) {
       return { content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${handle.value}</text></svg>` };
     },
-    async write({ handle }) {
+    async export({ handle }) {
       counts.writes++;
       return {
         files: [
@@ -156,7 +156,7 @@ const createHarness = async (
 };
 
 describe('document results name the source revision they evaluated (R4)', () => {
-  it('measures scoped export admission and write freshness without treating evaluation provenance as the write key', async () => {
+  it('measures scoped export admission and export freshness without treating evaluation provenance as the export key', async () => {
     const geometryPath = 'geometry.flag';
     const exportPath = 'export.flag';
     const geometryDependencies: Array<{ hash: string; files: string[] }> = [];
@@ -166,7 +166,7 @@ describe('document results name the source revision they evaluated (R4)', () => 
       name: 'MeasuredAuthoredDependencies',
       resolve: () => [
         { path: geometryPath, affects: ['evaluate'] },
-        { path: exportPath, affects: ['write'] },
+        { path: exportPath, affects: ['export'] },
       ],
       async wrapEvaluate(input, handler, runtime) {
         geometryDependencies.push({
@@ -177,7 +177,7 @@ describe('document results name the source revision they evaluated (R4)', () => 
         });
         return handler(input);
       },
-      async wrapWrite(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         exportDependencies.push({
           hash: runtime.dependencyHash,
           files: runtime.dependencies
@@ -274,7 +274,7 @@ describe('document results name the source revision they evaluated (R4)', () => 
       expect(exportDependencies[2]?.hash).not.toBe(exportDependencies[3]?.hash);
       expect(exportDependencies[0]?.files).toContainEqual(expect.stringContaining(`${exportPath}:missing`));
       expect(exportDependencies[3]?.files).toContainEqual(expect.stringContaining(`${exportPath}:`));
-      // Inline V2 admission and writing each revalidate source bytes; no synthetic bulk read path.
+      // Inline V2 admission and exporting each revalidate source bytes; no synthetic bulk read path.
       expect(
         observations.map(({ readCalls, readBytes, existsCalls, exportCalls }) => ({
           readCalls,
@@ -334,7 +334,7 @@ describe('document results name the source revision they evaluated (R4)', () => 
     }
   });
 
-  it('returns the entry digest computed by the write path and changes after a rewrite', async () => {
+  it('returns the entry digest computed by the export path and changes after a rewrite', async () => {
     const { files, evaluate } = await createHarness({ 'main.ts': 'v1' });
     const first = await evaluate();
     files.set('main.ts', 'v2');
@@ -381,15 +381,15 @@ describe('document results name the source revision they evaluated (R4)', () => 
     expect(first.sourceRevision?.files[path]).toBe(await writtenDigest('first'));
     expect(second.sourceRevision?.files[path]).toBe(await writtenDigest('second'));
   });
-  it('keeps write-only source identity separate from the pinned committed evaluation', async () => {
+  it('keeps export-only source identity separate from the pinned committed evaluation', async () => {
     const path = 'export.flag';
     const writeHashes: string[] = [];
     let exportValue = 'first';
     const middleware = defineMiddleware({
       id: 'export-only',
       name: 'Export only',
-      resolve: () => [{ path, affects: ['write'] }],
-      async wrapWrite(input, handler, runtime) {
+      resolve: () => [{ path, affects: ['export'] }],
+      async wrapExport(input, handler, runtime) {
         writeHashes.push(runtime.dependencyHash);
         const result = await handler(input);
         return result.success
@@ -414,15 +414,15 @@ describe('document results name the source revision they evaluated (R4)', () => 
     expect(first.sourceRevision?.files[path]).toBeUndefined();
     expect(writeHashes[0]).not.toBe(writeHashes[1]);
   });
-  it('revalidates a write-only missing dependency when the file appears', async () => {
+  it('revalidates a export-only missing dependency when the file appears', async () => {
     const path = 'optional-export.flag';
     let exportValue = 'missing';
     const writeHashes: string[] = [];
     const middleware = defineMiddleware({
       id: 'appearing-export',
       name: 'Appearing export',
-      resolve: () => [{ path, affects: ['write'] }],
-      async wrapWrite(input, handler, runtime) {
+      resolve: () => [{ path, affects: ['export'] }],
+      async wrapExport(input, handler, runtime) {
         writeHashes.push(runtime.dependencyHash);
         const result = await handler(input);
         return result.success

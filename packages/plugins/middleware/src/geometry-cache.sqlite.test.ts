@@ -72,7 +72,7 @@ describe('geometry cache with durable SQLite', () => {
         restores++;
         return serialized;
       },
-      async write({ handle }) {
+      async export({ handle }) {
         return {
           files: [{ name: 'shape.step', mimeType: 'application/step', bytes: encoder.encode(handle.source) }],
         };

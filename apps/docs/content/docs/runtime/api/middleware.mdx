@@ -27,13 +27,13 @@ icon: lucide:layers
 
 <auto-type-table path='./props/middleware.ts' name='RenderRequest' />
 
-<auto-type-table path='./props/middleware.ts' name='WriteRequest' />
+<auto-type-table path='./props/middleware.ts' name='ExportRequest' />
 
 ## defineMiddleware
 
-Calling its `MiddlewarePluginFactory` yields serializable registration metadata and a private executable definition. `WrapDescribeHook`, `WrapEvaluateHook`, `WrapRenderHook`, and `WrapWriteHook` receive `(input, next, services)`. Await `next(input)` to continue; return the corresponding hook result.
+Calling its `MiddlewarePluginFactory` yields serializable registration metadata and a private executable definition. `WrapDescribeHook`, `WrapEvaluateHook`, `WrapRenderHook`, and `WrapExportHook` receive `(input, next, services)`. Await `next(input)` to continue; return the corresponding hook result.
 
-Evaluation is independent of views. Render requests identify a view, MIME type, and optional instance. Write requests identify an export, extension, and MIME type. State and options schemas infer parsed output on services; do not forward unparsed caller options.
+Evaluation is independent of views. Render requests identify a view, MIME type, and optional instance. Export requests identify an export, extension, and MIME type. State and options schemas infer parsed output on services; do not forward unparsed caller options.
 
 Middleware participates in cache identity. A pure telemetry tap may declare `mutates: false`, return successful results unchanged, and declare no dependencies. Other middleware is assumed to mutate results.
 

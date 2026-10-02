@@ -36,7 +36,7 @@ The client contract contains no mandatory geometry field. Consumers dispatch art
 
 ### Plugin Layer
 
-`defineRuntime()` composes registered capabilities. A kernel owns source detection and the `describe`, `resolve`, `evaluate`, `render`, and `write` behavior it implements. Bundlers prepare executable inputs. Middleware wraps operations through the same typed input and result contracts. Transcoders connect declared file types into reachable output routes.
+`defineRuntime()` composes registered capabilities. A kernel owns source detection and the `describe`, `resolve`, `evaluate`, `render`, and `export` behavior it implements. Bundlers prepare executable inputs. Middleware wraps operations through the same typed input and result contracts. Transcoders connect declared file types into reachable output routes.
 
 Static declarations provide inference and option schemas. Evaluation offers describe what the actual model supports. The runtime validates requests and returned artifacts at their boundaries rather than trusting a TypeScript declaration to validate JavaScript or remote producers.
 

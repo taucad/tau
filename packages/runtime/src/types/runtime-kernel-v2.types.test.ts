@@ -41,7 +41,7 @@ const makeKernel = () =>
     async render() {
       return { content: new Uint8Array([1]) };
     },
-    async write() {
+    async export() {
       return {
         files: nonemptyExportFiles([{ name: 'board.glb', mimeType: 'model/gltf-binary', bytes: new Uint8Array([1]) }]),
       };

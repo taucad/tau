@@ -3,7 +3,7 @@
  *
  * Dual path (blueprint D5/D6): the viewer renders in the `'fast'` lane on the host's artifact, and
  * every export replays the model in the `'exact'` lane on the serial L0 artifact through the
- * runtime's native-build replay. `write` stays a pure function of its handle.
+ * runtime's native-build replay. `export` stays a pure function of its handle.
  */
 
 import type {
@@ -1272,7 +1272,7 @@ export const picovoxelKernel = defineKernel({
     };
   },
 
-  async write(input, _runtime, context) {
+  async export(input, _runtime, context) {
     const { shapes } = input.handle;
     switch (input.exportId) {
       case 'glb':

@@ -2,7 +2,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { createMockRuntime } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { EvaluateResult, RenderResult, WriteResult } from '@taucad/runtime/kernel';
+import type { EvaluateResult, RenderResult, KernelExportResult } from '@taucad/runtime/kernel';
 import type { KernelErrorResult } from '@taucad/runtime/types';
 import { IngestEntryName } from '@taucad/telemetry';
 import { observabilityMiddleware } from '#runtime/observability/observability.middleware.js';
@@ -13,14 +13,14 @@ vi.mock('#runtime/observability/report-to-api.js', () => ({ reportToApi: vi.fn()
 const reportUrl = 'https://api.test/ingest';
 const evaluateInput = { entryPath: 'main.ts', parameters: {}, options: {} };
 const renderInput = { view: 'model', mimeType: 'model/gltf-binary', options: {} };
-const writeInput = { exportId: 'step', mimeType: 'model/step', extension: 'step', options: {} };
+const exportInput = { exportId: 'step', mimeType: 'model/step', extension: 'step', options: {} };
 const evaluateResult: EvaluateResult = { success: true, data: { views: ['model'] }, issues: [] };
 const renderResult: RenderResult = {
   success: true,
   data: { mimeType: 'model/gltf-binary', content: new Uint8Array([1, 2, 3]) },
   issues: [],
 };
-const writeResult: WriteResult = {
+const exportResult: KernelExportResult = {
   success: true,
   data: [{ name: 'output.step', bytes: new Uint8Array([1]), mimeType: 'model/step' }],
   issues: [],
@@ -49,18 +49,18 @@ describe('observabilityMiddleware', () => {
     vi.clearAllMocks();
   });
 
-  it('passes evaluate, render, and write through unchanged without a reporting URL', async () => {
+  it('passes evaluate, render, and export through unchanged without a reporting URL', async () => {
     const middleware = await resolve();
     const runtime = services('');
     const evaluate = vi.fn(async () => evaluateResult);
     const render = vi.fn(async () => renderResult);
-    const write = vi.fn(async () => writeResult);
+    const exportModel = vi.fn(async () => exportResult);
     expect(await middleware.wrapEvaluate!(evaluateInput, evaluate, runtime)).toBe(evaluateResult);
     expect(await middleware.wrapRender!(renderInput, render, runtime)).toBe(renderResult);
-    expect(await middleware.wrapWrite!(writeInput, write, runtime)).toBe(writeResult);
+    expect(await middleware.wrapExport!(exportInput, exportModel, runtime)).toBe(exportResult);
     expect(evaluate).toHaveBeenCalledWith(evaluateInput);
     expect(render).toHaveBeenCalledWith(renderInput);
-    expect(write).toHaveBeenCalledWith(writeInput);
+    expect(exportModel).toHaveBeenCalledWith(exportInput);
     expect(measureSpy).not.toHaveBeenCalled();
     expect(reportToApi).not.toHaveBeenCalled();
   });
@@ -90,10 +90,10 @@ describe('observabilityMiddleware', () => {
     });
   });
 
-  it('reports the selected export extension and returns the writer result', async () => {
+  it('reports the selected export extension and returns the export result', async () => {
     const middleware = await resolve();
-    const result = await middleware.wrapWrite!(writeInput, async () => writeResult, services());
-    expect(result).toBe(writeResult);
+    const result = await middleware.wrapExport!(exportInput, async () => exportResult, services());
+    expect(result).toBe(exportResult);
     expect(measureSpy).toHaveBeenCalledWith(
       IngestEntryName.KERNEL_EXPORT_GEOMETRY,
       expect.objectContaining({ detail: { status: 'success', exportFormat: 'step' } }),
@@ -115,7 +115,7 @@ describe('observabilityMiddleware', () => {
     };
     expect(await middleware.wrapEvaluate!(evaluateInput, async () => failure, runtime)).toBe(failure);
     expect(await middleware.wrapRender!(renderInput, async () => failure, runtime)).toBe(failure);
-    expect(await middleware.wrapWrite!(writeInput, async () => failure, runtime)).toBe(failure);
+    expect(await middleware.wrapExport!(exportInput, async () => failure, runtime)).toBe(failure);
     expect(failure.issues[0]?.message).toBe('invalid model');
     expect(measureSpy).toHaveBeenCalledWith(
       IngestEntryName.KERNEL_CREATE_GEOMETRY,
@@ -145,7 +145,7 @@ describe('observabilityMiddleware', () => {
     expect(runtime.logger.error).not.toHaveBeenCalled();
   });
 
-  it('records and rethrows evaluation, render, and write failures with their phase', async () => {
+  it('records and rethrows evaluation, render, and export failures with their phase', async () => {
     const middleware = await resolve();
     const runtime = services();
     const error = new Error('kernel crash');
@@ -154,7 +154,7 @@ describe('observabilityMiddleware', () => {
     };
     await expect(middleware.wrapEvaluate!(evaluateInput, reject, runtime)).rejects.toBe(error);
     await expect(middleware.wrapRender!(renderInput, reject, runtime)).rejects.toBe(error);
-    await expect(middleware.wrapWrite!(writeInput, reject, runtime)).rejects.toBe(error);
+    await expect(middleware.wrapExport!(exportInput, reject, runtime)).rejects.toBe(error);
     expect(measureSpy).toHaveBeenCalledWith(
       IngestEntryName.KERNEL_CREATE_GEOMETRY,
       expect.objectContaining({ detail: { status: 'error', phase: 'evaluate', error: 'kernel crash' } }),
@@ -182,7 +182,7 @@ describe('observabilityMiddleware', () => {
     };
     await expect(middleware.wrapEvaluate!(evaluateInput, reject, runtime)).rejects.toBe(error);
     await expect(middleware.wrapRender!(renderInput, reject, runtime)).rejects.toBe(error);
-    await expect(middleware.wrapWrite!(writeInput, reject, runtime)).rejects.toBe(error);
+    await expect(middleware.wrapExport!(exportInput, reject, runtime)).rejects.toBe(error);
     expect(runtime.logger.error).not.toHaveBeenCalled();
     expect(measureSpy).not.toHaveBeenCalled();
     expect(reportToApi).not.toHaveBeenCalled();

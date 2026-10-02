@@ -92,12 +92,12 @@ const buildAndExport = async (
   const created = await definition.evaluate({ entryPath, parameters, options: {} }, runtime, context);
   const exported =
     format === 'glb'
-      ? await definition.write!(
+      ? await definition.export!(
           { exportId: 'glb', handle: created.handle, options: exportOptions.glb },
           runtime,
           context,
         )
-      : await definition.write!(
+      : await definition.export!(
           { exportId: '3mf', handle: created.handle, options: exportOptions['3mf'] },
           runtime,
           context,

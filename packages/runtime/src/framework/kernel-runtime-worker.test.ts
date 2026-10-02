@@ -40,7 +40,7 @@ import type {
   EvaluateInput,
   KernelExportDeclarations,
   ResolveInput,
-  WriteOutput,
+  ExportOutput,
 } from '#types/runtime-kernel-v2.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 
@@ -61,7 +61,7 @@ const emptyParameterDeclaration = {
 // ===================================================================
 
 type TestTranscoderPlugin = TranscoderPlugin & RuntimePluginDefinitionCarrier<TranscoderDefinition>;
-type TestWriteInput = Parameters<NonNullable<AnyKernelDefinitionV2['write']>>[0];
+type TestExportInput = Parameters<NonNullable<AnyKernelDefinitionV2['export']>>[0];
 type TestReleaseInput = Readonly<{ handle: unknown }>;
 type TestDeserializeInput = Readonly<{ serialized: unknown }>;
 
@@ -95,14 +95,14 @@ function createMockKernelDefinition(id: string, overrides: Partial<AnyKernelDefi
       }
       return { content: new Uint8Array([1, 2, 3]) };
     },
-    write: async () => {
+    export: async () => {
       throw new Error('This mock kernel declares no exports.');
     },
   };
   const defaultWrite =
-    Object.keys(exportDeclarations ?? {}).length > 0 && !overrides.write
+    Object.keys(exportDeclarations ?? {}).length > 0 && !overrides.export
       ? {
-          write: async ({ exportId }: { exportId: string }) => {
+          export: async ({ exportId }: { exportId: string }) => {
             const declaration = exportDeclarations?.[exportId];
             if (!declaration) {
               throw new Error(`Undeclared mock export: ${exportId}`);
@@ -1061,7 +1061,7 @@ describe('provider content projection', () => {
         seen.kernelMesh.push(Object.hasOwn(input, 'content'));
         return { content: bytesFor('display') };
       },
-      async write(input) {
+      async export(input) {
         seen.kernelExport.push(Object.hasOwn(input, 'content'));
         return {
           files: [exportFile('model.glb', bytesFor('source'), 'model/gltf-binary')],
@@ -1080,7 +1080,7 @@ describe('provider content projection', () => {
         seen.middlewareMesh.push(Object.hasOwn(input, 'content'));
         return handler(input);
       },
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         seen.middlewareExport.push(Object.hasOwn(input, 'content'));
         return handler(input);
       },
@@ -1169,7 +1169,7 @@ describe('provider content projection', () => {
         kernelCreateInputs.push(input);
         return { handle: { label: 'native' }, issues: [] };
       },
-      async write(input) {
+      async export(input) {
         kernelExportInputs.push(input);
         return {
           files: [exportFile('model.glb', bytesFor('direct'), 'model/gltf-binary')] as const,
@@ -1206,7 +1206,7 @@ describe('provider content projection', () => {
           content: { includeTopology: false },
         } as unknown as typeof input);
       },
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         observations.push({
           hook: 'edges-export',
           content: input.content,
@@ -1242,7 +1242,7 @@ describe('provider content projection', () => {
         });
         return handler(input);
       },
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         observations.push({
           hook: 'topology-export',
           content: input.content,
@@ -1561,7 +1561,7 @@ describe('create-options projection', () => {
         createInputs.push(input);
         return { handle: { label: 'native' }, issues: [] };
       },
-      write: async () => ({
+      export: async () => ({
         files: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')] as const,
         issues: [],
       }),
@@ -2284,7 +2284,7 @@ describe('native-handle snapshot restoration', () => {
       issues: [] as KernelIssue[],
     });
     const deserializeHandle = vi.fn().mockReturnValue({ kind: 'restored-handle' });
-    const write = vi.fn().mockResolvedValue({
+    const exportFiles = vi.fn().mockResolvedValue({
       files: [exportFile('model.gltf', new Uint8Array([9]), 'model/gltf+json')] as const,
       issues: [] as KernelIssue[],
     });
@@ -2304,7 +2304,7 @@ describe('native-handle snapshot restoration', () => {
         },
       },
       evaluate,
-      write,
+      export: exportFiles,
       serializeHandle: ({ handle }: { handle: unknown }) => ({
         snapshot: handle,
       }),
@@ -2343,7 +2343,7 @@ describe('native-handle snapshot restoration', () => {
       expect.any(Object),
       { id: 'snapshot-kernel' },
     );
-    expect(write).toHaveBeenCalledWith(
+    expect(exportFiles).toHaveBeenCalledWith(
       expect.objectContaining({ handle: { kind: 'restored-handle' } }),
       expect.any(Object),
       { id: 'snapshot-kernel' },
@@ -2364,7 +2364,7 @@ describe('native-handle snapshot restoration', () => {
     const deserializeHandle = vi.fn(() => {
       throw new Error('Snapshot payload is corrupt');
     });
-    const write = vi.fn().mockResolvedValue({
+    const exportFiles = vi.fn().mockResolvedValue({
       files: [exportFile('model.gltf', new Uint8Array([9]), 'model/gltf+json')] as const,
       issues: [] as KernelIssue[],
     });
@@ -2378,7 +2378,7 @@ describe('native-handle snapshot restoration', () => {
         },
       },
       evaluate,
-      write,
+      export: exportFiles,
       serializeHandle: ({ handle }: { handle: unknown }) => ({
         snapshot: handle,
       }),
@@ -2399,7 +2399,7 @@ describe('native-handle snapshot restoration', () => {
     expect(exportResult.success).toBe(true);
     expect(deserializeHandle).toHaveBeenCalledOnce();
     expect(evaluate).toHaveBeenCalledTimes(2);
-    expect(write).toHaveBeenCalledWith(
+    expect(exportFiles).toHaveBeenCalledWith(
       expect.objectContaining({ handle: { kind: 'reheated-live-handle' } }),
       expect.any(Object),
       { id: 'snapshot-kernel' },
@@ -2430,7 +2430,7 @@ describe('native-handle snapshot restoration', () => {
       };
     });
 
-    const write = vi.fn(async (input: TestWriteInput): Promise<WriteOutput> => {
+    const exportFiles = vi.fn(async (input: TestExportInput): Promise<ExportOutput> => {
       if (!canExportFromMemory) {
         throw Object.assign(new Error(noProgramIssue.message), {
           issues: [noProgramIssue],
@@ -2475,7 +2475,7 @@ describe('native-handle snapshot restoration', () => {
         },
       },
       evaluate,
-      write,
+      export: exportFiles,
       isHandleValid: ({ handle }) => {
         if (typeof handle === 'object' && handle !== null && 'hasGeometry' in handle) {
           return !handle['hasGeometry'] || canExportFromMemory;
@@ -2529,7 +2529,7 @@ describe('native-handle snapshot restoration', () => {
     expect(stepResult.success).toBe(true);
     expect(evaluate).toHaveBeenCalledTimes(3);
     /* oxlint-disable typescript/no-unsafe-assignment -- expect.objectContaining matchers return any */
-    expect(write).toHaveBeenLastCalledWith(
+    expect(exportFiles).toHaveBeenLastCalledWith(
       expect.objectContaining({
         exportId: 'step',
         handle: expect.objectContaining({ generation: 3 }),
@@ -2571,7 +2571,7 @@ describe('native-handle snapshot restoration', () => {
           issues: [] as KernelIssue[],
         };
       },
-      write: async (input: TestWriteInput) => ({
+      export: async (input: TestExportInput) => ({
         files: [exportFile('source.glb', bytesFor(handleLabel(input.handle)), 'model/gltf-binary')] as const,
         issues: [] as KernelIssue[],
       }),
@@ -2611,7 +2611,7 @@ describe('native-handle snapshot restoration', () => {
       await openWorkerDocument(worker, 'transcoded-options-doc', 'model.mock');
       const result = await worker.exportDocument({
         documentId: 'transcoded-options-doc',
-        operationId: 'transcoded-options-write',
+        operationId: 'transcoded-options-export',
         target: 'usdz',
         options: {
           quality: 64,
@@ -2689,7 +2689,7 @@ describe('native-handle snapshot restoration', () => {
           },
         },
         evaluate,
-        write: async (input: TestWriteInput) => {
+        export: async (input: TestExportInput) => {
           events.push(`export:${handleLabel(input.handle)}`);
           return {
             files: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')] as const,
@@ -2750,7 +2750,7 @@ describe('native-handle snapshot restoration', () => {
         handle: { label: 'live-1' },
         issues: [] as KernelIssue[],
       }),
-      write: async () => ({
+      export: async () => ({
         files: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')] as const,
         issues: [],
       }),
@@ -2833,7 +2833,7 @@ describe('native-handle snapshot restoration', () => {
           },
         },
         evaluate,
-        write: async () => ({
+        export: async () => ({
           files: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')] as const,
           issues: [],
         }),
@@ -2896,7 +2896,7 @@ describe('native-handle snapshot restoration', () => {
           issues: [] as KernelIssue[],
         };
       },
-      write: async (_input, runtime) => {
+      export: async (_input, runtime) => {
         exportSignals.push(runtime.signal);
         return {
           files: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')] as const,
@@ -2966,7 +2966,7 @@ describe('native-handle snapshot restoration', () => {
           issues: [] as KernelIssue[],
         };
       },
-      write: async () => ({
+      export: async () => ({
         files: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')] as const,
         issues: [],
       }),
@@ -3037,7 +3037,7 @@ describe('native-handle snapshot restoration', () => {
           issues: [] as KernelIssue[],
         };
       },
-      write: async () => ({
+      export: async () => ({
         files: [exportFile('model.gltf', bytesFor('export'), 'model/gltf+json')] as const,
         issues: [],
       }),
@@ -3183,7 +3183,7 @@ describe('cache identity regressions', () => {
         issues: [] as KernelIssue[],
       };
     });
-    const write = vi.fn(async (input: TestWriteInput) => {
+    const exportFiles = vi.fn(async (input: TestExportInput) => {
       const label = handleLabel(input.handle);
       return {
         files: [exportFile('model.gltf', bytesFor(label), 'model/gltf+json')] as const,
@@ -3200,7 +3200,7 @@ describe('cache identity regressions', () => {
         },
       },
       evaluate,
-      write,
+      export: exportFiles,
     });
     const worker = await createMultiKernelWorker([{ id: 'request-scope-kernel', extensions: ['mock'], definition }]);
 
@@ -3254,7 +3254,7 @@ describe('cache identity regressions', () => {
           issues: [] as KernelIssue[],
         };
       },
-      write: async (input: TestWriteInput) => ({
+      export: async (input: TestExportInput) => ({
         files: [exportFile('source.glb', bytesFor(handleLabel(input.handle)), 'model/gltf-binary')] as const,
         issues: [] as KernelIssue[],
       }),
@@ -3267,7 +3267,7 @@ describe('cache identity regressions', () => {
         issues: [] as KernelIssue[],
       };
     });
-    const otherExportGeometry = vi.fn(async (input: TestWriteInput) => ({
+    const otherExportGeometry = vi.fn(async (input: TestExportInput) => ({
       files: [exportFile('other.glb', bytesFor(handleLabel(input.handle)), 'model/gltf-binary')] as const,
       issues: [] as KernelIssue[],
     }));
@@ -3281,7 +3281,7 @@ describe('cache identity regressions', () => {
         },
       },
       evaluate: otherCreateGeometry,
-      write: otherExportGeometry,
+      export: otherExportGeometry,
     });
     const worker = await createMultiKernelWorker([
       {
@@ -3370,7 +3370,7 @@ describe('cache identity regressions', () => {
         handle: { label: 'export-b' },
         issues: [] as KernelIssue[],
       }),
-      write: async (input: TestWriteInput) => ({
+      export: async (input: TestExportInput) => ({
         files: [exportFile('export.glb', bytesFor(handleLabel(input.handle)), 'model/gltf-binary')] as const,
         issues: [],
       }),

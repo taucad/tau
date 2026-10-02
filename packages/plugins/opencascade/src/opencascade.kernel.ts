@@ -803,7 +803,7 @@ export const opencascadeKernel = defineKernel({
     }
   },
 
-  async write(input, _runtime, context) {
+  async export(input, _runtime, context) {
     const { exportId, handle, options } = input;
     const emptyGlbExport = () => ({
       files: [createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))] as const,

@@ -79,7 +79,7 @@ function createDeferredKernel(
       counters.lastMeshedHandle = handle;
       return { content: new Uint8Array(displayBytes) };
     },
-    write: async () => {
+    export: async () => {
       counters.export++;
       return {
         files: [createExportFile('step', 'model', new Uint8Array([1, 2]))] as const,
@@ -310,7 +310,7 @@ describe('mesh/build/export phase separation', () => {
           }
           return { content: new Uint8Array([1]) };
         },
-        write: async ({ handle }) => ({
+        export: async ({ handle }) => ({
           files: [
             createExportFile('step', 'model', new Uint8Array([(handle as { revision: number }).revision])),
           ] as const,
@@ -382,7 +382,7 @@ describe('mesh/build/export phase separation', () => {
     const exportOnly = defineMiddleware({
       id: 'export-only',
       name: 'export-only',
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         return handler(input);
       },
     });

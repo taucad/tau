@@ -8,7 +8,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { contentDigest, digestAction } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import type { ResidentCacheBinding, ResidentExportEntry } from '@taucad/runtime/kernel';
-import type { RenderResult, WriteResult } from '@taucad/runtime/types';
+import type { RenderResult, KernelExportResult } from '@taucad/runtime/types';
 
 import * as entry from '#index.js';
 
@@ -46,7 +46,7 @@ describe('@taucad/runtime-testing', () => {
     expect(fixture.viewSpy).toHaveBeenCalledWith('model', undefined);
   });
 
-  it('reads actual v2 render and write artifacts through the known-media boundary', () => {
+  it('reads actual v2 render and export artifacts through the known-media boundary', () => {
     const glb = new Uint8Array([1, 2, 3]);
     const rendered: RenderResult = {
       success: true,
@@ -58,7 +58,7 @@ describe('@taucad/runtime-testing', () => {
       entry.extractGltfFromResult({ ...rendered, data: { mimeType: 'model/gltf-binary', content: new Uint8Array() } }),
     ).toThrow(TypeError);
 
-    const written: WriteResult = {
+    const written: KernelExportResult = {
       success: true,
       data: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: glb }],
       issues: [],

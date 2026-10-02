@@ -119,7 +119,7 @@ vi.mock('picovoxel/multi', async (importOriginal) => recordArtifact('multi', awa
 
 type MainModule = Record<string, unknown>;
 
-type ExportInput = Parameters<NonNullable<typeof definition.write>>[0];
+type ExportInput = Parameters<NonNullable<typeof definition.export>>[0];
 
 const definition = await resolveRuntimePluginDefinition('kernel', picovoxelKernel());
 
@@ -1387,14 +1387,14 @@ describe('picovoxel kernel', () => {
     ) => {
       const { runtime, context, result } = await evaluate({ module, lane: input.lane ?? 'exact' });
       const options = { ...definition.exports[input.exportId].optionsSchema.parse(input.options ?? {}) };
-      return definition.write!(
+      return definition.export!(
         { exportId: input.exportId, options, handle: result.handle } as ExportInput,
         runtime,
         context,
       );
     };
 
-    it('should write an unstamped STL per shape from an exact handle', async () => {
+    it('should export an unstamped STL per shape from an exact handle', async () => {
       const result = await exportFrom({ default: helloCube }, { exportId: 'stl' });
 
       expect(result.files).toHaveLength(1);
@@ -1519,7 +1519,7 @@ describe('picovoxel kernel', () => {
 
     it('should refuse an undeclared format', async () => {
       const { runtime, context, result } = await evaluate({ module: { default: () => [] } });
-      const refused = definition.write!(
+      const refused = definition.export!(
         { exportId: 'step', options: {}, handle: result.handle } as unknown as ExportInput,
         runtime,
         context,
@@ -1542,8 +1542,8 @@ describe('picovoxel kernel', () => {
         );
         return rendered.content;
       };
-      const write = async () => {
-        const exported = await definition.write!(
+      const exportModel = async () => {
+        const exported = await definition.export!(
           { exportId: 'glb', options: definition.exports.glb.optionsSchema.parse({}), handle: result.handle },
           runtime,
           context,
@@ -1554,7 +1554,7 @@ describe('picovoxel kernel', () => {
         renderA: async () => project(result.handle, false),
         renderB: async () => project(result.handle, true),
         freshB: async () => project(fresh, true),
-        ...(lane === 'exact' ? { write } : {}),
+        ...(lane === 'exact' ? { export: exportModel } : {}),
       });
     });
 
@@ -1622,7 +1622,7 @@ describe('picovoxel kernel', () => {
         context,
       );
       expect(nativeHandle.shapes.map(({ name }) => name)).toEqual(['蓋 / Lid', 'Mesh', 'Shape 1', 'Shape 4']);
-      const exported = await definition.write!(
+      const exported = await definition.export!(
         { exportId: 'glb', handle: nativeHandle, options: definition.exports.glb.optionsSchema.parse({}) },
         runtime,
         context,
@@ -1799,7 +1799,7 @@ describe('PicoVoxel mechanism snapshots and binding', () => {
       ];
       for (const input of inputs) {
         // oxlint-disable-next-line no-await-in-loop -- Exports share one kernel context.
-        const exported = await definition.write!(input, runtime, context);
+        const exported = await definition.export!(input, runtime, context);
         expect(exported.issues).toEqual(result.issues);
       }
       for (const mechanismIssues of [

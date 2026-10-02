@@ -234,7 +234,7 @@ export const gltfEdgeDetection = defineMiddleware({
     return input.content?.includeEdges ? addEdgesToResult(result, options.thresholdDegrees, logger) : result;
   },
 
-  async wrapWrite(input, handler, { logger, options }) {
+  async wrapExport(input, handler, { logger, options }) {
     const result = await handler(input);
     if (!input.content?.includeEdges || !result.success) {
       return result;

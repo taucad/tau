@@ -4,7 +4,13 @@ import type { CacheCodec, ComputeAction } from '@taucad/cache-core';
 import { z } from 'zod';
 import { defineMiddleware, nativeBuildInputSymbol } from '@taucad/runtime/middleware';
 import type { NativeBuildInput, NativeBuildInputCarrier } from '@taucad/runtime/middleware';
-import type { Artifact, EvaluateResult, KernelSuccessResult, RenderResult, WriteResult } from '@taucad/runtime/types';
+import type {
+  Artifact,
+  EvaluateResult,
+  KernelSuccessResult,
+  RenderResult,
+  KernelExportResult,
+} from '@taucad/runtime/types';
 import { kernelIssueCodeValues } from '@taucad/runtime/types';
 import { nonemptyExportFiles } from '@taucad/runtime/kernel';
 import { traceCacheOperation } from '#_internal/cache-span.js';
@@ -77,7 +83,7 @@ const exportEntrySchema = z
   .strict();
 
 const dependencyAction = (
-  operation: 'evaluate' | 'render' | 'write',
+  operation: 'evaluate' | 'render' | 'export',
   dependencyHash: string,
   codec: { readonly id: string; readonly version: string },
 ): ComputeAction => ({
@@ -152,7 +158,7 @@ const meshCodec: CacheCodec<RenderResult> = {
   decode: ({ bytes }) => meshEntrySchema.parse(msgpackDecode(bytes)).result as KernelSuccessResult<Artifact>,
 };
 
-const exportCodec: CacheCodec<WriteResult> = {
+const exportCodec: CacheCodec<KernelExportResult> = {
   id: '@taucad/middleware/geometry-export',
   version: '2',
   mediaType: 'application/vnd.taucad.geometry-export+msgpack',
@@ -209,13 +215,13 @@ export const geometryCache = defineMiddleware({
     return result.value;
   },
 
-  async wrapWrite(input, handler, { compute, dependencyHash, logger, tracer }) {
+  async wrapExport(input, handler, { compute, dependencyHash, logger, tracer }) {
     if (compute.status !== 'on') {
       return handler(input);
     }
     const result = await traceCacheOperation(tracer, 'cache.geometry.export.evaluate', async () =>
       compute.evaluate({
-        action: dependencyAction('write', dependencyHash, exportCodec),
+        action: dependencyAction('export', dependencyHash, exportCodec),
         codec: exportCodec,
         policy: 'best-effort',
         compute: async () => handler(input),

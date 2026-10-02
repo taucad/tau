@@ -16,7 +16,7 @@ Integrate a new CAD engine by implementing the kernel lifecycle with `defineKern
 
 ### 1. Implement the kernel definition
 
-Declare static `views` and `exports`. Provide `initialize`, `resolve`, `describe`, and `evaluate`; declared views require `render`, exports require `write`. Evaluation returns a handle and offered IDs, default view first. Render returns selected content; write returns nonempty files:
+Declare static `views` and `exports`. Provide `initialize`, `resolve`, `describe`, and `evaluate`; declared views require `render`, exports require `export`. Evaluation returns a handle and offered IDs, default view first. Render returns selected content; export returns nonempty files:
 
 ```typescript
 import {
@@ -59,7 +59,7 @@ export const myKernel = defineKernel({
   async render({ handle }) {
     return { content: toSvg(handle.source) };
   },
-  async write({ handle }) {
+  async export({ handle }) {
     return {
       files: nonemptyExportFiles([
         {
@@ -73,7 +73,7 @@ export const myKernel = defineKernel({
 });
 ```
 
-Lifecycle methods receive `KernelServices` second and initialized context third. The inferred handle flows from `evaluate` into `render`, `write`, and `releaseHandle`.
+Lifecycle methods receive `KernelServices` second and initialized context third. The inferred handle flows from `evaluate` into `render`, `export`, and `releaseHandle`.
 
 ### 2. Register and use the kernel
 
@@ -153,4 +153,4 @@ Entries and dependencies share the canonical, root-relative [runtime-path namesp
 
 - [Plugin System](../concepts/plugin-system) — How kernels are loaded and selected
 - [API Reference: Kernels](../api/kernels) — KernelPlugin and kernel factory functions
-- [API Reference: Types](../api/types) — KernelServices, EvaluateInput, RenderInput, and WriteInput
+- [API Reference: Types](../api/types) — KernelServices, EvaluateInput, RenderInput, and ExportInput

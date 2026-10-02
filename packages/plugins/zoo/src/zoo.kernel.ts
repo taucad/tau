@@ -343,7 +343,7 @@ export const zooKernel = defineKernel({
 
       // Display GLTF fetch is deferred to render so a BRep-only export
       // skips the engine round-trip. An executed-but-empty scene is discovered
-      // at fetch/export time; write's per-format empty guards cover it.
+      // at fetch/export time; export's per-format empty guards cover it.
       return { handle: createZooNativeHandle(true, generation) };
     } catch (error) {
       if (error instanceof KclBuildError) {
@@ -396,7 +396,7 @@ export const zooKernel = defineKernel({
   },
 
   // oxlint-disable-next-line complexity -- self-contained, refactor later.
-  async write(input, { logger, signal }, context) {
+  async export(input, { logger, signal }, context) {
     const { exportId, handle } = input;
     assertCurrentZooHandle(handle, context);
 

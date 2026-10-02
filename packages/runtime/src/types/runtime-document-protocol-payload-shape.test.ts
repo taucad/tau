@@ -19,7 +19,7 @@ describe('document protocol payload-shape coverage (C18)', () => {
         result: { success: false, kernelId: undefined, issues: [issue] },
       },
       export: {
-        args: { documentId: 'doc', operationId: 'write-1', target: 'bom', options: {} },
+        args: { documentId: 'doc', operationId: 'export-1', target: 'bom', options: {} },
         result: {
           success: true,
           exportId: 'bom',
@@ -74,7 +74,7 @@ describe('document protocol payload-shape coverage (C18)', () => {
       openView: { documentId: 'doc', subscriptionId: 'view', requestId: 'request', view: 'model' },
       updateView: { subscriptionId: 'view', requestId: 'request-2', options: {} },
       closeView: { subscriptionId: 'view' },
-      abort: { operationId: 'write-1', reason: 2 },
+      abort: { operationId: 'export-1', reason: 2 },
       binaryMaterialised: { key: 'pool-1' },
     } as const;
     for (const name of Object.keys(commands) as Array<keyof typeof commands>) {
@@ -120,9 +120,9 @@ describe('document protocol payload-shape coverage (C18)', () => {
         scope: 'operation',
         documentId: 'doc',
         intent: 0,
-        operationId: 'write-1',
+        operationId: 'export-1',
         code: 'OPERATION_TIMEOUT',
-        phase: 'write',
+        phase: 'export',
         message: 'Timed out',
       },
       stateChanged: { state: 'error' },

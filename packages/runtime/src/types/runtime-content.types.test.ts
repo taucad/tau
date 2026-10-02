@@ -99,7 +99,7 @@ const declarationBoundaries: readonly DeclarationBoundary[] = [
             ...(value === undefined ? {} : { content: value }),
           },
         },
-        write: async () => ({
+        export: async () => ({
           files: [
             {
               name: 'part.glb',

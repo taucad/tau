@@ -955,7 +955,7 @@ export const replicadKernel = defineKernel({
     }
   },
 
-  async write(input, runtime, context) {
+  async export(input, runtime, context) {
     return context.libraryTrace.runInScope({
       scope: 'export',
       operation: async () => {

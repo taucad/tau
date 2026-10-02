@@ -55,7 +55,7 @@ const abortHookKernel = defineKernel({
     }
     return { content: '<svg/>' };
   },
-  async write({ handle }, runtime) {
+  async export({ handle }, runtime) {
     if (handle.spin) {
       const start = performance.now();
       let checks = 0;
@@ -65,10 +65,10 @@ const abortHookKernel = defineKernel({
           checks++;
         }
       } catch (error) {
-        runtime.logger.debug(`Native write stopped after ${checks} checks`);
+        runtime.logger.debug(`Native export stopped after ${checks} checks`);
         throw error;
       }
-      throw new Error('Native write did not receive its abort signal.');
+      throw new Error('Native export did not receive its abort signal.');
     }
     return { files: [{ name: 'model.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode('recovered') }] };
   },

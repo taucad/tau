@@ -722,15 +722,15 @@ describe('TscircuitKernel', () => {
         );
         return result.content;
       };
-      const write = async () => {
-        const result = await definition.write!({ exportId: 'circuit', handle, options: {} }, runtime, context);
+      const exportModel = async () => {
+        const result = await definition.export!({ exportId: 'circuit', handle, options: {} }, runtime, context);
         return result.files[0].bytes;
       };
       await expectKernelProjectionOrder({
         renderA: async () => project('board'),
         renderB: async () => project('schematic'),
         freshB: async () => project('schematic', fresh),
-        write,
+        export: exportModel,
       });
     });
   });

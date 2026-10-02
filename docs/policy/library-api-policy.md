@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, named operation inputs, max 3 params, naming, subpath exports, events, plugins, and lazy init.'
 status: active
 created: '2026-02-23'
-updated: '2026-09-30'
+updated: '2026-10-02'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -181,11 +181,11 @@ Three signals that indicate a parameter design violation:
 
 ```typescript
 // INCORRECT: developer must write _runtime, _ctx just to reach nativeHandle
-async write({ exportId, options }, _services, _ctx, handle) {
+async export({ exportId, options }, _services, _ctx, handle) {
   // Only uses the selected export, options, and handle
 
 // CORRECT: handle is in the input object, no extra positional argument
-async write({ exportId, options, handle }, _services, _ctx) {
+async export({ exportId, options, handle }, _services, _ctx) {
   // Everything the developer needs is in the first param
 ```
 
@@ -296,7 +296,7 @@ Each naming prefix signals a specific role:
 
 Use the `on*` prefix for callbacks and framework lifecycle hooks. Never use `*Callback` suffixes.
 
-An operation hook declared by a plugin contract is named for the action every implementation performs. The runtime kernel contract uses `resolve`, `describe`, `evaluate`, `render`, and `write`, including non-geometric kernels. Sibling middleware uses `wrapDescribe`, `wrapEvaluate`, `wrapRender`, and `wrapWrite`. Do not name a shared operation for one medium (`createGeometry`, `meshGeometry`) or retain an alias for the same hook. Lifecycle callbacks still use `onDispose`.
+An operation hook declared by a plugin contract is named for the action every implementation performs. The runtime kernel contract uses `resolve`, `describe`, `evaluate`, `render`, and `export`, including non-geometric kernels. Sibling middleware uses `wrapDescribe`, `wrapEvaluate`, `wrapRender`, and `wrapExport`. Do not name a shared operation for one medium (`createGeometry`, `meshGeometry`) or retain an alias for the same hook. Lifecycle callbacks still use `onDispose`.
 
 ```typescript
 // CORRECT: on* prefix for callbacks
@@ -791,7 +791,7 @@ exports: {
 
 Provider hook inputs follow the same contract: when a provider declares no content, its method input omits `content`; this is distinct from the consumer envelope, where requesting an unsupported property is a type and runtime error. Do not add empty capability objects or arrays to advertise absence.
 
-Hook return objects follow the same ownership rule and must avoid reserved-word member names when consumers are expected to destructure the result. Use `write` for the kernel export hook instead of a member named `export`, because `const { export } = useRuntime()` is a syntax error.
+Hook return objects follow the same ownership rule and must avoid reserved-word member names when consumers are expected to destructure the result. Kernel hooks use `export` to produce declared export artifacts. Object methods may use reserved-word property names. Destructurable consumer return objects use a binding name such as `exportModel`, because `const { export } = useRuntime()` is a syntax error.
 
 ## 22. Temporal Values
 

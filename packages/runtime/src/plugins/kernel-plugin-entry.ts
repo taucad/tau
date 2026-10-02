@@ -31,9 +31,9 @@ export type {
   ResolveOutput,
   ViewDeclaration,
   ViewInstance,
-  WriteInput,
-  WriteOutput,
-  WriteResult,
+  ExportInput,
+  ExportOutput,
+  KernelExportResult,
 } from '#types/runtime-kernel-v2.types.js';
 export type {
   KernelFileSystem,

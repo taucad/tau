@@ -67,7 +67,7 @@ export const runtime = defineRuntime({
 });
 ```
 
-Backends load in the selected kernel's `initialize()` and live in its context. Kernels declare keyed `views` and `exports`, and `evaluate` returns the IDs currently offered. `render` projects a selected view from the retained handle; `write` produces files for a selected export. Toolkit namespaces never rewrite flat capability IDs.
+Backends load in the selected kernel's `initialize()` and live in its context. Kernels declare keyed `views` and `exports`, and `evaluate` returns the IDs currently offered. `render` projects a selected view from the retained handle; `export` produces files for a selected export. Toolkit namespaces never rewrite flat capability IDs.
 
 `@taucad/runtime/kernel` exports `createKernelError` for structured failures and `createKernelSuccess` for successes.
 

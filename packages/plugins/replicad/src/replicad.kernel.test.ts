@@ -340,7 +340,7 @@ describe('ReplicadWorker', () => {
       renderA: async () => render(client, 0.001),
       renderB: async () => render(client, 1),
       freshB: async () => render(freshClient, 1),
-      write: async () => {
+      export: async () => {
         const result = await exportLastRender(client, 'step');
         assertExportSuccess(result);
         const { bytes } = result.files[0];

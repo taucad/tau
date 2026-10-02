@@ -16,7 +16,7 @@ Build middleware with `defineMiddleware` from `@taucad/runtime/middleware`. Midd
 
 ### 1. Wrap an operation
 
-Implement `wrapEvaluate` (or `wrapDescribe`, `wrapWrite`). The third argument is the operation runtime — destructure `logger`, `filesystem`, `dependencyHash`, `signal`, `state`, and `options` from it as needed:
+Implement `wrapEvaluate` (or `wrapDescribe`, `wrapExport`). The third argument is the operation runtime — destructure `logger`, `filesystem`, `dependencyHash`, `signal`, `state`, and `options` from it as needed:
 
 ```typescript
 import { defineMiddleware } from '@taucad/runtime/middleware';
@@ -101,12 +101,12 @@ const metadataMiddleware = defineMiddleware({
 });
 ```
 
-Dependency scope is not inferred from wrap hooks. The available operation names are `describe`, `evaluate`, `render`, and `write`.
+Dependency scope is not inferred from wrap hooks. The available operation names are `describe`, `evaluate`, `render`, and `export`.
 
 ## Variations
 
 - **Cancellation**: Destructure the fresh operation `signal`, pass it to cancellable APIs, and never retain it after the hook settles — see [Cooperate with Cancellation](./cooperate-with-cancellation).
-- **Other hooks**: Implement `wrapDescribe`, `wrapRender`, or `wrapWrite` for the corresponding operation. `wrapRender` receives a selected `view` and `mimeType`; `wrapWrite` receives a selected `exportId`, `mimeType`, and `extension`. Declare middleware content under `content.views[mimeType]` or `content.exports[extension]`; only that selected route’s keys reach its hook.
+- **Other hooks**: Implement `wrapDescribe`, `wrapRender`, or `wrapExport` for the corresponding operation. `wrapRender` receives a selected `view` and `mimeType`; `wrapExport` receives a selected `exportId`, `mimeType`, and `extension`. Declare middleware content under `content.views[mimeType]` or `content.exports[extension]`; only that selected route’s keys reach its hook.
 
 ## Related
 

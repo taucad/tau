@@ -40,7 +40,7 @@ const kernel = defineKernel({
   async evaluate() {
     return { handle: {}, views: [] as const, exports: ['glb', 'stl'] as const };
   },
-  async write() {
+  async export() {
     return {
       files: nonemptyExportFiles([{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: new Uint8Array([1]) }]),
     };

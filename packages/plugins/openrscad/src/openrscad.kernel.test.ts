@@ -493,7 +493,7 @@ translate([8, 0, 0]) color("blue", 0.5) cube(2);
         roughnessFactor: 0.6,
       },
     ]);
-    const exported = await definition.write!(
+    const exported = await definition.export!(
       {
         exportId: 'glb',
         handle: created.handle,
@@ -541,8 +541,8 @@ translate([1, 0, 0]) color("blue") cube(2);
         unit: { length: 'millimeter' },
       },
     } as const;
-    const first = await definition.write!(exportInput, runtime, context);
-    const second = await definition.write!(exportInput, runtime, context);
+    const first = await definition.export!(exportInput, runtime, context);
+    const second = await definition.export!(exportInput, runtime, context);
     expect(first.files[0].bytes).toEqual(second.files[0].bytes);
     await expect(getSignedVolumeFromGlb(first.files[0].bytes)).resolves.toBeCloseTo(16, 6);
   });
@@ -602,7 +602,7 @@ color("green") cube(10);
       ['#FF0000FF Material', 'OPAQUE'],
     ]);
 
-    const exported = await definition.write!(
+    const exported = await definition.export!(
       {
         exportId: 'glb',
         handle: preview.handle,
@@ -745,8 +745,8 @@ color("red") {
       );
       return result.content;
     };
-    const write = async () => {
-      const result = await definition.write!(
+    const exportModel = async () => {
+      const result = await definition.export!(
         {
           exportId: 'glb',
           handle: edged.handle,
@@ -761,7 +761,7 @@ color("red") {
       renderA: async () => project(edged.handle, true),
       renderB: async () => project(edged.handle, false),
       freshB: async () => project(plain.handle, false),
-      write,
+      export: exportModel,
     });
     expect(ordered.first).toEqual(edged.geometry.content);
     expect(ordered.intervening).toEqual(plain.geometry.content);
@@ -774,17 +774,17 @@ color("red") {
         unit: { length: 'millimeter' },
       },
     } as const;
-    const plainExport = await definition.write!(
+    const plainExport = await definition.export!(
       { ...exportInput, exportId: 'glb', content: { includeEdges: false } },
       runtime,
       context,
     );
-    const edgedExport = await definition.write!(
+    const edgedExport = await definition.export!(
       { ...exportInput, exportId: 'glb', content: { includeEdges: true } },
       runtime,
       context,
     );
-    const repeatedEdgedExport = await definition.write!(
+    const repeatedEdgedExport = await definition.export!(
       { ...exportInput, exportId: 'glb', content: { includeEdges: true } },
       runtime,
       context,
@@ -843,7 +843,7 @@ translate([0, 0, 4]) color("blue") cube(2);
       runtime,
       context,
     );
-    const exported = await definition.write!(
+    const exported = await definition.export!(
       {
         exportId: '3mf',
         handle: created.handle,
@@ -874,7 +874,7 @@ translate([0, 0, 4]) color("blue") cube(2);
       ),
     ).toBe(true);
 
-    const repeated = await definition.write!(
+    const repeated = await definition.export!(
       {
         exportId: '3mf',
         handle: created.handle,
@@ -928,7 +928,7 @@ roof_frame();
       runtime,
       context,
     );
-    const exported = await definition.write!(
+    const exported = await definition.export!(
       {
         exportId: '3mf',
         handle: created.handle,
@@ -1204,7 +1204,7 @@ roof_frame();
     );
     expect(meshed.issues).toEqual(created.issues);
 
-    const glb = await definition.write!(
+    const glb = await definition.export!(
       {
         exportId: 'glb',
         handle: created.handle,
@@ -1217,7 +1217,7 @@ roof_frame();
       runtime,
       context,
     );
-    const threemf = await definition.write!(
+    const threemf = await definition.export!(
       {
         exportId: '3mf',
         handle: created.handle,
@@ -1245,7 +1245,7 @@ roof_frame();
       runtime,
       context,
     );
-    const glb = await definition.write!(
+    const glb = await definition.export!(
       {
         exportId: 'glb',
         handle: created.handle,
@@ -1265,7 +1265,7 @@ roof_frame();
       }),
     ]);
 
-    const threemf = definition.write!(
+    const threemf = definition.export!(
       {
         exportId: '3mf',
         handle: created.handle,
@@ -1402,8 +1402,8 @@ endsolid tetrahedron`);
         unit: { length: 'millimeter' },
       },
     } as const;
-    const first = await definition.write!(input, runtime, context);
-    const second = await definition.write!(input, runtime, context);
+    const first = await definition.export!(input, runtime, context);
+    const second = await definition.export!(input, runtime, context);
     expect(first.files[0].bytes).toEqual(second.files[0].bytes);
     const report = await getInspectReport(first.files[0].bytes);
     expect(getBoundingBoxFromInspect(report)?.size).toEqual([7, 7, 7]);
@@ -1537,8 +1537,8 @@ endsolid tetrahedron`);
       handle: created.handle,
       options: renderOptions,
     };
-    const exported = definition.write!(
-      unsupportedRequest as unknown as Parameters<NonNullable<typeof definition.write>>[0],
+    const exported = definition.export!(
+      unsupportedRequest as unknown as Parameters<NonNullable<typeof definition.export>>[0],
       runtime,
       context,
     );

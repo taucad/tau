@@ -191,7 +191,7 @@ describe('v2 kernel boundary with the current client', () => {
         const source = await services.filesystem.readFile(entryPath, 'utf8');
         return { handle: source, views: [] as const, exports: ['text'] as const };
       },
-      async write({ handle }) {
+      async export({ handle }) {
         return {
           files: [{ name: 'source.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(handle) }] as const,
         };
@@ -653,12 +653,12 @@ describe('v2 kernel boundary with the current client', () => {
     }
   });
 
-  it('arms distinct shared abort tokens at native render and write hooks', async () => {
+  it('arms distinct shared abort tokens at native render and export hooks', async () => {
     const render = vi.fn(async () => {
       checkAbort();
       return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
     });
-    const write = vi.fn(async () => {
+    const exportFiles = vi.fn(async () => {
       checkAbort();
       return { files: [{ name: 'bom.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode('ok') }] as const };
     });
@@ -682,7 +682,7 @@ describe('v2 kernel boundary with the current client', () => {
         return { handle: {}, views: ['model'] as const, exports: ['bom'] as const };
       },
       render,
-      write,
+      export: exportFiles,
     })();
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
@@ -691,7 +691,7 @@ describe('v2 kernel boundary with the current client', () => {
     worker.setSignalBuffer(buffer);
     const phases: string[] = [];
     worker.onDocumentProgressUpdate = (event) => {
-      if (event.phase !== 'render' && event.phase !== 'write') {
+      if (event.phase !== 'render' && event.phase !== 'export') {
         return;
       }
       phases.push(event.phase);
@@ -717,11 +717,13 @@ describe('v2 kernel boundary with the current client', () => {
       await vi.waitFor(() => {
         expect(errors.some((event) => event.scope === 'operation' && event.phase === 'render')).toBe(true);
       });
-      await expect(worker.exportDocument({ documentId: 'doc', operationId: 'write', target: 'bom' })).rejects.toThrow();
-      expect(errors.some((event) => event.scope === 'operation' && event.phase === 'write')).toBe(true);
-      expect(phases).toEqual(['render', 'write']);
+      await expect(
+        worker.exportDocument({ documentId: 'doc', operationId: 'export', target: 'bom' }),
+      ).rejects.toThrow();
+      expect(errors.some((event) => event.scope === 'operation' && event.phase === 'export')).toBe(true);
+      expect(phases).toEqual(['render', 'export']);
       expect(render).toHaveBeenCalledOnce();
-      expect(write).toHaveBeenCalledOnce();
+      expect(exportFiles).toHaveBeenCalledOnce();
     } finally {
       await worker.cleanup();
     }
@@ -877,7 +879,7 @@ describe('v2 kernel boundary with the current client', () => {
       async evaluate() {
         return { handle: {}, views: [] as const, exports: ['source'] as const };
       },
-      async write() {
+      async export() {
         return { files: [{ name: 'source.txt', mimeType: 'text/plain', bytes: new Uint8Array([1]) }] as const };
       },
     })();
@@ -1119,11 +1121,13 @@ describe('v2 kernel boundary with the current client', () => {
   });
 
   it('selects same-extension document exports by ID and refuses unavailable declared IDs', async () => {
-    const write = vi.fn(async ({ exportId, options }: { exportId: string; options: Record<string, unknown> }) => ({
-      files: [
-        { name: `${exportId}.txt`, mimeType: 'text/plain', bytes: new TextEncoder().encode(JSON.stringify(options)) },
-      ] as const,
-    }));
+    const exportFiles = vi.fn(
+      async ({ exportId, options }: { exportId: string; options: Record<string, unknown> }) => ({
+        files: [
+          { name: `${exportId}.txt`, mimeType: 'text/plain', bytes: new TextEncoder().encode(JSON.stringify(options)) },
+        ] as const,
+      }),
+    );
     const kernel = defineKernelV2({
       id: 'same-extension',
       extensions: ['circuit'] as const,
@@ -1152,7 +1156,7 @@ describe('v2 kernel boundary with the current client', () => {
       async evaluate() {
         return { handle: {}, views: [] as const, exports: ['plain', 'configured'] as const };
       },
-      write,
+      export: exportFiles,
     })();
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
@@ -1182,7 +1186,7 @@ describe('v2 kernel boundary with the current client', () => {
       const unavailable = await worker.exportDocument({ documentId: 'doc', operationId: 'unavailable', target: 'txt' });
       expect(plain.success).toBe(true);
       expect(configured.success).toBe(true);
-      expect(write.mock.calls.map(([input]) => input.exportId)).toEqual(['plain', 'configured']);
+      expect(exportFiles.mock.calls.map(([input]) => input.exportId)).toEqual(['plain', 'configured']);
       expect(unavailable.success).toBe(false);
       expect(unavailable.issues[0]?.code).toBe('EXPORT_UNKNOWN');
     } finally {
@@ -1219,7 +1223,7 @@ describe('v2 kernel boundary with the current client', () => {
         }
         return { handle: { version, source }, views: [] as const, exports: ['bom'] as const };
       },
-      async write({ handle }) {
+      async export({ handle }) {
         writes.push(handle.version);
         return {
           files: [
@@ -1285,7 +1289,7 @@ describe('v2 kernel boundary with the current client', () => {
   it('settles a pinned export from a failed evaluation without borrowing a newer success', async () => {
     const entered = Promise.withResolvers<void>();
     const release = Promise.withResolvers<void>();
-    const write = vi.fn(async ({ handle }: { handle: unknown }) => {
+    const exportFiles = vi.fn(async ({ handle }: { handle: unknown }) => {
       if (!handle || typeof handle !== 'object' || !('version' in handle) || typeof handle.version !== 'number') {
         throw new Error('Expected the pinned evaluation handle.');
       }
@@ -1320,7 +1324,7 @@ describe('v2 kernel boundary with the current client', () => {
         }
         return { handle: { version }, views: [] as const, exports: ['bom'] as const };
       },
-      write,
+      export: exportFiles,
     })();
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
@@ -1353,7 +1357,7 @@ describe('v2 kernel boundary with the current client', () => {
         expect(runtimeDocumentProtocolSchemas.notifies.evaluated.safeParse(decoded).success).toBe(true);
       }
       expect(evaluated.at(-1)?.success).toBe(true);
-      expect(write).not.toHaveBeenCalled();
+      expect(exportFiles).not.toHaveBeenCalled();
     } finally {
       release.resolve();
       await worker.cleanup();
@@ -1361,7 +1365,7 @@ describe('v2 kernel boundary with the current client', () => {
   });
 
   it('should validate a v2 source export and transcoder edge separately', async () => {
-    const write = vi.fn(async ({ options }: { options: { source: string } }) => ({
+    const exportFiles = vi.fn(async ({ options }: { options: { source: string } }) => ({
       files: [{ name: 'source.txt', mimeType: 'text/plain', bytes: new TextEncoder().encode(options.source) }] as const,
     }));
     const transcode = vi.fn(async () => ({
@@ -1395,7 +1399,7 @@ describe('v2 kernel boundary with the current client', () => {
       async evaluate() {
         return { handle: {}, views: [] as const, exports: ['source'] as const };
       },
-      write,
+      export: exportFiles,
     })();
     const transcoder = defineTranscoder({
       id: 'txt-csv',
@@ -1434,7 +1438,7 @@ describe('v2 kernel boundary with the current client', () => {
         options: { source: 'ok', edge: true },
       });
       expect(result.success, JSON.stringify(result.issues)).toBe(true);
-      expect(write).toHaveBeenCalledWith(
+      expect(exportFiles).toHaveBeenCalledWith(
         expect.objectContaining({ options: { source: 'ok' } }),
         expect.any(Object),
         expect.any(Object),
@@ -1462,7 +1466,7 @@ describe('v2 kernel boundary with the current client', () => {
     const render = vi.fn(async ({ options }: { options: { scale: number } }) => ({
       content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${options.scale}</text></svg>`,
     }));
-    const write = vi.fn(async ({ options }: { options: { count: number } }) => ({
+    const exportFiles = vi.fn(async ({ options }: { options: { count: number } }) => ({
       files: [
         { name: 'data.csv', mimeType: 'text/csv', bytes: new TextEncoder().encode(String(options.count)) },
       ] as const,
@@ -1499,7 +1503,7 @@ describe('v2 kernel boundary with the current client', () => {
       },
       evaluate,
       render,
-      write,
+      export: exportFiles,
     })();
     await seedTestFileSystem({ 'model.circuit': 'board' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
@@ -1552,12 +1556,12 @@ describe('v2 kernel boundary with the current client', () => {
       );
       const exported = await worker.exportDocument({
         documentId: 'transform-doc',
-        operationId: 'transform-write',
+        operationId: 'transform-export',
         target: 'data',
         options: { count: '7' },
       });
       expect(exported.success, JSON.stringify(exported.issues)).toBe(true);
-      expect(write).toHaveBeenCalledWith(
+      expect(exportFiles).toHaveBeenCalledWith(
         expect.objectContaining({ options: { count: 7 } }),
         expect.any(Object),
         expect.any(Object),
@@ -1618,7 +1622,7 @@ describe('v2 kernel boundary with the current client', () => {
       },
       releaseHandle,
       render,
-      async write() {
+      async export() {
         return { files: [{ name: 'bom.csv', mimeType: 'text/csv', bytes: new Uint8Array([1]) }] as const };
       },
     })();
@@ -1671,7 +1675,7 @@ describe('v2 kernel boundary with the current client', () => {
         content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${view}:${String(options['labels'])}:${String(content?.includeEdges)}</text></svg>`,
       }),
     );
-    const write = vi.fn(async () => ({
+    const exportFiles = vi.fn(async () => ({
       files: [{ name: 'bom.csv', mimeType: 'text/csv', bytes: new TextEncoder().encode('part,count\nR1,1') }] as const,
     }));
     const onDispose = vi.fn(async () => undefined);
@@ -1701,7 +1705,7 @@ describe('v2 kernel boundary with the current client', () => {
       },
       evaluate,
       render,
-      write,
+      export: exportFiles,
       onDispose,
     })();
     const phases: string[] = [];
@@ -1720,9 +1724,9 @@ describe('v2 kernel boundary with the current client', () => {
         phases.push(`render:${input.view}:${input.mimeType}:${String(input.content?.includeTopology)}`);
         return next(input);
       },
-      async wrapWrite(input, next) {
+      async wrapExport(input, next) {
         phases.push(
-          `write:${input.exportId}:${input.mimeType}:${input.extension}:${String(input.content?.includeTopology)}`,
+          `export:${input.exportId}:${input.mimeType}:${input.extension}:${String(input.content?.includeTopology)}`,
         );
         return next(input);
       },
@@ -1774,11 +1778,11 @@ describe('v2 kernel boundary with the current client', () => {
       if (exported.success) {
         expect(exported.files).toHaveLength(1);
       }
-      expect(write).toHaveBeenCalledTimes(1);
+      expect(exportFiles).toHaveBeenCalledTimes(1);
       expect(phases).toContain('evaluate:model.circuit');
       expect(phases).toContain('render:schematic:image/svg+xml:true');
-      expect(phases).toContain('write:bom:text/csv:csv:true');
-      expect(phases.filter((phase) => phase === 'write:bom:text/csv:csv:true')).toHaveLength(1);
+      expect(phases).toContain('export:bom:text/csv:csv:true');
+      expect(phases.filter((phase) => phase === 'export:bom:text/csv:csv:true')).toHaveLength(1);
     } finally {
       await worker.cleanup();
     }
@@ -1882,7 +1886,7 @@ describe('v2 kernel boundary with the current client', () => {
     const render = vi.fn(async ({ view }: { view: 'a' | 'b' }) => ({
       content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${view}</text></svg>`,
     }));
-    const write = vi.fn(async ({ exportId }: { exportId: 'first' | 'second' }) => ({
+    const exportFiles = vi.fn(async ({ exportId }: { exportId: 'first' | 'second' }) => ({
       files: [{ name: `${exportId}.txt`, mimeType: 'text/plain', bytes: new TextEncoder().encode(exportId) }] as const,
     }));
     const kernel = defineKernelV2({
@@ -1913,7 +1917,7 @@ describe('v2 kernel boundary with the current client', () => {
           : { handle: undefined, views: ['b'] as const, exports: ['second'] as const };
       },
       render,
-      write,
+      export: exportFiles,
     })();
     await seedTestFileSystem({ 'first.circuit': 'first', 'second.circuit': 'second' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
@@ -1975,8 +1979,8 @@ describe('v2 kernel boundary with the current client', () => {
         target: 'second',
       });
       expect(available.success, JSON.stringify(available.issues)).toBe(true);
-      expect(write).toHaveBeenCalledOnce();
-      expect(write).toHaveBeenCalledWith(
+      expect(exportFiles).toHaveBeenCalledOnce();
+      expect(exportFiles).toHaveBeenCalledWith(
         expect.objectContaining({ exportId: 'second', handle: undefined }),
         expect.any(Object),
         expect.any(Object),
@@ -1988,7 +1992,7 @@ describe('v2 kernel boundary with the current client', () => {
   });
 
   it('exports from a zero-view evaluation without inventing a display offer', async () => {
-    const write = vi.fn(async () => ({
+    const exportFiles = vi.fn(async () => ({
       files: [{ name: 'bom.csv', mimeType: 'text/csv', bytes: new TextEncoder().encode('part,count\nR1,1') }] as const,
     }));
     const kernel = defineKernelV2({
@@ -2010,7 +2014,7 @@ describe('v2 kernel boundary with the current client', () => {
       async evaluate() {
         return { handle: undefined, views: [] as const, exports: ['bom'] as const };
       },
-      write,
+      export: exportFiles,
     })();
     await seedTestFileSystem({ 'export.circuit': 'export only' });
     const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel] }) });
@@ -2033,11 +2037,11 @@ describe('v2 kernel boundary with the current client', () => {
       expect(evaluated[0]?.success).toBe(true);
       const result = await worker.exportDocument({
         documentId: 'export-only-doc',
-        operationId: 'export-only-write',
+        operationId: 'export-only-export',
         target: 'bom',
       });
       expect(result.success, JSON.stringify(result.issues)).toBe(true);
-      expect(write).toHaveBeenCalledOnce();
+      expect(exportFiles).toHaveBeenCalledOnce();
     } finally {
       await worker.cleanup();
     }

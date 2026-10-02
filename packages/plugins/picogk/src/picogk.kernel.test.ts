@@ -299,7 +299,7 @@ describe('PicoGK kernel', () => {
     expect(restored.glb).toEqual(handle.glb);
     expect(restored.glb).not.toBe(handle.glb);
 
-    const exported = await definition.write!(
+    const exported = await definition.export!(
       { exportId: 'glb', handle, options: picogkExportSchemas.glb.parse({}) },
       runtime,
       value,
@@ -309,8 +309,8 @@ describe('PicoGK kernel', () => {
       const projected = await definition.render!({ view: 'model', handle: valueHandle, options: {} }, runtime, value);
       return projected.content;
     };
-    const write = async (valueHandle: typeof handle) => {
-      const projected = await definition.write!(
+    const exportModel = async (valueHandle: typeof handle) => {
+      const projected = await definition.export!(
         { exportId: 'glb', handle: valueHandle, options: picogkExportSchemas.glb.parse({}) },
         runtime,
         value,
@@ -319,9 +319,9 @@ describe('PicoGK kernel', () => {
     };
     const ordered = await expectKernelProjectionOrder({
       renderA: async () => render(handle),
-      renderB: async () => write(handle),
-      freshB: async () => write(restored),
-      write: async () => render(restored),
+      renderB: async () => exportModel(handle),
+      freshB: async () => exportModel(restored),
+      export: async () => render(restored),
     });
     expect(ordered.first).toEqual(artifact.content);
     expect(ordered.intervening).toEqual(artifact.content);
@@ -343,7 +343,7 @@ describe('PicoGK kernel', () => {
       },
     });
     await expect(
-      definition.write!(
+      definition.export!(
         {
           exportId: 'glb',
           handle: badHandle as { glb: Uint8Array<ArrayBuffer> },

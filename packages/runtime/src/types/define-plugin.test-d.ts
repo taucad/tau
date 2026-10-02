@@ -121,7 +121,7 @@ describe('positive-only middleware and transcoder declarations', () => {
         }
         return result;
       },
-      async wrapWrite(input, handler) {
+      async wrapExport(input, handler) {
         expectTypeOf(input).not.toHaveProperty('content');
         return handler(input);
       },

@@ -3,7 +3,7 @@ title: 'Runtime Architecture Policy'
 description: 'Runtime SDK ownership and CAD worker architecture. Covers generic job/configuration modules, plugin boundaries, transport, and independent lifecycles.'
 status: active
 created: '2026-02-18'
-updated: '2026-09-30'
+updated: '2026-10-02'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/worker-policy.md
@@ -436,7 +436,7 @@ Each kernel declares `views` and `exports` as keyed data and implements the same
 - `describe(input, services, context)` — return the parameter declaration without evaluating the model.
 - `evaluate(input, services, context)` — perform build-affecting work once and return an opaque handle, issues, offered view/export ids, and any view instances. `evaluateOptionsSchema` declares build-affecting options.
 - `render(input, services, context)` — project one declared view from that handle. A nonempty `views` map requires this hook; an empty map forbids it. View options and the requested instance are narrowed by view id.
-- `write(input, services, context)` — produce a nonempty file set for one declared export. A nonempty `exports` map requires this hook; an empty map forbids it. Export options are narrowed by export id.
+- `export(input, services, context)` — produce a nonempty file set for one declared export. A nonempty `exports` map requires this hook; an empty map forbids it. Export options are narrowed by export id.
 - `isHandleValid`, `releaseHandle`, the paired `serializeHandle`/`deserializeHandle`, and `onDispose` manage retained handles and backend resources.
 
 **Render purity:** `render` reads the handle and its request; it must not mutate the handle or rerun source evaluation. Two views, or a view and an export, may consume the same evaluation concurrently. Clone or isolate a converter that sorts or mutates its input. A view's option changes only its projection; an `evaluateOptionsSchema` change creates a new evaluation. A hidden view need not render. The artifact's `mimeType` comes from the view declaration, with one artifact per render; exports carry their declared media type and extension. A kernel with no views can still offer exports.
@@ -543,7 +543,7 @@ createRuntimeClient({
 });
 ```
 
-Two explicit slots (`preview` and `export`) express the current client's quality defaults. The v2 kernel contract separates construction in `evaluate` from projection in `render` and file production in `write`. Construction-affecting tessellation belongs to `evaluateOptionsSchema`; a selected view or export declares its own options schema when tessellation affects only that projection. The framework admits each selected route's options against its declaration. BRep exports (STEP/IGES) tessellate nothing.
+Two explicit slots (`preview` and `export`) express the current client's quality defaults. The v2 kernel contract separates construction in `evaluate` from projection in `render` and file production in `export`. Construction-affecting tessellation belongs to `evaluateOptionsSchema`; a selected view or export declares its own options schema when tessellation affects only that projection. The framework admits each selected route's options against its declaration. BRep exports (STEP/IGES) tessellate nothing.
 
 2. **Per-call overrides** — passed as `callOptions` to individual methods:
 
@@ -586,7 +586,7 @@ RuntimeClient.render({ source, parameters, renderOptions? })
   → artifact MIME from the selected view declaration
 ```
 
-The v2 authoring contract has no global render option or geometry-specific hook. W3 will expose explicit view and export IDs on the document client; until then, the current client renders only the first offered view. `write({ handle, exportId, options, content? })` produces nonempty files for an offered export; it does not require a render when the evaluated handle is available.
+The v2 authoring contract has no global render option or geometry-specific hook. W3 will expose explicit view and export IDs on the document client; until then, the current client renders only the first offered view. `export({ handle, exportId, options, content? })` produces nonempty files for an offered export; it does not require a render when the evaluated handle is available.
 
 ## Plugin Options & Validation
 
@@ -610,9 +610,9 @@ The `geometryCache()` middleware persists three role-aligned entries under `.tau
 | ---------- | ------------------- | -------------- | --------------------------------------------------------------------- |
 | **build**  | `{hash}.bin`        | `wrapEvaluate` | Admitted offers, exact replay input and serialized handle when needed |
 | **mesh**   | `mesh-{hash}.bin`   | `wrapRender`   | Selected view artifact with declared MIME type                        |
-| **export** | `export-{hash}.bin` | `wrapWrite`    | Nonempty export files after selected contributors/transcoders         |
+| **export** | `export-{hash}.bin` | `wrapExport`   | Nonempty export files after selected contributors/transcoders         |
 
-The native-build key is exact rather than scope-selected. It covers source/import hashes, parameters, kernel version and initialization, implementation assets, mutative evaluation middleware and dependencies, and parsed `evaluateOptionsSchema` options. The artifact `dependencyHash` additionally covers the selected view or export, route options, requested content, contributors, and transcoders. View packing belongs in `render`; file encoding belongs in `write`.
+The native-build key is exact rather than scope-selected. It covers source/import hashes, parameters, kernel version and initialization, implementation assets, mutative evaluation middleware and dependencies, and parsed `evaluateOptionsSchema` options. The artifact `dependencyHash` additionally covers the selected view or export, route options, requested content, contributors, and transcoders. View packing belongs in `render`; file encoding belongs in `export`.
 
 A warm exact-match export reuses the evaluation's live handle, restores its serialized handle, or reheats from the retained evaluation input, in that order. An export-only request writes no view entry. Cache temperature must not change export output: live, reheated, and deserialized handles produce structurally identical STEP (verified by the Replicad conformance suite), and `exportSTEP` pins its `Interface_Static` state on every call so unit statics cannot leak between exports sharing a WASM instance.
 

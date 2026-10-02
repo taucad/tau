@@ -16,7 +16,7 @@ const nextTurn = async (): Promise<void> => {
 };
 
 describe('document channel session', () => {
-  it('signals exact native render and write tokens on view supersession and document close', async () => {
+  it('signals exact native render and export tokens on view supersession and document close', async () => {
     const ports = new MessageChannel();
     const exportCalled = Promise.withResolvers<string>();
     const viewOpened = Promise.withResolvers<{ subscriptionId: string; requestId: string }>();
@@ -103,7 +103,7 @@ describe('document channel session', () => {
         intent: 0,
         evaluationId: '1',
         operationId: exportOperationId,
-        phase: 'write',
+        phase: 'export',
         detail: { abortSequence: 6, abortGeneration: 8 },
       });
       await nextTurn();

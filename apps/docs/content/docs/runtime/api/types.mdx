@@ -101,9 +101,9 @@ Document results always carry `issues`. Successful evaluations offer ordered vie
 
 <auto-type-table path='./props/types.ts' name='RenderOutput' />
 
-<auto-type-table path='./props/types.ts' name='WriteInput' />
+<auto-type-table path='./props/types.ts' name='ExportInput' />
 
-<auto-type-table path='./props/types.ts' name='WriteOutput' />
+<auto-type-table path='./props/types.ts' name='ExportOutput' />
 
 ## Bundler Types
 
@@ -131,11 +131,11 @@ Document results always carry `issues`. Successful evaluations offer ordered vie
 
 <auto-type-table path='./props/types.ts' name='RenderResult' />
 
-<auto-type-table path='./props/types.ts' name='WriteResult' />
+<auto-type-table path='./props/types.ts' name='KernelExportResult' />
 
 <auto-type-table path='./props/types.ts' name='KnownArtifact' />
 
-`Artifact` accepts open MIME types with text or bytes. `asKnownArtifact` narrows GLB and SVG; other MIME types remain valid. `WriteOutput` carries a nonempty ordered `ExportFile` tuple; `RenderOutput` carries one artifact whose MIME type matches the selected declaration.
+`Artifact` accepts open MIME types with text or bytes. `asKnownArtifact` narrows GLB and SVG; other MIME types remain valid. `ExportOutput` carries a nonempty ordered `ExportFile` tuple; `RenderOutput` carries one artifact whose MIME type matches the selected declaration.
 
 ## Conversion Types
 

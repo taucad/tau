@@ -76,7 +76,7 @@ const createHarness = async (initial: Record<string, string>, options?: { readon
     async render({ handle }) {
       return { content: svg(handle.label) };
     },
-    async write({ handle }) {
+    async export({ handle }) {
       return {
         files: [{ name: 'model.svg', mimeType: 'image/svg+xml', bytes: new TextEncoder().encode(svg(handle.label)) }],
       };
@@ -369,7 +369,7 @@ describe('revalidation keeps the observation ledger coherent', () => {
     });
     expect(harness.worker.getWatchedPaths().has('main.ts')).toBe(true);
 
-    /* The preview's entry moves without an event — a staged agent write, or one the watcher
+    /* The preview's entry moves without an event — a staged agent export, or one the watcher
      * coalesced — and the agent's next tool call is about a different entry. */
     harness.files.set('main.ts', 'v2');
     await evaluationHash(harness.worker, 'other.ts');

@@ -3985,7 +3985,7 @@ describe('export schema hard-fail', () => {
       id: 'readsDuringExport',
       name: 'ReadsDuringExport',
       version: '1.0.0',
-      async wrapWrite(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         await runtime.filesystem.exists('main.ts');
         return handler(input);
       },

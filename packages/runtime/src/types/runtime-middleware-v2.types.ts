@@ -17,7 +17,7 @@ import type {
   EvaluateResult,
   RenderResult,
   ResolveInput,
-  WriteResult,
+  KernelExportResult,
 } from '#types/runtime-kernel-v2.types.js';
 import type { MiddlewareState as ExistingMiddlewareState } from '#types/runtime-middleware.types.js';
 
@@ -32,7 +32,7 @@ export type MiddlewareContent = Readonly<{
 /** File whose changes affect selected middleware operations. @public */
 export type MiddlewareDependency = Readonly<{
   path: string;
-  affects: ReadonlyArray<'describe' | 'evaluate' | 'render' | 'write'>;
+  affects: ReadonlyArray<'describe' | 'evaluate' | 'render' | 'export'>;
   watchDebounce?: number;
 }>;
 /** Services available during middleware dependency resolution. @public */
@@ -79,7 +79,7 @@ export type RenderRequest<Content extends RuntimeContentKey = RuntimeContentKey>
   } & ContentHookInputFor<Content>
 >;
 /** Request for one export and its selected extension and media type. @public */
-export type WriteRequest<Content extends RuntimeContentKey = RuntimeContentKey> = Readonly<
+export type ExportRequest<Content extends RuntimeContentKey = RuntimeContentKey> = Readonly<
   {
     exportId: string;
     mimeType: MediaType;
@@ -110,16 +110,16 @@ export type WrapRenderHook<
   next: (input: RenderRequest<Content>) => Promise<RenderResult>,
   services: KernelMiddlewareServices<State, Options>,
 ) => Promise<RenderResult>;
-/** Wrap writing for a selected export. @public */
-export type WrapWriteHook<
+/** Wrap a selected export. @public */
+export type WrapExportHook<
   State extends Record<string, unknown>,
   Options extends Record<string, unknown>,
   Content extends RuntimeContentKey,
 > = (
-  input: WriteRequest<Content>,
-  next: (input: WriteRequest<Content>) => Promise<WriteResult>,
+  input: ExportRequest<Content>,
+  next: (input: ExportRequest<Content>) => Promise<KernelExportResult>,
   services: KernelMiddlewareServices<State, Options>,
-) => Promise<WriteResult>;
+) => Promise<KernelExportResult>;
 
 type ContentKeys<Map> =
   Map extends Readonly<Record<string, RuntimeContentDeclaration>>
@@ -161,5 +161,5 @@ export type KernelMiddlewareV2<
   wrapDescribe?: WrapDescribeHook<z.output<StateSchema>, z.output<OptionsSchema>>;
   wrapEvaluate?: WrapEvaluateHook<z.output<StateSchema>, z.output<OptionsSchema>>;
   wrapRender?: WrapRenderHook<z.output<StateSchema>, z.output<OptionsSchema>, ViewContentKeys<Content>>;
-  wrapWrite?: WrapWriteHook<z.output<StateSchema>, z.output<OptionsSchema>, ExportContentKeys<Content>>;
+  wrapExport?: WrapExportHook<z.output<StateSchema>, z.output<OptionsSchema>, ExportContentKeys<Content>>;
 }>;

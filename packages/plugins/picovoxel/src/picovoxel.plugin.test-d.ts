@@ -17,4 +17,6 @@ expectTypeOf(registration.id).toEqualTypeOf<'picovoxel'>();
 expectTypeOf<keyof typeof registration.views>().toEqualTypeOf<'model'>();
 expectTypeOf<keyof typeof registration.exports>().toEqualTypeOf<'glb' | 'gltf' | 'stl'>();
 expectTypeOf<Parameters<NonNullable<typeof definition.render>>[0]['view']>().toEqualTypeOf<'model'>();
-expectTypeOf<Parameters<NonNullable<typeof definition.write>>[0]['exportId']>().toEqualTypeOf<'glb' | 'gltf' | 'stl'>();
+expectTypeOf<Parameters<NonNullable<typeof definition.export>>[0]['exportId']>().toEqualTypeOf<
+  'glb' | 'gltf' | 'stl'
+>();

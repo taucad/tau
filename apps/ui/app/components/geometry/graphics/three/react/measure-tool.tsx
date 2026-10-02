@@ -36,6 +36,7 @@ import {
   hasSceneTagInHierarchy,
 } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { getGltfOccurrenceLayers } from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import {
   useGraphics,
   useGraphicsSelector,
@@ -60,7 +61,11 @@ import { measureExactOccurrenceDistance } from '#workers/measurement-exact.clien
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 
-const measurementPickBlockingSceneTags = new Set<SceneTagKey>([sceneTag.measurementUi, sceneTag.sectionViewHelper]);
+const measurementPickBlockingSceneTags = new Set<SceneTagKey>([
+  sceneTag.measurementUi,
+  sceneTag.sectionViewHelper,
+  sceneTag.gltfSurfacePresentation,
+]);
 const featureOrdinals = new WeakMap<MeshFeatureGraph, Map<string, number>>();
 
 /** Human-facing target names use build-local feature order while opaque IDs remain the selection values. */
@@ -407,7 +412,7 @@ export function MeasureTool(): React.JSX.Element {
     const lines: Array<THREE.Object3D & { geometry: THREE.BufferGeometry }> = [];
     sceneRef.current.traverseVisible((object) => {
       if (
-        !object.layers.test(cameraRef.current.layers) ||
+        !getGltfOccurrenceLayers(object).test(cameraRef.current.layers) ||
         hasSceneTagInHierarchy(object, measurementPickBlockingSceneTags)
       ) {
         return;
@@ -416,6 +421,7 @@ export function MeasureTool(): React.JSX.Element {
         meshes.push(object as THREE.Mesh);
       } else if (
         object.userData['measurementFeatures']?.kind === 'line' &&
+        object.userData['fatLineSource'] !== true &&
         'geometry' in object &&
         object.geometry instanceof THREE.BufferGeometry
       ) {

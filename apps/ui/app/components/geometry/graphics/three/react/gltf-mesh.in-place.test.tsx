@@ -9,6 +9,7 @@ import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Raycaster, Vector3 } from 'three';
 import type { BufferAttribute, Intersection, Mesh, Object3D } from 'three';
 import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import * as surfaceBatchOwners from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 
 const mocks = vi.hoisted(() => {
@@ -122,28 +123,27 @@ const surfaceMaterial: GlbMaterial = {
   pbrMetallicRoughness: { baseColorFactor: [0.5, 0.5, 0.5, 1], metallicFactor: 0.1, roughnessFactor: 0.8 },
 };
 
-function buildGlb({ lift = 0, indices = [0, 1, 2] } = {}): Uint8Array<ArrayBuffer> {
+function buildGlb({ lift = 0, indices = [0, 1, 2], occurrences = 1 } = {}): Uint8Array<ArrayBuffer> {
+  const primitives = [
+    {
+      mode: 4,
+      positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
+      normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      indices: Uint32Array.from(indices),
+      material: surfaceMaterial,
+    },
+    {
+      mode: 1,
+      positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
+      indices: Uint32Array.from([0, 1, 1, 2]),
+      material: surfaceMaterial,
+    },
+  ];
   return writeGlb({
-    nodes: [
-      {
-        name: 'Part',
-        primitives: [
-          {
-            mode: 4,
-            positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
-            normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
-            indices: Uint32Array.from(indices),
-            material: surfaceMaterial,
-          },
-          {
-            mode: 1,
-            positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
-            indices: Uint32Array.from([0, 1, 1, 2]),
-            material: surfaceMaterial,
-          },
-        ],
-      },
-    ],
+    nodes: Array.from({ length: occurrences }, (_, index) => ({
+      name: occurrences === 1 ? 'Part' : `Part${index}`,
+      primitives,
+    })),
   });
 }
 
@@ -272,6 +272,50 @@ describe('GltfMesh in-place updates', () => {
     view.unmount();
     expect(disposeGeometry).toHaveBeenCalledTimes(1);
     expect(disposeMaterial).toHaveBeenCalledTimes(1);
+  });
+
+  it('should dispose the current batches after an in-place edit and late edge expansion', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const createBatches = vi.spyOn(surfaceBatchOwners, 'createGltfSurfaceBatches');
+    const first = buildGlb({ occurrences: 2 });
+    const second = buildGlb({ occurrences: 2, lift: 2 });
+    const view = render(
+      <GltfMesh gltfFile={first} geometryHash='a' presentationRevision={1} enableMatcap={false} enableLines={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const initial = createBatches.mock.results[0]!.value as surfaceBatchOwners.GltfSurfaceBatches;
+    const disposeInitial = vi.spyOn(initial, 'dispose');
+    view.rerender(
+      <GltfMesh gltfFile={second} geometryHash='b' presentationRevision={2} enableMatcap={false} enableLines={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1, 2]);
+    });
+    expect(parseAsync).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <GltfMesh gltfFile={second} geometryHash='b' presentationRevision={2} enableMatcap={false} enableLines />,
+    );
+    await waitFor(() => {
+      expect(createBatches).toHaveBeenCalledTimes(2);
+    });
+    const current = createBatches.mock.results[1]!.value as surfaceBatchOwners.GltfSurfaceBatches;
+    const disposeCurrent = vi.spyOn(current, 'dispose');
+    expect(disposeInitial).toHaveBeenCalledTimes(1);
+    expect(initial.group.parent).toBeNull();
+    expect(current.group.parent).not.toBeNull();
+    view.rerender(
+      <GltfMesh gltfFile={second} geometryHash='b' presentationRevision={2} enableMatcap={false} enableLines={false} />,
+    );
+    view.rerender(
+      <GltfMesh gltfFile={second} geometryHash='b' presentationRevision={2} enableMatcap={false} enableLines />,
+    );
+    expect(createBatches).toHaveBeenCalledTimes(2);
+    view.unmount();
+    expect(disposeCurrent).toHaveBeenCalledTimes(1);
+    expect(disposeInitial).toHaveBeenCalledTimes(1);
+    expect(current.group.parent).toBeNull();
   });
 
   it('should retain every live buffer when replacement metadata is malformed', async () => {

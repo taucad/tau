@@ -7,7 +7,7 @@ import {
   getModelComponentOwnerInHierarchy,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import type { ModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
-import { hasSceneTag, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { hasSceneTag, hasSceneTagInHierarchy, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 const float32Epsilon = 1.1920928955078125e-7;
 const sectionCoordinatePrecision = 100_000_000;
@@ -1436,7 +1436,10 @@ const combineExactTopologies = (
   };
 };
 
-const isSectionSurfaceMesh = (object: THREE.Object3D): object is SectionSurfaceMesh => object instanceof THREE.Mesh;
+const presentationSceneTags = new Set([sceneTag.gltfSurfacePresentation]);
+
+const isSectionSurfaceMesh = (object: THREE.Object3D): object is SectionSurfaceMesh =>
+  object instanceof THREE.Mesh && !hasSceneTagInHierarchy(object, presentationSceneTags);
 
 const hasPositionAttribute = (geometry: THREE.BufferGeometry): boolean =>
   Object.hasOwn(geometry.attributes, 'position');

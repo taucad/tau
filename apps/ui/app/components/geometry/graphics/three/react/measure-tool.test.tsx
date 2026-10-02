@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import { createActor } from 'xstate';
 import type { Actor } from 'xstate';
 import type { Mechanism } from '@taucad/kinematics';
+import { applyFatLineSegments } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import { MeasureTool, describeMeasurementTarget } from '#components/geometry/graphics/three/react/measure-tool.js';
 import * as measurementFeatures from '#components/geometry/graphics/three/utils/measurement-features.js';
 import { getMeshMeasurementFeatures } from '#components/geometry/graphics/three/utils/measurement-features.js';
@@ -169,6 +170,63 @@ describe('MeasureTool', () => {
     });
     expect(mocks.send).toHaveBeenCalledWith(expect.objectContaining({ type: 'measurementPoseChanged' }));
     expect(mocks.send).toHaveBeenCalledWith({ type: 'cancelCurrentMeasurement' });
+  });
+
+  it('should refresh late line inventory and exclude retained pose sources through visibility toggles', async () => {
+    const geometry = new THREE.BufferGeometry();
+    geometry.setAttribute('position', new THREE.Float32BufferAttribute([-1, 0, 2, 1, 0, 2, 0, 2, 2], 3));
+    geometry.setIndex([0, 2]);
+    const line = new THREE.LineSegments(geometry, new THREE.LineBasicMaterial());
+    line.userData['measurementFeatures'] = {
+      occurrenceId: 'part',
+      componentId: 'part',
+      kind: 'line',
+      edges: [{ id: 'edge', start: 0, count: 2 }],
+    };
+    line.visible = false;
+    mesh.add(line);
+    getMeshMeasurementFeatures(mesh);
+    const graphs = vi.spyOn(measurementFeatures, 'getLineMeasurementFeatures');
+    pressCentre();
+    expect(graphs).not.toHaveBeenCalled();
+    line.visible = true;
+    applyFatLineSegments(
+      { scene: mesh },
+      { backend: 'webgl', resolution: new THREE.Vector2(800, 600), preserveSourceNodes: true },
+    );
+    const fatLine = line.children[0]!;
+    try {
+      await act(async () => {
+        mocks.graphicsSnapshot.context.pickableMeshesVersion++;
+        renderTool();
+      });
+      pressCentre();
+      expect(graphs).toHaveBeenCalledWith(fatLine);
+      expect(graphs.mock.calls.every(([source]) => source !== line)).toBe(true);
+      const afterOn = graphs.mock.calls.length;
+      line.visible = false;
+      await act(async () => {
+        mocks.graphicsSnapshot.context.pickableMeshesVersion++;
+        renderTool();
+      });
+      pressCentre();
+      expect(graphs.mock.calls.length).toBe(afterOn);
+      line.visible = true;
+      await act(async () => {
+        mocks.graphicsSnapshot.context.pickableMeshesVersion++;
+        renderTool();
+      });
+      pressCentre();
+      expect(graphs.mock.calls.length).toBeGreaterThan(afterOn);
+      expect(line.children[0]).toBe(fatLine);
+      expect(graphs.mock.calls.every(([source]) => source !== line)).toBe(true);
+    } finally {
+      mesh.remove(line);
+      geometry.dispose();
+      line.material.dispose();
+      (fatLine as THREE.Mesh).geometry.dispose();
+      ((fatLine as THREE.Mesh).material as THREE.Material).dispose();
+    }
   });
 
   it('names same-edge endpoints and distinct edges without exposing feature IDs', () => {

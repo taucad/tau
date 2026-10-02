@@ -58,7 +58,7 @@ export const picogkKernel = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.5.2+dotnet10.roslyn5.9.host19.protocol8.material2.mechanism2.compute1',
+  version: '2.5.2+dotnet10.roslyn5.9.host20.protocol8.material2.mechanism2.compute1',
   optionsSchema: picogkOptionsSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',

@@ -6820,7 +6820,7 @@
 +                {
 +                    Voxels corrected(VoxelSize(libraryVoxelSize), PICOGK_VOXEL_DEFAULTNARROWBAND);
 +                    corrected.TauBindCounters(m_tauState->counters);
-+                    corrected.TauRenderCapturedMesh(*surface);
++                    corrected.TauRenderCapturedMesh(*surface, m_roGrid.get());
 +                    observedVolume = corrected.fCalculateVolume();
 +                }
 +                if (m_tauState->cacheable) {
@@ -6925,7 +6925,7 @@
          
      	std::vector< openvdb::Vec3s > oPoints;
      	std::vector< openvdb::Vec3I > oTriangles;
-@@ -429,143 +766,187 @@
+@@ -429,143 +766,202 @@
                                                           0.0,
                                                           false);
  
@@ -7003,6 +7003,21 @@
 +            if (a > static_cast<uint32_t>(INT32_MAX) || b > static_cast<uint32_t>(INT32_MAX) ||
 +                c > static_cast<uint32_t>(INT32_MAX))
 +                throw std::overflow_error("surface mesh index exceeds native range");
++            if (a >= vertices.size() || b >= vertices.size() || c >= vertices.size())
++                throw std::out_of_range("surface mesh index exceeds vertex range");
++            // Drop only exactly zero-area triangles emitted by the native mesher.
++            // Use double arithmetic without a tolerance or changing nonzero mesher order.
++            const auto& first = vertices[a];
++            const auto& second = vertices[b];
++            const auto& third = vertices[c];
++            const double ux = double(second.X) - double(first.X);
++            const double uy = double(second.Y) - double(first.Y);
++            const double uz = double(second.Z) - double(first.Z);
++            const double vx = double(third.X) - double(first.X);
++            const double vy = double(third.Y) - double(first.Y);
++            const double vz = double(third.Z) - double(first.Z);
++            if (uy * vz - uz * vy == 0 && uz * vx - ux * vz == 0 && ux * vy - uy * vx == 0)
++                return;
 +            triangles.emplace_back(static_cast<int32_t>(a), static_cast<int32_t>(b), static_cast<int32_t>(c));
 +        };
 +        for (const auto& triangle : oTriangles) add(triangle[2], triangle[1], triangle[0]);
@@ -7231,7 +7246,7 @@
          
          return (oAccess.getValue(xyz) <= 0.0f);
      }
-@@ -573,8 +954,10 @@
+@@ -573,8 +969,10 @@
      inline void GetSurfaceNormal(   Vector3 vecPt,
                                      Vector3* pvecNormal)
      {
@@ -7243,7 +7258,7 @@
      
          oStencil.moveTo(    openvdb::Coord( xyz.X,
                                              xyz.Y,
-@@ -591,20 +974,28 @@
+@@ -591,20 +989,28 @@
      inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
                                              Vector3* pvecSurfacePoint)
      {
@@ -7280,7 +7295,7 @@
          bool bStartInside = oAccess.getValue(   
                                  openvdb::Coord( xyzSearch.X,
                                                  xyzSearch.Y,
-@@ -638,31 +1029,53 @@
+@@ -638,31 +1044,53 @@
                                      const Vector3& vecDirection,
                                      Vector3* pvecSurfacePoint)
      {
@@ -7359,7 +7374,7 @@
      void GetVoxelDimensions(    int32_t* pnXMin,
                                  int32_t* pnYMin,
                                  int32_t* pnZMin,
-@@ -670,7 +1083,9 @@
+@@ -670,7 +1098,9 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -7370,7 +7385,7 @@
          
          *pnXMin     = oBBox.min().x();
          *pnYMin     = oBBox.min().y();
-@@ -683,7 +1098,9 @@
+@@ -683,7 +1113,9 @@
      void GetZSlice( int32_t nZSlice,
                      float* pfBuffer)
      {
@@ -7381,7 +7396,7 @@
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -700,7 +1117,9 @@
+@@ -700,7 +1132,9 @@
      void GetXSlice( int32_t nXSlice,
                      float* pfBuffer)
      {
@@ -7392,7 +7407,7 @@
          openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -717,7 +1136,9 @@
+@@ -717,7 +1151,9 @@
      void GetYSlice( int32_t nYSlice,
                      float* pfBuffer)
      {
@@ -7403,7 +7418,7 @@
          openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -734,7 +1155,9 @@
+@@ -734,7 +1170,9 @@
      void GetInterpolatedZSlice( float fZSlice,
                                  float* pfBuffer)
      {
@@ -7414,7 +7429,7 @@
          
          auto oAccess = m_roGrid->getConstAccessor();
          
-@@ -750,18 +1173,53 @@
+@@ -750,18 +1188,53 @@
          }
      }
      
@@ -7472,7 +7487,7 @@
      int32_t             m_nSdfNarrowBand;
      
      bool bLevelSetNeedsRebuild() const
-@@ -826,40 +1284,76 @@
+@@ -826,40 +1299,96 @@
          }
      }
      
@@ -7510,7 +7525,7 @@
 -                                                                    nHalfWidth);
 -    }
 -    
-+    void TauRenderCapturedMesh(const Mesh& input)
++    void TauRenderCapturedMesh(const Mesh& input, const FloatGrid* signSource = nullptr)
 +    {
 +        std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate);
 +        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
@@ -7518,7 +7533,7 @@
 +        if (!TauHasSupportedGridTransform(*m_roGrid))
 +            throw std::invalid_argument("mesh target has an unsupported transformation");
 +        // Admission and conversion complete before invalidating the target revision.
-+        auto converted = roFloatGridFromMesh(input, m_roGrid->transform(), oVoxelSize(), m_nSdfNarrowBand);
++        auto converted = roFloatGridFromMesh(input, m_roGrid->transform(), oVoxelSize(), m_nSdfNarrowBand, signSource);
 +        TauGridMutation mutation(m_tauState);
 +        openvdb::tools::csgUnion(*m_roGrid, *converted);
 +    }
@@ -7537,7 +7552,7 @@
 +            throw std::invalid_argument("mesh conversion coordinate exceeds native range");
 +    }
 +
-+    static FloatGrid::Ptr roFloatGridFromMesh(const Mesh& input, const openvdb::math::Transform& transform, VoxelSize size, int32_t halfWidth)
++    static FloatGrid::Ptr roFloatGridFromMesh(const Mesh& input, const openvdb::math::Transform& transform, VoxelSize size, int32_t halfWidth, const FloatGrid* signSource)
 +    {
 +        TauValidateMeshConversion(input, size, halfWidth);
 +        const auto& vertices = input.vVertices();
@@ -7576,6 +7591,26 @@
 +                output[2] = double(point[2]);
 +            }
 +        } adapter{points.get(), vertices.size(), triangles};
++        if (signSource) {
++            // Property correction keeps the captured source's interior while rebuilding
++            // distances from its generated mesh. Imported meshes retain the default signer.
++            auto interior = [&](const openvdb::Coord& coordinate) {
++                const auto world = transform.indexToWorld(coordinate.asVec3d());
++                const auto sourceIndex = signSource->transform().worldToIndex(world);
++                // BoxSampler floors to int32 coordinates and reads each +1 neighbor.
++                for (int axis = 0; axis < 3; ++axis) {
++                    const double value = sourceIndex[axis];
++                    if (!std::isfinite(value) || value < double(INT32_MIN) || value >= double(INT32_MAX))
++                        throw std::invalid_argument("property sign-source coordinate exceeds native range");
++                }
++                return openvdb::tools::BoxSampler::sample(signSource->tree(), sourceIndex) < 0;
++            };
++            // The installed convenience overload discards its interior-test argument.
++            openvdb::util::NullInterrupter interrupter;
++            return openvdb::tools::meshToVolume<FloatGrid>(interrupter, adapter, transform,
++                static_cast<float>(halfWidth), static_cast<float>(halfWidth), 0, nullptr,
++                interior, openvdb::tools::EVAL_EVERY_TILE);
++        }
 +        return openvdb::tools::meshToVolume<FloatGrid>(adapter, transform,
 +            static_cast<float>(halfWidth), static_cast<float>(halfWidth), 0);
 +    }
@@ -7583,7 +7618,7 @@
      template <class TAccessor>
      inline bool bBresenhamSphereHitTest(    bool bReferenceInside,
                                              Coord xyzCenter,
-@@ -870,47 +1364,83 @@
+@@ -870,47 +1399,83 @@
                                              bool* pbOutsideActiveBounds)
      {
          *pbOutsideActiveBounds = true;
@@ -7697,7 +7732,7 @@
          poAccess->setValue(xyz, std::clamp( fValue,
                                              -fBackground,
                                              fBackground));
-@@ -921,20 +1451,17 @@
+@@ -921,20 +1486,17 @@
      
      static bool bHasValidPicoGKTransform(const FloatGrid::Ptr roGrid)
      {

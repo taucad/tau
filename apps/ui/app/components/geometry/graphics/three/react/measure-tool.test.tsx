@@ -1,3 +1,4 @@
+import { StrictMode } from 'react';
 import { act } from '@testing-library/react';
 import { createRoot, events as createPointerEvents, extend } from '@react-three/fiber';
 import type { ReconcilerRoot } from '@react-three/fiber';
@@ -12,11 +13,13 @@ import * as measurementFeatures from '#components/geometry/graphics/three/utils/
 import { getMeshMeasurementFeatures } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import type { EdgeFeature, MeasurementTarget } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
+import type { MeasurementFeatureWorkerClient } from '#components/geometry/graphics/three/utils/measurement-features-worker-client.js';
 
 const mocks = vi.hoisted(() => ({
   send: vi.fn<
     (event: { type: string; candidates?: Array<{ id: string; label: string }>; hasMore?: boolean }) => void
   >(),
+  workerClientFactory: undefined as (() => MeasurementFeatureWorkerClient) | undefined,
   kinematics: undefined as Actor<typeof kinematicsMachine> | undefined,
   renderFrame: {
     anchorFrameId: 'tau:root',
@@ -52,6 +55,15 @@ const mocks = vi.hoisted(() => ({
     },
   },
 }));
+
+vi.mock('#components/geometry/graphics/three/utils/measurement-features-worker-client.js', async (importOriginal) => {
+  const actual = await importOriginal<{ createMeasurementFeatureWorkerClient: () => MeasurementFeatureWorkerClient }>();
+  return {
+    ...actual,
+    createMeasurementFeatureWorkerClient: () =>
+      mocks.workerClientFactory?.() ?? actual.createMeasurementFeatureWorkerClient(),
+  };
+});
 
 const graphicsActorMock = {
   send: mocks.send,
@@ -124,9 +136,11 @@ describe('MeasureTool', () => {
   });
 
   beforeEach(async () => {
+    mocks.workerClientFactory = undefined;
     mocks.kinematics = createActor(kinematicsMachine, { input: {} }).start();
     mocks.send.mockClear();
     mocks.graphicsSnapshot.context.gltfPresentation.presentedKey = 'geometry';
+    mocks.graphicsSnapshot.context.pickableMeshesVersion = 0;
     mocks.graphicsSnapshot.context.measureCatalogRequest = 0;
     mocks.graphicsSnapshot.context.measureCatalogAppend = false;
     mocks.graphicsSnapshot.context.measureMessage = undefined;
@@ -153,6 +167,7 @@ describe('MeasureTool', () => {
   });
 
   afterEach(() => {
+    mocks.workerClientFactory = undefined;
     vi.useRealTimers();
     act(() => {
       root.unmount();
@@ -407,5 +422,64 @@ describe('MeasureTool', () => {
       });
     });
     expect(measurementFeatures.getCachedMeshMeasurementFeatures(mesh)).toBeUndefined();
+  });
+
+  it('prepares a cold mesh after StrictMode replays effect cleanup', () => {
+    let livePrepares = 0;
+    mocks.workerClientFactory = () => {
+      let disposed = false;
+      return {
+        ready: () => undefined,
+        prepare: async () => {
+          if (!disposed) {
+            livePrepares++;
+          }
+          return undefined;
+        },
+        dispose: () => {
+          disposed = true;
+        },
+      };
+    };
+    act(() => {
+      root.render(
+        <StrictMode>
+          <primitive object={mesh} />
+          <MeasureTool />
+        </StrictMode>,
+      );
+    });
+    pressCentre();
+    expect(livePrepares).toBeGreaterThan(0);
+  });
+
+  it('ignores a rejected pointer request after pickable meshes change', async () => {
+    const rejectRequests: Array<(reason: Error) => void> = [];
+    const dispose = vi.fn();
+    mocks.workerClientFactory = () => ({
+      ready: () => undefined,
+      prepare: async () =>
+        new Promise<ReturnType<MeasurementFeatureWorkerClient['ready']>>((_resolve, reject) => {
+          rejectRequests.push(reject);
+        }),
+      dispose,
+    });
+    pressCentre();
+    const rejectOldRequest = rejectRequests[0];
+    expect(rejectOldRequest).toBeDefined();
+    await act(async () => {
+      mocks.graphicsSnapshot.context.pickableMeshesVersion++;
+      renderTool();
+      await Promise.resolve();
+    });
+    expect(dispose).toHaveBeenCalled();
+    await act(async () => {
+      rejectOldRequest!(new Error('Old source failed'));
+      await Promise.resolve();
+    });
+    expect(mocks.send).not.toHaveBeenCalledWith({
+      type: 'setMeasureMessage',
+      message: 'Measurement features could not be prepared. Move the pointer to retry.',
+    });
   });
 });

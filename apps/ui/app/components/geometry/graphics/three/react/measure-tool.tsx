@@ -326,6 +326,8 @@ export function MeasureTool(): React.JSX.Element {
         geometryKey: typeof geometryKey;
         graphicsActor: typeof graphicsActor;
         isMeasureActive: boolean;
+        measureFilter: typeof measureFilter;
+        measureMode: typeof measureMode;
         modelDisplayRevision: typeof modelDisplayRevision;
         pickableMeshesVersion: typeof pickableMeshesVersion;
         poseRevision: number;
@@ -348,20 +350,33 @@ export function MeasureTool(): React.JSX.Element {
   const mouseRef = useRef(new THREE.Vector2());
   const measureInputActor = useMemo(() => createActor(measureInputMachine), []);
   const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
-  const graphClientRef = useRef<MeasurementFeatureWorkerClient | undefined>(undefined);
   const pointerGraphPendingRef = useRef(new WeakSet<THREE.Mesh>());
+  const graphSource = useMemo(
+    () => ({
+      geometryKey,
+      isMeasureActive,
+      modelDisplayRevision,
+      pickableMeshesVersion,
+    }),
+    [geometryKey, isMeasureActive, modelDisplayRevision, pickableMeshesVersion],
+  );
+  const graphSourceRef = useRef<typeof graphSource | undefined>(undefined);
+  const graphClientRef = useRef<MeasurementFeatureWorkerClient | undefined>(undefined);
   const graphClient = useCallback(() => {
     graphClientRef.current ??= createMeasurementFeatureWorkerClient();
     return graphClientRef.current;
   }, []);
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    graphSourceRef.current = graphSource;
+    return () => {
+      if (graphSourceRef.current === graphSource) {
+        graphSourceRef.current = undefined;
+      }
       graphClientRef.current?.dispose();
       graphClientRef.current = undefined;
       pointerGraphPendingRef.current = new WeakSet();
-    },
-    [geometryKey, isMeasureActive, modelDisplayRevision, pickableMeshesVersion],
-  );
+    };
+  }, [graphSource]);
   // Where the pointer last moved, so a cut change can raycast its snaps again from there.
   const lastPointerRef = useRef<MeasurePointerCoordinates | undefined>(undefined);
   const wasCameraMovingRef = useRef(cameraMoving);
@@ -439,12 +454,19 @@ export function MeasureTool(): React.JSX.Element {
   }, [getCachedMeshes]);
   const requestPointerGraph = useCallback(
     async (surface: THREE.Mesh, presentedKey: string | undefined): Promise<void> => {
-      if (pointerGraphPendingRef.current.has(surface)) {
+      if (graphSourceRef.current !== graphSource) {
         return;
       }
-      pointerGraphPendingRef.current.add(surface);
+      const pending = pointerGraphPendingRef.current;
+      if (pending.has(surface)) {
+        return;
+      }
+      pending.add(surface);
       try {
         const ready = await graphClient().prepare(surface);
+        if (graphSourceRef.current !== graphSource) {
+          return;
+        }
         if (
           ready &&
           graphicsActor.getSnapshot().context.measureMessage ===
@@ -456,6 +478,9 @@ export function MeasureTool(): React.JSX.Element {
           pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
         }
       } catch {
+        if (graphSourceRef.current !== graphSource) {
+          return;
+        }
         const { context } = graphicsActor.getSnapshot();
         if (
           presentedKey === geometryKeyRef.current &&
@@ -468,10 +493,10 @@ export function MeasureTool(): React.JSX.Element {
           });
         }
       } finally {
-        pointerGraphPendingRef.current.delete(surface);
+        pending.delete(surface);
       }
     },
-    [graphClient, graphicsActor],
+    [graphClient, graphSource, graphicsActor],
   );
 
   useEffect(() => {
@@ -1088,6 +1113,8 @@ export function MeasureTool(): React.JSX.Element {
       geometryKey,
       graphicsActor,
       isMeasureActive,
+      measureFilter,
+      measureMode,
       modelDisplayRevision,
       pickableMeshesVersion,
       poseRevision,
@@ -1103,6 +1130,8 @@ export function MeasureTool(): React.JSX.Element {
       previous.geometryKey === geometryKey &&
       previous.graphicsActor === graphicsActor &&
       previous.isMeasureActive === isMeasureActive &&
+      previous.measureFilter === measureFilter &&
+      previous.measureMode === measureMode &&
       previous.modelDisplayRevision === modelDisplayRevision &&
       previous.pickableMeshesVersion === pickableMeshesVersion &&
       previous.poseRevision === poseRevision
@@ -1171,7 +1200,12 @@ export function MeasureTool(): React.JSX.Element {
       graphicsActor.send({ type: 'setMeasureMessage', message: preparingMessage });
       try {
         const ready = await graphClient().prepare(surface);
-        if (cancelled || version !== catalogVersionRef.current || presentedKey !== geometryKeyRef.current) {
+        if (
+          cancelled ||
+          graphSourceRef.current !== graphSource ||
+          version !== catalogVersionRef.current ||
+          presentedKey !== geometryKeyRef.current
+        ) {
           return;
         }
         if (ready) {
@@ -1187,7 +1221,7 @@ export function MeasureTool(): React.JSX.Element {
           publish(false);
         }
       } catch {
-        if (!cancelled && version === catalogVersionRef.current) {
+        if (!cancelled && graphSourceRef.current === graphSource && version === catalogVersionRef.current) {
           graphicsActor.send({
             type: 'setMeasureMessage',
             message: 'Measurement features could not be prepared. Reopen the target list to retry.',
@@ -1289,6 +1323,7 @@ export function MeasureTool(): React.JSX.Element {
     getCachedLines,
     getCachedMeshes,
     graphClient,
+    graphSource,
     gl.domElement,
     graphicsActor,
     isMeasureActive,

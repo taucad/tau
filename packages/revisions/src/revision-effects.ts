@@ -642,7 +642,11 @@ export type TurnStore = Readonly<{
   /** Every lease record in `.tau/runs`, read now, never from a cached list (TS-R17). */
   leases: () => Promise<readonly TurnLease[]>;
   /** One checkout and its files, or `undefined` when the project has no checkout with that id. */
-  open: (checkoutId: string) => Promise<Readonly<{ checkout: Checkout; filesystem: RevisionFileSystem }> | undefined>;
+  open: (
+    checkoutId: string,
+  ) => Promise<
+    Readonly<{ checkout: Checkout; filesystem: RevisionFileSystem; versioned: (path: string) => boolean }> | undefined
+  >;
   /** A finalized settlement shaped for the wire, as {@link describeTurnSettlement} does. */
   describe: (settlement: TurnSettlement) => Promise<TurnFinalizedEvent>;
   /**
@@ -2827,7 +2831,9 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
       open: async (checkoutId) => {
         const places = await listPlaces();
         const checkout = places.find((candidate) => candidate.id === checkoutId);
-        return checkout === undefined ? undefined : { checkout, filesystem: await filesystem(checkout) };
+        return checkout === undefined
+          ? undefined
+          : { checkout, filesystem: await filesystem(checkout), versioned: (path) => policy.classify(path).versioned };
       },
       describe: async (settlement) => describeTurnSettlement(port, projectId, settlement),
       claim: async (runId) =>

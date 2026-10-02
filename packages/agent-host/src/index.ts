@@ -81,6 +81,7 @@ export type {
   ProviderMessageMetadata,
   TurnConflictedLogEvent,
   TurnFailedLogEvent,
+  TurnChangedLogEvent,
   TurnFinalizedLogEvent,
   RunLifecycleEvent,
   RunTrigger,

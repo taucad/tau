@@ -6,7 +6,7 @@
 import { readFileSync } from 'node:fs';
 import { isDeepStrictEqual } from 'node:util';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { transition } from 'xstate';
 import type { AnyEventObject, AnyMachineSnapshot, AnyStateMachine, InspectionEvent } from 'xstate';
 import { getShortestPaths } from 'xstate/graph';
@@ -22,10 +22,10 @@ import type { ChatRunInput } from '#host/chat-run.machine.js';
 import { chatRunIgnoredEvents, chatRunMachine } from '#host/chat-run.machine.js';
 import { chatId, commands, createChatLog, createChatRunHarness, lifecycle } from '#host/chat-run.fixture.js';
 import type { ChatRunHarness } from '#host/chat-run.fixture.js';
-import type { ChatRunRow } from '#host/chat-run-events.js';
+import type { ChatRunRow, ChatRunOutcomeEvent } from '#host/chat-run-events.js';
 import { chatRunState, emptyChatLedger } from '#log/chat-ledger.js';
 import type { ChatLedger } from '#log/chat-ledger.js';
-import type { TurnAttemptKey } from '#waist/ports.js';
+import type { TurnAttemptKey, TurnPlacementPort } from '#waist/ports.js';
 
 type Context = Readonly<{
   ledger: ChatLedger;
@@ -515,6 +515,63 @@ describe('chatRun placement paths (W7.r1)', () => {
 });
 
 describe('chatRun durable-driver readiness (RA-A11)', () => {
+  it('should continue settlements when recording change proof fails', async () => {
+    const unused = async (): Promise<never> => {
+      throw new Error('Unexpected service call');
+    };
+    const key = { chatId, turnId: 'turn-1', runId: 'run-1', attempt: 1 };
+    const placement: TurnPlacementPort = {
+      admit: unused,
+      complete: unused,
+      abandon: unused,
+      acknowledge: unused,
+      reconcile: async () => ({ status: 'applied', requestId: 'reconcile', held: [] }),
+      async *settlements() {
+        yield { kind: 'changed', key, checkoutId: 'live' };
+        yield {
+          kind: 'settled',
+          key,
+          row: { type: 'turn.failed', runId: key.runId, attempt: 1, chatId, turnId: key.turnId, reason: 'Finished' },
+        };
+      },
+    };
+    const events: ChatRunOutcomeEvent[] = [];
+    const warning = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const effects = createChatRunEffects(
+      inputs[0]!,
+      {
+        services: {
+          placement,
+          openLog: async () => ({ ledger: emptyChatLedger, repair: [] }),
+          append: async () => {
+            throw new Error('Log unavailable');
+          },
+          prepareAdmission: unused,
+          prepareResume: unused,
+          closeLog: unused,
+          startDriver: () => {
+            throw new Error('Unexpected driver');
+          },
+        },
+        answer: () => undefined,
+        redeliver: () => undefined,
+      },
+      (event) => {
+        events.push(event);
+      },
+    );
+    try {
+      effects.openLog({ chatId });
+      await vi.waitFor(() => {
+        expect(events.map((event) => event.type)).toContain('settlementPublished');
+      });
+      expect(warning).toHaveBeenCalled();
+      expect(events.map((event) => event.type)).not.toContain('rowsCommitted');
+    } finally {
+      warning.mockRestore();
+    }
+  });
+
   it('should provide every effect under a Function.name equal to its key', () => {
     const never = async (): Promise<never> =>
       new Promise<never>(() => {

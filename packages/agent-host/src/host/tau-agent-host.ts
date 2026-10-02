@@ -1239,6 +1239,12 @@ export const createTauAgentHost = (options: CreateTauAgentHostOptions): TauAgent
           `Run ${key.runId}'s attempt ${String(key.attempt)} has ended.`,
         );
       }
+      if (bodies.some((body) => body.type === 'turn.changed')) {
+        throw coded(
+          'FRAME_UNREADABLE' satisfies RefusalCode,
+          'Turn-change proof is written by the placement authority, not by an agent.',
+        );
+      }
       const committed = await serial(chatId, async () =>
         write(
           chatId,

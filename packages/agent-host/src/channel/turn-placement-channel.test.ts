@@ -112,7 +112,8 @@ describe('the placement session channel', () => {
 
   it('should stream the settlement facts and tell the server when the client lets go', async () => {
     const fact: TurnPlacementFact = { kind: 'leaseHeld', key, checkoutId: 'live' };
-    const { client, handle } = connect(session([fact]));
+    const change: TurnPlacementFact = { kind: 'changed', key, checkoutId: 'live' };
+    const { client, handle } = connect(session([change, fact]));
     const closed = vi.fn();
     handle.onClose(closed);
 
@@ -120,7 +121,7 @@ describe('the placement session channel', () => {
     for await (const heard of client.settlements({ signal: new AbortController().signal })) {
       facts.push(heard);
     }
-    expect(facts).toEqual([fact]);
+    expect(facts).toEqual([change, fact]);
 
     client.close();
     await vi.waitFor(() => {

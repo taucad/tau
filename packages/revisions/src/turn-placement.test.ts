@@ -9,8 +9,10 @@ import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { NodeFsProvider } from '@taucad/filesystem/backend/node';
-import type { RootedFileSystem } from '@taucad/filesystem';
+import { NodeFsAuthorityHost, serveNodeFsProvider, NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { WorkspaceFileService, ProviderRegistry, MountTable, ResourceQueue, ChangeEventBus } from '@taucad/filesystem';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import type { CheckedFileWrite, RootedFileSystem } from '@taucad/filesystem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from 'xstate';
 
@@ -27,7 +29,7 @@ const roots: string[] = [];
 const stops: Array<() => Promise<void>> = [];
 
 afterEach(async () => {
-  for (const stop of stops.splice(0)) {
+  for (const stop of stops.splice(0).reverse()) {
     // oxlint-disable-next-line no-await-in-loop -- each tree is stopped and settled before its directory goes.
     await stop();
   }
@@ -43,10 +45,36 @@ type Project = Readonly<{
   open: () => Readonly<{ revisions: ProjectRevisions; placement: TurnPlacementAdapter<RevisionFileSystem> }>;
 }>;
 
-const createProject = async (): Promise<Project> => {
+const createProject = async (withAuthority = false): Promise<Project> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-turn-placement-'));
   roots.push(root);
-  const filesystem: RootedFileSystem = new NodeFsProvider(root);
+  let filesystem: RootedFileSystem = new NodeFsProvider(root);
+  if (withAuthority) {
+    const authorityRoot = await mkdtemp(join(tmpdir(), 'tau-placement-authority-'));
+    roots.push(authorityRoot);
+    const { port1, port2 } = new MessageChannel();
+    const authority = new NodeFsAuthorityHost({
+      authorityDirectory: () => authorityRoot,
+      authorityIdentity: () => root,
+    });
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: () => true, authority });
+    const registry = new ProviderRegistry({ createNodeFsPort: async () => port1 });
+    const scope = { backend: 'node', path: root, storageRootKey: `node:${root}` } as const;
+    const mounts = new MountTable();
+    mounts.mount('/', await registry.getProvider(scope), { class: 'authored', ...scope });
+    const service = new WorkspaceFileService({
+      providerRegistry: registry,
+      mountTable: mounts,
+      resourceQueue: new ResourceQueue(),
+      eventBus: new ChangeEventBus(),
+    });
+    filesystem = service.createRootedFileSystem('/');
+    stops.push(async () => {
+      service.dispose();
+      await stop();
+      port2.close();
+    });
+  }
   const port = createIsomorphicGitRevisionPort({
     filesystem,
     checkouts: { projectId: 'project-1', root: () => filesystem },
@@ -119,6 +147,208 @@ const firstLeaseHeld = async (placement: TurnPlacementAdapter<RevisionFileSystem
 };
 
 describe('createTurnPlacementPort (TS-S3)', () => {
+  it('should attest only an actual versioned change through the admitted tools', async () => {
+    const project = await createProject(true);
+    await project.filesystem.writeFile('main.ts', 'before');
+    const { placement } = project.open();
+    const listening = new AbortController();
+    const facts: Array<{ readonly kind: string }> = [];
+    const collect = async (): Promise<void> => {
+      for await (const fact of placement.settlements({ signal: listening.signal })) {
+        facts.push(fact);
+      }
+    };
+    const collected = collect();
+    try {
+      const answer = await placement.admit({ requestId: 'admit', key });
+      if (answer.status === 'refused') {
+        throw new Error(answer.message);
+      }
+      await answer.placement.tools.writeFile('main.ts', 'before');
+      await answer.placement.tools.mkdir('empty');
+      await answer.placement.tools.writeFile('.tau/cache/report.json', '{}');
+      await project.filesystem.writeFile('foreign.ts', 'manual');
+      expect(facts).toEqual([]);
+      await answer.placement.tools.writeFile('main.ts', 'after');
+      await vi.waitFor(() => {
+        expect(facts).toContainEqual({ kind: 'changed', key, checkoutId: answer.placement.checkoutId });
+      });
+      await answer.placement.tools.writeFile('main.ts', 'again');
+      expect(facts).toHaveLength(1);
+    } finally {
+      listening.abort();
+      await collected;
+      await placement.fence();
+    }
+  });
+
+  it.each([
+    'create',
+    'delete',
+    'deletePlain',
+    'replay',
+    'contended',
+    'unsupported',
+    'rename',
+    'checkedConflict',
+    'unknownFailure',
+  ] as const)('should keep change proof authoritative for %s', async (scenario) => {
+    const project = await createProject(scenario !== 'unsupported');
+    await project.filesystem.writeFile('main.ts', 'before');
+    const { placement } = project.open();
+    const answer = await placement.admit({ requestId: 'admit', key });
+    if (answer.status === 'refused') {
+      throw new Error(answer.message);
+    }
+    const listening = new AbortController();
+    const facts: Array<{ readonly kind: string }> = [];
+    const collected = (async (): Promise<void> => {
+      for await (const fact of placement.settlements({ signal: listening.signal })) {
+        facts.push(fact);
+      }
+    })();
+    try {
+      const view = answer.placement.tools;
+      switch (scenario) {
+        case 'create': {
+          await view.writeFile('binary.dat', new Uint8Array([1, 2, 3]));
+          break;
+        }
+        case 'deletePlain': {
+          await view.unlink('main.ts');
+          break;
+        }
+        case 'delete': {
+          await view.deleteFileChecked({ path: 'main.ts', preconditions: [{ path: 'main.ts', expected: 'before' }] });
+          break;
+        }
+        case 'rename': {
+          await view.rename('main.ts', 'renamed.ts');
+          await expect(project.filesystem.readFile('renamed.ts', 'utf8')).resolves.toBe('before');
+          break;
+        }
+        case 'checkedConflict': {
+          await expect(
+            view.writeFileChecked({
+              path: 'main.ts',
+              data: 'after',
+              preconditions: [{ path: 'main.ts', expected: 'stale' }],
+            }),
+          ).resolves.toMatchObject({ status: 'conflict' });
+          await expect(project.filesystem.readFile('main.ts', 'utf8')).resolves.toBe('before');
+          break;
+        }
+        case 'unknownFailure': {
+          vi.spyOn(project.filesystem, 'writeFileChecked').mockImplementationOnce(async () => {
+            await project.filesystem.writeFile('main.ts', 'after');
+            throw Object.assign(new Error('Write outcome unknown'), { applicationState: 'unknown' });
+          });
+          await expect(view.writeFile('main.ts', 'after')).rejects.toThrow('Write outcome unknown');
+          await expect(project.filesystem.readFile('main.ts', 'utf8')).resolves.toBe('after');
+          break;
+        }
+        case 'contended': {
+          const original = project.filesystem.writeFileChecked.bind(project.filesystem);
+          vi.spyOn(project.filesystem, 'writeFileChecked').mockImplementationOnce(async (input) => {
+            await project.filesystem.writeFile('main.ts', 'after');
+            return original(input);
+          });
+          await view.writeFile('main.ts', 'after');
+          await placement.complete({ requestId: 'complete', key, cut: false });
+          await vi.waitFor(() => {
+            expect(facts.at(-1)?.kind).toBe('settled');
+          });
+          expect(facts.filter((fact) => fact.kind === 'changed')).toEqual([]);
+          await expect(project.filesystem.readFile('main.ts', 'utf8')).resolves.toBe('after');
+          return;
+        }
+        case 'unsupported': {
+          await view.writeFile('main.ts', 'after');
+          await placement.complete({ requestId: 'complete', key, cut: false });
+          await vi.waitFor(() => {
+            expect(facts.at(-1)?.kind).toBe('settled');
+          });
+          expect(facts.filter((fact) => fact.kind === 'changed')).toEqual([]);
+          await expect(project.filesystem.readFile('main.ts', 'utf8')).resolves.toBe('after');
+          return;
+        }
+        case 'replay': {
+          await view.writeFile('main.ts', 'after');
+          listening.abort();
+          await collected;
+          const iterator = placement.settlements({ signal: new AbortController().signal })[Symbol.asyncIterator]();
+          try {
+            await expect(iterator.next()).resolves.toMatchObject({
+              value: { kind: 'changed', key, checkoutId: answer.placement.checkoutId },
+            });
+          } finally {
+            await iterator.return?.();
+          }
+          return;
+        }
+      }
+      if (scenario === 'rename' || scenario === 'checkedConflict' || scenario === 'unknownFailure') {
+        await placement.complete({ requestId: 'complete', key, cut: false });
+        await vi.waitFor(() => {
+          expect(facts.at(-1)?.kind).toBe('settled');
+        });
+        expect(facts.filter((fact) => fact.kind === 'changed')).toEqual([]);
+        return;
+      }
+      await vi.waitFor(() => {
+        expect(facts).toEqual([{ kind: 'changed', key, checkoutId: answer.placement.checkoutId }]);
+      });
+    } finally {
+      listening.abort();
+      await collected;
+      await placement.fence();
+    }
+  });
+
+  it.each(['writeFileChecked', 'deleteFileChecked'] as const)(
+    'should classify %s before an asynchronous mutation can change its input',
+    async (operation) => {
+      const project = await createProject(true);
+      await project.filesystem.writeFile('.tau/cache/probe.json', '{}');
+      const { placement } = project.open();
+      const answer = await placement.admit({ requestId: 'admit', key });
+      if (answer.status === 'refused') {
+        throw new Error(answer.message);
+      }
+      const input = {
+        path: '.tau/cache/probe.json',
+        data: 'new',
+        preconditions: [{ path: '.tau/cache/probe.json', expected: '{}' }],
+      };
+      const original = project.filesystem[operation].bind(project.filesystem);
+      vi.spyOn(project.filesystem, operation).mockImplementationOnce(async (request: CheckedFileWrite) => {
+        const result = await original({ ...request, data: input.data });
+        input.path = 'main.ts';
+        return result;
+      });
+      const listening = new AbortController();
+      const facts: Array<{ readonly kind: string }> = [];
+      const collected = (async (): Promise<void> => {
+        for await (const fact of placement.settlements({ signal: listening.signal })) {
+          facts.push(fact);
+        }
+      })();
+      try {
+        await answer.placement.tools[operation](input);
+        await placement.complete({ requestId: 'complete', key, cut: false });
+        await vi.waitFor(() => {
+          expect(facts.at(-1)?.kind).toBe('settled');
+        });
+        expect(facts.filter((fact) => fact.kind === 'changed')).toEqual([]);
+        await expect(project.filesystem.exists('main.ts')).resolves.toBe(false);
+      } finally {
+        listening.abort();
+        await collected;
+        await placement.fence();
+      }
+    },
+  );
+
   /* TS-R12 (W8.a2): with no checkout named, the chat record's is the placement intent, not the live checkout. */
   it("should place an attempt on the chat record's checkout when the person named none", async () => {
     const project = await createProject();

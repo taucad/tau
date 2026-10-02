@@ -489,6 +489,8 @@ export type TurnPlacementAnswer<Result extends Record<string, unknown>, Code ext
 
 /** What the root publishes. Delivery is at least once; M1's append is idempotent per key (TS-R18). @public */
 export type TurnPlacementFact =
+  /** The admitted tools changed a versioned file in this attempt. */
+  | Readonly<{ kind: 'changed'; key: TurnAttemptKey; checkoutId: string }>
   | Readonly<{ kind: 'settled'; key: TurnAttemptKey; row: TurnSettlementRow }>
   /** A lease this session did not admit refused one of its operations (TS-R16, TS-R17). */
   | Readonly<{ kind: 'leaseHeld'; key: TurnAttemptKey; checkoutId: string }>;

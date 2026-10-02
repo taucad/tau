@@ -181,6 +181,7 @@ export const createEventLogReducer = (): {
         break;
       }
       case 'interrupt.recorded':
+      case 'turn.changed':
       case 'turn.finalized':
       case 'turn.conflicted':
       case 'turn.failed':

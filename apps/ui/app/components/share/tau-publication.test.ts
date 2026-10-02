@@ -190,6 +190,38 @@ describe('Tau publication loader', () => {
     expect(headers.get('Cache-Tag')).toBe('publication-viewer');
   });
 
+  it.each([
+    { label: 'the owner', viewerRole: 'owner', cookie: 'tau.session_token=owner' },
+    { label: 'a grantee', viewerRole: 'grantee', cookie: '__Secure-tau.session_token=grantee' },
+    { label: 'a signed-in public viewer', viewerRole: 'public', cookie: 'tau-theme=dark; tau.session_token=viewer' },
+  ])('keeps a public publication viewed by $label out of the CDN cache', async ({ viewerRole, cookie }) => {
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          ...sampleLoaderData,
+          viewerRole,
+          publication: { ...sampleLoaderData.publication, visibility: 'public' },
+        }),
+        {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        },
+      ),
+    );
+
+    const result = await loader(
+      loaderArgs({
+        request: new Request('http://localhost/s/tau~pub_1', { headers: [['Cookie', cookie]] }),
+        params: { id: 'pub_1' },
+      }),
+    );
+
+    const headers = loaderHeaders(result);
+    expect(headers.get('Cache-Control')).toBe('private, no-store');
+    expect(headers.get('Netlify-CDN-Cache-Control')).toBeNull();
+    expect(headers.get('Cache-Tag')).toBeNull();
+  });
+
   it('does not forward an upstream identifier cookie to the browser', async () => {
     vi.spyOn(globalThis, 'fetch').mockResolvedValue(
       new Response(JSON.stringify(sampleLoaderData), {

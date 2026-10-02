@@ -42,6 +42,9 @@ export type PublicationRouteLoaderData = {
   files: Record<string, string>;
 };
 
+// Better Auth's session cookie (`cookiePrefix: 'tau'`), with the `__Secure-` prefix it carries over HTTPS.
+const sessionCookiePattern = /(?:^|;\s*)(?:__Secure-)?tau\.session_token=/u;
+
 function throwPublicationLock(reason: PublicationLockReason, httpStatus: number): never {
   // oxlint-disable-next-line typescript-eslint/only-throw-error -- React Router uses Response throws as control-flow
   throw new Response(JSON.stringify({ reason }), {
@@ -100,10 +103,14 @@ export const loadPublication = async ({ request, params }: LoaderFunctionArgs): 
   })) as PublicationRouteLoaderData;
 
   const publication = parsePublicationRecord(body.publication, body.viewerRole);
-  const responseHeaders =
-    publication?.visibility === 'private'
-      ? new Headers({ 'Cache-Control': 'private, no-store' })
-      : new Headers(cdnBackedSsrRouteHeaders(cacheTag.publicationViewer, 'long'));
+  // Only an anonymous view of a public publication is the same for everyone; anything else embeds the viewer.
+  const isAnonymousPublicView =
+    publication?.visibility === 'public' &&
+    publication.viewerRole === 'public' &&
+    !sessionCookiePattern.test(request.headers.get('Cookie') ?? '');
+  const responseHeaders = isAnonymousPublicView
+    ? new Headers(cdnBackedSsrRouteHeaders(cacheTag.publicationViewer, 'long'))
+    : new Headers({ 'Cache-Control': 'private, no-store' });
   return data(body, { headers: responseHeaders });
 };
 

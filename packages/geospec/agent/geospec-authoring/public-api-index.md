@@ -826,7 +826,7 @@ GeoSpecTestCase (type) [7 members] — A collected GeoSpec test case [id: typesc
 GeoSpecTestStatus (type) — Test case status after runner collection [id: typescript:GeoSpecTestStatus]
 RunGeoSpecModuleOptions (type) [14 members] — Options for executing a GeoSpec ESM test module [id: typescript:RunGeoSpecModuleOptions]
   RunGeoSpecModuleOptions.filesystem (property) — Filesystem containing the test module and its project imports [id: typescript:RunGeoSpecModuleOptions.filesystem]
-  RunGeoSpecModuleOptions.entryPath (property) — Absolute ESM test entry path [id: typescript:RunGeoSpecModuleOptions.entryPath]
+  RunGeoSpecModuleOptions.entryPath (property) — Filesystem-root-relative ESM test entry path [id: typescript:RunGeoSpecModuleOptions.entryPath]
   RunGeoSpecModuleOptions.testNamePattern (property) — JavaScript regular expression matched against full `suite > test` names [id: typescript:RunGeoSpecModuleOptions.testNamePattern]
   RunGeoSpecModuleOptions.testTimeout (property) — Timeout for async test callbacks, in milliseconds [id: typescript:RunGeoSpecModuleOptions.testTimeout]
   RunGeoSpecModuleOptions.matcherWallBackstop (property) — Milliseconds [id: typescript:RunGeoSpecModuleOptions.matcherWallBackstop]

@@ -1045,7 +1045,7 @@ GeoSpecTestStatus: 'passed' | 'failed' | 'unsupported' | 'inconclusive' | 'not-r
 RunGeoSpecModuleOptions: {
     /** Filesystem containing the test module and its project imports. */
     filesystem: VmFileSystem;
-    /** Absolute ESM test entry path. */
+    /** Filesystem-root-relative ESM test entry path. */
     entryPath: string;
     /** JavaScript regular expression matched against full `suite > test` names. */
     testNamePattern?: string | RegExp;
@@ -1087,7 +1087,7 @@ RunGeoSpecModuleOptions: {
   // Filesystem containing the test module and its project imports
   filesystem: VmFileSystem
 
-  // Absolute ESM test entry path
+  // Filesystem-root-relative ESM test entry path
   entryPath: string
 
   // JavaScript regular expression matched against full `suite > test` names

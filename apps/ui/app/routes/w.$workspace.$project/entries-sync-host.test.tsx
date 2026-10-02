@@ -70,13 +70,39 @@ describe('entry owner reconciliation', () => {
     selectedRoot = '/root';
     liveWatchEntries = undefined;
   });
+  it.each([0, 600_000])('should map durable renderTimeout %i to the runtime operation event', (renderTimeout) => {
+    const send = vi.fn();
+    const cad = {
+      getSnapshot: () => ({ context: { operationTimeout: 180_000 } }),
+      send,
+    } as unknown as ActorRefFrom<typeof cadMachine>;
+    const model = {
+      getSnapshot: () => ({ context: { unitsById: {} } }),
+      send: vi.fn(),
+    } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
+    const view = render(
+      <EntryOwner
+        path='a.ts'
+        cadRef={cad}
+        modelInteractionRef={model}
+        entry={{ renderTimeout }}
+        recordPresent
+        ready
+        write={vi.fn(async () => true)}
+      />,
+    );
+    expect(send).toHaveBeenCalledOnce();
+    expect(send).toHaveBeenCalledWith({ type: 'setOperationTimeout', operationTimeout: renderTimeout });
+    view.unmount();
+  });
+
   it('retains and observes live entry settings after code selects a checkout', async () => {
     liveRootOnly = true;
     selectedRoot = '/projects/p';
     hostFiles.writeFileChecked.mockClear();
     hostFiles.set(
       new TextEncoder().encode(
-        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 30_000 } } }),
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 30_000 } } }),
       ),
     );
     const setEntriesRecord = vi.fn();
@@ -109,7 +135,7 @@ describe('entry owner reconciliation', () => {
     setEntriesRecord.mockClear();
     hostFiles.set(
       new TextEncoder().encode(
-        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 45_000 } } }),
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 45_000 } } }),
       ),
     );
     await act(async () => {
@@ -118,7 +144,7 @@ describe('entry owner reconciliation', () => {
     await waitFor(() => {
       expect(setEntriesRecord).toHaveBeenCalledWith(
         expect.objectContaining({
-          entries: { 'a.ts': expect.objectContaining({ operationTimeout: 45_000 }) },
+          entries: { 'a.ts': expect.objectContaining({ renderTimeout: 45_000 }) },
         }),
       );
     });
@@ -141,7 +167,7 @@ describe('entry owner reconciliation', () => {
   it('persists an entry owner edit after first service readiness and StrictMode replay', async () => {
     hostFiles.set(
       new TextEncoder().encode(
-        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 30_000 } } }),
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 30_000 } } }),
       ),
     );
     hostFiles.writeFileChecked.mockClear();
@@ -191,7 +217,7 @@ describe('entry owner reconciliation', () => {
       () => {
         expect(workbenchRecords.entries.read(hostFiles.get()!)).toMatchObject({
           status: 'current',
-          record: { entries: { 'a.ts': { operationTimeout: 45_000 } } },
+          record: { entries: { 'a.ts': { renderTimeout: 45_000 } } },
         });
       },
       { timeout: 1500 },
@@ -203,7 +229,7 @@ describe('entry owner reconciliation', () => {
   it('does not reacknowledge stale entry bytes after a read failure and a new owner mount', async () => {
     hostFiles.set(
       new TextEncoder().encode(
-        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 30_000 } } }),
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 30_000 } } }),
       ),
     );
     hostContentService = { subscribe: () => () => undefined };
@@ -301,7 +327,7 @@ describe('entry owner reconciliation', () => {
       ),
     } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
     type Entry = WorkbenchEntries['entries'][string];
-    const empty: Entry = { operationTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
+    const empty: Entry = { renderTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
     const write = vi.fn(async (_path: string, _next: Entry) => true);
     const draw = (entry: Entry) => (
       <EntryOwner
@@ -381,9 +407,9 @@ describe('entry owner reconciliation', () => {
       ),
     } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
     type Entry = WorkbenchEntries['entries'][string];
-    const initial: Entry = { operationTimeout, components: { hidden: [], isolated: [], opacity: [] } };
+    const initial: Entry = { renderTimeout: operationTimeout, components: { hidden: [], isolated: [], opacity: [] } };
     const write = vi.fn(async (_path: string, _next: Entry) => true);
-    const draw = (entry: Entry, localPatch?: { operationTimeout?: number; components?: { hidden?: string[] } }) => (
+    const draw = (entry: Entry, localPatch?: { renderTimeout?: number; components?: { hidden?: string[] } }) => (
       <EntryOwner
         path='a.ts'
         cadRef={cad}
@@ -412,7 +438,7 @@ describe('entry owner reconciliation', () => {
     view.rerender(
       draw(
         { ...olderLocal, components: { ...olderLocal.components!, isolated: ['part-c'] } },
-        { operationTimeout: olderLocal.operationTimeout, components: { hidden: olderLocal.components!.hidden } },
+        { renderTimeout: olderLocal.renderTimeout, components: { hidden: olderLocal.components!.hidden } },
       ),
     );
     await waitFor(() => {

@@ -1367,6 +1367,7 @@ describe('rpc-handlers', () => {
               committedSectionCuts: cuts,
               modelInteractionUnitId: 'file:src/pen.ts',
               modelInteractionRef: modelRef,
+              kinematicsRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
             },
           }),
         };
@@ -1691,13 +1692,13 @@ describe('rpc-handlers', () => {
           type: string;
           claimId: string;
           entryPath: string;
-          renderTimeout?: number;
+          operationTimeout?: number;
         };
         expect(claim).toEqual({
           type: 'claimGeometryUnit',
           claimId: claim.claimId,
           entryPath: 'parked.scad',
-          renderTimeout: undefined,
+          operationTimeout: undefined,
         });
         expect(typeof claim.claimId).toBe('string');
         expect(projectRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'releaseGeometryUnit' }));
@@ -1901,13 +1902,13 @@ describe('rpc-handlers', () => {
           type: string;
           claimId: string;
           entryPath: string;
-          renderTimeout?: number;
+          operationTimeout?: number;
         };
         expect(claim).toEqual({
           type: 'claimGeometryUnit',
           claimId: claim.claimId,
           entryPath: 'new-file.scad',
-          renderTimeout: undefined,
+          operationTimeout: undefined,
         });
         expect(typeof claim.claimId).toBe('string');
         expect(result.success).toBe(true);

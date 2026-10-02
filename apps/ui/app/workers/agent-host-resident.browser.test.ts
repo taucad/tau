@@ -1,5 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest';
 import { Topic } from '@taucad/events';
+import { toolName } from '@taucad/chat/constants';
 import { createMemoryComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
 import type { HostRunSnapshot, TurnPlacementFact } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
@@ -299,7 +300,7 @@ it('should use registered durable compute before and after a project-host rebrid
               {
                 index: 0,
                 id: `call-durable-compute-${String(call)}`,
-                function: { name: 'get_kernel_result', arguments: JSON.stringify({ targetFile: 'main.scad' }) },
+                function: { name: toolName.evaluateModel, arguments: JSON.stringify({ targetFile: 'main.scad' }) },
               },
             ],
           },
@@ -349,19 +350,36 @@ it('should use registered durable compute before and after a project-host rebrid
     host.connect(channel.port1);
     const openClient = createAgentChannelClient({ connect: () => channel.port2, sessionKey: 'durable-compute' });
     client = openClient;
+    let priorRunId: string | undefined;
     const runKernelTurn = async (runId: string, toolCallId: string) => {
-      await expect(
-        openClient.execute({
-          type: 'start',
-          commandId: runId,
-          payload: {
-            chatId: 'chat-durable-compute',
-            runId,
-            trigger: 'submit',
-            message: { id: `user-${runId}`, role: 'user', content: 'Evaluate main.scad.' },
-          },
-        } as Parameters<AgentChannelClient['execute']>[0]),
-      ).resolves.toMatchObject({ status: 'applied', effect: 'durable' });
+      const deadline = Date.now() + 20_000;
+      const command: Parameters<AgentChannelClient['execute']>[0] = {
+        type: 'start',
+        commandId: runId,
+        payload: {
+          chatId: 'chat-durable-compute',
+          runId,
+          trigger: 'submit',
+          message: { id: `user-${runId}`, role: 'user', content: 'Evaluate main.scad.' },
+        },
+      };
+      const started = await vi.waitUntil(
+        async () => {
+          const answer = await openClient.execute(command);
+          if (
+            answer.status === 'refused' &&
+            answer.code === 'CHAT_RUN_LIVE' &&
+            answer.details?.['state'] === 'settling' &&
+            priorRunId !== undefined &&
+            answer.details['runId'] === priorRunId
+          ) {
+            return false;
+          }
+          return answer;
+        },
+        { timeout: Math.max(1, deadline - Date.now()), interval: 50 },
+      );
+      expect(started, JSON.stringify(started)).toMatchObject({ status: 'applied', effect: 'durable' });
       const output = await vi.waitFor(
         async () => {
           const answer = await openClient.execute({
@@ -380,13 +398,14 @@ it('should use registered durable compute before and after a project-host rebrid
           return snapshot.messages.find(
             (message) =>
               message.role === 'tool-output' &&
-              message.toolName === 'get_kernel_result' &&
+              message.toolName === toolName.evaluateModel &&
               message.toolCallId === toolCallId,
           );
         },
-        { timeout: 20_000, interval: 50 },
+        { timeout: Math.max(1, deadline - Date.now()), interval: 50 },
       );
       expect(output, JSON.stringify(output)).toMatchObject({ content: { success: true, status: 'ready' } });
+      priorRunId = runId;
     };
     await runKernelTurn('run-durable-before', 'call-durable-compute-0');
 

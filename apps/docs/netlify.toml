@@ -1,7 +1,8 @@
 # Static Tau documentation site. The Netlify site base directory is `apps/docs`.
 
 [build]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run docs:deploy-check"
+# Load workspace TypeScript only after Netlify has installed dependencies.
+command = "NODE_OPTIONS='--import tsx' NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run docs:deploy-check"
 publish = "build/client"
 
 # Build every selected Git revision. Docs derive API content from packages across
@@ -11,7 +12,6 @@ publish = "build/client"
 
 [build.environment]
 NODE_VERSION = "24"
-NODE_OPTIONS = "--import tsx"
 PNPM_FLAGS = "--frozen-lockfile"
 NX_NO_CLOUD = "true"
 

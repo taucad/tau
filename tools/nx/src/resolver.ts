@@ -9,7 +9,7 @@
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { createProjectGraphAsync, readCachedProjectGraph, workspaceRoot } from '@nx/devkit';
+import { createProjectGraphAsync, readCachedProjectGraph, workspaceRoot } from '#devkit.js';
 import { projectTagVocabulary } from '#tags.js';
 
 /**

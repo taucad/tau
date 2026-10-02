@@ -63,6 +63,7 @@ const {
   revisionClientLifecycle,
   projectProviderInputs,
   flushProducers,
+  runtimeShutdown,
 } = vi.hoisted(() => {
   const frames: Array<{ type: string; projectId?: string }> = [];
   const calls: string[] = [];
@@ -138,6 +139,7 @@ const {
     getProjectRouteAccess: vi.fn(),
     /** `UnloadProvider`'s producer stage, as the quit hold reaches it; a test holds it open. */
     flushProducers: vi.fn(async (): Promise<void> => undefined),
+    runtimeShutdown: vi.fn(async (_projectId: string): Promise<void> => undefined),
 
     chatStore: {
       get: () => ({
@@ -267,6 +269,24 @@ const projectContextOf = (projectId: string): unknown => {
   if (existing) {
     return existing;
   }
+  let runtimeClosed = false;
+  let runtimeError: Error | undefined;
+  const runtimeListeners = new Set<() => void>();
+  const projectSnapshot = () => ({
+    status: 'active',
+    context: {
+      project: { id: 'p' },
+      geometryUnits: new Map(),
+      viewGraphics: viewGraphicsOf(projectId),
+      error: runtimeError,
+    },
+    matches: (value: unknown) =>
+      value === 'runtimeClosed'
+        ? runtimeClosed
+        : value === 'runtimeCloseFailed'
+          ? runtimeError !== undefined
+          : JSON.stringify(value) === JSON.stringify({ ready: { storing: 'idle' } }),
+  });
   const created = {
     projectId: 'unused',
     parameterService,
@@ -274,13 +294,38 @@ const projectContextOf = (projectId: string): unknown => {
     flushWorkbenchRecordProducers: async () => undefined,
     projectRef: {
       send: (event: { type: string }) => {
+        if (event.type === 'closeRuntime') {
+          runtimeClosed = false;
+          runtimeError = undefined;
+          // async-iife: bootstrap -- this actor seam delivers its asynchronous terminal acknowledgment to subscribers
+          void (async () => {
+            try {
+              await runtimeShutdown(projectId);
+              runtimeClosed = true;
+            } catch (error) {
+              runtimeError = error instanceof Error ? error : new Error('Runtime shutdown failed');
+            }
+            for (const listener of runtimeListeners) {
+              listener();
+            }
+          })();
+          return;
+        }
         serviceCalls.push(`project:${event.type}`);
       },
-      getSnapshot: () => ({
-        context: { project: { id: 'p' }, geometryUnits: new Map(), viewGraphics: viewGraphicsOf(projectId) },
-        matches: (value: unknown) => JSON.stringify(value) === JSON.stringify({ ready: { storing: 'idle' } }),
-      }),
-      subscribe: () => ({ unsubscribe: () => undefined }),
+      getSnapshot: projectSnapshot,
+      subscribe: (observer: ((snapshot: unknown) => void) | { next?: (snapshot: unknown) => void }) => {
+        const next = typeof observer === 'function' ? observer : (observer.next ?? (() => undefined));
+        const listener = () => {
+          next(projectSnapshot());
+        };
+        runtimeListeners.add(listener);
+        return {
+          unsubscribe: () => {
+            runtimeListeners.delete(listener);
+          },
+        };
+      },
     },
     /* `ProjectPersistenceGuard` awaits this editor reaching `storing.idle`
      * before the route may leave a project; an editor that never answers is a
@@ -579,6 +624,8 @@ const renderRouteFamily = async (
 };
 
 beforeEach(() => {
+  runtimeShutdown.mockReset();
+  runtimeShutdown.mockResolvedValue(undefined);
   workerFrames.length = 0;
   serviceCalls.length = 0;
   mounted.length = 0;
@@ -672,6 +719,75 @@ afterEach(async () => {
  * `apps/ui/app/hooks/use-revision-status.test.tsx` (W13, P32, A38).
  */
 describe('sessions composition — the quit flush order (S48(12))', () => {
+  it('should preserve runtimes when the person cancels the close question', async () => {
+    const view = await renderRoute('runtime-close-cancel');
+    const session = sessionsActor.getSnapshot().context.refs['runtime-close-cancel'];
+    try {
+      await act(async () => {
+        session?.send({ type: 'projectedRunsChanged', runs: ['chat-1'], stoppableRuns: ['chat-1'] });
+      });
+      await send({ type: 'close', projectId: 'runtime-close-cancel', reason: 'user' });
+      expect(session?.getSnapshot().matches({ closing: 'asking' })).toBe(true);
+      await act(async () => {
+        session?.send({ type: 'cancelClose' });
+      });
+      expect(session?.getSnapshot().matches('live')).toBe(true);
+      expect(runtimeShutdown).not.toHaveBeenCalled();
+      expect(serviceCalls).not.toContain('quiesce');
+    } finally {
+      view.unmount();
+    }
+  });
+
+  it('should acknowledge producers and revisions before awaiting runtime shutdown and sessionClosed', async () => {
+    const closed = Promise.withResolvers<void>();
+    runtimeShutdown.mockImplementation(async (projectId) => {
+      serviceCalls.push(`runtime:${projectId}`);
+      await closed.promise;
+    });
+    const view = await renderRoute('runtime-close-order');
+    try {
+      await send({ type: 'close', projectId: 'runtime-close-order', reason: 'user' });
+      await vi.waitFor(() => {
+        expect(runtimeShutdown).toHaveBeenCalledWith('runtime-close-order');
+      });
+      expect(serviceCalls.slice(-4)).toEqual([
+        'project:flushNow',
+        'editor:flushNow',
+        'quiesce',
+        'runtime:runtime-close-order',
+      ]);
+      expect(sessionsActor.getSnapshot().context.refs['runtime-close-order']).toBeDefined();
+      expect(mounted).not.toContain('unmount:runtime-close-order');
+      closed.resolve();
+      await settle();
+      expect(sessionsActor.getSnapshot().context.refs['runtime-close-order']).toBeUndefined();
+      expect(mounted).toContain('unmount:runtime-close-order');
+    } finally {
+      closed.resolve();
+      view.unmount();
+    }
+  });
+
+  it('should retain the exact runtime refusal without undoing the acknowledged revision flush', async () => {
+    const refusal = new Error('runtime cleanup refused');
+    runtimeShutdown.mockRejectedValueOnce(refusal);
+    const view = await renderRoute('runtime-close-refusal');
+    try {
+      await send({ type: 'close', projectId: 'runtime-close-refusal', reason: 'user' });
+      await vi.waitFor(() => {
+        const session = sessionsActor.getSnapshot().context.refs['runtime-close-refusal'];
+        expect(session?.getSnapshot().matches('failed')).toBe(true);
+        expect(session?.getSnapshot().context.failures['close']).toBe(refusal.message);
+      });
+      expect(serviceCalls).toContain('quiesce');
+      expect(sessionsActor.getSnapshot().context.closed['runtime-close-refusal']).toBeUndefined();
+      expect(mounted).not.toContain('unmount:runtime-close-refusal');
+    } finally {
+      view.unmount();
+    }
+  });
+
   it('holds the next project until the editor has stored, then takes the close revision', async () => {
     const view = await renderRoute('flush-a');
     expect(mounted).toEqual(['mount:flush-a']);
@@ -1691,6 +1807,7 @@ describe('sessions composition — the desktop quit hold (S48(17))', () => {
     /* One session whose flush never answers — the only reason a quit is ever
      * held open. */
     const unregister = freshStore.registerProjectSessionServices('quit-hold', {
+      closeRuntime: async () => undefined,
       flushProducers: async () => undefined,
       flushSync: async () => {
         await new Promise<void>(() => {

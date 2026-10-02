@@ -75,7 +75,7 @@ import {
 import type { RevisionClient, RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
-import { selectProjectKernelRefusal } from '#machines/project.machine.js';
+import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
@@ -397,6 +397,7 @@ function ProjectSessionBinding({
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
+      closeRuntime: async () => closeProjectRuntime(projectRef),
       flushProducers: async () =>
         flushProjectSessionPersistence({
           projectId,

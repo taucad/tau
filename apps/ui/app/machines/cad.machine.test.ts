@@ -1403,6 +1403,193 @@ describe('cadMachine', () => {
   });
 
   describe('cleanup', () => {
+    it.each(['connected', 'parked', 'refused'] as const)(
+      'should acknowledge repeated close of a %s unit without requiring geometry success',
+      async (mode) => {
+        const { actor, mockClient } = await startAndConnect(
+          mode === 'refused' ? { connectError: new Error('initialization refused') } : undefined,
+        );
+        try {
+          if (mode === 'parked') {
+            actor.send({ type: 'parkRuntime' });
+          }
+          actor.send({ type: 'closeRuntime' });
+          await waitFor(actor, (state) => state.matches('runtimeClosed'));
+          actor.send({ type: 'closeRuntime' });
+          expect(actor.getSnapshot().matches('runtimeClosed')).toBe(true);
+          expect(mockClient.shutdown).toHaveBeenCalledTimes(mode === 'connected' ? 1 : 0);
+          expect(actor.getSnapshot().context.kernelClient).toBeUndefined();
+        } finally {
+          actor.stop();
+        }
+      },
+    );
+
+    it('should attempt every cleanup and retain exact failed ownership for retry', async () => {
+      const { actor, mockClient } = await startAndConnect();
+      const refusal = new Error('shutdown refused');
+      const subscriptionRefusal = new Error('subscription refused');
+      const release = Promise.withResolvers<void>();
+      const shutdown = vi.spyOn(mockClient, 'shutdown').mockImplementation(async () => {
+        await release.promise;
+        throw refusal;
+      });
+      const failed = vi.fn<() => void>(() => {
+        throw subscriptionRefusal;
+      });
+      const successful = vi.fn();
+      actor.send({ type: 'kernelAllocated', client: mockClient, cleanups: [failed, successful] });
+      try {
+        actor.send({ type: 'closeRuntime' });
+        expect(failed).not.toHaveBeenCalled();
+        release.resolve();
+        await waitFor(actor, (state) => state.matches('runtimeCloseFailed'));
+        expect(failed).toHaveBeenCalledOnce();
+        expect(successful).toHaveBeenCalledOnce();
+        const { runtimeCloseError, eventCleanups } = actor.getSnapshot().context;
+        expect(runtimeCloseError).toBeInstanceOf(AggregateError);
+        if (!(runtimeCloseError instanceof AggregateError)) {
+          expect.fail('Expected both actual cleanup failures');
+        }
+        expect(runtimeCloseError.errors).toEqual([refusal, subscriptionRefusal]);
+        expect(eventCleanups).toEqual([failed]);
+        expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+        shutdown.mockResolvedValue(undefined);
+        failed.mockImplementation(() => undefined);
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        expect(shutdown).toHaveBeenCalledTimes(2);
+        expect(failed).toHaveBeenCalledTimes(2);
+        expect(successful).toHaveBeenCalledOnce();
+      } finally {
+        release.resolve();
+        actor.stop();
+      }
+    });
+
+    it.each(['client', 'subscription'] as const)('should retain one exact %s cleanup error', async (owner) => {
+      const { actor, mockClient } = await startAndConnect();
+      const refusal = new Error('single cleanup refusal');
+      const shutdown = vi.spyOn(mockClient, 'shutdown');
+      const cleanup = vi.fn(() => undefined);
+      if (owner === 'client') {
+        shutdown.mockRejectedValue(refusal);
+      } else {
+        cleanup.mockImplementation(() => {
+          throw refusal;
+        });
+      }
+      actor.send({ type: 'kernelAllocated', client: mockClient, cleanups: [cleanup] });
+      try {
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeCloseFailed'));
+        expect(actor.getSnapshot().context.runtimeCloseError).toBe(refusal);
+        shutdown.mockResolvedValue(undefined);
+        cleanup.mockImplementation(() => undefined);
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        expect(cleanup).toHaveBeenCalledTimes(owner === 'client' ? 1 : 2);
+        expect(shutdown).toHaveBeenCalledTimes(owner === 'client' ? 2 : 1);
+      } finally {
+        actor.stop();
+      }
+    });
+
+    it('should await shutdown of a privately connecting client without publishing connected readiness', async () => {
+      const runtime = await import('@taucad/runtime/client');
+      const client = createMockAppRuntimeClient();
+      const connected = Promise.withResolvers<void>();
+      const cleaned = Promise.withResolvers<void>();
+      vi.spyOn(client, 'connect').mockImplementation(async () => connected.promise);
+      vi.spyOn(client, 'shutdown').mockImplementation(async () => cleaned.promise);
+      vi.spyOn(runtime, 'createRuntimeClient').mockReturnValue(client);
+      const fileManager = createActor(
+        setup({}).createMachine({
+          initial: 'ready',
+          context: {
+            contentService: { id: 'content-service' },
+            openFileSystemBridge: () => ({ port: new MessageChannel().port1, dispose: noop }),
+          },
+          on: { replace: { context: { contentService: { id: 'replacement' } } } },
+          states: { ready: {} },
+        }),
+      ).start();
+      const actor = createActor(cadMachine, {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- real ready actor supplies exactly the connection owner's read-only filesystem seam
+          fileManagerRef: fileManager as unknown as NonNullable<CadContext['fileManagerRef']>,
+          kernelOptionsFactory: createKernelOptionsFactory(),
+          fileSystemRoot: '/projects/test',
+        },
+      }).start();
+      try {
+        await vi.waitFor(() => {
+          expect(client.connect).toHaveBeenCalledOnce();
+        });
+        expect(actor.getSnapshot().context.kernelClient).toBeUndefined();
+        actor.send({ type: 'closeRuntime' });
+        await vi.waitFor(() => {
+          expect(client.shutdown).toHaveBeenCalledOnce();
+        });
+        expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+        expect(client.terminate).not.toHaveBeenCalled();
+        fileManager.send({ type: 'replace' });
+        actor.send({ type: 'restoreParameters' });
+        await Promise.resolve();
+        expect(client.connect).toHaveBeenCalledOnce();
+        expect(runtime.createRuntimeClient).toHaveBeenCalledOnce();
+        expect(client.render).not.toHaveBeenCalled();
+        cleaned.resolve();
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        connected.resolve();
+        await Promise.resolve();
+        expect(actor.getSnapshot().context.kernelClient).toBeUndefined();
+        actor.send({ type: 'filesystemBindingChanged' });
+        actor.send({ type: 'restoreParameters' });
+        expect(actor.getSnapshot().matches('runtimeClosed')).toBe(true);
+      } finally {
+        cleaned.resolve();
+        connected.resolve();
+        actor.stop();
+        fileManager.stop();
+      }
+    });
+
+    it('should refuse late client allocation after close while lazy modules are pending', async () => {
+      const runtime = await import('@taucad/runtime/client');
+      const allocate = vi.spyOn(runtime, 'createRuntimeClient');
+      const modules = Promise.withResolvers<Awaited<ReturnType<LazyKernelOptionsFactory>>>();
+      const fileManager = createActor(
+        setup({}).createMachine({
+          initial: 'ready',
+          context: { contentService: {}, openFileSystemBridge: noop },
+          states: { ready: {} },
+        }),
+      ).start();
+      const actor = createActor(cadMachine, {
+        input: {
+          shouldInitializeKernelOnStart: false,
+          // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- real ready actor supplies exactly the connection owner's read-only filesystem seam
+          fileManagerRef: fileManager as unknown as NonNullable<CadContext['fileManagerRef']>,
+          kernelOptionsFactory: async () => modules.promise,
+          fileSystemRoot: '/projects/test',
+        },
+      }).start();
+      try {
+        await Promise.resolve();
+        actor.send({ type: 'closeRuntime' });
+        modules.resolve(await createKernelOptionsFactory()());
+        await vi.waitFor(() => {
+          expect(actor.getSnapshot().matches('runtimeClosed')).toBe(true);
+        });
+        expect(allocate).not.toHaveBeenCalled();
+      } finally {
+        actor.stop();
+        fileManager.stop();
+      }
+    });
+
     /* The root exit is what releases the kernel when the unit re-enters from its root; stopping
      * runs no exit, so the React resource boundary below owns disposal at teardown. */
     it('should release the kernel once through the root exit and leave stop to the resource boundary', async () => {

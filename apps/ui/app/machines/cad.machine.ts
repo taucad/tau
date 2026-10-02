@@ -1,5 +1,5 @@
 import { markGeometryReceipt } from '#lib/renderer-telemetry.js';
-import { setup, types, waitFor } from 'xstate';
+import { createAsyncLogic, setup, types, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { CodeIssue, Geometry, LogLevel, LogOrigin } from '@taucad/types';
 import type {
@@ -54,6 +54,9 @@ export type CadContext = {
   telemetryEntries: TelemetrySpanRecord[];
   renderTimeout: number;
   kernelClient?: AppRuntimeClient;
+  /** Allocated ownership, not connected readiness. */
+  connectingClient?: AppRuntimeClient;
+  runtimeCloseError?: Error;
   capabilities?: AppCapabilitiesManifest;
   activeKernelId?: string;
   eventCleanups: Array<() => void>;
@@ -117,6 +120,8 @@ type CadEvent =
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
   | { type: 'parkRuntime' }
   | { type: 'resumeRuntime' }
+  | { type: 'closeRuntime' }
+  | { type: 'kernelAllocated'; client: AppRuntimeClient; cleanups: Array<() => void> }
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
 
@@ -145,11 +150,33 @@ type CadInput = {
 };
 
 /** Release the runtime resources held by one CAD unit. */
-export const disposeCadRuntime = (context: Pick<CadContext, 'eventCleanups' | 'kernelClient'>): void => {
+export const disposeCadRuntime = (
+  context: Pick<CadContext, 'eventCleanups' | 'kernelClient' | 'connectingClient'>,
+): void => {
   for (const cleanup of context.eventCleanups) {
     safeDispose(cleanup);
   }
   safeDispose(() => context.kernelClient?.terminate());
+  if (context.connectingClient !== context.kernelClient) {
+    safeDispose(() => context.connectingClient?.terminate());
+  }
+};
+
+/** Await this unit's owned shutdown before its project drops the actor tree. */
+export const closeCadRuntime = async (actor: ActorRefFrom<typeof cadMachine>, signal?: AbortSignal): Promise<void> => {
+  actor.send({ type: 'closeRuntime' });
+  const snapshot = await waitFor(
+    actor,
+    (state) => state.matches('runtimeClosed') || state.matches('runtimeCloseFailed'),
+    { signal },
+  );
+  if (snapshot.matches('runtimeCloseFailed')) {
+    const error: unknown = snapshot.context.runtimeCloseError;
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('CAD runtime shutdown failed');
+  }
 };
 
 type ConnectKernelInput = {
@@ -253,8 +280,9 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   });
 
   let tornDown = false;
+  let ownershipTransferred = false;
   const teardown = () => {
-    if (tornDown) {
+    if (tornDown || ownershipTransferred) {
       return;
     }
     tornDown = true;
@@ -269,6 +297,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   signal.throwIfAborted();
 
   const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions] = await modules;
+  signal.throwIfAborted();
 
   const computeConnection =
     getComputeReuseMode() === 'durable' && snapshot.context.projectId
@@ -340,7 +369,11 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   signal.throwIfAborted();
 
+  machineRef.send({ type: 'kernelAllocated', client, cleanups });
+  ownershipTransferred = true;
+
   await client.connect();
+  signal.throwIfAborted();
 
   const currentSnapshot = fileManagerRef.getSnapshot();
   if (!currentSnapshot.matches('ready') || currentSnapshot.context.contentService !== capturedContentService) {
@@ -434,6 +467,37 @@ const boundTelemetryEntries = (entries: TelemetrySpanRecord[]): TelemetrySpanRec
 const cadActors = {
   connectKernelActor,
   renderModelActor,
+  shutdownKernelActor: createAsyncLogic<
+    { clientClosed: boolean; eventCleanups: Array<() => void>; error?: Error },
+    Pick<CadContext, 'kernelClient' | 'connectingClient' | 'eventCleanups'>
+  >({
+    run: async ({ input }) => {
+      const failures: unknown[] = [];
+      const eventCleanups: Array<() => void> = [];
+      let clientClosed = false;
+      try {
+        await (input.kernelClient ?? input.connectingClient)?.shutdown();
+        clientClosed = true;
+      } catch (error) {
+        failures.push(error);
+      }
+      for (const cleanup of input.eventCleanups) {
+        try {
+          cleanup();
+        } catch (error) {
+          failures.push(error);
+          eventCleanups.push(cleanup);
+        }
+      }
+      const error =
+        failures.length === 0
+          ? undefined
+          : failures.length === 1 && failures[0] instanceof Error
+            ? failures[0]
+            : new AggregateError(failures, 'CAD runtime cleanup failed');
+      return { clientClosed, eventCleanups, error };
+    },
+  }),
 };
 
 type CadEnqueue = EnqueueObject<CadEvent, CadEmitted, SystemRegistry, typeof cadActors>;
@@ -471,11 +535,11 @@ const notifyKernelRefusal = (
 
 /** Release the kernel. The disposal runs as an effect; the refs clear with the transition. */
 const destroyKernel = (context: CadContext, enq: CadEnqueue): CadPatch => {
-  const { eventCleanups, kernelClient } = context;
+  const { eventCleanups, kernelClient, connectingClient } = context;
   enq(() => {
-    disposeCadRuntime({ eventCleanups, kernelClient });
+    disposeCadRuntime({ eventCleanups, kernelClient, connectingClient });
   });
-  return { eventCleanups: [], kernelClient: undefined };
+  return { eventCleanups: [], kernelClient: undefined, connectingClient: undefined };
 };
 
 /** What a render-triggering event does to context, bumping the request watermark first. */
@@ -699,6 +763,10 @@ export const cadMachine = setup({
   }),
   exit: ({ context }, enq) => ({ context: destroyKernel(context, enq) }),
   on: {
+    closeRuntime: { target: '.runtimeClosing', context: { runtimeCloseError: undefined } },
+    kernelAllocated: ({ event }) => ({
+      context: { connectingClient: event.client, eventCleanups: event.cleanups },
+    }),
     parkRuntime: { context: { parkWhenIdle: true } },
     resumeRuntime: { context: { parkWhenIdle: false } },
     restoreParameters: ({ context }) => ({
@@ -723,6 +791,44 @@ export const cadMachine = setup({
   },
   initial: 'connecting',
   states: {
+    runtimeClosing: {
+      on: { closeRuntime: {}, filesystemBindingChanged: {}, restoreParameters: {} },
+      invoke: {
+        src: 'shutdownKernelActor',
+        input: ({ context }) => ({
+          kernelClient: context.kernelClient,
+          connectingClient: context.connectingClient,
+          eventCleanups: context.eventCleanups,
+        }),
+        onDone: ({ event }) => ({
+          target: event.output.error ? 'runtimeCloseFailed' : 'runtimeClosed',
+          context: {
+            ...(event.output.clientClosed ? { kernelClient: undefined, connectingClient: undefined } : {}),
+            eventCleanups: event.output.eventCleanups,
+            runtimeCloseError: event.output.error,
+          },
+        }),
+        onError: ({ event }) => ({
+          target: 'runtimeCloseFailed',
+          context: {
+            runtimeCloseError:
+              event.error instanceof Error
+                ? event.error
+                : new Error(errorMessageOf(event.error, 'CAD shutdown failed')),
+          },
+        }),
+      },
+    },
+    runtimeClosed: {
+      entry: ({ context, self }, enq) => {
+        if (context.parentRef) {
+          enq.sendTo(context.parentRef, { type: 'geometryUnit.runtimeClosed', unit: self });
+        }
+        return {};
+      },
+      on: { closeRuntime: {}, filesystemBindingChanged: {}, restoreParameters: {} },
+    },
+    runtimeCloseFailed: { on: { filesystemBindingChanged: {}, restoreParameters: {} } },
     connecting: {
       tags: ['cad-loading'],
       /* R4: a unit that is trying again is not refused. */
@@ -767,7 +873,7 @@ export const cadMachine = setup({
           }
           return {
             target: context.entryPath ? '#cad.rendering.submitting' : 'idle',
-            context: { kernelClient: event.client, eventCleanups: event.cleanups },
+            context: { kernelClient: event.client, connectingClient: undefined, eventCleanups: event.cleanups },
           };
         },
         initializeModel: renderRequest(),

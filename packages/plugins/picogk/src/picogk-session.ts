@@ -27,7 +27,11 @@ export type PicogkSessionOptions = {
   readonly workerSha256: string;
   readonly workspacePath: string;
   readonly artifactPath: string;
-  readonly resourceFiles: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly label: string }>;
+  readonly resourceFiles: ReadonlyArray<{
+    readonly path: string;
+    readonly sha256: string;
+    readonly label: string;
+  }>;
   readonly requestTimeout: number;
   readonly maxArtifactBytes: number;
   readonly logger: RuntimeLogger;
@@ -97,7 +101,10 @@ export class PicogkSession {
       logger: options.logger,
       sessionName: 'PicoGK C#',
       executableName: 'PicoGK C# worker',
-      shutdown: { method: 'shutdown', parseResult: (value) => picogkShutdownSchema.parse(value) },
+      shutdown: {
+        method: 'shutdown',
+        parseResult: (value) => picogkShutdownSchema.parse(value),
+      },
     });
   }
 
@@ -107,7 +114,10 @@ export class PicogkSession {
    */
   public async request<Result>({ schema, ...request }: PicogkRequest<Result>): Promise<Result> {
     try {
-      return await this.session.request<Result>({ ...request, parseResult: (value) => schema.parse(value) });
+      return await this.session.request<Result>({
+        ...request,
+        parseResult: (value) => schema.parse(value),
+      });
     } catch (error) {
       if (error instanceof NativeWorkerReportedError) {
         throw new PicogkWorkerError(picogkIssueSchema.array().parse(error.issues));

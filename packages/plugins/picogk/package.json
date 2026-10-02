@@ -70,6 +70,7 @@
     "@taucad/parameters": "workspace:*"
   },
   "devDependencies": {
+    "@gltf-transform/core": "catalog:",
     "@taucad/assimp": "workspace:*",
     "@taucad/middleware": "workspace:*",
     "@taucad/runtime": "workspace:*",

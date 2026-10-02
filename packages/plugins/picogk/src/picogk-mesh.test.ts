@@ -10,8 +10,38 @@ import {
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
 import { describe, expect, it } from 'vitest';
 
-import { picogkArtifactToGlb } from '#picogk-mesh.js';
-import type { PicogkBuild } from '#picogk.protocol.js';
+import { picogkArtifactToGlb as adaptV8 } from '#picogk-mesh.js';
+import type { PicogkBuild as SceneBuild } from '#picogk.protocol.js';
+
+// Existing scalar fixtures retain their malformed-region mutations; split them at the test boundary.
+type PicogkBuild = Omit<SceneBuild, 'prototypes' | 'occurrences'> & {
+  components: Array<
+    Omit<SceneBuild['prototypes'][number], 'indexComponentType'> &
+      Omit<SceneBuild['occurrences'][number], 'prototypeId' | 'matrix'>
+  >;
+};
+const picogkArtifactToGlb = (
+  bytes: Uint8Array<ArrayBuffer>,
+  result: PicogkBuild,
+  onIssues?: Parameters<typeof adaptV8>[2],
+) =>
+  adaptV8(
+    bytes,
+    {
+      ...result,
+      prototypes: result.components.map((component, index) => ({
+        ...component,
+        id: `prototype:${index + 1}`,
+        indexComponentType: 5125,
+      })),
+      occurrences: result.components.map((component, index) => ({
+        ...component,
+        prototypeId: `prototype:${index + 1}`,
+        matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1],
+      })),
+    },
+    onIssues,
+  );
 
 const artifact = (
   options: {
@@ -72,7 +102,11 @@ const artifact = (
       artifactWrite: 0,
       unload: 0,
     },
-    metrics: { managedHeapBytes: 0, picoGkNativeBytes: 0, processWorkingSetBytes: 0 },
+    metrics: {
+      managedHeapBytes: 0,
+      picoGkNativeBytes: 0,
+      processWorkingSetBytes: 0,
+    },
   };
   return { bytes, result };
 };
@@ -94,10 +128,20 @@ const glbJson = (bytes: Uint8Array<ArrayBuffer>) => {
         readonly attributes: Record<string, number>;
       }>;
     }>;
-    readonly materials: ReadonlyArray<{ readonly pbrMetallicRoughness: Readonly<Record<string, unknown>> }>;
-    readonly accessors: ReadonlyArray<{ readonly count: number; readonly bufferView: number }>;
-    readonly extensions?: { readonly TAU_cad_topology?: { readonly topologyBufferView: number } };
-    readonly bufferViews: ReadonlyArray<{ readonly byteOffset?: number; readonly byteLength: number }>;
+    readonly materials: ReadonlyArray<{
+      readonly pbrMetallicRoughness: Readonly<Record<string, unknown>>;
+    }>;
+    readonly accessors: ReadonlyArray<{
+      readonly count: number;
+      readonly bufferView: number;
+    }>;
+    readonly extensions?: {
+      readonly TAU_cad_topology?: { readonly topologyBufferView: number };
+    };
+    readonly bufferViews: ReadonlyArray<{
+      readonly byteOffset?: number;
+      readonly byteLength: number;
+    }>;
   };
 };
 
@@ -146,7 +190,10 @@ describe('PicoGK mesh artifact adapter', () => {
       validateTauCadTopology(topology, {
         nodes: json.nodes.map(({ mesh }) => ({ meshIndex: mesh })),
         meshes: json.meshes.map(({ primitives }) =>
-          primitives.map(({ mode = 4, indices }) => ({ mode, indexCount: json.accessors[indices!]!.count })),
+          primitives.map(({ mode = 4, indices }) => ({
+            mode,
+            indexCount: json.accessors[indices!]!.count,
+          })),
         ),
       }),
     ).toEqual([]);
@@ -216,7 +263,13 @@ describe('PicoGK mesh artifact adapter', () => {
           ...new Uint8Array(tangent.buffer),
           ...image,
         ]),
-        component: { ...component, positionOffset: 24, normalOffset: 60, indexOffset: 96, texCoordOffset: undefined },
+        component: {
+          ...component,
+          positionOffset: 24,
+          normalOffset: 60,
+          indexOffset: 96,
+          texCoordOffset: undefined,
+        },
       },
       {
         bytes: Uint8Array.from([
@@ -249,15 +302,23 @@ describe('PicoGK mesh artifact adapter', () => {
       new Uint8Array(new Float32Array([1, 0, -0, 1, 1, 0, -0, 1, 1, 0, -0, 1]).buffer),
     );
     for (const change of [{ texCoordCount: 4 }, { tangentCount: 8 }, { texCoordOffset: 0 }, { tangentOffset: 1000 }]) {
-      expect(() => picogkArtifactToGlb(bytes, { ...result, components: [{ ...component, ...change }] })).toThrow();
+      expect(() =>
+        picogkArtifactToGlb(bytes, {
+          ...result,
+          components: [{ ...component, ...change }],
+        }),
+      ).toThrow();
     }
     for (const range of [
       { offset: 0, byteLength: image.length },
       { offset: 156, byteLength: 1000 },
     ]) {
-      expect(() => picogkArtifactToGlb(bytes, { ...result, images: [{ ...result.images![0]!, ...range }] })).toThrow(
-        'image artifact range',
-      );
+      expect(() =>
+        picogkArtifactToGlb(bytes, {
+          ...result,
+          images: [{ ...result.images![0]!, ...range }],
+        }),
+      ).toThrow('image artifact range');
     }
     expect(() => picogkArtifactToGlb(bytes, { ...result, textures: [{ source: 99 }] })).toThrow();
     expect(() =>
@@ -269,14 +330,20 @@ describe('PicoGK mesh artifact adapter', () => {
     const invalid = Uint8Array.from(bytes);
     new DataView(invalid.buffer).setFloat32(84, Number.NaN, true);
     expect(() =>
-      picogkArtifactToGlb(invalid, { ...result, sha256: createHash('sha256').update(invalid).digest('hex') }),
+      picogkArtifactToGlb(invalid, {
+        ...result,
+        sha256: createHash('sha256').update(invalid).digest('hex'),
+      }),
     ).toThrow();
   });
 
   it('rejects duplicate authored names and warns on invalid mechanism structure', () => {
     const { bytes, result } = artifact();
     expect(() =>
-      picogkArtifactToGlb(bytes, { ...result, components: [result.components[0]!, result.components[0]!] }),
+      picogkArtifactToGlb(bytes, {
+        ...result,
+        components: [result.components[0]!, result.components[0]!],
+      }),
     ).toThrow('already in use');
     const warnings: unknown[] = [];
     const glb = picogkArtifactToGlb(bytes, { ...result, mechanism: { schemaVersion: 2 } }, (issues) =>
@@ -349,9 +416,23 @@ describe('PicoGK mesh artifact adapter', () => {
     ]);
     expect(topology.mechanism).toMatchObject({
       units: { length: 'm', angle: 'rad' },
-      links: { base: { components: ['component:picogk-1'] }, arm: { components: ['component:picogk-2'] } },
-      joints: { hinge: { origin: [0, 3, 0], axis: [0, 1, 0], limits: { lower: -1, upper: 1 } } },
-      animations: [{ id: 'spin', keyframes: [{ coordinates: { hinge: 0 } }, { coordinates: { hinge: 1 } }] }],
+      links: {
+        base: { components: ['component:picogk-1'] },
+        arm: { components: ['component:picogk-2'] },
+      },
+      joints: {
+        hinge: {
+          origin: [0, 3, 0],
+          axis: [0, 1, 0],
+          limits: { lower: -1, upper: 1 },
+        },
+      },
+      animations: [
+        {
+          id: 'spin',
+          keyframes: [{ coordinates: { hinge: 0 } }, { coordinates: { hinge: 1 } }],
+        },
+      ],
     });
   });
 
@@ -404,7 +485,12 @@ describe('PicoGK mesh artifact adapter', () => {
 
   it('preserves mesh topology and re-expresses mechanism on millimetre Z-up export', async () => {
     const base = artifact();
-    const slider = artifact({ kind: 'lines', positions: [0, 0, 0, 1000, 0, 0], normals: [], indices: [0, 1] });
+    const slider = artifact({
+      kind: 'lines',
+      positions: [0, 0, 0, 1000, 0, 0],
+      normals: [],
+      indices: [0, 1],
+    });
     const bytes = Uint8Array.from([...base.bytes, ...slider.bytes]);
     const line = slider.result.components[0]!;
     const result: PicogkBuild = {
@@ -470,9 +556,23 @@ describe('PicoGK mesh artifact adapter', () => {
     ]);
     expect(topology.mechanism).toMatchObject({
       units: { length: 'mm', angle: 'rad' },
-      links: { base: { components: ['component:picogk-1'] }, slider: { components: ['component:picogk-2'] } },
-      joints: { slide: { origin: [0, 0, 3000], axis: [1, 0, 0], limits: { lower: 0, upper: 1000 } } },
-      animations: [{ id: 'move', keyframes: [{ coordinates: { slide: 0 } }, { coordinates: { slide: 500 } }] }],
+      links: {
+        base: { components: ['component:picogk-1'] },
+        slider: { components: ['component:picogk-2'] },
+      },
+      joints: {
+        slide: {
+          origin: [0, 0, 3000],
+          axis: [1, 0, 0],
+          limits: { lower: 0, upper: 1000 },
+        },
+      },
+      animations: [
+        {
+          id: 'move',
+          keyframes: [{ coordinates: { slide: 0 } }, { coordinates: { slide: 500 } }],
+        },
+      ],
     });
     expect(
       validateTauCadTopology(topology, {
@@ -498,11 +598,17 @@ describe('PicoGK mesh artifact adapter', () => {
     const { bytes, result } = artifact();
     const material = (roughness: number) => {
       const json = glbJson(
-        picogkArtifactToGlb(bytes, { ...result, components: [{ ...result.components[0]!, roughness }] }),
+        picogkArtifactToGlb(bytes, {
+          ...result,
+          components: [{ ...result.components[0]!, roughness }],
+        }),
       );
       return json.materials[json.meshes[0]!.primitives[0]!.material!]!.pbrMetallicRoughness;
     };
-    expect(material(0.75)).toMatchObject({ metallicFactor: 0.25, roughnessFactor: 0.75 });
+    expect(material(0.75)).toMatchObject({
+      metallicFactor: 0.25,
+      roughnessFactor: 0.75,
+    });
     expect(material(1)).toHaveProperty('metallicFactor', 0.25);
     expect(material(1)).not.toHaveProperty('roughnessFactor');
   });
@@ -525,12 +631,18 @@ describe('PicoGK mesh artifact adapter', () => {
   it.each([
     [
       'descriptor size',
-      ({ bytes, result }: ReturnType<typeof artifact>) => ({ bytes, result: { ...result, byteLength: 1 } }),
+      ({ bytes, result }: ReturnType<typeof artifact>) => ({
+        bytes,
+        result: { ...result, byteLength: 1 },
+      }),
       /byte length/,
     ],
     [
       'digest',
-      ({ bytes, result }: ReturnType<typeof artifact>) => ({ bytes, result: { ...result, sha256: '0'.repeat(64) } }),
+      ({ bytes, result }: ReturnType<typeof artifact>) => ({
+        bytes,
+        result: { ...result, sha256: '0'.repeat(64) },
+      }),
       /integrity/,
     ],
     ['empty positions', () => artifact({ positions: [] }), /triangles shape/],
@@ -560,31 +672,50 @@ describe('PicoGK mesh artifact adapter', () => {
       'out-of-bounds range',
       ({ bytes, result }: ReturnType<typeof artifact>) => ({
         bytes,
-        result: { ...result, components: [{ ...result.components[0]!, indexOffset: bytes.byteLength }] },
+        result: {
+          ...result,
+          components: [{ ...result.components[0]!, indexOffset: bytes.byteLength }],
+        },
       }),
-      /Uint32 artifact range/,
+      /index artifact range/,
     ],
     [
       'overlap',
       ({ bytes, result }: ReturnType<typeof artifact>) => ({
         bytes,
-        result: { ...result, components: [{ ...result.components[0]!, normalOffset: 0 }] },
+        result: {
+          ...result,
+          components: [{ ...result.components[0]!, normalOffset: 0 }],
+        },
       }),
       /overlapping/,
     ],
     ['non-finite', () => artifact({ positions: [Number.NaN, 0, 0, 1, 0, 0, 0, 1, 0] }), /mesh values/],
     [
       'positive infinity',
-      () => artifact({ positions: [0, 0, 0, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0] }),
+      () =>
+        artifact({
+          positions: [0, 0, 0, 1, 0, 0, 0, Number.POSITIVE_INFINITY, 0],
+        }),
       /mesh values/,
     ],
     [
       'negative infinity',
-      () => artifact({ positions: [0, 0, Number.NEGATIVE_INFINITY, 1, 0, 0, 0, 1, 0] }),
+      () =>
+        artifact({
+          positions: [0, 0, Number.NEGATIVE_INFINITY, 1, 0, 0, 0, 1, 0],
+        }),
       /mesh values/,
     ],
     ['non-finite normal', () => artifact({ normals: [0, 0, 1, 0, Number.NaN, 1, 0, 0, 1] }), /mesh values/],
-    ['infinite normal', () => artifact({ normals: [0, 0, 1, 0, 0, 1, Number.POSITIVE_INFINITY, 0, 1] }), /mesh values/],
+    [
+      'infinite normal',
+      () =>
+        artifact({
+          normals: [0, 0, 1, 0, 0, 1, Number.POSITIVE_INFINITY, 0, 1],
+        }),
+      /mesh values/,
+    ],
     ['index range', () => artifact({ indices: [0, 1, 3] }), /mesh values/],
   ])('rejects an invalid %s', (_name, mutate, message) => {
     const value = mutate(artifact());

@@ -25,7 +25,7 @@
 #     missing-module error before `nx build api` can even start. Full install
 #     is required; the cold-cache cost is ~70s (network-bound, same as filtered).
 
-ARG NODE_VERSION=24.3.0
+ARG NODE_VERSION=24.19.0
 ARG PNPM_VERSION=10.30.3
 
 # ── Base ──────────────────────────────────────────────────────────────────

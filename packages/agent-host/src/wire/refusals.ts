@@ -232,6 +232,8 @@ export const refusals = {
   CHECKOUT_CONFLICT: { owner: 'revisions', retry: 'never' },
   ENGINE_FAILED: { owner: 'revisions', retry: 'never' },
   ENGINE_UNAVAILABLE: { owner: 'revisions', retry: 'never' },
+  /** The fetch exceeds its byte budget; change the transfer scope or budget before retrying. */
+  FETCH_LIMIT_EXCEEDED: { owner: 'revisions', retry: 'never' },
   INVALID_REPOSITORY: { owner: 'revisions', retry: 'never' },
   INVALID_TRANSPORT: { owner: 'revisions', retry: 'never' },
   /** The remote transfer exceeded its byte bound; change the requested scope before retrying. */

@@ -47,15 +47,6 @@ COPY patches/ ./patches/
 # tools/*. Nested workspace placements need explicit patterns because
 # `*/*/package.json` is only two levels deep, and `scripts/` is one level deep.
 COPY --parents scripts/package.json */*/package.json apps/libs/*/package.json apps/react-e2e/apps/*/package.json packages/plugins/*/package.json packages/core/*/package.json ./
-# `canvas` is a root devDependency that only jsdom loads, optionally, in tests.
-# In this workspace pnpm does not put its `prebuild-install` dependency on the
-# install script's PATH, so the script falls through to a node-gyp build that
-# needs Python and the cairo/pango headers, which node:slim lacks. The API never
-# loads canvas, so the image skips that build instead of carrying a C toolchain.
-# The build stage's `COPY . .` restores the committed setting; pnpm's pre-run
-# dependency check only warns about the difference (see the build stage).
-RUN sed -i 's/^  canvas: true$/  canvas: false/' pnpm-workspace.yaml && \
-    grep -q '^  canvas: false$' pnpm-workspace.yaml
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline
 
@@ -75,8 +66,12 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned
+# Peer auto-install is off because the legacy deploy resolves every workspace
+# package's peers from the registry, and `@taucad/camera` (a type-only peer of
+# `@taucad/workbench`) is not published; the API's runtime dependencies are all
+# declared directly.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter=@taucad/api --prod deploy /pruned --legacy
+    pnpm --config.auto-install-peers=false --filter=@taucad/api --prod deploy /pruned --legacy
 
 # ── Runtime ───────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-slim AS runtime

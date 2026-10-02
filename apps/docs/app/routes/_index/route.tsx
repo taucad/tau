@@ -154,7 +154,12 @@ const LandingPage = (): React.JSX.Element => {
                   Apache-2.0
                 </Badge>
               </div>
-              <pre className='overflow-x-auto px-5 py-7'>
+              <pre
+                role='region'
+                aria-label='Install runtime packages'
+                tabIndex={0}
+                className='overflow-x-auto px-5 py-7'
+              >
                 <code className='block min-w-max text-sm text-foreground'>
                   <span aria-hidden className='text-fd-primary'>
                     ${' '}

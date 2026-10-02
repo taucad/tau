@@ -128,3 +128,16 @@ describe('Fastify logger URL redaction', () => {
     }
   });
 });
+
+describe('Fastify logger service selection', () => {
+  it('should fall back to console logging in production when LOG_SERVICE is unset', () => {
+    vi.stubEnv('NODE_ENV', 'production');
+    vi.stubEnv('LOG_SERVICE', undefined);
+    try {
+      expect(() => getFastifyLoggingConfig()).not.toThrow();
+      expect(getFastifyLoggingConfig()).toHaveProperty('messageKey', 'msg');
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+});

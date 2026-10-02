@@ -36,6 +36,7 @@ import {
   revisionId,
 } from '#algorithms/index.js';
 import type { CaptureMemo, RevisionId, RevisionTreeInput } from '#algorithms/index.js';
+import { parseTemporarySibling } from '#revision-temporary-sibling.js';
 import { createApplyTreeEffects } from '#apply-tree.js';
 import { caseCollisions } from '#case-collisions.js';
 import { createChatEffects, storageRefusalOf } from '#chat-effects.js';
@@ -1007,19 +1008,6 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
     const name = path.slice(separator + 1);
     return `${directory}.${name}.tau-${role}.${randomUuid()}.tmp`;
   };
-  const temporarySiblingPattern =
-    /^\.(.+)\.tau-(staged|backup)\.[\da-f]{8}-[\da-f]{4}-[\da-f]{4}-[\da-f]{4}-[\da-f]{12}\.tmp$/u;
-  const parseTemporarySibling = (
-    path: string,
-  ): Readonly<{ originalPath: string; role: 'staged' | 'backup' }> | undefined => {
-    const separator = path.lastIndexOf('/');
-    const directory = separator === -1 ? '' : path.slice(0, separator + 1);
-    const match = temporarySiblingPattern.exec(path.slice(separator + 1));
-    const role = match?.[2];
-    return match === null || (role !== 'staged' && role !== 'backup')
-      ? undefined
-      : { originalPath: `${directory}${match[1]!}`, role };
-  };
 
   /**
    * Remove the staged and backup siblings a killed apply left behind.
@@ -1102,8 +1090,7 @@ export const createRevisionActors = (options: RevisionActorsOptions): RevisionAc
   ): Promise<ImmutableRevisionTree> => {
     const { memos, bypassMemo, changed } = captureOptions;
     const started = ++captureSequence;
-    const exclude = (path: string): boolean =>
-      !policy.classify(path).versioned || parseTemporarySibling(path) !== undefined;
+    const exclude = (path: string): boolean => !policy.classify(path).versioned;
     const since = options.completeChanges === true && changed?.paths !== undefined ? memos.last : undefined;
     const tree =
       since === undefined || changed?.paths === undefined

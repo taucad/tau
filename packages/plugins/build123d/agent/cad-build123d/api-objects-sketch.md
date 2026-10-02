@@ -2,7 +2,9 @@
 
 14 top-level symbols. Signatures are verbatim python.
 
+// Category: objects_sketch
 // BaseSketchObject
+// Remarks: Base class for all BuildSketch objects
 BaseSketchObject
 
   BaseSketchObject(obj: Compound | Face, rotation: float = 0, align: Align | tuple[Align, Align] | None = None, mode: Mode = Mode.ADD)
@@ -11,7 +13,9 @@ BaseSketchObject
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a circle defined by radius.
 Circle
 
   Circle(radius: float, arc_size: float = 360.0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -20,7 +24,9 @@ Circle
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create an ellipse defined by x- and y- radii.
 Ellipse
 
   Ellipse(x_radius: float, y_radius: float, rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -30,7 +36,13 @@ Ellipse
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a polygon defined by given sequence of points.
+
+Note: the order of the points defines the resulting normal of the Face in Algebra
+mode, where counter-clockwise order creates an upward normal while clockwise order
+a downward normal. In Builder mode, the Face is added with an upward normal.
 Polygon
 
   Polygon(*pts: VectorLike | Iterable[VectorLike], rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.NONE, Align.NONE), mode: Mode = Mode.ADD)
@@ -39,7 +51,9 @@ Polygon
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a rectangle defined by width and height.
 Rectangle
 
   Rectangle(width: float, height: float, rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -49,7 +63,9 @@ Rectangle
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a rectangle defined by width and height with filleted corners.
 RectangleRounded
 
   RectangleRounded(width: float, height: float, radius: float, rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -60,7 +76,10 @@ RectangleRounded
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a regular polygon defined by radius and side count. Use major_radius to define whether
+the polygon circumscribes (along the vertices) or inscribes (along the sides) the radius circle.
 RegularPolygon
 
   RegularPolygon(radius: float, side_count: int, major_radius: bool = True, rotation: float = 0, align: tuple[Align, Align] = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -71,7 +90,9 @@ RegularPolygon
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a slot defined by a line and height. May be an arc, stright line, spline, etc.
 SlotArc
 
   SlotArc(arc: Edge | Wire, height: float, rotation: float = 0, mode: Mode = Mode.ADD)
@@ -80,7 +101,10 @@ SlotArc
   //   rotation: angle to rotate object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a slot defined by the center of the slot and the center of one end arc.
+The slot will be symmetric about the center point.
 SlotCenterPoint
 
   SlotCenterPoint(center: VectorLike, point: VectorLike, height: float, rotation: float = 0, mode: Mode = Mode.ADD)
@@ -90,7 +114,9 @@ SlotCenterPoint
   //   rotation: angle to rotate object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a slot defined by the distance between the centers of the two end arcs.
 SlotCenterToCenter
 
   SlotCenterToCenter(center_separation: float, height: float, rotation: float = 0, mode: Mode = Mode.ADD)
@@ -99,7 +125,9 @@ SlotCenterToCenter
   //   rotation: angle to rotate object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a slot defined by the overall width and height.
 SlotOverall
 
   SlotOverall(width: float, height: float, rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -109,7 +137,26 @@ SlotOverall
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create text defined by text string and font size.
+
+Fonts installed to the system can be specified by name and FontStyle. Fonts with
+subfamilies not in FontStyle should be specified with the subfamily name, e.g.
+"Arial Black". Alternatively, a specific font file can be specified with font_path.
+
+Use `available_fonts()` to list available font names for `font` and FontStyles.
+Note: on Windows, fonts must be installed with "Install for all users" to be found
+by name.
+
+Not all fonts have every FontStyle available, however ITALIC and BOLDITALIC will
+still italicize the font if the respective font file is not available.
+
+text_align specifies alignment of text inside the bounding box, while align the
+aligns the bounding box itself.
+
+Optionally, the Text can be positioned on a non-linear edge or wire with a path and
+position_on_path.
 Text
 
   Text(txt: str, font_size: float, font: str = 'Arial', font_path: PathLike[str] | str | None = None, font_style: FontStyle = FontStyle.REGULAR, text_align: tuple[TextAlign, TextAlign] = (TextAlign.CENTER, TextAlign.CENTER), align: Align | tuple[Align, Align] | None = None, path: Edge | Wire | None = None, position_on_path: float = 0.0, single_line_width: float | None = None, rotation: float = 0.0, mode: Mode = Mode.ADD)
@@ -126,7 +173,10 @@ Text
   //   rotation: angle to rotate object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a trapezoid defined by major width, height, and interior angle(s).
+// Throws: ValueError: Give angles result in an invalid trapezoid
 Trapezoid
 
   Trapezoid(width: float, height: float, left_side_angle: float, right_side_angle: float | None = None, rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -138,7 +188,13 @@ Trapezoid
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_sketch
 // Sketch Object
+// Remarks: Create a triangle defined by one side length and any of two other side lengths or interior
+angles. The interior angles are opposite the side with the same designation
+(i.e. side 'a' is opposite angle 'A'). Side 'a' is the bottom side, followed by 'b'
+on the right, going counter-clockwise.
+// Throws: ValueError: One length and two other values were not provided
 Triangle
 
   Triangle(a: float | None = None, b: float | None = None, c: float | None = None, A: float | None = None, B: float | None = None, C: float | None = None, align: Align | tuple[Align, Align] | None = None, rotation: float = 0, mode: Mode = Mode.ADD)

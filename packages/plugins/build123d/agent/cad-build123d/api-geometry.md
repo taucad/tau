@@ -2,7 +2,14 @@
 
 18 top-level symbols. Signatures are verbatim python.
 
+// Category: geometry
 // Axis
+// Remarks: Axis defined by point and direction or by two points
+
+Attributes:
+    position (Vector): the global position of the axis origin
+    direction (Vector): the normalized direction vector
+    wrapped (gp_Ax1): the OCP axis object
 Axis
 
   Axis(gp_ax1: gp_Ax1) -> None
@@ -30,32 +37,76 @@ Axis
   to_plane() -> Plane
 
   // are axes coaxial
+  // Remarks: True if the angle between self and other is lower or equal to angular_tolerance and
+the distance between self and other is lower or equal to linear_tolerance.
+
+Returns:
+    bool: axes are coaxial
   is_coaxial(other: Axis, angular_tolerance: float = 1e-05, linear_tolerance: float = 1e-05) -> bool
   //   other: axis to compare to
   //   angular_tolerance: max angular deviation
   //   linear_tolerance: max linear deviation
 
   // are axes normal
+  // Remarks: Returns True if the direction of this and another axis are normal to each other. That is,
+if the angle between the two axes is equal to 90° within the angular_tolerance.
+
+Returns:
+    bool: axes are normal
   is_normal(other: Axis, angular_tolerance: float = 1e-05) -> bool
   //   other: axis to compare to
   //   angular_tolerance: max angular deviation
 
   // are axes opposite
+  // Remarks: Returns True if the direction of this and another axis are parallel with
+opposite orientation. That is, if the angle between the two axes is equal
+to 180° within the angular_tolerance.
+
+Returns:
+    bool: axes are opposite
   is_opposite(other: Axis, angular_tolerance: float = 1e-05) -> bool
   //   other: axis to compare to
   //   angular_tolerance: max angular deviation
 
   // are axes parallel
+  // Remarks: Returns True if the direction of this and another axis are parallel with same
+orientation or opposite orientation. That is, if the angle between the two axes is
+equal to 0° or 180° within the angular_tolerance.
+
+Returns:
+    bool: axes are parallel
   is_parallel(other: Axis, angular_tolerance: float = 1e-05) -> bool
   //   other: axis to compare to
   //   angular_tolerance: max angular deviation
 
   // are axes skew
+  // Remarks: Returns True if this axis and another axis are skew, meaning they are neither
+parallel nor coplanar. Two axes are skew if they do not lie in the same plane
+and never intersect.
+
+Mathematically, this means:
+
+- The axes are **not parallel** (the cross product of their direction vectors
+  is nonzero).
+
+- The axes are **not coplanar** (the vector between their positions is not
+  aligned with the plane spanned by their directions).
+
+If either condition is false (i.e., the axes are parallel or coplanar), they are
+not skew.
+
+Returns:
+    bool: axes are skew
   is_skew(other: Axis, tolerance: float = 1e-05) -> bool
   //   other: axis to compare to
   //   tolerance: max deviation
 
   // calculate angle between axes
+  // Remarks: Computes the angular value, in degrees, between the direction of self and other
+between 0° and 360°.
+
+Returns:
+    float: angle between axes
   angle_between(other: Axis) -> float
   //   other: axis to compare to
 
@@ -69,6 +120,7 @@ Axis
   intersect(plane: Plane) -> Vector | Axis | None
   intersect(shape: Shape) -> Shape | None
 
+// Category: geometry
 // Axis meta class to enable class properties
 AxisMeta
 
@@ -81,6 +133,7 @@ AxisMeta
   // Z Axis
   Z: Axis
 
+// Category: geometry
 // A BoundingBox for a Shape
 BoundBox
 
@@ -88,6 +141,9 @@ BoundBox
   BoundBox(shape: TopoDS_Shape, tolerance: float | None = None, optimal: bool = True) -> None
 
   // Return the overall Lebesgue measure of the bounding box
+  // Remarks: - For 1D objects: length
+- For 2D objects: area
+- For 3D objects: volume
   measure: float
 
   // body diagonal length (i.e
@@ -97,25 +153,46 @@ BoundBox
   center() -> Vector
 
   // Returns a modified (expanded) bounding box
+  // Remarks: obj can be one of several things:
+    1. a 3-tuple corresponding to x,y, and z amounts to add
+    2. a vector, containing the x,y,z values to add
+    3. another bounding box, where a new box will be created that
+       encloses both.
+
+This bounding box is not changed.
+
+Returns:
   add(obj: tuple[float, float, float] | Vector | BoundBox, tol: float | None = None) -> BoundBox
   //   obj: tuple[float, float, float] | Vector | BoundBox]
   //   tol: float
 
   // Compares bounding boxes
+  // Remarks: Compares bounding boxes. Returns none if neither is inside the other.
+Returns the outer one if either is outside the other.
+
+BoundBox.is_inside works in 3d, but this is a 2d bounding box, so it
+doesn't work correctly plus, there was all kinds of rounding error in
+the built-in implementation i do not understand.
+
+Returns:
   find_outside_box_2d(bb1: BoundBox, bb2: BoundBox) -> BoundBox | None
   //   bb1: BoundBox
   //   bb2: BoundBox
 
   // Constructs a bounding box from a TopoDS_Shape
+  // Remarks: Returns:
   from_topo_ds(shape: TopoDS_Shape, tolerance: float | None = None, optimal: bool = True) -> BoundBox
   //   shape: TopoDS_Shape
   //   tolerance: float
   //   optimal: bool
 
   // Is the provided bounding box inside this one?
+  // Remarks: Returns:
   is_inside(second_box: BoundBox) -> bool
 
   // Check if this bounding box overlaps with another
+  // Remarks: Returns:
+    True if bounding boxes overlap (share any volume), False otherwise
   overlaps(other: BoundBox, tolerance: float = TOLERANCE) -> bool
   //   other: BoundBox to check overlap with
   //   tolerance: Distance tolerance for overlap detection
@@ -123,7 +200,10 @@ BoundBox
   // Amount to move object to achieve the desired alignment
   to_align_offset(align: Align2D | Align3D) -> Vector
 
+// Category: geometry
 // Color object based on OCCT Quantity_ColorRGBA
+// Remarks: Attributes:
+    wrapped (Quantity_ColorRGBA): the OCP color object
 Color
 
   Color(color_like: ColorLike)
@@ -133,12 +213,58 @@ Color
   //   color_like: name, ex
 
   // Generate a palette of evenly spaced colors
+  // Remarks: Creates a list of visually distinct colors suitable for representing
+discrete categories (such as different parts, assemblies, or data
+series). Colors are evenly spaced around the hue circle and share
+consistent lightness and saturation levels, resulting in balanced
+perceptual contrast across all hues.
+
+Produces palettes similar in appearance to the **Tableau 10** and **D3
+Category10** color sets—both widely recognized standards in data
+visualization for their clarity and accessibility. These values have
+been empirically chosen to maintain consistent perceived brightness
+across hues while avoiding overly vivid or dark colors.
+
+Returns:
+    list[Color]: List of generated colors.
+  // Throws: ValueError: If starting_hue is out of range or alpha length mismatch.
   categorical_set(color_count: int, starting_hue: ColorLike | float = 0.0, alpha: float | Iterable[float] = 1.0) -> list[Color]
   //   color_count: Number of colors to generate
   //   starting_hue: Either a Color-like object or a hue value in the range [0.0, 1.0] that defines the starting color
   //   alpha: Alpha value(s) for the colors
 
+// Category: geometry
 // A JSON encoder for build123d geometry objects
+// Remarks: This class extends ``json.JSONEncoder`` to provide custom serialization for
+geometry objects such as Axis, Color, Location, Plane, and Vector. It converts
+each geometry object into a dictionary containing exactly one key that identifies
+the geometry type (e.g. ``"Axis"``, ``"Vector"``, etc.), paired with a tuple or
+list that represents the underlying data. Any other object types are handled by
+the standard encoder.
+
+The inverse decoding is performed by the ``geometry_hook`` static method, which
+expects the dictionary to have precisely one key from the known geometry types.
+It then uses a class registry (``CLASS_REGISTRY``) to look up and instantiate
+the appropriate class with the provided values.
+
+**Usage Example**::
+
+    import json
+
+    # Suppose we have some geometry objects:
+    axis = Axis(position=(0, 0, 0), direction=(1, 0, 0))
+    vector = Vector(0.0, 1.0, 2.0)
+
+    data = {
+        "my_axis": axis,
+        "my_vector": vector
+    }
+
+    # Encode them to JSON:
+    encoded_data = json.dumps(data, cls=GeomEncoder, indent=4)
+
+    # Decode them back:
+    decoded_data = json.loads(encoded_data, object_hook=GeomEncoder.geometry_hook)
 GeomEncoder
 
   // Return a JSON-serializable representation of a known geometry object
@@ -147,7 +273,14 @@ GeomEncoder
   // Convert dictionaries back into geometry objects for decoding
   geometry_hook(json_dict)
 
+// Category: geometry
 // Location in 3D space
+// Remarks: This class wraps the TopLoc_Location class from OCCT. It can be used to move Shape
+objects in both relative and absolute manner. It is the preferred type to locate objects
+in build123d.
+
+Attributes:
+    wrapped (TopLoc_Location): the OCP location object
 Location
 
   Location() -> None
@@ -165,9 +298,13 @@ Location
   wrapped: TopLoc_Location
 
   // Extract Position component of self
+  // Remarks: Returns:
+  Vector: Position part of Location
   position: Vector
 
   // Extract orientation/rotation component of self
+  // Remarks: Returns:
+  Vector: orientation part of Location
   orientation: Vector
 
   // Default X axis when used as a plane
@@ -186,6 +323,22 @@ Location
   center() -> Vector
 
   // Return a new Location mirrored across the given plane
+  // Remarks: This method reflects both the position and orientation of the current Location
+across the specified mirror_plane using affine vector mathematics.
+
+Due to the mathematical properties of reflection:
+    - The true mirror of a right-handed coordinate system is a *left-handed* one.
+
+However, `build123d` requires all coordinate systems to be right-handed.
+Therefore, this implementation:
+- Reflects the X and Z directions across the mirror plane
+- Recomputes the Y direction as: `Y = X × Z`
+
+This ensures the resulting Location maintains a valid right-handed frame,
+while remaining as close as possible to the geometric mirror.
+
+Returns:
+    Location: A new mirrored Location that preserves right-handedness.
   mirror(mirror_plane: Plane) -> Location
   //   mirror_plane: The plane to mirror across
 
@@ -202,16 +355,55 @@ Location
   intersect(plane: Plane) -> Vector | Location | None
   intersect(shape: Shape) -> Shape | None
 
+// Category: geometry
 // Custom JSON Encoder for Location values
+// Remarks: Example:
+
+.. code::
+
+    data_dict = {
+        "part1": {
+            "joint_one": Location((1, 2, 3), (4, 5, 6)),
+            "joint_two": Location((7, 8, 9), (10, 11, 12)),
+        },
+        "part2": {
+            "joint_one": Location((13, 14, 15), (16, 17, 18)),
+            "joint_two": Location((19, 20, 21), (22, 23, 24)),
+        },
+    }
+    json_object = json.dumps(data_dict, indent=4, cls=LocationEncoder)
+    with open("sample.json", "w") as outfile:
+        outfile.write(json_object)
+    with open("sample.json", "r") as infile:
+        copy_data_dict = json.load(infile, object_hook=LocationEncoder.location_hook)
 LocationEncoder
 
   // Return a serializable object
   default(o: Location) -> dict
 
   // Convert Locations loaded from json to Location objects
+  // Remarks: Example:
+    read_json = json.load(infile, object_hook=LocationEncoder.location_hook)
   location_hook(obj) -> dict
 
+// Category: geometry
 // A 3d , 4x4 transformation matrix
+// Remarks: Used to move geometry in space.
+
+The provided "matrix" parameter may be None, a gp_GTrsf, or a nested list of
+values.
+
+If given a nested list, it is expected to be of the form:
+
+    [[m11, m12, m13, m14],
+     [m21, m22, m23, m24],
+     [m31, m32, m33, m34]]
+
+A fourth row may be given, but it is expected to be: [0.0, 0.0, 0.0, 1.0]
+since this is a transform matrix.
+
+Attributes:
+    wrapped (gp_GTrsf): the OCP transformation function
 Matrix
 
   Matrix()
@@ -231,15 +423,25 @@ Matrix
   // Needed by the cqparts gltf exporter
   transposed_list() -> Sequence[float]
 
+// Category: geometry
 // Raised when an iterable contains objects that cannot be converted to Locations
+// Remarks: The exception message lists the unique type names of the invalid objects.
 NotAllLocationLikeError
 
   NotAllLocationLikeError(wrong_types: Iterable[Type[Any]]) -> None
 
+// Category: geometry
 // An Oriented Bounding Box
+// Remarks: This class computes the oriented bounding box for a given build123d shape.
+It exposes properties such as the center, principal axis directions, the
+extents along these axes, and the full diagonal length of the box.
+
+Note: The axes of the oriented bounding box are arbitrary and may not be
+consistent across platforms or time.
 OrientedBoundBox
 
   // Create an oriented bounding box from either a precomputed Bnd_OBB or
+  // Remarks: a build123d Shape (which wraps a TopoDS_Shape).
   OrientedBoundBox(shape: Bnd_OBB | Shape)
   //   shape: Either a precomputed Bnd_OBB or a build123d shape from which to compute the oriented bounding box
 
@@ -247,41 +449,129 @@ OrientedBoundBox
   wrapped
 
   // Compute and return the unique corner points of the oriented bounding box
+  // Remarks: in the coordinate system defined by the OBB's plane.
+
+For degenerate shapes (e.g. a line or a planar face), only the unique
+points are returned. For 2D shapes the corners are returned in an order
+that allows a polygon to be directly created from them.
+
+Returns:
+    list[Vector]: The unique corner points.
   corners: list[Vector]
 
   // The full length of the body diagonal of the oriented bounding box,
+  // Remarks: which represents the maximum size of the object.
+
+Returns:
+    float: The diagonal length.
   diagonal: float
 
   // The Location of the center of the oriented bounding box
+  // Remarks: Returns:
+    Location: center location
   location: Location
 
   // The oriented coordinate system of the bounding box
+  // Remarks: Returns:
+    Plane: The coordinate system defined by the center and primary
+           (X) and tertiary (Z) directions of the bounding box.
   plane: Plane
 
   // The full extents of the bounding box along its primary axes
+  // Remarks: Returns:
+    Vector: The oriented size (full dimensions) of the box.
   size: Vector
 
   // The primary (X) direction of the oriented bounding box
+  // Remarks: Returns:
+    Vector: The X direction as a unit vector.
   x_direction: Vector
 
   // The secondary (Y) direction of the oriented bounding box
+  // Remarks: Returns:
+    Vector: The Y direction as a unit vector.
   y_direction: Vector
 
   // The tertiary (Z) direction of the oriented bounding box
+  // Remarks: Returns:
+    Vector: The Z direction as a unit vector.
   z_direction: Vector
 
   // Compute and return the center point of the oriented bounding box
+  // Remarks: Returns:
+    Vector: The center point of the box.
   center() -> Vector
 
   // Determine whether the given oriented bounding box is entirely contained
+  // Remarks: within this bounding box.
+
+This method checks that every point of 'other' lies strictly within the
+boundaries of this box, according to the tolerance criteria inherent to the
+underlying OCCT implementation.
+
+Returns:
+    bool: True if 'other' is completely inside this bounding box; otherwise, False.
+  // Throws: ValueError: If the 'other' bounding box has an uninitialized (null) underlying geometry.
   is_completely_inside(other: OrientedBoundBox) -> bool
   //   other: The bounding box to test for containment
 
   // Determine whether a given point lies entirely outside this oriented bounding box
+  // Remarks: A point is considered outside if it is neither inside the box nor on its surface,
+based on the criteria defined by the OCCT implementation.
+
+Returns:
+    bool: True if the point is completely outside the bounding box; otherwise, False.
+  // Throws: ValueError: If the point's underlying geometry is not set (null).
   is_outside(point: Vector) -> bool
   //   point: The point to test
 
+// Category: geometry
 // Plane
+// Remarks: A plane is positioned in space with a coordinate system such that the plane is defined by
+the origin, x_dir (X direction), y_dir (Y direction), and z_dir (Z direction) of this coordinate
+system, which is the "local coordinate system" of the plane. The z_dir is a vector normal to the
+plane. The coordinate system is right-handed.
+
+A plane allows the use of local 2D coordinates, which are later converted to
+global, 3d coordinates when the operations are complete.
+
+Planes can be created from faces as workplanes for feature creation on objects.
+
+=========   ====== ======== ========
+Name        x_dir  y_dir    z_dir
+=========   ====== ======== ========
+XY           +x     +y       +z
+YZ           +y     +z       +x
+ZX           +z     +x       +y
+XZ           +x     +z       -y
+YX           +y     +x       -z
+ZY           +z     +y       -x
+front        +x     +z       -y
+back         -x     +z       +y
+left         -y     +z       -x
+right        +y     +z       +x
+top          +x     +y       +z
+bottom       +x     -y       -z
+isometric    +x+y   -x+y+z   +x+y-z
+=========   ====== ======== ========
+
+Attributes:
+    origin (Vector): global position of local (0,0,0) point
+    x_dir (Vector): x direction
+    y_dir (Vector): y direction
+    z_dir (Vector): z direction
+    forward_transform (Matrix): forward location transformation matrix
+    reverse_transform (Matrix): reverse location transformation matrix
+    wrapped (gp_Pln): the OCP plane object
+
+Returns:
+    Plane: A plane
+// Throws: ValueError: z_dir must be non null
+// Throws: ValueError: y_dir must be non null
+// Throws: ValueError: x_dir must be non null
+// Throws: ValueError: the specified x_dir is not orthogonal to the provided normal
+// Throws: ValueError: x_dir and y_dir must not be parallel
+// Throws: ValueError: the specified x_dir is not orthogonal to the provided normal
 Plane
 
   // Find the normal at the center of a TopoDS_Face
@@ -319,19 +609,39 @@ Plane
   y_dir: Vector
 
   // shift plane origin
+  // Remarks: Creates a new plane with the origin moved within the plane to the point of intersection
+of the axis or at the given Vertex. The plane's x_dir and z_dir are unchanged.
+
+Returns:
+    Plane: plane with new origin
+  // Throws: ValueError: Vertex isn't within plane
+  // Throws: ValueError: Point isn't within plane
+  // Throws: ValueError: Axis doesn't intersect plane
   shift_origin(locator: Axis | VectorLike | Vertex) -> Plane
   //   locator: Either Axis that intersects the new plane origin or Vertex within Plane
 
   // Returns a copy of this plane, rotated about the specified axes
+  // Remarks: The origin of the workplane is unaffected by the rotation.
+
+Rotations are done in order x, y, z. If you need a different order,
+specify ordering. e.g. Intrinsic.ZYX changes rotation to
+(z angle, y angle, x angle) and rotates in that order.
+
+Returns:
+    Plane: a copy of this plane rotated as requested.
   rotated(rotation: VectorLike = (0, 0, 0), ordering: Extrinsic | Intrinsic | None = None) -> Plane
   //   rotation: (x angle, y angle, z angle)
   //   ordering: order of rotations in Intrinsic or Extrinsic rotation mode
 
   // Change the position & orientation of a copy of self by applying a relative location
+  // Remarks: Returns:
+    Plane: relocated plane
   moved(loc: Location | Plane) -> Plane
   //   loc: relative change
 
   // Change the position & orientation of self by applying a relative location
+  // Remarks: Returns:
+    Plane: relocated self
   move(loc: Location | Plane) -> Plane
   //   loc: relative change
 
@@ -351,10 +661,14 @@ Plane
   to_gp_ax2() -> gp_Ax2
 
   // Reposition the object relative to this plane
+  // Remarks: Returns:
+    an object of the same type, but repositioned to local coordinates
   to_local_coords(obj: VectorLike | Any | BoundBox)
   //   obj: VectorLike | Shape | BoundBox an object to reposition
 
   // Reposition the object relative from this plane
+  // Remarks: Returns:
+    an object of the same type, but repositioned to world coordinates
   from_local_coords(obj: tuple | Vector | Any | BoundBox)
   //   obj: VectorLike | Shape | BoundBox an object to reposition
 
@@ -362,6 +676,10 @@ Plane
   location_between(other: Plane) -> Location
 
   // contains
+  // Remarks: Is this point or Axis fully contained in this plane?
+
+Returns:
+    bool: self contains point or Axis
   contains(obj: VectorLike | Axis, tolerance: float = TOLERANCE) -> bool
   //   obj: point or Axis to evaluate
   //   tolerance: comparison tolerance
@@ -373,6 +691,7 @@ Plane
   intersect(plane: Plane) -> Axis | Plane | None
   intersect(shape: Shape) -> Shape | None
 
+// Category: geometry
 // Plane meta class to enable class properties
 PlaneMeta
 
@@ -415,6 +734,7 @@ PlaneMeta
   // Isometric Plane
   isometric: Plane
 
+// Category: geometry
 // A position only sub-class of Location
 Pos
 
@@ -422,19 +742,36 @@ Pos
   Pos(v: Iterable)
   Pos(X: float = 0, Y: float = 0, Z: float = 0)
 
+// Category: geometry
 // Subclass of Location used only for object rotation
+// Remarks: Attributes:
+    X (float): rotation in degrees about X axis
+    Y (float): rotation in degrees about Y axis
+    Z (float): rotation in degrees about Z axis
+    optionally specify rotation ordering with Intrinsic or Extrinsic enums,
+        defaults to Intrinsic.XYZ
 Rot
 
   Rotation(rotation: RotationLike, ordering: Extrinsic | Intrinsic == Intrinsic.XYZ)
   Rotation(X: float = 0, Y: float = 0, Z: float = 0, ordering: Extrinsic | Intrinsic = Intrinsic.XYZ)
 
+// Category: geometry
 // Subclass of Location used only for object rotation
+// Remarks: Attributes:
+    X (float): rotation in degrees about X axis
+    Y (float): rotation in degrees about Y axis
+    Z (float): rotation in degrees about Z axis
+    optionally specify rotation ordering with Intrinsic or Extrinsic enums,
+        defaults to Intrinsic.XYZ
 Rotation
 
   Rotation(rotation: RotationLike, ordering: Extrinsic | Intrinsic == Intrinsic.XYZ)
   Rotation(X: float = 0, Y: float = 0, Z: float = 0, ordering: Extrinsic | Intrinsic = Intrinsic.XYZ)
 
+// Category: geometry
 // Create a 3-dimensional vector
+// Remarks: Attributes:
+    wrapped (gp_Vec): the OCP vector object
 Vector
 
   Vector(X: float, Y: float, Z: float)
@@ -482,16 +819,30 @@ Vector
   reverse() -> Vector
 
   // center
+  // Remarks: Returns:
+  The center of myself is myself.
+  Provided so that vectors, vertices, and other shapes all support a
+  common interface, when center() is requested for all objects on the
+  stack.
   center() -> Vector
 
   // Unsigned angle between vectors
   get_angle(vec: Vector) -> float
 
   // Signed Angle Between Vectors
+  // Remarks: Return the signed angle in degrees between two vectors with the given normal
+based on this math: angle = atan2((Va × Vb) ⋅ Vn, Va ⋅ Vb)
+
+Returns:
+    float: Angle between vectors
   get_signed_angle(vec: Vector, normal: Vector | None = None) -> float
   //   normal: normal direction
 
   // Returns a new vector equal to the projection of this Vector onto the line
+  // Remarks: represented by Vector <line>
+
+Returns:
+    Vector: Returns the projected vector.
   project_to_line(line: Vector) -> Vector
   //   line: project to this line
 
@@ -502,6 +853,7 @@ Vector
   signed_distance_from_plane(plane: Plane) -> float
 
   // Vector is projected onto the plane provided as input
+  // Remarks: Returns:
   project_to_plane(plane: Plane) -> Vector
 
   // Convert to OCCT gp_Pnt object
@@ -511,11 +863,17 @@ Vector
   to_dir() -> gp_Dir
 
   // Apply affine transformation
+  // Remarks: Returns:
+    Vector: transformed vector
   transform(affine_transform: Matrix, is_direction: bool = False) -> Vector
   //   affine_transform: affine transformation matrix
   //   is_direction: Should self be transformed as a vector or direction? Defaults to False (vector)
 
   // Rotate about axis
+  // Remarks: Rotate about the given Axis by an angle in degrees
+
+Returns:
+    Vector: rotated vector
   rotate(axis: Axis, angle: float) -> Vector
   //   axis: Axis of rotation
   //   angle: angle in degrees
@@ -527,8 +885,11 @@ Vector
   intersect(plane: Plane) -> Vector | None
   intersect(shape: Shape) -> Shape | None
 
+// Category: geometry
 // Returns the items as a list unless any of them is not an instance of `Location | Plane`
+// Remarks: Otherwise raises `NotAllLocationLikeError`.
 all_location_like(items: Iterable[Any]) -> list[Location | Plane]
 
+// Category: geometry
 // Amount to move object to achieve the desired alignment
 to_align_offset(min_point: VectorLike, max_point: VectorLike, align: Align2D | Align3D, center: VectorLike | None = None) -> Vector

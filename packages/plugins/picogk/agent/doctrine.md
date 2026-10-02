@@ -2,7 +2,7 @@
 
 1. Write ordinary `main.cs` with optional local C# helpers/assets and the public `PicoGK` API; no Tau authoring wrapper.
 2. Call `Library.Go(voxelSizeMm, task)`; create and publish geometry inside `task` with `Library.oViewer().Add(...)`.
-3. The final viewer state is the model. `Remove`, `SetGroupVisible`, and `RemoveAllObjects` change it. Keep displayed geometry alive; dispose temporary operands.
+3. The final viewer state is the model. `Remove`, `SetGroupVisible`, and `RemoveAllObjects` change it. Tau hosted Add owns a snapshot before returning; ordinary using statements may dispose temporary geometry. Add the same object again after a mutation to replace its published snapshot. Native viewer queues retain their existing borrowed lifetime.
 
 ## Canonical pattern
 
@@ -26,7 +26,7 @@ For PBR or textures, read `materials-reference.md`. Assign `PicoGK.Material` wit
 
 Use unique `Viewer.Add(geometry, name, nGroupID)` labels, indexed in loops. Groups control appearance/transforms; slash labels do not create assemblies. Unnamed parts get `Shape N`.
 
-For motion, read `kinematics-reference.md`. Keep moving parts separate; call `Viewer.SetMechanism(source)` inside `Library.Go` with lowercase JSON-equivalent data and exact part names. Give each independent motion a clip. Use millimetre/Z-up; Tau converts metadata with the GLB. PicoGK `Animation` does not declare Tau motion.
+For motion, read `kinematics-reference.md`. Keep moving parts separate; call `Viewer.SetMechanism(source)` inside `Library.Go` with JSON-equivalent data using canonical keys or PascalCase structural properties and exact part names. Give each independent motion a clip. Use millimetre/Z-up; Tau converts metadata with the GLB. PicoGK `Animation` does not declare Tau motion.
 
 Fix `get_kernel_result` warnings. Verify named hover, clip direction/travel, followers and Reset; check changed parameters or filtered views. Use GeoSpec for clearance; playback does not prove it.
 
@@ -48,3 +48,7 @@ public static class Params
     public static float VoxelSizeMm { get; set; } = 0.5f;
 }
 ```
+
+## Runtime and reference
+
+Read runtime-reference.md for owned/borrowed lifetime, backend support and errors. The main index covers CAD and selected BCL symbols. Read embedding-api-index.md for host/native, diagnostics and subclass symbols; accessibility is unchanged.

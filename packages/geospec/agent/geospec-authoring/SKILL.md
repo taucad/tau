@@ -60,6 +60,7 @@ All 361 symbols are listed in `api-index.md`. Grep it for a name, then read only
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants
 - `api-types.md` — Types
+- `api-types-2.md` — Types (2)
 - `api-classs.md` — Classs
 
 Read ranges, not whole files. Never copy a reference into a source file.

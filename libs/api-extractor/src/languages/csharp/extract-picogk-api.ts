@@ -67,8 +67,8 @@ function main(): void {
     execFileSync(worker, ['--emit-api', surfacePath, sourceRoot], { stdio: 'inherit' });
     const payload = parseCsharpSurface(JSON.parse(readFileSync(surfacePath, 'utf8')));
     if (payload.diagnosticErrors > 0) {
-      console.warn(
-        `PicoGK sources produced ${String(payload.diagnosticErrors)} compiler errors; the surface may be partial.`,
+      throw new Error(
+        `PicoGK sources produced ${String(payload.diagnosticErrors)} compiler errors; refusing to replace the committed corpus with a partial surface.`,
       );
     }
     mkdirSync(outputDirectory, { recursive: true });

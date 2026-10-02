@@ -1,6 +1,6 @@
 # geospec — Types
 
-273 top-level symbols. Signatures are verbatim typescript.
+257 top-level symbols. Signatures are verbatim typescript.
 
 // Stateful GeoSpec API created by {@link createGeoSpec}
 GeoSpec: {
@@ -14,6 +14,8 @@ GeoSpecSubject: {
 }
 
 // Geometry units accepted at GeoSpec evidence-loading boundaries
+// Remarks: Loaded subjects normalize coordinates into canonical millimetres; this type
+describes source and provenance units, not a project-wide configuration.
 GeoSpecUnit: 'mm' | 'cm' | 'm' | 'in' | 'ft' | (string & {})
 
 // Geometry assertion collected from a GeoSpec test module
@@ -110,6 +112,12 @@ GeoSpecComponentInterferenceAllowance: {
 }
 
 // Component-interference expectation accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
+// Remarks: GeoSpec checks for positive solid intersection volume between assembly
+components. Tangent contact and correctly meshed gears are allowed.
+`pairs` narrows the check to specific component-label pairs while preserving
+exact positive-volume evidence for every selected pair. `allowances`
+documents explicitly intentional positive-volume interference such as gasket
+compression, press fits, or simplified thread engagement.
 GeoSpecComponentInterferenceExpectation: {
     tolerance?: number;
     pairs?: GeoSpecComponentInterferencePairExpectation[];
@@ -296,6 +304,7 @@ GeoSpecMeshIntegrityExpectation: {
 }
 
 // Diagnostic severities rejected by `expectGeo(...).toHaveNoDiagnostics(...)`
+// Remarks: Defaults to `error` and `warning` when omitted.
 GeoSpecNoDiagnosticsExpectation: {
     severities?: Array<GeometryDiagnostic['severity']>;
 }
@@ -350,6 +359,12 @@ GeoSpecProductStructureExpectation: {
 }
 
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
+// Remarks: Verdicts are decided by exact BRep evidence only (D3): extrema for
+`contact`/`clearance`, analytic fact comparison for
+`coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`,
+exact solid classification for `containment`/`insertion`, and exact
+boolean common volume for `interference` (positive volume outside the
+`minVolume`/`maxVolume` allowance band fails).
 GeoSpecSpatialRelationshipExpectation: {
     id?: string;
     kind: 'contact' | 'clearance' | 'coaxial' | 'concentric' | 'coplanar' | 'parallel' | 'perpendicular' | 'angle' | 'containment' | 'insertion' | 'interference';
@@ -409,6 +424,12 @@ GeoSpecValidBrepExpectation: {
 }
 
 // Void-continuity expectation accepted by `expectGeo(...).toHaveVoidContinuity(...)`
+// Remarks: A whole-assembly negative-space claim: the ordered `path` waypoints must all
+lie in ONE connected open-void component (void = outside every `material`
+solid), that component must not reach any `isolatedFrom` point, and its
+tightest sampled cross-section must meet `minCrossSection`. Connectivity and
+isolation are proven from Boolean shell topology, generalized winding-number
+body identity, and deterministic cross-sections.
 GeoSpecVoidContinuityExpectation: {
     /** Ordered waypoints (>= 1) known to lie in the void being proven. */
     path: GeoSpecVoidWaypoint[];
@@ -605,6 +626,8 @@ GeometrySource: {
 }
 
 // Canonical P0 object under test for GeoSpec
+// Remarks: This is intentionally a GeoSpec-loaded subject rather than a Tau runtime
+contract. Runtime integrations pass GLB/glTF bytes or files into loaders.
 GeometrySubject: {
     kind: 'geometry-subject';
     /** Opaque engine-owned identifier used by every protocol claim. */
@@ -633,6 +656,7 @@ MeshEvidence: {
 MeshFileFormat: 'glb' | 'gltf' | 'mesh-buffer'
 
 // Triangle quality and scalar mesh metrics used by P0 GeoSpec matchers
+// Remarks: Values are reported in the glTF document coordinate units.
 MeshQualityStats: {
     triangleCount: number;
     nonFiniteVertices: Array<{
@@ -761,6 +785,11 @@ GeoSpecMatcherDescriptor: {
 }
 
 // How the substrate derives an assertion's recorded `expected` value from the arguments the spec author passed
+// Remarks: - `first` — the first argument verbatim.
+- `first-or-empty` — the first argument, defaulting to `{}`.
+- `bounds` — `(min, max)` pairs collapse to `{ min, max }`; a lone object
+  argument passes through.
+- `true` — nullary matchers record the literal `true`.
 GeoSpecMatcherExpectedShape: 'first' | 'first-or-empty' | 'bounds' | 'true'
 
 // Whether a matcher settles synchronously (throwing its `GeoSpecAssertionError` inside the `it()` body) or asynchronously (settled before the test completes)
@@ -806,6 +835,8 @@ GeoSpecClaimResult: {
 GeoSpecDeterminismClass: 'reference-wasm' | 'bit-parity-verified' | 'defers-to-reference'
 
 // First TypeScript binding of Contract B
+// Remarks: The methods are transport operations; every data type they exchange is a
+protocol DTO above. `Uint8Array` is the one ratified bulk lane.
 GeoSpecEngineProtocol: {
     initialize(request: GeoSpecInitializeRequest): GeoSpecInitializeResult;
     ingestSubject(request: GeoSpecIngestSubjectRequest, bytes: Uint8Array<ArrayBuffer>): Promise<GeoSpecIngestSubjectResult>;
@@ -1185,6 +1216,10 @@ GeometryEvidenceDiagnostic: Omit<GeometryDiagnostic, 'details'> & {
 }
 
 // Statistics about a parsed GLB geometry
+// Remarks: `vertexCount` and `meshCount` are kept on the type for internal diagnostic
+use (and for the kernel-author Vitest harness in
+`kernel-geometry-testing.utils.ts`); they are no longer exposed via the
+agent-facing requirement schema.
 GeometryStats: {
     vertexCount: number;
     meshCount: number;
@@ -1340,9 +1375,13 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
     dispose(): Promise<void>;
 }
 
-GeoSpecRuntimeClient: {
-    connect(): Promise<void>;
-    terminate(): void;
+// Runtime client surface consumed by `geospec/model`
+// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but
+only needs connection lifecycle and request-scoped documents. Keep this shape
+small so typed runtime clients do not have to widen their full generic
+method surface to GeoSpec's testing DSL.
+GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
+    open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {
         readonly entries: ReadonlyArray<{
             name: string;
@@ -1351,11 +1390,6 @@ GeoSpecRuntimeClient: {
             workerTimeOrigin: number;
         }>;
     }) => void): () => void;
-    export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(format: Format, options?: {
-        readonly source?: RuntimeSource<Files>;
-        readonly parameters?: Record<string, unknown>;
-        readonly exportOptions?: Record<string, unknown>;
-    }): Promise<ExportResult>;
 }
 
 // Lazy runtime factory consumed by `geospec/model`
@@ -1486,6 +1520,10 @@ RelationshipFinalEvidence: {
 }
 
 // One geometric witness backing a relationship verdict
+// Remarks: `value` layout by kind: `point` is `[x, y, z]`; `axis` is
+`[ox, oy, oz, dx, dy, dz]`; `plane` is `[nx, ny, nz, offset]`.
+`topologyRef` is the snapshot topology-ref string (`'#o1.2.f7'`) —
+diagnostics and pinning only, never a durable reference.
 RelationshipWitness: {
     kind: 'point' | 'axis' | 'plane';
     value: number[];
@@ -1525,6 +1563,11 @@ GeoSpecCollectorOptions: {
 GeoSpecTestNamePattern: RegExp
 
 // Options for recursive GeoSpec test discovery
+// Remarks: `files` accepts either exact `*.geospec.ts` / `*.geospec.js` files or
+directory roots. When omitted, discovery starts at `projectPath`.
+
+`include` and `exclude` are Vitest-style file globs applied to
+project-relative GeoSpec paths after `files` roots have been expanded.
 DiscoverGeoSpecFilesOptions: {
     filesystem: GeoSpecDiscoveryFileSystem;
     projectPath: string;
@@ -1543,18 +1586,27 @@ GeoSpecDiscoveryFileStat: {
 }
 
 // Minimal filesystem contract used by GeoSpec test discovery
+// Remarks: Browser workers, Node CLI hosts, and embedded runners adapt their native
+filesystem APIs to this shape so discovery has one shared behavior.
 GeoSpecDiscoveryFileSystem: {
     readdir(path: string): Promise<readonly string[]>;
     stat(path: string): Promise<GeoSpecDiscoveryFileStat>;
 }
 
 // Result returned by recursive GeoSpec test discovery
+// Remarks: `files` are project-relative, sorted, and de-duplicated. `unmatchedRoots`
+contains requested file or directory roots that did not select any GeoSpec
+files.
 GeoSpecDiscoveryResult: {
     files: string[];
     unmatchedRoots: string[];
 }
 
 // Worker-local cache for successful GeoSpec bundles
+// Remarks: The cache is internal runner infrastructure. Each invocation still creates a
+fresh collector, run token and host binding, so runs that reuse one entry
+stay isolated. An entry is reused only while every read its bundle was built
+from still returns the answer the bundler got.
 GeoSpecModuleBundleCache: Map<string, {
     builtinIdentity: string;
     /** The run token embedded in `bundle.code`; a reuse executes a copy under its own run's token. */
@@ -1710,6 +1762,12 @@ GeoSpecNativeModelEngine: GeoSpecNativeEngine & {
 }
 
 // Model loader injected into native VM runs
+// Remarks: The freshness unit is one load: every call reads its source again (the
+source reader or a Runtime export) and the engine digests those exact bytes.
+Nothing is deduplicated per run or per scope; bytes equal to an admitted
+subject's reuse that subject by digest, length and descriptor, and edited
+bytes admit a new subject. Only concurrent identical inline-code Runtime
+loads share one in-flight export.
 GeoSpecNativeModelLoader: <Code extends Record<string, string> = Record<string, string>>(options: GeoSpecNativeLoadModelOptions<Code>) => Promise<GeoSpecNativeModelSubject>
 
 // Subject identity returned by native STEP/GLB admission
@@ -1726,6 +1784,9 @@ GeoSpecNativeModelResource: {
 }
 
 // Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
+// Remarks: The loader takes ownership of the returned bytes and admits them without a
+copy, so a reader must return bytes that nothing mutates afterwards (a fresh
+read, not a view of a shared or reused buffer).
 GeoSpecNativeSourceReader: (source: LoadModelSourceOptions['source']) => Promise<Uint8Array<ArrayBuffer>>
 
 // Reusable native model loader whose admitted subjects can be released as one run
@@ -2452,6 +2513,13 @@ SelectorDiagnosticOptions: {
 GeoSpecStepLoader: (options: LoadStepOptions) => Promise<GeometrySubject>
 
 // The five lazily materialized BRep evidence facets
+// Remarks: Facet → evidence-field ownership:
+- `summary` → `topologyCounts`, `boundingBox`
+- `massProperties` → `massProperties`
+- `validity` → `validity`
+- `faceFeatures` → `planarFaces`, `cylindricalFaces`, `circularHoles`,
+  `circularHolePatterns`, `chamferFeatures`, `filletFeatures`
+- `wallThickness` → `minimumWallThickness`
 BrepFacetName: 'summary' | 'massProperties' | 'validity' | 'faceFeatures' | 'wallThickness'
 
 // Defaults accepted by {@link import ('./load-step.js').createStepLoader}
@@ -2486,6 +2554,9 @@ StepSource: string | URL | Uint8Array<ArrayBuffer> | ArrayBuffer | Blob | File |
 StepStreamingMode: 'auto' | 'native-stream' | 'filesystem'
 
 // One native AP242 datum placement row (a coordinate *frame* from the supplemental-geometry channel), expanded per occurrence like subshape names and expressed in subject-frame coordinates
+// Remarks: Distinct from {@link XdeSemanticDatum}: this is supplemental geometry
+(`AXIS2_PLACEMENT_3D` items in a CONSTRUCTIVE_GEOMETRY_REPRESENTATION), not
+the GD&T `DATUM` family.
 XdeDatumPlacement: {
     occurrencePath: string;
     name: string;
@@ -2503,6 +2574,9 @@ XdeDatumSystem: {
 }
 
 // One placed occurrence recovered from an AP242 STEP structure read
+// Remarks: `path` is dot-joined instance-name segments from the root (root omitted) per
+the GeoSpec AP242 profile; repeated names under one parent are disambiguated
+`name[k]` in the parent's stored component order.
 XdeOccurrence: {
     path: string;
     productName: string;
@@ -2599,6 +2673,8 @@ GeoSpecMatcherMethods: {
 }
 
 // One positive-only ancillary query
+// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return
+full reports, including failed/refused reports, without assertion errors.
 GeoSpecQueryOptions: {
     readonly capability: GeoSpecQueryCapability;
     readonly claimId?: string;
@@ -2725,145 +2801,4 @@ GeoSpecPmiInventory: {
     readonly fileSchema: string;
     readonly editionValidation: 'not-validated';
     readonly records: readonly GeoSpecPmiRecord[];
-}
-
-// Strict inventory output limits
-GeoSpecPmiQueryPayload: {
-    readonly maxRecords?: number;
-    readonly maxOutputBytes?: number;
-}
-
-// Complete inventory value
-GeoSpecPmiQueryValue: {
-    readonly inventory: GeoSpecPmiInventory;
-    readonly subjectHash: string;
-    readonly provenance: Readonly<Record<string, unknown>>;
-}
-
-// Full native assertion result with the exact core-owned bytes retained
-GeoSpecCanonicalClaimReport: {
-    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
-    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
-    readonly canonicalResult: Uint8Array<ArrayBuffer>;
-    readonly claim: Readonly<Record<string, JSONValue>>;
-    readonly claimId: string;
-    readonly diagnostics: readonly JSONValue[];
-    readonly evidence?: JSONValue;
-    readonly polarity: GeoSpecClaimPolarity;
-    readonly result: Readonly<Record<string, JSONValue>>;
-    readonly status: GeoSpecCanonicalClaimStatus;
-}
-
-// Exact core bytes of one claim evaluated in one engine call
-GeoSpecNativeClaimEvaluation: {
-    readonly canonicalClaim: Uint8Array<ArrayBuffer>;
-    readonly canonicalPlan: Uint8Array<ArrayBuffer>;
-    readonly canonicalResult: Uint8Array<ArrayBuffer>;
-}
-
-// Byte-only engine surface consumed by the runner-independent assertion client
-GeoSpecNativeEngine: {
-    evaluateClaim(request: Uint8Array<ArrayBuffer>): GeoSpecNativeClaimEvaluation;
-    processRequest(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
-}
-
-// Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
-GeoSpecNativeEvidenceProfile: 'bounded' | 'complete'
-
-// Content-addressed subject accepted by a protocol-3 assertion plan
-GeoSpecNativeSubject: {
-    readonly contentHash?: string;
-    readonly subjectHash?: string;
-}
-
-// A canonical fixed-contract matcher
-GeoSpecFixedMatcherDescriptor: {
-    readonly contract: 'geospec.plate-two-windows/v1' | 'geospec.pmi.parallel-plane-distance/v1';
-    readonly expected: 'true';
-    readonly mode: 'sync';
-}
-
-// Installed Vitest matcher map and lifecycle settlement hook
-GeoSpecVitestAdapter: {
-    readonly matchers: GeoSpecVitestMatcherMap;
-    flush(): Promise<void>;
-}
-
-// Input for exporting one validated Tau project descriptor
-ExportTauProjectArtifactOptions: {
-    readonly descriptor: GeoSpecTauProjectDescriptor;
-    /** Called twice so source discovery and export use separate runtime lifetimes. */
-    readonly createRuntime: () => GeoSpecTauProjectRuntime | Promise<GeoSpecTauProjectRuntime>;
-    readonly signal?: AbortSignal;
-}
-
-// Finalized geometry bytes and the exact source/export metadata that produced them
-GeoSpecTauProjectArtifact: {
-    readonly format: 'step' | 'glb';
-    readonly name: string;
-    readonly mimeType: string;
-    readonly bytes: Uint8Array<ArrayBuffer>;
-    readonly frame: {
-        readonly coordinateSystem: 'z-up';
-        readonly lengthUnit: 'millimeter';
-        readonly sourceUnit: 'mm';
-    };
-    readonly source: {
-        readonly manifestPath: string;
-        readonly manifestBytes: Uint8Array<ArrayBuffer>;
-        readonly manifest: ProjectManifest;
-        readonly projectEntryPath: string;
-        readonly entryPath: string;
-        readonly kernelId: string;
-        readonly files: readonly RuntimeSourceSnapshotFile[];
-    };
-    readonly export: {
-        readonly options: Readonly<Record<string, unknown>>;
-        readonly route: NonNullable<GeometryExportIntent['route']>;
-    };
-}
-
-// Runtime surface required to snapshot and export one Tau project
-GeoSpecTauProjectRuntime: RuntimeClientWithRoutes & Pick<RuntimeClient, 'shutdown' | 'snapshotSource'>
-
-// Trusted project configuration using existing discovery and runner options
-GeoSpecConfig: {
-    include?: readonly string[];
-    exclude?: readonly string[];
-    testNamePattern?: string;
-    /** Positive finite milliseconds; the runner owns its default. */
-    testTimeout?: number;
-    /** Positive finite milliseconds; does not define a geometry verdict. */
-    matcherWallBackstop?: number;
-    bail?: boolean;
-    forensic?: boolean;
-    cache?: boolean;
-    /** Requested cache location only; loading configuration creates no store. */
-    cacheDirectory?: string;
-    subjects?: Readonly<Record<string, GeoSpecTauProjectDescriptor>>;
-}
-
-// Imported Tau project data for later host resolution
-GeoSpecTauProjectDescriptor: {
-    readonly kind: 'tau-project';
-    /** Normalized project-relative POSIX path identifying the imported manifest. */
-    readonly manifestPath: string;
-    readonly manifest: Readonly<Record<string, JSONValue>>;
-    readonly format: 'step' | 'glb';
-    readonly parameters?: Readonly<Record<string, JSONValue>>;
-}
-
-// Resolved file identity and validated configuration data
-LoadedGeoSpecConfig: {
-    readonly configPath?: string;
-    readonly options: GeoSpecConfig;
-}
-
-// Options for one trusted Node configuration load
-LoadGeoSpecConfigOptions: {
-    readonly projectPath: string;
-    /** Explicit file, resolved relative to the project unless absolute. */
-    readonly configPath?: string;
-    /** Own defined fields override configuration without deep merging. */
-    readonly overrides?: GeoSpecConfig;
 }

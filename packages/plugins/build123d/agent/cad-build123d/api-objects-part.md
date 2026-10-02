@@ -2,7 +2,9 @@
 
 11 top-level symbols. Signatures are verbatim python.
 
+// Category: objects_part
 // BasePartObject
+// Remarks: Base class for all BuildPart objects & operations
 BasePartObject
 
   BasePartObject(part: Part | Solid, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] | None = None, mode: Mode = Mode.ADD)
@@ -10,7 +12,9 @@ BasePartObject
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a box defined by length, width, and height.
 Box
 
   Box(length: float, width: float, height: float, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -21,7 +25,9 @@ Box
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a cone defined by bottom radius, top radius, and height.
 Cone
 
   Cone(bottom_radius: float, top_radius: float, height: float, arc_size: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -33,7 +39,9 @@ Cone
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a convex solid from the convex hull of the provided points.
 ConvexPolyhedron
 
   ConvexPolyhedron(points: Iterable[VectorLike], rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] | None = Align.NONE, mode: Mode = Mode.ADD)
@@ -42,7 +50,9 @@ ConvexPolyhedron
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Operation
+// Remarks: Create a counter bore hole defined by radius, counter bore radius, counter bore and depth.
 CounterBoreHole
 
   CounterBoreHole(radius: float, counter_bore_radius: float, counter_bore_depth: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
@@ -52,7 +62,10 @@ CounterBoreHole
   //   depth: hole depth, through part if None
   //   mode: combination mode
 
+// Category: objects_part
 // Part Operation
+// Remarks: Create a countersink hole defined by radius, countersink radius, countersink
+angle, and depth.
 CounterSinkHole
 
   CounterSinkHole(radius: float, counter_sink_radius: float, depth: float | None = None, counter_sink_angle: float = 82, mode: Mode = Mode.SUBTRACT)
@@ -62,7 +75,9 @@ CounterSinkHole
   //   counter_sink_angle: cone angle
   //   mode: combination mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a cylinder defined by radius and height.
 Cylinder
 
   Cylinder(radius: float, height: float, arc_size: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -73,7 +88,9 @@ Cylinder
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Operation
+// Remarks: Create a hole defined by radius and depth.
 Hole
 
   Hole(radius: float, depth: float | None = None, mode: Mode = Mode.SUBTRACT)
@@ -81,7 +98,9 @@ Hole
   //   depth: hole depth, through part if None
   //   mode: combination mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a sphere defined by a radius.
 Sphere
 
   Sphere(radius: float, arc_size1: float = -90, arc_size2: float = 90, arc_size3: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -93,7 +112,9 @@ Sphere
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a torus defined by major and minor radii.
 Torus
 
   Torus(major_radius: float, minor_radius: float, minor_start_angle: float = 0, minor_end_angle: float = 360, major_angle: float = 360, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -106,7 +127,10 @@ Torus
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a wedge with a near face defined by xsize and z size, a far face defined by
+xmin to xmax and zmin to zmax, and a depth of ysize.
 Wedge
 
   Wedge(xsize: float, ysize: float, zsize: float, xmin: float, zmin: float, xmax: float, zmax: float, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)

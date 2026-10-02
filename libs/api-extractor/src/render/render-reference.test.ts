@@ -83,15 +83,41 @@ describe('renderIndex', () => {
   const shards = planShards(corpus, { groupBy });
   const index = renderIndex(corpus, shards, { title: 'Replicad API index' });
 
-  it('lists every addressable symbol exactly once', () => {
-    for (const entry of flattenEntries(corpus)) {
-      const occurrences = index.split('\n').filter((line) => line.trim().startsWith(`${entry.name} (`)).length;
-      const nested = index.split('\n').filter((line) => line.trim().endsWith(`${entry.name} (${entry.kind})`)).length;
-      expect(occurrences + nested).toBeGreaterThanOrEqual(1);
-    }
+  it('should list every addressable identity exactly once', () => {
+    const identities = [...index.matchAll(/\[id: (.+)\]$/gmu)].map((match) => match[1]);
+    expect(identities).toStrictEqual([...flattenEntries(corpus)].map((entry) => entry.id));
+    expect(new Set(identities).size).toBe(identities.length);
+  });
 
-    const symbolLines = index.split('\n').filter((line) => /\(\w+\)/u.test(line));
-    expect(symbolLines).toHaveLength([...flattenEntries(corpus)].length);
+  it('should retain nested grandchildren and disambiguate equal display names', () => {
+    const nested = createApiCorpus(corpus.metadata, [
+      {
+        name: 'Outer',
+        kind: 'class',
+        members: [
+          {
+            name: 'Inner',
+            kind: 'class',
+            members: [
+              {
+                name: 'Deeper',
+                kind: 'enum',
+                members: [{ name: 'Value', kind: 'enumMember' }],
+              },
+              { name: 'this[]', kind: 'property' },
+              { name: 'this[]', kind: 'property' },
+            ],
+          },
+        ],
+      },
+    ]);
+    const shards = planShards(nested, { groupBy });
+    const rendered = renderIndex(nested, shards, { title: 'Nested API' });
+    expect(rendered).toContain('Outer.Inner.Deeper.Value (enumMember)');
+    const identities = [...rendered.matchAll(/\[id: (.+)\]$/gmu)].map((match) => match[1]);
+    expect(identities).toStrictEqual([...flattenEntries(nested)].map((entry) => entry.id));
+    expect(new Set(identities).size).toBe(identities.length);
+    expect(shardIndexById(shards).size).toBe(identities.length);
   });
 
   it('names the shard that holds each group, so a pointer always resolves', () => {
@@ -103,7 +129,9 @@ describe('renderIndex', () => {
   it('caps an index summary at ten words', () => {
     const line = index.split('\n').find((entry) => entry.startsWith('drawCircle ('));
 
-    expect(line).toBe('drawCircle (function) — Draw a circle of the given radius on the current…');
+    expect(line).toBe(
+      'drawCircle (function) [category: sketching] — Draw a circle of the given radius on the current… [id: typescript:drawCircle]',
+    );
   });
 
   it('is deterministic', () => {

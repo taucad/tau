@@ -1,7 +1,214 @@
 # build123d — Geom (2)
 
-4 top-level symbols. Signatures are verbatim python.
+2 top-level symbols. Signatures are verbatim python.
 
+// Category: Geom
+// Describes a rational or non-rational Bezier curve - a non-rational Bezier curve is defined by a table of poles (also called control points), - a rational Bezier curve is defined by a table of poles with varying weights
+Geom_BezierCurve
+
+  // __init__(*args, **kwargs)
+  // Remarks: Overloaded function.
+
+1. __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
+
+2. __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt, PoleWeights: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
+  __init__(*args, **kwargs)
+  __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
+  __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt, PoleWeights: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
+
+  // Increase(self
+  // Remarks: Increases the degree of a bezier curve. Degree is the new degree of <me>. Raises ConstructionError if Degree is greater than MaxDegree or lower than 2 or lower than the initial degree of <me>.
+  Increase(self: OCP.OCP.Geom.Geom_BezierCurve, Degree: int) -> None
+
+  // InsertPoleAfter(*args, **kwargs)
+  // Remarks: Overloaded function.
+
+1. InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
+
+Inserts a pole P after the pole of range Index. If the curve <me> is rational the weight value for the new pole of range Index is 1.0. raised if Index is not in the range [1, NbPoles]
+
+2. InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
+
+Inserts a pole with its weight in the set of poles after the pole of range Index. If the curve was non rational it can become rational if all the weights are not identical. Raised if Index is not in the range [1, NbPoles]
+  InsertPoleAfter(*args, **kwargs)
+  InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
+  InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
+
+  // InsertPoleBefore(*args, **kwargs)
+  // Remarks: Overloaded function.
+
+1. InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
+
+Inserts a pole P before the pole of range Index. If the curve <me> is rational the weight value for the new pole of range Index is 1.0. Raised if Index is not in the range [1, NbPoles]
+
+2. InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
+
+Inserts a pole with its weight in the set of poles after the pole of range Index. If the curve was non rational it can become rational if all the weights are not identical. Raised if Index is not in the range [1, NbPoles]
+  InsertPoleBefore(*args, **kwargs)
+  InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
+  InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
+
+  // RemovePole(self
+  // Remarks: Removes the pole of range Index. If the curve was rational it can become non rational. Raised if Index is not in the range [1, NbPoles] Raised if Degree is lower than 2.
+  RemovePole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int) -> None
+
+  // Reverse(self
+  // Remarks: Reverses the direction of parametrization of <me> Value (NewU) = Value (1 - OldU)
+  Reverse(self: OCP.OCP.Geom.Geom_BezierCurve) -> None
+
+  // ReversedParameter(self
+  // Remarks: Returns the parameter on the reversed curve for the point of parameter U on <me>.
+  ReversedParameter(self: OCP.OCP.Geom.Geom_BezierCurve, U: float) -> float
+
+  // Segment(self
+  // Remarks: Segments the curve between U1 and U2 which can be out of the bounds of the curve. The curve is oriented from U1 to U2. The control points are modified, the first and the last point are not the same but the parametrization range is [0, 1] else it could not be a Bezier curve. Warnings : Even if <me> is not closed it can become closed after the segmentation for example if U1 or U2 are out of the bounds of the curve <me> or if the curve makes loop. After the segmentation the length of a curve can be null.
+  Segment(self: OCP.OCP.Geom.Geom_BezierCurve, U1: float, U2: float) -> None
+
+  // SetPole(*args, **kwargs)
+  // Remarks: Overloaded function.
+
+1. SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
+
+Substitutes the pole of range index with P. If the curve <me> is rational the weight of range Index is not modified. raiseD if Index is not in the range [1, NbPoles]
+
+2. SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
+
+Substitutes the pole and the weights of range Index. If the curve <me> is not rational it can become rational if all the weights are not identical. If the curve was rational it can become non rational if all the weights are identical. Raised if Index is not in the range [1, NbPoles] Raised if Weight <= Resolution from package gp
+  SetPole(*args, **kwargs)
+  SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
+  SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
+
+  // SetWeight(self
+  // Remarks: Changes the weight of the pole of range Index. If the curve <me> is not rational it can become rational if all the weights are not identical. If the curve was rational it can become non rational if all the weights are identical. Raised if Index is not in the range [1, NbPoles] Raised if Weight <= Resolution from package gp
+  SetWeight(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, Weight: float) -> None
+
+  // IsClosed(self
+  // Remarks: Returns True if the distance between the first point and the last point of the curve is lower or equal to the Resolution from package gp.
+  IsClosed(self: OCP.OCP.Geom.Geom_BezierCurve) -> bool
+
+  // IsCN(self
+  // Remarks: Continuity of the curve, returns True.
+  IsCN(self: OCP.OCP.Geom.Geom_BezierCurve, N: int) -> bool
+
+  // IsPeriodic(self
+  // Remarks: Returns True if the parametrization of a curve is periodic. (P(u) = P(u + T) T = constante)
+  IsPeriodic(self: OCP.OCP.Geom.Geom_BezierCurve) -> bool
+
+  // IsRational(self
+  // Remarks: Returns false if all the weights are identical. The tolerance criterion is Resolution from package gp.
+  IsRational(self: OCP.OCP.Geom.Geom_BezierCurve) -> bool
+
+  // Continuity(self
+  // Remarks: a Bezier curve is CN
+  Continuity(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.GeomAbs.GeomAbs_Shape
+
+  // Degree(self
+  // Remarks: Returns the polynomial degree of the curve. it is the number of poles - 1 point P and derivatives (V1, V2, V3) computation The Bezier Curve has a Polynomial representation so the parameter U can be out of the bounds of the curve.
+  Degree(self: OCP.OCP.Geom.Geom_BezierCurve) -> int
+
+  // D0(self
+  D0(self: OCP.OCP.Geom.Geom_BezierCurve, U: float, P: OCP.OCP.gp.gp_Pnt) -> None
+
+  // D1(self
+  D1(self: OCP.OCP.Geom.Geom_BezierCurve, U: float, P: OCP.OCP.gp.gp_Pnt, V1: OCP.OCP.gp.gp_Vec) -> None
+
+  // D2(self
+  D2(self: OCP.OCP.Geom.Geom_BezierCurve, U: float, P: OCP.OCP.gp.gp_Pnt, V1: OCP.OCP.gp.gp_Vec, V2: OCP.OCP.gp.gp_Vec) -> None
+
+  // D3(self
+  // Remarks: For this Bezier curve, computes - the point P of parameter U, or - the point P and one or more of the following values: - V1, the first derivative vector, - V2, the second derivative vector, - V3, the third derivative vector. Note: the parameter U can be outside the bounds of the curve.
+  D3(self: OCP.OCP.Geom.Geom_BezierCurve, U: float, P: OCP.OCP.gp.gp_Pnt, V1: OCP.OCP.gp.gp_Vec, V2: OCP.OCP.gp.gp_Vec, V3: OCP.OCP.gp.gp_Vec) -> None
+
+  // DN(self
+  // Remarks: For the point of parameter U of this Bezier curve, computes the vector corresponding to the Nth derivative. Note: the parameter U can be outside the bounds of the curve. Exceptions Standard_RangeError if N is less than 1.
+  DN(self: OCP.OCP.Geom.Geom_BezierCurve, U: float, N: int) -> OCP.OCP.gp.gp_Vec
+
+  // StartPoint(self
+  // Remarks: Returns Value (U=0.), it is the first control point of the curve.
+  StartPoint(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.gp.gp_Pnt
+
+  // EndPoint(self
+  // Remarks: Returns Value (U=1.), it is the last control point of the Bezier curve.
+  EndPoint(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.gp.gp_Pnt
+
+  // FirstParameter(self
+  // Remarks: Returns the value of the first parameter of this Bezier curve. This is 0.0, which gives the start point of this Bezier curve
+  FirstParameter(self: OCP.OCP.Geom.Geom_BezierCurve) -> float
+
+  // LastParameter(self
+  // Remarks: Returns the value of the last parameter of this Bezier curve. This is 1.0, which gives the end point of this Bezier curve.
+  LastParameter(self: OCP.OCP.Geom.Geom_BezierCurve) -> float
+
+  // NbPoles(self
+  // Remarks: Returns the number of poles of this Bezier curve.
+  NbPoles(self: OCP.OCP.Geom.Geom_BezierCurve) -> int
+
+  // Pole(self
+  // Remarks: Returns the pole of range Index. Raised if Index is not in the range [1, NbPoles]
+  Pole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int) -> OCP.OCP.gp.gp_Pnt
+
+  // Poles(*args, **kwargs)
+  // Remarks: Overloaded function.
+
+1. Poles(self: OCP.OCP.Geom.Geom_BezierCurve, P: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
+
+Returns all the poles of the curve.
+
+2. Poles(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColgp.TColgp_Array1OfPnt
+
+Returns all the poles of the curve.
+  Poles(*args, **kwargs)
+  Poles(self: OCP.OCP.Geom.Geom_BezierCurve, P: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
+  Poles(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColgp.TColgp_Array1OfPnt
+
+  // Weight(self
+  // Remarks: Returns the weight of range Index. Raised if Index is not in the range [1, NbPoles]
+  Weight(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int) -> float
+
+  // Weights(*args, **kwargs)
+  // Remarks: Overloaded function.
+
+1. Weights(self: OCP.OCP.Geom.Geom_BezierCurve, W: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
+
+Returns all the weights of the curve.
+
+2. Weights(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal
+
+Returns all the weights of the curve.
+  Weights(*args, **kwargs)
+  Weights(self: OCP.OCP.Geom.Geom_BezierCurve, W: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
+  Weights(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal
+
+  // Transform(self
+  // Remarks: Applies the transformation T to this Bezier curve.
+  Transform(self: OCP.OCP.Geom.Geom_BezierCurve, T: OCP.OCP.gp.gp_Trsf) -> None
+
+  // Copy(self
+  // Remarks: Creates a new object which is a copy of this Bezier curve.
+  Copy(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.Geom.Geom_Geometry
+
+  // DumpJson(self
+  // Remarks: Dumps the content of me into the stream
+  DumpJson(self: OCP.OCP.Geom.Geom_BezierCurve, theOStream: io.BytesIO, theDepth: int = -1) -> None
+
+  // Resolution(self
+  // Remarks: Computes for this Bezier curve the parametric tolerance UTolerance for a given 3D tolerance Tolerance3D. If f(t) is the equation of this Bezier curve, UTolerance ensures that: |t1-t0| < UTolerance ===> |f(t1)-f(t0)| < Tolerance3D
+  Resolution(self: OCP.OCP.Geom.Geom_BezierCurve, Tolerance3D: float) -> tuple[float]
+
+  // MaxDegree_s() -> int
+  // Remarks: Returns the value of the maximum polynomial degree of any Geom_BezierCurve curve. This value is 25.
+  MaxDegree_s() -> int
+
+  // get_type_name_s() -> str
+  get_type_name_s() -> str
+
+  // get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
+  get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
+
+  // DynamicType(self
+  DynamicType(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.Standard.Standard_Type
+
+// Category: Geom
 // The root class for bounded surfaces in 3D space
 Geom_BoundedSurface
 
@@ -16,241 +223,3 @@ Geom_BoundedSurface
 
   // DynamicType(self
   DynamicType(self: OCP.OCP.Geom.Geom_BoundedSurface) -> OCP.OCP.Standard.Standard_Type
-
-// Describes the common behavior of surfaces which have a simple parametric equation in a local coordinate system
-Geom_ElementarySurface
-
-  // Initialize self
-  Geom_ElementarySurface(*args, **kwargs)
-
-  // SetAxis(self
-  SetAxis(self: OCP.OCP.Geom.Geom_ElementarySurface, theA1: OCP.OCP.gp.gp_Ax1) -> None
-
-  // SetLocation(self
-  SetLocation(self: OCP.OCP.Geom.Geom_ElementarySurface, theLoc: OCP.OCP.gp.gp_Pnt) -> None
-
-  // SetPosition(self
-  SetPosition(self: OCP.OCP.Geom.Geom_ElementarySurface, theAx3: OCP.OCP.gp.gp_Ax3) -> None
-
-  // UReverse(self
-  UReverse(self: OCP.OCP.Geom.Geom_ElementarySurface) -> None
-
-  // UReversedParameter(self
-  UReversedParameter(self: OCP.OCP.Geom.Geom_ElementarySurface, U: float) -> float
-
-  // VReverse(self
-  VReverse(self: OCP.OCP.Geom.Geom_ElementarySurface) -> None
-
-  // VReversedParameter(self
-  VReversedParameter(self: OCP.OCP.Geom.Geom_ElementarySurface, V: float) -> float
-
-  // Continuity(self
-  Continuity(self: OCP.OCP.Geom.Geom_ElementarySurface) -> OCP.OCP.GeomAbs.GeomAbs_Shape
-
-  // IsCNu(self
-  IsCNu(self: OCP.OCP.Geom.Geom_ElementarySurface, N: int) -> bool
-
-  // IsCNv(self
-  IsCNv(self: OCP.OCP.Geom.Geom_ElementarySurface, N: int) -> bool
-
-  // DumpJson(self
-  DumpJson(self: OCP.OCP.Geom.Geom_ElementarySurface, theOStream: io.BytesIO, theDepth: int = -1) -> None
-
-  // get_type_name_s() -> str
-  get_type_name_s() -> str
-
-  // get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
-  get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
-
-  // Axis(self
-  Axis(self: OCP.OCP.Geom.Geom_ElementarySurface) -> OCP.OCP.gp.gp_Ax1
-
-  // Location(self
-  Location(self: OCP.OCP.Geom.Geom_ElementarySurface) -> OCP.OCP.gp.gp_Pnt
-
-  // Position(self
-  Position(self: OCP.OCP.Geom.Geom_ElementarySurface) -> OCP.OCP.gp.gp_Ax3
-
-  // DynamicType(self
-  DynamicType(self: OCP.OCP.Geom.Geom_ElementarySurface) -> OCP.OCP.Standard.Standard_Type
-
-// Describes an infinite line
-Geom_Line
-
-  // __init__(*args, **kwargs)
-  __init__(*args, **kwargs)
-  __init__(self: OCP.OCP.Geom.Geom_Line, A1: OCP.OCP.gp.gp_Ax1) -> None
-  __init__(self: OCP.OCP.Geom.Geom_Line, L: OCP.OCP.gp.gp_Lin) -> None
-  __init__(self: OCP.OCP.Geom.Geom_Line, P: OCP.OCP.gp.gp_Pnt, V: OCP.OCP.gp.gp_Dir) -> None
-
-  // SetLin(self
-  SetLin(self: OCP.OCP.Geom.Geom_Line, L: OCP.OCP.gp.gp_Lin) -> None
-
-  // SetDirection(self
-  SetDirection(self: OCP.OCP.Geom.Geom_Line, V: OCP.OCP.gp.gp_Dir) -> None
-
-  // SetLocation(self
-  SetLocation(self: OCP.OCP.Geom.Geom_Line, P: OCP.OCP.gp.gp_Pnt) -> None
-
-  // SetPosition(self
-  SetPosition(self: OCP.OCP.Geom.Geom_Line, A1: OCP.OCP.gp.gp_Ax1) -> None
-
-  // Lin(self
-  Lin(self: OCP.OCP.Geom.Geom_Line) -> OCP.OCP.gp.gp_Lin
-
-  // Reverse(self
-  Reverse(self: OCP.OCP.Geom.Geom_Line) -> None
-
-  // ReversedParameter(self
-  ReversedParameter(self: OCP.OCP.Geom.Geom_Line, U: float) -> float
-
-  // FirstParameter(self
-  FirstParameter(self: OCP.OCP.Geom.Geom_Line) -> float
-
-  // LastParameter(self
-  LastParameter(self: OCP.OCP.Geom.Geom_Line) -> float
-
-  // IsClosed(self
-  IsClosed(self: OCP.OCP.Geom.Geom_Line) -> bool
-
-  // IsPeriodic(self
-  IsPeriodic(self: OCP.OCP.Geom.Geom_Line) -> bool
-
-  // Continuity(self
-  Continuity(self: OCP.OCP.Geom.Geom_Line) -> OCP.OCP.GeomAbs.GeomAbs_Shape
-
-  // IsCN(self
-  IsCN(self: OCP.OCP.Geom.Geom_Line, N: int) -> bool
-
-  // D0(self
-  D0(self: OCP.OCP.Geom.Geom_Line, U: float, P: OCP.OCP.gp.gp_Pnt) -> None
-
-  // D1(self
-  D1(self: OCP.OCP.Geom.Geom_Line, U: float, P: OCP.OCP.gp.gp_Pnt, V1: OCP.OCP.gp.gp_Vec) -> None
-
-  // D2(self
-  D2(self: OCP.OCP.Geom.Geom_Line, U: float, P: OCP.OCP.gp.gp_Pnt, V1: OCP.OCP.gp.gp_Vec, V2: OCP.OCP.gp.gp_Vec) -> None
-
-  // D3(self
-  D3(self: OCP.OCP.Geom.Geom_Line, U: float, P: OCP.OCP.gp.gp_Pnt, V1: OCP.OCP.gp.gp_Vec, V2: OCP.OCP.gp.gp_Vec, V3: OCP.OCP.gp.gp_Vec) -> None
-
-  // DN(self
-  DN(self: OCP.OCP.Geom.Geom_Line, U: float, N: int) -> OCP.OCP.gp.gp_Vec
-
-  // Transform(self
-  Transform(self: OCP.OCP.Geom.Geom_Line, T: OCP.OCP.gp.gp_Trsf) -> None
-
-  // TransformedParameter(self
-  TransformedParameter(self: OCP.OCP.Geom.Geom_Line, U: float, T: OCP.OCP.gp.gp_Trsf) -> float
-
-  // ParametricTransformation(self
-  ParametricTransformation(self: OCP.OCP.Geom.Geom_Line, T: OCP.OCP.gp.gp_Trsf) -> float
-
-  // Copy(self
-  Copy(self: OCP.OCP.Geom.Geom_Line) -> OCP.OCP.Geom.Geom_Geometry
-
-  // DumpJson(self
-  DumpJson(self: OCP.OCP.Geom.Geom_Line, theOStream: io.BytesIO, theDepth: int = -1) -> None
-
-  // get_type_name_s() -> str
-  get_type_name_s() -> str
-
-  // get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
-  get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
-
-  // Position(self
-  Position(self: OCP.OCP.Geom.Geom_Line) -> OCP.OCP.gp.gp_Ax1
-
-  // DynamicType(self
-  DynamicType(self: OCP.OCP.Geom.Geom_Line) -> OCP.OCP.Standard.Standard_Type
-
-// Describes a plane in 3D space
-Geom_Plane
-
-  // __init__(*args, **kwargs)
-  __init__(*args, **kwargs)
-  __init__(self: OCP.OCP.Geom.Geom_Plane, A3: OCP.OCP.gp.gp_Ax3) -> None
-  __init__(self: OCP.OCP.Geom.Geom_Plane, Pl: OCP.OCP.gp.gp_Pln) -> None
-  __init__(self: OCP.OCP.Geom.Geom_Plane, P: OCP.OCP.gp.gp_Pnt, V: OCP.OCP.gp.gp_Dir) -> None
-  __init__(self: OCP.OCP.Geom.Geom_Plane, A: float, B: float, C: float, D: float) -> None
-
-  // SetPln(self
-  SetPln(self: OCP.OCP.Geom.Geom_Plane, Pl: OCP.OCP.gp.gp_Pln) -> None
-
-  // Pln(self
-  Pln(self: OCP.OCP.Geom.Geom_Plane) -> OCP.OCP.gp.gp_Pln
-
-  // UReverse(self
-  UReverse(self: OCP.OCP.Geom.Geom_Plane) -> None
-
-  // UReversedParameter(self
-  UReversedParameter(self: OCP.OCP.Geom.Geom_Plane, U: float) -> float
-
-  // VReverse(self
-  VReverse(self: OCP.OCP.Geom.Geom_Plane) -> None
-
-  // VReversedParameter(self
-  VReversedParameter(self: OCP.OCP.Geom.Geom_Plane, V: float) -> float
-
-  // ParametricTransformation(self
-  ParametricTransformation(self: OCP.OCP.Geom.Geom_Plane, T: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.gp.gp_GTrsf2d
-
-  // IsUClosed(self
-  IsUClosed(self: OCP.OCP.Geom.Geom_Plane) -> bool
-
-  // IsVClosed(self
-  IsVClosed(self: OCP.OCP.Geom.Geom_Plane) -> bool
-
-  // IsUPeriodic(self
-  IsUPeriodic(self: OCP.OCP.Geom.Geom_Plane) -> bool
-
-  // IsVPeriodic(self
-  IsVPeriodic(self: OCP.OCP.Geom.Geom_Plane) -> bool
-
-  // UIso(self
-  UIso(self: OCP.OCP.Geom.Geom_Plane, U: float) -> OCP.OCP.Geom.Geom_Curve
-
-  // VIso(self
-  VIso(self: OCP.OCP.Geom.Geom_Plane, V: float) -> OCP.OCP.Geom.Geom_Curve
-
-  // D0(self
-  D0(self: OCP.OCP.Geom.Geom_Plane, U: float, V: float, P: OCP.OCP.gp.gp_Pnt) -> None
-
-  // D1(self
-  D1(self: OCP.OCP.Geom.Geom_Plane, U: float, V: float, P: OCP.OCP.gp.gp_Pnt, D1U: OCP.OCP.gp.gp_Vec, D1V: OCP.OCP.gp.gp_Vec) -> None
-
-  // D2(self
-  D2(self: OCP.OCP.Geom.Geom_Plane, U: float, V: float, P: OCP.OCP.gp.gp_Pnt, D1U: OCP.OCP.gp.gp_Vec, D1V: OCP.OCP.gp.gp_Vec, D2U: OCP.OCP.gp.gp_Vec, D2V: OCP.OCP.gp.gp_Vec, D2UV: OCP.OCP.gp.gp_Vec) -> None
-
-  // D3(self
-  D3(self: OCP.OCP.Geom.Geom_Plane, U: float, V: float, P: OCP.OCP.gp.gp_Pnt, D1U: OCP.OCP.gp.gp_Vec, D1V: OCP.OCP.gp.gp_Vec, D2U: OCP.OCP.gp.gp_Vec, D2V: OCP.OCP.gp.gp_Vec, D2UV: OCP.OCP.gp.gp_Vec, D3U: OCP.OCP.gp.gp_Vec, D3V: OCP.OCP.gp.gp_Vec, D3UUV: OCP.OCP.gp.gp_Vec, D3UVV: OCP.OCP.gp.gp_Vec) -> None
-
-  // DN(self
-  DN(self: OCP.OCP.Geom.Geom_Plane, U: float, V: float, Nu: int, Nv: int) -> OCP.OCP.gp.gp_Vec
-
-  // Transform(self
-  Transform(self: OCP.OCP.Geom.Geom_Plane, T: OCP.OCP.gp.gp_Trsf) -> None
-
-  // Copy(self
-  Copy(self: OCP.OCP.Geom.Geom_Plane) -> OCP.OCP.Geom.Geom_Geometry
-
-  // DumpJson(self
-  DumpJson(self: OCP.OCP.Geom.Geom_Plane, theOStream: io.BytesIO, theDepth: int = -1) -> None
-
-  // TransformParameters(self
-  TransformParameters(self: OCP.OCP.Geom.Geom_Plane, T: OCP.OCP.gp.gp_Trsf) -> tuple[float, float]
-
-  // Bounds(self
-  Bounds(self: OCP.OCP.Geom.Geom_Plane) -> tuple[float, float, float, float]
-
-  // Coefficients(self
-  Coefficients(self: OCP.OCP.Geom.Geom_Plane) -> tuple[float, float, float, float]
-
-  // get_type_name_s() -> str
-  get_type_name_s() -> str
-
-  // get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
-  get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
-
-  // DynamicType(self
-  DynamicType(self: OCP.OCP.Geom.Geom_Plane) -> OCP.OCP.Standard.Standard_Type

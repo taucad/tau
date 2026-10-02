@@ -1,4 +1,5 @@
 import type { BaseLayoutProps } from 'fumadocs-ui/layouts/shared';
+import { resolveLinkItems } from 'fumadocs-ui/layouts/shared';
 import { TauThemeSwitch } from '#components/theme-switch.js';
 
 const TauDocsTitle = (): React.JSX.Element => (
@@ -20,8 +21,10 @@ export const baseOptions = (): BaseLayoutProps => ({
   links: [
     { text: 'Runtime', url: '/runtime' },
     { text: 'Editor', url: '/editor' },
+    ...resolveLinkItems({ githubUrl: 'https://github.com/taucad/tau' }).map((link) =>
+      link.type === 'icon' ? { ...link, icon: <span aria-hidden>{link.icon}</span> } : link,
+    ),
   ],
-  githubUrl: 'https://github.com/taucad/tau',
   searchToggle: { enabled: true },
   themeSwitch: { enabled: true },
   slots: { themeSwitch: TauThemeSwitch },

@@ -96,7 +96,8 @@ def run(command):
 def selected_executable(name):
     found = shutil.which(name)
     require(found is not None, f'Missing required executable: {name}')
-    return Path(found).resolve()
+    # rustup dispatches on argv[0], and Homebrew links `rustup` to `rustup-init`.
+    return Path(found).absolute() if name == 'rustup' else Path(found).resolve()
 
 
 def executable_identity(path, version_arguments=()):

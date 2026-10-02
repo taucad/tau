@@ -44,7 +44,8 @@ type Part =
     });
 const assembly = assemblyJson as unknown as { parts: Part[] };
 
-const load = (parameters = {}) => loadModel({ file: 'main.cs', parameters });
+const load = async (parameters = {}) =>
+  loadModel({ file: 'main.cs', parameters });
 const nacaUnitAreas: Record<string, number> = {
   '2410': 0.06856840935884928,
   '2412': 0.08228209123061872,
@@ -117,24 +118,25 @@ describe('TF-2000 assembly requirements', () => {
         });
         if (part.count === 1) {
           expectGeo(model).toHaveBoundingBox({
-            center: { y: part.y || 0, z: part.z || 0 },
+            center: { y: part.y ?? 0, z: part.z ?? 0 },
             size: { y: radius * 2, z: radius * 2 },
             tolerance: 0.1,
           });
         }
         if (part.count > 1) {
-          const pitch = part.pitch;
-          if (pitch === undefined)
+          const { pitch } = part;
+          if (pitch === undefined) {
             throw new Error(`${part.id} lacks blade pitch`);
+          }
           const centers: Array<[number, number]> = Array.from(
             { length: part.count },
             (_, index) => {
               const angle =
                 (2 * Math.PI * index) / part.count +
-                ((part.phase || 0) * Math.PI) / 180;
+                ((part.phase ?? 0) * Math.PI) / 180;
               return [
-                (part.y || 0) + pitch * Math.cos(angle),
-                (part.z || 0) + pitch * Math.sin(angle),
+                (part.y ?? 0) + pitch * Math.cos(angle),
+                (part.z ?? 0) + pitch * Math.sin(angle),
               ];
             },
           );
@@ -161,7 +163,7 @@ describe('TF-2000 assembly requirements', () => {
             Math.PI *
             (outer * outer -
               inner * inner -
-              (part.holes || 0) * (part.holeRadius || 0) ** 2) *
+              (part.holes ?? 0) * (part.holeRadius ?? 0) ** 2) *
             (Math.max(...axial) - Math.min(...axial)) *
             part.count;
           expectGeo(model).toHaveVolume({
@@ -171,8 +173,8 @@ describe('TF-2000 assembly requirements', () => {
           expectGeo(model).toHaveCenterOfMass({
             point: {
               x: (Math.max(...axial) + Math.min(...axial)) / 2,
-              y: part.y || 0,
-              z: part.z || 0,
+              y: part.y ?? 0,
+              z: part.z ?? 0,
             },
             tolerance: 0.02,
           });
@@ -221,8 +223,9 @@ describe('TF-2000 assembly requirements', () => {
           tolerance: part.chord,
         });
         const nacaArea = nacaUnitAreas[part.naca];
-        if (nacaArea === undefined)
+        if (nacaArea === undefined) {
           throw new Error(`Unknown NACA profile ${part.naca}`);
+        }
         const ideal =
           ((nacaArea *
             part.chord ** 2 *
@@ -234,8 +237,9 @@ describe('TF-2000 assembly requirements', () => {
           value: ideal,
           tolerance: ideal * 0.02,
         });
-        if (part.count > 1)
+        if (part.count > 1) {
           expectGeo(model).toHaveNoComponentInterference({ tolerance: 0.01 });
+        }
       }
     });
   }

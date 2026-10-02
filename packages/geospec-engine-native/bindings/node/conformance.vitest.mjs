@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { runEarlyCorpus } from './run-conformance.mjs';
 
 const loadBinding = async () =>
-  /** @type {typeof import('./generated/index.js')} */ (
+  /** @type {typeof import('./types/generated/index.js')} */ (
     /** @type {unknown} */ (await import(new URL('generated/index.js', import.meta.url)))
   );
 

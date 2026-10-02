@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   classifyUpstreamRefusal,
   cloudUpstreamRefusalMessage,
+  contextWindowRefusalMessage,
+  isContextWindowRefusal,
   readUpstreamRefusal,
   redactCredentials,
   upstreamRetryAfterSeconds,
@@ -145,9 +147,62 @@ describe('cloudUpstreamRefusalMessage', () => {
     expect(cloudUpstreamRefusalMessage({ type, status })).toBe(expected);
   });
 
+  it('should name the context window when the provider refused the request for its size', () => {
+    expect(cloudUpstreamRefusalMessage({ type: 'UPSTREAM_REJECTED', status: 400, contextWindowExceeded: true })).toBe(
+      'The request exceeds the context window of the selected model.',
+    );
+  });
+
   it('should never quote the supplier, whatever it said', () => {
     // The pre-stream leg and the mid-stream frame filter share these sentences so
     // a refusal cannot name Tau's supplier account on one path and not the other.
     expect(cloudUpstreamRefusalMessage({ type: 'RATE_LIMITED', status: 429 })).not.toContain('Resource exhausted');
+  });
+});
+
+describe('isContextWindowRefusal', () => {
+  it.each([
+    [
+      'an Anthropic prompt-too-long body',
+      {
+        type: 'error',
+        error: { type: 'invalid_request_error', message: 'prompt is too long: 217210 tokens > 200000 maximum' },
+      },
+    ],
+    [
+      'an Anthropic 413 body',
+      { type: 'error', error: { type: 'request_too_large', message: 'Request exceeds the maximum size' } },
+    ],
+    [
+      'an OpenAI context_length_exceeded code',
+      { error: { code: 'context_length_exceeded', message: 'Your input exceeds the context window of this model.' } },
+    ],
+    [
+      'a Gemini token-count sentence',
+      {
+        error: {
+          code: 400,
+          message: 'The input token count (1100000) exceeds the maximum number of tokens allowed (1048576).',
+        },
+      },
+    ],
+    ['an in-band error object', { code: 'context_length_exceeded', message: 'Too long.' }],
+  ])('should recognise %s', (_label, body) => {
+    expect(isContextWindowRefusal(body)).toBe(true);
+  });
+
+  it.each([
+    ['a credit-balance refusal', { error: { type: 'invalid_request_error', message: 'Your credit balance is too low.' } }],
+    ['a schema refusal', { error: { type: 'invalid_request_error', message: 'tools.0.name: String should match' } }],
+    ['an absent body', undefined],
+    ['a non-object body', 'prompt is too long'],
+  ])('should not recognise %s', (_label, body) => {
+    expect(isContextWindowRefusal(body)).toBe(false);
+  });
+
+  it('should answer in words the host overflow recognition matches', () => {
+    // The host compacts and retries only on a refusal it recognises as a context
+    // overflow; pi-ai matches "exceeds the context window".
+    expect(contextWindowRefusalMessage).toMatch(/exceeds the context window/i);
   });
 });

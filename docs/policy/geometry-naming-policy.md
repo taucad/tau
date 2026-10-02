@@ -3,7 +3,7 @@ title: 'Geometry Naming Policy'
 description: 'Rules for kernel geometry names across display labels, glTF nodes and meshes, materials, scenes, component IDs, selectors, topology metadata, imports, native handles, diagnostics, and export artifacts.'
 status: active
 created: '2026-06-16'
-updated: '2026-06-16'
+updated: '2026-10-02'
 related:
   - docs/research/kernel-geometry-naming-audit.md
   - docs/research/kernel-shape-name-normalization.md
@@ -58,11 +58,11 @@ INCORRECT:
 const label = candidateName ?? `Shape_${index}`;
 ```
 
-### 3. Keep Semantic Node and Mesh Names in Parity
+### 3. Name Occurrences and Shared Assets Independently
 
-Every semantic mesh-bearing glTF node emitted or normalized by Tau must have a non-empty node name and matching mesh name. Line-only helper nodes do not count as semantic shapes and must not consume shape ordinals.
+Every semantic mesh-bearing glTF node emitted or normalized by Tau must have a non-empty occurrence name. A mesh used by one semantic node keeps the matching name. A mesh referenced by several nodes retains one authored/imported asset name, or its first-seen generated name; never overwrite that asset name for each occurrence. Keep occurrence IDs, selectors and topology placement at their node address. Line-only helper nodes do not count as semantic shapes and must not consume shape ordinals.
 
-**Why**: Explorer labels, geometry analysis, and GLB inspection tools may read either the node name or mesh name.
+**Why**: Explorer labels identify individual placements, while a shared mesh name describes their common asset.
 
 CORRECT:
 
@@ -250,7 +250,7 @@ Use `model.*` for single-document mesh exports, assembly-style names for BRep as
 
 - [ ] Authored/imported names are preserved by provenance.
 - [ ] Generated shape labels come from `shape-names.ts`.
-- [ ] Semantic glTF node and mesh names are non-empty and equal.
+- [ ] Semantic nodes have occurrence names; exclusive meshes match them and shared assets keep one stable name.
 - [ ] Tau-generated materials and single scenes are unnamed.
 - [ ] Primitive semantics live in modes, extras, or topology payloads.
 - [ ] Component IDs and selectors are payload addresses, not labels.

@@ -1184,7 +1184,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         throw new Error('This host has no bounded candidate transport.');
       }
       const controller = new AbortController();
-      const candidateTimeout = setTimeout(() => {
+      const candidateFetchTimeout = setTimeout(() => {
         controller.abort();
       }, 15_000);
       try {
@@ -1200,7 +1200,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           },
         });
       } finally {
-        clearTimeout(candidateTimeout);
+        clearTimeout(candidateFetchTimeout);
       }
     },
     publishGeoSpecCandidate: async (candidate) => {
@@ -1208,7 +1208,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
         throw new Error('This host has no bounded candidate transport.');
       }
       const controller = new AbortController();
-      const candidateTimeout = setTimeout(() => {
+      const candidatePublishTimeout = setTimeout(() => {
         controller.abort();
       }, 15_000);
       try {
@@ -1225,7 +1225,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
           },
         });
       } finally {
-        clearTimeout(candidateTimeout);
+        clearTimeout(candidatePublishTimeout);
       }
     },
     send: (command) => {

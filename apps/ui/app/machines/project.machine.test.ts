@@ -2,6 +2,7 @@ import { describe, it, expect, vi, afterEach } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { projectToManifest } from '@taucad/types';
+import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
@@ -111,6 +112,182 @@ async function startAndLoad(options?: Parameters<typeof createTestActor>[0]) {
 describe('projectMachine', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+  });
+
+  describe('acknowledged runtime close', () => {
+    it.each(['destroyGeometryUnit', 'fileDeleted', 'directoryDeleted'] as const)(
+      'should retain acknowledged private cleanup after %s removes file metadata',
+      async (type) => {
+        const actor = await startAndLoad();
+        const client = createMockRuntimeClient();
+        const cleaned = Promise.withResolvers<void>();
+        vi.spyOn(client, 'shutdown').mockImplementation(async () => cleaned.promise);
+        try {
+          actor.send({ type: 'createGeometryUnit', entryPath: 'retired/main.ts' });
+          const unit = actor.getSnapshot().context.geometryUnits.get('retired/main.ts');
+          if (!unit) {
+            expect.fail('Expected the actual owned CAD unit');
+          }
+          unit.send({ type: 'kernelAllocated', client, cleanups: [] });
+          if (type === 'destroyGeometryUnit') {
+            actor.send({ type, entryPath: 'retired/main.ts' });
+          } else {
+            actor.send({ type, path: type === 'fileDeleted' ? 'retired/main.ts' : 'retired' });
+          }
+          expect(actor.getSnapshot().context.geometryUnits.has('retired/main.ts')).toBe(false);
+          actor.send({ type: 'closeRuntime' });
+          await vi.waitFor(() => {
+            expect(client.shutdown).toHaveBeenCalledOnce();
+          });
+          expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+          cleaned.resolve();
+          await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        } finally {
+          cleaned.resolve();
+          actor.stop();
+        }
+      },
+    );
+
+    it('should bind a retired acknowledgement to its old child while the same path reopens', async () => {
+      const actor = await startAndLoad();
+      const client = createMockRuntimeClient();
+      const cleaned = Promise.withResolvers<void>();
+      vi.spyOn(client, 'shutdown').mockImplementation(async () => cleaned.promise);
+      try {
+        actor.send({ type: 'createGeometryUnit', entryPath: 'reopen.ts' });
+        const old = actor.getSnapshot().context.geometryUnits.get('reopen.ts');
+        if (!old) {
+          expect.fail('Expected the original owned CAD unit');
+        }
+        old.send({ type: 'kernelAllocated', client, cleanups: [] });
+        actor.send({ type: 'destroyGeometryUnit', entryPath: 'reopen.ts' });
+        actor.send({ type: 'createGeometryUnit', entryPath: 'reopen.ts' });
+        const replacement = actor.getSnapshot().context.geometryUnits.get('reopen.ts');
+        expect(replacement).toBeDefined();
+        expect(replacement).not.toBe(old);
+        expect(Object.values(actor.getSnapshot().children)).toContain(old);
+        cleaned.resolve();
+        await vi.waitFor(() => {
+          expect(old.getSnapshot().status).toBe('stopped');
+        });
+        actor.send({ type: 'geometryUnit.runtimeClosed', unit: old });
+        expect(actor.getSnapshot().context.geometryUnits.get('reopen.ts')).toBe(replacement);
+        expect(Object.values(actor.getSnapshot().children)).toContain(replacement);
+        expect(replacement?.getSnapshot().status).toBe('active');
+      } finally {
+        cleaned.resolve();
+        actor.stop();
+      }
+    });
+
+    it('should retain a refused retired child and retry its cleanup before final close', async () => {
+      const actor = await startAndLoad();
+      const client = createMockRuntimeClient();
+      const refusal = new Error('retired cleanup refused');
+      const shutdown = vi.spyOn(client, 'shutdown').mockRejectedValue(refusal);
+      try {
+        actor.send({ type: 'createGeometryUnit', entryPath: 'retired.ts' });
+        const unit = actor.getSnapshot().context.geometryUnits.get('retired.ts');
+        if (!unit) {
+          expect.fail('Expected the retired child');
+        }
+        unit.send({ type: 'kernelAllocated', client, cleanups: [] });
+        actor.send({ type: 'destroyGeometryUnit', entryPath: 'retired.ts' });
+        await waitFor(unit, (state) => state.matches('runtimeCloseFailed'));
+        expect(Object.values(actor.getSnapshot().children)).toContain(unit);
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeCloseFailed'));
+        expect(actor.getSnapshot().context.error).toBeInstanceOf(AggregateError);
+        shutdown.mockResolvedValue(undefined);
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        expect(shutdown).toHaveBeenCalledTimes(3);
+      } finally {
+        actor.stop();
+      }
+    });
+
+    it('should await every CAD owner and fence new units without closing a sibling project', async () => {
+      const actor = await startAndLoad();
+      const sibling = await startAndLoad({ projectId: 'sibling' });
+      const first = createMockRuntimeClient();
+      const second = createMockRuntimeClient();
+      const firstClosed = Promise.withResolvers<void>();
+      const secondClosed = Promise.withResolvers<void>();
+      vi.spyOn(first, 'shutdown').mockImplementation(async () => firstClosed.promise);
+      vi.spyOn(second, 'shutdown').mockImplementation(async () => secondClosed.promise);
+      try {
+        actor.send({ type: 'createGeometryUnit', entryPath: 'main.ts' });
+        actor.send({ type: 'createGeometryUnit', entryPath: 'second.ts' });
+        const units = [...actor.getSnapshot().context.geometryUnits.values()];
+        expect(units).toHaveLength(2);
+        units[0]!.send({ type: 'kernelAllocated', client: first, cleanups: [] });
+        units[1]!.send({ type: 'kernelAllocated', client: second, cleanups: [] });
+        actor.send({ type: 'closeRuntime' });
+        await vi.waitFor(() => {
+          expect(first.shutdown).toHaveBeenCalledOnce();
+          expect(second.shutdown).toHaveBeenCalledOnce();
+        });
+        actor.send({ type: 'createGeometryUnit', entryPath: 'too-late.ts' });
+        actor.send({ type: 'openInViewer', entryPath: 'also-too-late.ts' });
+        expect(actor.getSnapshot().context.geometryUnits.size).toBe(2);
+        firstClosed.resolve();
+        await Promise.resolve();
+        expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+        expect(sibling.getSnapshot().matches({ ready: {} })).toBe(true);
+        secondClosed.resolve();
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        actor.send({ type: 'closeRuntime' });
+        expect(first.shutdown).toHaveBeenCalledOnce();
+        expect(second.shutdown).toHaveBeenCalledOnce();
+      } finally {
+        firstClosed.resolve();
+        secondClosed.resolve();
+        actor.stop();
+        sibling.stop();
+      }
+    });
+
+    it('should retain exact cleanup refusal after attempting all units', async () => {
+      const actor = await startAndLoad();
+      const first = createMockRuntimeClient();
+      const second = createMockRuntimeClient();
+      const refusal = new Error('native cleanup refused');
+      vi.spyOn(first, 'shutdown').mockRejectedValue(refusal);
+      try {
+        actor.send({ type: 'createGeometryUnit', entryPath: 'first.ts' });
+        actor.send({ type: 'createGeometryUnit', entryPath: 'second.ts' });
+        const units = [...actor.getSnapshot().context.geometryUnits.values()];
+        units[0]!.send({ type: 'kernelAllocated', client: first, cleanups: [] });
+        units[1]!.send({ type: 'kernelAllocated', client: second, cleanups: [] });
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeCloseFailed'));
+        expect(first.shutdown).toHaveBeenCalledOnce();
+        expect(second.shutdown).toHaveBeenCalledOnce();
+        expect(actor.getSnapshot().context.error).toBeInstanceOf(AggregateError);
+        const { error } = actor.getSnapshot().context;
+        if (!(error instanceof AggregateError)) {
+          expect.fail('Expected the actual aggregated cleanup refusal');
+        }
+        expect(error.errors).toEqual([refusal]);
+        expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+      } finally {
+        actor.stop();
+      }
+    });
+
+    it('should close a cold project without starting a CAD client', async () => {
+      const actor = await startAndLoad();
+      try {
+        expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
+        actor.send({ type: 'closeRuntime' });
+        await waitFor(actor, (state) => state.matches('runtimeClosed'));
+        expect(actor.getSnapshot().context.geometryUnits.size).toBe(0);
+      } finally {
+        actor.stop();
+      }
+    });
   });
 
   describe('project content activity path classification', () => {

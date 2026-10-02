@@ -668,7 +668,7 @@ const strictKernel = defineKernel({
     }
     return { content: '<svg/>' };
   },
-  async write() { return { files: [{ name: 'data.json', mimeType: 'application/json', bytes: new Uint8Array([1]) }] }; },
+  async export() { return { files: [{ name: 'data.json', mimeType: 'application/json', bytes: new Uint8Array([1]) }] }; },
 });
 const route = defineTranscoder({
   id: 'type-route', name: 'Type route', version: '1',
@@ -870,7 +870,7 @@ const kernel = defineKernel({
     if (input.view === 'loose') assert(input.options.extra === true, 'Loose view option was stripped.');
     return { content: '<svg/>' };
   },
-  async write(input) {
+  async export(input) {
     assert(input.options.count === 4, 'Required export option changed.');
     return { files: [{ name: 'data.json', mimeType: 'application/json', bytes: new Uint8Array([1]) }] };
   },

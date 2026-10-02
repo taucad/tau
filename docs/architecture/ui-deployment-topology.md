@@ -2,7 +2,7 @@
 
 How `apps/ui` reaches staging and production, and the cross-origin contract it shares with `apps/api`.
 
-Both staging and production UIs deploy on Netlify against Fly.io staging and production APIs. **Production promotions** are GitOps-style: a bot-managed trail PR merges `release/main-to-production` into `production`; that merge triggers native Netlify Git builds and pushes the Fly API via [`prod-deploy-on-merge.yml`](../../.github/workflows/prod-deploy-on-merge.yml).
+Both staging and production UIs deploy on Netlify against Fly.io staging and production APIs. **Production promotions** are explicit: a maintainer dispatches [`deploy-production.yml`](../../.github/workflows/deploy-production.yml) with a release tag created by [`release.yml`](../../.github/workflows/release.yml), and it moves `production` to that release's commit; the push triggers native Netlify Git builds and deploys the Fly API via [`prod-deploy-on-merge.yml`](../../.github/workflows/prod-deploy-on-merge.yml).
 
 Site identity, the per-environment variable matrices, DNS authority, and the promote and rollback procedures are operational. They live in Tau's private operations handbook at `docs/handbooks/cloud/` (`system/environments.md`, `system/services/ui.md`, `operate/deploy-and-promote.md`, `operate/rollback-ui.md`, `operate/rollback-api.md`), maintained with the `create-handbook` skill; that path resolves only in a checkout that has the private handbook.
 
@@ -33,19 +33,18 @@ Site identity, the per-environment variable matrices, DNS authority, and the pro
    ┌───────────────────────────┐              ┌──────────────────────────────┐
    │ Netlify rebuilds staging  │              │ ci.yml → deploy-api-staging  │
    └───────────────────────────┘              └──────────────────────────────┘
-                   │
-                   ▼
+
    ┌──────────────────────────────────────────────────────────────────────────┐
-   │ prepare-prod-release.yml → force-push `release/main-to-production`        │
-   │ → open/update PR (base `production`, head `release/main-to-production`)    │
-   │ → NO CI on that PR (`ci.yml` branches-ignore production)                  │
+   │ release.yml → regenerate `release/next` → open/update the release PR      │
+   │ merge it → tags `<app>@<version>` + GitHub Releases → release-build.yml   │
    └──────────────────────────────────────────────────────────────────────────┘
 
 
-                    ┌────────────────────────┐
-                    │ Maintainer merges trail│
-                    │ PR → updates `production` branch
-                    └────────────┬───────────┘
+                    ┌──────────────────────────────┐
+                    │ Maintainer dispatches         │
+                    │ deploy-production.yml with a  │
+                    │ release tag → `production`    │
+                    └────────────┬─────────────────┘
                                  │
                    ┌─────────────┴──────────────────────────┐
                    │                                        │
@@ -72,7 +71,9 @@ Netlify sends `Cross-Origin-Embedder-Policy: require-corp` from [`apps/ui/netlif
 
 ## See Also
 
-- [`.github/workflows/prepare-prod-release.yml`](../../.github/workflows/prepare-prod-release.yml)
+- [`.github/workflows/release.yml`](../../.github/workflows/release.yml)
+- [`.github/workflows/release-build.yml`](../../.github/workflows/release-build.yml)
+- [`.github/workflows/deploy-production.yml`](../../.github/workflows/deploy-production.yml)
 - [`.github/workflows/prod-deploy-on-merge.yml`](../../.github/workflows/prod-deploy-on-merge.yml)
 - [`.github/workflows/deploy.yml`](../../.github/workflows/deploy.yml)
 - [`.github/workflows/ci.yml`](../../.github/workflows/ci.yml)

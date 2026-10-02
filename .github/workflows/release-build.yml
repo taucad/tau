@@ -99,7 +99,12 @@ jobs:
     if: needs.resolve.outputs.kind == 'app' || needs.resolve.outputs.kind == 'desktop'
     name: Verify ${{ needs.resolve.outputs.tag }}
     runs-on: ubuntu-24.04
-    timeout-minutes: 90
+    # Includes waiting for the release commit's main CI run, which starts with
+    # the same merge and whose macOS GeoSpec producer takes over an hour.
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      actions: read
     steps:
       - name: Checkout the release
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -123,6 +128,15 @@ jobs:
           actual=$(jq -r .version "$root/package.json")
           test "$actual" = "$VERSION" \
             || { echo "::error::$root/package.json is $actual, the tag says $VERSION"; exit 1; }
+
+      # The UI, desktop and API builds need the GeoSpec engine products, which
+      # only main CI's macOS producer makes. Waiting for that run also means a
+      # release is built only once main is green on its commit.
+      - name: Take the GeoSpec artifact from the release commit's main CI run
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          wait-minutes: '180'
+          github-token: ${{ github.token }}
 
       - name: Lint, typecheck, test and build the release
         env:
@@ -302,6 +316,9 @@ jobs:
             archive: Tau-win32-x64.zip
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
     env:
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
     steps:
@@ -313,6 +330,11 @@ jobs:
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      - name: Take the GeoSpec artifact from the release commit's main CI run
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          github-token: ${{ github.token }}
 
       # prepare-build123d-python resolves its wheels with uv on both hosts;
       # prepare-git builds git on Linux against libcurl and zlib.

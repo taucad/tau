@@ -22,6 +22,7 @@ import {
   createCheckoutRoutes,
   createRemoteAttention,
   createWorkerRevisionRegistry,
+  versionedChangePaths,
 } from '#machines/file-manager.worker.revisions.js';
 import type {
   WorkerProjectRevisions,
@@ -106,7 +107,10 @@ const finish = async (
 const harness = (
   projectIds: readonly string[],
   wrapPort = (port: RevisionPort): RevisionPort => port,
-  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock'> & { onCreatePort?: () => void } = {},
+  extra: Pick<WorkerRevisionRegistryOptions, 'servePlacement' | 'clock'> & {
+    onCreatePort?: () => void;
+    observeFileEvents?: boolean;
+  } = {},
 ): Harness => {
   const providers = projectIds.map(() => new MemoryProvider());
   const mountTable = new MountTable();
@@ -143,6 +147,14 @@ const harness = (
     },
     filesystem: (root) => service.createRootedFileSystem(root),
     observe: (root, onChanged) => {
+      if (extra.observeFileEvents) {
+        return eventBus.subscribe((event) => {
+          const paths = versionedChangePaths(event, root);
+          if (paths.length > 0) {
+            onChanged(paths);
+          }
+        });
+      }
       observers.set(root, onChanged);
       return () => observers.delete(root);
     },
@@ -232,6 +244,34 @@ const branchOff = async (
 };
 
 describe('the file-manager worker revision root (north star S48 jsdom 1–4)', () => {
+  it('does not notify revision readers for a Workbench record write', async () => {
+    const fixture = harness(['alpha'], (port) => port, { observeFileEvents: true });
+    const project = fixture.service.createRootedFileSystem('/projects/alpha');
+    await project.writeFile('main.ts', 'first');
+    await fixture.open('alpha');
+    const root = await fixture.root('alpha');
+    const checkoutId = root.status().checkoutId!;
+    const changes: string[][] = [];
+    root.subscribeEvents((event) => {
+      if (event.type === 'checkout.changed') {
+        changes.push([...event.paths]);
+      }
+    });
+    const generation = (): number => root.inspect().writeGenerations[checkoutId] ?? 0;
+    const before = generation();
+
+    await project.mkdir('.tau/workbench', { recursive: true });
+    await project.writeFile('.tau/workbench/entries.json', '{}');
+    await settle();
+    expect(changes).toEqual([]);
+    expect(generation()).toBe(before);
+
+    await project.writeFile('main.ts', 'second');
+    await settle();
+    expect(changes).toEqual([['main.ts']]);
+    expect(generation()).toBe(before + 1);
+  });
+
   it('should start one root per opened project and stop its actor when the last port closes', async () => {
     const fixture = harness(['alpha', 'beta']);
     const alpha = await fixture.open('alpha');
@@ -550,8 +590,22 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
-    alpha.send({ command: 'saveRevision' });
-    await alpha.settle();
+    const root = await fixture.root('alpha');
+    alpha.send({ command: 'saveRevision', id: 90 });
+    for (
+      let attempt = 0;
+      attempt < 40 && !alpha.frames.some((frame) => 'id' in frame && frame.id === 90);
+      attempt += 1
+    ) {
+      // oxlint-disable-next-line no-await-in-loop -- polling the port's own answer.
+      await alpha.settle();
+    }
+    expect(alpha.frames.find((frame) => 'id' in frame && frame.id === 90)).toEqual({
+      type: 'result',
+      id: 90,
+      result: { kind: 'saved' },
+    });
+    expect(root.status().headRevisionId).toBeDefined();
 
     /* `main` already has a checkout, which the registry refuses before any port
      * call — the refusal a person sees most often. */

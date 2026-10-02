@@ -1,6 +1,11 @@
 name: Docs external links
 
 on:
+  push:
+    branches: [geospec]
+    paths:
+      - 'apps/docs/content/**'
+      - '.github/workflows/docs-links.yml'
   schedule:
     - cron: '17 4 * * 1'
   workflow_dispatch: {}
@@ -24,7 +29,8 @@ jobs:
           key: docs-links-${{ runner.os }}-${{ github.run_id }}
           restore-keys: docs-links-${{ runner.os }}-
 
-      # This workflow never runs on pull requests; failures remain visible as scheduled-run alerts.
+      # Check GeoSpec documentation pushes while the weekly schedule awaits default-branch adoption.
+      # This workflow never runs on pull requests and needs no deployment credentials.
       - name: Check external documentation links
         uses: lycheeverse/lychee-action@e7477775783ea5526144ba13e8db5eec57747ce8 # v2.9.0
         with:

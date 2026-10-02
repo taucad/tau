@@ -5317,6 +5317,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       renderOptions: renderArtifact.identity.renderOptions,
       exportOptions: exportMaterialization.options,
       content: plan.route.content,
+      pinnedSourceRevision,
     });
     if (!desiredNativeHandleKey.success) {
       return createKernelError(desiredNativeHandleKey.issues);
@@ -7173,16 +7174,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     renderOptions: Record<string, unknown>;
     exportOptions?: Record<string, unknown>;
     content: RuntimeContentInput;
+    pinnedSourceRevision?: SourceRevision;
   }): Promise<{ success: true; key: string } | { success: false; issues: KernelIssue[] }> {
     const createOptions = this.resolveCreateOptions(input.renderOptions, input.exportOptions, input.owner);
     if (!createOptions.success) {
       return createOptions;
     }
-    const dependencies = await this.computeDependencies({
+    const currentDependencies = await this.computeDependencies({
       operations: ['evaluate'],
       parameters: input.parameters,
       resolvedMiddleware: this.getCreateExecutionList(input.owner, input.content, input.exportOptions !== undefined),
       owner: input.owner,
+    });
+    // A committed document may outlive its source files. Compare this route's
+    // construction against the hashes admitted with that document, while
+    // export-only dependencies remain fresh for the export result below.
+    const dependencies = currentDependencies.map((dependency) => {
+      if (dependency.type !== 'file') {
+        return dependency;
+      }
+      const pinned = input.pinnedSourceRevision?.files[dependency.path];
+      return pinned === undefined
+        ? dependency
+        : { ...dependency, contentHash: pinned === 'missing' ? pinned : pinned.slice('sha256:'.length) };
     });
     if ('options' in createOptions.input) {
       dependencies.push({

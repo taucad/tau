@@ -740,8 +740,8 @@ describe('useRevisions over a long history (B4)', () => {
 });
 
 describe('useRevisionChangesSince', () => {
-  /* Canvas round 4b: *Compare with current* reads the whole revision against the head the checkout is at. */
-  it('asks which paths differ between a revision and the head, and nothing before the head is known', async () => {
+  /* Live comparison needs a selected checkout, and includes unsaved changes before a head exists. */
+  it('should compare the selected checkout even before its head is known', async () => {
     const card: RevisionCard = {
       revisionId: 'rev-1',
       n: 1,
@@ -755,7 +755,10 @@ describe('useRevisionChangesSince', () => {
     revisionStatusHarness.diff = [{ path: 'main.scad', kind: 'modified' }];
     const { result, rerender } = renderHook(() => useRevisionChangesSince(card), { wrapper });
     expect(result.current.isLoaded).toBe(false);
-    expect(revisionStatusHarness.diffRequests).toStrictEqual([]);
+    await waitFor(() => {
+      expect(result.current.isLoaded).toBe(true);
+    });
+    expect(revisionStatusHarness.diffRequests).toStrictEqual(['rev-1..checkout']);
 
     revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-3' };
     rerender();
@@ -764,7 +767,7 @@ describe('useRevisionChangesSince', () => {
       expect(result.current.isLoaded).toBe(true);
     });
     expect(result.current.changes).toStrictEqual([{ path: 'main.scad', kind: 'modified' }]);
-    expect(revisionStatusHarness.diffRequests).toStrictEqual(['rev-1..rev-3']);
+    expect(revisionStatusHarness.diffRequests).toStrictEqual(['rev-1..checkout', 'rev-1..checkout']);
   });
 });
 
@@ -793,19 +796,112 @@ describe('useRevisionChanges', () => {
     expect(result.current[1]).toEqual({ path: 'part.scad', kind: 'added' });
   });
 
+  it('should compare unsaved paths and refresh an open comparison on its checkout changes', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+    revisionStatusHarness.diff = [{ path: 'new.ts', kind: 'added' }];
+    revisionStatusHarness.comparison = {
+      original: 'one',
+      modified: 'first',
+      kind: 'text',
+      change: 'modified',
+      notices: [],
+    };
+    const card: RevisionCard = {
+      revisionId: 'rev-1',
+      n: 1,
+      createdAt: 0,
+      summary: '',
+      actor: '',
+      turnId: undefined,
+      conflicted: false,
+      trigger: 'save',
+    };
+    const { result } = renderHook(
+      () => ({ paths: useRevisionChangesSince(card), file: useRevisionFileComparison('rev-1', 'main.ts', 'checkout') }),
+      { wrapper },
+    );
+    await waitFor(() => {
+      expect(result.current.file.modified).toBe('first');
+    });
+    expect(revisionStatusHarness.diffRequests).toContain('rev-1..checkout');
+    revisionStatusHarness.diff = [{ path: 'later.ts', kind: 'added' }];
+    revisionStatusHarness.comparison = { ...revisionStatusHarness.comparison, modified: 'second' };
+    act(() => {
+      for (const listener of revisionStatusHarness.events) {
+        listener({ type: 'checkout.changed', checkoutId: 'other', paths: ['main.ts'] });
+      }
+    });
+    expect(result.current.file.modified).toBe('first');
+    act(() => {
+      for (const listener of revisionStatusHarness.events) {
+        listener({ type: 'checkout.changed', checkoutId: 'live', paths: ['main.ts'] });
+      }
+    });
+    await waitFor(() => {
+      expect(result.current.paths.changes).toEqual([{ path: 'later.ts', kind: 'added' }]);
+      expect(result.current.file.modified).toBe('second');
+    });
+  });
+
+  it('should discard an initial live read that overlaps a checkout write', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+    const initial = { original: 'one', modified: 'first', kind: 'text', change: 'modified', notices: [] } as const;
+    const pending = Promise.withResolvers<typeof initial>();
+    let reads = 0;
+    revisionStatusHarness.comparisonRead = async () =>
+      ++reads === 1 ? pending.promise : { ...initial, modified: 'second' };
+    const { result } = renderHook(() => useRevisionFileComparison('rev-1', 'main.ts', 'checkout'), { wrapper });
+    await waitFor(() => {
+      expect(reads).toBe(1);
+    });
+    act(() => {
+      for (const listener of revisionStatusHarness.events) {
+        listener({ type: 'checkout.changed', checkoutId: 'live', paths: ['main.ts'] });
+      }
+    });
+    pending.resolve(initial);
+    await waitFor(() => {
+      expect(result.current.modified).toBe('second');
+    });
+  });
+
+  it('should re-read when the selected checkout changes without moving the head', async () => {
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, headRevisionId: 'rev-1' };
+    revisionStatusHarness.comparison = {
+      original: 'one',
+      modified: 'live',
+      kind: 'text',
+      change: 'modified',
+      notices: [],
+    };
+    const { result, rerender } = renderHook(() => useRevisionFileComparison('rev-1', 'main.ts', 'checkout'), {
+      wrapper,
+    });
+    await waitFor(() => {
+      expect(result.current.modified).toBe('live');
+    });
+    revisionStatusHarness.status = { ...revisionStatusHarness.status, checkoutId: 'linked' };
+    revisionStatusHarness.comparison = { ...revisionStatusHarness.comparison, modified: 'linked' };
+    rerender();
+    await waitFor(() => {
+      expect(result.current.modified).toBe('linked');
+    });
+  });
+
   it('re-reads the working side every time it is opened, not only after a save (review R7)', async () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: true, headRevisionId: 'rev-1' };
     revisionStatusHarness.comparison = {
       original: 'one',
       modified: 'first edit',
-      originalBytes: { digest: 'original', byteLength: 3 },
-      modifiedBytes: { digest: 'first', byteLength: 10 },
+      kind: 'text',
+      change: 'modified',
+      notices: [],
     };
 
     const first = renderHook(() => useRevisionFileComparison('rev-1', 'main.scad', 'checkout'), { wrapper });
     await waitFor(() => {
       expect(first.result.current.modified).toBe('first edit');
-      expect(first.result.current.modifiedBytes).toEqual({ digest: 'first', byteLength: 10 });
+      expect(first.result.current.comparison?.change).toBe('modified');
     });
     first.unmount();
 
@@ -814,15 +910,16 @@ describe('useRevisionChanges', () => {
     revisionStatusHarness.comparison = {
       original: 'one',
       modified: 'second edit',
-      originalBytes: { digest: 'original', byteLength: 3 },
-      modifiedBytes: { digest: 'second', byteLength: 11 },
+      kind: 'text',
+      change: 'modified',
+      notices: [],
     };
 
     const second = renderHook(() => useRevisionFileComparison('rev-1', 'main.scad', 'checkout'), { wrapper });
 
     await waitFor(() => {
       expect(second.result.current.modified).toBe('second edit');
-      expect(second.result.current.modifiedBytes).toEqual({ digest: 'second', byteLength: 11 });
+      expect(second.result.current.comparison?.change).toBe('modified');
     });
   });
 

@@ -24,7 +24,7 @@
  */
 
 import { createAsyncLogic, createCallbackLogic, setup, types } from 'xstate';
-import type { AnyActorRef } from 'xstate';
+import type { AnyActorRef, StateMachine, StateSchemaFrom, StateValueFromStateSchema } from 'xstate';
 import type {
   AgentRequestParamsByMethod,
   AgentRequestResponsesByMethod,
@@ -69,7 +69,7 @@ import {
   childEventSchemas as eventSchemas,
   reportSchemas,
 } from '#acp/acp-machine-schemas.js';
-import type { AcpBusyContext, AcpSessionContext } from '#acp/acp-machine-schemas.js';
+import type { AcpBusyContext, AcpSessionContext, AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 
 /** E16: milliseconds the adapter has to spawn, initialize and restore before it is closed. */
 export const acpStartTimeout = 30_000;
@@ -970,6 +970,19 @@ const skillsPublished = (
 
 const presentationPersisted = ({ context }: { readonly context: AcpSessionContext }) => afterPersist(context);
 
+const actors = {
+  adapterConnection: createCallbackLogic<AcpConnectionCommand, AcpConnectionInput>(({ sendBack }) => {
+    sendBack({ type: 'adapterExited', stderr: 'acpSession: the adapterConnection actor was not provided.' });
+    return () => undefined;
+  }),
+  lentTurn: createCallbackLogic<AcpLentTurnCommand, AcpLentTurnInput>(({ sendBack }) => {
+    sendBack({ type: 'lentFailed', failure: unavailable('acpSession: the lentTurn actor was not provided.') });
+    return () => undefined;
+  }),
+  publishSkills: createAsyncLogic<readonly string[], undefined>({ run: async () => [] }),
+  persistPresentation: createAsyncLogic<void, AcpPresentationInput>({ run: async () => undefined }),
+};
+
 const machineDefinition = setup({
   schemas: {
     context: contextSchema,
@@ -1007,65 +1020,94 @@ const machineDefinition = setup({
     },
     closed: { id: 'closed', type: 'final', schemas: { context: closingContextSchema } },
   },
-  actors: {
-    adapterConnection: createCallbackLogic<AcpConnectionCommand, AcpConnectionInput>(({ sendBack }) => {
-      sendBack({ type: 'adapterExited', stderr: 'acpSession: the adapterConnection actor was not provided.' });
-      return () => undefined;
-    }),
-    lentTurn: createCallbackLogic<AcpLentTurnCommand, AcpLentTurnInput>(({ sendBack }) => {
-      sendBack({ type: 'lentFailed', failure: unavailable('acpSession: the lentTurn actor was not provided.') });
-      return () => undefined;
-    }),
-    publishSkills: createAsyncLogic<readonly string[], undefined>({
-      run: async () => [],
-    }),
-    persistPresentation: createAsyncLogic<void, AcpPresentationInput>({
-      run: async () => undefined,
-    }),
-  },
+  actors,
 });
+
+const initialContext = ({ input }: { readonly input: AcpSessionInput }) => ({
+  key: input.key,
+  parentRef: input.parentRef,
+  adapter: input.opening.adapter,
+  cwd: input.opening.cwd,
+  mcpServers: input.opening.mcpServers,
+  ...(input.opening.capabilityToken === undefined ? {} : { capabilityToken: input.opening.capabilityToken }),
+  ...(input.opening.mode === undefined ? {} : { mode: input.opening.mode }),
+  notices: input.opening.notices,
+  cwdMoved: input.opening.cwdMoved ?? false,
+  sessionMessageId: input.opening.sessionMessageId,
+  sessionCommitted: input.opening.sessionCommitted,
+  directories: [],
+  facts: { protocolVersion, agentCapabilities: undefined, authMethods: [], agentInfo: undefined },
+  pluginDirectories: false,
+  ...(input.opening.acpSessionId === undefined ? {} : { acpSessionId: input.opening.acpSessionId }),
+  contextLost: false,
+  fresh: false,
+  configOptions: undefined,
+  presentation: emptySessionPresentation,
+  priorUsage: input.opening.priorUsage,
+  limit: input.opening.limit,
+  calls: 0,
+  exited: false,
+  stderr: '',
+  ...(input.lend === undefined ? {} : { opening: input.lend }),
+  dirty: false,
+  stale: false,
+});
+
+const acpSessionShape = () =>
+  // oxlint-disable-next-line tau-lint/xstate-owner-machine -- type-only schema witness; this factory is never called
+  machineDefinition.createMachine({
+    id: 'acpSession',
+    version: '2',
+    context: initialContext,
+    initial: 'opening',
+    states: {
+      opening: {
+        id: 'opening',
+        states: { starting: { states: { publishing: {}, initializing: {} } }, resuming: {}, loading: {}, creating: {} },
+      },
+      busy: {
+        id: 'busy',
+        states: { binding: {}, configuring: {}, prompting: {}, cancelling: {}, flushing: {}, recording: {} },
+      },
+      idle: { id: 'idle', states: { resting: {}, probing: {}, persisting: {} } },
+      closing: { id: 'closing', states: { ending: {}, terminating: { states: { signalled: {}, killed: {} } } } },
+      closed: { id: 'closed', type: 'final' },
+    },
+  });
+
+type AcpStateSchema = StateSchemaFrom<ReturnType<typeof acpSessionShape>>;
+type AcpSessionMachine = StateMachine<
+  AcpSessionContext,
+  AcpSessionEvent,
+  { connection?: AnyActorRef | undefined; lentTurn?: AnyActorRef | undefined },
+  StateValueFromStateSchema<AcpStateSchema>,
+  'lent' | 'resting',
+  AcpSessionInput,
+  unknown,
+  Report | ProbeReport,
+  Record<string, unknown>,
+  AcpStateSchema,
+  Record<never, never>,
+  typeof actors,
+  Record<never, never>,
+  Record<never, never>,
+  never,
+  { tla: AcpSessionsAction }
+>;
 
 /**
  * One vendor ACP session: restore, the lent turn, cancel, and the close ladder (W10 EA-S5).
  *
  * @internal
  */
-export const acpSessionMachine = machineDefinition.createMachine({
+export const acpSessionMachine: AcpSessionMachine = machineDefinition.createMachine({
   id: 'acpSession',
   version: '2',
-  context: ({ input }) => ({
-    key: input.key,
-    parentRef: input.parentRef,
-    adapter: input.opening.adapter,
-    cwd: input.opening.cwd,
-    mcpServers: input.opening.mcpServers,
-    ...(input.opening.capabilityToken === undefined ? {} : { capabilityToken: input.opening.capabilityToken }),
-    ...(input.opening.mode === undefined ? {} : { mode: input.opening.mode }),
-    notices: input.opening.notices,
-    cwdMoved: input.opening.cwdMoved ?? false,
-    sessionMessageId: input.opening.sessionMessageId,
-    sessionCommitted: input.opening.sessionCommitted,
-    directories: [],
-    facts: { protocolVersion, agentCapabilities: undefined, authMethods: [], agentInfo: undefined },
-    pluginDirectories: false,
-    ...(input.opening.acpSessionId === undefined ? {} : { acpSessionId: input.opening.acpSessionId }),
-    contextLost: false,
-    fresh: false,
-    configOptions: undefined,
-    presentation: emptySessionPresentation,
-    priorUsage: input.opening.priorUsage,
-    limit: input.opening.limit,
-    calls: 0,
-    exited: false,
-    stderr: '',
-    ...(input.lend === undefined ? {} : { opening: input.lend }),
-    dirty: false,
-    stale: false,
-  }),
+  context: initialContext,
   invoke: {
     id: 'connection',
     src: 'adapterConnection',
-    input: ({ context }) => ({ adapter: context.adapter, cwd: context.cwd }),
+    input: ({ context }: { readonly context: AcpSessionContext }) => ({ adapter: context.adapter, cwd: context.cwd }),
   },
   /*
    * A fault (MC-R12): a transition threw. The turn in hand is answered with it, and the child
@@ -1249,7 +1291,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
       invoke: {
         id: 'lentTurn',
         src: 'lentTurn',
-        input: ({ context }) => ({
+        input: ({ context }: { readonly context: AcpBusyContext }) => ({
           requestId: context.lent.requestId,
           key: context.key,
           adapter: context.adapter,
@@ -1573,7 +1615,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
         persisting: {
           invoke: {
             src: 'persistPresentation',
-            input: ({ context }) => ({
+            input: ({ context }: { readonly context: AcpSessionContext }) => ({
               key: context.key,
               agentId: context.adapter.id,
               sessionMessageId: context.sessionMessageId,
@@ -1636,14 +1678,14 @@ export const acpSessionMachine = machineDefinition.createMachine({
           states: {
             /* E17: SIGTERM to the group, then acpKillGrace before SIGKILL. */
             signalled: {
-              entry: (_args, enq) => {
+              entry: (_args: unknown, enq: Enqueue) => {
                 enq.sendTo('connection', { type: 'terminate' });
               },
               timeout: acpKillGrace,
               onTimeout: refines('Stutter', () => ({ target: 'killed' })),
             },
             killed: {
-              entry: (_args, enq) => {
+              entry: (_args: unknown, enq: Enqueue) => {
                 enq.sendTo('connection', { type: 'kill' });
               },
             },
@@ -1655,7 +1697,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
     closed: {
       id: 'closed',
       type: 'final',
-      entry: ({ context }, enq) => {
+      entry: ({ context }: { readonly context: AcpSessionContext & { readonly deferred?: Report } }, enq: Enqueue) => {
         if (context.deferred !== undefined) {
           tell(context, enq, context.deferred);
         }

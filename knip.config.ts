@@ -72,6 +72,9 @@ const config: KnipConfig = {
   ],
 
   ignoreDependencies: [
+    // The docs collections generate under the root node_modules/.cache and import
+    // fumadocs-mdx/runtime from there, so it must resolve from the workspace root.
+    'fumadocs-mdx',
     'oxlint',
     'oxlint-tsgolint',
     'copy-files-from-to',

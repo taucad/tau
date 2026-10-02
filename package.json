@@ -149,6 +149,7 @@
     "fake-indexeddb": "catalog:",
     "fast-check": "catalog:",
     "fastify": "catalog:",
+    "fumadocs-mdx": "15.4.0",
     "fumadocs-ui": "^16.10.4",
     "geist": "catalog:",
     "hast-util-sanitize": "catalog:",

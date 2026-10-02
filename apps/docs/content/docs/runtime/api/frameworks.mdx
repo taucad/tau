@@ -124,8 +124,8 @@ Application renderer code needs only the high-level options provider:
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
 
-const provideClientOptions = createElectronClientOptions({ renderTimeout: 60_000 });
-const client = createRuntimeClient(await provideClientOptions());
+const provideClientOptions = createElectronClientOptions();
+const client = createRuntimeClient({ ...(await provideClientOptions()), operationTimeout: 60_000 });
 ```
 
 `requestElectronRuntimePort()`, `getElectronRuntimeBridge()`, `awaitElectronRuntimePort()`, and the bridge types are escape hatches for alternate globals or host adapters, as are the wire pieces `electronRuntimeChannel`, `electronUtilityTransport` (`ElectronUtilityTransportOptions`), `electronUtilityClient`, `electronUtilityClientDescribe`, and `electronUtilityHost` (`ElectronUtilityHostOptions`). Application code should not handle opaque host IDs or call `releaseRuntimeHost()` directly.
@@ -140,10 +140,9 @@ import { createWebWorkerClientOptions } from '@taucad/runtime/transport/web';
 
 const clientOptions = createWebWorkerClientOptions({
   createWorker: () => new Worker(new URL('./runtime.worker.ts', import.meta.url), { type: 'module' }),
-  renderTimeout: 60_000,
 });
 
-const client = createRuntimeClient(clientOptions);
+const client = createRuntimeClient({ ...clientOptions, operationTimeout: 60_000 });
 ```
 
 <auto-type-table path='./props/frameworks.ts' name='WebWorkerClientOptionsInput' />

@@ -1,8 +1,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type { ProjectManifest } from '@taucad/project-core';
-import type { RuntimeSourceSnapshotFile } from '@taucad/runtime/client';
-import type { ExportFile } from '@taucad/runtime/types';
+import type { RuntimeDocument } from '@taucad/runtime/client';
+import type { ExportFile, RuntimeSourceSnapshotFile } from '@taucad/runtime/types';
 import { exportTauProjectArtifact } from '#config/tau-project-artifact.js';
 import type { GeoSpecTauProjectRuntime } from '#config/tau-project-artifact.js';
 import type { GeoSpecExportRoute } from '#model/export-intent.js';
@@ -93,9 +93,14 @@ const run = async (options?: {
   });
   const exportRuntime = mock<GeoSpecTauProjectRuntime>();
   exportRuntime.bestRouteFor.mockReturnValue(options?.exportRoute ?? options?.snapshotRoute ?? route);
-  exportRuntime.export.mockResolvedValue({
+  const exportDocument = mock<RuntimeDocument>();
+  exportRuntime.open.mockReturnValue(exportDocument);
+  const [primary = artifact, ...companions] = options?.artifacts ?? [artifact];
+  exportDocument.export.mockResolvedValue({
     success: true,
-    data: options?.artifacts ?? [artifact],
+    exportId: options?.format ?? 'step',
+    evaluationId: 'evaluation-1',
+    files: [primary, ...companions],
     issues: [],
   });
   const createRuntime = vi.fn().mockResolvedValueOnce(sourceRuntime).mockResolvedValueOnce(exportRuntime);
@@ -114,6 +119,7 @@ const run = async (options?: {
     createRuntime,
     entryBytes,
     exportRuntime,
+    exportDocument,
     files,
     manifestBytes,
     result,
@@ -177,7 +183,7 @@ describe('exportTauProjectArtifact', () => {
       source: { path: 'parts/bracket/src/model.ts' },
       additionalPaths: [{ path: 'parts/bracket/tau.json', required: true }],
     });
-    expect(fixture.exportRuntime.export).toHaveBeenCalledWith('step', {
+    expect(fixture.exportRuntime.open).toHaveBeenCalledWith({
       source: {
         files: {
           'parts/bracket/src/model.ts': fixture.entryBytes,
@@ -186,21 +192,18 @@ describe('exportTauProjectArtifact', () => {
         entry: 'parts/bracket/src/model.ts',
       },
       parameters: { width: 10 },
-      exportOptions: { coordinateSystem: 'z-up' },
     });
+    expect(fixture.exportDocument.export).toHaveBeenCalledWith('step', { options: { coordinateSystem: 'z-up' } });
     expect(fixture.sourceRuntime.snapshotSource.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.sourceRuntime.bestRouteFor.mock.invocationCallOrder[0]!,
     );
-    expect(fixture.exportRuntime.export.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(fixture.exportDocument.export.mock.invocationCallOrder[0]).toBeLessThan(
       fixture.exportRuntime.bestRouteFor.mock.invocationCallOrder[0]!,
     );
     expect(fixture.createRuntime).toHaveBeenCalledTimes(2);
-    expect(fixture.sourceRuntime.shutdown).toHaveBeenCalledWith({
-      drain: true,
-    });
-    expect(fixture.exportRuntime.shutdown).toHaveBeenCalledWith({
-      drain: true,
-    });
+    expect(fixture.exportDocument.close).toHaveBeenCalledOnce();
+    expect(fixture.sourceRuntime.shutdown).toHaveBeenCalledWith();
+    expect(fixture.exportRuntime.shutdown).toHaveBeenCalledWith();
   });
 
   it('rotates source/finalized identity on edits and recovers it on revert', async () => {
@@ -287,7 +290,7 @@ describe('exportTauProjectArtifact', () => {
         },
       ],
     });
-    expect(fixture.exportRuntime.export).toHaveBeenCalledOnce();
+    expect(fixture.exportDocument.export).toHaveBeenCalledOnce();
   });
 
   it('refuses stale imported manifest data and unusable multi-file output', async () => {

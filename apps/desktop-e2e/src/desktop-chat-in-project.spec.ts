@@ -104,14 +104,14 @@ test('builds an openrscad model on disk from the project chat', async () => {
   const token = await seedTauTestUser(account);
   session = await launchDesktopApp({ token });
   const { page } = session;
-  /* The scripted turn runs the kernel as well as writing it: `get_kernel_result`
+  /* The scripted turn runs the kernel as well as writing it: `evaluate_model`
    * is the only deterministic row that makes the services utility ask the
    * services host for the project's filesystem, which is where a refused root
    * shows up. */
   /* Scripted **per turn**, because this row runs two of them in one chat. The
    * same bytes twice would settle the second turn as `turn.finalized` with no
    * changed paths — nothing to save, so no `Rev n saved` marker — and the two
-   * identical `create_file`/`get_kernel_result` pairs are the exact alternation
+   * identical `create_file`/`evaluate_model` pairs are the exact alternation
    * the host's `ping_pong` safeguard nudges on, which re-enters the script and
    * writes `main.scad` a third time. */
   fixture = await startGatewayFixture({
@@ -120,7 +120,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
         name: 'create_file',
         input: { targetFile: 'main.scad', content: `${gatewayFixtureScadSource}// turn ${String(turn)}\n` },
       },
-      { name: 'get_kernel_result', input: { targetFile: 'main.scad' } },
+      { name: 'evaluate_model', input: { targetFile: 'main.scad' } },
     ],
   });
   await fixture.routeThrough(page);
@@ -151,7 +151,7 @@ test('builds an openrscad model on disk from the project chat', async () => {
      * so waiting on it is exact where the UI affordance is not. `cancelRun`
      * keeps its coverage in the external-write test.
      *
-     * Re-derived from the script above: `create_file`, then `get_kernel_result`,
+     * Re-derived from the script above: `create_file`, then `evaluate_model`,
      * then the round that finds no third call and closes the turn. */
     const scriptedRequestsPerTurn = 3;
     await expect

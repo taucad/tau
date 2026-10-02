@@ -51,7 +51,7 @@ vi.mock('#hooks/use-cad.js', () => ({
             parentRef: mockCadParentRef,
             entryPath: 'main.scad',
             kernelIssues: mockKernelIssues,
-            latestGeometryOutcome: mockLatestGeometryOutcome,
+            latestRenderingOutcome: mockLatestGeometryOutcome,
           },
           hasTag: (tag: string) => mockCadTags.has(tag),
         })

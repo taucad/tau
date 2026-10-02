@@ -136,6 +136,30 @@ describe('Desktop renderer ownership', () => {
     );
   });
 
+  it('should admit public operation errors while rejecting adjacent runtime execution modules', async () => {
+    const paths = await fixture();
+    const rejected = [
+      'packages/runtime/src/framework/cooperative-abort.ts',
+      'packages/runtime/src/framework/kernel-runtime-worker.ts',
+      'packages/plugins/openrscad/src/openrscad.kernel.ts',
+    ];
+    await writeFile(
+      join(paths.renderer, 'tau-module-graph-123.json'),
+      JSON.stringify({
+        chunks: [
+          {
+            fileName: 'renamed.js',
+            moduleIds: ['packages/runtime/src/framework/runtime-operation-errors.ts', ...rejected],
+          },
+        ],
+      }),
+    );
+    const report = await inspectDesktopPayload(paths);
+    expect(report.violations).toEqual(
+      rejected.map((moduleId) => `Renderer execution module in renamed.js: ${moduleId}`).sort(),
+    );
+  });
+
   it('should recognize fingerprinted React Router JSON without exempting appended execution', async () => {
     const paths = await fixture();
     const data = { entry: { module: '/renamed.js' }, routes: {} };

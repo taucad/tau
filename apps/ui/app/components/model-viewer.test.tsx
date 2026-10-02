@@ -1,6 +1,7 @@
 import { render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
-import type { Geometry } from '@taucad/types';
+import { createEmptyGlb } from '@taucad/geometry-core';
+import type { Artifact } from '@taucad/runtime';
 import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
 import type { ModelViewerProps } from '#components/model-viewer.js';
 
@@ -43,7 +44,8 @@ vi.mock('#machines/graphics.machine.js', () => ({
 
 // ── Test data ──────────────────────────────────────────────────────────
 
-const testGeometry: Geometry = { format: 'gltf', content: new Uint8Array([1, 2, 3]), hash: 'abc' };
+const testArtifact: Artifact = { mimeType: 'model/gltf-binary', content: new Uint8Array([1, 2, 3]) };
+const testHash = 'abc';
 
 // ── Tests ──────────────────────────────────────────────────────────────
 
@@ -58,27 +60,63 @@ describe('ModelViewer', () => {
 
   describe('rendering states', () => {
     it('should render loading indicator when geometry is absent', () => {
-      render(<ModelViewer geometry={undefined} />);
+      render(<ModelViewer artifact={undefined} artifactHash={undefined} />);
 
       expect(screen.getByTestId('loader')).toBeInTheDocument();
       expect(screen.getByRole('status')).toHaveAttribute('aria-label', 'Loading preview');
     });
 
     it('should default to loading when geometry is absent and viewerState is omitted', () => {
-      render(<ModelViewer geometry={undefined} />);
+      render(<ModelViewer artifact={undefined} artifactHash={undefined} />);
 
       expect(screen.getByTestId('loader')).toBeInTheDocument();
     });
 
+    it('clears the prior graphics actor on a successful empty GLB', () => {
+      const viewer = render(<ModelViewer artifact={testArtifact} artifactHash={testHash} />);
+      mockSend.mockClear();
+      viewer.rerender(
+        <ModelViewer artifact={{ mimeType: 'model/gltf-binary', content: createEmptyGlb() }} artifactHash='empty' />,
+      );
+
+      expect(mockSend).toHaveBeenCalledWith({ type: 'clearArtifact' });
+      expect(screen.getByRole('status', { name: 'Empty model' })).toBeInTheDocument();
+      expect(screen.queryByTestId('cad-viewer')).not.toBeInTheDocument();
+    });
+
+    it('clears graphics for settled no-artifact success and unknown media, but retains them on failure', () => {
+      const viewer = render(<ModelViewer artifact={testArtifact} artifactHash={testHash} />);
+      mockSend.mockClear();
+      viewer.rerender(
+        <ModelViewer artifact={undefined} artifactHash={undefined} viewerState='ready' error={new Error('failed')} />,
+      );
+      expect(mockSend).not.toHaveBeenCalledWith({ type: 'clearArtifact' });
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+
+      viewer.rerender(<ModelViewer artifact={undefined} artifactHash={undefined} viewerState='ready' />);
+      expect(mockSend).toHaveBeenCalledWith({ type: 'clearArtifact' });
+      expect(screen.getByRole('status', { name: 'Empty model' })).toBeInTheDocument();
+
+      mockSend.mockClear();
+      viewer.rerender(
+        <ModelViewer
+          artifact={{ mimeType: 'application/octet-stream', content: new Uint8Array([1]) }}
+          artifactHash='unknown'
+        />,
+      );
+      expect(mockSend).toHaveBeenCalledWith({ type: 'clearArtifact' });
+      expect(screen.getByRole('status', { name: 'Unsupported preview format' })).toBeInTheDocument();
+    });
+
     it('should show loading when viewerState is loading even with geometry present', () => {
-      render(<ModelViewer geometry={testGeometry} viewerState='loading' />);
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} viewerState='loading' />);
 
       expect(screen.getByTestId('loader')).toBeInTheDocument();
       expect(screen.queryByTestId('cad-viewer')).not.toBeInTheDocument();
     });
 
     it('should render CadViewer when geometry is provided', () => {
-      render(<ModelViewer geometry={testGeometry} />);
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} />);
 
       expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
       expect(screen.queryByTestId('loader')).not.toBeInTheDocument();
@@ -87,7 +125,7 @@ describe('ModelViewer', () => {
     it('should render a blocking error state when error is provided without geometry', () => {
       const error = new Error('Something went wrong');
 
-      render(<ModelViewer geometry={undefined} error={error} />);
+      render(<ModelViewer artifact={undefined} artifactHash={undefined} error={error} />);
 
       const alert = screen.getByRole('alert', { name: 'CAD runtime error' });
       expect(alert).toHaveTextContent('Preview could not load. Open the project to see the error.');
@@ -98,7 +136,7 @@ describe('ModelViewer', () => {
     });
 
     it('should retain geometry and show a non-blocking alert after a failed rerender', () => {
-      render(<ModelViewer geometry={testGeometry} error={new Error('rerender sentinel')} />);
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} error={new Error('rerender sentinel')} />);
 
       expect(screen.getByTestId('cad-viewer')).toBeInTheDocument();
       expect(screen.getByRole('alert', { name: 'CAD runtime error' })).toHaveTextContent('rerender sentinel');
@@ -109,19 +147,19 @@ describe('ModelViewer', () => {
 
   describe('viewer props forwarding', () => {
     it('should forward enablePan to CadViewer', () => {
-      render(<ModelViewer geometry={testGeometry} enablePan />);
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} enablePan />);
 
       expect(screen.getByTestId('cad-viewer')).toHaveAttribute('data-enable-pan', 'true');
     });
 
     it('should forward enableZoom to CadViewer', () => {
-      render(<ModelViewer geometry={testGeometry} enableZoom />);
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} enableZoom />);
 
       expect(screen.getByTestId('cad-viewer')).toHaveAttribute('data-enable-zoom', 'true');
     });
 
     it('should apply className to the container', () => {
-      render(<ModelViewer geometry={testGeometry} className='custom-class' />);
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} className='custom-class' />);
 
       expect(screen.getByRole('img')).toHaveClass('custom-class');
     });
@@ -131,20 +169,21 @@ describe('ModelViewer', () => {
 
   describe('graphics machine integration', () => {
     it('should send updateGeometry to graphicsMachine when geometry is provided', () => {
-      render(<ModelViewer geometry={testGeometry} />);
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} />);
 
       expect(mockSend).toHaveBeenCalledWith(
         expect.objectContaining({
-          type: 'updateGeometry',
-          geometry: testGeometry,
+          type: 'updateArtifact',
+          artifact: testArtifact,
+          hash: testHash,
         }),
       );
     });
 
     it('should not send updateGeometry when geometry is absent', () => {
-      render(<ModelViewer geometry={undefined} />);
+      render(<ModelViewer artifact={undefined} artifactHash={undefined} />);
 
-      expect(mockSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'updateGeometry' }));
+      expect(mockSend).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'updateArtifact' }));
     });
   });
 
@@ -156,13 +195,18 @@ describe('ModelViewer', () => {
       const externalRef = { send: externalSend, getSnapshot: () => ({ context: {} }) };
 
       render(
-        <ModelViewer geometry={testGeometry} graphicsRef={externalRef as unknown as ModelViewerProps['graphicsRef']} />,
+        <ModelViewer
+          artifact={testArtifact}
+          artifactHash={testHash}
+          graphicsRef={externalRef as unknown as ModelViewerProps['graphicsRef']}
+        />,
       );
 
       expect(externalSend).toHaveBeenCalledWith(
         expect.objectContaining({
-          type: 'updateGeometry',
-          geometry: testGeometry,
+          type: 'updateArtifact',
+          artifact: testArtifact,
+          hash: testHash,
         }),
       );
       expect(mockUseActorRef).not.toHaveBeenCalled();
@@ -172,14 +216,18 @@ describe('ModelViewer', () => {
       const externalRef = { send: vi.fn(), getSnapshot: () => ({ context: {} }) };
 
       render(
-        <ModelViewer geometry={undefined} graphicsRef={externalRef as unknown as ModelViewerProps['graphicsRef']} />,
+        <ModelViewer
+          artifact={undefined}
+          artifactHash={undefined}
+          graphicsRef={externalRef as unknown as ModelViewerProps['graphicsRef']}
+        />,
       );
 
       expect(mockUseActorRef).not.toHaveBeenCalled();
     });
 
     it('should create internal graphicsMachine when no external graphicsRef is provided', () => {
-      render(<ModelViewer geometry={testGeometry} />);
+      render(<ModelViewer artifact={testArtifact} artifactHash={testHash} />);
 
       expect(mockUseActorRef).toHaveBeenCalled();
     });
@@ -189,7 +237,8 @@ describe('ModelViewer', () => {
 
       render(
         <ModelViewer
-          geometry={testGeometry}
+          artifact={testArtifact}
+          artifactHash={testHash}
           graphicsRef={externalRef as unknown as ModelViewerProps['graphicsRef']}
           enablePan
         />,
@@ -203,7 +252,11 @@ describe('ModelViewer', () => {
       const externalRef = { send: vi.fn(), getSnapshot: () => ({ context: {} }) };
 
       render(
-        <ModelViewer geometry={undefined} graphicsRef={externalRef as unknown as ModelViewerProps['graphicsRef']} />,
+        <ModelViewer
+          artifact={undefined}
+          artifactHash={undefined}
+          graphicsRef={externalRef as unknown as ModelViewerProps['graphicsRef']}
+        />,
       );
 
       expect(screen.getByTestId('loader')).toBeInTheDocument();
@@ -215,7 +268,8 @@ describe('ModelViewer', () => {
 
       render(
         <ModelViewer
-          geometry={testGeometry}
+          artifact={testArtifact}
+          artifactHash={testHash}
           graphicsRef={externalRef as unknown as ModelViewerProps['graphicsRef']}
           error={error}
         />,
@@ -230,21 +284,21 @@ describe('ModelViewer', () => {
 
 describe('RuntimeStatusOverlay', () => {
   it('should render status overlay when status is connecting', () => {
-    render(<RuntimeStatusOverlay status='connecting' />);
+    render(<RuntimeStatusOverlay status='evaluating' />);
 
     expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.getByText('connecting...')).toBeInTheDocument();
+    expect(screen.getByText('evaluating...')).toBeInTheDocument();
   });
 
   it('should render status overlay when status is rendering', () => {
-    render(<RuntimeStatusOverlay status='rendering' />);
+    render(<RuntimeStatusOverlay status='evaluating' />);
 
     expect(screen.getByRole('status')).toBeInTheDocument();
-    expect(screen.getByText('rendering...')).toBeInTheDocument();
+    expect(screen.getByText('evaluating...')).toBeInTheDocument();
   });
 
   it('should render nothing when status is idle', () => {
-    const { container } = render(<RuntimeStatusOverlay status='idle' />);
+    const { container } = render(<RuntimeStatusOverlay status='closed' />);
 
     expect(container.innerHTML).toBe('');
   });
@@ -256,7 +310,7 @@ describe('RuntimeStatusOverlay', () => {
   });
 
   it('should apply custom className to the overlay', () => {
-    render(<RuntimeStatusOverlay status='rendering' className='custom-position' />);
+    render(<RuntimeStatusOverlay status='evaluating' className='custom-position' />);
 
     expect(screen.getByRole('status')).toHaveClass('custom-position');
   });

@@ -95,7 +95,7 @@ vi.mock('#components/markdown/markdown-viewer.js', () => ({
   },
 }));
 
-type KernelInvocation = ToolInvocation<typeof toolName.getKernelResult>;
+type KernelInvocation = ToolInvocation<typeof toolName.evaluateModel>;
 type KernelOutputAvailable = Extract<KernelInvocation, { state: 'output-available' }>;
 type KernelInputAvailable = Extract<KernelInvocation, { state: 'input-available' }>;
 

@@ -6,7 +6,20 @@ const hex = (bytes: ArrayBuffer): string =>
 
 describe('browser skill resources', () => {
   it('should fetch every declared package resource with its generated identity', async () => {
-    expect(systemSkillBundles).toHaveLength(9);
+    expect(systemSkillBundles.map(({ slug }) => slug)).toEqual([
+      'cad-replicad',
+      'workbench',
+      'cad-jscad',
+      'cad-manifold',
+      'cad-opencascadejs',
+      'cad-build123d',
+      'cad-openscad',
+      'cad-picogk',
+      'cad-picovoxel',
+      'cad-zoo',
+      'cad-tscircuit',
+      'geospec-authoring',
+    ]);
 
     await Promise.all(
       systemSkillBundles.flatMap((bundle) =>

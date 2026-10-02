@@ -12,12 +12,15 @@ import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
 import { digest, identity } from '#host/node-machine-context.js';
-import type { NodeMachineHostContext } from '#host/node-machine-context.js';
+import type {
+  CompleteNodeMachineBindingInput,
+  NodeMachineHostContext,
+  RemoveNodeMachineBindingInput,
+} from '#host/node-machine-context.js';
 import { bindingBusyStates } from '#host/node-machine-print-requests.js';
 import { machineDisplayName } from '#host/node-machine-store.js';
 import type { MachineBindingRecord } from '#host/node-machine-store.js';
 import type { NodeMachineSupervision } from '#host/node-machine-supervision.js';
-import type { CompleteNodeMachineBindingInput, NodeMachineHost, RemoveNodeMachineBindingInput } from '#host/node.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
 import type { MachineBindingRemoval } from '#machines/machine-client.js';
 import { machineCredentialReference } from '#machines/machine-credential.js';
@@ -27,7 +30,10 @@ const candidateSchema = z.strictObject({
   id: identity,
   name: identity,
   endpoint: z.strictObject({ address: identity, interface: identity }),
-  claimedIdentity: z.strictObject({ serial: identity.optional(), model: identity.optional() }),
+  claimedIdentity: z.strictObject({
+    serial: identity.optional(),
+    model: identity.optional(),
+  }),
   observedAt: z.iso.datetime({ offset: true }),
   expiresAt: z.iso.datetime({ offset: true }),
 });
@@ -36,8 +42,15 @@ const trustSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('pinned'), digest }),
 ]);
 const discoveryEventSchema = z.discriminatedUnion('type', [
-  z.strictObject({ type: z.enum(['found', 'updated']), candidate: candidateSchema }),
-  z.strictObject({ type: z.literal('lost'), candidateId: identity, observedAt: z.iso.datetime({ offset: true }) }),
+  z.strictObject({
+    type: z.enum(['found', 'updated']),
+    candidate: candidateSchema,
+  }),
+  z.strictObject({
+    type: z.literal('lost'),
+    candidateId: identity,
+    observedAt: z.iso.datetime({ offset: true }),
+  }),
 ]);
 const discoveryLimits = {
   code: 'NODE_MACHINE_DISCOVERY',
@@ -53,8 +66,8 @@ const connectionContextSchema = z.strictObject({
 /** What discovery and binding serve: the channel's operations and the host's trusted ceremony completion. @internal */
 export type NodeMachineBindings = Readonly<{
   operations: Pick<MachineChannelHostOperations, 'discover' | 'beginBinding' | 'removeBinding'>;
-  completeBinding: NodeMachineHost['completeBinding'];
-  describeBinding: NodeMachineHost['describeBinding'];
+  completeBinding(input: CompleteNodeMachineBindingInput): Promise<MachineBindingOutcome>;
+  describeBinding(ceremonyId: string): Readonly<{ providerId: string; candidate: MachineCandidate }> | undefined;
   /** Unbind one machine; a channel removal checks its admission through `assertCurrent` once it is queued. */
   removeBinding(
     removal: RemoveNodeMachineBindingInput & Readonly<{ assertCurrent?(): void }>,
@@ -124,7 +137,10 @@ export const createNodeMachineBindings = (
       throw new Error('MACHINE_BINDING_UNKNOWN_CEREMONY');
     }
     const connection = Object.freeze(
-      connectionContextSchema.parse({ secretRef: bindingInput.secretRef, serviceTrust: bindingInput.serviceTrust }),
+      connectionContextSchema.parse({
+        secretRef: bindingInput.secretRef,
+        serviceTrust: bindingInput.serviceTrust,
+      }),
     );
     const definition = await definitionOf(pending.providerId);
     const abort = new AbortController();
@@ -169,7 +185,10 @@ export const createNodeMachineBindings = (
           boundAt: now(),
           last: { descriptor, snapshot, observedAt: now() },
         });
-        machines.set(created.record.id, { record: created.record, operations: { status: 'open', log: created.log } });
+        machines.set(created.record.id, {
+          record: created.record,
+          operations: { status: 'open', log: created.log },
+        });
         return created.record;
       });
       try {
@@ -297,11 +316,21 @@ export const createNodeMachineBindings = (
             if (!discovered.has(key) && discovered.size >= 256) {
               throw new Error('MACHINE_DISCOVERY_CANDIDATE_LIMIT');
             }
-            discovered.set(key, Object.freeze({ providerId: source.id, configuration, candidate: event.candidate }));
+            discovered.set(
+              key,
+              Object.freeze({
+                providerId: source.id,
+                configuration,
+                candidate: event.candidate,
+              }),
+            );
           }
           yield event.type === 'lost'
             ? event
-            : Object.freeze({ ...event, candidate: await withCredentialFlag(source.id, event.candidate) });
+            : Object.freeze({
+                ...event,
+                candidate: await withCredentialFlag(source.id, event.candidate),
+              });
         }
       },
       async beginBinding(operationInput) {
@@ -317,7 +346,11 @@ export const createNodeMachineBindings = (
           !selected ||
           Date.parse(selected.candidate.expiresAt) <= Date.parse(context.runtime.discovery.clock.now()) ||
           // The saved-credential flag is this host's projection, not part of what the provider reported.
-          JSON.stringify(selected.candidate) !== JSON.stringify({ ...operationInput.candidate, credential: undefined })
+          JSON.stringify(selected.candidate) !==
+            JSON.stringify({
+              ...operationInput.candidate,
+              credential: undefined,
+            })
         ) {
           throw new Error('MACHINE_BINDING_CANDIDATE_EXPIRED');
         }
@@ -325,14 +358,20 @@ export const createNodeMachineBindings = (
           ({ record }) => record.providerId === selected.providerId && record.candidate.id === selected.candidate.id,
         );
         if (existing) {
-          return Object.freeze({ status: 'bound', machineId: existing.record.id });
+          return Object.freeze({
+            status: 'bound',
+            machineId: existing.record.id,
+          });
         }
         if (ceremonies.size >= 64) {
           throw new Error('MACHINE_BINDING_CEREMONY_LIMIT');
         }
         const ceremonyId = randomUUID();
         ceremonies.set(ceremonyId, Object.freeze({ ...selected, name }));
-        return Object.freeze({ status: 'operator-action-required', ceremonyId });
+        return Object.freeze({
+          status: 'operator-action-required',
+          ceremonyId,
+        });
       },
       async removeBinding(operationInput) {
         return removeBoundMachine({
@@ -347,7 +386,12 @@ export const createNodeMachineBindings = (
     completeBinding,
     describeBinding(ceremonyId) {
       const pending = ceremonies.get(ceremonyId);
-      return pending ? Object.freeze({ providerId: pending.providerId, candidate: pending.candidate }) : undefined;
+      return pending
+        ? Object.freeze({
+            providerId: pending.providerId,
+            candidate: pending.candidate,
+          })
+        : undefined;
     },
     removeBinding: removeBoundMachine,
     clear() {

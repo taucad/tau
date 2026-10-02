@@ -202,13 +202,17 @@ describe('webSocketHost (in-process, real ws server)', { concurrent: false }, ()
         compute: { mode: 'durable', store: fromSqlite({ store: compute, workspace: 'trusted-project' }) },
       }),
     });
+    const document = client.open({ source: { path: 'main.ts' } });
+    const view = document.view('model');
     try {
-      await expect(client.render({ source: { path: 'main.ts' } })).resolves.toMatchObject({
+      await expect(view.rendering()).resolves.toMatchObject({
         superseded: false,
-        geometry: { success: true },
+        rendering: { success: true },
       });
     } finally {
-      client.terminate();
+      view.close();
+      document.close();
+      await client.shutdown();
     }
   });
 
@@ -221,13 +225,17 @@ describe('webSocketHost (in-process, real ws server)', { concurrent: false }, ()
         pairingTimeout: 100,
       });
       const client = createRuntimeClient({ transport: webSocketTransport({ url, compute }) });
+      const document = client.open({ source: { path: 'main.ts' } });
+      const view = document.view('model');
       try {
-        await expect(client.render({ source: { path: 'main.ts' } })).resolves.toMatchObject({
+        await expect(view.rendering()).resolves.toMatchObject({
           superseded: false,
-          geometry: { success: true },
+          rendering: { success: true },
         });
       } finally {
-        client.terminate();
+        view.close();
+        document.close();
+        await client.shutdown();
       }
     },
   );
@@ -272,21 +280,25 @@ describe('webSocketHost (in-process, real ws server)', { concurrent: false }, ()
     const first = createRuntimeClient({ transport: webSocketTransport({ url }) });
     const second = createRuntimeClient({ transport: webSocketTransport({ url }) });
 
+    const firstDocument = first.open({ source: { path: 'main.ts' } });
+    const secondDocument = second.open({ source: { path: 'main.ts' } });
+    const firstView = firstDocument.view('model');
+    const secondView = secondDocument.view('model');
     try {
-      const [one, two] = await Promise.all([
-        first.render({ source: { path: 'main.ts' } }),
-        second.render({ source: { path: 'main.ts' } }),
-      ]);
+      const [one, two] = await Promise.all([firstView.rendering(), secondView.rendering()]);
       if (one.superseded || two.superseded) {
         throw new Error('Expected both socket clients to settle their own render');
       }
-      await geometryHelpers.expectValidGltf(one.geometry);
-      await geometryHelpers.expectValidGltf(two.geometry);
-      await geometryHelpers.expectMeshCount(one.geometry, 1);
-      await geometryHelpers.expectMeshCount(two.geometry, 1);
+      await geometryHelpers.expectValidGltf(one.rendering);
+      await geometryHelpers.expectValidGltf(two.rendering);
+      await geometryHelpers.expectMeshCount(one.rendering, 1);
+      await geometryHelpers.expectMeshCount(two.rendering, 1);
     } finally {
-      first.terminate();
-      second.terminate();
+      firstView.close();
+      secondView.close();
+      firstDocument.close();
+      secondDocument.close();
+      await Promise.all([first.shutdown(), second.shutdown()]);
     }
   });
 
@@ -366,15 +378,19 @@ describe('webSocketHost (in-process, real ws server)', { concurrent: false }, ()
       }),
     });
 
+    const document = client.open({ source: { path: 'main.ts' } });
+    const view = document.view('model');
     try {
-      const result = await client.render({ source: { path: 'main.ts' } });
+      const result = await view.rendering();
       if (result.superseded) {
         throw new Error('Expected the shared-server render to settle');
       }
-      await geometryHelpers.expectValidGltf(result.geometry);
-      await geometryHelpers.expectMeshCount(result.geometry, 1);
+      await geometryHelpers.expectValidGltf(result.rendering);
+      await geometryHelpers.expectMeshCount(result.rendering, 1);
     } finally {
-      client.terminate();
+      view.close();
+      document.close();
+      await client.shutdown();
     }
   }, 30_000);
 
@@ -416,14 +432,18 @@ describe('webSocketHost (in-process, real ws server)', { concurrent: false }, ()
       transport: webSocketTransport({ url: `${url}/?token=abc`, fileSystem: fromNodeFs(await makeRoot()) }),
     });
 
+    const document = client.open({ source: { path: 'main.ts' } });
+    const view = document.view('model');
     try {
-      const result = await client.render({ source: { path: 'main.ts' } });
+      const result = await view.rendering();
       if (result.superseded) {
         throw new Error('Expected the authorized render to settle');
       }
-      await geometryHelpers.expectValidGltf(result.geometry);
+      await geometryHelpers.expectValidGltf(result.rendering);
     } finally {
-      client.terminate();
+      view.close();
+      document.close();
+      await client.shutdown();
     }
 
     /* `buildSocketUrl` preserves the base URL's search params, so the token

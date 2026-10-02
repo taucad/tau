@@ -32,10 +32,10 @@ import {
   DropdownMenuSliderItem,
   preventMenuSliderEscapeDismissal,
 } from '#components/ui/menu-slider-item.js';
-import { defaultRenderTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '#constants/editor.constants.js';
 import { useCameraRig, useCameraSelector, useGraphics, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useCad, useCadSelector } from '#hooks/use-cad.js';
-import { selectCadRenderTimeout } from '#machines/cad.machine.js';
+import { selectCadOperationTimeout } from '#machines/cad.machine.js';
 import { clamp } from '#utils/number.utils.js';
 
 // Up direction options
@@ -58,7 +58,7 @@ const timeoutOptions: TimeoutOption[] = [
 ];
 
 const defaultTimeoutOption =
-  timeoutOptions.find((option) => option.value === defaultRenderTimeout) ?? timeoutOptions[0]!;
+  timeoutOptions.find((option) => option.value === defaultOperationTimeout) ?? timeoutOptions[0]!;
 
 const upDirectionOptions: Array<{ value: UpDirection; label: React.ReactNode; ariaLabel: string }> = [
   { value: 'x', label: <AxisLabel axis='x' />, ariaLabel: 'X-up' },
@@ -173,10 +173,10 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const enablePostProcessing = useGraphicsSelector((state) => state.context.enablePostProcessing);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
-  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
+  const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
 
   const cadRef = useCad();
-  const renderTimeout = useCadSelector(selectCadRenderTimeout, defaultRenderTimeout);
+  const operationTimeout = useCadSelector(selectCadOperationTimeout, defaultOperationTimeout);
 
   const handleMeshToggle = useCallback(
     (checked: boolean) => {
@@ -234,16 +234,16 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
     [graphicsRef],
   );
 
-  const handleRenderTimeoutChange = useCallback(
+  const handleOperationTimeoutChange = useCallback(
     (value: string) => {
-      cadRef?.send({ type: 'setRenderTimeout', renderTimeout: Number(value) });
+      cadRef?.send({ type: 'setOperationTimeout', operationTimeout: Number(value) });
     },
     [cadRef],
   );
 
   const currentTimeoutOption = useMemo(
-    () => timeoutOptions.find((option) => option.value === renderTimeout) ?? defaultTimeoutOption,
-    [renderTimeout],
+    () => timeoutOptions.find((option) => option.value === operationTimeout) ?? defaultTimeoutOption,
+    [operationTimeout],
   );
 
   const getTimeoutValue = useCallback((option: TimeoutOption): string => String(option.value), []);
@@ -366,7 +366,7 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
               <br /> Set to &quot;Disabled&quot; to turn off timeout.
             </InfoTooltip>
           }
-          onValueChange={handleRenderTimeoutChange}
+          onValueChange={handleOperationTimeoutChange}
         >
           <Timer />
           Timeout

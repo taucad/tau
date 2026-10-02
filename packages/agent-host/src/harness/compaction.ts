@@ -33,7 +33,7 @@ const compactableTools = new Set([
   'web_search',
   'web_browser',
   'use_skill',
-  'get_kernel_result',
+  'evaluate_model',
 ]);
 
 /** Typed failure used when compaction cannot restore provider headroom. @public */

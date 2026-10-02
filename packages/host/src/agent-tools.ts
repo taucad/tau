@@ -12,8 +12,8 @@
  * the native raster backend, which resolves and runs under plain Node — probed
  * on this machine at 512² webp in 16.6 ms cold and ~2.9 ms warm on the Metal
  * adapter (`substrate/capture/nanoraster-node-probe.txt`). `screenshot` and
- * `export_geometry` are therefore offered whenever a runtime client is
- * attached, exactly like `get_kernel_result`.
+ * `export_model` are therefore offered whenever a runtime client is
+ * attached, exactly like `evaluate_model`.
  *
  * `test_model` and `use_skill` were the two absentees, both for the same
  * reason: their adapters lived in `apps/ui`. They now live in
@@ -45,6 +45,7 @@ import {
 import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
+import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -97,7 +98,8 @@ export type HostExportFile = ExportFile;
  *
  * @public
  */
-export type HostRuntimeClient = Pick<RuntimeClient, 'evaluate' | 'export' | 'transcode' | 'connect' | 'capabilities'>;
+export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | 'connect' | 'capabilities'> &
+  Pick<RuntimeAgentClient, 'open'>;
 
 /** Filesystem capability the host tool registry consumes. @public */
 export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;
@@ -133,7 +135,7 @@ const issueMessage = (issues: ReadonlyArray<{ readonly message: string }>, fallb
  * 'error' }` with its kernel issues — so the only way to reach this is a child
  * that would not start, an engine that would not load, or a wire that died.
  * Routing that through `toRpcError` classified it by *message*: the G4 live
- * proof answered six `get_kernel_result` calls and one `screenshot` with
+ * proof answered six `evaluate_model` calls and one `screenshot` with
  * `{"errorCode":"IO_ERROR","message":"Runtime render failed"}` while the
  * daemon's log named the real cause, and `IO_ERROR` on a file the model had
  * just written reads as "your geometry is wrong". The reason now travels
@@ -267,6 +269,7 @@ export const createHostNativeGeoSpecRunner = async (
       import('geospec/runner/native'),
       import('@taucad/geospec-engine/node-filesystem'),
     ]);
+
     const filesystem = createNodeVmFileSystem(workspaceRoot);
     const runner = createNativeGeoSpecRunner({
       filesystem,
@@ -466,18 +469,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       return client;
     };
 
-    const runtime = {
-      async evaluate(input: Parameters<HostRuntimeClient['evaluate']>[0]) {
-        const client = await requireRuntime(input);
-        return client.evaluate(input);
-      },
-      async export(format: string, exportOptions: Parameters<HostRuntimeClient['export']>[1]) {
-        const client = await requireRuntime(exportOptions);
-        return client.export(format, exportOptions);
-      },
-    };
     const { kernelClient, graphics, images } = createRuntimeAgentClients({
-      runtime,
+      runtime: async () => requireRuntime(),
       mapRuntimeError: runtimeFailure,
       async exportImage(job) {
         const client = await requireRuntime(job);

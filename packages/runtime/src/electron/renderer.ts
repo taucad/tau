@@ -7,7 +7,7 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- public Electron renderer subpath */
 
 import { randomUuid } from '@taucad/utils/id';
-import type { RuntimeClientOptionsWithTransport } from '#client/runtime-client-core.js';
+import type { RuntimeClientOptionsWithTransport } from '#client/runtime-document-client-core.js';
 import { electronUtilityTransport } from '#electron/electron-utility-transport.js';
 import type { ElectronUtilityTransportOptions } from '#electron/electron-utility-transport.schemas.js';
 import type { AnyRuntimeDefinition, RuntimeConfigInput, RuntimeConfigProvider } from '#worker/runtime-definition.js';
@@ -52,7 +52,7 @@ export type ElectronRuntimeRendererBridge = {
    * Release exactly one opaque utility host lease. Called by the transport;
    * application code should normally use `RuntimeClient.terminate()`.
    */
-  releaseRuntimeHost(hostId: string, reason: 'requested' | 'render-timeout'): void;
+  releaseRuntimeHost(hostId: string, reason: 'requested' | 'operation-timeout'): void;
 };
 
 /**
@@ -84,10 +84,10 @@ export type RequestElectronRuntimePortOptions = {
 export type ElectronClientOptionsInput<Runtime extends AnyRuntimeDefinition | undefined = undefined> =
   RequestElectronRuntimePortOptions & {
     /**
-     * Wall-clock deadline applied independently to each preview. Milliseconds.
+     * Wall-clock deadline applied independently to each operation. Milliseconds.
      * Zero disables timeout enforcement.
      */
-    readonly renderTimeout?: number;
+    readonly operationTimeout?: number;
     /**
      * Authenticated machines service brokered beside the runtime port, in the
      * WebSocket transport's `machines` shape. Absent, the client negotiates
@@ -294,7 +294,7 @@ export const requestElectronRuntimePort = async (
   /* `release()` asks main to kill the utility, so the exit relay it provokes
    * arrives *after* it. Dropping the listener here is what made every
    * release-first teardown report an unexplained exit. */
-  const release = (reason: 'requested' | 'render-timeout'): void => {
+  const release = (reason: 'requested' | 'operation-timeout'): void => {
     if (released) {
       return;
     }
@@ -333,20 +333,20 @@ export const requestElectronRuntimePort = async (
  * import { createRuntimeClient } from '@taucad/runtime/client';
  * import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
  *
- * const provideClientOptions = createElectronClientOptions({ renderTimeout: 60_000 });
+ * const provideClientOptions = createElectronClientOptions({ operationTimeout: 60_000 });
  * const client = createRuntimeClient(await provideClientOptions());
  * ```
  */
 export const createElectronClientOptions = <Runtime extends AnyRuntimeDefinition | undefined = undefined>(
   options: ElectronClientOptionsInput<Runtime> = {} as ElectronClientOptionsInput<Runtime>,
 ): (() => Promise<RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof electronUtilityTransport>>>) => {
-  const { config, machines, renderTimeout, ...portOptions } = options;
+  const { config, machines, operationTimeout, ...portOptions } = options;
   return async () => {
     const port = await requestElectronRuntimePort(portOptions);
     const clientOptions = {
       transport: electronUtilityTransport({ port, ...(machines === undefined ? {} : { machines }) }),
       ...(config === undefined ? {} : { config }),
-      ...(renderTimeout === undefined ? {} : { renderTimeout }),
+      ...(operationTimeout === undefined ? {} : { operationTimeout }),
     };
     return clientOptions as RuntimeClientOptionsWithTransport<Runtime, ReturnType<typeof electronUtilityTransport>>;
   };

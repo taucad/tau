@@ -1,32 +1,70 @@
 import { act, renderHook } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createEmptyGlb } from '@taucad/geometry-core';
 import type { HeadlessImageJob } from '#services/headless-image.service.js';
 
 const sourceEntryPath = 'src/main.ts';
 const geometryContent = new Uint8Array([0x67, 0x6c, 0x54, 0x46]);
+let geometryBytes: Uint8Array<ArrayBuffer> = geometryContent;
 let geometryFormat: 'gltf' | 'svg' = 'gltf';
+let emptyEvaluationId: string | undefined;
+let renderingNow = false;
+let openAttempt = 0;
+const currentArtifact = ():
+  | { mimeType: 'model/gltf-binary'; content: Uint8Array<ArrayBuffer> }
+  | { mimeType: 'image/svg+xml'; content: string } =>
+  geometryFormat === 'gltf'
+    ? { mimeType: 'model/gltf-binary', content: geometryBytes }
+    : { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
 const getSnapshot = vi.fn(() => ({
   context: {
     entryPath: sourceEntryPath,
-    geometry: {
-      format: geometryFormat,
-      content: geometryFormat === 'gltf' ? geometryContent : '<svg xmlns="http://www.w3.org/2000/svg"/>',
+    openAttempt,
+    rendering: {
+      success: true,
+      requestId: 'request-1',
+      evaluationId: 'evaluation-1',
+      transient: false,
+      view: 'model',
+      artifact: currentArtifact(),
       hash: 'geometry-hash',
+      issues: [],
     },
-    lastRequestedRenderId,
+    evaluation:
+      emptyEvaluationId === undefined
+        ? undefined
+        : {
+            id: emptyEvaluationId,
+            success: true,
+            transient: false,
+            views: [],
+            exports: [],
+            issues: [],
+          },
   },
+  matches: (state: string) => state === 'rendering' && renderingNow,
 }));
-let geometryListener: ((event: { geometry: { hash: string } }) => void) | undefined;
+type RenderEvent = {
+  rendering:
+    | {
+        success: true;
+        transient: boolean;
+        hash: string;
+        evaluationId: string;
+        artifact: { mimeType: 'model/gltf-binary' | 'image/svg+xml'; content: Uint8Array<ArrayBuffer> | string };
+      }
+    | { success: false; transient: boolean };
+};
+let renderingListener: ((event: RenderEvent) => void) | undefined;
 const unsubscribe = vi.fn();
-let lastRequestedRenderId = 0;
 let snapshotListener: ((snapshot: ReturnType<typeof getSnapshot>) => void) | undefined;
 const unsubscribeSnapshots = vi.fn();
 const subscribe = vi.fn((listener: (snapshot: ReturnType<typeof getSnapshot>) => void) => {
   snapshotListener = listener;
   return { unsubscribe: unsubscribeSnapshots };
 });
-const on = vi.fn((_event: string, listener: (event: { geometry: { hash: string } }) => void) => {
-  geometryListener = listener;
+const on = vi.fn((_event: string, listener: (event: RenderEvent) => void) => {
+  renderingListener = listener;
   return { unsubscribe };
 });
 
@@ -39,8 +77,9 @@ vi.mock('#hooks/use-project.js', () => ({
 }));
 
 const writeFile = vi.fn(async () => undefined);
+const deleteFile = vi.fn(async () => undefined);
 vi.mock('#hooks/use-file-manager.js', () => ({
-  useFileManager: () => ({ writeFile }),
+  useFileManager: () => ({ writeFile, deleteFile }),
 }));
 
 const webpBytes = (marker = 0): Uint8Array<ArrayBuffer> => {
@@ -79,14 +118,15 @@ const deferred = <T,>() => {
 
 const settle = (hash: string): void => {
   act(() => {
-    geometryListener?.({ geometry: { hash } });
-  });
-};
-
-const requestRender = (): void => {
-  lastRequestedRenderId += 1;
-  act(() => {
-    snapshotListener?.(getSnapshot());
+    renderingListener?.({
+      rendering: {
+        success: true,
+        transient: false,
+        hash,
+        evaluationId: 'evaluation-1',
+        artifact: getSnapshot().context.rendering.artifact,
+      },
+    });
   });
 };
 
@@ -100,10 +140,13 @@ describe('useThumbnailGenerator integration', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     vi.clearAllMocks();
-    geometryListener = undefined;
+    renderingListener = undefined;
     snapshotListener = undefined;
-    lastRequestedRenderId = 0;
     geometryFormat = 'gltf';
+    geometryBytes = geometryContent;
+    emptyEvaluationId = undefined;
+    renderingNow = false;
+    openAttempt = 0;
     getProjectFileSystemConfig.mockResolvedValue(locator);
     exportImage.mockResolvedValue(webpFile(1));
     writeFile.mockResolvedValue(undefined);
@@ -137,12 +180,54 @@ describe('useThumbnailGenerator integration', () => {
     expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', webpBytes(1), { source: 'machine' });
   });
 
-  it('should hold a pending thumbnail back while the main unit renders a newer request', async () => {
+  it('keeps the prior thumbnail on failure or transient output and clears it after a successful empty model', async () => {
+    renderHook(() => useThumbnailGenerator());
+    settle('committed-hash');
+    await advance(1000);
+    expect(writeFile).toHaveBeenCalledOnce();
+    act(() => {
+      renderingListener?.({ rendering: { success: false, transient: false } });
+      renderingListener?.({
+        rendering: {
+          success: true,
+          transient: true,
+          hash: 'drag-hash',
+          evaluationId: 'evaluation-1',
+          artifact: getSnapshot().context.rendering.artifact,
+        },
+      });
+    });
+    await advance(2000);
+    expect(exportImage).toHaveBeenCalledOnce();
+    expect(deleteFile).not.toHaveBeenCalled();
+    emptyEvaluationId = 'empty-evaluation';
+    act(() => {
+      snapshotListener?.(getSnapshot());
+    });
+    expect(deleteFile).toHaveBeenCalledWith('thumbnail.webp', { source: 'machine' });
+  });
+
+  it('clears a prior thumbnail for Replicad’s successful empty GLB model offer', async () => {
+    renderHook(() => useThumbnailGenerator());
+    settle('committed-hash');
+    await advance(1000);
+    expect(writeFile).toHaveBeenCalledOnce();
+
+    geometryBytes = createEmptyGlb();
+    settle('empty-glb-hash');
+    await advance(2000);
+
+    expect(deleteFile).toHaveBeenCalledWith('thumbnail.webp', { source: 'machine' });
+    expect(exportImage).toHaveBeenCalledOnce();
+    expect(writeFile).toHaveBeenCalledOnce();
+  });
+
+  it('debounces again when a newer committed rendering settles', async () => {
     renderHook(() => useThumbnailGenerator());
 
     settle('geometry-hash');
     await advance(900);
-    requestRender();
+    settle('newer-rendering-hash');
     await advance(900);
     expect(exportImage).not.toHaveBeenCalled();
 
@@ -183,6 +268,28 @@ describe('useThumbnailGenerator integration', () => {
     expect(exportImage).toHaveBeenCalledTimes(2);
     expect(writeFile).toHaveBeenCalledOnce();
     expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', webpBytes(2), { source: 'machine' });
+  });
+
+  it('should discard an in-flight artifact when a watched document starts another render', async () => {
+    const first = deferred<ReturnType<typeof webpFile>>();
+    exportImage.mockImplementationOnce(async () => first.promise).mockResolvedValueOnce(webpFile(2));
+    renderHook(() => useThumbnailGenerator());
+
+    settle('geometry-hash-1');
+    await advance(2000);
+    expect(exportImage).toHaveBeenCalledOnce();
+
+    act(() => {
+      renderingNow = true;
+      snapshotListener?.(getSnapshot());
+    });
+    first.resolve(webpFile(1));
+    await advance(0);
+    expect(writeFile).not.toHaveBeenCalled();
+
+    settle('geometry-hash-2');
+    await advance(2000);
+    expect(writeFile).toHaveBeenCalledExactlyOnceWith('thumbnail.webp', webpBytes(2), { source: 'machine' });
   });
 
   it('should recover from a failed request on a newer settlement without writing failed bytes', async () => {

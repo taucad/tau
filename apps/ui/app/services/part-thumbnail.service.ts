@@ -1,6 +1,11 @@
 import type { ExportFile } from '@taucad/types';
 import { Topic } from '@taucad/events';
-import type { HeadlessImageService } from '#services/headless-image.service.js';
+import type { HeadlessImageJob, HeadlessImageService } from '#services/headless-image.service.js';
+
+type BatchPreviewOptions = Extract<
+  Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'],
+  { mode: 'batch' }
+>;
 
 /** A source primitive instance, including its glTF node occurrence. */
 export type PartPrimitiveReference = Readonly<{
@@ -110,6 +115,7 @@ export class PartThumbnailService {
   }
 
   /** Combine simultaneous callers for the same presented unit without replacing each other's demand. */
+  /* oxlint-disable eslint/max-params -- Owner, source, visible parts, and optional retry target are independent admission inputs. */
   // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Owner, source, requested parts, and one optional retry target are independent admission inputs.
   public requestForOwner(
     owner: string,
@@ -121,6 +127,7 @@ export class PartThumbnailService {
     this.ownerDemands.set(owner, { source, parts: [...parts] });
     this.replaceRequest(source, this.partsFor(source), options);
   }
+  /* oxlint-enable eslint/max-params */
 
   /** Drop only this caller's rows; the other caller and its last-good previews remain. */
   public releaseOwner(owner: string): void {
@@ -370,25 +377,22 @@ export class PartThumbnailService {
         }
         const manualPart = missing.find((part) => part.id === work.manualPartId);
         const chunk = manualPart ? [manualPart] : missing.slice(0, batchSize);
-        const views = chunk.map(
-          (part, index) =>
-            ({
-              id: `part-${index}`,
-              visiblePrimitives: [...part.primitives],
-              camera: {
-                framing: 'fit',
-                direction: [0.6123724357, -0.6123724357, 0.5] as const,
-                up: [0, 0, 1] as const,
-                margin: 0.1,
-                projection: { kind: 'perspective', verticalFieldOfView: 45 },
-              },
-            }) as const,
-        );
+        const views = chunk.map((part, index): NonNullable<BatchPreviewOptions['views']>[number] => ({
+          id: `part-${index}`,
+          visiblePrimitives: part.primitives.map((primitive) => ({ ...primitive })),
+          camera: {
+            framing: 'fit',
+            direction: [0.6123724357, -0.6123724357, 0.5] satisfies [number, number, number],
+            up: [0, 0, 1] satisfies [number, number, number],
+            margin: 0.1,
+            projection: { kind: 'perspective', verticalFieldOfView: 45 },
+          },
+        }));
         const controller = new AbortController();
         this.activeAbort = controller;
         try {
           const content = work.source.renderContent?.() ?? work.source.content;
-          if (content.buffer.byteLength > maxSourceBytes) {
+          if (content.byteLength > maxSourceBytes) {
             throw new RangeError('Part thumbnail render source exceeds 64 MiB');
           }
           const files = await this.imageService.export({

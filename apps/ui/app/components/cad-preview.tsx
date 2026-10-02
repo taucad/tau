@@ -21,11 +21,11 @@ type CadPreviewViewerProps = {
   readonly graphicsOptions?: CadPreviewGraphicsOptions;
 };
 
-const cadPreviewStatusToViewerState = (status: CadPreviewStatus, hasGeometry: boolean): ModelViewerState => {
+const cadPreviewStatusToViewerState = (status: CadPreviewStatus, hasArtifact: boolean): ModelViewerState => {
   // Keep the last settled frame visible during parameter re-renders; only
   // block the viewport with a full-screen loader on the initial load.
   if (status === 'loading') {
-    return hasGeometry ? 'ready' : 'loading';
+    return hasArtifact ? 'ready' : 'loading';
   }
 
   return 'ready';
@@ -56,7 +56,7 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   stageOptions,
   graphicsOptions,
 }: CadPreviewViewerProps): React.JSX.Element {
-  const { geometry, graphicsRef, status, error } = useCadPreview();
+  const { artifact, artifactHash, graphicsRef, status, error } = useCadPreview();
   const enableLines = useSelector(graphicsRef, (state) => state.context.enableLines);
   const enableSurfaces = useSelector(graphicsRef, (state) => state.context.enableSurfaces);
   const enableMatcap = useSelector(graphicsRef, (state) => state.context.enableMatcap);
@@ -66,8 +66,9 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
 
   return (
     <ModelViewer
-      geometry={geometry}
-      viewerState={cadPreviewStatusToViewerState(status, Boolean(geometry))}
+      artifact={artifact}
+      artifactHash={artifactHash}
+      viewerState={cadPreviewStatusToViewerState(status, Boolean(artifact))}
       graphicsRef={graphicsRef}
       className={className}
       enablePan={enablePan}
@@ -101,5 +102,12 @@ type CadPreviewStatusProps = {
 export function CadPreviewStatus({ className }: CadPreviewStatusProps): React.ReactNode {
   const { status } = useCadPreview();
 
-  return <RuntimeStatusOverlay status={status === 'loading' ? 'rendering' : 'idle'} className={className} />;
+  return (
+    <RuntimeStatusOverlay
+      status={
+        status === 'loading' ? 'evaluating' : status === 'ready' ? 'ready' : status === 'error' ? 'error' : 'closed'
+      }
+      className={className}
+    />
+  );
 }

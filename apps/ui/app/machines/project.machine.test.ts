@@ -3,9 +3,10 @@ import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
 import { projectToManifest } from '@taucad/types';
 import { createMockRuntimeClient } from '@taucad/runtime-testing';
-import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
+import type { GeometryComponentManifest, ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { isProjectContentActivityPath, projectMachine, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
+import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { ProjectContext, ProjectLoadInput, ProjectRetrievedEvent } from '#machines/project.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { KernelOptionsFactory, LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
@@ -962,6 +963,91 @@ describe('projectMachine', () => {
   // State: ready – view graphics
   // =========================================================================
   describe('ready – view graphics', () => {
+    it('keeps a shared manifest while a sibling GLB pane is live and clears it after the last pane switches or closes', async () => {
+      const actor = await startAndLoad();
+      actor.send({ type: 'createViewGraphics', viewId: 'glb' });
+      actor.send({ type: 'createViewGraphics', viewId: 'sibling' });
+      const { viewGraphics, modelInteractionRef } = actor.getSnapshot().context;
+      const first = viewGraphics.get('glb')!;
+      const sibling = viewGraphics.get('sibling')!;
+      const unitId = deriveModelInteractionUnitId({ sourceFile: 'main.ts' });
+      const manifest: GeometryComponentManifest = {
+        schemaVersion: 1,
+        sourceFile: 'main.ts',
+        rootId: 'root',
+        nodeOrder: ['root'],
+        nodesById: {
+          root: {
+            id: 'root',
+            name: 'Model',
+            kind: 'model',
+            selector: 'root',
+            childIds: [],
+            depth: 0,
+            path: ['Model'],
+            meshNodeIndices: [],
+            primitiveIndices: [],
+            materialIndices: [],
+            capabilities: {
+              canHide: true,
+              canIsolate: true,
+              canFocus: true,
+              canAdjustOpacity: true,
+              hasDrawings: false,
+              hasPreciseTopology: false,
+              exports: [],
+            },
+          },
+        },
+        capabilities: {
+          canHide: true,
+          canIsolate: true,
+          canFocus: true,
+          canAdjustOpacity: true,
+          hasDrawings: false,
+          hasPreciseTopology: false,
+          exports: [],
+        },
+      };
+      const showGlb = (graphics: typeof first, hash: string): void => {
+        graphics.send({
+          type: 'updateArtifact',
+          artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array([1]) },
+          hash,
+          sourceFile: 'main.ts',
+        });
+        graphics.send({
+          type: 'gltfPresentationCommitted',
+          revision: graphics.getSnapshot().context.gltfPresentation.requestedRevision,
+          key: hash,
+          unitId,
+          manifest,
+        });
+      };
+      const showSvg = (graphics: typeof first): void => {
+        graphics.send({
+          type: 'updateArtifact',
+          artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg" />' },
+          hash: 'drawing',
+          sourceFile: 'main.ts',
+        });
+        actor.send({ type: 'reconcileViewManifest', unitId });
+      };
+
+      showGlb(first, 'first');
+      showGlb(sibling, 'second');
+      showSvg(first);
+      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
+      showSvg(sibling);
+      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBeUndefined();
+
+      showGlb(sibling, 'third');
+      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBe(manifest);
+      actor.send({ type: 'destroyViewGraphics', viewId: 'sibling' });
+      expect(getModelInteractionUnitState(modelInteractionRef.getSnapshot().context, unitId).manifest).toBeUndefined();
+      actor.stop();
+    });
+
     it('should create a graphics actor for a view', async () => {
       const actor = await startAndLoad();
       actor.send({ type: 'createViewGraphics', viewId: 'panel-1' });

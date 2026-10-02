@@ -9,7 +9,7 @@
 
 import { describe, expectTypeOf, it } from 'vitest';
 import type { JSONSchema7 } from '@taucad/json-schema';
-import type { ExportFidelity, FileExtension } from '@taucad/types';
+import type { ExportFidelity } from '@taucad/types';
 import type * as RuntimeTypes from '#types/runtime.types.js';
 import type { CapabilitiesManifest, ExportRoute, GetParametersResult, RenderCapability } from '#types/runtime.types.js';
 import type { KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
@@ -25,9 +25,9 @@ describe('ExportRoute target shape (wide default)', () => {
     expectTypeOf<ExportRoute['exportOptions']['schema']>().toEqualTypeOf<JSONSchema7>();
   });
 
-  it('should expose targetFormat and sourceFormat as FileExtension', () => {
-    expectTypeOf<ExportRoute['targetFormat']>().toEqualTypeOf<FileExtension>();
-    expectTypeOf<ExportRoute['sourceFormat']>().toEqualTypeOf<FileExtension>();
+  it('should expose open targetFormat and sourceFormat strings', () => {
+    expectTypeOf<ExportRoute['targetFormat']>().toEqualTypeOf<string>();
+    expectTypeOf<ExportRoute['sourceFormat']>().toEqualTypeOf<string>();
   });
 
   it('should expose fidelity as ExportFidelity', () => {

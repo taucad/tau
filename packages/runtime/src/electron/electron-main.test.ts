@@ -563,7 +563,7 @@ describe('Electron main runtime helpers', () => {
 
     listeners.get('taucad:connect-runtime:release')?.(
       { sender },
-      { hostId: firstPayload.hostId, reason: 'render-timeout' },
+      { hostId: firstPayload.hostId, reason: 'operation-timeout' },
     );
 
     const first = liveUtilities.at(-2);

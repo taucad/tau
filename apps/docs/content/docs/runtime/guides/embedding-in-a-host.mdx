@@ -39,7 +39,7 @@ const clientOptions = createWebWorkerClientOptions({
 const client = createRuntimeClient(clientOptions);
 await client.connect();
 
-const result = await client.export('glb', { source: { path: 'main.ts' } });
+const result = await client.open({ source: { path: 'main.ts' } }).export('glb');
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
 
 client.terminate();
@@ -120,12 +120,16 @@ Create the renderer client through the async options provider:
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
 
-const provideClientOptions = createElectronClientOptions({ renderTimeout: 60_000 });
+const provideClientOptions = createElectronClientOptions();
 
-export const createElectronRuntimeClient = async () => createRuntimeClient(await provideClientOptions());
+export const createElectronRuntimeClient = async () =>
+  createRuntimeClient({
+    ...(await provideClientOptions()),
+    operationTimeout: 60_000,
+  });
 ```
 
-Renderer code never handles the host ID or releases the lease itself; the transport releases it through the preload bridge on `terminate()` and on hard timeout recovery. The same helpers cover electron-vite 5/Vite 7 and electron-vite 6 beta/Vite 8. See [Bundling](./bundling#electron) for electron-vite configuration and [Configure Render Timeouts](./render-timeouts) for the typed restart flow.
+Renderer code never handles the host ID or releases the lease itself; the transport releases it through the preload bridge on `terminate()` and on hard timeout recovery. The same helpers cover electron-vite 5/Vite 7 and electron-vite 6 beta/Vite 8. See [Bundling](./bundling#electron) for electron-vite configuration and [Configure Operation Timeouts](./render-timeouts) for the typed restart flow.
 
 ## Lifecycle
 
@@ -133,15 +137,7 @@ The progression is `'unconnected' -> 'connecting' -> 'connected' -> 'terminated'
 
 ### Deterministic terminate() and graceful shutdown()
 
-`client.terminate()` is synchronous and observes seven invariants the host can rely on without timing-dependent choreography:
-
-1. `client.lifecycleState` becomes `'terminated'` synchronously.
-2. The transport's `close()` is invoked exactly once.
-3. Every in-flight `connect()` / `render()` / `updateParameters()` / `setOptions()` / `export()` Promise rejects on the next microtask with `RuntimeTerminatedError` (`causeKind: 'explicit'`).
-4. `client.on(...)` calls made after `terminate()` throw synchronously.
-5. Subsequent commands reject synchronously with `RuntimeTerminatedError` (`causeKind: 'explicit'`).
-6. A second `terminate()` is a no-op.
-7. Captured connect options are cleared, so a fresh client built from the same host primitives starts clean.
+`client.terminate()` synchronously closes admission and the owned transport. Pending operations reject with `RuntimeTerminatedError`; repeated termination is a no-op. Closing one client does not close another client's host lease. Create a new client to reconnect.
 
 For orderly shutdown paths (`beforeunload`, server graceful exit, test teardown), the asynchronous `shutdown({ drain? })` companion awaits in-flight intents first:
 
@@ -159,5 +155,5 @@ function attachShutdown(client: { shutdown: (opts: { drain?: boolean }) => Promi
 
 - [API Reference: Client](../api/client) — `RuntimeClient.connect` and the lifecycle taxonomy
 - [API Reference: Filesystem](../api/filesystem) — `RuntimeFileSystem` and the `from*` factories
-- [Live Rendering](./live-rendering) — Drive the autonomous loop once the wiring is in place
+- [Live Rendering](./live-rendering) — Observe documents and views after connecting
 - [Cross-Origin Isolation](./cross-origin-isolation) — COOP/COEP headers for transport-owned shared memory

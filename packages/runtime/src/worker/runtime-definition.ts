@@ -42,14 +42,27 @@ type PublicKernelPlugin<Plugin> =
     infer Id,
     infer RenderContent,
     infer ExportContent,
-    infer Extensions
+    infer Extensions,
+    infer EvaluateSchema,
+    infer Views,
+    infer Exports
   >
-    ? KernelPlugin<FormatMap, RenderOptions, Id, RenderContent, ExportContent, Extensions>
+    ? KernelPlugin<
+        FormatMap,
+        RenderOptions,
+        Id,
+        RenderContent,
+        ExportContent,
+        Extensions,
+        EvaluateSchema,
+        Views,
+        Exports
+      >
     : never;
 
 type PublicMiddlewarePlugin<Plugin> =
-  Plugin extends MiddlewarePlugin<infer Id, infer RenderContent, infer ExportContent>
-    ? MiddlewarePlugin<Id, RenderContent, ExportContent>
+  Plugin extends MiddlewarePlugin<infer Id, infer RenderContent, infer ExportContent, infer ViewContent>
+    ? MiddlewarePlugin<Id, RenderContent, ExportContent, ViewContent>
     : never;
 
 type PublicBundlerPlugin<Plugin> = Plugin extends BundlerPlugin<infer Id> ? BundlerPlugin<Id> : never;

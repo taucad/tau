@@ -11,6 +11,7 @@ import { esbuild } from '@taucad/esbuild';
 import { middleware } from '@taucad/middleware';
 import { replicad } from '@taucad/replicad';
 import { defineRuntime } from '@taucad/runtime/worker';
+import { tscircuit } from '@taucad/tscircuit';
 
 /**
  * Replicad + caches + esbuild. `geometryCache`/`parameterCache` are what put
@@ -18,7 +19,7 @@ import { defineRuntime } from '@taucad/runtime/worker';
  * crosses the `/fs` socket.
  */
 export const webSocketRuntime = defineRuntime({
-  plugins: [replicad(), esbuild(), middleware({ preset: 'cache' })],
+  plugins: [replicad(), esbuild(), middleware({ preset: 'cache' }), tscircuit()],
 });
 
 /**

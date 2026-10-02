@@ -72,7 +72,7 @@ The caller owns a client returned by `createTestRuntimeClient`. Always call `shu
 | Area                     | Exports                                                                                                                                         |
 | ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------- |
 | Integration harness      | `createTestRuntimeClient`, `createTestGeometry`, `getTestParameters`, type `CreateTestRuntimeClientOptions`                                     |
-| Result assertions        | `assertSuccess`, `assertFailure`, `createSuccessResult`, `createGltfSuccessResult`, `createErrorResult`                                         |
+| Result assertions        | `assertSuccess`, `assertFailure`, `createErrorResult`                                                                                           |
 | Runtime mocks            | `createMockLogger`, `createMockFileSystem`, `createMockKernelRuntime`, `createMockRuntime`, `createMockRuntimeClient`, `createMockDependencies` |
 | Middleware fixtures      | `createMockInput`, `createMockCreateGeometryHandler`, `createMockGetParametersHandler`                                                          |
 | Direct-definition helper | `createGeometryFile`, types `TestKernelDefinition`, `TestRuntimeDefinition`, `MockFileSystem`, `MockFileSystemMocks`, `MockFileSystemOptions`   |

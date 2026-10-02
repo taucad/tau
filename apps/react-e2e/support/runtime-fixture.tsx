@@ -3,6 +3,7 @@ import type { ReactElement } from 'react';
 import { useRuntime } from '@taucad/react';
 import type { UseRuntimeOptions, UseRuntimeTransportPlugin } from '@taucad/react';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
+import { asKnownArtifact } from '@taucad/runtime/client';
 import { getIsolationStatus } from '@taucad/runtime/cross-origin-isolation';
 import { summarizeGlb } from './glb-bounds';
 
@@ -24,16 +25,17 @@ export function RuntimeFixture<Runtime extends AnyRuntimeDefinition>({
     readonly isolation: 'isolated' | 'non-isolated';
     readonly sharedMemory: 'available' | 'unavailable';
   }>();
-  const runtimeState = useRuntime<Runtime, UseRuntimeTransportPlugin, InlineSourceFiles>(options);
-  const parameters = runtimeState.parameters as { radius?: unknown; height?: unknown };
-  const radius = Number(parameters.radius ?? 10);
-  const height = Number(parameters.height ?? 24);
+  const runtimeState = useRuntime(options);
+  const { parameters } = runtimeState;
+  const radius = Number(parameters['radius'] ?? 10);
+  const height = Number(parameters['height'] ?? 24);
   const geometrySummary = useMemo(() => {
-    if (runtimeState.geometry?.format !== 'gltf') {
+    const artifact = runtimeState.artifact && asKnownArtifact(runtimeState.artifact);
+    if (artifact?.mimeType !== 'model/gltf-binary') {
       return undefined;
     }
-    return summarizeGlb(new Uint8Array(runtimeState.geometry.content));
-  }, [runtimeState.geometry]);
+    return summarizeGlb(artifact.content);
+  }, [runtimeState.artifact]);
 
   useEffect(() => {
     const status = getIsolationStatus();
@@ -62,6 +64,7 @@ export function RuntimeFixture<Runtime extends AnyRuntimeDefinition>({
       <p role='status' aria-label='Runtime status'>
         {runtimeState.error ? 'error' : runtimeState.status}
       </p>
+      <output aria-label='Artifact status'>{runtimeState.artifactStatus}</output>
       {runtimeState.error ? (
         <p role='alert' aria-label='Runtime error'>
           {runtimeState.error.message}

@@ -3,8 +3,9 @@ import { z } from 'zod';
 import { createRuntimeClient } from '#client/runtime-client.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { definePlugin } from '#plugins/plugin.js';
+import type { CollectFormatMap, ExportOptionsFor, KernelExportContentFor } from '#plugins/plugin-types.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
+import { defineKernelV2, nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import type {
   RuntimeBundlers,
@@ -12,29 +13,35 @@ import type {
   RuntimeMiddleware,
   RuntimeTranscoders,
 } from '#worker/runtime-definition.js';
-// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
-import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
-
-const kernel = defineKernel({
+const kernel = defineKernelV2({
   id: 'typed-export',
   name: 'Typed export',
   version: '1.0.0',
   extensions: ['typed'],
-  exportFormats: { stl: { optionsSchema: z.object({ binary: z.boolean() }) } },
+  views: {},
+  exports: {
+    mesh: {
+      title: 'STL',
+      mimeType: 'model/stl',
+      extension: 'stl',
+      optionsSchema: z.object({ binary: z.boolean() }),
+      content: ['includeEdges'],
+    },
+  },
   async initialize() {
     return {};
   },
-  async getDependencies() {
+  async resolve() {
     return { resolved: [], unresolved: [] };
   },
-  async getParameters() {
-    return createParameterDeclaration();
+  async describe() {
+    return { success: false, issues: [] };
   },
-  async createGeometry() {
-    return { geometry: { format: 'gltf', content: new Uint8Array() }, nativeHandle: {} };
+  async evaluate() {
+    return { handle: {} };
   },
-  async exportGeometry() {
-    return { success: true, data: [], issues: [] };
+  async export() {
+    return { files: nonemptyExportFiles([{ name: 'model.stl', mimeType: 'model/stl', bytes: new Uint8Array([1]) }]) };
   },
 });
 
@@ -46,16 +53,31 @@ const toolkit = definePlugin({
 
 describe('runtime capability tuple composition', () => {
   it('should preserve a singleton toolkit export when direct buckets are omitted', async () => {
+    const registration = kernel();
+    expectTypeOf<CollectFormatMap<readonly [typeof registration]>['stl']>().toEqualTypeOf<{ binary: boolean }>();
     const runtime = defineRuntime({ plugins: [toolkit()] });
     expectTypeOf<RuntimeKernels<typeof runtime>['length']>().toEqualTypeOf<1>();
+    expectTypeOf<RuntimeKernels<typeof runtime>[0]['exports']['mesh']['extension']>().toEqualTypeOf<'stl'>();
+    expectTypeOf<CollectFormatMap<RuntimeKernels<typeof runtime>>['stl']>().toEqualTypeOf<{ binary: boolean }>();
+    expectTypeOf<
+      ExportOptionsFor<RuntimeKernels<typeof runtime>, RuntimeTranscoders<typeof runtime>, 'stl'>
+    >().toEqualTypeOf<{ binary: boolean }>();
+    expectTypeOf<KernelExportContentFor<RuntimeKernels<typeof runtime>, 'stl'>>().toEqualTypeOf<'includeEdges'>();
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
     });
-    await client.export('stl', { source: { path: 'model.typed' }, exportOptions: { binary: true } });
+    const document = client.open({ source: { path: 'model.typed' } });
+    await document.export('stl', {
+      options: { binary: true },
+      content: { includeEdges: true },
+    });
+    // @ts-expect-error -- export content stays narrowed through the toolkit and runtime.
+    await document.export('stl', { options: { binary: true }, content: { includeTopology: true } });
+    await document.export('mesh', { options: { binary: true }, content: { includeEdges: true } });
     // @ts-expect-error -- the route's options must survive toolkit composition.
-    await client.export('stl', { source: { path: 'model.typed' }, exportOptions: { binary: 'yes' } });
+    await document.export('stl', { options: { binary: 'yes' } });
     // @ts-expect-error -- no STEP route is declared.
-    await client.export('step');
+    await document.export('step');
   });
 
   it('should preserve direct and configured tuples without an empty variadic tail', () => {

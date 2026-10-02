@@ -115,18 +115,16 @@ const createClient = (kernel: typeof openrscadKernel, files: Record<string, stri
 };
 
 const exportGlb = async (client: ReturnType<typeof createClient>, mainFile: string) => {
-  const result = await client.export('glb', {
-    source: { path: mainFile },
-    parameters: {},
-  });
-  if (!result.success) {
-    throw new Error(result.issues.map((issue) => issue.message).join('; '));
+  const document = client.open({ source: { path: mainFile }, parameters: {} });
+  try {
+    const result = await document.export('glb');
+    if (!result.success) {
+      throw new Error(result.issues.map((issue) => issue.message).join('; '));
+    }
+    return Buffer.from(result.files[0].bytes);
+  } finally {
+    document.close();
   }
-  const file = result.data[0];
-  if (!file) {
-    throw new Error('export produced no file');
-  }
-  return Buffer.from(file.bytes);
 };
 
 describe('native OpenRSCAD speedup (gated)', () => {
@@ -144,10 +142,11 @@ describe('native OpenRSCAD speedup (gated)', () => {
         const fingerprints: Record<string, { bytes: number; sha256: string }> = {};
         for (const [engine, kernel] of Object.entries(engines)) {
           const client = createClient(kernel, fixture.files);
-          // eslint-disable-next-line no-await-in-loop -- one cold client per engine, sequentially
+          // oxlint-disable-next-line no-await-in-loop -- one cold client per engine, sequentially
           const glb = await exportGlb(client, fixture.mainFile);
           fingerprints[engine] = { bytes: glb.byteLength, sha256: createHash('sha256').update(glb).digest('hex') };
-          client.terminate();
+          // oxlint-disable-next-line no-await-in-loop -- one cold client per engine, sequentially
+          await client.shutdown();
         }
 
         // Then timings, interleaved sample by sample. Warm cases reuse one
@@ -164,11 +163,12 @@ describe('native OpenRSCAD speedup (gated)', () => {
             for (const engine of ['wasm', 'native'] as const) {
               const client = shared?.[engine] ?? createClient(engines[engine], fixture.files);
               const started = performance.now();
-              // eslint-disable-next-line no-await-in-loop -- interleaved sampling is the point
+              // oxlint-disable-next-line no-await-in-loop -- interleaved sampling is the point
               await exportGlb(client, fixture.mainFile);
               const elapsed = performance.now() - started;
               if (shared === undefined) {
-                client.terminate();
+                // oxlint-disable-next-line no-await-in-loop -- cold clients are disposed between samples
+                await client.shutdown();
               }
               if (sample >= (cold ? 1 : warmups)) {
                 timings[engine]!.push(elapsed);
@@ -176,8 +176,7 @@ describe('native OpenRSCAD speedup (gated)', () => {
             }
           }
         } finally {
-          shared?.wasm.terminate();
-          shared?.native.terminate();
+          await Promise.all([shared?.wasm.shutdown(), shared?.native.shutdown()]);
         }
 
         const report = {

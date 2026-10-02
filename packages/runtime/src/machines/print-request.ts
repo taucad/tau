@@ -10,12 +10,81 @@
  * @module
  */
 
-import type { CacheValue } from '@taucad/cache-core';
+import type { CacheValue, ContentDigest } from '@taucad/cache-core';
 
 import type { MachineSettingsProvenance } from '#machines/settings.js';
 
 import type { MachineArtifactReference } from '#machines/machine.js';
-import type { MachineOperationReceipt, MachinePreparedPrint } from '#machines/machine-client.js';
+
+/** Durable preparation identity bound to one machine, artifact, setup and the remote object one upload will create. @public */
+export type MachinePreparedPrint = Readonly<{
+  preparedId: string;
+  preparedDigest: ContentDigest;
+  configurationDigest: ContentDigest;
+  providerDataDigest: ContentDigest;
+  setupDigest: ContentDigest;
+  machineId: string;
+  physicalMachineId: string;
+  artifact: MachineArtifactReference;
+  remoteName: string;
+  parser: Readonly<{ id: string; version: string }>;
+  preparedAt: string;
+  expiresAt: string;
+}>;
+
+/** Physical effects that address a run. @public */
+export type MachineRunOperationKind = 'cancel' | 'pause' | 'resume' | 'start' | 'urgent-stop';
+
+/** Every journaled physical effect kind. @public */
+export type MachineOperationKind = MachineRunOperationKind | 'upload';
+
+/** Terminal result returned after one physical effect may have been sent. @public */
+export type MachineOperationReceipt =
+  | Readonly<{
+      operationId: string;
+      machineId: string;
+      kind: 'upload';
+      status: 'accepted';
+      evidence: Readonly<{ transferId: string }>;
+      observedAt: string;
+    }>
+  | Readonly<{
+      operationId: string;
+      machineId: string;
+      kind: MachineRunOperationKind;
+      status: 'accepted';
+      providerRunId?: string;
+      observedAt: string;
+    }>
+  | Readonly<{
+      operationId: string;
+      machineId: string;
+      kind: MachineOperationKind;
+      status: 'rejected';
+      code: string;
+      message: string;
+      observedAt: string;
+    }>
+  | Readonly<{
+      operationId: string;
+      machineId: string;
+      kind: MachineOperationKind;
+      status: 'unknown';
+      reason: string;
+      providerRunId?: string;
+      observedAt: string;
+    }>;
+
+/** Durable physical-effect projection, including pre-send phases after recovery. @public */
+export type MachineOperationSnapshot = Readonly<{
+  operationId: string;
+  machineId: string;
+  kind: MachineOperationReceipt['kind'];
+  inputDigest: ContentDigest;
+  status: 'accepted' | 'planned' | 'rejected' | 'sending' | 'unknown';
+  updatedAt: string;
+  receipt?: MachineOperationReceipt;
+}>;
 
 /** Every state a print request can be observed in. @public */
 export type PrintRequestState =
@@ -87,7 +156,11 @@ export type MachineRequestPrintInput = Readonly<{
 }>;
 
 /** Read requests, newest first, optionally for one machine and one project (`artifact.projectId`). @public */
-export type MachineListPrintRequestsInput = Readonly<{ machineId?: string; projectId?: string; signal?: AbortSignal }>;
+export type MachineListPrintRequestsInput = Readonly<{
+  machineId?: string;
+  projectId?: string;
+  signal?: AbortSignal;
+}>;
 
 /** Observe request transitions as they are recorded, optionally for one machine and one project. @public */
 export type MachineWatchPrintRequestsInput = Readonly<{

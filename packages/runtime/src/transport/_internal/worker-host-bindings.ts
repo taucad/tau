@@ -3,7 +3,7 @@
  *
  * Builds the SAB-pool-aware {@link HostInitializeBindings} from the
  * inbound `memoryHandle` so the worker bundle's dispatcher can encode
- * geometry payloads via the highest tier the wire allows
+ * binary payloads via the highest tier the wire allows
  * (`pool` > `transfer` > `copy`). Used uniformly by every worker-side
  * transport host (web-worker, node-worker): the
  * encoder logic is the same regardless of which wire delivered the
@@ -12,11 +12,9 @@
  * @internal
  */
 
-import type { Geometry } from '@taucad/types';
 import { SharedPool } from '@taucad/memory';
 import type {
   EncodedBinary,
-  EncodedGeometry,
   HostInitializeBindings,
   RuntimeInitializeMemoryHandle,
 } from '#transport/runtime-transport.types.js';
@@ -47,21 +45,8 @@ export const createWorkerHostBindings = (handle: RuntimeInitializeMemoryHandle):
     return { value: { delivery: 'inline', bytes }, transferables: [bytes.buffer], tier: 'transfer' };
   };
 
-  const publishGeometry = (geometry: Geometry): EncodedGeometry => {
-    if (geometry.format !== 'gltf') {
-      return { value: geometry, transferables: [], tier: 'copy' };
-    }
-    const encoded = publishBytes(geometry.hash, geometry.content);
-    return {
-      value: { format: 'gltf', content: encoded.value, hash: geometry.hash },
-      transferables: encoded.transferables,
-      tier: encoded.tier,
-    };
-  };
-
   return {
-    geometryDelivery: {
-      publish: publishGeometry,
+    binaryDelivery: {
       publishBytes,
       acknowledge: (key) => geometryPool?.acknowledge(key),
       tier: geomTier,

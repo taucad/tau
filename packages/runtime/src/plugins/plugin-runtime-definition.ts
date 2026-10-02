@@ -8,7 +8,7 @@ type RuntimeToolkitCapabilityKind = 'kernel' | 'middleware' | 'bundler' | 'trans
  *
  * @public
  */
-export const runtimePluginAbiVersion = 3;
+export const runtimePluginAbiVersion = 5;
 export const runtimePluginDefinitionSymbol: unique symbol = Symbol.for('@taucad/runtime/plugin-definition');
 export const runtimePluginFactoryAcceptsOptionsSymbol: unique symbol = Symbol.for(
   '@taucad/runtime/plugin-factory-accepts-options',

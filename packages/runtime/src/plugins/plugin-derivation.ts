@@ -65,7 +65,9 @@ export function deriveExportTargets<
 /** @public */
 export function deriveExportTargets(runtime: StaticRuntimeDefinition): readonly string[] {
   const { kernels, transcoders } = runtime;
-  const kernelFormats = kernels.flatMap((kernel) => kernel.exportFormats ?? []);
+  const kernelFormats = kernels.flatMap((kernel) =>
+    Object.values(kernel.exports ?? {}).map((declaration) => declaration.extension),
+  );
   const targets = new Set(kernelFormats);
   const sourceFormats = new Set(kernelFormats);
   for (const transcoder of transcoders) {

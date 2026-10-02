@@ -15,7 +15,7 @@ Bundlers resolve imports, transpile code, and produce executable bundles for JS/
 
 <auto-type-table path='./props/bundler.ts' name='BundlerDefinition' />
 
-<auto-type-table path='./props/bundler.ts' name='BundlerRuntime' />
+<auto-type-table path='./props/bundler.ts' name='BundlerServices' />
 
 <auto-type-table path='./props/bundler.ts' name='KernelBundler' />
 
@@ -27,9 +27,9 @@ Bundlers resolve imports, transpile code, and produce executable bundles for JS/
 
 ## defineBundler
 
-`defineBundler` creates a `BundlerPluginFactory` from a configuration object. Required methods: `initialize`, `detectImports`, `bundle`, `execute`, `registerModule`. Optional: `clearExecutionCache`, `cleanup`.
+`defineBundler` creates a `BundlerPluginFactory` from a configuration object. Required methods: `initialize`, `detectImports`, `bundle`, `execute`, `registerModule`. Optional: `clearExecutionCache`, `onDispose`.
 
-Operation methods use `(input, runtime, context)`: a `BundleInput`, a `BundlerRuntime` carrying a fresh operation-scoped `AbortSignal`, and the persistent context returned by `initialize` (which receives a `BundlerInitRuntime`). `detectImports` returns a `DetectImportsResult`; `execute` returns an `ExecuteResult`. `entryPath` and returned dependency paths are canonical root-relative [runtime paths](../concepts/path-namespaces).
+Operation methods use `(input, runtime, context)`: a `BundleInput`, a `BundlerServices` carrying a fresh operation-scoped `AbortSignal`, and the persistent context returned by `initialize` (which receives a `BundlerInitServices`). `detectImports` returns a `DetectImportsResult`; `execute` returns an `ExecuteResult`. `entryPath` and returned dependency paths are canonical root-relative [runtime paths](../concepts/path-namespaces).
 
 ## Usage
 

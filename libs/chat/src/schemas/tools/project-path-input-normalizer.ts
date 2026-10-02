@@ -15,8 +15,8 @@ const singlePathFields = new Map<string, 'targetFile' | 'path'>([
   [toolName.editFile, 'targetFile'],
   [toolName.createFile, 'targetFile'],
   [toolName.deleteFile, 'targetFile'],
-  [toolName.getKernelResult, 'targetFile'],
-  [toolName.exportGeometry, 'targetFile'],
+  [toolName.evaluateModel, 'targetFile'],
+  [toolName.exportModel, 'targetFile'],
   [toolName.screenshot, 'targetFile'],
   [toolName.listDirectory, 'path'],
   [toolName.grep, 'path'],
@@ -108,7 +108,7 @@ export const normalizeProjectPathToolOutputAliases = (
             ['files', ''],
             ['entries', 'path'],
           ] as const)
-        : name === toolName.exportGeometry
+        : name === toolName.exportModel
           ? ([['files', 'artifactPath']] as const)
           : name === toolName.testModel
             ? ([
@@ -138,7 +138,7 @@ export const normalizeProjectPathToolOutputAliases = (
   }
 
   const issues = next['kernelIssues'];
-  if (name === toolName.getKernelResult && isUnknownArray(issues)) {
+  if (name === toolName.evaluateModel && isUnknownArray(issues)) {
     const kernelIssues = issues.map((issue) => {
       if (!isRecord(issue) || !isRecord(issue['location'])) {
         return issue;

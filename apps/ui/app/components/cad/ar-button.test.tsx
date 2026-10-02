@@ -34,25 +34,25 @@ beforeEach(() => {
 describe('ArButton', () => {
   it('returns nothing when not mobile', () => {
     mobileMocks.isMobile = false;
-    const { container } = render(<ArButton geometry={undefined} />);
+    const { container } = render(<ArButton artifact={undefined} />);
     expect(container.firstChild).toBeNull();
   });
 
   it('returns nothing when AR cannot be activated (non-iOS / no kernel)', () => {
     arMocks.canActivateAr = false;
-    const { container } = render(<ArButton geometry={undefined} />);
+    const { container } = render(<ArButton artifact={undefined} />);
     expect(container.firstChild).toBeNull();
   });
 
   it('invokes activateAr() when clicked on a supported device', async () => {
-    render(<ArButton geometry={undefined} />);
+    render(<ArButton artifact={undefined} />);
     await userEvent.click(screen.getByRole('button'));
     expect(arMocks.activateAr).toHaveBeenCalledTimes(1);
   });
 
   it('disables the button while converting', () => {
     arMocks.isConverting = true;
-    render(<ArButton geometry={undefined} />);
+    render(<ArButton artifact={undefined} />);
     expect(screen.getByRole('button').hasAttribute('disabled')).toBe(true);
   });
 });

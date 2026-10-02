@@ -44,7 +44,7 @@ const pendingRuntimePorts = new Map<
     reject(error: Error): void;
     resolve(lease: {
       readonly port: UtilityMessage['ports'][number];
-      release(reason: 'requested' | 'render-timeout'): void;
+      release(reason: 'requested' | 'operation-timeout'): void;
     }): void;
   }
 >();
@@ -81,12 +81,12 @@ const requestRuntimePort = async (
   workspaceRoot: string,
 ): Promise<{
   readonly port: UtilityMessage['ports'][number];
-  release(reason: 'requested' | 'render-timeout'): void;
+  release(reason: 'requested' | 'operation-timeout'): void;
 }> => {
   const requestId = randomUUID();
   const port = new Promise<{
     readonly port: UtilityMessage['ports'][number];
-    release(reason: 'requested' | 'render-timeout'): void;
+    release(reason: 'requested' | 'operation-timeout'): void;
   }>((resolve, reject) => {
     const runtimePortTimeout = setTimeout(() => {
       pendingRuntimePorts.delete(requestId);

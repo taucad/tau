@@ -20,7 +20,7 @@
 
 import { toGeoSpecProtocolJson } from 'geospec/engine';
 import { GeoSpecModelLoadError, resolveRuntimeExportIntent } from 'geospec/model';
-import type { KernelIssue } from '@taucad/runtime/types';
+import type { ExportFile, KernelIssue } from '@taucad/runtime/types';
 import type { GeometrySubject as PublicGeometrySubject } from 'geospec/mesh';
 import type {
   CreateModelLoaderOptions,
@@ -170,7 +170,7 @@ const createDefaultRuntimeClient = async (projectPath: string | undefined): Prom
     import('@taucad/runtime/node'),
     import('#model/default-runtime.js'),
   ]);
-  return (await createNodeClient({ runtime: defaultRuntime, projectPath })) as unknown as GeoSpecRuntimeClient;
+  return createNodeClient({ runtime: defaultRuntime, projectPath });
 };
 
 /**
@@ -200,17 +200,6 @@ const resolveRuntime = async (options: RuntimeOptions): Promise<{ runtime: GeoSp
   }
   return { runtime: await createDefaultRuntimeClient(options.projectPath), owned: true };
 };
-
-type RuntimeSourceInput = { files: Record<string, string>; entry: string } | { path: string };
-
-type RuntimeExport = (
-  format: string,
-  options: {
-    source?: RuntimeSourceInput;
-    parameters?: Record<string, unknown>;
-    exportOptions: Record<string, unknown>;
-  },
-) => ReturnType<GeoSpecRuntimeClient['export']>;
 
 const runtimeSource = (options: RuntimeOptions): { files: Record<string, string>; entry: string } | { path: string } =>
   'code' in options ? { files: options.code, entry: options.file } : { path: options.file };
@@ -246,18 +235,22 @@ const loadFromRuntime = async (options: RuntimeOptions, forensic?: ForensicSink)
     if ('success' in requestedIntent) {
       throw failure(requestedIntent.diagnostics);
     }
-    // The client's `export` is generic over the runtime's registered formats;
-    // GeoSpec speaks the protocol's own five, so the call is made through the
-    // protocol shape rather than the runtime's inferred format union.
-    const exported = await (runtime.export as unknown as RuntimeExport)(format, {
+    const document = runtime.open({
       source: runtimeSource(options),
       ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-      exportOptions: requestedIntent.options,
     });
+    const exported = await (async () => {
+      try {
+        return await document.export(format, { options: requestedIntent.options });
+      } finally {
+        document.close();
+      }
+    })();
     if (!exported.success) {
       throw failure(exported.issues.map((issue) => runtimeIssueDiagnostic(issue, 'GEOSPEC_MODEL_EXPORT_FAILED')));
     }
-    const file = exported.data[0];
+    const files: ExportFile[] = [...exported.files];
+    const file = files[0];
     if (!file) {
       throw failure([
         {

@@ -3,7 +3,7 @@ import { createContext, useContext, useEffect, useMemo, useCallback, useId, useR
 import { useActorRef, useSelector } from '@xstate/react';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
-import type { Geometry } from '@taucad/types';
+import type { Artifact } from '@taucad/runtime';
 import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -29,7 +29,8 @@ export type CadPreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
  * Context value exposed by CadPreviewProvider via the useCadPreview() hook.
  */
 export type CadPreviewContextValue = {
-  readonly geometry: Geometry | undefined;
+  readonly artifact: Artifact | undefined;
+  readonly artifactHash: string | undefined;
   readonly status: CadPreviewStatus;
   readonly error: Error | undefined;
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
@@ -88,8 +89,8 @@ function deriveStatus(cadState: string): CadPreviewStatus {
 export const deriveCadPreviewStatus = (args: {
   readonly initError: Error | undefined;
   readonly cadState: string;
-  /** The latest render settled as a failure and no geometry frame exists to keep showing. */
-  readonly geometryFailed?: boolean;
+  /** The latest render settled as a failure and no frame exists to keep showing. */
+  readonly renderingFailed?: boolean;
 }): CadPreviewStatus => {
   if (args.initError) {
     return 'error';
@@ -100,7 +101,7 @@ export const deriveCadPreviewStatus = (args: {
    * `error`, so a failed *first* render would otherwise display as an
    * eternal loader. A failure after a successful frame keeps the stale
    * frame (geometryFailed is false then). */
-  if (args.geometryFailed === true && (status === 'ready' || status === 'idle')) {
+  if (args.renderingFailed === true && (status === 'ready' || status === 'idle')) {
     return 'error';
   }
   return status;
@@ -296,7 +297,9 @@ function CadPreviewPipeline({
   }, [cadRef]);
 
   // Selectors on cadRef for reactive state
-  const geometry = useSelector(cadRef, (s) => s.context.geometry);
+  const rendering = useSelector(cadRef, (s) => s.context.rendering);
+  const artifact = rendering?.success ? rendering.artifact : undefined;
+  const artifactHash = rendering?.success ? rendering.hash : undefined;
   const cadStateValue = useSelector(cadRef, (state) => {
     if (state.hasTag('cad-runtime-error')) {
       return 'error';
@@ -311,7 +314,6 @@ function CadPreviewPipeline({
   const defaultParameters = parameterManifest?.defaults ?? {};
   const jsonSchema =
     parameterManifest?.legacyProjection.status === 'usable' ? parameterManifest.legacyProjection.schema : undefined;
-  const cadUnits = useSelector(cadRef, (s) => s.context.units);
 
   // Initialization error from the preview machine
   const initError = useSelector(previewRef, (s) => s.context.initError);
@@ -322,9 +324,9 @@ function CadPreviewPipeline({
       deriveCadPreviewStatus({
         initError,
         cadState: cadStateValue,
-        geometryFailed: failureIssues !== undefined && geometry === undefined,
+        renderingFailed: failureIssues !== undefined && artifact === undefined,
       }),
-    [initError, cadStateValue, failureIssues, geometry],
+    [initError, cadStateValue, failureIssues, artifact],
   );
 
   const error = useMemo(() => {
@@ -340,17 +342,6 @@ function CadPreviewPipeline({
     return undefined;
   }, [failureIssues, initError]);
 
-  // Forward geometry to graphics machine
-  useEffect(() => {
-    if (geometry) {
-      graphicsRef.send({
-        type: 'updateGeometry',
-        geometry,
-        units: cadUnits,
-      });
-    }
-  }, [geometry, cadUnits, graphicsRef]);
-
   const setParameters = useCallback(
     (newParameters: Record<string, unknown>) => {
       previewRef.send({ type: 'setParameters', parameters: newParameters });
@@ -360,7 +351,8 @@ function CadPreviewPipeline({
 
   const value = useMemo<CadPreviewContextValue>(
     () => ({
-      geometry,
+      artifact,
+      artifactHash,
       status,
       error,
       cadRef,
@@ -372,7 +364,8 @@ function CadPreviewPipeline({
       setParameters,
     }),
     [
-      geometry,
+      artifact,
+      artifactHash,
       status,
       error,
       cadRef,
@@ -393,7 +386,7 @@ function CadPreviewPipeline({
  *
  * @example <caption>Read preview state</caption>
  * ```tsx
- * const { geometry, status, setParameters } = useCadPreview();
+ * const { artifact, status, setParameters } = useCadPreview();
  * ```
  */
 export function useCadPreview(): CadPreviewContextValue;

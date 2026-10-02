@@ -245,6 +245,14 @@ describe('plugin generator', () => {
     expect(readText(tree, 'packages/plugins/assimp-fixture/src/assimp-fixture.kernel.ts')).toContain(
       "version: '1.0.0'",
     );
+    const kernel = readText(tree, 'packages/plugins/assimp-fixture/src/assimp-fixture.kernel.ts');
+    expect(kernel).toContain('views: {}');
+    expect(kernel).toContain('exports: {}');
+    expect(kernel).toContain('async resolve({ entryPath })');
+    expect(kernel).toContain('async describe()');
+    expect(kernel).toContain('async evaluate()');
+    expect(kernel).not.toContain('createGeometry');
+    expect(kernel).not.toContain('exportGeometry');
     expect(readText(tree, 'packages/plugins/assimp-fixture/src/assimp-fixture.transcoder.ts')).toContain(
       "id: 'assimp-fixture'",
     );

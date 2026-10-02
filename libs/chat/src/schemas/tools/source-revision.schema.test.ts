@@ -12,7 +12,7 @@ import { describe, it, expect } from 'vitest';
 import { createFileOutputSchema } from '#schemas/tools/create-file.tool.schema.js';
 import { deleteFileOutputSchema } from '#schemas/tools/delete-file.tool.schema.js';
 import { editFileOutputSchema } from '#schemas/tools/edit-file.tool.schema.js';
-import { getKernelResultOutputSchema } from '#schemas/tools/get-kernel-result.tool.schema.js';
+import { evaluateModelOutputSchema } from '#schemas/tools/evaluate-model.tool.schema.js';
 import { getParametersOutputSchema } from '#schemas/tools/parameter.tool.schema.js';
 import { screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 import { testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
@@ -23,8 +23,8 @@ const sourceRevision = { entry: 'main.ts', files: { 'main.ts': digest, 'lib/miss
 const diffStats = { linesAdded: 1, linesRemoved: 0, originalContent: '', modifiedContent: 'x' };
 
 describe('tool outputs carry the source revision they were computed from (R4)', () => {
-  it('should preserve sourceRevision on a get_kernel_result output', () => {
-    expect(getKernelResultOutputSchema.parse({ status: 'ready', sourceRevision })).toMatchObject({ sourceRevision });
+  it('should preserve sourceRevision on a evaluate_model output', () => {
+    expect(evaluateModelOutputSchema.parse({ status: 'ready', sourceRevision })).toMatchObject({ sourceRevision });
   });
 
   it('should preserve sourceRevision on a screenshot output', () => {
@@ -53,7 +53,7 @@ describe('tool outputs carry the source revision they were computed from (R4)', 
 
   it('should reject a digest that is not a lowercase sha256 content digest', () => {
     expect(() =>
-      getKernelResultOutputSchema.parse({
+      evaluateModelOutputSchema.parse({
         status: 'ready',
         sourceRevision: { entry: 'main.ts', files: { 'main.ts': 'sha256:NOPE' } },
       }),

@@ -1,6 +1,6 @@
 # geospec authoring API index
 
-geospec 0.1.0-beta.1 · 1466 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.1 · 1460 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
@@ -659,11 +659,9 @@ WatertightResult (type) [9 members] — Full watertight analysis (global + per-p
   WatertightResult.perPrimitive (property)
 GeoSpecExportRoute (type) — Runtime route metadata used to decide whether a runtime export…
 RuntimeBackedModelFormat (type)
-RuntimeClientWithRoutes (type) [5 members] — Runtime client shape for route-aware Tau runtimes
-  RuntimeClientWithRoutes.connect (method)
-  RuntimeClientWithRoutes.terminate (method)
+RuntimeClientWithRoutes (type) [3 members] — Runtime client shape for route-aware Tau runtimes
+  RuntimeClientWithRoutes.open (property)
   RuntimeClientWithRoutes.on (method)
-  RuntimeClientWithRoutes.export (method)
   RuntimeClientWithRoutes.bestRouteFor (method)
 RuntimeExportIntent (type) [3 members] — Resolved runtime export request and provenance for a GeoSpec model…
   RuntimeExportIntent.options (property)
@@ -687,11 +685,9 @@ GeoSpecModelFormat (type) — Geometry formats accepted by {@link import ('./loa
 GeoSpecModelLoader (type) — Function shape used by GeoSpec runners to provide model loading…
 ManagedGeoSpecModelLoader (type) [1 members] — A configured loader whose shared runtime can be released with…
   ManagedGeoSpecModelLoader.dispose (method)
-GeoSpecRuntimeClient (type) [4 members]
-  GeoSpecRuntimeClient.connect (method)
-  GeoSpecRuntimeClient.terminate (method)
+GeoSpecRuntimeClient (type) [2 members] — Runtime client surface consumed by `geospec/model`
+  GeoSpecRuntimeClient.open (property)
   GeoSpecRuntimeClient.on (method)
-  GeoSpecRuntimeClient.export (method)
 GeoSpecRuntimeClientFactory (type) — Lazy runtime factory consumed by `geospec/model`
 GeoSpecRuntimeSourceAdapter (type) [3 members] — Explicit source adapter for formats whose runtime setup is not…
   GeoSpecRuntimeSourceAdapter.id (property)
@@ -1008,9 +1004,6 @@ AxisQuery (type) [12 members] — Axis query predicates over cylindrical/conical
   AxisQuery.allOf (property)
   AxisQuery.anyOf (property)
   AxisQuery.not (property)
-
-## Types (3) — `public-api-types-3.md`
-
 AxisSelector (type) [4 members] — Axis selector resolved from cylindrical/conical face facts
   AxisSelector.kind (property)
   AxisSelector.of (property)
@@ -1027,6 +1020,9 @@ BodyQuery (type) [10 members] — Body query predicates over available source fa
   BodyQuery.allOf (property)
   BodyQuery.anyOf (property)
   BodyQuery.not (property)
+
+## Types (3) — `public-api-types-3.md`
+
 BodySelector (type) [4 members] — Body selector over source-backed solid evidence
   BodySelector.kind (property)
   BodySelector.of (property) — STEP occurrence scope, or the exact retained mesh primitive label…
@@ -1448,11 +1444,9 @@ GeoSpecTauProjectArtifact (type) [7 members] — Finalized geometry bytes and th
   GeoSpecTauProjectArtifact.frame (property)
   GeoSpecTauProjectArtifact.source (property)
   GeoSpecTauProjectArtifact.export (property)
-GeoSpecTauProjectRuntime (type) [5 members] — Runtime surface required to snapshot and export one Tau project
-  GeoSpecTauProjectRuntime.connect (method)
-  GeoSpecTauProjectRuntime.terminate (method)
+GeoSpecTauProjectRuntime (type) [3 members] — Runtime surface required to snapshot and export one Tau project
+  GeoSpecTauProjectRuntime.open (property)
   GeoSpecTauProjectRuntime.on (method)
-  GeoSpecTauProjectRuntime.export (method)
   GeoSpecTauProjectRuntime.bestRouteFor (method)
 GeoSpecConfig (type) [10 members] — Trusted project configuration using existing discovery and runner options
   GeoSpecConfig.include (property)

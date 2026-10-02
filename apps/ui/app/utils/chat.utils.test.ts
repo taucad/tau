@@ -616,10 +616,10 @@ describe('serializeMessage', () => {
       );
     });
 
-    it('serializes tool-get_kernel_result output-available', () => {
+    it('serializes tool-evaluate_model output-available', () => {
       const message = baseMessage([
         {
-          type: 'tool-get_kernel_result',
+          type: 'tool-evaluate_model',
           toolCallId: 'c1',
           state: 'output-available',
           input: { targetFile: 'main.kcl' },
@@ -630,7 +630,7 @@ describe('serializeMessage', () => {
         },
       ]);
       expect(serializeMessage(message)).toBe(
-        '<tool_call name="get_kernel_result">\ntargetFile: main.kcl\n</tool_call>\n<tool_result>\nStatus: error\nIssues:\n  - Syntax error\n</tool_result>',
+        '<tool_call name="evaluate_model">\ntargetFile: main.kcl\n</tool_call>\n<tool_result>\nStatus: error\nIssues:\n  - Syntax error\n</tool_result>',
       );
     });
 

@@ -221,7 +221,7 @@ export default function main() {
   const result = await call(
     {
       views: [{ id: 'inspect', name: 'Inspect', entryPath: model, camera: { kind: 'look', direction: [0, -1, 0] } }],
-      entries: [{ path: model, renderTimeout: 0, components: { hidden } }],
+      entries: [{ path: model, operationTimeout: 0, components: { hidden } }],
     },
     'Inspect the joint.',
   );
@@ -230,7 +230,7 @@ export default function main() {
   await target.click(viewTab('inspect'));
   const before = await readWorkbenchTree();
   expect(JSON.parse(before['/.tau/workbench/entries.json']!)).toMatchObject({
-    entries: { [model]: { renderTimeout: 0, components: { hidden } } },
+    entries: { [model]: { operationTimeout: 0, components: { hidden } } },
   });
   await expect
     .poll(

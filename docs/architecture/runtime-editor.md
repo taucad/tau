@@ -1,241 +1,27 @@
 # Kernel-Editor Reactive Architecture
 
-## Status
+## Current integration
 
-**Reference** -- documents the reactive integration between the filesystem layer, kernel workers, and the editor UI. Companion to [runtime-topology.md](runtime-topology.md) (autonomous render service) and [filesystem-policy.md](../policy/filesystem-policy.md) (implementation rules).
+The editor writes through the file-manager service. The project machine owns CAD units keyed by entry path and viewer demand; each active [`cadMachine`](../../apps/ui/app/machines/cad.machine.ts) connects a runtime client to a rooted filesystem view. A CAD unit opens a document for its entry path and a default view for display. The worker resolves source dependencies, evaluates a native handle, renders the view, and emits document and view events. The CAD unit translates those events into its display state and rendering projection. See [runtime-topology.md](runtime-topology.md) for the runtime document protocol and abort channel.
 
----
+The browser's [file-manager worker](../../apps/ui/app/machines/file-manager.worker.ts) owns workspace filesystem access, mounted providers, and the change bus. It exposes rooted, consumer-scoped filesystem bridges. The CAD unit obtains an `agent` view rooted at its selected project filesystem, so the kernel reads the same authored source view as the agent rather than the uncomposed working copy. The runtime receives only that filesystem capability and local paths; it has no project-route or authority-global file-pool access.
 
-## System Overview
+## Document and display lifecycle
 
-Three runtime contexts collaborate to turn user code into 3D geometry:
+The CAD unit waits for the file-manager bridge, creates a client from the selected kernel options, subscribes to client state, capabilities, issues, logs, and telemetry, and calls `connect()`. For an entry path, it calls `client.open({ source: { path: entryPath }, parameters?, stage?, watch: true })`, creates `document.view()` for the default offer, and subscribes to `described`, `evaluated`, `progress`, `status`, and view `rendered`/`status` events. `document.evaluation()` waits for the initial admission. A successful rendering supplies the CAD unit's current artifact and issues; the project and viewer layers choose where to display it. No `setFile` or `geometryComputed` command crosses this boundary.
 
-```
-┌────────────────────────────────────┐
-│ Main Thread                        │
-│  Editor (Monaco) ─── writes ──▶   │
-│  Parameters UI   ─── setParams ──▶│
-│  Three.js viewport ◀── geometry   │
-│  cadMachine (display state)        │
-│  projectMachine (geometry units)  │
-└──────────┬──────────┬──────────────┘
-           │          │
-   MessagePort   MessagePort
-           │          │
-┌──────────▼──┐  ┌────▼─────────────┐
-│ File Manager │  │ Kernel Worker    │
-│ Worker       │  │ (per comp. unit) │
-│              │  │                  │
-│ Workspace FS │◀─│ watch() ──────── │
-│ Providers    │  │ render loop      │
-│ EventBus     │──│ ──▶ push geometry│
-└──────────────┘  └──────────────────┘
-```
+Parameter actions become document updates. A committed sidecar change can stage the committed bytes; a preview supplies parameters; a scrub supplies transient parameters. An empty update can restore the committed inputs. A source-path change closes the old document and default view before opening the next source, while an obsolete asynchronous open is closed by its request identity. Parking a CAD unit releases its runtime client and watches but retains its displayed result and editor state; resuming reconnects and opens the current entry. On final teardown, subscriptions, view, document, and client are released. The [CAD machine implementation](../../apps/ui/app/machines/cad.machine.ts) owns these transitions.
 
-**File Manager Worker**: single instance hosting `WorkspaceFileService`, `ProviderRegistry`, `ResourceQueue`, `TreeIndexes`, and `ChangeEventBus`. Owns mounted browser filesystem access. Serves both the main thread and kernel workers via the bridge protocol, composing a masked view per rooted connection.
+The worker's watched-document path is independent of parameter commands. An affected dependency change is reread through the rooted bridge, reconciled against file hashes, and routed to the documents whose watch paths contain it. The worker updates its cache and dependency watch union and starts a fresh evaluation; the document and default view then publish their own outcomes. A change to an unrelated source does not require every CAD unit to reevaluate. Watch events are an optimization, while source-revision checks guard freshness when a watch is absent or delayed. The [worker watch reconciliation](../../packages/runtime/src/framework/kernel-worker.ts) is authoritative for this behavior.
 
-**Kernel Worker**: one per geometry unit. Runs bundler (esbuild), executes user code, computes geometry, tessellates, and pushes results. Watches its dependency graph via the filesystem bridge.
+## File tree and watch planes
 
-**Main Thread**: display and user input only. No render orchestration, no dependency tracking, no cache management.
+The file explorer and kernel subscribe for different purposes. The kernel's watch set follows document entry files and resolved dependencies in its rooted filesystem. The file tree uses the file-manager's user-facing composed view and its own change channel, so a tree refresh is not a render command. Both observe changes originating from the file service, subject to their respective rooted-view visibility rules.
 
----
+On project initialization, the [file-manager machine](../../apps/ui/app/machines/file-manager.machine.ts) reads the composed root directory and seeds [`FileTreeService`](../../apps/libs/fs-client/src/file-tree-service.ts) with those entries. Later file and directory changes update that service's tree projection; it can refresh an affected directory through `readDirectory` when needed. The kernel watch reconciliation separately maintains its dependency set. Neither path depends on a main-thread relay that sends every file write to every CAD unit.
 
-## Two Watch Planes
+The file-manager worker composes rooted connections for `user`, `agent`, and `working-copy` consumers and applies the corresponding path policy before serving reads or mutations. Its change bus and coalescer route watch notifications. An overflow or reset requires consumers to reconcile from their filesystem authority rather than trust a partial event history; the runtime worker's watch handler has explicit reset handling. The [filesystem policy](../policy/filesystem-policy.md) governs the rooted and watch contracts.
 
-File changes flow through two independent watch planes, each optimized for its consumer:
+## Ownership boundary
 
-### Kernel fast path (dependency-scoped)
-
-```
-FileService mutation
-  → ChangeEventBus.emit()
-  → Watch router: normalize → coalesce → filter (by dependency set)
-  → Kernel worker handler: invalidate caches, schedule re-render
-  → Worker pushes geometryComputed to main thread
-```
-
-- Scoped to the kernel's known dependency set (esbuild metafile inputs, SCAD imports, KCL imports)
-- Excludes `.tau/cache/**` to avoid self-churn
-- Sub-25ms p95 event-to-invalidation latency target
-- No main thread involvement
-
-### UI tree path (directory-scoped)
-
-```
-FileService mutation
-  → ChangeEventBus.emit()
-  → Watch router: normalize → coalesce → filter (by watched directories)
-  → File manager machine: incremental tree patch
-  → React re-render of file explorer
-```
-
-- Scoped to directories the user has expanded in the file explorer
-- Sub-75ms p95 event-to-patch latency target
-- Incremental: only the affected parent directory is re-read
-
----
-
-## Watch Request Contract
-
-```typescript
-type WatchRequest = {
-  paths: string[];
-  recursive?: boolean;
-  includes?: string[];
-  excludes?: string[];
-  filter?: WatchEventFilter;
-  correlationId?: string;
-};
-
-type WatchEventFilter = {
-  added?: boolean;
-  updated?: boolean;
-  deleted?: boolean;
-  renamed?: boolean;
-};
-
-type WatchEvent =
-  | { type: 'change'; path: string; correlationId?: string }
-  | { type: 'delete'; path: string; correlationId?: string }
-  | { type: 'rename'; oldPath: string; newPath: string; correlationId?: string }
-  | { type: 'reset'; correlationId?: string }
-  | { type: 'overflow'; correlationId?: string };
-```
-
-## Event Pipeline
-
-Worker-side, before delivery to subscribers:
-
-1. **Normalize**: canonical absolute paths, separator normalization, duplicate slash removal
-2. **Coalesce**: within ~50ms window -- `added→deleted` cancels, `deleted→added` collapses to `updated`, parent delete suppresses child spam, rename emits old/new semantics
-3. **Filter**: by path scope (exact or recursive), include/exclude globs, event type mask
-4. **Deliver**: only matched events to subscribed ports with correlation IDs
-
----
-
-## Kernel Rendering Lifecycle
-
-```
-1. initialize(options, fileSystemPort)
-   → load WASM, configure bundler, set up bridge proxy
-
-2. setFile(file, params)
-   → store entry path + parameters
-   → render() immediately
-   → discover dependencies from bundler metafile
-   → watch(dependencies) via filesystem bridge
-
-3. watch event (dependency changed)
-   → invalidate fileHashCache, fileContentCache, bundleResultCache
-   → schedule debounced re-render (500ms)
-
-4. debounce timer fires
-   → render()
-   → diff dependency set: add new, remove stale, keep unchanged
-   → push geometryComputed to main thread
-
-5. setParameters(params)
-   → store new parameters
-   → schedule debounced re-render (50ms)
-
-6. export(format)
-   → export from last native handle
-   → push exported blob
-```
-
-### Dependency graphs by kernel
-
-| Kernel      | Dependency source                                         | Shape            |
-| ----------- | --------------------------------------------------------- | ---------------- |
-| Replicad    | esbuild metafile `inputs`                                 | Deep import tree |
-| JSCAD       | esbuild metafile `inputs`                                 | Deep import tree |
-| Manifold    | esbuild metafile `inputs`                                 | Deep import tree |
-| OpenCascade | esbuild metafile `inputs`                                 | Deep import tree |
-| OpenSCAD    | `use`/`include` regex via `getReferencedScadFiles()`      | `.scad` tree     |
-| Zoo/KCL     | KCL AST import resolution via `discoverKclDependencies()` | `.kcl` tree      |
-| Tau         | Main file + siblings via `readdir(directory)`             | Star             |
-
----
-
-## Incremental Tree Model
-
-### Startup hydration
-
-On project load, the rooted `statTree('')` provides a one-time recursive snapshot for the initial file explorer state, answered from the root's `TreeIndex`. This is the only permitted full recursive scan.
-
-### Post-startup incremental updates
-
-All post-startup tree changes flow through the watch system:
-
-1. File mutation → `ChangeEventBus` emits `fileWritten`/`fileDeleted`/`fileRenamed`/`directoryChanged`
-2. Tree watcher receives event, re-reads only the parent directory via `readDirectory(parentPath)`
-3. `DirectoryTreeCache` stores per-directory entry maps, patched incrementally
-4. File explorer React tree is updated with minimal re-render
-
-No mutation-triggered full recursive tree scans.
-
----
-
-## Compilation Unit Lifecycle
-
-A geometry unit is a single `cadMachine` actor managing one runtime worker for one entry path:
-
-```
-projectMachine spawns cadMachine(entryPath, kernelType)
-  → cadMachine enters 'connecting' state
-  → creates RuntimeClient, connects to runtime worker
-  → sends setFile(entryPath, initialParams)
-  → transitions to 'idle'
-
-  [worker pushes stateChanged('rendering')]
-  → cadMachine transitions to 'rendering'
-
-  [worker pushes geometryComputed]
-  → cadMachine updates Three.js scene, transitions to 'idle'
-
-  [worker pushes error]
-  → cadMachine transitions to 'error', shows diagnostics
-
-  [user changes entry path]
-  → cadMachine sends setFile(newFile)
-
-  [build closes]
-  → cadMachine disposes RuntimeClient
-  → worker terminates, all watches cleaned up
-```
-
----
-
-## Overflow/Resync Protocol
-
-When the event pipeline detects event loss (queue overflow, backend reset):
-
-1. Emit `{ type: 'overflow' }` or `{ type: 'reset' }` to all affected subscribers
-2. **Kernel consumers**: clear all dependency caches, set flag for fresh dependency pass on next render
-3. **Tree consumers**: trigger targeted parent/subtree rescan (not blind full tree)
-
-No silent event drop is permitted. Every dropped event must trigger an explicit resync.
-
----
-
-## Comparison to Prior Art
-
-### Vite HMR
-
-| Concept          | Vite                          | Tau                                      |
-| ---------------- | ----------------------------- | ---------------------------------------- |
-| File watcher     | chokidar (OS-level)           | `FileService.watch()` (VFS-level)        |
-| Dependency graph | Module graph                  | esbuild metafile + kernel resolvers      |
-| Change detection | Watcher + module invalidation | Watch subscription scoped to deps        |
-| Debounce         | HMR batching                  | Worker-internal 500ms/50ms timers        |
-| Rebuild trigger  | HMR update pushed to browser  | `geometryComputed` pushed to main thread |
-
-### VS Code Watcher Architecture
-
-| Concept            | VS Code                                  | Tau                                    |
-| ------------------ | ---------------------------------------- | -------------------------------------- |
-| Watch dedup        | Ref-counted `activeWatchers`             | Request hash → ref-counted registry    |
-| Event coalescing   | `EventCoalescer`                         | Normalize → coalesce → filter pipeline |
-| Session management | `sessionId` + per-watch `req` UUID       | `correlationId` + per-port ownership   |
-| Overflow handling  | Throttled workers + restart/suspend      | Explicit overflow event + resync       |
-| Two event planes   | `onDidChangeFile` vs `onDidRunOperation` | Kernel fast path vs UI tree path       |
+The project machine creates and routes CAD units and viewer demand. A CAD unit owns one runtime connection, its current document, a default view subscription, and UI-facing state. The runtime worker owns dependency discovery, cache invalidation, native evaluation, render and export operations, and native cancellation. The file-manager worker owns the filesystem authority and its change stream. Keeping these owners separate lets editor writes, watched source updates, parameter updates, and viewer subscriptions converge on one document's current evaluation without resurrecting the retired preview-render protocol.

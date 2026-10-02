@@ -77,10 +77,10 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
  * @public
  */
 export const hostMcpAllowedTools = [
-  toolName.getKernelResult,
+  toolName.evaluateModel,
   toolName.testModel,
   toolName.screenshot,
-  toolName.exportGeometry,
+  toolName.exportModel,
   toolName.arrangeWorkbench,
   toolName.getPrintProfiles,
   toolName.requestPrint,
@@ -160,10 +160,10 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
  * (`apps/api/app/api/mcp/mcp-authority.service.ts`).
  */
 const toolForRpc: Readonly<Record<TauMcpRpcName, HostMcpAllowedTool>> = {
-  [rpcName.getKernelResult]: toolName.getKernelResult,
+  [rpcName.evaluateModel]: toolName.evaluateModel,
   [rpcName.runGeoSpecTests]: toolName.testModel,
   [rpcName.captureImages]: toolName.screenshot,
-  [rpcName.exportGeometry]: toolName.exportGeometry,
+  [rpcName.exportModel]: toolName.exportModel,
 };
 
 const capabilityClaimsSchema = z

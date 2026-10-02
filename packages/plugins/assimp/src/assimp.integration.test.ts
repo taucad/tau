@@ -1,4 +1,3 @@
-/* oxlint-disable @typescript-eslint/no-unsafe-assignment -- AnyKernelDefinition intentionally erases private backend context */
 import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -12,7 +11,6 @@ import {
   getInspectReport,
   glbToDocument,
 } from '@taucad/runtime-testing';
-import type { AnyKernelDefinition, CreateGeometryOutput } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createExportFile } from '@taucad/runtime/types';
 import { createAssimp } from 'libassimp';
@@ -53,7 +51,7 @@ type AssimpContext = { readonly assimp: Assimp };
 type Fixture = Readonly<{ entry: string; sidecarFile: string }>;
 type SidecarReader = (path: string) => Promise<Uint8Array<ArrayBuffer>>;
 
-const kernelDefinition = await resolveRuntimePluginDefinition<AnyKernelDefinition>('kernel', assimpKernel());
+const kernelDefinition = await resolveRuntimePluginDefinition('kernel', assimpKernel());
 const transcoderDefinition = await resolveRuntimePluginDefinition('transcoder', assimpTranscoder());
 
 const withWatchdog = async <Value>(promise: Promise<Value>, label: string): Promise<Value> => {
@@ -160,17 +158,22 @@ const expectClosedTexturedExport = async (context: AssimpContext): Promise<void>
       ['textured/tau-texture.png', texturePng],
     ]),
   };
-  const preview = await kernelDefinition.createGeometry(
-    { entryPath: texturedEntryPath, parameters: {} },
+  const preview = await kernelDefinition.evaluate(
+    { entryPath: texturedEntryPath, parameters: {}, options: {} },
     runtime,
     context,
   );
-  const glb = preview.geometry?.format === 'gltf' ? preview.geometry.content : undefined;
+  const artifact = await kernelDefinition.render!(
+    { handle: preview.handle, view: 'model', options: {} },
+    runtime,
+    context,
+  );
+  const glb = artifact.content as Uint8Array<ArrayBuffer>;
   expect(glb).toBeDefined();
-  const document = await glbToDocument(glb!);
+  const document = await glbToDocument(glb);
   expect(document.getRoot().listTextures()[0]?.getImage()).toEqual(texturePng);
 
-  const converted = await context.assimp.convert({ name: 'preview.glb', bytes: glb! }, { to: 'usdz' });
+  const converted = await context.assimp.convert({ name: 'preview.glb', bytes: glb }, { to: 'usdz' });
   const usdz = converted.files.find(({ name }) => name.endsWith('.usdz'));
   expect(usdz).toBeDefined();
   const entries = zipEntries(new Uint8Array(usdz!.bytes));
@@ -213,18 +216,16 @@ const render = async (
   context: AssimpContext,
   runtime: ReturnType<typeof createRuntime>,
 ): Promise<Uint8Array<ArrayBuffer>> => {
-  const result: CreateGeometryOutput<Uint8Array<ArrayBuffer>> = await kernelDefinition.createGeometry(
-    { entryPath, parameters: {} },
+  const result = await kernelDefinition.evaluate({ entryPath, parameters: {}, options: {} }, runtime, context);
+  const artifact = await kernelDefinition.render!(
+    { handle: result.handle, view: 'model', options: {} },
     runtime,
     context,
   );
-  expect(result.geometry?.format).toBe('gltf');
-  if (result.geometry?.format !== 'gltf') {
-    throw new Error('Assimp kernel returned no GLB geometry');
-  }
-  expect(result.nativeHandle).toEqual(result.geometry.content);
-  await expectTriangleGeometry(result.geometry.content);
-  return result.geometry.content;
+  expect(artifact.content).toEqual(result.handle);
+  const glb = artifact.content as Uint8Array<ArrayBuffer>;
+  await expectTriangleGeometry(glb);
+  return glb;
 };
 
 const renderWithDiskSidecar = async (context: AssimpContext, fixture: Fixture): Promise<Uint8Array<ArrayBuffer>> => {
@@ -235,7 +236,7 @@ const renderWithDiskSidecar = async (context: AssimpContext, fixture: Fixture): 
 };
 
 const cleanupContext = async (context: AssimpContext, label: string): Promise<void> => {
-  await withWatchdog(Promise.resolve(kernelDefinition.cleanup?.(context)), `${label} cleanup`);
+  await withWatchdog(Promise.resolve(kernelDefinition.onDispose?.(context)), `${label} cleanup`);
 };
 
 const exerciseCancellation = async (
@@ -250,7 +251,7 @@ const exerciseCancellation = async (
   const reason = { backend: options.backend, lateSettlement: options.lateSettlement };
   let readerOpened = false;
   let released = false;
-  let pending: Promise<CreateGeometryOutput<Uint8Array<ArrayBuffer>>> | undefined;
+  let pending: ReturnType<typeof kernelDefinition.evaluate> | undefined;
 
   const settleReader = async (): Promise<void> => {
     if (released) {
@@ -281,7 +282,7 @@ const exerciseCancellation = async (
         }
       },
     });
-    pending = kernelDefinition.createGeometry({ entryPath, parameters: {} }, runtime, context);
+    pending = kernelDefinition.evaluate({ entryPath, parameters: {}, options: {} }, runtime, context);
     await withWatchdog(opened.promise, `${options.backend} sidecar open`);
     expectOneSidecarRead(runtime);
 
@@ -423,7 +424,7 @@ describe('assimp real backend integration', () => {
           expect(result.data[0]).toMatchObject({ name: 'result.ply', mimeType: 'application/x-ply' });
           await expectNativePlyRoundTrip(result.data[0]!);
         } finally {
-          await withWatchdog(Promise.resolve(transcoderDefinition.cleanup?.(context)), 'native transcoder cleanup');
+          await withWatchdog(Promise.resolve(transcoderDefinition.onDispose?.(context)), 'native transcoder cleanup');
           await cleanupContext(sourceContext, 'wasm source');
         }
       });
@@ -466,7 +467,7 @@ describe('assimp real backend integration', () => {
           });
           await expectNativePlyRoundTrip(recovered.data[0]!);
         } finally {
-          await withWatchdog(Promise.resolve(transcoderDefinition.cleanup?.(context)), 'native transcoder cleanup');
+          await withWatchdog(Promise.resolve(transcoderDefinition.onDispose?.(context)), 'native transcoder cleanup');
           await cleanupContext(sourceContext, 'wasm source');
         }
       });

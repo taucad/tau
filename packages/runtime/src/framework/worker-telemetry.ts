@@ -25,7 +25,7 @@
 import { randomUuid } from '@taucad/utils/id';
 
 import { isWebWorker } from '#framework/environment.js';
-import type { TelemetryEntry, TelemetryOrigin } from '#types/runtime-protocol.types.js';
+import type { TelemetryEntry, TelemetryOrigin } from '#types/runtime-wire.types.js';
 
 /**
  * Name this realm's process role.

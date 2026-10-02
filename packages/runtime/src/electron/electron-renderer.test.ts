@@ -14,11 +14,11 @@ import {
   requestElectronRuntimePort,
 } from '#electron/renderer.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { createRuntimeWorker, defineRuntime } from '#worker/index.js';
-import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
-import { createRuntimeClient } from '#client/runtime-client-core.js';
+import { createRuntimeClient } from '#client/runtime-document-client-core.js';
 import { registerElectronRuntimeHostRelease } from '#electron/_internal/runtime-host-lease.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
@@ -78,7 +78,7 @@ const setupRendererHarness = (hostId: string) => {
 };
 
 describe('Electron renderer runtime helpers', () => {
-  it.each(['default', 'drain', 'terminate'] as const)(
+  it.each(['default', 'repeated', 'terminate'] as const)(
     'disposes the real worker once on %s client shutdown',
     async (mode) => {
       const { port1, port2 } = new MessageChannel();
@@ -98,7 +98,9 @@ describe('Electron renderer runtime helpers', () => {
       if (filesystem.kind !== 'inline') {
         throw new Error('Expected inline owned filesystem');
       }
-      const server = createWorkerDispatcher(worker, wrapMessagePort(port2), { inlineFileSystem: filesystem.create() });
+      const server = createDocumentWorkerDispatcher(worker, wrapMessagePort(port2), {
+        inlineFileSystem: filesystem.create(),
+      });
       const release = vi.fn();
       registerElectronRuntimeHostRelease(port1, release);
       const client = createRuntimeClient({ transport: electronUtilityTransport({ port: port1 }) });
@@ -107,7 +109,10 @@ describe('Electron renderer runtime helpers', () => {
         if (mode === 'terminate') {
           client.terminate();
         }
-        const closing = client.shutdown({ drain: mode === 'drain' });
+        const closing = client.shutdown();
+        if (mode === 'repeated') {
+          void client.shutdown();
+        }
         await entered.promise;
         expect(disposed).toHaveBeenCalledOnce();
         expect(release).not.toHaveBeenCalled();
@@ -127,7 +132,7 @@ describe('Electron renderer runtime helpers', () => {
     },
   );
 
-  it.each(['error', 'host-exit', 'render-timeout'] as const)(
+  it.each(['error', 'host-exit', 'operation-timeout'] as const)(
     'releases its own utility when cleanup encounters %s',
     async (mode) => {
       const { port1, port2 } = new MessageChannel();
@@ -141,14 +146,14 @@ describe('Electron renderer runtime helpers', () => {
         await gate.promise;
         return undefined;
       });
-      const server = createChannelServer<RuntimeProtocol>({
+      const server = createChannelServer<RuntimeDocumentProtocol>({
         port: wrapMessagePort(port2),
         sessionKey: 'tau.runtime/v1',
         hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
         impl: {
           async call(_context, name) {
-            if (name !== 'cleanup') {
-              throw new Error('Only cleanup is served');
+            if (name !== 'dispose') {
+              throw new Error('Only document dispose is served');
             }
             await cleanup();
             throw new Error('Cleanup response unavailable after hard termination');
@@ -170,15 +175,17 @@ describe('Electron renderer runtime helpers', () => {
           server.dispose();
           port2.close();
           await expect(transport.closed).resolves.toMatchObject({ cause: 'host-exit', phase: 'session' });
-        } else if (mode === 'render-timeout') {
-          if (transport.renderTimeoutRecovery.kind !== 'terminable') {
+        } else if (mode === 'operation-timeout') {
+          if (transport.operationTimeoutRecovery.kind !== 'terminable') {
             throw new Error('Expected hard timeout recovery');
           }
-          await transport.renderTimeoutRecovery.terminate();
-          await expect(transport.closed).resolves.toEqual({ cause: 'render-timeout' });
+          await transport.operationTimeoutRecovery.terminate();
+          await expect(transport.closed).resolves.toEqual({ cause: 'operation-timeout' });
         }
         await closing;
-        expect(release).toHaveBeenCalledExactlyOnceWith(mode === 'render-timeout' ? 'render-timeout' : 'requested');
+        expect(release).toHaveBeenCalledExactlyOnceWith(
+          mode === 'operation-timeout' ? 'operation-timeout' : 'requested',
+        );
         expect(cleanup).toHaveBeenCalledOnce();
       } finally {
         gate.resolve();
@@ -194,7 +201,7 @@ describe('Electron renderer runtime helpers', () => {
     const siblingPorts = new MessageChannel();
     const siblingWorker = createRuntimeWorker({ runtime: defineRuntime({}) });
     const siblingCleanup = vi.spyOn(siblingWorker, 'cleanup');
-    const siblingServer = createWorkerDispatcher(siblingWorker, wrapMessagePort(siblingPorts.port2));
+    const siblingServer = createDocumentWorkerDispatcher(siblingWorker, wrapMessagePort(siblingPorts.port2));
     const siblingRelease = vi.fn();
     registerElectronRuntimeHostRelease(siblingPorts.port1, siblingRelease);
     const sibling = electronUtilityTransport({ port: siblingPorts.port1 }).materialize();
@@ -207,7 +214,7 @@ describe('Electron renderer runtime helpers', () => {
       await cleanupGate.promise;
       await originalCleanup();
     });
-    const server = createWorkerDispatcher(worker, wrapMessagePort(port2));
+    const server = createDocumentWorkerDispatcher(worker, wrapMessagePort(port2));
     let receive: ((event: MessageEvent) => void) | undefined;
     const bridge = {
       requestRuntimePort: vi.fn((requestId: string) => {
@@ -411,7 +418,7 @@ describe('Electron renderer runtime helpers', () => {
     const provider = createElectronClientOptions({
       bridge,
       context: { projectRoot: '/projects/a' },
-      renderTimeout: 1234,
+      operationTimeout: 1234,
       target,
     });
     const options = await provider();
@@ -425,7 +432,7 @@ describe('Electron renderer runtime helpers', () => {
     ]);
     expect(requestRuntimePort.mock.calls[0]?.[0]).not.toBe(requestRuntimePort.mock.calls[1]?.[0]);
     expect(options.transport).not.toBe(nextOptions.transport);
-    expect(options.renderTimeout).toBe(1234);
+    expect(options.operationTimeout).toBe(1234);
     expect(options.transport.id).toBe('electron-utility');
     expect(options.transport.describe()).toMatchObject({
       fileSystem: 'host-local',
@@ -437,18 +444,18 @@ describe('Electron renderer runtime helpers', () => {
     });
 
     const transport = options.transport.materialize();
-    if (transport.renderTimeoutRecovery.kind !== 'terminable') {
+    if (transport.operationTimeoutRecovery.kind !== 'terminable') {
       throw new Error('Expected terminable Electron transport');
     }
-    await transport.renderTimeoutRecovery.terminate();
+    await transport.operationTimeoutRecovery.terminate();
     const nextTransport = nextOptions.transport.materialize();
-    if (nextTransport.renderTimeoutRecovery.kind !== 'terminable') {
+    if (nextTransport.operationTimeoutRecovery.kind !== 'terminable') {
       throw new Error('Expected terminable Electron transport');
     }
-    await nextTransport.renderTimeoutRecovery.terminate();
+    await nextTransport.operationTimeoutRecovery.terminate();
     expect(bridge.releaseRuntimeHost.mock.calls).toEqual([
-      ['host-1', 'render-timeout'],
-      ['host-2', 'render-timeout'],
+      ['host-1', 'operation-timeout'],
+      ['host-2', 'operation-timeout'],
     ]);
   });
 
@@ -513,13 +520,13 @@ describe('Electron renderer runtime helpers', () => {
       }),
       removeEventListener: vi.fn(),
     } as unknown as Window;
-    let server: ChannelServerHandle<RuntimeProtocol> | undefined;
+    let server: ChannelServerHandle<RuntimeDocumentProtocol> | undefined;
     const bridge = {
       requestRuntimePort: vi.fn((requestId: string) => {
         listener?.(relayEvent({ taucadRelay: runtimeRelayTag, hostId: 'host-warm', requestId }, [port1]));
         /* A warm utility serves the moment main hands it the other leg, so its
          * hello is on the wire before the renderer has built the client. */
-        server = createChannelServer<RuntimeProtocol>({
+        server = createChannelServer<RuntimeDocumentProtocol>({
           port: wrapMessagePort<unknown>(port2, { label: 'warm-utility' }),
           sessionKey: 'tau.runtime/v1',
           hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
@@ -561,25 +568,12 @@ describe('Electron renderer runtime helpers', () => {
     }
   });
 
-  it('materialises inline export bytes on the copy-only Electron transport', async () => {
+  it('materialises inline binary bytes on the copy-only Electron transport', async () => {
     const client = electronUtilityTransport({ port: new MessageChannel().port1 }).materialize();
 
-    await expect(
-      client.resolveExport?.({
-        data: [
-          {
-            bytes: { bytes: new Uint8Array([1, 2, 3]), delivery: 'inline' },
-            mimeType: 'application/step',
-            name: 'model.step',
-          },
-        ],
-        issues: [],
-        success: true,
-      }),
-    ).resolves.toMatchObject({
-      data: [{ bytes: new Uint8Array([1, 2, 3]), mimeType: 'application/step', name: 'model.step' }],
-      success: true,
-    });
+    await expect(client.resolveBinary({ bytes: new Uint8Array([1, 2, 3]), delivery: 'inline' })).resolves.toEqual(
+      new Uint8Array([1, 2, 3]),
+    );
 
     await client.close();
   });

@@ -107,6 +107,17 @@ protocol.registerSchemesAsPrivileged([...appSchemePrivileges]);
 
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
+/* Packaged executable launches skip Playwright's readiness loader. Hold window
+ * creation until its main-process bridge is attached, so an already-navigating
+ * window cannot lose the initial CDP navigation event during attachment. */
+const playwrightReady =
+  process.env['TAU_E2E_WAIT_FOR_PLAYWRIGHT'] === '1' &&
+  typeof Reflect.get(globalThis, '__playwright_run') !== 'function'
+    ? Promise.withResolvers<void>()
+    : undefined;
+if (playwrightReady) {
+  Object.defineProperty(globalThis, '__playwright_run', { value: playwrightReady.resolve, configurable: true });
+}
 /* The built SPA, relative to `dist/main/`. Packaging (ruling C7) will relocate
  * this; an env override keeps the e2e lane free to point elsewhere meanwhile. */
 const clientRoot =
@@ -320,6 +331,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * its answer, so the two run side by side instead of end to end. */
   const loginShellApplied = app.isPackaged ? loginShellEnvironment() : undefined;
   await app.whenReady();
+  if (playwrightReady) {
+    await playwrightReady.promise;
+  }
   app.dock?.setIcon(applicationIcon);
   const loginShell = await loginShellApplied;
   const environment = desktopEnvironment();

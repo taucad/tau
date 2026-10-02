@@ -86,7 +86,8 @@ describe('rewriteDeclarationImports', () => {
     });
     expect(runtimeManifest.dependencies).toHaveProperty('@taucad/units', 'workspace:*');
     expect(runtimeManifest.devDependencies).not.toHaveProperty('@taucad/units');
-    expect(existsSync(resolve(repositoryRoot, 'libs/units'))).toBe(false);
+    // A stale generated dist directory does not make units a private source library.
+    expect(existsSync(resolve(repositoryRoot, 'libs/units/package.json'))).toBe(false);
 
     for (const name of ['types', 'json-schema']) {
       expect(existsSync(resolve(repositoryRoot, `libs/${name}/dist/node_modules/.pnpm`))).toBe(false);

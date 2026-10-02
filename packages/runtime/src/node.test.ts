@@ -3,7 +3,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
 import { createNodeClient } from '#node.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
+import { defineKernelV2 as defineKernel } from '#types/runtime-kernel-v2.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 // oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
 import { createParameterDeclaration } from '../test/support/kernel-worker.fixture.js';
@@ -13,21 +13,26 @@ const syntheticKernel = defineKernel({
   extensions: ['mock'],
   name: 'SyntheticKernel',
   version: '1.0.0',
-  exportFormats: {},
+  views: { preview: { title: 'Preview', mimeType: 'model/gltf-binary' } },
+  exports: {},
   async initialize() {
     return {};
   },
-  async getDependencies({ entryPath }) {
+  async resolve({ entryPath }) {
     return { resolved: [entryPath], unresolved: [] };
   },
-  async getParameters() {
-    return createParameterDeclaration();
+  async describe() {
+    const declaration = createParameterDeclaration();
+    if (!declaration.success) {
+      return declaration;
+    }
+    return { success: true, data: { parameters: declaration.data }, issues: declaration.issues };
   },
-  async createGeometry() {
-    return { geometry: { format: 'svg', content: '<svg xmlns="http://www.w3.org/2000/svg"/>' }, nativeHandle: {} };
+  async evaluate() {
+    return { handle: {}, views: ['preview'] as const, exports: [] as const };
   },
-  async exportGeometry() {
-    return { success: true, data: [], issues: [] };
+  async render() {
+    return { content: new Uint8Array([1, 2, 3]) };
   },
 });
 
@@ -39,11 +44,8 @@ describe('createNodeClient', () => {
     const client = await createClient();
 
     expect(client.lifecycleState).toBe('unconnected');
-    expect(client.render).toBeTypeOf('function');
-    expect(client.updateParameters).toBeTypeOf('function');
-    expect(client.setOptions).toBeTypeOf('function');
-    expect(client.setRenderTimeout).toBeTypeOf('function');
-    expect(client.export).toBeTypeOf('function');
+    expect(client.open).toBeTypeOf('function');
+    expect(client.setOperationTimeout).toBeTypeOf('function');
     expect(client.terminate).toBeTypeOf('function');
     expect(client.on).toBeTypeOf('function');
     expect(client.connect).toBeTypeOf('function');
@@ -51,15 +53,20 @@ describe('createNodeClient', () => {
     client.terminate();
   });
 
-  it('auto-connects on the first inline render', async () => {
+  it('auto-connects on the first inline document evaluation and view', async () => {
     const client = await createClient();
-    const outcome = await client.render({ source: { files: { 'main.mock': 'fixture' } } });
+    const document = client.open({ source: { files: { 'main.mock': 'fixture' } } });
+    const outcome = await document.evaluation();
 
     expect(client.lifecycleState).toBe('connected');
     expect(outcome.superseded).toBe(false);
     if (!outcome.superseded) {
-      expect(outcome.geometry.success).toBe(true);
+      expect(outcome.evaluation.success, JSON.stringify(outcome.evaluation.issues)).toBe(true);
     }
+    const view = document.view('preview');
+    await expect(view.rendering()).resolves.toMatchObject({ superseded: false, rendering: { success: true } });
+    view.close();
+    document.close();
 
     client.terminate();
   });
@@ -69,10 +76,12 @@ describe('createNodeClient', () => {
     await writeFile(join(projectDirectory, 'main.mock'), 'fixture');
     const client = await createClient(projectDirectory);
 
-    const outcome = await client.render({ source: { path: 'main.mock' } });
+    const document = client.open({ source: { path: 'main.mock' }, watch: true });
+    const outcome = await document.evaluation();
     expect(outcome.superseded).toBe(false);
     expect(process.getActiveResourcesInfo()).toContain('FSEventWrap');
 
+    document.close();
     client.terminate();
     await vi.waitFor(() => {
       expect(process.getActiveResourcesInfo()).not.toContain('FSEventWrap');

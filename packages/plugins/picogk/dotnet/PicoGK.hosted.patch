@@ -442,7 +442,21 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -290,9 +289,7 @@
+@@ -273,12 +272,7 @@
+         /// <param name="voxOperand">Voxels to add to our field</param>
+         public void BoolAdd(in Voxels voxOperand)
+         {
+-            if (voxOperand.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            _BoolAdd(   lib.hThis,
+-                        hThis, 
+-                        voxOperand.hThis);
++            TauMutateCsg(voxOperand, 0);
+         }
+ 
+         /// <summary>
+@@ -290,9 +284,7 @@
          /// <returns></returns>
          public Voxels voxBoolAdd(in Voxels voxOperand)
          {
@@ -453,7 +467,19 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -368,9 +365,7 @@
+@@ -353,10 +345,7 @@
+         /// <param name="voxOperand">Voxels to remove from our field</param>
+         public void BoolSubtract(in Voxels voxOperand)
+         {
+-            if (voxOperand.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            _BoolSubtract(lib.hThis, hThis, voxOperand.hThis);
++            TauMutateCsg(voxOperand, 1);
+         }
+ 
+         /// <summary>
+@@ -368,9 +357,7 @@
          /// <returns></returns>
          public Voxels voxBoolSubtract(in Voxels voxOperand)
          {
@@ -464,7 +490,19 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -419,9 +414,7 @@
+@@ -404,10 +391,7 @@
+         /// <param name="voxOperand">Voxels masking our voxel field</param>
+         public void BoolIntersect(in Voxels voxOperand)
+         {
+-            if (voxOperand.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            _BoolIntersect(lib.hThis, hThis, voxOperand.hThis);
++            TauMutateCsg(voxOperand, 2);
+         }
+ 
+         /// <summary>
+@@ -419,9 +403,7 @@
          /// <returns></returns>
          public Voxels voxBoolIntersect(in Voxels voxOperand)
          {
@@ -475,7 +513,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -660,11 +653,20 @@
+@@ -660,11 +642,20 @@
          {
              if (fOffset < 0)
              {
@@ -501,7 +539,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -688,15 +690,19 @@
+@@ -688,15 +679,19 @@
                  fPosOffsetMM    = fTemp;
              }
  
@@ -529,7 +567,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -706,10 +712,7 @@
+@@ -706,10 +701,7 @@
          /// <param name="msh">The mesh to render (needs to be a closed surface)</param>
          public void RenderMesh(in Mesh msh)
          {
@@ -541,7 +579,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -722,7 +725,7 @@
+@@ -722,7 +714,7 @@
          /// <param name="oBounds">Bounding box in which to render the implicit</param>
          public void RenderImplicit( in IImplicit xImp,
                                      in BBox3 oBounds)
@@ -550,7 +588,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
          /// <summary>
          /// Render an implicit signed distance function into the voxels
-@@ -736,7 +739,7 @@
+@@ -736,7 +728,7 @@
          /// </summary>
          /// <param name="xImp">Implicit object with signed distance function</param>
          public void IntersectImplicit(in IImplicit xImp)
@@ -559,7 +597,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
  
          /// <summary>
-@@ -759,10 +762,19 @@
+@@ -759,10 +751,19 @@
          /// <param name="lat">The lattice to render</param>
          public void RenderLattice(in Lattice lat)
          {
@@ -581,7 +619,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -773,7 +785,11 @@
+@@ -773,7 +774,11 @@
          /// <param name="fEndZMM">End voxel slice in mm</param>
          public void ProjectZSlice(  float fStartZMM,
                                      float fEndZMM)
@@ -594,7 +632,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
          /// <summary>
          /// Makes a copy of the voxel field and applies
-@@ -783,8 +799,8 @@
+@@ -783,8 +788,8 @@
                                          float fEndZMM)
          {
              Voxels vox = new(this);
@@ -605,7 +643,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -794,10 +810,7 @@
+@@ -794,10 +799,7 @@
          /// <returns></returns>
          public bool bIsEqual(in Voxels voxOther)
          {
@@ -617,7 +655,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -812,16 +825,7 @@
+@@ -812,16 +814,7 @@
          public void CalculateProperties(    out float fVolumeCubicMM,
                                              out BBox3 oBBox)
          {
@@ -635,7 +673,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -834,8 +838,8 @@
+@@ -834,8 +827,8 @@
          /// <returns>Bounding box of the voxels in real world coordinates</returns>
          public BBox3 oCalculateBoundingBox()
          {
@@ -646,7 +684,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -963,21 +967,9 @@
+@@ -963,21 +956,9 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -671,7 +709,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -990,21 +982,8 @@
+@@ -990,21 +971,8 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -695,7 +733,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
           /// <summary>
-@@ -1066,30 +1045,28 @@
+@@ -1066,30 +1034,28 @@
              {
              case ESliceAxis.Z:
                  nSliceCount = nZSize;
@@ -734,7 +772,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1101,32 +1078,8 @@
+@@ -1101,32 +1067,8 @@
                                      ESliceMode eMode = ESliceMode.SignedDistance,
                                      ESliceAxis eAxis = ESliceAxis.Z)
          {
@@ -769,7 +807,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
              switch (eMode)
              {
-@@ -1176,15 +1129,13 @@
+@@ -1176,15 +1118,13 @@
  
          /// <summary>
          /// Returns a signed distance-field-encoded slice of the voxel field
@@ -790,7 +828,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1193,17 +1144,7 @@
+@@ -1193,17 +1133,7 @@
                                                  ref ImageGrayScale img,
                                                  ESliceMode eMode = ESliceMode.SignedDistance)
          {
@@ -919,6 +957,300 @@ diff --git a/IO/MeshIo.cs b/IO/MeshIo.cs
              }
          }
  
+diff --git a/IO/OpenVdbFile.cs b/IO/OpenVdbFile.cs
+--- a/IO/OpenVdbFile.cs
++++ b/IO/OpenVdbFile.cs
+@@ -198,17 +198,19 @@
+         /// <exception>Throws exception if no Voxels found at index</exception>
+         public Voxels voxGet(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            VoxHandle hVoxels = _hGetVoxels(   lib.hThis, 
+-                                                hThis, 
+-                                                nIndex);
+-                                                
+-            if (!Voxels._bIsValid(lib.hThis, hVoxels))
+-                throw new Exception($"No voxel field found at index {nIndex}");
+-
+-            return new Voxels(lib, hVoxels);
++            TauGetField(nIndex, TauVoxelFieldKind, out ulong handle, out var metadataHandle);
++            if (handle == 0) throw new Exception($"No voxel field found at index {nIndex}");
++            FieldMetadata? metadata = null;
++            try
++            {
++                metadata = new FieldMetadata(lib, metadataHandle);
++                return new Voxels(lib, new VoxHandle(unchecked((long)handle)), metadata);
++            }
++            catch
++            {
++                TauReleaseFailedLoadedField(TauVoxelFieldKind, handle, metadata, metadataHandle);
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -241,19 +243,16 @@
+         /// <returns>Index of the field inside the VdbFile object</returns>
+         public int nAdd(Voxels vox, string strFieldName = "")
+         {
+-            if (strFieldName == "")
+-            {
+-                // Use a unique name if none specified
+-                strFieldName = $"PicoGK.Voxels.{nFieldCount()}";
+-            }
+-
+-            if (vox.lib.hThis != lib.hThis)
+-                throw new Exception("Cannot mix objects from different PicoGK library instances");
+-
+-            return _nAddVoxels( lib.hThis,
+-                                hThis, 
+-                                strFieldName, 
+-                                vox.hThis);
++            ArgumentNullException.ThrowIfNull(vox);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            vox.TauThrowIfDisposed();
++            if (vox.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++            try
++            {
++                if (strFieldName == "") strFieldName = $"PicoGK.Voxels.{nFieldCount()}";
++                return _nAddVoxels(lib.hThis, hThis, strFieldName, vox.hThis);
++            }
++            finally { GC.KeepAlive(this); GC.KeepAlive(vox); }
+         }
+ 
+         /// <summary>
+@@ -266,16 +265,19 @@
+         /// <exception>Throws exception if no ScalarField found at index</exception>
+         public ScalarField oGetScalarField(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            ScalarFieldHandle hField = _hGetScalarField(    lib.hThis, 
+-                                                            hThis, 
+-                                                            nIndex);
+-            if (!ScalarField._bIsValid(lib.hThis, hField))
+-                throw new Exception($"No scalar field found at index {nIndex}");
+-
+-            return new ScalarField(lib, hField);
++            TauGetField(nIndex, TauScalarFieldKind, out ulong handle, out var metadataHandle);
++            if (handle == 0) throw new Exception($"No scalar field found at index {nIndex}");
++            FieldMetadata? metadata = null;
++            try
++            {
++                metadata = new FieldMetadata(lib, metadataHandle);
++                return new ScalarField(lib, new ScalarFieldHandle(unchecked((IntPtr)(long)handle)), metadata);
++            }
++            catch
++            {
++                TauReleaseFailedLoadedField(TauScalarFieldKind, handle, metadata, metadataHandle);
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -308,13 +310,16 @@
+         /// <returns>Index of the field inside the VdbFile object</returns>
+         public int nAdd(ScalarField oField, string strFieldName = "")
+         {
+-            if (strFieldName == "")
+-            {
+-                // Use a unique name if none specified
+-                strFieldName = $"PicoGK.ScalarField.{nFieldCount()}";
+-            }
+-
+-            return _nAddScalarField(lib.hThis, hThis, strFieldName, oField.hThis);
++            ArgumentNullException.ThrowIfNull(oField);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            oField.TauThrowIfDisposed();
++            if (oField.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++            try
++            {
++                if (strFieldName == "") strFieldName = $"PicoGK.ScalarField.{nFieldCount()}";
++                return _nAddScalarField(lib.hThis, hThis, strFieldName, oField.hThis);
++            }
++            finally { GC.KeepAlive(this); GC.KeepAlive(oField); }
+         }
+ 
+         /// <summary>
+@@ -327,15 +332,19 @@
+         /// <exception>Throws exception if no ScalarField found at index</exception>
+         public VectorField oGetVectorField(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            VectorFieldHandle hField = _hGetVectorField(lib.hThis, hThis, nIndex);
+-
+-            if (!VectorField._bIsValid(lib.hThis, hField))
+-                throw new Exception($"No vector field found at index {nIndex}");
+-
+-            return new VectorField(lib, hField);
++            TauGetField(nIndex, TauVectorFieldKind, out ulong handle, out var metadataHandle);
++            if (handle == 0) throw new Exception($"No vector field found at index {nIndex}");
++            FieldMetadata? metadata = null;
++            try
++            {
++                metadata = new FieldMetadata(lib, metadataHandle);
++                return new VectorField(lib, new VectorFieldHandle(unchecked((IntPtr)(long)handle)), metadata);
++            }
++            catch
++            {
++                TauReleaseFailedLoadedField(TauVectorFieldKind, handle, metadata, metadataHandle);
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -368,13 +377,16 @@
+         /// <returns>Index of the field inside the VdbFile object</returns>
+         public int nAdd(VectorField oField, string strFieldName = "")
+         {
+-            if (strFieldName == "")
+-            {
+-                // Use a unique name if none specified
+-                strFieldName = $"PicoGK.VectorField.{nFieldCount()}";
+-            }
+-
+-            return _nAddVectorField(lib.hThis, hThis, strFieldName, oField.hThis);
++            ArgumentNullException.ThrowIfNull(oField);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            oField.TauThrowIfDisposed();
++            if (oField.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++            try
++            {
++                if (strFieldName == "") strFieldName = $"PicoGK.VectorField.{nFieldCount()}";
++                return _nAddVectorField(lib.hThis, hThis, strFieldName, oField.hThis);
++            }
++            finally { GC.KeepAlive(this); GC.KeepAlive(oField); }
+         }
+ 
+         /// <summary>
+@@ -383,7 +395,14 @@
+         /// <returns>The number of fields in the VdbFile</returns>
+         public int nFieldCount()
+         {
+-            return _nFieldCount(lib.hThis, hThis);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            try
++            {
++                int count = _nFieldCount(lib.hThis, hThis);
++                if (count < 0) throw new ObjectDisposedException(nameof(OpenVdbFile));
++                return count;
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         /// <summary>
+@@ -396,12 +415,16 @@
+         /// </exception>
+         public string strFieldName(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            StringBuilder oBuilder = new StringBuilder(Library.nStringLength);
+-            _GetFieldName(lib.hThis, hThis, nIndex, oBuilder);
+-            return oBuilder.ToString();
++            try
++            {
++                if (nIndex < 0 || nIndex >= nFieldCount())
++                    throw new ArgumentOutOfRangeException();
++
++                StringBuilder oBuilder = new StringBuilder(Library.nStringLength);
++                _GetFieldName(lib.hThis, hThis, nIndex, oBuilder);
++                return oBuilder.ToString();
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         /// <summary>
+@@ -413,10 +436,14 @@
+         /// </exception>
+         public EFieldType eFieldType(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            return (EFieldType)_nFieldType(lib.hThis, hThis, nIndex);
++            try
++            {
++                if (nIndex < 0 || nIndex >= nFieldCount())
++                    throw new ArgumentOutOfRangeException();
++
++                return (EFieldType)_nFieldType(lib.hThis, hThis, nIndex);
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         /// <summary>
+@@ -429,35 +456,39 @@
+         /// </exception>
+         public string strFieldType(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            // We intentionally use the runtime function, so we can catch
+-            // values not represented by the enum (default:)
+-            switch (_nFieldType(lib.hThis, hThis, nIndex))
+-            {
+-                case -1:
+-                    return "Unsupported";
+-
+-                case 0:
+-                    return "Voxels";
+-
+-                 case 1:
+-                    return "ScalarField";
+-
+-                 case 2:
+-                    return "VectorField";
+-
+-                default:
+-                    // Incompatible value returned from runtime
+-                    Debug.Assert(false);
+-                    return $"Unknown #{_nFieldType(lib.hThis, hThis, nIndex)}";
+-            }
++            try
++            {
++                if (nIndex < 0 || nIndex >= nFieldCount())
++                    throw new ArgumentOutOfRangeException();
++
++                // We intentionally use the runtime function, so we can catch
++                // values not represented by the enum (default:)
++                switch (_nFieldType(lib.hThis, hThis, nIndex))
++                {
++                    case -1:
++                        return "Unsupported";
++
++                    case 0:
++                        return "Voxels";
++
++                     case 1:
++                        return "ScalarField";
++
++                     case 2:
++                        return "VectorField";
++
++                    default:
++                        // Incompatible value returned from runtime
++                        Debug.Assert(false);
++                        return $"Unknown #{_nFieldType(lib.hThis, hThis, nIndex)}";
++                }
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         public IFieldWithMetadata xField(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
++            if (nIndex < 0 || nIndex >= nFieldCount())
+                 throw new ArgumentOutOfRangeException();
+ 
+             switch (eFieldType(nIndex))
 diff --git a/Internals/Interop.cs b/Internals/Interop.cs
 --- a/Internals/Interop.cs
 +++ b/Internals/Interop.cs
@@ -988,7 +1320,33 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bIsValid")]
          internal static extern bool _bIsValid(   LibHandle   hLib,
-@@ -373,10 +372,6 @@
+@@ -341,20 +340,11 @@
+         private static extern float _fVoxelSize(    LibHandle   hLib,
+                                                     VoxHandle   hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_BoolAdd")]
+-        private static extern void _BoolAdd(    LibHandle   hLib,
+-                                                VoxHandle   hThis,
+-                                                VoxHandle   hOther);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_BoolSubtract")]
+-        private static extern void _BoolSubtract(   LibHandle   hLib,
+-                                                    VoxHandle   hThis,
+-                                                    VoxHandle   hOther);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_BoolIntersect")]
+-        private static extern void _BoolIntersect(  LibHandle   hLib,
+-                                                    VoxHandle   hThis,
+-                                                    VoxHandle   hOther);
++
++
++
++
++
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_Offset")]
+         private static extern void _Offset( LibHandle   hLib,
+@@ -373,10 +363,6 @@
                                                      float       fOffset);
  
  
@@ -999,7 +1357,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
          [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
          private delegate float CallbackImplicitDistance(in Vector3 vec);
-@@ -392,8 +387,8 @@
+@@ -392,8 +378,8 @@
                                                          VoxHandle   hThis,
                                                          CallbackImplicitDistance Callback);
  
@@ -1010,7 +1368,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
                                                      VoxHandle   hThis,
                                                      LatHandle   hLattice);
  
-@@ -501,7 +496,7 @@
+@@ -501,7 +487,7 @@
                  m_oMetadata.Dispose();
              }
  
@@ -1019,7 +1377,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -578,7 +573,7 @@
+@@ -578,7 +564,7 @@
                  // Nothing to do in this class
              }
  
@@ -1028,7 +1386,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
              m_bDisposed = true;
          }
-@@ -793,7 +788,10 @@
+@@ -793,7 +779,10 @@
                  // Nothing to do in this class
              }
  
@@ -1040,7 +1398,43 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1075,7 +1073,7 @@
+@@ -996,10 +985,7 @@
+                                                     VdbHandle  hThis,
+                                                     string strFileName);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_hGetVoxels")]
+-        private static extern VoxHandle _hGetVoxels(   LibHandle  hLib,
+-                                                        VdbHandle  hThis,
+-                                                        int nIndex);
++
+ 
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVoxels", CharSet = CharSet.Ansi)]
+@@ -1008,10 +994,7 @@
+                                                 string      strFieldName,
+                                                 VoxHandle   hVoxels);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_hGetScalarField")]
+-        private static extern ScalarFieldHandle _hGetScalarField(   LibHandle  hLib,
+-                                                                    VdbHandle  hThis,
+-                                                                    int nIndex);
++
+ 
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddScalarField", CharSet = CharSet.Ansi)]
+@@ -1020,10 +1003,7 @@
+                                                     string              strFieldName,
+                                                     ScalarFieldHandle   hField);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_hGetVectorField")]
+-        private static extern VectorFieldHandle _hGetVectorField(   LibHandle   hLib,
+-                                                                    VdbHandle   hThis,
+-                                                                    int         nIndex);
++
+ 
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVectorField", CharSet = CharSet.Ansi)]
+@@ -1075,7 +1055,7 @@
                  // Nothing to do in this class
              }
  
@@ -1049,7 +1443,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1174,11 +1172,11 @@
+@@ -1174,11 +1154,11 @@
  
              if (bDisposing)
              {
@@ -1066,7 +1460,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
          }
  
          bool m_bDisposed = false;
-@@ -1259,11 +1257,10 @@
+@@ -1259,11 +1239,10 @@
  
              if (bDisposing)
              {
@@ -1082,7 +1476,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1383,7 +1380,7 @@
+@@ -1383,7 +1362,7 @@
                  // Nothing to do in this class
              }
  
@@ -1091,7 +1485,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1388,4 @@
+@@ -1391,4 +1370,4 @@
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }
@@ -1341,6 +1735,85 @@ new file mode 100644
 +        ObjectDisposedException.ThrowIf(m_bDisposed, this);
 +        return TauGeometryCapture.Acquire(lib, 2, hThis.Value, this);
 +    }
++}
+diff --git a/Library/GridAdmission.cs b/Library/GridAdmission.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/GridAdmission.cs
+@@ -0,0 +1,74 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++
++public partial class OpenVdbFile
++{
++    private const int TauVoxelFieldKind = 0;
++    private const int TauScalarFieldKind = 1;
++    private const int TauVectorFieldKind = 2;
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVdbFile_GetField")]
++    private static extern int TauGetFieldNative(LibHandle library, VdbHandle file, int index, int kind,
++        out ulong output, out VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
++    private static extern void TauDestroyLoadedMetadata(LibHandle library, VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_Destroy")]
++    private static extern void TauDestroyLoadedVoxels(LibHandle library, ulong field);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_Destroy")]
++    private static extern void TauDestroyLoadedScalar(LibHandle library, ulong field);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_Destroy")]
++    private static extern void TauDestroyLoadedVector(LibHandle library, ulong field);
++    private static void TauDestroyLoadedField(LibHandle library, int kind, ulong field)
++    {
++        if (kind == 0) TauDestroyLoadedVoxels(library, field);
++        else if (kind == 1) TauDestroyLoadedScalar(library, field);
++        else TauDestroyLoadedVector(library, field);
++    }
++    private void TauGetField(int index, int kind, out ulong field, out VdbMetaHandle metadata)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        if (index < 0 || index >= nFieldCount()) throw new ArgumentOutOfRangeException();
++        try
++        {
++            var status = TauGetFieldNative(lib.hThis, hThis, index, kind, out field, out metadata);
++            TauCheckedCallbacks.Check(status, null, this);
++            if (field != 0 && metadata.Value == IntPtr.Zero)
++            {
++                TauDestroyLoadedField(lib.hThis, kind, field);
++                throw new InvalidOperationException("Loaded field returned incomplete ownership.");
++            }
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    private void TauReleaseFailedLoadedField(int kind, ulong field, FieldMetadata? metadata, VdbMetaHandle rawMetadata)
++    {
++        try
++        {
++            try
++            {
++                if (metadata is not null) metadata.Dispose();
++                else if (rawMetadata.Value != IntPtr.Zero) TauDestroyLoadedMetadata(lib.hThis, rawMetadata);
++            }
++            finally { TauDestroyLoadedField(lib.hThis, kind, field); }
++        }
++        catch { /* Retain the original constructor failure after attempting both releases. */ }
++    }
++}
++public partial class ScalarField
++{
++    internal ScalarField(Library library, ScalarFieldHandle handle, FieldMetadata metadata)
++    {
++        lib = library;
++        hThis = handle;
++        m_oMetadata = metadata;
++    }
++    internal void TauThrowIfDisposed() => ObjectDisposedException.ThrowIf(m_bDisposed, this);
++}
++public partial class VectorField
++{
++    internal void TauThrowIfDisposed() => ObjectDisposedException.ThrowIf(m_bDisposed, this);
++}
++public partial class Voxels
++{
++    internal void TauThrowIfDisposed() => ObjectDisposedException.ThrowIf(m_bDisposed, this);
 +}
 diff --git a/Library/LatticeChecked.cs b/Library/LatticeChecked.cs
 new file mode 100644
@@ -2223,7 +2696,7 @@ new file mode 100644
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
 +    private static extern void TauDestroyNormalMetadata(LibHandle library, VdbMetaHandle metadata);
 +
-+    private VectorField(Library library, VectorFieldHandle handle, FieldMetadata metadata)
++    internal VectorField(Library library, VectorFieldHandle handle, FieldMetadata metadata)
 +    {
 +        lib = library;
 +        hThis = handle;
@@ -2339,7 +2812,7 @@ diff --git a/Library/VoxelsCsg.cs b/Library/VoxelsCsg.cs
 new file mode 100644
 --- /dev/null
 +++ b/Library/VoxelsCsg.cs
-@@ -0,0 +1,53 @@
+@@ -0,0 +1,70 @@
 +using System.Runtime.InteropServices;
 +
 +namespace PicoGK;
@@ -2350,7 +2823,24 @@ new file mode 100644
 +    private static extern int TauCreateCsgNative(LibHandle library, VoxHandle left, VoxHandle right,
 +        int operation, out VoxHandle output, out VdbMetaHandle metadata);
 +
-+    private Voxels(Library library, VoxHandle handle, FieldMetadata metadata)
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_MutateCsg")]
++    private static extern int TauMutateCsgNative(LibHandle library, VoxHandle target, VoxHandle source, int operation);
++
++    private void TauMutateCsg(Voxels operand, int operation)
++    {
++        ArgumentNullException.ThrowIfNull(operand);
++        if (operand.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ObjectDisposedException.ThrowIf(operand.m_bDisposed, operand);
++        try
++        {
++            var status = TauMutateCsgNative(lib.hThis, hThis, operand.hThis, operation);
++            TauCheckedCallbacks.Check(status, null, this);
++        }
++        finally { GC.KeepAlive(this); GC.KeepAlive(operand); }
++    }
++
++    internal Voxels(Library library, VoxHandle handle, FieldMetadata metadata)
 +    {
 +        lib = library;
 +        hThis = handle;

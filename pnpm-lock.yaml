@@ -2779,6 +2779,9 @@ importers:
 
   apps/www:
     dependencies:
+      '@taucad/utils':
+        specifier: workspace:*
+        version: link:../../libs/utils
       three:
         specifier: 'catalog:'
         version: 0.184.0

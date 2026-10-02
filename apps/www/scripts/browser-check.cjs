@@ -107,6 +107,10 @@ const origin = process.env.WWW_TEST_URL || 'http://127.0.0.1:4173';
     await nojs.close();
     const context = await browser.newContext();
     const page = await context.newPage();
+    // Exercise the shared UUID helper's plain-HTTP fallback without changing navigation.
+    await page.addInitScript(() => {
+      Object.defineProperty(globalThis.crypto, 'randomUUID', { configurable: true, value: undefined });
+    });
     const events = [];
     await page.route('**/api/marketing-events', async (route) => {
       events.push({ body: route.request().postDataJSON(), headers: route.request().headers() });
@@ -132,6 +136,7 @@ const origin = process.env.WWW_TEST_URL || 'http://127.0.0.1:4173';
     await page.waitForTimeout(100);
     assert.equal(events.length, 1);
     assert.equal(events[0].body.event, 'marketing_page_view');
+    assert.match(events[0].body.event_id, /^[a-f\d]{8}-[a-f\d]{4}-4[a-f\d]{3}-[89ab][a-f\d]{3}-[a-f\d]{12}$/u);
     assert.equal(events[0].headers.referer, undefined);
     assert.equal(JSON.stringify(events[0].body).includes('secret-bearer'), false);
     assert.equal(JSON.stringify(events[0].body).includes('person@example.com'), false);
@@ -153,7 +158,9 @@ const origin = process.env.WWW_TEST_URL || 'http://127.0.0.1:4173';
     await context.close();
     const gpc = await browser.newContext();
     await gpc.addInitScript(() => Object.defineProperty(navigator, 'globalPrivacyControl', { value: true }));
-    await gpc.addInitScript(() => localStorage.setItem('tau-www-analytics-consent-v1', 'accepted'));
+    await gpc.addInitScript(() => {
+      localStorage.setItem('tau-www-analytics-consent-v1', 'accepted');
+    });
     let gpcEvents = 0;
     await gpc.route('**/api/marketing-events', async (route) => {
       gpcEvents += 1;

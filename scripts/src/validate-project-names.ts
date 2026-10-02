@@ -16,6 +16,8 @@ const stripScope = (name: string): string => name.replace(/^@[^/]+\//, '');
 // packages/ui, while the app keeps the `ui` project name — so each side of the
 // collision carries an explicit exception instead of a placement-derived name.
 const placementExceptions: Record<string, { projectName?: string; packageName?: string }> = {
+  // Native extensions keep the desktop owner in their project name.
+  'apps/desktop/macos': { projectName: 'desktop-quick-look' },
   'apps/ui': { packageName: '@taucad/app' },
   'packages/ui': { projectName: 'taucad-ui', packageName: '@taucad/ui' },
 };

@@ -570,7 +570,7 @@ describe('PicoGK native C# kernel', () => {
       if (rendered.superseded) {
         throw new Error('Native HeatX render was unexpectedly superseded.');
       }
-      assert.ok(rendered.rendering.success);
+      assert.ok(rendered.rendering.success, JSON.stringify(rendered.rendering.issues));
       const glb = extractGltfFromResult(rendered.rendering);
       if (!glb) {
         throw new Error('Expected HeatX GLB geometry.');

@@ -287,6 +287,7 @@ export const modelList: Record<CloudCatalogProviderId, Record<string, ModelListE
         families: ['claude'],
         contextWindow: 200_000, // Provider supports 1M tokens; Tau caps effective chat budget for cost and compaction reliability.
         maxTokens: 128_000,
+        knowledgeCutoff: '2026-06',
         cost: {
           inputTokens: 2,
           outputTokens: 10,

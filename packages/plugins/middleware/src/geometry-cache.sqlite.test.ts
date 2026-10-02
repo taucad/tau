@@ -9,6 +9,7 @@ import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { defineKernel } from '@taucad/runtime';
+import { asKnownArtifact } from '@taucad/runtime/types';
 import { geometryCache } from '#geometry-cache.middleware.js';
 
 describe('geometry cache with durable SQLite', () => {
@@ -23,50 +24,57 @@ describe('geometry cache with durable SQLite', () => {
       name: 'Cache reopen fixture',
       version: '1.0.0',
       extensions: ['probe'],
-      exportFormats: { step: { optionsSchema: z.object({}) } },
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: {
+        step: { title: 'STEP', mimeType: 'application/step', extension: 'step', optionsSchema: z.object({}) },
+      },
       async initialize() {
         return {};
       },
-      async getDependencies({ entryPath }) {
+      async resolve({ entryPath }) {
         return { resolved: [entryPath, 'helper.txt'], unresolved: [] };
       },
-      async getParameters() {
+      async describe() {
         return {
           success: true,
           data: {
-            schema: {
-              $schema: 'https://json-structure.org/meta/extended/v0/#',
-              $id: 'urn:taucad:cache-reopen',
-              $uses: ['JSONSchemaUnits'],
-              name: 'CacheReopenParameters',
-              type: 'object',
+            parameters: {
+              schema: {
+                $schema: 'https://json-structure.org/meta/extended/v0/#',
+                $id: 'urn:taucad:cache-reopen',
+                $uses: ['JSONSchemaUnits'],
+                name: 'CacheReopenParameters',
+                type: 'object',
+              },
+              defaults: {},
             },
-            defaults: {},
           },
           issues: [],
         };
       },
-      async createGeometry(_input, runtime) {
+      async evaluate(_input, services) {
         builds++;
-        const source = await runtime.filesystem.readFile('helper.txt', 'utf8');
+        const source = await services.filesystem.readFile('helper.txt', 'utf8');
         return {
-          geometry: { format: 'gltf', content: encoder.encode(source) },
-          nativeHandle: { source },
+          handle: { source },
+          views: ['model'],
+          exports: ['step'],
           issues: [],
         };
       },
-      serializeNativeHandle({ nativeHandle }) {
-        return nativeHandle;
+      async render({ handle }) {
+        return { content: encoder.encode(handle.source) };
       },
-      deserializeNativeHandle({ serializedNativeHandle }) {
+      serializeHandle({ handle }) {
+        return handle;
+      },
+      deserializeHandle({ serialized }) {
         restores++;
-        return serializedNativeHandle;
+        return serialized;
       },
-      async exportGeometry({ nativeHandle }) {
+      async export({ handle }) {
         return {
-          success: true,
-          data: [{ name: 'shape.step', mimeType: 'application/step', bytes: encoder.encode(nativeHandle.source) }],
-          issues: [],
+          files: [{ name: 'shape.step', mimeType: 'application/step', bytes: encoder.encode(handle.source) }],
         };
       },
     })();
@@ -77,26 +85,35 @@ describe('geometry cache with durable SQLite', () => {
       const client = createRuntimeClient({
         transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(), compute }),
       });
+      const document = client.open({
+        source: { entry: 'main.probe', files: { 'main.probe': 'unchanged entry', 'helper.txt': helper } },
+        watch: false,
+      });
+      const view = document.view('model');
       try {
-        const result = await client.render({
-          source: { entry: 'main.probe', files: { 'main.probe': 'unchanged entry', 'helper.txt': helper } },
-        });
+        const result = await view.rendering();
         expect(result.superseded).toBe(false);
-        if (result.superseded || !result.geometry.success || result.geometry.data.format !== 'gltf') {
+        if (result.superseded || !result.rendering.success) {
           throw new Error('Expected display geometry');
         }
-        const geometry = decoder.decode(result.geometry.data.content);
+        const artifact = asKnownArtifact(result.rendering.artifact);
+        if (artifact?.mimeType !== 'model/gltf-binary') {
+          throw new Error('Expected GLB display geometry');
+        }
+        const geometry = decoder.decode(artifact.content);
         let exported: string | undefined;
         if (exportStep) {
-          const result = await client.export('step');
+          const result = await document.export('step');
           expect(result.success).toBe(true);
           if (!result.success) {
             throw new Error('Expected STEP export');
           }
-          exported = decoder.decode(result.data[0]!.bytes);
+          exported = decoder.decode(result.files[0].bytes);
         }
         return { geometry, exported };
       } finally {
+        view.close();
+        document.close();
         await client.shutdown();
         await store.dispose();
       }

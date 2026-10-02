@@ -1,11 +1,9 @@
 import { unpartition } from '@gltf-transform/functions';
 import {
   coordinateSystemSchema,
-  createKernelError,
   createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
-  finalizeRenderOutput,
   unitSchema,
 } from '@taucad/runtime/kernel';
 import { createExportFile } from '@taucad/runtime/types';
@@ -28,13 +26,16 @@ export const gltfKernel = defineKernel({
   extensions: ['glb', 'gltf'],
   name: 'GltfKernel',
   version: '0.1.0',
-  exportFormats: { glb: { optionsSchema: glbOptionsSchema } },
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+  exports: {
+    glb: { title: 'glTF binary', mimeType: 'model/gltf-binary', extension: 'glb', optionsSchema: glbOptionsSchema },
+  },
 
   async initialize() {
     return {};
   },
 
-  async getDependencies({ entryPath }, { filesystem }) {
+  async resolve({ entryPath }, { filesystem }) {
     const inventory = await createImportFileInventory(filesystem, entryPath);
     return {
       resolved: [...inventory.resolved],
@@ -42,9 +43,9 @@ export const gltfKernel = defineKernel({
     };
   },
 
-  async getParameters() {
-    return createKernelSuccess(
-      createKernelParameterDeclaration(
+  async describe() {
+    return createKernelSuccess({
+      parameters: createKernelParameterDeclaration(
         {},
         { type: 'object', properties: {}, additionalProperties: false },
         {
@@ -52,10 +53,10 @@ export const gltfKernel = defineKernel({
           name: 'GltfParameters',
         },
       ),
-    );
+    });
   },
 
-  async createGeometry({ entryPath }, { filesystem }) {
+  async evaluate({ entryPath }, { filesystem }) {
     const inventory = await createImportFileInventory(filesystem, entryPath);
     const isJson = entryPath.toLowerCase().endsWith('.gltf');
     const io = createFileResolverIo(inventory.resolver);
@@ -78,31 +79,25 @@ export const gltfKernel = defineKernel({
       sceneNamePolicy: 'clear-generated',
       sceneNameSource: 'imported',
     });
-    return finalizeRenderOutput({
-      artifacts: [{ format: 'gltf', content: normalized }],
-      nativeHandle: normalized,
-    });
+    return { handle: normalized };
   },
 
-  async exportGeometry(input) {
-    if (input.nativeHandle.length === 0) {
-      return createKernelError([
-        {
-          message: 'No geometry available for export.',
-          code: 'RUNTIME',
-          type: 'runtime',
-          severity: 'error',
-        },
-      ]);
+  async render({ handle }) {
+    return { content: handle };
+  },
+
+  async export(input) {
+    if (input.handle.length === 0) {
+      throw new Error('No geometry available for export.');
     }
-    const bytes = await transformGltfExportBytes(input.nativeHandle, {
+    const bytes = await transformGltfExportBytes(input.handle, {
       format: 'glb',
       coordinateSystem: input.options.coordinateSystem,
       unit: input.options.unit,
     });
-    return createKernelSuccess([createExportFile('glb', 'model.glb', bytes)]);
+    return { files: [createExportFile('glb', 'model.glb', bytes)] };
   },
 
-  serializeNativeHandle: ({ nativeHandle }) => new Uint8Array(nativeHandle),
-  deserializeNativeHandle: ({ serializedNativeHandle }) => new Uint8Array(serializedNativeHandle),
+  serializeHandle: ({ handle }) => new Uint8Array(handle),
+  deserializeHandle: ({ serialized }) => new Uint8Array(serialized),
 });

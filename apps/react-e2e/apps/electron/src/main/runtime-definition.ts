@@ -10,34 +10,34 @@ const blocking = defineKernel({
   extensions: ['block'],
   name: 'BlockingKernel',
   version: '1.0.0',
-  exportFormats: {},
+  views: {},
+  exports: {},
   async initialize() {
     return {};
   },
-  async getDependencies({ entryPath }) {
+  async resolve({ entryPath }) {
     return { resolved: [entryPath], unresolved: [] };
   },
-  async getParameters() {
+  async describe() {
     return {
       success: true,
-      data: createKernelParameterDeclaration(
-        {},
-        { type: 'object', properties: {} },
-        {
-          id: 'urn:taucad:test:blocking-electron',
-          name: 'BlockingElectronParameters',
-        },
-      ),
+      data: {
+        parameters: createKernelParameterDeclaration(
+          {},
+          { type: 'object', properties: {} },
+          {
+            id: 'urn:taucad:test:blocking-electron',
+            name: 'BlockingElectronParameters',
+          },
+        ),
+      },
       issues: [],
     };
   },
-  async createGeometry() {
+  async evaluate() {
     const lock = new Int32Array(new SharedArrayBuffer(Int32Array.BYTES_PER_ELEMENT));
     Atomics.wait(lock, 0, 0);
     throw new Error('Blocking Electron recovery fixture unexpectedly resumed.');
-  },
-  async exportGeometry() {
-    return { success: false, issues: [] };
   },
 });
 

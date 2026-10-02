@@ -90,6 +90,14 @@ vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ appliedWorkbenchRevisions: new Map(), appliedEntryRevisions: new Map() }),
 }));
 
+vi.mock('#routes/w.$workspace.$project/project-workspace-context.js', () => ({
+  useWorkbenchLayoutController: () => ({
+    snapshot: () => undefined,
+    subscribe: () => () => undefined,
+    restorePreviousArrangement: async () => false,
+  }),
+}));
+
 vi.mock('#routes/w.$workspace.$project/chat-message-planning.js', () => ({
   ChatMessagePlanning({ messageId, className }: { readonly messageId: string; readonly className?: string }) {
     return (
@@ -591,9 +599,9 @@ describe('ChatMessage agent media', () => {
     const article = screen.getByRole('article');
     const image = within(article).getByRole('img', { name: 'Agent image' });
     const [before, after] = within(article).getAllByTestId('chat-message-text');
-    // eslint-disable-next-line no-bitwise -- compareDocumentPosition returns a bitmask.
+    // oxlint-disable-next-line eslint/no-bitwise -- compareDocumentPosition returns a bitmask.
     expect(before!.compareDocumentPosition(image) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-    // eslint-disable-next-line no-bitwise -- compareDocumentPosition returns a bitmask.
+    // oxlint-disable-next-line eslint/no-bitwise -- compareDocumentPosition returns a bitmask.
     expect(image.compareDocumentPosition(after!) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     expect(screen.queryByTestId('chat-message-file-attachments')).not.toBeInTheDocument();
   });
@@ -812,12 +820,12 @@ describe('ChatMessage external Tau MCP porcelain', () => {
         {
           type: 'dynamic-tool',
           toolCallId: 'call-kernel',
-          toolName: 'get_kernel_result',
+          toolName: 'evaluate_model',
           state: 'output-available',
           input: { targetFile: 'main.ts' },
           output: { status: 'ready' },
           toolMetadata: {
-            tau: { origin: 'external', nativeName: 'get_kernel_result', presentation: 'tau-mcp' },
+            tau: { origin: 'external', nativeName: 'evaluate_model', presentation: 'tau-mcp' },
           },
         },
       ],
@@ -838,11 +846,11 @@ describe('ChatMessage external Tau MCP porcelain', () => {
         {
           type: 'dynamic-tool',
           toolCallId: 'call-foreign-kernel',
-          toolName: 'get_kernel_result',
+          toolName: 'evaluate_model',
           state: 'output-available',
           input: { targetFile: 'main.ts' },
           output: { status: 'ready' },
-          toolMetadata: { tau: { origin: 'external', nativeName: 'get_kernel_result' } },
+          toolMetadata: { tau: { origin: 'external', nativeName: 'evaluate_model' } },
         },
       ],
     };
@@ -857,13 +865,13 @@ describe('ChatMessage external Tau MCP porcelain', () => {
     const preliminaryPart = {
       type: 'dynamic-tool',
       toolCallId: 'call-preliminary-kernel',
-      toolName: 'get_kernel_result',
+      toolName: 'evaluate_model',
       state: 'output-available',
       input: { targetFile: 'main.scad' },
       output: { status: 'pending' },
       preliminary: true,
       toolMetadata: {
-        tau: { origin: 'external', nativeName: 'get_kernel_result', presentation: 'tau-mcp' },
+        tau: { origin: 'external', nativeName: 'evaluate_model', presentation: 'tau-mcp' },
       },
     };
     const message: MyUIMessage = {

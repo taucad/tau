@@ -447,8 +447,8 @@ describe('ModelService', () => {
     expect(
       service.filterProviderToolNamesForModel({
         modelId: 'together-glm-5.2',
-        toolNames: [toolName.screenshot, toolName.testModel, toolName.getKernelResult, toolName.exportGeometry],
+        toolNames: [toolName.screenshot, toolName.testModel, toolName.evaluateModel, toolName.exportModel],
       }),
-    ).toEqual([toolName.testModel, toolName.getKernelResult, toolName.exportGeometry]);
+    ).toEqual([toolName.testModel, toolName.evaluateModel, toolName.exportModel]);
   });
 });

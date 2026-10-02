@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-09-29'
+updated: '2026-09-30'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -55,13 +55,14 @@ Use pnpm to change workspace dependencies. Add a general root dependency with `p
 
 Serialize dependency changes and the resulting install before parallel verification. The pinned pnpm 11 defaults to installing when a command detects stale dependencies; use per-call `pnpm_config_verify_deps_before_run=error` for concurrent checks so drift fails instead of starting competing installs.
 
-| Bucket                      | Field                                                             | Treatment                                                    |
-| --------------------------- | ----------------------------------------------------------------- | ------------------------------------------------------------ |
-| A. Bundled-in workspace dep | `devDependencies`                                                 | Bundle into `dist/` via `tsdown.config.ts#deps.alwaysBundle` |
-| B. External runtime dep     | `dependencies`                                                    | Installed alongside the package; never bundled               |
-| C. Optional runtime dep     | `optionalDependencies`                                            | Best-effort install (e.g., platform-specific natives)        |
-| D. Optional peer dep        | `peerDependencies` + `peerDependenciesMeta.<name>.optional: true` | Build-time integration (e.g., `vite`, `rolldown`)            |
-| E. Dev-only                 | `devDependencies`                                                 | Test/build tooling — never present at consumer install time  |
+| Bucket                         | Field                                                             | Treatment                                                                                                                                                                   |
+| ------------------------------ | ----------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| A. Bundled-in workspace dep    | `devDependencies`                                                 | Bundle into `dist/` via `tsdown.config.ts#deps.alwaysBundle`                                                                                                                |
+| B. External runtime dep        | `dependencies`                                                    | Installed alongside the package; never bundled                                                                                                                              |
+| C. Optional runtime dep        | `optionalDependencies`                                            | Best-effort install (e.g., platform-specific natives)                                                                                                                       |
+| D. Optional peer dep           | `peerDependencies` + `peerDependenciesMeta.<name>.optional: true` | Build-time integration (e.g., `vite`, `rolldown`)                                                                                                                           |
+| E. Dev-only                    | `devDependencies`                                                 | Test/build tooling — never present at consumer install time                                                                                                                 |
+| F. Vendored third-party engine | `devDependencies`                                                 | Bundle a reviewed upstream graph into a separate `dist/engine/` build; record included packages and actual LICENSE text, and block publication for held or pending entries. |
 
 **Why**: Mis-classification causes either bloat (bundling a real dep), install failures (bundling a private workspace dep is fine but leaving it in `dependencies` 404s the install), or hidden requirements (forgetting an optional peer in `peerDependenciesMeta`).
 
@@ -182,6 +183,9 @@ export default defineConfig(packageConfig);
 Required fields:
 
 - `unbundle: true` — emit source files mirroring `src/` structure. Required for any package whose consumers use `new URL(literal, import.meta.url)` for asset/plugin discovery (see `docs/research/runtime-zero-config-bundling.md`). Default-on workspace-wide for consistency.
+
+For bucket F, keep Tau's own `tsdown.config.ts` at `unbundle: true` and use a second config with `unbundle: false` for the vendored engine alone. `@taucad/tscircuit` owns this exception under D14. Remove the second build when the upstream graph installs cleanly without Tau's Zod or native-module workarounds. An inventory row hidden from a package roster is not evidence that held code is absent from a distributable; inspect the actual package, app, and desktop outputs before release (EQ5).
+
 - `dts: true` — emit `.d.mts` declarations beside ESM JavaScript.
 - `minify: true` — non-negotiable for published artefacts.
 - `tsconfig: 'tsconfig.build.json'` — separate from `tsconfig.json` (dev) and `tsconfig.spec.json` (tests).
@@ -315,7 +319,7 @@ Every publishable package must declare these fields. Missing fields fail `publin
 | `publishConfig.exports` | Map every public subpath to its ESM output (publish-time override)                                      |
 | `publishConfig.access`  | `"public"` for scoped packages                                                                          |
 
-No `prepublishOnly` hook: `nx.json` `targetDefaults["nx-release-publish"].dependsOn` includes `pkgcheck`, so the gate runs as a native dependency of publish for every package. Do not add the hook back.
+No `prepublishOnly` hook by default: `nx.json` `targetDefaults["nx-release-publish"].dependsOn` includes `pkgcheck`, so the gate runs as a native dependency of publish for every package. Bucket F's `@taucad/tscircuit` is a narrow exception while its vendored-code licence inventory contains held or unreviewed entries. Its source-package `prepublishOnly` runs the same licence checker as its required `nx-release-publish` dependency, guarding direct source publish as well as the workspace release path. The Nx dependency remains authoritative because package managers may strip lifecycle scripts from packed manifests. Remove the source hook with the held-code distribution gate when every inventory entry is cleared and EQ5 output-level exclusion is proved; do not treat this hook as distribution approval.
 
 INCORRECT (missing `engines`, `sideEffects`, `bugs`, `homepage`):
 
@@ -515,7 +519,7 @@ Before merging a PR that touches a publishable package's `package.json` or `tsdo
 - [ ] Workspace deps bundled via `deps.alwaysBundle` with subpath-aware regex (Rule 4)
 - [ ] `exports` and `publishConfig.exports` list identical keys (Rule 5)
 - [ ] Plugin packages export named `plugin` and no default plugin; core packages export no `plugin`
-- [ ] All required `package.json` fields present (Rule 6): `engines`, `sideEffects`, `bugs`, `homepage`; no `prepublishOnly` hook
+- [ ] All required `package.json` fields present (Rule 6): `engines`, `sideEffects`, `bugs`, `homepage`; no `prepublishOnly` hook except the bucket F held-licence gate described above
 - [ ] `pnpm nx run <pkg>:pkgcheck` passes (Rule 7)
 - [ ] README covers every required section (Rule 8)
 - [ ] Build-time integrations declared as optional peers (Rule 10)

@@ -15,7 +15,18 @@
 import type { ImmutableRevisionTree, RevisionId } from '#algorithms/index.js';
 import type { RevisionActor, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
 import type { ObjectFormat } from '#object-hash.js';
-import type { Remote } from '#remotes.js';
+/** Which of the two remote kinds a project's remote is. @public */
+export type RemoteKind = 'tau' | 'git';
+
+/** One remote, as git's remotes list holds it. @public */
+export type Remote = Readonly<{
+  name: string;
+  url: string;
+  kind: RemoteKind;
+  provider?: 'github';
+  repositoryId?: string;
+  fetchOnly?: boolean;
+}>;
 
 /** Which implementation is behind one port. @public */
 export type RevisionEngine = 'isomorphic-git' | 'native-git' | 'remote';

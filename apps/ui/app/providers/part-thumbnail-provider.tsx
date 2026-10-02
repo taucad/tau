@@ -6,6 +6,7 @@ import { PartThumbnailService } from '#services/part-thumbnail.service.js';
 
 class PartThumbnailRegistry {
   private readonly services = new Map<string, PartThumbnailService>();
+  // oxlint-disable-next-line typescript/parameter-properties -- The app's erasableSyntaxOnly compiler forbids parameter properties.
   private readonly imageService: ConstructorParameters<typeof PartThumbnailService>[0];
   public constructor(imageService: ConstructorParameters<typeof PartThumbnailService>[0]) {
     this.imageService = imageService;

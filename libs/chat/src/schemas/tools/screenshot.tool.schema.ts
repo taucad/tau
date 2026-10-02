@@ -14,15 +14,22 @@ export const screenshotInputSchema = z
     targetFile: rootedFilePathSchema.describe(
       'Source file path of the geometry unit to screenshot (e.g. "main.ts", "lib/bracket.scad").',
     ),
+    view: z.string().optional().describe('A view ID offered by evaluate_model; omit for the default view.'),
+    instance: z.string().optional().describe('A sheet or drawing ID offered under that view; omit for the first.'),
+    options: z
+      .any()
+      .describe('JSON object of options declared by the selected view.')
+      .pipe(z.record(z.string(), z.json()))
+      .optional(),
   })
   .strict();
 /** @public */
 export type ScreenshotInput = z.infer<typeof screenshotInputSchema>;
 
-/** Canonical view identifiers produced by screenshot capture. @public */
-export const screenshotViewSchema = z.enum(['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom', 'drawing']);
+/** Canonical camera angles produced by screenshot capture of a 3D view. @public */
+export const screenshotAngleSchema = z.enum(['isometric', 'front', 'back', 'right', 'left', 'top', 'bottom']);
 /** @public */
-export type ScreenshotView = z.infer<typeof screenshotViewSchema>;
+export type ScreenshotAngle = z.infer<typeof screenshotAngleSchema>;
 
 /**
  * Screenshot image entry.
@@ -30,7 +37,9 @@ export type ScreenshotView = z.infer<typeof screenshotViewSchema>;
  */
 export const screenshotImageSchema = z
   .object({
-    view: screenshotViewSchema.describe('Canonical captured view'),
+    view: z.string().describe('Kernel view ID captured.'),
+    instance: z.string().optional().describe('Captured sheet or drawing ID.'),
+    angle: screenshotAngleSchema.optional().describe('Camera angle for a 3D view only.'),
     dataUrl: z.string().describe('Base64 data URL of the captured image'),
   })
   .strict();
@@ -38,7 +47,9 @@ export const screenshotImageSchema = z
 /** A persisted image returned to an external agent without inline image bytes. @public */
 export const screenshotArtifactImageSchema = z
   .object({
-    view: screenshotViewSchema.describe('Canonical captured view'),
+    view: z.string().describe('Kernel view ID captured.'),
+    instance: z.string().optional().describe('Captured sheet or drawing ID.'),
+    angle: screenshotAngleSchema.optional().describe('Camera angle for a 3D view only.'),
     path: z
       .string()
       .regex(/^attachments\/[\da-f]{64}\.(?:png|webp)$/u)

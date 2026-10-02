@@ -48,9 +48,9 @@ const startGraphics = (): GraphicsActor => {
 
 const showSvg = (actor: GraphicsActor): void => {
   actor.send({
-    type: 'updateGeometry',
-    geometry: { format: 'svg', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', hash: 'svg' },
-    units: { length: 'mm' },
+    type: 'updateArtifact',
+    artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' },
+    hash: 'svg',
   });
 };
 

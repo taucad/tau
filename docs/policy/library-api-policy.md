@@ -3,7 +3,7 @@ title: 'Library API Policy'
 description: 'Design rules for world-class JavaScript/TypeScript library APIs: factories, defineX, named operation inputs, max 3 params, naming, subpath exports, events, plugins, and lazy init.'
 status: active
 created: '2026-02-23'
-updated: '2026-09-21'
+updated: '2026-10-02'
 related:
   - docs/policy/api-evolution-policy.md
   - docs/policy/resource-cleanup-policy.md
@@ -57,8 +57,12 @@ export const myKernel = defineKernel({
   extensions: ['mycad'],
   name: 'MyKernel',
   version: '1.0.0',
-  async initialize(options, runtime) { ... },
-  async createGeometry(input, runtime, context) { ... },
+  views: {},
+  exports: {},
+  async initialize(options, services) { ... },
+  async resolve(input, services, context) { ... },
+  async describe(input, services, context) { ... },
+  async evaluate(input, services, context) { ... },
 });
 ```
 
@@ -106,13 +110,13 @@ render(source, parameters, renderOptions);
 
 Use a **named, exported, readonly object for evolving operation data**. I/O or a process/provider/plugin boundary makes cancellation, identity and preconditions important; it does not, by itself, require every argument to share one object. A stable subject or route discriminator may precede the named request when it improves call-site clarity or dependent inference, as in `export(format, input)`. Distinct framework-owned `runtime` or provider-owned `context` parameters may follow under the rules below. When the request's only current field is `signal`, keep it inside that request: an `AbortSignal` must not become the sole positional parameter.
 
-| Semantic shape                                | Signature                                 | Reason                                                             |
-| --------------------------------------------- | ----------------------------------------- | ------------------------------------------------------------------ |
-| Same-owner operation fields and controls      | `submit(input)`, `connect(input)`         | Identity, configuration and preconditions evolve together          |
-| Stable subject/route plus evolving request    | `export(format, input)`                   | The route discriminates inferred options; controls stay extensible |
-| Operation, framework services, provider state | `createGeometry(input, runtime, context)` | Three distinct ownership boundaries                                |
-| Scalar semantic construction                  | `quantity('length')`                      | No request lifecycle or unrelated control fields                   |
-| Standard event/lifecycle convention           | `on(event, handler)`, `close()`           | Preserve familiar stable contracts                                 |
+| Semantic shape                                | Signature                            | Reason                                                             |
+| --------------------------------------------- | ------------------------------------ | ------------------------------------------------------------------ |
+| Same-owner operation fields and controls      | `submit(input)`, `connect(input)`    | Identity, configuration and preconditions evolve together          |
+| Stable subject/route plus evolving request    | `export(format, input)`              | The route discriminates inferred options; controls stay extensible |
+| Operation, framework services, provider state | `evaluate(input, services, context)` | Three distinct ownership boundaries                                |
+| Scalar semantic construction                  | `quantity('length')`                 | No request lifecycle or unrelated control fields                   |
+| Standard event/lifecycle convention           | `on(event, handler)`, `close()`      | Preserve familiar stable contracts                                 |
 
 Do not migrate a signature merely to reduce its arity. Verify inference, ownership and actual callers; a wire envelope can differ from the ergonomic local call. New job/machine operations with several identities and preconditions normally use one named request. Do not pre-add unused fields.
 
@@ -149,22 +153,22 @@ on(event, handler)
 
 ```typescript
 // CORRECT: each param is a different architectural layer
-createGeometry(input, runtime, context)
+evaluate(input, services, context)
 //              ^       ^        ^
 //              |       |        └─ kernel state ("mine")
 //              |       └────────── framework services ("theirs")
 //              └────────────────── operation data ("what")
 
 // CORRECT: standard middleware/interceptor pattern
-wrapCreateGeometry(input, handler, runtime)
+wrapEvaluate(input, handler, services)
 //                  ^       ^        ^
 //                  |       |        └─ middleware context
 //                  |       └────────── next-in-chain function
 //                  └────────────────── operation data
 
 // INCORRECT: all three are the same concern (operation input data)
-createGeometry(file, parameters, tessellation?)
-// Should be: createGeometry({ file, parameters, tessellation? })
+evaluate(file, parameters, options?)
+// Should be: evaluate({ entryPath: file, parameters, options })
 ```
 
 **4+ params -- Never.** Refactor to an object pattern.
@@ -177,11 +181,11 @@ Three signals that indicate a parameter design violation:
 
 ```typescript
 // INCORRECT: developer must write _runtime, _ctx just to reach nativeHandle
-async exportGeometry({ format, tessellation }, _runtime, _ctx, nativeHandle) {
-  // Only uses format, tessellation, and nativeHandle
+async export({ exportId, options }, _services, _ctx, handle) {
+  // Only uses the selected export, options, and handle
 
-// CORRECT: nativeHandle is in the input object, no placeholders needed
-async exportGeometry({ format, tessellation, nativeHandle }, _runtime, _ctx) {
+// CORRECT: handle is in the input object, no extra positional argument
+async export({ exportId, options, handle }, _services, _ctx) {
   // Everything the developer needs is in the first param
 ```
 
@@ -189,17 +193,17 @@ async exportGeometry({ format, tessellation, nativeHandle }, _runtime, _ctx) {
 
 ```typescript
 // INCORRECT: all three are operation input data
-createGeometry(file, parameters, tessellation?)
+evaluate(file, parameters, options?)
 
 // CORRECT: single input object
-createGeometry({ file, parameters, tessellation? })
+evaluate({ entryPath: file, parameters, options })
 ```
 
 **3. Inconsistent destructuring.** If you destructure the first param but pass others through as-is at the same conceptual level, the grouping is wrong. When params at the same level are split across positions, they should be merged.
 
 ### Consistency principle
 
-Within a contract interface (`KernelDefinition`, `BundlerDefinition`, middleware hooks), every method must follow the same positional pattern. A developer who learns `createGeometry(input, runtime, context)` should be able to predict the shape of `getParameters(input, runtime, context)` without reading docs. This consistency builds muscle memory and reduces cognitive load across all Tau packages.
+Within a contract interface (`KernelDefinition`, `BundlerDefinition`, middleware hooks), every operation follows its declared positional pattern. A developer who learns `evaluate(input, services, context)` can predict `describe(input, services, context)`; middleware follows `(input, next, services)`. This consistency builds muscle memory and preserves each argument's ownership.
 
 ### Rationale: why (input, runtime, context) is 3 params, not 2
 
@@ -208,7 +212,7 @@ The `context` and `runtime` parameters represent different ownership boundaries:
 - `**runtime`\*\* is "theirs" -- framework-provided services (filesystem, logger, tracer, bundler). The kernel author consumes these but doesn't own or create them.
 - `**context**` is "mine" -- the kernel's own state, created during `initialize` and threaded through every subsequent call. The kernel author owns and mutates this.
 
-Merging them into a single object would conflate ownership, require making `KernelRuntime` generic over every kernel's context type, and remove the visual signal at the call site that distinguishes framework services from kernel state. The 3-param pattern is also consistent with the middleware `(input, handler, runtime)` pattern -- a standard composition model used by Express, Koa, and gRPC interceptors.
+Merging them into a single object would conflate ownership, require making `KernelServices` generic over every kernel's context type, and remove the visual signal at the call site that distinguishes framework services from kernel state. The 3-param pattern is also consistent with the middleware `(input, next, services)` pattern -- a standard composition model used by Express, Koa, and gRPC interceptors.
 
 **Why**: Parameter conventions are enforced by `max-params: 3` in ESLint. The same-concern smell tests require semantic understanding and are enforced through code review and agentic documentation.
 
@@ -290,7 +294,9 @@ Each naming prefix signals a specific role:
 
 ### Callback and hook naming
 
-Always use the `on*` prefix for callbacks and framework hooks. Never use `*Callback` suffixes or bare verbs.
+Use the `on*` prefix for callbacks and framework lifecycle hooks. Never use `*Callback` suffixes.
+
+An operation hook declared by a plugin contract is named for the action every implementation performs. The runtime kernel contract uses `resolve`, `describe`, `evaluate`, `render`, and `export`, including non-geometric kernels. Sibling middleware uses `wrapDescribe`, `wrapEvaluate`, `wrapRender`, and `wrapExport`. Do not name a shared operation for one medium (`createGeometry`, `meshGeometry`) or retain an alias for the same hook. Lifecycle callbacks still use `onDispose`.
 
 ```typescript
 // CORRECT: on* prefix for callbacks
@@ -299,7 +305,7 @@ client.on('progress', handler)
 
 // CORRECT: on* prefix for framework hooks (subclass overrides)
 protected abstract onInitialize(input, runtime): Promise<Context>;
-protected abstract onCreateGeometry(input, runtime): Promise<Result>;
+protected abstract onEvaluate(input, services): Promise<Result>;
 
 // INCORRECT: bare verbs or *Callback suffix
 { print: (msg) => console.log(msg) }
@@ -767,25 +773,25 @@ Provider capability declarations are positive-only. Omit an unsupported declarat
 CORRECT:
 
 ```typescript
-render: { content: ['includeEdges'] as const },
-exportFormats: {
-  glb: { optionsSchema: glbSchema, content: ['includeEdges'] as const },
-  step: { optionsSchema: stepSchema }, // format supported; no framework content
+views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeEdges'] } },
+exports: {
+  glb: { title: 'GLB', mimeType: 'model/gltf-binary', extension: 'glb', optionsSchema: glbSchema, content: ['includeEdges'] },
+  step: { title: 'STEP', mimeType: 'model/step', extension: 'step', optionsSchema: stepSchema },
 },
 ```
 
 INCORRECT:
 
 ```typescript
-render: { content: [] },
-exportFormats: {
-  glb: { optionsSchema: glbSchema, content: ['includeEdges', 'includeEdges'] },
+views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: [] } },
+exports: {
+  glb: { title: 'GLB', mimeType: 'model/gltf-binary', extension: 'glb', content: ['includeEdges', 'includeEdges'] },
 },
 ```
 
 Provider hook inputs follow the same contract: when a provider declares no content, its method input omits `content`; this is distinct from the consumer envelope, where requesting an unsupported property is a type and runtime error. Do not add empty capability objects or arrays to advertise absence.
 
-Hook return objects follow the same ownership rule and must avoid reserved-word member names when consumers are expected to destructure the result. Prefer `exportGeometry` over a hook member named `export`, because `const { export } = useRuntime()` is a syntax error.
+Hook return objects follow the same ownership rule and must avoid reserved-word member names when consumers are expected to destructure the result. Kernel hooks use `export` to produce declared export artifacts. Object methods may use reserved-word property names. Destructurable consumer return objects use a binding name such as `exportModel`, because `const { export } = useRuntime()` is a syntax error.
 
 ## 22. Temporal Values
 

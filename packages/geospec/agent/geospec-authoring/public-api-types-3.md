@@ -1,60 +1,6 @@
 # geospec — Types (3)
 
-87 top-level symbols. Signatures are verbatim typescript.
-
-// Axis selector resolved from cylindrical/conical face facts
-AxisSelector: {
-    kind: 'axis';
-    of?: string | RegExp;
-    query?: AxisQuery;
-    expect?: Cardinality;
-}
-
-  kind: 'axis'
-
-  of: string | RegExp
-
-  query: AxisQuery
-
-  expect: Cardinality
-
-// Body query predicates over available source facts
-BodyQuery: {
-    area?: NumericRange;
-    near?: Partial<Vec3Record> & {
-        tolerance?: number;
-    };
-    nearestTo?: Vec3;
-    within?: GeometrySelector;
-    orderBy?: 'area' | 'offsetAlong';
-    along?: Vec3;
-    pick?: 'first' | 'last' | number;
-    allOf?: BodyQuery[];
-    anyOf?: BodyQuery[];
-    not?: BodyQuery;
-}
-
-  area: NumericRange
-
-  near: Partial<Vec3Record> & {
-          tolerance?: number;
-      }
-
-  nearestTo: Vec3
-
-  within: GeometrySelector
-
-  orderBy: 'area' | 'offsetAlong'
-
-  along: Vec3
-
-  pick: 'first' | 'last' | number
-
-  allOf: BodyQuery[]
-
-  anyOf: BodyQuery[]
-
-  not: BodyQuery
+85 top-level symbols. Signatures are verbatim typescript.
 
 // Body selector over source-backed solid evidence
 BodySelector: {
@@ -1586,11 +1532,7 @@ GeoSpecTauProjectArtifact: {
 // Runtime surface required to snapshot and export one Tau project
 GeoSpecTauProjectRuntime: RuntimeClientWithRoutes & Pick<RuntimeClient, 'shutdown' | 'snapshotSource'>
 
-  // GeoSpecTauProjectRuntime.connect (method)
-  connect(): Promise<void>;
-
-  // GeoSpecTauProjectRuntime.terminate (method)
-  terminate(): void;
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
 
   // GeoSpecTauProjectRuntime.on (method)
   on?(event: 'telemetry', handler: (batch: {
@@ -1601,13 +1543,6 @@ GeoSpecTauProjectRuntime: RuntimeClientWithRoutes & Pick<RuntimeClient, 'shutdow
               workerTimeOrigin: number;
           }>;
       }) => void): () => void;
-
-  // GeoSpecTauProjectRuntime.export (method)
-  export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(format: Format, options?: {
-          readonly source?: RuntimeSource<Files>;
-          readonly parameters?: Record<string, unknown>;
-          readonly exportOptions?: Record<string, unknown>;
-      }): Promise<ExportResult>;
 
   // GeoSpecTauProjectRuntime.bestRouteFor (method)
   bestRouteFor(format: string, options?: {

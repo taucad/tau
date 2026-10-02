@@ -29,19 +29,19 @@ Filter examples:
 Returns compact rows tagged by targetFile, plus \`sourceRevisions\` for loaded models. Check \`runStatus\`, \`accounting\`, discovery completion and \`lineageStatus\`; empty failures alone do not qualify a run. Unsupported, inconclusive, skipped and not-run requirements are not passes. Filters qualify only the selected scope, never excluded requirements. Read the retained \`fullResult\` when compact details are omitted. ${sourceRevisionRule}
 
 When NOT to use:
-- NOT as a substitute for \`get_kernel_result\` when you only need compile status; \`test_model\` measures geometry against requirements.`,
-  [toolName.getKernelResult]: `Check one file for CAD kernel compile and runtime errors.
+- NOT as a substitute for \`evaluate_model\` when you only need build status; \`test_model\` measures geometry against requirements.`,
+  [toolName.evaluateModel]: `Evaluate one CAD source and its default view, then list what this build can show and export.
 
-Call it after every \`edit_file\`, \`create_file\` or \`delete_file\`. Returns \`status\` — 'ready' or 'error' — with any \`kernelIssues\`. ${sourceRevisionRule}
+Call it after every \`edit_file\`, \`create_file\` or \`delete_file\`. Returns \`status\`, \`kernelIssues\`, offered \`views\`, per-view \`instances\`, and an export-id-to-extension map. A ready build may still report error-severity design issues; inspect them. A default-view render failure is an error, and a valid export-only build can offer zero views. Set \`includeCapabilities: true\` to inspect view/export option schemas, defaults and reachable export targets. ${sourceRevisionRule}
 
 Once 'ready', use \`test_model\` to measure the geometry against requirements.`,
-  [toolName.exportGeometry]: `Produce a persisted interchange/mesh artifact for one geometry unit and write it under \`.tau/artifacts/\` in the active project workspace.
+  [toolName.exportModel]: `Export one model artifact set and write its files under \`.tau/artifacts/\` in the active project workspace.
 
-Give explicit \`targetFile\` and \`format\` (extension only, matching the Tau MIME/extension registry — include the leading dot nowhere).
+Give explicit \`targetFile\` and \`to\`: a declared export ID (such as \`bom\`) or an unambiguous reachable extension (such as \`stl\` or \`3mf\`), without a dot. IDs win over extensions. Use \`evaluate_model({ includeCapabilities: true })\` to discover targets and options. An unavailable or ambiguous target returns the available choices.
 
-Examples: \`format: "stl"\`, \`format: "step"\`, \`format: "glb"\`, \`format: "3mf"\`. The runtime must expose an export route for that extension on the user's active kernel — when it does not, the tool surfaces an RPC error explaining the rejection.
+For a design question, text/JSON exports may be used as evidence only when both the declaration and every actual output file are text/JSON: call \`export_model\`, then \`read_file\` on the returned artifact path, and compare \`sourceRevision\` with the current source. A binary or mixed deliverable requires the person's export request.
 
-Returns an ordered \`files\` array with each producer name, persisted \`artifactPath\`, \`mimeType\`, and \`byteLength\`. The first entry is the primary artifact and later entries are required companions. Any \`warnings\` name what the export could not honour, such as colours; tell the person.
+Returns the resolved \`exportId\`, pinned \`sourceRevision\`, and ordered \`files\` with producer names, persisted paths, MIME types and byte lengths. The first file is primary; later files are required companions. Report \`warnings\` about limits of the written result.
 
 For deterministic measurement runs, create or edit \`*.geospec.ts\` tests and use \`${toolName.testModel}\` instead.`,
   [toolName.getParameters]: `Read the admitted parameter manifest and current checked parameter record for one geometry source file.
@@ -61,15 +61,15 @@ Call get_parameters first and pass its exact identity as expected. ${parameterUn
 A value operation names its field by group and pointer, exactly as get_parameters lists them: native-value carries the number, unit-value carries text plus the inputUnit it was typed in. Nothing else identifies a field. Rejections: UNKNOWN_FIELD — fix the pointer, the manifest did not change; REPRESENTATION_UNSUPPORTED — address a scalar member, or send native-value for a field with no unit; STALE_MANIFEST — call get_parameters again.
 
 A source-unit operation changes the unit the source interprets a value in, and is the operation that asks for confirmation. Only a binding with sourceUnitCapability admits it. Build it from get_parameters, with binding = manifest.bindings[pointer]: producerCapability is { producer: manifest.source.id, sourceRevision: manifest.source.revision, capability: binding.sourceUnitCapability }.`,
-  [toolName.screenshot]: `Capture a screenshot of a specific geometry unit's 3D model for visual inspection.
+  [toolName.screenshot]: `Capture a declared model view for visual inspection.
 
-You MUST pass \`targetFile\` (the source file path of the geometry unit to screenshot, e.g. "main.ts" or "lib/bracket.scad"). There is no project-level fallback. The call fails for a missing source file, render failure or render timeout, an unavailable renderer, or invalid image artifacts. ${sourceRevisionRule}
+Pass \`targetFile\` explicitly. Choose a kernel \`view\`, optional sheet/drawing \`instance\`, and that view's \`options\` from \`evaluate_model\`; omit \`view\` for the default. A 2D view produces one image. Each result echoes its view, instance and, for 3D, camera \`angle\`. The call fails for a missing source, unavailable view or instance, render failure, timeout or invalid image. ${sourceRevisionRule}
 
 Modes:
-- single: Captures one deterministic perspective isometric image
-- multi_angle: Captures 6 separate orthographic images (front, back, right, left, top, bottom)
+- single: one deterministic perspective isometric image for a 3D view
+- multi_angle: six orthographic camera angles for a 3D view (front, back, right, left, top, bottom)
 
-Every image includes:
+Annotated 3D images include:
 - an in-image view label; canonical axis-aligned labels name the camera position as View From ±axis
 - a camera-aligned red-X, green-Y, blue-Z orientation indicator with dot/cross depth notation
 - a physical scale bar; orthographic scale is depth-invariant, while perspective scale is measured at the subject-center plane and marked @ center

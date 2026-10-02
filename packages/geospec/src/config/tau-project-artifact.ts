@@ -5,8 +5,8 @@ import {
   serializeProjectManifest,
 } from '@taucad/project-core';
 import type { ProjectManifest } from '@taucad/project-core';
-import type { RuntimeClient, RuntimeSourceSnapshotFile } from '@taucad/runtime/client';
-import type { ExportFile, KernelIssue, KernelResult } from '@taucad/runtime/types';
+import type { RuntimeClient } from '@taucad/runtime/client';
+import type { ExportFile, KernelIssue, KernelResult, RuntimeSourceSnapshotFile } from '@taucad/runtime/types';
 import { resolveRuntimeExportIntent } from '#model/export-intent.js';
 import type { RuntimeClientWithRoutes } from '#model/export-intent.js';
 import type { GeometryExportIntent } from '#mesh/types.js';
@@ -133,7 +133,7 @@ export const exportTauProjectArtifact = async (
       );
     }
   } finally {
-    await snapshotRuntime.shutdown({ drain: true });
+    await snapshotRuntime.shutdown();
   }
   if (!snapshot.success) {
     return snapshot;
@@ -235,12 +235,21 @@ export const exportTauProjectArtifact = async (
   }
   try {
     await exportRuntime.connect();
-    const exported = await exportRuntime.export(descriptor.format, {
+    const document = exportRuntime.open({
       source: { files: sourceFiles, entry: snapshot.data.entryPath },
       parameters: descriptor.parameters ?? {},
-      exportOptions: requestedIntent.options,
       ...(options.signal === undefined ? {} : { signal: options.signal }),
     });
+    const exported = await (async () => {
+      try {
+        return await document.export(descriptor.format, {
+          options: requestedIntent.options,
+          ...(options.signal === undefined ? {} : { signal: options.signal }),
+        });
+      } finally {
+        document.close();
+      }
+    })();
     if (!exported.success) {
       return {
         success: false,
@@ -281,13 +290,14 @@ export const exportTauProjectArtifact = async (
         },
       );
     }
-    if (exported.data.length !== 1) {
+    const files = [...exported.files];
+    if (files.length !== 1) {
       return failure('EXPORT_ARTIFACT_SET_INVALID', 'Tau project export must produce exactly one usable artifact.', {
-        details: { actualCount: exported.data.length },
+        details: { actualCount: files.length },
         priorIssues: [...snapshot.issues, ...exported.issues],
       });
     }
-    const [artifact] = exported.data;
+    const [artifact] = files;
     if (!artifact || !usableArtifact(descriptor.format, artifact)) {
       return failure(
         'EXPORT_ARTIFACT_SET_INVALID',
@@ -332,6 +342,6 @@ export const exportTauProjectArtifact = async (
       issues: [...snapshot.issues, ...exported.issues],
     };
   } finally {
-    await exportRuntime.shutdown({ drain: true });
+    await exportRuntime.shutdown();
   }
 };

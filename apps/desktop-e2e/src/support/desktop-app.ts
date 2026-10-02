@@ -275,6 +275,7 @@ export const launchDesktopApp = async (options: {
       TAU_CONFIG_DIR: join(userData, 'config'),
       ...options.env,
       TAU_E2E_HIDE_WINDOW: '1',
+      ...(packaged ? { TAU_E2E_WAIT_FOR_PLAYWRIGHT: '1' } : {}),
     },
   });
   const child = application.process();
@@ -298,6 +299,10 @@ export const launchDesktopApp = async (options: {
   const consoleErrors: string[] = [];
   let page: Page;
   try {
+    /* A packaged launch releases main bootstrap before its first window exists.
+     * Configure the main-process test overrides only after that startup boundary. */
+    page = await application.firstWindow();
+    await page.waitForLoadState('domcontentloaded');
     await application.evaluate(({ dialog, shell }, selectedDirectory) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {
@@ -306,8 +311,6 @@ export const launchDesktopApp = async (options: {
       dialog.showOpenDialog = async () => ({ canceled: false, filePaths: [selectedDirectory] });
       dialog.showMessageBox = async () => ({ checkboxChecked: false, response: 1 });
     }, pickedDirectory);
-    page = await application.firstWindow();
-    await page.waitForLoadState('domcontentloaded');
     page.setDefaultTimeout(60_000);
     page.on('console', (message) => {
       if (message.type() === 'error') {

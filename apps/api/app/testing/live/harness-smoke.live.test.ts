@@ -90,7 +90,7 @@ describe.skipIf(!hasLiveCredential(modelId))(
         .list()
         .map((tool) => tool.name);
       expect(names).toContain('edit_file');
-      expect(names).toContain('get_kernel_result');
+      expect(names).toContain('evaluate_model');
     });
   },
 );

@@ -274,11 +274,18 @@ const moduleBoundaryOptions = {
    * filesystem bridge out of its initial bundle, and the CLI client
    * loads the agent host on demand, while the Node daemon, its render
    * probe and the integration tests import the same packages directly.
+   * PicoGK package verification also loads lazily after CLI parsing, while
+   * desktop runtime composition imports its kernel and asset schema directly.
    * Entries are matched as regular expressions against the import
    * specifier, so `(/|$)` keeps `@taucad/runtime` from also exempting
    * `@taucad/runtime-testing`.
    */
-  checkDynamicDependenciesExceptions: ['@taucad/runtime(/|$)', '@taucad/agent-host(/|$)', '@taucad/fs-bridge(/|$)'],
+  checkDynamicDependenciesExceptions: [
+    '@taucad/runtime(/|$)',
+    '@taucad/agent-host(/|$)',
+    '@taucad/fs-bridge(/|$)',
+    '@taucad/picogk(/|$)',
+  ],
   depConstraints: [
     {
       sourceTag: 'scope:api',

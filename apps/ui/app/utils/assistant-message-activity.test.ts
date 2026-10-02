@@ -98,7 +98,7 @@ describe('assistant message activity', () => {
       stepStart(),
       dynamic({ kind: 'execute' }),
       text('Observed result'),
-      tool('tool-get_kernel_result'),
+      tool('tool-evaluate_model'),
     ]);
 
     expect(groups.map((group) => group.kind)).toEqual(['aggregated', 'singleton', 'aggregated']);
@@ -109,13 +109,13 @@ describe('assistant message activity', () => {
   it('uses the same semantic families for Tau-native and qualified ACP tools', () => {
     expect(activityFamily(tool('tool-arrange_workbench'))).toBe('edit');
     expect(activityFamily(dynamic({ nativeName: 'arrange_workbench' }))).toBe('edit');
-    expect(activityFamily(tool('tool-get_kernel_result'))).toBe('render');
-    expect(activityFamily(dynamic({ nativeName: 'get_kernel_result' }))).toBe('render');
+    expect(activityFamily(tool('tool-evaluate_model'))).toBe('render');
+    expect(activityFamily(dynamic({ nativeName: 'evaluate_model' }))).toBe('render');
     expect(activityFamily(dynamic({ nativeName: 'screenshot' }))).toBe('screenshot');
     expect(activityFamily(dynamic({ nativeName: 'test_model' }))).toBe('test');
     expect(
       describeActivity([
-        dynamic({ nativeName: 'get_kernel_result' }),
+        dynamic({ nativeName: 'evaluate_model' }),
         dynamic({ nativeName: 'screenshot' }),
         dynamic({ nativeName: 'test_model' }),
       ]),
@@ -126,9 +126,7 @@ describe('assistant message activity', () => {
     expect(describeActivity([tool('tool-read_file', 'input-available'), dynamic({ kind: 'execute' })])).toBe(
       'Reading files, ran commands',
     );
-    expect(describeActivity([dynamic({ nativeName: 'get_kernel_result', preliminary: true })])).toBe(
-      'Rendering models',
-    );
+    expect(describeActivity([dynamic({ nativeName: 'evaluate_model', preliminary: true })])).toBe('Rendering models');
   });
 
   it('counts a shell command that only explored under what it explored, not as a command', () => {
@@ -181,7 +179,7 @@ describe('assistant message activity', () => {
   });
 
   it('keeps export artifacts standalone while ordinary edits stay in the activity stack', () => {
-    const groups = groupAssistantParts([tool('tool-edit_file'), tool('tool-export_geometry'), tool('tool-read_file')]);
+    const groups = groupAssistantParts([tool('tool-edit_file'), tool('tool-export_model'), tool('tool-read_file')]);
 
     expect(groups.map((group) => group.category)).toEqual(['research', 'write', 'research']);
   });
@@ -202,7 +200,7 @@ describe('assistant message activity', () => {
 
 /*
  * The durable log of the desktop in-project run whose transcript rendered a
- * bare "File edits failed" over four `create_file`/`get_kernel_result` rounds
+ * bare "File edits failed" over four `create_file`/`evaluate_model` rounds
  * that every log row reports as `isError: false` (W11-diag, W11-fix section 7).
  * The chat is replayed through the same projection materializer the store
  * reads, then its interrupted tool parts are finalized.

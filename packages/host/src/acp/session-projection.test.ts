@@ -410,7 +410,7 @@ describe('the ACP turn projection', () => {
         visible: [{ kind: 'view', view: 'front' }],
       },
     ],
-    ['get_kernel_result', { targetFile: 'main.ts' }, { status: 'ready' }],
+    ['evaluate_model', { targetFile: 'main.ts' }, { status: 'ready' }],
     ['test_model', {}, { failures: [], passes: [], passed: 0, total: 0 }],
     [
       'screenshot',
@@ -429,10 +429,11 @@ describe('the ACP turn projection', () => {
       },
     ],
     [
-      'export_geometry',
-      { targetFile: 'main.ts', format: 'glb' },
+      'export_model',
+      { targetFile: 'main.ts', to: 'glb' },
       {
-        format: 'glb',
+        to: 'glb',
+        exportId: 'glb',
         files: [
           { name: 'main.glb', artifactPath: '.tau/artifacts/main.glb', mimeType: 'model/gltf-binary', byteLength: 1 },
         ],
@@ -558,7 +559,7 @@ describe('the ACP turn projection', () => {
           toolCallId: 'mcp-error',
           status: 'completed',
           rawOutput: {
-            result: { isError: true, content: [{ type: 'text', text: 'RENDER_TIMEOUT: Renderer did not settle.' }] },
+            result: { isError: true, content: [{ type: 'text', text: 'OPERATION_TIMEOUT: Renderer did not settle.' }] },
             error: null,
           },
         },
@@ -571,7 +572,7 @@ describe('the ACP turn projection', () => {
     expect(messages[1]).toMatchObject({
       role: 'tool-output',
       isError: true,
-      content: { errorCode: 'RENDER_TIMEOUT', message: 'Renderer did not settle.' },
+      content: { errorCode: 'OPERATION_TIMEOUT', message: 'Renderer did not settle.' },
     });
   });
 
@@ -1125,7 +1126,7 @@ describe('the ACP turn projection', () => {
           sessionUpdate: 'tool_call_update',
           toolCallId: 'late',
           status: 'in_progress',
-          rawInput: { server: 'tau', tool: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+          rawInput: { server: 'tau', tool: 'evaluate_model', arguments: { targetFile: 'main.ts' } },
           _meta: { is_mcp_tool_call: true },
         },
         {
@@ -1143,13 +1144,13 @@ describe('the ACP turn projection', () => {
     expect(messages[0]).toMatchObject({
       role: 'tool-input',
       toolName: 'Working',
-      call: { nativeName: 'get_kernel_result', status: 'completed' },
+      call: { nativeName: 'evaluate_model', status: 'completed' },
     });
     expect(messages[1]).toMatchObject({
       role: 'tool-output',
       toolCallId: 'id-1',
       toolName: 'Working',
-      call: { nativeName: 'get_kernel_result', status: 'completed' },
+      call: { nativeName: 'evaluate_model', status: 'completed' },
       content: { status: 'ready' },
       metadata: { tauInternal: { presentation: 'tau-mcp' } },
     });

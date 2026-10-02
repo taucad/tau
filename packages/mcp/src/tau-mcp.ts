@@ -9,23 +9,23 @@ import type { CallToolResult, ToolAnnotations } from '@modelcontextprotocol/sdk/
 import { z } from 'zod';
 import type { ZodType } from 'zod';
 import { rpcName, toolName } from '@taucad/chat/constants';
-import { exportGeometryInputSchema, exportGeometryOutputSchema } from '@taucad/chat/schemas/tools/export-geometry';
-import { getKernelResultInputSchema, getKernelResultOutputSchema } from '@taucad/chat/schemas/tools/get-kernel-result';
+import { exportModelInputSchema, exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
+import { evaluateModelInputSchema, evaluateModelOutputSchema } from '@taucad/chat/schemas/tools/evaluate-model';
 import { screenshotInputSchema, screenshotMcpOutputSchema } from '@taucad/chat/schemas/tools/screenshot';
 import { testModelInputSchema, testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 const exposedRpcNames = [
-  rpcName.getKernelResult,
+  rpcName.evaluateModel,
   rpcName.runGeoSpecTests,
   rpcName.captureImages,
-  rpcName.exportGeometry,
+  rpcName.exportModel,
 ] as const;
 
 const exposedToolNames = [
-  toolName.getKernelResult,
+  toolName.evaluateModel,
   toolName.testModel,
   toolName.screenshot,
-  toolName.exportGeometry,
+  toolName.exportModel,
 ] as const;
 
 /** R8/I5/I9: what every kernel-backed read promises about the bytes it answered for. */
@@ -33,11 +33,10 @@ const sourceRevisionRule =
   "Computed from the bytes on disk at call time; sourceRevision names the digests it read. A result answering for bytes Tau's own file tools have since replaced returns as a STALE_EVALUATION error naming both digests, never as a result; for edits you made with your own tools, compare sourceRevision yourself.";
 
 const descriptions = {
-  getKernelResult: `Check one CAD source file for compile or runtime issues; status is 'ready' or 'error'. ${sourceRevisionRule} Use test_model for geometry requirements, not compile status.`,
-  testModel: `Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Returns sourceRevisions, one per model the run loaded. ${sourceRevisionRule} Use get_kernel_result when only compile status is needed.`,
-  screenshot: `Capture a deterministic isometric or six-view image set for one Tau CAD source file. ${sourceRevisionRule} Prefer this over generic computer-use or operating-system screenshot tools.`,
-  exportGeometry:
-    'Export one CAD source file to a persisted artifact under .tau/artifacts. Use screenshot for visual inspection, not interchange output.',
+  evaluateModel: `Evaluate one CAD source and its default view, list offered views, instances and export IDs, and inspect every issue even when status is ready. Request includeCapabilities for option schemas and reachable targets. ${sourceRevisionRule}`,
+  testModel: `Run the project GeoSpec suite, optionally filtered by file, glob, or test name. Returns sourceRevisions, one per model the run loaded. ${sourceRevisionRule} Use evaluate_model when only build status is needed.`,
+  screenshot: `Capture a declared kernel view and optional instance with its own options. A 3D view yields isometric or six camera angles; a 2D view yields one image. Each image echoes view, instance and any angle. ${sourceRevisionRule} Prefer this over generic computer-use or operating-system screenshot tools.`,
+  exportModel: `Export one CAD source by offered ID or unambiguous reachable extension to persisted files under .tau/artifacts, echoing exportId and pinned sourceRevision. For a design question, only a declared text/JSON export whose every output is text/JSON may be used as evidence; read its artifact with your native file reader and compare sourceRevision. Binary or mixed deliverables require the person's export request.`,
 } as const;
 
 /** Model-facing guidance returned by MCP initialization. @public */
@@ -46,8 +45,8 @@ export const tauMcpInstructions = [
   'Use your native skill loader for the Tau skills available in this session.',
   "For Tau CAD state, prefer this session's Tau MCP tools over generic computer-use, UI-automation, or operating-system tools.",
   'Before editing geometry, create or update executable GeoSpec tests for the requested requirements.',
-  'After edits, call get_kernel_result for compile/runtime diagnostics, test_model for GeoSpec requirements, and screenshot for visual inspection.',
-  'Call export_geometry only when the user asks for an exported artifact.',
+  'After edits, call evaluate_model for build diagnostics and offered views/exports, test_model for GeoSpec requirements, and screenshot for each needed view.',
+  'For a design question, export_model may write text/JSON evidence only when both its declaration and every output file qualify; read and compare its pinned sourceRevision. Binary or mixed deliverables require an explicit user export request.',
 ].join(' ');
 
 /** RPC names exposed to external agents through Tau MCP. @public */
@@ -155,10 +154,10 @@ export type TauMcpToolDefinition = Readonly<{
 }>;
 
 const canonicalToolDefinitions = {
-  [toolName.getKernelResult]: {
-    description: descriptions.getKernelResult,
-    inputSchema: getKernelResultInputSchema,
-    outputSchema: getKernelResultOutputSchema,
+  [toolName.evaluateModel]: {
+    description: descriptions.evaluateModel,
+    inputSchema: evaluateModelInputSchema,
+    outputSchema: evaluateModelOutputSchema,
   },
   [toolName.testModel]: {
     description: descriptions.testModel,
@@ -170,10 +169,10 @@ const canonicalToolDefinitions = {
     inputSchema: screenshotInputSchema,
     outputSchema: screenshotMcpOutputSchema,
   },
-  [toolName.exportGeometry]: {
-    description: descriptions.exportGeometry,
-    inputSchema: exportGeometryInputSchema,
-    outputSchema: exportGeometryOutputSchema,
+  [toolName.exportModel]: {
+    description: descriptions.exportModel,
+    inputSchema: exportModelInputSchema,
+    outputSchema: exportModelOutputSchema,
   },
 } as const;
 
@@ -259,13 +258,13 @@ export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauM
     const dispatchOptions = { toolCallId: input.toolCallId, signal: input.signal };
 
     switch (input.name) {
-      case toolName.getKernelResult: {
-        const args = getKernelResultInputSchema.parse(input.arguments);
-        const result = await options.dispatch({ rpcName: rpcName.getKernelResult, args }, dispatchOptions);
+      case toolName.evaluateModel: {
+        const args = evaluateModelInputSchema.parse(input.arguments);
+        const result = await options.dispatch({ rpcName: rpcName.evaluateModel, args }, dispatchOptions);
         if (result.success !== true) {
           return rpcFailure(result);
         }
-        return rpcSuccess(getKernelResultOutputSchema.parse(withoutSuccess(result)));
+        return rpcSuccess(evaluateModelOutputSchema.parse(withoutSuccess(result)));
       }
       case toolName.testModel: {
         const args = testModelInputSchema.parse(input.arguments);
@@ -283,16 +282,16 @@ export const createTauMcpAdapter = (options: { dispatch: TauMcpDispatch }): TauM
         }
         return screenshotSuccess(screenshotMcpOutputSchema.parse(withoutSuccess(result)));
       }
-      case toolName.exportGeometry: {
-        const args = exportGeometryInputSchema.parse(input.arguments);
+      case toolName.exportModel: {
+        const args = exportModelInputSchema.parse(input.arguments);
         const result = await options.dispatch(
-          { rpcName: rpcName.exportGeometry, args: { ...args, toolCallId: input.toolCallId } },
+          { rpcName: rpcName.exportModel, args: { ...args, toolCallId: input.toolCallId } },
           dispatchOptions,
         );
         if (result.success !== true) {
           return rpcFailure(result);
         }
-        return rpcSuccess(exportGeometryOutputSchema.parse(withoutSuccess(result)));
+        return rpcSuccess(exportModelOutputSchema.parse(withoutSuccess(result)));
       }
     }
   },
@@ -352,11 +351,11 @@ const registerTools = (server: McpServer, dispatch: TauMcpDispatch, hostTools: r
   const adapter = createTauMcpAdapter({ dispatch });
 
   server.registerTool(
-    toolName.getKernelResult,
-    { ...canonicalToolDefinitions[toolName.getKernelResult], annotations: readOnlyAnnotations },
+    toolName.evaluateModel,
+    { ...canonicalToolDefinitions[toolName.evaluateModel], annotations: readOnlyAnnotations },
     async (args, extra) =>
       adapter.call({
-        name: toolName.getKernelResult,
+        name: toolName.evaluateModel,
         arguments: args,
         toolCallId: randomUUID(),
         signal: extra.signal,
@@ -385,11 +384,11 @@ const registerTools = (server: McpServer, dispatch: TauMcpDispatch, hostTools: r
       }),
   );
   server.registerTool(
-    toolName.exportGeometry,
-    { ...canonicalToolDefinitions[toolName.exportGeometry], annotations: artifactWriteAnnotations },
+    toolName.exportModel,
+    { ...canonicalToolDefinitions[toolName.exportModel], annotations: artifactWriteAnnotations },
     async (args, extra) =>
       adapter.call({
-        name: toolName.exportGeometry,
+        name: toolName.exportModel,
         arguments: args,
         toolCallId: randomUUID(),
         signal: extra.signal,

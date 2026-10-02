@@ -1,4 +1,3 @@
-/* eslint-disable @typescript-eslint/naming-convention -- file names use extensions */
 // @vitest-environment node
 /**
  * Cross-kernel mesh parity test.
@@ -22,7 +21,7 @@ import { esbuildBundler } from '@taucad/esbuild';
 import { replicadKernel } from '@taucad/replicad';
 import { opencascadeKernel } from '@taucad/opencascade';
 import {
-  assertSuccess,
+  assertRenderingSuccess,
   colorParityCases,
   createTestGeometry,
   expectLinearBaseColor,
@@ -124,10 +123,9 @@ export default function main() {
   return makeCylinder(5, 20);
 }`,
       },
-      mainFile: 'cylinder.ts',
-      parameters: {},
+      open: { source: { path: 'cylinder.ts' } },
     });
-    assertSuccess(replicadResult, 'replicad createGeometry');
+    assertRenderingSuccess(replicadResult, 'replicad createGeometry');
     const replicadGlb = extractGltfFromResult(replicadResult);
     expect(replicadGlb, 'Replicad GLB data').toBeDefined();
 
@@ -140,10 +138,9 @@ export default function main() {
   return new BRepPrimAPI_MakeCylinder(5, 20).Shape();
 }`,
       },
-      mainFile: 'cylinder.ts',
-      parameters: {},
+      open: { source: { path: 'cylinder.ts' } },
     });
-    assertSuccess(occtResult, 'occt createGeometry');
+    assertRenderingSuccess(occtResult, 'occt createGeometry');
     const occtGlb = extractGltfFromResult(occtResult);
     expect(occtGlb, 'OCCT GLB data').toBeDefined();
 
@@ -230,10 +227,9 @@ export default function main() {
   return { shape: makeCylinder(5, 20), color: '${hex}' };
 }`,
           },
-          mainFile: 'colored-cylinder.ts',
-          parameters: {},
+          open: { source: { path: 'colored-cylinder.ts' } },
         });
-        assertSuccess(replicadResult, `replicad createGeometry (${hex})`);
+        assertRenderingSuccess(replicadResult, `replicad createGeometry (${hex})`);
         const replicadGlb = extractGltfFromResult(replicadResult);
         expect(replicadGlb, 'Replicad GLB data').toBeDefined();
 
@@ -246,10 +242,9 @@ export default function main() {
   return { shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(), color: '${hex}' };
 }`,
           },
-          mainFile: 'colored-cylinder.ts',
-          parameters: {},
+          open: { source: { path: 'colored-cylinder.ts' } },
         });
-        assertSuccess(occtResult, `occt createGeometry (${hex})`);
+        assertRenderingSuccess(occtResult, `occt createGeometry (${hex})`);
         const occtGlb = extractGltfFromResult(occtResult);
         expect(occtGlb, 'OCCT GLB data').toBeDefined();
 
@@ -295,10 +290,9 @@ export default function main() {
   return { shape: makeCylinder(5, 20), color: '${testColor}', metalness: ${testMetallic}, roughness: ${testRoughness} };
 }`,
       },
-      mainFile: 'pbr-cylinder.ts',
-      parameters: {},
+      open: { source: { path: 'pbr-cylinder.ts' } },
     });
-    assertSuccess(replicadResult, 'replicad createGeometry (PBR)');
+    assertRenderingSuccess(replicadResult, 'replicad createGeometry (PBR)');
     const replicadGlb = extractGltfFromResult(replicadResult);
     expect(replicadGlb, 'Replicad GLB data').toBeDefined();
 
@@ -311,10 +305,9 @@ export default function main() {
   return { shape: new BRepPrimAPI_MakeCylinder(5, 20).Shape(), color: '${testColor}', metalness: ${testMetallic}, roughness: ${testRoughness} };
 }`,
       },
-      mainFile: 'pbr-cylinder.ts',
-      parameters: {},
+      open: { source: { path: 'pbr-cylinder.ts' } },
     });
-    assertSuccess(occtResult, 'occt createGeometry (PBR)');
+    assertRenderingSuccess(occtResult, 'occt createGeometry (PBR)');
     const occtGlb = extractGltfFromResult(occtResult);
     expect(occtGlb, 'OCCT GLB data').toBeDefined();
 

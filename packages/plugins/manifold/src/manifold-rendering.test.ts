@@ -13,7 +13,7 @@ import { describe, expect, it } from 'vitest';
 import { manifoldKernel } from '#manifold.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
 import {
-  assertSuccess,
+  assertRenderingSuccess,
   createTestGeometry,
   expectLinearBaseColor,
   getAllMaterialBaseColors,
@@ -21,18 +21,17 @@ import {
 } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
-import type { HashedGeometryResult } from '@taucad/runtime/types';
+import type { Rendering } from '@taucad/runtime/client';
 
 const runtime = defineRuntime({ kernels: [manifoldKernel()], bundlers: [esbuildBundler()] });
 
-async function renderSource(file: string, source: string): Promise<HashedGeometryResult> {
+async function renderSource(file: string, source: string): Promise<Rendering> {
   const result = await createTestGeometry({
     runtime,
     files: { [file]: source },
-    mainFile: file,
-    parameters: {},
+    open: { source: { path: file } },
   });
-  assertSuccess(result, `manifold ${file}`);
+  assertRenderingSuccess(result, `manifold ${file}`);
   return result;
 }
 

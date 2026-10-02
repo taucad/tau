@@ -291,9 +291,9 @@ describe('useViewerShortcuts', () => {
     it('should keep S, M and P off for 2D geometry, while F and G still work', async () => {
       const actor = startGraphics();
       actor.send({
-        type: 'updateGeometry',
-        geometry: { format: 'svg', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>', hash: 'svg' },
-        units: { length: 'mm' },
+        type: 'updateArtifact',
+        artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' },
+        hash: 'svg',
       });
       const send = recordSends(actor);
       const user = userEvent.setup();

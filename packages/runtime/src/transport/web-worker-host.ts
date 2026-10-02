@@ -21,14 +21,13 @@ import type {
   RuntimeTransportHost,
   TransportHostReady,
 } from '#transport/runtime-transport.types.js';
-import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import { buildHelloPayload } from '#transport/_internal/transport-hello.js';
 import { createWorkerHostBindings } from '#transport/_internal/worker-host-bindings.js';
-import { encodeGeometryAsOwnedTransfer } from '#transport/_internal/owned-transfer-bytes.js';
 import { acquireWebWorkerSelfPort } from '#transport/_internal/web-worker-self-port.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { webWorkerId } from '#transport/_internal/web-worker-id.js';
 import type { WebWorkerId } from '#transport/_internal/web-worker-id.js';
 
@@ -55,8 +54,8 @@ export type WebWorkerHostOptions = {
  */
 export const webWorkerHost = (
   options: WebWorkerHostOptions,
-): RuntimeTransportHost<RuntimeProtocol, Readonly<Record<never, never>>, WebWorkerId> => {
-  let serverHandle: ReturnType<typeof createWorkerDispatcher> | undefined;
+): RuntimeTransportHost<RuntimeDocumentProtocol, Readonly<Record<never, never>>, WebWorkerId> => {
+  let serverHandle: ReturnType<typeof createDocumentWorkerDispatcher> | undefined;
   let crashTrapDispose: (() => void) | undefined;
   let port: ReturnType<typeof acquireWebWorkerSelfPort> | undefined;
   let isClosed = false;
@@ -73,7 +72,7 @@ export const webWorkerHost = (
         return { channel: serverHandle, peerHello: buildHelloPayload(webWorkerId) };
       }
       port = acquireWebWorkerSelfPort();
-      serverHandle = createWorkerDispatcher(options.worker, port, {
+      serverHandle = createDocumentWorkerDispatcher(options.worker, port, {
         bindingsFactory: (handle) => createWorkerHostBindings(handle),
       });
       crashTrapDispose = installWorkerCrashTrap(serverHandle);
@@ -84,9 +83,6 @@ export const webWorkerHost = (
     },
     adoptInitialize(handle: RuntimeInitializeMemoryHandle): HostInitializeBindings {
       return createWorkerHostBindings(handle);
-    },
-    encodeGeometry(geometry) {
-      return encodeGeometryAsOwnedTransfer(geometry);
     },
     async close(reason?: string): Promise<void> {
       if (isClosed) {

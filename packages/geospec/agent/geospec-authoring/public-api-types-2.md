@@ -1,6 +1,6 @@
 # geospec — Types (2)
 
-73 top-level symbols. Signatures are verbatim typescript.
+75 top-level symbols. Signatures are verbatim typescript.
 
 // One TRIANGLES primitive with identity for spatial-test feedback
 PrimitiveRecord: {
@@ -180,11 +180,7 @@ RuntimeClientWithRoutes: GeoSpecRuntimeClient & {
     }): GeoSpecExportRoute | undefined;
 }
 
-  // RuntimeClientWithRoutes.connect (method)
-  connect(): Promise<void>;
-
-  // RuntimeClientWithRoutes.terminate (method)
-  terminate(): void;
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
 
   // RuntimeClientWithRoutes.on (method)
   on?(event: 'telemetry', handler: (batch: {
@@ -195,13 +191,6 @@ RuntimeClientWithRoutes: GeoSpecRuntimeClient & {
               workerTimeOrigin: number;
           }>;
       }) => void): () => void;
-
-  // RuntimeClientWithRoutes.export (method)
-  export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(format: Format, options?: {
-          readonly source?: RuntimeSource<Files>;
-          readonly parameters?: Record<string, unknown>;
-          readonly exportOptions?: Record<string, unknown>;
-      }): Promise<ExportResult>;
 
   // RuntimeClientWithRoutes.bestRouteFor (method)
   bestRouteFor(format: string, options?: {
@@ -299,9 +288,9 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
   // ManagedGeoSpecModelLoader.dispose (method)
   dispose(): Promise<void>;
 
-GeoSpecRuntimeClient: {
-    connect(): Promise<void>;
-    terminate(): void;
+// Runtime client surface consumed by `geospec/model`
+GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
+    open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {
         readonly entries: ReadonlyArray<{
             name: string;
@@ -310,18 +299,9 @@ GeoSpecRuntimeClient: {
             workerTimeOrigin: number;
         }>;
     }) => void): () => void;
-    export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(format: Format, options?: {
-        readonly source?: RuntimeSource<Files>;
-        readonly parameters?: Record<string, unknown>;
-        readonly exportOptions?: Record<string, unknown>;
-    }): Promise<ExportResult>;
 }
 
-  // GeoSpecRuntimeClient.connect (method)
-  connect(): Promise<void>;
-
-  // GeoSpecRuntimeClient.terminate (method)
-  terminate(): void;
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>
 
   // GeoSpecRuntimeClient.on (method)
   on?(event: 'telemetry', handler: (batch: {
@@ -332,13 +312,6 @@ GeoSpecRuntimeClient: {
               workerTimeOrigin: number;
           }>;
       }) => void): () => void;
-
-  // GeoSpecRuntimeClient.export (method)
-  export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(format: Format, options?: {
-          readonly source?: RuntimeSource<Files>;
-          readonly parameters?: Record<string, unknown>;
-          readonly exportOptions?: Record<string, unknown>;
-      }): Promise<ExportResult>;
 
 // Lazy runtime factory consumed by `geospec/model`
 GeoSpecRuntimeClientFactory: () => Promise<GeoSpecRuntimeClient>
@@ -1770,3 +1743,57 @@ AxisQuery: {
   anyOf: AxisQuery[]
 
   not: AxisQuery
+
+// Axis selector resolved from cylindrical/conical face facts
+AxisSelector: {
+    kind: 'axis';
+    of?: string | RegExp;
+    query?: AxisQuery;
+    expect?: Cardinality;
+}
+
+  kind: 'axis'
+
+  of: string | RegExp
+
+  query: AxisQuery
+
+  expect: Cardinality
+
+// Body query predicates over available source facts
+BodyQuery: {
+    area?: NumericRange;
+    near?: Partial<Vec3Record> & {
+        tolerance?: number;
+    };
+    nearestTo?: Vec3;
+    within?: GeometrySelector;
+    orderBy?: 'area' | 'offsetAlong';
+    along?: Vec3;
+    pick?: 'first' | 'last' | number;
+    allOf?: BodyQuery[];
+    anyOf?: BodyQuery[];
+    not?: BodyQuery;
+}
+
+  area: NumericRange
+
+  near: Partial<Vec3Record> & {
+          tolerance?: number;
+      }
+
+  nearestTo: Vec3
+
+  within: GeometrySelector
+
+  orderBy: 'area' | 'offsetAlong'
+
+  along: Vec3
+
+  pick: 'first' | 'last' | number
+
+  allOf: BodyQuery[]
+
+  anyOf: BodyQuery[]
+
+  not: BodyQuery

@@ -3,31 +3,22 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runCommand } from 'citty';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { ExportResult, GetParametersResult } from '@taucad/runtime';
+import type { ExportResult } from '@taucad/runtime';
 import type * as RuntimeNode from '@taucad/runtime/node';
-import type * as RuntimeParameter from '@taucad/parameters';
-import type { ParameterManifest } from '@taucad/parameters';
 import { exitCodes } from '#output.js';
 
 vi.mock('@taucad/runtime/node', async (importOriginal) => ({
   ...(await importOriginal<typeof RuntimeNode>()),
   createNodeClient: vi.fn(),
 }));
-vi.mock('@taucad/parameters', async (importOriginal) => ({
-  ...(await importOriginal<typeof RuntimeParameter>()),
-  resolveParameterInputValues: vi.fn((_manifest: unknown, values: Record<string, unknown>) => values),
-}));
 vi.mock('#cli-runtime.js', () => ({
   createCliRuntime: vi.fn(async () => ({ plugins: [] })),
 }));
 
 const exportFunction = vi.fn<(format: string, input: unknown) => Promise<ExportResult>>();
-const resolveParametersFunction = vi.fn<() => Promise<GetParametersResult>>(async () => ({
-  success: true,
-  data: { fixture: true } as unknown as ParameterManifest,
-  issues: [],
-}));
-const shutdown = vi.fn<(_options?: { drain?: boolean }) => Promise<void>>(async () => undefined);
+const closeDocument = vi.fn<() => void>();
+const openFunction = vi.fn(() => ({ export: exportFunction, close: closeDocument }));
+const shutdown = vi.fn<() => Promise<void>>(async () => undefined);
 
 const importViewCommand = async () => {
   const { viewCommand } = await import('#commands/view.js');
@@ -36,7 +27,9 @@ const importViewCommand = async () => {
 
 const buildPreview = (bytes: Uint8Array<ArrayBuffer>): ExportResult => ({
   success: true,
-  data: [{ name: 'model.webp', bytes, mimeType: 'image/webp' }],
+  exportId: 'fixture-export',
+  evaluationId: 'fixture-evaluation',
+  files: [{ name: 'model.webp', bytes, mimeType: 'image/webp' }],
   issues: [],
 });
 
@@ -77,8 +70,7 @@ describe('viewCommand', () => {
     };
     runtime.createNodeClient.mockResolvedValue({
       on: vi.fn(),
-      export: exportFunction,
-      resolveParameters: resolveParametersFunction,
+      open: openFunction,
       terminate: vi.fn(),
       shutdown,
     });
@@ -108,17 +100,17 @@ describe('viewCommand', () => {
 
       await runCommand(command, { rawArgs: [inputPath] });
 
-      expect(exportFunction).toHaveBeenCalledWith('webp', {
+      expect(openFunction).toHaveBeenCalledWith({
         source: { path: 'model.ts' },
         parameters: {},
-        exportOptions: { quality: 0.8 },
       });
+      expect(exportFunction).toHaveBeenCalledWith('webp', { options: { quality: 0.8 } });
       await expect(readFile(previewPath)).resolves.toEqual(Buffer.from(bytes));
       expect(stdout).toEqual([`${previewPath}\n`]);
       // A terminal preview that cannot be drawn must not smuggle an escape onto stdout.
       expect(stdout.join('')).not.toContain('\u001B');
       expect(bytes.byteLength).toBeLessThan(1024 * 1024);
-      expect(shutdown).toHaveBeenCalledWith({ drain: true });
+      expect(shutdown).toHaveBeenCalledWith();
     },
   );
 
@@ -131,13 +123,12 @@ describe('viewCommand', () => {
       rawArgs: [inputPath, '--width=1024', '--height=576', '--params={"teeth":24}'],
     });
 
-    expect(exportFunction).toHaveBeenCalledWith('webp', {
+    expect(openFunction).toHaveBeenCalledWith({
       source: { path: 'model.ts' },
       parameters: { teeth: 24 },
-      exportOptions: { quality: 0.8, width: 1024, height: 576 },
     });
-    // Parameters travel as the caller's overrides; the runtime resolves them at the kernel boundary.
-    expect(resolveParametersFunction).not.toHaveBeenCalled();
+    expect(exportFunction).toHaveBeenCalledWith('webp', { options: { quality: 0.8, width: 1024, height: 576 } });
+    // Parameters travel as the document's overrides; the runtime resolves them at the kernel boundary.
   });
 
   it('should report a preview above the terminal ceiling without discarding it', async () => {

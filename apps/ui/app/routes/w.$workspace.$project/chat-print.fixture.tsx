@@ -11,7 +11,8 @@ import type { Mock } from 'vitest';
 import { z } from 'zod';
 import { Topic } from '@taucad/events';
 import type { JSONSchema7 } from '@taucad/json-schema';
-import type { CapabilitiesManifest, KernelIssue } from '@taucad/runtime';
+import type { CapabilitiesManifest, ExportResult } from '@taucad/runtime';
+import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import { defineConfiguration } from '@taucad/runtime/configuration';
 import { quantity } from '@taucad/runtime/configuration/zod';
 import { parseMachineManifest } from '@taucad/runtime/machine';
@@ -55,18 +56,21 @@ export const mockWriteFiles = vi.fn(async (files: Readonly<Record<string, { cont
   }
 });
 /** What a slice the slicer still made warns about; none unless a test says so. */
-const noIssues: KernelIssue[] = [];
-export const mockExport = vi.fn(async () => ({
-  success: true,
-  data: [
-    {
-      name: 'main.gcode.3mf',
-      bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
-      mimeType: 'application/vnd.bambulab.gcode-3mf',
-    },
-  ],
-  issues: noIssues,
-}));
+export const mockExport = vi.fn(
+  async (): Promise<ExportResult> => ({
+    success: true,
+    exportId: 'gcode.3mf',
+    evaluationId: 'mock-evaluation',
+    files: [
+      {
+        name: 'main.gcode.3mf',
+        bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+        mimeType: 'application/vnd.bambulab.gcode-3mf',
+      },
+    ],
+    issues: [],
+  }),
+);
 
 const capabilities: CapabilitiesManifest = {
   routes: [
@@ -96,17 +100,20 @@ export const gcodeRoute = capabilities.routes[0]!;
 const kernelClient = {
   capabilities,
   bestRouteFor: (format: string) => capabilities.routes.find((route) => route.targetFormat === format),
-  export: mockExport,
 };
+const { document, rendering: initialRendering } = createMockRuntimeDocument();
+const runtimeDocument = { ...document, export: mockExport };
+let rendering = initialRendering;
 const cadRenders = new Topic<void>({ name: 'chat-print-fixture.cad-renders' });
 const cadSnapshot = (): { context: Record<string, unknown>; hasTag: () => boolean } => ({
   context: {
     kernelClient,
     activeKernelId: 'replicad',
     capabilities,
-    geometry: {},
+    rendering,
+    document: runtimeDocument,
     entryPath: 'main.ts',
-    latestGeometryOutcome: 'success',
+    latestRenderingOutcome: 'success',
     kernelIssues: new Map(),
   },
   hasTag: () => false,
@@ -125,15 +132,16 @@ export const failedCadSnapshot = (): ReturnType<typeof cadActor.getSnapshot> => 
   ...cadSnapshot(),
   context: {
     ...cadState.context,
-    latestGeometryOutcome: 'failure',
+    latestRenderingOutcome: 'failure',
     kernelIssues: new Map([
       ['main.ts', [{ message: 'radius must be positive', code: 'RUNTIME', type: 'runtime', severity: 'error' }]],
     ]),
   },
 });
 
-/** The kernel renders the model again: a new geometry, as after an edit. */
+/** The kernel renders the model again, as after an edit. */
 export const renderGeometry = (): void => {
+  rendering = { ...rendering, requestId: `${rendering.requestId}-next` };
   cadState = cadSnapshot();
   cadRenders.emit();
 };
@@ -141,14 +149,14 @@ export const renderGeometry = (): void => {
 type ProjectSeam = Readonly<{
   projectId: string;
   geometryUnits: Map<string, typeof cadActor>;
-  mainEntryPath: string;
   viewRecords: Record<string, { entryPath: string }>;
-  entriesRecord: { entries: Record<string, { renderTimeout?: number }> };
+  mainEntryPath: string;
+  entriesRecord: { entries: Record<string, { operationTimeout?: number }> };
   editorRef: {
     send: typeof mockEditorSend;
     getSnapshot: () => {
       context: {
-        unitSettings: Record<string, { renderTimeout?: number }>;
+        unitSettings: Record<string, { operationTimeout?: number }>;
         viewSettings: Record<string, { entryPath: string }>;
       };
     };
@@ -188,8 +196,8 @@ export const projectMock = {
   useProject: (): ProjectSeam => ({
     projectId,
     geometryUnits,
-    mainEntryPath: 'main.ts',
     viewRecords: viewSettings,
+    mainEntryPath: 'main.ts',
     entriesRecord: { entries: {} },
     editorRef,
     projectRef,
@@ -855,7 +863,7 @@ export const sliceFixture: SlicedArtifact = {
   length: 4,
   mimeType: accepted.mediaType,
   optionsKey: '{}',
-  geometry: {},
+  rendering: undefined,
   materialConfiguration: {},
   summary: baseSliceSummary,
   fit: { fits: true, message: 'The part fits the plate' },

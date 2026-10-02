@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { toOtlpJson } from '#framework/telemetry-otlp.js';
-import type { TelemetryBatch } from '#types/runtime-protocol.types.js';
+import type { TelemetryBatch } from '#types/runtime-wire.types.js';
 
 const batch: TelemetryBatch = {
   origin: { label: 'kernel', instance: 'i-1' },

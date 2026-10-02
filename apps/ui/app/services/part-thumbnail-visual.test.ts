@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import type { ExportFile } from '@taucad/types';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
 import {
   canonicalPartPreview,
@@ -190,24 +191,31 @@ it('reuses the production preview without an image export after rigid pose or de
     scale: [1, 1, 1],
     topology: 7,
   });
-  const exportImage = vi.fn(async () => [
-    { name: 'render-part-0.webp', mimeType: 'image/webp' as const, bytes: new Uint8Array([1, 2, 3]) },
-  ]);
+  const exportImage = vi.fn(
+    async (): Promise<ExportFile[]> => [
+      { name: 'render-part-0.webp', mimeType: 'image/webp', bytes: new Uint8Array([1, 2, 3]) },
+    ],
+  );
   const service = new PartThumbnailService({ export: exportImage });
   try {
     for (const content of [first, moved, changedDensity]) {
+      // oxlint-disable-next-line no-await-in-loop -- Each preview must settle before the next source changes its cache key.
       const prepared = await canonicalPartPreviews(content, [reference]);
+      // oxlint-disable-next-line no-await-in-loop -- Hash each source in the same serial cache transition.
+      const geometryHash = await sourceGlbDigest(content);
       service.request(
         {
           sourcePath: 'main.ts',
-          geometryHash: await sourceGlbDigest(content),
+          geometryHash,
           content,
           renderContent: prepared.renderContent,
         },
         [{ id: 'part', primitives: reference, visualKey: prepared.previews[0]?.key ?? prepared.visualKey }],
       );
       // oxlint-disable-next-line no-await-in-loop -- Verify each complete cache state before changing the source.
-      await vi.waitFor(() => expect(service.get('part')?.status).toBe('ready'));
+      await vi.waitFor(() => {
+        expect(service.get('part')?.status).toBe('ready');
+      });
     }
     expect(exportImage).toHaveBeenCalledOnce();
   } finally {

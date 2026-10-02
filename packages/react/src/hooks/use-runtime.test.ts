@@ -1,1226 +1,335 @@
-import { renderHook, act, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi, afterEach, beforeEach } from 'vitest';
-import type { Geometry, JSONSchema7 } from '@taucad/runtime/types';
-import type {
-  RuntimeClient,
-  HashedGeometryResult,
-  GetParametersResult,
-  KernelIssue,
-  RenderOutcome,
-  RenderStatus,
-} from '@taucad/runtime';
+import { act, renderHook, waitFor } from '@testing-library/react';
+import { createElement, StrictMode } from 'react';
+import type { PropsWithChildren } from 'react';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createRuntimeClient } from '@taucad/runtime/client';
-import { compileParameterManifest } from '@taucad/parameters';
-import type { CompileParameterManifestInput } from '@taucad/parameters';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { createMockRuntimeClient } from '@taucad/runtime-testing';
 import { replicad } from '@taucad/replicad';
 import { esbuild } from '@taucad/esbuild';
+import { compileParameterManifest } from '@taucad/parameters';
+import type { CompileParameterManifestInput } from '@taucad/parameters';
+import type { Description, DocumentStatus, Evaluation, Rendering, ViewStatus } from '@taucad/runtime';
 import { useRuntime } from '#hooks/use-runtime.js';
-import type { UseRuntimeClientOptionsProvider, UseRuntimeOptions } from '#hooks/use-runtime.js';
+import type { UseRuntimeOptions } from '#hooks/use-runtime.js';
 
 vi.mock('@taucad/runtime/client', async (importOriginal) => {
-  // oxlint-disable-next-line typescript/consistent-type-imports -- dynamic import required for vi.mock factory
+  // oxlint-disable-next-line typescript/consistent-type-imports -- vi.mock factory needs the runtime module type.
   const original: typeof import('@taucad/runtime/client') = await importOriginal();
-  return {
-    ...original,
-    createRuntimeClient: vi.fn(),
+  return { ...original, createRuntimeClient: vi.fn() };
+});
+
+const source = { path: 'main.ts' };
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
+const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
+const clientOptions = { transport };
+type Handlers = {
+  status?: (value: DocumentStatus) => void;
+  described?: (value: Description) => void;
+  evaluated?: (value: Evaluation) => void;
+  rendered?: (value: Rendering) => void;
+  viewStatus?: (value: ViewStatus) => void;
+};
+
+const fixture = () => {
+  const handlers: Handlers = {};
+  const closeView = vi.fn();
+  const close = vi.fn();
+  const terminate = vi.fn();
+  const update = vi.fn().mockResolvedValue({ superseded: true });
+  const exportResult = {
+    success: true,
+    exportId: 'model',
+    evaluationId: 'eval-1',
+    files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', content: new Uint8Array([1]) }],
+    issues: [],
   };
-});
-
-const testRuntime = defineRuntime({
-  plugins: [replicad(), esbuild()],
-});
-/* `createRuntimeClient` is mocked above so the transport never actually
- * opens — it only needs to satisfy the typed `transport` field on the
- * runtime client options. */
-const stubTransport = inProcessTransport({
-  runtime: testRuntime,
-  fileSystem: fromMemoryFs(),
-});
-
-const testClientOptions = {
-  transport: stubTransport,
+  const exportModel = vi.fn().mockResolvedValue(exportResult);
+  const view = vi.fn(() => ({
+    on: vi.fn((event: string, handler: (value: never) => void) => {
+      if (event === 'rendered') {
+        handlers.rendered = handler as (value: Rendering) => void;
+      }
+      if (event === 'status') {
+        handlers.viewStatus = handler as (value: ViewStatus) => void;
+      }
+      return vi.fn();
+    }),
+    close: closeView,
+  }));
+  const document = {
+    id: 'mock-document',
+    view,
+    update,
+    evaluation: vi.fn().mockResolvedValue({ superseded: true }),
+    export: exportModel,
+    close,
+    on: vi.fn((event: keyof Handlers, handler: (value: never) => void) => {
+      switch (event) {
+        case 'status': {
+          handlers.status = handler as (value: DocumentStatus) => void;
+          break;
+        }
+        case 'described': {
+          handlers.described = handler as (value: Description) => void;
+          break;
+        }
+        case 'evaluated': {
+          handlers.evaluated = handler as (value: Evaluation) => void;
+          break;
+        }
+        default: {
+          break;
+        }
+      }
+      return vi.fn();
+    }),
+  };
+  const open = vi.fn(() => document);
+  vi.mocked(createRuntimeClient).mockReturnValue({
+    // @ts-expect-error -- lifecycle test supplies only the document methods the hook exercises.
+    open,
+    terminate,
+    on: vi.fn(() => vi.fn()),
+  });
+  return { handlers, open, view, update, closeView, close, terminate, exportModel, exportResult };
 };
 
-const successGeometry: Geometry = {
-  format: 'gltf',
-  content: new Uint8Array([1, 2, 3]),
-  hash: 'abc123',
-};
-
-const successResult: HashedGeometryResult = {
+const renderSuccess: Rendering = {
   success: true,
-  data: successGeometry,
+  view: 'pcb',
+  artifact: { mimeType: 'image/svg+xml', content: '<svg />' },
+  hash: 'hash',
+  requestId: 'request-1',
+  evaluationId: 'eval-1',
+  transient: false,
   issues: [],
 };
 
-const errorResult: HashedGeometryResult = {
-  success: false,
-  issues: [
-    {
-      message: 'Kernel error: invalid geometry',
-      code: 'RUNTIME',
-      severity: 'error',
-    },
-  ],
-};
+describe('useRuntime document lifecycle', () => {
+  beforeEach(() => vi.mocked(createRuntimeClient).mockReset());
 
-const parameterResult = async (
-  defaults: Readonly<Record<string, unknown>>,
-  schema: JSONSchema7,
-): Promise<GetParametersResult> => ({
-  success: true,
-  data: await compileParameterManifest({
-    declaration: {
-      schema: {
-        $schema: 'https://json-structure.org/meta/extended/v0/#',
-        $id: 'urn:taucad:test:react-parameters',
-        $uses: ['JSONSchemaUnits'],
-        name: 'ReactParameters',
-        ...schema,
-      },
-      defaults,
-    },
-    scope: { kind: 'source', authority: 'test', root: '', entry: 'main.ts' },
-    source: {
-      id: 'test',
-      version: '1',
-      revision: 'react-parameters',
-      capability: 'json-structure',
-    },
-    dependency: `sha256:${'1'.repeat(64)}` as CompileParameterManifestInput['dependency'],
-    middleware: `sha256:${'2'.repeat(64)}` as CompileParameterManifestInput['middleware'],
-  }),
-  issues: [],
-});
-
-type EventHandlerMap = {
-  geometry?: (result: HashedGeometryResult) => void;
-  error?: (issues: KernelIssue[]) => void;
-  parametersResolved?: (result: GetParametersResult) => void;
-  renderStatus?: (status: RenderStatus) => void;
-};
-
-function createConfiguredMockClient(result: HashedGeometryResult = successResult): {
-  client: RuntimeClient;
-  handlers: EventHandlerMap;
-} {
-  const client = createMockRuntimeClient();
-  const handlers: EventHandlerMap = {};
-  const unsubscribe = vi.fn();
-  vi.mocked(client.on).mockImplementation((event: string, handler: (...args: never[]) => void) => {
-    switch (event) {
-      case 'geometry': {
-        handlers.geometry = handler as (result: HashedGeometryResult) => void;
-        break;
-      }
-      case 'error': {
-        handlers.error = handler as (issues: KernelIssue[]) => void;
-        break;
-      }
-      case 'parametersResolved': {
-        handlers.parametersResolved = handler as (result: GetParametersResult) => void;
-        break;
-      }
-      case 'renderStatus': {
-        handlers.renderStatus = handler as (status: RenderStatus) => void;
-        break;
-      }
-      default: {
-        break;
-      }
-    }
-    return unsubscribe;
-  });
-  vi.mocked(client.render).mockImplementation(async () => {
-    handlers.renderStatus?.('rendering');
-    queueMicrotask(() => {
-      handlers.geometry?.(result);
-      handlers.renderStatus?.(result.success ? 'ready' : 'error');
+  it('opens once, changes views without evaluating, and exports from the committed document', async () => {
+    const mock = fixture();
+    const options: UseRuntimeOptions<typeof runtime, typeof transport> = {
+      clientOptions,
+      source,
+      view: { id: 'drawing', instance: 'front' },
+    };
+    const { result, rerender, unmount } = renderHook((props) => useRuntime(props), { initialProps: options });
+    await waitFor(() => {
+      expect(mock.open).toHaveBeenCalled();
     });
-    return { superseded: false, geometry: result };
-  });
-  vi.mocked(client.updateParameters).mockImplementation(async () => {
-    handlers.renderStatus?.('rendering');
-    queueMicrotask(() => {
-      handlers.geometry?.(result);
-      handlers.renderStatus?.(result.success ? 'ready' : 'error');
+    const initialOpenCount = mock.open.mock.calls.length;
+    const initialCloseCount = mock.close.mock.calls.length;
+    const initialTerminateCount = mock.terminate.mock.calls.length;
+    expect(mock.open).toHaveBeenCalledWith({
+      source,
+      parameters: {},
+      watch: true,
     });
-    return { superseded: false, geometry: result };
-  });
-  vi.mocked(createRuntimeClient).mockReturnValue(client);
-  return { client, handlers };
-}
-
-type TestSourceFiles = { 'main.ts': string };
-type TestSourceOptions = UseRuntimeOptions<typeof testRuntime, typeof stubTransport, TestSourceFiles>;
-type TestFileOptions = UseRuntimeOptions<typeof testRuntime, typeof stubTransport>;
-
-function defaultOptions(overrides: Partial<TestSourceOptions> = {}): TestSourceOptions {
-  return {
-    clientOptions: testClientOptions,
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
-    source: { files: { 'main.ts': 'export default () => ({})' } },
-    ...overrides,
-  };
-}
-
-function defaultFileOptions(overrides: Partial<TestFileOptions> = {}): TestFileOptions {
-  return {
-    clientOptions: testClientOptions,
-    source: { path: '/project/main.scad' },
-    ...overrides,
-  };
-}
-
-const deferred = <T>(): {
-  readonly promise: Promise<T>;
-  readonly resolve: (value: T) => void;
-  readonly reject: (reason: unknown) => void;
-} => {
-  let resolveDeferred!: (value: T) => void;
-  let rejectDeferred!: (reason: unknown) => void;
-  const promise = new Promise<T>((resolve, reject) => {
-    resolveDeferred = resolve;
-    rejectDeferred = reject;
-  });
-  return { promise, resolve: resolveDeferred, reject: rejectDeferred };
-};
-
-describe('useRuntime', () => {
-  beforeEach(() => {
-    vi.mocked(createRuntimeClient).mockReset();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-  });
-
-  // ── Initial state ─────────────────────────────────────────────────────────
-
-  describe('initial state', () => {
-    it('should return idle status with undefined geometry when disabled', async () => {
-      createConfiguredMockClient();
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      expect(result.current.status).toBe('idle');
-      expect(result.current.geometry).toBeUndefined();
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledOnce();
-      });
-    });
-
-    it('should return undefined error and empty defaults when disabled', async () => {
-      createConfiguredMockClient();
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      expect(result.current.error).toBeUndefined();
-      expect(result.current.defaultParameters).toEqual({});
-      expect(result.current.jsonSchema).toBeUndefined();
-      expect(result.current.parameterManifest).toBeUndefined();
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledOnce();
-      });
-    });
-  });
-
-  // ── Rendering lifecycle ───────────────────────────────────────────────────
-
-  describe('rendering lifecycle', () => {
-    it('should create a RuntimeClient with the provided client options', async () => {
-      createConfiguredMockClient();
-
-      renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledWith(testClientOptions);
-      });
-    });
-
-    it('should call client.render with source and initial parameters when enabled', async () => {
-      const { client } = createConfiguredMockClient();
-      const parameters = { width: 42 };
-
-      renderHook(() => useRuntime(defaultOptions({ initialParameters: parameters })));
-
-      await waitFor(() => {
-        expect(client.render).toHaveBeenCalledWith(
-          expect.objectContaining({
-            // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
-            source: { files: { 'main.ts': 'export default () => ({})' } },
-            parameters,
-          }),
-        );
-      });
-    });
-
-    it('should forward single-file inline source without synthesizing an entry path', async () => {
-      const { client } = createConfiguredMockClient();
-
-      renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(client.render).toHaveBeenCalledWith({
-          // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
-          source: { files: { 'main.ts': 'export default () => ({})' } },
-        });
-      });
-    });
-
-    it('should forward filesystem source without an inline file map', async () => {
-      const { client } = createConfiguredMockClient();
-      const parameters = { len: 200 };
-
-      renderHook(() => useRuntime(defaultFileOptions({ initialParameters: parameters })));
-
-      await waitFor(() => {
-        expect(client.render).toHaveBeenCalledWith({
-          source: { path: '/project/main.scad' },
-          parameters,
-        });
-      });
-    });
-
-    it('should reject dynamic empty inline source maps before calling client.render', async () => {
-      const { client } = createConfiguredMockClient();
-      const invalidOptions = {
-        ...defaultOptions(),
-        source: { files: {} },
-      } as unknown as TestSourceOptions;
-
-      const { result } = renderHook(() => useRuntime(invalidOptions));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
-      });
-      expect(result.current.error?.message).toBe('Runtime source.files must contain at least one file.');
-      expect(client.render).not.toHaveBeenCalled();
-    });
-
-    it('should reject legacy controlled parameters before calling client.render', async () => {
-      const { client } = createConfiguredMockClient();
-      const invalidOptions = {
-        ...defaultOptions(),
-        parameters: { width: 20 },
-      } as unknown as TestSourceOptions;
-
-      const { result } = renderHook(() => useRuntime(invalidOptions));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
-      });
-      expect(result.current.error?.message).toBe(
-        'useRuntime parameters input was removed; use initialParameters or setParameters.',
-      );
-      expect(client.render).not.toHaveBeenCalled();
-    });
-
-    it('should mirror runtime renderStatus events', async () => {
-      const { handlers } = createConfiguredMockClient();
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(handlers.renderStatus).toBeDefined();
-      });
-
-      act(() => {
-        handlers.renderStatus?.('connecting');
-      });
-      expect(result.current.status).toBe('connecting');
-
-      act(() => {
-        handlers.renderStatus?.('rendering');
-      });
-      expect(result.current.status).toBe('rendering');
-    });
-
-    it('should transition status to ready on successful render', async () => {
-      createConfiguredMockClient();
-
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('ready');
-      });
-    });
-
-    it('should return geometry from successful render result', async () => {
-      createConfiguredMockClient(successResult);
-
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('ready');
-      });
-
-      expect(result.current.geometry).toEqual(successGeometry);
-      expect(result.current.geometryStatus).toBe('current');
-      expect(result.current.error).toBeUndefined();
-    });
-
-    it('should retain last-good geometry as stale through failure and recovery', async () => {
-      const { client, handlers } = createConfiguredMockClient(successResult);
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.geometryStatus).toBe('current');
-      });
-
-      act(() => {
-        handlers.geometry?.(errorResult);
-        handlers.renderStatus?.('error');
-      });
-      expect(result.current.geometry).toBe(successGeometry);
-      expect(result.current.geometryStatus).toBe('stale');
-      expect(result.current.error?.message).toBe('Kernel error: invalid geometry');
-
-      await act(async () => {
-        await result.current.exportGeometry('stl');
-      });
-      expect(client.export).toHaveBeenLastCalledWith('stl', {
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
-        source: { files: { 'main.ts': 'export default () => ({})' } },
-      });
-
-      const recoveredGeometry: Geometry = { ...successGeometry, hash: 'recovered' };
-      act(() => {
-        handlers.geometry?.({ success: true, data: recoveredGeometry, issues: [] });
-        handlers.renderStatus?.('ready');
-      });
-      expect(result.current.geometry).toBe(recoveredGeometry);
-      expect(result.current.geometryStatus).toBe('current');
-      expect(result.current.error).toBeUndefined();
-    });
-
-    it('should transition status to error when geometry event reports an unsuccessful result', async () => {
-      createConfiguredMockClient(errorResult);
-
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
-      });
-    });
-
-    it('should set error with issue message from unsuccessful geometry event', async () => {
-      createConfiguredMockClient(errorResult);
-
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
-      });
-
-      expect(result.current.error).toBeInstanceOf(Error);
-      expect(result.current.error?.message).toBe('Kernel error: invalid geometry');
-    });
-
-    it('should transition status to error when client.render rejects with an exception', async () => {
-      const client = createMockRuntimeClient();
-      vi.mocked(client.render).mockRejectedValue(new Error('Worker crashed'));
-      vi.mocked(createRuntimeClient).mockReturnValue(client);
-
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
-      });
-    });
-
-    it('should set error from the rejected exception', async () => {
-      const client = createMockRuntimeClient();
-      vi.mocked(client.render).mockRejectedValue(new Error('Worker crashed'));
-      vi.mocked(createRuntimeClient).mockReturnValue(client);
-
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
-      });
-
-      expect(result.current.error).toBeInstanceOf(Error);
-      expect(result.current.error?.message).toBe('Worker crashed');
-    });
-
-    it('should use fallback message when error event has empty issues array', async () => {
-      const emptyIssuesResult: HashedGeometryResult = {
-        success: false,
+    expect(mock.view).toHaveBeenCalledWith('drawing', { instance: 'front' });
+    expect(mock.update).not.toHaveBeenCalled();
+    act(() => {
+      mock.handlers.evaluated?.({
+        success: true,
+        id: 'eval-1',
+        transient: false,
+        views: [],
+        exports: [],
         issues: [],
-      };
-      createConfiguredMockClient(emptyIssuesResult);
-
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
       });
-
-      expect(result.current.error?.message).toBe('Render failed');
+      mock.handlers.rendered?.(renderSuccess);
     });
-
-    it('should wrap non-Error rejection values in an Error', async () => {
-      const client = createMockRuntimeClient();
-      vi.mocked(client.render).mockRejectedValue('string error');
-      vi.mocked(createRuntimeClient).mockReturnValue(client);
-
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
-      });
-
-      expect(result.current.error).toBeInstanceOf(Error);
-      expect(result.current.error?.message).toBe('string error');
-    });
-
-    it('should subscribe to the standalone error event so kernel issues surface independently of the geometry channel', async () => {
-      const { client } = createConfiguredMockClient();
-
-      renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(client.on).toHaveBeenCalledWith('error', expect.any(Function));
-      });
-    });
+    expect(result.current.artifactStatus).toBe('current');
+    await expect(result.current.exportModel('glb')).resolves.toEqual(mock.exportResult);
+    expect(mock.exportModel).toHaveBeenCalledWith('glb', undefined);
+    rerender({ ...options, view: { id: 'drawing', instance: 'rear' } });
+    expect(mock.open).toHaveBeenCalledTimes(initialOpenCount);
+    expect(mock.update).not.toHaveBeenCalled();
+    expect(mock.closeView).toHaveBeenCalled();
+    expect(result.current.artifactStatus).toBe('stale');
+    unmount();
+    expect(mock.close).toHaveBeenCalledTimes(initialCloseCount + 1);
+    expect(mock.terminate).toHaveBeenCalledTimes(initialTerminateCount + 1);
   });
 
-  // ── Parameter resolution ──────────────────────────────────────────────────
-
-  describe('parameter resolution', () => {
-    it('should subscribe to parametersResolved event on client creation', async () => {
-      const { client } = createConfiguredMockClient();
-
-      renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(client.on).toHaveBeenCalledWith('parametersResolved', expect.any(Function));
+  it('retains the last artifact as stale after failure and clears it on a new successful empty model', async () => {
+    const mock = fixture();
+    const { result } = renderHook(() => useRuntime({ clientOptions, source }));
+    await waitFor(() => {
+      expect(mock.open).toHaveBeenCalled();
+    });
+    act(() => {
+      mock.handlers.evaluated?.({
+        success: true,
+        id: 'eval-1',
+        transient: false,
+        views: [],
+        exports: [],
+        issues: [],
+      });
+      mock.handlers.rendered?.(renderSuccess);
+    });
+    expect(result.current.artifactStatus).toBe('current');
+    act(() => {
+      mock.handlers.status?.('evaluating');
+      mock.handlers.evaluated?.({
+        success: false,
+        id: 'eval-2',
+        transient: false,
+        issues: [{ code: 'RUNTIME', severity: 'error', message: 'Bad model' }],
       });
     });
-
-    it('should expose defaultParameters when parametersResolved fires with success', async () => {
-      const { handlers } = createConfiguredMockClient();
-      const resolved = await parameterResult(
-        { width: 10, height: 20 },
-        { type: 'object', properties: { width: { type: 'number' } } },
-      );
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(handlers.parametersResolved).toBeDefined();
+    expect(result.current.artifactStatus).toBe('stale');
+    expect(result.current.artifactHash).toBe('hash');
+    expect(result.current.error?.message).toBe('Bad model');
+    act(() => {
+      mock.handlers.evaluated?.({
+        success: true,
+        id: 'eval-3',
+        transient: false,
+        views: [],
+        exports: [],
+        issues: [],
       });
-
-      act(() => {
-        handlers.parametersResolved?.(resolved);
+      mock.handlers.rendered?.({
+        ...renderSuccess,
+        evaluationId: 'eval-3',
+        artifact: { mimeType: 'model/gltf-binary', content: new Uint8Array() },
       });
-
-      expect(result.current.defaultParameters).toEqual({
-        width: 10,
-        height: 20,
-      });
-      expect(result.current.parameterManifest).toBe(resolved.success ? resolved.data : undefined);
     });
+    expect(result.current.artifact?.content).toEqual(new Uint8Array());
+    expect(result.current.artifactHash).toBe('hash');
+    expect(result.current.artifactStatus).toBe('current');
+    expect(result.current.error).toBeUndefined();
+  });
 
-    it('should expose effective parameters from defaults and initial overrides', async () => {
-      const { handlers } = createConfiguredMockClient();
-      const resolved = await parameterResult(
-        { width: 10, height: 20 },
-        {
+  it('closes the previous document when the source changes or the hook is disabled', async () => {
+    const first = fixture();
+    const initial = { clientOptions, source, enabled: true };
+    const { rerender, result } = renderHook((props) => useRuntime(props), { initialProps: initial });
+    await waitFor(() => {
+      expect(first.open).toHaveBeenCalled();
+    });
+    act(() => {
+      first.handlers.evaluated?.({ success: true, id: 'eval-1', transient: false, views: [], exports: [], issues: [] });
+      first.handlers.rendered?.(renderSuccess);
+    });
+    expect(result.current.artifactStatus).toBe('current');
+    const initialOpenCount = first.open.mock.calls.length;
+    const initialCloseCount = first.close.mock.calls.length;
+    rerender({ ...initial, source: { path: 'other.ts' } });
+    expect(first.close).toHaveBeenCalledTimes(initialCloseCount + 1);
+    expect(first.open).toHaveBeenCalledTimes(initialOpenCount + 1);
+    expect(result.current.artifact).toEqual(renderSuccess.artifact);
+    expect(result.current.artifactHash).toBe(renderSuccess.hash);
+    expect(result.current.artifactStatus).toBe('stale');
+    rerender({ ...initial, enabled: false });
+    expect(first.close).toHaveBeenCalledTimes(initialCloseCount + 2);
+  });
+
+  it('reports a view timeout while retaining the previous artifact', async () => {
+    const mock = fixture();
+    const { result } = renderHook(() => useRuntime({ clientOptions, source }));
+    await waitFor(() => {
+      expect(mock.open).toHaveBeenCalled();
+    });
+    act(() => {
+      mock.handlers.evaluated?.({ success: true, id: 'eval-1', transient: false, views: [], exports: [], issues: [] });
+      mock.handlers.rendered?.(renderSuccess);
+      mock.handlers.viewStatus?.('error');
+    });
+    expect(result.current.artifact).toEqual(renderSuccess.artifact);
+    expect(result.current.artifactStatus).toBe('stale');
+    expect(result.current.status).toBe('error');
+    expect(result.current.error?.message).toBe('View rendering failed');
+  });
+
+  it('keeps initial edits over discovered defaults and resets to those defaults', async () => {
+    const mock = fixture();
+    const onParametersChange = vi.fn();
+    const { result } = renderHook(() =>
+      useRuntime({
+        clientOptions,
+        source,
+        initialParameters: { size: 20 },
+        onParametersChange,
+      }),
+    );
+    await waitFor(() => {
+      expect(mock.open).toHaveBeenCalled();
+    });
+    const initialOpenCount = mock.open.mock.calls.length;
+    const manifest = await compileParameterManifest({
+      declaration: {
+        schema: {
+          $schema: 'https://json-structure.org/meta/extended/v0/#',
+          $id: 'urn:taucad:test:react-parameters',
+          $uses: ['JSONSchemaUnits'],
+          name: 'ReactParameters',
           type: 'object',
-          properties: { width: { type: 'number' }, height: { type: 'number' } },
+          properties: { size: { type: 'number' } },
         },
-      );
-
-      const { result } = renderHook(() =>
-        useRuntime(defaultOptions({ enabled: false, initialParameters: { width: 12 } })),
-      );
-
-      expect(result.current.parameters).toEqual({ width: 12 });
-
-      await waitFor(() => {
-        expect(handlers.parametersResolved).toBeDefined();
-      });
-
-      act(() => {
-        handlers.parametersResolved?.(resolved);
-      });
-
-      expect(result.current.parameters).toEqual({ width: 12, height: 20 });
+        defaults: { size: 10 },
+      },
+      scope: { kind: 'source', authority: 'test', root: '', entry: 'main.ts' },
+      source: { id: 'test', version: '1', revision: 'react-parameters', capability: 'json-structure' },
+      dependency: `sha256:${'1'.repeat(64)}` as CompileParameterManifestInput['dependency'],
+      middleware: `sha256:${'2'.repeat(64)}` as CompileParameterManifestInput['middleware'],
     });
-
-    it('should prune overrides when resolved defaults change shape', async () => {
-      const { handlers } = createConfiguredMockClient();
-      const widthResolved = await parameterResult(
-        { width: 10 },
-        { type: 'object', properties: { width: { type: 'number' } } },
-      );
-      const heightResolved = await parameterResult(
-        { height: 20 },
-        { type: 'object', properties: { height: { type: 'number' } } },
-      );
-
-      const { result } = renderHook(() =>
-        useRuntime(
-          defaultOptions({
-            enabled: false,
-            initialParameters: { width: 12, stale: true },
-          }),
-        ),
-      );
-
-      await waitFor(() => {
-        expect(handlers.parametersResolved).toBeDefined();
-      });
-
-      act(() => {
-        handlers.parametersResolved?.(widthResolved);
-      });
-
-      expect(result.current.parameters).toEqual({ width: 12 });
-
-      act(() => {
-        handlers.parametersResolved?.(heightResolved);
-      });
-
-      expect(result.current.parameters).toEqual({ height: 20 });
+    act(() => {
+      mock.handlers.described?.({ success: true, parameters: manifest, kernelId: 'replicad', issues: [] });
     });
-
-    it('should update effective parameters from full values and reset to defaults', async () => {
-      const { handlers } = createConfiguredMockClient();
-      const resolved = await parameterResult(
-        { width: 10, height: 20 },
-        {
-          type: 'object',
-          properties: { width: { type: 'number' }, height: { type: 'number' } },
-        },
-      );
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(handlers.parametersResolved).toBeDefined();
-      });
-
-      act(() => {
-        handlers.parametersResolved?.(resolved);
-      });
-
-      act(() => {
-        result.current.setParameters({ width: 10, height: 24 });
-      });
-
-      expect(result.current.parameters).toEqual({ width: 10, height: 24 });
-
-      act(() => {
-        result.current.setParameters((current) => ({ ...current, width: 12 }));
-      });
-
-      expect(result.current.parameters).toEqual({ width: 12, height: 24 });
-
-      act(() => {
-        result.current.resetParameters();
-      });
-
-      expect(result.current.parameters).toEqual({ width: 10, height: 20 });
+    expect(result.current.defaultParameters).toEqual({ size: 10 });
+    expect(result.current.parameters).toEqual({ size: 20 });
+    act(() => {
+      result.current.setParameters({ size: 30 });
     });
-
-    it('should notify parameter changes with effective values', async () => {
-      const { handlers } = createConfiguredMockClient();
-      const onParametersChange = vi.fn();
-      const resolved = await parameterResult(
-        { width: 10, height: 20 },
-        {
-          type: 'object',
-          properties: { width: { type: 'number' }, height: { type: 'number' } },
-        },
-      );
-
-      const { result } = renderHook(() =>
-        useRuntime(
-          defaultOptions({
-            enabled: false,
-            initialParameters: { width: 12 },
-            onParametersChange,
-          }),
-        ),
-      );
-
-      await waitFor(() => {
-        expect(handlers.parametersResolved).toBeDefined();
-      });
-
-      act(() => {
-        handlers.parametersResolved?.(resolved);
-      });
-
-      await waitFor(() => {
-        expect(onParametersChange).toHaveBeenLastCalledWith({
-          width: 12,
-          height: 20,
-        });
-      });
-
-      act(() => {
-        result.current.setParameters({ width: 10, height: 24 });
-      });
-
-      await waitFor(() => {
-        expect(onParametersChange).toHaveBeenLastCalledWith({
-          width: 10,
-          height: 24,
-        });
-      });
-
-      act(() => {
-        result.current.resetParameters();
-      });
-
-      await waitFor(() => {
-        expect(onParametersChange).toHaveBeenLastCalledWith({
-          width: 10,
-          height: 20,
-        });
-      });
+    expect(result.current.parameters).toEqual({ size: 30 });
+    act(() => {
+      result.current.resetParameters();
     });
-
-    it('should expose jsonSchema when parametersResolved fires with success', async () => {
-      const { handlers } = createConfiguredMockClient();
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      const schema: JSONSchema7 = {
-        type: 'object',
-        properties: { size: { type: 'number' } },
-      };
-      const resolved = await parameterResult({}, schema);
-
-      await waitFor(() => {
-        expect(handlers.parametersResolved).toBeDefined();
-      });
-
-      act(() => {
-        handlers.parametersResolved?.(resolved);
-      });
-
-      if (!resolved.success) {
-        throw new Error('Expected parameter resolution');
-      }
-      if (resolved.data.legacyProjection.status !== 'usable') {
-        throw new Error('Expected a usable Draft-7 projection');
-      }
-      const expectedSchema = resolved.data.legacyProjection.schema;
-      await waitFor(() => {
-        expect(result.current.jsonSchema).toEqual(expectedSchema);
-      });
-    });
-
-    it('should not update parameters state when parametersResolved fires with failure', async () => {
-      const { handlers } = createConfiguredMockClient();
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(handlers.parametersResolved).toBeDefined();
-      });
-
-      act(() => {
-        handlers.parametersResolved?.({
-          success: false,
-          issues: [{ message: 'parse error', code: 'RUNTIME', severity: 'error' }],
-        });
-      });
-
-      expect(result.current.defaultParameters).toEqual({});
-      expect(result.current.jsonSchema).toBeUndefined();
-    });
+    expect(result.current.parameters).toEqual({ size: 10 });
+    expect(onParametersChange).toHaveBeenLastCalledWith({ size: 10 });
+    expect(mock.open).toHaveBeenCalledTimes(initialOpenCount);
+    expect(mock.update).toHaveBeenCalled();
   });
 
-  // ── Reactive updates ──────────────────────────────────────────────────────
-
-  describe('reactive updates', () => {
-    it('should re-render when source reference changes', async () => {
-      const { client } = createConfiguredMockClient();
-
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
-      const source1 = { files: { 'main.ts': 'version 1' } };
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
-      const source2 = { files: { 'main.ts': 'version 2' } };
-
-      const { result, rerender } = renderHook(({ source }) => useRuntime(defaultOptions({ source })), {
-        initialProps: { source: source1 },
+  it('ignores a provider that resolves after replacement', async () => {
+    const mock = fixture();
+    let resolveFirst: ((options: typeof clientOptions) => void) | undefined;
+    const first = async (): Promise<typeof clientOptions> =>
+      new Promise((resolve) => {
+        resolveFirst = resolve;
       });
-
-      await waitFor(() => {
-        expect(result.current.geometryStatus).toBe('current');
-      });
-
-      const pending = Promise.withResolvers<RenderOutcome>();
-      vi.mocked(client.render).mockReturnValueOnce(pending.promise);
-      rerender({ source: source2 });
-
-      expect(result.current.geometry).toBe(successGeometry);
-      expect(result.current.geometryStatus).toBe('stale');
-
-      await waitFor(() => {
-        expect(client.render).toHaveBeenCalledTimes(2);
-      });
-
-      expect(client.render).toHaveBeenLastCalledWith(expect.objectContaining({ source: source2 }));
-      pending.resolve({ superseded: true });
+    const second = async (): Promise<typeof clientOptions> => clientOptions;
+    const { rerender, unmount } = renderHook(
+      ({ provider }: { provider: () => Promise<typeof clientOptions> }) =>
+        useRuntime({ clientOptions: provider, source }),
+      { initialProps: { provider: first } },
+    );
+    rerender({ provider: second });
+    resolveFirst?.(clientOptions);
+    await waitFor(() => {
+      expect(mock.open).toHaveBeenCalled();
     });
-
-    it('should update active render parameters without calling render again', async () => {
-      const { client } = createConfiguredMockClient();
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ initialParameters: { width: 10 } })));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('ready');
-      });
-
-      act(() => {
-        result.current.setParameters({ width: 20 });
-      });
-
-      await waitFor(() => {
-        expect(client.updateParameters).toHaveBeenCalledWith({ width: 20 });
-      });
-      expect(client.render).toHaveBeenCalledTimes(1);
-    });
-
-    it('should not call client.render when enabled is false', async () => {
-      const { client } = createConfiguredMockClient();
-
-      renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledOnce();
-      });
-      expect(client.render).not.toHaveBeenCalled();
-    });
-
-    it('should call client.render when enabled transitions from false to true', async () => {
-      const { client } = createConfiguredMockClient();
-
-      const { rerender } = renderHook(({ enabled }) => useRuntime(defaultOptions({ enabled })), {
-        initialProps: { enabled: false },
-      });
-
-      expect(client.render).not.toHaveBeenCalled();
-
-      rerender({ enabled: true });
-
-      await waitFor(() => {
-        expect(client.render).toHaveBeenCalled();
-      });
-    });
-
-    it('should display latest geometry when supersession arrives via the geometry event', async () => {
-      const { client, handlers } = createConfiguredMockClient();
-
-      // Override client.render so it does NOT auto-fire `geometry` -- we control
-      // settlement order manually below, mirroring real supersession.
-      vi.mocked(client.render).mockResolvedValue({ superseded: true });
-
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
-      const source1 = { files: { 'main.ts': 'v1' } };
-      // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key
-      const source2 = { files: { 'main.ts': 'v2' } };
-
-      const { result, rerender } = renderHook(({ source }) => useRuntime(defaultOptions({ source })), {
-        initialProps: { source: source1 },
-      });
-
-      await waitFor(() => {
-        expect(handlers.geometry).toBeDefined();
-      });
-
-      rerender({ source: source2 });
-
-      await act(async () => {
-        handlers.geometry?.(successResult);
-        handlers.renderStatus?.('ready');
-      });
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('ready');
-      });
-
-      expect(result.current.geometry).toEqual(successGeometry);
-    });
+    expect(createRuntimeClient).toHaveBeenCalledOnce();
+    unmount();
+    expect(mock.terminate).toHaveBeenCalledOnce();
   });
 
-  // ── Cleanup ───────────────────────────────────────────────────────────────
-
-  describe('cleanup', () => {
-    it('should terminate the client on unmount', async () => {
-      const { client } = createConfiguredMockClient();
-
-      const { unmount } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledOnce();
-      });
-
-      unmount();
-
-      expect(client.terminate).toHaveBeenCalledOnce();
+  it('closes every StrictMode document and client on unmount', async () => {
+    const mock = fixture();
+    const wrapper = ({ children }: PropsWithChildren): ReturnType<typeof createElement> =>
+      createElement(StrictMode, undefined, children);
+    const { unmount } = renderHook(() => useRuntime({ clientOptions, source }), { wrapper });
+    await waitFor(() => {
+      expect(mock.open).toHaveBeenCalled();
     });
-
-    it('should not update state after unmount', async () => {
-      const client = createMockRuntimeClient();
-
-      let resolveOpen: ((value: { superseded: false; geometry: HashedGeometryResult }) => void) | undefined;
-      vi.mocked(client.render).mockReturnValue(
-        new Promise((resolve) => {
-          resolveOpen = resolve;
-        }),
-      );
-      vi.mocked(createRuntimeClient).mockReturnValue(client);
-
-      const { result, unmount } = renderHook(() => useRuntime(defaultOptions()));
-
-      unmount();
-
-      await act(async () => {
-        resolveOpen?.({ superseded: false, geometry: successResult });
-      });
-
-      expect(result.current.geometry).toBeUndefined();
-      expect(result.current.status).not.toBe('ready');
-    });
-
-    it('should unsubscribe from every event subscription on unmount', async () => {
-      const unsubscribe = vi.fn();
-      const client = createMockRuntimeClient();
-      vi.mocked(client.on).mockReturnValue(unsubscribe);
-      vi.mocked(client.render).mockResolvedValue({
-        superseded: false,
-        geometry: successResult,
-      });
-      vi.mocked(createRuntimeClient).mockReturnValue(client);
-
-      const { unmount } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(client.on).toHaveBeenCalled();
-      });
-
-      // `useRuntime` subscribes to: renderStatus, parametersResolved, capabilities, geometry, error
-      const subscriptionCount = vi.mocked(client.on).mock.calls.length;
-
-      unmount();
-
-      expect(unsubscribe).toHaveBeenCalledTimes(subscriptionCount);
-    });
-
-    it('should terminate the old client and create a new one when client options change', async () => {
-      const client1 = createMockRuntimeClient();
-      const client2 = createMockRuntimeClient();
-      vi.mocked(client1.render).mockResolvedValue({
-        superseded: false,
-        geometry: successResult,
-      });
-      vi.mocked(client2.render).mockResolvedValue({
-        superseded: false,
-        geometry: successResult,
-      });
-
-      vi.mocked(createRuntimeClient).mockReturnValueOnce(client1).mockReturnValueOnce(client2);
-
-      const runtime1 = defineRuntime({ plugins: [replicad(), esbuild()] });
-      const runtime2 = defineRuntime({ plugins: [replicad(), esbuild()] });
-      const options1 = { transport: inProcessTransport({ runtime: runtime1 }) };
-      const options2 = { transport: inProcessTransport({ runtime: runtime2 }) };
-
-      const { rerender } = renderHook(
-        ({ clientOptions }) => useRuntime(defaultOptions({ clientOptions, enabled: false })),
-        {
-          initialProps: { clientOptions: options1 },
-        },
-      );
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledTimes(1);
-      });
-
-      rerender({ clientOptions: options2 });
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledTimes(2);
-      });
-      expect(client1.terminate).toHaveBeenCalledOnce();
-    });
-  });
-
-  // ── Client options providers ─────────────────────────────────────────────
-
-  describe('client options providers', () => {
-    it('should resolve a synchronous client options provider before creating the runtime client', async () => {
-      createConfiguredMockClient();
-      const provider: UseRuntimeClientOptionsProvider<typeof testRuntime, typeof stubTransport> = () =>
-        testClientOptions;
-
-      renderHook(() => useRuntime(defaultOptions({ clientOptions: provider, enabled: false })));
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledWith(testClientOptions);
-      });
-    });
-
-    it('should await an asynchronous client options provider before creating the runtime client', async () => {
-      createConfiguredMockClient();
-      const options = deferred<typeof testClientOptions>();
-      const provider = vi.fn(async () => options.promise);
-
-      renderHook(() => useRuntime(defaultOptions({ clientOptions: provider, enabled: false })));
-
-      expect(provider).toHaveBeenCalledOnce();
-      expect(createRuntimeClient).not.toHaveBeenCalled();
-
-      await act(async () => {
-        options.resolve(testClientOptions);
-      });
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledWith(testClientOptions);
-      });
-    });
-
-    it('should surface provider rejection as a hook error without creating a client', async () => {
-      const provider = vi.fn(async () => {
-        throw new Error('bridge unavailable');
-      });
-
-      const { result } = renderHook(() => useRuntime(defaultOptions({ clientOptions: provider })));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('error');
-      });
-      expect(result.current.error?.message).toBe('bridge unavailable');
-      expect(createRuntimeClient).not.toHaveBeenCalled();
-    });
-
-    it('should ignore an asynchronous provider that resolves after unmount', async () => {
-      createConfiguredMockClient();
-      const options = deferred<typeof testClientOptions>();
-      const provider = vi.fn(async () => options.promise);
-
-      const { unmount } = renderHook(() => useRuntime(defaultOptions({ clientOptions: provider })));
-      unmount();
-
-      await act(async () => {
-        options.resolve(testClientOptions);
-      });
-
-      expect(createRuntimeClient).not.toHaveBeenCalled();
-    });
-
-    it('should ignore stale provider resolution after a newer provider identity wins', async () => {
-      const client = createMockRuntimeClient();
-      vi.mocked(client.render).mockResolvedValue({
-        superseded: false,
-        geometry: successResult,
-      });
-      vi.mocked(createRuntimeClient).mockReturnValue(client);
-      const staleOptions = deferred<typeof testClientOptions>();
-      const freshOptions = deferred<typeof testClientOptions>();
-      const staleProvider = vi.fn(async () => staleOptions.promise);
-      const freshProvider = vi.fn(async () => freshOptions.promise);
-
-      const { rerender } = renderHook(
-        ({ provider }) => useRuntime(defaultOptions({ clientOptions: provider, enabled: false })),
-        {
-          initialProps: { provider: staleProvider },
-        },
-      );
-
-      rerender({ provider: freshProvider });
-
-      await act(async () => {
-        freshOptions.resolve(testClientOptions);
-        staleOptions.resolve(testClientOptions);
-      });
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledTimes(1);
-      });
-    });
-
-    it('should replay the current source on a newly resolved client when options identity changes', async () => {
-      const client1 = createMockRuntimeClient();
-      const client2 = createMockRuntimeClient();
-      vi.mocked(client1.render).mockResolvedValue({
-        superseded: false,
-        geometry: successResult,
-      });
-      vi.mocked(client2.render).mockResolvedValue({
-        superseded: false,
-        geometry: successResult,
-      });
-      vi.mocked(createRuntimeClient).mockReturnValueOnce(client1).mockReturnValueOnce(client2);
-
-      const provider1 = (): typeof testClientOptions => testClientOptions;
-      const provider2 = (): typeof testClientOptions => testClientOptions;
-      const { rerender } = renderHook(({ provider }) => useRuntime(defaultOptions({ clientOptions: provider })), {
-        initialProps: { provider: provider1 },
-      });
-
-      await waitFor(() => {
-        expect(client1.render).toHaveBeenCalledOnce();
-      });
-
-      rerender({ provider: provider2 });
-
-      await waitFor(() => {
-        expect(client2.render).toHaveBeenCalledOnce();
-      });
-      expect(client2.render).toHaveBeenCalledWith({
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
-        source: { files: { 'main.ts': 'export default () => ({})' } },
-      });
-    });
-  });
-
-  // ── Export helpers ───────────────────────────────────────────────────────
-
-  describe('exportGeometry', () => {
-    it('should export the settled preview with nested export options', async () => {
-      const { client } = createConfiguredMockClient();
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('ready');
-      });
-
-      await act(async () => {
-        await result.current.exportGeometry('stl', {
-          exportOptions: { binary: true },
-        });
-      });
-
-      expect(client.export).toHaveBeenCalledWith('stl', {
-        exportOptions: { binary: true },
-      });
-    });
-
-    it('should forward route-scoped content when exporting the settled preview', async () => {
-      const { client } = createConfiguredMockClient();
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('ready');
-      });
-
-      await act(async () => {
-        await result.current.exportGeometry('glb', {
-          content: { includeEdges: true },
-        });
-      });
-
-      expect(client.export).toHaveBeenCalledWith('glb', {
-        content: { includeEdges: true },
-      });
-    });
-
-    it('should request-scope export the hook source when preview rendering is disabled', async () => {
-      const { client } = createConfiguredMockClient();
-      const { result } = renderHook(() => useRuntime(defaultOptions({ enabled: false })));
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledOnce();
-      });
-
-      await act(async () => {
-        await result.current.exportGeometry('stl', {
-          exportOptions: { binary: true },
-        });
-      });
-
-      expect(client.render).not.toHaveBeenCalled();
-      expect(client.export).toHaveBeenCalledWith('stl', {
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
-        source: { files: { 'main.ts': 'export default () => ({})' } },
-        exportOptions: { binary: true },
-      });
-    });
-
-    it('should not leak preview content or render options into a request-scoped export', async () => {
-      const { client } = createConfiguredMockClient();
-      const { result } = renderHook(() =>
-        useRuntime(
-          defaultOptions({
-            enabled: false,
-            content: { includeEdges: true, includeTopology: true },
-            renderOptions: {
-              tessellation: { linearTolerance: 0.1, angularTolerance: 12 },
-            },
-          }),
-        ),
-      );
-
-      await waitFor(() => {
-        expect(createRuntimeClient).toHaveBeenCalledOnce();
-      });
-
-      await act(async () => {
-        await result.current.exportGeometry('glb', {
-          content: { includeEdges: false },
-        });
-      });
-
-      expect(client.export).toHaveBeenCalledWith('glb', {
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
-        source: { files: { 'main.ts': 'export default () => ({})' } },
-        content: { includeEdges: false },
-      });
-    });
-
-    it('should request-scope export the hook source when the current preview has not settled', async () => {
-      const { client } = createConfiguredMockClient();
-      vi.mocked(client.render).mockResolvedValue({ superseded: true });
-      const { result } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(client.render).toHaveBeenCalledOnce();
-      });
-
-      await act(async () => {
-        await result.current.exportGeometry('glb');
-      });
-
-      expect(client.export).toHaveBeenCalledWith('glb', {
-        // eslint-disable-next-line @typescript-eslint/naming-convention -- file path key in assertion
-        source: { files: { 'main.ts': 'export default () => ({})' } },
-      });
-    });
-  });
-
-  // ── Return value stability ────────────────────────────────────────────────
-
-  describe('return value stability', () => {
-    it('should return a stable geometry reference when geometry has not changed', async () => {
-      createConfiguredMockClient();
-
-      const { result, rerender } = renderHook(() => useRuntime(defaultOptions()));
-
-      await waitFor(() => {
-        expect(result.current.status).toBe('ready');
-      });
-
-      const firstRef = result.current.geometry;
-
-      rerender();
-
-      expect(result.current.geometry).toBe(firstRef);
-    });
+    unmount();
+    expect(mock.close).toHaveBeenCalledTimes(mock.open.mock.calls.length);
+    expect(mock.terminate).toHaveBeenCalledTimes(vi.mocked(createRuntimeClient).mock.calls.length);
   });
 });

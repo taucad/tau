@@ -9,8 +9,8 @@ export type {
 export type {
   BundleInput,
   BundlerDefinition,
-  BundlerInitRuntime,
+  BundlerInitRuntime as BundlerInitServices,
   BundlerPluginFactory,
-  BundlerRuntime,
+  BundlerRuntime as BundlerServices,
   DetectImportsResult,
 } from '#types/runtime-bundler.types.js';

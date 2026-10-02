@@ -133,6 +133,15 @@
       "fixedBy": "W6"
     },
     {
+      "id": "B14G",
+      "bound": "Geometry-runner port request to main (10 s)",
+      "site": "apps/desktop/src/tau/services-host.ts",
+      "token": "geometryPortTimeout",
+      "class": "Peer",
+      "owner": "desktop geometry broker",
+      "fixedBy": "outside this charter: desktop geometry broker owner"
+    },
+    {
       "id": "B15",
       "bound": "Agent-host configuration from main",
       "site": "apps/desktop/src/tau/services-host.impl.ts",
@@ -720,6 +729,22 @@
       "token": "server.dispose(reason.message)",
       "class": "Debounce",
       "owner": "machines"
+    },
+    {
+      "id": "D21",
+      "bound": "GeoSpec candidate fetch and publication deadline (15 s): abort the remote Git transport and clear the timer when its operation settles",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "const candidateTimeout = setTimeout",
+      "class": "External edge",
+      "owner": "GeoSpec candidate transport"
+    },
+    {
+      "id": "N3",
+      "bound": "Not a timer: the RevisionClock host-clock interface declares setTimeout without scheduling it",
+      "site": "packages/revisions/src/revision-effects.types.ts",
+      "token": "setTimeout(callback:",
+      "class": "None",
+      "owner": "revisions host clock"
     }
   ]
 }

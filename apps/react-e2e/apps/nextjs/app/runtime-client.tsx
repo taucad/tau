@@ -15,7 +15,7 @@ const createWorker = (): Worker =>
 
 const clientOptions = createWebWorkerClientOptions<typeof runtime>({
   createWorker,
-  renderTimeout: 60_000,
+  operationTimeout: 60_000,
 });
 const runtimeOptions = {
   clientOptions,

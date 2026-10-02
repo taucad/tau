@@ -63,7 +63,8 @@
     "@testing-library/react": "catalog:",
     "@types/react": "catalog:",
     "react": "catalog:",
-    "react-dom": "catalog:"
+    "react-dom": "catalog:",
+    "zod": "catalog:"
   },
   "dependencies": {
     "@taucad/parameters": "workspace:*"

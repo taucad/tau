@@ -160,9 +160,10 @@ const startHarness = async (
   roots.push(workspaceRoot);
   await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
   const api = await startStubApi();
+  const toolRegistry = options.mcpRegistry ?? registry;
   const mcp = createHostMcpEndpoint({
     secret: randomBytes(32).toString('base64url'),
-    registry,
+    registry: toolRegistry,
     workspaceRoot,
     ...(options.mcpNow === undefined ? {} : { now: options.mcpNow }),
   });
@@ -205,8 +206,8 @@ const startHarness = async (
     gatewayBaseUrl: `http://127.0.0.1:${String(api.port)}/`,
     model: { id: 'unused-by-external-runs', contextWindow: 1000 },
     systemPrompt: 'unused by external runs',
-    toolRegistry: registry,
-    ...(revisions === undefined ? {} : { turnPlacement: revisions.placement(() => registry) }),
+    toolRegistry,
+    ...(revisions === undefined ? {} : { turnPlacement: revisions.placement(() => toolRegistry) }),
     externalAgents: createAcpExternalAgentPort({
       agents: options.agents ?? [fakeAgent, otherFakeAgent],
       workspaceRoot,

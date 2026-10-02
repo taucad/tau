@@ -22,10 +22,10 @@ import type { RuntimeHostConfig, RuntimeHostHandle } from '#host/runtime-host.ty
  * ```typescript
  * import { createRuntimeHost } from './create-runtime-host.js';
  * import type { RuntimeTransportHost } from '@taucad/runtime/transport';
- * import type { RuntimeProtocol } from '@taucad/runtime/types';
+ * import type { RuntimeDocumentProtocol } from '@taucad/runtime/types';
  *
  * declare const transport: RuntimeTransportHost<
- *   RuntimeProtocol,
+ *   RuntimeDocumentProtocol,
  *   Readonly<Record<string, never>>,
  *   string
  * >;

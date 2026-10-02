@@ -48,10 +48,8 @@ import type { GeoSpecRunner, GeoSpecRunnerEvent, GeoSpecRunnerResult } from 'geo
 type Mode = 'serial-cold' | 'serial-warm' | 'workers-cold' | 'workers-warm';
 type ModelObservation = {
   file: string;
-  vertexCount: number;
-  primitiveCount: number;
-  triangleCount: number;
-  diagnostics: number;
+  unavailable: readonly ['vertexCount', 'primitiveCount', 'triangleCount', 'diagnostics'];
+  reason: string;
 };
 type Sample = {
   mode: Mode;
@@ -149,22 +147,21 @@ const createRunner = ({ mode, cacheDirectory, workers, observations }: CreateRun
     projectPath: examplesSource,
     runtime: async () => createExampleGeoSpecRuntimeClient(examplesRoot),
   });
-  const modelLoader = Object.assign(
+  const modelLoader: GeoSpecModelLoader = Object.assign(
     async (options: Parameters<GeoSpecModelLoader>[0]) => {
       const subject = await baseLoader(options);
       if ('file' in options) {
         observations.set(options.file, {
           file: options.file,
-          vertexCount: subject.mesh.stats.vertexCount,
-          primitiveCount: subject.mesh.stats.meshCount,
-          triangleCount: subject.mesh.stats.triangleCount,
-          diagnostics: subject.diagnostics.length,
+          unavailable: ['vertexCount', 'primitiveCount', 'triangleCount', 'diagnostics'],
+          reason:
+            'The public model-loader subject is opaque; obtaining mesh counts would require a second load and distort benchmark timing.',
         });
       }
       return subject;
     },
     { dispose: async () => baseLoader.dispose() },
-  ) as GeoSpecModelLoader;
+  );
   return createGeoSpecNodeRunner({
     filesystem: createNodeVmFileSystem(examplesRoot),
     projectPath: examplesRoot,

@@ -2,7 +2,8 @@ import type { ReactElement } from 'react';
 import { useMemo, useState } from 'react';
 import { useRuntime } from '@taucad/react';
 import type { UseRuntimeOptions, UseRuntimeTransportPlugin } from '@taucad/react';
-import type { RenderStatus } from '@taucad/runtime';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { DocumentStatus } from '@taucad/runtime';
 import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
 import type { runtime } from '../tau/runtime-definition.js';
 import { ParametersPanel } from './components/parameters-panel.js';
@@ -18,26 +19,24 @@ type SourceMode = 'disk' | 'inline';
 type InlineSourceFiles = { readonly 'main.scad': string };
 type ElectronRuntimeOptions = UseRuntimeOptions<typeof runtime, UseRuntimeTransportPlugin, InlineSourceFiles>;
 
-const clientOptions = createElectronClientOptions<typeof runtime>({ renderTimeout: 60_000 });
+const clientOptions = createElectronClientOptions<typeof runtime>({ operationTimeout: 60_000 });
 
 const surfaceClassName = 'min-w-0 overflow-hidden rounded-lg border border-slate-400/20 bg-slate-950/90';
 const headerClassName =
   'flex min-h-10 items-center justify-between gap-3 border-b border-slate-400/15 bg-slate-900/90 px-3.5 py-2.5';
 const statusBadgeBaseClassName = 'shrink-0 rounded-full border px-3.5 py-2 text-xs font-bold capitalize';
 const statusBadgeToneClassNames = {
-  idle: 'border-slate-400/20 bg-slate-900/90 text-blue-100',
-  connecting: 'border-sky-300/30 bg-sky-900/25 text-sky-100',
-  rendering: 'border-cyan-300/30 bg-cyan-900/25 text-cyan-100',
+  closed: 'border-slate-400/20 bg-slate-900/90 text-blue-100',
+  evaluating: 'border-cyan-300/30 bg-cyan-900/25 text-cyan-100',
   ready: 'border-teal-300/30 bg-teal-700/15 text-sky-300',
   error: 'border-red-400/45 bg-red-900/30 text-red-200',
-} satisfies Record<RenderStatus, string>;
+} satisfies Record<DocumentStatus, string>;
 const resultToneClassNames = {
-  idle: 'bg-slate-900/80 text-slate-400',
-  connecting: 'bg-sky-950/30 text-sky-100',
-  rendering: 'bg-cyan-950/30 text-cyan-100',
+  closed: 'bg-slate-900/80 text-slate-400',
+  evaluating: 'bg-cyan-950/30 text-cyan-100',
   ready: 'bg-emerald-950/30 text-slate-400',
   error: 'bg-red-950/30 text-red-200',
-} satisfies Record<RenderStatus, string>;
+} satisfies Record<DocumentStatus, string>;
 
 export function App(): ReactElement {
   const [source, setSource] = useState(initialSource);
@@ -57,14 +56,19 @@ export function App(): ReactElement {
       source: { files },
     };
   }, [source, sourceMode]);
-  const runtimeState = useRuntime<typeof runtime, UseRuntimeTransportPlugin, InlineSourceFiles>(runtimeOptions);
+  const runtimeState = useRuntime(runtimeOptions);
 
-  const glb = useMemo(
-    () => (runtimeState.geometry?.format === 'gltf' ? runtimeState.geometry.content.buffer : undefined),
-    [runtimeState.geometry],
-  );
+  const glb = useMemo(() => {
+    const artifact = runtimeState.artifact && asKnownArtifact(runtimeState.artifact);
+    if (artifact?.mimeType !== 'model/gltf-binary') {
+      return undefined;
+    }
+    const bytes = artifact.content;
+    return bytes.buffer.slice(bytes.byteOffset, bytes.byteOffset + bytes.byteLength);
+  }, [runtimeState.artifact]);
 
-  const { status } = runtimeState;
+  const status =
+    runtimeState.status === 'ready' && runtimeState.artifactStatus !== 'current' ? 'evaluating' : runtimeState.status;
   const message =
     runtimeState.error?.message ??
     (status === 'ready'

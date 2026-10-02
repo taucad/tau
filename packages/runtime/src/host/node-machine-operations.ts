@@ -8,10 +8,29 @@
 
 import { z } from 'zod';
 
-import { digest, identity, receiptMessage } from '#host/node-machine-context.js';
+import type { ContentDigest } from '@taucad/cache-core';
 import type { MachineEventLog } from '#host/node-machine-event-log.js';
 import type { MachineOperationReceipt, MachineOperationSnapshot } from '#machines/machine-client.js';
 import type { MachineSubmissionReceipt, MachineTransferReceipt } from '#machines/machine.js';
+
+/** A well-formed string of 1–256 characters: every id, name and code the host records. @internal */
+export const identity = z
+  .string()
+  .min(1)
+  .max(256)
+  .refine((value) => value.isWellFormed());
+
+/** A `sha256:` content digest. @internal */
+export const digest = z.custom<ContentDigest>(
+  (value) => typeof value === 'string' && /^sha256:[0-9a-f]{64}$/u.test(value),
+);
+
+/** The readable message a refusal carries. @internal */
+export const receiptMessage = z
+  .string()
+  .min(1)
+  .max(1024)
+  .refine((value) => value.isWellFormed());
 
 const runEffectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop']);
 const effectKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'upload', 'urgent-stop']);
@@ -185,7 +204,11 @@ export const replayOperations = async (
         if (event.machineId !== machineId) {
           throw new Error('NODE_MACHINE_EFFECT_MACHINE_MISMATCH');
         }
-        replayed.set(event.operationId, { intent: event, status: 'planned', updatedAt: event.plannedAt });
+        replayed.set(event.operationId, {
+          intent: event,
+          status: 'planned',
+          updatedAt: event.plannedAt,
+        });
         continue;
       }
       const state = replayed.get(event.operationId);
@@ -234,7 +257,11 @@ export const publicOperationReceipt = (
   }>,
 ): MachineOperationReceipt => {
   const { intent } = input;
-  const base = { operationId: input.operationId, machineId: input.machineId, kind: intent.kind };
+  const base = {
+    operationId: input.operationId,
+    machineId: input.machineId,
+    kind: intent.kind,
+  };
   if (intent.kind !== 'upload') {
     const receipt = providerReceiptSchema.parse(input.receipt);
     // A control's preflight matched its run, so an accepted control names that run when the provider's reply does not.
@@ -247,7 +274,12 @@ export const publicOperationReceipt = (
   const transfer = transferReceiptSchema.parse(input.receipt);
   return operationReceiptSchema.parse(
     transfer.status === 'transferred'
-      ? { ...base, status: 'accepted', evidence: { transferId: transfer.transferId }, observedAt: transfer.observedAt }
+      ? {
+          ...base,
+          status: 'accepted',
+          evidence: { transferId: transfer.transferId },
+          observedAt: transfer.observedAt,
+        }
       : { ...base, ...transfer },
   );
 };

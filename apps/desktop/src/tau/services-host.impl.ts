@@ -242,7 +242,7 @@ export type ServicesHostOptions = {
   /** Ask main to mint a runtime port for this already-admitted project. */
   readonly requestRuntimePort?: (workspaceRoot: string) => Promise<{
     readonly port: UtilityPort;
-    release(reason: 'requested' | 'render-timeout'): void;
+    release(reason: 'requested' | 'operation-timeout'): void;
   }>;
   /** Ask main for one runner channel into the separately supervised geometry slot. */
   readonly requestGeometryPort?: (workspaceRoot: string) => Promise<UtilityPort>;

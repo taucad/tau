@@ -120,6 +120,19 @@ vi.mock('#components/panes/dockview.js', () => ({
       return {
         panels,
         groups: [{}],
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- Dockview's public API spells this method fromJSON.
+        fromJSON: () => {
+          panels.splice(0, panels.length, main, secondary);
+          refresh((value) => value + 1);
+        },
+        addPanel: ({ id, params }: { id: string; params: { viewId: string; entryPath: string } }) => {
+          panels.push({ id, params, api: main.api });
+          refresh((value) => value + 1);
+        },
+        clear: () => {
+          panels.length = 0;
+          refresh((value) => value + 1);
+        },
         onDidLayoutChange: subscribe,
         onDidActivePanelChange: subscribe,
         onDidAddPanel: subscribe,
@@ -177,7 +190,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.projectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'main.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
     expect(fixture.projectSend).not.toHaveBeenCalledWith(
       expect.objectContaining({ type: 'createGeometryUnit', entryPath: 'other.ts' }),
@@ -190,7 +203,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.projectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'other.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
 
     act(() => {
@@ -216,7 +229,7 @@ describe('restored viewer layout admission', () => {
     expect(fixture.nextProjectSend).toHaveBeenCalledWith({
       type: 'createGeometryUnit',
       entryPath: 'main.ts',
-      renderTimeout: undefined,
+      operationTimeout: undefined,
     });
     expect(fixture.nextProjectSend).not.toHaveBeenCalledWith(expect.objectContaining({ entryPath: 'other.ts' }));
   });

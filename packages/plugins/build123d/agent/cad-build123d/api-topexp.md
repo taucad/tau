@@ -7,11 +7,7 @@
 TopExp_Explorer
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.TopExp.TopExp_Explorer) -> None
-
-2. __init__(self: OCP.OCP.TopExp.TopExp_Explorer, S: OCP.OCP.TopoDS.TopoDS_Shape, ToFind: OCP.OCP.TopAbs.TopAbs_ShapeEnum, ToAvoid: OCP.OCP.TopAbs.TopAbs_ShapeEnum = <TopAbs_ShapeEnum.TopAbs_SHAPE: 8>) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.TopExp.TopExp_Explorer) -> None 2. __init__(self: OCP.OCP.TopExp.TopExp_Explorer, S: OCP.OCP.TopoDS.TopoDS_Shape, ToFind: OCP.OCP.TopAbs.TopAbs_ShapeEnum, ToAvoid: OCP.OCP.TopAbs.TopAbs_ShapeEnum = <TopAbs_ShapeEnum.TopAbs_SHAPE: 8>) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.TopExp.TopExp_Explorer) -> None
   __init__(self: OCP.OCP.TopExp.TopExp_Explorer, S: OCP.OCP.TopoDS.TopoDS_Shape, ToFind: OCP.OCP.TopAbs.TopAbs_ShapeEnum, ToAvoid: OCP.OCP.TopAbs.TopAbs_ShapeEnum = <TopAbs_ShapeEnum.TopAbs_SHAPE: 8>) -> None

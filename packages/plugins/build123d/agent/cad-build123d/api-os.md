@@ -8,7 +8,5 @@ PathLike
 
 // Category: os
 // Decode filename (an os.PathLike, bytes, or str) from the filesystem
-// Remarks: encoding with 'surrogateescape' error handler, return str unchanged. On
-Windows, use 'strict' error handler if the file system encoding is
-'mbcs' (which is the default encoding).
+// Remarks: encoding with 'surrogateescape' error handler, return str unchanged. On Windows, use 'strict' error handler if the file system encoding is 'mbcs' (which is the default encoding).
 fsdecode(filename)

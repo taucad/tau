@@ -50,18 +50,7 @@ Export2D
 
 // Category: exporters
 // The ExportDXF class provides functionality for exporting 2D shapes to DXF
-// Remarks: (Drawing Exchange Format) format. DXF is a widely used file format for
-exchanging CAD (Computer-Aided Design) data between different software
-applications.
-
-Example:
-
-    .. code-block:: python
-
-        exporter = ExportDXF(unit=Unit.MM, line_weight=0.5)
-        exporter.add_layer("Layer 1", color=ColorIndex.RED, line_type=LineType.DASHED)
-        exporter.add_shape(shape_object, layer="Layer 1")
-        exporter.write("output.dxf")
+// Remarks: (Drawing Exchange Format) format. DXF is a widely used file format for exchanging CAD (Computer-Aided Design) data between different software applications. Example: .. code-block:: python exporter = ExportDXF(unit=Unit.MM, line_weight=0.5) exporter.add_layer("Layer 1", color=ColorIndex.RED, line_type=LineType.DASHED) exporter.add_shape(shape_object, layer="Layer 1") exporter.write("output.dxf")
 // Throws: ValueError: unit not supported
 ExportDXF
 
@@ -73,10 +62,7 @@ ExportDXF
   //   line_type: e default line type for shapes
 
   // add_layer
-  // Remarks: Adds a new layer to the DXF export with the given properties.
-
-Returns:
-    Self: DXF document with additional layer
+  // Remarks: Adds a new layer to the DXF export with the given properties. Returns: Self: DXF document with additional layer
   add_layer(name: str, color: ColorIndex | None = None, line_weight: float | None = None, line_type: LineType | None = None) -> Self
   //   name: The name of the layer definition
   //   color: The color index for shapes on this layer
@@ -84,10 +70,7 @@ Returns:
   //   line_type: The line type for shapes on this layer
 
   // add_shape
-  // Remarks: Adds a shape to the specified layer.
-
-Returns:
-    Self: Document with additional shape
+  // Remarks: Adds a shape to the specified layer. Returns: Self: Document with additional shape
   add_shape(shape: Shape | Iterable[Shape], layer: str = '') -> Self
   //   shape: The shape or collection of shapes to be added
   //   layer: The name of the layer where the shape will be added
@@ -100,20 +83,7 @@ Returns:
 
 // Category: exporters
 // ExportSVG
-// Remarks: SVG file export functionality.
-
-The ExportSVG class provides functionality for exporting 2D shapes to SVG
-(Scalable Vector Graphics) format. SVG is a widely used vector graphics format
-that is supported by web browsers and various graphic editors.
-
-Example:
-
-    .. code-block:: python
-
-        exporter = ExportSVG(unit=Unit.MM, line_weight=0.5)
-        exporter.add_layer("Layer 1", fill_color=(255, 0, 0), line_color=(0, 0, 255))
-        exporter.add_shape(shape_object, layer="Layer 1")
-        exporter.write("output.svg")
+// Remarks: SVG file export functionality. The ExportSVG class provides functionality for exporting 2D shapes to SVG (Scalable Vector Graphics) format. SVG is a widely used vector graphics format that is supported by web browsers and various graphic editors. Example: .. code-block:: python exporter = ExportSVG(unit=Unit.MM, line_weight=0.5) exporter.add_layer("Layer 1", fill_color=(255, 0, 0), line_color=(0, 0, 255)) exporter.add_shape(shape_object, layer="Layer 1") exporter.write("output.svg")
 // Throws: ValueError: Invalid unit.
 ExportSVG
 
@@ -130,10 +100,7 @@ ExportSVG
   //   dot_length: The width of rendered dots in a Can be either a DotLength enum or a float value in tenths of an inch
 
   // add_layer
-  // Remarks: Adds a new layer to the SVG export with the given properties.
-
-Returns:
-    Self: Drawing with an additional layer
+  // Remarks: Adds a new layer to the SVG export with the given properties. Returns: Self: Drawing with an additional layer
   // Throws: ValueError: Duplicate layer name
   // Throws: ValueError: Unknown linetype
   add_layer(name: str, fill_color: ColorIndex | RGB | Color | None = None, line_color: ColorIndex | RGB | Color | None = Export2D.DEFAULT_COLOR_INDEX, line_weight: float = Export2D.DEFAULT_LINE_WEIGHT, line_type: LineType = Export2D.DEFAULT_LINE_TYPE) -> Self
@@ -240,16 +207,12 @@ LineType
 
 // Category: exporters
 // Prepare an ANSI line pattern for ezdxf usage
-// Remarks: Input pattern is specified in inches.
-Output is given in tenths of an inch, and the total pattern length
-is prepended to the list.
+// Remarks: Input pattern is specified in inches. Output is given in tenths of an inch, and the total pattern length is prepended to the list.
 ansi_pattern(*args)
 
 // Category: exporters
 // Prepare an ISO line pattern for ezdxf usage
-// Remarks: Input pattern is specified in millimeters.
-Output is given in tenths of an inch, and the total pattern length
-is prepended to the list.
+// Remarks: Input pattern is specified in millimeters. Output is given in tenths of an inch, and the total pattern length is prepended to the list.
 iso_pattern(*args)
 
 // Category: exporters

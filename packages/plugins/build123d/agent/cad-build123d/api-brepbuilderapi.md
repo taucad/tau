@@ -7,51 +7,7 @@
 BRepBuilderAPI_MakeFace
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace) -> None
-
-2. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
-
-3. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, P: OCP.OCP.gp.gp_Pln) -> None
-
-4. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cylinder) -> None
-
-5. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cone) -> None
-
-6. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.gp.gp_Sphere) -> None
-
-7. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Torus) -> None
-
-8. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, TolDegen: float) -> None
-
-9. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, P: OCP.OCP.gp.gp_Pln, UMin: float, UMax: float, VMin: float, VMax: float) -> None
-
-10. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cylinder, UMin: float, UMax: float, VMin: float, VMax: float) -> None
-
-11. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cone, UMin: float, UMax: float, VMin: float, VMax: float) -> None
-
-12. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.gp.gp_Sphere, UMin: float, UMax: float, VMin: float, VMax: float) -> None
-
-13. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Torus, UMin: float, UMax: float, VMin: float, VMax: float) -> None
-
-14. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, UMin: float, UMax: float, VMin: float, VMax: float, TolDegen: float) -> None
-
-15. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, W: OCP.OCP.TopoDS.TopoDS_Wire, OnlyPlane: bool = False) -> None
-
-16. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, P: OCP.OCP.gp.gp_Pln, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None
-
-17. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cylinder, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None
-
-18. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cone, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None
-
-19. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.gp.gp_Sphere, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None
-
-20. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Torus, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None
-
-21. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None
-
-22. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace) -> None 2. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face) -> None 3. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, P: OCP.OCP.gp.gp_Pln) -> None 4. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cylinder) -> None 5. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cone) -> None 6. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.gp.gp_Sphere) -> None 7. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Torus) -> None 8. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, TolDegen: float) -> None 9. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, P: OCP.OCP.gp.gp_Pln, UMin: float, UMax: float, VMin: float, VMax: float) -> None 10. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cylinder, UMin: float, UMax: float, VMin: float, VMax: float) -> None 11. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cone, UMin: float, UMax: float, VMin: float, VMax: float) -> None 12. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.gp.gp_Sphere, UMin: float, UMax: float, VMin: float, VMax: float) -> None 13. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Torus, UMin: float, UMax: float, VMin: float, VMax: float) -> None 14. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, UMin: float, UMax: float, VMin: float, VMax: float, TolDegen: float) -> None 15. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, W: OCP.OCP.TopoDS.TopoDS_Wire, OnlyPlane: bool = False) -> None 16. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, P: OCP.OCP.gp.gp_Pln, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None 17. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cylinder, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None 18. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Cone, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None 19. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.gp.gp_Sphere, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None 20. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, C: OCP.OCP.gp.gp_Torus, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None 21. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, W: OCP.OCP.TopoDS.TopoDS_Wire, Inside: bool = True) -> None 22. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace) -> None
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
@@ -77,19 +33,7 @@ BRepBuilderAPI_MakeFace
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None
 
   // Init(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Init(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
-
-Initializes (or reinitializes) the construction of a face by creating a new object which is a copy of the face F, in order to add wires to it, using the function Add. Note: this complete copy of the geometry is only required if you want to work on the geometries of the two faces independently.
-
-2. Init(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, Bound: bool, TolDegen: float) -> None
-
-Initializes (or reinitializes) the construction of a face on the surface S. If Bound is true, a wire is automatically created from the natural bounds of the surface S and added to the face in order to bound it. If Bound is false, no wire is added. This option is used when real bounds are known. These will be added to the face after this initialization, using the function Add. TolDegen parameter is used for resolution of degenerated edges if calculation of natural bounds is turned on.
-
-3. Init(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, UMin: float, UMax: float, VMin: float, VMax: float, TolDegen: float) -> None
-
-Initializes (or reinitializes) the construction of a face on the surface S, limited in the u parametric direction by the two parameter values UMin and UMax and in the v parametric direction by the two parameter values VMin and VMax. Warning Error returns: - BRepBuilderAPI_ParametersOutOfRange when the parameters given are outside the bounds of the surface or the basis surface of a trimmed surface. TolDegen parameter is used for resolution of degenerated edges.
+  // Remarks: Overloaded function. 1. Init(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face) -> None Initializes (or reinitializes) the construction of a face by creating a new object which is a copy of the face F, in order to add wires to it, using the function Add. Note: this complete copy of the geometry is only required if you want to work on the geometries of the two faces independently. 2. Init(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, Bound: bool, TolDegen: float) -> None Initializes (or reinitializes) the construction of a face on the surface S. If Bound is true, a wire is automatically created from the natural bounds of the surface S and added to the face in order to bound it. If Bound is false, no wire is added. This option is used when real bounds are known. These will be added to the face after this initialization, using the function Add. TolDegen parameter is used for resolution of degenerated edges if calculation of natural bounds is turned on. 3. Init(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, UMin: float, UMax: float, VMin: float, VMax: float, TolDegen: float) -> None Initializes (or reinitializes) the construction of a face on the surface S, limited in the u parametric direction by the two parameter values UMin and UMax and in the v parametric direction by the two parameter values VMin and VMax. Warning Error returns: - BRepBuilderAPI_ParametersOutOfRange when the parameters given are outside the bounds of the surface or the basis surface of a trimmed surface. TolDegen parameter is used for resolution of degenerated edges.
   Init(*args, **kwargs)
   Init(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
   Init(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeFace, S: OCP.OCP.Geom.Geom_Surface, Bound: bool, TolDegen: float) -> None
@@ -116,21 +60,7 @@ Initializes (or reinitializes) the construction of a face on the surface S, limi
 BRepBuilderAPI_MakePolygon
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon) -> None
-
-2. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt) -> None
-
-3. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt, P3: OCP.OCP.gp.gp_Pnt, Close: bool = False) -> None
-
-4. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt, P3: OCP.OCP.gp.gp_Pnt, P4: OCP.OCP.gp.gp_Pnt, Close: bool = False) -> None
-
-5. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex) -> None
-
-6. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex, V3: OCP.OCP.TopoDS.TopoDS_Vertex, Close: bool = False) -> None
-
-7. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex, V3: OCP.OCP.TopoDS.TopoDS_Vertex, V4: OCP.OCP.TopoDS.TopoDS_Vertex, Close: bool = False) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon) -> None 2. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt) -> None 3. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt, P3: OCP.OCP.gp.gp_Pnt, Close: bool = False) -> None 4. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt, P3: OCP.OCP.gp.gp_Pnt, P4: OCP.OCP.gp.gp_Pnt, Close: bool = False) -> None 5. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex) -> None 6. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex, V3: OCP.OCP.TopoDS.TopoDS_Vertex, Close: bool = False) -> None 7. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex, V3: OCP.OCP.TopoDS.TopoDS_Vertex, V4: OCP.OCP.TopoDS.TopoDS_Vertex, Close: bool = False) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon) -> None
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt) -> None
@@ -141,13 +71,7 @@ BRepBuilderAPI_MakePolygon
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex, V3: OCP.OCP.TopoDS.TopoDS_Vertex, V4: OCP.OCP.TopoDS.TopoDS_Vertex, Close: bool = False) -> None
 
   // Add(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Add(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P: OCP.OCP.gp.gp_Pnt) -> None
-
-2. Add(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None
-
-Adds the point P or the vertex V at the end of the polygonal wire under construction. A vertex is automatically created on the point P. Warning - When P or V is coincident to the previous vertex, no edge is built. The method Added can be used to test for this. Neither P nor V is checked to verify that it is coincident with another vertex than the last one, of the polygonal wire under construction. It is also possible to add vertices on a closed polygon (built for example by using a constructor which declares the polygon closed, or after the use of the Close function). Consequently, be careful using this function: you might create: - a polygonal wire with two consecutive coincident edges, or - a non manifold polygonal wire. - P or V is not checked to verify if it is coincident with another vertex but the last one, of the polygonal wire under construction. It is also possible to add vertices on a closed polygon (built for example by using a constructor which declares the polygon closed, or after the use of the Close function). Consequently, be careful when using this function: you might create: - a polygonal wire with two consecutive coincident edges, or - a non-manifold polygonal wire.
+  // Remarks: Overloaded function. 1. Add(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P: OCP.OCP.gp.gp_Pnt) -> None 2. Add(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None Adds the point P or the vertex V at the end of the polygonal wire under construction. A vertex is automatically created on the point P. Warning - When P or V is coincident to the previous vertex, no edge is built. The method Added can be used to test for this. Neither P nor V is checked to verify that it is coincident with another vertex than the last one, of the polygonal wire under construction. It is also possible to add vertices on a closed polygon (built for example by using a constructor which declares the polygon closed, or after the use of the Close function). Consequently, be careful using this function: you might create: - a polygonal wire with two consecutive coincident edges, or - a non manifold polygonal wire. - P or V is not checked to verify if it is coincident with another vertex but the last one, of the polygonal wire under construction. It is also possible to add vertices on a closed polygon (built for example by using a constructor which declares the polygon closed, or after the use of the Close function). Consequently, be careful when using this function: you might create: - a polygonal wire with two consecutive coincident edges, or - a non-manifold polygonal wire.
   Add(*args, **kwargs)
   Add(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, P: OCP.OCP.gp.gp_Pnt) -> None
   Add(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakePolygon, V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None
@@ -184,21 +108,7 @@ Adds the point P or the vertex V at the end of the polygonal wire under construc
 BRepBuilderAPI_MakeSolid
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid) -> None
-
-2. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S: OCP.OCP.TopoDS.TopoDS_CompSolid) -> None
-
-3. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S: OCP.OCP.TopoDS.TopoDS_Shell) -> None
-
-4. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S1: OCP.OCP.TopoDS.TopoDS_Shell, S2: OCP.OCP.TopoDS.TopoDS_Shell) -> None
-
-5. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S1: OCP.OCP.TopoDS.TopoDS_Shell, S2: OCP.OCP.TopoDS.TopoDS_Shell, S3: OCP.OCP.TopoDS.TopoDS_Shell) -> None
-
-6. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, So: OCP.OCP.TopoDS.TopoDS_Solid) -> None
-
-7. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, So: OCP.OCP.TopoDS.TopoDS_Solid, S: OCP.OCP.TopoDS.TopoDS_Shell) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid) -> None 2. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S: OCP.OCP.TopoDS.TopoDS_CompSolid) -> None 3. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S: OCP.OCP.TopoDS.TopoDS_Shell) -> None 4. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S1: OCP.OCP.TopoDS.TopoDS_Shell, S2: OCP.OCP.TopoDS.TopoDS_Shell) -> None 5. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S1: OCP.OCP.TopoDS.TopoDS_Shell, S2: OCP.OCP.TopoDS.TopoDS_Shell, S3: OCP.OCP.TopoDS.TopoDS_Shell) -> None 6. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, So: OCP.OCP.TopoDS.TopoDS_Solid) -> None 7. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, So: OCP.OCP.TopoDS.TopoDS_Solid, S: OCP.OCP.TopoDS.TopoDS_Shell) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid) -> None
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_MakeSolid, S: OCP.OCP.TopoDS.TopoDS_CompSolid) -> None

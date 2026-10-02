@@ -35,8 +35,7 @@ Mesher
   //   must_preserve: metadata must not be removed if unused
 
   // Add the code calling this method to the 3MF metadata with the custom
-  // Remarks: name space `build123d`, name equal to the base file name and the type
-as `python`
+  // Remarks: name space `build123d`, name equal to the base file name and the type as `python`
   add_code_to_metadata()
 
   // Retrieve all of the metadata
@@ -62,8 +61,7 @@ as `python`
   //   uuid_value: value from uuid package
 
   // read
-  // Remarks: Returns:
-    list[Shape]: build123d shapes extracted from mesh file
+  // Remarks: Returns: list[Shape]: build123d shapes extracted from mesh file
   // Throws: ValueError: Unknown file format - must be 3mf or stl
   read(file_name: PathLike | str | bytes) -> list[Shape]
 

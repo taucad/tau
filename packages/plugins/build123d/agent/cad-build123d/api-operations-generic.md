@@ -4,32 +4,20 @@
 
 // Category: operations_generic
 // Generic Object
-// Remarks: Add an object to a builder.
-
-BuildPart:
-    Edges and Wires are added to pending_edges. Compounds of Face are added to
-    pending_faces. Solids or Compounds of Solid are combined into the part.
-BuildSketch:
-    Edges and Wires are added to pending_edges. Compounds of Face are added to sketch.
-BuildLine:
-    Edges and Wires are added to line.
+// Remarks: Add an object to a builder. BuildPart: Edges and Wires are added to pending_edges. Compounds of Face are added to pending_faces. Solids or Compounds of Solid are combined into the part. BuildSketch: Edges and Wires are added to pending_edges. Compounds of Face are added to sketch. BuildLine: Edges and Wires are added to line.
 add(objects: AddType | Iterable[AddType], rotation: float | RotationLike | None = None, clean: bool = True, mode: Mode = Mode.ADD) -> Compound
 //   mode: combine mode
 
 // Category: operations_generic
 // Generic Operation
-// Remarks: Applies to: BuildSketch and BuildPart
-
-Add the 2D or 3D bounding boxes of the object sequence
+// Remarks: Applies to: BuildSketch and BuildPart Add the 2D or 3D bounding boxes of the object sequence
 bounding_box(objects: Shape | Iterable[Shape] | None = None, mode: Mode = Mode.PRIVATE) -> Sketch | Part
 //   objects: objects to create bbox for
 //   mode: combination mode
 
 // Category: operations_generic
 // Generic Operation
-// Remarks: Applies to 2 and 3 dimensional objects.
-
-Chamfer the given sequence of edges or vertices.
+// Remarks: Applies to 2 and 3 dimensional objects. Chamfer the given sequence of edges or vertices.
 // Throws: ValueError: no objects provided
 // Throws: ValueError: objects must be Edges
 // Throws: ValueError: objects must be Vertices
@@ -44,10 +32,7 @@ chamfer(objects: ChamferFilletType | Iterable[ChamferFilletType], length: float,
 
 // Category: operations_generic
 // Generic Operation
-// Remarks: Applies to 2 and 3 dimensional objects.
-
-Fillet the given sequence of edges or vertices. Note that vertices on
-either end of an open line will be automatically skipped.
+// Remarks: Applies to 2 and 3 dimensional objects. Fillet the given sequence of edges or vertices. Note that vertices on either end of an open line will be automatically skipped.
 // Throws: ValueError: no objects provided
 // Throws: ValueError: objects must be Edges
 // Throws: ValueError: objects must be Vertices
@@ -58,9 +43,7 @@ fillet(objects: ChamferFilletType | Iterable[ChamferFilletType], radius: float) 
 
 // Category: operations_generic
 // Generic Operation
-// Remarks: Applies to 1, 2, and 3 dimensional objects.
-
-Mirror a sequence of objects over the given plane.
+// Remarks: Applies to 1, 2, and 3 dimensional objects. Mirror a sequence of objects over the given plane.
 // Throws: ValueError: missing objects
 mirror(objects: MirrorType | Iterable[MirrorType] | None = None, about: Plane = Plane.XZ, mode: Mode = Mode.ADD) -> Curve | Sketch | Part | Compound
 //   objects: objects to mirror
@@ -69,12 +52,7 @@ mirror(objects: MirrorType | Iterable[MirrorType] | None = None, about: Plane = 
 
 // Category: operations_generic
 // Generic Operation
-// Remarks: Applies to 1, 2, and 3 dimensional objects.
-
-Offset the given sequence of Edges, Faces, Compound of Faces, or Solids.
-The kind parameter controls the shape of the transitions. For Solid
-objects, the openings parameter allows selected faces to be open, like
-a hollow box with no lid.
+// Remarks: Applies to 1, 2, and 3 dimensional objects. Offset the given sequence of Edges, Faces, Compound of Faces, or Solids. The kind parameter controls the shape of the transitions. For Solid objects, the openings parameter allows selected faces to be open, like a hollow box with no lid.
 // Throws: ValueError: missing objects
 // Throws: ValueError: Invalid object type
 offset(objects: OffsetType | Iterable[OffsetType] | None = None, amount: float = 0, openings: Face | list[Face] | None = None, kind: Kind = Kind.ARC, side: Side = Side.BOTH, closed: bool = True, min_edge_length: float | None = None, mode: Mode = Mode.REPLACE) -> Curve | Sketch | Part | Compound
@@ -88,17 +66,7 @@ offset(objects: OffsetType | Iterable[OffsetType] | None = None, amount: float =
 
 // Category: operations_generic
 // Generic Operation
-// Remarks: Applies to 0, 1, and 2 dimensional objects.
-
-Project the given objects or points onto a BuildLine or BuildSketch workplane in
-the direction of the normal of that workplane. When projecting onto a
-sketch a Face(s) are generated while Edges are generated for BuildLine.
-Will only use the first if BuildSketch has multiple active workplanes.
-In algebra mode a workplane must be provided and the output is either
-a Face, Curve, Sketch, Compound, or ShapeList[Vector].
-
-Note that only if mode is not Mode.PRIVATE only Faces can be projected into
-BuildSketch and Edge/Wires into BuildLine.
+// Remarks: Applies to 0, 1, and 2 dimensional objects. Project the given objects or points onto a BuildLine or BuildSketch workplane in the direction of the normal of that workplane. When projecting onto a sketch a Face(s) are generated while Edges are generated for BuildLine. Will only use the first if BuildSketch has multiple active workplanes. In algebra mode a workplane must be provided and the output is either a Face, Curve, Sketch, Compound, or ShapeList[Vector]. Note that only if mode is not Mode.PRIVATE only Faces can be projected into BuildSketch and Edge/Wires into BuildLine.
 // Throws: ValueError: project doesn't accept group_by
 // Throws: ValueError: Either a workplane must be provided or a builder must be active
 // Throws: ValueError: Points and faces can only be projected in PRIVATE mode
@@ -111,11 +79,7 @@ project(objects: ProjectType | Iterable[ProjectType] | None = None, workplane: P
 
 // Category: operations_generic
 // Generic Operation
-// Remarks: Applies to 1, 2, and 3 dimensional objects.
-
-Scale a sequence of objects. Note that when scaling non-uniformly across
-the three axes, the type of the underlying object may change to bspline from
-line, circle, etc.
+// Remarks: Applies to 1, 2, and 3 dimensional objects. Scale a sequence of objects. Note that when scaling non-uniformly across the three axes, the type of the underlying object may change to bspline from line, circle, etc.
 // Throws: ValueError: missing objects
 scale(objects: Shape | Iterable[Shape] | None = None, by: float | tuple[float, float, float] = 1, about: VectorLike | None = None, mode: Mode = Mode.REPLACE) -> Curve | Sketch | Part | Compound
 //   objects: objects to scale
@@ -125,9 +89,7 @@ scale(objects: Shape | Iterable[Shape] | None = None, by: float | tuple[float, f
 
 // Category: operations_generic
 // Generic Operation
-// Remarks: Applies to 1, 2, and 3 dimensional objects.
-
-Bisect object with plane and keep either top, bottom or both.
+// Remarks: Applies to 1, 2, and 3 dimensional objects. Bisect object with plane and keep either top, bottom or both.
 // Throws: ValueError: missing objects
 split(objects: SplitType | Iterable[SplitType] | None = None, bisect_by: Plane | Face | Shell = Plane.XZ, keep: Keep = Keep.TOP, mode: Mode = Mode.REPLACE)
 //   bisect_by: plane to segment part

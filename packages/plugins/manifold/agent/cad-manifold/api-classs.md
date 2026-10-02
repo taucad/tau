@@ -68,10 +68,7 @@ CrossSection: export declare class CrossSection
   //   circularSegments: Number of segments per 360 degrees of <B>JoinType::Round</B> corners (roughly, the number of vertices that will be added to each contour)
 
   // Remove vertices from the contours in this CrossSection that are less than the specified distance epsilon from an imaginary line that passes through its two adjacent vertices
-  // Remarks: It is recommended to apply this function following Offset, in order to
-clean up any spurious tiny line segments introduced that do not improve
-quality in any meaningful way. This is particularly important if further
-offseting operations are to be performed, which would compound the issue.
+  // Remarks: It is recommended to apply this function following Offset, in order to clean up any spurious tiny line segments introduced that do not improve quality in any meaningful way. This is particularly important if further offseting operations are to be performed, which would compound the issue.
   simplify(epsilon?: number): CrossSection;
   //   epsilon: minimum distance vertices must diverge from the hypothetical outline without them in order to be included in the output (default 1e-6)
 
@@ -147,23 +144,7 @@ offseting operations are to be performed, which would compound the issue.
   delete(): void;
 
 // This library's internal representation of an oriented, 2-manifold, triangle mesh - a simple boundary-representation of a solid object
-// Remarks: In addition to storing geometric data, a Manifold can also store an arbitrary
-number of vertex properties. These could be anything, e.g. normals, UV
-coordinates, colors, etc, but this library is completely agnostic. All
-properties are merely float values indexed by channel number. It is up to the
-user to associate channel numbers with meaning.
-
-Manifold allows vertex properties to be shared for efficient storage, or to
-have multiple property verts associated with a single geometric vertex,
-allowing sudden property changes, e.g. at Boolean intersections, without
-sacrificing manifoldness.
-
-Manifolds also keep track of their relationships to their inputs, via
-OriginalIDs and the faceIDs and transforms accessible through MeshGL. This
-allows object-level properties to be re-associated with the output after many
-operations, particularly useful for materials. Since separate object's
-properties are not mixed, there is no requirement that channels have
-consistent meaning between different inputs.
+// Remarks: In addition to storing geometric data, a Manifold can also store an arbitrary number of vertex properties. These could be anything, e.g. normals, UV coordinates, colors, etc, but this library is completely agnostic. All properties are merely float values indexed by channel number. It is up to the user to associate channel numbers with meaning. Manifold allows vertex properties to be shared for efficient storage, or to have multiple property verts associated with a single geometric vertex, allowing sudden property changes, e.g. at Boolean intersections, without sacrificing manifoldness. Manifolds also keep track of their relationships to their inputs, via OriginalIDs and the faceIDs and transforms accessible through MeshGL. This allows object-level properties to be re-associated with the output after many operations, particularly useful for materials. Since separate object's properties are not mixed, there is no requirement that channels have consistent meaning between different inputs.
 Manifold: export declare class Manifold
 
   constructor
@@ -212,17 +193,11 @@ Manifold: export declare class Manifold
   //   revolveDegrees: Number of degrees to revolve
 
   // Convert a Mesh into a Manifold, retaining its properties and merging only the positions according to the merge vectors
-  // Remarks: All fields are read, making this structure suitable for a lossless
-round-trip of data from getMesh(). For multi-material input, use
-reserveIDs() to set a unique originalID for each material, and sort the
-materials into triangle runs.
+  // Remarks: All fields are read, making this structure suitable for a lossless round-trip of data from getMesh(). For multi-material input, use reserveIDs() to set a unique originalID for each material, and sort the materials into triangle runs.
   static ofMesh(mesh: Mesh): Manifold;
 
   // Constructs a smooth version of the input mesh by creating tangents
-  // Remarks: By default, every edge is calculated for maximum smoothness (very much
-approximately), attempting to minimize the maximum mean Curvature
-magnitude. No higher-order derivatives are considered, as the interpolation
-is independent per triangle, only sharing constraints on their boundaries.
+  // Remarks: By default, every edge is calculated for maximum smoothness (very much approximately), attempting to minimize the maximum mean Curvature magnitude. No higher-order derivatives are considered, as the interpolation is independent per triangle, only sharing constraints on their boundaries.
   static smooth(mesh: Mesh, sharpenedEdges?: readonly Smoothness[]): Manifold;
   //   mesh: input Mesh
   //   sharpenedEdges: If desired, you can supply a vector of sharpened halfedges, which should in general be a small subset of all halfedges
@@ -249,16 +224,7 @@ is independent per triangle, only sharing constraints on their boundaries.
   //   v: The vector to add to every vertex
 
   // Applies an Euler or Tait-Bryan angle rotation to the manifold
-  // Remarks: We use degrees so that we can minimize rounding error, and eliminate it
-completely for any multiples of 90 degrees. Additionally, more efficient
-code paths are used to update the manifold when the transforms only rotate
-by multiples of 90 degrees.
-
-From the reference frame of the model being rotated, rotations are applied
-in *z-y'-x"* order. That is yaw first, then pitch and finally roll.
-
-From the global reference frame, a model will be rotated in *x-y-z* order.
-That is about the global X axis, then global Y axis, and finally global Z.
+  // Remarks: We use degrees so that we can minimize rounding error, and eliminate it completely for any multiples of 90 degrees. Additionally, more efficient code paths are used to update the manifold when the transforms only rotate by multiples of 90 degrees. From the reference frame of the model being rotated, rotations are applied in *z-y'-x"* order. That is yaw first, then pitch and finally roll. From the global reference frame, a model will be rotated in *x-y-z* order. That is about the global X axis, then global Y axis, and finally global Z.
   rotate(v: Readonly<Vec3>): Manifold;
   rotate(x: number, y?: number, z?: number): Manifold;
   rotate(v: Readonly<Vec3>): Manifold;
@@ -435,11 +401,7 @@ That is about the global X axis, then global Y axis, and finally global Z.
   //   normalIdx: If the original MeshGL inputs that formed this manifold had properties corresponding to normal vectors, you can specify the first of the three consecutive property channels forming the (x, y, z) normals, which will cause this output MeshGL to automatically update these normals according to the applied transforms and front/back side
 
   // If you copy a manifold, but you want this new copy to have new properties (e.g
-  // Remarks: This function also condenses all coplanar faces in the relation, and
-collapses those edges. If you want to have inconsistent properties across
-these faces, meaning you want to preserve some of these edges, you should
-instead call GetMesh(), calculate your properties and use these to
-construct a new manifold.
+  // Remarks: This function also condenses all coplanar faces in the relation, and collapses those edges. If you want to have inconsistent properties across these faces, meaning you want to preserve some of these edges, you should instead call GetMesh(), calculate your properties and use these to construct a new manifold.
   asOriginal(): Manifold;
 
   // If this mesh is an original, this returns its ID that can be referenced by product manifolds
@@ -499,11 +461,7 @@ Mesh: export declare class Mesh
   numRun
 
   // Updates the mergeFromVert and mergeToVert vectors in order to create a manifold solid
-  // Remarks: There is no guarantee the result will be manifold - this is a best-effort
-helper function designed primarily to aid in the case where a manifold
-multi-material MeshGL was produced, but its merge vectors were lost due to
-a round-trip through a file format. Constructing a Manifold from the result
-will report a Status if it is not manifold.
+  // Remarks: There is no guarantee the result will be manifold - this is a best-effort helper function designed primarily to aid in the case where a manifold multi-material MeshGL was produced, but its merge vectors were lost due to a round-trip through a file format. Constructing a Manifold from the result will report a Status if it is not manifold.
   merge(): boolean;
 
   // Gets the three vertex indices of this triangle in CCW order

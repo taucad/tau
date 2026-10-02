@@ -4,8 +4,7 @@
 
 // Category: std.array
 // Apply a function to every element of a list
-// Remarks: Given a list like `[a, b, c]`, and a function like `f`, returns
-`[f(a), f(b), f(c)]`
+// Remarks: Given a list like `[a, b, c]`, and a function like `f`, returns `[f(a), f(b), f(c)]`
 map(
   @array: [any],
   f: fn(any): any,

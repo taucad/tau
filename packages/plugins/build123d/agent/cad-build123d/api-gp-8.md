@@ -7,25 +7,13 @@
 gp_XYZ
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.gp.gp_XYZ) -> None
-
-2. __init__(self: OCP.OCP.gp.gp_XYZ, theX: float, theY: float, theZ: float) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.gp.gp_XYZ) -> None 2. __init__(self: OCP.OCP.gp.gp_XYZ, theX: float, theY: float, theZ: float) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.gp.gp_XYZ) -> None
   __init__(self: OCP.OCP.gp.gp_XYZ, theX: float, theY: float, theZ: float) -> None
 
   // SetCoord(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetCoord(self: OCP.OCP.gp.gp_XYZ, theX: float, theY: float, theZ: float) -> None
-
-For this XYZ object, assigns the values theX, theY and theZ to its three coordinates
-
-2. SetCoord(self: OCP.OCP.gp.gp_XYZ, theIndex: int, theXi: float) -> None
-
-modifies the coordinate of range theIndex theIndex = 1 => X is modified theIndex = 2 => Y is modified theIndex = 3 => Z is modified Raises OutOfRange if theIndex != {1, 2, 3}.
+  // Remarks: Overloaded function. 1. SetCoord(self: OCP.OCP.gp.gp_XYZ, theX: float, theY: float, theZ: float) -> None For this XYZ object, assigns the values theX, theY and theZ to its three coordinates 2. SetCoord(self: OCP.OCP.gp.gp_XYZ, theIndex: int, theXi: float) -> None modifies the coordinate of range theIndex theIndex = 1 => X is modified theIndex = 2 => Y is modified theIndex = 3 => Z is modified Raises OutOfRange if theIndex != {1, 2, 3}.
   SetCoord(*args, **kwargs)
   SetCoord(self: OCP.OCP.gp.gp_XYZ, theX: float, theY: float, theZ: float) -> None
   SetCoord(self: OCP.OCP.gp.gp_XYZ, theIndex: int, theXi: float) -> None
@@ -43,13 +31,7 @@ modifies the coordinate of range theIndex theIndex = 1 => X is modified theIndex
   SetZ(self: OCP.OCP.gp.gp_XYZ, theZ: float) -> None
 
   // Coord(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Coord(self: OCP.OCP.gp.gp_XYZ, theIndex: int) -> float
-
-returns the coordinate of range theIndex : theIndex = 1 => X is returned theIndex = 2 => Y is returned theIndex = 3 => Z is returned
-
-2. Coord(self: OCP.OCP.gp.gp_XYZ) -> tuple[float, float, float]
+  // Remarks: Overloaded function. 1. Coord(self: OCP.OCP.gp.gp_XYZ, theIndex: int) -> float returns the coordinate of range theIndex : theIndex = 1 => X is returned theIndex = 2 => Y is returned theIndex = 3 => Z is returned 2. Coord(self: OCP.OCP.gp.gp_XYZ) -> tuple[float, float, float]
   Coord(*args, **kwargs)
   Coord(self: OCP.OCP.gp.gp_XYZ, theIndex: int) -> float
   Coord(self: OCP.OCP.gp.gp_XYZ) -> tuple[float, float, float]
@@ -96,11 +78,7 @@ returns the coordinate of range theIndex : theIndex = 1 => X is returned theInde
   Added(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> OCP.OCP.gp.gp_XYZ
 
   // Cross(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Cross(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> None
-
-2. Cross(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> None
+  // Remarks: Overloaded function. 1. Cross(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> None 2. Cross(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> None
   Cross(*args, **kwargs)
   Cross(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> None
   Cross(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> None
@@ -109,43 +87,19 @@ returns the coordinate of range theIndex : theIndex = 1 => X is returned theInde
   Crossed(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> OCP.OCP.gp.gp_XYZ
 
   // CrossMagnitude(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. CrossMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float
-
-Computes the magnitude of the cross product between <me> and theRight. Returns || <me> ^ theRight ||
-
-2. CrossMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float
-
-Computes the magnitude of the cross product between <me> and theRight. Returns || <me> ^ theRight ||
+  // Remarks: Overloaded function. 1. CrossMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float Computes the magnitude of the cross product between <me> and theRight. Returns || <me> ^ theRight || 2. CrossMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float Computes the magnitude of the cross product between <me> and theRight. Returns || <me> ^ theRight ||
   CrossMagnitude(*args, **kwargs)
   CrossMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float
   CrossMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float
 
   // CrossSquareMagnitude(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. CrossSquareMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float
-
-Computes the square magnitude of the cross product between <me> and theRight. Returns || <me> ^ theRight ||**2
-
-2. CrossSquareMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float
-
-Computes the square magnitude of the cross product between <me> and theRight. Returns || <me> ^ theRight ||**2
+  // Remarks: Overloaded function. 1. CrossSquareMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float Computes the square magnitude of the cross product between <me> and theRight. Returns || <me> ^ theRight ||**2 2. CrossSquareMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float Computes the square magnitude of the cross product between <me> and theRight. Returns || <me> ^ theRight ||**2
   CrossSquareMagnitude(*args, **kwargs)
   CrossSquareMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float
   CrossSquareMagnitude(self: OCP.OCP.gp.gp_XYZ, theRight: OCP.OCP.gp.gp_XYZ) -> float
 
   // CrossCross(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. CrossCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> None
-
-Triple vector product Computes <me> = <me>.Cross(theCoord1.Cross(theCoord2))
-
-2. CrossCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> None
-
-Triple vector product Computes <me> = <me>.Cross(theCoord1.Cross(theCoord2))
+  // Remarks: Overloaded function. 1. CrossCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> None Triple vector product Computes <me> = <me>.Cross(theCoord1.Cross(theCoord2)) 2. CrossCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> None Triple vector product Computes <me> = <me>.Cross(theCoord1.Cross(theCoord2))
   CrossCross(*args, **kwargs)
   CrossCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> None
   CrossCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> None
@@ -167,33 +121,13 @@ Triple vector product Computes <me> = <me>.Cross(theCoord1.Cross(theCoord2))
   Dot(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> float
 
   // DotCross(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. DotCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> float
-
-computes the triple scalar product
-
-2. DotCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> float
-
-computes the triple scalar product
+  // Remarks: Overloaded function. 1. DotCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> float computes the triple scalar product 2. DotCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> float computes the triple scalar product
   DotCross(*args, **kwargs)
   DotCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> float
   DotCross(self: OCP.OCP.gp.gp_XYZ, theCoord1: OCP.OCP.gp.gp_XYZ, theCoord2: OCP.OCP.gp.gp_XYZ) -> float
 
   // Multiply(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Multiply(self: OCP.OCP.gp.gp_XYZ, theScalar: float) -> None
-
-2. Multiply(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> None
-
-3. Multiply(self: OCP.OCP.gp.gp_XYZ, theMatrix: OCP.OCP.gp.gp_Mat) -> None
-
-<me> = theMatrix * <me>
-
-4. Multiply(self: OCP.OCP.gp.gp_XYZ, theMatrix: OCP.OCP.gp.gp_Mat) -> None
-
-<me> = theMatrix * <me>
+  // Remarks: Overloaded function. 1. Multiply(self: OCP.OCP.gp.gp_XYZ, theScalar: float) -> None 2. Multiply(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> None 3. Multiply(self: OCP.OCP.gp.gp_XYZ, theMatrix: OCP.OCP.gp.gp_Mat) -> None <me> = theMatrix * <me> 4. Multiply(self: OCP.OCP.gp.gp_XYZ, theMatrix: OCP.OCP.gp.gp_Mat) -> None <me> = theMatrix * <me>
   Multiply(*args, **kwargs)
   Multiply(self: OCP.OCP.gp.gp_XYZ, theScalar: float) -> None
   Multiply(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> None
@@ -201,30 +135,14 @@ computes the triple scalar product
   Multiply(self: OCP.OCP.gp.gp_XYZ, theMatrix: OCP.OCP.gp.gp_Mat) -> None
 
   // Multiplied(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Multiplied(self: OCP.OCP.gp.gp_XYZ, theScalar: float) -> OCP.OCP.gp.gp_XYZ
-
-2. Multiplied(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> OCP.OCP.gp.gp_XYZ
-
-3. Multiplied(self: OCP.OCP.gp.gp_XYZ, theMatrix: OCP.OCP.gp.gp_Mat) -> OCP.OCP.gp.gp_XYZ
-
-New = theMatrix * <me>
+  // Remarks: Overloaded function. 1. Multiplied(self: OCP.OCP.gp.gp_XYZ, theScalar: float) -> OCP.OCP.gp.gp_XYZ 2. Multiplied(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> OCP.OCP.gp.gp_XYZ 3. Multiplied(self: OCP.OCP.gp.gp_XYZ, theMatrix: OCP.OCP.gp.gp_Mat) -> OCP.OCP.gp.gp_XYZ New = theMatrix * <me>
   Multiplied(*args, **kwargs)
   Multiplied(self: OCP.OCP.gp.gp_XYZ, theScalar: float) -> OCP.OCP.gp.gp_XYZ
   Multiplied(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> OCP.OCP.gp.gp_XYZ
   Multiplied(self: OCP.OCP.gp.gp_XYZ, theMatrix: OCP.OCP.gp.gp_Mat) -> OCP.OCP.gp.gp_XYZ
 
   // Normalize(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Normalize(self: OCP.OCP.gp.gp_XYZ) -> None
-
-Raised if <me>.Modulus() <= Resolution from gp
-
-2. Normalize(self: OCP.OCP.gp.gp_XYZ) -> None
-
-Raised if <me>.Modulus() <= Resolution from gp
+  // Remarks: Overloaded function. 1. Normalize(self: OCP.OCP.gp.gp_XYZ) -> None Raised if <me>.Modulus() <= Resolution from gp 2. Normalize(self: OCP.OCP.gp.gp_XYZ) -> None Raised if <me>.Modulus() <= Resolution from gp
   Normalize(*args, **kwargs)
   Normalize(self: OCP.OCP.gp.gp_XYZ) -> None
   Normalize(self: OCP.OCP.gp.gp_XYZ) -> None
@@ -246,31 +164,7 @@ Raised if <me>.Modulus() <= Resolution from gp
   Subtracted(self: OCP.OCP.gp.gp_XYZ, theOther: OCP.OCP.gp.gp_XYZ) -> OCP.OCP.gp.gp_XYZ
 
   // SetLinearForm(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ, theA3: float, theXYZ3: OCP.OCP.gp.gp_XYZ, theXYZ4: OCP.OCP.gp.gp_XYZ) -> None
-
-<me> is set to the following linear form :
-
-2. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ, theA3: float, theXYZ3: OCP.OCP.gp.gp_XYZ) -> None
-
-<me> is set to the following linear form :
-
-3. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ, theXYZ3: OCP.OCP.gp.gp_XYZ) -> None
-
-<me> is set to the following linear form :
-
-4. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ) -> None
-
-<me> is set to the following linear form :
-
-5. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theXYZ2: OCP.OCP.gp.gp_XYZ) -> None
-
-<me> is set to the following linear form :
-
-6. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theXYZ1: OCP.OCP.gp.gp_XYZ, theXYZ2: OCP.OCP.gp.gp_XYZ) -> None
-
-<me> is set to the following linear form :
+  // Remarks: Overloaded function. 1. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ, theA3: float, theXYZ3: OCP.OCP.gp.gp_XYZ, theXYZ4: OCP.OCP.gp.gp_XYZ) -> None <me> is set to the following linear form : 2. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ, theA3: float, theXYZ3: OCP.OCP.gp.gp_XYZ) -> None <me> is set to the following linear form : 3. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ, theXYZ3: OCP.OCP.gp.gp_XYZ) -> None <me> is set to the following linear form : 4. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ) -> None <me> is set to the following linear form : 5. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theXYZ2: OCP.OCP.gp.gp_XYZ) -> None <me> is set to the following linear form : 6. SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theXYZ1: OCP.OCP.gp.gp_XYZ, theXYZ2: OCP.OCP.gp.gp_XYZ) -> None <me> is set to the following linear form :
   SetLinearForm(*args, **kwargs)
   SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ, theA3: float, theXYZ3: OCP.OCP.gp.gp_XYZ, theXYZ4: OCP.OCP.gp.gp_XYZ) -> None
   SetLinearForm(self: OCP.OCP.gp.gp_XYZ, theA1: float, theXYZ1: OCP.OCP.gp.gp_XYZ, theA2: float, theXYZ2: OCP.OCP.gp.gp_XYZ, theA3: float, theXYZ3: OCP.OCP.gp.gp_XYZ) -> None

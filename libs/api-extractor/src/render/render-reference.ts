@@ -104,10 +104,10 @@ const annotationLines = (entry: ApiEntry, indent: string, parentCategory?: strin
     lines.push(`${indent}// ${firstSentence(summary)}`);
   }
   if (entry.docs?.remarks !== undefined) {
-    lines.push(`${indent}// Remarks: ${entry.docs.remarks}`);
+    lines.push(`${indent}// Remarks: ${entry.docs.remarks.replaceAll(/\s+/gu, ' ').trim()}`);
   }
   for (const exception of entry.docs?.throws ?? []) {
-    lines.push(`${indent}// Throws: ${exception}`);
+    lines.push(`${indent}// Throws: ${exception.replaceAll(/\s+/gu, ' ').trim()}`);
   }
   if (entry.deprecated !== undefined) {
     lines.push(`${indent}// DEPRECATED${entry.deprecated === true ? '' : `: ${entry.deprecated}`}`);

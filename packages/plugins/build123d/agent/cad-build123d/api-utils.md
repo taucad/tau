@@ -17,10 +17,7 @@ isclose_b(x: float, y: float, rel_tol = 1e-09, abs_tol = 1e-14) -> bool
 
 // Category: utils
 // new_edges
-// Remarks: Given a sequence of shapes and the combination of those shapes, find the newly added edges
-
-Returns:
-    ShapeList[Edge]: new edges
+// Remarks: Given a sequence of shapes and the combination of those shapes, find the newly added edges Returns: ShapeList[Edge]: new edges
 new_edges(*objects: Shape, combined: Shape) -> ShapeList[Edge]
 //   objects: sequence of shapes
 //   combined: result of the combination of objects

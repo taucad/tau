@@ -79,13 +79,7 @@ Geom_ElementarySurface
 Geom_Line
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Geom.Geom_Line, A1: OCP.OCP.gp.gp_Ax1) -> None
-
-2. __init__(self: OCP.OCP.Geom.Geom_Line, L: OCP.OCP.gp.gp_Lin) -> None
-
-3. __init__(self: OCP.OCP.Geom.Geom_Line, P: OCP.OCP.gp.gp_Pnt, V: OCP.OCP.gp.gp_Dir) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Geom.Geom_Line, A1: OCP.OCP.gp.gp_Ax1) -> None 2. __init__(self: OCP.OCP.Geom.Geom_Line, L: OCP.OCP.gp.gp_Lin) -> None 3. __init__(self: OCP.OCP.Geom.Geom_Line, P: OCP.OCP.gp.gp_Pnt, V: OCP.OCP.gp.gp_Dir) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Geom.Geom_Line, A1: OCP.OCP.gp.gp_Ax1) -> None
   __init__(self: OCP.OCP.Geom.Geom_Line, L: OCP.OCP.gp.gp_Lin) -> None
@@ -201,15 +195,7 @@ Geom_Line
 Geom_Plane
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Geom.Geom_Plane, A3: OCP.OCP.gp.gp_Ax3) -> None
-
-2. __init__(self: OCP.OCP.Geom.Geom_Plane, Pl: OCP.OCP.gp.gp_Pln) -> None
-
-3. __init__(self: OCP.OCP.Geom.Geom_Plane, P: OCP.OCP.gp.gp_Pnt, V: OCP.OCP.gp.gp_Dir) -> None
-
-4. __init__(self: OCP.OCP.Geom.Geom_Plane, A: float, B: float, C: float, D: float) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Geom.Geom_Plane, A3: OCP.OCP.gp.gp_Ax3) -> None 2. __init__(self: OCP.OCP.Geom.Geom_Plane, Pl: OCP.OCP.gp.gp_Pln) -> None 3. __init__(self: OCP.OCP.Geom.Geom_Plane, P: OCP.OCP.gp.gp_Pnt, V: OCP.OCP.gp.gp_Dir) -> None 4. __init__(self: OCP.OCP.Geom.Geom_Plane, A: float, B: float, C: float, D: float) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Geom.Geom_Plane, A3: OCP.OCP.gp.gp_Ax3) -> None
   __init__(self: OCP.OCP.Geom.Geom_Plane, Pl: OCP.OCP.gp.gp_Pln) -> None

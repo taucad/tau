@@ -7,28 +7,14 @@
 BRepMesh_IncrementalMesh
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh) -> None
-
-2. __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theLinDeflection: float, isRelative: bool = False, theAngDeflection: float = 0.5, isInParallel: bool = False) -> None
-
-3. __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theParameters: OCP.OCP.IMeshTools.IMeshTools_Parameters, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f2ee2b0>) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh) -> None 2. __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theLinDeflection: float, isRelative: bool = False, theAngDeflection: float = 0.5, isInParallel: bool = False) -> None 3. __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theParameters: OCP.OCP.IMeshTools.IMeshTools_Parameters, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f2ee2b0>) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh) -> None
   __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theLinDeflection: float, isRelative: bool = False, theAngDeflection: float = 0.5, isInParallel: bool = False) -> None
   __init__(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theParameters: OCP.OCP.IMeshTools.IMeshTools_Parameters, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f2ee2b0>) -> None
 
   // Perform(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Perform(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f463eb0>) -> None
-
-Performs meshing of the shape.
-
-2. Perform(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theContext: OCP.OCP.IMeshTools.IMeshTools_Context, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f498db0>) -> None
-
-Performs meshing using custom context;
+  // Remarks: Overloaded function. 1. Perform(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f463eb0>) -> None Performs meshing of the shape. 2. Perform(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theContext: OCP.OCP.IMeshTools.IMeshTools_Context, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f498db0>) -> None Performs meshing using custom context;
   Perform(*args, **kwargs)
   Perform(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f463eb0>) -> None
   Perform(self: OCP.OCP.BRepMesh.BRepMesh_IncrementalMesh, theContext: OCP.OCP.IMeshTools.IMeshTools_Context, theRange: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f498db0>) -> None

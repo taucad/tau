@@ -7,11 +7,7 @@
 APIHeaderSection_MakeHeader
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.APIHeaderSection.APIHeaderSection_MakeHeader, shapetype: int = 0) -> None
-
-2. __init__(self: OCP.OCP.APIHeaderSection.APIHeaderSection_MakeHeader, model: OCP.OCP.StepData.StepData_StepModel) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.APIHeaderSection.APIHeaderSection_MakeHeader, shapetype: int = 0) -> None 2. __init__(self: OCP.OCP.APIHeaderSection.APIHeaderSection_MakeHeader, model: OCP.OCP.StepData.StepData_StepModel) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.APIHeaderSection.APIHeaderSection_MakeHeader, shapetype: int = 0) -> None
   __init__(self: OCP.OCP.APIHeaderSection.APIHeaderSection_MakeHeader, model: OCP.OCP.StepData.StepData_StepModel) -> None

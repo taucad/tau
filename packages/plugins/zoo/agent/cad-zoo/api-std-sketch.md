@@ -4,24 +4,7 @@
 
 // Category: std.sketch
 // Start a new 2-dimensional sketch on a specific plane or face
-// Remarks: ### Sketch on Face Behavior
-
-There are some important behaviors to understand when sketching on a face:
-
-The resulting sketch will _include_ the face and thus Solid
-that was sketched on. So say you were to export the resulting Sketch / Solid
-from a sketch on a face, you would get both the artifact of the sketch
-on the face and the parent face / Solid itself.
-
-This is important to understand because if you were to then sketch on the
-resulting Solid, it would again include the face and parent Solid that was
-sketched on. This could go on indefinitely.
-
-The point is if you want to export the result of a sketch on a face, you
-only need to export the final Solid that was created from the sketch on the
-face, since it will include all the parent faces and Solids.
-
-See [sketch on face](/docs/kcl-lang/sketch-on-face) for more details.
+// Remarks: ### Sketch on Face Behavior There are some important behaviors to understand when sketching on a face: The resulting sketch will _include_ the face and thus Solid that was sketched on. So say you were to export the resulting Sketch / Solid from a sketch on a face, you would get both the artifact of the sketch on the face and the parent face / Solid itself. This is important to understand because if you were to then sketch on the resulting Solid, it would again include the face and parent Solid that was sketched on. This could go on indefinitely. The point is if you want to export the result of a sketch on a face, you only need to export the final Solid that was created from the sketch on the face, since it will include all the parent faces and Solids. See [sketch on face](/docs/kcl-lang/sketch-on-face) for more details.
 startSketchOn(
   @planeOrSolid: Solid | Plane,
   face?: TaggedFace,
@@ -97,13 +80,7 @@ ellipse(
 
 // Category: std.sketch
 // Extend a 2-dimensional sketch through a third dimension in order to create new 3-dimensional volume, or if extruded into an existing volume, cut into an existing solid
-// Remarks: You can provide more than one sketch to extrude, and they will all be
-extruded in the same direction.
-
-When you sketch on a face of a solid, extruding extends or cuts into the
-existing solid, meaning you don't need to union or subtract the volumes. You
-can change this behavior by using the `method` parameter. See
-[sketch on face](/docs/kcl-lang/sketch-on-face) for more details.
+// Remarks: You can provide more than one sketch to extrude, and they will all be extruded in the same direction. When you sketch on a face of a solid, extruding extends or cuts into the existing solid, meaning you don't need to union or subtract the volumes. You can change this behavior by using the `method` parameter. See [sketch on face](/docs/kcl-lang/sketch-on-face) for more details.
 extrude(
   @sketches: [Sketch; 1+],
   length?: number(Length),
@@ -131,16 +108,7 @@ extrude(
 
 // Category: std.sketch
 // Rotate a sketch around some provided axis, creating a solid from its extent
-// Remarks: This, like extrude, is able to create a 3-dimensional solid from a
-2-dimensional sketch. However, unlike extrude, this creates a solid
-by using the extent of the sketch as its revolved around an axis rather
-than using the extent of the sketch linearly translated through a third
-dimension.
-
-Revolve occurs around a local sketch axis rather than a global axis.
-
-You can provide more than one sketch to revolve, and they will all be
-revolved around the same axis.
+// Remarks: This, like extrude, is able to create a 3-dimensional solid from a 2-dimensional sketch. However, unlike extrude, this creates a solid by using the extent of the sketch as its revolved around an axis rather than using the extent of the sketch linearly translated through a third dimension. Revolve occurs around a local sketch axis rather than a global axis. You can provide more than one sketch to revolve, and they will all be revolved around the same axis.
 revolve(
   @sketches: [Sketch; 1+],
   axis: Axis2d | Edge,
@@ -225,14 +193,7 @@ polygon(
 
 // Category: std.sketch
 // Extrude a sketch along a path
-// Remarks: This, like extrude, is able to create a 3-dimensional solid from a
-2-dimensional sketch. However, unlike extrude, this creates a solid
-by using the extent of the sketch as its path. This is useful for
-creating more complex shapes that can't be created with a simple
-extrusion.
-
-You can provide more than one sketch to sweep, and they will all be
-swept along the same path.
+// Remarks: This, like extrude, is able to create a 3-dimensional solid from a 2-dimensional sketch. However, unlike extrude, this creates a solid by using the extent of the sketch as its path. This is useful for creating more complex shapes that can't be created with a simple extrusion. You can provide more than one sketch to sweep, and they will all be swept along the same path.
 sweep(
   @sketches: [Sketch; 1+],
   path: Sketch | Helix,
@@ -470,10 +431,7 @@ angledLineThatIntersects(
 
 // Category: std.sketch
 // Construct a line segment from the current origin back to the profile's origin, ensuring the resulting 2-dimensional sketch is not open-ended
-// Remarks: If you want to perform some 3-dimensional operation on a sketch, like
-extrude or sweep, you must `close` it first. `close` must be called even
-if the end point of the last segment is coincident with the sketch
-starting point.
+// Remarks: If you want to perform some 3-dimensional operation on a sketch, like extrude or sweep, you must `close` it first. `close` must be called even if the end point of the last segment is coincident with the sketch starting point.
 close(
   @sketch: Sketch,
   tag?: TagDecl,
@@ -483,14 +441,7 @@ close(
 
 // Category: std.sketch
 // Draw a curved line segment along an imaginary circle
-// Remarks: The arc is constructed such that the current position of the sketch is
-placed along an imaginary circle of the specified radius, at angleStart
-degrees. The resulting arc is the segment of the imaginary circle from
-that origin point to angleEnd, radius away from the center of the imaginary
-circle.
-
-Unless this makes a lot of sense and feels like what you're looking
-for to construct your shape, you're likely looking for tangentialArc.
+// Remarks: The arc is constructed such that the current position of the sketch is placed along an imaginary circle of the specified radius, at angleStart degrees. The resulting arc is the segment of the imaginary circle from that origin point to angleEnd, radius away from the center of the imaginary circle. Unless this makes a lot of sense and feels like what you're looking for to construct your shape, you're likely looking for tangentialArc.
 arc(
   @sketch: Sketch,
   angleStart?: number(Angle),
@@ -512,11 +463,7 @@ arc(
 
 // Category: std.sketch
 // Starting at the current sketch's origin, draw a curved line segment along some part of an imaginary circle until it reaches the desired (x, y) coordinates
-// Remarks: When using radius and angle, draw a curved line segment along part of an
-imaginary circle. The arc is constructed such that the last line segment is
-placed tangent to the imaginary circle of the specified radius. The
-resulting arc is the segment of the imaginary circle from that tangent point
-for 'angle' degrees along the imaginary circle.
+// Remarks: When using radius and angle, draw a curved line segment along part of an imaginary circle. The arc is constructed such that the last line segment is placed tangent to the imaginary circle of the specified radius. The resulting arc is the segment of the imaginary circle from that tangent point for 'angle' degrees along the imaginary circle.
 tangentialArc(
   @sketch: Sketch,
   endAbsolute?: Point2d,

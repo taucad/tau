@@ -10,29 +10,13 @@ BRepLib
   __init__(self: OCP.OCP.BRepLib.BRepLib) -> None
 
   // Precision_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Precision_s(P: float) -> None
-
-Computes the max distance between edge and its 2d representation on the face. Sets the default precision. The current Precision is returned.
-
-2. Precision_s() -> float
-
-Returns the default precision.
+  // Remarks: Overloaded function. 1. Precision_s(P: float) -> None Computes the max distance between edge and its 2d representation on the face. Sets the default precision. The current Precision is returned. 2. Precision_s() -> float Returns the default precision.
   Precision_s(*args, **kwargs)
   Precision_s(P: float) -> None
   Precision_s() -> float
 
   // Plane_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Plane_s(P: OCP.OCP.Geom.Geom_Plane) -> None
-
-Sets the current plane to P.
-
-2. Plane_s() -> OCP.OCP.Geom.Geom_Plane
-
-Returns the current plane.
+  // Remarks: Overloaded function. 1. Plane_s(P: OCP.OCP.Geom.Geom_Plane) -> None Sets the current plane to P. 2. Plane_s() -> OCP.OCP.Geom.Geom_Plane Returns the current plane.
   Plane_s(*args, **kwargs)
   Plane_s(P: OCP.OCP.Geom.Geom_Plane) -> None
   Plane_s() -> OCP.OCP.Geom.Geom_Plane
@@ -50,29 +34,13 @@ Returns the current plane.
   BuildCurve3d_s(E: OCP.OCP.TopoDS.TopoDS_Edge, Tolerance: float = 1e-05, Continuity: OCP.OCP.GeomAbs.GeomAbs_Shape = <GeomAbs_Shape.GeomAbs_C1: 2>, MaxDegree: int = 14, MaxSegment: int = 0) -> bool
 
   // BuildCurves3d_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. BuildCurves3d_s(S: OCP.OCP.TopoDS.TopoDS_Shape, Tolerance: float, Continuity: OCP.OCP.GeomAbs.GeomAbs_Shape = <GeomAbs_Shape.GeomAbs_C1: 2>, MaxDegree: int = 14, MaxSegment: int = 0) -> bool
-
-Computes the 3d curves for all the edges of <S> return False if one of the computation failed. <MaxSegment> >= 30 in approximation
-
-2. BuildCurves3d_s(S: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Computes the 3d curves for all the edges of <S> return False if one of the computation failed.
+  // Remarks: Overloaded function. 1. BuildCurves3d_s(S: OCP.OCP.TopoDS.TopoDS_Shape, Tolerance: float, Continuity: OCP.OCP.GeomAbs.GeomAbs_Shape = <GeomAbs_Shape.GeomAbs_C1: 2>, MaxDegree: int = 14, MaxSegment: int = 0) -> bool Computes the 3d curves for all the edges of <S> return False if one of the computation failed. <MaxSegment> >= 30 in approximation 2. BuildCurves3d_s(S: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Computes the 3d curves for all the edges of <S> return False if one of the computation failed.
   BuildCurves3d_s(*args, **kwargs)
   BuildCurves3d_s(S: OCP.OCP.TopoDS.TopoDS_Shape, Tolerance: float, Continuity: OCP.OCP.GeomAbs.GeomAbs_Shape = <GeomAbs_Shape.GeomAbs_C1: 2>, MaxDegree: int = 14, MaxSegment: int = 0) -> bool
   BuildCurves3d_s(S: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
 
   // BuildPCurveForEdgeOnPlane_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. BuildPCurveForEdgeOnPlane_s(theE: OCP.OCP.TopoDS.TopoDS_Edge, theF: OCP.OCP.TopoDS.TopoDS_Face) -> None
-
-Builds pcurve of edge on face if the surface is plane, and updates the edge.
-
-2. BuildPCurveForEdgeOnPlane_s(theE: OCP.OCP.TopoDS.TopoDS_Edge, theF: OCP.OCP.TopoDS.TopoDS_Face, aC2D: OCP.OCP.Geom2d.Geom2d_Curve) -> tuple[bool]
-
-Builds pcurve of edge on face if the surface is plane, but does not update the edge. The output are the pcurve and the flag telling that pcurve was built.
+  // Remarks: Overloaded function. 1. BuildPCurveForEdgeOnPlane_s(theE: OCP.OCP.TopoDS.TopoDS_Edge, theF: OCP.OCP.TopoDS.TopoDS_Face) -> None Builds pcurve of edge on face if the surface is plane, and updates the edge. 2. BuildPCurveForEdgeOnPlane_s(theE: OCP.OCP.TopoDS.TopoDS_Edge, theF: OCP.OCP.TopoDS.TopoDS_Face, aC2D: OCP.OCP.Geom2d.Geom2d_Curve) -> tuple[bool] Builds pcurve of edge on face if the surface is plane, but does not update the edge. The output are the pcurve and the flag telling that pcurve was built.
   BuildPCurveForEdgeOnPlane_s(*args, **kwargs)
   BuildPCurveForEdgeOnPlane_s(theE: OCP.OCP.TopoDS.TopoDS_Edge, theF: OCP.OCP.TopoDS.TopoDS_Face) -> None
   BuildPCurveForEdgeOnPlane_s(theE: OCP.OCP.TopoDS.TopoDS_Edge, theF: OCP.OCP.TopoDS.TopoDS_Face, aC2D: OCP.OCP.Geom2d.Geom2d_Curve) -> tuple[bool]
@@ -86,23 +54,7 @@ Builds pcurve of edge on face if the surface is plane, but does not update the e
   UpdateEdgeTolerance_s(S: OCP.OCP.TopoDS.TopoDS_Shape, MinToleranceRequest: float, MaxToleranceToCheck: float) -> bool
 
   // SameParameter_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SameParameter_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, Tolerance: float = 1e-05) -> None
-
-Computes new 2d curve(s) for the edge <theEdge> to have the same parameter as the 3d curve. The algorithm is not done if the flag SameParameter was True on the Edge.
-
-2. SameParameter_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, theTolerance: float, theNewTol: float, IsUseOldEdge: bool) -> OCP.OCP.TopoDS.TopoDS_Edge
-
-Computes new 2d curve(s) for the edge <theEdge> to have the same parameter as the 3d curve. The algorithm is not done if the flag SameParameter was True on the Edge. theNewTol is a new tolerance of vertices of the input edge (not applied inside the algorithm, but pre-computed). If IsUseOldEdge is true then the input edge will be modified, otherwise the new copy of input edge will be created. Returns the new edge as a result, can be ignored if IsUseOldEdge is true.
-
-3. SameParameter_s(S: OCP.OCP.TopoDS.TopoDS_Shape, Tolerance: float = 1e-05, forced: bool = False) -> None
-
-Computes new 2d curve(s) for all the edges of <S> to have the same parameter as the 3d curve. The algorithm is not done if the flag SameParameter was True on an Edge.
-
-4. SameParameter_s(S: OCP.OCP.TopoDS.TopoDS_Shape, theReshaper: OCP.OCP.BRepTools.BRepTools_ReShape, Tolerance: float = 1e-05, forced: bool = False) -> None
-
-Computes new 2d curve(s) for all the edges of <S> to have the same parameter as the 3d curve. The algorithm is not done if the flag SameParameter was True on an Edge. theReshaper is used to record the modifications of input shape <S> to prevent any modifications on the shape itself. Thus the input shape (and its subshapes) will not be modified, instead the reshaper will contain a modified empty-copies of original subshapes as substitutions.
+  // Remarks: Overloaded function. 1. SameParameter_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, Tolerance: float = 1e-05) -> None Computes new 2d curve(s) for the edge <theEdge> to have the same parameter as the 3d curve. The algorithm is not done if the flag SameParameter was True on the Edge. 2. SameParameter_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, theTolerance: float, theNewTol: float, IsUseOldEdge: bool) -> OCP.OCP.TopoDS.TopoDS_Edge Computes new 2d curve(s) for the edge <theEdge> to have the same parameter as the 3d curve. The algorithm is not done if the flag SameParameter was True on the Edge. theNewTol is a new tolerance of vertices of the input edge (not applied inside the algorithm, but pre-computed). If IsUseOldEdge is true then the input edge will be modified, otherwise the new copy of input edge will be created. Returns the new edge as a result, can be ignored if IsUseOldEdge is true. 3. SameParameter_s(S: OCP.OCP.TopoDS.TopoDS_Shape, Tolerance: float = 1e-05, forced: bool = False) -> None Computes new 2d curve(s) for all the edges of <S> to have the same parameter as the 3d curve. The algorithm is not done if the flag SameParameter was True on an Edge. 4. SameParameter_s(S: OCP.OCP.TopoDS.TopoDS_Shape, theReshaper: OCP.OCP.BRepTools.BRepTools_ReShape, Tolerance: float = 1e-05, forced: bool = False) -> None Computes new 2d curve(s) for all the edges of <S> to have the same parameter as the 3d curve. The algorithm is not done if the flag SameParameter was True on an Edge. theReshaper is used to record the modifications of input shape <S> to prevent any modifications on the shape itself. Thus the input shape (and its subshapes) will not be modified, instead the reshaper will contain a modified empty-copies of original subshapes as substitutions.
   SameParameter_s(*args, **kwargs)
   SameParameter_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, Tolerance: float = 1e-05) -> None
   SameParameter_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, theTolerance: float, theNewTol: float, IsUseOldEdge: bool) -> OCP.OCP.TopoDS.TopoDS_Edge
@@ -110,15 +62,7 @@ Computes new 2d curve(s) for all the edges of <S> to have the same parameter as 
   SameParameter_s(S: OCP.OCP.TopoDS.TopoDS_Shape, theReshaper: OCP.OCP.BRepTools.BRepTools_ReShape, Tolerance: float = 1e-05, forced: bool = False) -> None
 
   // UpdateTolerances_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. UpdateTolerances_s(S: OCP.OCP.TopoDS.TopoDS_Shape, verifyFaceTolerance: bool = False) -> None
-
-Replaces tolerance of FACE EDGE VERTEX by the tolerance Max of their connected handling shapes. It is not necessary to use this call after SameParameter. (called in)
-
-2. UpdateTolerances_s(S: OCP.OCP.TopoDS.TopoDS_Shape, theReshaper: OCP.OCP.BRepTools.BRepTools_ReShape, verifyFaceTolerance: bool = False) -> None
-
-Replaces tolerance of FACE EDGE VERTEX by the tolerance Max of their connected handling shapes. It is not necessary to use this call after SameParameter. (called in) theReshaper is used to record the modifications of input shape <S> to prevent any modifications on the shape itself. Thus the input shape (and its subshapes) will not be modified, instead the reshaper will contain a modified empty-copies of original subshapes as substitutions.
+  // Remarks: Overloaded function. 1. UpdateTolerances_s(S: OCP.OCP.TopoDS.TopoDS_Shape, verifyFaceTolerance: bool = False) -> None Replaces tolerance of FACE EDGE VERTEX by the tolerance Max of their connected handling shapes. It is not necessary to use this call after SameParameter. (called in) 2. UpdateTolerances_s(S: OCP.OCP.TopoDS.TopoDS_Shape, theReshaper: OCP.OCP.BRepTools.BRepTools_ReShape, verifyFaceTolerance: bool = False) -> None Replaces tolerance of FACE EDGE VERTEX by the tolerance Max of their connected handling shapes. It is not necessary to use this call after SameParameter. (called in) theReshaper is used to record the modifications of input shape <S> to prevent any modifications on the shape itself. Thus the input shape (and its subshapes) will not be modified, instead the reshaper will contain a modified empty-copies of original subshapes as substitutions.
   UpdateTolerances_s(*args, **kwargs)
   UpdateTolerances_s(S: OCP.OCP.TopoDS.TopoDS_Shape, verifyFaceTolerance: bool = False) -> None
   UpdateTolerances_s(S: OCP.OCP.TopoDS.TopoDS_Shape, theReshaper: OCP.OCP.BRepTools.BRepTools_ReShape, verifyFaceTolerance: bool = False) -> None
@@ -136,19 +80,7 @@ Replaces tolerance of FACE EDGE VERTEX by the tolerance Max of their connected h
   ContinuityOfFaces_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, theFace1: OCP.OCP.TopoDS.TopoDS_Face, theFace2: OCP.OCP.TopoDS.TopoDS_Face, theAngleTol: float) -> OCP.OCP.GeomAbs.GeomAbs_Shape
 
   // EncodeRegularity_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. EncodeRegularity_s(S: OCP.OCP.TopoDS.TopoDS_Shape, TolAng: float = 1e-10) -> None
-
-Encodes the Regularity of edges on a Shape. Warning: <TolAng> is an angular tolerance, expressed in Rad. Warning: If the edges's regularity are coded before, nothing is done.
-
-2. EncodeRegularity_s(S: OCP.OCP.TopoDS.TopoDS_Shape, LE: OCP.OCP.TopTools.TopTools_ListOfShape, TolAng: float = 1e-10) -> None
-
-Encodes the Regularity of edges in list <LE> on the shape <S> Warning: <TolAng> is an angular tolerance, expressed in Rad. Warning: If the edges's regularity are coded before, nothing is done.
-
-3. EncodeRegularity_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F1: OCP.OCP.TopoDS.TopoDS_Face, F2: OCP.OCP.TopoDS.TopoDS_Face, TolAng: float = 1e-10) -> None
-
-Encodes the Regularity between <F1> and <F2> by <E> Warning: <TolAng> is an angular tolerance, expressed in Rad. Warning: If the edge's regularity is coded before, nothing is done.
+  // Remarks: Overloaded function. 1. EncodeRegularity_s(S: OCP.OCP.TopoDS.TopoDS_Shape, TolAng: float = 1e-10) -> None Encodes the Regularity of edges on a Shape. Warning: <TolAng> is an angular tolerance, expressed in Rad. Warning: If the edges's regularity are coded before, nothing is done. 2. EncodeRegularity_s(S: OCP.OCP.TopoDS.TopoDS_Shape, LE: OCP.OCP.TopTools.TopTools_ListOfShape, TolAng: float = 1e-10) -> None Encodes the Regularity of edges in list <LE> on the shape <S> Warning: <TolAng> is an angular tolerance, expressed in Rad. Warning: If the edges's regularity are coded before, nothing is done. 3. EncodeRegularity_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F1: OCP.OCP.TopoDS.TopoDS_Face, F2: OCP.OCP.TopoDS.TopoDS_Face, TolAng: float = 1e-10) -> None Encodes the Regularity between <F1> and <F2> by <E> Warning: <TolAng> is an angular tolerance, expressed in Rad. Warning: If the edge's regularity is coded before, nothing is done.
   EncodeRegularity_s(*args, **kwargs)
   EncodeRegularity_s(S: OCP.OCP.TopoDS.TopoDS_Shape, TolAng: float = 1e-10) -> None
   EncodeRegularity_s(S: OCP.OCP.TopoDS.TopoDS_Shape, LE: OCP.OCP.TopTools.TopTools_ListOfShape, TolAng: float = 1e-10) -> None
@@ -171,15 +103,7 @@ Encodes the Regularity between <F1> and <F2> by <E> Warning: <TolAng> is an angu
   UpdateDeflection_s(S: OCP.OCP.TopoDS.TopoDS_Shape) -> None
 
   // FindValidRange_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. FindValidRange_s(theCurve: OCP.OCP.Adaptor3d.Adaptor3d_Curve, theTolE: float, theParV1: float, thePntV1: OCP.OCP.gp.gp_Pnt, theTolV1: float, theParV2: float, thePntV2: OCP.OCP.gp.gp_Pnt, theTolV2: float, theFirst: float, theLast: float) -> bool
-
-For an edge defined by 3d curve and tolerance and vertices defined by points, parameters on curve and tolerances, finds a range of curve between vertices not covered by vertices tolerances. Returns false if there is no such range. Otherwise, sets theFirst and theLast as its bounds.
-
-2. FindValidRange_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, theFirst: float, theLast: float) -> bool
-
-Finds a range of 3d curve of the edge not covered by vertices tolerances. Returns false if there is no such range. Otherwise, sets theFirst and theLast as its bounds.
+  // Remarks: Overloaded function. 1. FindValidRange_s(theCurve: OCP.OCP.Adaptor3d.Adaptor3d_Curve, theTolE: float, theParV1: float, thePntV1: OCP.OCP.gp.gp_Pnt, theTolV1: float, theParV2: float, thePntV2: OCP.OCP.gp.gp_Pnt, theTolV2: float, theFirst: float, theLast: float) -> bool For an edge defined by 3d curve and tolerance and vertices defined by points, parameters on curve and tolerances, finds a range of curve between vertices not covered by vertices tolerances. Returns false if there is no such range. Otherwise, sets theFirst and theLast as its bounds. 2. FindValidRange_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, theFirst: float, theLast: float) -> bool Finds a range of 3d curve of the edge not covered by vertices tolerances. Returns false if there is no such range. Otherwise, sets theFirst and theLast as its bounds.
   FindValidRange_s(*args, **kwargs)
   FindValidRange_s(theCurve: OCP.OCP.Adaptor3d.Adaptor3d_Curve, theTolE: float, theParV1: float, thePntV1: OCP.OCP.gp.gp_Pnt, theTolV1: float, theParV2: float, thePntV2: OCP.OCP.gp.gp_Pnt, theTolV2: float, theFirst: float, theLast: float) -> bool
   FindValidRange_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge, theFirst: float, theLast: float) -> bool

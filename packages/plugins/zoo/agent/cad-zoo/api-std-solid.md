@@ -4,9 +4,7 @@
 
 // Category: std.solid
 // Blend a transitional edge along a tagged path, smoothing the sharp edge
-// Remarks: Fillet is similar in function and use to a chamfer, except
-a chamfer will cut a sharp transition along an edge while fillet
-will smoothly blend the transition.
+// Remarks: Fillet is similar in function and use to a chamfer, except a chamfer will cut a sharp transition along an edge while fillet will smoothly blend the transition.
 fillet(
   @solid: Solid,
   radius: number(Length),
@@ -22,9 +20,7 @@ fillet(
 
 // Category: std.solid
 // Cut a straight transitional edge along a tagged path
-// Remarks: Chamfer is similar in function and use to a fillet, except
-a fillet will blend the transition along an edge, rather than cut
-a sharp, straight transitional edge.
+// Remarks: Chamfer is similar in function and use to a fillet, except a fillet will blend the transition along an edge, rather than cut a sharp, straight transitional edge.
 chamfer(
   @solid: Solid,
   length: number(Length),
@@ -53,8 +49,7 @@ shell(
 
 // Category: std.solid
 // Make the inside of a 3D object hollow
-// Remarks: Remove volume from a 3-dimensional shape such that a wall of the
-provided thickness remains around the exterior of the shape.
+// Remarks: Remove volume from a 3-dimensional shape such that a wall of the provided thickness remains around the exterior of the shape.
 hollow(
   @solid: Solid,
   thickness: number(Length),
@@ -64,43 +59,7 @@ hollow(
 
 // Category: std.solid
 // Repeat a 3-dimensional solid, changing it each time
-// Remarks: Replicates the 3D solid, applying a transformation function to each replica.
-Transformation function could alter rotation, scale, visibility, position, etc.
-
-The `patternTransform` call itself takes a number for how many total instances of
-the shape should be. For example, if you use a circle with `patternTransform(instances = 4, transform = f)`
-then there will be 4 circles: the original, and 3 created by replicating the original and
-calling the transform function on each.
-
-The transform function takes a single parameter: an integer representing which
-number replication the transform is for. E.g. the first replica to be transformed
-will be passed the argument `1`. This simplifies your math: the transform function can
-rely on id `0` being the original instance passed into the `patternTransform`. See the examples.
-
-The transform function returns a transform object. All properties of the object are optional,
-they each default to "no change". So the overall transform object defaults to "no change" too.
-Its properties are:
-
- - `translate` (3D point)
-
-   Translates the replica, moving its position in space.
-
- - `replicate` (bool)
-
-   If false, this ID will not actually copy the object. It'll be skipped.
-
- - `scale` (3D point)
-
-   Stretches the object, multiplying its width in the given dimension by the point's component in
-   that direction.
-
- - `rotation` (object, with the following properties)
-
-   - `rotation.axis` (a 3D point, defaults to the Z axis)
-
-   - `rotation.angle`
-
-   - `rotation.origin` (either "local" i.e. rotate around its own center, "global" i.e. rotate around the scene's center, or a 3D point, defaults to "local")
+// Remarks: Replicates the 3D solid, applying a transformation function to each replica. Transformation function could alter rotation, scale, visibility, position, etc. The `patternTransform` call itself takes a number for how many total instances of the shape should be. For example, if you use a circle with `patternTransform(instances = 4, transform = f)` then there will be 4 circles: the original, and 3 created by replicating the original and calling the transform function on each. The transform function takes a single parameter: an integer representing which number replication the transform is for. E.g. the first replica to be transformed will be passed the argument `1`. This simplifies your math: the transform function can rely on id `0` being the original instance passed into the `patternTransform`. See the examples. The transform function returns a transform object. All properties of the object are optional, they each default to "no change". So the overall transform object defaults to "no change" too. Its properties are: - `translate` (3D point) Translates the replica, moving its position in space. - `replicate` (bool) If false, this ID will not actually copy the object. It'll be skipped. - `scale` (3D point) Stretches the object, multiplying its width in the given dimension by the point's component in that direction. - `rotation` (object, with the following properties) - `rotation.axis` (a 3D point, defaults to the Z axis) - `rotation.angle` - `rotation.origin` (either "local" i.e. rotate around its own center, "global" i.e. rotate around the scene's center, or a 3D point, defaults to "local")
 patternTransform(
   @solids: [Solid; 1+],
   instances: number(_),
@@ -157,10 +116,7 @@ union(
 
 // Category: std.solid
 // Intersect returns the shared volume between multiple solids, preserving only overlapping regions
-// Remarks: Intersect computes the geometric intersection of multiple solid bodies,
-returning a new solid representing the volume that is common to all input
-solids. This operation is useful for determining shared material regions,
-verifying fit, and analyzing overlapping geometries in assemblies.
+// Remarks: Intersect computes the geometric intersection of multiple solid bodies, returning a new solid representing the volume that is common to all input solids. This operation is useful for determining shared material regions, verifying fit, and analyzing overlapping geometries in assemblies.
 intersect(
   @solids: [Solid; 2+],
   tolerance?: number(Length),
@@ -170,11 +126,7 @@ intersect(
 
 // Category: std.solid
 // Subtract removes tool solids from base solids, leaving the remaining material
-// Remarks: Performs a bool subtraction operation, removing the volume of one or more
-tool solids from one or more base solids. The result is a new solid
-representing the material that remains after all tool solids have been cut
-away. This function is essential for machining simulations, cavity creation,
-and complex multi-body part modeling.
+// Remarks: Performs a bool subtraction operation, removing the volume of one or more tool solids from one or more base solids. The result is a new solid representing the material that remains after all tool solids have been cut away. This function is essential for machining simulations, cavity creation, and complex multi-body part modeling.
 subtract(
   @solids: [Solid; 1+],
   tools: [Solid],

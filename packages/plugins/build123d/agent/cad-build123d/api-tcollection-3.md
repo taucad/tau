@@ -7,27 +7,7 @@
 TCollection_HAsciiString
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
-
-2. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, message: str) -> None
-
-3. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, aChar: str) -> None
-
-4. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, length: int, filler: str) -> None
-
-5. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, value: int) -> None
-
-6. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, value: float) -> None
-
-7. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, aString: OCP.OCP.TCollection.TCollection_AsciiString) -> None
-
-8. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, aString: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
-
-9. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, aString: OCP.OCP.TCollection.TCollection_HExtendedString, replaceNonAscii: str) -> None
-
-10. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, arg0: str) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> None 2. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, message: str) -> None 3. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, aChar: str) -> None 4. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, length: int, filler: str) -> None 5. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, value: int) -> None 6. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, value: float) -> None 7. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, aString: OCP.OCP.TCollection.TCollection_AsciiString) -> None 8. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, aString: OCP.OCP.TCollection.TCollection_HAsciiString) -> None 9. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, aString: OCP.OCP.TCollection.TCollection_HExtendedString, replaceNonAscii: str) -> None 10. __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, arg0: str) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
   __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, message: str) -> None
@@ -41,23 +21,7 @@ TCollection_HAsciiString
   __init__(self: OCP.OCP.TCollection.TCollection_HAsciiString, arg0: str) -> None
 
   // AssignCat(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: str) -> None
-
-Appends <other> to me.
-
-2. AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
-
-Appends <other> to me. Example: aString = aString + anotherString
-
-3. AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: str) -> None
-
-Appends <other> to me.
-
-4. AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
-
-Appends <other> to me. Example: aString = aString + anotherString
+  // Remarks: Overloaded function. 1. AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: str) -> None Appends <other> to me. 2. AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString) -> None Appends <other> to me. Example: aString = aString + anotherString 3. AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: str) -> None Appends <other> to me. 4. AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString) -> None Appends <other> to me. Example: aString = aString + anotherString
   AssignCat(*args, **kwargs)
   AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: str) -> None
   AssignCat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
@@ -69,15 +33,7 @@ Appends <other> to me. Example: aString = aString + anotherString
   Capitalize(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
 
   // Cat(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Cat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: str) -> OCP.OCP.TCollection.TCollection_HAsciiString
-
-Creates a new string by concatenation of this ASCII string and the other ASCII string. Example: aString = aString + anotherString aString = aString + "Dummy" aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" Warning: To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
-
-2. Cat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_HAsciiString
-
-Creates a new string by concatenation of this ASCII string and the other ASCII string. Example: aString = aString + anotherString
+  // Remarks: Overloaded function. 1. Cat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: str) -> OCP.OCP.TCollection.TCollection_HAsciiString Creates a new string by concatenation of this ASCII string and the other ASCII string. Example: aString = aString + anotherString aString = aString + "Dummy" aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" Warning: To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too. 2. Cat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_HAsciiString Creates a new string by concatenation of this ASCII string and the other ASCII string. Example: aString = aString + anotherString
   Cat(*args, **kwargs)
   Cat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: str) -> OCP.OCP.TCollection.TCollection_HAsciiString
   Cat(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_HAsciiString
@@ -103,19 +59,7 @@ Creates a new string by concatenation of this ASCII string and the other ASCII s
   FirstLocationNotInSet(self: OCP.OCP.TCollection.TCollection_HAsciiString, Set: OCP.OCP.TCollection.TCollection_HAsciiString, FromIndex: int, ToIndex: int) -> int
 
   // Insert(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Insert(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None
-
-Insert a Character at position <where>. Example: aString contains "hy not ?" aString.Insert(1,'W'); gives "Why not ?" aString contains "Wh" aString.Insert(3,'y'); gives "Why" aString contains "Way" aString.Insert(2,'h'); gives "Why"
-
-2. Insert(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None
-
-Insert a HAsciiString at position <where>.
-
-3. Insert(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
-
-Insert a HAsciiString at position <where>.
+  // Remarks: Overloaded function. 1. Insert(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None Insert a Character at position <where>. Example: aString contains "hy not ?" aString.Insert(1,'W'); gives "Why not ?" aString contains "Wh" aString.Insert(3,'y'); gives "Why" aString contains "Way" aString.Insert(2,'h'); gives "Why" 2. Insert(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None Insert a HAsciiString at position <where>. 3. Insert(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> None Insert a HAsciiString at position <where>.
   Insert(*args, **kwargs)
   Insert(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None
   Insert(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None
@@ -162,15 +106,7 @@ Insert a HAsciiString at position <where>.
   IsDifferent(self: OCP.OCP.TCollection.TCollection_HAsciiString, S: OCP.OCP.TCollection.TCollection_HAsciiString) -> bool
 
   // IsSameString(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsSameString(self: OCP.OCP.TCollection.TCollection_HAsciiString, S: OCP.OCP.TCollection.TCollection_HAsciiString) -> bool
-
-Returns True if the string S contains same characters than the string <me>.
-
-2. IsSameString(self: OCP.OCP.TCollection.TCollection_HAsciiString, S: OCP.OCP.TCollection.TCollection_HAsciiString, CaseSensitive: bool) -> bool
-
-Returns True if the string S contains same characters than the string <me>.
+  // Remarks: Overloaded function. 1. IsSameString(self: OCP.OCP.TCollection.TCollection_HAsciiString, S: OCP.OCP.TCollection.TCollection_HAsciiString) -> bool Returns True if the string S contains same characters than the string <me>. 2. IsSameString(self: OCP.OCP.TCollection.TCollection_HAsciiString, S: OCP.OCP.TCollection.TCollection_HAsciiString, CaseSensitive: bool) -> bool Returns True if the string S contains same characters than the string <me>.
   IsSameString(*args, **kwargs)
   IsSameString(self: OCP.OCP.TCollection.TCollection_HAsciiString, S: OCP.OCP.TCollection.TCollection_HAsciiString) -> bool
   IsSameString(self: OCP.OCP.TCollection.TCollection_HAsciiString, S: OCP.OCP.TCollection.TCollection_HAsciiString, CaseSensitive: bool) -> bool
@@ -184,29 +120,13 @@ Returns True if the string S contains same characters than the string <me>.
   LeftJustify(self: OCP.OCP.TCollection.TCollection_HAsciiString, Width: int, Filler: str) -> None
 
   // Length(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Length(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> int
-
-Returns number of characters in <me>. This is the same functionality as 'strlen' in C.
-
-2. Length(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> int
-
-Returns number of characters in <me>. This is the same functionality as 'strlen' in C.
+  // Remarks: Overloaded function. 1. Length(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> int Returns number of characters in <me>. This is the same functionality as 'strlen' in C. 2. Length(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> int Returns number of characters in <me>. This is the same functionality as 'strlen' in C.
   Length(*args, **kwargs)
   Length(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> int
   Length(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> int
 
   // Location(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Location(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString, FromIndex: int, ToIndex: int) -> int
-
-returns an index in the string <me> of the first occurrence of the string S in the string <me> from the starting index FromIndex to the ending index ToIndex returns zero if failure Raises an exception if FromIndex or ToIndex is out of range. Example: before me = "aabAaAa", S = "Aa", FromIndex = 1, ToIndex = 7 after me = "aabAaAa" returns 4
-
-2. Location(self: OCP.OCP.TCollection.TCollection_HAsciiString, N: int, C: str, FromIndex: int, ToIndex: int) -> int
-
-Returns the index of the nth occurrence of the character C in the string <me> from the starting index FromIndex to the ending index ToIndex. Returns zero if failure. Raises an exception if FromIndex or ToIndex is out of range Example: before me = "aabAa", N = 3, C = 'a', FromIndex = 1, ToIndex = 5 after me = "aabAa" returns 5
+  // Remarks: Overloaded function. 1. Location(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString, FromIndex: int, ToIndex: int) -> int returns an index in the string <me> of the first occurrence of the string S in the string <me> from the starting index FromIndex to the ending index ToIndex returns zero if failure Raises an exception if FromIndex or ToIndex is out of range. Example: before me = "aabAaAa", S = "Aa", FromIndex = 1, ToIndex = 7 after me = "aabAaAa" returns 4 2. Location(self: OCP.OCP.TCollection.TCollection_HAsciiString, N: int, C: str, FromIndex: int, ToIndex: int) -> int Returns the index of the nth occurrence of the character C in the string <me> from the starting index FromIndex to the ending index ToIndex. Returns zero if failure. Raises an exception if FromIndex or ToIndex is out of range Example: before me = "aabAa", N = 3, C = 'a', FromIndex = 1, ToIndex = 5 after me = "aabAa" returns 5
   Location(*args, **kwargs)
   Location(self: OCP.OCP.TCollection.TCollection_HAsciiString, other: OCP.OCP.TCollection.TCollection_HAsciiString, FromIndex: int, ToIndex: int) -> int
   Location(self: OCP.OCP.TCollection.TCollection_HAsciiString, N: int, C: str, FromIndex: int, ToIndex: int) -> int
@@ -228,15 +148,7 @@ Returns the index of the nth occurrence of the character C in the string <me> fr
   RealValue(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> float
 
   // RemoveAll(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. RemoveAll(self: OCP.OCP.TCollection.TCollection_HAsciiString, C: str, CaseSensitive: bool) -> None
-
-Remove all the occurrences of the character C in the string Example: before me = "HellLLo", C = 'L' , CaseSensitive = True after me = "Hello"
-
-2. RemoveAll(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> None
-
-Removes every <what> characters from <me>
+  // Remarks: Overloaded function. 1. RemoveAll(self: OCP.OCP.TCollection.TCollection_HAsciiString, C: str, CaseSensitive: bool) -> None Remove all the occurrences of the character C in the string Example: before me = "HellLLo", C = 'L' , CaseSensitive = True after me = "Hello" 2. RemoveAll(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> None Removes every <what> characters from <me>
   RemoveAll(*args, **kwargs)
   RemoveAll(self: OCP.OCP.TCollection.TCollection_HAsciiString, C: str, CaseSensitive: bool) -> None
   RemoveAll(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> None
@@ -254,47 +166,19 @@ Removes every <what> characters from <me>
   RightJustify(self: OCP.OCP.TCollection.TCollection_HAsciiString, Width: int, Filler: str) -> None
 
   // Search(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Search(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> int
-
-Searches a CString in <me> from the beginning and returns position of first item <what> matching. It returns -1 if not found. Example: aString contains "Sample single test" aString.Search("le") returns 5
-
-2. Search(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> int
-
-Searches a String in <me> from the beginning and returns position of first item <what> matching. it returns -1 if not found.
+  // Remarks: Overloaded function. 1. Search(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> int Searches a CString in <me> from the beginning and returns position of first item <what> matching. It returns -1 if not found. Example: aString contains "Sample single test" aString.Search("le") returns 5 2. Search(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> int Searches a String in <me> from the beginning and returns position of first item <what> matching. it returns -1 if not found.
   Search(*args, **kwargs)
   Search(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> int
   Search(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> int
 
   // SearchFromEnd(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SearchFromEnd(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> int
-
-Searches a CString in a String from the end and returns position of first item <what> matching. It returns -1 if not found. Example: aString contains "Sample single test" aString.SearchFromEnd("le") returns 12
-
-2. SearchFromEnd(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> int
-
-Searches a HAsciiString in another HAsciiString from the end and returns position of first item <what> matching. It returns -1 if not found.
+  // Remarks: Overloaded function. 1. SearchFromEnd(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> int Searches a CString in a String from the end and returns position of first item <what> matching. It returns -1 if not found. Example: aString contains "Sample single test" aString.SearchFromEnd("le") returns 12 2. SearchFromEnd(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> int Searches a HAsciiString in another HAsciiString from the end and returns position of first item <what> matching. It returns -1 if not found.
   SearchFromEnd(*args, **kwargs)
   SearchFromEnd(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: str) -> int
   SearchFromEnd(self: OCP.OCP.TCollection.TCollection_HAsciiString, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> int
 
   // SetValue(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetValue(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None
-
-Replaces one character in the string at position <where>. If <where> is less than zero or greater than the length of <me> an exception is raised. Example: aString contains "Garbake" astring.Replace(6,'g') gives <me> = "Garbage"
-
-2. SetValue(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None
-
-Replaces a part of <me> in the string at position <where>. If <where> is less than zero or greater than the length of <me> an exception is raised. Example: aString contains "Garbake" astring.Replace(6,'g') gives <me> = "Garbage"
-
-3. SetValue(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> None
-
-Replaces a part of <me> by another string.
+  // Remarks: Overloaded function. 1. SetValue(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None Replaces one character in the string at position <where>. If <where> is less than zero or greater than the length of <me> an exception is raised. Example: aString contains "Garbake" astring.Replace(6,'g') gives <me> = "Garbage" 2. SetValue(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None Replaces a part of <me> in the string at position <where>. If <where> is less than zero or greater than the length of <me> an exception is raised. Example: aString contains "Garbake" astring.Replace(6,'g') gives <me> = "Garbage" 3. SetValue(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: OCP.OCP.TCollection.TCollection_HAsciiString) -> None Replaces a part of <me> by another string.
   SetValue(*args, **kwargs)
   SetValue(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None
   SetValue(self: OCP.OCP.TCollection.TCollection_HAsciiString, where: int, what: str) -> None
@@ -309,15 +193,7 @@ Replaces a part of <me> by another string.
   SubString(self: OCP.OCP.TCollection.TCollection_HAsciiString, FromIndex: int, ToIndex: int) -> OCP.OCP.TCollection.TCollection_HAsciiString
 
   // ToCString(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. ToCString(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> str
-
-Returns pointer to string (char *) This is useful for some casual manipulations Because this "char *" is 'const', you can't modify its contents.
-
-2. ToCString(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> str
-
-Returns pointer to string (char *) This is useful for some casual manipulations Because this "char *" is 'const', you can't modify its contents.
+  // Remarks: Overloaded function. 1. ToCString(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> str Returns pointer to string (char *) This is useful for some casual manipulations Because this "char *" is 'const', you can't modify its contents. 2. ToCString(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> str Returns pointer to string (char *) This is useful for some casual manipulations Because this "char *" is 'const', you can't modify its contents.
   ToCString(*args, **kwargs)
   ToCString(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> str
   ToCString(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> str
@@ -352,15 +228,7 @@ Returns pointer to string (char *) This is useful for some casual manipulations 
   get_type_descriptor_s() -> OCP.OCP.Standard.Standard_Type
 
   // String(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. String(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Returns the field myString.
-
-2. String(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Returns the field myString.
+  // Remarks: Overloaded function. 1. String(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString Returns the field myString. 2. String(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString Returns the field myString.
   String(*args, **kwargs)
   String(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString
   String(self: OCP.OCP.TCollection.TCollection_HAsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString

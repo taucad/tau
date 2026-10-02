@@ -68,40 +68,15 @@ _3DShape: export declare class _3DShape<Type extends TopoDS_Shape> extends Shape
   shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;
 
   // Creates a new shapes with some edges filletted, as specified in the radius config
-  // Remarks: If the radius is a filter finder object (with an EdgeFinder as filter,
-and a radius to specifiy the fillet radius), the fillet will only be
-applied to the edges as selected by the finder. The finder will be
-deleted unless it is explicitly specified to `keep` it.
-
-If the radius is a number all the edges will be filletted.
-
-If the radius is a function edges will be filletted according to the
-value returned by the function (0 or null will not add any fillet).
+  // Remarks: If the radius is a filter finder object (with an EdgeFinder as filter, and a radius to specifiy the fillet radius), the fillet will only be applied to the edges as selected by the finder. The finder will be deleted unless it is explicitly specified to `keep` it. If the radius is a number all the edges will be filletted. If the radius is a function edges will be filletted according to the value returned by the function (0 or null will not add any fillet).
   fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
 
   // Creates a new shapes with some edges chamfered, as specified in the radius config
-  // Remarks: If the radius is a filter finder object (with an EdgeFinder as filter,
-and a radius to specifiy the chamfer radius), the fillet will only be
-applied to the edges as selected by the finder. The finder will be
-deleted unless it is explicitly specified to `keep` it.
-
-If the radius is a number all the edges will be chamfered.
-
-If the radius is a function edges will be chamfered according to the
-value returned by the function (0 or null will not add any chamfer).
+  // Remarks: If the radius is a filter finder object (with an EdgeFinder as filter, and a radius to specifiy the chamfer radius), the fillet will only be applied to the edges as selected by the finder. The finder will be deleted unless it is explicitly specified to `keep` it. If the radius is a number all the edges will be chamfered. If the radius is a function edges will be chamfered according to the value returned by the function (0 or null will not add any chamfer).
   chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
 
   // Applies a draft angle to selected faces of the shape
-  // Remarks: A draft angle is a taper applied to faces, commonly used in moulding
-and casting to allow parts to be released from a mould. The selected
-faces are tilted by the given angle relative to the neutral plane.
-
-The face finder function receives a `FaceFinder` and should return it
-with the desired filters applied to select which faces to draft.
-
-The neutral plane defines the reference from which the draft angle is
-measured — faces are unchanged where they intersect this plane and
-taper away from it.
+  // Remarks: A draft angle is a taper applied to faces, commonly used in moulding and casting to allow parts to be released from a mould. The selected faces are tilted by the given angle relative to the neutral plane. The face finder function receives a `FaceFinder` and should return it with the desired filters applied to select which faces to draft. The neutral plane defines the reference from which the draft angle is measured — faces are unchanged where they intersect this plane and taper away from it.
   draft(angle: number, faceFinder: (e: FaceFinder) => FaceFinder, neutralPlane?: Plane | PlaneName): AnyShape;
 
 AssemblyExporter: export declare class AssemblyExporter extends WrappingObj<TDocStd_Document>
@@ -121,9 +96,7 @@ BaseSketcher2d: export declare class BaseSketcher2d
   penPosition
 
   // Returns the current pen angle in degrees
-  // Remarks: The angle represents the tangent direction at the current pen position,
-based on the last drawing operation (line, arc, bezier, etc.).
-Returns 0 if nothing has been drawn yet.
+  // Remarks: The angle represents the tangent direction at the current pen position, based on the last drawing operation (line, arc, bezier, etc.). Returns 0 if nothing has been drawn yet.
   penAngle
 
   movePointerTo(point: Point2D): this;
@@ -229,14 +202,7 @@ Blueprint: export declare class Blueprint implements DrawingInterface
   sketchOnPlane(inputPlane?: PlaneName | Plane, origin?: Point | number): Sketch;
 
   // Returns the sketched version of the drawing, on a face
-  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are
-interpreted match with the face:
-
-- `original` uses global coordinates (1mm in the drawing is 1mm on the
-  face). This is the default, but currently supported only for planar
-  and circular faces
-- `bounds` normalises the UV parameters on the face to [0,1] intervals.
-- `native` uses the default UV parameters of opencascade
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   sketchOnFace(face: Face, scaleMode?: ScaleMode): Sketch;
 
   subFace(face: Face, origin?: Point | null): Face;
@@ -300,14 +266,7 @@ Blueprints: export declare class Blueprints implements DrawingInterface
   sketchOnPlane(plane?: PlaneName | Plane, origin?: Point | number): Sketches;
 
   // Returns the sketched version of the drawing, on a face
-  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are
-interpreted match with the face:
-
-- `original` uses global coordinates (1mm in the drawing is 1mm on the
-  face). This is the default, but currently supported only for planar
-  and circular faces
-- `bounds` normalises the UV parameters on the face to [0,1] intervals.
-- `native` uses the default UV parameters of opencascade
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   sketchOnFace(face: Face, scaleMode?: ScaleMode): Sketches;
 
   punchHole(shape: AnyShape, face: SingleFace, options?: {
@@ -417,14 +376,7 @@ CompoundBlueprint: export declare class CompoundBlueprint implements DrawingInte
   sketchOnPlane(plane?: PlaneName | Plane, origin?: Point | number): CompoundSketch;
 
   // Returns the sketched version of the drawing, on a face
-  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are
-interpreted match with the face:
-
-- `original` uses global coordinates (1mm in the drawing is 1mm on the
-  face). This is the default, but currently supported only for planar
-  and circular faces
-- `bounds` normalises the UV parameters on the face to [0,1] intervals.
-- `native` uses the default UV parameters of opencascade
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   sketchOnFace(face: Face, scaleMode?: ScaleMode): CompoundSketch;
 
   punchHole(shape: AnyShape, face: SingleFace, options?: {
@@ -445,9 +397,7 @@ interpreted match with the face:
   toSVG(margin?: number): string;
 
 // A group of sketches that should correspond to a unique face (i.e
-// Remarks: All the sketches should share the same base face (or surface)
-
-Ideally generated from a `CompoundBlueprint`
+// Remarks: All the sketches should share the same base face (or surface) Ideally generated from a `CompoundBlueprint`
 CompoundSketch: export declare class CompoundSketch implements SketchInterface
 
   sketches: Sketch[]
@@ -466,12 +416,7 @@ CompoundSketch: export declare class CompoundSketch implements SketchInterface
   face(): Face;
 
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
-  // Remarks: You can define another extrusion direction or origin,
-
-It is also possible to twist extrude with an angle (in degrees), or to
-give a profile to the extrusion (the endFactor will scale the face, and
-the profile will define how the scale is applied (either linarly or with
-a s-shape).
+  // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).
   extrude(extrusionDistance: number, { extrusionDirection, extrusionProfile, twistAngle, origin, }?: {
           extrusionDirection?: Point;
           extrusionProfile?: ExtrusionProfile;
@@ -486,12 +431,7 @@ a s-shape).
       }): Shape3D;
 
   // Loft between this sketch and another sketch (or an array of them)
-  // Remarks: You can also define a `startPoint` for the loft (that will be placed
-before this sketch) and an `endPoint` after the last one.
-
-You can also define if you want the loft to result in a ruled surface.
-
-Note that all sketches will be deleted by this operation
+  // Remarks: You can also define a `startPoint` for the loft (that will be placed before this sketch) and an `endPoint` after the last one. You can also define if you want the loft to result in a ruled surface. Note that all sketches will be deleted by this operation
   loftWith(otherCompound: this, loftConfig: LoftConfig): Shape3D;
 
 CompSolid: export declare class CompSolid extends _3DShape<TopoDS_CompSolid>
@@ -640,14 +580,7 @@ Drawing: export declare class Drawing implements DrawingInterface
   sketchOnPlane(inputPlane?: PlaneName, origin?: Point | number): SketchInterface | Sketches;
 
   // Returns the sketched version of the drawing, on a face
-  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are
-interpreted match with the face:
-
-- `original` uses global coordinates (1mm in the drawing is 1mm on the
-  face). This is the default, but currently supported only for planar
-  and circular faces
-- `bounds` normalises the UV parameters on the face to [0,1] intervals.
-- `native` uses the default UV parameters of opencascade
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   sketchOnFace(face: Face, scaleMode: ScaleMode): SketchInterface | Sketches;
 
   punchHole(shape: AnyShape, faceFinder: SingleFace, options?: {
@@ -705,13 +638,11 @@ EdgeFinder: export declare class EdgeFinder extends Finder3d<Edge>
   ofCurveType(curveType: CurveType): this;
 
   // Filter to find edges that are parallel to a plane
-  // Remarks: Note that this will work only in lines (but the method does not
-check this assumption).
+  // Remarks: Note that this will work only in lines (but the method does not check this assumption).
   parallelTo(plane: Plane | StandardPlane | Face): this;
 
   // Filter to find edges that within a plane
-  // Remarks: Note that this will work only in lines (but the method does not
-check this assumption).
+  // Remarks: Note that this will work only in lines (but the method does not check this assumption).
   inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
 
   // Check if a particular element should be filtered or not according to the current finder
@@ -751,16 +682,14 @@ FaceFinder: export declare class FaceFinder extends Finder3d<Face>
   clone(): FaceFinder;
 
   // Filter to find faces that are parallel to plane or another face
-  // Remarks: Note that this will work only in planar faces (but the method does not
-check this assumption).
+  // Remarks: Note that this will work only in planar faces (but the method does not check this assumption).
   parallelTo(plane: Plane | StandardPlane | Face): this;
 
   // Filter to find faces that are of a cetain surface type
   ofSurfaceType(surfaceType: SurfaceType): this;
 
   // Filter to find faces that are contained in a plane
-  // Remarks: Note that this will work only in planar faces (but the method does not
-check this assumption).
+  // Remarks: Note that this will work only in planar faces (but the method does not check this assumption).
   inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
 
   // Check if a particular element should be filtered or not according to the current finder
@@ -769,12 +698,7 @@ check this assumption).
   protected applyFilter(shape: AnyShape): Face[];
 
 // The FaceSketcher allows you to sketch on a face that is not planar, for instance the sides of a cylinder
-// Remarks: The coordinates passed to the methods corresponds to normalised distances on
-this surface, between 0 and 1 in both direction.
-
-Note that if you are drawing on a closed surface (typically a revolution
-surface or a cylinder), the first parameters represents the angle and can be
-smaller than 0 or bigger than 1.
+// Remarks: The coordinates passed to the methods corresponds to normalised distances on this surface, between 0 and 1 in both direction. Note that if you are drawing on a closed surface (typically a revolution surface or a cylinder), the first parameters represents the angle and can be smaller than 0 or bigger than 1.
 FaceSketcher: export declare class FaceSketcher extends BaseSketcher2d implements GenericSketcher<Sketch>
 
   face: Face

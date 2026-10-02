@@ -14,15 +14,7 @@ TDataStd_Name
   Set(self: OCP.OCP.TDataStd.TDataStd_Name, S: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
 
   // SetID(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetID(self: OCP.OCP.TDataStd.TDataStd_Name, guid: OCP.OCP.Standard.Standard_GUID) -> None
-
-Sets the explicit user defined GUID to the attribute.
-
-2. SetID(self: OCP.OCP.TDataStd.TDataStd_Name) -> None
-
-Sets default GUID for the attribute.
+  // Remarks: Overloaded function. 1. SetID(self: OCP.OCP.TDataStd.TDataStd_Name, guid: OCP.OCP.Standard.Standard_GUID) -> None Sets the explicit user defined GUID to the attribute. 2. SetID(self: OCP.OCP.TDataStd.TDataStd_Name) -> None Sets default GUID for the attribute.
   SetID(*args, **kwargs)
   SetID(self: OCP.OCP.TDataStd.TDataStd_Name, guid: OCP.OCP.Standard.Standard_GUID) -> None
   SetID(self: OCP.OCP.TDataStd.TDataStd_Name) -> None
@@ -38,15 +30,7 @@ Sets default GUID for the attribute.
   GetID_s() -> OCP.OCP.Standard.Standard_GUID
 
   // Set_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Set_s(label: OCP.OCP.TDF.TDF_Label, string: OCP.OCP.TCollection.TCollection_ExtendedString) -> OCP.OCP.TDataStd.TDataStd_Name
-
-Creates (if does not exist) and sets the name in the name attribute. from any label <L> search in father labels (L is not concerned) the first name attribute.if found set it in <father>. class methods working on the name tree ====================================== Search in the whole TDF_Data the Name attribute which fit with <fullPath>. Returns True if found. Search under <currentLabel> a label which fit with <name>. Returns True if found. Shortcut which avoids building a ListOfExtendedStrin. Search in the whole TDF_Data the label which fit with name Returns True if found. tools methods to translate path <-> pathlist =========================================== move to draw For Draw test we may provide this tool method which convert a path in a sequence of string to call after the FindLabel methods. Example: if it's given "Assembly:Part_1:Sketch_5" it will return in <pathlist> the list of 3 strings: "Assembly","Part_1","Sketch_5". move to draw from <pathlist> build the string path Name methods ============
-
-2. Set_s(label: OCP.OCP.TDF.TDF_Label, guid: OCP.OCP.Standard.Standard_GUID, string: OCP.OCP.TCollection.TCollection_ExtendedString) -> OCP.OCP.TDataStd.TDataStd_Name
-
-Finds, or creates, a Name attribute with explicit user defined <guid> and sets <string>. The Name attribute is returned.
+  // Remarks: Overloaded function. 1. Set_s(label: OCP.OCP.TDF.TDF_Label, string: OCP.OCP.TCollection.TCollection_ExtendedString) -> OCP.OCP.TDataStd.TDataStd_Name Creates (if does not exist) and sets the name in the name attribute. from any label <L> search in father labels (L is not concerned) the first name attribute.if found set it in <father>. class methods working on the name tree ====================================== Search in the whole TDF_Data the Name attribute which fit with <fullPath>. Returns True if found. Search under <currentLabel> a label which fit with <name>. Returns True if found. Shortcut which avoids building a ListOfExtendedStrin. Search in the whole TDF_Data the label which fit with name Returns True if found. tools methods to translate path <-> pathlist =========================================== move to draw For Draw test we may provide this tool method which convert a path in a sequence of string to call after the FindLabel methods. Example: if it's given "Assembly:Part_1:Sketch_5" it will return in <pathlist> the list of 3 strings: "Assembly","Part_1","Sketch_5". move to draw from <pathlist> build the string path Name methods ============ 2. Set_s(label: OCP.OCP.TDF.TDF_Label, guid: OCP.OCP.Standard.Standard_GUID, string: OCP.OCP.TCollection.TCollection_ExtendedString) -> OCP.OCP.TDataStd.TDataStd_Name Finds, or creates, a Name attribute with explicit user defined <guid> and sets <string>. The Name attribute is returned.
   Set_s(*args, **kwargs)
   Set_s(label: OCP.OCP.TDF.TDF_Label, string: OCP.OCP.TCollection.TCollection_ExtendedString) -> OCP.OCP.TDataStd.TDataStd_Name
   Set_s(label: OCP.OCP.TDF.TDF_Label, guid: OCP.OCP.Standard.Standard_GUID, string: OCP.OCP.TCollection.TCollection_ExtendedString) -> OCP.OCP.TDataStd.TDataStd_Name

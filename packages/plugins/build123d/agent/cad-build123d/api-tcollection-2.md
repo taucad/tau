@@ -7,29 +7,7 @@
 TCollection_ExtendedString
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
-
-2. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: str, isMultiByte: bool = False) -> None
-
-3. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: str) -> None
-
-4. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, theStringUtf: str) -> None
-
-5. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, aChar: str) -> None
-
-6. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, aChar: str) -> None
-
-7. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, length: int, filler: str) -> None
-
-8. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, value: int) -> None
-
-9. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, value: float) -> None
-
-10. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
-
-11. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: OCP.OCP.TCollection.TCollection_AsciiString, isMultiByte: bool = True) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString) -> None 2. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: str, isMultiByte: bool = False) -> None 3. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: str) -> None 4. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, theStringUtf: str) -> None 5. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, aChar: str) -> None 6. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, aChar: str) -> None 7. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, length: int, filler: str) -> None 8. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, value: int) -> None 9. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, value: float) -> None 10. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: OCP.OCP.TCollection.TCollection_ExtendedString) -> None 11. __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: OCP.OCP.TCollection.TCollection_AsciiString, isMultiByte: bool = True) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
   __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: str, isMultiByte: bool = False) -> None
@@ -44,15 +22,7 @@ TCollection_ExtendedString
   __init__(self: OCP.OCP.TCollection.TCollection_ExtendedString, astring: OCP.OCP.TCollection.TCollection_AsciiString, isMultiByte: bool = True) -> None
 
   // AssignCat(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. AssignCat(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
-
-Appends the other extended string to this extended string. Note that this method is an alias of operator +=. Example: aString += anotherString
-
-2. AssignCat(self: OCP.OCP.TCollection.TCollection_ExtendedString, theChar: str) -> None
-
-Appends the utf16 char to this extended string.
+  // Remarks: Overloaded function. 1. AssignCat(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> None Appends the other extended string to this extended string. Note that this method is an alias of operator +=. Example: aString += anotherString 2. AssignCat(self: OCP.OCP.TCollection.TCollection_ExtendedString, theChar: str) -> None Appends the utf16 char to this extended string.
   AssignCat(*args, **kwargs)
   AssignCat(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
   AssignCat(self: OCP.OCP.TCollection.TCollection_ExtendedString, theChar: str) -> None
@@ -78,15 +48,7 @@ Appends the utf16 char to this extended string.
   Swap(self: OCP.OCP.TCollection.TCollection_ExtendedString, theOther: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
 
   // Insert(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Insert(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: str) -> None
-
-Insert a Character at position <where>.
-
-2. Insert(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
-
-Insert a ExtendedString at position <where>.
+  // Remarks: Overloaded function. 1. Insert(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: str) -> None Insert a Character at position <where>. 2. Insert(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: OCP.OCP.TCollection.TCollection_ExtendedString) -> None Insert a ExtendedString at position <where>.
   Insert(*args, **kwargs)
   Insert(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: str) -> None
   Insert(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
@@ -96,57 +58,25 @@ Insert a ExtendedString at position <where>.
   IsEmpty(self: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
 
   // IsEqual(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsEqual(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool
-
-Returns true if the characters in this extended string are identical to the characters in the other extended string. Note that this method is an alias of operator ==
-
-2. IsEqual(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
-
-Returns true if the characters in this extended string are identical to the characters in the other extended string. Note that this method is an alias of operator ==
+  // Remarks: Overloaded function. 1. IsEqual(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool Returns true if the characters in this extended string are identical to the characters in the other extended string. Note that this method is an alias of operator == 2. IsEqual(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool Returns true if the characters in this extended string are identical to the characters in the other extended string. Note that this method is an alias of operator ==
   IsEqual(*args, **kwargs)
   IsEqual(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool
   IsEqual(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
 
   // IsDifferent(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsDifferent(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool
-
-Returns true if there are differences between the characters in this extended string and the other extended string. Note that this method is an alias of operator !=.
-
-2. IsDifferent(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
-
-Returns true if there are differences between the characters in this extended string and the other extended string. Note that this method is an alias of operator !=.
+  // Remarks: Overloaded function. 1. IsDifferent(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool Returns true if there are differences between the characters in this extended string and the other extended string. Note that this method is an alias of operator !=. 2. IsDifferent(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool Returns true if there are differences between the characters in this extended string and the other extended string. Note that this method is an alias of operator !=.
   IsDifferent(*args, **kwargs)
   IsDifferent(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool
   IsDifferent(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
 
   // IsLess(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsLess(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool
-
-Returns TRUE if <me> is less than <other>.
-
-2. IsLess(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
-
-Returns TRUE if <me> is less than <other>.
+  // Remarks: Overloaded function. 1. IsLess(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool Returns TRUE if <me> is less than <other>. 2. IsLess(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool Returns TRUE if <me> is less than <other>.
   IsLess(*args, **kwargs)
   IsLess(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool
   IsLess(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
 
   // IsGreater(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsGreater(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool
-
-Returns TRUE if <me> is greater than <other>.
-
-2. IsGreater(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
-
-Returns TRUE if <me> is greater than <other>.
+  // Remarks: Overloaded function. 1. IsGreater(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool Returns TRUE if <me> is greater than <other>. 2. IsGreater(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool Returns TRUE if <me> is greater than <other>.
   IsGreater(*args, **kwargs)
   IsGreater(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: str) -> bool
   IsGreater(self: OCP.OCP.TCollection.TCollection_ExtendedString, other: OCP.OCP.TCollection.TCollection_ExtendedString) -> bool
@@ -188,15 +118,7 @@ Returns TRUE if <me> is greater than <other>.
   SearchFromEnd(self: OCP.OCP.TCollection.TCollection_ExtendedString, what: OCP.OCP.TCollection.TCollection_ExtendedString) -> int
 
   // SetValue(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetValue(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: str) -> None
-
-Replaces one character in the ExtendedString at position <where>. If <where> is less than zero or greater than the length of <me> an exception is raised.
-
-2. SetValue(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
-
-Replaces a part of <me> by another ExtendedString see above.
+  // Remarks: Overloaded function. 1. SetValue(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: str) -> None Replaces one character in the ExtendedString at position <where>. If <where> is less than zero or greater than the length of <me> an exception is raised. 2. SetValue(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: OCP.OCP.TCollection.TCollection_ExtendedString) -> None Replaces a part of <me> by another ExtendedString see above.
   SetValue(*args, **kwargs)
   SetValue(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: str) -> None
   SetValue(self: OCP.OCP.TCollection.TCollection_ExtendedString, where: int, what: OCP.OCP.TCollection.TCollection_ExtendedString) -> None

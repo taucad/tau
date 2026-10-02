@@ -14,57 +14,25 @@ TDocStd_Document
   IsSaved(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
 
   // IsChanged(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsChanged(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
-
-returns True if document differs from the state of last saving. this method have to be called only working in the transaction mode
-
-2. IsChanged(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
-
-returns True if document differs from the state of last saving. this method have to be called only working in the transaction mode
+  // Remarks: Overloaded function. 1. IsChanged(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool returns True if document differs from the state of last saving. this method have to be called only working in the transaction mode 2. IsChanged(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool returns True if document differs from the state of last saving. this method have to be called only working in the transaction mode
   IsChanged(*args, **kwargs)
   IsChanged(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
   IsChanged(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
 
   // SetSaved(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetSaved(self: OCP.OCP.TDocStd.TDocStd_Document) -> None
-
-This method have to be called to show document that it has been saved
-
-2. SetSaved(self: OCP.OCP.TDocStd.TDocStd_Document) -> None
-
-This method have to be called to show document that it has been saved
+  // Remarks: Overloaded function. 1. SetSaved(self: OCP.OCP.TDocStd.TDocStd_Document) -> None This method have to be called to show document that it has been saved 2. SetSaved(self: OCP.OCP.TDocStd.TDocStd_Document) -> None This method have to be called to show document that it has been saved
   SetSaved(*args, **kwargs)
   SetSaved(self: OCP.OCP.TDocStd.TDocStd_Document) -> None
   SetSaved(self: OCP.OCP.TDocStd.TDocStd_Document) -> None
 
   // SetSavedTime(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document, theTime: int) -> None
-
-Say to document what it is not saved. Use value, returned earlier by GetSavedTime().
-
-2. SetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document, theTime: int) -> None
-
-Say to document what it is not saved. Use value, returned earlier by GetSavedTime().
+  // Remarks: Overloaded function. 1. SetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document, theTime: int) -> None Say to document what it is not saved. Use value, returned earlier by GetSavedTime(). 2. SetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document, theTime: int) -> None Say to document what it is not saved. Use value, returned earlier by GetSavedTime().
   SetSavedTime(*args, **kwargs)
   SetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document, theTime: int) -> None
   SetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document, theTime: int) -> None
 
   // GetSavedTime(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. GetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document) -> int
-
-Returns value of <mySavedTime> to be used later in SetSavedTime()
-
-2. GetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document) -> int
-
-Returns value of <mySavedTime> to be used later in SetSavedTime()
+  // Remarks: Overloaded function. 1. GetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document) -> int Returns value of <mySavedTime> to be used later in SetSavedTime() 2. GetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document) -> int Returns value of <mySavedTime> to be used later in SetSavedTime()
   GetSavedTime(*args, **kwargs)
   GetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document) -> int
   GetSavedTime(self: OCP.OCP.TDocStd.TDocStd_Document) -> int
@@ -183,29 +151,13 @@ Returns value of <mySavedTime> to be used later in SetSavedTime()
   StorageFormat(self: OCP.OCP.TDocStd.TDocStd_Document) -> OCP.OCP.TCollection.TCollection_ExtendedString
 
   // SetEmptyLabelsSavingMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetEmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None
-
-Sets saving mode for empty labels. If Standard_True, empty labels will be saved.
-
-2. SetEmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None
-
-Sets saving mode for empty labels. If Standard_True, empty labels will be saved.
+  // Remarks: Overloaded function. 1. SetEmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None Sets saving mode for empty labels. If Standard_True, empty labels will be saved. 2. SetEmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None Sets saving mode for empty labels. If Standard_True, empty labels will be saved.
   SetEmptyLabelsSavingMode(*args, **kwargs)
   SetEmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None
   SetEmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None
 
   // EmptyLabelsSavingMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. EmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
-
-Returns saving mode for empty labels.
-
-2. EmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
-
-Returns saving mode for empty labels.
+  // Remarks: Overloaded function. 1. EmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool Returns saving mode for empty labels. 2. EmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool Returns saving mode for empty labels.
   EmptyLabelsSavingMode(*args, **kwargs)
   EmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
   EmptyLabelsSavingMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
@@ -215,57 +167,25 @@ Returns saving mode for empty labels.
   ChangeStorageFormat(self: OCP.OCP.TDocStd.TDocStd_Document, newStorageFormat: OCP.OCP.TCollection.TCollection_ExtendedString) -> None
 
   // SetNestedTransactionMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool = True) -> None
-
-Sets nested transaction mode if isAllowed == Standard_True
-
-2. SetNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None
-
-Sets nested transaction mode if isAllowed == Standard_True
+  // Remarks: Overloaded function. 1. SetNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool = True) -> None Sets nested transaction mode if isAllowed == Standard_True 2. SetNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None Sets nested transaction mode if isAllowed == Standard_True
   SetNestedTransactionMode(*args, **kwargs)
   SetNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool = True) -> None
   SetNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document, isAllowed: bool) -> None
 
   // IsNestedTransactionMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
-
-Returns Standard_True if mode is set
-
-2. IsNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
-
-Returns Standard_True if mode is set
+  // Remarks: Overloaded function. 1. IsNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool Returns Standard_True if mode is set 2. IsNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool Returns Standard_True if mode is set
   IsNestedTransactionMode(*args, **kwargs)
   IsNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
   IsNestedTransactionMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
 
   // SetModificationMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document, theTransactionOnly: bool) -> None
-
-if theTransactionOnly is True changes is denied outside transactions
-
-2. SetModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document, theTransactionOnly: bool) -> None
-
-if theTransactionOnly is True changes is denied outside transactions
+  // Remarks: Overloaded function. 1. SetModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document, theTransactionOnly: bool) -> None if theTransactionOnly is True changes is denied outside transactions 2. SetModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document, theTransactionOnly: bool) -> None if theTransactionOnly is True changes is denied outside transactions
   SetModificationMode(*args, **kwargs)
   SetModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document, theTransactionOnly: bool) -> None
   SetModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document, theTransactionOnly: bool) -> None
 
   // ModificationMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. ModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
-
-returns True if changes allowed only inside transactions
-
-2. ModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
-
-returns True if changes allowed only inside transactions
+  // Remarks: Overloaded function. 1. ModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool returns True if changes allowed only inside transactions 2. ModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool returns True if changes allowed only inside transactions
   ModificationMode(*args, **kwargs)
   ModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool
   ModificationMode(self: OCP.OCP.TDocStd.TDocStd_Document) -> bool

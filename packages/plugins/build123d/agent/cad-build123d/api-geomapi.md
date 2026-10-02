@@ -7,11 +7,7 @@
 GeomAPI_IntCS
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntCS) -> None
-
-2. __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, C: OCP.OCP.Geom.Geom_Curve, S: OCP.OCP.Geom.Geom_Surface) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntCS) -> None 2. __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, C: OCP.OCP.Geom.Geom_Curve, S: OCP.OCP.Geom.Geom_Surface) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntCS) -> None
   __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, C: OCP.OCP.Geom.Geom_Curve, S: OCP.OCP.Geom.Geom_Surface) -> None
@@ -41,15 +37,7 @@ GeomAPI_IntCS
   Segment(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, Index: int) -> OCP.OCP.Geom.Geom_Curve
 
   // Parameters(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Parameters(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, Index: int) -> tuple[float, float, float]
-
-Returns parameter W on the curve and (parameters U,V) on the surface of the computed intersection point of index Index in case of cross intersection. Exceptions StdFail_NotDone if intersection algorithm fails or is not initialized. Standard_OutOfRange if Index is not in the range [ 1,NbPoints ], where NbPoints is the number of computed intersection points.
-
-2. Parameters(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, Index: int) -> tuple[float, float, float, float]
-
-Returns the parameters of the first (U1,V1) and the last (U2,V2) points of curve's segment on the surface in case of tangential intersection. Index is the number of computed intersection segments. Exceptions StdFail_NotDone if intersection algorithm fails or is not initialized. Standard_OutOfRange if Index is not in the range [ 1,NbSegments ], where NbSegments is the number of computed intersection segments.
+  // Remarks: Overloaded function. 1. Parameters(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, Index: int) -> tuple[float, float, float] Returns parameter W on the curve and (parameters U,V) on the surface of the computed intersection point of index Index in case of cross intersection. Exceptions StdFail_NotDone if intersection algorithm fails or is not initialized. Standard_OutOfRange if Index is not in the range [ 1,NbPoints ], where NbPoints is the number of computed intersection points. 2. Parameters(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, Index: int) -> tuple[float, float, float, float] Returns the parameters of the first (U1,V1) and the last (U2,V2) points of curve's segment on the surface in case of tangential intersection. Index is the number of computed intersection segments. Exceptions StdFail_NotDone if intersection algorithm fails or is not initialized. Standard_OutOfRange if Index is not in the range [ 1,NbSegments ], where NbSegments is the number of computed intersection segments.
   Parameters(*args, **kwargs)
   Parameters(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, Index: int) -> tuple[float, float, float]
   Parameters(self: OCP.OCP.GeomAPI.GeomAPI_IntCS, Index: int) -> tuple[float, float, float, float]
@@ -59,67 +47,31 @@ Returns the parameters of the first (U1,V1) and the last (U2,V2) points of curve
 GeomAPI_IntSS
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> None
-
-2. __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> None 2. __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> None
   __init__(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None
 
   // Perform(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Perform(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None
-
-Initializes an algorithm with the given arguments and computes the intersection curves between the two surfaces S1 and S2. Parameter Tol defines the precision of curves computation. For most cases the value 1.0e-7 is recommended to use. Warning Use function IsDone to verify that the intersections are successfully computed.
-
-2. Perform(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None
-
-Initializes an algorithm with the given arguments and computes the intersection curves between the two surfaces S1 and S2. Parameter Tol defines the precision of curves computation. For most cases the value 1.0e-7 is recommended to use. Warning Use function IsDone to verify that the intersections are successfully computed.
+  // Remarks: Overloaded function. 1. Perform(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None Initializes an algorithm with the given arguments and computes the intersection curves between the two surfaces S1 and S2. Parameter Tol defines the precision of curves computation. For most cases the value 1.0e-7 is recommended to use. Warning Use function IsDone to verify that the intersections are successfully computed. 2. Perform(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None Initializes an algorithm with the given arguments and computes the intersection curves between the two surfaces S1 and S2. Parameter Tol defines the precision of curves computation. For most cases the value 1.0e-7 is recommended to use. Warning Use function IsDone to verify that the intersections are successfully computed.
   Perform(*args, **kwargs)
   Perform(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None
   Perform(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None
 
   // IsDone(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsDone(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> bool
-
-Returns True if the intersection was successful.
-
-2. IsDone(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> bool
-
-Returns True if the intersection was successful.
+  // Remarks: Overloaded function. 1. IsDone(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> bool Returns True if the intersection was successful. 2. IsDone(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> bool Returns True if the intersection was successful.
   IsDone(*args, **kwargs)
   IsDone(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> bool
   IsDone(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> bool
 
   // NbLines(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. NbLines(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> int
-
-Returns the number of computed intersection curves. Exceptions StdFail_NotDone if the computation fails.
-
-2. NbLines(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> int
-
-Returns the number of computed intersection curves. Exceptions StdFail_NotDone if the computation fails.
+  // Remarks: Overloaded function. 1. NbLines(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> int Returns the number of computed intersection curves. Exceptions StdFail_NotDone if the computation fails. 2. NbLines(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> int Returns the number of computed intersection curves. Exceptions StdFail_NotDone if the computation fails.
   NbLines(*args, **kwargs)
   NbLines(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> int
   NbLines(self: OCP.OCP.GeomAPI.GeomAPI_IntSS) -> int
 
   // Line(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Line(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, Index: int) -> OCP.OCP.Geom.Geom_Curve
-
-Returns the computed intersection curve of index Index. Exceptions StdFail_NotDone if the computation fails. Standard_OutOfRange if Index is out of range [1, NbLines] where NbLines is the number of computed intersection curves.
-
-2. Line(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, I: int) -> OCP.OCP.Geom.Geom_Curve
-
-Returns the computed intersection curve of index Index. Exceptions StdFail_NotDone if the computation fails. Standard_OutOfRange if Index is out of range [1, NbLines] where NbLines is the number of computed intersection curves.
+  // Remarks: Overloaded function. 1. Line(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, Index: int) -> OCP.OCP.Geom.Geom_Curve Returns the computed intersection curve of index Index. Exceptions StdFail_NotDone if the computation fails. Standard_OutOfRange if Index is out of range [1, NbLines] where NbLines is the number of computed intersection curves. 2. Line(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, I: int) -> OCP.OCP.Geom.Geom_Curve Returns the computed intersection curve of index Index. Exceptions StdFail_NotDone if the computation fails. Standard_OutOfRange if Index is out of range [1, NbLines] where NbLines is the number of computed intersection curves.
   Line(*args, **kwargs)
   Line(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, Index: int) -> OCP.OCP.Geom.Geom_Curve
   Line(self: OCP.OCP.GeomAPI.GeomAPI_IntSS, I: int) -> OCP.OCP.Geom.Geom_Curve
@@ -129,17 +81,7 @@ Returns the computed intersection curve of index Index. Exceptions StdFail_NotDo
 GeomAPI_ProjectPointOnSurf
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> None
-
-2. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
-
-3. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
-
-4. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
-
-5. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> None 2. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None 3. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None 4. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None 5. __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> None
   __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
@@ -148,23 +90,7 @@ GeomAPI_ProjectPointOnSurf
   __init__(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
 
   // Init(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
-
-2. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
-
-Init the projection of a point <P> on a surface <Surface>. The solution are computed in the domain [Umin,Usup] [Vmin,Vsup] of the surface.
-
-3. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
-
-4. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
-
-Init the projection for many points on a surface <Surface>. The solutions will be computed in the domain [Umin,Usup] [Vmin,Vsup] of the surface.
-
-5. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
-
-6. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
+  // Remarks: Overloaded function. 1. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None 2. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None Init the projection of a point <P> on a surface <Surface>. The solution are computed in the domain [Umin,Usup] [Vmin,Vsup] of the surface. 3. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None 4. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None Init the projection for many points on a surface <Surface>. The solutions will be computed in the domain [Umin,Usup] [Vmin,Vsup] of the surface. 5. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None 6. Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, Surface: OCP.OCP.Geom.Geom_Surface, Umin: float, Usup: float, Vmin: float, Vsup: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
   Init(*args, **kwargs)
   Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Tolerance: float, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
   Init(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf, P: OCP.OCP.gp.gp_Pnt, Surface: OCP.OCP.Geom.Geom_Surface, Algo: OCP.OCP.Extrema.Extrema_ExtAlgo = <Extrema_ExtAlgo.Extrema_ExtAlgo_Grad: 0>) -> None
@@ -217,15 +143,7 @@ Init the projection for many points on a surface <Surface>. The solutions will b
   LowerDistanceParameters(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> tuple[float, float]
 
   // Extrema(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Extrema(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> OCP.OCP.Extrema.Extrema_ExtPS
-
-return the algorithmic object from Extrema
-
-2. Extrema(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> OCP.OCP.Extrema.Extrema_ExtPS
-
-return the algorithmic object from Extrema
+  // Remarks: Overloaded function. 1. Extrema(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> OCP.OCP.Extrema.Extrema_ExtPS return the algorithmic object from Extrema 2. Extrema(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> OCP.OCP.Extrema.Extrema_ExtPS return the algorithmic object from Extrema
   Extrema(*args, **kwargs)
   Extrema(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> OCP.OCP.Extrema.Extrema_ExtPS
   Extrema(self: OCP.OCP.GeomAPI.GeomAPI_ProjectPointOnSurf) -> OCP.OCP.Extrema.Extrema_ExtPS

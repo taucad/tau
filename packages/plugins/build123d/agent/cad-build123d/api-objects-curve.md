@@ -4,13 +4,7 @@
 
 // Category: objects_curve
 // Create an airfoil described by a 4-digit (or fractional) NACA airfoil
-// Remarks: (e.g. '2412' or '2213.323').
-
-The NACA four-digit wing sections define the airfoil_code by:
-- First digit describing maximum camber as percentage of the chord.
-- Second digit describing the distance of maximum camber from the airfoil leading edge
-in tenths of the chord.
-- Last two digits describing maximum thickness of the airfoil as percent of the chord.
+// Remarks: (e.g. '2412' or '2213.323'). The NACA four-digit wing sections define the airfoil_code by: - First digit describing maximum camber as percentage of the chord. - Second digit describing the distance of maximum camber from the airfoil leading edge in tenths of the chord. - Last two digits describing maximum thickness of the airfoil as percent of the chord.
 Airfoil
 
   // Parse NACA 4-digit (or fractional) airfoil code into parameters
@@ -27,13 +21,7 @@ Airfoil
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create an arc tangent to two arcs and a radius.
-
-keep specifies tangent arc position with a Keep pair: (placement, type)
-
-- placement: start_arc is tangent INSIDE or OUTSIDE the tangent arc. BOTH is a
-  special case for overlapping arcs with type INSIDE
-- type: tangent arc is INSIDE or OUTSIDE start_arc and end_arc
+// Remarks: Create an arc tangent to two arcs and a radius. keep specifies tangent arc position with a Keep pair: (placement, type) - placement: start_arc is tangent INSIDE or OUTSIDE the tangent arc. BOTH is a special case for overlapping arcs with type INSIDE - type: tangent arc is INSIDE or OUTSIDE start_arc and end_arc
 ArcArcTangentArc
 
   ArcArcTangentArc(start_arc: Curve | Edge | Wire, end_arc: Curve | Edge | Wire, radius: float, side: Side = Side.LEFT, keep: Keep | tuple[Keep, Keep] = (Keep.INSIDE, Keep.INSIDE), short_sagitta: bool = True, mode: Mode = Mode.ADD)
@@ -59,25 +47,7 @@ ArcArcTangentLine
 
 // Category: objects_curve
 // Line Object
-// Remarks: An exact B-spline edge defined directly from control points and knot data.
-
-BSpline creates an exact B-spline from control points, a knot sequence, and
-optional weights. Control points define the control polygon that pulls the curve,
-but the curve does not generally pass through them. Knots define the parameter-space
-structure of the spline: they determine where polynomial spans begin and
-end and how smoothly those spans join. Repeated knot values indicate knot multiplicity.
-For a spline of degree p, a knot with multiplicity m has continuity
-C^(p-m) at that location, so increasing multiplicity reduces smoothness. Repeating the
-first and last knots degree + 1 times creates a clamped spline that
-starts and ends at the first and last control points. Optional weights create a
-rational B-spline, allowing some control points to pull more strongly than
-others and enabling exact representation of conic sections.`
-
-Unlike :class:`~build123d.objects_curve.Spline`, which creates an interpolated curve
-through a set of points using ``GeomAPI_Interpolate``, ``BSpline`` preserves
-the supplied spline definition by building the underlying OCCT
-``Geom_BSplineCurve`` from its poles, knot vector, optional weights,
-degree, and periodic flag.
+// Remarks: An exact B-spline edge defined directly from control points and knot data. BSpline creates an exact B-spline from control points, a knot sequence, and optional weights. Control points define the control polygon that pulls the curve, but the curve does not generally pass through them. Knots define the parameter-space structure of the spline: they determine where polynomial spans begin and end and how smoothly those spans join. Repeated knot values indicate knot multiplicity. For a spline of degree p, a knot with multiplicity m has continuity C^(p-m) at that location, so increasing multiplicity reduces smoothness. Repeating the first and last knots degree + 1 times creates a clamped spline that starts and ends at the first and last control points. Optional weights create a rational B-spline, allowing some control points to pull more strongly than others and enabling exact representation of conic sections.` Unlike :class:`~build123d.objects_curve.Spline`, which creates an interpolated curve through a set of points using ``GeomAPI_Interpolate``, ``BSpline`` preserves the supplied spline definition by building the underlying OCCT ``Geom_BSplineCurve`` from its poles, knot vector, optional weights, degree, and periodic flag.
 BSpline
 
   BSpline(control_points: Iterable[VectorLike], knots: Iterable[float], degree: int, weights: Iterable[float] | None = None, periodic: bool = False, mode: Mode = Mode.ADD)
@@ -114,9 +84,7 @@ BaseLineObject
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a non-rational bezier curve defined by a sequence of points and include optional
-weights to create a rational bezier curve. The number of weights must match the number
-of control points.
+// Remarks: Create a non-rational bezier curve defined by a sequence of points and include optional weights to create a rational bezier curve. The number of weights must match the number of control points.
 Bezier
 
   Bezier(*cntl_pnts: VectorLike, weights: list[float] | None = None, mode: Mode = Mode.ADD)
@@ -126,17 +94,7 @@ Bezier
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a smooth Bézier-based transition curve between two existing edges.
-
-The blend is constructed as a cubic (C1) or quintic (C2) Bézier curve
-whose control points are determined from the position, first derivative,
-and (for C2) second derivative of the input curves at the chosen endpoints.
-Optional scalar multipliers can be applied to the endpoint tangents to
-control the "tension" of the blend.
-
-Example:
-    >>> blend = BlendCurve(curve_a, curve_b, ContinuityLevel.C1, tangent_scalars=(1.2, 0.8))
-    >>> show(blend)
+// Remarks: Create a smooth Bézier-based transition curve between two existing edges. The blend is constructed as a cubic (C1) or quintic (C2) Bézier curve whose control points are determined from the position, first derivative, and (for C2) second derivative of the input curves at the chosen endpoints. Optional scalar multipliers can be applied to the endpoint tangents to control the "tension" of the blend. Example: >>> blend = BlendCurve(curve_a, curve_b, ContinuityLevel.C1, tangent_scalars=(1.2, 0.8)) >>> show(blend)
 // Throws: ValueError: `tangent_scalars` must be a pair of float values.
 // Throws: ValueError: If specified `end_points` are not coincident with the start
 // Throws: or end of their respective curves.
@@ -164,44 +122,7 @@ CenterArc
 
 // Category: objects_curve
 // Line Object
-// Remarks: The result is always a Curve containing one or more Edges. If you need
-to access Edge-specific properties or methods (such as ``arc_center``),
-extract the edge or edges first::
-
-    result = ConstrainedArcs(...)
-    arc = result.edge()           # extract the Edge
-    center = arc.arc_center       # now Edge methods are available
-
-Note that in Builder mode the ``selector`` parameter must be provided or
-all results will be combined into the BuildLine context. In Algebra mode
-the selector can be applied as a parameter or in the normal way to the
-ConstrainedArcs object. The content of the selector is the same in both cases.
-
-Examples:
-    An arc built from three edge constraints.
-
-    Algebra::
-
-        l4 = PolarLine((0, 0), 4, 60)
-        l5 = PolarLine((0, 0), 4, 40)
-        a3 = CenterArc((0, 0), 4, 0, 90)
-        ex_a3 = (
-            ConstrainedArcs(l4, l5, a3, sagitta=Sagitta.BOTH).edges().sort_by(Edge.length)[0]
-        )
-
-    Builder::
-
-        with BuildLine() as arc_ex3:
-            l4 = PolarLine((0, 0), 4, 60)
-            l5 = PolarLine((0, 0), 4, 40)
-            a3 = CenterArc((0, 0), 4, 0, 90)
-            ex_a3 = ConstrainedArcs(
-                l4,
-                l5,
-                a3,
-                sagitta=Sagitta.BOTH,
-                selector=lambda arcs: arcs.sort_by(Edge.length)[0],
-            )
+// Remarks: The result is always a Curve containing one or more Edges. If you need to access Edge-specific properties or methods (such as ``arc_center``), extract the edge or edges first:: result = ConstrainedArcs(...) arc = result.edge() # extract the Edge center = arc.arc_center # now Edge methods are available Note that in Builder mode the ``selector`` parameter must be provided or all results will be combined into the BuildLine context. In Algebra mode the selector can be applied as a parameter or in the normal way to the ConstrainedArcs object. The content of the selector is the same in both cases. Examples: An arc built from three edge constraints. Algebra:: l4 = PolarLine((0, 0), 4, 60) l5 = PolarLine((0, 0), 4, 40) a3 = CenterArc((0, 0), 4, 0, 90) ex_a3 = ( ConstrainedArcs(l4, l5, a3, sagitta=Sagitta.BOTH).edges().sort_by(Edge.length)[0] ) Builder:: with BuildLine() as arc_ex3: l4 = PolarLine((0, 0), 4, 60) l5 = PolarLine((0, 0), 4, 40) a3 = CenterArc((0, 0), 4, 0, 90) ex_a3 = ConstrainedArcs( l4, l5, a3, sagitta=Sagitta.BOTH, selector=lambda arcs: arcs.sort_by(Edge.length)[0], )
 ConstrainedArcs
 
   ConstrainedArcs(tangency_one: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, tangency_two: tuple[Axis | Edge, Tangency] | Axis | Edge | Vertex | VectorLike, radius: float, sagitta: Sagitta = Sagitta.SHORT, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda arcs: arcs, mode: Mode = Mode.ADD)
@@ -216,25 +137,11 @@ ConstrainedArcs
 
 // Category: objects_curve
 // Line Object
-// Remarks: The result is always a Curve containing one or more Edges. If you need
-to access Edge-specific properties or methods (such as ``length``),
-extract the edge or edges first::
-
-    result = ConstrainedLines(...)
-    lines = result.edges()      # extract the Edges
-    length = lines[1].length    # now Edge methods are available
-
-Note that in Builder mode the ``selector`` parameter must be provided or
-all results will be combined into the BuildLine context. In Algebra mode
-the selector can be applied as a parameter or in the normal way to the
-ConstrainedArcs object. The content of the selector is the same in both cases.
+// Remarks: The result is always a Curve containing one or more Edges. If you need to access Edge-specific properties or methods (such as ``length``), extract the edge or edges first:: result = ConstrainedLines(...) lines = result.edges() # extract the Edges length = lines[1].length # now Edge methods are available Note that in Builder mode the ``selector`` parameter must be provided or all results will be combined into the BuildLine context. In Algebra mode the selector can be applied as a parameter or in the normal way to the ConstrainedArcs object. The content of the selector is the same in both cases.
 ConstrainedLines
 
   // Create planar line(s) on XY subject to tangency/contact constraints
-  // Remarks: Supported cases
----------------
-1. Tangent to two curves
-2. Tangent to one curve and passing through a given point
+  // Remarks: Supported cases --------------- 1. Tangent to two curves 2. Tangent to one curve and passing through a given point
   ConstrainedLines(tangency_one: tuple[Edge, Tangency] | Axis | Edge, tangency_two: tuple[Edge, Tangency] | Axis | Edge, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda lines: lines, mode: Mode = Mode.ADD)
   ConstrainedLines(tangency_one: tuple[Edge, Tangency] | Edge, tangency_two: VectorLike, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda lines: lines, mode: Mode = Mode.ADD)
   ConstrainedLines(tangency_one: tuple[Edge, Tangency] | Edge, tangency_two: Axis, angle: float | None = None, direction: VectorLike | None = None, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda lines: lines, mode: Mode = Mode.ADD)
@@ -243,11 +150,7 @@ ConstrainedLines
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a circular arc defined by a point/tangent pair and another line find a tangent to.
-
-The arc specified with TOP or BOTTOM depends on the geometry and isn't predictable.
-
-Contains a solver.
+// Remarks: Create a circular arc defined by a point/tangent pair and another line find a tangent to. The arc specified with TOP or BOTTOM depends on the geometry and isn't predictable. Contains a solver.
 // Throws: RunTimeError: no double tangent arcs found
 DoubleTangentArc
 
@@ -276,10 +179,7 @@ EllipticalCenterArc
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a circular arc defined by a start point/tangent pair, radius and arc size.
-
-Note:
-    One of start_angle or major_axis_dir must be provided.
+// Remarks: Create a circular arc defined by a start point/tangent pair, radius and arc size. Note: One of start_angle or major_axis_dir must be provided.
 EllipticalStartArc
 
   EllipticalStartArc(start_pnt: VectorLike, start_tangent: VectorLike, x_radius: float, y_radius: float, arc_size: float, start_angle: float | None = None, major_axis_dir: VectorLike | None = None, mode: Mode = Mode.ADD)
@@ -294,8 +194,7 @@ EllipticalStartArc
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a sequence of straight lines defined by successive points that are filleted
-to a given radius.
+// Remarks: Create a sequence of straight lines defined by successive points that are filleted to a given radius.
 // Throws: ValueError: Two or more points not provided
 // Throws: ValueError: radius must be non-negative
 FilletPolyline
@@ -308,11 +207,7 @@ FilletPolyline
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a helix defined by pitch, height, and radius. The helix may have a taper
-defined by cone_angle.
-
-If cone_angle is not 0, radius is the initial helix radius at center. cone_angle > 0
-increases the final radius. cone_angle < 0 decreases the final radius.
+// Remarks: Create a helix defined by pitch, height, and radius. The helix may have a taper defined by cone_angle. If cone_angle is not 0, radius is the initial helix radius at center. cone_angle > 0 increases the final radius. cone_angle < 0 decreases the final radius.
 Helix
 
   Helix(pitch: float, height: float, radius: float, center: VectorLike = (0, 0, 0), direction: VectorLike = (0, 0, 1), cone_angle: float = 0, lefthand: bool = False, mode: Mode = Mode.ADD)
@@ -327,8 +222,7 @@ Helix
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a hyperbolic arc defined by a center point and focal length
-(distance from focus to vertex).
+// Remarks: Create a hyperbolic arc defined by a center point and focal length (distance from focus to vertex).
 HyperbolicCenterArc
 
   HyperbolicCenterArc(center: VectorLike, x_radius: float, y_radius: float, start_angle: float = 0.0, end_angle: float | None = None, arc_size: float | Shape | Axis | Location | Plane | VectorLike = 90.0, rotation: float = 0.0, angular_direction: AngularDirection | None = None, mode: Mode = Mode.ADD)
@@ -355,12 +249,7 @@ IntersectingLine
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a circular arc defined by a start point/tangent pair, radius and arc size or arc limit.
-
-Attributes:
-    start (Vector): start point
-    end_of_arc (Vector): end point of arc
-    center_point (Vector): center of arc
+// Remarks: Create a circular arc defined by a start point/tangent pair, radius and arc size or arc limit. Attributes: start (Vector): start point end_of_arc (Vector): end point of arc center_point (Vector): center of arc
 JernArc
 
   JernArc(start: VectorLike, tangent: VectorLike, radius: float, arc_size: float | Shape | Axis | Location | Plane | VectorLike, mode: Mode = Mode.ADD)
@@ -382,8 +271,7 @@ Line
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a parabolic arc defined by a vertex point and focal length
-(distance from focus to vertex).
+// Remarks: Create a parabolic arc defined by a vertex point and focal length (distance from focus to vertex).
 ParabolicCenterArc
 
   ParabolicCenterArc(vertex: VectorLike, focal_length: float, start_angle: float = 0.0, end_angle: float | None = None, arc_size: float | Shape | Axis | Location | Plane | VectorLike = 90.0, rotation: float = 0.0, angular_direction: AngularDirection | None = None, mode: Mode = Mode.ADD)
@@ -398,8 +286,7 @@ ParabolicCenterArc
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create an arc defined by a point/tangent pair and another line which the other end
-is tangent to.
+// Remarks: Create an arc defined by a point/tangent pair and another line which the other end is tangent to.
 // Throws: ValueError: Arc must have GeomType.CIRCLE
 // Throws: ValueError: Point is already tangent to arc
 // Throws: RuntimeError: No tangent arc found
@@ -425,17 +312,7 @@ PointArcTangentLine
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a straight line defined by a start point, length, and angle.
-The length can specify the DIAGONAL, HORIZONTAL, or VERTICAL component of the triangle
-defined by the angle.
-
-Alternatively, the length parameter can contain a limit to the length of the line
-in the form of another object. If the PolarLine doesn't contact the limit an error
-will be generated.
-
-Example:
-
-    p = PolarLine(start=(2, 0), length=Axis.Y, angle=135)
+// Remarks: Create a straight line defined by a start point, length, and angle. The length can specify the DIAGONAL, HORIZONTAL, or VERTICAL component of the triangle defined by the angle. Alternatively, the length parameter can contain a limit to the length of the line in the form of another object. If the PolarLine doesn't contact the limit an error will be generated. Example: p = PolarLine(start=(2, 0), length=Axis.Y, angle=135)
 // Throws: ValueError: Either angle or direction must be provided
 // Throws: ValueError: Polar line doesn't intersect length limit
 PolarLine
@@ -485,9 +362,7 @@ SagittaArc
 
 // Category: objects_curve
 // Line Object
-// Remarks: Create a spline defined by a sequence of points, optionally constrained by tangents.
-Tangents and tangent scalars must have length of 2 for only the end points or a length
-of the number of points.
+// Remarks: Create a spline defined by a sequence of points, optionally constrained by tangents. Tangents and tangent scalars must have length of 2 for only the end points or a length of the number of points.
 Spline
 
   Spline(*pts: VectorLike | Iterable[VectorLike], tangents: Iterable[VectorLike] | None = None, tangent_scalars: Iterable[float] | None = None, periodic: bool = False, mode: Mode = Mode.ADD)

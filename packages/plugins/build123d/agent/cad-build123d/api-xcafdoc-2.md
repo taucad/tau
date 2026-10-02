@@ -25,15 +25,7 @@ XCAFDoc_ShapeTool
   Search(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, S: OCP.OCP.TopoDS.TopoDS_Shape, L: OCP.OCP.TDF.TDF_Label, findInstance: bool = True, findComponent: bool = True, findSubshape: bool = True) -> bool
 
   // FindShape(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. FindShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, S: OCP.OCP.TopoDS.TopoDS_Shape, L: OCP.OCP.TDF.TDF_Label, findInstance: bool = False) -> bool
-
-Returns the label corresponding to shape S (searches among top-level shapes, not including subcomponents of assemblies and subshapes) If findInstance is False (default), search for the input shape without location If findInstance is True, searches for the input shape as is. Return True if <S> is found.
-
-2. FindShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, S: OCP.OCP.TopoDS.TopoDS_Shape, findInstance: bool = False) -> OCP.OCP.TDF.TDF_Label
-
-Does the same as previous method Returns Null label if not found
+  // Remarks: Overloaded function. 1. FindShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, S: OCP.OCP.TopoDS.TopoDS_Shape, L: OCP.OCP.TDF.TDF_Label, findInstance: bool = False) -> bool Returns the label corresponding to shape S (searches among top-level shapes, not including subcomponents of assemblies and subshapes) If findInstance is False (default), search for the input shape without location If findInstance is True, searches for the input shape as is. Return True if <S> is found. 2. FindShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, S: OCP.OCP.TopoDS.TopoDS_Shape, findInstance: bool = False) -> OCP.OCP.TDF.TDF_Label Does the same as previous method Returns Null label if not found
   FindShape(*args, **kwargs)
   FindShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, S: OCP.OCP.TopoDS.TopoDS_Shape, L: OCP.OCP.TDF.TDF_Label, findInstance: bool = False) -> bool
   FindShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, S: OCP.OCP.TopoDS.TopoDS_Shape, findInstance: bool = False) -> OCP.OCP.TDF.TDF_Label
@@ -79,15 +71,7 @@ Does the same as previous method Returns Null label if not found
   GetFreeShapes(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, FreeLabels: OCP.OCP.TDF.TDF_LabelSequence) -> None
 
   // AddComponent(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. AddComponent(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, assembly: OCP.OCP.TDF.TDF_Label, comp: OCP.OCP.TDF.TDF_Label, Loc: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.TDF.TDF_Label
-
-Adds a component given by its label and location to the assembly Note: assembly must be IsAssembly() or IsSimpleShape()
-
-2. AddComponent(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, assembly: OCP.OCP.TDF.TDF_Label, comp: OCP.OCP.TopoDS.TopoDS_Shape, expand: bool = False) -> OCP.OCP.TDF.TDF_Label
-
-Adds a shape (located) as a component to the assembly If necessary, creates an additional top-level shape for component and return the Label of component. If expand is True and component is Compound, it will be created as assembly also Note: assembly must be IsAssembly() or IsSimpleShape()
+  // Remarks: Overloaded function. 1. AddComponent(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, assembly: OCP.OCP.TDF.TDF_Label, comp: OCP.OCP.TDF.TDF_Label, Loc: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.TDF.TDF_Label Adds a component given by its label and location to the assembly Note: assembly must be IsAssembly() or IsSimpleShape() 2. AddComponent(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, assembly: OCP.OCP.TDF.TDF_Label, comp: OCP.OCP.TopoDS.TopoDS_Shape, expand: bool = False) -> OCP.OCP.TDF.TDF_Label Adds a shape (located) as a component to the assembly If necessary, creates an additional top-level shape for component and return the Label of component. If expand is True and component is Compound, it will be created as assembly also Note: assembly must be IsAssembly() or IsSimpleShape()
   AddComponent(*args, **kwargs)
   AddComponent(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, assembly: OCP.OCP.TDF.TDF_Label, comp: OCP.OCP.TDF.TDF_Label, Loc: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.TDF.TDF_Label
   AddComponent(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, assembly: OCP.OCP.TDF.TDF_Label, comp: OCP.OCP.TopoDS.TopoDS_Shape, expand: bool = False) -> OCP.OCP.TDF.TDF_Label
@@ -105,15 +89,7 @@ Adds a shape (located) as a component to the assembly If necessary, creates an a
   FindSubShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, shapeL: OCP.OCP.TDF.TDF_Label, sub: OCP.OCP.TopoDS.TopoDS_Shape, L: OCP.OCP.TDF.TDF_Label) -> bool
 
   // AddSubShape(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. AddSubShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, shapeL: OCP.OCP.TDF.TDF_Label, sub: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TDF.TDF_Label
-
-Adds a label for subshape of shape stored on label shapeL Returns Null label if it is not subshape
-
-2. AddSubShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, shapeL: OCP.OCP.TDF.TDF_Label, sub: OCP.OCP.TopoDS.TopoDS_Shape, addedSubShapeL: OCP.OCP.TDF.TDF_Label) -> bool
-
-Adds (of finds already existed) a label for subshape of shape stored on label shapeL. Label addedSubShapeL returns added (found) label or empty in case of wrong subshape. Returns True, if new shape was added, False in case of already existed subshape/wrong subshape
+  // Remarks: Overloaded function. 1. AddSubShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, shapeL: OCP.OCP.TDF.TDF_Label, sub: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TDF.TDF_Label Adds a label for subshape of shape stored on label shapeL Returns Null label if it is not subshape 2. AddSubShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, shapeL: OCP.OCP.TDF.TDF_Label, sub: OCP.OCP.TopoDS.TopoDS_Shape, addedSubShapeL: OCP.OCP.TDF.TDF_Label) -> bool Adds (of finds already existed) a label for subshape of shape stored on label shapeL. Label addedSubShapeL returns added (found) label or empty in case of wrong subshape. Returns True, if new shape was added, False in case of already existed subshape/wrong subshape
   AddSubShape(*args, **kwargs)
   AddSubShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, shapeL: OCP.OCP.TDF.TDF_Label, sub: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TDF.TDF_Label
   AddSubShape(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, shapeL: OCP.OCP.TDF.TDF_Label, sub: OCP.OCP.TopoDS.TopoDS_Shape, addedSubShapeL: OCP.OCP.TDF.TDF_Label) -> bool
@@ -130,25 +106,13 @@ Adds (of finds already existed) a label for subshape of shape stored on label sh
   BaseLabel(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool) -> OCP.OCP.TDF.TDF_Label
 
   // Dump(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Dump(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theDumpLog: io.BytesIO, deep: bool) -> io.BytesIO
-
-2. Dump(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theDumpLog: io.BytesIO) -> io.BytesIO
+  // Remarks: Overloaded function. 1. Dump(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theDumpLog: io.BytesIO, deep: bool) -> io.BytesIO 2. Dump(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theDumpLog: io.BytesIO) -> io.BytesIO
   Dump(*args, **kwargs)
   Dump(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theDumpLog: io.BytesIO, deep: bool) -> io.BytesIO
   Dump(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theDumpLog: io.BytesIO) -> io.BytesIO
 
   // SetExternRefs(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetExternRefs(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, SHAS: OCP.OCP.TColStd.TColStd_SequenceOfHAsciiString) -> OCP.OCP.TDF.TDF_Label
-
-Sets the names of references on the no-step files
-
-2. SetExternRefs(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, L: OCP.OCP.TDF.TDF_Label, SHAS: OCP.OCP.TColStd.TColStd_SequenceOfHAsciiString) -> None
-
-Sets the names of references on the no-step files
+  // Remarks: Overloaded function. 1. SetExternRefs(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, SHAS: OCP.OCP.TColStd.TColStd_SequenceOfHAsciiString) -> OCP.OCP.TDF.TDF_Label Sets the names of references on the no-step files 2. SetExternRefs(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, L: OCP.OCP.TDF.TDF_Label, SHAS: OCP.OCP.TColStd.TColStd_SequenceOfHAsciiString) -> None Sets the names of references on the no-step files
   SetExternRefs(*args, **kwargs)
   SetExternRefs(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, SHAS: OCP.OCP.TColStd.TColStd_SequenceOfHAsciiString) -> OCP.OCP.TDF.TDF_Label
   SetExternRefs(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, L: OCP.OCP.TDF.TDF_Label, SHAS: OCP.OCP.TColStd.TColStd_SequenceOfHAsciiString) -> None
@@ -186,15 +150,7 @@ Sets the names of references on the no-step files
   Expand(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, Shape: OCP.OCP.TDF.TDF_Label) -> bool
 
   // GetNamedProperties(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. GetNamedProperties(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theLabel: OCP.OCP.TDF.TDF_Label, theToCreate: bool = False) -> OCP.OCP.TDataStd.TDataStd_NamedData
-
-Method to get NamedData attribute assigned to the given shape label.
-
-2. GetNamedProperties(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theToCreate: bool = False) -> OCP.OCP.TDataStd.TDataStd_NamedData
-
-Method to get NamedData attribute assigned to a label of the given shape.
+  // Remarks: Overloaded function. 1. GetNamedProperties(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theLabel: OCP.OCP.TDF.TDF_Label, theToCreate: bool = False) -> OCP.OCP.TDataStd.TDataStd_NamedData Method to get NamedData attribute assigned to the given shape label. 2. GetNamedProperties(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theToCreate: bool = False) -> OCP.OCP.TDataStd.TDataStd_NamedData Method to get NamedData attribute assigned to a label of the given shape.
   GetNamedProperties(*args, **kwargs)
   GetNamedProperties(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theLabel: OCP.OCP.TDF.TDF_Label, theToCreate: bool = False) -> OCP.OCP.TDataStd.TDataStd_NamedData
   GetNamedProperties(self: OCP.OCP.XCAFDoc.XCAFDoc_ShapeTool, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theToCreate: bool = False) -> OCP.OCP.TDataStd.TDataStd_NamedData
@@ -246,15 +202,7 @@ Method to get NamedData attribute assigned to a label of the given shape.
   IsSubShape_s(L: OCP.OCP.TDF.TDF_Label) -> bool
 
   // GetShape_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. GetShape_s(L: OCP.OCP.TDF.TDF_Label, S: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-To get TopoDS_Shape from shape's label For component, returns new shape with correct location Returns False if label does not contain shape
-
-2. GetShape_s(L: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TopoDS.TopoDS_Shape
-
-To get TopoDS_Shape from shape's label For component, returns new shape with correct location Returns Null shape if label does not contain shape
+  // Remarks: Overloaded function. 1. GetShape_s(L: OCP.OCP.TDF.TDF_Label, S: OCP.OCP.TopoDS.TopoDS_Shape) -> bool To get TopoDS_Shape from shape's label For component, returns new shape with correct location Returns False if label does not contain shape 2. GetShape_s(L: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TopoDS.TopoDS_Shape To get TopoDS_Shape from shape's label For component, returns new shape with correct location Returns Null shape if label does not contain shape
   GetShape_s(*args, **kwargs)
   GetShape_s(L: OCP.OCP.TDF.TDF_Label, S: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   GetShape_s(L: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TopoDS.TopoDS_Shape

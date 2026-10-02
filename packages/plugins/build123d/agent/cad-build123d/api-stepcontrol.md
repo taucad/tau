@@ -39,23 +39,7 @@ STEPControl_Controller
 
 // Category: STEPControl
 // Gives you the choice of translation mode for an Open CASCADE shape that is being translated to STEP
-// Remarks: Members:
-
-  STEPControl_AsIs
-
-  STEPControl_ManifoldSolidBrep
-
-  STEPControl_BrepWithVoids
-
-  STEPControl_FacetedBrep
-
-  STEPControl_FacetedBrepAndBrepWithVoids
-
-  STEPControl_ShellBasedSurfaceModel
-
-  STEPControl_GeometricCurveSet
-
-  STEPControl_Hybrid
+// Remarks: Members: STEPControl_AsIs STEPControl_ManifoldSolidBrep STEPControl_BrepWithVoids STEPControl_FacetedBrep STEPControl_FacetedBrepAndBrepWithVoids STEPControl_ShellBasedSurfaceModel STEPControl_GeometricCurveSet STEPControl_Hybrid
 STEPControl_StepModelType
 
   // __init__(self

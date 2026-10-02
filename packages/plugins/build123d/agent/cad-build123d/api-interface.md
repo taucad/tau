@@ -7,11 +7,7 @@
 Interface_Static
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Interface.Interface_Static, family: str, name: str, type: OCP.OCP.Interface.Interface_ParamType = <Interface_ParamType.Interface_ParamText: 5>, init: str = '') -> None
-
-2. __init__(self: OCP.OCP.Interface.Interface_Static, family: str, name: str, other: OCP.OCP.Interface.Interface_Static) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Interface.Interface_Static, family: str, name: str, type: OCP.OCP.Interface.Interface_ParamType = <Interface_ParamType.Interface_ParamText: 5>, init: str = '') -> None 2. __init__(self: OCP.OCP.Interface.Interface_Static, family: str, name: str, other: OCP.OCP.Interface.Interface_Static) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Interface.Interface_Static, family: str, name: str, type: OCP.OCP.Interface.Interface_ParamType = <Interface_ParamType.Interface_ParamText: 5>, init: str = '') -> None
   __init__(self: OCP.OCP.Interface.Interface_Static, family: str, name: str, other: OCP.OCP.Interface.Interface_Static) -> None
@@ -41,15 +37,7 @@ Interface_Static
   UpdatedStatus(self: OCP.OCP.Interface.Interface_Static) -> bool
 
   // Init_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Init_s(family: str, name: str, type: OCP.OCP.Interface.Interface_ParamType, init: str = '') -> bool
-
-Declares a new Static (by calling its constructor) If this name is already taken, does nothing and returns False Else, creates it and returns True For additional definitions, get the Static then edit it
-
-2. Init_s(family: str, name: str, type: str, init: str = '') -> bool
-
-As Init with ParamType, but type is given as a character This allows a simpler call Types : 'i' Integer, 'r' Real, 't' Text, 'e' Enum, 'o' Object '=' for same definition as, <init> gives the initial Static Returns False if <type> does not match this list
+  // Remarks: Overloaded function. 1. Init_s(family: str, name: str, type: OCP.OCP.Interface.Interface_ParamType, init: str = '') -> bool Declares a new Static (by calling its constructor) If this name is already taken, does nothing and returns False Else, creates it and returns True For additional definitions, get the Static then edit it 2. Init_s(family: str, name: str, type: str, init: str = '') -> bool As Init with ParamType, but type is given as a character This allows a simpler call Types : 'i' Integer, 'r' Real, 't' Text, 'e' Enum, 'o' Object '=' for same definition as, <init> gives the initial Static Returns False if <type> does not match this list
   Init_s(*args, **kwargs)
   Init_s(family: str, name: str, type: OCP.OCP.Interface.Interface_ParamType, init: str = '') -> bool
   Init_s(family: str, name: str, type: str, init: str = '') -> bool

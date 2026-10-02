@@ -110,225 +110,97 @@ BRepBuilderAPI_Sewing
   WhichFace(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theEdg: OCP.OCP.TopoDS.TopoDS_Edge, index: int = 1) -> OCP.OCP.TopoDS.TopoDS_Face
 
   // SameParameterMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Gets same parameter mode.
-
-2. SameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Gets same parameter mode.
+  // Remarks: Overloaded function. 1. SameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Gets same parameter mode. 2. SameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Gets same parameter mode.
   SameParameterMode(*args, **kwargs)
   SameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
   SameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
 
   // SetSameParameterMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetSameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, SameParameterMode: bool) -> None
-
-Sets same parameter mode.
-
-2. SetSameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, SameParameterMode: bool) -> None
-
-Sets same parameter mode.
+  // Remarks: Overloaded function. 1. SetSameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, SameParameterMode: bool) -> None Sets same parameter mode. 2. SetSameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, SameParameterMode: bool) -> None Sets same parameter mode.
   SetSameParameterMode(*args, **kwargs)
   SetSameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, SameParameterMode: bool) -> None
   SetSameParameterMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, SameParameterMode: bool) -> None
 
   // Tolerance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Tolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
-
-Gives set tolerance.
-
-2. Tolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
-
-Gives set tolerance.
+  // Remarks: Overloaded function. 1. Tolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float Gives set tolerance. 2. Tolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float Gives set tolerance.
   Tolerance(*args, **kwargs)
   Tolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
   Tolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
 
   // SetTolerance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theToler: float) -> None
-
-Sets tolerance
-
-2. SetTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theToler: float) -> None
-
-Sets tolerance
+  // Remarks: Overloaded function. 1. SetTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theToler: float) -> None Sets tolerance 2. SetTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theToler: float) -> None Sets tolerance
   SetTolerance(*args, **kwargs)
   SetTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theToler: float) -> None
   SetTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theToler: float) -> None
 
   // MinTolerance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. MinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
-
-Gives set min tolerance.
-
-2. MinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
-
-Gives set min tolerance.
+  // Remarks: Overloaded function. 1. MinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float Gives set min tolerance. 2. MinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float Gives set min tolerance.
   MinTolerance(*args, **kwargs)
   MinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
   MinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
 
   // SetMinTolerance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetMinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMinToler: float) -> None
-
-Sets min tolerance
-
-2. SetMinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMinToler: float) -> None
-
-Sets min tolerance
+  // Remarks: Overloaded function. 1. SetMinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMinToler: float) -> None Sets min tolerance 2. SetMinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMinToler: float) -> None Sets min tolerance
   SetMinTolerance(*args, **kwargs)
   SetMinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMinToler: float) -> None
   SetMinTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMinToler: float) -> None
 
   // MaxTolerance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. MaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
-
-Gives set max tolerance
-
-2. MaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
-
-Gives set max tolerance
+  // Remarks: Overloaded function. 1. MaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float Gives set max tolerance 2. MaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float Gives set max tolerance
   MaxTolerance(*args, **kwargs)
   MaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
   MaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> float
 
   // SetMaxTolerance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetMaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMaxToler: float) -> None
-
-Sets max tolerance.
-
-2. SetMaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMaxToler: float) -> None
-
-Sets max tolerance.
+  // Remarks: Overloaded function. 1. SetMaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMaxToler: float) -> None Sets max tolerance. 2. SetMaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMaxToler: float) -> None Sets max tolerance.
   SetMaxTolerance(*args, **kwargs)
   SetMaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMaxToler: float) -> None
   SetMaxTolerance(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theMaxToler: float) -> None
 
   // FaceMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. FaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Returns mode for sewing faces By default - true.
-
-2. FaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Returns mode for sewing faces By default - true.
+  // Remarks: Overloaded function. 1. FaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Returns mode for sewing faces By default - true. 2. FaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Returns mode for sewing faces By default - true.
   FaceMode(*args, **kwargs)
   FaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
   FaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
 
   // SetFaceMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetFaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFaceMode: bool) -> None
-
-Sets mode for sewing faces By default - true.
-
-2. SetFaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFaceMode: bool) -> None
-
-Sets mode for sewing faces By default - true.
+  // Remarks: Overloaded function. 1. SetFaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFaceMode: bool) -> None Sets mode for sewing faces By default - true. 2. SetFaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFaceMode: bool) -> None Sets mode for sewing faces By default - true.
   SetFaceMode(*args, **kwargs)
   SetFaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFaceMode: bool) -> None
   SetFaceMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFaceMode: bool) -> None
 
   // FloatingEdgesMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. FloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Returns mode for sewing floating edges By default - false.
-
-2. FloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Returns mode for sewing floating edges By default - false.
+  // Remarks: Overloaded function. 1. FloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Returns mode for sewing floating edges By default - false. 2. FloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Returns mode for sewing floating edges By default - false.
   FloatingEdgesMode(*args, **kwargs)
   FloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
   FloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
 
   // SetFloatingEdgesMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetFloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFloatingEdgesMode: bool) -> None
-
-Sets mode for sewing floating edges By default - false. Returns mode for cutting floating edges By default - false. Sets mode for cutting floating edges By default - false.
-
-2. SetFloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFloatingEdgesMode: bool) -> None
-
-Sets mode for sewing floating edges By default - false. Returns mode for cutting floating edges By default - false. Sets mode for cutting floating edges By default - false.
+  // Remarks: Overloaded function. 1. SetFloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFloatingEdgesMode: bool) -> None Sets mode for sewing floating edges By default - false. Returns mode for cutting floating edges By default - false. Sets mode for cutting floating edges By default - false. 2. SetFloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFloatingEdgesMode: bool) -> None Sets mode for sewing floating edges By default - false. Returns mode for cutting floating edges By default - false. Sets mode for cutting floating edges By default - false.
   SetFloatingEdgesMode(*args, **kwargs)
   SetFloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFloatingEdgesMode: bool) -> None
   SetFloatingEdgesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theFloatingEdgesMode: bool) -> None
 
   // LocalTolerancesMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. LocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Returns mode for accounting of local tolerances of edges and vertices during of merging.
-
-2. LocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Returns mode for accounting of local tolerances of edges and vertices during of merging.
+  // Remarks: Overloaded function. 1. LocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Returns mode for accounting of local tolerances of edges and vertices during of merging. 2. LocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Returns mode for accounting of local tolerances of edges and vertices during of merging.
   LocalTolerancesMode(*args, **kwargs)
   LocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
   LocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
 
   // SetLocalTolerancesMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetLocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theLocalTolerancesMode: bool) -> None
-
-Sets mode for accounting of local tolerances of edges and vertices during of merging in this case WorkTolerance = myTolerance + tolEdge1+ tolEdg2;
-
-2. SetLocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theLocalTolerancesMode: bool) -> None
-
-Sets mode for accounting of local tolerances of edges and vertices during of merging in this case WorkTolerance = myTolerance + tolEdge1+ tolEdg2;
+  // Remarks: Overloaded function. 1. SetLocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theLocalTolerancesMode: bool) -> None Sets mode for accounting of local tolerances of edges and vertices during of merging in this case WorkTolerance = myTolerance + tolEdge1+ tolEdg2; 2. SetLocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theLocalTolerancesMode: bool) -> None Sets mode for accounting of local tolerances of edges and vertices during of merging in this case WorkTolerance = myTolerance + tolEdge1+ tolEdg2;
   SetLocalTolerancesMode(*args, **kwargs)
   SetLocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theLocalTolerancesMode: bool) -> None
   SetLocalTolerancesMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theLocalTolerancesMode: bool) -> None
 
   // SetNonManifoldMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetNonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theNonManifoldMode: bool) -> None
-
-Sets mode for non-manifold sewing.
-
-2. SetNonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theNonManifoldMode: bool) -> None
-
-Sets mode for non-manifold sewing.
+  // Remarks: Overloaded function. 1. SetNonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theNonManifoldMode: bool) -> None Sets mode for non-manifold sewing. 2. SetNonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theNonManifoldMode: bool) -> None Sets mode for non-manifold sewing.
   SetNonManifoldMode(*args, **kwargs)
   SetNonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theNonManifoldMode: bool) -> None
   SetNonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing, theNonManifoldMode: bool) -> None
 
   // NonManifoldMode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. NonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Gets mode for non-manifold sewing.
-
-2. NonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
-
-Gets mode for non-manifold sewing.
+  // Remarks: Overloaded function. 1. NonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Gets mode for non-manifold sewing. 2. NonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool Gets mode for non-manifold sewing.
   NonManifoldMode(*args, **kwargs)
   NonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
   NonManifoldMode(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Sewing) -> bool
@@ -355,11 +227,7 @@ Gets mode for non-manifold sewing.
 BRepBuilderAPI_Transform
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Transform, T: OCP.OCP.gp.gp_Trsf) -> None
-
-2. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Transform, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theTrsf: OCP.OCP.gp.gp_Trsf, theCopyGeom: bool = False, theCopyMesh: bool = False) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Transform, T: OCP.OCP.gp.gp_Trsf) -> None 2. __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Transform, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theTrsf: OCP.OCP.gp.gp_Trsf, theCopyGeom: bool = False, theCopyMesh: bool = False) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Transform, T: OCP.OCP.gp.gp_Trsf) -> None
   __init__(self: OCP.OCP.BRepBuilderAPI.BRepBuilderAPI_Transform, theShape: OCP.OCP.TopoDS.TopoDS_Shape, theTrsf: OCP.OCP.gp.gp_Trsf, theCopyGeom: bool = False, theCopyMesh: bool = False) -> None

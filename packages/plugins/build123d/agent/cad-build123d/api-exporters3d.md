@@ -4,22 +4,14 @@
 
 // Category: exporters3d
 // Export this shape to a BREP file
-// Remarks: Returns:
-    bool: write status
+// Remarks: Returns: bool: write status
 export_brep(to_export: Shape, file_path: PathLike | str | bytes | BytesIO | BinaryIO) -> bool
 //   to_export: object or assembly
 //   file_path: Union[PathLike, str, bytes, BytesIO]
 
 // Category: exporters3d
 // export_gltf
-// Remarks: The glTF (GL Transmission Format) specification primarily focuses on the efficient
-transmission and loading of 3D models as a compact, binary format that is directly
-renderable by graphics APIs like WebGL, OpenGL, and Vulkan. It's designed to store
-detailed 3D model data, including meshes (vertices, normals, textures, etc.),
-animations, materials, and scene hierarchy, among other aspects.
-
-Returns:
-    bool: write status
+// Remarks: The glTF (GL Transmission Format) specification primarily focuses on the efficient transmission and loading of 3D models as a compact, binary format that is directly renderable by graphics APIs like WebGL, OpenGL, and Vulkan. It's designed to store detailed 3D model data, including meshes (vertices, normals, textures, etc.), animations, materials, and scene hierarchy, among other aspects. Returns: bool: write status
 // Throws: RuntimeError: Failed to write glTF file
 export_gltf(to_export: Shape, file_path: PathLike | str | bytes, unit: Unit = Unit.MM, binary: bool = False, linear_deflection: float = 0.001, angular_deflection: float = 0.1) -> bool
 //   to_export: object or assembly
@@ -31,12 +23,7 @@ export_gltf(to_export: Shape, file_path: PathLike | str | bytes, unit: Unit = Un
 
 // Category: exporters3d
 // export_step
-// Remarks: Export a build123d Shape or assembly with color and label attributes.
-Note that if the color of a node in an assembly isn't set, it will be
-assigned the color of its nearest ancestor.
-
-Returns:
-    bool: success
+// Remarks: Export a build123d Shape or assembly with color and label attributes. Note that if the color of a node in an assembly isn't set, it will be assigned the color of its nearest ancestor. Returns: bool: success
 // Throws: RuntimeError: Unknown Compound type
 export_step(to_export: Shape, file_path: PathLike | str | bytes | BytesIO | BinaryIO, unit: Unit = Unit.MM, write_pcurves: bool = True, precision_mode: PrecisionMode = PrecisionMode.AVERAGE, timestamp: str | datetime | None = None) -> bool
 //   to_export: object or assembly
@@ -47,10 +34,7 @@ export_step(to_export: Shape, file_path: PathLike | str | bytes | BytesIO | Bina
 
 // Category: exporters3d
 // Export STL
-// Remarks: Exports a shape to a specified STL file.
-
-Returns:
-    bool: Success
+// Remarks: Exports a shape to a specified STL file. Returns: bool: Success
 export_stl(to_export: Shape, file_path: PathLike | str | bytes, tolerance: float = 0.001, angular_tolerance: float = 0.1, ascii_format: bool = False) -> bool
 //   to_export: object or assembly
 //   file_path: The path and file name to write the STL output to
@@ -60,12 +44,7 @@ export_stl(to_export: Shape, file_path: PathLike | str | bytes, tolerance: float
 
 // Category: exporters3d
 // Export a shape to PCBWay for quoting
-// Remarks: This function writes ``to_export`` to a temporary STEP file, uploads that file
-to PCBWay's external web service, opens the returned pricing page in the
-default browser, and returns the pricing page URL.
-
-Returns:
-    str: URL of the pricing page
+// Remarks: This function writes ``to_export`` to a temporary STEP file, uploads that file to PCBWay's external web service, opens the returned pricing page in the default browser, and returns the pricing page URL. Returns: str: URL of the pricing page
 export_to_pcbway(to_export: Shape, unit: Unit = Unit.MM, write_pcurves: bool = True, precision_mode: PrecisionMode = PrecisionMode.AVERAGE) -> str
 //   to_export: object or assembly
 //   unit: shape units

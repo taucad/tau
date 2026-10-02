@@ -4,8 +4,7 @@
 
 // Category: import_dxf
 // Import shapes from a DXF file
-// Remarks: Returns:
-    ShapeList: build123d objects
+// Remarks: Returns: ShapeList: build123d objects
 // Throws: DXFStructureError: file not found
 import_dxf(dxf_file: str | PathLike | TextIO | BinaryIO) -> ShapeList
 //   dxf_file: dxf file path or readable stream

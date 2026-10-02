@@ -64,8 +64,7 @@ CounterBoreHole
 
 // Category: objects_part
 // Part Operation
-// Remarks: Create a countersink hole defined by radius, countersink radius, countersink
-angle, and depth.
+// Remarks: Create a countersink hole defined by radius, countersink radius, countersink angle, and depth.
 CounterSinkHole
 
   CounterSinkHole(radius: float, counter_sink_radius: float, depth: float | None = None, counter_sink_angle: float = 82, mode: Mode = Mode.SUBTRACT)
@@ -129,8 +128,7 @@ Torus
 
 // Category: objects_part
 // Part Object
-// Remarks: Create a wedge with a near face defined by xsize and z size, a far face defined by
-xmin to xmax and zmin to zmax, and a depth of ysize.
+// Remarks: Create a wedge with a near face defined by xsize and z size, a far face defined by xmin to xmax and zmin to zmax, and a depth of ysize.
 Wedge
 
   Wedge(xsize: float, ysize: float, zsize: float, xmin: float, zmin: float, xmax: float, zmax: float, rotation: RotationLike = (0, 0, 0), align: Align | tuple[Align, Align, Align] = (Align.CENTER, Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)

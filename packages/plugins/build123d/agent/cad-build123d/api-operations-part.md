@@ -12,10 +12,7 @@ draft(faces: Face | Iterable[Face], neutral_plane: Plane, angle: float) -> Part
 
 // Category: operations_part
 // Part Operation
-// Remarks: Extrude a sketch or face by an amount or until another object.
-
-Returns:
-    Part: extruded object
+// Remarks: Extrude a sketch or face by an amount or until another object. Returns: Part: extruded object
 // Throws: ValueError: No object to extrude
 // Throws: ValueError: No target object
 extrude(to_extrude: Face | Sketch | None = None, amount: float | None = None, dir: VectorLike | None = None, until: Until | None = None, target: Compound | Solid | None = None, both: bool = False, taper: float = 0.0, clean: bool = True, mode: Mode = Mode.ADD) -> Part
@@ -40,15 +37,7 @@ loft(sections: Face | Sketch | Iterable[Vertex | Face | Sketch] | None = None, r
 
 // Category: operations_part
 // make_brake_formed
-// Remarks: Create a part typically formed with a sheet metal brake from a single outline.
-The line parameter describes how the material is to be bent. Either a single
-width value or a width value at each vertex or station is provided to control
-the width of the end part.  Note that if multiple values are provided there
-must be one for each vertex and that the resulting part is composed of linear
-segments.
-
-Returns:
-    Part: sheet metal part
+// Remarks: Create a part typically formed with a sheet metal brake from a single outline. The line parameter describes how the material is to be bent. Either a single width value or a width value at each vertex or station is provided to control the width of the end part. Note that if multiple values are provided there must be one for each vertex and that the resulting part is composed of linear segments. Returns: Part: sheet metal part
 // Throws: ValueError: invalid line type
 // Throws: ValueError: not line provided
 // Throws: ValueError: line not suitable
@@ -64,13 +53,7 @@ make_brake_formed(thickness: float, station_widths: float | Iterable[float], lin
 
 // Category: operations_part
 // Part Operation
-// Remarks: Return a plane to be used as a BuildSketch or BuildLine workplane
-with a known origin and x direction. The plane's origin will be
-the projection of the provided origin (in 3D space). The plane's
-x direction will be the projection of the provided x_dir (in 3D space).
-
-Returns:
-    Plane: workplane aligned for projection
+// Remarks: Return a plane to be used as a BuildSketch or BuildLine workplane with a known origin and x direction. The plane's origin will be the projection of the provided origin (in 3D space). The plane's x direction will be the projection of the provided x_dir (in 3D space). Returns: Plane: workplane aligned for projection
 // Throws: RuntimeError: Not suitable for BuildLine or BuildSketch
 // Throws: ValueError: x_dir perpendicular to projection_dir
 project_workplane(origin: VectorLike | Vertex, x_dir: VectorLike | Vertex, projection_dir: VectorLike, distance: float) -> Plane
@@ -81,9 +64,7 @@ project_workplane(origin: VectorLike | Vertex, x_dir: VectorLike | Vertex, proje
 
 // Category: operations_part
 // Part Operation
-// Remarks: Revolve the profile or pending sketches/face about the given axis.
-Note that the most common use case is when the axis is in the same plane as the
-face to be revolved but this isn't required.
+// Remarks: Revolve the profile or pending sketches/face about the given axis. Note that the most common use case is when the axis is in the same plane as the face to be revolved but this isn't required.
 // Throws: ValueError: Invalid axis of revolution
 revolve(profiles: Face | Iterable[Face] | None = None, axis: Axis = Axis.Z, revolution_arc: float = 360.0, clean: bool = True, mode: Mode = Mode.ADD) -> Part
 //   profiles: 2D profile(s) to revolve
@@ -104,10 +85,7 @@ section(obj: Part | None = None, section_by: Plane | Iterable[Plane] = Plane.XZ,
 
 // Category: operations_part
 // Part Operation
-// Remarks: Create a solid(s) from a potentially non planar face(s) by thickening along the normals.
-
-Returns:
-    Part: extruded object
+// Remarks: Create a solid(s) from a potentially non planar face(s) by thickening along the normals. Returns: Part: extruded object
 // Throws: ValueError: No object to extrude
 // Throws: ValueError: No target object
 thicken(to_thicken: Face | Sketch | None = None, amount: float | None = None, normal_override: VectorLike | None = None, both: bool = False, clean: bool = True, mode: Mode = Mode.ADD) -> Part

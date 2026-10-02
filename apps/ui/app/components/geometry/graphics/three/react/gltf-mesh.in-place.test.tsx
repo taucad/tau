@@ -11,9 +11,12 @@ import type { BufferAttribute, Intersection, Mesh, Object3D } from 'three';
 import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 import * as surfaceBatchOwners from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import { getModelEmphasisSet } from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
+import { getModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 
 const mocks = vi.hoisted(() => {
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
+  const selectedComponentIds: string[] = [];
   return {
     noHoveredComponentIds: [] as readonly string[],
     camera: { name: 'perspective' },
@@ -46,7 +49,7 @@ const mocks = vi.hoisted(() => {
       isolatedComponentIds: [],
       manifest: undefined,
       opacityByComponentId: {},
-      selectedComponentIds: [],
+      selectedComponentIds,
     },
     renderFrame: {
       anchorFrameId: 'tau:root',
@@ -175,6 +178,7 @@ describe('GltfMesh in-place updates', () => {
     mocks.invalidate.mockClear();
     mocks.frameCallback = undefined;
     mocks.sectionView = { isActive: false };
+    mocks.modelUnit = { ...mocks.modelUnit, selectedComponentIds: [] };
   });
 
   it('should present a same-topology result without reparsing it', async () => {
@@ -347,6 +351,49 @@ describe('GltfMesh in-place updates', () => {
     expect([...position.array]).toEqual(before);
     expect((position as BufferAttribute).version).toBe(version);
     expect(committedRevisions()).toEqual([1]);
+  });
+
+  it('should keep selected emphasis after a material change and a full scene replacement', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const firstGlb = buildGlb();
+    const view = render(
+      <GltfMesh gltfFile={firstGlb} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const first = (await parseAsync.mock.results[0]?.value) as GLTF;
+    const firstSurface = findSurface(first.scene);
+    const componentId = getModelComponentOwner(firstSurface)?.componentId;
+    if (!componentId) {
+      throw new Error('Expected the presented surface to belong to a component.');
+    }
+    mocks.modelUnit = { ...mocks.modelUnit, selectedComponentIds: [componentId] };
+    view.rerender(<GltfMesh gltfFile={firstGlb} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(getModelEmphasisSet(mocks.rootScene as unknown as Object3D).selected).toEqual([firstSurface]);
+    });
+
+    const originalMaterial = firstSurface.material;
+    view.rerender(<GltfMesh gltfFile={firstGlb} geometryHash='a' presentationRevision={1} enableMatcap />);
+    await waitFor(() => {
+      expect(firstSurface.material).not.toBe(originalMaterial);
+    });
+    expect(parseAsync).toHaveBeenCalledTimes(1);
+    expect(getModelEmphasisSet(mocks.rootScene as unknown as Object3D).selected).toEqual([firstSurface]);
+
+    view.rerender(
+      <GltfMesh gltfFile={buildGlb({ indices: [0, 2, 1] })} geometryHash='b' presentationRevision={2} enableMatcap />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1, 2]);
+    });
+    expect(parseAsync).toHaveBeenCalledTimes(2);
+    const second = (await parseAsync.mock.results[1]?.value) as GLTF;
+    const secondSurface = findSurface(second.scene);
+    expect(secondSurface).not.toBe(firstSurface);
+    expect(getModelComponentOwner(secondSurface)?.componentId).toBe(componentId);
+    expect(getModelEmphasisSet(mocks.rootScene as unknown as Object3D).selected).toEqual([secondSurface]);
   });
 
   it('should fall back to a full presentation when the topology changes', async () => {

@@ -50,7 +50,7 @@ describe('workbench snapshot', () => {
       lanes: { chat: true, workbench: true },
       visible: [{ kind: 'pane', pane: 'parameters' }],
       views: [{ id: 'front', name: 'Front', entryPath: 'main.ts', camera: 'front' }],
-      entries: [{ path: 'main.ts', operationTimeout: 180_000, hidden: 2 }],
+      entries: [{ path: 'main.ts', renderTimeout: 180_000, hidden: 2 }],
       unavailable: ['kernel', 'console'],
       refused: [{ tab: { kind: 'pane', pane: 'kernel' }, reason: 'debug-only' }],
     };

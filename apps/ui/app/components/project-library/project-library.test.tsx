@@ -850,11 +850,9 @@ describe('ProjectLibrary', () => {
       screen.getByRole('button', { name: `Delete permanently ${mockProjects[0]!.name}` }).click();
       await waitFor(() => {
         expect(verifyProjectQuiescent).toHaveBeenCalledWith(mockProjects[0]!.id);
-        expect(mockToastError).toHaveBeenCalledWith(
-          `Could not delete ${mockProjects[0]!.name} permanently`,
-          // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is typed any.
-          expect.objectContaining({ description: expect.stringMatching(/Restore and open/u) }),
-        );
+        expect(mockToastError).toHaveBeenCalledWith(`Could not delete ${mockProjects[0]!.name} permanently`, {
+          description: 'Restore and open this project to verify its chats before deleting it.',
+        });
       });
       expect(screen.queryByRole('heading', { name: 'Delete this project permanently?' })).not.toBeInTheDocument();
       expect(mockUseProjectsResult.permanentlyDeleteProject).not.toHaveBeenCalled();

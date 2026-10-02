@@ -110,8 +110,9 @@ const main = async (): Promise<void> => {
   }
   const resolved = await workspace({ fresh: true });
   const projects = new Map(publishable(resolved).map((project) => [project.name, project]));
-  const closure = publishableClosure(resolved, ['geospec']);
+  const closure = publishableClosure(resolved, ['geospec', 'geospec-engine']);
   assert.ok(closure.includes('geospec'), 'GeoSpec is missing from the publishable closure');
+  assert.ok(closure.includes('geospec-engine'), 'GeoSpec CLI is missing from the publishable closure');
   const packages = closure.map((name) => {
     const project = projects.get(name);
     assert.ok(project, `Missing publishable project: ${name}`);

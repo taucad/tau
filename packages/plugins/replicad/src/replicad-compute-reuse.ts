@@ -24,6 +24,16 @@ type ReplicadLibraryLike = {
   readonly deserializeShape: (serialized: string) => ShapeLike;
 };
 
+/**
+ * Give runtime proxies configurable properties while retaining the imported module's functions.
+ *
+ * @param library - Imported Replicad module namespace.
+ * @returns A mutable namespace facade with the same exported values.
+ */
+export const replicadModuleFacade = <Library extends ReplicadLibraryLike>(library: Library): Library => ({
+  ...library,
+});
+
 type ShapeIdentity = { readonly actionDigest: ActionDigest };
 
 /**

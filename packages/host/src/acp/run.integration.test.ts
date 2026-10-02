@@ -160,9 +160,10 @@ const startHarness = async (
   roots.push(workspaceRoot);
   await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
   const api = await startStubApi();
+  const toolRegistry = options.mcpRegistry ?? registry;
   const mcp = createHostMcpEndpoint({
     secret: randomBytes(32).toString('base64url'),
-    registry,
+    registry: toolRegistry,
     workspaceRoot,
     ...(options.mcpNow === undefined ? {} : { now: options.mcpNow }),
   });
@@ -205,8 +206,8 @@ const startHarness = async (
     gatewayBaseUrl: `http://127.0.0.1:${String(api.port)}/`,
     model: { id: 'unused-by-external-runs', contextWindow: 1000 },
     systemPrompt: 'unused by external runs',
-    toolRegistry: registry,
-    ...(revisions === undefined ? {} : { turnPlacement: revisions.placement(() => registry) }),
+    toolRegistry,
+    ...(revisions === undefined ? {} : { turnPlacement: revisions.placement(() => toolRegistry) }),
     externalAgents: createAcpExternalAgentPort({
       agents: options.agents ?? [fakeAgent, otherFakeAgent],
       workspaceRoot,
@@ -499,6 +500,56 @@ const trackedAdapter = async (mode: string): Promise<{ readonly adapter: AcpAdap
 };
 
 describe('the external agent run kind', () => {
+  it('should publish and consume every generated GeoSpec skill resource through an active ACP fixture session', async () => {
+    const { default: geospecBundles } = await import('geospec/agent/resources.js');
+    const harness = await startHarness({ systemSkillBundles: geospecBundles });
+    await runTurn(harness, {
+      chatId: 'chat-geospec-skills',
+      runId: 'run-geospec-skills',
+      text: 'inspect skills noask',
+    });
+    const assistant = messagesOf(await readLog(harness.workspaceRoot, 'chat-geospec-skills'))
+      .filter((message) => message.role === 'assistant')
+      .map((message) => textOfMessage(message))
+      .join('');
+    const marker = 'native-skills: ';
+    expect(assistant).toContain(marker);
+    const consumed = JSON.parse(assistant.slice(assistant.indexOf(marker) + marker.length)) as Array<{
+      readonly root: string;
+      readonly files: Readonly<Record<string, string>>;
+    }>;
+    expect(consumed).toHaveLength(1);
+    const expectedPaths = geospecBundles.flatMap((bundle) => bundle.files.map((file) => `${bundle.slug}/${file.path}`));
+    expect(Object.keys(consumed[0]!.files).toSorted()).toEqual(expectedPaths.toSorted());
+    const digest = createHash('sha256')
+      .update(
+        JSON.stringify(
+          geospecBundles.map((bundle) => ({
+            slug: bundle.slug,
+            files: bundle.files.map(({ path, sha256 }) => ({ path, sha256 })),
+          })),
+        ),
+      )
+      .digest('hex');
+    expect(consumed[0]!.root.split('/').at(-1)).toBe(digest);
+    const opened = harness.frames.find(
+      (frame) => frame.direction === 'client->agent' && frame.frame.includes('"method":"session/new"'),
+    );
+    const directories = (JSON.parse(opened!.frame) as { params: { additionalDirectories: string[] } }).params
+      .additionalDirectories;
+    expect(directories).toEqual([consumed[0]!.root]);
+    for (const bundle of geospecBundles) {
+      for (const resource of bundle.files) {
+        const content = consumed[0]!.files[`${bundle.slug}/${resource.path}`]!;
+        expect(Buffer.byteLength(content)).toBe(resource.byteLength);
+        expect(createHash('sha256').update(content).digest('hex')).toBe(resource.sha256);
+        // oxlint-disable-next-line no-await-in-loop -- verify each actively consumed resource against its owner bytes.
+        expect(content).toBe(await readFile(new URL(resource.url), 'utf8'));
+      }
+      expect(consumed[0]!.files[`${bundle.slug}/SKILL.md`]).toBe(bundle.body);
+    }
+  }, 60_000);
+
   it('drains admitted filesystem work even after the adapter transport closes', async () => {
     const cwd = await mkdtemp(join(tmpdir(), 'tau-acp-fs-drain-'));
     roots.push(cwd);

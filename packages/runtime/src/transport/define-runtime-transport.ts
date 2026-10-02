@@ -13,7 +13,7 @@
 
 import type { z } from 'zod';
 import type { RpcProtocol } from '@taucad/rpc';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import type { RuntimeTransportClient, TransportPlugin } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
 
@@ -62,7 +62,7 @@ const synthTransportCallable = <
 export function defineRuntimeTransport<
   const Id extends string,
   ClientOptionsSchema extends z.ZodType,
-  Protocol extends RpcProtocol = RuntimeProtocol,
+  Protocol extends RpcProtocol = RuntimeDocumentProtocol,
   BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 >(definition: {
   readonly id: Id;
@@ -122,7 +122,7 @@ export function defineRuntimeTransport(definition: any): any {
 export function definePassthroughTransport<
   const Id extends string,
   ClientOptionsSchema extends z.ZodType,
-  Protocol extends RpcProtocol = RuntimeProtocol,
+  Protocol extends RpcProtocol = RuntimeDocumentProtocol,
   BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 >(definition: {
   readonly id: Id;
@@ -139,7 +139,7 @@ export function definePassthroughTransport<
  */
 export function definePassthroughTransport<
   const Id extends string,
-  Protocol extends RpcProtocol = RuntimeProtocol,
+  Protocol extends RpcProtocol = RuntimeDocumentProtocol,
   BindingsExtra extends Readonly<Record<string, unknown>> = Readonly<Record<never, never>>,
 >(definition: {
   readonly id: Id;

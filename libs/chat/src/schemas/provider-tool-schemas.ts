@@ -19,8 +19,8 @@ import { modelSupportsInput, modelSupportsTools } from '#types/model.types.js';
  */
 export const cadProviderFacingToolNames = [
   toolName.testModel,
-  toolName.getKernelResult,
-  toolName.exportGeometry,
+  toolName.evaluateModel,
+  toolName.exportModel,
   toolName.getParameters,
   toolName.applyParameterOperation,
   toolName.screenshot,

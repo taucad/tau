@@ -192,6 +192,9 @@ export function createWorkbenchLayoutStore(
     resetBytes?: Uint8Array<ArrayBuffer> | null,
     eligible?: () => boolean,
   ): Promise<'saved' | 'retry' | 'blocked'> => {
+    if (isDisposed()) {
+      return 'blocked';
+    }
     if (!observed && !(await read())) {
       return 'retry';
     }
@@ -289,7 +292,7 @@ export function createWorkbenchLayoutStore(
     return 'retry';
   };
   const retry = (): void => {
-    if (!deferred || retryTimer) {
+    if (isDisposed() || !deferred || retryTimer) {
       return;
     }
     retryTimer = setTimeout(() => {
@@ -317,9 +320,18 @@ export function createWorkbenchLayoutStore(
         if (saved) {
           deferred = undefined;
           retryDelay = 250;
-        } else if (status === 'retry') {
-          deferred = combine(deferred, patch);
-          retry();
+        } else {
+          const remaining = combine(deferred, patch);
+          deferred =
+            status === 'retry' ||
+            remaining.viewer !== undefined ||
+            remaining.workbench !== undefined ||
+            Object.keys(remaining.lanes ?? {}).length > 0
+              ? remaining
+              : undefined;
+          if (status === 'retry') {
+            retry();
+          }
         }
         if (sequence === editSequence) {
           intended = saved ? state.layout : next;
@@ -348,6 +360,9 @@ export function createWorkbenchLayoutStore(
   return {
     read,
     edit: async (next) => {
+      if (isDisposed()) {
+        return false;
+      }
       const patch = diff(next, observed ? undefined : null);
       intended = next;
       const sequence = ++editSequence;
@@ -400,13 +415,25 @@ export function createWorkbenchLayoutStore(
       return result;
     },
     reset: async (next) => {
-      if (state.refusal?.code !== 'INVALID_RECORD') {
+      if (isDisposed() || state.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
       const reviewedBytes = state.bytes;
+      await drainEdit();
+      const sequence = ++editSequence;
       const result = pending
         .then(async () => write(next, undefined, true, reviewedBytes))
-        .then((status) => status === 'saved');
+        .then((status) => {
+          if (status !== 'saved') {
+            return false;
+          }
+          deferred = undefined;
+          settledSequence = sequence;
+          if (sequence === editSequence) {
+            intended = state.layout;
+          }
+          return true;
+        });
       pending = result;
       return result;
     },

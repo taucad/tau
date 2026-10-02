@@ -2,7 +2,8 @@ import { cpSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import process from 'node:process';
 import { afterEach, expect, test } from 'vitest';
-import { launchDesktopApp } from '#support/desktop-app.js';
+import { desktopE2ECompletedArtifact } from '#support/config.js';
+import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { gatewayFixtureFinalText, gatewayFixtureModelName, installGatewayFixture } from '#support/gateway-fixture.js';
 import type { GatewayFixture } from '#support/gateway-fixture.js';
@@ -76,6 +77,9 @@ test('builds an openrscad model on disk from the desktop composer', async () => 
 
   try {
     await expectVisible(page.locator('[aria-label="Ask Tau to build anything..."]'), 120_000);
+    if (desktopE2ECompletedArtifact) {
+      await authenticatePackagedDesktop(session, token);
+    }
     await expectSignedIn(page);
 
     await selectKernel(page, 'OpenSCAD');

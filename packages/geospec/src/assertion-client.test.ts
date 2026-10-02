@@ -22,9 +22,9 @@ class RecordingEngine implements GeoSpecNativeEngine {
   public returnedPlan?: Uint8Array<ArrayBuffer>;
   public returnedResult?: Uint8Array<ArrayBuffer>;
   private readonly defaultWorkUnitBudget: unknown;
-  private readonly status: 'failed' | 'passed' | 'refused';
+  private readonly status: string;
 
-  public constructor(defaultWorkUnitBudget: unknown = 8_000_000, status: 'failed' | 'passed' | 'refused' = 'passed') {
+  public constructor(defaultWorkUnitBudget: unknown = 8_000_000, status = 'passed') {
     this.defaultWorkUnitBudget = defaultWorkUnitBudget;
     this.status = status;
   }
@@ -84,15 +84,20 @@ class RecordingEngine implements GeoSpecNativeEngine {
 const hash = 'a'.repeat(64);
 
 describe('runner-independent GeoSpec assertion client', () => {
-  it('executes the 24 legacy matchers and both fixed native contracts', async () => {
+  it('should complete a bare assertion before returning and throw a refused claim synchronously', () => {
+    const passed = createGeoSpecAssertionClient({ engine: new RecordingEngine(), workUnitLimit: 10_000 });
+    expect(passed.expectGeo({ subjectHash: hash }).toBeWatertight()).toMatchObject({ status: 'passed' });
+    const refused = createGeoSpecAssertionClient({
+      engine: new RecordingEngine(10_000, 'refused'),
+      workUnitLimit: 10_000,
+    });
+    expect(() => refused.expectGeo({ subjectHash: hash }).not.toBeWatertight()).toThrow(GeoSpecAssertionError);
+  });
+  it('executes all 26 canonical matcher contracts', async () => {
     const engine = new RecordingEngine();
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 50_000 });
     const matchers = client.expectGeo({ subjectHash: hash });
-    const names = [
-      ...Object.keys(geoSpecMatcherDescriptors),
-      'toSatisfyRationalPlate',
-      'toSatisfyParallelPlaneDistance',
-    ];
+    const names = Object.keys(geoSpecMatcherDescriptors);
 
     expect(Object.keys(matchers)).toStrictEqual([...names, 'not']);
     await Promise.all(
@@ -112,7 +117,7 @@ describe('runner-independent GeoSpec assertion client', () => {
       workUnitLimit: 123_456,
     });
 
-    const report = await client.expectGeo({ subjectHash: hash }).not.toHaveBoundingBox([0, 0, 0], [1, 2, 3]);
+    const report = client.expectGeo({ subjectHash: hash }).not.toHaveBoundingBox([0, 0, 0], [1, 2, 3]);
     const request = record(engine.canonicalInput!);
     const plan = record(request['plan']!);
     const { claims } = plan;
@@ -149,14 +154,20 @@ describe('runner-independent GeoSpec assertion client', () => {
     { polarity: 'negative', status: 'failed' },
     { polarity: 'positive', status: 'refused' },
     { polarity: 'negative', status: 'refused' },
+    ...['unsupported', 'inconclusive', 'not-run', 'invalid', 'cancelled', 'engine-error'].flatMap((status) => [
+      { polarity: 'positive', status },
+      { polarity: 'negative', status },
+    ]),
   ] as const)('rejects a $polarity $status core report with the exact report bytes', async ({ polarity, status }) => {
     const engine = new RecordingEngine(8_000_000, status);
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 10_000 });
     const chain = client.expectGeo({ subjectHash: hash });
-    const operation = polarity === 'positive' ? chain.toBeWatertight() : chain.not.toBeWatertight();
-
     try {
-      await operation;
+      if (polarity === 'positive') {
+        chain.toBeWatertight();
+      } else {
+        chain.not.toBeWatertight();
+      }
       expect.fail('The standalone assertion should reject a non-passed core report.');
     } catch (error) {
       expect(error).toBeInstanceOf(GeoSpecAssertionError);
@@ -203,7 +214,7 @@ describe('runner-independent GeoSpec assertion client', () => {
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 10_000 });
 
     try {
-      await client.expectGeo({ subjectHash: hash }).toBeWatertight();
+      client.expectGeo({ subjectHash: hash }).toBeWatertight();
       expect.fail('The native evaluation error should reject the assertion.');
     } catch (error) {
       expect(error).toBe(nativeError);
@@ -258,7 +269,7 @@ describe('runner-independent GeoSpec assertion client', () => {
     const engine = new RecordingEngine();
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 1 });
 
-    await client.expectGeo({ contentHash: hash }).toBeWatertight();
+    client.expectGeo({ contentHash: hash }).toBeWatertight();
     const request = record(engine.canonicalInput!);
     const plan = record(request['plan']!);
     expect(plan['subjects']).toStrictEqual([{ slot: 'subject', contentHash: hash }]);
@@ -267,10 +278,10 @@ describe('runner-independent GeoSpec assertion client', () => {
   it('names the evidence profile on the plan only when a client selects one', async () => {
     const engine = new RecordingEngine();
 
-    await createGeoSpecAssertionClient({ engine, workUnitLimit: 1 }).expectGeo({ subjectHash: hash }).toBeWatertight();
+    createGeoSpecAssertionClient({ engine, workUnitLimit: 1 }).expectGeo({ subjectHash: hash }).toBeWatertight();
     expect(record(record(engine.canonicalInput!)['plan']!)).not.toHaveProperty('evidenceProfile');
 
-    await createGeoSpecAssertionClient({ engine, evidenceProfile: 'bounded', workUnitLimit: 1 })
+    createGeoSpecAssertionClient({ engine, evidenceProfile: 'bounded', workUnitLimit: 1 })
       .expectGeo({ subjectHash: hash })
       .toBeWatertight();
     expect(record(record(engine.canonicalInput!)['plan']!)['evidenceProfile']).toBe('bounded');
@@ -281,13 +292,13 @@ describe('runner-independent GeoSpec assertion client', () => {
     const first = createGeoSpecAssertionClient({ engine });
     const second = createGeoSpecAssertionClient({ engine });
 
-    await first.expectGeo({ subjectHash: hash }).toBeWatertight();
+    first.expectGeo({ subjectHash: hash }).toBeWatertight();
     let request = record(engine.canonicalInput!);
     let plan = record(request['plan']!);
     let { claims } = plan;
     expect(record(Array.isArray(claims) ? claims[0]! : null)['workUnitBudget']).toBe(8_000_000);
 
-    await second.expectGeo({ subjectHash: hash }).toHaveNoDiagnostics();
+    second.expectGeo({ subjectHash: hash }).toHaveNoDiagnostics();
     request = record(engine.canonicalInput!);
     plan = record(request['plan']!);
     ({ claims } = plan);
@@ -299,7 +310,7 @@ describe('runner-independent GeoSpec assertion client', () => {
     const engine = new RecordingEngine(8_000_000);
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 99 });
 
-    await client.expectGeo({ subjectHash: hash }).toBeWatertight();
+    client.expectGeo({ subjectHash: hash }).toBeWatertight();
     const request = record(engine.canonicalInput!);
     const plan = record(request['plan']!);
     const { claims } = plan;
@@ -314,14 +325,14 @@ describe('runner-independent GeoSpec assertion client', () => {
         engine: new RecordingEngine(defaultWorkUnitBudget),
       });
 
-      await expect(client.expectGeo({ subjectHash: hash }).toBeWatertight()).rejects.toThrow(
+      expect(() => client.expectGeo({ subjectHash: hash }).toBeWatertight()).toThrow(
         defaultWorkUnitBudget === null ? 'omitted defaultWorkUnitBudget' : 'positive exact safe integer',
       );
     },
   );
 
   it.each([
-    { subject: {}, limit: 1, message: 'exactly one' },
+    { subject: {}, limit: 1, message: 'not admitted' },
     { subject: { contentHash: hash, subjectHash: hash }, limit: 1, message: 'exactly one' },
     { subject: { subjectHash: 'sha256:bad' }, limit: 1, message: '64 lowercase' },
     { subject: { subjectHash: hash }, limit: 0, message: 'positive exact safe integer' },
@@ -332,6 +343,6 @@ describe('runner-independent GeoSpec assertion client', () => {
       workUnitLimit: limit,
     });
 
-    await expect(client.expectGeo(subject).toBeWatertight()).rejects.toThrow(message);
+    expect(() => client.expectGeo(subject).toBeWatertight()).toThrow(message);
   });
 });

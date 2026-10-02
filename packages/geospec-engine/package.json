@@ -8,8 +8,6 @@
     "./dist/register.mjs",
     "./src/cli/main.ts",
     "./dist/cli/main.mjs",
-    "./src/runner/node/pool-worker-entry.ts",
-    "./dist/runner/node/pool-worker-entry.mjs",
     "./src/runner/node/native-pool-worker-entry.ts",
     "./dist/runner/node/native-pool-worker-entry.mjs"
   ],
@@ -111,7 +109,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.4.0",
+    "@gltf-transform/core": "catalog:",
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",
@@ -124,22 +122,32 @@
     "@taucad/middleware": "workspace:*",
     "@taucad/occt-core": "workspace:*",
     "@taucad/opencascade": "workspace:*",
+    "@taucad/openrscad": "workspace:*",
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "geospec": "workspace:*",
     "manifold-3d": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@libcascade/toolchain": "catalog:",
-    "@taucad/openrscad": "workspace:*",
+    "@taucad/picogk": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@vitest/browser-playwright": "catalog:",
     "vitest": "catalog:"
   },
   "scripts": {
     "prepack": "node scripts/generate-provenance.mjs"
+  },
+  "peerDependencies": {
+    "@taucad/picogk": "^0.1.0-beta.0"
+  },
+  "peerDependenciesMeta": {
+    "@taucad/picogk": {
+      "optional": true
+    }
   }
 }

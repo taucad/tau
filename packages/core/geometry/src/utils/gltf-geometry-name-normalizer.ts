@@ -1,4 +1,4 @@
-import { BufferUtils, NodeIO, Primitive } from '@gltf-transform/core';
+import { BufferUtils, WebIO, Primitive } from '@gltf-transform/core';
 import type { Document, JSONDocument, Mesh, Node, PlatformIO } from '@gltf-transform/core';
 
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
@@ -25,6 +25,8 @@ type NormalizeNodeAndMeshNamesOptions = {
   mesh: Mesh;
   shapeIndex: number;
   rewriteLegacyGeneratedShapeNames: boolean;
+  sharedMesh: boolean;
+  firstOccurrence: boolean;
 };
 
 const hasSemanticPrimitive = (mesh: Mesh): boolean =>
@@ -48,6 +50,8 @@ const normalizeNodeAndMeshNames = ({
   mesh,
   shapeIndex,
   rewriteLegacyGeneratedShapeNames,
+  sharedMesh,
+  firstOccurrence,
 }: NormalizeNodeAndMeshNamesOptions): void => {
   const nodeName = node.getName();
   const meshName = mesh.getName();
@@ -60,7 +64,9 @@ const normalizeNodeAndMeshNames = ({
 
   const resolvedName = resolvedNodeName ?? resolvedMeshName ?? formatShapeName(shapeIndex);
   node.setName(resolvedName);
-  mesh.setName(resolvedName);
+  if (!sharedMesh || (firstOccurrence && !resolvedMeshName)) {
+    mesh.setName(resolvedName);
+  }
 };
 
 const normalizeMaterialNames = (
@@ -139,9 +145,16 @@ const writeGlbJson = (source: Uint8Array<ArrayBuffer>, json: JSONDocument['json'
 
 const normalizeGlbGeometryNames = (
   bytes: Uint8Array<ArrayBuffer>,
-  options: Omit<NormalizeGltfGeometryNamesOptions, 'format' | 'io'>,
+  options: Required<Omit<NormalizeGltfGeometryNamesOptions, 'format' | 'io'>>,
 ): Uint8Array<ArrayBuffer> => {
   const json = readGlbJson(bytes);
+  const meshUses = new Map<number, number>();
+  for (const node of json.nodes ?? []) {
+    if (node.mesh !== undefined) {
+      meshUses.set(node.mesh, (meshUses.get(node.mesh) ?? 0) + 1);
+    }
+  }
+  const namedMeshes = new Set<number>();
   let shapeIndex = 0;
   for (const node of json.nodes ?? []) {
     const mesh = node.mesh === undefined ? undefined : json.meshes?.[node.mesh];
@@ -150,26 +163,28 @@ const normalizeGlbGeometryNames = (
     ) {
       continue;
     }
-    const nodeName = usableShapeName(node.name, options.rewriteLegacyGeneratedShapeNames ?? false);
-    const meshName = usableShapeName(mesh.name, options.rewriteLegacyGeneratedShapeNames ?? false);
+    const nodeName = usableShapeName(node.name, options.rewriteLegacyGeneratedShapeNames);
+    const meshName = usableShapeName(mesh.name, options.rewriteLegacyGeneratedShapeNames);
     const name = nodeName ?? meshName ?? formatShapeName(shapeIndex);
     node.name = name;
-    mesh.name = name;
+    if (meshUses.get(node.mesh!) === 1 || (!namedMeshes.has(node.mesh!) && !meshName)) {
+      mesh.name = name;
+    }
+    namedMeshes.add(node.mesh!);
     shapeIndex++;
   }
   for (const material of json.materials ?? []) {
     if (options.materialNamePolicy === 'clear-all') {
       material.name = '';
     } else if (options.materialNamePolicy === 'clear-generated') {
-      material.name =
-        resolveMaterialName({ name: material.name, source: options.materialNameSource ?? 'authored' }) ?? '';
+      material.name = resolveMaterialName({ name: material.name, source: options.materialNameSource }) ?? '';
     }
   }
   for (const scene of json.scenes ?? []) {
     if (options.sceneNamePolicy === 'clear-all') {
       scene.name = '';
     } else if (options.sceneNamePolicy === 'clear-generated') {
-      scene.name = resolveSceneName({ name: scene.name, source: options.sceneNameSource ?? 'authored' }) ?? '';
+      scene.name = resolveSceneName({ name: scene.name, source: options.sceneNameSource }) ?? '';
     }
   }
   return writeGlbJson(bytes, json);
@@ -204,12 +219,20 @@ export async function normalizeGltfGeometryNames(
       sceneNamePolicy,
     });
   }
-  const io = configuredIo ?? registerTauGltfExtensions(new NodeIO()).registerExtensions([KHRMaterialsUnlit]);
+  const io = configuredIo ?? registerTauGltfExtensions(new WebIO()).registerExtensions([KHRMaterialsUnlit]);
   const document = await io.readJSON({
     json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'],
     resources: {},
   });
 
+  const meshUses = new Map<Mesh, number>();
+  for (const node of document.getRoot().listNodes()) {
+    const mesh = node.getMesh();
+    if (mesh) {
+      meshUses.set(mesh, (meshUses.get(mesh) ?? 0) + 1);
+    }
+  }
+  const namedMeshes = new Set<Mesh>();
   let shapeIndex = 0;
   for (const node of document.getRoot().listNodes()) {
     const mesh = node.getMesh();
@@ -217,7 +240,15 @@ export async function normalizeGltfGeometryNames(
       continue;
     }
 
-    normalizeNodeAndMeshNames({ node, mesh, shapeIndex, rewriteLegacyGeneratedShapeNames });
+    normalizeNodeAndMeshNames({
+      node,
+      mesh,
+      shapeIndex,
+      rewriteLegacyGeneratedShapeNames,
+      sharedMesh: meshUses.get(mesh)! > 1,
+      firstOccurrence: !namedMeshes.has(mesh),
+    });
+    namedMeshes.add(mesh);
     shapeIndex++;
   }
 

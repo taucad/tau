@@ -24,6 +24,7 @@ import type { VmFileSystem } from '@taucad/esbuild/vm';
 import type { AnalyzeMeshResult, LoadMeshOptions, LoadMeshResult } from '#mesh/load-mesh.js';
 import type { GeometryDiagnostic, GeometrySubject } from '#mesh/types.js';
 import type { CreateModelLoaderOptions, LoadModelOptions, ManagedGeoSpecModelLoader } from '#model/types.js';
+import type { GeoSpecSubject } from '#model/subject.js';
 import type { GeoSpecNodePoolRunnerOptions } from '#runner/node/node-pool-runner.js';
 import type { GeoSpecNodeRunnerOptions } from '#runner/node/node-runner.js';
 import type { GeoSpecPoolWorkerHostOptions } from '#runner/worker/pool-worker-host.js';
@@ -77,7 +78,7 @@ export type GeoSpecEngineHostBindings = {
   loadStep(options: LoadStepOptions): Promise<GeometrySubject>;
   loadModel<Code extends Record<string, string> = Record<string, string>>(
     options: LoadModelOptions<Code>,
-  ): Promise<GeometrySubject>;
+  ): Promise<GeoSpecSubject>;
   createModelLoader(options: CreateModelLoaderOptions): ManagedGeoSpecModelLoader;
   createGeoSpecNodeRunner(options: GeoSpecNodeRunnerOptions): GeoSpecRunner;
   createGeoSpecNodePoolRunner(options: GeoSpecNodePoolRunnerOptions): GeoSpecRunner;

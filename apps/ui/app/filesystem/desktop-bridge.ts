@@ -189,7 +189,6 @@ export type DesktopAgentHostConnectInput = {
   readonly workspaceRoot: string;
   readonly projectId: string;
   readonly computeMode: 'off' | 'memory' | 'durable';
-  readonly geoSpecEngine?: 'legacy' | 'native' | undefined;
 };
 
 export type DesktopBridge = {
@@ -371,12 +370,11 @@ export const desktopBridge = (): DesktopBridge | undefined => {
       connect: async () => connectServices('nodeFs'),
     },
     agentHost: {
-      connect: async ({ workspaceRoot, projectId, computeMode, geoSpecEngine }) =>
+      connect: async ({ workspaceRoot, projectId, computeMode }) =>
         connectServices('agentHost', {
           workspaceRoot,
           projectId,
           computeMode,
-          ...(geoSpecEngine === undefined ? {} : { geoSpecEngine }),
         }),
       retain: async (workspaceRoot, projectId, attachmentId) =>
         shell.agentHost.retain(workspaceRoot, projectId, attachmentId),

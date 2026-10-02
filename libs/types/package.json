@@ -13,7 +13,8 @@
   "license": "Apache-2.0",
   "exports": {
     ".": "./src/types/index.ts",
-    "./constants": "./src/constants/index.ts"
+    "./constants": "./src/constants/index.ts",
+    "./constants/id": "./src/constants/id.constants.ts"
   },
   "imports": {
     "#*.js": "./src/*.ts",

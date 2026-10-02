@@ -1,6 +1,7 @@
 import * as React from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
+import { invalidateSceneTransparency } from '#components/geometry/graphics/three/utils/scene-transparency-revision.js';
 import { toast } from '#components/ui/sonner.js';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import {
@@ -599,8 +600,8 @@ function extractTintHex(material: THREE.Material): number {
   return resolveModelMaterialBaseTintHex(material);
 }
 
-export function collectSectionSourceRecords(root: THREE.Group): SectionSourceRecord[] {
-  return collectSectionSurfaceSources(root).map((visibleSource) => {
+export function collectSectionSourceRecords(root: THREE.Group, onBlocked?: () => void): SectionSourceRecord[] {
+  return collectSectionSurfaceSources(root, onBlocked).map((visibleSource) => {
     const { source } = visibleSource;
     const { mesh } = source.participants[0]!;
     const material = Array.isArray(mesh.material) ? mesh.material[0]! : mesh.material;
@@ -911,7 +912,7 @@ export function SectionContourFills({
   const modelInteractionUnitState = useModelInteractionSelector((state) =>
     modelInteractionUnitId ? getModelInteractionUnitState(state.context, modelInteractionUnitId) : undefined,
   );
-  const { invalidate, size } = useThree();
+  const { invalidate, size, scene } = useThree();
   const resolution = React.useMemo(() => new THREE.Vector2(size.width, size.height), [size.height, size.width]);
   const invalidatedRenderStateRef = React.useRef<
     readonly [SectionCutSet, number, ModelInteractionUnitState | undefined, number, number] | undefined
@@ -971,12 +972,14 @@ export function SectionContourFills({
     const renderState = [cutSet, edgeColor, modelInteractionUnitState, resolution.x, resolution.y] as const;
     if (invalidatedRenderStateRef.current?.every((value, index) => Object.is(value, renderState[index])) !== true) {
       invalidatedRenderStateRef.current = renderState;
+      invalidateSceneTransparency(scene);
       invalidate();
     }
-  }, [cutSet, edgeColor, enabled, invalidate, modelInteractionUnitState, resolution]);
+  }, [cutSet, edgeColor, enabled, invalidate, modelInteractionUnitState, resolution, scene]);
 
   React.useEffect(
     () => () => {
+      invalidateSceneTransparency(scene);
       const root = rootRef.current;
       if (root) {
         for (const helper of helperByKey.current.values()) {
@@ -991,7 +994,7 @@ export function SectionContourFills({
       workerClientRef.current?.dispose();
       workerClientRef.current = undefined;
     },
-    [],
+    [scene],
   );
 
   useFrame(() => {
@@ -1028,7 +1031,16 @@ export function SectionContourFills({
       : undefined;
     const frameStartedAt = startSectionCapPhase(performanceFrame);
     const sourceCollectionStartedAt = startSectionCapPhase(performanceFrame);
-    const sourceRecords = collectSectionSourceRecords(inner);
+    const readiness = { hasBlockedSources: false };
+    const sourceRecords = collectSectionSourceRecords(inner, () => {
+      readiness.hasBlockedSources = true;
+    });
+    // Deferred topology is not an empty model. Keep the last certified cuts/caps
+    // until its owner publishes readiness and invalidates this demand canvas.
+    if (readiness.hasBlockedSources) {
+      finishSectionCapPerformanceFrame(root, performanceFrame, frameStartedAt);
+      return;
+    }
     for (const sourceRoot of new Set(sourceRecords.map((record) => record.source.root))) {
       sourceRoot.updateWorldMatrix(true, true);
     }

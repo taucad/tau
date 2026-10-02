@@ -1805,6 +1805,60 @@ mod tests {
     }
 
     #[test]
+    fn hollow_housing_and_rotor_remain_two_spatial_material_components() {
+        let mut record = MeshAnalysisRecord {
+            positions: Vec::new(),
+            triangles: Vec::new(),
+            triangle_primitives: Vec::new(),
+            primitives: Vec::new(),
+        };
+        for (radius, inward, primitive) in [(3.0, false, 0), (2.0, true, 0), (1.0, false, 1)] {
+            let cube = box_record(0.0);
+            let start = record.positions.len() as u32;
+            record.positions.extend(
+                cube.positions
+                    .into_iter()
+                    .map(|point| point.map(|value| (2.0 * value - 1.0) * radius)),
+            );
+            record
+                .triangles
+                .extend(cube.triangles.into_iter().map(|triangle| {
+                    let [a, b, c] = triangle.map(|vertex| start + vertex);
+                    if inward {
+                        [c, b, a]
+                    } else {
+                        [a, b, c]
+                    }
+                }));
+            record.triangle_primitives.extend([primitive; 12]);
+        }
+        record.primitives = vec![
+            Primitive {
+                name: "housing#0".into(),
+                vertex_start: 0,
+                vertex_count: 16,
+            },
+            Primitive {
+                name: "rotor#0".into(),
+                vertex_start: 16,
+                vertex_count: 8,
+            },
+        ];
+        let analysis = analyze(&Rc::new(record));
+        assert!(analysis.watertight().watertight);
+        assert_eq!(
+            analysis.pieces().len(),
+            3,
+            "boundary surfaces are a separate fact"
+        );
+        assert_eq!(analysis.mesh_count, 2, "two producer-named occurrences");
+        assert!((analysis.mesh_quality().signed_volume - 160.0).abs() < 1e-12);
+        // Outer +/-3 minus cavity +/-2 is one material housing. Rotor +/-1
+        // is another body, separated from that material by exactly 1 mm.
+        assert_eq!(analysis.connected_components(0.0).count, 2);
+    }
+
+    #[test]
     fn joins_components_at_the_declared_tolerance_boundary() {
         let mut record = box_record(0.0);
         let right = box_record(2.0);

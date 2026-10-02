@@ -69,21 +69,21 @@ export const parameterFileResolver = defineMiddleware({
     watchDebounce: z.number().default(0),
   }),
 
-  getDependencies({ entryPath }, { options }) {
+  resolve({ entryPath }, { options }) {
     return [
       {
         path: parameterEntryPath(entryPath),
-        affects: ['createGeometry'],
+        affects: ['evaluate'],
         watchDebounce: options.watchDebounce,
       },
     ];
   },
 
-  async wrapCreateGeometry(input, handler, runtime) {
+  async wrapEvaluate(input, handler, services) {
     const parametersPath = parameterEntryPath(input.entryPath);
     let content: string;
     try {
-      content = await runtime.filesystem.readFile(parametersPath, 'utf8');
+      content = await services.filesystem.readFile(parametersPath, 'utf8');
     } catch (error) {
       if (isNotFoundError(error)) {
         return handler(input);

@@ -5,7 +5,6 @@ import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
 import {
   createSectionDragSteps,
   createSectionHandles,
-  createSectionHandlesWarmup,
   resolveSectionDragParameter,
   resolveSectionDragPatch,
   snapSectionAngle,
@@ -203,42 +202,6 @@ describe('createSectionHandles', () => {
     handles.paint({ active: handles.handles[0], hoveredCutId: undefined });
     expect(outline?.opacity).toBe(1);
   });
-});
-
-describe('createSectionHandlesWarmup', () => {
-  /** What decides a material's program and pipeline: its kind and its draw state. */
-  const programOf = ({ type, side, transparent, blending, depthTest, depthWrite }: THREE.Material): string =>
-    [type, side, transparent, blending, depthTest, depthWrite].join(':');
-
-  it.each(['webgl', 'webgpu'] as const)(
-    'should hold, all shown, the program of every material a %s drawing draws and no other',
-    (backend) => {
-      const drawn = new Set<string>();
-      for (const [cuts, selectedId] of [
-        [[planeCut(0)], 'plane'],
-        [[planeCut(0)], undefined],
-        [[revolutionCut(0, 90)], 'revolution'],
-        [[revolutionCut(0, 200)], undefined],
-      ] as const) {
-        const handles = createSectionHandles({ backend });
-        handles.update({ cuts, selectedId, bounds, renderFrame });
-        for (const material of collect(handles.root).materials) {
-          if (material.visible) {
-            drawn.add(programOf(material));
-          }
-        }
-        handles.dispose();
-      }
-
-      const warmup = createSectionHandlesWarmup({ backend });
-      const warmed = collect(warmup.root);
-
-      expect(new Set(warmed.materials.map(programOf))).toEqual(drawn);
-      // Halos and press rims rest hidden, and WebGPU's `compileAsync` passes over what is hidden.
-      expect(warmed.objects.filter((object) => !object.visible)).toEqual([]);
-      warmup.dispose();
-    },
-  );
 });
 
 describe('section drag math', () => {

@@ -20,11 +20,11 @@ const automaticAdapterAvailable = async (): Promise<boolean> => {
     return false;
   }
   try {
-    const adapter = (await gpu.requestAdapter()) as AutomaticAdapter | null;
+    const adapter = ((await gpu.requestAdapter()) ?? undefined) as AutomaticAdapter | undefined;
     if (!adapter || adapter.isFallbackAdapter === true) {
       return false;
     }
-    const info = adapter.info;
+    const { info } = adapter;
     const identity = [info?.vendor, info?.architecture, info?.device, info?.description].join(' ').trim().toLowerCase();
     return identity.length > 0 && !/swiftshader|llvmpipe|software|cpu/u.test(identity);
   } catch {
@@ -56,7 +56,7 @@ export const headlessImageBackend: HeadlessImageBackend = {
       import('@taucad/runtime/client'),
       import('@taucad/runtime/transport/web'),
     ]);
-    return createRuntimeClient<typeof imageRuntime>({
+    const client = createRuntimeClient<typeof imageRuntime>({
       transport: webWorkerTransport({
         createWorker: () =>
           new Worker(new URL('../runtime/image-runtime.worker.ts', import.meta.url), {
@@ -66,5 +66,19 @@ export const headlessImageBackend: HeadlessImageBackend = {
         fileSystem: fromMemoryFs(),
       }),
     });
+    const adapter: Awaited<ReturnType<HeadlessImageBackend['createImageClient']>> = {
+      connect: async () => client.connect(),
+      terminate: () => {
+        client.terminate();
+      },
+      on: (event, handler) => client.on(event, handler),
+      transcode: async (input) => {
+        if (input.from !== 'glb') {
+          throw new Error(`Image worker cannot transcode ${input.from}; SVG uses the direct renderer`);
+        }
+        return client.transcode(input);
+      },
+    };
+    return adapter;
   },
 };

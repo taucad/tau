@@ -4,7 +4,7 @@ import type * as Nanoraster from 'nanoraster';
 import type { encodeRgbaWebp } from 'nanoraster';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { ExportFile } from '@taucad/runtime/types';
-import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
+import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import * as svgPublic from '#svg.js';
 import {
   renderSvgPng,
@@ -28,7 +28,7 @@ const dimensions = (bytes: Uint8Array<ArrayBuffer>): readonly [number, number] =
   return [view.getUint32(16), view.getUint32(20)];
 };
 
-const runtime: TranscoderRuntime = {
+const runtime: TranscoderServices = {
   logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn(), trace: vi.fn(), custom: vi.fn() },
   tracer: { startSpan: () => ({ end: vi.fn(), setAttribute: vi.fn(), addEvent: vi.fn() }) },
   signal: new AbortController().signal,

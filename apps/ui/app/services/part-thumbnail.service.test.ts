@@ -229,7 +229,7 @@ describe('PartThumbnailService', () => {
 
   it('should render exact per-part instances in bounded ordered batches through the shared queue', async () => {
     const exportImage = vi.fn(async (job: Parameters<HeadlessImageService['export']>[0]) => {
-      if (job.sourceFormat !== 'glb' || job.exportOptions['mode'] !== 'batch') {
+      if (job.sourceFormat !== 'glb' || job.exportOptions.mode !== 'batch') {
         throw new Error('Expected GLB batch');
       }
       return [image(3), image(2), image(1), image(0)];

@@ -26,7 +26,7 @@ export function GearDemo(): React.JSX.Element {
         tags: ['jscad', 'parametric', 'gear'],
         forkedFrom: 'demo-gear',
       }}
-      renderVerification={(geometry) => <VerificationOverlay geometry={geometry} />}
+      renderVerification={(artifact) => <VerificationOverlay artifact={artifact} />}
     />
   );
 }

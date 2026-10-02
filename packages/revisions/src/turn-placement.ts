@@ -63,6 +63,7 @@ type Placement<Tools> = Readonly<{
 }>;
 type Held = Readonly<{ key: TurnAttemptKey; checkoutId: string }>;
 type Fact =
+  | Readonly<{ kind: 'changed'; key: TurnAttemptKey; checkoutId: string }>
   | Readonly<{ kind: 'settled'; key: TurnAttemptKey; row: SettlementRow }>
   | (Readonly<{ kind: 'leaseHeld' }> & Held);
 type Fenced = 'SESSION_FENCED';
@@ -145,6 +146,7 @@ type FencedHeard = Extract<Heard, { type: 'fenced' }>;
 type Revocable = Readonly<{
   view: RevisionFileSystem;
   revoked: () => boolean;
+  changed: () => boolean;
   revoke: () => Promise<void>;
   /** Refuse later calls now, without waiting: the attempt is retired, so nothing waits on its writes. */
   close: () => void;
@@ -160,8 +162,13 @@ const toolPortRevoked = (): Error =>
     code: 'TOOL_PORT_REVOKED',
   });
 
-const revocable = (filesystem: RevisionFileSystem): Revocable => {
+const revocable = (
+  filesystem: RevisionFileSystem,
+  versioned: (path: string) => boolean,
+  changed: () => void,
+): Revocable => {
   let revoked = false;
+  let confirmed = false;
   const accepted = new Set<Promise<unknown>>();
   const view = new Proxy(filesystem, {
     get: (target, property, receiver): unknown => {
@@ -173,8 +180,82 @@ const revocable = (filesystem: RevisionFileSystem): Revocable => {
         if (revoked) {
           throw toolPortRevoked();
         }
-        // oxlint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- a filesystem member, called as itself.
-        const result = Promise.resolve((value as (...parameters: unknown[]) => unknown).apply(target, args));
+        const call = async (): Promise<unknown> => {
+          // oxlint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- a filesystem member, called as itself.
+          const invoke = async (): Promise<unknown> =>
+            (value as (...parameters: unknown[]) => unknown).apply(target, args);
+          const [input] = args;
+          if (confirmed) {
+            return invoke();
+          }
+          if ((property === 'writeFile' || property === 'unlink') && typeof input === 'string' && versioned(input)) {
+            const data = args[1];
+            if (property === 'unlink' || typeof data === 'string' || data instanceof Uint8Array) {
+              /* Plain writes and deletes have no receipt. Use the authority's checked comparison; contention or an unsupported
+               * comparison preserves the original mutation semantics but establishes no turn-change proof. */
+              const ownedData =
+                typeof data === 'string' ? data : data instanceof Uint8Array ? new Uint8Array(data) : undefined;
+              const expected = await filesystem.readFile(input).catch(() => undefined);
+              if (expected !== undefined || (property === 'writeFile' && !(await filesystem.exists(input)))) {
+                try {
+                  const preconditions = [{ path: input, expected: expected ?? null }];
+                  const result =
+                    property === 'unlink'
+                      ? await filesystem.deleteFileChecked({ path: input, preconditions })
+                      : await filesystem.writeFileChecked({ path: input, data: ownedData!, preconditions });
+                  if (result.status !== 'conflict') {
+                    if (result.status === 'applied') {
+                      confirmed = true;
+                      changed();
+                    }
+                    return undefined;
+                  }
+                } catch (error) {
+                  if (
+                    typeof error === 'object' &&
+                    error !== null &&
+                    'applicationState' in error &&
+                    error.applicationState !== 'known-not-applied'
+                  ) {
+                    throw error;
+                  }
+                  if (
+                    !(error instanceof TypeError) &&
+                    !(
+                      typeof error === 'object' &&
+                      error !== null &&
+                      'code' in error &&
+                      error.code === 'CHECKED_WRITE_UNSUPPORTED'
+                    )
+                  ) {
+                    throw error;
+                  }
+                }
+              }
+            }
+            return invoke();
+          }
+          const isVersionedMutation =
+            (property === 'writeFileChecked' || property === 'deleteFileChecked') &&
+            typeof input === 'object' &&
+            input !== null &&
+            'path' in input &&
+            typeof input.path === 'string' &&
+            versioned(input.path);
+          const result = await invoke();
+          if (
+            isVersionedMutation &&
+            typeof result === 'object' &&
+            result !== null &&
+            'status' in result &&
+            result.status === 'applied'
+          ) {
+            confirmed = true;
+            changed();
+          }
+          return result;
+        };
+        const result = call();
         accepted.add(result);
         try {
           return await result;
@@ -187,6 +268,7 @@ const revocable = (filesystem: RevisionFileSystem): Revocable => {
   return {
     view,
     revoked: () => revoked,
+    changed: () => confirmed,
     revoke: async () => {
       revoked = true;
       await Promise.allSettled(accepted);
@@ -562,7 +644,11 @@ export const createTurnPlacementPort = <Tools>(
     if (opened === undefined) {
       return { unplaced: await unplace(key) };
     }
-    const revocableView = known?.revocable ?? revocable(opened.filesystem);
+    const revocableView =
+      known?.revocable ??
+      revocable(opened.filesystem, opened.versioned, () => {
+        push({ kind: 'changed', key, checkoutId: opened.checkout.id });
+      });
     const placement: Omit<Placement<Tools>, 'tools'> = known?.placement ?? {
       checkoutId: opened.checkout.id,
       ...(event.branch === undefined ? {} : { branch: event.branch }),
@@ -744,6 +830,12 @@ export const createTurnPlacementPort = <Tools>(
         try {
           /* TS-R4: every settlement not yet acknowledged, whichever session's attempt published it. */
           const replayed: Fact[] = [];
+          for (const [id, entry] of tools) {
+            const fact = actor.getSnapshot().context.turnFacts[id];
+            if (entry.revocable.changed() && fact !== undefined) {
+              replayed.push({ kind: 'changed', key: fact.key, checkoutId: entry.placement.checkoutId });
+            }
+          }
           for (const ref of Object.values(actor.getSnapshot().context.turnRefs)) {
             const announcement = selectTurnAnnouncement(ref.getSnapshot());
             if (announcement !== undefined) {

@@ -1,0 +1,134 @@
+/* Native targets and allocation stay separate from the neutral resize paint. */
+.pane-resize,
+.section-resize {
+  --resize-idle: color-mix(in oklch, var(--muted-foreground) 30%, transparent);
+  --resize-hover: color-mix(in oklch, var(--muted-foreground) 70%, transparent);
+  --resize-drag: color-mix(in oklch, var(--foreground) 70%, transparent);
+  --dv-sash-color: transparent;
+  --dv-active-sash-color: transparent;
+}
+
+.pane-resize .dv-sash,
+.section-resize .dv-sash,
+.pane-resize-allotment .sash::before {
+  background: transparent !important;
+  transition: none !important;
+}
+
+/* Clipped collapsed bodies must also leave the accessibility/focus tree. */
+.section-resize .dv-pane:has([data-slot='paneview-header'][data-state='closed']) > .dv-pane-body {
+  visibility: hidden;
+}
+
+/* Dockview's ::before expands coarse-pointer targets. Keep it and paint on ::after. */
+.pane-resize .dv-sash:not(.section-resize .dv-sash)::after,
+.pane-resize-allotment .sash::after,
+.section-resize .dv-sash::after {
+  content: '';
+  position: absolute;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 100ms ease-out;
+}
+
+.pane-resize-allotment .sash.sash-vertical::after,
+.pane-resize .dv-horizontal > .dv-sash-container > .dv-sash:not(.section-resize .dv-sash)::after {
+  inset-block: 0;
+  left: 50%;
+  width: calc(var(--spacing) / 4);
+  transform: translateX(-50%);
+  background: linear-gradient(to bottom, transparent, var(--resize-hover) 45%, var(--resize-hover) 55%, transparent);
+}
+.pane-resize-allotment .sash.sash-horizontal::after,
+.pane-resize .dv-vertical > .dv-sash-container > .dv-sash:not(.section-resize .dv-sash)::after {
+  inset-inline: 0;
+  top: 50%;
+  height: calc(var(--spacing) / 4);
+  transform: translateY(-50%);
+  background: linear-gradient(to right, transparent, var(--resize-hover) 45%, var(--resize-hover) 55%, transparent);
+}
+
+.pane-resize .dv-sash:not(.section-resize .dv-sash):is(:hover, :focus-visible)::after,
+.pane-resize-allotment .sash:is(:hover, :focus-visible)::after {
+  opacity: 1;
+}
+.pane-resize .dv-sash:not(.section-resize .dv-sash)[data-resize-dragging]::after,
+.pane-resize-allotment .sash[data-resize-dragging]::after {
+  --resize-hover: var(--resize-drag);
+  opacity: 1;
+  transition: none;
+}
+.pane-resize-allotment .sash.sash-vertical[data-resize-dragging]::after,
+.pane-resize .dv-horizontal > .dv-sash-container > .dv-sash:not(.section-resize .dv-sash)[data-resize-dragging]::after {
+  width: calc(var(--spacing) / 2);
+}
+.pane-resize-allotment .sash.sash-horizontal[data-resize-dragging]::after,
+.pane-resize .dv-vertical > .dv-sash-container > .dv-sash:not(.section-resize .dv-sash)[data-resize-dragging]::after {
+  height: calc(var(--spacing) / 2);
+}
+
+/* The native 4px sash sits on the upper surface edge. Occupy the following 8px gap. */
+.section-resize .dv-vertical > .dv-sash-container > .dv-sash {
+  height: var(--pane-unit-gap) !important;
+  /* Dockview positions its physical 4px target 2px above the boundary, even at text zoom. */
+  margin-top: 2px;
+}
+.section-resize .dv-pane-header {
+  border-top: 0 !important;
+}
+.section-resize .dv-sash::after {
+  top: 50%;
+  left: 50%;
+  width: calc(var(--spacing) * 12);
+  height: calc(var(--spacing) / 2);
+  border-radius: var(--radius-xl);
+  background: var(--resize-idle);
+  transform: translate(-50%, -50%);
+}
+.section-resize .dv-sash:is(:hover, :focus-visible)::after {
+  background: var(--muted-foreground);
+  opacity: 1;
+}
+.section-resize .dv-sash[data-resize-dragging]::after {
+  background: var(--resize-drag);
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.333333, 1.5);
+  transition: none;
+}
+
+[data-resize-owner] :is(.dv-sash, .sash)[aria-disabled='true']::after {
+  opacity: 0 !important;
+  transition: none !important;
+}
+[data-resize-owner] :is(.dv-sash, .sash):focus-visible {
+  @apply focus-outline-outside;
+}
+.high-contrast .pane-resize {
+  --resize-hover: var(--muted-foreground);
+  --resize-drag: var(--foreground);
+}
+.high-contrast .section-resize {
+  --resize-idle: var(--muted-foreground);
+  --resize-drag: var(--foreground);
+}
+/* Allotment has no coarse-pointer expansion; enlarge its transparent target, not the paint. */
+@media (pointer: coarse) {
+  .pane-resize-allotment .sash:not(.sash-disabled)[aria-disabled='false']::before {
+    pointer-events: auto;
+  }
+  .pane-resize-allotment .sash.sash-vertical::before {
+    width: calc(var(--spacing) * 6) !important;
+    left: 50% !important;
+    transform: translateX(-50%);
+  }
+  .pane-resize-allotment .sash.sash-horizontal::before {
+    height: calc(var(--spacing) * 6) !important;
+    top: 50% !important;
+    transform: translateY(-50%);
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  [data-resize-owner] :is(.dv-sash, .sash)::after {
+    transition-duration: 0.01ms;
+  }
+}

@@ -14,6 +14,25 @@ import * as url from 'node:url';
 import vm from 'node:vm';
 import * as ts from 'typescript';
 import { load } from 'js-yaml';
+import { publishableClosure, workspace } from '@taucad/nx';
+
+void test('should declare the complete normal consumer build closure except the assembled native package', async () => {
+  const project = JSON.parse(readFileSync(new URL('../project.json', import.meta.url), 'utf8')) as {
+    targets: { 'prepare-geospec-test-consumer': { dependsOn: Array<{ target: string; projects: string[] }> } };
+  };
+  const roots = new Set(
+    project.targets['prepare-geospec-test-consumer'].dependsOn
+      .filter(({ target }) => target === 'build')
+      .flatMap(({ projects }) => projects),
+  );
+  const closure = publishableClosure(await workspace({ fresh: true }), ['geospec', 'geospec-engine']);
+  assert.deepEqual(
+    closure.filter((name) => name !== 'geospec-engine-native' && !roots.has(name)),
+    [],
+    'Normal consumer target omits publishable build prerequisites',
+  );
+  assert.ok(!roots.has('geospec-engine-native'), 'Native production must remain separately assembled');
+});
 
 type Manifest = {
   name: string;
@@ -27,7 +46,7 @@ type CommandOptions = { cwd: string; env: Record<string, string> };
 type RecordedCommand = { command: string; args: string[]; options: CommandOptions };
 type Receipt = {
   consumerRoot: string;
-  installed: unknown[];
+  installed: Array<{ name: string }>;
   packages: unknown[];
   source: { revision: string };
   lock: { sha256: string };
@@ -106,6 +125,11 @@ const prepare = async (fault?: Fault) => {
       name: 'geospec',
       root: 'packages/geospec',
       manifest: { ...manifest('geospec'), dependencies: { '@taucad/support': '0.1.0' } },
+    },
+    {
+      name: 'geospec-engine',
+      root: 'packages/geospec-engine',
+      manifest: { ...manifest('@taucad/geospec-engine'), dependencies: { geospec: '0.1.0' } },
     },
   ];
   const nativeManifest = { ...manifest(native), optionalDependencies: { [platform]: '0.1.0' } };
@@ -188,8 +212,8 @@ const prepare = async (fault?: Fault) => {
     workspace: async () => ({ projects }),
     publishable: (value: { projects: typeof projects }) => value.projects,
     publishableClosure(_value: unknown, names: string[]) {
-      assert.deepEqual([...names], ['geospec']);
-      return ['support', 'geospec'];
+      assert.deepEqual([...names], ['geospec', 'geospec-engine']);
+      return ['support', 'geospec', 'geospec-engine'];
     },
     spawnSync(command: string, args: string[], options: CommandOptions) {
       // Normalize VM arrays before strict host-realm assertions and recording.
@@ -288,14 +312,14 @@ void test('should prepare one local-tarball closure and record source, payload a
   const result = await prepare();
   assert.ifError(result.error);
   assert.equal(result.commands.filter((command) => command.command === 'npm').length, 2);
-  assert.equal(result.commands.filter((command) => command.command === 'pnpm').length, 2);
+  assert.equal(result.commands.filter((command) => command.command === 'pnpm').length, 3);
   assert.ok(result.receipt);
-  assert.equal(result.receipt.installed.length, 4);
+  assert.equal(result.receipt.installed.length, 5);
   assert.equal(result.receipt.source.revision, 'inert-revision');
   assert.ok(result.receipt.consumerRoot.startsWith('/tmp/'));
-  assert.equal(result.receipt.packages.length, 4);
+  assert.equal(result.receipt.packages.length, 5);
   assert.equal(result.receipt.frameworkSuccessor.version, '4.1.11');
-  assert.equal(result.receipt.frameworkSuccessor.unchangedPackages.length, 4);
+  assert.equal(result.receipt.frameworkSuccessor.unchangedPackages.length, 5);
   assert.equal(result.receipt.lock.sha256, result.receipt.frameworkSuccessor.lock.sha256);
   assert.notEqual(result.receipt.lock.sha256, result.receipt.frameworkSuccessor.initialLock.sha256);
   assert.deepEqual(
@@ -313,6 +337,11 @@ void test('should prepare one local-tarball closure and record source, payload a
   ) as Receipt;
   assert.equal(initial.lock.sha256, result.receipt.frameworkSuccessor.initialLock.sha256);
   assert.equal(initial.frameworkSuccessor, undefined);
+});
+void test('should install the current CLI package through the same local tarball closure', async () => {
+  const result = await prepare();
+  assert.ifError(result.error);
+  assert.ok(result.receipt?.installed.some((entry) => entry.name === '@taucad/geospec-engine'));
 });
 for (const fault of ['missing-build', 'missing-wasm', 'registry', 'stale-assembly'] as const) {
   void test(`should reject ${fault} without a successful receipt`, async () => {

@@ -103,11 +103,13 @@ const planAtTier = ({
   spans,
   newString,
   replaceAll,
+  literal = false,
 }: {
   snapshot: ClientTextSnapshot;
   spans: readonly MatchSpan[];
   newString: string;
   replaceAll: boolean;
+  literal?: boolean;
 }): ClientTextPlan => {
   if (spans.length > 1 && !replaceAll) {
     return {
@@ -119,7 +121,14 @@ const planAtTier = ({
   const selected = replaceAll ? spans : spans.slice(0, 1);
   return {
     ok: true,
-    content: replaceSpans(snapshot.content, selected, newString),
+    content: literal
+      ? selected
+          .toReversed()
+          .reduce(
+            (content, span) => content.slice(0, span.start) + newString + content.slice(span.end),
+            snapshot.content,
+          )
+      : replaceSpans(snapshot.content, selected, newString),
     occurrences: selected.length,
   };
 };
@@ -129,10 +138,12 @@ export const createExactReplacementPlan = ({
   oldString,
   newString,
   replaceAll = false,
+  expectedDigest,
 }: {
   oldString: string;
   newString: string;
   replaceAll?: boolean;
+  expectedDigest?: string;
 }): ((snapshot: ClientTextSnapshot) => ClientTextPlan) => {
   return (snapshot) => {
     if (!oldString.isWellFormed() || !newString.isWellFormed()) {
@@ -152,18 +163,21 @@ export const createExactReplacementPlan = ({
 
     const exact = exactSpans(snapshot.content, oldString);
     if (exact.length > 0) {
-      return planAtTier({ snapshot, spans: exact, newString, replaceAll });
+      return planAtTier({ snapshot, spans: exact, newString, replaceAll, literal: expectedDigest !== undefined });
     }
 
-    const folded = foldedSpans(snapshot.content, oldString);
+    const folded = expectedDigest === undefined ? foldedSpans(snapshot.content, oldString) : [];
     if (folded.length > 0) {
       return planAtTier({ snapshot, spans: folded, newString, replaceAll });
     }
 
     return {
       ok: false,
-      errorCode: rpcClientErrorCode.contextNotFound,
-      message: 'oldString was not found. Read the file again and copy a larger exact context.',
+      errorCode: expectedDigest === undefined ? rpcClientErrorCode.contextNotFound : rpcClientErrorCode.editConflict,
+      message:
+        expectedDigest === undefined
+          ? 'oldString was not found. Read the file again and copy a larger exact context.'
+          : 'Reviewed literal context was not found. Read and review the file again.',
     };
   };
 };

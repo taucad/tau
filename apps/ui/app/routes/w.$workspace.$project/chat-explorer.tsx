@@ -3,7 +3,7 @@ import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExterna
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
-import { PaneviewReact } from 'dockview-react';
+import { Paneview } from '#components/panes/paneview.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import type { GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
@@ -427,7 +427,7 @@ function ModelPaneview({
   }, [revealTarget]);
 
   return (
-    <PaneviewReact
+    <Paneview
       key={paneviewKey}
       className={paneviewAttachedSurfaceStyleOverrides}
       components={paneviewComponents}
@@ -524,9 +524,9 @@ function LiveComponentTree({
     [currentSelection],
   );
   const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
-  const geometry = useSelector(graphicsRef, (state) => state.context.geometry);
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Legacy embedded test actors omit presentation state.
-  const presentedKey = useSelector(graphicsRef, (state) => state.context.gltfPresentation?.presentedKey);
+  const artifact = useSelector(graphicsRef, (state) => state.context.artifact);
+  const artifactKey = useSelector(graphicsRef, (state) => state.context.artifactKey);
+  const presentedKey = useSelector(graphicsRef, (state) => state.context.gltfPresentation.presentedKey);
 
   useEffect(() => {
     if (!imageService || sharedThumbnails) {
@@ -621,7 +621,7 @@ function LiveComponentTree({
       return;
     }
     thumbnails.announcePresentedSource(presentedKey);
-    if (geometry?.format !== 'gltf' || geometry.hash !== presentedKey || !manifest) {
+    if (artifact?.mimeType !== 'model/gltf-binary' || artifactKey !== presentedKey || !manifest) {
       thumbnails.releaseOwner('explorer');
       return;
     }
@@ -632,11 +632,11 @@ function LiveComponentTree({
       return node?.kind === 'part' && node.primitiveRefs?.length ? [{ id, primitives: node.primitiveRefs }] : [];
     });
     let active = true;
-    const { content } = geometry;
+    const { content } = artifact;
     const requestedParts = parts.slice(0, 128);
     const manualPartId = manualPreviewRetry.current;
     manualPreviewRetry.current = undefined;
-    if (content.buffer.byteLength > 64 * 1024 * 1024) {
+    if (content.byteLength > 64 * 1024 * 1024) {
       thumbnails.failPreparationForOwner(
         'explorer',
         requestedParts,
@@ -683,7 +683,8 @@ function LiveComponentTree({
       active = false;
     };
   }, [
-    geometry,
+    artifact,
+    artifactKey,
     manifest,
     params.entryPath,
     presentedKey,

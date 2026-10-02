@@ -222,7 +222,9 @@ def host_tool_paths():
     for name in ['node', 'python3', 'cmake', 'ninja', 'xcrun', 'bash', 'git', 'rustup']:
         found = shutil.which(os.environ.get('GEOSPEC_GIT', 'git') if name == 'git' else name)
         require(found is not None, f'Missing prerequisite: {name}')
-        paths[name] = Path(found).resolve()
+        # rustup is a multicall binary that dispatches on argv[0]; Homebrew links `rustup` to
+        # `rustup-init`, so resolving the link would run the installer.
+        paths[name] = Path(found).absolute() if name == 'rustup' else Path(found).resolve()
     return paths
 
 
@@ -625,10 +627,15 @@ def migrate_sdk_support(prefix, receipt, contract, evidence_input):
     }
 
 
-def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
+def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None, producing_builder=None):
     receipt_path = prefix / 'prefix-receipt.json'
     require(receipt_path.is_file(), f'Missing prefix receipt: {receipt_path}')
     receipt = json.loads(receipt_path.read_text())
+    if producing_builder is not None:
+        require(Path(producing_builder).is_absolute() and
+                isinstance(receipt.get('command'), list) and len(receipt['command']) >= 2 and
+                Path(receipt['command'][1]).resolve() == Path(producing_builder).resolve(),
+                f'Prefix producer selector changed: {prefix}')
     schema = receipt.get('schema')
     require(schema in (PREFIX_RECEIPT_SCHEMA, PORTABLE_PREFIX_RECEIPT_SCHEMA),
             f'Unsupported prefix receipt: {prefix}')
@@ -656,7 +663,8 @@ def verify_prefix(prefix, contract, recipe_path=None, support_inputs=None):
                     actual[0] == expected[0] and actual[2:] == expected[2:] and
                     Path(actual[1]).is_absolute() and Path(expected[1]).is_absolute() and
                     (schema == PORTABLE_PREFIX_RECEIPT_SCHEMA or
-                     Path(actual[1]).resolve() == producer_builder()),
+                     Path(actual[1]).resolve() ==
+                     (Path(producing_builder).resolve() if producing_builder is not None else producer_builder())),
                     f'Prefix receipt command changed: {prefix}')
             original_builder = Path(actual[1])
             current_builder = Path(expected[1])

@@ -44,14 +44,14 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
     desktopKernelOptions(options.projectId, undefined, getComputeReuseMode())(),
   ]);
   const client = createRuntimeClient(resolveOptions({ fileSystem: options.runtimeFileSystem }));
+  const document = client.open({ source: { path }, watch: false });
   try {
-    await client.connect();
-    const exported = await client.export('usdz', { source: { path } });
+    const exported = await document.export('usdz');
     if (!exported.success) {
       throw new Error(exported.issues[0]?.message ?? 'USDZ export failed');
     }
-    const file = exported.data[0];
-    if (exported.data.length !== 1 || file?.name.endsWith('.usdz') !== true || file.mimeType !== mimeTypes.usdz) {
+    const file = exported.files[0];
+    if (exported.files.length !== 1 || !file.name.endsWith('.usdz') || file.mimeType !== mimeTypes.usdz) {
       throw new Error('Quick Look conversion did not return one USDZ file.');
     }
     const result = await bridge.quickLook.previewUsdz({ bytes: file.bytes, displayName: file.name });
@@ -59,6 +59,7 @@ export const previewProjectFileInQuickLook = async (options: PreviewProjectFileO
       throw new Error(result.error);
     }
   } finally {
-    client.terminate();
+    document.close();
+    await client.shutdown();
   }
 };

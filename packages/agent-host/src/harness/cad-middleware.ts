@@ -416,7 +416,9 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
     ...(value['revision'] === undefined ? {} : { revision: value['revision'] }),
   };
   if (toolName === 'test_model' && Array.isArray(value['failures']) && typeof value['total'] === 'number') {
-    return { failures: value['failures'], total: value['total'], ...provenance };
+    // The record owner already bounded evidence; qualification and artifact references must survive replay.
+    const { passes: _passes, ...summary } = value;
+    return summary;
   }
   if (
     (toolName === 'create_file' || toolName === 'edit_file' || toolName === 'delete_file') &&
@@ -437,7 +439,7 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
       ...provenance,
     };
   }
-  if (toolName === 'get_kernel_result' && typeof value['status'] === 'string') {
+  if (toolName === 'evaluate_model' && typeof value['status'] === 'string') {
     const kernelIssues: unknown[] | undefined = Array.isArray(value['kernelIssues'])
       ? value['kernelIssues']
       : undefined;

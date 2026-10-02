@@ -2,7 +2,7 @@ import { describe, it, expect } from 'vitest';
 import {
   mobilePanelIds,
   defaultPanelState,
-  defaultRenderTimeout,
+  defaultOperationTimeout,
   defaultGraphicsSettings,
   omitEmptyComponentDisplayState,
 } from '#constants/editor.constants.js';
@@ -28,7 +28,7 @@ describe('editor device defaults', () => {
       workbenchWidth: 420,
       compactAuxiliary: 'chat',
     });
-    expect(defaultRenderTimeout).toBe(180_000);
+    expect(defaultOperationTimeout).toBe(180_000);
     expect(defaultGraphicsSettings.graphicsBackend).toBe('webgl');
   });
 

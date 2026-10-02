@@ -36,4 +36,30 @@ describe('shiki.lib', () => {
       ]),
     );
   });
+
+  it.each(['"""', "'''"])('should end Python docstrings delimited by %s', async (delimiter) => {
+    const highlighter = await getHighlighter();
+    const source = `${delimiter}\nA Python module.\n${delimiter}\ndef polar(radius):\n    return 2.0 # scale`;
+
+    for (const theme of highlighter.getLoadedThemes()) {
+      const { tokens } = highlighter.codeToTokens(source, { lang: 'python', theme });
+      expect(tokens[3]?.[0]?.content).toBe('def');
+      expect(new Set(tokens[4]?.map(({ color }) => color)).size).toBeGreaterThan(2);
+    }
+  });
+
+  it.each(['', 'r', 'R', 'u', 'b', 'br', 'f', 'fr', 'rf'])(
+    'should preserve Python string delimiters with prefix "%s"',
+    async (prefix) => {
+      const highlighter = await getHighlighter();
+      for (const delimiter of ['"', "'", '"""', "'''"]) {
+        const opposite = (delimiter.includes('"') ? "'" : '"').repeat(delimiter.length);
+        const source = `value = ${prefix}${delimiter}opposite: ${opposite} tail {1 + 2}${delimiter}\ndef polar(radius):\n    return 2.0 # scale`;
+        const { tokens } = highlighter.codeToTokens(source, { lang: 'python', theme: 'github-light' });
+        expect(tokens[0]?.find(({ content }) => content.includes('tail'))?.color).toBe('#032F62');
+        expect(tokens[1]?.[0]?.content).toBe('def');
+        expect(new Set(tokens[2]?.map(({ color }) => color)).size).toBeGreaterThan(2);
+      }
+    },
+  );
 });

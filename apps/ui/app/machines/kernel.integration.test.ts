@@ -26,7 +26,8 @@
 
 import { describe, it, expect, afterEach } from 'vitest';
 
-import { createRuntimeClient } from '@taucad/runtime';
+import { asKnownArtifact, createRuntimeClient } from '@taucad/runtime';
+import type { ViewUpdateOutcome } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { replicad } from '@taucad/replicad';
@@ -66,6 +67,20 @@ const createIntegrationClient = (fileSystem = fromMemoryFs()) =>
   createRuntimeClient({
     transport: inProcessTransport({ runtime: integrationRuntime, fileSystem }),
   });
+
+const expectNonEmptyGlb = (outcome: ViewUpdateOutcome): Uint8Array<ArrayBuffer> => {
+  expect(outcome.superseded).toBe(false);
+  if (outcome.superseded || !outcome.rendering.success) {
+    throw new Error('Expected a successful view rendering');
+  }
+  const artifact = asKnownArtifact(outcome.rendering.artifact);
+  expect(artifact?.mimeType).toBe('model/gltf-binary');
+  if (artifact?.mimeType !== 'model/gltf-binary') {
+    throw new Error('Expected GLB output');
+  }
+  expect(artifact.content.byteLength).toBeGreaterThan(0);
+  return artifact.content;
+};
 
 const uiRuntimeConfig = {
   tauApiUrl: 'http://localhost:4000',
@@ -119,20 +134,13 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
     await client.connect();
 
-    const outcome = await client.render({
-      source: { path: 'main.ts' },
-      content: { includeEdges: true },
-    });
-
-    expect(outcome.superseded).toBe(false);
-    if (!outcome.superseded) {
-      expect(outcome.geometry.success).toBe(true);
-      if (outcome.geometry.success) {
-        expect(outcome.geometry.data.format).toBe('gltf');
-        if (outcome.geometry.data.format === 'gltf') {
-          expect(outcome.geometry.data.content.byteLength).toBeGreaterThan(0);
-        }
-      }
+    const document = client.open({ source: { path: 'main.ts' } });
+    const view = document.view('model', { content: { includeEdges: true } });
+    try {
+      expectNonEmptyGlb(await view.rendering());
+    } finally {
+      view.close();
+      document.close();
     }
   });
 
@@ -141,19 +149,13 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
     await client.connect();
 
-    const outcome = await client.render({
-      source: { files: { 'main.ts': hollowBoxSource } },
-    });
-
-    expect(outcome.superseded).toBe(false);
-    if (!outcome.superseded) {
-      expect(outcome.geometry.success).toBe(true);
-      if (outcome.geometry.success) {
-        expect(outcome.geometry.data.format).toBe('gltf');
-        if (outcome.geometry.data.format === 'gltf') {
-          expect(outcome.geometry.data.content.byteLength).toBeGreaterThan(0);
-        }
-      }
+    const document = client.open({ source: { files: { 'main.ts': hollowBoxSource } } });
+    const view = document.view();
+    try {
+      expectNonEmptyGlb(await view.rendering());
+    } finally {
+      view.close();
+      document.close();
     }
   });
 
@@ -168,24 +170,20 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     try {
       await Promise.all([rootClient.connect(), nestedClient.connect()]);
 
-      const outcomes = await Promise.all([
-        rootClient.render({ source: { path: 'main.ts' } }),
-        nestedClient.render({ source: { path: 'lib/cube.ts' } }),
-      ]);
-
-      for (const outcome of outcomes) {
-        expect(outcome.superseded).toBe(false);
-        if (outcome.superseded) {
-          continue;
+      const rootDocument = rootClient.open({ source: { path: 'main.ts' } });
+      const nestedDocument = nestedClient.open({ source: { path: 'lib/cube.ts' } });
+      const rootView = rootDocument.view();
+      const nestedView = nestedDocument.view();
+      try {
+        const outcomes = await Promise.all([rootView.rendering(), nestedView.rendering()]);
+        for (const outcome of outcomes) {
+          expectNonEmptyGlb(outcome);
         }
-        expect(outcome.geometry.success).toBe(true);
-        if (!outcome.geometry.success) {
-          continue;
-        }
-        expect(outcome.geometry.data.format).toBe('gltf');
-        if (outcome.geometry.data.format === 'gltf') {
-          expect(outcome.geometry.data.content.byteLength).toBeGreaterThan(0);
-        }
+      } finally {
+        rootView.close();
+        nestedView.close();
+        rootDocument.close();
+        nestedDocument.close();
       }
     } finally {
       rootClient.terminate();
@@ -193,7 +191,7 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     }
   });
 
-  it('updateParameters re-renders against the previously opened file', async () => {
+  it('document parameters update the previously opened file', async () => {
     const fileSystem = fromMemoryFs({
       'main.ts': hollowBoxSource,
     });
@@ -202,30 +200,22 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
 
     await client.connect();
 
-    const initial = await client.render({
-      source: { path: 'main.ts' },
-      content: { includeEdges: true },
+    const document = client.open({ source: { path: 'main.ts' } });
+    const view = document.view('model', { content: { includeEdges: true } });
+    expectNonEmptyGlb(await view.rendering());
+    const updated = await document.update({
+      parameters: {
+        width: 200,
+        length: 300,
+        height: 100,
+        thickness: 4,
+        cornerRadius: 10,
+      },
     });
-    expect(initial.superseded).toBe(false);
-
-    const updated = await client.updateParameters({
-      width: 200,
-      length: 300,
-      height: 100,
-      thickness: 4,
-      cornerRadius: 10,
-    });
-
     expect(updated.superseded).toBe(false);
-    if (!updated.superseded) {
-      expect(updated.geometry.success).toBe(true);
-      if (updated.geometry.success) {
-        expect(updated.geometry.data.format).toBe('gltf');
-        if (updated.geometry.data.format === 'gltf') {
-          expect(updated.geometry.data.content.byteLength).toBeGreaterThan(0);
-        }
-      }
-    }
+    expectNonEmptyGlb(await view.rendering());
+    view.close();
+    document.close();
   });
 
   it('renders Replicad geometry through the production UI runtime under SAB/COI auto selection', async () => {
@@ -244,19 +234,13 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     try {
       await client.connect();
 
-      const outcome = await client.render({
-        source: { path: 'main.ts' },
-      });
-
-      expect(outcome.superseded).toBe(false);
-      if (!outcome.superseded) {
-        expect(outcome.geometry.success).toBe(true);
-        if (outcome.geometry.success) {
-          expect(outcome.geometry.data.format).toBe('gltf');
-          if (outcome.geometry.data.format === 'gltf') {
-            expect(outcome.geometry.data.content.byteLength).toBeGreaterThan(0);
-          }
-        }
+      const document = client.open({ source: { path: 'main.ts' } });
+      const view = document.view();
+      try {
+        expectNonEmptyGlb(await view.rendering());
+      } finally {
+        view.close();
+        document.close();
       }
     } finally {
       if (previousCrossOriginIsolated) {
@@ -275,15 +259,13 @@ describe('Kernel Integration — v6 zero-arg connect + transport-owned FS', { ti
     );
     await client.connect();
 
-    const outcome = await client.render({
-      source: { path: 'main.scad' },
-      content: { includeEdges: true },
-    });
-
-    expect(outcome.superseded).toBe(false);
-    if (outcome.superseded || !outcome.geometry.success || outcome.geometry.data.format !== 'gltf') {
-      throw new Error('Expected successful OpenRSCAD GLB render');
+    const document = client.open({ source: { path: 'main.scad' } });
+    const view = document.view('model', { content: { includeEdges: true } });
+    try {
+      expect(glbPrimitiveModes(expectNonEmptyGlb(await view.rendering()))).toEqual([[4, 1]]);
+    } finally {
+      view.close();
+      document.close();
     }
-    expect(glbPrimitiveModes(outcome.geometry.data.content)).toEqual([[4, 1]]);
   });
 });

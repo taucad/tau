@@ -13,8 +13,9 @@ const seconds = (value: number): number => value * 1000;
  * @public
  */
 export const bambuX1cManifest: MachineManifest = parseMachineManifest({
-  version: 1,
+  version: 2,
   identity: {
+    typeId: 'bambu.x1c',
     vendor: 'Bambu Lab',
     model: 'x1c',
     displayName: 'X1 Carbon',
@@ -239,6 +240,7 @@ export const bambuX1cManifest: MachineManifest = parseMachineManifest({
 export const bambuA1MiniManifest: MachineManifest = parseMachineManifest({
   ...bambuX1cManifest,
   identity: {
+    typeId: 'bambu.a1-mini',
     vendor: 'Bambu Lab',
     model: 'a1-mini',
     displayName: 'A1 mini',

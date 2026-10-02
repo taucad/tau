@@ -4,7 +4,6 @@ import userEvent from '@testing-library/user-event';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
-import { awaitFreshRender } from '#machines/await-fresh-render.js';
 
 const mocks = vi.hoisted(() => {
   const exportToDisk = vi.fn();
@@ -12,7 +11,7 @@ const mocks = vi.hoisted(() => {
   const toastError = vi.fn();
   const cadActor = {
     getSnapshot: () => ({
-      context: { kernelClient: { export: vi.fn() }, activeKernelId: 'replicad' },
+      context: { kernelClient: { export: vi.fn() }, activeKernelId: 'replicad', document: { export: vi.fn() } },
     }),
   };
   const geometryUnits = new Map([['other.ts', cadActor]]);
@@ -68,7 +67,6 @@ vi.mock('@taucad/ui/components/tooltip', () => ({
   TooltipContent: () => null,
 }));
 vi.mock('sonner', () => ({ toast: { error: mocks.toastError } }));
-vi.mock('#machines/await-fresh-render.js', () => ({ awaitFreshRender: vi.fn() }));
 vi.mock('#utils/export-formats.utils.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),
   deriveAvailableFormats: () => [
@@ -80,12 +78,13 @@ vi.mock('#utils/export-formats.utils.js', async (importOriginal) => ({
 const { ChatMessageToolExportGeometry } =
   await import('#routes/w.$workspace.$project/chat-message-tool-export-geometry.js');
 
-const part: ToolInvocation<typeof toolName.exportGeometry> = {
+const part: ToolInvocation<typeof toolName.exportModel> = {
   toolCallId: 'export-1',
   state: 'output-available',
-  input: { targetFile: 'other.ts', format: 'glb' },
+  input: { targetFile: 'other.ts', to: 'glb' },
   output: {
-    format: 'glb',
+    to: 'glb',
+    exportId: 'model',
     files: [
       { name: 'other.glb', artifactPath: '.tau/artifacts/other.glb', mimeType: 'model/gltf-binary', byteLength: 4 },
     ],
@@ -97,29 +96,16 @@ describe('chat export geometry download', () => {
     vi.clearAllMocks();
   });
 
-  it('refuses retained runtime export after the claimed entry settles with a failed render', async () => {
-    // SAFETY: this snapshot retains the old runtime client while the latest render failed.
-    vi.mocked(awaitFreshRender).mockResolvedValue({
-      context: {
-        entryPath: 'other.ts',
-        latestGeometryOutcome: 'failure',
-        kernelClient: mocks.cadActor.getSnapshot().context.kernelClient,
-        kernelIssues: new Map([
-          ['other.ts', [{ message: 'radius must be positive', code: 'RUNTIME', type: 'runtime', severity: 'error' }]],
-        ]),
-      },
-      hasTag: () => false,
-    } as unknown as Awaited<ReturnType<typeof awaitFreshRender>>);
-
+  it('allows an alternate document export without requiring a successful view render', async () => {
     const user = userEvent.setup();
     render(<ChatMessageToolExportGeometry part={part} />);
     await user.click(screen.getByRole('button', { name: 'Choose STL' }));
     await user.click(screen.getByRole('button', { name: 'Download STL' }));
 
     await waitFor(() => {
-      expect(mocks.toastError).toHaveBeenCalledWith('radius must be positive');
+      expect(mocks.exportToDisk).toHaveBeenCalledWith(mocks.cadActor, 'stl');
     });
-    expect(mocks.exportToDisk).not.toHaveBeenCalled();
+    expect(mocks.toastError).not.toHaveBeenCalled();
     const claim = mocks.send.mock.calls.find(([event]) => event.type === 'claimGeometryUnit')?.[0] as
       | { claimId: string; entryPath: string }
       | undefined;

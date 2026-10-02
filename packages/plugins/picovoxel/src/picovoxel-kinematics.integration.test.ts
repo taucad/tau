@@ -12,12 +12,14 @@ import type { Mechanism, MechanismSource } from '@taucad/kinematics';
 import { geometryCache } from '@taucad/middleware';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineKernel } from '@taucad/runtime/kernel';
 import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { assertSuccess, createTestRuntimeClient, extractGltfFromResult } from '@taucad/runtime-testing';
+import { createTestRuntimeClient, extractGltfFromResult } from '@taucad/runtime-testing';
 import { picovoxel, picovoxelKernel } from '@taucad/picovoxel';
+import { picovoxelBuiltinModuleNames, picovoxelDetectPattern } from '#picovoxel.kernel.js';
 
 const mechanism: MechanismSource = {
   schemaVersion: 1,
@@ -147,6 +149,13 @@ const parse = async (bytes: Uint8Array<ArrayBuffer>, format: 'glb' | 'gltf' = 'g
       : await io.readJSON({ json: JSON.parse(new TextDecoder().decode(bytes)), resources: {} });
   return { document, topology: document.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload() };
 };
+function assertSuccess<
+  Result extends { readonly success: boolean; readonly issues: ReadonlyArray<{ message: string }> },
+>(result: Result): asserts result is Extract<Result, { success: true }> {
+  if (!result.success) {
+    throw new Error(result.issues.map(({ message }) => message).join('; '));
+  }
+}
 const admitted = (value: unknown): Mechanism => {
   const result = admitMechanism(value);
   if (result.status !== 'admitted') {
@@ -185,14 +194,18 @@ export const defaultParams = { voxelSize: 1 };
 export default function main(pico: Pico) { return { name: 'base', shape: pico.createMesh({ vertices: [0,20,30,4,20,30,0,26,30], triangles: [0,1,2] }) }; }
 export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg' }, root: 'base', links: { base: { shapes: ['base'] } }, joints: {} };
 `;
-      const glb = await client.export('glb', { source: { entry: 'main.ts', files: { 'main.ts': code } } });
+      const document = client.open({
+        source: { entry: 'main.ts', files: { 'main.ts': code } },
+        evaluateOptions: { lane: 'exact' },
+      });
+      const glb = await document.export('glb');
       assertSuccess(glb);
-      expect(createHash('sha256').update(glb.data[0]!.bytes).digest('hex')).toBe(
+      expect(createHash('sha256').update(glb.files[0].bytes).digest('hex')).toBe(
         '853d1eecb0d48f0cad26b6decff90df1e43de67d45475939e8cc109cee6807b8',
       );
-      const stl = await client.export('stl', { source: { entry: 'main.ts', files: { 'main.ts': code } } });
+      const stl = await document.export('stl');
       assertSuccess(stl);
-      expect(createHash('sha256').update(stl.data[0]!.bytes).digest('hex')).toBe(
+      expect(createHash('sha256').update(stl.files[0].bytes).digest('hex')).toBe(
         'd73acca400b9d1ce02f737bab0687d3d2a695e40b432b3b9a5a4b6e7cf0054d5',
       );
     } finally {
@@ -205,25 +218,26 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
     async (lane) => {
       const client = createClient();
       try {
-        const result = await client.render({ source: { path: 'main.ts' }, renderOptions: { lane } });
+        const document = client.open({ source: { path: 'main.ts' }, evaluateOptions: { lane } });
+        const result = await document.view('model', { content: { includeTopology: true } }).rendering();
         if (result.superseded) {
           throw new Error('Unexpected superseded render');
         }
-        assertSuccess(result.geometry);
-        const { document, topology } = await parse(extractGltfFromResult(result.geometry)!);
+        assertSuccess(result.rendering);
+        const { document: sceneDocument, topology } = await parse(extractGltfFromResult(result.rendering)!);
         const delivered = admitted(topology?.['mechanism']);
-        expect(result.geometry.issues).toEqual([]);
+        expect(result.rendering.issues).toEqual([]);
         expect(delivered.units).toEqual({ length: 'm', angle: 'deg' });
         expect(Object.values(delivered.links).flatMap(({ components }) => components)).toEqual(
           Array.from({ length: 8 }, (_, index) => `component:node-${index}`),
         );
         expect(
-          document
+          sceneDocument
             .getRoot()
             .listNodes()
             .map((node) => node.getExtras()['tauComponentId']),
         ).toEqual(Array.from({ length: 8 }, (_, index) => `component:node-${index}`));
-        expect(document.getRoot().listMaterials()[0]!.getMetallicFactor()).toBe(0.7);
+        expect(sceneDocument.getRoot().listMaterials()[0]!.getMetallicFactor()).toBe(0.7);
         const pose = poseAt(delivered, 1);
         expect(pose.coordinates['screw']).toBe(-10);
         expect(pose.coordinates['cylindrical/distance']).toBeCloseTo(0.02, 9);
@@ -249,17 +263,17 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
             link,
           ).toBe(true);
         }
-        const plain = await client.export('glb');
+        const plain = await document.export('glb');
         assertSuccess(plain);
-        const plainScene = await parse(plain.data[0]!.bytes);
+        const plainScene = await parse(plain.files[0].bytes);
         expect(plainScene.topology).toBeUndefined();
-        const disabled = await client.export('gltf', { content: { includeTopology: false } });
+        const disabled = await document.export('gltf', { content: { includeTopology: false } });
         assertSuccess(disabled);
-        const disabledScene = await parse(disabled.data[0]!.bytes, 'gltf');
+        const disabledScene = await parse(disabled.files[0].bytes, 'gltf');
         expect(disabledScene.topology).toBeUndefined();
-        const stl = await client.export('stl');
+        const stl = await document.export('stl');
         assertSuccess(stl);
-        expect(stl.data).toHaveLength(8);
+        expect(stl.files).toHaveLength(8);
       } finally {
         await client.shutdown();
       }
@@ -271,17 +285,17 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
     async (format) => {
       const client = createClient();
       try {
+        const document = client.open({ source: { path: 'main.ts' }, evaluateOptions: { lane: 'exact' } });
         for (const coordinateSystem of ['y-up', 'z-up'] as const) {
           for (const length of ['meter', 'millimeter'] as const) {
             // oxlint-disable-next-line no-await-in-loop -- One kernel owns each sequential export.
-            const result = await client.export(format, {
-              source: { path: 'main.ts' },
-              exportOptions: { coordinateSystem, unit: { length } },
+            const result = await document.export(format, {
+              options: { coordinateSystem, unit: { length } },
               content: { includeTopology: true },
             });
             assertSuccess(result);
             // oxlint-disable-next-line no-await-in-loop -- Parse the just-produced route before its next export.
-            const { document, topology } = await parse(result.data[0]!.bytes, format);
+            const { document: sceneDocument, topology } = await parse(result.files[0].bytes, format);
             const wire = admitted(topology?.['mechanism']);
             const scale = length === 'meter' ? 0.001 : 1;
             expect(wire.units.length).toBe(length === 'meter' ? 'm' : 'mm');
@@ -289,7 +303,7 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
               (coordinateSystem === 'y-up' ? [10, 30, -20] : [10, 20, 30]).map((value) => value * scale),
             );
             expect(
-              document
+              sceneDocument
                 .getRoot()
                 .listMeshes()[0]!
                 .listPrimitives()[0]!
@@ -323,12 +337,13 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
           : `export ${kind === 'async' ? 'async ' : ''}function mechanism(params: { travel: number }) { const data = ${JSON.stringify(mechanism)}; data.joints.prismatic.limits.upper = params.travel; return data; }`;
       const client = createClient(source(code));
       try {
-        const result = await client.render({ source: { path: 'main.ts' }, parameters: { travel: 80 } });
+        const document = client.open({ source: { path: 'main.ts' }, parameters: { travel: 80 } });
+        const result = await document.view('model', { content: { includeTopology: true } }).rendering();
         if (result.superseded) {
           throw new Error('Unexpected superseded render');
         }
-        assertSuccess(result.geometry);
-        const scene = await parse(extractGltfFromResult(result.geometry)!);
+        assertSuccess(result.rendering);
+        const scene = await parse(extractGltfFromResult(result.rendering)!);
         const delivered = admitted(scene.topology?.['mechanism']);
         expect(delivered.joints['prismatic']).toMatchObject({ limits: { upper: kind === 'object' ? 0.1 : 0.08 } });
       } finally {
@@ -355,15 +370,16 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
   ])('should retain geometry and actionable warnings for %s', async (kind, exported, code) => {
     const client = createClient(source(exported));
     try {
-      const result = await client.render({ source: { path: 'main.ts' } });
+      const document = client.open({ source: { path: 'main.ts' } });
+      const result = await document.view('model', { content: { includeTopology: true } }).rendering();
       if (result.superseded) {
         throw new Error('Unexpected superseded render');
       }
-      assertSuccess(result.geometry);
-      const { document, topology } = await parse(extractGltfFromResult(result.geometry)!);
-      expect(document.getRoot().listMeshes()).toHaveLength(8);
+      assertSuccess(result.rendering);
+      const { document: sceneDocument, topology } = await parse(extractGltfFromResult(result.rendering)!);
+      expect(sceneDocument.getRoot().listMeshes()).toHaveLength(8);
       expect(topology?.['mechanism']).toBeUndefined();
-      expect(result.geometry.issues).toEqual(
+      expect(result.rendering.issues).toEqual(
         expect.arrayContaining([
           expect.objectContaining({
             code,
@@ -373,11 +389,11 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
         ]),
       );
       if (kind === 'throw' || kind === 'reject') {
-        expect(result.geometry.issues[0]!.location).toMatchObject({ fileName: 'main.ts', startLineNumber: 10 });
+        expect(result.rendering.issues[0]!.location).toMatchObject({ fileName: 'main.ts', startLineNumber: 10 });
       }
-      const exportedResult = await client.export('glb', { content: { includeTopology: true } });
+      const exportedResult = await document.export('glb', { content: { includeTopology: true } });
       assertSuccess(exportedResult);
-      const exportedScene = await parse(exportedResult.data[0]!.bytes);
+      const exportedScene = await parse(exportedResult.files[0].bytes);
       expect(exportedScene.topology?.['mechanism']).toBeUndefined();
       expect(exportedResult.issues.some((issue) => issue.severity === 'warning')).toBe(true);
     } finally {
@@ -387,10 +403,19 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
 
   it('should restore mechanisms from reopened SQLite and rebuild changed parameters and imported sources', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tau-picovoxel-kinematics-'));
-    const plugin = picovoxelKernel({ wasm: 'serial' });
-    const definition = await resolveRuntimePluginDefinition('kernel', plugin);
-    const build = vi.spyOn(definition, 'createGeometry');
-    const restore = vi.spyOn(definition, 'deserializeNativeHandle');
+    const definition = await resolveRuntimePluginDefinition('kernel', picovoxelKernel({ wasm: 'serial' }));
+    const build = vi.fn(definition.evaluate);
+    const restore = vi.fn(definition.deserializeHandle);
+    const plugin = defineKernel({
+      ...definition,
+      id: 'picovoxel',
+      extensions: ['ts', 'js'],
+      detectImport: picovoxelDetectPattern,
+      builtinModuleNames: [...picovoxelBuiltinModuleNames],
+      evaluate: build,
+      serializeHandle: definition.serializeHandle!,
+      deserializeHandle: restore,
+    })({ wasm: 'serial' });
     const cachedRuntime = defineRuntime({ kernels: [plugin], plugins: [esbuild()], middleware: [geometryCache()] });
     const reopen = async (travel: number, format: 'glb' | 'gltf' = 'glb', lead = 12) => {
       const store = createSqliteComputeEngine({ directory });
@@ -404,18 +429,19 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
       try {
         const code = source("export { mechanism } from './motion.js';");
         const motion = `export function mechanism(params: { travel: number }) { const data = ${JSON.stringify(mechanism)}; data.joints.prismatic.limits.upper = params.travel; data.joints.screw.lead = ${lead}; return data; }`;
-        const result = await client.render({
+        const document = client.open({
           source: { entry: 'main.ts', files: { 'main.ts': code, 'motion.ts': motion } },
           parameters: { travel },
-          renderOptions: { lane: 'exact' },
+          evaluateOptions: { lane: 'exact' },
         });
+        const result = await document.view('model', { content: { includeTopology: true } }).rendering();
         if (result.superseded) {
           throw new Error('Unexpected superseded render');
         }
-        assertSuccess(result.geometry);
-        const exported = await client.export(format, { content: { includeTopology: true } });
+        assertSuccess(result.rendering);
+        const exported = await document.export(format, { content: { includeTopology: true } });
         assertSuccess(exported);
-        return await parse(exported.data[0]!.bytes, format);
+        return await parse(exported.files[0].bytes, format);
       } finally {
         await client.shutdown();
         await store.dispose();
@@ -436,18 +462,25 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
       expect(admitted(changedSource.topology?.['mechanism']).joints['screw']).toMatchObject({ lead: 0.024 });
       expect(build).toHaveBeenCalledTimes(3);
     } finally {
-      build.mockRestore();
-      restore.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
   }, 120_000);
 
   it('should restore source-mapped reader warnings through a reopened SQLite build', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tau-picovoxel-warnings-'));
-    const plugin = picovoxelKernel({ wasm: 'serial' });
-    const definition = await resolveRuntimePluginDefinition('kernel', plugin);
-    const build = vi.spyOn(definition, 'createGeometry');
-    const restore = vi.spyOn(definition, 'deserializeNativeHandle');
+    const definition = await resolveRuntimePluginDefinition('kernel', picovoxelKernel({ wasm: 'serial' }));
+    const build = vi.fn(definition.evaluate);
+    const restore = vi.fn(definition.deserializeHandle);
+    const plugin = defineKernel({
+      ...definition,
+      id: 'picovoxel',
+      extensions: ['ts', 'js'],
+      detectImport: picovoxelDetectPattern,
+      builtinModuleNames: [...picovoxelBuiltinModuleNames],
+      evaluate: build,
+      serializeHandle: definition.serializeHandle!,
+      deserializeHandle: restore,
+    })({ wasm: 'serial' });
     const cachedRuntime = defineRuntime({ kernels: [plugin], plugins: [esbuild()], middleware: [geometryCache()] });
     const reopen = async (format: 'glb' | 'gltf') => {
       const store = createSqliteComputeEngine({ directory });
@@ -459,7 +492,7 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
         }),
       });
       try {
-        const result = await client.render({
+        const document = client.open({
           source: {
             entry: 'main.ts',
             files: {
@@ -467,21 +500,22 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
               'motion.ts': "export function mechanism() { throw new Error('imported annotation broke'); }",
             },
           },
-          renderOptions: { lane: 'exact' },
+          evaluateOptions: { lane: 'exact' },
         });
+        const result = await document.view('model', { content: { includeTopology: true } }).rendering();
         if (result.superseded) {
           throw new Error('Unexpected superseded render');
         }
-        assertSuccess(result.geometry);
-        expect(result.geometry.issues).toHaveLength(1);
-        expect(result.geometry.issues[0]).toMatchObject({
+        assertSuccess(result.rendering);
+        expect(result.rendering.issues).toHaveLength(1);
+        expect(result.rendering.issues[0]).toMatchObject({
           severity: 'warning',
           location: { fileName: 'motion.ts', startLineNumber: 1 },
         });
-        const exported = await client.export(format, { content: { includeTopology: true } });
+        const exported = await document.export(format, { content: { includeTopology: true } });
         assertSuccess(exported);
-        expect(exported.issues).toEqual(result.geometry.issues);
-        const parsed = await parse(exported.data[0]!.bytes, format);
+        expect(exported.issues).toEqual(result.rendering.issues);
+        const parsed = await parse(exported.files[0].bytes, format);
         expect(parsed.topology?.['components']).toHaveLength(8);
         expect(parsed.topology?.['mechanism']).toBeUndefined();
         return exported.issues;
@@ -498,8 +532,6 @@ export const mechanism = { schemaVersion: 1, units: { length: 'mm', angle: 'deg'
       expect(restore).toHaveBeenCalledTimes(1);
       expect(restored).toEqual(first);
     } finally {
-      build.mockRestore();
-      restore.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
   });

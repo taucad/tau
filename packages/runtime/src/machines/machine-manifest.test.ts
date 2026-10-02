@@ -54,7 +54,7 @@ describe('parseMachineManifest', () => {
         },
       },
     ],
-    ['a version other than 1', { ...machineManifestFixture, version: 2 }],
+    ['a version other than 2', { ...machineManifestFixture, version: 1 }],
     [
       'an external spool slot beyond 255',
       {

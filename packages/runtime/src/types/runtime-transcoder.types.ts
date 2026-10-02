@@ -9,7 +9,7 @@
  */
 
 import type { z } from 'zod';
-import type { ExportFidelity, ExportFile, FileExtension } from '@taucad/types';
+import type { ExportFidelity, ExportFile } from '@taucad/types';
 import type { KernelResult } from '#types/runtime.types.js';
 import type { RuntimeImplementationAsset, RuntimeLogger } from '#types/runtime-kernel.types.js';
 import type { RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
@@ -40,8 +40,8 @@ import { validateRuntimeContentDeclarations } from '#types/runtime-content.types
  * @public
  */
 export type TranscoderEdge<
-  From extends FileExtension = FileExtension,
-  To extends FileExtension = FileExtension,
+  From extends string = string,
+  To extends string = string,
   Schema extends z.ZodType | undefined = z.ZodType | undefined,
 > = {
   from: From;
@@ -151,7 +151,7 @@ export type TranscoderDefinition<
   transcode(input: TranscodeInput<Edges>, runtime: TranscoderRuntime, context: Context): Promise<TranscodeResult>;
 
   /** Tear down transcoder resources */
-  cleanup?(context: Context): Promise<void>;
+  onDispose?(context: Context): Promise<void>;
 };
 
 type TranscoderDefinitionConfig<
@@ -175,7 +175,7 @@ type TranscoderDefinitionConfig<
   /** Execute the format conversion */
   transcode(input: TranscodeInput<Edges>, runtime: TranscoderRuntime, context: Context): Promise<TranscodeResult>;
   /** Tear down transcoder resources */
-  cleanup?(context: Context): Promise<void>;
+  onDispose?(context: Context): Promise<void>;
 };
 
 type EdgeOptionMap<Edges extends readonly TranscoderEdge[]> = {
@@ -229,28 +229,6 @@ export interface TranscoderPluginFactory<
  *
  * @public
  *
- * @example <caption>Defining a format converter transcoder</caption>
- * ```typescript
- * import { defineTranscoder } from '@taucad/runtime';
- *
- * export const myTranscoder = defineTranscoder({
- *   id: 'my-transcoder',
- *   name: 'MyTranscoder',
- *   version: '1.0.0',
- *   edges: [
- *     { from: 'glb', to: 'usdz', fidelity: 'mesh' },
- *     { from: 'glb', to: 'stl', fidelity: 'mesh' },
- *   ] as const,
- *   async initialize(options, runtime) {
- *     return {};
- *   },
- *   async transcode(input, runtime, context) {
- *     // input.from is 'glb', input.to is 'usdz' | 'stl' (literal narrowing)
- *     return { success: true, data: input.files, issues: [] };
- *   },
- *   async cleanup(context) {},
- * });
- * ```
  */
 export function defineTranscoder<
   const Id extends string,

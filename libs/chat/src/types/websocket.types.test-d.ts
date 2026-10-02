@@ -10,9 +10,9 @@ describe('RpcResponse discriminated by rpcName (R5)', () => {
   });
 
   it('should expose RpcResponseFor<T> with rpcName literal', () => {
-    expectTypeOf<RpcResponseFor<'get_kernel_result'>>().toExtend<{
+    expectTypeOf<RpcResponseFor<'evaluate_model'>>().toExtend<{
       type: 'rpc_response';
-      rpcName: 'get_kernel_result';
+      rpcName: 'evaluate_model';
     }>();
   });
 

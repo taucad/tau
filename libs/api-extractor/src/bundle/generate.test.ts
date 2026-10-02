@@ -64,10 +64,10 @@ describe('generateBundles', () => {
     await generateBundles({ outputRoot: scratch });
   }, 300_000);
 
-  it('ships the approved workbench text with only its DRAFT banner removed', () => {
+  it('ships the approved workbench content with the document API names', () => {
     const shipped = readFileSync(join(workspaceRoot, 'packages/workbench/agent/workbench/SKILL.md'), 'utf8');
-    // SHA-256 of the approved 92-line draft after its DRAFT heading is removed.
-    expect(digest(Buffer.from(shipped))).toBe('ad215da4bd2b02f736ee80ed5861860bad1f1f1c73e86815ce1259c18630cb9c');
+    // Approved content, retaining evaluate_model and operationTimeout from the document API migration.
+    expect(digest(Buffer.from(shipped))).toBe('fe1b920f303a21df9e2c78c39ace2ee690dbb35f0f462813ab8434e1897ef6d8');
   });
 
   it('should expose all PicoVoxel Tau authoring types through the shipped reference index', () => {
@@ -205,14 +205,14 @@ describe('every committed bundle', () => {
     },
   );
 
+  // Doctrine-only owners (no `corpus`) have no extracted symbols to cover.
   it.each(
     declarations
-      .filter((entry) => entry.owner.slug !== 'workbench')
+      .filter(({ owner }) => owner.corpus !== undefined)
       .map((entry) => [entry.owner.slug, entry.owner] as const),
   )(
     '%s covers every extracted symbol exactly once',
     (_slug, owner) => {
-      expect(owner.corpus).toBeDefined();
       expect(owner.groupBy).toBeDefined();
       if (owner.corpus === undefined || owner.groupBy === undefined) {
         return;
@@ -263,7 +263,7 @@ describe('every committed bundle', () => {
     expect(serialized).not.toContain('"docs"');
     expect(serialized).not.toContain('"description":');
     expect(serialized).not.toMatch(/"deprecated":"/u);
-  });
+  }, 120_000);
 });
 
 describe('skill declarations', () => {

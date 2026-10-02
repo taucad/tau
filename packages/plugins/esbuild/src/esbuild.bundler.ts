@@ -122,7 +122,7 @@ export const esbuildBundler = defineBundler({
     context.vm.clearExecutionCache(code);
   },
 
-  async cleanup(context) {
+  async onDispose(context) {
     context.vm.dispose();
   },
 });

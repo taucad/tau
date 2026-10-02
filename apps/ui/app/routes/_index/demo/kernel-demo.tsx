@@ -8,8 +8,8 @@ import { ModelViewer, RuntimeStatusOverlay } from '#components/model-viewer.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useProjectCreationLocationError } from '#hooks/use-project-creation-location-error.js';
 import { useRuntime } from '@taucad/react';
+import type { Artifact } from '@taucad/runtime';
 import { parameterEntryPath } from '@taucad/types';
-import type { Geometry } from '@taucad/types';
 import { Button } from '@taucad/ui/components/button';
 import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { FileExtensionIcon } from '#components/icons/file-extension-icon.js';
@@ -48,8 +48,8 @@ export type KernelDemoConfig = {
     readonly tags: readonly string[];
     readonly forkedFrom: string;
   };
-  /** Optional live verification overlay, given the current geometry. */
-  readonly renderVerification?: (geometry: Geometry | undefined) => React.ReactNode;
+  /** Optional live verification overlay, given the current rendering. */
+  readonly renderVerification?: (artifact: Artifact | undefined) => React.ReactNode;
   /** Optional note under the viewer (e.g. the QR scan hint). */
   readonly note?: string;
 };
@@ -74,12 +74,13 @@ export function KernelDemo({
   const [isExporting, setIsExporting] = useState(false);
 
   const {
-    geometry,
+    artifact,
+    artifactHash,
     status,
     defaultParameters,
     jsonSchema,
     parameterManifest,
-    exportGeometry,
+    exportModel,
     capabilities,
     setParameters,
   } = useRuntime({
@@ -116,10 +117,10 @@ export function KernelDemo({
     // oxlint-disable-next-line tau-lint/no-async-iife -- export is async.
     void (async () => {
       try {
-        const result = await exportGeometry(activeFormat.format);
+        const result = await exportModel(activeFormat.format);
         if (result.success) {
           const filename = `${exportName}.${activeFormat.format}`;
-          await downloadExportArtifactSet(result.data, {
+          await downloadExportArtifactSet(result.files, {
             singleFileName: filename,
             archiveName: `${exportName}-${activeFormat.format}.zip`,
           });
@@ -135,7 +136,7 @@ export function KernelDemo({
         setIsExporting(false);
       }
     })();
-  }, [activeFormat, isExporting, exportGeometry, exportName]);
+  }, [activeFormat, isExporting, exportModel, exportName]);
 
   const handleFormatSelect = useCallback(
     (value: string) => {
@@ -197,10 +198,15 @@ export function KernelDemo({
         </Button>
 
         {renderVerification ? (
-          <div className='absolute top-2 left-2 z-10 flex flex-col gap-1.5'>{renderVerification(geometry)}</div>
+          <div className='absolute top-2 left-2 z-10 flex flex-col gap-1.5'>{renderVerification(artifact)}</div>
         ) : null}
 
-        <ModelViewer geometry={geometry} enablePan graphicsOptions={{ enableGrid: true, enableAxes: true }} />
+        <ModelViewer
+          artifact={artifact}
+          artifactHash={artifactHash}
+          enablePan
+          graphicsOptions={{ enableGrid: true, enableAxes: true }}
+        />
 
         {note ? (
           <p className='absolute right-0 bottom-2 left-0 text-center text-xs text-muted-foreground'>{note}</p>

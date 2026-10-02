@@ -48,6 +48,33 @@ const facts = (over: Partial<TurnRevisionFacts> = {}): TurnRevisionFacts => ({
 const finalized = { type: 'turn.finalized', revisionId: 'rev-5' } as const;
 
 describe('deriveTurnRevisionState', () => {
+  it('should reject stale progress, unverified graph cards and pre-turn saves', () => {
+    const previous = { kind: 'working', base: { kind: 'revision', n: 4 }, isWaiting: false } as const;
+    for (const attempt of [1, 2]) {
+      expect(deriveTurnRevisionState(facts({ log: log({ attempt }), hasChanges: false, previous }))).toEqual({
+        kind: 'hidden',
+      });
+    }
+    expect(deriveTurnRevisionState(facts({ log: undefined, recorded: revision, hasChanges: false }))).toEqual({
+      kind: 'hidden',
+    });
+    expect(
+      deriveTurnRevisionState(
+        facts({
+          log: log({ settlement: { type: 'turn.failed', revisionId: 'rev-5' } }),
+          settled: revision,
+          hasChanges: false,
+        }),
+      ),
+    ).toEqual({ kind: 'hidden' });
+    expect(
+      deriveTurnRevisionState(facts({ log: log({ settlement: { type: 'turn.conflicted' } }), hasChanges: false })),
+    ).toEqual({ kind: 'hidden' });
+    expect(
+      deriveTurnRevisionState(facts({ log: log({ settlement: finalized }), settled: revision, hasChanges: false })),
+    ).toEqual({ kind: 'hidden' });
+  });
+
   it('should hide a request until files change, including a no-change request awaiting settlement', () => {
     for (const terminal of [undefined, 'completed', 'failed', 'cancelled'] as const) {
       for (const isWaiting of [false, true]) {
@@ -62,10 +89,10 @@ describe('deriveTurnRevisionState', () => {
 
   it('should keep changed work visible when saving clears dirty before settlement', () => {
     const previous = deriveTurnRevisionState(facts());
-    const saving = deriveTurnRevisionState(facts({ log: log({ terminal: 'completed' }), hasChanges: false, previous }));
+    const saving = deriveTurnRevisionState(facts({ log: log({ terminal: 'completed' }), hasChanges: true, previous }));
     expect(saving).toStrictEqual({ kind: 'saving' });
     expect(
-      deriveTurnRevisionState(facts({ log: log({ terminal: 'completed' }), hasChanges: false, previous: saving })),
+      deriveTurnRevisionState(facts({ log: log({ terminal: 'completed' }), hasChanges: true, previous: saving })),
     ).toStrictEqual({ kind: 'saving' });
     expect(
       deriveTurnRevisionState(
@@ -78,25 +105,25 @@ describe('deriveTurnRevisionState', () => {
     ).toStrictEqual({ kind: 'hidden' });
   });
 
-  it('should show a confirmed save or conflict even when no live changes were observed', () => {
-    expect(
-      deriveTurnRevisionState(facts({ log: log({ settlement: finalized }), settled: revision, hasChanges: false })),
-    ).toStrictEqual({ kind: 'saved', revision, isInterrupted: false });
-    expect(
-      deriveTurnRevisionState(facts({ log: log({ settlement: { type: 'turn.conflicted' } }), hasChanges: false })),
-    ).toStrictEqual({ kind: 'conflicted' });
-    expect(deriveTurnRevisionState(facts({ log: log({ settlement: finalized }), hasChanges: false }))).toStrictEqual({
-      kind: 'saving',
-    });
+  it('should hide unverified settlements, including cards that happen to be loaded', () => {
+    for (const settlement of [
+      finalized,
+      { type: 'turn.conflicted' } as const,
+      { type: 'turn.failed', revisionId: 'rev-5' } as const,
+    ]) {
+      expect(
+        deriveTurnRevisionState(facts({ log: log({ settlement }), settled: revision, hasChanges: false })),
+      ).toEqual({ kind: 'hidden' });
+    }
   });
 
   it('should keep changed work visible through a reconnect or an unreachable host', () => {
     const previous = deriveTurnRevisionState(facts());
-    expect(deriveTurnRevisionState(facts({ hasChanges: false, isReconnecting: true, previous }))).toBe(previous);
-    const unconfirmed = deriveTurnRevisionState(facts({ hasChanges: false, isUnreachable: true, previous }));
+    expect(deriveTurnRevisionState(facts({ hasChanges: true, isReconnecting: true, previous }))).toEqual(previous);
+    const unconfirmed = deriveTurnRevisionState(facts({ hasChanges: true, isUnreachable: true, previous }));
     expect(turnRevisionLabel(unconfirmed, 0)).toBe('Save not confirmed');
     expect(
-      deriveTurnRevisionState(facts({ hasChanges: false, isUnreachable: true, previous: unconfirmed })),
+      deriveTurnRevisionState(facts({ hasChanges: true, isUnreachable: true, previous: unconfirmed })),
     ).toStrictEqual(unconfirmed);
   });
 
@@ -162,18 +189,15 @@ describe('deriveTurnRevisionState', () => {
     }
   });
 
-  /* V5 A8, Q14: an attempt that never ran still saved the person's edits as its base. */
-  it('should show the base a failed attempt minted as saved, saying whose edits it holds', () => {
-    const state = deriveTurnRevisionState(
-      facts({
-        log: log({ terminal: 'failed', settlement: { type: 'turn.failed', revisionId: 'rev-5' } }),
-        settled: revision,
-      }),
-    );
-    expect(state).toStrictEqual({ kind: 'saved', revision, isInterrupted: false, isBase: true });
-    expect(turnRevisionLabel(state, 2)).toBe('Rev 5 saved · 2 files');
-    expect(turnRevisionDetail(state)).toBe('Your unsaved edits, saved before this request.');
-    expect(turnRevisionDetail({ kind: 'saved', revision, isInterrupted: false })).toBe('');
+  it('should hide a failed attempt’s pre-turn base even when a card is loaded', () => {
+    expect(
+      deriveTurnRevisionState(
+        facts({
+          log: log({ terminal: 'failed', settlement: { type: 'turn.failed', revisionId: 'rev-5' } }),
+          settled: revision,
+        }),
+      ),
+    ).toEqual({ kind: 'hidden' });
   });
 
   it('should route a conflicted settlement to its own label', () => {
@@ -182,8 +206,8 @@ describe('deriveTurnRevisionState', () => {
   });
 
   it('should hold the last known state while reconnecting', () => {
-    const previous = { kind: 'working', base: { kind: 'revision', n: 4 }, isWaiting: true } as const;
-    expect(deriveTurnRevisionState(facts({ isReconnecting: true, previous }))).toBe(previous);
+    const previous = { kind: 'working', base: { kind: 'revision', n: 4 }, isWaiting: false } as const;
+    expect(deriveTurnRevisionState(facts({ isReconnecting: true, previous }))).toEqual(previous);
     expect(deriveTurnRevisionState(facts({ isReconnecting: true })).kind).toBe('working');
   });
 
@@ -200,16 +224,19 @@ describe('deriveTurnRevisionState', () => {
     expect(settled.kind).toBe('saved');
   });
 
-  it('should answer from the revision client for a turn its log will never settle', () => {
-    /* A legacy run with no placement, and a turn the log does not name. */
-    const legacy = log({ terminal: 'cancelled', placement: undefined });
-    expect(deriveTurnRevisionState(facts({ log: legacy, recorded: revision }))).toStrictEqual({
-      kind: 'saved',
-      revision,
-      isInterrupted: true,
-    });
-    expect(deriveTurnRevisionState(facts({ log: undefined, recorded: revision })).kind).toBe('saved');
-    expect(deriveTurnRevisionState(facts({ log: legacy })).kind).toBe('hidden');
-    expect(deriveTurnRevisionState(facts({ log: undefined, isUnreachable: true })).kind).toBe('hidden');
+  it('should hide graph-only cards whose result attribution is unknown', () => {
+    for (const source of [undefined, log({ terminal: 'cancelled', placement: undefined })]) {
+      expect(deriveTurnRevisionState(facts({ log: source, recorded: revision, hasChanges: false }))).toEqual({
+        kind: 'hidden',
+      });
+    }
+  });
+
+  it('should retain an earlier verified save without suggesting retry progress', () => {
+    expect(
+      deriveTurnRevisionState(
+        facts({ log: log({ attempt: 2, previousRevisionId: 'rev-5' }), recorded: revision, hasChanges: false }),
+      ),
+    ).toEqual({ kind: 'saved', revision, isInterrupted: false });
   });
 });

@@ -1,7 +1,7 @@
 ---
 runtime: minor
 bambu: minor
-slicer: patch
+slicer: minor
 ---
 
 A Bambu X1C can print from its external spool. The provider reports that spool (`vt_tray`, or `vir_slot` on newer firmware) as material slot `254`, Bambu's own tray id, after the AMS trays. It also reads `tray_now`/`tray_tar` `254` as the external spool feeding.

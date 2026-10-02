@@ -795,22 +795,34 @@ describe('useRevisionChanges', () => {
 
   it('re-reads the working side every time it is opened, not only after a save (review R7)', async () => {
     revisionStatusHarness.status = { ...revisionStatusHarness.status, dirty: true, headRevisionId: 'rev-1' };
-    revisionStatusHarness.comparison = { original: 'one', modified: 'first edit' };
+    revisionStatusHarness.comparison = {
+      original: 'one',
+      modified: 'first edit',
+      originalBytes: { digest: 'original', byteLength: 3 },
+      modifiedBytes: { digest: 'first', byteLength: 10 },
+    };
 
     const first = renderHook(() => useRevisionFileComparison('rev-1', 'main.scad', 'checkout'), { wrapper });
     await waitFor(() => {
       expect(first.result.current.modified).toBe('first edit');
+      expect(first.result.current.modifiedBytes).toEqual({ digest: 'first', byteLength: 10 });
     });
     first.unmount();
 
     /* A second edit inside the same dirty window: the head has not moved, which
      * is exactly the case a cached answer could not see. */
-    revisionStatusHarness.comparison = { original: 'one', modified: 'second edit' };
+    revisionStatusHarness.comparison = {
+      original: 'one',
+      modified: 'second edit',
+      originalBytes: { digest: 'original', byteLength: 3 },
+      modifiedBytes: { digest: 'second', byteLength: 11 },
+    };
 
     const second = renderHook(() => useRevisionFileComparison('rev-1', 'main.scad', 'checkout'), { wrapper });
 
     await waitFor(() => {
       expect(second.result.current.modified).toBe('second edit');
+      expect(second.result.current.modifiedBytes).toEqual({ digest: 'second', byteLength: 11 });
     });
   });
 

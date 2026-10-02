@@ -62,7 +62,12 @@ const emptyStatus = (): RevisionStatusProjection => ({
   conflicts: [],
 });
 
-const emptyComparison = (): RevisionFileComparison => ({ original: '', modified: '' });
+const emptyComparison = (): RevisionFileComparison => ({
+  original: '',
+  modified: '',
+  originalBytes: { digest: 'missing', byteLength: null },
+  modifiedBytes: { digest: 'missing', byteLength: null },
+});
 
 /** What the scripted client answers, and what the surface under test sent it. */
 export const revisionStatusHarness = {

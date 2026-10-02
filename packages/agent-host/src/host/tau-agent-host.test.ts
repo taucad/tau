@@ -63,6 +63,61 @@ const appendSettlement = async (
 const orphanedFirstTurn: readonly SeededLogEvent[] = completedFirstTurn.slice(0, 3);
 
 describe('createTauAgentHost', () => {
+  it('should reject agent-authored turn-change proof', async () => {
+    const file = createMemoryLogFile();
+    let outcome: unknown;
+    const host = createTauAgentHost({
+      ...hostOptions({
+        openEventLog: file.open,
+        toolRegistry: tools(async () => ({ content: null, isError: false })),
+        transport: {
+          funding: { type: 'unfunded' },
+          stream: () => {
+            throw new Error('No Tau model call expected');
+          },
+        },
+      }),
+      externalRunners: {
+        acp: {
+          list: () => ['stub'],
+          run: async (turn) => {
+            try {
+              await turn.append([
+                {
+                  type: 'turn.changed',
+                  turnId: 'turn-1',
+                  chatId: turn.chatId,
+                  attempt: turn.attempt,
+                  checkoutId: 'checkout-live',
+                },
+              ]);
+              outcome = 'accepted';
+            } catch (error) {
+              outcome = error;
+            }
+            return undefined;
+          },
+        },
+      },
+    });
+    try {
+      await host.admit({
+        chatId: 'chat',
+        runId: 'run-1',
+        trigger: 'submit',
+        message: { id: 'turn-1', role: 'user', content: 'Only talk' },
+        config: { systemPrompt: '', toolChoice: 'none', agent: { kind: 'acp', id: 'stub' } },
+      });
+      await vi.waitFor(() => {
+        expect(outcome).toMatchObject({ code: 'FRAME_UNREADABLE' });
+      });
+      const rows = await readLog(file);
+      expect(rows.some((row) => row.type === 'turn.changed')).toBe(false);
+    } finally {
+      await host.close();
+    }
+  });
+
   it('should cancel before the first model request while invocation preparation is pending', async () => {
     const file = createMemoryLogFile();
     const preparing = Promise.withResolvers<void>();
@@ -887,7 +942,7 @@ finished. Tools that mutate state (file writes, edits, deletes) may have
 partially executed.
 
 Before retrying, verify the current state of any file or resource you were
-operating on (read_file / list_directory / get_kernel_result) and only then
+operating on (read_file / list_directory / evaluate_model) and only then
 decide whether to repeat, adjust, or skip the cancelled work. Do NOT assume
 the cancelled tools left the system unchanged.
 </system-reminder>`);

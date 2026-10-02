@@ -4,5 +4,7 @@
   "name": "Lead Screw Stage",
   "description": "A guided carriage driven by a steel spindle and handwheel, with named PBR components and a 4 mm per turn coupling.",
   "tags": ["picovoxel", "typescript", "mechanism", "kinematics", "materials"],
-  "assets": { "main": { "entryPath": "main.ts", "thumbnail": "thumbnail.webp" } }
+  "assets": {
+    "main": { "entryPath": "main.ts", "thumbnail": "thumbnail.webp" }
+  }
 }

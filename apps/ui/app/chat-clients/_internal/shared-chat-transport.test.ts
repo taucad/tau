@@ -5,12 +5,12 @@ import { BrowserPlacementChatTransport } from '#chat-clients/_internal/browser-a
 const observed = vi.hoisted(() => ({ options: undefined as Record<string, unknown> | undefined }));
 
 vi.mock('@ai-sdk/react', () => {
-  function MockChat(options: Record<string, unknown>): void {
+  function mockChat(options: Record<string, unknown>): void {
     observed.options = options;
   }
   return {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- third-party constructor name
-    Chat: MockChat,
+    Chat: mockChat,
   };
 });
 

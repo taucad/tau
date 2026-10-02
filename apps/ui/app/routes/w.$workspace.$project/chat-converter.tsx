@@ -42,7 +42,7 @@ import type { FormatEntry } from '#utils/export-formats.utils.js';
 import {
   bestRouteForActiveKernel,
   deriveAvailableFormats,
-  exportWithRuntimeValidatedInput,
+  exportDocumentWithValidatedInput,
   getFormatInfo,
 } from '#utils/export-formats.utils.js';
 import { groupExportFormatsByFidelity } from '#components/files/export-format-groups.js';
@@ -1061,7 +1061,7 @@ export const ConverterPanelBody = function ({
     }
   }, [cuEntries, selectedEntryPath, mainEntryPath]);
 
-  const selectedRenderTimeout = entriesRecord?.entries[selectedEntryPath]?.renderTimeout;
+  const selectedOperationTimeout = entriesRecord?.entries[selectedEntryPath]?.operationTimeout;
   useEffect(() => {
     if (!isShown || !selectedEntryPath) {
       return;
@@ -1071,16 +1071,21 @@ export const ConverterPanelBody = function ({
       type: 'claimGeometryUnit',
       claimId,
       entryPath: selectedEntryPath,
-      renderTimeout: selectedRenderTimeout,
+      operationTimeout: selectedOperationTimeout,
     });
     return () => {
       projectRef.send({ type: 'releaseGeometryUnit', claimId });
     };
-  }, [isShown, projectRef, selectedEntryPath, selectedRenderTimeout]);
+  }, [isShown, projectRef, selectedEntryPath, selectedOperationTimeout]);
 
   const selectedActor = geometryUnits.get(selectedEntryPath);
 
-  const geometry = useSelector(selectedActor, (state) => state?.context.geometry);
+  const rendering = useSelector(selectedActor, (state) => state?.context.rendering);
+  const evaluation = useSelector(selectedActor, (state) => state?.context.evaluation);
+  const latestRenderingOutcome = useSelector(selectedActor, (state) => state?.context.latestRenderingOutcome);
+  const hasExportableDocument =
+    rendering?.success === true ||
+    (latestRenderingOutcome === 'success' && evaluation?.success === true && evaluation.views.length === 0);
   const capabilities = useSelector(selectedActor, (state) => state?.context.capabilities);
   const activeKernelId = useSelector(selectedActor, (state) => state?.context.activeKernelId);
   const kernelClient = useSelector(selectedActor, (state) => state?.context.kernelClient);
@@ -1209,7 +1214,7 @@ export const ConverterPanelBody = function ({
       type: 'claimGeometryUnit',
       claimId,
       entryPath: selectedEntryPath,
-      renderTimeout: selectedRenderTimeout,
+      operationTimeout: selectedOperationTimeout,
     });
     setIsExporting(true);
 
@@ -1223,12 +1228,13 @@ export const ConverterPanelBody = function ({
       if (failedIssues) {
         throw new Error(failedIssues.map((issue) => issue.message).join('; ') || 'The selected CAD render failed');
       }
-      if (settled.context.latestGeometryOutcome !== 'success') {
+      if (settled.context.latestRenderingOutcome !== 'success') {
         throw new Error(`No current successful geometry is available for ${selectedEntryPath}`);
       }
       const freshKernelClient = settled.context.kernelClient;
+      const freshDocument = settled.context.document;
       const freshKernelId = settled.context.activeKernelId;
-      if (!freshKernelClient) {
+      if (!freshKernelClient || !freshDocument) {
         throw new Error('The selected CAD runtime is unavailable');
       }
       /* oxlint-disable no-await-in-loop -- Sequential: each export depends on shared kernel state */
@@ -1276,9 +1282,9 @@ export const ConverterPanelBody = function ({
           const content = contentResolved
             ? runtimeContentFromRecord(sanitizeFormDelta(route.content!.schema, contentResolved.values))
             : undefined;
-          const result = await exportWithRuntimeValidatedInput(freshKernelClient, route, {
+          const result = await exportDocumentWithValidatedInput(freshDocument, route, {
             ...(content && Object.keys(content).length > 0 ? { content } : {}),
-            exportOptions: options,
+            options,
           });
 
           if (!result.success) {
@@ -1286,7 +1292,7 @@ export const ConverterPanelBody = function ({
             continue;
           }
 
-          const files = result.data;
+          const files = [...result.files];
 
           if (shouldDownload) {
             downloadQueue.push({ format, files });
@@ -1329,7 +1335,7 @@ export const ConverterPanelBody = function ({
     kernelClient,
     selectedActor,
     selectedEntryPath,
-    selectedRenderTimeout,
+    selectedOperationTimeout,
     projectRef,
     selectedFormats,
     formatOptions,
@@ -1362,7 +1368,7 @@ export const ConverterPanelBody = function ({
             </div>
           </section>
 
-          {geometry ? (
+          {hasExportableDocument ? (
             availableFormats.length > 0 ? (
               <>
                 <section aria-label='Formats' className='overflow-hidden rounded-xl border border-border bg-card'>

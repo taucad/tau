@@ -15,15 +15,17 @@ import { replicad } from '@taucad/replicad';
 
 const runtime = defineRuntime({ plugins: [esbuild(), replicad()] });
 const client = await createNodeClient({ runtime });
-const result = await client.export('step', {
+const document = client.open({
   source: {
     files: {
       'box.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);',
     },
   },
 });
-// result.data (when result.success) -> [{ name, bytes, mimeType }]
-client.terminate();
+const result = await document.export('step');
+// result.files (when result.success) -> [{ name, bytes, mimeType }]
+document.close();
+await client.shutdown();
 ```
 
 The same client runs in browser Web Workers, Node.js worker threads, and Electron utility processes by swapping the transport — the application code does not change.
@@ -43,11 +45,12 @@ The same client runs in browser Web Workers, Node.js worker threads, and Electro
 | **Rhino**       | 3DM           | Rhino import via `@taucad/rhino`.                                          |
 | **Assimp**      | Mesh formats  | Assimp-backed imports and transcodes via `@taucad/assimp`.                 |
 | **Build123d**   | Python        | Native Python BRep modeling and STEP export in trusted desktop projects.   |
+| **tscircuit**   | TSX           | Electronics: 3D board, schematic, and PCB via `@taucad/tscircuit`.         |
 
 ## Key Capabilities
 
-- **Multi-kernel selection** — the runtime picks a kernel by file type, or you select one explicitly.
-- **Autonomous rendering** — `render` and `updateParameters` hand the worker a `(source, parameters)` pair; the worker owns the render loop, watches files, debounces re-renders, and pushes geometry over the `geometry` event.
+- **Multi-kernel selection** — the runtime resolves a kernel from source extensions and imports.
+- **Autonomous rendering** — documents evaluate source and watch dependencies; independent view subscriptions project each evaluation and publish `rendered` events.
 - **Cancellation without exceptions** — when a newer command takes ownership, the older call resolves with `{ superseded: true }` instead of throwing. `try/catch` fires only for genuine failures.
 - **Plugin architecture** — extend with [`defineKernel`](./api/kernels), [`defineMiddleware`](./api/middleware), and [`defineBundler`](./api/bundler); add caching, coordinate transforms, and edge detection through the onion-model middleware pipeline.
 - **Worker isolation** — kernel computation runs in workers over MessagePort channels, with cooperative abort backed by `SharedArrayBuffer` on capable transports.

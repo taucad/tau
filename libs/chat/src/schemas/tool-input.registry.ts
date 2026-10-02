@@ -13,12 +13,9 @@ import { createFileInputSchema, createFileOutputSchema } from '#schemas/tools/cr
 import { deleteFileInputSchema, deleteFileOutputSchema } from '#schemas/tools/delete-file.tool.schema.js';
 import { grepInputSchema, grepOutputSchema } from '#schemas/tools/grep.tool.schema.js';
 import { globSearchInputSchema, globSearchOutputSchema } from '#schemas/tools/glob-search.tool.schema.js';
-import {
-  getKernelResultInputSchema,
-  getKernelResultOutputSchema,
-} from '#schemas/tools/get-kernel-result.tool.schema.js';
+import { evaluateModelInputSchema, evaluateModelOutputSchema } from '#schemas/tools/evaluate-model.tool.schema.js';
 import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
-import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { exportModelInputSchema, exportModelOutputSchema } from '#schemas/tools/export-model.tool.schema.js';
 import { testModelInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
 import { revisionsInputSchema, revisionsOutputSchema } from '#schemas/tools/revisions.tool.schema.js';
 import { updateTodosInputSchema, updateTodosOutputSchema } from '#schemas/tools/update-todos.tool.schema.js';
@@ -112,13 +109,13 @@ export const uiMessageTools = {
     inputSchema: globSearchInputSchema,
     outputSchema: globSearchOutputSchema,
   },
-  [toolName.getKernelResult]: {
-    inputSchema: getKernelResultInputSchema,
-    outputSchema: getKernelResultOutputSchema,
+  [toolName.evaluateModel]: {
+    inputSchema: evaluateModelInputSchema,
+    outputSchema: evaluateModelOutputSchema,
   },
-  [toolName.exportGeometry]: {
-    inputSchema: exportGeometryInputSchema,
-    outputSchema: exportGeometryOutputSchema,
+  [toolName.exportModel]: {
+    inputSchema: exportModelInputSchema,
+    outputSchema: exportModelOutputSchema,
   },
   [toolName.getParameters]: {
     inputSchema: getParametersInputSchema,

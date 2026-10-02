@@ -1,12 +1,12 @@
 /**
  * Wire-protocol envelope for runtime transport messages. Every call and
  * notify that crosses a `RuntimeChannel` is structurally a payload from
- * the typed {@link RuntimeProtocol} contract intersected with a
+ * the typed {@link RuntimeDocumentProtocol} contract intersected with a
  * {@link ProtocolHeader}, giving downstream layers stable correlation,
  * ordering, and version-skew detection without re-parsing the payload
  * itself.
  *
- * The current wire targets `protocolVersion === 3`. Bumping the version is
+ * The current wire targets `protocolVersion === 4`. Bumping the version is
  * a wire-breaking change validated end-to-end by the conformance suite.
  *
  * @public
@@ -20,7 +20,7 @@
  *
  * @public
  */
-export const protocolVersion = 3;
+export const protocolVersion = 4;
 
 /**
  * Header fields stamped on every wire message. The header is structurally
@@ -49,19 +49,12 @@ export type ProtocolHeader = {
    * `generatePrefixedId(idPrefix.command)` (`cmd_…`).
    */
   readonly cid?: string;
-  /**
-   * Optional render-generation correlation id. Set on autonomous render-loop
-   * events (`progress`, `parameters`, `geometry`, `error`) so consumers can
-   * group events belonging to the same `openFile`/`updateParameters`/
-   * `setOptions` cycle.
-   */
-  readonly rgen?: number;
 };
 
 /**
  * Structural intersection of a payload and a {@link ProtocolHeader}. Every
- * value crossing a `RuntimeChannel` is a `WireMessage<RuntimeProtocol['calls'][K]['args']>` or
- * `WireMessage<RuntimeProtocol['notifies'][K]['args']>` for some key `K`.
+ * value crossing a runtime channel is a `WireMessage<RuntimeDocumentProtocol['calls'][K]['args']>` or
+ * `WireMessage<RuntimeDocumentProtocol['notifies'][K]['args']>` for some key `K`.
  *
  * @public
  */

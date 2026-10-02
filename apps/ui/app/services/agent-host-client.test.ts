@@ -617,7 +617,6 @@ describe('createBrowserAgentHostClient', () => {
     const client = createTestClient(workerOf(worker), {
       computeMode: 'off',
       openComputeStorePort,
-      geoSpecEngine: 'native',
     });
     const events: unknown[] = [];
     const positions: Array<number | undefined> = [];
@@ -657,7 +656,6 @@ describe('createBrowserAgentHostClient', () => {
       args: {
         projectId: 'project-one',
         computeMode: 'off',
-        geoSpecEngine: 'native',
         authority: { projectId: 'project-one', workspaceId: 'workspace-one' },
         model: { providerKind: 'openai' },
       },

@@ -84,10 +84,10 @@ export const viewPatchSchema = z.strictObject({
   measurements: z.array(measurementPatchSchema).max(64).optional().describe('Replaces the pinned list.'),
 });
 
-/** Per-entry settings (entries.json), shared by every view of the entry: `renderTimeout` 0–600 000 ms (0 disables) and component display. */
+/** Per-entry settings (entries.json), shared by every view of the entry: `operationTimeout` 0–600 000 ms (0 disables) and component display. */
 export const entryPatchSchema = z.strictObject({
   path: projectPathSchema,
-  renderTimeout: z.number().int().min(0).max(600_000).optional().describe('Milliseconds; 0 disables the timeout.'),
+  operationTimeout: z.number().int().min(0).max(600_000).optional().describe('Milliseconds; 0 disables the timeout.'),
   components: z
     .strictObject({
       hidden: z.array(z.string().min(1).max(256)).max(1024),

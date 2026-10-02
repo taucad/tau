@@ -5,34 +5,23 @@
  */
 
 import { assertType, describe, expectTypeOf, it } from 'vitest';
-import type { GeometryResponse } from '@taucad/types';
 import { z } from 'zod';
-import type { RuntimeClientOptions } from '#client/runtime-client-core.js';
+import type { RuntimeClientOptions } from '#client/runtime-document-client-core.js';
 import type { AnyRuntimeDefinition, RuntimeDefinition, RuntimeDefinitionOptions } from '#index.js';
-import type { ExportRoute } from '#types/runtime.types.js';
 import { createRuntimeClient } from '#client/runtime-client.js';
-import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
+import type { BundlerPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { defineBundler } from '#types/runtime-bundler.types.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
+import { defineMiddleware } from '#plugins/middleware-entry.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import type { TranscodeInput } from '#types/runtime-transcoder.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import type { RuntimeConfigInput, RuntimeConfigOutput } from '#worker/runtime-definition.js';
 import { inProcessTransport } from '#transport/in-process-transport.js';
 import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
-// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
-import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
-
-const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
-const typedRenderSchema = z.object({
-  tessellation: z.object({
-    linearTolerance: z.number(),
-  }),
-});
 
 const makeKernel = () =>
-  defineKernel({
+  defineKernelV2({
     id: 'typedKernel',
     extensions: ['ts'],
     name: 'TypedKernel',
@@ -41,317 +30,54 @@ const makeKernel = () =>
       endpoint: z.string(),
       retries: z.number().default(2),
     }),
-    createOptionsSchema: typedRenderSchema,
-    render: { optionsSchema: typedRenderSchema },
-    exportFormats: {
-      step: { optionsSchema: z.object({ tolerance: z.number().default(0.1) }) },
-      stl: { optionsSchema: z.object({ binary: z.boolean() }) },
-    },
+    views: {},
+    exports: {},
     async initialize(options) {
+      expectTypeOf(options.endpoint).toEqualTypeOf<string>();
+      expectTypeOf(options.retries).toEqualTypeOf<number>();
       return { endpoint: options.endpoint };
     },
-    async getDependencies(input) {
+    async resolve(input) {
       expectTypeOf(input.entryPath).toEqualTypeOf<string>();
       return { resolved: [], unresolved: [] };
     },
-    async getParameters(input) {
-      expectTypeOf(input.entryPath).toEqualTypeOf<string>();
-      return createParameterDeclaration();
+    async describe() {
+      return { success: false, issues: [] };
     },
-    async createGeometry(input) {
+    async evaluate(input) {
       expectTypeOf(input.entryPath).toEqualTypeOf<string>();
-      expectTypeOf(input.options).toEqualTypeOf<{
-        tessellation: { linearTolerance: number };
-      }>();
-      // @ts-expect-error -- kernel create inputs carry resolved values, not route intent.
-      void input.operation;
-      return { geometry: testGeometry, nativeHandle: { id: input.entryPath } };
-    },
-    async exportGeometry(_input) {
-      return { success: true, data: [], issues: [] };
+      return { handle: { id: input.entryPath } };
     },
   });
 
-describe('defineKernel', () => {
-  it('returns a callable factory with typed options, exports, and render options', () => {
+describe('defineKernelV2 runtime projection', () => {
+  it('preserves required factory options and exact kernel identity', () => {
     const kernel = makeKernel();
-
-    assertType<(options: { endpoint: string; retries?: number | undefined }) => KernelPlugin>(kernel);
     expectTypeOf(kernel({ endpoint: 'wss://example.test' }).id).toEqualTypeOf<'typedKernel'>();
-
     // @ts-expect-error -- required kernel options are enforced on the factory.
     kernel();
-
-    defineKernel({
-      id: 'bad',
-      extensions: ['ts'],
-      name: 'Bad',
-      version: '1.0.0',
-      exportFormats: {},
-      // @ts-expect-error -- unknown authoring keys are rejected at definition time.
-      worker: () => undefined,
-      async initialize() {
-        return {};
-      },
-      async getDependencies() {
-        return { resolved: [], unresolved: [] };
-      },
-      async getParameters() {
-        return createParameterDeclaration();
-      },
-      async createGeometry() {
-        return { geometry: testGeometry, nativeHandle: {} };
-      },
-      async exportGeometry() {
-        return { success: true, data: [], issues: [] };
-      },
-    });
-  });
-
-  it('threads durable native-handle snapshot types through paired hooks', () => {
-    const kernel = defineKernel({
-      id: 'snapshotKernel',
-      extensions: ['snap'],
-      name: 'SnapshotKernel',
-      version: '1.0.0',
-      exportFormats: {},
-      async initialize() {
-        return { contextValue: 'ready' };
-      },
-      async getDependencies() {
-        return { resolved: [], unresolved: [] };
-      },
-      async getParameters() {
-        return createParameterDeclaration();
-      },
-      async createGeometry() {
-        return { geometry: testGeometry, nativeHandle: { handleId: 'native' } };
-      },
-      serializeNativeHandle(input, runtime, context) {
-        expectTypeOf(input.nativeHandle).toEqualTypeOf<{ handleId: string }>();
-        expectTypeOf(runtime.logger.log).toBeFunction();
-        expectTypeOf(runtime.emitEvent).toBeFunction();
-        expectTypeOf(context).toEqualTypeOf<{ contextValue: string }>();
-        return { snapshotId: input.nativeHandle.handleId };
-      },
-      deserializeNativeHandle(input, runtime, context) {
-        expectTypeOf(input.serializedNativeHandle).toEqualTypeOf<{ snapshotId: string }>();
-        expectTypeOf(runtime.logger.log).toBeFunction();
-        expectTypeOf(context).toEqualTypeOf<{ contextValue: string }>();
-        return { handleId: input.serializedNativeHandle.snapshotId };
-      },
-      isNativeHandleValid(input, runtime, context) {
-        expectTypeOf(input.nativeHandle).toEqualTypeOf<{ handleId: string }>();
-        expectTypeOf(runtime.logger.log).toBeFunction();
-        expectTypeOf(context).toEqualTypeOf<{ contextValue: string }>();
-        return input.nativeHandle.handleId.length > 0;
-      },
-      async exportGeometry(input) {
-        expectTypeOf(input.nativeHandle).toEqualTypeOf<{ handleId: string }>();
-        return { success: true, data: [], issues: [] };
-      },
-    });
-
-    assertType<() => KernelPlugin>(kernel);
-  });
-
-  it('rejects one-sided durable native-handle snapshot hooks', () => {
-    // @ts-expect-error -- snapshot persistence is only valid when both hooks are present.
-    defineKernel({
-      id: 'halfSnapshotKernel',
-      extensions: ['snap'],
-      name: 'HalfSnapshotKernel',
-      version: '1.0.0',
-      exportFormats: {},
-      async initialize() {
-        return {};
-      },
-      async getDependencies() {
-        return { resolved: [], unresolved: [] };
-      },
-      async getParameters() {
-        return createParameterDeclaration();
-      },
-      async createGeometry() {
-        return { geometry: testGeometry, nativeHandle: { handleId: 'native' } };
-      },
-      serializeNativeHandle(input: { nativeHandle: { handleId: string } }) {
-        const { nativeHandle } = input;
-        return { snapshotId: nativeHandle.handleId };
-      },
-      async exportGeometry() {
-        return { success: true, data: [], issues: [] };
-      },
-    });
-  });
-});
-
-const minimalKernelDefinition = {
-  id: 'minimalKernel',
-  extensions: ['minimal'],
-  name: 'MinimalKernel',
-  version: '1.0.0',
-  exportFormats: {},
-  async initialize() {
-    return {};
-  },
-  async getDependencies() {
-    return { resolved: [], unresolved: [] };
-  },
-  async getParameters() {
-    return createParameterDeclaration();
-  },
-  async createGeometry() {
-    return { geometry: testGeometry, nativeHandle: {} };
-  },
-  async exportGeometry() {
-    return { success: true, data: [], issues: [] };
-  },
-};
-
-describe('positive-only kernel declarations', () => {
-  it('accepts omitted render and export content', () => {
-    defineKernel(minimalKernelDefinition);
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'schemaOnlyRender',
-      render: { optionsSchema: z.object({ quality: z.number().default(1) }) },
-      exportFormats: { glb: { optionsSchema: z.object({}) } },
-    });
-  });
-
-  it('rejects empty and unknown kernel content declarations', () => {
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'emptyRenderContent',
-      render: {
-        // @ts-expect-error -- content declarations are positive and non-empty.
-        content: [],
-      },
-      async meshGeometry() {
-        return { geometry: testGeometry };
-      },
-    });
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'emptyExportContent',
-      exportFormats: {
-        glb: {
-          optionsSchema: z.object({}),
-          // @ts-expect-error -- content declarations are positive and non-empty.
-          content: [],
-        },
-      },
-    });
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'unknownRenderContent',
-      render: {
-        // @ts-expect-error -- only canonical framework content keys are accepted.
-        content: ['includeSketches'],
-      },
-      async meshGeometry() {
-        return { geometry: testGeometry };
-      },
-    });
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'unknownExportContent',
-      exportFormats: {
-        glb: {
-          optionsSchema: z.object({}),
-          // @ts-expect-error -- only canonical framework content keys are accepted.
-          content: ['includeSketches'],
-        },
-      },
-    });
-  });
-
-  it('requires meshGeometry for positive native render content', () => {
-    // @ts-expect-error -- render content is fulfilled at the mesh boundary.
-    defineKernel({ ...minimalKernelDefinition, id: 'renderContentWithoutMesh', render: { content: ['includeEdges'] } });
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'renderContentWithMesh',
-      render: { content: ['includeEdges'] },
-      async meshGeometry(input) {
-        expectTypeOf(input.content).toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
-        return { geometry: testGeometry };
-      },
-    });
-  });
-
-  it('accepts only object create option schemas and rejects the removed scope flag', () => {
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'objectCreateSchema',
-      createOptionsSchema: z.object({ quality: z.number().default(1) }),
-      async createGeometry(input) {
-        expectTypeOf(input.options).toEqualTypeOf<{ quality: number }>();
-        expectTypeOf(input).not.toHaveProperty('content');
-        const output = { geometry: testGeometry, nativeHandle: {} };
-        expectTypeOf(output).not.toHaveProperty('nativeBuildInput');
-        return output;
-      },
-    });
-
-    // @ts-expect-error -- createOptionsSchema must be a Zod object.
-    defineKernel({ ...minimalKernelDefinition, id: 'scalarCreateSchema', createOptionsSchema: z.string() });
-    // @ts-expect-error -- createOptionsSchema must be a Zod object.
-    defineKernel({ ...minimalKernelDefinition, id: 'arrayCreateSchema', createOptionsSchema: z.array(z.string()) });
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'unionCreateSchema',
-      // @ts-expect-error -- createOptionsSchema must be a Zod object.
-      createOptionsSchema: z.union([z.object({ a: z.string() }), z.object({ b: z.string() })]),
-    });
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'transformedCreateSchema',
-      // @ts-expect-error -- transformed object schemas are not direct Zod objects.
-      createOptionsSchema: z.object({ quality: z.number() }).transform((value) => value),
-    });
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'removedNativeScope',
-      // @ts-expect-error -- native compatibility is derived from exact build identity.
-      nativeHandleScope: 'source',
-    });
-  });
-
-  it('omits content and options from source-only create hooks', () => {
-    defineKernel({
-      ...minimalKernelDefinition,
-      id: 'sourceOnlyCreate',
-      async createGeometry(input) {
-        expectTypeOf(input).not.toHaveProperty('content');
-        expectTypeOf(input).not.toHaveProperty('options');
-        // @ts-expect-error -- framework content never reaches kernel construction.
-        void input.content;
-        // @ts-expect-error -- options exist only with createOptionsSchema.
-        void input.options;
-        return { geometry: testGeometry, nativeHandle: {} };
-      },
-    });
   });
 });
 
 describe('positive-only middleware and transcoder declarations', () => {
   it('accepts omission and rejects empty or unknown middleware declarations', () => {
-    defineMiddleware({ id: 'omittedMiddlewareContent', name: 'Omitted middleware content' });
+    defineMiddleware({
+      id: 'omittedMiddlewareContent',
+      name: 'Omitted middleware content',
+    });
     defineMiddleware({
       id: 'invalidMiddlewareRenderContent',
       name: 'Invalid middleware render content',
       content: {
         // @ts-expect-error -- middleware render content must be non-empty.
-        render: [],
+        views: { 'image/svg+xml': [] },
       },
     });
     defineMiddleware({
       id: 'invalidMiddlewareExportContent',
       name: 'Invalid middleware export content',
       content: {
-        exportFormats: {
+        exports: {
           // @ts-expect-error -- middleware export content must be non-empty.
           glb: [],
         },
@@ -362,14 +88,14 @@ describe('positive-only middleware and transcoder declarations', () => {
       name: 'Unknown middleware render content',
       content: {
         // @ts-expect-error -- unknown middleware render content is rejected.
-        render: ['includeSketches'],
+        views: { 'image/svg+xml': ['includeSketches'] },
       },
     });
     defineMiddleware({
       id: 'unknownMiddlewareExportContent',
       name: 'Unknown middleware export content',
       content: {
-        exportFormats: {
+        exports: {
           // @ts-expect-error -- unknown middleware export content is rejected.
           glb: ['includeSketches'],
         },
@@ -381,21 +107,21 @@ describe('positive-only middleware and transcoder declarations', () => {
     defineMiddleware({
       id: 'contentEmptyHooks',
       name: 'Content-empty hooks',
-      async wrapCreateGeometry(input, handler) {
+      async wrapEvaluate(input, handler) {
         expectTypeOf(input).not.toHaveProperty('content');
         // @ts-expect-error -- omission removes the provider property.
         void input.content;
         return handler(input);
       },
-      async wrapMeshGeometry(input, handler) {
+      async wrapRender(input, handler) {
         expectTypeOf(input).not.toHaveProperty('content');
         const result = await handler(input);
         if (result.success) {
-          expectTypeOf(result.data).toEqualTypeOf<GeometryResponse>();
+          expectTypeOf(result.data.content).toEqualTypeOf<Uint8Array<ArrayBuffer> | string>();
         }
         return result;
       },
-      async wrapExportGeometry(input, handler) {
+      async wrapExport(input, handler) {
         expectTypeOf(input).not.toHaveProperty('content');
         return handler(input);
       },
@@ -456,7 +182,7 @@ describe('defineMiddleware', () => {
       optionsSchema: z.object({
         cacheTtl: z.number().default(60),
       }),
-      async wrapCreateGeometry(input, handler, runtime) {
+      async wrapEvaluate(input, handler, runtime) {
         expectTypeOf(input.entryPath).toEqualTypeOf<string>();
         expectTypeOf(runtime.options).toEqualTypeOf<{ cacheTtl: number }>();
         return handler(input);
@@ -489,7 +215,13 @@ describe('defineBundler', () => {
       },
       async bundle(input) {
         expectTypeOf(input.entryPath).toEqualTypeOf<string>();
-        return { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
+        return {
+          code: '',
+          issues: [],
+          success: true,
+          dependencies: [],
+          unresolvedPaths: [],
+        };
       },
       async execute(input) {
         expectTypeOf(input.code).toEqualTypeOf<string>();
@@ -513,7 +245,12 @@ describe('defineTranscoder', () => {
       name: 'TypedTranscoder',
       version: '1.0.0',
       edges: [
-        { from: 'glb', to: 'stl', fidelity: 'mesh', optionsSchema: z.object({ binary: z.boolean() }) },
+        {
+          from: 'glb',
+          to: 'stl',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ binary: z.boolean() }),
+        },
         { from: 'glb', to: 'usdz', fidelity: 'mesh' },
       ] as const,
       async initialize() {
@@ -541,8 +278,18 @@ describe('defineTranscoder', () => {
       name: 'CorrelatedTranscoder',
       version: '1.0.0',
       edges: [
-        { from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: z.object({ width: z.number() }) },
-        { from: 'svg', to: 'png', fidelity: 'mesh', optionsSchema: z.object({ density: z.number() }) },
+        {
+          from: 'glb',
+          to: 'webp',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ width: z.number() }),
+        },
+        {
+          from: 'svg',
+          to: 'png',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ density: z.number() }),
+        },
       ] as const,
       async initialize() {
         return {};
@@ -552,15 +299,43 @@ describe('defineTranscoder', () => {
       },
     })();
     const runtime = defineRuntime({ transcoders: [transcoder] });
-    const client = createRuntimeClient({ transport: inProcessTransport({ runtime }) });
-    const files = [{ name: 'input.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }] as const;
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime }),
+    });
+    const files = [
+      {
+        name: 'input.glb',
+        bytes: new Uint8Array([1]),
+        mimeType: 'model/gltf-binary',
+      },
+    ] as const;
 
-    void client.transcode({ from: 'glb', to: 'webp', files: [...files], options: { width: 640 } });
-    void client.transcode({ from: 'svg', to: 'png', files: [...files], options: { density: 2 } });
+    void client.transcode({
+      from: 'glb',
+      to: 'webp',
+      files: [...files],
+      options: { width: 640 },
+    });
+    void client.transcode({
+      from: 'svg',
+      to: 'png',
+      files: [...files],
+      options: { density: 2 },
+    });
     // @ts-expect-error -- no svg → webp edge exists.
-    void client.transcode({ from: 'svg', to: 'webp', files: [...files], options: { width: 640 } });
-    // @ts-expect-error -- png options belong only to the svg → png edge.
-    void client.transcode({ from: 'svg', to: 'png', files: [...files], options: { width: 640 } });
+    void client.transcode({
+      from: 'svg',
+      to: 'webp',
+      files: [...files],
+      options: { width: 640 },
+    });
+    void client.transcode({
+      from: 'svg',
+      to: 'png',
+      files: [...files],
+      // @ts-expect-error -- png options belong only to the svg → png edge.
+      options: { width: 640 },
+    });
   });
 
   it('types duplicate direct routes from the first registration only', () => {
@@ -569,7 +344,12 @@ describe('defineTranscoder', () => {
       name: 'First route',
       version: '1.0.0',
       edges: [
-        { from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: z.object({ first: z.literal(true) }) },
+        {
+          from: 'glb',
+          to: 'webp',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ first: z.literal(true) }),
+        },
       ] as const,
       async initialize() {
         return {};
@@ -583,7 +363,12 @@ describe('defineTranscoder', () => {
       name: 'Second route',
       version: '1.0.0',
       edges: [
-        { from: 'glb', to: 'webp', fidelity: 'mesh', optionsSchema: z.object({ second: z.literal(true) }) },
+        {
+          from: 'glb',
+          to: 'webp',
+          fidelity: 'mesh',
+          optionsSchema: z.object({ second: z.literal(true) }),
+        },
       ] as const,
       async initialize() {
         return {};
@@ -593,19 +378,39 @@ describe('defineTranscoder', () => {
       },
     })();
     const runtime = defineRuntime({ transcoders: [first, second] });
-    const client = createRuntimeClient({ transport: inProcessTransport({ runtime }) });
-    const files = [{ name: 'input.glb', bytes: new Uint8Array([1]), mimeType: 'model/gltf-binary' }] as const;
+    const client = createRuntimeClient({
+      transport: inProcessTransport({ runtime }),
+    });
+    const files = [
+      {
+        name: 'input.glb',
+        bytes: new Uint8Array([1]),
+        mimeType: 'model/gltf-binary',
+      },
+    ] as const;
 
-    void client.transcode({ from: 'glb', to: 'webp', files: [...files], options: { first: true } });
-    // @ts-expect-error -- the shadowed registration's options are not public.
-    void client.transcode({ from: 'glb', to: 'webp', files: [...files], options: { second: true } });
+    void client.transcode({
+      from: 'glb',
+      to: 'webp',
+      files: [...files],
+      options: { first: true },
+    });
+    void client.transcode({
+      from: 'glb',
+      to: 'webp',
+      files: [...files],
+      // @ts-expect-error -- the shadowed registration's options are not public.
+      options: { second: true },
+    });
   });
 });
 
 describe('defineRuntime and client projections', () => {
   it('exports runtime authoring types from the root entry', () => {
     expectTypeOf<RuntimeDefinition>().toExtend<AnyRuntimeDefinition>();
-    expectTypeOf<RuntimeDefinitionOptions>().toExtend<{ readonly kernels?: readonly never[] }>();
+    expectTypeOf<RuntimeDefinitionOptions>().toExtend<{
+      readonly kernels?: readonly never[];
+    }>();
   });
 
   it('threads plugin factories through a typed runtime definition', () => {
@@ -630,7 +435,13 @@ describe('defineRuntime and client projections', () => {
             return { detectedModules: [], dependencies: [] };
           },
           async bundle() {
-            return { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] };
+            return {
+              code: '',
+              issues: [],
+              success: true,
+              dependencies: [],
+              unresolvedPaths: [],
+            };
           },
           async execute() {
             return { success: true, value: undefined };
@@ -640,27 +451,12 @@ describe('defineRuntime and client projections', () => {
       ],
     });
 
-    const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
+    const transport = inProcessTransport({
+      runtime,
+      fileSystem: fromMemoryFs(),
+    });
     const client = createRuntimeClient({ transport });
-    const mainSourcePath = 'main.ts';
-    void client.bestRouteFor('step');
-    void client.export('step', {
-      source: { files: { [mainSourcePath]: 'export default 1;' } },
-      exportOptions: { tolerance: 0.1 },
-    });
-    void client.export('step', {
-      source: { files: { [mainSourcePath]: 'export default 1;' } },
-      exportOptions: { tolerance: 0.1 },
-    });
-    void client.export('step', {
-      source: { files: { [mainSourcePath]: 'export default 1;' } },
-      exportOptions: {
-        // @ts-expect-error -- `binary` is an STL export option, not a STEP export option.
-        binary: true,
-      },
-    });
-    // @ts-expect-error -- unknown export formats are rejected from the typed runtime projection.
-    void client.bestRouteFor('unknown');
+    void client.open({ source: { files: { 'main.ts': 'export default 1;' } } });
 
     // @ts-expect-error -- static runtimes do not accept boot config.
     createRuntimeClient({ transport, config: {} });
@@ -677,9 +473,17 @@ describe('defineRuntime and client projections', () => {
     const runtime = defineRuntime({
       configSchema,
       createRuntime(config) {
-        expectTypeOf(config).toEqualTypeOf<{ endpoint: string; retries: number }>();
+        expectTypeOf(config).toEqualTypeOf<{
+          endpoint: string;
+          retries: number;
+        }>();
         return {
-          kernels: [makeKernel()({ endpoint: config.endpoint, retries: config.retries })],
+          kernels: [
+            makeKernel()({
+              endpoint: config.endpoint,
+              retries: config.retries,
+            }),
+          ],
         };
       },
     });
@@ -700,210 +504,13 @@ describe('defineRuntime and client projections', () => {
     void createRuntimeClient<typeof runtime>(options);
 
     // @ts-expect-error -- configured runtimes require client boot config.
-    createRuntimeClient<typeof runtime>({ transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }) });
+    createRuntimeClient<typeof runtime>({
+      transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
+    });
 
     void createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
       config: { endpoint: 'https://example.test', retries: '3' },
     });
-  });
-});
-
-describe('route-scoped content projections', () => {
-  const contentKernel = defineKernel({
-    id: 'contentKernel',
-    extensions: ['content'],
-    name: 'ContentKernel',
-    version: '1.0.0',
-    render: {
-      optionsSchema: z.object({ detail: z.number().default(1) }),
-      content: ['includeEdges', 'includeTopology'],
-    },
-    exportFormats: {
-      glb: {
-        optionsSchema: z
-          .object({
-            coordinateSystem: z.enum(['y-up', 'z-up']).default('y-up'),
-            unit: z.object({ length: z.enum(['meter', 'millimeter']).default('meter') }).default({ length: 'meter' }),
-            tessellation: z.object({ linearTolerance: z.number().default(0.01) }).optional(),
-          })
-          .strict(),
-        content: ['includeEdges', 'includeTopology'],
-      },
-      step: { optionsSchema: z.object({ tolerance: z.number().default(0.01) }).strict() },
-    },
-    async initialize() {
-      return {};
-    },
-    async getDependencies() {
-      return { resolved: [], unresolved: [] };
-    },
-    async getParameters() {
-      return createParameterDeclaration();
-    },
-    async createGeometry(input) {
-      expectTypeOf(input).not.toHaveProperty('content');
-      expectTypeOf(input).not.toHaveProperty('options');
-      // @ts-expect-error -- kernel construction is always content-free.
-      void input.content;
-      return { nativeHandle: {} };
-    },
-    async meshGeometry(input) {
-      expectTypeOf<typeof input.content>().toEqualTypeOf<
-        | {
-            readonly includeEdges?: boolean;
-            readonly includeTopology?: boolean;
-          }
-        | undefined
-      >();
-      return { geometry: testGeometry };
-    },
-    async exportGeometry(input) {
-      // @ts-expect-error -- mixed format unions require format narrowing before content access.
-      void input.content;
-      if (input.format === 'glb') {
-        expectTypeOf<typeof input.content>().toEqualTypeOf<
-          | {
-              readonly includeEdges?: boolean;
-              readonly includeTopology?: boolean;
-            }
-          | undefined
-        >();
-      }
-      if (input.format === 'step') {
-        expectTypeOf(input).not.toHaveProperty('content');
-        // @ts-expect-error -- omitted STEP support removes the provider property.
-        void input.content;
-      }
-      return { success: true, data: [], issues: [] };
-    },
-  })();
-
-  const fallbackKernel = defineKernel({
-    id: 'fallbackKernel',
-    extensions: ['fallback'],
-    name: 'FallbackKernel',
-    version: '1.0.0',
-    exportFormats: { glb: { optionsSchema: z.object({}) } },
-    async initialize() {
-      return {};
-    },
-    async getDependencies() {
-      return { resolved: [], unresolved: [] };
-    },
-    async getParameters() {
-      return createParameterDeclaration();
-    },
-    async createGeometry(input) {
-      expectTypeOf(input).not.toHaveProperty('content');
-      expectTypeOf(input).not.toHaveProperty('options');
-      return { geometry: testGeometry, nativeHandle: {} };
-    },
-    async exportGeometry(input) {
-      expectTypeOf(input).not.toHaveProperty('content');
-      return { success: true, data: [], issues: [] };
-    },
-  })();
-
-  const edges = defineMiddleware({
-    id: 'typedEdges',
-    name: 'TypedEdges',
-    content: {
-      render: ['includeEdges'],
-      exportFormats: { glb: ['includeEdges'] },
-    },
-    async wrapCreateGeometry(input, handler) {
-      expectTypeOf<typeof input.content>().toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
-      return handler(input);
-    },
-    async wrapMeshGeometry(input, handler) {
-      expectTypeOf<typeof input.content>().toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
-      return handler(input);
-    },
-    async wrapExportGeometry(input, handler) {
-      expectTypeOf<typeof input.content>().toEqualTypeOf<{ readonly includeEdges?: boolean } | undefined>();
-      return handler(input);
-    },
-  })();
-
-  const images = defineTranscoder({
-    id: 'typedImages',
-    name: 'TypedImages',
-    version: '1.0.0',
-    edges: [
-      {
-        from: 'glb',
-        to: 'webp',
-        fidelity: 'mesh',
-        optionsSchema: z.object({ width: z.number().default(768) }).strict(),
-        content: ['includeEdges'],
-        sourceOptions: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
-      },
-    ] as const,
-    async initialize() {
-      return {};
-    },
-    async transcode(input) {
-      expectTypeOf(input).not.toHaveProperty('content');
-      return { success: true, data: input.files, issues: [] };
-    },
-    async cleanup() {},
-  })();
-
-  const runtime = defineRuntime({
-    kernels: [contentKernel, fallbackKernel],
-    middleware: [edges],
-    transcoders: [images],
-  });
-  const client = createRuntimeClient({
-    transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
-  });
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- Runtime source maps are keyed by literal file paths.
-  const source = { files: { 'main.content': 'model' } } as const;
-
-  it('accepts only content reachable for the requested target', () => {
-    void client.render({ source, content: { includeEdges: true, includeTopology: true } });
-    void client.export('glb', { source, content: { includeEdges: true, includeTopology: true } });
-    void client.export('webp', {
-      source,
-      content: { includeEdges: true },
-      exportOptions: { tessellation: { linearTolerance: 0.005 }, width: 1920 },
-    });
-
-    void client.export('webp', {
-      source,
-      // @ts-expect-error -- the image edge fulfills edges, not Tau topology metadata.
-      content: { includeTopology: true },
-    });
-    void client.export('step', {
-      source,
-      // @ts-expect-error -- STEP does not advertise framework content.
-      content: { includeEdges: false },
-    });
-    void client.export('webp', {
-      source,
-      exportOptions: { coordinateSystem: 'z-up' },
-    });
-  });
-
-  it('narrows bestRouteFor by target, kernel, and requested content', () => {
-    const native = client.bestRouteFor('glb', { kernelId: 'contentKernel' });
-    expectTypeOf(native).toEqualTypeOf<
-      | ExportRoute<
-          readonly [typeof contentKernel, typeof fallbackKernel],
-          readonly [typeof edges],
-          readonly [typeof images],
-          'glb',
-          'contentKernel'
-        >
-      | undefined
-    >();
-    void client.bestRouteFor('glb', { kernelId: 'fallbackKernel', content: { includeEdges: true } });
-    void client.bestRouteFor('webp', { kernelId: 'contentKernel', content: { includeEdges: true } });
-
-    // @ts-expect-error -- kernel ids are projected from the runtime definition.
-    void client.bestRouteFor('glb', { kernelId: 'missingKernel' });
-    // @ts-expect-error -- WebP does not carry topology.
-    void client.bestRouteFor('webp', { content: { includeTopology: true } });
   });
 });

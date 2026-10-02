@@ -6,6 +6,9 @@ import type { ThreeContextProperties } from '#components/geometry/graphics/three
 import { useFeature } from '#flags/use-feature.js';
 import { useWebglContextRef } from '#hooks/use-webgl-context-tracker.js';
 
+// Three owns one global switch; each requesting WebGPU canvas holds a reference.
+let shaderStackOwners = 0;
+
 export function ThreeProvider({
   children,
   graphicsBackend,
@@ -23,7 +26,7 @@ export function ThreeProvider({
   gizmoContainer,
   ...properties
 }: ThreeContextProperties): React.JSX.Element {
-  const isTauDebugEnabled = useFeature('tauDebug');
+  const captureShaderStacks = useFeature('webGpuShaderStacks');
 
   const webglRef = useWebglContextRef();
 
@@ -49,15 +52,17 @@ export function ThreeProvider({
   }, [graphicsBackend, webglRef, isOverLimit]);
 
   useEffect(() => {
-    if (!isTauDebugEnabled) {
+    if (!captureShaderStacks || graphicsBackend !== 'webgpu') {
       return;
     }
 
+    shaderStackOwners += 1;
     Node.captureStackTrace = true;
     return () => {
-      Node.captureStackTrace = false;
+      shaderStackOwners -= 1;
+      Node.captureStackTrace = shaderStackOwners > 0;
     };
-  }, [isTauDebugEnabled]);
+  }, [captureShaderStacks, graphicsBackend]);
 
   const [canvasKey, setCanvasKey] = useState(0);
 

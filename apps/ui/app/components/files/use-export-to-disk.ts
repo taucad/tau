@@ -4,7 +4,7 @@ import type { FileExtension } from '@taucad/types';
 import { isRecord } from '@taucad/utils/schema';
 import { toast } from '#components/ui/sonner.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
+import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 
 export type UseExportToDiskResult = {
@@ -32,9 +32,9 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
 
   const exportToDisk = useCallback(
     async (cadActor: ActorRefFrom<typeof cadMachine>, format: FileExtension): Promise<void> => {
-      const { kernelClient, activeKernelId } = cadActor.getSnapshot().context;
+      const { kernelClient, activeKernelId, document } = cadActor.getSnapshot().context;
 
-      if (!kernelClient || !activeKernelId) {
+      if (!kernelClient || !activeKernelId || !document) {
         toast.error('Export failed');
         return;
       }
@@ -51,7 +51,7 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
         const options: Record<string, unknown> = isRecord(route.exportOptions.defaults)
           ? route.exportOptions.defaults
           : {};
-        const result = await exportWithRuntimeValidatedInput(kernelClient, route, { exportOptions: options });
+        const result = await exportDocumentWithValidatedInput(document, route, { options });
 
         if (!result.success) {
           const message = result.issues[0]?.message ?? 'Export failed';
@@ -59,7 +59,7 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
           return;
         }
 
-        await downloadExportArtifactSet(result.data, {
+        await downloadExportArtifactSet(result.files, {
           singleFileName: `${filenameBase}.${exportFormat}`,
           archiveName: `${filenameBase}-${exportFormat}.zip`,
         });

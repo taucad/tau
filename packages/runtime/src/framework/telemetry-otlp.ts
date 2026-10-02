@@ -10,7 +10,7 @@
  * dispatcher has returned.
  */
 
-import type { TelemetryBatch, TelemetryEntry } from '#types/runtime-protocol.types.js';
+import type { TelemetryBatch, TelemetryEntry } from '#types/runtime-wire.types.js';
 
 /** Keys that describe a span's place in the tree rather than its work. */
 const identityKeys = new Set(['spanId', 'parentSpanId', 'devtools']);

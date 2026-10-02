@@ -180,6 +180,44 @@ describe('mixed WASM input', () => {
     expect(options).not.toHaveProperty('wasmBinary');
   });
 
+  it('should retry rejected ST initialization with corrected input in the same module realm', async () => {
+    const failure = new Error('corrupt ST module');
+    createModule.mockRejectedValueOnce(failure);
+    const loader = await import('./mixed-wasm-loader');
+    await expect(loader.initializeMixedWasm(Uint8Array.from([0]))).rejects.toBe(failure);
+    expect(() => loader.canonicalizeMixedWasm(Uint8Array.from([0x7b, 0x7d]))).toThrow('Call initialize()');
+
+    const corrected = Uint8Array.from([0, 97, 115, 109]);
+    await loader.initializeMixedWasm(corrected);
+    expect(createModule).toHaveBeenCalledTimes(2);
+    expect(createModule.mock.calls[1]?.[0]).toMatchObject({ wasmBinary: corrected });
+    await loader.initializeMixedWasm(Uint8Array.from([9]));
+    expect(createModule).toHaveBeenCalledTimes(2);
+  });
+
+  it('should share a rejected ST attempt and retain one concurrent successful retry', async () => {
+    const attempt = Promise.withResolvers<Record<string, unknown>>();
+    createModule.mockReturnValueOnce(attempt.promise);
+    const loader = await import('./mixed-wasm-loader');
+    const first = loader.initializeMixedWasm(Uint8Array.from([0]));
+    const second = loader.initializeMixedWasm(Uint8Array.from([1]));
+    const settled = Promise.allSettled([first, second]);
+    const failure = new Error('shared corrupt ST module');
+    attempt.reject(failure);
+    expect(await settled).toEqual([
+      { status: 'rejected', reason: failure },
+      { status: 'rejected', reason: failure },
+    ]);
+    expect(createModule).toHaveBeenCalledTimes(1);
+
+    const corrected = Uint8Array.from([0, 97, 115, 109]);
+    await Promise.all([loader.initializeMixedWasm(corrected), loader.initializeMixedWasm(Uint8Array.from([2]))]);
+    expect(createModule).toHaveBeenCalledTimes(2);
+    expect(createModule.mock.calls[1]?.[0]).toMatchObject({ wasmBinary: corrected });
+    await loader.initializeMixedWasm();
+    expect(createModule).toHaveBeenCalledTimes(2);
+  });
+
   it('should reject an unavailable MT product before loading or constructing an ST engine', async () => {
     vi.stubGlobal('crossOriginIsolated', true);
     const loader = await import('./mixed-wasm-loader');

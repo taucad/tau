@@ -6,13 +6,14 @@ import { createGeoSpecAssertionClient, GeoSpecAssertionError } from '#assertion-
 import type {
   GeoSpecAssertionClient,
   GeoSpecAssertionClientOptions,
-  GeoSpecNativeMatcherMethods,
+  GeoSpecMatcherMethods,
 } from '#assertion-client/index.js';
-import { geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';
-import type { GeoSpecNativeMatcherName } from '#engine/matchers.js';
+import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
+import type { GeoSpecMatcherName } from '#engine/matchers.js';
 import type { GeoSpecCanonicalClaimReport, GeoSpecNativeSubject } from '#engine/client.js';
+import type { GeoSpecSubject } from '#model/subject.js';
 
-type GeoSpecVitestMatcherMethods = GeoSpecNativeMatcherMethods<Promise<void>>;
+type GeoSpecVitestMatcherMethods = GeoSpecMatcherMethods<Promise<void>>;
 type GeoSpecVitestResult = {
   readonly actual: GeoSpecCanonicalClaimReport;
   readonly expected: Readonly<{ claimId: string; polarity: string; status: string }>;
@@ -22,7 +23,7 @@ type GeoSpecVitestResult = {
 };
 type GeoSpecVitestMatcher = (
   this: MatcherState,
-  received: GeoSpecNativeSubject | PromiseLike<GeoSpecNativeSubject>,
+  received: GeoSpecNativeSubject | GeoSpecSubject | PromiseLike<GeoSpecNativeSubject | GeoSpecSubject>,
   ...arguments_: readonly unknown[]
 ) => Promise<GeoSpecVitestResult>;
 type GeoSpecVitestMatcherMap = Record<string, GeoSpecVitestMatcher>;
@@ -195,13 +196,13 @@ export const createGeoSpecVitestAdapter = (client: GeoSpecAssertionClient): GeoS
   const pending = new Set<Promise<GeoSpecCanonicalClaimReport>>();
   const matchers: GeoSpecVitestMatcherMap = {};
 
-  for (const matcher of Object.keys(geoSpecNativeMatcherDescriptors) as GeoSpecNativeMatcherName[]) {
+  for (const matcher of Object.keys(geoSpecMatcherDescriptors) as GeoSpecMatcherName[]) {
     // This must throw synchronously for Vitest's asymmetric path, which cannot
     // consume an asynchronous custom matcher result.
     // oxlint-disable-next-line typescript/promise-function-async -- A synchronous throw rejects Vitest's unsupported asymmetric path before it treats a Promise as truthy.
     matchers[matcher] = function (
       this: MatcherState,
-      received: GeoSpecNativeSubject | PromiseLike<GeoSpecNativeSubject>,
+      received: GeoSpecNativeSubject | GeoSpecSubject | PromiseLike<GeoSpecNativeSubject | GeoSpecSubject>,
       ...arguments_: readonly unknown[]
     ): Promise<GeoSpecVitestResult> {
       if (!Reflect.has(this, 'assertion')) {
@@ -213,7 +214,7 @@ export const createGeoSpecVitestAdapter = (client: GeoSpecAssertionClient): GeoS
         const chain = client.expectGeo(subject);
         const methods = this.isNot ? chain.not : chain;
         try {
-          return await (Reflect.apply(methods[matcher], methods, arguments_) as Promise<GeoSpecCanonicalClaimReport>);
+          return Reflect.apply(methods[matcher], methods, arguments_) as GeoSpecCanonicalClaimReport;
         } catch (error) {
           if (error instanceof GeoSpecAssertionError) {
             return error.report;

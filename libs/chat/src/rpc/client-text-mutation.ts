@@ -203,17 +203,20 @@ const verifyCommit = (
 
 /**
  * Apply one pure text plan through Tau's client filesystem authority.
- * Owns bounds, fatal decode, byte CAS, one stale replan, and exact readback.
+ * Owns bounds, fatal decode, byte CAS and exact readback. Ordinary edits allow
+ * one stale replan; reviewed edits fence the raw digest and attempt one CAS even for no-op.
  * @public
  */
 export const applyClientTextMutation = async ({
   targetFile,
   fileSystem,
   plan,
+  expectedDigest,
 }: {
   targetFile: string;
   fileSystem: ClientTextMutationFileSystem;
   plan: (snapshot: ClientTextSnapshot) => ClientTextPlan;
+  expectedDigest?: string;
 }): Promise<ClientTextMutationResult> => {
   const path = assertRootedPath(targetFile);
   const stat = await fileSystem.stat(path);
@@ -224,11 +227,23 @@ export const applyClientTextMutation = async ({
     return failure(rpcClientErrorCode.resultTooLarge, `Target file exceeds the ${editFileMaxBytes}-byte limit.`);
   }
 
-  const first = planSnapshot(await fileSystem.readFileBytes(path), plan);
+  const original = await fileSystem.readFileBytes(path);
+  if (original.byteLength > editFileMaxBytes) {
+    return failure(rpcClientErrorCode.resultTooLarge, `Target file exceeds the ${editFileMaxBytes}-byte limit.`);
+  }
+  if (expectedDigest !== undefined) {
+    if (!/^sha256:[0-9a-f]{64}$/u.test(expectedDigest)) {
+      return failure(rpcClientErrorCode.validationError, 'Expected a lowercase sha256 content digest.');
+    }
+    if (`sha256:${await sha256Bytes(original)}` !== expectedDigest) {
+      return failure(rpcClientErrorCode.editConflict, 'Reviewed bytes changed. Read and review the file again.');
+    }
+  }
+  const first = planSnapshot(original, plan);
   if (!first.ok) {
     return first;
   }
-  if (bytesEqual(first.snapshot.bytes, first.replacementBytes)) {
+  if (expectedDigest === undefined && bytesEqual(first.snapshot.bytes, first.replacementBytes)) {
     return success(first, false);
   }
 
@@ -236,6 +251,12 @@ export const applyClientTextMutation = async ({
   if (firstCommit.status === 'committed') {
     const verification = verifyCommit(firstCommit, first);
     return verification ?? success(first, false);
+  }
+  if (expectedDigest !== undefined) {
+    return failure(
+      rpcClientErrorCode.editConflict,
+      'Reviewed bytes changed before commit. Read and review the file again.',
+    );
   }
 
   const recovered = planSnapshot(firstCommit.currentBytes, plan);

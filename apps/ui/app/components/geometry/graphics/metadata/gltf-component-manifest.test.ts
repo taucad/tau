@@ -3,6 +3,7 @@ import { tauCadTopologyExtension } from '@taucad/types/constants';
 import {
   buildGltfComponentManifest,
   buildGltfMeasurementFeatures,
+  prepareGltfMetadata,
   listReachableGltfPrimitiveReferences,
 } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 
@@ -58,7 +59,10 @@ describe('buildGltfComponentManifest', () => {
       },
     });
     const manifest = buildGltfComponentManifest(bytes);
-    const features = buildGltfMeasurementFeatures(bytes, manifest);
+    const candidate = prepareGltfMetadata(bytes);
+    const features = candidate.getMeasurementFeatures();
+    expect(features).toEqual(buildGltfMeasurementFeatures(bytes, manifest));
+    expect(candidate.getMeasurementFeatures()).toBe(features);
 
     expect(features.get('0/0/0')).toMatchObject({
       occurrenceId: 'part-a@node:0',
@@ -383,6 +387,72 @@ describe('buildGltfComponentManifest', () => {
       },
     ]);
   });
+
+  it.each([false, true])(
+    'should place shared-mesh occurrence bounds through nested transforms with topology=%s',
+    (withTopology) => {
+      const bytes = encodeJson({
+        scene: 0,
+        scenes: [{ nodes: [0] }],
+        nodes: [
+          { name: 'Assembly', translation: [10, 20, 30], children: [1, 2] },
+          {
+            name: 'Left bolt',
+            mesh: 0,
+            translation: [1, 2, 3],
+            rotation: [0, 0, Math.SQRT1_2, Math.SQRT1_2],
+            scale: [2, 3, 4],
+          },
+          { name: 'Right bolt', mesh: 0, matrix: [0, 2, 0, 0, -3, 0, 0, 0, 0, 0, 4, 0, -5, 0, 0, 1] },
+        ],
+        meshes: [{ name: 'Bolt prototype', primitives: [{ attributes: { [positionAttribute]: 0 } }] }],
+        accessors: [{ componentType: 5126, count: 8, type: 'VEC3', min: [0, 0, 0], max: [1, 2, 3] }],
+        ...(withTopology
+          ? {
+              extensions: {
+                [tauCadTopologyExtension]: {
+                  components: [
+                    { id: 'left', name: 'Left bolt', nodeIndex: 1, meshIndex: 0, primitiveIndices: [0], kind: 'part' },
+                    {
+                      id: 'right',
+                      name: 'Right bolt',
+                      primitiveRefs: [{ nodeIndex: 2, meshIndex: 0, primitiveIndex: 0 }],
+                      kind: 'part',
+                    },
+                  ],
+                },
+              },
+            }
+          : {}),
+      });
+      const manifest = buildGltfComponentManifest(bytes);
+      const left = manifest.nodesById[withTopology ? 'left' : 'component:node-1']!;
+      const right = manifest.nodesById[withTopology ? 'right' : 'component:node-2']!;
+      expect(left.name).toBe('Left bolt');
+      expect(right.name).toBe('Right bolt');
+      expect(left.primitiveRefs).toEqual([{ nodeIndex: 1, meshIndex: 0, primitiveIndex: 0 }]);
+      expect(right.primitiveRefs).toEqual([{ nodeIndex: 2, meshIndex: 0, primitiveIndex: 0 }]);
+      for (const [actual, expected] of [
+        [left.bounds!.min, [5, 22, 33]],
+        [left.bounds!.max, [11, 24, 45]],
+        [left.bounds!.center, [8, 23, 39]],
+        [right.bounds!.min, [-1, 20, 30]],
+        [right.bounds!.max, [5, 22, 42]],
+      ]) {
+        for (const axis of [0, 1, 2]) {
+          expect(actual![axis]).toBeCloseTo(expected![axis]!, 12);
+        }
+      }
+      expect(left.bounds!.radius).toBeCloseTo(Math.sqrt(46), 12);
+      if (!withTopology) {
+        const parentBounds = manifest.nodesById['component:node-0']!.bounds!;
+        for (const axis of [0, 1, 2]) {
+          expect(parentBounds.min[axis]).toBeCloseTo([-1, 20, 30][axis]!, 12);
+          expect(parentBounds.max[axis]).toBeCloseTo([11, 24, 45][axis]!, 12);
+        }
+      }
+    },
+  );
 
   it('should preserve standard glTF hierarchy including named meshless parents', () => {
     const bytes = encodeJson({

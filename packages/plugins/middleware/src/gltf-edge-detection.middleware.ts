@@ -1,13 +1,14 @@
 // oxlint-disable-next-line import/consistent-type-specifier-style -- a separate type import trips import/no-duplicates.
-import { Primitive, type Document } from '@gltf-transform/core';
+import { Primitive, WebIO, type Document, type JSONDocument } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
-import { createNodeIo, detectEdges } from '@taucad/geometry-core';
+import { allExtensions, detectEdges, embedGltfResources } from '@taucad/geometry-core';
 import { cadEdgeOverlayMaterialDefaults } from '@taucad/runtime/types';
-import type { GeometryGltf, CreateGeometryResult, RuntimeLogger } from '@taucad/runtime/types';
+import type { RenderResult, RuntimeLogger } from '@taucad/runtime/types';
 
 import { z } from 'zod';
 
 import { defineMiddleware } from '@taucad/runtime/middleware';
+import { nonemptyExportFiles } from '@taucad/runtime/kernel';
 
 /**
  * Create fallback edge primitives for every eligible triangle mesh in a glTF document.
@@ -146,27 +147,40 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
  * If no triangle meshes need generated edges, the original geometry is returned
  * unchanged to skip the @gltf-transform re-serialisation roundtrip.
  *
- * @param geometry - The GLTF geometry to process
+ * @param content - The GLB or JSON glTF bytes to process
  * @param thresholdDegrees - the dihedral angle threshold in degrees for edge detection
- * @returns The geometry with owner-local edges added, or the original if no work was needed
+ * @returns The requested glTF format with owner-local edges added, or the original if no work was needed
  */
-async function addEdgePrimitivesToGltf(geometry: GeometryGltf, thresholdDegrees: number): Promise<GeometryGltf> {
-  const io = await createNodeIo();
+async function addEdgePrimitivesToGltf(
+  content: Uint8Array<ArrayBuffer>,
+  thresholdDegrees: number,
+  {
+    resources = {},
+    outputFormat = 'glb',
+  }: { resources?: JSONDocument['resources']; outputFormat?: 'glb' | 'gltf' } = {},
+): Promise<Uint8Array<ArrayBuffer>> {
+  const io = new WebIO().registerExtensions(allExtensions);
   io.registerExtensions([KHRMaterialsUnlit]);
 
-  const document = await io.readBinary(geometry.content);
+  const binary =
+    content.length >= 4 &&
+    new DataView(content.buffer, content.byteOffset, content.byteLength).getUint32(0, true) === 0x46_54_6c_67;
+  const document = binary
+    ? await io.readBinary(content)
+    : await io.readJSON({
+        json: JSON.parse(new TextDecoder().decode(content)) as JSONDocument['json'],
+        resources,
+      });
 
-  const hadEdgesAdded = addEdgePrimitivesToDocument(document, thresholdDegrees);
-  if (!hadEdgesAdded) {
-    return geometry;
+  if (!addEdgePrimitivesToDocument(document, thresholdDegrees)) {
+    return content;
   }
-
-  const transformedContent = await io.writeBinary(document);
-
-  return {
-    format: 'gltf',
-    content: transformedContent,
-  };
+  if (outputFormat === 'gltf') {
+    const output = await io.writeJSON(document);
+    const json = embedGltfResources(output.json as unknown as Record<string, unknown>, output.resources);
+    return new TextEncoder().encode(JSON.stringify(json));
+  }
+  return io.writeBinary(document);
 }
 
 /**
@@ -188,21 +202,29 @@ async function addEdgePrimitivesToGltf(geometry: GeometryGltf, thresholdDegrees:
  * @param logger - Runtime logger for the active middleware operation.
  * @returns The original result or a GLTF result enriched with line primitives.
  */
-async function addEdgesToResult<Result extends CreateGeometryResult>(
-  result: Result,
+async function addEdgesToResult(
+  result: RenderResult,
   thresholdDegrees: number,
   logger: RuntimeLogger,
-): Promise<Result> {
+): Promise<RenderResult> {
   // Add edges on the way back up (onion model "return journey")
-  if (!result.success || result.data?.format !== 'gltf') {
+  if (!result.success || result.data.mimeType !== 'model/gltf-binary' || !(result.data.content instanceof Uint8Array)) {
     return result;
   }
 
   logger.trace('Adding edge primitives to GLTF geometry');
 
+  const content = await addEdgePrimitivesToGltf(result.data.content, thresholdDegrees);
+  if (content === result.data.content) {
+    return result;
+  }
+
   return {
     ...result,
-    data: await addEdgePrimitivesToGltf(result.data, thresholdDegrees),
+    data: {
+      ...result.data,
+      content,
+    },
   };
 }
 
@@ -210,47 +232,46 @@ async function addEdgesToResult<Result extends CreateGeometryResult>(
 export const gltfEdgeDetection = defineMiddleware({
   id: 'gltfEdgeDetection',
   name: 'GltfEdgeDetection',
-  version: '2.0.0',
+  version: '3.0.0',
   content: {
-    render: ['includeEdges'],
-    exportFormats: { glb: ['includeEdges'], gltf: ['includeEdges'] },
+    views: { 'model/gltf-binary': ['includeEdges'] },
+    exports: { glb: ['includeEdges'], gltf: ['includeEdges'] },
   },
 
   optionsSchema: z.object({
     thresholdDegrees: z.number().default(30),
   }),
 
-  async wrapCreateGeometry(input, handler, { logger, options }) {
+  // Every display artifact is produced by render, including kernels that
+  // formerly returned GLB bytes directly from createGeometry.
+  async wrapRender(input, handler, { logger, options }) {
     const result = await handler(input);
     return input.content?.includeEdges ? addEdgesToResult(result, options.thresholdDegrees, logger) : result;
   },
 
-  // Display GLTF from kernels that defer tessellation flows through the mesh
-  // phase, so the fallback edge primitives are added there too.
-  async wrapMeshGeometry(input, handler, { logger, options }) {
-    const result = await handler(input);
-    return input.content?.includeEdges ? addEdgesToResult(result, options.thresholdDegrees, logger) : result;
-  },
-
-  async wrapExportGeometry(input, handler, { logger, options }) {
+  async wrapExport(input, handler, { logger, options }) {
     const result = await handler(input);
     if (!input.content?.includeEdges || !result.success) {
       return result;
     }
 
+    const resources = Object.fromEntries(result.data.map((file) => [file.name, file.bytes]));
     const files = await Promise.all(
       result.data.map(async (file) => {
         if (!file.name.endsWith('.glb') && !file.name.endsWith('.gltf')) {
           return file;
         }
-        const geometry = await addEdgePrimitivesToGltf(
-          { format: 'gltf', content: file.bytes },
-          options.thresholdDegrees,
-        );
-        return { ...file, bytes: geometry.content };
+        const bytes = await addEdgePrimitivesToGltf(file.bytes, options.thresholdDegrees, {
+          resources,
+          outputFormat: file.name.endsWith('.gltf') ? 'gltf' : 'glb',
+        });
+        return bytes === file.bytes ? file : { ...file, bytes };
       }),
     );
     logger.trace('Added edge primitives to exported GLTF');
-    return { ...result, data: files };
+    if (files.every((file, index) => file === result.data[index])) {
+      return result;
+    }
+    return { ...result, data: nonemptyExportFiles(files) };
   },
 });

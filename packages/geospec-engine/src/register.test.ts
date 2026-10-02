@@ -7,6 +7,7 @@ import {
   geoSpecMatcherDescriptors,
 } from 'geospec/engine';
 import type { LoadMeshOptions, MeshBufferSource } from 'geospec/mesh';
+import { createModelLoader, loadModel } from 'geospec/model';
 // oxlint-disable-next-line no-restricted-imports -- registration must be tested against this package's own publish metadata.
 import packageMetadata from '../package.json' with { type: 'json' };
 import { clearEngineSubjects } from '#engine/subject-store.js';
@@ -45,13 +46,26 @@ describe('engine registration', () => {
     expect(initialized.engine.version).toBe(packageMetadata.version);
     expect(initialized.capabilities.map(({ name }) => name).sort()).toStrictEqual(
       [
-        ...Object.keys(geoSpecMatcherDescriptors),
+        ...Object.keys(geoSpecMatcherDescriptors).filter(
+          (name) => name !== 'toSatisfyRationalPlate' && name !== 'toSatisfyParallelPlaneDistance',
+        ),
         'analyzeBrep',
         'analyzeMesh',
         'inspectGeometry',
         'analyzeMeshOverlap',
       ].sort(),
     );
+  });
+
+  it('should refuse canonical loading under a reference-only registered host', async () => {
+    const { geoSpecEngineImplementation } = await import('#register.js');
+    const { registerGeoSpecEngine } = await import('geospec/engine');
+    registerGeoSpecEngine(geoSpecEngineImplementation);
+    const expectation = { diagnostics: [expect.objectContaining({ code: 'GEOSPEC_ENGINE_UNAVAILABLE' })] };
+    await expect(loadModel({ source: Uint8Array.of(1), format: 'glb' })).rejects.toMatchObject(expectation);
+    const load = createModelLoader();
+    await expect(load({ source: Uint8Array.of(1), format: 'glb' })).rejects.toMatchObject(expectation);
+    await load.dispose();
   });
 
   it('keeps neutral host bindings free of Node-only capabilities', async () => {
@@ -62,10 +76,8 @@ describe('engine registration', () => {
       'analyzeMesh',
       'createGeoSpecWebPoolRunner',
       'createGeoSpecWebRunner',
-      'createModelLoader',
       'flushEvidenceStore',
       'loadMesh',
-      'loadModel',
       'loadStep',
       'startGeoSpecPoolWorkerHost',
     ]);
@@ -93,14 +105,13 @@ describe('engine registration', () => {
   it('projects every neutral loader result across the data-only seam', async () => {
     const { geoSpecEngineImplementation } = await import('#register.js');
     const host = geoSpecEngineImplementation.host!;
-    if (!host.loadMesh || !host.analyzeMesh || !host.loadStep || !host.loadModel) {
+    if (!host.loadMesh || !host.analyzeMesh || !host.loadStep) {
       throw new Error('neutral loader bindings are missing');
     }
 
     const loaded = await host.loadMesh({ source: triangle });
     const analyzed = await host.analyzeMesh({ source: triangle });
     const step = await host.loadStep({ source: stepFixture, mesh: false });
-    const model = await host.loadModel({ source: triangle, format: 'mesh-buffer' });
 
     expect(loaded.success).toBe(true);
     if (loaded.success) {
@@ -112,7 +123,8 @@ describe('engine registration', () => {
       expect(analyzed.stats.triangleCount).toBe(1);
     }
     expect(step.subjectId).toBeTypeOf('string');
-    expect(model.subjectId).toBeTypeOf('string');
+    expect(host).not.toHaveProperty('loadModel');
+    expect(host).not.toHaveProperty('createModelLoader');
   }, 120_000);
 
   it('passes mesh loader failures through unchanged', async () => {

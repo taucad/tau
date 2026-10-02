@@ -50,6 +50,7 @@ describe('kernel-worker constants', () => {
       'assimp',
       'replicad',
       'zoo',
+      'tscircuit',
     ]);
     for (const kernel of resolvedRuntime.kernels) {
       expect(typeof kernel.id).toBe('string');

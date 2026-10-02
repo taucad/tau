@@ -512,6 +512,20 @@ class WorkerTest(unittest.TestCase):
         ):
             worker._mesh_shape(Cylinder(1, 2), 0.05, 0.1)
 
+    def test_mesh_tolerances_do_not_change_a_retained_shape(self) -> None:
+        from build123d import Cylinder
+
+        retained = Cylinder(1, 2)
+        exact_before = worker._brep_bytes(retained)
+        fine = worker._mesh_shape(retained, 0.05, 0.1)
+        coarse = worker._mesh_shape(retained, 0.25, 0.5)
+        fine_again = worker._mesh_shape(retained, 0.05, 0.1)
+        fresh_coarse = worker._mesh_shape(Cylinder(1, 2), 0.25, 0.5)
+
+        self.assertTrue(fine_again == fine, "fine A changed after coarse B")
+        self.assertTrue(coarse == fresh_coarse, "coarse B differs from a fresh shape")
+        self.assertEqual(worker._brep_bytes(retained), exact_before, "render changed the exact BRep")
+
     def test_resident_lineage_hits_are_share_mode_clones_without_codec_work(self) -> None:
         """G-F1/I1/U2: a warm hit is a lineage lookup plus a clone; no codec, no mesh, no I/O."""
 

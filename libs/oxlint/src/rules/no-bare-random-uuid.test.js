@@ -17,7 +17,7 @@ const ruleTester = new RuleTester({
 const root = process.cwd();
 const helperFile = path.join(root, 'libs/utils/src/id.utils.ts');
 const testFile = path.join(root, 'packages/filesystem/src/backend/direct-idb-provider.test.ts');
-const browserFile = path.join(root, 'packages/runtime/src/framework/runtime-worker-client.ts');
+const browserFile = path.join(root, 'packages/runtime/src/client/runtime-document-client-core.ts');
 
 describe('no-bare-random-uuid', () => {
   it('flags Web Crypto randomUUID outside the helper; allows node:crypto, the helper, and tests', () => {

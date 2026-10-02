@@ -66,7 +66,7 @@ def subject_and_native():
         native_engine=native,
         native_module=SimpleNamespace(),
     )
-    return GeoSpecSubject(engine, "part", "subjectHash", "a" * 64), native
+    return engine._subject({"result": {"subject": {"subjectHash": "a" * 64}}}, "part"), native
 
 
 class QueryTests(unittest.TestCase):

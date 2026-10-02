@@ -166,7 +166,7 @@ export function ProjectActionDropdown({ project, actions }: ProjectActionDropdow
           row={row}
           name={project.name}
           closePlan={closePlan}
-          beforeDelete
+          isBeforeDelete
           isOpen
           onOpenChange={setIsConfirmingClose}
           onConfirm={() => {

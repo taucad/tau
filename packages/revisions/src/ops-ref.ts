@@ -25,7 +25,7 @@ import { randomUuid } from '@taucad/utils/id';
 import { ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
 import type { CheckoutCutTrigger } from '#checkout.machine.js';
 import type { RevisionActor, RevisionProvenance, RevisionUserActor } from '#revision-authority.js';
-import type { RevisionFileSystem } from '#revision-effects.js';
+import type { RevisionFileSystem } from '#revision-effects.types.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { RevisionPort } from '#revision-port.js';
 

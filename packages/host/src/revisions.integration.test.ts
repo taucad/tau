@@ -10,7 +10,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { chmod, mkdtemp, readdir, readFile, realpath, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, readdir, readFile, realpath, rm, writeFile, unlink } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 
@@ -25,6 +25,7 @@ import { RevisionPortError, createIsomorphicGitRevisionPort, readRevisionLog } f
 import { createNativeGitRevisionPort } from '@taucad/revisions/node';
 import type { RevisionPort, RevisionStatusProjection, TurnAttemptKey } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { sha256Bytes } from '@taucad/utils/hash';
 import { ImmutableRevisionTree, revisionId } from '@taucad/revisions/algorithms';
 import type { RevisionId } from '@taucad/revisions/algorithms';
 
@@ -479,6 +480,62 @@ for (const row of ports) {
 
       expect(replay.status).toBe('replayed');
       await expect.poll(async () => held.leaseIds(), { timeout: 5000 }).toEqual([]);
+    }, 30_000);
+
+    it('should compare exact raw bytes over the host channel without hiding read failures', async () => {
+      const held = await harness(row.create);
+      await startTurn(held.launcher, { chatId: 'chat-1', runId: 'run-1' });
+      const settlement = await held.settlementFor('run-1');
+      if (settlement.revisionId === undefined) {
+        throw new Error('The fixture turn did not record a revision.');
+      }
+      const original = new TextEncoder().encode('export const size = 2;\n');
+      const parentBytes = new TextEncoder().encode('export const size = 1;\n');
+      const parentComparison = await held.revisions.channel.request({
+        command: 'compare',
+        revisionId: settlement.revisionId,
+        path: 'main.ts',
+      });
+      expect(parentComparison.result).toMatchObject({
+        originalBytes: { digest: `sha256:${await sha256Bytes(parentBytes)}`, byteLength: parentBytes.byteLength },
+        modifiedBytes: { digest: `sha256:${await sha256Bytes(original)}`, byteLength: original.byteLength },
+      });
+      const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...original]);
+      await writeFile(join(held.workspaceRoot, 'main.ts'), bom);
+      const request = { command: 'compare', revisionId: settlement.revisionId, path: 'main.ts', against: 'checkout' };
+      const comparison = await held.revisions.channel.request(request);
+      expect(comparison.result).toEqual({
+        original: 'export const size = 2;\n',
+        modified: 'export const size = 2;\n',
+        originalBytes: { digest: `sha256:${await sha256Bytes(original)}`, byteLength: original.byteLength },
+        modifiedBytes: { digest: `sha256:${await sha256Bytes(bom)}`, byteLength: bom.byteLength },
+      });
+      await unlink(join(held.workspaceRoot, 'main.ts'));
+      const missingComparison = await held.revisions.channel.request(request);
+      expect(missingComparison.result).toMatchObject({
+        modifiedBytes: { digest: 'missing', byteLength: null },
+      });
+      await writeFile(join(held.workspaceRoot, 'main.ts'), new Uint8Array());
+      const emptyComparison = await held.revisions.channel.request(request);
+      expect(emptyComparison.result).toMatchObject({
+        modifiedBytes: { digest: `sha256:${await sha256Bytes(new Uint8Array())}`, byteLength: 0 },
+      });
+      await expect(held.revisions.channel.request({ ...request, revisionId: 'unknown-revision' })).rejects.toThrow();
+      await expect(
+        held.revisions.channel.request({ command: 'compare', revisionId: 'unknown-revision', path: 'main.ts' }),
+      ).rejects.toThrow();
+      const failure = new Error('Device read failed');
+      const providerRead = NodeFsProvider.prototype.readFile;
+      const read = vi
+        .spyOn(NodeFsProvider.prototype, 'readFile')
+        .mockImplementation(async function (this: NodeFsProvider, path, options) {
+          if (path === 'main.ts') {
+            throw failure;
+          }
+          return providerRead.call(this, path, options);
+        });
+      await expect(held.revisions.channel.request(request)).rejects.toBe(failure);
+      read.mockRestore();
     }, 30_000);
 
     it('serves the same revision graph and branch verbs over the host channel', async () => {

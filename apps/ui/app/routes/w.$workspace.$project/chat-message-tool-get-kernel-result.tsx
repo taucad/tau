@@ -98,7 +98,7 @@ function FilenameLink({ targetFile }: { readonly targetFile: string }): React.JS
 export function ChatMessageToolGetKernelResult({
   part,
 }: {
-  readonly part: ToolInvocation<typeof toolName.getKernelResult>;
+  readonly part: ToolInvocation<typeof toolName.evaluateModel>;
 }): React.JSX.Element {
   switch (part.state) {
     case 'input-streaming': {
@@ -256,7 +256,7 @@ export function ChatMessageToolGetKernelResult({
     case 'approval-requested':
     case 'approval-responded':
     case 'output-denied': {
-      throw new Error(`Unexpected ${toolName.getKernelResult} state: ${part.state}`);
+      throw new Error(`Unexpected ${toolName.evaluateModel} state: ${part.state}`);
     }
   }
 }

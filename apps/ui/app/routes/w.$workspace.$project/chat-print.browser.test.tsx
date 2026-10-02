@@ -42,9 +42,13 @@ vi.doMock('#routes/w.$workspace.$project/chat-converter.js', async (importOrigin
 vi.doMock('#components/geometry/parameters/parameters.js', async (importOriginal) =>
   parametersMock(await importOriginal()),
 );
-vi.doMock('#routes/w.$workspace.$project/chat-print-summary.js', async (importOriginal) => ({
-  ...(await importOriginal<Record<string, unknown>>()),
-  summarizeGcodeContainer: summarizeGcodeContainerMock,
+vi.doMock('#components/printer/printer-preparation.js', () => ({
+  printerPreparation: {
+    prepare: async ({ signal }: { bytes: Uint8Array<ArrayBuffer>; signal: AbortSignal }) => {
+      signal.throwIfAborted();
+      return { kind: 'refused', summary: summarizeGcodeContainerMock(), preparationDuration: 0 };
+    },
+  },
 }));
 vi.doMock('#filesystem/desktop-bridge.js', async (importOriginal) => ({
   ...(await importOriginal<Record<string, unknown>>()),

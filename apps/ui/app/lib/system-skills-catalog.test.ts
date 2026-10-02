@@ -16,6 +16,7 @@ const progressiveDisclosureSkillNames = [
   'cad-zoo',
   'cad-jscad',
   'cad-opencascadejs',
+  'cad-tscircuit',
   'geospec-authoring',
 ] as const;
 

@@ -243,8 +243,8 @@ export const summarizeToolEvents = async (
           'create_file',
           'delete_file',
           'read_file',
-          'get_kernel_result',
-          'export_geometry',
+          'evaluate_model',
+          'export_model',
           'screenshot',
           'test_model',
         ].includes(message.toolName)
@@ -347,7 +347,7 @@ If you need fresh data, change the arguments. If you already have the result, us
       const event = events[index]!;
       if (
         edits > 0 &&
-        ((event.toolName === 'get_kernel_result' && event.targetFile === tail.targetFile && !event.isError) ||
+        ((event.toolName === 'evaluate_model' && event.targetFile === tail.targetFile && !event.isError) ||
           (event.toolName === 'test_model' &&
             event.verification?.outcome === 'passed' &&
             (event.verification.coversAll || event.verification.files.includes(tail.targetFile))))
@@ -364,7 +364,7 @@ If you need fresh data, change the arguments. If you already have the result, us
           pattern: anomalyPattern.perTargetEdit,
           reminder: `You have edited \`${tail.targetFile}\` ${edits} times without verifying the kernel output between attempts.
 
-After each edit, call \`get_kernel_result\` for that file before editing again. Repeated edits without checking the kernel result usually mean the previous diff did not produce the change you intended — re-read the file or inspect the kernel error before continuing.`,
+After each edit, call \`evaluate_model\` for that file before editing again. Repeated edits without checking the kernel result usually mean the previous diff did not produce the change you intended — re-read the file or inspect the kernel error before continuing.`,
           signature: `per_target_edit:${tail.targetFile}:${edits}`,
           eventIndexes: indexes(events.slice(-edits)),
         }

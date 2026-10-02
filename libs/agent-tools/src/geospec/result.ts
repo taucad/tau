@@ -10,6 +10,7 @@
  */
 
 import type { RunGeoSpecTestsRpcResult } from '@taucad/chat';
+import { geoSpecRunAccountingSchema, geoSpecRunLineageSchema } from '@taucad/chat/schemas/tools/test-model';
 import { isRecord } from '@taucad/utils/schema';
 import type { GeometryDiagnostic } from 'geospec/mesh';
 import type { GeoSpecTestCase } from 'geospec/runner';
@@ -18,7 +19,7 @@ import type { GeoSpecRunnerResult } from 'geospec/runner/worker';
 type RunGeoSpecTestsSuccess = Extract<RunGeoSpecTestsRpcResult, { success: true }>;
 type RunGeoSpecTestFailure = RunGeoSpecTestsSuccess['failures'][number];
 type RunGeoSpecTestDiagnostic = NonNullable<RunGeoSpecTestFailure['diagnostics']>[number];
-type RunGeoSpecNativeReport = NonNullable<RunGeoSpecTestFailure['reports']>[number];
+type RunGeoSpecReport = NonNullable<RunGeoSpecTestFailure['reports']>[number];
 
 const fullGeoSpecTestName = (test: GeoSpecTestCase): string => [...test.suite, test.name].join(' > ');
 
@@ -79,10 +80,10 @@ const transportDiagnostics = (
     ...(diagnostic.details === undefined ? {} : { details: structuredClone(diagnostic.details) }),
   }));
 
-// The model reads claim, result and evidence as JSON; canonical engine bytes stay with the engine-side report.
-const transportNativeReports = (test: GeoSpecTestCase): RunGeoSpecNativeReport[] | undefined => {
-  const reports = test.assertions.flatMap((assertion): RunGeoSpecNativeReport[] => {
-    const report = assertion.nativeReport;
+// Exact bytes cross the JSON boundary once; the record owner retains them before compact normalization.
+const transportReports = (test: GeoSpecTestCase): RunGeoSpecReport[] | undefined => {
+  const reports = test.assertions.flatMap((assertion): RunGeoSpecReport[] => {
+    const { report } = assertion;
     if (report === undefined) {
       return [];
     }
@@ -95,6 +96,12 @@ const transportNativeReports = (test: GeoSpecTestCase): RunGeoSpecNativeReport[]
         result: structuredClone(report.result),
         diagnostics: report.diagnostics.map((diagnostic) => structuredClone(diagnostic)),
         ...(report.evidence === undefined ? {} : { evidence: structuredClone(report.evidence) }),
+        ...(assertion.loadId === undefined ? {} : { loadId: assertion.loadId }),
+        canonical: {
+          claim: [...report.canonicalClaim],
+          plan: [...report.canonicalPlan],
+          result: [...report.canonicalResult],
+        },
       },
     ];
   });
@@ -120,6 +127,30 @@ export const runnerResultToTestModelOutput = (
 ): TestModelOutput => {
   const failures: RunGeoSpecTestsSuccess['failures'] = [];
   const passes: RunGeoSpecTestsSuccess['passes'] = [];
+  const tests: NonNullable<TestModelOutput['tests']> = result.files.flatMap(({ file, result: moduleResult }) =>
+    (moduleResult.tests ?? []).map((test) => ({
+      id: `${file}:${test.ordinal ?? fullGeoSpecTestName(test)}`,
+      requirement: fullGeoSpecTestName(test),
+      targetFile: file,
+      status: test.status,
+      ...(test.ordinal === undefined ? {} : { ordinal: test.ordinal }),
+    })),
+  );
+  const lineage = result.files.flatMap(({ file, result: moduleResult }) =>
+    moduleResult.lineage === undefined
+      ? []
+      : [
+          {
+            file,
+            lineage: geoSpecRunLineageSchema.parse(moduleResult.lineage),
+          },
+        ],
+  );
+  const sourceRevisions = lineage.flatMap(({ lineage: fileLineage }) =>
+    fileLineage.loads.flatMap(({ evidence }) =>
+      evidence?.sourceRevision === undefined ? [] : [evidence.sourceRevision],
+    ),
+  );
 
   if (entryPaths.length === 0) {
     if (options.filtersApplied) {
@@ -137,7 +168,7 @@ export const runnerResultToTestModelOutput = (
         requirement: 'At least one GeoSpec test file must exist',
         reason: 'No *.geospec.ts or *.geospec.js files found in the project.',
         suggestion:
-          'Create a *.geospec.ts test file using the selected API recipe in the test_model description. Keep its loader and matcher paired: loadModel with expectGeo for legacy, or loadNativeModel with expectNativeGeo for native.',
+          'Create a *.geospec.ts test file using loadModel from geospec/model and expectGeo from geospec. The host supplies the geometry binding.',
         targetFile: '*.geospec.ts',
       });
     }
@@ -163,17 +194,23 @@ export const runnerResultToTestModelOutput = (
         suggestion: 'Fix the GeoSpec syntax, imports, or referenced project files.',
         targetFile: fileResult.file,
       });
-      continue;
     }
 
-    for (const test of fileResult.result.tests) {
+    for (const test of fileResult.result.tests ?? []) {
       if (test.status === 'skipped') {
         continue;
       }
 
       const requirement = fullGeoSpecTestName(test);
-      const reports = transportNativeReports(test);
-      if (test.status === 'failed') {
+      const reports = transportReports(test);
+      const nonPassingReport = reports?.find((report) => report.status !== 'passed');
+      if (
+        test.status !== 'passed' ||
+        test.assertions.some(
+          (assertion) =>
+            assertion.passed === false || (assertion.report !== undefined && assertion.report.status !== 'passed'),
+        )
+      ) {
         const assertionDiagnostics = test.assertions.flatMap((assertion) => assertion.diagnostics ?? []);
         // The collector mirrors its thrown assertion's exact diagnostic objects.
         // Worker structured-clone preserves these aliases. Never deduplicate by
@@ -186,7 +223,9 @@ export const runnerResultToTestModelOutput = (
         failures.push({
           id: `${fileResult.file}:${requirement}`,
           requirement,
-          reason: diagnosticText(diagnostics) ?? 'GeoSpec test failed.',
+          reason:
+            diagnosticText(diagnostics) ??
+            (nonPassingReport ? `GeoSpec evidence status: ${nonPassingReport.status}.` : 'GeoSpec test failed.'),
           suggestion:
             diagnostics.find((diagnostic) => diagnostic.suggestion)?.suggestion ??
             'Inspect the GeoSpec diagnostics and update the model or expected geometry assertion.',
@@ -220,6 +259,39 @@ export const runnerResultToTestModelOutput = (
     failures,
     passes,
     passed: passes.length,
-    total: failures.length + passes.length,
+    total: result.accounting?.selected ?? result.selectedTests,
+    runStatus: runStatus(result, tests),
+    tests,
+    ...(result.accounting === undefined ? {} : { accounting: geoSpecRunAccountingSchema.parse(result.accounting) }),
+    lineageStatus: result.lineageStatus ?? 'unavailable',
+    ...(lineage.length === 0 ? {} : { lineage }),
+    ...(sourceRevisions.length === 0 ? {} : { sourceRevisions }),
   };
+};
+
+const runStatus = (
+  result: GeoSpecRunnerResult,
+  tests: NonNullable<TestModelOutput['tests']>,
+): TestModelOutput['runStatus'] => {
+  if (result.failed > 0 || tests.some((test) => test.status === 'failed')) {
+    return 'failed';
+  }
+  if (tests.some((test) => test.status === 'inconclusive') || result.accounting?.cancelled) {
+    return 'inconclusive';
+  }
+  if (tests.some((test) => test.status === 'unsupported')) {
+    return 'unsupported';
+  }
+  if (result.selectedTests === 0 || (tests.length > 0 && tests.every((test) => test.status === 'skipped'))) {
+    return 'not-run';
+  }
+  const { accounting } = result;
+  return result.success &&
+    result.lineageStatus === 'complete' &&
+    accounting?.discoveryComplete &&
+    accounting.completed + tests.filter((test) => test.status === 'skipped').length === accounting.selected &&
+    accounting.notRunFiles.length === 0 &&
+    !accounting.bailed
+    ? 'passed'
+    : 'inconclusive';
 };

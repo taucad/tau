@@ -12,8 +12,7 @@ export type TurnRevisionState =
   | Readonly<{ kind: 'hidden' }>
   | Readonly<{ kind: 'working'; base: TurnRevisionBase; isWaiting: boolean }>
   | Readonly<{ kind: 'saving' }>
-  /** `isBase`: an attempt that never ran saved only the person's unsaved edits, as its base (RV8-F4, V5 Q14). */
-  | Readonly<{ kind: 'saved'; revision: RevisionCard; isInterrupted: boolean; isBase?: boolean }>
+  | Readonly<{ kind: 'saved'; revision: RevisionCard; isInterrupted: boolean }>
   | Readonly<{ kind: 'conflicted' }>
   | Readonly<{ kind: 'unconfirmed'; base: TurnRevisionBase }>;
 
@@ -27,11 +26,11 @@ export type TurnRevisionFacts = Readonly<{
   log: TurnRevisionLog | undefined;
   /** The card for the revision the attempt's settlement names, once the revision client has it. */
   settled: RevisionCard | undefined;
-  /** The turn's revision as the revision client recorded it, for a turn whose log will never settle it (legacy). */
+  /** The turn's revision as the earlier attempt's verified result, named by the durable log. */
   recorded: RevisionCard | undefined;
   /** The starting point attempt 1's placement names. */
   base: TurnRevisionBase | undefined;
-  /** The turn's checkout has file changes after its starting revision. */
+  /** Durable host proof that this attempt changed a versioned file. */
   hasChanges: boolean;
   /**
    * The host cannot be reached.
@@ -72,21 +71,18 @@ const settledState = (
     /* Nothing changed on a clean base, or the attempt never ran on one: the run's own card says why. */
     return hidden;
   }
-  if (card === undefined) {
+  if (card === undefined || card.revisionId !== settlement.revisionId) {
     /* Named, and on its way from the revision client. */
     return { kind: 'saving' };
   }
-  return settlement.type === 'turn.failed'
-    ? { kind: 'saved', revision: card, isInterrupted: false, isBase: true }
-    : { kind: 'saved', revision: card, isInterrupted };
+  return { kind: 'saved', revision: card, isInterrupted };
 };
 
 /**
  * Derive one request's revision summary from its newest attempt (§5.8).
  *
  * The settlement row decides; before it, the attempt's terminal row says the save is on its way, and before that the
- * attempt is working once files change. A run the log placed nowhere never settles, so the revision client's record
- * answers for it.
+ * attempt is working once its durable change proof exists. A graph card alone never establishes turn attribution.
  *
  * @param facts - The turn's facts.
  * @returns The state the summary renders.
@@ -95,16 +91,26 @@ const settledState = (
 export const deriveTurnRevisionState = (facts: TurnRevisionFacts): TurnRevisionState => {
   const { log } = facts;
   const isInterrupted = log?.terminal === 'failed' || log?.terminal === 'cancelled';
+  /* A failed placement can name only the person's pre-turn base, never this request's result. */
+  const earlier: TurnRevisionState =
+    log?.previousRevisionId !== undefined && facts.recorded?.revisionId === log.previousRevisionId
+      ? { kind: 'saved', revision: facts.recorded, isInterrupted: false }
+      : hidden;
+  if (
+    log?.settlement?.type === 'turn.failed' ||
+    (log?.settlement !== undefined &&
+      log.settlement.type !== 'turn.conflicted' &&
+      (log.settlement.revisionId === undefined || log.settlement.revisionId === log.placement?.baseRevisionId))
+  ) {
+    return earlier;
+  }
+  if (!facts.hasChanges) {
+    return earlier;
+  }
   if (log?.settlement !== undefined) {
     return settledState(log.settlement, facts.settled, isInterrupted);
   }
-  if (log === undefined || (log.terminal !== undefined && log.placement === undefined)) {
-    return facts.recorded === undefined ? hidden : { kind: 'saved', revision: facts.recorded, isInterrupted };
-  }
-  /* A save can clear dirty before its settlement arrives; keep changes already shown visible until it answers. */
-  const hadChanges =
-    facts.previous?.kind === 'working' || facts.previous?.kind === 'saving' || facts.previous?.kind === 'unconfirmed';
-  if (!facts.hasChanges && !hadChanges) {
+  if (log === undefined) {
     return hidden;
   }
   if (facts.isUnreachable) {
@@ -112,9 +118,6 @@ export const deriveTurnRevisionState = (facts: TurnRevisionFacts): TurnRevisionS
   }
   if (log.terminal !== undefined) {
     return { kind: 'saving' };
-  }
-  if (facts.isReconnecting && facts.previous !== undefined && facts.previous.kind !== 'hidden') {
-    return facts.previous;
   }
   /* Only attempt 1 carries a placement; a later attempt names no base. */
   return {
@@ -196,7 +199,7 @@ export const turnRevisionDetail = (state: TurnRevisionState): string => {
       return `Tau could not reach the host to confirm this save.${name === undefined || state.base.kind === 'first' ? '' : ` ${name} is the last confirmed revision.`}`;
     }
     case 'saved': {
-      return state.isBase === true ? 'Your unsaved edits, saved before this request.' : '';
+      return '';
     }
     case 'conflicted': {
       return 'Two versions changed the same files. Choose one in Revisions.';

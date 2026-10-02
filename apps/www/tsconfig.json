@@ -6,8 +6,9 @@
     "composite": false,
     "declaration": false,
     "declarationMap": false,
-    "noEmit": true
+    "noEmit": true,
+    "lib": ["ESNext", "DOM", "DOM.Iterable"]
   },
-  "include": ["src/*.mjs", "scripts/*.mjs", "scripts/*.cjs", "tests/*.mjs"],
+  "include": ["src/*.mjs", "scripts/*.mjs", "scripts/*.js", "tests/*.mjs"],
   "exclude": ["dist", "public"]
 }

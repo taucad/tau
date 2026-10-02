@@ -1,22 +1,21 @@
 /** Offline CAD tessellation. No CAD kernel or compiler ships to visitors. */
-const { resolve, join } = require('node:path');
-const { readFile, writeFile, cp } = require('node:fs/promises');
-const { spawnSync } = require('node:child_process');
-const { createHash } = require('node:crypto');
+import { resolve, join } from 'node:path';
+import { readFile, writeFile, cp } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 const tools = process.env.WWW_RENDER_TOOLS;
 if (!tools) {
   throw new Error('Set WWW_RENDER_TOOLS to the isolated tool installation.');
 }
-const app = resolve(__dirname, '..');
-(async () => {
-  const source = join(app, '../../libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts');
-  const sha256 = createHash('sha256')
-    .update(await readFile(source))
-    .digest('hex');
-  await cp(source, join(tools, 'model.ts'));
-  await writeFile(
-    join(tools, 'export-story.mjs'),
-    `
+const app = resolve(import.meta.dirname, '..');
+const source = join(app, '../../libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts');
+const sha256 = createHash('sha256')
+  .update(await readFile(source))
+  .digest('hex');
+await cp(source, join(tools, 'model.ts'));
+await writeFile(
+  join(tools, 'export-story.mjs'),
+  `
 import oc from 'replicad-opencascadejs';
 import {setOC} from 'replicad';
 import model from './model.ts';
@@ -38,16 +37,12 @@ await writeFile(${JSON.stringify(join(app, 'public/planetary.bin.gz'))},gzipSync
 await writeFile(${JSON.stringify(join(app, 'public/planetary.json'))},JSON.stringify({source:'libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts',sha256:${JSON.stringify(sha256)},parts:34,teeth:{sun:24,planet:24,ring:72},meshes}));
 console.log('Exported',parts.length,'parts;',offset,'uncompressed bytes.');
 `,
-  );
-  const result = spawnSync(
-    process.execPath,
-    ['--import', join(tools, 'node_modules/tsx/dist/loader.mjs'), join(tools, 'export-story.mjs')],
-    { stdio: 'inherit' },
-  );
-  if (result.status !== 0) {
-    throw new Error('CAD export failed.');
-  }
-})().catch((error) => {
-  console.error(error);
-  process.exitCode = 1;
-});
+);
+const result = spawnSync(
+  process.execPath,
+  ['--import', join(tools, 'node_modules/tsx/dist/loader.mjs'), join(tools, 'export-story.mjs')],
+  { stdio: 'inherit' },
+);
+if (result.status !== 0) {
+  throw new Error('CAD export failed.');
+}

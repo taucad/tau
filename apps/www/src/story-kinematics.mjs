@@ -1,4 +1,11 @@
-/** Rigid transforms for the frozen example at module 2 and inputAngle 0. */
+/**
+ * Rigid transforms for the frozen example at module 2 and inputAngle 0.
+ * @internal
+ * @param name - Authored part name.
+ * @param sunAngle - Input rotation in radians.
+ * @returns Planar rigid pose.
+ * @type {(name: string, sunAngle: number) => {x: number, y: number, rotation: number}}
+ */
 export const partPose = (name, sunAngle) => {
   const planet = /^(?:Planet Gear|Flanged Bushing) (\d)$/u.exec(name);
   const carrierAngle = sunAngle / 4;

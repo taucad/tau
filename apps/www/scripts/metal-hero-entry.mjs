@@ -10,6 +10,7 @@ import {
   Vector3,
 } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
+// oxlint-disable eslint/no-restricted-imports -- Offline provenance capture compiles the original committed Tau app source; these imports never enter the website bundle.
 import {
   getMetalMorphGeometryData,
   metalMorphShapeIds,
@@ -20,6 +21,7 @@ import {
   metalMorphDirectionAttributeName,
 } from '../../ui/app/components/geometry/loader/metal-morph-material.node.ts';
 import { createMetalMorphEnvironment } from '../../ui/app/components/geometry/loader/metal-morph-environment.ts';
+// oxlint-enable eslint/no-restricted-imports
 const data = getMetalMorphGeometryData(6);
 const geometry = new BufferGeometry();
 geometry.setAttribute('position', new BufferAttribute(data.directions, 3));
@@ -46,5 +48,5 @@ mesh.quaternion.setFromAxisAngle(new Vector3(0.55, 0.8, 0.25).normalize(), 0.9);
 scene.add(mesh);
 const env = createMetalMorphEnvironment(renderer, 'light', { size: 256 });
 scene.environment = env.texture;
-await renderer.renderAsync(scene, camera);
-window.ready = true;
+renderer.render(scene, camera);
+document.documentElement.dataset.captureReady = 'true';

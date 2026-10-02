@@ -69,7 +69,7 @@
       const camera = new THREE.PerspectiveCamera(31, 1, 0.1, 3000);
       camera.position.set(245, 225, 285);
       camera.lookAt(0, 8, 0);
-      window.renderView = (view) => {
+      const renderView = (view) => {
         for (const mesh of root.children) {
           const n = mesh.name;
           let lift = 0;
@@ -95,8 +95,11 @@
         camera.lookAt(center);
         renderer.render(scene, camera);
       };
-      window.renderView('assembly');
-      window.ready = true;
+      document.addEventListener('tau-render-view', (event) => {
+        if (event instanceof CustomEvent && ['assembly', 'exploded'].includes(event.detail)) renderView(event.detail);
+      });
+      renderView('assembly');
+      document.documentElement.dataset.captureReady = 'true';
     </script>
   </body>
 </html>

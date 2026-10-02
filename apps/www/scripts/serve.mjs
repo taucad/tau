@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 const port = Number(process.env.PORT ?? 4173);
 const root = fileURLToPath(new URL('../dist', import.meta.url));
 const headerText = await readFile(resolve(root, '_headers'), 'utf8');
+/** @type {Record<string, string>} */
 const globalHeaders = Object.fromEntries(
   headerText
     .split('\n\n')[0]
@@ -17,6 +18,7 @@ const globalHeaders = Object.fromEntries(
       return [line.slice(0, colon).trim(), line.slice(colon + 1).trim()];
     }),
 );
+/** @type {Record<string, string>} */
 const types = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css',
@@ -30,51 +32,52 @@ const types = {
   '.xml': 'application/xml',
   '.txt': 'text/plain',
 };
-createServer(async (request, res) => {
+createServer(async (request, response) => {
   try {
     const url = new URL(request.url, 'http://localhost');
     const path = decodeURIComponent(url.pathname);
     const filename = resolve(root, `.${path}`);
     if (filename !== root && !filename.startsWith(root + sep)) {
-      res.writeHead(403).end();
+      response.writeHead(403).end();
       return;
     }
     if (request.method !== 'GET' && request.method !== 'HEAD') {
-      res.writeHead(405).end();
+      response.writeHead(405).end();
       return;
     }
     let target = filename;
     try {
-      if ((await stat(target)).isDirectory()) {
+      const targetInfo = await stat(target);
+      if (targetInfo.isDirectory()) {
         target = resolve(target, 'index.html');
       }
       await stat(target);
     } catch {
       target = resolve(root, '404.html');
-      res.statusCode = 404;
+      response.statusCode = 404;
     }
     for (const [key, value] of Object.entries(globalHeaders)) {
-      res.setHeader(key, value);
+      response.setHeader(key, value);
     }
-    res.setHeader('Content-Type', types[extname(target)] ?? 'application/octet-stream');
-    res.setHeader('X-Robots-Tag', 'noindex, nofollow');
-    res.setHeader('Referrer-Policy', 'no-referrer');
-    res.setHeader('X-Content-Type-Options', 'nosniff');
+    response.setHeader('Content-Type', types[extname(target)] ?? 'application/octet-stream');
+    response.setHeader('X-Robots-Tag', 'noindex, nofollow');
+    response.setHeader('Referrer-Policy', 'no-referrer');
+    response.setHeader('X-Content-Type-Options', 'nosniff');
     let bytes = await readFile(target);
     if (target.startsWith(resolve(root, '_www/assets') + sep)) {
-      res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
+      response.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
     }
     if (
       /\b gzip\b|^gzip\b/u.test(String(request.headers['accept-encoding'])) &&
       ['.html', '.css', '.mjs', '.xml', '.svg', '.txt', '.json'].includes(extname(target))
     ) {
       bytes = gzipSync(bytes);
-      res.setHeader('Content-Encoding', 'gzip');
-      res.setHeader('Vary', 'Accept-Encoding');
+      response.setHeader('Content-Encoding', 'gzip');
+      response.setHeader('Vary', 'Accept-Encoding');
     }
-    res.end(request.method === 'HEAD' ? undefined : bytes);
+    response.end(request.method === 'HEAD' ? undefined : bytes);
   } catch {
-    res.writeHead(400).end('Bad request');
+    response.writeHead(400).end('Bad request');
   }
 }).listen(port, '127.0.0.1', () => {
   console.log(`Tau marketing: http://127.0.0.1:${port}`);

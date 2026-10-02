@@ -1,5 +1,11 @@
-import { storyMarkup } from './story.mjs';
-import { appOrigin, navigation, useCases, visionChapters } from './content.mjs';
+import { storyMarkup } from '#www/story.js';
+import { appOrigin, navigation, useCases, visionChapters } from '#www/content.js';
+/** @typedef {{path: string, title: string, description: string, error?: boolean, body: () => string}} Page */
+
+/**
+ * @param value - Text to escape for an HTML context.
+ * @type {(value: unknown) => string}
+ */
 export const escapeHtml = (value) =>
   String(value)
     .replaceAll('&', '&amp;')
@@ -10,7 +16,15 @@ export const escapeHtml = (value) =>
 const arrow = '<span aria-hidden="true">↗</span>';
 const cta = (label = 'Start a project', path = '/projects/new') =>
   `<a class="button primary" href="${appOrigin}${path}" data-event="cta" data-placement="primary">${label} ${arrow}</a>`;
+/**
+ * @param text - Section label.
+ * @type {(text: string) => string}
+ */
 const kicker = (text) => `<p class="kicker">${text}</p>`;
+/**
+ * @param options - Authored introduction.
+ * @type {(options: {eyebrow: string, title: string, body: string}) => string}
+ */
 const intro = ({ eyebrow, title, body }) =>
   `<header class="page-intro">${kicker(eyebrow)}<h1>${title}</h1><p class="lead">${body}</p></header>`;
 const endCta = () =>
@@ -19,6 +33,7 @@ const model = () =>
   `<figure class="assembly" aria-label="Planetary assembly illustration"><div class="assembly-top"><span class="kicker">Assembly study / 001</span><span class="small">Parametric CAD</span></div><div class="assembly-stage"><img id="assembly-image" src="/_www/assets/exploded.webp" srcset="/_www/assets/exploded-640.webp 640w, /_www/assets/exploded.webp 1000w" sizes="(max-width:760px) calc(100vw - 32px), 640px" width="1000" height="1000" alt="Exploded view of an authored planetary assembly with a fixed ring, three planet gears and a blue carrier" decoding="async" loading="lazy"><span class="model-label label-top">Coaxial input & output</span><span class="model-label label-bottom">A design you can inspect</span></div><figcaption><span id="assembly-caption">Authored Tau example · 4:1 planetary stage</span><a href="https://github.com/taucad/tau/tree/faecc9ac8f456b7fa5639fc0eb146012e3e499c8/libs/tau-examples/src/kernels/replicad/planetary-gear-system">View source ${arrow}</a></figcaption><div class="view-controls" aria-label="Assembly views" aria-hidden="true"><button type="button" data-view="assembly" aria-pressed="false">Assembled</button><button type="button" data-view="exploded" aria-pressed="true">Exploded</button><span class="small">Saved geometry · not a simulation</span></div></figure>`;
 const cases = () =>
   `<div class="case-grid">${useCases.map((item) => `<a class="case" href="/use-cases/${item.slug}/"><div class="case-image"><img src="/_www/assets/${item.image.replace('.webp', '-768.webp')}" srcset="/_www/assets/${item.image.replace('.webp', '-480.webp')} 480w, /_www/assets/${item.image.replace('.webp', '-768.webp')} 768w" sizes="(max-width:760px) calc(100vw - 32px), 420px" alt="${item.alt}" loading="lazy" width="1536" height="1152"></div>${kicker(item.audience)}<h3>${item.title} ${arrow}</h3></a>`).join('')}</div>`;
+/** @type {Page[]} */
 export const pages = [
   {
     path: '/',
@@ -127,6 +142,13 @@ export const pages = [
       `<div class="wrap error-page">${kicker('404 / Page not found')}<h1>This path<br>ends here.</h1><p class="lead">The link may have changed. Start from the homepage or head back to your projects.</p><div class="actions"><a class="button primary" href="/">Back to Tau</a><a class="text-link" href="${appOrigin}/projects">Open projects →</a></div></div>`,
   },
 ];
+/**
+ * Render a complete static page.
+ * @internal
+ * @param options - Build-validated settings.
+ * @returns Standalone HTML document.
+ * @type {(options: {page: Page, origin: string, launch: boolean, asset: {css: string, js: string}, analyticsEndpoint: string}) => string}
+ */
 export const renderPage = ({ page, origin, launch, asset, analyticsEndpoint }) => {
   const canonical = origin ? new URL(page.path, origin).href : undefined;
   const robots = launch && !page.error ? 'index,follow' : 'noindex,nofollow';

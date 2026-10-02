@@ -4,7 +4,7 @@
 #
 # Stages: base -> deps -> build -> pruned -> runtime
 #   base    : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
-#   deps    : workspace skeleton only (lockfile + every workspace package.json
+#   deps    : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
 #             + patches); cache key independent of source edits.
 #   build   : full source + `pnpm nx build api`; reuses deps layer cache.
 #   pruned  : `pnpm deploy --prod` to materialise a self-contained app dir.
@@ -25,12 +25,7 @@
 #     missing-module error before `nx build api` can even start. Full install
 #     is required; the cold-cache cost is ~70s (network-bound, same as filtered).
 
-# 24.11.1 exactly: tsdown's config loader trips a Node bug fixed in 24.11.1
-# ("Failed to load the config file due to a known Node.js bug"), which broke
-# library builds on 24.3.0 and 24.10.0, while tsx 4.22's CJS loader hook breaks
-# on 24.21.0 ("ENOENT ... node:fs?tsx-namespace="), which broke `jobs:build`
-# (`tsdown --config-loader=tsx`). Both targets build on 24.11.1.
-ARG NODE_VERSION=24.11.1
+ARG NODE_VERSION=24.19.0
 ARG PNPM_VERSION=10.30.3
 
 # ── Base ──────────────────────────────────────────────────────────────────
@@ -71,12 +66,12 @@ COPY . .
 # pre-run dependency check would otherwise re-run a full install here and
 # exhaust the builder's 2 GB Node heap, so it only warns, as CI does.
 ENV pnpm_config_verify_deps_before_run=warn
+# The script builds the API without the GeoSpec native engine's Darwin-only artifact gate;
+# its header says why the runtime image does not need it.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \
-    pnpm nx build api && \
-    pnpm nx run api:build:billing-command && \
-    pnpm nx run api:build:maintenance-command
+    node apps/api/scripts/build-image.mts
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned

@@ -320,9 +320,14 @@ jobs:
       # PostgreSQL and real MinIO and refuse rather than skip when they are absent. The
       # whole of `test` for that tag runs in the `api` lane below, which has both; this
       # lane stays hermetic. The selector is a tag, never a project name.
+      #
+      # `--parallel=1`: ui:lint and ui:typecheck each peak near 9.5 GB, so any two of
+      # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
+      # its VM ("The runner has received a shutdown signal"). At Nx's default of three
+      # this happened a few minutes in; at two it still happened once both overlapped.
       - name: Run affected tasks
         run: |
-          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart
+          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1
           pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64
 
       - name: Select affected Python checks

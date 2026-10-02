@@ -30,7 +30,7 @@ import {
  * @public
  */
 export const bambuStudioRequired =
-  'This printer only accepts files sliced by Bambu Studio. Install Bambu Studio (or set TAU_BAMBU_STUDIO_PATH) and use the Tau desktop app.';
+  'This printer only accepts files sliced by Bambu Studio, which was not found at its default install location. Install Bambu Studio and use the Tau desktop app.';
 
 /**
  * What to do when the printer refuses an unsigned command, in the person's words.

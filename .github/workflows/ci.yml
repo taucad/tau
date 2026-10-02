@@ -82,6 +82,11 @@ jobs:
       - name: Plan artifact prerequisites from expanded tasks
         id: geospec
         env:
+          # Planning only expands the graph. On the hosted runner these graph commands
+          # segfault intermittently as they exit; the same commands without Nx Cloud
+          # never crashed locally. Planning needs neither Nx Cloud nor the task database.
+          NX_NO_CLOUD: 'true'
+          NX_DISABLE_DB: 'true'
           PLAN_API: ${{ steps.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push') }}
           PLAN_E2E: ${{ steps.plan.outputs.e2e == 'true' }}
           PLAN_SIZE: ${{ github.event_name == 'pull_request' && steps.plan.outputs.size == 'true' }}
@@ -423,9 +428,16 @@ jobs:
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
       (needs.plan.outputs.e2e == 'true')
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
     steps:
+      # `nx affected` below diffs against the PR base, so the checkout needs its history.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -495,9 +507,15 @@ jobs:
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
       (needs.plan.outputs.e2e == 'true')
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx

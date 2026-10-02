@@ -97,10 +97,11 @@ jobs:
           # Every application release on this commit must have built green. A
           # release run's title is its release's name, which release.yml sets
           # to the tag; the newest run for each tag decides.
-          for tag in $(git tag --points-at "$commit" | grep -E '^(ui|api|desktop)@' || true); do
-            conclusion=$(gh run list --workflow release-build.yml --commit "$commit" --limit 50 \
-              --json conclusion,displayTitle \
-              --jq "[.[] | select(.displayTitle == \"$tag\")][0].conclusion // empty")
+          runs=$(gh run list --workflow release-build.yml --commit "$commit" --limit 50 \
+            --json conclusion,displayTitle)
+          for tag in $(git tag --points-at "$commit" | grep -E '^(ui|api|desktop)@[0-9]+\.[0-9]+\.[0-9]+$' || true); do
+            conclusion=$(jq -r --arg tag "$tag" \
+              '[.[] | select(.displayTitle == $tag)][0].conclusion // empty' <<<"$runs")
             test "$conclusion" = success \
               || { echo "::error::release-build.yml has not succeeded for $tag (${conclusion:-no run})"; exit 1; }
           done

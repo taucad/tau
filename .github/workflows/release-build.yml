@@ -57,6 +57,10 @@ jobs:
         id: tag
         env:
           TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          EVENT: ${{ github.event_name }}
+          AUTHOR: ${{ github.event.release.author.login }}
+          RELEASE_BOT_LOGIN: ${{ vars.RELEASE_BOT_LOGIN || 'tau-release-bot[bot]' }}
+          GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           if ! [[ "$TAG" =~ ^([a-z0-9-]+)@([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
@@ -68,6 +72,19 @@ jobs:
           version=${BASH_REMATCH[2]}
           kind=app
           if [ "$project" = desktop ]; then kind=desktop; fi
+
+          # Only build what release.yml released: a release the bot published,
+          # whose tag names a commit already on main. Anyone with write access
+          # can publish a release, and a desktop build signs and ships it.
+          if [ "$EVENT" = release ] && [ "$AUTHOR" != "$RELEASE_BOT_LOGIN" ]; then
+            echo "::error::$TAG was published by $AUTHOR, not $RELEASE_BOT_LOGIN; refusing to build it."
+            exit 1
+          fi
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$TAG" --jq .status)
+          if [ "$status" != behind ] && [ "$status" != identical ]; then
+            echo "::error::$TAG is not on main (compare status: $status); refusing to build it."
+            exit 1
+          fi
           {
             echo "tag=$TAG"
             echo "project=$project"

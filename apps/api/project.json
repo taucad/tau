@@ -3,7 +3,7 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/api",
   "projectType": "application",
-  "tags": ["scope:api", "type:app"],
+  "tags": ["scope:api", "type:app", "release:app"],
   "targets": {
     "formal": {},
     "formal:nightly": {},

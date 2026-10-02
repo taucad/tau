@@ -141,6 +141,22 @@ describe('validateTags()', () => {
     expect(validateTags(live)).toEqual([]);
   });
 
+  it('should allow no release tag or release:app and reject unknown or duplicate release tags', () => {
+    expect(
+      validateTags({
+        projects: [
+          project('unreleased', ['scope:ui', 'type:app'], undefined),
+          project('released', ['scope:ui', 'type:app', 'release:app'], undefined),
+          project('unknown-release', ['scope:ui', 'type:app', 'release:npm'], undefined),
+          project('two-releases', ['scope:ui', 'type:app', 'release:app', 'release:app'], undefined),
+        ],
+      }),
+    ).toEqual([
+      'fixture/unknown-release: unknown tag "release:npm" (release: must be one of app)',
+      'fixture/two-releases: expected exactly one release: tag, found release:app, release:app',
+    ]);
+  });
+
   it('rejects a project Nx inferred from a bare package.json that declares no tags', () => {
     expect(validateTags({ projects: [{ ...project('inferred', [], undefined), configured: false }] })).toEqual([
       'fixture/inferred: expected exactly one type: tag, found none; expected exactly one scope: tag, found none',

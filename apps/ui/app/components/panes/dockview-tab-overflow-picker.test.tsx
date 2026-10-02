@@ -82,14 +82,30 @@ describe('DockviewTabOverflowPicker', () => {
     const menu = openWithHover();
     expect(screen.getByRole('button', { name: 'Editor' })).toHaveFocus();
     const rows = within(menu).getAllByRole('option');
-    expect(rows[0]).toHaveTextContent('src/main.txt');
+    expect(rows[0]).toHaveTextContent('main.txtsrc');
+    expect(rows[0]).toHaveAttribute('title', 'src/main.txt');
+    expect(rows[0]).toHaveAttribute('aria-description', 'src/main.txt');
     expect(rows[0]).toHaveAttribute('aria-current', 'page');
-    expect(rows[1]).toHaveTextContent('docs/main.txt');
+    expect(rows[1]).toHaveTextContent('main.txtdocs');
+    expect(rows[1]).toHaveAttribute('title', 'docs/main.txt');
     expect(within(menu).getByLabelText('Active tab')).toBeInTheDocument();
     fireEvent.click(rows[1]!);
     expect(second.api.setActive).toHaveBeenCalledOnce();
     expect(first.api.setActive).not.toHaveBeenCalled();
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  });
+
+  it('should keep unique titles single-line and reveal folders only for duplicate titles', () => {
+    const panels = [createPanel('first', 'models/a/main.py'), createPanel('second', 'models/b/main.py')];
+    const properties = createProperties(panels);
+    const view = render(<DockviewTabOverflowPicker {...properties} />);
+    openWithHover();
+    expect(screen.getAllByRole('option')[0]).toHaveTextContent('main.pymodels/a');
+    view.rerender(<DockviewTabOverflowPicker {...properties} panels={[panels[0]!]} />);
+    const row = screen.getByRole('option');
+    expect(row).toHaveTextContent(/^main.py$/);
+    expect(row).toHaveAttribute('title', 'models/a/main.py');
+    expect(row).toHaveAttribute('aria-description', 'models/a/main.py');
   });
 
   it('should keep the hover menu reachable across the portal gap and close after leaving it', () => {
@@ -161,7 +177,8 @@ describe('DockviewTabOverflowPicker', () => {
     await waitFor(() => {
       expect(screen.getAllByRole('option')).toHaveLength(1);
     });
-    expect(screen.getByRole('option')).toHaveTextContent('docs/main.txt');
+    expect(screen.getByRole('option')).toHaveTextContent('main.txtdocs');
+    expect(screen.getByRole('option')).toHaveAttribute('aria-description', 'docs/main.txt');
     fireEvent.keyDown(input, { key: 'Enter' });
     expect(second.api.setActive).toHaveBeenCalledOnce();
     expect(first.api.setActive).not.toHaveBeenCalled();

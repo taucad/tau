@@ -1,7 +1,9 @@
 name: Billing nightly (slow matrix)
 
 # The real Stripe test-mode acceptance runs nightly against its isolated
-# account. The same target runs in the internal PR/push L3 lane.
+# account. The same target runs in the internal PR/push L3 lane. Like that
+# lane, it skips with a notice while no STRIPE_TEST_* secret is configured
+# (operator ruling, 2026-10-02) and fails on a partial set.
 
 on:
   schedule:
@@ -25,33 +27,49 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Require isolated Stripe acceptance credentials
+      - name: Skip without isolated Stripe acceptance credentials
+        id: gate
         run: |
-          test -n "$STRIPE_SECRET_KEY"
-          test -n "$STRIPE_READ_SECRET_KEY"
-          test -n "$STRIPE_REFUND_SECRET_KEY"
-          test -n "$STRIPE_ACCOUNT_ID"
+          set=0
+          for value in "$STRIPE_SECRET_KEY" "$STRIPE_READ_SECRET_KEY" "$STRIPE_REFUND_SECRET_KEY" "$STRIPE_ACCOUNT_ID"; do
+            if [ -n "$value" ]; then set=$((set + 1)); fi
+          done
+          if [ "$set" -eq 0 ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Billing nightly skipped::No STRIPE_TEST_* secret is configured; the real Stripe lane runs once the payments work adds them."
+          elif [ "$set" -eq 4 ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Only $set of the four STRIPE_TEST_* secrets are set; set all four or none."
+            exit 1
+          fi
 
       - name: Setup Nx Environment
+        if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
 
       - name: Install Stripe CLI
+        if: steps.gate.outputs.enabled == 'true'
         run: |
           curl -fsSL https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg >/dev/null
           echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
           sudo apt-get update -qq && sudo apt-get install -y stripe
 
       - name: Prepare API env file
+        if: steps.gate.outputs.enabled == 'true'
         run: cp apps/api/.env.example apps/api/.env
 
       - name: Start Postgres + Redis + MinIO
+        if: steps.gate.outputs.enabled == 'true'
         run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
       # `api:db-migrate` is the release migration job: DDL, the billing protections and
       # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in
       # `.env.example`, so these lanes get schema and protections only, as Fly does).
       - name: Apply the protected migration job
+        if: steps.gate.outputs.enabled == 'true'
         run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run api:db-migrate
 
       - name: Run real Stripe billing acceptance (L3)
+        if: steps.gate.outputs.enabled == 'true'
         run: pnpm nx run api:test:billing-stripe

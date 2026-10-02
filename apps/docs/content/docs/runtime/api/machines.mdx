@@ -29,6 +29,29 @@ The resulting `MachineOperationReceipt` is `accepted`, `rejected`, or `unknown`.
 
 `MachineRequestPrintInput` creates a `PrintRequest` for a `PrintRequester`. `PrintRequestState` distinguishes approval, transfer, start, and terminal outcomes; `PrintRequestSummary` is the list projection. `MachineListPrintRequestsInput` and `MachineWatchPrintRequestsInput` read and follow requests. `MachineResolvePrintRequestInput` supplies an approval decision; `MachineWithdrawPrintRequestInput` withdraws a pending request. These methods sit on `MachinePrintRequestClient`, not on a provider's raw session.
 
+## Saved machine settings
+
+Import persistence helpers from `@taucad/runtime/machine/settings`. A `MachineTypeId` identifies a namespaced machine type; `machineTypeIdSchema` rejects unsafe path spellings. `machineSettingsPath({ typeId })` returns `.tau/machines/settings/<typeId>.json` within the project. These files contain preferences, not credentials or permission to operate hardware.
+
+`MachineSettingsRecord` stores version `1`, the machine type, an active `MachineProfileId`, and named profiles. Each `MachineSettingsProfile` maps configuration IDs to `SavedMachineConfiguration` blocks with an exact source version and sparse JSON values. Inactive and unknown blocks remain preserved.
+
+| Helper                                                                         | Result and failure contract                                                                                                                                                                                    |
+| ------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `readMachineSettings({ bytes, typeId })`                                       | Returns `ReadMachineSettingsResult`: an immutable current record or `MachineSettingsFailure`. Refusals distinguish invalid data, a newer record version, and a different machine type. Preserve refused bytes. |
+| `serializeMachineSettings({ record })`                                         | Validates and writes deterministic JSON with a trailing newline. Throws for invalid records or output above `machineSettingsMaximumBytes` (262,144 UTF-8 bytes).                                               |
+| `readMachineConfiguration({ settings, profileId, definition, signal })`        | Returns `ReadMachineConfigurationResult` with absent, current, or refused status. Current `SavedSettingsValues` are deeply immutable.                                                                          |
+| `setMachineConfiguration({ settings, profileId, definition, values, signal })` | Produces a replacement record without I/O. Passing `undefined` removes that configuration block. Persist the returned record through a checked write.                                                          |
+
+A `SettingsSchema` admits sparse JSON objects. A `SettingsDefinition` preserves the schema's input and output values: validation cannot inject defaults or transform persisted values. `MachineProfileFailure` reports a missing selected profile. `MachineConfigurationFailure` reports an unsupported configuration version or invalid values; neither refusal falls back to defaults.
+
+`MachineSettingsProvenance`, validated by `machineSettingsProvenanceSchema`, captures project scope, type, profile, and exact configuration versions for a prepared job. Subsequent preference edits do not change captured provenance.
+
+### Host ownership
+
+Import `MachineSettingsOwner` and its boundary types from `@taucad/runtime/host`. Construct it with an exact rooted filesystem supporting bounded streaming reads and checked writes, plus trusted definitions. Its `read` and `subscribe` methods return `MachineSettingsSnapshot`, distinguishing current, absent, refused, and unavailable records.
+
+An edit supplies a `MachineSettingsEdit`: operation ID, type ID, captured base record, and proposed next record. `MachineSettingsSave` reports saved, conflict, refused, or uncertain. Keep the operation ID and call `settlement` after an uncertain result; do not reinterpret uncertainty as success. Call `dispose` when the owner is no longer used.
+
 ## Related
 
 - [Machine provider API](./machine-providers)

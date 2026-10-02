@@ -1,0 +1,12 @@
+[
+  {
+    "name": "Tau toolkit (ESM JS)",
+    "path": ["dist/**/*.mjs", "!dist/engine/**"],
+    "limit": "12 kB"
+  },
+  {
+    "name": "Offline circuit engine (ESM JS and embedded textures)",
+    "path": "dist/engine/**/*.mjs",
+    "limit": "2.3 MB"
+  }
+]

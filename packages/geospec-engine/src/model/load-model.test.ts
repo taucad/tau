@@ -7,12 +7,11 @@ import { openrscad } from '@taucad/openrscad';
 import { createNodeClient } from '@taucad/runtime/node';
 import type { KernelIssue } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { GeoSpecModelLoadError, loadModel as publicLoadModel } from 'geospec/model';
+import { GeoSpecModelLoadError } from 'geospec/model';
 import { analyzeMesh as publicAnalyzeMesh } from 'geospec/mesh';
-import { createCollector } from 'geospec/runner';
 import { clearGeoSpecEngine, registerGeoSpecEngine } from 'geospec/engine';
 import { geoSpecEngineImplementation } from '#register.js';
-import { releaseEngineSubject } from '#engine/subject-store.js';
+import { exposeEngineSubject, releaseEngineSubject } from '#engine/subject-store.js';
 import type { GeoSpecRuntimeClient, GeoSpecRuntimeSourceAdapter, LoadModelOptions } from 'geospec/model';
 import {
   createModelLoader,
@@ -61,7 +60,7 @@ const createOpenScadSourceAdapter = (): GeoSpecRuntimeSourceAdapter => ({
   extensions: ['.scad'],
   async createRuntime({ projectPath }) {
     const runtime = defineRuntime({ plugins: [openrscad()] });
-    return (await createNodeClient({ runtime, projectPath })) as unknown as GeoSpecRuntimeClient;
+    return createNodeClient({ runtime, projectPath });
   },
 });
 
@@ -157,25 +156,37 @@ const fakeRuntime = (options?: {
     terminate: () => {
       state.terminated += 1;
     },
-    export: async (_format: string, request: { source?: unknown; parameters?: unknown; exportOptions?: unknown }) => {
-      state.exports.push(request);
-      if (options?.throws !== undefined) {
-        // oxlint-disable-next-line typescript/only-throw-error -- a runtime that throws a non-Error is exactly the case under test.
-        throw options.throws;
-      }
-      return options?.fail === true
-        ? {
-            success: false,
-            issues: [
-              { code: 'KERNEL_ERROR', message: 'boom', severity: 'error' },
-              { message: 'no code at all', severity: 'error' },
-            ],
+    open(openRequest: { source?: unknown; parameters?: unknown }) {
+      return {
+        close: vi.fn(),
+        export: async (format: string, request: { options?: unknown }) => {
+          state.exports.push({
+            source: openRequest.source,
+            parameters: openRequest.parameters,
+            exportOptions: request.options,
+          });
+          if (options?.throws !== undefined) {
+            // oxlint-disable-next-line typescript/only-throw-error -- a runtime that throws a non-Error is exactly the case under test.
+            throw options.throws;
           }
-        : {
-            success: true,
-            issues: options?.issues ?? [],
-            data: options?.empty === true ? [] : [{ name: 'model.glb', bytes: options?.bytes ?? new Uint8Array(0) }],
-          };
+          return options?.fail === true
+            ? {
+                success: false,
+                issues: [
+                  { code: 'KERNEL_ERROR', message: 'boom', severity: 'error' },
+                  { message: 'no code at all', severity: 'error' },
+                ],
+              }
+            : {
+                success: true,
+                exportId: format,
+                evaluationId: 'evaluation-1',
+                issues: options?.issues ?? [],
+                files:
+                  options?.empty === true ? [] : [{ name: 'model.glb', bytes: options?.bytes ?? new Uint8Array(0) }],
+              };
+        },
+      };
     },
     ...(options?.render === true
       ? {
@@ -334,31 +345,18 @@ describe('loadModel — the runtime branch', () => {
     }));
     const bytes = await glbBytes(20);
     const runtime = fakeRuntime({ bytes, issues });
-    const subject = await publicLoadModel({ file: 'main.ts', runtime });
+    const subject = await loadModel({ file: 'main.ts', runtime });
+    const retained = exposeEngineSubject(subject);
     try {
       expect(subject.diagnostics.map(({ details }) => details)).toEqual(issues);
-      const first = await publicAnalyzeMesh({ subject });
+      const first = await publicAnalyzeMesh({ subject: retained });
       bytes.fill(0);
-      const second = await publicAnalyzeMesh({ subject });
+      const second = await publicAnalyzeMesh({ subject: retained });
       expect(second).toStrictEqual(first);
       expect(first.success && first.stats.boundingBox?.size).toEqual([20, 20, 0]);
       expect(runtime.state.exports).toHaveLength(1);
-      const collector = createCollector();
-      collector.it('default severities', () => collector.expectGeo(subject).toHaveNoDiagnostics());
-      collector.it('info explicitly rejected', () =>
-        collector.expectGeo(subject).toHaveNoDiagnostics({ severities: ['info'] }),
-      );
-      collector.it('explicit empty rejection set', () =>
-        collector.expectGeo(subject).toHaveNoDiagnostics({ severities: [] }),
-      );
-      await collector.waitForCompletion();
-      expect(collector.tests.map(({ status }) => status)).toEqual(['failed', 'failed', 'passed']);
-      expect(collector.tests[0]?.diagnostics[0]?.details).toMatchObject({
-        diagnostics: subject.diagnostics.slice(0, 2),
-      });
-      expect(collector.tests[1]?.diagnostics[0]?.details).toMatchObject({ diagnostics: subject.diagnostics.slice(2) });
     } finally {
-      releaseEngineSubject(subject.subjectId);
+      releaseEngineSubject(retained.subjectId);
       runtime.terminate();
       clearGeoSpecEngine();
     }
@@ -429,6 +427,23 @@ describe('loadModel — the runtime branch', () => {
     expect(subject.mesh.stats.watertight).toBe(true);
     expect(subject.provenance.unit).toBe('mm');
   });
+
+  it(
+    'should preserve the real OpenSCAD replay through the unchanged default runtime',
+    { timeout: 120_000 },
+    async () => {
+      const packageText = await readFile(join(import.meta.dirname, '../../package.json'), 'utf8');
+      expect(JSON.parse(packageText)).toMatchObject({ dependencies: { '@taucad/openrscad': 'workspace:*' } });
+      const subject = await loadModel({
+        code: Object.fromEntries([['main.scad', openScadReplayCode]]),
+        file: 'main.scad',
+      });
+      expect(subject.mesh.stats.boundingBox?.size).toEqual([20, 20, 20]);
+      expect(subject.mesh.stats.boundingBox?.center).toEqual([0, 0, 0]);
+      expect(subject.mesh.stats.watertight).toBe(true);
+      expect(subject.provenance.unit).toBe('mm');
+    },
+  );
 
   it('should connect, export, record the honored route and terminate a runtime it created', async () => {
     const runtime = fakeRuntime({ bytes: await glbBytes() });

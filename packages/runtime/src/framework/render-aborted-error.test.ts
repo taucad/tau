@@ -1,19 +1,18 @@
 /**
  * `RenderAbortedError` is internal cooperative-abort plumbing. Its message
- * describes the selection event instead of naming commands because watched
- * filesystem changes can also select a successor preview.
+ * describes the document operation instead of naming transport commands.
  *
  * @vitest-environment node
  */
 
 import { describe, expect, it } from 'vitest';
 
-import { RenderAbortedError } from '#framework/runtime-worker-client.js';
+import { RenderAbortedError } from '#framework/runtime-operation-errors.js';
 
-describe('RenderAbortedError message (R19)', () => {
-  it('describes source-agnostic preview supersession', () => {
+describe('RenderAbortedError message', () => {
+  it('describes document-operation supersession', () => {
     const error = new RenderAbortedError();
-    expect(error.message).toBe('Render aborted by a newer selected preview');
+    expect(error.message).toBe('Render aborted by a superseding document operation');
   });
 
   it('does not reference the legacy v5 command names (setFile / setParameters)', () => {

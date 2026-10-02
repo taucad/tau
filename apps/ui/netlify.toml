@@ -22,8 +22,9 @@
 # plugin config files — this flag uses Node's native type stripping instead.
 
 [build]
+# Vendored engine licences must clear before any deploy artifact is built.
 # Paths relative to site base directory (`apps/ui`, set in Terraform).
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui && pnpm nx run ui:sourcemaps"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && pnpm nx run ui:sourcemaps"
 publish = "build/client"
 
 [build.environment]
@@ -31,13 +32,13 @@ publish = "build/client"
 NX_NO_CLOUD = "true"
 
 [context.production]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui && pnpm nx run ui:sourcemaps"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui && pnpm nx run ui:sourcemaps"
 
 [context.deploy-preview]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
 
 [context.branch-deploy]
-command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx build ui"
+command = "NX_PREFER_NODE_STRIP_TYPES=true pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui"
 
 [dev]
 command = "pnpm nx dev ui"

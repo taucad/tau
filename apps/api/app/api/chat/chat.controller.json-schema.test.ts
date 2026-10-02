@@ -231,6 +231,7 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                 "zoo",
                 "jscad",
                 "opencascadejs",
+                "tscircuit",
               ],
               "type": "string",
             },
@@ -425,6 +426,33 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                           "size",
                           "type",
                           "contentKind",
+                        ],
+                        "type": "object",
+                      },
+                      {
+                        "additionalProperties": false,
+                        "properties": {
+                          "name": {
+                            "type": "string",
+                          },
+                          "path": {
+                            "type": "string",
+                          },
+                          "size": {
+                            "maximum": 9007199254740991,
+                            "minimum": 0,
+                            "type": "integer",
+                          },
+                          "type": {
+                            "const": "file",
+                            "type": "string",
+                          },
+                        },
+                        "required": [
+                          "path",
+                          "name",
+                          "size",
+                          "type",
                         ],
                         "type": "object",
                       },
@@ -904,8 +932,8 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                       "delete_file",
                       "grep",
                       "glob_search",
-                      "get_kernel_result",
-                      "export_geometry",
+                      "evaluate_model",
+                      "export_model",
                       "get_parameters",
                       "apply_parameter_operation",
                       "screenshot",

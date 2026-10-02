@@ -289,6 +289,14 @@ const knownLogEventSchema = z.union([
   }),
   z.looseObject({
     ...eventBase,
+    type: z.literal('turn.changed'),
+    turnId: nonEmptyString,
+    chatId: nonEmptyString,
+    attempt: z.number().int().positive(),
+    checkoutId: nonEmptyString,
+  }),
+  z.looseObject({
+    ...eventBase,
     type: z.literal('turn.finalized'),
     turnId: nonEmptyString,
     runId: nonEmptyString,

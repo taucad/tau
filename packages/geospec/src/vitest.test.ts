@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { JSONValue } from '@taucad/runtime/types';
 import { createGeoSpecAssertionClient, GeoSpecAssertionError } from '#assertion-client/index.js';
 import type { GeoSpecNativeClaimEvaluation, GeoSpecNativeEngine } from '#assertion-client/index.js';
-import { geoSpecNativeMatcherDescriptors } from '#engine/matchers.js';
+import { geoSpecMatcherDescriptors } from '#engine/matchers.js';
 import type { GeoSpecVolumeExpectation } from '#runner/types.js';
 import { createGeoSpecVitestAdapter } from '#vitest/index.js';
 import type { MatcherState } from 'vitest';
@@ -85,7 +85,7 @@ describe('GeoSpec Vitest adapter', () => {
   it('registers the same complete matcher catalog as standalone GeoSpec', () => {
     const adapter = install();
 
-    expect(Object.keys(adapter.matchers)).toStrictEqual(Object.keys(geoSpecNativeMatcherDescriptors));
+    expect(Object.keys(adapter.matchers)).toStrictEqual(Object.keys(geoSpecMatcherDescriptors));
   });
 
   it('returns the same canonical plan and result bytes as standalone assertions', async () => {
@@ -95,7 +95,7 @@ describe('GeoSpec Vitest adapter', () => {
         engine: new PolarityEngine(),
         workUnitLimit: 10_000,
       });
-    const standalone = await createClient().expectGeo(subject).toHaveVolume({ value: 1 });
+    const standalone = createClient().expectGeo(subject).toHaveVolume({ value: 1 });
     const adapter = createGeoSpecVitestAdapter(createClient());
     const matcher = adapter.matchers['toHaveVolume']!;
     const state = { assertion: {}, isNot: false } as unknown as MatcherState;

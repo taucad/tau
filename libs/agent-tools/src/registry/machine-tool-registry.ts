@@ -2,6 +2,7 @@
 import type {
   HostToolApprovalAnswer,
   HostToolInvocation,
+  HostToolResult,
   InterruptResolution,
   JsonObject,
   JsonValue,
@@ -18,6 +19,7 @@ import type {
   PrintRequest,
   PrintRequester,
   PrintRequestSummary,
+  MachineProvider,
 } from '@taucad/runtime/machine';
 import {
   cancelPrintInputSchema,
@@ -29,14 +31,19 @@ import {
   requestPrintOptionKeys,
 } from '@taucad/chat';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
-import type { RpcFileSystem } from '@taucad/chat/rpc';
+import type { ToolInputValidationError } from '@taucad/chat';
+import type { MachineSettingsService } from '@taucad/types';
 import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import type { SlicerOptionsInput } from '@taucad/slicer';
 import { z } from 'zod';
 
 import { captureFilesToDataUrls } from '#capture/capture-data-urls.js';
-import { defaultBambuStudioEngine, describePrintProfiles, readProjectPrintIntent } from '#registry/print-profiles.js';
-import type { BambuStudioEngine, PrintIntentFile } from '#registry/print-profiles.js';
+import {
+  defaultBambuStudioEngine,
+  describePrintProfiles,
+  readProjectMachinePreferences,
+} from '#registry/print-profiles.js';
+import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
 
 const identity = z.string().min(1).max(256);
 const digest = z.string().regex(/^sha256:[0-9a-f]{64}$/u);
@@ -174,7 +181,7 @@ const asJson = (value: unknown): JsonValue => {
  * What `request_print` needs from its host beyond the machine client.
  *
  * Slices the named source through the runtime export route to `gcode.3mf` —
- * the same route `export_geometry` takes, so the artifact is recorded in the
+ * the same route `export_model` takes, so the artifact is recorded in the
  * project and named by the project, its path and its digest — composes the
  * provider's submission configuration for the resolved machine (expected setup
  * from what the machine observes, since an agent cannot know a provider's
@@ -205,7 +212,7 @@ export type MachinePrintPlanner = (
      * the project has none. The planner applies it under the call's own
      * choices when it names this machine's model.
      */
-    intentFile?: PrintIntentFile | undefined;
+    preferences?: ResolvedMachinePreferences | undefined;
     signal: AbortSignal;
   }>,
 ) => Promise<
@@ -215,7 +222,7 @@ export type MachinePrintPlanner = (
     configuration: PrintRequest['configuration'];
     summary?: Omit<PrintRequestSummary, 'fileName'> | undefined;
     /** What the project's print intent contributed, or why it was ignored, for the tool result. */
-    printIntent?: JsonObject | undefined;
+    machinePreferences?: JsonObject | undefined;
     /** What the slice could not honour although it was made (the export's warning issues); the agent tells the person. */
     warnings?: readonly KernelIssue[] | undefined;
   }>
@@ -234,10 +241,10 @@ export type MachineToolRegistryOptions = {
   /**
    * The agent's project filesystem for one invocation. `request_print` and
    * `get_print_profiles` read the project's print intent,
-   * `.tau/machines/printer.json`, through it as their defaults; without it no
+   * `.tau/machines/settings/<typeId>.json`, through it as their defaults; without it no
    * file applies.
    */
-  readonly fileSystemFor?: ((signal: AbortSignal) => RpcFileSystem) | undefined;
+  readonly machineSettings?: Pick<MachineSettingsService, 'readMachineSettings'> | undefined;
   /** Backs `get_print_profiles`; defaults to this host's `@taucad/slicer/bambu-studio`. */
   readonly bambuStudio?: BambuStudioEngine | undefined;
 };
@@ -246,14 +253,20 @@ export type MachineToolRegistryOptions = {
  * The project's print intent as this invocation reads it.
  *
  * @param options - The registry options; their filesystem is the agent's view of the project.
- * @param signal - Cancels the read.
+ * @param provider - Selected provider and stable type.
+ * @param selection - Cancellation and optional read-only profile override.
  * @returns The file as read, or undefined when the project has none or no filesystem is wired.
  */
-const readIntentFile = async (
+const readPreferences = async (
   options: MachineToolRegistryOptions,
-  signal: AbortSignal,
-): Promise<PrintIntentFile | undefined> =>
-  options.fileSystemFor === undefined ? undefined : readProjectPrintIntent(options.fileSystemFor(signal), signal);
+  provider: MachineProvider,
+  selection: Readonly<{ signal: AbortSignal; profileId?: string }>,
+): Promise<ResolvedMachinePreferences | undefined> => {
+  if (!options.machineSettings) {
+    throw new Error('Machine settings authority is unavailable.');
+  }
+  return readProjectMachinePreferences(options.machineSettings, provider, selection);
+};
 
 /** Request states in which there is nothing left to stop. */
 const settledStates = new Set<PrintRequest['state']>(['denied', 'withdrawn', 'rejected', 'failed']);
@@ -479,6 +492,11 @@ const requestPrint = async (
     const settled = await settleApproval(client, { requestId: priorRequestId, resolution: prior.resolution, signal });
     return asJson({ request: settled, machineName, approval: prior.resolution.outcome, ...nextStepOf(settled) });
   }
+  const providers = await client.listProviders({ signal });
+  const provider = providers.find(({ id }) => id === machine.providerId);
+  if (!provider) {
+    throw new Error(`Provider ${machine.providerId} is unavailable.`);
+  }
   const plan = await planPrint({
     toolCallId: invocation.toolCallId,
     targetFile: parsed.targetFile,
@@ -489,12 +507,12 @@ const requestPrint = async (
     options: parsed.options as JsonObject | undefined,
     profiles: parsed.profiles,
     settings: parsed.settings,
-    intentFile: await readIntentFile(options, signal),
+    preferences: await readPreferences(options, provider, { signal, profileId: parsed.profileId }),
     signal,
   });
   signal.throwIfAborted();
   const reported = {
-    ...(plan.printIntent === undefined ? {} : { printIntent: plan.printIntent }),
+    ...(plan.machinePreferences === undefined ? {} : { machinePreferences: plan.machinePreferences }),
     ...(plan.warnings === undefined ? {} : { warnings: plan.warnings }),
   };
   /* Idempotent by the tool call: a retried call finds its own request rather
@@ -606,7 +624,7 @@ const getPrintProfiles = async (
     provider,
     machine: entry,
     ...rest,
-    intentFile: await readIntentFile(options, signal),
+    preferences: await readPreferences(options, provider, { signal, profileId: rest.profileId }),
   });
 };
 
@@ -752,7 +770,7 @@ export const createMachineToolRegistry = (
       )
       .map((name) => definitionFor(name)),
   answerApproval: async (answer) => answerPrintApproval(client, answer),
-  async invoke(invocation) {
+  async invoke(invocation): Promise<HostToolResult> {
     if (!toolNames.has(invocation.toolName)) {
       return {
         content: {
@@ -778,15 +796,22 @@ export const createMachineToolRegistry = (
           : new DOMException('The operation was aborted.', 'AbortError');
       }
       return {
-        content: {
-          errorCode: error instanceof z.ZodError ? 'TOOL_INPUT_VALIDATION_FAILED' : 'MACHINE_TOOL_ERROR',
-          message:
-            error instanceof z.ZodError
-              ? z.prettifyError(error)
-              : error instanceof Error
-                ? error.message
-                : String(error),
-        },
+        content:
+          error instanceof z.ZodError
+            ? ({
+                errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+                message: z.prettifyError(error),
+                toolName: invocation.toolName,
+                toolCallId: invocation.toolCallId,
+                validationErrors: error.issues.map((issue) => ({
+                  path: issue.path.join('.'),
+                  message: issue.message,
+                })),
+              } satisfies ToolInputValidationError)
+            : {
+                errorCode: 'MACHINE_TOOL_ERROR',
+                message: error instanceof Error ? error.message : String(error),
+              },
         isError: true,
       };
     }

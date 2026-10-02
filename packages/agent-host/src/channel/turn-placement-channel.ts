@@ -107,7 +107,11 @@ const requests = {
 
 /* Answers and facts are the session's own; the client checks only what it routes on. */
 const answerSchema = z.looseObject({ requestId: text, status: z.enum(['applied', 'replayed', 'refused']) });
-const factSchema = z.looseObject({ kind: z.enum(['settled', 'leaseHeld']), key: keySchema });
+const factSchema = z.discriminatedUnion('kind', [
+  z.looseObject({ kind: z.literal('settled'), key: keySchema }),
+  z.looseObject({ kind: z.literal('leaseHeld'), key: keySchema, checkoutId: text }),
+  z.looseObject({ kind: z.literal('changed'), key: keySchema, checkoutId: text }),
+]);
 const call = { args: z.unknown(), result: answerSchema };
 
 const turnPlacementProtocolSchemas = {

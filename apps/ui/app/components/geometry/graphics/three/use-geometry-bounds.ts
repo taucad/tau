@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import * as THREE from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -37,8 +37,8 @@ type GeometryBoundsResult = {
  *
  * Integrates with the graphics machine's `geometryKey` to avoid expensive
  * scene traversals once bounds have stabilized — they are only recomputed
- * when new geometry loads (key change) or a kinematic pose settles, and until
- * the radius converges, then skipped entirely during orbit/pan/zoom.
+ * when new geometry loads (key change) or a kinematic pose settles, then skipped
+ * entirely during orbit/pan/zoom.
  *
  * Native render-local bounds are inverted through the current render frame;
  * callers therefore always receive physical metres.
@@ -86,7 +86,7 @@ export function useGeometryBounds(
     };
   }, [invalidate, kinematicsRef]);
 
-  useFrame(() => {
+  const measureBounds = useCallback(() => {
     if (!innerRef.current) {
       return;
     }
@@ -107,7 +107,7 @@ export function useGeometryBounds(
     }
 
     if (outerRef.current) {
-      outerRef.current.updateWorldMatrix(true, true);
+      outerRef.current.updateWorldMatrix(true, false);
     }
 
     _box3.setFromObject(innerRef.current);
@@ -117,6 +117,18 @@ export function useGeometryBounds(
     if (_box3.isEmpty()) {
       return;
     }
+
+    if (
+      ![_box3.min.x, _box3.min.y, _box3.min.z, _box3.max.x, _box3.max.y, _box3.max.z].every((value) =>
+        Number.isFinite(value),
+      )
+    ) {
+      boundsStableRef.current = true;
+      console.warn('Geometry produced non-finite viewport bounds', { key: geometryKey });
+      return;
+    }
+    // The complete committed scene/settled pose is already in this frame. No convergence poll is needed.
+    boundsStableRef.current = true;
 
     const physicalBounds = fromThreeRenderBounds({
       renderFrame,
@@ -142,8 +154,7 @@ export function useGeometryBounds(
       const boundsChanged = !previous.geometryBounds.equals(snapshotBounds);
 
       if (previous.geometryRadius === snapshotRadius && !centerChanged && !boundsChanged) {
-        // Radius and center converged -- bounds are stable, stop polling
-        boundsStableRef.current = true;
+        // Nothing physical changed.
         return previous;
       }
 
@@ -154,7 +165,12 @@ export function useGeometryBounds(
         isPoseUpdate: snapshotIsPoseUpdate,
       };
     });
-  });
+  }, [geometryKey, innerRef, outerRef, renderFrame]);
+
+  // Committed geometry and saved pose are attached before layout effects. Fit the
+  // active camera before its first draw; the frame callback handles settled poses.
+  useLayoutEffect(measureBounds, [measureBounds]);
+  useFrame(measureBounds);
 
   // Sync the real bounding-sphere radius to the graphics machine so other
   // components (and downstream consumers of geometryRadius) get the actual value

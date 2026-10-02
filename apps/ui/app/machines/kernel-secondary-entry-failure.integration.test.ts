@@ -129,7 +129,7 @@ const createFixture = async (partSource: string) => {
           fileSystemRoot: '/',
         },
       }).start();
-      actor.send({ type: 'setRenderTimeout', renderTimeout: 0 });
+      actor.send({ type: 'setOperationTimeout', operationTimeout: 0 });
       return actor;
     },
     dispose() {
@@ -152,35 +152,28 @@ describe('kernel entry failure settlement', { timeout: 30_000 }, () => {
       });
       expect(connectedMain.value, JSON.stringify([...connectedMain.context.kernelIssues])).toBe('idle');
       main.send({ type: 'initializeModel', entryPath: 'main.ts' });
-      await waitFor(
-        main,
-        (snapshot) =>
-          snapshot.value === 'idle' &&
-          snapshot.context.geometry !== undefined &&
-          snapshot.context.lastRequestedRenderId === 1 &&
-          snapshot.context.lastSettledRenderId === 1,
-        { timeout: 5000 },
-      );
-      const lastViewableMainGeometry = main.getSnapshot().context.geometry;
-      expect(lastViewableMainGeometry).toBeDefined();
+      await waitFor(main, (snapshot) => snapshot.value === 'idle' && snapshot.context.rendering?.success === true, {
+        timeout: 5000,
+      });
+      const lastViewableMainRendering = main.getSnapshot().context.rendering;
+      expect(lastViewableMainRendering?.success).toBe(true);
 
       await fixture.fileService.writeFile('/lib/part.ts', brokenPart);
       const failedMain = await waitFor(
         main,
         (snapshot) =>
-          snapshot.value === 'idle' &&
+          snapshot.value === 'error' &&
           (snapshot.context.kernelIssues
             .get('main.ts')
             ?.some((issue) => issue.message.includes('radius must be positive')) ??
             false),
         { timeout: 5000 },
       );
-      expect(failedMain.context.geometry).toBe(lastViewableMainGeometry);
-      expect(failedMain.context.latestGeometryOutcome).toBe('failure');
+      expect(failedMain.context.rendering).toBe(lastViewableMainRendering);
+      expect(failedMain.context.latestRenderingOutcome).toBe('failure');
       const returnedMain = await awaitFreshRender(main, { awaitTimeout: 5000 });
-      expect(returnedMain).toBe(failedMain);
-      expect(returnedMain.context.lastRequestedRenderId).toBe(1);
-      expect(returnedMain.context.lastSettledRenderId).toBe(1);
+      expect(returnedMain.context.rendering).toBe(lastViewableMainRendering);
+      expect(returnedMain.context.latestRenderingOutcome).toBe('failure');
 
       secondary = fixture.createCadActor();
       const connectedSecondary = await waitFor(
@@ -194,7 +187,7 @@ describe('kernel entry failure settlement', { timeout: 30_000 }, () => {
       const failedSecondary = await waitFor(
         secondary,
         (snapshot) =>
-          snapshot.value === 'idle' &&
+          snapshot.value === 'error' &&
           (snapshot.context.kernelIssues
             .get('lib/part.ts')
             ?.some((issue) => issue.message.includes('radius must be positive')) ??
@@ -202,10 +195,9 @@ describe('kernel entry failure settlement', { timeout: 30_000 }, () => {
         { timeout: 5000 },
       );
 
-      expect(failedSecondary.context.lastRequestedRenderId).toBe(1);
-      expect(failedSecondary.context.lastSettledRenderId).toBe(1);
-      expect(failedSecondary.context.latestGeometryOutcome).toBe('failure');
-      await expect(secondarySettlement).resolves.toBe(failedSecondary);
+      expect(failedSecondary.context.rendering).toBeUndefined();
+      expect(failedSecondary.context.latestRenderingOutcome).toBe('failure');
+      await expect(secondarySettlement).resolves.toMatchObject({ context: { latestRenderingOutcome: 'failure' } });
     } finally {
       main.stop();
       secondary?.stop();
@@ -229,7 +221,7 @@ describe('kernel entry failure settlement', { timeout: 30_000 }, () => {
       const failedPrimary = await waitFor(
         primary,
         (snapshot) =>
-          snapshot.value === 'idle' &&
+          snapshot.value === 'error' &&
           (snapshot.context.kernelIssues
             .get('main.ts')
             ?.some((issue) => issue.message.includes('radius must be positive')) ??
@@ -237,10 +229,9 @@ describe('kernel entry failure settlement', { timeout: 30_000 }, () => {
         { timeout: 5000 },
       );
 
-      expect(failedPrimary.context.lastRequestedRenderId).toBe(1);
-      expect(failedPrimary.context.lastSettledRenderId).toBe(1);
-      expect(failedPrimary.context.latestGeometryOutcome).toBe('failure');
-      await expect(primarySettlement).resolves.toBe(failedPrimary);
+      expect(failedPrimary.context.rendering).toBeUndefined();
+      expect(failedPrimary.context.latestRenderingOutcome).toBe('failure');
+      await expect(primarySettlement).resolves.toMatchObject({ context: { latestRenderingOutcome: 'failure' } });
     } finally {
       primary.stop();
       fixture.dispose();

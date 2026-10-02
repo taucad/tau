@@ -1,5 +1,4 @@
 import type { RpcFileSystem } from '#rpc/rpc-dependencies.js';
-import type { ExportFile } from '@taucad/types';
 import { isSafeRelativePath } from '@taucad/utils/path';
 
 const artifactsDirectory = '.tau/artifacts';
@@ -13,6 +12,7 @@ export function slugifyTargetFile(targetFile: string): string {
   return targetFile.replaceAll(/[/\\]/g, '_').replaceAll(/[^\w.-]/g, '_');
 }
 
+/** One file successfully retained by the record filesystem owner. @public */
 export type WrittenArtifactFile = {
   readonly name: string;
   readonly artifactPath: string;
@@ -20,12 +20,23 @@ export type WrittenArtifactFile = {
   readonly byteLength: number;
 };
 
+/**
+ * Retain an ordered artifact set through the caller's record filesystem authority.
+ * @param options - Trusted invocation identity and actual file bytes.
+ * @param fileSystem - The record filesystem owned by this host.
+ * @returns Written references, or undefined when the set could not be retained.
+ * @public
+ */
 export async function writeArtifactSet(
   options: {
     readonly toolCallId: string;
     readonly targetFile: string;
     readonly format: string;
-    readonly files: readonly ExportFile[];
+    readonly files: ReadonlyArray<{
+      readonly name: string;
+      readonly mimeType: string;
+      readonly bytes: Uint8Array<ArrayBuffer>;
+    }>;
   },
   fileSystem: RpcFileSystem,
 ): Promise<WrittenArtifactFile[] | undefined> {

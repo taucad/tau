@@ -38,7 +38,6 @@ const packageConfig: UserConfig = {
     'src/register.ts',
     'src/register-node.ts',
     'src/cli/main.ts',
-    'src/runner/node/pool-worker-entry.ts',
     'src/runner/node/native-pool-worker-entry.ts',
     'src/runner/node/native-pool-runner.ts',
     'src/runner/node/node-vm-filesystem.ts',

@@ -2,18 +2,20 @@ import { describe, expect, it, vi } from 'vitest';
 import { resolveRuntimeExportIntent } from '#model/export-intent.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
 
-const createRuntime = <Runtime extends Record<string, unknown> = Record<string, never>>(
-  runtime?: Runtime,
-): GeoSpecRuntimeClient & Runtime =>
-  ({
-    export: vi.fn(),
-    ...runtime,
-  }) as unknown as GeoSpecRuntimeClient & Runtime;
+function createRuntime(): GeoSpecRuntimeClient;
+function createRuntime<Runtime extends Record<string, unknown>>(runtime: Runtime): GeoSpecRuntimeClient & Runtime;
+function createRuntime(runtime?: Record<string, unknown>) {
+  const client: GeoSpecRuntimeClient = {
+    connect: vi.fn(async () => undefined),
+    open: vi.fn<GeoSpecRuntimeClient['open']>(),
+    terminate: vi.fn(),
+  };
+  return Object.assign(client, runtime);
+}
 
 describe('resolveRuntimeExportIntent', () => {
   it('should request canonical mesh options from route-aware runtimes', () => {
     const runtime = createRuntime({
-      export: vi.fn(),
       bestRouteFor: vi.fn(() => ({
         kernelId: 'replicad',
         sourceFormat: 'glb',
@@ -134,7 +136,6 @@ describe('resolveRuntimeExportIntent', () => {
 
   it('should request canonical options from Tau-like runtimes before route metadata is available', () => {
     const runtime = createRuntime({
-      export: vi.fn(),
       bestRouteFor: vi.fn(() => undefined),
       routesFor: vi.fn(() => []),
     });
@@ -178,7 +179,6 @@ describe('resolveRuntimeExportIntent', () => {
 
   it('should report unsupported canonical mesh intent when a route lacks unit support', () => {
     const runtime = createRuntime({
-      export: vi.fn(),
       bestRouteFor: vi.fn(() => ({
         kernelId: 'legacy',
         sourceFormat: 'glb',
@@ -209,7 +209,6 @@ describe('resolveRuntimeExportIntent', () => {
 
   it('should reject mesh-fidelity STEP transcodes for exact evidence', () => {
     const runtime = createRuntime({
-      export: vi.fn(),
       bestRouteFor: vi.fn(() => ({
         kernelId: 'replicad',
         sourceFormat: 'glb',
@@ -236,7 +235,6 @@ describe('resolveRuntimeExportIntent', () => {
 
   it('should pass z-up intent to direct STEP routes that expose coordinateSystem', () => {
     const runtime = createRuntime({
-      export: vi.fn(),
       bestRouteFor: vi.fn(() => ({
         kernelId: 'opencascade',
         sourceFormat: 'step',

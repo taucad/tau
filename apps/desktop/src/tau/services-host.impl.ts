@@ -242,10 +242,10 @@ export type ServicesHostOptions = {
   /** Ask main to mint a runtime port for this already-admitted project. */
   readonly requestRuntimePort?: (workspaceRoot: string) => Promise<{
     readonly port: UtilityPort;
-    release(reason: 'requested' | 'render-timeout'): void;
+    release(reason: 'requested' | 'operation-timeout'): void;
   }>;
   /** Ask main for one runner channel into the separately supervised geometry slot. */
-  readonly requestGeometryPort?: (workspaceRoot: string, engine: 'native' | 'legacy') => Promise<UtilityPort>;
+  readonly requestGeometryPort?: (workspaceRoot: string) => Promise<UtilityPort>;
   /**
    * Tell main a candidate turn's checkout is (or is no longer) a runtime root.
    *
@@ -369,7 +369,6 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * connection to it: a run keeps executing with zero clients attached, which is
    * the whole point of the portable host. It leaves the map when it ends. */
   const projectHosts = new Map<string, ProjectHostActor>();
-  const projectHostGeoSpecEngines = new Map<string, 'legacy' | 'native'>();
   const retiredProjectHosts = new Set<ProjectHostActor>();
   /* Renderer ports held for the actor that serves or refuses them, by connection id. */
   const connections = new Map<string, UtilityPort>();
@@ -815,15 +814,10 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    *
    * @param workspaceRoot - The project root, canonical.
    * @param projectId - The renderer's project id.
-   * @param selection - The actor's MCP route and authoring engine.
+   * @param route - The actor's MCP route.
    * @returns The options.
    */
-  const projectHostOptions = (
-    workspaceRoot: string,
-    projectId: string,
-    selection: Readonly<{ route: string; geoSpecEngine: 'legacy' | 'native' }>,
-  ): ProjectHostOptions => {
-    const { route, geoSpecEngine } = selection;
+  const projectHostOptions = (workspaceRoot: string, projectId: string, route: string): ProjectHostOptions => {
     const config = agentHostConfig;
     if (config === undefined || internalChannel === undefined || authority === undefined) {
       throw new Error('The desktop agent host has no configuration or filesystem authority.');
@@ -848,12 +842,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       /* Rooted per run, exactly as the daemon does it: a candidate turn's kernel
        * and GeoSpec tools read the checkout its file tools write. */
       runtimeClient: async (root) => runtimeClients.get(root),
-      geospecAuthoringMode: geoSpecEngine,
       geospecRunner: async (root) => {
         if (!requestGeometryPort) {
           throw new Error('The desktop services host has no isolated geometry runner broker.');
         }
-        const port = await requestGeometryPort(root, geoSpecEngine);
+        const port = await requestGeometryPort(root);
         return createGeometryRunnerClient(port);
       },
       systemSkillBundles,
@@ -922,14 +915,9 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    *
    * @param workspaceRoot - The project root, canonical.
    * @param projectId - The renderer's project id.
-   * @param geoSpecEngine - The authoring engine selected for this root.
    * @returns The running actor.
    */
-  const projectHostFor = (
-    workspaceRoot: string,
-    projectId: string,
-    geoSpecEngine: 'legacy' | 'native',
-  ): ProjectHostActor => {
+  const projectHostFor = (workspaceRoot: string, projectId: string): ProjectHostActor => {
     const existing = projectHosts.get(workspaceRoot);
     if (existing !== undefined) {
       return existing;
@@ -942,7 +930,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     let servedHost: ProjectHost | undefined;
     const actor = createProjectHostActor({
       root: workspaceRoot,
-      host: () => ({ ...projectHostOptions(workspaceRoot, projectId, { route, geoSpecEngine }), machines }),
+      host: () => ({ ...projectHostOptions(workspaceRoot, projectId, route), machines }),
       serve: (connectionId, host) => {
         const port = takeConnection(connectionId);
         if (port === undefined) {
@@ -959,7 +947,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
           sessionKey: agentSessionKey,
           revisions: host.revisions.channel,
         });
-        log('agent-host-served', { workspaceRoot, reused: servedHost === host, geoSpecEngine });
+        log('agent-host-served', { workspaceRoot, reused: servedHost === host });
         servedHost = host;
       },
       refuse: (connectionId) => {
@@ -984,7 +972,6 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const retire = (): void => {
       if (projectHosts.get(workspaceRoot) === actor) {
         projectHosts.delete(workspaceRoot);
-        projectHostGeoSpecEngines.delete(workspaceRoot);
       }
       retiredProjectHosts.add(actor);
       const settleRetired = async (): Promise<void> => {
@@ -1004,7 +991,6 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     };
     actor.subscribe({ complete: retire, error: retire });
     projectHosts.set(workspaceRoot, actor);
-    projectHostGeoSpecEngines.set(workspaceRoot, geoSpecEngine);
     actor.start();
     return actor;
   };
@@ -1209,29 +1195,11 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
      * person granted — under `$TMPDIR` those differ by `/private`, and an actor
      * filed under one of them is unreachable from the other. */
     const workspaceRoot = canonicalPath(requested);
-    const requestedEngine = context?.['geoSpecEngine'];
-    if (requestedEngine !== undefined && requestedEngine !== 'legacy' && requestedEngine !== 'native') {
-      log('agent-host.invalid-geospec-engine', { geoSpecEngine: requestedEngine });
-      port.close();
-      return;
-    }
-    const geoSpecEngine = requestedEngine ?? 'legacy';
-    const existingEngine = projectHostGeoSpecEngines.get(workspaceRoot);
-    if (existingEngine !== undefined && existingEngine !== geoSpecEngine) {
-      log('agent-host.geospec-engine-mismatch', {
-        workspaceRoot,
-        current: existingEngine,
-        requested: geoSpecEngine,
-        reason: 'Reload the project host to change the GeoSpec engine.',
-      });
-      port.close();
-      return;
-    }
     connectionCount += 1;
     const connectionId = `connection-${String(connectionCount)}`;
     connections.set(connectionId, port);
     const generation = Number(context?.['attachmentGeneration']);
-    projectHostFor(workspaceRoot, projectId, geoSpecEngine).send({
+    projectHostFor(workspaceRoot, projectId).send({
       type: 'connect',
       gen:
         context?.['attachmentGeneration'] !== undefined && Number.isSafeInteger(generation) && generation >= 0

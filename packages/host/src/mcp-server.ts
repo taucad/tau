@@ -77,10 +77,10 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
  * @public
  */
 export const hostMcpAllowedTools = [
-  toolName.getKernelResult,
+  toolName.evaluateModel,
   toolName.testModel,
   toolName.screenshot,
-  toolName.exportGeometry,
+  toolName.exportModel,
   toolName.arrangeWorkbench,
   toolName.getPrintProfiles,
   toolName.requestPrint,
@@ -160,10 +160,10 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
  * (`apps/api/app/api/mcp/mcp-authority.service.ts`).
  */
 const toolForRpc: Readonly<Record<TauMcpRpcName, HostMcpAllowedTool>> = {
-  [rpcName.getKernelResult]: toolName.getKernelResult,
+  [rpcName.evaluateModel]: toolName.evaluateModel,
   [rpcName.runGeoSpecTests]: toolName.testModel,
   [rpcName.captureImages]: toolName.screenshot,
-  [rpcName.exportGeometry]: toolName.exportGeometry,
+  [rpcName.exportModel]: toolName.exportModel,
 };
 
 const capabilityClaimsSchema = z
@@ -422,12 +422,16 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
           const verdict = testModelOutputSchema.parse(payload);
           const full = JSON.stringify(verdict);
           if (Buffer.byteLength(full, 'utf8') > 128 * 1024) {
-            const saved = await saveChatAttachment({
-              workspaceRoot: options.workspaceRoot,
-              chatId: claims.chatId,
-              data: Buffer.from(full, 'utf8').toString('base64'),
-              mimeType: 'application/json',
-            });
+            const saved =
+              verdict.fullResult ??
+              (await saveChatAttachment({
+                workspaceRoot: options.workspaceRoot,
+                chatId: claims.chatId,
+                data: Buffer.from(full, 'utf8').toString('base64'),
+                mimeType: 'application/json',
+              }));
+            signal.throwIfAborted();
+            binding?.signal.throwIfAborted();
             const failures = verdict.failures.slice(0, 20).map((failure) => ({
               id: shortDiagnostic(failure.id),
               requirement: shortDiagnostic(failure.requirement),
@@ -439,11 +443,16 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
               success: true,
               passed: verdict.passed,
               total: verdict.total,
+              ...(verdict.runStatus === undefined ? {} : { runStatus: verdict.runStatus }),
+              ...(verdict.accounting === undefined ? {} : { accounting: verdict.accounting }),
+              ...(verdict.lineageStatus === undefined ? {} : { lineageStatus: verdict.lineageStatus }),
               failures,
               passes: [],
-              omittedFailures: verdict.failures.length - failures.length,
-              omittedPasses: verdict.passes.length,
-              omittedSourceRevisions: verdict.sourceRevisions?.length ?? 0,
+              omittedFailures: (verdict.omittedFailures ?? 0) + verdict.failures.length - failures.length,
+              omittedPasses: (verdict.omittedPasses ?? 0) + verdict.passes.length,
+              omittedSourceRevisions: (verdict.omittedSourceRevisions ?? 0) + (verdict.sourceRevisions?.length ?? 0),
+              omittedTests: (verdict.omittedTests ?? 0) + (verdict.tests?.length ?? 0),
+              omittedLineage: (verdict.omittedLineage ?? 0) + (verdict.lineage?.length ?? 0),
               fullResult: { ...saved, mimeType: 'application/json' },
             };
           }
@@ -459,6 +468,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         return { success: true, ...content };
       }
       return {
+        ...content,
         errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
         message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
       };
@@ -523,6 +533,12 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     };
     return async (call, dispatchOptions) => {
       if ('rpcName' in call) {
+        // Export RPCs carry call identity in args; the tool registry takes it
+        // from invocation metadata and adds it after strict input validation.
+        if (call.rpcName === rpcName.exportModel) {
+          const { toolCallId: _toolCallId, ...input } = call.args;
+          return invokeAllowed(toolName.exportModel, input, dispatchOptions);
+        }
         return invokeAllowed(toolForRpc[call.rpcName], call.args, dispatchOptions);
       }
       const tool = hostMcpAllowedTools.find((name) => name === call.toolName);

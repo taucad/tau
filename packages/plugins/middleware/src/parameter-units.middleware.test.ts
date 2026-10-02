@@ -2,7 +2,7 @@ import { contentDigest } from '@taucad/cache-core';
 import { compileParameterManifest } from '@taucad/parameters';
 import type { ParameterDeclaration, ParameterManifest } from '@taucad/parameters';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { GetParametersResult } from '@taucad/runtime/types';
+import type { DescribeResult } from '@taucad/runtime/types';
 import { createMockRuntime } from '@taucad/runtime-testing';
 import { describe, expect, it } from 'vitest';
 
@@ -40,11 +40,11 @@ const infer = async (
     inferenceLanguage?: string;
   }> = {},
   angleDefault: 'deg' | 'rad' = 'deg',
-): Promise<GetParametersResult> => {
+): Promise<DescribeResult<ParameterManifest>> => {
   const definition = await resolveRuntimePluginDefinition('middleware', parameterUnits());
-  return definition.wrapGetParameters!(
+  return definition.wrapDescribe!(
     { entryPath: 'main.ts', resolution: input },
-    async () => ({ success: true, data: manifest, issues: [] }),
+    async () => ({ success: true, data: { parameters: manifest }, issues: [] }),
     createMockRuntime({ options: { angleDefault } }),
   );
 };
@@ -97,27 +97,27 @@ describe('parameterUnits', () => {
       return;
     }
     for (const [pointer, quantityKind] of Object.entries(expectedKinds)) {
-      expect(inferred.data.bindings[pointer]).toMatchObject({
+      expect(inferred.data.parameters.bindings[pointer]).toMatchObject({
         unit: 'mm',
         quantityKind,
         space: 'linear',
       });
       expect(
-        Object.values(inferred.data.provenance).some(
+        Object.values(inferred.data.parameters.provenance).some(
           ({ field, origin, evidence }) =>
             field === 'unit' && origin === 'inferred' && evidence?.includes(`instance=${pointer};`),
         ),
       ).toBe(true);
     }
     for (const name of unknown) {
-      expect(inferred.data.bindings[`/${name}`]?.unit).toBeUndefined();
+      expect(inferred.data.parameters.bindings[`/${name}`]?.unit).toBeUndefined();
     }
     expect(
-      Object.values(inferred.data.provenance).find(
+      Object.values(inferred.data.parameters.provenance).find(
         ({ field, evidence }) => field === 'unit' && evidence?.includes('instance=/width;'),
       )?.profile,
     ).toContain('tau-parameter-units-03');
-    expect(await infer(inferred.data, { inferenceLanguage: 'en-NZ' })).toEqual(inferred);
+    expect(await infer(inferred.data.parameters, { inferenceLanguage: 'en-NZ' })).toEqual(inferred);
   });
 
   it('preserves compatible and conflicting declared units without replacing them', async () => {
@@ -130,14 +130,14 @@ describe('parameterUnits', () => {
         defaults: { width: 20 },
       }),
     );
-    expect(compatible.success && compatible.data.bindings['/width']).toMatchObject({
+    expect(compatible.success && compatible.data.parameters.bindings['/width']).toMatchObject({
       unit: 'cm',
       quantityKind: 'http://qudt.org/vocab/quantitykind/Width',
       space: 'linear',
     });
     expect(
       compatible.success &&
-        Object.values(compatible.data.provenance).find(
+        Object.values(compatible.data.parameters.provenance).find(
           ({ field, origin }) => field === 'unit' && origin === 'declared',
         ),
     ).toBeDefined();
@@ -150,9 +150,9 @@ describe('parameterUnits', () => {
       defaults: { width: 20 },
     });
     const explicitWins = await infer(conflicting);
-    expect(explicitWins.success && explicitWins.data.bindings['/width']).toMatchObject({ unit: 's' });
-    expect(explicitWins.success && explicitWins.data.bindings['/width']).not.toHaveProperty('quantityKind');
-    expect(explicitWins.success && explicitWins.data.bindings['/width']).not.toHaveProperty('space');
+    expect(explicitWins.success && explicitWins.data.parameters.bindings['/width']).toMatchObject({ unit: 's' });
+    expect(explicitWins.success && explicitWins.data.parameters.bindings['/width']).not.toHaveProperty('quantityKind');
+    expect(explicitWins.success && explicitWins.data.parameters.bindings['/width']).not.toHaveProperty('space');
   });
 
   it('infers angle fields per claim while explicit and project semantics win', async () => {
@@ -204,20 +204,20 @@ describe('parameterUnits', () => {
     if (!first.success) {
       return;
     }
-    expect(first.data.defaults).toEqual(defaults);
+    expect(first.data.parameters.defaults).toEqual(defaults);
     expect(declaration).toEqual(before);
-    expect(first.data.bindings['/cameraAngle']).toMatchObject({
+    expect(first.data.parameters.bindings['/cameraAngle']).toMatchObject({
       unit: 'deg',
       quantityKind: 'http://qudt.org/vocab/quantitykind/PlaneAngle',
       space: 'linear',
       constraints: { default: 38, minimum: 0, maximum: 90 },
     });
-    expect(first.data.bindings['/rotationRadians']).toMatchObject({
+    expect(first.data.parameters.bindings['/rotationRadians']).toMatchObject({
       unit: 'rad',
       quantityKind: 'http://qudt.org/vocab/quantitykind/PlaneAngle',
       space: 'linear',
     });
-    expect(first.data.bindings['/nested/tilt']).toMatchObject({
+    expect(first.data.parameters.bindings['/nested/tilt']).toMatchObject({
       unit: 'deg',
       constraints: { minimum: -180, maximum: 180, multipleOf: 0.5 },
       schema: {
@@ -225,7 +225,7 @@ describe('parameterUnits', () => {
         pointer: '/definitions/angle',
       },
     });
-    const inferred = Object.values(first.data.provenance).filter(({ origin }) => origin === 'inferred');
+    const inferred = Object.values(first.data.parameters.provenance).filter(({ origin }) => origin === 'inferred');
     expect(inferred).toHaveLength(7);
     expect(inferred).toEqual(
       expect.arrayContaining([
@@ -244,12 +244,12 @@ describe('parameterUnits', () => {
       ]),
     );
     expect(
-      Object.values(first.data.provenance).find(
+      Object.values(first.data.parameters.provenance).find(
         ({ field, origin }) => field === 'quantity-kind' && origin === 'project',
       ),
     ).toMatchObject({ producer: 'project.json' });
 
-    const second = await infer(first.data, { inferenceLanguage: 'en-NZ' });
+    const second = await infer(first.data.parameters, { inferenceLanguage: 'en-NZ' });
     expect(second).toEqual(first);
   });
 
@@ -284,7 +284,7 @@ describe('parameterUnits', () => {
     if (!inferred.success) {
       return;
     }
-    expect(inferred.data.bindings['/cameraAngle']).toMatchObject({
+    expect(inferred.data.parameters.bindings['/cameraAngle']).toMatchObject({
       unit: 'deg',
     });
     for (const pointer of [
@@ -296,16 +296,16 @@ describe('parameterUnits', () => {
       '/widthDegreesRadians',
       '/widthHeightAngle',
     ]) {
-      expect(inferred.data.bindings[pointer]?.unit).toBeUndefined();
+      expect(inferred.data.parameters.bindings[pointer]?.unit).toBeUndefined();
     }
     const declaredOnly = await infer(manifest, { mode: 'declared-only' });
-    expect(declaredOnly).toEqual({ success: true, data: manifest, issues: [] });
+    expect(declaredOnly).toEqual({ success: true, data: { parameters: manifest }, issues: [] });
     const unsupportedLanguage = await infer(manifest, {
       inferenceLanguage: 'fr',
     });
     expect(unsupportedLanguage).toEqual({
       success: true,
-      data: manifest,
+      data: { parameters: manifest },
       issues: [],
     });
   });
@@ -371,7 +371,7 @@ describe('parameterUnits', () => {
     if (!inferred.success) {
       return;
     }
-    expect(inferred.data.defaults).toEqual(defaults);
+    expect(inferred.data.parameters.defaults).toEqual(defaults);
     for (const pointer of [
       '/width2',
       '/2Width',
@@ -381,12 +381,14 @@ describe('parameterUnits', () => {
       '/externalParts/*/height',
       '/nullableWidthArray/*',
     ]) {
-      expect(inferred.data.bindings[pointer]).toMatchObject({
+      expect(inferred.data.parameters.bindings[pointer]).toMatchObject({
         unit: 'mm',
         space: 'linear',
       });
     }
-    expect(inferred.data.bindings['/parts/*/width']?.quantityKind).toBe('http://qudt.org/vocab/quantitykind/Width');
+    expect(inferred.data.parameters.bindings['/parts/*/width']?.quantityKind).toBe(
+      'http://qudt.org/vocab/quantitykind/Width',
+    );
   });
 
   it('resolves external references independently and changes profile identity with the angle default', async () => {
@@ -408,19 +410,19 @@ describe('parameterUnits', () => {
     });
     const degrees = await infer(manifest, {}, 'deg');
     const radians = await infer(manifest, {}, 'rad');
-    expect(degrees.success && degrees.data.bindings['/cameraAngle']).toMatchObject({
+    expect(degrees.success && degrees.data.parameters.bindings['/cameraAngle']).toMatchObject({
       unit: 'deg',
       schema: { resource: external.$id, pointer: '' },
     });
-    expect(radians.success && radians.data.bindings['/cameraAngle']).toMatchObject({ unit: 'rad' });
-    expect(degrees.success && radians.success && degrees.data.revision).not.toBe(
-      radians.success ? radians.data.revision : undefined,
+    expect(radians.success && radians.data.parameters.bindings['/cameraAngle']).toMatchObject({ unit: 'rad' });
+    expect(degrees.success && radians.success && degrees.data.parameters.revision).not.toBe(
+      radians.success ? radians.data.parameters.revision : undefined,
     );
     const degreeProfile = degrees.success
-      ? Object.values(degrees.data.provenance).find(({ field }) => field === 'unit')?.profile
+      ? Object.values(degrees.data.parameters.provenance).find(({ field }) => field === 'unit')?.profile
       : undefined;
     const radianProfile = radians.success
-      ? Object.values(radians.data.provenance).find(({ field }) => field === 'unit')?.profile
+      ? Object.values(radians.data.parameters.provenance).find(({ field }) => field === 'unit')?.profile
       : undefined;
     expect(degreeProfile).toContain('angle=deg');
     expect(radianProfile).toContain('angle=rad');

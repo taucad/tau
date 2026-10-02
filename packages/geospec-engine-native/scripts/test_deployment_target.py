@@ -703,6 +703,130 @@ class PreparationContractTest(unittest.TestCase):
             self.recipe['occt']['sha256'] = selected
             self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes)
 
+    def test_should_authenticate_effective_mixed_recovery_without_rewriting_original_receipt(self):
+        producer_root = self.root / 'producer'
+        producer_package = producer_root / 'packages/geospec-engine-native'
+        builder = producer_package / 'native/occt/build-occt.sh'
+        builder.parent.mkdir(parents=True)
+        builder.write_bytes(self.builder.read_bytes())
+        self.builder = builder
+        self.stack.enter_context(patch.object(prepare, 'PACKAGE', producer_package))
+        self.stack.enter_context(patch.object(materials, 'ROOT', producer_root))
+        self.stack.enter_context(patch.object(materials, 'PACKAGE', producer_package))
+        self.receipt['command'][1] = str(builder)
+        prepare.write_json(self.receipt_path, self.receipt)
+        unchanged = {
+            'sourceRoot': str(producer_root),
+            'occtPrefix': str(self.prefix / 'install'),
+            'tools': {name: str(path) for name, path in self.paths.items()},
+            'environment': self.env,
+            'prefixProducerBuilder': str(self.builder),
+            'prefixProducerRecipe': str(self.original_recipe),
+            'prefixRecovery': {'mixed': None},
+        }
+        with patch.object(materials, 'prepare', prepare), \
+                patch.object(prepare, 'prefix_context', return_value=self.context):
+            self.assertEqual(materials.verify_mixed_prefix(unchanged), self.receipt)
+            consumer_root = self.root / 'consumer'
+            consumer_package = consumer_root / 'packages/geospec-engine-native'
+            consumer_builder = consumer_package / 'native/occt/build-occt.sh'
+            consumer_builder.parent.mkdir(parents=True)
+            consumer_builder.write_bytes(builder.read_bytes())
+            with patch.object(prepare, 'PACKAGE', consumer_package), \
+                    patch.object(materials, 'ROOT', consumer_root), \
+                    patch.object(materials, 'PACKAGE', consumer_package):
+                self.assertEqual(materials.verify_mixed_prefix(unchanged), self.receipt,
+                                 'historical None remains valid when the assembler moves')
+                portable_same = deepcopy(self.receipt)
+                portable_same['schema'] = prepare.PORTABLE_PREFIX_RECEIPT_SCHEMA
+                portable_same['producerSources'] = prepare.builder_sources(builder)
+                prepare.write_json(self.receipt_path, portable_same)
+                builder.unlink()
+                try:
+                    self.assertEqual(materials.verify_mixed_prefix(unchanged), portable_same,
+                                     'package-owned producer selector maps after its checkout retires')
+                finally:
+                    builder.write_bytes(consumer_builder.read_bytes())
+                    prepare.write_json(self.receipt_path, self.receipt)
+        original = self.root / 'original/packages/geospec-engine-native/native/occt/build-occt.sh'
+        original.parent.mkdir(parents=True)
+        original.write_bytes(self.builder.read_bytes())
+        self.receipt['command'][1] = str(original)
+        prepare.write_json(self.receipt_path, self.receipt)
+        receipt_bytes = self.receipt_path.read_bytes()
+        with patch.dict(os.environ, GEOSPEC_OCCT_PRODUCER_BUILDER=str(original)):
+            effective = self.verify()
+            closure = {
+                'sourceRoot': str(producer_root),
+                'occtPrefix': str(self.prefix / 'install'),
+                'tools': {name: str(path) for name, path in self.paths.items()},
+                'environment': self.env,
+                'prefixProducerBuilder': str(original),
+                'prefixProducerRecipe': str(self.original_recipe),
+                'prefixRecovery': {'mixed': effective['recovery']},
+            }
+            with patch.dict(os.environ, {}, clear=True), \
+                    patch.object(materials, 'prepare', prepare), \
+                    patch.object(prepare, 'prefix_context', return_value=self.context):
+                self.assertEqual(materials.verify_mixed_prefix(closure), self.receipt)
+                self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes)
+                with patch.object(prepare, 'PACKAGE', consumer_package), \
+                        patch.object(materials, 'ROOT', consumer_root), \
+                        patch.object(materials, 'PACKAGE', consumer_package):
+                    self.assertEqual(materials.verify_mixed_prefix(closure), self.receipt,
+                                     'historical relocation remains attributed to the producing checkout')
+                with patch.object(prepare, 'PACKAGE', original.parents[2]), \
+                        patch.object(materials, 'ROOT', original.parents[4]), \
+                        patch.object(materials, 'PACKAGE', original.parents[2]):
+                    self.assertEqual(materials.verify_mixed_prefix(closure), self.receipt,
+                                     'historical relocation remains valid when current admission needs none')
+                portable = deepcopy(self.receipt)
+                portable['schema'] = prepare.PORTABLE_PREFIX_RECEIPT_SCHEMA
+                portable['producerSources'] = prepare.builder_sources(builder)
+                prepare.write_json(self.receipt_path, portable)
+                portable_closure = deepcopy(closure)
+                portable_closure['prefixProducerBuilder'] = str(builder)
+                portable_closure['prefixRecovery']['mixed']['originalReceiptSha256'] = prepare.digest(self.receipt_path)
+                original.unlink()
+                try:
+                    with patch.object(prepare, 'PACKAGE', consumer_package), \
+                            patch.object(materials, 'ROOT', consumer_root), \
+                            patch.object(materials, 'PACKAGE', consumer_package):
+                        self.assertEqual(materials.verify_mixed_prefix(portable_closure), portable,
+                                         'portable historical evidence survives a retired original checkout')
+                        missing_external = deepcopy(portable_closure)
+                        missing_external['prefixProducerBuilder'] = str(original)
+                        with self.assertRaisesRegex(FileNotFoundError, 'build-occt.sh'):
+                            materials.verify_mixed_prefix(missing_external)
+                finally:
+                    original.write_bytes(builder.read_bytes())
+                    self.receipt_path.write_bytes(receipt_bytes)
+                annotated = deepcopy(self.receipt)
+                annotated['recovery'] = closure['prefixRecovery']['mixed']
+                prepare.write_json(self.receipt_path, annotated)
+                with self.assertRaisesRegex(ValueError, 'Raw mixed recovery is not admission evidence'):
+                    materials.verify_mixed_prefix(closure)
+                self.receipt_path.write_bytes(receipt_bytes)
+                wrong_builder = self.root / 'wrong-builder.sh'
+                wrong_builder.write_bytes(original.read_bytes())
+                wrong_selector = deepcopy(closure)
+                wrong_selector['prefixProducerBuilder'] = str(wrong_builder)
+                with self.assertRaisesRegex(ValueError, 'Prefix producer selector changed'):
+                    materials.verify_mixed_prefix(wrong_selector)
+                for field in ['originalReceiptSha256', 'originalBuilder', 'currentBuilder', 'sourceFiles']:
+                    forged = deepcopy(closure)
+                    forged['prefixRecovery']['mixed'][field] = 'forged'
+                    with self.subTest(field=field), self.assertRaisesRegex(ValueError, 'Mixed recovery differs'):
+                        materials.verify_mixed_prefix(forged)
+                changed = deepcopy(closure)
+                changed['environment']['CXXFLAGS'] = '-changed'
+                with self.assertRaisesRegex(ValueError, 'Prefix receipt environment changed'):
+                    materials.verify_mixed_prefix(changed)
+                self.library.write_text('changed archive bytes')
+                with self.assertRaisesRegex(ValueError, 'Installed prefix outputs changed'):
+                    materials.verify_mixed_prefix(closure)
+                self.assertEqual(self.receipt_path.read_bytes(), receipt_bytes)
+
     def test_portable_receipt_survives_retired_checkout_and_binds_source_manifest(self):
         source = self.builder.parent
         (source / 'selected.patch').write_text('selected patch')

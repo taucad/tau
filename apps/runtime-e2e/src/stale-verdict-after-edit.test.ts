@@ -70,7 +70,13 @@ describe('a repaired model is never answered with the verdict it replaced', () =
     });
 
     try {
-      const broken = await client.evaluate({ source: { path: entryPath }, parameters: {} });
+      const brokenDocument = client.open({ source: { path: entryPath }, parameters: {}, watch: false });
+      const brokenOutcome = await brokenDocument.evaluation();
+      if (brokenOutcome.superseded) {
+        throw new Error('Expected the broken model evaluation to settle');
+      }
+      const broken = brokenOutcome.evaluation;
+      brokenDocument.close();
 
       expect(broken.success).toBe(false);
       // The failure is the model's own, so the closure was resolved and hashed before it.
@@ -78,7 +84,13 @@ describe('a repaired model is never answered with the verdict it replaced', () =
       expect(broken.sourceRevision?.files[entryPath]).toBe(digestOf(brokenSource));
 
       await writeFile(entryFile, repairedSource, 'utf8');
-      const repaired = await client.evaluate({ source: { path: entryPath }, parameters: {} });
+      const repairedDocument = client.open({ source: { path: entryPath }, parameters: {}, watch: false });
+      const repairedOutcome = await repairedDocument.evaluation();
+      if (repairedOutcome.superseded) {
+        throw new Error('Expected the repaired model evaluation to settle');
+      }
+      const repaired = repairedOutcome.evaluation;
+      repairedDocument.close();
 
       // The verdict differs, and it differs by succeeding — the mined signature is an
       // identical error verdict after the edit.
@@ -87,7 +99,7 @@ describe('a repaired model is never answered with the verdict it replaced', () =
       // …and it says so: the revision it names is the one the edit left behind.
       expect(repaired.sourceRevision?.files[entryPath]).toBe(digestOf(repairedSource));
     } finally {
-      client.terminate();
+      await client.shutdown();
     }
   });
 });

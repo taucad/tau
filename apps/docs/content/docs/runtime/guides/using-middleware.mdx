@@ -43,7 +43,7 @@ The default preset installs four middleware, in order:
 
 - **`parameterFileResolver()`** — merges persisted parameter-group values from `.tau/parameters/<entry>.json` over the request parameters.
 - **`parameterUnits()`** — infers units for parameters whose schema does not declare one.
-- **`geometryCache()`** — caches `createGeometry` results as MessagePack binaries under `.tau/cache/geometry/`, skipping kernel computation when code and parameters are unchanged.
+- **`geometryCache()`** — caches `evaluate` results as MessagePack binaries under `.tau/cache/geometry/`, skipping kernel computation when code and parameters are unchanged.
 - **`gltfEdgeDetection()`** — adds edge primitives to glTF meshes for sharp-edge rendering.
 
 ### 3. Give caches a writable filesystem
@@ -73,7 +73,7 @@ The `'cache'` preset shown here installs only `geometryCache` — pick it when y
 
 ### 4. Render as usual
 
-Middleware runs automatically inside the worker. `client.export(format, input)` and the autonomous loop in [Live Rendering](./live-rendering) need no changes; cached results flow through the same result shapes as fresh ones.
+Middleware runs automatically inside the worker. `document.export(target, request)` and view subscriptions in [Live Rendering](./live-rendering) need no changes; cached results flow through the same result shapes as fresh ones.
 
 ## Related
 

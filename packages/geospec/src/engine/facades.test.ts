@@ -21,6 +21,9 @@ import { analyzeMesh, loadMesh } from '#mesh/load-mesh.js';
 import { analyzeMeshOverlap } from '#mesh/overlap.js';
 import type { GeometryStats, GeometrySubject } from '#mesh/types.js';
 import { createModelLoader, loadModel } from '#model/load-model.js';
+import { bindGeoSpecSubject } from '#model/subject.js';
+import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
+import type { GeoSpecNativeEngine } from '#engine/client.js';
 import { createCollector } from '#runner/collector.js';
 import { createGeoSpecNodePoolRunner } from '#runner/node/node-pool-runner.js';
 import { createGeoSpecNodeRunner } from '#runner/node/node-runner.js';
@@ -339,12 +342,19 @@ describe('host-backed facades', () => {
     };
     const loadStepHost = vi.fn<GeoSpecEngineHostBindings['loadStep']>(async () => subject);
     const disposeModelLoader = vi.fn(async () => undefined);
+    const admittingEngine = mock<GeoSpecNativeEngine>();
+    const admitted = bindGeoSpecSubject({
+      client: createGeoSpecAssertionClient({ engine: admittingEngine }),
+      engine: admittingEngine,
+      identity: { subjectHash: 'a'.repeat(64) },
+      isLive: () => true,
+    });
     const managedModelLoader = Object.assign(
-      vi.fn(async () => subject),
+      vi.fn(async () => admitted),
       { dispose: disposeModelLoader },
     );
     const host: Partial<GeoSpecEngineHostBindings> = {
-      loadModel: vi.fn(async () => subject),
+      loadModel: vi.fn(async () => admitted),
       createModelLoader: vi.fn(() => managedModelLoader),
       loadStep: loadStepHost,
       loadMesh: vi.fn<GeoSpecEngineHostBindings['loadMesh']>(async () => ({ success: true, subject })),
@@ -362,9 +372,9 @@ describe('host-backed facades', () => {
     };
     registerResult({ status: 'passed', diagnostics: [] }, { host });
 
-    expect(await loadModel({ source: new Uint8Array(), format: 'glb' })).toBe(subject);
+    expect(await loadModel({ source: new Uint8Array(), format: 'glb' })).toBe(admitted);
     const configuredModelLoader = createModelLoader({ projectPath: '/project' });
-    expect(await configuredModelLoader({ file: 'main.ts' })).toBe(subject);
+    expect(await configuredModelLoader({ file: 'main.ts' })).toBe(admitted);
     expect(host.createModelLoader).toHaveBeenCalledWith({ projectPath: '/project' });
     expect(managedModelLoader).toHaveBeenCalledWith({ file: 'main.ts' });
     await configuredModelLoader.dispose();

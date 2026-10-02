@@ -16,22 +16,12 @@
 
 import { isIncompleteRepositoryRefusal, isStorageRefusal } from '#refusal-markers.js';
 import { RevisionPortError } from '#revision-port.js';
-import type { RevisionPortErrorCode } from '#revision-port.js';
+import type { Remote, RemoteKind, RevisionPortErrorCode } from '#revision-port.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 import type { RemoteStorage } from '#remote.types.js';
 
-/** Which of the two remote kinds a project's remote is. @public */
-export type RemoteKind = 'tau' | 'git';
-
-/** One remote, as git's remotes list holds it. @public */
-export type Remote = Readonly<{
-  name: string;
-  url: string;
-  kind: RemoteKind;
-  provider?: 'github';
-  repositoryId?: string;
-  fetchOnly?: boolean;
-}>;
+// oxlint-disable-next-line no-barrel-files/no-barrel-files -- Preserve the existing remote contract names.
+export type { Remote, RemoteKind } from '#revision-port.js';
 
 /**
  * The reserved name of a project's Tau Cloud remote.

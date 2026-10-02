@@ -1,8 +1,154 @@
+diff --git a/Base/Lattice.cs b/Base/Lattice.cs
+--- a/Base/Lattice.cs
++++ b/Base/Lattice.cs
+@@ -64,7 +64,12 @@
+         public void AddSphere(  in Vector3 vecCenter,
+                                 float fRadius)
+         {
+-            _AddSphere(lib.hThis, hThis, vecCenter, fRadius);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            try
++            {
++                Library.TauCheckLatticeStatus(_AddSphere(lib.hThis, hThis, vecCenter, fRadius), nameof(Lattice));
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         /// <summary>
+@@ -81,13 +86,7 @@
+                                 float fRadB,
+                                 bool bRoundCap = true)
+         {
+-            _AddBeam(   lib.hThis,
+-                        hThis,
+-                        in vecA,
+-                        in vecB,
+-                        fRadA,
+-                        fRadB,
+-                        bRoundCap);
++            AddBeam(in vecA, in vecB, fRadA, fRadB, bRoundCap);
+         }
+ 
+         /// <summary>
+@@ -104,13 +103,13 @@
+                                 float fRadB,
+                                 bool bRoundCap = true)
+         {
+-            _AddBeam(   lib.hThis,
+-                        hThis,
+-                        in vecA,
+-                        in vecB,
+-                        fRadA,
+-                        fRadB,
+-                        bRoundCap);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            try
++            {
++                Library.TauCheckLatticeStatus(_AddBeam(lib.hThis, hThis, in vecA, in vecB,
++                    fRadA, fRadB, bRoundCap), nameof(Lattice));
++            }
++            finally { GC.KeepAlive(this); }
+         }
+     }
+ 
 diff --git a/Base/Mesh.cs b/Base/Mesh.cs
-index 8446ad225..eab75dd09 100644
 --- a/Base/Mesh.cs
 +++ b/Base/Mesh.cs
-@@ -152,7 +152,11 @@ namespace PicoGK
+@@ -34,6 +34,7 @@
+ //
+ 
+ using System.Numerics;
++using System.Runtime.InteropServices;
+ using PicoGK.Numerics;
+ 
+ namespace PicoGK
+@@ -75,26 +76,10 @@
+         public Mesh mshCreateTransformed(   Vector3 vecScale,
+                                             Vector3 vecOffset)
+         {
+-            Mesh mshTrans = new Mesh(lib);
+-            for (int n = 0; n < nTriangleCount(); n++)
+-            {
+-                GetTriangle(    n,
+-                                out Vector3 A,
+-                                out Vector3 B,
+-                                out Vector3 C);
+-
+-                A *= vecScale.X;
+-                B *= vecScale.Y;
+-                C *= vecScale.Z;
+-
+-                A += vecOffset;
+-                B += vecOffset;
+-                C += vecOffset;
+-
+-                mshTrans.nAddTriangle(A, B, C);
+-            }
+-
+-            return mshTrans;
++            TauRequireFinite(vecScale, nameof(vecScale));
++            TauRequireFinite(vecOffset, nameof(vecOffset));
++            return TauCreateTransformed(vec => vec * vecScale + vecOffset,
++                Matrix4x4.CreateScale(vecScale) * Matrix4x4.CreateTranslation(vecOffset));
+         }
+ 
+         /// <summary>
+@@ -104,20 +89,8 @@
+         /// <returns>A new mesh that has the transformation applied</returns>
+         public Mesh mshCreateTransformed(Matrix4x4 matTrans)
+         {
+-            Mesh mshTrans = new Mesh(lib);
+-            for (int n = 0; n < nTriangleCount(); n++)
+-            {
+-                GetTriangle(    n,
+-                                out Vector3 A,
+-                                out Vector3 B,
+-                                out Vector3 C);
+-
+-               mshTrans.nAddTriangle(   A.vecTransformed(matTrans),
+-                                        B.vecTransformed(matTrans),
+-                                        C.vecTransformed(matTrans));
+-            }
+-
+-            return mshTrans;
++            TauRequireFinite(matTrans, nameof(matTrans));
++            return TauCreateTransformed(vec => vec.vecTransformed(matTrans), matTrans, actualUsesMatrix: true);
+         }
+ 
+         /// <summary>
+@@ -126,24 +99,14 @@
+         /// <param name="vecPlanePoint">A point through which the mirror plane passes.</param>
+         /// <param name="vecPlaneNormal">The normal vector of the mirror plane.</param>
+         /// <returns>The mirrored mesh.</returns>
+-        public Mesh mshCreateMirrored(  Vector3 vecPlanePoint,
+-									    Vector3 vecPlaneNormal)
+-		{
+-			Mesh mshResult = new(lib);
+-
++        public Mesh mshCreateMirrored(Vector3 vecPlanePoint, Vector3 vecPlaneNormal)
++        {
++            TauRequireFinite(vecPlanePoint, nameof(vecPlanePoint));
++            TauRequireFinite(vecPlaneNormal, nameof(vecPlaneNormal));
+             vecPlaneNormal = vecPlaneNormal.vecNormalized();
+-
+-			for (int n=0; n<nTriangleCount();n++)
+-			{
+-				GetTriangle(n, out Vector3 vecA, out Vector3 vecB, out Vector3 vecC);
+-
+-				mshResult.nAddTriangle(	vecA.vecMirrored(vecPlanePoint, vecPlaneNormal),
+-										vecB.vecMirrored(vecPlanePoint, vecPlaneNormal),
+-										vecC.vecMirrored(vecPlanePoint, vecPlaneNormal));
+-			}
+-
+-			return mshResult;
+-		}
++            return TauCreateTransformed(vec => vec.vecMirrored(vecPlanePoint, vecPlaneNormal),
++                TauMirrorPlacement(vecPlanePoint, vecPlaneNormal.vecSafeNormalized()));
++        }
+ 
+         /// <summary>
+         /// Add a new vertex to the mesh so that it can be used in mesh triangles
+@@ -152,20 +115,69 @@
          /// <returns>The index of the vertex (to be used in triangles)</returns>
          public int nAddVertex(in Vector3 vec)
          {
@@ -15,7 +161,73 @@ index 8446ad225..eab75dd09 100644
          }
  
          public void AddVertices(    in  IEnumerable<Vector3> avecVertices,
-@@ -200,9 +204,11 @@ namespace PicoGK
+                                     out int[] anVertexIndex)
+         {
+-            int nVertexCount = avecVertices.Count();
+-            anVertexIndex = new int[nVertexCount];
+-            
+-            int n=0;
+-            foreach (Vector3 vec in avecVertices)
+-            {
+-                anVertexIndex[n] = nAddVertex(vec);
+-                n++;
++            ArgumentNullException.ThrowIfNull(avecVertices);
++            Vector3[]? vertices = avecVertices as Vector3[];
++            if (vertices is null && avecVertices.GetType() == typeof(List<Vector3>))
++                vertices = ((List<Vector3>)avecVertices).ToArray();
++            if (vertices is null)
++            {
++                // Arbitrary iterators may observe each native write before yielding the next vertex.
++                var indices = new List<int>();
++                foreach (Vector3 vertex in avecVertices) indices.Add(nAddVertex(vertex));
++                anVertexIndex = indices.ToArray();
++                return;
++            }
++            anVertexIndex = new int[vertices.Length];
++            if (vertices.Length == 0) return;
++            var positions = new float[checked(vertices.Length * 3)];
++            for (int index = 0; index < vertices.Length; index++)
++            {
++                positions[index * 3] = vertices[index].X;
++                positions[index * 3 + 1] = vertices[index].Y;
++                positions[index * 3 + 2] = vertices[index].Z;
++            }
++            lock (m_tauSnapshotGate)
++            {
++                ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                var first = _nVertexCount(lib.hThis, hThis);
++                for (int index = 0; index < vertices.Length; index++) anVertexIndex[index] = checked(first + index);
++                TauAppendIndexedArrays(positions, Array.Empty<uint>());
++            }
++        }
++
++
++        // Existing private indexed ABI; no temporary Mesh/native handle or per-vertex calls.
++        private void TauAppendIndexedArrays(float[] positions, uint[] indices)
++        {
++            GCHandle pinnedPositions = default;
++            GCHandle pinnedIndices = default;
++            try
++            {
++                pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++                pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++                lock (m_tauSnapshotGate)
++                {
++                    ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                    TauCheckMeshStatus(TauAppendIndexedNative(lib.hThis, hThis,
++                        pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                        pinnedIndices.AddrOfPinnedObject(), indices.Length));
++                }
++                GC.KeepAlive(this);
++            }
++            finally
++            {
++                if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++                if (pinnedPositions.IsAllocated) pinnedPositions.Free();
+             }
+         }
+ 
+@@ -200,9 +212,11 @@
          /// <returns>The triangle index of the added triangle</returns>
          public int nAddTriangle(in Triangle t)
          {
@@ -30,11 +242,1135 @@ index 8446ad225..eab75dd09 100644
          }
  
          /// <summary>
+@@ -334,15 +348,7 @@
+         /// </summary>
+         public void Append(Mesh msh)
+         {
+-            for (int n=0; n<msh.nTriangleCount(); n++)
+-            {
+-                msh.GetTriangle(    n,
+-                                    out Vector3 vecA,
+-                                    out Vector3 vecB,
+-                                    out Vector3 vecC);
+-
+-                nAddTriangle(vecA, vecB, vecC);
+-            }
++            TauAppendIndexed(msh);
+         }
+ 
+         /// <summary>
+diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
+--- a/Base/ScalarField.cs
++++ b/Base/ScalarField.cs
+@@ -138,7 +138,7 @@
+         public void SetValue(   Vector3 vecPosition,
+                                 float   fValue)
+         {
+-            _SetValue(lib.hThis, hThis, vecPosition, fValue);
++            TauCheckedCallbacks.Check(_SetValue(lib.hThis, hThis, vecPosition, fValue), null, this);
+         }
+ 
+         /// <summary>
+@@ -156,7 +156,8 @@
+                                 out float fValue)
+         {
+             fValue = 0.0f;
+-            return _bGetValue(lib.hThis, hThis, vecPosition, ref fValue);
++            TauCheckedCallbacks.Check(_bGetValue(lib.hThis, hThis, vecPosition, ref fValue, out byte active), null, this);
++            return active != 0;
+         }
+ 
+         /// <summary>
+@@ -165,7 +166,7 @@
+         /// <param name="vecPosition">Position of the value in space</param>
+         public void RemoveValue(Vector3 vecPosition)
+         {
+-            _RemoveValue(lib.hThis, hThis, vecPosition);
++            TauCheckedCallbacks.Check(_RemoveValue(lib.hThis, hThis, vecPosition), null, this);
+         }
+ 
+         /// <summary>
+@@ -184,21 +185,9 @@
+                                         out int nYSize,
+                                         out int nZSize)
+         {
+-            nXOrigin    = 0;
+-            nYOrigin    = 0;
+-            nZOrigin    = 0;
+-            nXSize      = 0;
+-            nYSize      = 0;
+-            nZSize      = 0;
+-
+-            _GetVoxelDimensions(    lib.hThis,
+-                                    hThis,
+-                                    ref nXOrigin,
+-                                    ref nYOrigin,
+-                                    ref nZOrigin,
+-                                    ref nXSize,
+-                                    ref nYSize,
+-                                    ref nZSize);
++            var info = TauDimensions();
++            nXOrigin = info.XOrigin; nYOrigin = info.YOrigin; nZOrigin = info.ZOrigin;
++            nXSize = info.XSize; nYSize = info.YSize; nZSize = info.ZSize;
+         }
+ 
+         /// <summary>
+@@ -211,47 +200,23 @@
+                                         out int nYSize,
+                                         out int nZSize)
+         {
+-            int nXOrigin    = 0; // unused in this function
+-            int nYOrigin    = 0; // unused in this function
+-            int nZOrigin    = 0; // unused in this function
+-            nXSize          = 0;
+-            nYSize          = 0;
+-            nZSize          = 0;
+-
+-            _GetVoxelDimensions(    lib.hThis,
+-                                    hThis,
+-                                    ref nXOrigin,
+-                                    ref nYOrigin,
+-                                    ref nZOrigin,
+-                                    ref nXSize,
+-                                    ref nYSize,
+-                                    ref nZSize);
++            var info = TauDimensions();
++            nXSize = info.XSize; nYSize = info.YSize; nZSize = info.ZSize;
+         }
+ 
+         /// <summary>
+         /// Returns a signed distance-field-encoded slice of the voxel field
+-        /// To use it, use GetVoxelDimensions to find out the size of the voxel
+-        /// field in voxel units. Then allocate a new grayscale image to copy
+-        /// the data into, and pass it as a reference. Since GetVoxelDimensions
+-        /// is potentially an "expensive" function, we are putting the burden
+-        /// on you to allocate an image and don't create it for you. You can
+-        /// also re-use the image if you want to save an entire image stack
++        /// Reuses the supplied image when its dimensions match the observed field.
++        /// Otherwise replaces it with an image of the observed dimensions, retaining
++        /// sufficient pixel-array capacity. Only Width * Height pixels belong to
++        /// the returned slice; extra array capacity is not part of the image.
+         /// </summary>
+         /// <param name="nZSlice">Slice to retrieve. 0 is at the bottom.</param>
+-        /// <param name="img">Pre-allocated grayscale image to receive the values</param>
++        /// <param name="img">Reusable grayscale image; resized to receive the observed slice</param>
+         public void GetVoxelSlice(  in int nZSlice,
+                                     ref ImageGrayScale img)
+         {
+-            GCHandle oPinnedArray = GCHandle.Alloc(img.m_afValues, GCHandleType.Pinned);
+-            try
+-            {
+-                IntPtr afBufferPtr = oPinnedArray.AddrOfPinnedObject();
+-                _GetVoxelSlice(lib.hThis, hThis, nZSlice, afBufferPtr);
+-            }
+-            finally
+-            {
+-                oPinnedArray.Free();
+-            }
++            TauFillSlice(nZSlice, ref img);
+         }
+ 
+         /// <summary>
+@@ -261,7 +226,7 @@
+         /// <param name="xTraverse">The interface containing the callback</param>
+         public void TraverseActive(ITraverseScalarField xTraverse)
+         {
+-            _TraverseActive(lib.hThis, hThis, xTraverse.InformActiveValue);
++            TauTraverseActive(xTraverse);
+         }
+ 
+         /// <summary>
+@@ -272,14 +237,14 @@
+         /// </summary>
+         /// <param name="vecPosition">Position to sample</param>
+         /// <returns>
+-        /// Distance to the surface - negative values are inside the object
++        /// Distance in millimeters to the surface - negative values are inside the object
+         /// positive values are outside the object, values of 0 are exactly
+         /// on the surface
+         /// </returns>
+         public float fSignedDistance(in Vector3 vecPosition)
+         {
+             bGetValue(vecPosition, out float fValue);
+-            return fValue * lib.fVoxelSize;
++            return fValue;
+         }
+ 
+         /// <summary>
+diff --git a/Base/VectorField.cs b/Base/VectorField.cs
+--- a/Base/VectorField.cs
++++ b/Base/VectorField.cs
+@@ -149,10 +149,10 @@
+         public void SetValue(   Vector3 vecPosition,
+                                 Vector3 vecValue)
+         {
+-            _SetValue(  lib.hThis, 
++            TauCheckedCallbacks.Check(_SetValue(  lib.hThis,
+                         hThis, 
+                         vecPosition, 
+-                        vecValue);
++                        vecValue), null, this);
+         }
+ 
+         /// <summary>
+@@ -170,10 +170,11 @@
+                                 out Vector3 vecValue)
+         {
+             vecValue = Vector3.Zero;
+-            return _bGetValue(  lib.hThis, 
++            TauCheckedCallbacks.Check(_bGetValue(  lib.hThis,
+                                 hThis, 
+                                 vecPosition, 
+-                                ref vecValue);
++                                ref vecValue, out byte active), null, this);
++            return active != 0;
+         }
+ 
+         /// <summary>
+@@ -182,9 +183,9 @@
+         /// <param name="vecPosition">Position of the value in space</param>
+         public void RemoveValue(Vector3 vecPosition)
+         {
+-            _RemoveValue(   lib.hThis, 
++            TauCheckedCallbacks.Check(_RemoveValue(   lib.hThis,
+                             hThis, 
+-                            vecPosition);
++                            vecPosition), null, this);
+         }
+ 
+         /// <summary>
+@@ -194,9 +195,7 @@
+         /// <param name="xTraverse">The interface containing the callback</param>
+         public void TraverseActive(ITraverseVectorField xTraverse)
+         {
+-            _TraverseActive(    lib.hThis, 
+-                                hThis, 
+-                                xTraverse.InformActiveValue);
++            TauTraverseActive(xTraverse);
+         }
+ 
+         /// <summary>
+diff --git a/Base/Voxels.cs b/Base/Voxels.cs
+--- a/Base/Voxels.cs
++++ b/Base/Voxels.cs
+@@ -160,18 +160,17 @@
+         /// Creates a new voxel field form a mesh
+         /// </summary>
+         /// <param name="msh">The mesh that is rendered into the voxels</param>
+-        public Voxels(in Mesh msh) : this(msh.lib)
+-        {
+-            RenderMesh(msh);
+-        }
++        public Voxels(in Mesh msh) : this(msh?.lib ?? throw new ArgumentNullException(nameof(msh)), msh, 0, false)
++        { }
+ 
+         /// <summary>
+         /// Creates a new voxel field from a lattice
+         /// </summary>
+         /// <param name="lat">The lattice used</param>
+-        public Voxels(in Lattice lat) : this(lat.lib)
+-        {
+-            RenderLattice(lat);
++        public Voxels(in Lattice lat) : this(lat?.lib ?? throw new ArgumentNullException(nameof(lat)))
++        {
++            try { RenderLattice(lat); }
++            catch { Dispose(); throw; }
+         }
+ 
+         /// <summary>
+@@ -235,9 +234,7 @@
+                                             Mesh msh,
+                                             float fRadius)
+         {
+-            return new(libSet, _hCreateMeshShell(   libSet.hThis,
+-                                                    msh.hThis,
+-                                                    fRadius));
++            return new(libSet, msh, fRadius, true);
+         }
+ 
+         /// <summary>
+@@ -248,7 +245,7 @@
+         /// <returns></returns>
+         public bool bIsEmpty()
+         {
+-            return _bIsEmpty(lib.hThis, hThis);
++            return TauIsEmpty();
+         }
+ 
+         /// <summary>
+@@ -257,7 +254,9 @@
+         /// <returns>Number of bytes allocated to this object</returns>
+         public long nMemUsage()
+         {
+-            return _nMemUsage(lib.hThis, hThis);
++            var status = TauOwnedMemoryNative(lib.hThis, hThis, out long bytes);
++            Library.TauCheckOwnedMemoryStatus(status, nameof(Voxels));
++            return bytes;
+         }
+ 
+         /// <summary>
+@@ -273,12 +272,7 @@
+         /// <param name="voxOperand">Voxels to add to our field</param>
+         public void BoolAdd(in Voxels voxOperand)
+         {
+-            if (voxOperand.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            _BoolAdd(   lib.hThis,
+-                        hThis, 
+-                        voxOperand.hThis);
++            TauMutateCsg(voxOperand, 0);
+         }
+ 
+         /// <summary>
+@@ -290,9 +284,7 @@
+         /// <returns></returns>
+         public Voxels voxBoolAdd(in Voxels voxOperand)
+         {
+-            Voxels vox = new(this);
+-            vox.BoolAdd(voxOperand);
+-            return vox;
++            return TauCreateCsg(voxOperand, 0);
+         }
+ 
+         /// <summary>
+@@ -353,10 +345,7 @@
+         /// <param name="voxOperand">Voxels to remove from our field</param>
+         public void BoolSubtract(in Voxels voxOperand)
+         {
+-            if (voxOperand.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            _BoolSubtract(lib.hThis, hThis, voxOperand.hThis);
++            TauMutateCsg(voxOperand, 1);
+         }
+ 
+         /// <summary>
+@@ -368,9 +357,7 @@
+         /// <returns></returns>
+         public Voxels voxBoolSubtract(in Voxels voxOperand)
+         {
+-            Voxels vox = new(this);
+-            vox.BoolSubtract(voxOperand);
+-            return vox;
++            return TauCreateCsg(voxOperand, 1);
+         }
+ 
+         /// <summary>
+@@ -404,10 +391,7 @@
+         /// <param name="voxOperand">Voxels masking our voxel field</param>
+         public void BoolIntersect(in Voxels voxOperand)
+         {
+-            if (voxOperand.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            _BoolIntersect(lib.hThis, hThis, voxOperand.hThis);
++            TauMutateCsg(voxOperand, 2);
+         }
+ 
+         /// <summary>
+@@ -419,9 +403,7 @@
+         /// <returns></returns>
+         public Voxels voxBoolIntersect(in Voxels voxOperand)
+         {
+-            Voxels vox = new(this);
+-            vox.BoolIntersect(voxOperand);
+-            return vox;
++            return TauCreateCsg(voxOperand, 2);
+         }
+ 
+         /// <summary>
+@@ -660,11 +642,20 @@
+         {
+             if (fOffset < 0)
+             {
+-                // Outside remains the same
+-                return voxBoolSubtract(voxOffset(fOffset));
+-            }
+-            
+-            return voxOffset(fOffset).voxBoolSubtract(this);
++                using Voxels inner = voxOffset(fOffset);
++                return voxBoolSubtract(inner);
++            }
++            Voxels outer = voxOffset(fOffset);
++            try
++            {
++                outer.BoolSubtract(this);
++                return outer;
++            }
++            catch
++            {
++                outer.Dispose();
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -688,15 +679,19 @@
+                 fPosOffsetMM    = fTemp;
+             }
+ 
+-            Voxels voxInner = voxOffset(fNegOffsetMM);
+-            
+-            if (fSmoothInnerMM > 0)
+-                voxInner.voxTripleOffset(fSmoothInnerMM);
+-            
++            using Voxels voxInner = voxOffset(fNegOffsetMM);
++            if (fSmoothInnerMM > 0) voxInner.TripleOffset(fSmoothInnerMM);
+             Voxels voxOuter = voxOffset(fPosOffsetMM);
+-            voxOuter.voxBoolSubtract(voxInner);
+-
+-            return voxOuter;
++            try
++            {
++                voxOuter.BoolSubtract(voxInner);
++                return voxOuter;
++            }
++            catch
++            {
++                voxOuter.Dispose();
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -706,10 +701,7 @@
+         /// <param name="msh">The mesh to render (needs to be a closed surface)</param>
+         public void RenderMesh(in Mesh msh)
+         {
+-            if (msh.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            _RenderMesh(lib.hThis, hThis, msh.hThis);
++            TauRenderMesh(msh);
+         }
+ 
+         /// <summary>
+@@ -722,7 +714,7 @@
+         /// <param name="oBounds">Bounding box in which to render the implicit</param>
+         public void RenderImplicit( in IImplicit xImp,
+                                     in BBox3 oBounds)
+-            => _RenderImplicit(lib.hThis, hThis, in oBounds, xImp.fSignedDistance);
++            => TauRenderImplicit(xImp, oBounds, false);
+ 
+         /// <summary>
+         /// Render an implicit signed distance function into the voxels
+@@ -736,7 +728,7 @@
+         /// </summary>
+         /// <param name="xImp">Implicit object with signed distance function</param>
+         public void IntersectImplicit(in IImplicit xImp)
+-            => _IntersectImplicit(lib.hThis, hThis, xImp.fSignedDistance);
++            => TauRenderImplicit(xImp, default, true);
+ 
+ 
+         /// <summary>
+@@ -759,10 +751,19 @@
+         /// <param name="lat">The lattice to render</param>
+         public void RenderLattice(in Lattice lat)
+         {
++            ArgumentNullException.ThrowIfNull(lat);
+             if (lat.lib.hThis != lib.hThis)
+                 throw new PicoGKLibraryMismatchException();
+-
+-            _RenderLattice(lib.hThis, hThis, lat.hThis);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            try
++            {
++                Library.TauCheckLatticeStatus(_RenderLattice(lib.hThis, hThis, lat.hThis), nameof(Lattice));
++            }
++            finally
++            {
++                GC.KeepAlive(this);
++                GC.KeepAlive(lat);
++            }
+         }
+ 
+         /// <summary>
+@@ -773,7 +774,11 @@
+         /// <param name="fEndZMM">End voxel slice in mm</param>
+         public void ProjectZSlice(  float fStartZMM,
+                                     float fEndZMM)
+-            => _ProjectZSlice(lib.hThis, hThis, fStartZMM, fEndZMM);
++        {
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            try { TauCheckedCallbacks.Check(TauProjectZSliceNative(lib.hThis, hThis, fStartZMM, fEndZMM), null, this); }
++            finally { GC.KeepAlive(this); }
++        }
+ 
+         /// <summary>
+         /// Makes a copy of the voxel field and applies
+@@ -783,8 +788,8 @@
+                                         float fEndZMM)
+         {
+             Voxels vox = new(this);
+-            vox.ProjectZSlice(fStartZMM, fEndZMM);
+-            return vox;    
++            try { vox.ProjectZSlice(fStartZMM, fEndZMM); return vox; }
++            catch { vox.Dispose(); throw; }
+         }
+ 
+         /// <summary>
+@@ -794,10 +799,7 @@
+         /// <returns></returns>
+         public bool bIsEqual(in Voxels voxOther)
+         {
+-            if (voxOther.lib.hThis != lib.hThis)
+-                throw new PicoGKLibraryMismatchException();
+-
+-            return _bIsEqual(lib.hThis, hThis, voxOther.hThis);
++            return TauIsEqual(voxOther);
+         }
+ 
+         /// <summary>
+@@ -812,16 +814,7 @@
+         public void CalculateProperties(    out float fVolumeCubicMM,
+                                             out BBox3 oBBox)
+         {
+-            // Unfortunately openvdb keeps surface voxels (distance 0) around after boolean 
+-            // operations, which cause wrong numbers when calculating the volume
+-            // the only way around is to construct a mesh (which skips these values), 
+-            // create a new voxel field from that mesh, and calculate the values from that.
+-
+-            using Mesh      msh = new(this);
+-            using Voxels    vox = new(msh);
+-
+-            oBBox           = msh.oBoundingBox();
+-            fVolumeCubicMM  = _fCalculateVolume(lib.hThis, vox.hThis);
++            TauCalculateProperties(true, out fVolumeCubicMM, out oBBox);
+         }
+ 
+         /// <summary>
+@@ -834,8 +827,8 @@
+         /// <returns>Bounding box of the voxels in real world coordinates</returns>
+         public BBox3 oCalculateBoundingBox()
+         {
+-            using Mesh msh = new(this);
+-            return msh.oBoundingBox();  
++            TauCalculateProperties(false, out _, out var bounds);
++            return bounds;
+         }
+ 
+         /// <summary>
+@@ -846,7 +839,7 @@
+         /// <returns>True if inside or on the surface, False if outside</returns>
+         public bool bIsInside(Vector3 vecTestPoint)
+         {
+-            return _bIsInside(lib.hThis, hThis, vecTestPoint);
++            return TauSurfaceQuery(0, vecTestPoint, Vector3.Zero, out _);
+         }
+ 
+         /// <summary>
+@@ -860,11 +853,7 @@
+         /// <returns>The normal vector of the surface at the point</returns>
+         public Vector3 vecSurfaceNormal(in Vector3 vecSurfacePoint)
+         {
+-            Vector3 vecNormal = Vector3.Zero;
+-            _GetSurfaceNormal(  lib.hThis, 
+-                                hThis, 
+-                                vecSurfacePoint, 
+-                                ref vecNormal);
++            TauSurfaceQuery(1, vecSurfacePoint, Vector3.Zero, out var vecNormal);
+             return vecNormal;
+         }
+ 
+@@ -879,11 +868,7 @@
+         public bool bClosestPointOnSurface( in  Vector3 vecSearch,
+                                             out Vector3 vecSurfacePoint)
+         {
+-            vecSurfacePoint = new();
+-            return _bClosestPointOnSurface( lib.hThis,
+-                                            hThis,
+-                                            in  vecSearch,
+-                                            ref vecSurfacePoint);
++            return TauSurfaceQuery(2, vecSearch, Vector3.Zero, out vecSurfacePoint);
+         }
+ 
+         /// <summary>
+@@ -917,12 +902,7 @@
+                                         in  Vector3 vecDirection,
+                                         out Vector3 vecSurfacePoint)
+         {
+-            vecSurfacePoint     = new();
+-            return _bRayCastToSurface(  lib.hThis,
+-                                        hThis,
+-                                        in  vecSearch,
+-                                        in  vecDirection,
+-                                        ref vecSurfacePoint);
++            return TauSurfaceQuery(3, vecSearch, vecDirection, out vecSurfacePoint);
+         }
+ 
+         /// <summary>
+@@ -963,21 +943,9 @@
+                                         out int nYSize,
+                                         out int nZSize)
+         {
+-            nXOrigin    = 0;
+-            nYOrigin    = 0;
+-            nZOrigin    = 0;
+-            nXSize      = 0;
+-            nYSize      = 0;
+-            nZSize      = 0;
+-
+-            _GetVoxelDimensions(    lib.hThis,
+-                                    hThis,
+-                                    ref nXOrigin,
+-                                    ref nYOrigin,
+-                                    ref nZOrigin,
+-                                    ref nXSize,
+-                                    ref nYSize,
+-                                    ref nZSize);
++            var info = TauDimensions();
++            nXOrigin = info.XOrigin; nYOrigin = info.YOrigin; nZOrigin = info.ZOrigin;
++            nXSize = info.XSize; nYSize = info.YSize; nZSize = info.ZSize;
+         }
+ 
+         /// <summary>
+@@ -990,21 +958,8 @@
+                                         out int nYSize,
+                                         out int nZSize)
+         {
+-            int nXOrigin    = 0; // unused in this function
+-            int nYOrigin    = 0; // unused in this function
+-            int nZOrigin    = 0; // unused in this function
+-            nXSize          = 0;
+-            nYSize          = 0;
+-            nZSize          = 0;
+-
+-            _GetVoxelDimensions(    lib.hThis,
+-                                    hThis,
+-                                    ref nXOrigin,
+-                                    ref nYOrigin,
+-                                    ref nZOrigin,
+-                                    ref nXSize,
+-                                    ref nYSize,
+-                                    ref nZSize);
++            var info = TauDimensions();
++            nXSize = info.XSize; nYSize = info.YSize; nZSize = info.ZSize;
+         }
+ 
+          /// <summary>
+@@ -1066,30 +1021,28 @@
+             {
+             case ESliceAxis.Z:
+                 nSliceCount = nZSize;
+-                return new ImageGrayScale(nXSize, nYSize);
++                return TauSliceRead.Allocate(nXSize, nYSize);
+ 
+             case ESliceAxis.Y:
+                 nSliceCount = nYSize;
+-                return new ImageGrayScale(nXSize, nZSize);
++                return TauSliceRead.Allocate(nXSize, nZSize);
+                 
+             case ESliceAxis.X:
+             default:
+                 nSliceCount = nXSize;
+-                return new ImageGrayScale(nYSize, nZSize);
++                return TauSliceRead.Allocate(nYSize, nZSize);
+             }
+         }
+ 
+         /// <summary>
+         /// Returns a slice of the voxel field along the specified axis.
+-        /// To use it, use GetVoxelDimensions to find out the size of the voxel
+-        /// field in voxel units. Then allocate a new grayscale image to copy
+-        /// the data into, and pass it as a reference. Since GetVoxelDimensions
+-        /// is potentially an "expensive" function, we are putting the burden
+-        /// on you to allocate an image and don't create it for you. You can
+-        /// also re-use the image if you want to save an entire image stack
++        /// Reuses the supplied image when its dimensions match the observed field.
++        /// Otherwise replaces it with an image of the observed dimensions, retaining
++        /// sufficient pixel-array capacity. Only Width * Height pixels belong to
++        /// the returned slice; extra array capacity is not part of the image.
+         /// </summary>
+         /// <param name="nSlice">Slice to retrieve. 0 is at the origin.</param>
+-        /// <param name="img">Pre-allocated grayscale image to receive the values</param>
++        /// <param name="img">Reusable grayscale image; resized to receive the observed slice</param>
+         /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
+         /// which is the native narrow band distance encoded in the float image. You
+         /// can also speciy black/white, which encodes the inside of the field as black
+@@ -1101,32 +1054,8 @@
+                                     ESliceMode eMode = ESliceMode.SignedDistance,
+                                     ESliceAxis eAxis = ESliceAxis.Z)
+         {
+-            float fBackground = 0f;
+-            GCHandle oPinnedArray = GCHandle.Alloc(img.m_afValues, GCHandleType.Pinned);
+-            try
+-            {
+-                IntPtr afBufferPtr = oPinnedArray.AddrOfPinnedObject();
+-
+-                switch (eAxis)
+-                {
+-                case ESliceAxis.Z:
+-                    _GetZSlice(lib.hThis, hThis, nSlice, afBufferPtr, ref fBackground);
+-                    break;
+-
+-                case ESliceAxis.Y:
+-                    _GetYSlice(lib.hThis, hThis, nSlice, afBufferPtr, ref fBackground);
+-                    break;
+-
+-                case ESliceAxis.X:
+-                default:
+-                    _GetXSlice(lib.hThis, hThis, nSlice, afBufferPtr, ref fBackground);
+-                    break;
+-                }
+-            }
+-            finally
+-            {
+-                oPinnedArray.Free();
+-            }
++            int mode = eAxis == ESliceAxis.Z ? 2 : eAxis == ESliceAxis.Y ? 1 : 0;
++            float fBackground = TauFillSlice(mode, nSlice, 0, ref img).Background;
+ 
+             switch (eMode)
+             {
+@@ -1176,15 +1105,13 @@
+ 
+         /// <summary>
+         /// Returns a signed distance-field-encoded slice of the voxel field
+-        /// To use it, use GetVoxelDimensions to find out the size of the voxel
+-        /// field in voxel units. Then allocate a new grayscale image to copy
+-        /// the data into, and pass it as a reference. Since GetVoxelDimensions
+-        /// is potentially an "expensive" function, we are putting the burden
+-        /// on you to allocate an image and don't create it for you. You can
+-        /// also re-use the image if you want to save an entire image stack
++        /// Reuses the supplied image when its dimensions match the observed field.
++        /// Otherwise replaces it with an image of the observed dimensions, retaining
++        /// sufficient pixel-array capacity. Only Width * Height pixels belong to
++        /// the returned slice; extra array capacity is not part of the image.
+         /// </summary>
+         /// <param name="fZSlice">Slice to retrieve. 0 is at the bottom.</param>
+-        /// <param name="img">Pre-allocated grayscale image to receive the values</param>
++        /// <param name="img">Reusable grayscale image; resized to receive the observed slice</param>
+         /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
+         /// which is the native narrow band distance encoded in the float image. You
+         /// can also speciy black/white, which encodes the inside of the field as black
+@@ -1193,17 +1120,7 @@
+                                                 ref ImageGrayScale img,
+                                                 ESliceMode eMode = ESliceMode.SignedDistance)
+         {
+-            float fBackground = 0f;
+-            GCHandle oPinnedArray = GCHandle.Alloc(img.m_afValues, GCHandleType.Pinned);
+-            try
+-            {
+-                IntPtr afBufferPtr = oPinnedArray.AddrOfPinnedObject();
+-                _GetInterpolatedZSlice(lib.hThis, hThis, fZSlice, afBufferPtr, ref fBackground);
+-            }
+-            finally
+-            {
+-                oPinnedArray.Free();
+-            }
++            float fBackground = TauFillSlice(3, 0, fZSlice, ref img).Background;
+ 
+             switch (eMode)
+             {
+diff --git a/IO/MeshIo.cs b/IO/MeshIo.cs
+--- a/IO/MeshIo.cs
++++ b/IO/MeshIo.cs
+@@ -132,7 +132,6 @@
+                     oFile.Seek(lPos, 0);
+                 }
+ 
+-                float fScale = 1.0f; // 1mm default
+ 
+                 if (eLoadUnit == EStlUnit.AUTO)
+                 {
+@@ -161,25 +160,33 @@
+                 oMesh.m_strLoadHeaderData = strOriginal;
+                 oMesh.m_eLoadUnits = eLoadUnit;
+ 
+-                if (bAscii)
+-                {
+-                    oMesh.DoReadMeshFromAsciiStl(   oReader,
+-                                                    eLoadUnit,
+-                                                    fPostScale,
+-                                                    vecOffset);
+-                }
+-                else
+-                {
+-                    oMesh.DoReadMeshFromBinaryStl(  oReader,
+-                                                    eLoadUnit,
+-                                                    fScale,
+-                                                    vecOffset);
+-                }
+-
+-                if (oMesh.nTriangleCount() == 0)
+-                    throw new Exception("Imported STL mesh is empty (zero triangles), failed to load");
+-
+-                return oMesh;
++                try
++                {
++                    if (bAscii)
++                    {
++                        oMesh.DoReadMeshFromAsciiStl(   oReader,
++                                                        eLoadUnit,
++                                                        fPostScale,
++                                                        vecOffset);
++                    }
++                    else
++                    {
++                        oMesh.DoReadMeshFromBinaryStl(  oReader,
++                                                        eLoadUnit,
++                                                        fPostScale,
++                                                        vecOffset);
++                    }
++
++                    if (oMesh.nTriangleCount() == 0)
++                        throw new Exception("Imported STL mesh is empty (zero triangles), failed to load");
++
++                    return oMesh;
++                }
++                catch
++                {
++                    oMesh.Dispose();
++                    throw;
++                }
+             }
+         }
+ 
+@@ -333,24 +340,31 @@
+         {
+             UInt32 nNumberOfTriangles = oReader.ReadUInt32();
+ 
++            const int maximumBatchTriangles = 1024;
+             SStlTriangle sTriangle = new SStlTriangle();
+             var oTriangleSpan = MemoryMarshal.CreateSpan(ref sTriangle, 1);
+-
+             while (nNumberOfTriangles > 0)
+             {
+-                oReader.Read(MemoryMarshal.AsBytes(oTriangleSpan));
+-
+-                Vector3 v1 = new Vector3(sTriangle.V1X, sTriangle.V1Y, sTriangle.V1Z);
+-                Vector3 v2 = new Vector3(sTriangle.V2X, sTriangle.V2Y, sTriangle.V2Z);
+-                Vector3 v3 = new Vector3(sTriangle.V3X, sTriangle.V3Y, sTriangle.V3Z);
+-
+-                TransformFromUnit(ref v1, eLoadUnit, fPostScale, vecPostOffsetMM);
+-                TransformFromUnit(ref v2, eLoadUnit, fPostScale, vecPostOffsetMM);
+-                TransformFromUnit(ref v3, eLoadUnit, fPostScale, vecPostOffsetMM);
+-
+-                nAddTriangle(v1, v2, v3);
+-
+-                nNumberOfTriangles--;
++                int count = (int)Math.Min(nNumberOfTriangles, maximumBatchTriangles);
++                var positions = new float[checked(count * 9)];
++                var indices = new uint[checked(count * 3)];
++                for (int triangle = 0; triangle < count; triangle++)
++                {
++                    oReader.BaseStream.ReadExactly(MemoryMarshal.AsBytes(oTriangleSpan));
++                    Vector3 v1 = new(sTriangle.V1X, sTriangle.V1Y, sTriangle.V1Z);
++                    Vector3 v2 = new(sTriangle.V2X, sTriangle.V2Y, sTriangle.V2Z);
++                    Vector3 v3 = new(sTriangle.V3X, sTriangle.V3Y, sTriangle.V3Z);
++                    TransformFromUnit(ref v1, eLoadUnit, fPostScale, vecPostOffsetMM);
++                    TransformFromUnit(ref v2, eLoadUnit, fPostScale, vecPostOffsetMM);
++                    TransformFromUnit(ref v3, eLoadUnit, fPostScale, vecPostOffsetMM);
++                    int offset = triangle * 9;
++                    positions[offset] = v1.X; positions[offset + 1] = v1.Y; positions[offset + 2] = v1.Z;
++                    positions[offset + 3] = v2.X; positions[offset + 4] = v2.Y; positions[offset + 5] = v2.Z;
++                    positions[offset + 6] = v3.X; positions[offset + 7] = v3.Y; positions[offset + 8] = v3.Z;
++                    for (int corner = 0; corner < 3; corner++) indices[triangle * 3 + corner] = (uint)(triangle * 3 + corner);
++                }
++                TauAppendIndexedArrays(positions, indices);
++                nNumberOfTriangles -= (uint)count;
+             }
+         }
+ 
+diff --git a/IO/OpenVdbFile.cs b/IO/OpenVdbFile.cs
+--- a/IO/OpenVdbFile.cs
++++ b/IO/OpenVdbFile.cs
+@@ -198,17 +198,19 @@
+         /// <exception>Throws exception if no Voxels found at index</exception>
+         public Voxels voxGet(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            VoxHandle hVoxels = _hGetVoxels(   lib.hThis, 
+-                                                hThis, 
+-                                                nIndex);
+-                                                
+-            if (!Voxels._bIsValid(lib.hThis, hVoxels))
+-                throw new Exception($"No voxel field found at index {nIndex}");
+-
+-            return new Voxels(lib, hVoxels);
++            TauGetField(nIndex, TauVoxelFieldKind, out ulong handle, out var metadataHandle);
++            if (handle == 0) throw new Exception($"No voxel field found at index {nIndex}");
++            FieldMetadata? metadata = null;
++            try
++            {
++                metadata = new FieldMetadata(lib, metadataHandle);
++                return new Voxels(lib, new VoxHandle(unchecked((long)handle)), metadata);
++            }
++            catch
++            {
++                TauReleaseFailedLoadedField(TauVoxelFieldKind, handle, metadata, metadataHandle);
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -241,19 +243,16 @@
+         /// <returns>Index of the field inside the VdbFile object</returns>
+         public int nAdd(Voxels vox, string strFieldName = "")
+         {
+-            if (strFieldName == "")
+-            {
+-                // Use a unique name if none specified
+-                strFieldName = $"PicoGK.Voxels.{nFieldCount()}";
+-            }
+-
+-            if (vox.lib.hThis != lib.hThis)
+-                throw new Exception("Cannot mix objects from different PicoGK library instances");
+-
+-            return _nAddVoxels( lib.hThis,
+-                                hThis, 
+-                                strFieldName, 
+-                                vox.hThis);
++            ArgumentNullException.ThrowIfNull(vox);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            vox.TauThrowIfDisposed();
++            if (vox.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++            try
++            {
++                if (strFieldName == "") strFieldName = $"PicoGK.Voxels.{nFieldCount()}";
++                return _nAddVoxels(lib.hThis, hThis, strFieldName, vox.hThis);
++            }
++            finally { GC.KeepAlive(this); GC.KeepAlive(vox); }
+         }
+ 
+         /// <summary>
+@@ -266,16 +265,19 @@
+         /// <exception>Throws exception if no ScalarField found at index</exception>
+         public ScalarField oGetScalarField(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            ScalarFieldHandle hField = _hGetScalarField(    lib.hThis, 
+-                                                            hThis, 
+-                                                            nIndex);
+-            if (!ScalarField._bIsValid(lib.hThis, hField))
+-                throw new Exception($"No scalar field found at index {nIndex}");
+-
+-            return new ScalarField(lib, hField);
++            TauGetField(nIndex, TauScalarFieldKind, out ulong handle, out var metadataHandle);
++            if (handle == 0) throw new Exception($"No scalar field found at index {nIndex}");
++            FieldMetadata? metadata = null;
++            try
++            {
++                metadata = new FieldMetadata(lib, metadataHandle);
++                return new ScalarField(lib, new ScalarFieldHandle(unchecked((IntPtr)(long)handle)), metadata);
++            }
++            catch
++            {
++                TauReleaseFailedLoadedField(TauScalarFieldKind, handle, metadata, metadataHandle);
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -308,13 +310,16 @@
+         /// <returns>Index of the field inside the VdbFile object</returns>
+         public int nAdd(ScalarField oField, string strFieldName = "")
+         {
+-            if (strFieldName == "")
+-            {
+-                // Use a unique name if none specified
+-                strFieldName = $"PicoGK.ScalarField.{nFieldCount()}";
+-            }
+-
+-            return _nAddScalarField(lib.hThis, hThis, strFieldName, oField.hThis);
++            ArgumentNullException.ThrowIfNull(oField);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            oField.TauThrowIfDisposed();
++            if (oField.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++            try
++            {
++                if (strFieldName == "") strFieldName = $"PicoGK.ScalarField.{nFieldCount()}";
++                return _nAddScalarField(lib.hThis, hThis, strFieldName, oField.hThis);
++            }
++            finally { GC.KeepAlive(this); GC.KeepAlive(oField); }
+         }
+ 
+         /// <summary>
+@@ -327,15 +332,19 @@
+         /// <exception>Throws exception if no ScalarField found at index</exception>
+         public VectorField oGetVectorField(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            VectorFieldHandle hField = _hGetVectorField(lib.hThis, hThis, nIndex);
+-
+-            if (!VectorField._bIsValid(lib.hThis, hField))
+-                throw new Exception($"No vector field found at index {nIndex}");
+-
+-            return new VectorField(lib, hField);
++            TauGetField(nIndex, TauVectorFieldKind, out ulong handle, out var metadataHandle);
++            if (handle == 0) throw new Exception($"No vector field found at index {nIndex}");
++            FieldMetadata? metadata = null;
++            try
++            {
++                metadata = new FieldMetadata(lib, metadataHandle);
++                return new VectorField(lib, new VectorFieldHandle(unchecked((IntPtr)(long)handle)), metadata);
++            }
++            catch
++            {
++                TauReleaseFailedLoadedField(TauVectorFieldKind, handle, metadata, metadataHandle);
++                throw;
++            }
+         }
+ 
+         /// <summary>
+@@ -368,13 +377,16 @@
+         /// <returns>Index of the field inside the VdbFile object</returns>
+         public int nAdd(VectorField oField, string strFieldName = "")
+         {
+-            if (strFieldName == "")
+-            {
+-                // Use a unique name if none specified
+-                strFieldName = $"PicoGK.VectorField.{nFieldCount()}";
+-            }
+-
+-            return _nAddVectorField(lib.hThis, hThis, strFieldName, oField.hThis);
++            ArgumentNullException.ThrowIfNull(oField);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            oField.TauThrowIfDisposed();
++            if (oField.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++            try
++            {
++                if (strFieldName == "") strFieldName = $"PicoGK.VectorField.{nFieldCount()}";
++                return _nAddVectorField(lib.hThis, hThis, strFieldName, oField.hThis);
++            }
++            finally { GC.KeepAlive(this); GC.KeepAlive(oField); }
+         }
+ 
+         /// <summary>
+@@ -383,7 +395,14 @@
+         /// <returns>The number of fields in the VdbFile</returns>
+         public int nFieldCount()
+         {
+-            return _nFieldCount(lib.hThis, hThis);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            try
++            {
++                int count = _nFieldCount(lib.hThis, hThis);
++                if (count < 0) throw new ObjectDisposedException(nameof(OpenVdbFile));
++                return count;
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         /// <summary>
+@@ -396,12 +415,16 @@
+         /// </exception>
+         public string strFieldName(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            StringBuilder oBuilder = new StringBuilder(Library.nStringLength);
+-            _GetFieldName(lib.hThis, hThis, nIndex, oBuilder);
+-            return oBuilder.ToString();
++            try
++            {
++                if (nIndex < 0 || nIndex >= nFieldCount())
++                    throw new ArgumentOutOfRangeException();
++
++                StringBuilder oBuilder = new StringBuilder(Library.nStringLength);
++                _GetFieldName(lib.hThis, hThis, nIndex, oBuilder);
++                return oBuilder.ToString();
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         /// <summary>
+@@ -413,10 +436,14 @@
+         /// </exception>
+         public EFieldType eFieldType(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            return (EFieldType)_nFieldType(lib.hThis, hThis, nIndex);
++            try
++            {
++                if (nIndex < 0 || nIndex >= nFieldCount())
++                    throw new ArgumentOutOfRangeException();
++
++                return (EFieldType)_nFieldType(lib.hThis, hThis, nIndex);
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         /// <summary>
+@@ -429,35 +456,39 @@
+         /// </exception>
+         public string strFieldType(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
+-                throw new ArgumentOutOfRangeException();
+-
+-            // We intentionally use the runtime function, so we can catch
+-            // values not represented by the enum (default:)
+-            switch (_nFieldType(lib.hThis, hThis, nIndex))
+-            {
+-                case -1:
+-                    return "Unsupported";
+-
+-                case 0:
+-                    return "Voxels";
+-
+-                 case 1:
+-                    return "ScalarField";
+-
+-                 case 2:
+-                    return "VectorField";
+-
+-                default:
+-                    // Incompatible value returned from runtime
+-                    Debug.Assert(false);
+-                    return $"Unknown #{_nFieldType(lib.hThis, hThis, nIndex)}";
+-            }
++            try
++            {
++                if (nIndex < 0 || nIndex >= nFieldCount())
++                    throw new ArgumentOutOfRangeException();
++
++                // We intentionally use the runtime function, so we can catch
++                // values not represented by the enum (default:)
++                switch (_nFieldType(lib.hThis, hThis, nIndex))
++                {
++                    case -1:
++                        return "Unsupported";
++
++                    case 0:
++                        return "Voxels";
++
++                     case 1:
++                        return "ScalarField";
++
++                     case 2:
++                        return "VectorField";
++
++                    default:
++                        // Incompatible value returned from runtime
++                        Debug.Assert(false);
++                        return $"Unknown #{_nFieldType(lib.hThis, hThis, nIndex)}";
++                }
++            }
++            finally { GC.KeepAlive(this); }
+         }
+ 
+         public IFieldWithMetadata xField(int nIndex)
+         {
+-            if (nIndex >= nFieldCount())
++            if (nIndex < 0 || nIndex >= nFieldCount())
+                 throw new ArgumentOutOfRangeException();
+ 
+             switch (eFieldType(nIndex))
 diff --git a/Internals/Interop.cs b/Internals/Interop.cs
-index 254cedbb8..458803130 100644
 --- a/Internals/Interop.cs
 +++ b/Internals/Interop.cs
-@@ -203,6 +203,8 @@ namespace PicoGK
+@@ -203,6 +203,8 @@
  
          protected virtual void Dispose(bool bDisposing)
          {
@@ -43,38 +1379,869 @@ index 254cedbb8..458803130 100644
              if (m_bDisposed)
              {
                  return;
-@@ -216,6 +218,7 @@ namespace PicoGK
+@@ -214,8 +216,9 @@
+                 // Nothing to do in this class
+             }
  
-             _Destroy(lib.hThis, hThis);
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
              m_bDisposed = true;
 +            }
          }
  
          bool m_bDisposed = false;
-@@ -793,7 +796,10 @@ namespace PicoGK
+@@ -237,20 +240,20 @@
+         private static extern void _Destroy(    LibHandle   hLib,
+                                                 LatHandle   hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Lattice_AddSphere")]
+-        private static extern void _AddSphere(  LibHandle      hLib,
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauLattice_AddSphere")]
++        private static extern int _AddSphere(  LibHandle      hLib,
+                                                 LatHandle      hThis,
+                                                 in Vector3  vecCenter,
+                                                 float       fRadius);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Lattice_AddBeam")]
+-        private static extern void _AddBeam(    LibHandle      hLib,
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauLattice_AddBeam")]
++        private static extern int _AddBeam(    LibHandle      hLib,
+                                                 LatHandle      hThis,
+                                                 in Vector3  vecA,
+                                                 in Vector3  vecB,
+                                                 float       fRadiusA,
+                                                 float       fRadiusB,
+-                                                bool        bRoundCap);
++                                                [MarshalAs(UnmanagedType.I1)] bool bRoundCap);
+ 
+         // Dispose Pattern
+ 
+@@ -280,7 +283,7 @@
                  // Nothing to do in this class
              }
  
--            _Destroy(hThis);
-+            if (m_xBackend is not null)
-+                m_xBackend.Dispose();
-+            else
-+                _Destroy(hThis);
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1397,4 @@ namespace PicoGK
+@@ -316,10 +319,6 @@
+                                                             float fRadius1,
+                                                             float fRadius2);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_hCreateMeshShell")]
+-        private static extern VoxHandle _hCreateMeshShell(  LibHandle   hLib,
+-                                                            MshHandle   hMsh,
+-                                                            float fRadius);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bIsValid")]
+         internal static extern bool _bIsValid(   LibHandle   hLib,
+@@ -341,20 +340,11 @@
+         private static extern float _fVoxelSize(    LibHandle   hLib,
+                                                     VoxHandle   hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_BoolAdd")]
+-        private static extern void _BoolAdd(    LibHandle   hLib,
+-                                                VoxHandle   hThis,
+-                                                VoxHandle   hOther);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_BoolSubtract")]
+-        private static extern void _BoolSubtract(   LibHandle   hLib,
+-                                                    VoxHandle   hThis,
+-                                                    VoxHandle   hOther);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_BoolIntersect")]
+-        private static extern void _BoolIntersect(  LibHandle   hLib,
+-                                                    VoxHandle   hThis,
+-                                                    VoxHandle   hOther);
++
++
++
++
++
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_Offset")]
+         private static extern void _Offset( LibHandle   hLib,
+@@ -373,10 +363,6 @@
+                                                     float       fOffset);
+ 
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_RenderMesh")]
+-        private static extern void _RenderMesh( LibHandle   hLib,
+-                                                VoxHandle   hThis,
+-                                                MshHandle   hMesh);
+ 
+         [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
+         private delegate float CallbackImplicitDistance(in Vector3 vec);
+@@ -392,8 +378,8 @@
+                                                         VoxHandle   hThis,
+                                                         CallbackImplicitDistance Callback);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_RenderLattice")]
+-        private static extern void _RenderLattice(  LibHandle   hLib,
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_RenderLattice")]
++        private static extern int _RenderLattice(  LibHandle   hLib,
+                                                     VoxHandle   hThis,
+                                                     LatHandle   hLattice);
+ 
+@@ -412,29 +398,9 @@
+         private extern static float _fCalculateVolume(  LibHandle   hLib,
+                                                         VoxHandle   hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bIsInside")]
+-        private static extern bool _bIsInside(      LibHandle   hLib,
+-                                                    VoxHandle   hThis,
+-                                                    in Vector3 vecTestPoint);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_GetSurfaceNormal")]
+-        private extern static void _GetSurfaceNormal(   LibHandle   hLib,
+-                                                        VoxHandle   hThis,
+-                                                        in  Vector3 vecSurfacePoint,
+-                                                        ref Vector3 vecSurfaceNormal);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bClosestPointOnSurface")]
+-        private extern static bool _bClosestPointOnSurface( LibHandle   hLib,
+-                                                            VoxHandle   hThis,
+-                                                            in  Vector3 vecSearch,
+-                                                            ref Vector3 vecSurfacePoint);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bRayCastToSurface")]
+-        private extern static bool _bRayCastToSurface(  LibHandle   hLib,
+-                                                        VoxHandle   hThis,
+-                                                        in  Vector3 vecSearch,
+-                                                        in  Vector3 vecNormal,
+-                                                        ref Vector3 vecSurfacePoint);
++
++
++
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_GetVoxelDimensions")]
+         private extern static void _GetVoxelDimensions( LibHandle   hLib,
+@@ -501,7 +467,7 @@
+                 m_oMetadata.Dispose();
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -578,7 +544,7 @@
+                 // Nothing to do in this class
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+ 
+             m_bDisposed = true;
+         }
+@@ -658,8 +624,8 @@
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestUpdate")]
+         private static extern void _RequestUpdate(IntPtr hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_bPoll")]
+-        private static extern bool _bPoll(IntPtr hThis);
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauViewer_PollChecked")]
++        private static extern int _PollChecked(IntPtr hThis, [MarshalAs(UnmanagedType.I1)] out bool alive);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestScreenShot")]
+         private static extern bool _RequestScreenShot(  IntPtr hThis,
+@@ -679,11 +645,9 @@
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestClose")]
+         private static extern void _RequestClose(IntPtr hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_AddMesh")]
+-        private static extern void _AddMesh(    LibHandle   hLib,
+-                                                IntPtr      hThis,
+-                                                int         nGroup,
+-                                                MshHandle   hMesh);
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauViewer_AddCaptured")]
++        private static extern int _AddCaptured(LibHandle library, IntPtr viewer, int group,
++            int kind, long identity, ulong snapshot);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveMesh")]
+         private static extern void _RemoveMesh( LibHandle   hLib,
+@@ -696,12 +660,6 @@
+                                                     MshHandle       hMesh,
+                                                     in Matrix4x4    mat);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_AddVoxels")]
+-        private static extern void _AddVoxels(  LibHandle   hLib,
+-                                                IntPtr      hThis,
+-                                                int         nGroup,
+-                                                VoxHandle   hMox);
+-
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveVoxels")]
+         private static extern void _RemoveVoxels(   LibHandle   hLib,
+                                                     IntPtr      hThis,
+@@ -712,12 +670,6 @@
+                                                         IntPtr          hThis,
+                                                         VoxHandle       hVoxels,
+                                                         in Matrix4x4    mat);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_AddPolyLine")]
+-        private static extern void _AddPolyLine(    LibHandle   hLib,
+-                                                    IntPtr      hThis,
+-                                                    int         nGroupID,
+-                                                    PolyHandle  hPolyLine);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemovePolyLine")]
+         private static extern void _RemovePolyLine( LibHandle   hLib,
+@@ -781,20 +733,20 @@
+ 
+         protected virtual void Dispose(bool bDisposing)
+         {
+-            
+-            if (m_bDisposed)
+-            {
+-                return;
+-            }
+-
+-            if (bDisposing)
+-            {
+-                // dispose managed state (managed objects).
+-                // Nothing to do in this class
+-            }
+-
+-            _Destroy(hThis);
+-            m_bDisposed = true;
++            System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure;
++            lock (m_oActions)
++            {
++                if (m_bDisposed) return;
++                m_bDisposed = true;
++                failure = ReleaseNativeActions();
++            }
++            try
++            {
++                if (m_xBackend is not null) m_xBackend.Dispose();
++                else if (hThis != IntPtr.Zero) _Destroy(hThis);
++            }
++            catch (Exception error) { failure ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
++            if (bDisposing) failure?.Throw();
+         }
+ 
+         InfoCallback        m_fnInfoCB;
+@@ -996,10 +948,7 @@
+                                                     VdbHandle  hThis,
+                                                     string strFileName);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_hGetVoxels")]
+-        private static extern VoxHandle _hGetVoxels(   LibHandle  hLib,
+-                                                        VdbHandle  hThis,
+-                                                        int nIndex);
++
+ 
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVoxels", CharSet = CharSet.Ansi)]
+@@ -1008,10 +957,7 @@
+                                                 string      strFieldName,
+                                                 VoxHandle   hVoxels);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_hGetScalarField")]
+-        private static extern ScalarFieldHandle _hGetScalarField(   LibHandle  hLib,
+-                                                                    VdbHandle  hThis,
+-                                                                    int nIndex);
++
+ 
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddScalarField", CharSet = CharSet.Ansi)]
+@@ -1020,10 +966,7 @@
+                                                     string              strFieldName,
+                                                     ScalarFieldHandle   hField);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_hGetVectorField")]
+-        private static extern VectorFieldHandle _hGetVectorField(   LibHandle   hLib,
+-                                                                    VdbHandle   hThis,
+-                                                                    int         nIndex);
++
+ 
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVectorField", CharSet = CharSet.Ansi)]
+@@ -1075,7 +1018,7 @@
+                 // Nothing to do in this class
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -1111,20 +1054,20 @@
+         private static extern void _Destroy(    LibHandle           hLib,
+                                                 ScalarFieldHandle   hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_SetValue")]
+-        private static extern void _SetValue(   LibHandle           hLib,
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_SetValueChecked")]
++        private static extern int _SetValue(   LibHandle           hLib,
+                                                 ScalarFieldHandle   hThis,
+                                                 in Vector3          vecPosition,
+                                                 float               fValue);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_bGetValue")]
+-        private static extern bool _bGetValue(  LibHandle           hLib, 
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_bGetValueChecked")]
++        private static extern int _bGetValue(  LibHandle           hLib,
+                                                 ScalarFieldHandle   hThis,
+                                                 in  Vector3         vecPosition,
+-                                                ref float           fValue);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_RemoveValue")]
+-        private static extern bool _RemoveValue(    LibHandle           hLib,
++                                                ref float           fValue, out byte active);
++
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_RemoveValueChecked")]
++        private static extern int _RemoveValue(    LibHandle           hLib,
+                                                     ScalarFieldHandle   hThis,
+                                                     in  Vector3         vecPosition);
+ 
+@@ -1174,11 +1117,11 @@
+ 
+             if (bDisposing)
+             {
+-                // dispose managed state (managed objects).
+-                // Nothing to do in this class
+-            }
+-
+-            _Destroy(lib.hThis, hThis);
++                m_oMetadata?.Dispose();
++            }
++
++            if (lib is not null) _Destroy(lib.hThis, hThis);
++            m_bDisposed = true;
+         }
+ 
+         bool m_bDisposed = false;
+@@ -1213,20 +1156,20 @@
+         private static extern void _Destroy(    LibHandle  hLib,
+                                                 VectorFieldHandle hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_SetValue")]
+-        private static extern void _SetValue(   LibHandle  hLib,
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_SetValueChecked")]
++        private static extern int _SetValue(   LibHandle  hLib,
+                                                 VectorFieldHandle  hThis,
+                                                 in Vector3 vecPosition,
+                                                 in Vector3 vecValue);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_bGetValue")]
+-        private static extern bool _bGetValue(  LibHandle  hLib, 
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_bGetValueChecked")]
++        private static extern int _bGetValue(  LibHandle  hLib,
+                                                 VectorFieldHandle  hThis,
+                                                  in  Vector3 vecPosition,
+-                                                 ref Vector3 vecValue);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_RemoveValue")]
+-        private static extern bool _RemoveValue(    LibHandle  hLib,
++                                                 ref Vector3 vecValue, out byte active);
++
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_RemoveValueChecked")]
++        private static extern int _RemoveValue(    LibHandle  hLib,
+                                                     VectorFieldHandle  hThis,
+                                                     in  Vector3 vecPosition);
+ 
+@@ -1259,11 +1202,10 @@
+ 
+             if (bDisposing)
+             {
+-                // dispose managed state (managed objects).
+-                // Nothing to do in this class
+-            }
+-
+-            _Destroy(lib.hThis, hThis);
++                m_oMetadata?.Dispose();
++            }
++
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -1383,7 +1325,7 @@
+                 // Nothing to do in this class
+             }
+ 
+-            _Destroy(lib.hThis, hThis);
++            if (lib is not null) _Destroy(lib.hThis, hThis);
+             m_bDisposed = true;
+         }
+ 
+@@ -1391,4 +1333,4 @@
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }
 -}
 \ No newline at end of file
 +}
+diff --git a/Library/CheckedCallbacks.cs b/Library/CheckedCallbacks.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/CheckedCallbacks.cs
+@@ -0,0 +1,103 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Numerics;
++using System.Runtime.ExceptionServices;
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++internal static class TauCheckedCallbacks
++{
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    internal delegate int Sdf(in Vector3 point, out float distance);
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    internal delegate int Scalar(in Vector3 point, float value);
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    internal delegate int Vector(in Vector3 point, in Vector3 value);
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_Voxels_RenderImplicitChecked")]
++    internal static extern int Render(LibHandle library, VoxHandle voxels, in BBox3 bounds, Sdf callback);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_Voxels_IntersectImplicitChecked")]
++    internal static extern int Intersect(LibHandle library, VoxHandle voxels, Sdf callback);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_TraverseActiveChecked")]
++    internal static extern int TraverseScalar(LibHandle library, ScalarFieldHandle field, Scalar callback);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_TraverseActiveChecked")]
++    internal static extern int TraverseVector(LibHandle library, VectorFieldHandle field, Vector callback);
++
++    internal static void Check(int status, ExceptionDispatchInfo? error, object owner)
++    {
++        // Never unwind a managed exception through OpenVDB/C++. Restore the exact first error here.
++        error?.Throw();
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(owner.GetType().Name);
++        if (status == -1) throw new ArgumentException("PicoGK callback operation received invalid bounds or input.");
++        throw new InvalidOperationException($"PicoGK callback operation failed with native status {status}.");
++    }
++}
++
++public partial class Voxels
++{
++    private void TauRenderImplicit(IImplicit implicitFunction, in BBox3 bounds, bool intersect)
++    {
++        ArgumentNullException.ThrowIfNull(implicitFunction);
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ExceptionDispatchInfo? failure = null;
++        TauCheckedCallbacks.Sdf callback = (in Vector3 point, out float distance) =>
++        {
++            distance = 0;
++            if (failure is not null) return 1;
++            try
++            {
++                distance = implicitFunction.fSignedDistance(point);
++                return 0;
++            }
++            catch (Exception error)
++            {
++                failure = ExceptionDispatchInfo.Capture(error);
++                return 1;
++            }
++        };
++        var status = intersect
++            ? TauCheckedCallbacks.Intersect(lib.hThis, hThis, callback)
++            : TauCheckedCallbacks.Render(lib.hThis, hThis, bounds, callback);
++        GC.KeepAlive(callback);
++        TauCheckedCallbacks.Check(status, failure, this);
++    }
++}
++
++public partial class ScalarField
++{
++    private void TauTraverseActive(ITraverseScalarField traversal)
++    {
++        ArgumentNullException.ThrowIfNull(traversal);
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ExceptionDispatchInfo? failure = null;
++        TauCheckedCallbacks.Scalar callback = (in Vector3 point, float value) =>
++        {
++            if (failure is not null) return 1;
++            try { traversal.InformActiveValue(point, value); return 0; }
++            catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); return 1; }
++        };
++        var status = TauCheckedCallbacks.TraverseScalar(lib.hThis, hThis, callback);
++        GC.KeepAlive(callback);
++        TauCheckedCallbacks.Check(status, failure, this);
++    }
++}
++
++public partial class VectorField
++{
++    private void TauTraverseActive(ITraverseVectorField traversal)
++    {
++        ArgumentNullException.ThrowIfNull(traversal);
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ExceptionDispatchInfo? failure = null;
++        TauCheckedCallbacks.Vector callback = (in Vector3 point, in Vector3 value) =>
++        {
++            if (failure is not null) return 1;
++            try { traversal.InformActiveValue(point, value); return 0; }
++            catch (Exception error) { failure = ExceptionDispatchInfo.Capture(error); return 1; }
++        };
++        var status = TauCheckedCallbacks.TraverseVector(lib.hThis, hThis, callback);
++        GC.KeepAlive(callback);
++        TauCheckedCallbacks.Check(status, failure, this);
++    }
++}
+diff --git a/Library/GeometryCapture.cs b/Library/GeometryCapture.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/GeometryCapture.cs
+@@ -0,0 +1,131 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++// Private host bridge. A lease pins one validated native generation, never the caller's mutable handle.
++internal sealed class TauGeometryCapture : IDisposable
++{
++    internal Library Library { get; }
++    internal ulong Generation { get; }
++    internal int PositionCount { get; }
++    internal int IndexCount { get; }
++    internal ColorFloat Color { get; }
++    internal ulong Snapshot { get { ObjectDisposedException.ThrowIf(snapshot == 0, this); return snapshot; } }
++    private ulong snapshot;
++
++    private TauGeometryCapture(Library library, ulong snapshot, ulong generation,
++        int positionCount, int indexCount, ColorFloat color)
++    {
++        Library = library;
++        this.snapshot = snapshot;
++        Generation = generation;
++        PositionCount = positionCount;
++        IndexCount = indexCount;
++        Color = color;
++    }
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_Acquire")]
++    private static extern int AcquireNative(LibHandle library, int kind, long source,
++        out ulong snapshot, out ulong generation, out int positions, out int indices, out ColorFloat color);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_Copy")]
++    private static extern int CopyNative(LibHandle library, ulong snapshot,
++        IntPtr positions, int positionCapacity, IntPtr indices, int indexCapacity);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_Release")]
++    private static extern int ReleaseNative(LibHandle library, ulong snapshot);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_Counters")]
++    private static extern int CountersNative(LibHandle library, [Out] ulong[] counters, int capacity);
++
++    internal static TauGeometryCapture Acquire(Library library, int kind, long source, object identity)
++    {
++        var status = AcquireNative(library.hThis, kind, source,
++            out var snapshot, out var generation, out var positions, out var indices, out var color);
++        GC.KeepAlive(identity);
++        Check(status, identity.GetType().Name);
++        try
++        {
++            if (snapshot == 0 || generation == 0 || positions < 0 || positions % 3 != 0 || indices < 0 ||
++                indices % (kind == 2 ? 2 : 3) != 0)
++                throw new InvalidOperationException("PicoGK returned invalid immutable capture metadata.");
++            return new TauGeometryCapture(library, snapshot, generation, positions, indices, color);
++        }
++        catch
++        {
++            _ = ReleaseNative(library.hThis, snapshot);
++            throw;
++        }
++    }
++
++    internal void Copy(float[] positions, uint[] indices)
++    {
++        ObjectDisposedException.ThrowIf(snapshot == 0, this);
++        if (positions.Length != PositionCount || indices.Length != IndexCount)
++            throw new ArgumentException("Capture buffers must match the immutable geometry counts.");
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            Check(CopyNative(Library.hThis, snapshot, pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                pinnedIndices.AddrOfPinnedObject(), indices.Length), nameof(TauGeometryCapture));
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    internal static ulong[] Counters(Library library)
++    {
++        var counters = new ulong[5];
++        Check(CountersNative(library.hThis, counters, counters.Length), nameof(Library));
++        return counters;
++    }
++
++    public void Dispose()
++    {
++        var handle = snapshot;
++        snapshot = 0;
++        if (handle == 0) return;
++        var status = ReleaseNative(Library.hThis, handle);
++        // Library teardown owns all remaining native leases; a late managed release is idempotent.
++        if (status != -3) Check(status, nameof(TauGeometryCapture));
++    }
++
++    private static void Check(int status, string owner)
++    {
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(owner);
++        if (status == -1) throw new ArgumentException("PicoGK immutable capture contains invalid geometry or counts.");
++        throw new InvalidOperationException($"PicoGK immutable capture failed with native status {status}.");
++    }
++}
++
++public partial class Mesh
++{
++    internal TauGeometryCapture TauAcquireGeometry()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        return TauGeometryCapture.Acquire(lib, 0, hThis.Value, this);
++    }
++}
++
++public partial class Voxels
++{
++    internal TauGeometryCapture TauAcquireGeometry()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        return TauGeometryCapture.Acquire(lib, 1, hThis.Value, this);
++    }
++}
++
++public partial class PolyLine
++{
++    internal TauGeometryCapture TauAcquireGeometry()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        return TauGeometryCapture.Acquire(lib, 2, hThis.Value, this);
++    }
++}
+diff --git a/Library/GridAdmission.cs b/Library/GridAdmission.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/GridAdmission.cs
+@@ -0,0 +1,74 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++
++public partial class OpenVdbFile
++{
++    private const int TauVoxelFieldKind = 0;
++    private const int TauScalarFieldKind = 1;
++    private const int TauVectorFieldKind = 2;
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVdbFile_GetField")]
++    private static extern int TauGetFieldNative(LibHandle library, VdbHandle file, int index, int kind,
++        out ulong output, out VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
++    private static extern void TauDestroyLoadedMetadata(LibHandle library, VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_Destroy")]
++    private static extern void TauDestroyLoadedVoxels(LibHandle library, ulong field);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_Destroy")]
++    private static extern void TauDestroyLoadedScalar(LibHandle library, ulong field);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_Destroy")]
++    private static extern void TauDestroyLoadedVector(LibHandle library, ulong field);
++    private static void TauDestroyLoadedField(LibHandle library, int kind, ulong field)
++    {
++        if (kind == 0) TauDestroyLoadedVoxels(library, field);
++        else if (kind == 1) TauDestroyLoadedScalar(library, field);
++        else TauDestroyLoadedVector(library, field);
++    }
++    private void TauGetField(int index, int kind, out ulong field, out VdbMetaHandle metadata)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        if (index < 0 || index >= nFieldCount()) throw new ArgumentOutOfRangeException();
++        try
++        {
++            var status = TauGetFieldNative(lib.hThis, hThis, index, kind, out field, out metadata);
++            TauCheckedCallbacks.Check(status, null, this);
++            if (field != 0 && metadata.Value == IntPtr.Zero)
++            {
++                TauDestroyLoadedField(lib.hThis, kind, field);
++                throw new InvalidOperationException("Loaded field returned incomplete ownership.");
++            }
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    private void TauReleaseFailedLoadedField(int kind, ulong field, FieldMetadata? metadata, VdbMetaHandle rawMetadata)
++    {
++        try
++        {
++            try
++            {
++                if (metadata is not null) metadata.Dispose();
++                else if (rawMetadata.Value != IntPtr.Zero) TauDestroyLoadedMetadata(lib.hThis, rawMetadata);
++            }
++            finally { TauDestroyLoadedField(lib.hThis, kind, field); }
++        }
++        catch { /* Retain the original constructor failure after attempting both releases. */ }
++    }
++}
++public partial class ScalarField
++{
++    internal ScalarField(Library library, ScalarFieldHandle handle, FieldMetadata metadata)
++    {
++        lib = library;
++        hThis = handle;
++        m_oMetadata = metadata;
++    }
++    internal void TauThrowIfDisposed() => ObjectDisposedException.ThrowIf(m_bDisposed, this);
++}
++public partial class VectorField
++{
++    internal void TauThrowIfDisposed() => ObjectDisposedException.ThrowIf(m_bDisposed, this);
++}
++public partial class Voxels
++{
++    internal void TauThrowIfDisposed() => ObjectDisposedException.ThrowIf(m_bDisposed, this);
++}
+diff --git a/Library/LatticeChecked.cs b/Library/LatticeChecked.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/LatticeChecked.cs
+@@ -0,0 +1,12 @@
++// SPDX-License-Identifier: Apache-2.0
++namespace PicoGK;
++public partial class Library
++{
++    internal static void TauCheckLatticeStatus(int status, string owner)
++    {
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(owner);
++        if (status == -1) throw new ArgumentException("Invalid lattice geometry or voxel coordinate bounds.");
++        throw new InvalidOperationException($"Native lattice operation failed (status {status}).");
++    }
++}
+diff --git a/Library/Library.cs b/Library/Library.cs
+--- a/Library/Library.cs
++++ b/Library/Library.cs
+@@ -51,6 +51,8 @@
+         /// <param name="fVoxelSizeMM">Voxel size in MM</param>
+         public Library(float fVoxelSizeMM)
+         {
++            if (!float.IsFinite(fVoxelSizeMM) || fVoxelSizeMM <= 0)
++                throw new ArgumentOutOfRangeException(nameof(fVoxelSizeMM), "Voxel size must be finite and greater than zero.");
+             hThis               = _hCreateInstance(fVoxelSizeMM);
+             fVoxelSize          = fVoxelSizeMM;
+             m_oTimerMemCheck    = new(_ => MonitorMemory(), null, m_oInterval, m_oInterval);
+@@ -87,12 +89,13 @@
+         }
+ 
+         /// <summary>
+-        /// Return the total memory usage of all objects created with this Library instance
++        /// Return deduplicated logical owned storage retained by this Library instance.
++        /// This excludes allocator overhead and is not physical memory or peak RSS.
+         /// </summary>
+         /// <returns>Memory usage in bytes</returns>
+         public long nTotalMemUsage()
+         {
+-            return _nTotalMemUsage(hThis);
++            return TauOwnedMemoryBytes(0);
+         }
+ 
+         /// <summary>
+@@ -101,7 +104,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nMeshesMemUsage()
+         {
+-            return _nMeshesMemUsage(hThis);
++            return TauOwnedMemoryBytes(1);
+         }
+ 
+          /// <summary>
+@@ -110,7 +113,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nLatticesMemUsage()
+         {
+-            return _nLatticesMemUsage(hThis);
++            return TauOwnedMemoryBytes(2);
+         }
+ 
+          /// <summary>
+@@ -119,7 +122,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nPolyLinesMemUsage()
+         {
+-            return _nPolyLinesMemUsage(hThis);
++            return TauOwnedMemoryBytes(3);
+         }
+ 
+          /// <summary>
+@@ -128,7 +131,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nVoxelsMemUsage()
+         {
+-            return _nVoxelsMemUsage(hThis);
++            return TauOwnedMemoryBytes(4);
+         }
+ 
+          /// <summary>
+@@ -137,7 +140,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nVdbFilesMemUsage()
+         {
+-            return _nVdbFilesMemUsage(hThis);
++            return TauOwnedMemoryBytes(5);
+         }
+ 
+          /// <summary>
+@@ -146,7 +149,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nScalarFieldsMemUsage()
+         {
+-            return _nScalarFieldsMemUsage(hThis);
++            return TauOwnedMemoryBytes(6);
+         }
+ 
+          /// <summary>
+@@ -155,7 +158,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nVectorFieldsMemUsage()
+         {
+-            return _nVectorFieldsMemUsage(hThis);
++            return TauOwnedMemoryBytes(7);
+         }
+ 
+          /// <summary>
+@@ -164,7 +167,7 @@
+         /// <returns>Memory usage in bytes</returns>
+         public long nVdbMetasMemUsage()
+         {
+-            return _nVdbMetasMemUsage(hThis);
++            return TauOwnedMemoryBytes(8);
+         }
+ 
+         /// <summary>
+@@ -277,9 +280,9 @@
+                             vecMm,
+                             ref vecResult);
+ 
+-            x = (int) (vecResult.X + 0.5f);
+-            y = (int) (vecResult.Y + 0.5f);
+-            z = (int) (vecResult.Z + 0.5f);
++            x = (int) vecResult.X;
++            y = (int) vecResult.Y;
++            z = (int) vecResult.Z;
+         }
+ 
+         /// <summary>
+@@ -363,7 +366,9 @@
+                 if (m_bDisposed)
+                     return;
+ 
+-                long nNew  = nTotalMemUsage();
++                // Keep the last known pressure if a metadata snapshot could not be allocated.
++                if (TauOwnedMemoryNative(hThis, 0, out long nNew) != 0)
++                    return;
+                 long nDiff = nNew - m_nUsedMemory;
+ 
+                 if (nDiff > 0)
 diff --git a/Library/LibraryGlobal.cs b/Library/LibraryGlobal.cs
-index 5fbe98389..870e4a66b 100644
 --- a/Library/LibraryGlobal.cs
 +++ b/Library/LibraryGlobal.cs
-@@ -373,11 +373,32 @@ namespace PicoGK
+@@ -373,10 +373,31 @@
              if (fVoxelSizeMM <= 0.0f)
                  throw new Exception("Voxel size needs to be larger than 0mm");
  
@@ -86,7 +2253,7 @@ index 5fbe98389..870e4a66b 100644
 +                                ?? Path.Combine(Utils.strDocumentsFolder(), "PicoGK.log");
  
              m_strLogPath = Path.GetDirectoryName(strLogFilePath) ?? Utils.strDocumentsFolder();
- 
++
 +            if (xHost is not null)
 +            {
 +                try
@@ -104,11 +2271,10 @@ index 5fbe98389..870e4a66b 100644
 +                }
 +                return;
 +            }
-+
+ 
              using (GlobalInstance oInstance = new(fVoxelSizeMM, strLogFilePath, strWindowTitle, strLightsFile))
              {
-                 Thread oThread = new Thread(fnTask);
-@@ -496,4 +517,4 @@ namespace PicoGK
+@@ -496,4 +517,4 @@
  
          #pragma warning restore CS1591 // Missing XML comment for publicly visible type or member
      }
@@ -117,7 +2283,6 @@ index 5fbe98389..870e4a66b 100644
 +}
 diff --git a/Library/LibraryHost.cs b/Library/LibraryHost.cs
 new file mode 100644
-index 000000000..6c0ed9460
 --- /dev/null
 +++ b/Library/LibraryHost.cs
 @@ -0,0 +1,68 @@
@@ -189,16 +2354,337 @@ index 000000000..6c0ed9460
 +        static ILibraryHost? m_xLibraryHost;
 +    }
 +}
-diff --git a/Library/MeshReadback.cs b/Library/MeshReadback.cs
+diff --git a/Library/MeshConversion.cs b/Library/MeshConversion.cs
 new file mode 100644
-index 000000000..686b54008
 --- /dev/null
-+++ b/Library/MeshReadback.cs
-@@ -0,0 +1,75 @@
++++ b/Library/MeshConversion.cs
+@@ -0,0 +1,48 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_CreateFromMesh")]
++    private static extern int TauCreateFromMeshNative(LibHandle library, MshHandle mesh, int shell,
++        float radius, out VoxHandle output, out VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_RenderMesh")]
++    private static extern int TauRenderMeshNative(LibHandle library, VoxHandle voxels, MshHandle mesh);
++
++    private Voxels(Library library, Mesh mesh, float radius, bool shell)
++    {
++        ArgumentNullException.ThrowIfNull(library);
++        ArgumentNullException.ThrowIfNull(mesh);
++        lib = library;
++        if (mesh.lib.hThis != library.hThis) throw new PicoGKLibraryMismatchException();
++        VoxHandle handle = default;
++        VdbMetaHandle metadataHandle = default;
++        FieldMetadata? metadata = null;
++        try
++        {
++            var status = TauCreateFromMeshNative(library.hThis, mesh.hThis, shell ? 1 : 0, radius, out handle, out metadataHandle);
++            TauCheckedCallbacks.Check(status, null, mesh);
++            if (handle.Value == 0 || metadataHandle.Value == IntPtr.Zero)
++                throw new InvalidOperationException("Mesh conversion returned incomplete ownership.");
++            metadata = new FieldMetadata(library, metadataHandle);
++            m_oMetadata = metadata;
++            hThis = handle;
++        }
++        catch
++        {
++            if (metadata is not null) metadata.Dispose();
++            else if (metadataHandle.Value != IntPtr.Zero) TauDestroyCsgMetadata(library.hThis, metadataHandle);
++            if (handle.Value != 0) _Destroy(library.hThis, handle);
++            throw;
++        }
++        finally { GC.KeepAlive(mesh); GC.KeepAlive(library); }
++    }
++    private void TauRenderMesh(Mesh mesh)
++    {
++        ArgumentNullException.ThrowIfNull(mesh);
++        if (mesh.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try { TauCheckedCallbacks.Check(TauRenderMeshNative(lib.hThis, hThis, mesh.hThis), null, mesh); }
++        finally { GC.KeepAlive(this); GC.KeepAlive(mesh); }
++    }
++}
+diff --git a/Library/MeshIndexed.cs b/Library/MeshIndexed.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/MeshIndexed.cs
+@@ -0,0 +1,122 @@
 +// SPDX-License-Identifier: Apache-2.0
 +using System.Numerics;
-+using System.Runtime.CompilerServices;
 +using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++public partial class Mesh
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_CreateIndexed")]
++    private static extern int TauCreateIndexedNative(LibHandle library,
++        IntPtr positions, int positionCount, IntPtr indices, int indexCount, out MshHandle output);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_CreateCopy")]
++    private static extern int TauCreateCopyNative(LibHandle library, ulong snapshot, out MshHandle output);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_AppendIndexed")]
++    private static extern int TauAppendIndexedNative(LibHandle library, MshHandle target,
++        IntPtr positions, int positionCount, IntPtr indices, int indexCount);
++
++    // Native success transfers exactly one already-created handle. No empty native object or validity lookup.
++    private Mesh(Library library, MshHandle mesh)
++    {
++        lib = library;
++        hThis = mesh;
++    }
++
++    private static Mesh TauAdoptResult(Library library, int status, MshHandle result)
++    {
++        try
++        {
++            TauCheckMeshStatus(status);
++            if (result.Value == 0)
++                throw new InvalidOperationException("PicoGK bulk mesh creation returned an empty handle.");
++            return new Mesh(library, result);
++        }
++        catch
++        {
++            if (result.Value != 0) _Destroy(library.hThis, result);
++            throw;
++        }
++    }
++
++    // Raw internal copy is distinct from authored arithmetic, including an authored identity matrix.
++    internal Mesh TauCreateCopy()
++    {
++        using var capture = TauAcquireGeometry();
++        var status = TauCreateCopyNative(capture.Library.hThis, capture.Snapshot, out var output);
++        GC.KeepAlive(capture);
++        return TauAdoptResult(capture.Library, status, output);
++    }
++
++    private static Mesh TauCreateIndexed(Library library, float[] positions, uint[] indices)
++    {
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            var status = TauCreateIndexedNative(library.hThis, pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                pinnedIndices.AddrOfPinnedObject(), indices.Length, out var output);
++            GC.KeepAlive(library);
++            return TauAdoptResult(library, status, output);
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    private void TauAppendIndexed(Mesh source)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        // Acquire/copy before the target gate: self-append is finite and opposite appends never nest owners.
++        using var capture = source.TauAcquireGeometry();
++        var positions = new float[capture.PositionCount];
++        var indices = new uint[capture.IndexCount];
++        capture.Copy(positions, indices);
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            lock (m_tauSnapshotGate)
++            {
++                ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                TauCheckMeshStatus(TauAppendIndexedNative(lib.hThis, hThis,
++                    pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                    pinnedIndices.AddrOfPinnedObject(), indices.Length));
++            }
++            GC.KeepAlive(this);
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    private static void TauCheckMeshStatus(int status)
++    {
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(nameof(Mesh));
++        if (status == -1) throw new ArgumentException("PicoGK bulk mesh contains invalid geometry or counts.");
++        throw new InvalidOperationException($"PicoGK bulk mesh failed with native status {status}.");
++    }
++
++    private static void TauRequireFinite(Vector3 point, string name)
++    {
++        if (!float.IsFinite(point.X) || !float.IsFinite(point.Y) || !float.IsFinite(point.Z))
++            throw new ArgumentException("PicoGK mesh transform requires finite values.", name);
++    }
++
++    private static void TauRequireFinite(Matrix4x4 matrix, string name)
++    {
++        if (!float.IsFinite(matrix.M11) || !float.IsFinite(matrix.M12) || !float.IsFinite(matrix.M13) || !float.IsFinite(matrix.M14) ||
++            !float.IsFinite(matrix.M21) || !float.IsFinite(matrix.M22) || !float.IsFinite(matrix.M23) || !float.IsFinite(matrix.M24) ||
++            !float.IsFinite(matrix.M31) || !float.IsFinite(matrix.M32) || !float.IsFinite(matrix.M33) || !float.IsFinite(matrix.M34) ||
++            !float.IsFinite(matrix.M41) || !float.IsFinite(matrix.M42) || !float.IsFinite(matrix.M43) || !float.IsFinite(matrix.M44))
++            throw new ArgumentException("PicoGK mesh transform requires finite values.", name);
++    }
++}
+diff --git a/Library/MeshPlacement.cs b/Library/MeshPlacement.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/MeshPlacement.cs
+@@ -0,0 +1,139 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Numerics;
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++internal readonly record struct TauMeshPlacement(ulong PrototypeGeneration, Matrix4x4 Matrix, bool IsPlaced, BBox3 Bounds);
++
++public partial class Mesh
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_GetPlacement")]
++    private static extern int TauGetPlacementNative(LibHandle library, ulong snapshot,
++        out ulong prototypeGeneration, out Matrix4x4 matrix, int matrixCapacity, out int placed, out BBox3 bounds);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauCapture_CopyPrototype")]
++    private static extern int TauCopyPrototypeNative(LibHandle library, ulong snapshot,
++        IntPtr positions, int positionCapacity, IntPtr indices, int indexCapacity);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauMesh_CreatePlacedIndexed")]
++    private static extern int TauCreatePlacedNative(LibHandle library, ulong snapshot,
++        in Matrix4x4 matrix, int matrixCount, IntPtr positions, int positionCount,
++        IntPtr indices, int indexCount, out MshHandle output);
++
++    // Read once from the live actual lease. Consumers key canonical source arrays by this root
++    // generation and keep capture.Generation separately for actual mutation/layout state.
++    internal static TauMeshPlacement TauReadPlacement(TauGeometryCapture capture)
++    {
++        TauCheckMeshStatus(TauGetPlacementNative(capture.Library.hThis, capture.Snapshot,
++            out var generation, out var matrix, 16, out var placed, out var bounds));
++        if (generation == 0 || (placed != 0 && placed != 1))
++            throw new InvalidOperationException("PicoGK returned invalid immutable placement metadata.");
++        if (!TauFinitePlacement(matrix))
++            throw new InvalidOperationException("PicoGK returned invalid immutable placement matrix.");
++        return new(generation, matrix, placed == 1, bounds);
++    }
++
++    // A null index buffer explicitly requests positions only during nested construction proof.
++    // Add-time admission requests both buffers only on a unique prototype cache miss.
++    internal static void TauCopyPrototype(TauGeometryCapture capture, float[] positions, uint[]? indices = null)
++    {
++        if (positions.Length != capture.PositionCount || (indices is not null && indices.Length != capture.IndexCount))
++            throw new ArgumentException("Prototype buffers must match the immutable geometry counts.");
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            if (indices is not null) pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            TauCheckMeshStatus(TauCopyPrototypeNative(capture.Library.hThis, capture.Snapshot,
++                pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                indices is null ? IntPtr.Zero : pinnedIndices.AddrOfPinnedObject(), indices?.Length ?? 0));
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    private Mesh TauCreateTransformed(Func<Vector3, Vector3> transform, Matrix4x4 step, bool actualUsesMatrix = false)
++    {
++        using var capture = TauAcquireGeometry();
++        var positions = new float[capture.PositionCount];
++        var indices = new uint[capture.IndexCount];
++        capture.Copy(positions, indices);
++        var placement = TauReadPlacement(capture);
++        // Vector3.Transform ignores these four homogeneous entries. Its actual XYZ arithmetic
++        // stays unchanged; placement expresses that same affine XYZ map.
++        step.M14 = 0; step.M24 = 0; step.M34 = 0; step.M44 = 1;
++        var rootMatrix = placement.IsPlaced ? placement.Matrix * step : step;
++        var eligible = TauFinitePlacement(rootMatrix);
++        float[]? rootPositions = null;
++        if (eligible && placement.IsPlaced)
++        {
++            rootPositions = new float[positions.Length];
++            TauCopyPrototype(capture, rootPositions);
++        }
++        for (var index = 0; index < positions.Length; index += 3)
++        {
++            var source = new Vector3(positions[index], positions[index + 1], positions[index + 2]);
++            var actual = transform(source);
++            if (!float.IsFinite(actual.X) || !float.IsFinite(actual.Y) || !float.IsFinite(actual.Z))
++                throw new ArgumentException("PicoGK mesh transform returned a nonfinite vertex.");
++            // A first matrix transform already evaluates the canonical map as its actual arithmetic.
++            if (eligible && (!actualUsesMatrix || placement.IsPlaced))
++            {
++                var root = rootPositions is null ? source :
++                    new Vector3(rootPositions[index], rootPositions[index + 1], rootPositions[index + 2]);
++                eligible = TauSameBits(actual, Vector3.Transform(root, rootMatrix));
++            }
++            positions[index] = actual.X;
++            positions[index + 1] = actual.Y;
++            positions[index + 2] = actual.Z;
++        }
++        // Qualification is conservative. A failed proof keeps every actual authored float and
++        // index, and simply becomes a new prototype; it never rejects valid authored geometry.
++        return eligible ? TauCreatePlaced(capture, rootMatrix, positions, indices) :
++            TauCreateIndexed(capture.Library, positions, indices);
++    }
++
++    private static Mesh TauCreatePlaced(TauGeometryCapture capture, Matrix4x4 matrix, float[] positions, uint[] indices)
++    {
++        GCHandle pinnedPositions = default;
++        GCHandle pinnedIndices = default;
++        try
++        {
++            pinnedPositions = GCHandle.Alloc(positions, GCHandleType.Pinned);
++            pinnedIndices = GCHandle.Alloc(indices, GCHandleType.Pinned);
++            var status = TauCreatePlacedNative(capture.Library.hThis, capture.Snapshot, matrix, 16,
++                pinnedPositions.AddrOfPinnedObject(), positions.Length,
++                pinnedIndices.AddrOfPinnedObject(), indices.Length, out var output);
++            return TauAdoptResult(capture.Library, status, output);
++        }
++        finally
++        {
++            if (pinnedIndices.IsAllocated) pinnedIndices.Free();
++            if (pinnedPositions.IsAllocated) pinnedPositions.Free();
++        }
++    }
++
++    private static bool TauSameBits(Vector3 a, Vector3 b) =>
++        BitConverter.SingleToInt32Bits(a.X) == BitConverter.SingleToInt32Bits(b.X) &&
++        BitConverter.SingleToInt32Bits(a.Y) == BitConverter.SingleToInt32Bits(b.Y) &&
++        BitConverter.SingleToInt32Bits(a.Z) == BitConverter.SingleToInt32Bits(b.Z);
++
++    private static bool TauFinitePlacement(Matrix4x4 matrix) =>
++        float.IsFinite(matrix.M11) && float.IsFinite(matrix.M12) && float.IsFinite(matrix.M13) && matrix.M14 == 0 &&
++        float.IsFinite(matrix.M21) && float.IsFinite(matrix.M22) && float.IsFinite(matrix.M23) && matrix.M24 == 0 &&
++        float.IsFinite(matrix.M31) && float.IsFinite(matrix.M32) && float.IsFinite(matrix.M33) && matrix.M34 == 0 &&
++        float.IsFinite(matrix.M41) && float.IsFinite(matrix.M42) && float.IsFinite(matrix.M43) && matrix.M44 == 1;
++
++    private static Matrix4x4 TauMirrorPlacement(Vector3 point, Vector3 normal)
++    {
++        var x = 2f * normal.X; var y = 2f * normal.Y; var z = 2f * normal.Z;
++        var distance = 2f * Vector3.Dot(point, normal);
++        return new(1f - x * normal.X, -x * normal.Y, -x * normal.Z, 0,
++            -y * normal.X, 1f - y * normal.Y, -y * normal.Z, 0,
++            -z * normal.X, -z * normal.Y, 1f - z * normal.Z, 0,
++            distance * normal.X, distance * normal.Y, distance * normal.Z, 1);
++    }
++}
+diff --git a/Library/MeshReadback.cs b/Library/MeshReadback.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/MeshReadback.cs
+@@ -0,0 +1,22 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.CompilerServices;
 +
 +[assembly: InternalsVisibleTo("Tau.PicoGK.Worker")]
 +[assembly: InternalsVisibleTo("Tau.PicoGK.Worker.Tests")]
@@ -208,71 +2694,496 @@ index 000000000..686b54008
 +public partial class Mesh
 +{
 +    private readonly object m_tauSnapshotGate = new();
-+    private static int m_tauBulkAvailable;
 +
-+    [DllImport("tau-picogk-readback", CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_GetVertices")]
-+    private static extern int TauGetVertices(LibHandle library, MshHandle mesh, IntPtr buffer, int capacity);
-+    [DllImport("tau-picogk-readback", CallingConvention = CallingConvention.Cdecl, EntryPoint = "Mesh_GetTriangles")]
-+    private static extern int TauGetTriangles(LibHandle library, MshHandle mesh, IntPtr buffer, int capacity);
-+
-+    // Private host integration: no new model-author API. Synchronizes with managed mesh mutation
-+    // and disposal for one consistent snapshot, including when an older library needs element reads.
-+    internal (float[] Positions, uint[] Indices) TauCopyGeometry(bool allowBulk = true)
++    // Every host read uses the same immutable, validated native generation.
++    internal (float[] Positions, uint[] Indices) TauCopyGeometry()
 +    {
-+        lock (m_tauSnapshotGate)
++        using var capture = TauAcquireGeometry();
++        var positions = new float[capture.PositionCount];
++        var indices = new uint[capture.IndexCount];
++        capture.Copy(positions, indices);
++        return (positions, indices);
++    }
++}
+diff --git a/Library/OwnedMemory.cs b/Library/OwnedMemory.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/OwnedMemory.cs
+@@ -0,0 +1,28 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Library
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauLibrary_GetOwnedMemory")]
++    private static extern int TauOwnedMemoryNative(LibHandle library, int category, out long bytes);
++
++    private long TauOwnedMemoryBytes(int category)
++    {
++        var status = TauOwnedMemoryNative(hThis, category, out long bytes);
++        TauCheckOwnedMemoryStatus(status);
++        return bytes;
++    }
++
++    internal static void TauCheckOwnedMemoryStatus(int status, string owner = nameof(Library))
++    {
++        if (status == 0) return;
++        if (status == -3) throw new ObjectDisposedException(owner);
++        if (status == -1) throw new ArgumentException("Invalid owned-memory query or byte-count overflow.");
++        throw new InvalidOperationException($"Native owned-memory snapshot failed (status {status}).");
++    }
++}
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_GetOwnedMemory")]
++    private static extern int TauOwnedMemoryNative(LibHandle library, VoxHandle voxels, out long bytes);
++}
+diff --git a/Library/Projection.cs b/Library/Projection.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/Projection.cs
+@@ -0,0 +1,8 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_ProjectZSlice")]
++    private static extern int TauProjectZSliceNative(LibHandle library, VoxHandle voxels, float start, float end);
++}
+diff --git a/Library/Properties.cs b/Library/Properties.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/Properties.cs
+@@ -0,0 +1,19 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_GetProperties")]
++    private static extern int TauGetPropertiesNative(LibHandle library, VoxHandle voxels, int mode,
++        out float volume, out BBox3 bounds);
++    private void TauCalculateProperties(bool includeVolume, out float volume, out BBox3 bounds)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
 +        {
-+            ObjectDisposedException.ThrowIf(m_bDisposed, this);
-+            var vertexCount = nVertexCount();
-+            var triangleCount = nTriangleCount();
-+            if (vertexCount < 0 || triangleCount < 0) throw new InvalidOperationException("PicoGK returned a negative mesh count.");
-+            var positions = new float[checked(vertexCount * 3)];
-+            var indices = new uint[checked(triangleCount * 3)];
-+            var copied = false;
-+            if (allowBulk && System.Threading.Volatile.Read(ref m_tauBulkAvailable) >= 0)
++            var status = TauGetPropertiesNative(lib.hThis, hThis, includeVolume ? 1 : 0, out volume, out bounds);
++            TauCheckedCallbacks.Check(status, null, this);
++        }
++        finally { GC.KeepAlive(this); }
++    }
++}
+diff --git a/Library/Queries.cs b/Library/Queries.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/Queries.cs
+@@ -0,0 +1,52 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++using System.Numerics;
++namespace PicoGK;
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_IsEmpty")]
++    private static extern int TauIsEmptyNative(LibHandle library, VoxHandle voxels, out int output);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_IsEqual")]
++    private static extern int TauIsEqualNative(LibHandle library, VoxHandle voxels, VoxHandle other, out int output);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_SurfaceQuery")]
++    private static extern int TauSurfaceQueryNative(LibHandle library, VoxHandle voxels, int mode,
++        in Vector3 point, in Vector3 direction, out int hit, out Vector3 output);
++
++    private bool TauSurfaceQuery(int mode, in Vector3 point, in Vector3 direction, out Vector3 output)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauSurfaceQueryNative(lib.hThis, hThis, mode, point, direction, out var hit, out output);
++            TauCheckedCallbacks.Check(status, null, this);
++            return hit != 0;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++
++    private bool TauIsEmpty()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauIsEmptyNative(lib.hThis, hThis, out var output);
++            TauCheckedCallbacks.Check(status, null, this);
++            return output != 0;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    private bool TauIsEqual(Voxels other)
++    {
++        ArgumentNullException.ThrowIfNull(other);
++        if (other.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ObjectDisposedException.ThrowIf(other.m_bDisposed, other);
++        try
++        {
++            var status = TauIsEqualNative(lib.hThis, hThis, other.hThis, out var output);
++            TauCheckedCallbacks.Check(status, null, this);
++            return output != 0;
++        }
++        finally { GC.KeepAlive(this); GC.KeepAlive(other); }
++    }
++}
+diff --git a/Library/SliceRead.cs b/Library/SliceRead.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/SliceRead.cs
+@@ -0,0 +1,133 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Runtime.InteropServices;
++namespace PicoGK;
++
++[StructLayout(LayoutKind.Sequential)]
++internal struct TauSliceInfo
++{
++    internal int XOrigin, YOrigin, ZOrigin, XSize, YSize, ZSize, Width, Height;
++    internal float Background;
++    internal ulong Required;
++}
++internal static class TauSliceRead
++{
++    internal static ImageGrayScale Allocate(int width, int height)
++    {
++        var required = (long)width * height;
++        if (width < 0 || height < 0 || required > Array.MaxLength)
++            throw new ArgumentException("PicoGK slice capacity exceeds the managed array range.");
++        return new ImageGrayScale(new TauSliceInfo { Width = width, Height = height }, new float[checked((int)required)]);
++    }
++    internal static TauSliceInfo Fill(object owner, int mode, int slice, float fractionalSlice, ref ImageGrayScale image)
++    {
++        ArgumentNullException.ThrowIfNull(image);
++        var original = image;
++        var values = image.m_afValues;
++        ArgumentNullException.ThrowIfNull(values);
++        while (true)
++        {
++            TauSliceInfo info;
++            int status;
++            var pinned = GCHandle.Alloc(values, GCHandleType.Pinned);
++            try
 +            {
-+                var verticesHandle = GCHandle.Alloc(positions, GCHandleType.Pinned);
-+                GCHandle trianglesHandle = default;
-+                try
++                status = owner switch
 +                {
-+                    trianglesHandle = GCHandle.Alloc(indices, GCHandleType.Pinned);
-+                    if (TauGetVertices(lib.hThis, hThis, verticesHandle.AddrOfPinnedObject(), vertexCount) != vertexCount ||
-+                        TauGetTriangles(lib.hThis, hThis, trianglesHandle.AddrOfPinnedObject(), triangleCount) != triangleCount)
-+                        throw new InvalidOperationException("PicoGK bulk readback returned inconsistent mesh counts.");
-+                    System.Threading.Volatile.Write(ref m_tauBulkAvailable, 1);
-+                    copied = true;
-+                }
-+                catch (Exception error) when (error is EntryPointNotFoundException or DllNotFoundException)
-+                {
-+                    System.Threading.Volatile.Write(ref m_tauBulkAvailable, -1);
-+                }
-+                finally { if (trianglesHandle.IsAllocated) trianglesHandle.Free(); verticesHandle.Free(); }
++                    Voxels voxels => voxels.TauReadSlice(mode, slice, fractionalSlice, pinned.AddrOfPinnedObject(), (ulong)values.LongLength, out info),
++                    ScalarField field => field.TauReadSlice(slice, pinned.AddrOfPinnedObject(), (ulong)values.LongLength, out info),
++                    _ => throw new ArgumentException("Unsupported PicoGK slice owner.", nameof(owner))
++                };
 +            }
-+            if (!copied)
++            finally { pinned.Free(); }
++            if (status == 1)
 +            {
-+                for (var vertex = 0; vertex < vertexCount; vertex++)
-+                {
-+                    var value = vecVertexAt(vertex);
-+                    positions[vertex * 3] = value.X; positions[vertex * 3 + 1] = value.Y; positions[vertex * 3 + 2] = value.Z;
-+                }
-+                for (var triangle = 0; triangle < triangleCount; triangle++)
-+                {
-+                    var value = oTriangleAt(triangle);
-+                    indices[triangle * 3] = checked((uint)value.A);
-+                    indices[triangle * 3 + 1] = checked((uint)value.B);
-+                    indices[triangle * 3 + 2] = checked((uint)value.C);
-+                }
++                if (info.Required <= (ulong)values.LongLength || info.Required > (ulong)Array.MaxLength)
++                    throw new ArgumentException("PicoGK slice capacity exceeds the managed array range.");
++                values = new float[checked((int)info.Required)];
++                continue;
 +            }
-+            foreach (var index in indices)
-+                if (index >= vertexCount) throw new InvalidOperationException("PicoGK readback returned an out-of-range triangle index.");
-+            foreach (var value in positions)
-+                if (!float.IsFinite(value)) throw new InvalidOperationException("PicoGK readback returned a nonfinite vertex.");
-+            return (positions, indices);
++            TauCheckedCallbacks.Check(status, null, owner);
++            if (info.Width < 0 || info.Height < 0 || info.Required != (ulong)info.Width * (ulong)info.Height ||
++                info.Required > (ulong)values.LongLength)
++                throw new InvalidOperationException("PicoGK returned inconsistent slice dimensions.");
++            if (original.nWidth != info.Width || original.nHeight != info.Height ||
++                !ReferenceEquals(original.m_afValues, values))
++                image = new ImageGrayScale(info, values);
++            return info;
 +        }
 +    }
 +}
++public abstract partial class Image
++{
++    // Internal slice adoption permits an empty image; authored constructors retain their validation.
++    internal Image(TauSliceInfo dimensions)
++    {
++        if (dimensions.Width < 0 || dimensions.Height < 0)
++            throw new ArgumentOutOfRangeException(nameof(dimensions));
++        nWidth = dimensions.Width;
++        nHeight = dimensions.Height;
++        eType = EType.GRAY;
++    }
++}
++public abstract partial class ImageGrayscaleAbstract
++{
++    internal ImageGrayscaleAbstract(TauSliceInfo dimensions) : base(dimensions) { }
++}
++public partial class ImageGrayScale
++{
++    // A coherent read may change dimensions while retaining sufficient caller-owned capacity.
++    internal ImageGrayScale(TauSliceInfo dimensions, float[] values) : base(dimensions)
++    {
++        m_afValues = values;
++    }
++}
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention=CallingConvention.Cdecl, EntryPoint="TauVoxels_ReadSlice")]
++    private static extern int TauReadSliceNative(LibHandle library, VoxHandle voxels, int mode,
++        int slice, float fractionalSlice, IntPtr buffer, ulong capacity, out TauSliceInfo info);
++    private TauSliceInfo TauDimensions()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauReadSliceNative(lib.hThis, hThis, -1, 0, 0, IntPtr.Zero, 0, out var info);
++            TauCheckedCallbacks.Check(status, null, this);
++            return info;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    internal int TauReadSlice(int mode, int slice, float fractionalSlice, IntPtr buffer, ulong capacity, out TauSliceInfo info)
++        => TauReadSliceNative(lib.hThis, hThis, mode, slice, fractionalSlice, buffer, capacity, out info);
++    private TauSliceInfo TauFillSlice(int mode, int slice, float fractionalSlice, ref ImageGrayScale image)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try { return TauSliceRead.Fill(this, mode, slice, fractionalSlice, ref image); }
++        finally { GC.KeepAlive(this); }
++    }
++}
++public partial class ScalarField
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention=CallingConvention.Cdecl, EntryPoint="TauScalarField_ReadSlice")]
++    private static extern int TauReadSliceNative(LibHandle library, ScalarFieldHandle field, int mode,
++        int slice, IntPtr buffer, ulong capacity, out TauSliceInfo info);
++    private TauSliceInfo TauDimensions()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauReadSliceNative(lib.hThis, hThis, -1, 0, IntPtr.Zero, 0, out var info);
++            TauCheckedCallbacks.Check(status, null, this);
++            return info;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++    internal int TauReadSlice(int slice, IntPtr buffer, ulong capacity, out TauSliceInfo info)
++        => TauReadSliceNative(lib.hThis, hThis, 2, slice, buffer, capacity, out info);
++    private void TauFillSlice(int slice, ref ImageGrayScale image)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try { TauSliceRead.Fill(this, 2, slice, 0, ref image); }
++        finally { GC.KeepAlive(this); }
++    }
++}
+diff --git a/Library/SurfaceNormals.cs b/Library/SurfaceNormals.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/SurfaceNormals.cs
+@@ -0,0 +1,132 @@
++// SPDX-License-Identifier: Apache-2.0
++using System.Buffers;
++using System.Numerics;
++using System.Runtime.ExceptionServices;
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++public partial class VectorField
++{
++    private const int TauNormalBatchCapacity = 256;
++    [UnmanagedFunctionPointer(CallingConvention.Cdecl)]
++    private delegate int TauNormalBatch(uint count, IntPtr normals, IntPtr values, IntPtr keep);
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVectorField_CreateSurfaceNormals")]
++    private static extern int TauCreateNormalsNative(LibHandle library, VoxHandle voxels, float threshold,
++        TauNormalBatch callback, out VectorFieldHandle output, out VdbMetaHandle metadata);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
++    private static extern void TauDestroyNormalMetadata(LibHandle library, VdbMetaHandle metadata);
++
++    internal VectorField(Library library, VectorFieldHandle handle, FieldMetadata metadata)
++    {
++        lib = library;
++        hThis = handle;
++        m_oMetadata = metadata;
++    }
++
++    internal static VectorField TauExtractSurfaceNormals(Voxels source, float threshold,
++        Vector3 direction, float tolerance, Vector3 scale)
++    {
++        ArgumentNullException.ThrowIfNull(source);
++        if (direction != Vector3.Zero) direction = Vector3.Normalize(direction);
++        var buffer = ArrayPool<float>.Shared.Rent(TauNormalBatchCapacity * 6);
++        byte[]? selectionBuffer = null;
++        try
++        {
++            var keep = selectionBuffer = ArrayPool<byte>.Shared.Rent(TauNormalBatchCapacity);
++            ExceptionDispatchInfo? failure = null;
++            TauNormalBatch callback = (count, normals, values, selection) =>
++            {
++                if (failure is not null) return 1;
++                try
++                {
++                    if (count == 0 || count > TauNormalBatchCapacity)
++                        throw new InvalidOperationException("Invalid internal surface-normal batch size.");
++                    var length = checked((int)count * 3);
++                    Marshal.Copy(normals, buffer, 0, length);
++                    for (var i = 0; i < count; ++i)
++                    {
++                        var offset = i * 3;
++                        var normal = new Vector3(buffer[offset], buffer[offset + 1], buffer[offset + 2]);
++                        keep[i] = 0;
++                        if (direction != Vector3.Zero && float.Abs(1 - Vector3.Dot(normal, direction)) > tolerance) continue;
++                        var value = normal * scale;
++                        buffer[TauNormalBatchCapacity * 3 + offset] = value.X;
++                        buffer[TauNormalBatchCapacity * 3 + offset + 1] = value.Y;
++                        buffer[TauNormalBatchCapacity * 3 + offset + 2] = value.Z;
++                        keep[i] = 1;
++                    }
++                    Marshal.Copy(buffer, TauNormalBatchCapacity * 3, values, length);
++                    Marshal.Copy(keep, 0, selection, (int)count);
++                    return 0;
++                }
++                catch (Exception error)
++                {
++                    failure = ExceptionDispatchInfo.Capture(error);
++                    return 1;
++                }
++            };
++            VectorFieldHandle handle = default;
++            VdbMetaHandle metadataHandle = default;
++            FieldMetadata? metadata = null;
++            try
++            {
++                var status = TauCreateNormalsNative(source.lib.hThis, source.hThis, threshold, callback,
++                    out handle, out metadataHandle);
++                TauCheckedCallbacks.Check(status, failure, source);
++                if (handle.Value == 0 || metadataHandle.Value == IntPtr.Zero)
++                    throw new InvalidOperationException("Surface-normal extraction returned incomplete ownership.");
++                metadata = new FieldMetadata(source.lib, metadataHandle);
++                return new VectorField(source.lib, handle, metadata);
++            }
++            catch (Exception error)
++            {
++                var original = ExceptionDispatchInfo.Capture(error);
++                try
++                {
++                    try
++                    {
++                        if (metadata is not null) metadata.Dispose();
++                        else if (metadataHandle.Value != IntPtr.Zero) TauDestroyNormalMetadata(source.lib.hThis, metadataHandle);
++                    }
++                    finally
++                    {
++                        if (handle.Value != 0) _Destroy(source.lib.hThis, handle);
++                    }
++                }
++                catch { /* Preserve the first failure while releasing both owners. */ }
++                original.Throw();
++                throw;
++            }
++            finally
++            {
++                GC.KeepAlive(callback);
++                GC.KeepAlive(source);
++            }
++        }
++        finally
++        {
++            ArrayPool<float>.Shared.Return(buffer, clearArray: true);
++            if (selectionBuffer is not null) ArrayPool<byte>.Shared.Return(selectionBuffer, clearArray: true);
++        }
++    }
++}
++
++public partial class ScalarField
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauScalarField_CountActiveValues")]
++    private static extern int TauCountActiveNative(LibHandle library, ScalarFieldHandle field, out int count);
++
++    internal int TauCountActiveValues()
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauCountActiveNative(lib.hThis, hThis, out var count);
++            TauCheckedCallbacks.Check(status, null, this);
++            return count;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++}
+diff --git a/Library/VoxelsCsg.cs b/Library/VoxelsCsg.cs
+new file mode 100644
+--- /dev/null
++++ b/Library/VoxelsCsg.cs
+@@ -0,0 +1,70 @@
++using System.Runtime.InteropServices;
++
++namespace PicoGK;
++
++public partial class Voxels
++{
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_CreateCsg")]
++    private static extern int TauCreateCsgNative(LibHandle library, VoxHandle left, VoxHandle right,
++        int operation, out VoxHandle output, out VdbMetaHandle metadata);
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_MutateCsg")]
++    private static extern int TauMutateCsgNative(LibHandle library, VoxHandle target, VoxHandle source, int operation);
++
++    private void TauMutateCsg(Voxels operand, int operation)
++    {
++        ArgumentNullException.ThrowIfNull(operand);
++        if (operand.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ObjectDisposedException.ThrowIf(operand.m_bDisposed, operand);
++        try
++        {
++            var status = TauMutateCsgNative(lib.hThis, hThis, operand.hThis, operation);
++            TauCheckedCallbacks.Check(status, null, this);
++        }
++        finally { GC.KeepAlive(this); GC.KeepAlive(operand); }
++    }
++
++    internal Voxels(Library library, VoxHandle handle, FieldMetadata metadata)
++    {
++        lib = library;
++        hThis = handle;
++        m_oMetadata = metadata;
++    }
++
++    private Voxels TauCreateCsg(Voxels operand, int operation)
++    {
++        ArgumentNullException.ThrowIfNull(operand);
++        if (operand.lib.hThis != lib.hThis) throw new PicoGKLibraryMismatchException();
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        ObjectDisposedException.ThrowIf(operand.m_bDisposed, operand);
++        VoxHandle handle = default;
++        VdbMetaHandle metadataHandle = default;
++        FieldMetadata? metadata = null;
++        try
++        {
++            var status = TauCreateCsgNative(lib.hThis, hThis, operand.hThis, operation, out handle, out metadataHandle);
++            if (status == -3) throw new ObjectDisposedException(nameof(Voxels));
++            if (status == -1) throw new ArgumentException("Invalid functional CSG input.");
++            if (status != 0) throw new InvalidOperationException($"Functional CSG failed with status {status}.");
++            if (handle.Value == 0 || metadataHandle.Value == IntPtr.Zero) throw new InvalidOperationException("Functional CSG returned incomplete ownership.");
++            metadata = new FieldMetadata(lib, metadataHandle);
++            return new Voxels(lib, handle, metadata);
++        }
++        catch
++        {
++            if (metadata != null) metadata.Dispose();
++            else if (metadataHandle.Value != IntPtr.Zero) TauDestroyCsgMetadata(lib.hThis, metadataHandle);
++            if (handle.Value != 0) _Destroy(lib.hThis, handle);
++            throw;
++        }
++        finally
++        {
++            GC.KeepAlive(this);
++            GC.KeepAlive(operand);
++        }
++    }
++
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Metadata_Destroy")]
++    private static extern void TauDestroyCsgMetadata(LibHandle library, VdbMetaHandle metadata);
++}
 diff --git a/Material.cs b/Material.cs
 new file mode 100644
-index 000000000..d544bbb35
 --- /dev/null
 +++ b/Material.cs
 @@ -0,0 +1,66 @@
@@ -342,15 +3253,53 @@ index 000000000..d544bbb35
 + public MaterialTransmission? Transmission { get; init; }
 + public MaterialVolume? Volume { get; init; }
 +}
+diff --git a/Utils/FieldUtils.cs b/Utils/FieldUtils.cs
+--- a/Utils/FieldUtils.cs
++++ b/Utils/FieldUtils.cs
+@@ -253,10 +253,7 @@
+     {
+         public static int nCount(ScalarField oField)
+         {
+-            ActiveVoxelCounterScalar oCounter = new(oField);
+-            oCounter.Run();
+-
+-            return oCounter.m_nCount;
++            return oField.TauCountActiveValues();
+         }
+ 
+         protected ActiveVoxelCounterScalar(ScalarField oField)
+@@ -286,22 +283,10 @@
+                                             float fDirectionFilterTolerance   = 0f,
+                                             Vector3? vecScaleBy               = null)
+         {
+-            VectorField oField = new(vox.lib);
+-
+             Debug.Assert(fDirectionFilterTolerance >= 0f);
+             Debug.Assert(fDirectionFilterTolerance <= 1f);
+-
+-            SurfaceNormalFieldExtractor oExtractor
+-                = new(  vox,
+-                        oField,
+-                        fSurfaceThresholdVx,
+-                        vecDirectionFilter ?? Vector3.Zero,
+-                        fDirectionFilterTolerance,
+-                        vecScaleBy ?? Vector3.One);
+-
+-            oExtractor.Run();
+-
+-            return oField;
++            return VectorField.TauExtractSurfaceNormals(vox, fSurfaceThresholdVx,
++                vecDirectionFilter ?? Vector3.Zero, fDirectionFilterTolerance, vecScaleBy ?? Vector3.One);
+         }
+ 
+         protected SurfaceNormalFieldExtractor(  Voxels voxSource,
 diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
-index fe3d87d5b..c5b029ce2 100644
 --- a/Viewer/Viewer.cs
 +++ b/Viewer/Viewer.cs
-@@ -45,6 +45,51 @@ namespace PicoGK
-     /// </summary>
+@@ -46,6 +46,51 @@
      public partial class Viewer
      {
-+        /// <summary>
+         /// <summary>
 +        /// Initialize a hosted Viewer that delegates display operations without creating a native window.
 +        /// </summary>
 +        public Viewer(IViewerBackend xBackend,
@@ -395,13 +3344,30 @@ index fe3d87d5b..c5b029ce2 100644
 +        /// <summary>True when viewer operations are delegated to an embedding backend.</summary>
 +        public bool bIsHosted => m_xBackend is not null;
 +
-         /// <summary>
++        /// <summary>
          /// Initialize a new Viewer
          /// </summary>
-@@ -195,6 +240,22 @@ namespace PicoGK
+         /// <param name="strTitle">Window title</param>
+@@ -187,7 +232,13 @@
+                                 m_fnScrollWheelCB,
+                                 m_fnWindowSizeCB);
+          
+-            Debug.Assert(hThis != IntPtr.Zero);
++            if (m_tauCallbackFailure is not null)
++            {
++                lock (m_oActions) { m_bDisposed = true; ReleaseNativeActions(); }
++                _Destroy(hThis);
++                m_tauCallbackFailure.Throw();
++            }
++            if (hThis == IntPtr.Zero) throw new InvalidOperationException("PicoGK native viewer creation failed.");
+         }
+ 
+         /// <summary>
+@@ -195,7 +246,29 @@
          /// </summary>
          public bool bPoll()
          {
+-            Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
 +            if (m_xBackend is not null)
 +            {
 +                bool bAnimated;
@@ -418,31 +3384,82 @@ index fe3d87d5b..c5b029ce2 100644
 +                return bAnimated;
 +            }
 +
-             Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            if (m_iMainThreadID != Environment.CurrentManagedThreadId)
++                throw new InvalidOperationException("Poll requires the viewer's context-owning thread.");
++            if (s_tauNativePolling) throw new ArgumentException("Native viewer Poll cannot be called recursively.");
++            s_tauNativePolling = true;
++            try
++            {
              // Call this function only from the main() thread of the application
  
-@@ -247,6 +308,11 @@ namespace PicoGK
+             Thread.Yield();
+@@ -218,7 +291,7 @@
+                 while (m_oActions.Count > 0)
+                 {
+                     IViewerAction oAction = m_oActions.Dequeue();
+-                    oAction.Do(this);
++                    ExecuteNativeAction(oAction);
+                     bUpdateNeeded = true;
+                 }
+             }
+@@ -235,11 +308,25 @@
+                 }
+             }
+ 
++            if (m_bDisposed) return false;
+             if (bUpdateNeeded)
+                 _RequestUpdate(hThis);
+ 
+-            Debug.Assert(_bIsValid(hThis));
+-            return _bPoll(hThis);
++            int status = _PollChecked(hThis, out bool keepPolling);
++            if (status == -1) throw new ArgumentException("Native viewer Poll must run on its owner thread and cannot be called recursively.");
++            m_tauCallbackFailure?.Throw();
++            TauCheckedCallbacks.Check(status, null, this);
++            if (!keepPolling) Dispose();
++            return keepPolling;
++            }
++            catch (Exception error)
++            {
++                var failure = m_tauCallbackFailure ?? System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error);
++                try { Dispose(); } catch { }
++                failure.Throw();
++                throw;
++            }
++            finally { s_tauNativePolling = false; }
+         }
+ 
+         /// <summary>
+@@ -247,9 +334,14 @@
          /// </summary>
          public void RequestUpdate()
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RequestUpdateAction());
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.RequestUpdate();
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RequestUpdateAction());
-@@ -307,13 +373,18 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RequestUpdateAction());
+             }
+         }
+ 
+@@ -307,13 +399,18 @@
  
                      lock (m_oActions)
                      {
+-                        m_oActions.Enqueue(new LoadLightSetupAction(    m_xLog,
 +                        if (m_xBackend is not null)
 +                        {
 +                            m_xBackend.LoadLightSetup(abyDiffuseData, abySpecularData);
 +                            return;
 +                        }
-                         m_oActions.Enqueue(new LoadLightSetupAction(    m_xLog,
++                        EnqueueNativeAction(new LoadLightSetupAction(    m_xLog,
                                                                          abyDiffuseData,
                                                                          abySpecularData));
                      }
@@ -453,7 +3470,7 @@ index fe3d87d5b..c5b029ce2 100644
                  {
                      Console.WriteLine("Unable to load lights");
                  }
-@@ -323,9 +394,23 @@ namespace PicoGK
+@@ -323,13 +420,26 @@
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -469,39 +3486,57 @@ index fe3d87d5b..c5b029ce2 100644
          public void Add(    in Voxels vox,
                              int nGroupID = 0)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
+-            }
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Add(vox, nGroupID);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
-@@ -337,6 +422,11 @@ namespace PicoGK
++            ArgumentNullException.ThrowIfNull(vox);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            EnqueueNativeAction(new AddVoxelsAction(vox, nGroupID));
+         }
+ 
+         /// <summary>
+@@ -337,9 +447,14 @@
          /// </summary>
          public void Remove(Voxels vox)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RemoveVoxelsAction(vox));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Remove(vox);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveVoxelsAction(vox));
-@@ -349,6 +439,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RemoveVoxelsAction(vox));
+             }
+         }
+ 
+@@ -349,22 +464,40 @@
          public void SetObjectMatrix(    Voxels vox,
                                          in Matrix4x4 mat)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetObjectMatrix(vox, mat);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
-@@ -358,9 +453,23 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetVoxelsMatrixAction(vox, mat));
+             }
+         }
+ 
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -517,39 +3552,57 @@ index fe3d87d5b..c5b029ce2 100644
          public void Add(    Mesh msh,
                              int nGroupID = 0)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
+-            }
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Add(msh, nGroupID);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
-@@ -372,6 +481,11 @@ namespace PicoGK
++            ArgumentNullException.ThrowIfNull(msh);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            EnqueueNativeAction(new AddMeshAction(msh, nGroupID));
+         }
+ 
+         /// <summary>
+@@ -372,9 +505,14 @@
          /// </summary>
          public void Remove(Mesh msh)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RemoveMeshAction(msh));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Remove(msh);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveMeshAction(msh));
-@@ -384,6 +498,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RemoveMeshAction(msh));
+             }
+         }
+ 
+@@ -384,22 +522,40 @@
          public void SetObjectMatrix(    Mesh msh,
                                          in Matrix4x4 mat)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetObjectMatrix(msh, mat);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
-@@ -393,9 +512,23 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetMeshMatrixAction(msh, mat));
+             }
+         }
+ 
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -565,63 +3618,94 @@ index fe3d87d5b..c5b029ce2 100644
          public void Add(    PolyLine oPoly,
                              int nGroupID = 0)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
+-            }
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Add(oPoly, nGroupID);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
-@@ -407,6 +540,11 @@ namespace PicoGK
++            ArgumentNullException.ThrowIfNull(oPoly);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            EnqueueNativeAction(new AddPolyLineAction(oPoly, nGroupID));
+         }
+ 
+         /// <summary>
+@@ -407,9 +563,14 @@
          /// </summary>
          public void Remove(PolyLine oPoly)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Remove(oPoly);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
-@@ -419,6 +557,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RemovePolyLineAction(oPoly));
+             }
+         }
+ 
+@@ -419,9 +580,14 @@
          public void SetObjectMatrix(    PolyLine poly,
                                          in Matrix4x4 mat)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetObjectMatrix(poly, mat);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
-@@ -430,6 +573,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetPolyLineMatrixAction(poly, mat));
+             }
+         }
+ 
+@@ -430,9 +596,14 @@
          /// </summary>
          public void RemoveAllObjects()
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RemoveAllObjectsAction());
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.RemoveAllObjects();
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveAllObjectsAction());
-@@ -442,6 +590,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RemoveAllObjectsAction());
+             }
+         }
+ 
+@@ -442,9 +613,14 @@
          /// </summary>
          public void RequestScreenShot(string strScreenShotPath)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.RequestScreenShot(strScreenShotPath);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
-@@ -453,6 +606,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RequestScreenShotAction(strScreenShotPath));
+             }
+         }
+ 
+@@ -453,6 +629,11 @@
          /// </summary>
          public void EnableExperimental(bool bEnable)
          {
@@ -633,21 +3717,25 @@ index fe3d87d5b..c5b029ce2 100644
              _EnableExperimental(hThis, bEnable);
          }
  
-@@ -462,12 +620,28 @@ namespace PicoGK
+@@ -462,10 +643,26 @@
          public void SetGroupVisible(int nGroupID,
                                          bool bVisible)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
+-            }
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetGroupVisible(nGroupID, bVisible);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
-             }
-         }
- 
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetGroupVisibleAction(nGroupID, bVisible));
++            }
++        }
++
 +        /// <summary>Assign a typed physical material to every object in the hosted group.</summary>
 +        /// <param name="groupId">Existing viewer group assignment.</param>
 +        /// <param name="material">Appearance and encoded textures, snapshotted synchronously.</param>
@@ -657,60 +3745,82 @@ index fe3d87d5b..c5b029ce2 100644
 +            if (m_xBackend is null)
 +                throw new NotSupportedException("Typed materials require the hosted PicoGK viewer backend");
 +            m_xBackend.SetGroupMaterial(groupId, material);
-+        }
-+
+         }
+ 
          /// <summary>
-         /// Set the material for this viewer group
-         /// </summary>
-@@ -480,6 +654,11 @@ namespace PicoGK
+@@ -480,9 +677,14 @@
                                          float       fMetallic,
                                          float       fRoughness)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetGroupMaterial(nGroupID, clr, fMetallic, fRoughness);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
-@@ -495,6 +674,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetGroupMaterialAction(  nGroupID,
+                                                                 clr,
+                                                                 fMetallic,
+                                                                 fRoughness));
+@@ -495,9 +697,14 @@
          public void SetGroupMatrix( int nGroupID,
                                      Matrix4x4 mat)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetGroupMatrix(nGroupID, mat);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
-@@ -512,6 +696,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetGroupMatrixAction(    nGroupID,
+                                                                 mat));
+             }
+         }
+@@ -512,9 +719,14 @@
                                              Overhang uWarning,
                                              Overhang uError)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.EnableOverhangWarning(nGroupID, uWarning, uError);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
-@@ -542,6 +731,11 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new EnableGroupOverhangWarningAction(    nGroupID,
+                                                                             uWarning, 
+                                                                             uError));
+             }   
+@@ -542,9 +754,14 @@
          /// </summary>
          public void DisableOverhangWarning(int nGroupID)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.DisableOverhangWarning(nGroupID);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
-@@ -553,6 +747,8 @@ namespace PicoGK
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new DisableGroupOverhangWarningAction(nGroupID));
+             }   
+         }
+ 
+@@ -553,6 +770,8 @@
          /// </summary>
          public BBox3 oBBox()
          {
@@ -719,7 +3829,7 @@ index fe3d87d5b..c5b029ce2 100644
              BBox3 oBBox = new();
              _GetBoundingBox(hThis, ref oBBox);
              return oBBox;
-@@ -563,6 +759,11 @@ namespace PicoGK
+@@ -563,6 +782,11 @@
          /// </summary>
          public void SetBackgroundColor(ColorFloat clr)
          {
@@ -731,7 +3841,7 @@ index fe3d87d5b..c5b029ce2 100644
              m_clrBackground = clr;
              RequestUpdate();
          }
-@@ -572,6 +773,11 @@ namespace PicoGK
+@@ -572,6 +796,11 @@
          /// </summary>
          public void ZoomToFit()
          {
@@ -743,7 +3853,7 @@ index fe3d87d5b..c5b029ce2 100644
              m_bForceZoomToFit = true;
              RequestUpdate();
          }
-@@ -581,6 +787,11 @@ namespace PicoGK
+@@ -581,6 +810,11 @@
          /// </summary>
          public void SetFov(float fAngle)
          {
@@ -755,7 +3865,7 @@ index fe3d87d5b..c5b029ce2 100644
              m_oCamera.SetVerticalFov(fAngle);
              RequestUpdate();
          }
-@@ -590,9 +801,14 @@ namespace PicoGK
+@@ -590,9 +824,14 @@
          /// </summary>
          public Quaternion qOrientation
          {
@@ -771,7 +3881,7 @@ index fe3d87d5b..c5b029ce2 100644
                  m_oCamera.qOrientation = value; 
                  RequestUpdate();
              }
-@@ -614,6 +830,8 @@ namespace PicoGK
+@@ -614,6 +853,8 @@
          /// false: Viewer actions still pending (busy)</returns>
          public bool bIsIdle()
          {
@@ -780,7 +3890,7 @@ index fe3d87d5b..c5b029ce2 100644
              lock (m_oActions)
              {
                  if (m_oActions.Count() > 0)
-@@ -625,11 +843,13 @@ namespace PicoGK
+@@ -625,11 +866,13 @@
  
          bool m_bIdle = false;
  
@@ -795,15 +3905,608 @@ index fe3d87d5b..c5b029ce2 100644
                 void DoRemove(Mesh msh)
          {
              _RemoveMesh(    msh.lib.hThis,
-@@ -822,4 +1042,3 @@ namespace PicoGK
+@@ -650,10 +893,23 @@
+ 
+         ///////// Internals
+ 
++        [ThreadStatic] static bool s_tauNativePolling;
++        System.Runtime.ExceptionServices.ExceptionDispatchInfo? m_tauCallbackFailure;
++        void TauRecordCallbackFailure(Exception error)
++        {
++            Interlocked.CompareExchange(ref m_tauCallbackFailure,
++                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error), null);
++        }
++
+         void InfoCB(    string strMessage,
+                         bool bFatalError)
+         {
+-            m_xLog.Log(strMessage);
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                m_xLog.Log(strMessage);
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void UpdateCB(  IntPtr          hViewer,
+@@ -662,6 +918,7 @@
+                         ref Matrix4x4   matVP,
+                         ref Vector3     vecEye)
+         {
++            if (m_tauCallbackFailure is not null) return;
+             try
+             {
+                 Debug.Assert(hViewer == hThis);
+@@ -692,11 +949,7 @@
+                 vecEye          =   m_oCamera.vecEye;
+                 clrBackground   =   m_clrBackground;
+             }
+-
+-            catch (Exception e)
+-            {
+-                m_xLog.Log($"Caught exception in Viewer update callback:\n{e.ToString()}\n");
+-            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void KeyPressedCB(  IntPtr hViewer,
+@@ -705,23 +958,28 @@
+                             int iAction,
+                             int iModifiers)
+         {
+-            Debug.Assert(hViewer == hThis);
+-
+-            EKeys eKey = (EKeys)iKey;
+-
+-            if ((iAction == 0) || (iAction == 1)) // ignore 2, which is repeat, only down and up
+-            {
+-                foreach (IKeyHandler xHandler in m_oKeyHandlers)
+-                {
+-                    if (xHandler.bHandleEvent(  this,
+-                                                eKey, iAction == 1, // Pressed
+-                                                (iModifiers & 0x0001) != 0,
+-                                                (iModifiers & 0x0002) != 0,
+-                                                (iModifiers & 0x0004) != 0,
+-                                                (iModifiers & 0x0008) != 0))
+-                        return; // Handled
+-                }
+-            }
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++
++                EKeys eKey = (EKeys)iKey;
++
++                if ((iAction == 0) || (iAction == 1)) // ignore 2, which is repeat, only down and up
++                {
++                    foreach (IKeyHandler xHandler in m_oKeyHandlers)
++                    {
++                        if (xHandler.bHandleEvent(  this,
++                                                    eKey, iAction == 1, // Pressed
++                                                    (iModifiers & 0x0001) != 0,
++                                                    (iModifiers & 0x0002) != 0,
++                                                    (iModifiers & 0x0004) != 0,
++                                                    (iModifiers & 0x0008) != 0))
++                            return; // Handled
++                    }
++                }
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void MouseMovedCB(  IntPtr hViewer,
+@@ -731,30 +989,35 @@
+                             bool        bAlt,
+                             bool        bCmd)
+         {
+-            Debug.Assert(hViewer == hThis);
+-
+-            if (m_bMouseDrag)
+-            {
+-                Vector2 vecDist         = vecMousePos - m_vecMousePos;
+-                Camera.EDragType eType  = Camera.EDragType.Rotate;
+-
+-                if (bShift)
+-                    eType = Camera.EDragType.Pan;
+-                else if (bAlt)
+-                    eType = Camera.EDragType.Spin;
+-
+-                m_oCamera.MouseDrag(vecDist, eType);
+-                m_bHadCamInteractions = true;
+-
+-                lock (m_oAnims)
+-                {
+-                    m_oAnims.Clear();
+-                }
+-
+-                RequestUpdate();
+-            }
+-
+-            m_vecMousePos = vecMousePos;
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++
++                if (m_bMouseDrag)
++                {
++                    Vector2 vecDist         = vecMousePos - m_vecMousePos;
++                    Camera.EDragType eType  = Camera.EDragType.Rotate;
++
++                    if (bShift)
++                        eType = Camera.EDragType.Pan;
++                    else if (bAlt)
++                        eType = Camera.EDragType.Spin;
++
++                    m_oCamera.MouseDrag(vecDist, eType);
++                    m_bHadCamInteractions = true;
++
++                    lock (m_oAnims)
++                    {
++                        m_oAnims.Clear();
++                    }
++
++                    RequestUpdate();
++                }
++
++                m_vecMousePos = vecMousePos;
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void MouseButtonCB( IntPtr hViewer,
+@@ -763,24 +1026,29 @@
+                             int iModifiers,
+                             in Vector2 vecMousePos)
+         {
+-            Debug.Assert(hViewer == hThis);
+-            m_vecMousePos = vecMousePos;
+-
+-            if (iAction == 1)
+-            {
+-                m_bMouseDrag = true;
+-                
+-                lock (m_oAnims)
+-                {
+-                    m_oAnims.Clear();
+-                }
+-
+-                RequestUpdate();
+-            }
+-            else if (iAction == 0)
+-            {
+-                m_bMouseDrag = false;
+-            }
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++                m_vecMousePos = vecMousePos;
++
++                if (iAction == 1)
++                {
++                    m_bMouseDrag = true;
++
++                    lock (m_oAnims)
++                    {
++                        m_oAnims.Clear();
++                    }
++
++                    RequestUpdate();
++                }
++                else if (iAction == 0)
++                {
++                    m_bMouseDrag = false;
++                }
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void ScrollWheelCB( IntPtr      hViewer,
+@@ -791,35 +1059,44 @@
+                             bool        bAlt,
+                             bool        bCmd)
+         {
+-            Debug.Assert(hViewer == hThis);
+-
+-            if (bCtrl || bCmd)
+-            {
+-                m_oCamera.Scroll(vecScrollWheel);
+-            }
+-            else
+-            {
+-                Camera.EDragType eType = Camera.EDragType.Rotate;
+-
+-                if (bShift)
+-                    eType = Camera.EDragType.Pan;
+-                else if (bAlt)
+-                    eType = Camera.EDragType.Spin;
+-
+-                m_oCamera.MouseDrag(vecScrollWheel * 3, eType);
+-            }
+-
+-            m_bHadCamInteractions = true;
+-            RequestUpdate();
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++
++                if (bCtrl || bCmd)
++                {
++                    m_oCamera.Scroll(vecScrollWheel);
++                }
++                else
++                {
++                    Camera.EDragType eType = Camera.EDragType.Rotate;
++
++                    if (bShift)
++                        eType = Camera.EDragType.Pan;
++                    else if (bAlt)
++                        eType = Camera.EDragType.Spin;
++
++                    m_oCamera.MouseDrag(vecScrollWheel * 3, eType);
++                }
++
++                m_bHadCamInteractions = true;
++                RequestUpdate();
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void WindowSizeCB(  IntPtr hViewer,
+                             in Vector2 vecWindowSize)
+         {
+-            Debug.Assert(hViewer == hThis);
+-            // Vieport size will be updated in Update Callback
+-            RequestUpdate();
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++                // Vieport size will be updated in Update Callback
++                RequestUpdate();
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
          }
      }
  }
 -    
 \ No newline at end of file
+diff --git a/Viewer/ViewerActions.cs b/Viewer/ViewerActions.cs
+--- a/Viewer/ViewerActions.cs
++++ b/Viewer/ViewerActions.cs
+@@ -54,6 +54,53 @@
+ 
+         Queue<IViewerAction> m_oActions = new();
+ 
++        void EnqueueNativeAction(IViewerAction action)
++        {
++            try
++            {
++                lock (m_oActions)
++                {
++                    ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                    m_oActions.Enqueue(action);
++                }
++            }
++            catch
++            {
++                if (action is AddGeometryAction captured) captured.Dispose();
++                throw;
++            }
++        }
++
++        System.Runtime.ExceptionServices.ExceptionDispatchInfo? ReleaseNativeActions()
++        {
++            System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
++            while (m_oActions.Count > 0)
++            {
++                if (m_oActions.Dequeue() is not AddGeometryAction captured) continue;
++                try { captured.Dispose(); }
++                catch (Exception error) { failure ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
++            }
++            return failure;
++        }
++
++        void ExecuteNativeAction(IViewerAction action)
++        {
++            System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
++            try { action.Do(this); }
++            catch (Exception error) { failure = m_tauCallbackFailure ?? System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
++            failure ??= m_tauCallbackFailure;
++            if (action is AddGeometryAction captured)
++            {
++                try { captured.Dispose(); }
++                catch (Exception error) { failure ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
++            }
++            if (failure is not null)
++            {
++                ReleaseNativeActions();
++                failure.Throw();
++            }
++        }
++
+         class SetGroupVisibleAction : IViewerAction
+         {
+             public SetGroupVisibleAction(   int nGroupID,
+@@ -192,183 +239,125 @@
+         }
+ 
+         
+-        class AddVoxelsAction : IViewerAction
+-        {
+-            public AddVoxelsAction( Voxels vox,
+-                                    int nGroupID)
+-            {
+-                m_vox = vox;
+-                m_nGroupID = nGroupID;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _AddVoxels( m_vox.lib.hThis,
+-                            oViewer.hThis,
+-                            m_nGroupID,
+-                            m_vox.hThis);
+-            }
+-         
+-            Voxels m_vox;
+-            int m_nGroupID;
++        // Native actions own the call-time frozen lease, never deferred mutable source reads.
++        abstract class AddGeometryAction : IViewerAction, IDisposable
++        {
++            TauGeometryCapture m_capture = null!;
++            readonly int m_kind;
++            readonly long m_identity;
++            readonly int m_group;
++            protected AddGeometryAction(int kind, long identity, int group)
++            {
++                m_kind = kind;
++                m_identity = identity;
++                m_group = group;
++            }
++            // Acquire only after this action has been allocated; a failed acquisition publishes nothing.
++            protected void Capture(TauGeometryCapture capture) => m_capture = capture;
++            public void Do(Viewer viewer)
++            {
++                int status = _AddCaptured(m_capture.Library.hThis, viewer.hThis,
++                    m_group, m_kind, m_identity, m_capture.Snapshot);
++                GC.KeepAlive(m_capture);
++                TauCheckedCallbacks.Check(status, null, viewer);
++            }
++            public void Dispose() => m_capture.Dispose();
++        }
++
++        class AddVoxelsAction : AddGeometryAction
++        {
++            public AddVoxelsAction(Voxels vox, int group)
++                : base(1, vox.hThis.Value, group) { Capture(vox.TauAcquireGeometry()); }
+         }
+ 
+         class RemoveVoxelsAction : IViewerAction
+         {
++            readonly LibHandle m_library;
++            readonly VoxHandle m_identity;
+             public RemoveVoxelsAction(Voxels vox)
+             {
+-                m_vox = vox;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _RemoveVoxels(  m_vox.lib.hThis,
+-                                oViewer.hThis,
+-                                m_vox.hThis);
+-            }
+-
+-            Voxels m_vox;
+-
++                m_library = vox.lib.hThis;
++                m_identity = vox.hThis;
++            }
++            public void Do(Viewer viewer) => _RemoveVoxels(m_library, viewer.hThis, m_identity);
+         }
+ 
+         class SetVoxelsMatrixAction : IViewerAction
+         {
+-            public SetVoxelsMatrixAction(   Voxels vox,
+-                                            in Matrix4x4 mat)
+-            {
+-                m_vox   = vox;
+-                m_mat   = mat;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _SetVoxelsMatrix(   m_vox.lib.hThis,
+-                                    oViewer.hThis,
+-                                    m_vox.hThis,
+-                                    m_mat);
+-            }
+-
+-            Voxels      m_vox;
+-            Matrix4x4   m_mat;
+-        }
+-
+-        class AddMeshAction : IViewerAction
+-        {
+-            public AddMeshAction(   Mesh msh,
+-                                    int nGroupID)
+-            {
+-                m_msh = msh;
+-                m_nGroupID = nGroupID;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _AddMesh(   m_msh.lib.hThis,
+-                            oViewer.hThis,
+-                            m_nGroupID,
+-                            m_msh.hThis);
+-            }
+-
+-            Mesh m_msh;
+-            int m_nGroupID;
++            readonly LibHandle m_library;
++            readonly VoxHandle m_identity;
++            readonly Matrix4x4 m_matrix;
++            public SetVoxelsMatrixAction(Voxels vox, in Matrix4x4 matrix)
++            {
++                m_library = vox.lib.hThis;
++                m_identity = vox.hThis;
++                m_matrix = matrix;
++            }
++            public void Do(Viewer viewer) => _SetVoxelsMatrix(m_library, viewer.hThis, m_identity, m_matrix);
++        }
++
++        class AddMeshAction : AddGeometryAction
++        {
++            public AddMeshAction(Mesh msh, int group)
++                : base(0, msh.hThis.Value, group) { Capture(msh.TauAcquireGeometry()); }
+         }
+ 
+         class RemoveMeshAction : IViewerAction
+         {
++            readonly LibHandle m_library;
++            readonly MshHandle m_identity;
+             public RemoveMeshAction(Mesh msh)
+             {
+-                m_msh = msh;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _RemoveMesh(    m_msh.lib.hThis,
+-                                oViewer.hThis,
+-                                m_msh.hThis);
+-            }
+-
+-            Mesh m_msh;
++                m_library = msh.lib.hThis;
++                m_identity = msh.hThis;
++            }
++            public void Do(Viewer viewer) => _RemoveMesh(m_library, viewer.hThis, m_identity);
+         }
+ 
+         class SetMeshMatrixAction : IViewerAction
+         {
+-            public SetMeshMatrixAction(   Mesh msh,
+-                                          in Matrix4x4 mat)
+-            {
+-                m_msh   = msh;
+-                m_mat   = mat;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _SetMeshMatrix( m_msh.lib.hThis,
+-                                oViewer.hThis,
+-                                m_msh.hThis,
+-                                m_mat);
+-            }
+-
+-            Mesh        m_msh;
+-            Matrix4x4   m_mat;
+-        }
+-
+-        class AddPolyLineAction : IViewerAction
+-        {
+-            public AddPolyLineAction(   PolyLine poly,
+-                                        int nGroupID)
+-            {
+-                m_poly = poly;
+-                m_nGroupID = nGroupID;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _AddPolyLine(   m_poly.lib.hThis,
+-                                oViewer.hThis,
+-                                m_nGroupID,
+-                                m_poly.hThis);
+-
+-            }
+-
+-            PolyLine m_poly;
+-            int m_nGroupID;
++            readonly LibHandle m_library;
++            readonly MshHandle m_identity;
++            readonly Matrix4x4 m_matrix;
++            public SetMeshMatrixAction(Mesh msh, in Matrix4x4 matrix)
++            {
++                m_library = msh.lib.hThis;
++                m_identity = msh.hThis;
++                m_matrix = matrix;
++            }
++            public void Do(Viewer viewer) => _SetMeshMatrix(m_library, viewer.hThis, m_identity, m_matrix);
++        }
++
++        class AddPolyLineAction : AddGeometryAction
++        {
++            public AddPolyLineAction(PolyLine poly, int group)
++                : base(2, poly.hThis.Value, group) { Capture(poly.TauAcquireGeometry()); }
+         }
+ 
+         class RemovePolyLineAction : IViewerAction
+         {
++            readonly LibHandle m_library;
++            readonly PolyHandle m_identity;
+             public RemovePolyLineAction(PolyLine poly)
+             {
+-                m_poly = poly;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _RemovePolyLine(    m_poly.lib.hThis,
+-                                    oViewer.hThis,
+-                                    m_poly.hThis);
+-            }
+-
+-            PolyLine m_poly;
++                m_library = poly.lib.hThis;
++                m_identity = poly.hThis;
++            }
++            public void Do(Viewer viewer) => _RemovePolyLine(m_library, viewer.hThis, m_identity);
+         }
+ 
+         class SetPolyLineMatrixAction : IViewerAction
+         {
+-            public SetPolyLineMatrixAction( PolyLine poly,
+-                                            in Matrix4x4 mat)
+-            {
+-                m_poly  = poly;
+-                m_mat   = mat;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _SetPolyLineMatrix( m_poly.lib.hThis,
+-                                    oViewer.hThis,
+-                                    m_poly.hThis,
+-                                    m_mat);
+-            }
+-
+-            PolyLine    m_poly;
+-            Matrix4x4   m_mat;
++            readonly LibHandle m_library;
++            readonly PolyHandle m_identity;
++            readonly Matrix4x4 m_matrix;
++            public SetPolyLineMatrixAction(PolyLine poly, in Matrix4x4 matrix)
++            {
++                m_library = poly.lib.hThis;
++                m_identity = poly.hThis;
++                m_matrix = matrix;
++            }
++            public void Do(Viewer viewer) => _SetPolyLineMatrix(m_library, viewer.hThis, m_identity, m_matrix);
+         }
+ 
+         class RemoveAllObjectsAction : IViewerAction
 diff --git a/Viewer/ViewerBackend.cs b/Viewer/ViewerBackend.cs
 new file mode 100644
-index 000000000..e98439f9e
 --- /dev/null
 +++ b/Viewer/ViewerBackend.cs
 @@ -0,0 +1,47 @@
@@ -855,10 +4558,9 @@ index 000000000..e98439f9e
 +    }
 +}
 diff --git a/Viewer/ViewerGpuTex.cs b/Viewer/ViewerGpuTex.cs
-index 9b4213b90..6fee77a14 100644
 --- a/Viewer/ViewerGpuTex.cs
 +++ b/Viewer/ViewerGpuTex.cs
-@@ -47,6 +47,8 @@ namespace PicoGK
+@@ -47,6 +47,8 @@
              public GpuTex(  Viewer oSetViewer,
                              ImageRgba32 img)
              {
@@ -867,17 +4569,16 @@ index 9b4213b90..6fee77a14 100644
                  oViewer = oSetViewer;
  
                  GCHandle handle = GCHandle.Alloc(img.m_aclrValues, GCHandleType.Pinned);
-@@ -89,4 +91,3 @@ namespace PicoGK
+@@ -89,4 +91,3 @@
          } 
      }
  }
 -    
 \ No newline at end of file
 diff --git a/Viewer/ViewerImageQuad.cs b/Viewer/ViewerImageQuad.cs
-index 6bcf599e1..9b7336d4b 100644
 --- a/Viewer/ViewerImageQuad.cs
 +++ b/Viewer/ViewerImageQuad.cs
-@@ -53,6 +53,8 @@ namespace PicoGK
+@@ -53,6 +53,8 @@
                                  bool bFlipY,
                                  bool bDoubleSided)
              {
@@ -886,17 +4587,16 @@ index 6bcf599e1..9b7336d4b 100644
                  oViewer = oSetViewer;
                  m_oTex = new(oSetViewer, img);
  
-@@ -79,4 +81,3 @@ namespace PicoGK
+@@ -79,4 +81,3 @@
          } 
      }
  }
 -    
 \ No newline at end of file
 diff --git a/Viewer/Viewer_Gui.cs b/Viewer/Viewer_Gui.cs
-index b9692acc5..8386afa86 100644
 --- a/Viewer/Viewer_Gui.cs
 +++ b/Viewer/Viewer_Gui.cs
-@@ -45,6 +45,8 @@ namespace PicoGK
+@@ -45,6 +45,8 @@
                                              ColorFloat clrNormal,
                                              ColorFloat clrHovered)
          {
@@ -905,7 +4605,7 @@ index b9692acc5..8386afa86 100644
              if (m_oSideBarLeft is not null)
                  m_oSideBarLeft.Dispose();
  
-@@ -58,6 +60,8 @@ namespace PicoGK
+@@ -58,6 +60,8 @@
                                              ColorFloat clrNormal,
                                              ColorFloat clrHovered)
          {
@@ -914,7 +4614,7 @@ index b9692acc5..8386afa86 100644
              if (m_oSideBarRight is not null)
                  m_oSideBarRight.Dispose();
  
-@@ -91,4 +95,3 @@ namespace PicoGK
+@@ -91,4 +95,3 @@
          }
      }
  }

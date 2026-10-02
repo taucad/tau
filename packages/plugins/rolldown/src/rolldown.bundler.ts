@@ -30,7 +30,7 @@ export const rolldownBundler = defineBundler({
   clearExecutionCache(code, context) {
     context.vm.clearExecutionCache(code);
   },
-  async cleanup(context) {
+  async onDispose(context) {
     context.vm.dispose();
   },
 });

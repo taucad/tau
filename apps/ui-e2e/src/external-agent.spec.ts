@@ -28,7 +28,7 @@
 
 import { describe, expect, inject, test } from 'vitest';
 import { page as selectors } from 'vitest/browser';
-import { getKernelResultOutputSchema, screenshotOutputSchema } from '@taucad/chat';
+import { evaluateModelOutputSchema, screenshotOutputSchema } from '@taucad/chat';
 import * as target from '#support/external-target.js';
 
 const composer = '[aria-label="Ask Tau to build anything..."]';
@@ -147,7 +147,7 @@ describe('external agent (AV-5)', () => {
         throw error;
       }
       const events = await durableEvents();
-      for (const name of ['get_kernel_result', 'screenshot']) {
+      for (const name of ['evaluate_model', 'screenshot']) {
         expect(
           events.some(
             (event) =>
@@ -159,9 +159,9 @@ describe('external agent (AV-5)', () => {
         ).toBe(true);
       }
       const kernel = events.findLast(
-        (event) => event.message?.role === 'tool-output' && event.message.toolName === 'get_kernel_result',
+        (event) => event.message?.role === 'tool-output' && event.message.toolName === 'evaluate_model',
       );
-      expect(getKernelResultOutputSchema.parse(kernel?.message?.content)).toMatchObject({
+      expect(evaluateModelOutputSchema.parse(kernel?.message?.content)).toMatchObject({
         status: 'ready',
         kernelIssues: [],
       });

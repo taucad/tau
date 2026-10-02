@@ -1,5 +1,5 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { GeometrySubject } from '#mesh/types.js';
+import type { GeoSpecSubject } from '#model/subject.js';
 import type {
   GeoSpecRuntimeClient,
   GeoSpecRuntimeClientFactory,
@@ -10,22 +10,48 @@ import type {
 } from '#model/types.js';
 import { createModelLoader, loadModel } from '#model/index.js';
 import type { RuntimeClient } from '@taucad/runtime/client';
+import type { KernelPlugin } from '@taucad/runtime';
+import { defineRuntime } from '@taucad/runtime';
+import type { z } from 'zod';
+
+type RequiredEvaluationKernel = KernelPlugin<
+  Record<never, never>,
+  Record<string, unknown>,
+  'required-evaluation',
+  never,
+  Record<never, never>,
+  readonly ['cad'],
+  z.ZodObject<{ precision: z.ZodNumber }>
+>;
+declare const requiredEvaluationKernel: RequiredEvaluationKernel;
+const requiredEvaluationRuntime = defineRuntime({ kernels: [requiredEvaluationKernel] });
+type OptionalEvaluationKernel = KernelPlugin<
+  Record<never, never>,
+  Record<string, unknown>,
+  'optional-evaluation',
+  never,
+  Record<never, never>,
+  readonly ['cad'],
+  z.ZodObject<{ quality: z.ZodOptional<z.ZodNumber> }>
+>;
+declare const optionalEvaluationKernel: OptionalEvaluationKernel;
+const optionalEvaluationRuntime = defineRuntime({ kernels: [optionalEvaluationKernel] });
 
 describe('geospec/model public types', () => {
   it('should accept direct parameters for source, code, and file loads', () => {
     const code = Object.fromEntries([['main.ts', '']]);
     expectTypeOf(loadModel({ source: new Uint8Array(), parameters: { width: 10 } })).toEqualTypeOf<
-      Promise<GeometrySubject>
+      Promise<GeoSpecSubject>
     >();
     expectTypeOf(loadModel({ code, file: 'main.ts', parameters: { width: 20 } })).toEqualTypeOf<
-      Promise<GeometrySubject>
+      Promise<GeoSpecSubject>
     >();
-    expectTypeOf(loadModel({ file: 'main.ts', parameters: { width: 30 } })).toEqualTypeOf<Promise<GeometrySubject>>();
+    expectTypeOf(loadModel({ file: 'main.ts', parameters: { width: 30 } })).toEqualTypeOf<Promise<GeoSpecSubject>>();
   });
 
   it('should keep source-unit declarations on direct raw geometry only', () => {
     expectTypeOf(loadModel({ source: new Uint8Array(), format: 'glb', sourceUnit: 'mm' })).toEqualTypeOf<
-      Promise<GeometrySubject>
+      Promise<GeoSpecSubject>
     >();
 
     // @ts-expect-error -- loadModel has no output-unit knob; every subject is canonical millimetres.
@@ -67,6 +93,9 @@ describe('geospec/model public types', () => {
 
   it('should accept Tau runtime clients through the GeoSpec runtime surface', () => {
     expectTypeOf<RuntimeClient>().toExtend<GeoSpecRuntimeClient>();
+    expectTypeOf<RuntimeClient<typeof optionalEvaluationRuntime>>().toExtend<GeoSpecRuntimeClient>();
+    // GeoSpec loadModel has no evaluateOptions input; a kernel requiring one cannot be admitted through it.
+    expectTypeOf<RuntimeClient<typeof requiredEvaluationRuntime>>().not.toExtend<GeoSpecRuntimeClient>();
     expectTypeOf<LoadModelFileOptions['runtime']>().toEqualTypeOf<
       GeoSpecRuntimeClient | GeoSpecRuntimeClientFactory | undefined
     >();

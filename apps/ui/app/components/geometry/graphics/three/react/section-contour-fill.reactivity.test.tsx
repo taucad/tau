@@ -1,3 +1,4 @@
+import { Scene } from 'three';
 import { render } from '@testing-library/react';
 import { describe, expect, it, vi, beforeEach } from 'vitest';
 import { resolveSectionPieces } from '#components/geometry/graphics/section-cuts.js';
@@ -39,7 +40,7 @@ vi.mock('@react-three/fiber', async (importOriginal) => {
   return {
     ...fiberFacade,
     useFrame: vi.fn(),
-    useThree: () => ({ invalidate: hoistedMocks.invalidate, size: { width: 1024, height: 768 } }),
+    useThree: () => ({ scene: new Scene(), invalidate: hoistedMocks.invalidate, size: { width: 1024, height: 768 } }),
   };
 });
 

@@ -44,7 +44,6 @@ import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { dialAgentHost, agentHostClientConfig } from '#chat-clients/_internal/turn-body.js';
 import { getProjectFileSystemConfig } from '#filesystem/handle-store.js';
 import { useComputeReuseMode } from '#lib/compute-reuse-preference.js';
-import { useFeature } from '#flags/use-feature.js';
 import { ENV } from '#environment.config.js';
 import { createUiRuntimeConfig } from '#runtime/ui-runtime.config.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
@@ -167,12 +166,11 @@ function ProjectSessionBinding({
   const { kernel: defaultKernel } = useKernel();
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const computeMode = useComputeReuseMode();
-  const nativeGeoSpec = useFeature('nativeGeoSpec');
   const browserHostRelease = useRef<(() => void) | undefined>(undefined);
-  const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel });
+  const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel });
   useEffect(() => {
-    choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel };
-  }, [defaultExecution, defaultKernel, testingEnabled, computeMode, nativeGeoSpec, resolveModel]);
+    choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel };
+  }, [defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel]);
   const { parameterService, projectRef, editorRef, flushWorkbenchRecordProducers } = useProject();
   const client = useRevisionClientLifecycle();
   const revisionCommands = useRevisionCommands();
@@ -199,7 +197,6 @@ function ProjectSessionBinding({
         defaultKernel: kernelFallback,
         testingEnabled: tests,
         computeMode: reuse,
-        nativeGeoSpec: nativeGeoSpecChoice,
         resolveModel: resolve,
       } = choices.current;
       const execution = stored?.activeExecution ?? fallback;
@@ -276,7 +273,6 @@ function ProjectSessionBinding({
           resolvedModel: resolve(execution.model),
         }),
         runtimeConfig: createUiRuntimeConfig(ENV),
-        geoSpecEngine: nativeGeoSpecChoice ? 'native' : 'legacy',
       } as const;
       const hostClient = createBrowserAgentHostClient(options);
       browserHostRelease.current ??= retainBrowserAgentHostProject(options);

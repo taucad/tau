@@ -49,7 +49,7 @@ def facade():
         native_engine=native,
         native_module=SimpleNamespace(),
     )
-    return native, GeoSpecSubject(engine, "subject", "subjectHash", "a" * 64)
+    return native, engine._subject({"result": {"subject": {"subjectHash": "a" * 64}}}, "subject")
 
 
 def authored_arguments(native):

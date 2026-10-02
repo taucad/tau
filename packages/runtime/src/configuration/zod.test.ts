@@ -90,6 +90,21 @@ describe('quantity authoring', () => {
     expect(() => quantity({ unit: '1', symbol: '' })).toThrow('A quantity symbol must not be empty');
   });
 
+  it('should merge a later description with quantity metadata after refinement and default', () => {
+    const schema = quantity({ unit: 'mm', space: 'linear' }).positive().default(0.2).describe('Linear tolerance');
+    for (const io of ['input', 'output'] as const) {
+      expect(z.toJSONSchema(schema, { target: 'draft-07', io })).toMatchObject({
+        'x-tau-unit': 'mm',
+        'x-tau-space': 'linear',
+        description: 'Linear tolerance',
+        exclusiveMinimum: 0,
+        default: 0.2,
+      });
+    }
+    expect(schema.parse(undefined)).toBe(0.2);
+    expect(schema.safeParse(0).success).toBe(false);
+  });
+
   it('should reject unknown IDs at a JavaScript boundary', () => {
     expect(() => {
       Reflect.apply(quantity, undefined, [{ unit: 'meters' }]);

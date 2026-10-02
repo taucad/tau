@@ -31,6 +31,7 @@
     "@taucad/picovoxel": "workspace:*",
     "@taucad/replicad": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*"
   },
   "devDependencies": {

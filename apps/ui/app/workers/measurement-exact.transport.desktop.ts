@@ -46,9 +46,11 @@ export const runExactRequest = async (request: ExactRequest, signal?: AbortSigna
         port = connected;
         port.addEventListener('message', (event: MessageEvent<ExactNativeReply>) => {
           try {
-            finish(event.data.id === request.id
-              ? exactResponseFromNative(request.id, event.data.result)
-              : unavailable('The AP242 response identity changed.'));
+            finish(
+              event.data.id === request.id
+                ? exactResponseFromNative(request.id, event.data.result)
+                : unavailable('The AP242 response identity changed.'),
+            );
           } catch {
             finish(unavailable('The AP242 response could not be decoded.'));
           }

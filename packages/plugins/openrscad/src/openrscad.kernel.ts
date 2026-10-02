@@ -9,16 +9,14 @@ import type { ExportShape3DOutput, RenderOptions } from '@taulabs/openrscad-engi
 import type * as OpenRscadModule from '@taulabs/openrscad-engine';
 import { z } from 'zod';
 import { createExportFile } from '@taucad/runtime/types';
-import type { GeometryGltf, JSONSchema7, JSONSchema7Definition } from '@taucad/runtime/types';
+import type { JSONSchema7, JSONSchema7Definition } from '@taucad/runtime/types';
 
 import {
   asBuffer,
   assertRootedPath,
-  createKernelError,
   createKernelSuccess,
   createKernelParameterDeclaration,
   defineKernel,
-  finalizeMeshOutput,
   gltfExportConventionSchema,
   isRecordObject,
   quantity,
@@ -34,12 +32,6 @@ type OpenRscadBackend = typeof OpenRscadModule;
 type OpenRscadContext = {
   backend: OpenRscadBackend;
   entryPath: string | undefined;
-  /**
-   * Whether the last display mesh asked for edges. A build renders the variant its mesh will most
-   * likely want, so a host that always shows edges renders once per request; a switch costs one
-   * extra render, which is what every edged request cost before.
-   */
-  includeEdges: boolean;
 };
 
 // `$fa`: the minimum fragment angle, in degrees.
@@ -57,6 +49,7 @@ const renderTessellationSchema = z.object({
     })
     .default({}),
 });
+const defaultPreviewTessellation = renderTessellationSchema.parse({}).tessellation;
 
 /** Render-time OpenSCAD tessellation options. @public */
 export const openrscadRenderSchema = renderTessellationSchema;
@@ -114,10 +107,9 @@ type SourceBundle = {
 };
 
 type OpenRscadNativeHandle = {
-  /** The display GLB without edge overlays, once rendered. */
+  /** The plain GLB produced by evaluation; render never mutates this handle. */
   previewGlb?: Uint8Array<ArrayBuffer>;
-  /** The display GLB with native edge overlays, once rendered. */
-  previewGlbWithEdges?: Uint8Array<ArrayBuffer>;
+  previewGlbTessellation?: string;
   source: string;
   files: Record<string, string>;
   binaryFiles: Record<string, Uint8Array<ArrayBuffer>>;
@@ -462,6 +454,14 @@ const assertExport = (result: ExportShape3DOutput): ExportShape3DOutput => {
   return result;
 };
 
+class OpenRscadExportError extends Error {
+  public readonly issues: readonly KernelIssue[];
+  public constructor(issues: readonly KernelIssue[]) {
+    super(issues.map((issue) => issue.message).join('\n'));
+    this.issues = issues;
+  }
+}
+
 /** Engine version this kernel is authored against. @public */
 const engineVersion = '0.11.0-beta.4';
 
@@ -508,14 +508,29 @@ export const createOpenrscadKernel = ({
     extensions: ['scad'],
     name: 'OpenRSCADKernel',
     version,
-    createOptionsSchema: openrscadRenderSchema,
-    render: { optionsSchema: openrscadRenderSchema, content: ['includeEdges'] },
-    exportFormats: {
+    evaluateOptionsSchema: z.object({}),
+    views: {
+      model: {
+        title: 'Model',
+        mimeType: 'model/gltf-binary',
+        optionsSchema: openrscadRenderSchema,
+        content: ['includeEdges'],
+      },
+    },
+    exports: {
       glb: {
+        title: 'glTF binary',
+        mimeType: 'model/gltf-binary',
+        extension: 'glb',
         optionsSchema: openrscadExportSchemas.glb,
         content: ['includeEdges'],
       },
-      '3mf': { optionsSchema: openrscadExportSchemas['3mf'] },
+      '3mf': {
+        title: '3D Manufacturing Format',
+        mimeType: 'model/3mf',
+        extension: '3mf',
+        optionsSchema: openrscadExportSchemas['3mf'],
+      },
     },
 
     async initialize(_options, { logger }) {
@@ -533,11 +548,11 @@ export const createOpenrscadKernel = ({
           data: backend.backendCause,
         });
       }
-      const context: OpenRscadContext = { backend, entryPath: undefined, includeEdges: false };
+      const context: OpenRscadContext = { backend, entryPath: undefined };
       return context;
     },
 
-    async getDependencies({ entryPath }, { filesystem, logger }) {
+    async resolve({ entryPath }, { filesystem, logger }) {
       const bundle = await collectSourceBundle({
         entryPath,
         filesystem,
@@ -546,18 +561,18 @@ export const createOpenrscadKernel = ({
       return { resolved: bundle.resolved, unresolved: bundle.unresolved };
     },
 
-    async getParameters({ entryPath }, { filesystem }, context) {
+    async describe({ entryPath }, { filesystem }, context) {
       const source = await filesystem.readFile(entryPath, 'utf8');
       const { defaultParameters, jsonSchema } = await parseCustomizer(source, context.backend.parameters);
-      return createKernelSuccess(
-        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+      return createKernelSuccess({
+        parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
           id: 'urn:taucad:openrscad:parameters',
           name: 'OpenRscadParameters',
         }),
-      );
+      });
     },
 
-    async createGeometry({ entryPath, parameters, options }, { filesystem, logger, tracer }, context) {
+    async evaluate({ entryPath, parameters }, { filesystem, logger, tracer }, context) {
       const normalizedEntryPath = assertRootedPath(entryPath);
       if (context.entryPath !== normalizedEntryPath) {
         await context.backend.clearCache();
@@ -568,7 +583,7 @@ export const createOpenrscadKernel = ({
         filesystem,
         logger,
       });
-      const { includeEdges } = context;
+      const includeEdges = false;
       const span = tracer.startSpan('openrscad.export-3d', {
         phase: 'computingGeometry',
         includeEdges,
@@ -582,7 +597,7 @@ export const createOpenrscadKernel = ({
               files: bundle.files,
               binaryFiles: bundle.binaryFiles,
               parameters,
-              tessellation: options.tessellation,
+              tessellation: defaultPreviewTessellation,
               exportOptions: {
                 includeEdges,
               },
@@ -598,7 +613,8 @@ export const createOpenrscadKernel = ({
       const issues = collectIssues(result, bundle.source, normalizedEntryPath);
       const preview = asBuffer(result.bytes);
       const nativeHandle: OpenRscadNativeHandle = {
-        ...(includeEdges ? { previewGlbWithEdges: preview } : { previewGlb: preview }),
+        previewGlb: preview,
+        previewGlbTessellation: JSON.stringify(defaultPreviewTessellation),
         source: bundle.source,
         files: bundle.files,
         binaryFiles: bundle.binaryFiles,
@@ -614,20 +630,17 @@ export const createOpenrscadKernel = ({
         },
       };
       return {
-        nativeHandle,
+        handle: nativeHandle,
         issues,
       };
     },
 
-    async meshGeometry({ nativeHandle, options, content }, { tracer }, context) {
+    async render({ handle: nativeHandle, options, content }, { tracer }, context) {
       const includeEdges = content?.includeEdges === true;
-      context.includeEdges = includeEdges;
-      const rendered = includeEdges ? nativeHandle.previewGlbWithEdges : nativeHandle.previewGlb;
+      const tessellation = JSON.stringify(options.tessellation);
+      const rendered = !includeEdges && nativeHandle.previewGlbTessellation === tessellation && nativeHandle.previewGlb;
       if (rendered) {
-        return finalizeMeshOutput({
-          artifacts: [{ format: 'gltf', content: rendered }],
-          issues: nativeHandle.issues,
-        });
+        return { content: rendered, issues: nativeHandle.issues };
       }
       const span = tracer.startSpan(includeEdges ? 'openrscad.export-3d-edges' : 'openrscad.export-3d-plain', {
         phase: 'serializingGeometry',
@@ -652,19 +665,11 @@ export const createOpenrscadKernel = ({
         span.end();
       }
       const preview = asBuffer(result.bytes);
-      nativeHandle[includeEdges ? 'previewGlbWithEdges' : 'previewGlb'] = preview;
-      const geometry: GeometryGltf = {
-        format: 'gltf',
-        content: preview,
-      };
-      return finalizeMeshOutput({
-        artifacts: [geometry],
-        issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath),
-      });
+      return { content: preview, issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath) };
     },
 
-    async exportGeometry(input, { tracer }, context) {
-      const { format, nativeHandle } = input;
+    async export(input, { tracer }, context) {
+      const { exportId: format, handle: nativeHandle } = input;
       const exportNative = async (
         format: '3mf' | 'glb',
         exportArtifact: () => Promise<ExportShape3DOutput>,
@@ -700,9 +705,9 @@ export const createOpenrscadKernel = ({
           );
           const issues = collectIssues(result, nativeHandle.source, nativeHandle.entryPath);
           if (!result.ok) {
-            return createKernelError(issues);
+            throw new OpenRscadExportError(issues);
           }
-          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(result.bytes))], issues);
+          return { files: [createExportFile('glb', 'model.glb', asBuffer(result.bytes))], issues };
         }
         case '3mf': {
           const { options } = input;
@@ -721,13 +726,13 @@ export const createOpenrscadKernel = ({
           );
           const issues = collectIssues(result, nativeHandle.source, nativeHandle.entryPath);
           if (!result.ok) {
-            return createKernelError(issues);
+            throw new OpenRscadExportError(issues);
           }
-          return createKernelSuccess([createExportFile('3mf', 'model.3mf', asBuffer(result.bytes))], issues);
+          return { files: [createExportFile('3mf', 'model.3mf', asBuffer(result.bytes))], issues };
         }
         default: {
           const exhaustive: never = format;
-          return createKernelError([
+          throw new OpenRscadExportError([
             {
               message: `Export format '${String(exhaustive)}' is not supported by OpenSCAD.`,
               code: 'KERNEL_CAPABILITY_MISSING',
@@ -739,7 +744,7 @@ export const createOpenrscadKernel = ({
       }
     },
 
-    async cleanup(context) {
+    async onDispose(context) {
       await context.backend.clearCache();
     },
   });

@@ -1,6 +1,7 @@
 /** Host-selecting esbuild adapter backed by `@taucad/bundler-core`. */
 
 import type { BuildOptions, Loader, Message, OnLoadArgs, OnLoadResult, Plugin } from 'esbuild-wasm';
+import type * as NativeEsbuild from 'esbuild';
 import * as wasmEsbuild from 'esbuild-wasm';
 
 import { createBundlerSourceHost } from '@taucad/bundler-core';
@@ -15,7 +16,7 @@ import type { BuiltinModule } from '@taucad/runtime/bundler';
 import { importBrowserModule } from '#vm/browser-module-import.js';
 import { esbuildNamespace } from '#vm/esbuild.constants.js';
 import { isNode } from '#vm/environment.js';
-import { executeCodeInNode } from '#vm/node-module-execution.js';
+import { executeCodeInNode, importNodeModule } from '#vm/node-module-execution.js';
 import type { VmExecuteResult, VmFileSystem, VmIssue } from '#vm/types.js';
 
 /** Outcome of bundling a CAD script entry point. @public */
@@ -59,12 +60,7 @@ export const initializeEsbuild = async (): Promise<void> => {
   initializationPromise ??= (async () => {
     try {
       if (isNode()) {
-        activeEsbuild = (await import(
-          /* webpackIgnore: true */
-          /* @vite-ignore */
-          /* turbopackIgnore: true */
-          'esbuild'
-        )) as typeof wasmEsbuild;
+        activeEsbuild = await importNodeModule<typeof NativeEsbuild>('esbuild');
       }
       if ((import.meta as ImportMeta & { readonly env?: { readonly SSR?: boolean } }).env?.SSR === true) {
         await activeEsbuild.initialize({});

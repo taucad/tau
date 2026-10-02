@@ -190,11 +190,11 @@ export const runOpenrscadUsdzParity: BrowserCommand<never[], OpenrscadUsdzParity
   const nativeTracker = trackEngineBackend(client);
   const workspace = await mkdtemp(join(tmpdir(), 'openrscad-usdz-'));
   try {
-    const exported = await client.export('usdz', { source: { files: { 'main.scad': source } } });
+    const exported = await client.open({ source: { files: { 'main.scad': source } } }).export('usdz');
     if (!exported.success) {
       throw new Error(`Native usdz export failed: ${exported.issues.map((issue) => issue.message).join('; ')}`);
     }
-    const nativeBytes = exported.data[0]!.bytes;
+    const nativeBytes = exported.files[0].bytes;
     await writeFile(join(workspace, 'native.usdz'), nativeBytes);
     const browserBytes = report.usdzBase64 === undefined ? undefined : Buffer.from(report.usdzBase64, 'base64');
     if (browserBytes) {
@@ -209,11 +209,11 @@ export const runOpenrscadUsdzParity: BrowserCommand<never[], OpenrscadUsdzParity
     const roundtripClient = await createNodeClient({ runtime, projectPath: workspace });
     try {
       const roundtrip = async (name: string): Promise<MeshSummary> => {
-        const glb = await roundtripClient.export('glb', { source: { path: name } });
+        const glb = await roundtripClient.open({ source: { path: name } }).export('glb');
         if (!glb.success) {
           throw new Error(`${name} → glb failed: ${glb.issues.map((issue) => issue.message).join('; ')}`);
         }
-        return summarize(glb.data[0]!.bytes);
+        return summarize(glb.files[0].bytes);
       };
       const nativeBackend = await nativeTracker.backend();
 

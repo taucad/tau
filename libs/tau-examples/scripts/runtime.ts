@@ -9,6 +9,7 @@ import { openrscad } from '@taucad/openrscad';
 import { loadPicogkKernelOptions, picogk } from '@taucad/picogk';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
+import { tscircuit } from '@taucad/tscircuit';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { createNodeClient } from '@taucad/runtime/node';
 import { defineRuntime } from '@taucad/runtime/worker';
@@ -40,6 +41,7 @@ export const exampleRuntime = defineRuntime({
     esbuild(),
     image(),
     ...nativePlugins,
+    tscircuit(),
   ],
   middleware: [parameterFileResolver(), parameterUnits(), gltfEdgeDetection()],
 });
@@ -58,30 +60,49 @@ export const createExampleGeoSpecRuntimeClient = async (projectPath: string): Pr
   return {
     connect: async () => undefined,
     terminate: () => client?.terminate(),
-    async export(format, options) {
-      if (format !== 'glb') {
-        throw new TypeError('The example GeoSpec runtime exports GLB mesh evidence only.');
-      }
-      const source = options?.source;
-      if (!source || !('path' in source) || typeof source.path !== 'string') {
+    open(input) {
+      const { source } = input;
+      if (!('path' in source) || typeof source.path !== 'string') {
         throw new TypeError('The example GeoSpec runtime requires a model file path.');
       }
       const path = assertRootedPath(source.path);
       const isolated = extname(path) === '.cs';
       const root = resolve(projectPath, 'src', isolated ? dirname(path) : '.');
-      if (root !== activeRoot) {
-        client?.terminate();
-        client = await createExampleRuntimeClient(root);
-        await client.connect();
-        activeRoot = root;
-      }
-      if (!client) {
-        throw new Error('Example runtime client was not initialized.');
-      }
-      return client.export(format, {
-        ...options,
-        source: { path: isolated ? basename(path) : path },
-      });
+      let document: ReturnType<RuntimeClient<typeof exampleRuntime>['open']> | undefined;
+      let closed = false;
+      const requireOpen = (): void => {
+        if (closed) {
+          throw new Error('The example GeoSpec document is closed.');
+        }
+      };
+      return {
+        async export(format, request) {
+          requireOpen();
+          if (format !== 'glb') {
+            throw new TypeError('The example GeoSpec runtime exports GLB mesh evidence only.');
+          }
+          if (root !== activeRoot) {
+            client?.terminate();
+            client = await createExampleRuntimeClient(root);
+            await client.connect();
+            activeRoot = root;
+          }
+          if (!client) {
+            throw new Error('Example runtime client was not initialized.');
+          }
+          requireOpen();
+          document ??= client.open({
+            ...input,
+            source: { path: isolated ? basename(path) : path },
+            watch: false,
+          });
+          return document.export('glb', request);
+        },
+        close() {
+          closed = true;
+          document?.close();
+        },
+      };
     },
   };
 };

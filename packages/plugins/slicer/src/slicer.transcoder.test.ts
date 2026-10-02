@@ -6,7 +6,7 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
+import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import type { ExportFile } from '@taucad/runtime/types';
 import { unzipSync } from 'fflate';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
@@ -28,8 +28,8 @@ const readGlb = (name: string): ExportFile => ({
   mimeType: 'model/gltf-binary',
 });
 const sha256 = (bytes: Uint8Array<ArrayBuffer>): string => createHash('sha256').update(bytes).digest('hex');
-const createRuntime = (signal = new AbortController().signal): TranscoderRuntime =>
-  mock<TranscoderRuntime>({
+const createRuntime = (signal = new AbortController().signal): TranscoderServices =>
+  mock<TranscoderServices>({
     logger: { log: vi.fn(), warn: vi.fn(), error: vi.fn(), debug: vi.fn() },
     tracer: { startSpan: vi.fn(() => ({ end: vi.fn() })) },
     signal,

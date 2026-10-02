@@ -45,6 +45,49 @@ const committed = {
 const batch = (cursor: number, events: readonly AgentLogEvent[], endCursor = cursor + events.length) =>
   ({ status: 'batch', cursor, nextCursor: cursor + events.length, endCursor, events }) as const;
 
+describe('turn change proof', () => {
+  it('should retain proof by attempt without changing lifecycle or transcript', () => {
+    const rows = term([
+      life('admitted'),
+      committed,
+      life('running', { attempt: 1 }),
+      { type: 'turn.changed', turnId: 'turn-1', chatId: 'chat-1', attempt: 1, checkoutId: 'live' },
+      failed('RUN_ABANDONED'),
+      life('running', { attempt: 2 }),
+    ]);
+    const ledger = foldChatLedger(emptyChatLedger, rows);
+    expect(ledger.runs['run-1']).toMatchObject({
+      attempt: 2,
+      lifecycle: 'running',
+      changes: { 1: { checkoutId: 'live' } },
+    });
+    const stamped = stampRows({
+      ledger,
+      leaderEpoch: 'e01',
+      recordedAt: 'now',
+      runId: 'run-1',
+      bodies: [{ type: 'turn.changed', turnId: 'turn-1', chatId: 'chat-1', attempt: 1, checkoutId: 'live' }],
+    });
+    expect(stamped[0]?.attempt).toBe(1);
+    expect(foldChatLedger(ledger, stamped).runs['run-1']?.changes?.[2]).toBeUndefined();
+  });
+
+  it('should refuse proof for another turn or a future attempt', () => {
+    const ledger = foldChatLedger(emptyChatLedger, term([life('admitted'), committed, life('running')]));
+    for (const [turnId, attempt] of [
+      ['foreign', 1],
+      ['turn-1', 2],
+    ] as const) {
+      expect(
+        gateRows(
+          ledger,
+          term([{ type: 'turn.changed', turnId, chatId: 'chat-1', attempt, checkoutId: 'live' }], 'proof', 2),
+        ),
+      ).toMatchObject({ ok: false, code: 'TURN_CHANGE_UNPLACED' });
+    }
+  });
+});
+
 describe('foldReadAnswer', () => {
   const rows = term([life('admitted'), life('running'), life('completed')]);
   const read = foldChatLedger(emptyChatLedger, rows);

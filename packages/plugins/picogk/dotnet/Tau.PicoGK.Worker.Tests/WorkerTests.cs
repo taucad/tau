@@ -927,6 +927,7 @@ Library.Go(1f, () =>
         0.04f,
         Animation.EType.Once,
         Easing.EEasing.LINEAR));
+    viewer.bPoll(); // Start the animation clock before measuring its existing completion interval.
     System.Threading.Thread.Sleep(90);
 });
 """);
@@ -1042,7 +1043,7 @@ Library.Go(1f, () =>
     }
 
     [Fact]
-    public void BulkReadbackMatchesFallbackAndBoundsCallerBuffers()
+    public void CaptureReadbackPreservesIndicesAndBoundsCallerBuffers()
     {
         using var library = new Library(1f);
         Library.RegisterGlobalLibrary(library);
@@ -1054,8 +1055,7 @@ Library.Go(1f, () =>
             mesh.nAddVertex(new Vector3(4, 5, 6));
             mesh.nAddVertex(new Vector3(7, 8, 9));
             mesh.nAddTriangle(0, 1, 2);
-            var bulk = mesh.TauCopyGeometry(); var fallback = mesh.TauCopyGeometry(false);
-            Assert.Equal(1, (int)typeof(Mesh).GetField("m_tauBulkAvailable", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!.GetValue(null)!);
+            var bulk = mesh.TauCopyGeometry(); var fallback = mesh.TauCopyGeometry();
             Assert.Equal(new float[] { 1, 2, 3, 4, 5, 6, 7, 8, 9 }, bulk.Positions);
             Assert.Equal(new uint[] { 0, 1, 2 }, bulk.Indices);
             Assert.Equal(fallback.Positions, bulk.Positions);
@@ -1089,7 +1089,7 @@ Library.Go(1f, () =>
             Assert.Throws<ObjectDisposedException>(() => mesh.nAddTriangle(0, 1, 2));
             using var nonfinite = new Mesh();
             nonfinite.nAddVertex(new Vector3(float.NaN, 0, 0));
-            Assert.Equal("PicoGK readback returned a nonfinite vertex.", Assert.Throws<InvalidOperationException>(() => nonfinite.TauCopyGeometry()).Message);
+            Assert.Equal("PicoGK immutable capture contains invalid geometry or counts.", Assert.Throws<ArgumentException>(() => nonfinite.TauCopyGeometry()).Message);
         }
         finally { Library.UnregisterGlobalLibrary(); }
     }
@@ -1117,7 +1117,7 @@ Library.Go(1f, () =>
             {
                 var geometry = mesh.TauCopyGeometry();
                 Assert.All(geometry.Indices, index => Assert.True(index < geometry.Positions.Length / 3));
-                Assert.Equal(geometry.Indices, mesh.TauCopyGeometry(false).Indices.Take(geometry.Indices.Length));
+                Assert.Equal(geometry.Indices, mesh.TauCopyGeometry().Indices.Take(geometry.Indices.Length));
             }
             await mutation;
             Assert.Same(original.Positions, Assert.Single(backend.Extract().Components).Positions);
@@ -1125,6 +1125,104 @@ Library.Go(1f, () =>
             Assert.Equal(257 * 3, Assert.Single(backend.Extract().Components).Indices.Length);
         }
         finally { Library.UnregisterGlobalLibrary(); }
+    }
+
+    [Fact]
+    public void FailedCommandReleasesBarriersAlreadyDrainedIntoItsBatch()
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "failed-batch"));
+        using var completion = new ManualResetEventSlim();
+        using var secondCompletion = new ManualResetEventSlim();
+        var ranAfterFailure = false;
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var applyBatch = typeof(CaptureViewerBackend).GetMethod("ApplyBatch", flags)!;
+        var commandType = typeof(CaptureViewerBackend).GetNestedType("ViewerCommand", System.Reflection.BindingFlags.NonPublic)!;
+        object Command(Action apply, ManualResetEventSlim? signal = null) => Activator.CreateInstance(commandType, [apply, signal])!;
+        var batch = (System.Collections.IList)Activator.CreateInstance(typeof(List<>).MakeGenericType(commandType))!;
+        batch.Add(Command(() => throw new InvalidOperationException("batch failed")));
+        batch.Add(Command(() => { }, completion));
+        batch.Add(Command(() => ranAfterFailure = true, secondCompletion));
+        var failure = Assert.Throws<System.Reflection.TargetInvocationException>(() => applyBatch.Invoke(backend, [batch]));
+        Assert.Equal("batch failed", Assert.IsType<InvalidOperationException>(failure.InnerException).Message);
+        Assert.True(completion.Wait(TimeSpan.FromSeconds(3)), "A failed command must wake every barrier in its batch.");
+        Assert.True(secondCompletion.Wait(TimeSpan.FromSeconds(3)), "Every remaining barrier must wake after the first failure.");
+        Assert.False(ranAfterFailure);
+        Assert.Equal("batch failed", Assert.Throws<InvalidOperationException>(backend.RequestUpdate).Message);
+        Assert.Equal("batch failed", Assert.Throws<InvalidOperationException>(backend.Dispose).Message);
+        Assert.Throws<ObjectDisposedException>(() => _ = backend.IsIdle);
+        backend.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void ViewerAdmissionPreservesFailureWhenQueueClosesAfterInitialCheck(bool captureFailure)
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "closing-admission"));
+        using var started = new ManualResetEventSlim();
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        var gate = typeof(CaptureViewerBackend).GetField("gate", flags)!.GetValue(backend)!;
+        var commands = typeof(CaptureViewerBackend).GetField("commands", flags)!.GetValue(backend)!;
+        Exception? admissionError = null;
+        var producer = new Thread(() =>
+        {
+            started.Set();
+            try { backend.RequestUpdate(); }
+            catch (Exception error) { admissionError = error; }
+        }) { IsBackground = true };
+        lock (gate)
+        {
+            producer.Start();
+            Assert.True(started.Wait(TimeSpan.FromSeconds(3)));
+            // The producer has passed the initial error check and is waiting for this gate.
+            Assert.True(SpinWait.SpinUntil(() => (producer.ThreadState & ThreadState.WaitSleepJoin) != 0, TimeSpan.FromSeconds(3)));
+            if (captureFailure)
+                typeof(CaptureViewerBackend).GetField("pumpError", flags)!.SetValue(backend,
+                    System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(new InvalidOperationException("capture failed")));
+            commands.GetType().GetMethod("CompleteAdding")!.Invoke(commands, null);
+        }
+        Assert.True(producer.Join(TimeSpan.FromSeconds(3)), "Closed admission must release the producer.");
+        var failure = Assert.IsType<InvalidOperationException>(admissionError);
+        if (captureFailure)
+        {
+            Assert.Equal("capture failed", failure.Message);
+            Assert.Equal("capture failed", Assert.Throws<InvalidOperationException>(backend.Dispose).Message);
+        }
+        else backend.Dispose();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task CompletionAndExtractionJoinPumpWhenAnotherCallerHasStartedClosing(bool extract)
+    {
+        using var backend = new CaptureViewerBackend(Path.Combine(root, "concurrent-complete"));
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var flags = System.Reflection.BindingFlags.Instance | System.Reflection.BindingFlags.NonPublic;
+        // Pause the first closer after marking completed, before it closes the collection.
+        typeof(CaptureViewerBackend).GetField("completed", flags)!.SetValue(backend, true);
+        var commands = typeof(CaptureViewerBackend).GetField("commands", flags)!.GetValue(backend)!;
+        var pump = (Task)typeof(CaptureViewerBackend).GetField("pump", flags)!.GetValue(backend)!;
+        var joining = Task.Run(() =>
+        {
+            started.SetResult();
+            if (extract) backend.Extract();
+            else backend.Complete();
+        });
+        try
+        {
+            await started.Task.WaitAsync(TimeSpan.FromSeconds(3));
+            var interval = Task.Delay(TimeSpan.FromMilliseconds(100));
+            Assert.Same(interval, await Task.WhenAny(joining, interval));
+        }
+        finally
+        {
+            commands.GetType().GetMethod("CompleteAdding")!.Invoke(commands, null);
+            await pump.WaitAsync(TimeSpan.FromSeconds(3));
+            await joining.WaitAsync(TimeSpan.FromSeconds(3));
+        }
+        backend.Dispose();
+        Assert.Throws<ObjectDisposedException>(() => _ = backend.IsIdle);
     }
 
     [Fact]

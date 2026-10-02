@@ -3,6 +3,7 @@ import { FlipHorizontal, Ruler } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import { Separator } from '@taucad/ui/components/separator';
 import { cn } from '@taucad/ui/utils/cn';
+import type { Rendering } from '@taucad/runtime';
 import { CaptureViewControl } from '#components/geometry/cad/capture-view-control.js';
 import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
 import { FullscreenViewControl } from '#components/geometry/cad/fullscreen-view-control.js';
@@ -76,6 +77,7 @@ function ToolRow({ tool, name, icon, above, children, onDone }: ToolRowProps): R
 type ChatViewerControlsProps = Readonly<{
   /** Capture writes to the active chat draft and is unavailable in read-only shared sessions. */
   shouldEnableCapture?: boolean;
+  captureRendering?: () => Promise<Rendering>;
 }>;
 
 /**
@@ -87,10 +89,13 @@ type ChatViewerControlsProps = Readonly<{
  * and Section in view. The bar also owns the viewer's keyboard shortcuts, and speaks each one's result in a polite
  * live region.
  */
-export function ChatViewerControls({ shouldEnableCapture = true }: ChatViewerControlsProps): React.JSX.Element {
+export function ChatViewerControls({
+  shouldEnableCapture = true,
+  captureRendering,
+}: ChatViewerControlsProps): React.JSX.Element {
   const graphicsRef = useGraphics();
   const barRef = useRef<HTMLDivElement>(null);
-  const is2dGeometry = useGraphicsSelector((state) => state.context.geometry?.format === 'svg');
+  const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
   // Counted, so a phrase said twice in a row is a new node and is announced again.
@@ -164,7 +169,7 @@ export function ChatViewerControls({ shouldEnableCapture = true }: ChatViewerCon
         {shouldEnableCapture ? (
           <>
             <Hairline />
-            <CaptureViewControl />
+            <CaptureViewControl captureRendering={captureRendering} />
           </>
         ) : null}
         <Hairline />

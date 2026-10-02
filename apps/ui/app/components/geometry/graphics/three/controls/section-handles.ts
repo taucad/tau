@@ -1,4 +1,5 @@
 import * as THREE from 'three';
+import { MeshMatcapNodeMaterial } from 'three/webgpu';
 import { Line2 } from 'three/addons/lines/Line2.js';
 import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
 import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
@@ -175,15 +176,20 @@ const tintMaterial = (color: number, opacity: number, own: Own): THREE.MeshBasic
  * A grip shaded by the viewer's soft matcap: form without gloss, the same under any lighting. Grips write depth,
  * so a grip's own parts hide one another over the depth their overlay clears.
  */
-export const createGripMaterial = (color: number): THREE.MeshMatcapMaterial =>
-  new THREE.MeshMatcapMaterial({
+export const createGripMaterial = (
+  color: number,
+  backend: ResolvedGraphicsBackend = 'webgl',
+): THREE.MeshMatcapMaterial | MeshMatcapNodeMaterial => {
+  const options = {
     color,
     matcap: matcapMaterial(),
     transparent: true,
     depthTest: true,
     depthWrite: true,
     toneMapped: false,
-  });
+  };
+  return backend === 'webgpu' ? new MeshMatcapNodeMaterial(options) : new THREE.MeshMatcapMaterial(options);
+};
 
 const gripMesh = (geometry: THREE.BufferGeometry, material: THREE.Material): THREE.Mesh => {
   const mesh = new THREE.Mesh(geometry, material);
@@ -433,7 +439,7 @@ const planeDrawing = ({ cut, isSelected, model, backend }: DrawingOptions<PlaneC
   if (isSelected) {
     arrow = screenGroup(kit);
     const body = new THREE.Group();
-    const bodyMaterial = own(createGripMaterial(color));
+    const bodyMaterial = own(createGripMaterial(color, backend));
     const headUp = gripMesh(grips.head, bodyMaterial);
     headUp.position.y = 56;
     const headDown = gripMesh(grips.head, bodyMaterial);
@@ -577,7 +583,7 @@ const revolutionDrawing = ({ cut, isSelected, model, backend }: DrawingOptions<R
   const knob = (kind: 'sweep-start' | 'sweep-end'): SectionHandle => {
     const knobGroup = screenGroup(kit);
     const body = new THREE.Group();
-    const material = own(createGripMaterial(color));
+    const material = own(createGripMaterial(color, backend));
     const ball = gripMesh(grips.knobBall, material);
     const rim = pressRim(grips.knobRim, kit);
     body.add(ball, rim);
@@ -708,55 +714,6 @@ export type SectionHandles = Readonly<{
 }>;
 
 type Entry = { readonly key: string; cut: SectionCut; readonly drawing: Drawing };
-
-/**
- * One drawing of each kind, never drawn: a selected plane and a selected revolution on a unit model, with their
- * halos and press rims shown. Warm `root` once with the renderer's `compileAsync` and keep it: while its materials
- * live their programs stay compiled, so the drawings built when Section turns on or the selection changes link none.
- */
-export const createSectionHandlesWarmup = ({
-  backend,
-}: Readonly<{ backend: ResolvedGraphicsBackend }>): Readonly<{ root: THREE.Object3D; dispose: () => void }> => {
-  const model = createModel(
-    { min: [-1, -1, -1], max: [1, 1, 1] },
-    { anchorFrameId: 'tau:root', originMeters: [0, 0, 0], metersPerRenderUnit: 1 },
-    'warmup',
-  );
-  const drawings = [
-    planeDrawing({
-      cut: { id: 'warmup-plane', kind: 'plane', plane: 'xy', offset: 0, isFlipped: false },
-      isSelected: true,
-      model,
-      backend,
-    }),
-    revolutionDrawing({
-      cut: { id: 'warmup-revolution', kind: 'revolution', axis: 'z', origin: [0, 0, 0], start: 0, sweep: 90 },
-      isSelected: true,
-      model,
-      backend,
-    }),
-  ];
-  const root = new THREE.Group();
-  for (const drawing of drawings) {
-    for (const handle of drawing.handles) {
-      handle.setState('active');
-    }
-    root.add(drawing.group);
-  }
-  // Hit proxies are never drawn, so compiling them would only waste a program.
-  const hitProxies = root.getObjectsByProperty('material', hiddenMaterial);
-  for (const hitProxy of hitProxies) {
-    hitProxy.removeFromParent();
-  }
-  return {
-    root,
-    dispose: () => {
-      for (const drawing of drawings) {
-        drawing.dispose();
-      }
-    },
-  };
-};
 
 /** Copies `values` into `target` from `offset`; true when nothing there changed. */
 const copyIfChanged = (target: Float64Array, offset: number, values: readonly number[]): boolean => {

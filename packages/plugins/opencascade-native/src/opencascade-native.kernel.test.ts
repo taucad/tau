@@ -1,31 +1,42 @@
 // @vitest-environment node
 import { esbuildBundler } from '@taucad/esbuild';
-import { createTestGeometry, createTestRuntimeClient, getTestParameters } from '@taucad/runtime-testing';
+import {
+  createMockKernelRuntime,
+  createTestGeometry,
+  createTestRuntimeClient,
+  expectKernelProjectionOrder,
+  getTestParameters,
+} from '@taucad/runtime-testing';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+import { asKnownArtifact } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { loadNativeBackend, OpencascadeNativeUnavailableError } from '#opencascade-native-backend.js';
+import type { NativeBinding, NativeSolid } from '#opencascade-native-backend.js';
 import {
   normalizeSolids,
   opencascadeNativeDetectPattern,
   opencascadeNativeKernel,
   toModelApi,
 } from '#opencascade-native.kernel.js';
+import { opencascadeNativeRenderSchema } from '#opencascade-native.schemas.js';
 
 const model = (body: string) => ({ 'model.ts': `import oc from '@taucad/opencascade-native';\n${body}` });
 const runtime = defineRuntime({ kernels: [opencascadeNativeKernel()], bundlers: [esbuildBundler()] });
 
 const render = async (files: Record<string, string>, parameters: Record<string, unknown> = {}) =>
-  createTestGeometry({ runtime, files, mainFile: 'model.ts', parameters });
+  createTestGeometry({ runtime, files, open: { source: { path: 'model.ts' }, parameters } });
 
 const glbOf = (result: Awaited<ReturnType<typeof createTestGeometry>>): Uint8Array<ArrayBuffer> => {
   if (!result.success) {
     throw new Error(`render failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
   }
-  if (result.data.format !== 'gltf') {
-    throw new Error(`expected gltf, received ${result.data.format}`);
+  const artifact = asKnownArtifact(result.artifact);
+  if (artifact?.mimeType !== 'model/gltf-binary') {
+    throw new Error(`expected gltf, received ${result.artifact.mimeType}`);
   }
-  return result.data.content;
+  return artifact.content;
 };
 
 describe('native OpenCascade backend', () => {
@@ -102,6 +113,94 @@ describe('native OpenCascade backend', () => {
 });
 
 describe('OpenCascadeNativeKernel', () => {
+  it('should preserve real native fine and coarse projections and STEP geometry on one handle', async () => {
+    const binding = loadNativeBackend();
+    expect(binding.version().occt).toBe('8.0.1');
+    const definition = await resolveRuntimePluginDefinition('kernel', opencascadeNativeKernel());
+    const runtime = createMockKernelRuntime();
+    const handle = [binding.Solid.createCylinder(5, [0, 0, 15])];
+    const brep = binding.writeBrep(handle);
+    const freshHandle = binding.readBrep(brep);
+    const context = {
+      binding,
+      version: binding.version(),
+      brepByHandle: new WeakMap([
+        [handle, brep],
+        [freshHandle, brep],
+      ]),
+    };
+    const fine = opencascadeNativeRenderSchema.parse({ tessellation: { linearTolerance: 0.02 } });
+    const coarse = opencascadeNativeRenderSchema.parse({ tessellation: { linearTolerance: 0.5 } });
+    const project = async (solids: NativeSolid[], options: typeof fine) => {
+      const rendered = await definition.render!({ handle: solids, view: 'model', options }, runtime, context);
+      return rendered.content;
+    };
+    const exportModel = async () => {
+      const step = await definition.export!({ exportId: 'step', handle, options: {} }, runtime, context);
+      return binding.readStep(step.files[0].bytes).map((solid) => solid.metrics());
+    };
+
+    await expectKernelProjectionOrder({
+      renderA: async () => project(handle, fine),
+      renderB: async () => project(handle, coarse),
+      freshB: async () => project(freshHandle, coarse),
+      export: exportModel,
+    });
+    expect(binding.writeBrep(handle)).toEqual(brep);
+  });
+
+  it('renders each option from a pristine captured BRep', async () => {
+    const definition = await resolveRuntimePluginDefinition('kernel', opencascadeNativeKernel());
+    const runtime = createMockKernelRuntime();
+    const brep = new Uint8Array([7]);
+    const dummy: unknown = {};
+    const handle = [dummy as NativeSolid];
+    const fakeBinding = {
+      readBrep: vi.fn(() => {
+        const solids = [{ meshQuality: 0 }];
+        return solids as unknown as NativeSolid[];
+      }),
+      toGlb: vi.fn((solids: NativeSolid[], tessellation: { deflectionLinear: number }) => {
+        const solid = solids[0] as NativeSolid & { meshQuality: number };
+        const previous = solid.meshQuality;
+        solid.meshQuality = tessellation.deflectionLinear;
+        return new Uint8Array([previous, solid.meshQuality * 100]);
+      }),
+      writeStep: vi.fn(
+        (solids: NativeSolid[]) => new Uint8Array([(solids[0] as NativeSolid & { meshQuality: number }).meshQuality]),
+      ),
+    };
+    const binding: NativeBinding = fakeBinding as unknown as NativeBinding;
+    const fakeContext = {
+      binding,
+      version: { backend: 'native', occt: '8.0.1', package: 'test' },
+      brepByHandle: new WeakMap([[handle, brep]]),
+    };
+    const context: Parameters<NonNullable<typeof definition.render>>[2] = fakeContext;
+    const fine = opencascadeNativeRenderSchema.parse({ tessellation: { linearTolerance: 0.02 } });
+    const coarse = opencascadeNativeRenderSchema.parse({ tessellation: { linearTolerance: 0.5 } });
+    const project = async (options: typeof fine) => {
+      const rendered = await definition.render!({ handle, view: 'model', options }, runtime, context);
+      return rendered.content;
+    };
+    const exportModel = async () => {
+      const exported = await definition.export!({ exportId: 'step', handle, options: {} }, runtime, context);
+      return exported.files[0].bytes;
+    };
+    await expectKernelProjectionOrder({
+      renderA: async () => project(fine),
+      renderB: async () => project(coarse),
+      freshB: () =>
+        binding.toGlb(binding.readBrep(brep), {
+          deflectionLinear: coarse.tessellation.linearTolerance,
+          deflectionAngular: coarse.tessellation.angularTolerance * (Math.PI / 180),
+          relativeLinear: false,
+        }),
+      export: exportModel,
+    });
+    expect(binding.readBrep).toHaveBeenCalledTimes(6);
+  });
+
   it('detects the facade import', () => {
     expect(opencascadeNativeDetectPattern.test("import oc from '@taucad/opencascade-native';")).toBe(true);
     expect(opencascadeNativeDetectPattern.test("import { draw } from 'replicad';")).toBe(false);
@@ -151,18 +250,24 @@ describe('OpenCascadeNativeKernel', () => {
       runtime,
       files: model('export default (oc) => oc.createSolid.cylinder(5, [0,0,15]);'),
     });
+    const document = client.open({ source: { path: 'model.ts' }, watch: false });
     try {
-      const created = await client.render({ source: { path: 'model.ts' } });
+      const created = await document.evaluation();
       expect(created.superseded).toBe(false);
+      if (created.superseded) {
+        return;
+      }
+      expect(created.evaluation.success).toBe(true);
 
-      const glb = await client.export('glb');
+      const glb = await document.export('glb');
       expect(glb.success).toBe(true);
-      expect(glb.success && Buffer.from(glb.data[0]!.bytes).subarray(0, 4).toString()).toBe('glTF');
+      expect(glb.success && Buffer.from(glb.files[0].bytes).subarray(0, 4).toString()).toBe('glTF');
 
-      const step = await client.export('step');
+      const step = await document.export('step');
       expect(step.success).toBe(true);
-      expect(step.success && Buffer.from(step.data[0]!.bytes).subarray(0, 13).toString()).toBe('ISO-10303-21;');
+      expect(step.success && Buffer.from(step.files[0].bytes).subarray(0, 13).toString()).toBe('ISO-10303-21;');
     } finally {
+      document.close();
       await client.shutdown();
     }
   });

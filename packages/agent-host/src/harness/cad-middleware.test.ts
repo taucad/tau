@@ -67,6 +67,44 @@ const onTheWire = (messages: readonly AgentMessage[]): AgentMessage[] => {
 const dummyStream = (): AssistantMessageEventStream => createAssistantMessageEventStream();
 
 describe('ToolResultTrimmer', () => {
+  it('should preserve run qualification and retained evidence references through provider replay', () => {
+    const content = {
+      failures: [],
+      passes: [{ requirement: 'individual pass' }],
+      passed: 1,
+      total: 2,
+      runStatus: 'inconclusive',
+      lineageStatus: 'mixed',
+      accounting: { selected: 2, completed: 1, notRun: 1, discoveryComplete: false },
+      tests: [
+        { id: 'spec:0', status: 'passed' },
+        { id: 'spec:1', status: 'not-run' },
+      ],
+      fullResult: {
+        path: '.tau/artifacts/call-1__geospec-json/result.json',
+        sha256: 'a'.repeat(64),
+        byteLength: 1024,
+        mimeType: 'application/json',
+      },
+      omittedPasses: 3,
+      omittedLineage: 1,
+    };
+    const [sent] = onTheWire([
+      {
+        role: 'toolResult',
+        toolCallId: 'call-1',
+        toolName: 'test_model',
+        content: [{ type: 'text', text: JSON.stringify(content) }],
+        details: { content, isError: false, substituted: false },
+        isError: false,
+        timestamp: 0,
+      },
+    ]);
+    const text = sent?.role === 'toolResult' && sent.content[0]?.type === 'text' ? sent.content[0].text : '';
+    const { passes, ...expected } = content;
+    expect(passes).toHaveLength(1);
+    expect(JSON.parse(text)).toStrictEqual(expected);
+  });
   it('keeps test failures and total while dropping redundant pass payloads', () => {
     const content = { failures: [{ targetFile: 'main.ts', message: 'bad' }], passes: [{ huge: 'x' }], total: 2 };
     const [trimmed] = trimToolResultContext([
@@ -97,7 +135,7 @@ describe('ToolResultTrimmer', () => {
       {
         role: 'toolResult',
         toolCallId: 'call-1',
-        toolName: 'get_kernel_result',
+        toolName: 'evaluate_model',
         content: [{ type: 'text', text: JSON.stringify(content) }],
         details: { content, isError: false, substituted: false },
         isError: false,

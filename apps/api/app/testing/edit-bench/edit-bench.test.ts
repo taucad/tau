@@ -1,10 +1,12 @@
 import { readFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { z } from 'zod';
 import { replayFixtures } from '#testing/edit-bench/fixtures.js';
 import { replayFixtureSchema, replayFixtureStoreSchema } from '#testing/edit-bench/replay-fixture.schema.js';
 import { replayEditFixture } from '#testing/edit-bench/runner.js';
+import { editFileInputSchema } from '@taucad/chat';
 
 const repositoryRoot = fileURLToPath(new URL('../../../../../', import.meta.url));
 const legacyRowSchema = z.object({
@@ -84,6 +86,33 @@ describe('Tier-D edit replay store', () => {
         fixture.expected.kind === 'success'
           ? { kind: 'success', staleRecovered: fixture.expected.staleRecovered ?? false }
           : { kind: 'error', errorCode: fixture.expected.errorCode },
+    });
+  });
+
+  it('replays a reviewed exact edit without changing the frozen fixture store or expected bytes', async () => {
+    const source = replayFixtures.find((fixture) => fixture.id === 'unique-match-jscad-cube-size');
+    const emission = source?.emissions[0];
+    const original = source?.initial.files.find((file) => file.path === source.targetFile)?.bytes;
+    if (source?.expected.kind !== 'success' || emission === undefined || original === undefined) {
+      throw new Error('Missing unchanged exact edit fixture.');
+    }
+    const value: unknown = JSON.parse(emission.argumentsJson);
+    const input = editFileInputSchema.parse(value);
+    const fixture = replayFixtureSchema.parse({
+      ...source,
+      id: 'reviewed-exact-edit-control',
+      emissions: [
+        {
+          ...emission,
+          argumentsJson: JSON.stringify({
+            ...input,
+            expectedDigest: `sha256:${createHash('sha256').update(original).digest('hex')}`,
+          }),
+        },
+      ],
+    });
+    await expect(replayEditFixture(fixture)).resolves.toMatchObject({
+      outcome: { kind: 'success', staleRecovered: false },
     });
   });
 

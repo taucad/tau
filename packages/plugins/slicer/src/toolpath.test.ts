@@ -90,7 +90,7 @@ describe('parseGcode', () => {
     it('should record the source digest and parser identity', () => {
       expect(program.source).toEqual({
         digest: 'sha256:0967e63c5dab107b89d9d0ce4215de99b65b731c962bbced32b1bb8986e4ac50',
-        parser: { id: 'tau.slicer.toolpath', version: '4' },
+        parser: { id: 'tau.slicer.toolpath', version: '5' },
       });
       expect(program.version).toBe(1);
       expect(program.units).toBe('mm');
@@ -355,10 +355,10 @@ describe('parseGcode', () => {
         ['Internal solid infill', 'infill'],
         ['Top surface', 'infill'],
         ['Bottom surface', 'infill'],
-        ['Bridge', 'infill'],
-        ['Ironing', 'infill'],
+        ['Bridge', 'bridge'],
+        ['Ironing', 'ironing'],
         ['Support', 'support'],
-        ['Support interface', 'support'],
+        ['Support interface', 'support-interface'],
         ['Skirt', 'skirt'],
         ['Brim', 'brim'],
         ['Custom', 'purge'],
@@ -497,4 +497,68 @@ describe('parseGcode', () => {
       expect(parseGcode('G28\nG1 X10 F600\n').preambleSegmentCount).toBe(0);
     });
   });
+});
+
+describe('deposition semantics', () => {
+  it('should preserve annotated beads while excluding recovery, stationary prime and wipes', () => {
+    const program = parseGcode(`; filament_diameter = 1.75;2.85
+G28
+M104 S220
+M83
+G1 Z0.2 F1200
+; LINE_WIDTH: 0.45
+; LAYER_HEIGHT: 0.2
+; FEATURE: Outer wall
+G1 X10 E0.3385
+G1 E-1
+G1 X20 E0.5
+G1 X30 E1
+; WIPE_START
+G1 X40 E0.1
+; WIPE_END
+T1
+; FEATURE: Bridge
+G1 X50 E0.1
+; FEATURE: Ironing
+G1 X60 E0.01
+`);
+    expect(program.deposition?.widths[1]).toBeCloseTo(0.45);
+    expect(program.deposition?.heights[1]).toBeCloseTo(0.2);
+    expect(program.deposition?.volumes[1]).toBeCloseTo(0.8142, 3);
+    expect(program.deposition?.widths[2]).toBe(0);
+    expect(program.deposition?.widths[3]).toBe(0);
+    expect(program.deposition?.starts[4]).toBeCloseTo(0.5);
+    expect(program.deposition?.widths[5]).toBe(0);
+    expect(program.deposition?.filamentDiameters[1]).toBeCloseTo(2.85);
+    expect(toolpathSegmentKinds[program.kinds[6]!]).toBe('bridge');
+    expect(toolpathSegmentKinds[program.kinds[7]!]).toBe('ironing');
+    expect(program.deposition?.warnings).toContain('Positive extrusion in a wipe is not rendered as filament.');
+  });
+
+  it('should keep layer height independent of hops and expose unsupported flow semantics', () => {
+    const program = parseGcode(`; layer_height = 0.2
+G28
+M104 S220
+M83
+G1 Z0.2 F1200
+; FEATURE: Outer wall
+G1 X10 E0.3385
+G1 Z2
+G1 Z0.2
+G1 X20 E0.3385
+M200 D1.75
+G1 X30 E0.3385
+`);
+    expect(program.deposition?.heights[1]).toBeCloseTo(0.2);
+    expect(program.deposition?.heights[4]).toBeCloseTo(0.2);
+    expect(program.deposition?.widths[5]).toBe(0);
+    expect(program.deposition?.warnings.join(' ')).toContain('M200');
+    expect(program.extrusion[5]).toBeCloseTo(0.3385);
+  });
+});
+
+it('should refuse event-heavy input before its object timeline grows without bound', () => {
+  expect(() => parseGcode('M107\n'.repeat(250_001))).toThrow(
+    expect.objectContaining({ code: 'TOOLPATH_RECORD_LIMIT', record: 250_001 }),
+  );
 });

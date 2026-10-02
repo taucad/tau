@@ -105,8 +105,14 @@ const fixtureMachine = defineMachine({
     },
   ],
   manifest: {
-    version: 1,
-    identity: { vendor: 'fixture', model: 'fixture-printer', displayName: 'Fixture printer', qualifiedFirmware: [] },
+    version: 2,
+    identity: {
+      typeId: 'fixture.printer',
+      vendor: 'fixture',
+      model: 'fixture-printer',
+      displayName: 'Fixture printer',
+      qualifiedFirmware: [],
+    },
     technology: 'additive.fff',
     geometry: {
       unit: 'mm',
@@ -463,7 +469,7 @@ describe('startHostDaemon', () => {
       expect(create.isError).toBe(false);
       outcome = await registry.invoke({
         toolCallId: 'runtime-authority-render',
-        toolName: 'get_kernel_result',
+        toolName: 'evaluate_model',
         input: { targetFile: 'main.scad' },
         signal: new AbortController().signal,
       });

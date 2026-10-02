@@ -8,6 +8,9 @@ version = "0.0.0"
 requires-python = ">=3.13,<3.15"
 license-files = ["licenses/**/*"]
 
+[project.optional-dependencies]
+test = ["pytest==9.1.1", "mypy==2.3.1"]
+
 [project.entry-points.pytest11]
 geospec = "geospec.pytest_plugin"
 

@@ -54,18 +54,18 @@ export const assimpTranscoder = defineTranscoder({
   edges,
   optionsSchema: assimpTranscoderOptionsSchema,
 
-  async initialize({ backend }, runtime) {
+  async initialize({ backend }, services) {
     const assimp = await createAssimp({
       backend,
       onLog: ({ cause, level, message }) => {
-        runtime.logger.custom(level === 'warning' ? 'warn' : level, message, { data: cause });
+        services.logger.custom(level === 'warning' ? 'warn' : level, message, { data: cause });
       },
     });
-    runtime.logger.log(`libassimp backend=${assimp.backend} addon=${assimp.buildIdentity ?? 'none'}`);
+    services.logger.log(`libassimp backend=${assimp.backend} addon=${assimp.buildIdentity ?? 'none'}`);
     return { assimp };
   },
 
-  async transcode(input, runtime, context: AssimpTranscoderContext) {
+  async transcode(input, services, context: AssimpTranscoderContext) {
     if (input.files.length === 0) {
       return {
         success: false,
@@ -76,11 +76,11 @@ export const assimpTranscoder = defineTranscoder({
     }
 
     try {
-      runtime.logger.log(`Transcoding ${input.from} -> ${input.to}`);
+      services.logger.log(`Transcoding ${input.from} -> ${input.to}`);
       const options = {
         to: input.to,
         exportOptions: input.options as ExportOptionsFor<typeof input.to>,
-        signal: runtime.signal,
+        signal: services.signal,
       };
       const { files } = await context.assimp.convert(
         input.files.map(({ name, bytes }) => ({ name, bytes })),
@@ -94,7 +94,7 @@ export const assimpTranscoder = defineTranscoder({
           mimeType: lookupMimeType(name.split('.').pop() ?? ''),
         };
       });
-      runtime.logger.log(`Successfully transcoded to ${input.to}`);
+      services.logger.log(`Successfully transcoded to ${input.to}`);
       return { success: true, data: output, issues: [] };
     } catch (error) {
       const message = error instanceof Error ? error.message : 'Transcoding failed';
@@ -105,7 +105,7 @@ export const assimpTranscoder = defineTranscoder({
     }
   },
 
-  async cleanup(context) {
+  async onDispose(context) {
     context.assimp.dispose();
   },
 });

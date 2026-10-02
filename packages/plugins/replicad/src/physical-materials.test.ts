@@ -7,7 +7,7 @@ import type { Material } from '@taucad/replicad/model';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
 import {
-  assertSuccess,
+  assertRenderingSuccess,
   createTestRuntimeClient,
   extractGltfFromResult,
   createMockKernelRuntime,
@@ -62,7 +62,9 @@ const runtime = (tessellationInstancing: boolean) =>
     kernels: [replicadKernel({ wasm: 'single', tessellationInstancing })],
     bundlers: [esbuildBundler()],
   });
-const clients = new Set<ReturnType<typeof createTestRuntimeClient>>();
+const makeClient = (tessellationInstancing: boolean, files: Record<string, string>) =>
+  createTestRuntimeClient({ runtime: runtime(tessellationInstancing), files });
+const clients = new Set<ReturnType<typeof makeClient>>();
 afterEach(async () => {
   await Promise.all([...clients].map(async (client) => client.shutdown()));
   clients.clear();
@@ -72,21 +74,18 @@ describe('standard physical materials through Replicad and the runtime', () => {
   it.each([false, true])(
     'should preserve per-occurrence materials, seam UVs, edits and exports (instancing=%s)',
     async (tessellationInstancing) => {
-      const client = createTestRuntimeClient({
-        runtime: runtime(tessellationInstancing),
-        files: { 'main.ts': source },
-      });
+      const client = makeClient(tessellationInstancing, { 'main.ts': source });
       clients.add(client);
-      const rendered = await client.render({
-        source: { path: 'main.ts' },
-        content: { includeEdges: true, includeTopology: true },
-      });
+      const runtimeDocument = client.open({ source: { path: 'main.ts' } });
+      const rendered = await runtimeDocument
+        .view('model', { content: { includeEdges: true, includeTopology: true } })
+        .rendering();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Unexpected superseded render');
       }
-      assertSuccess(rendered.geometry);
-      const bytes = extractGltfFromResult(rendered.geometry)!;
+      assertRenderingSuccess(rendered.rendering);
+      const bytes = extractGltfFromResult(rendered.rendering)!;
       const io = new NodeIO().registerExtensions(ALL_EXTENSIONS);
       const { json } = await io.binaryToJSON(bytes);
       expect(json.materials).toEqual(expect.arrayContaining([copper, glass]));
@@ -123,17 +122,24 @@ describe('standard physical materials through Replicad and the runtime', () => {
       }
       expect([...seam.values()].some((values) => Math.max(...values) - Math.min(...values) > 0.99)).toBe(true);
 
-      const exported = await client.export('glb');
-      assertSuccess(exported);
-      const exportedJson = await io.binaryToJSON(exported.data[0]!.bytes);
+      const exported = await runtimeDocument.export('glb');
+      expect(exported.success).toBe(true);
+      if (!exported.success) {
+        throw new Error(exported.issues.map((issue) => issue.message).join('\n'));
+      }
+      const exportedJson = await io.binaryToJSON(exported.files[0].bytes);
       expect(exportedJson.json.materials).toEqual(expect.arrayContaining([copper, glass]));
-      const edited = await client.updateParameters({ anisotropy: 0.25 });
+      const edited = await runtimeDocument.update({ parameters: { anisotropy: 0.25 } });
       expect(edited.superseded).toBe(false);
       if (edited.superseded) {
         throw new Error('Unexpected superseded edit');
       }
-      assertSuccess(edited.geometry);
-      const { json: editedJson } = await io.binaryToJSON(extractGltfFromResult(edited.geometry)!);
+      const editedView = await runtimeDocument.view('model').rendering();
+      if (editedView.superseded) {
+        throw new Error('Unexpected superseded edited view');
+      }
+      assertRenderingSuccess(editedView.rendering);
+      const { json: editedJson } = await io.binaryToJSON(extractGltfFromResult(editedView.rendering)!);
       const editedCopper = editedJson.materials?.find((material) => material.name === copper.name);
       expect(editedCopper?.extensions?.['KHR_materials_anisotropy']).toEqual({
         anisotropyStrength: 0.25,
@@ -144,34 +150,34 @@ describe('standard physical materials through Replicad and the runtime', () => {
   );
 
   it('should diagnose mixed legacy and standard material settings', async () => {
-    const client = createTestRuntimeClient({
-      runtime: runtime(false),
-      files: {
-        'main.ts': `import { makeBox } from 'replicad'; export default () => ({ shape: makeBox([0,0,0],[1,1,1]), color: '#fff', material: {} });`,
-      },
+    const client = makeClient(false, {
+      'main.ts': `import { makeBox } from 'replicad'; export default () => ({ shape: makeBox([0,0,0],[1,1,1]), color: '#fff', material: {} });`,
     });
     clients.add(client);
-    const result = await client.render({ source: { path: 'main.ts' } });
+    const result = await client.open({ source: { path: 'main.ts' } }).evaluation();
     expect(result.superseded).toBe(false);
     if (result.superseded) {
       throw new Error('Unexpected superseded render');
     }
-    expect(result.geometry.success).toBe(false);
-    expect(JSON.stringify(result.geometry.issues)).toContain('Use material or legacy');
+    expect(result.evaluation.success).toBe(false);
+    expect(JSON.stringify(result.evaluation.issues)).toContain('Use material or legacy');
   }, 60_000);
 
   it('should retain embedded textures and physical materials across native-handle serialization', async () => {
-    const client = createTestRuntimeClient({ runtime: runtime(false), files: { 'main.ts': source } });
+    const client = makeClient(false, { 'main.ts': source });
     clients.add(client);
-    const boot = await client.render({ source: { path: 'main.ts' } });
+    const boot = await client
+      .open({ source: { path: 'main.ts' } })
+      .view('model')
+      .rendering();
     if (boot.superseded) {
       throw new Error('Unexpected superseded render');
     }
-    assertSuccess(boot.geometry);
+    assertRenderingSuccess(boot.rendering);
     const library = await import('replicad');
     const definition = await resolveRuntimePluginDefinition('kernel', replicadKernel());
-    const serialize = definition.serializeNativeHandle!;
-    const deserialize = definition.deserializeNativeHandle!;
+    const serialize = definition.serializeHandle!;
+    const deserialize = definition.deserializeHandle!;
     const context = mock<Parameters<typeof deserialize>[2]>();
     context.replicadLibrary = library;
     const image = Uint8Array.from(
@@ -184,17 +190,13 @@ describe('standard physical materials through Replicad and the runtime', () => {
       ...copper,
       pbrMetallicRoughness: { ...copper.pbrMetallicRoughness, baseColorTexture: { index: 0 } },
     };
-    const nativeHandle: Parameters<typeof serialize>[0]['nativeHandle'] = {
+    const nativeHandle: Parameters<typeof serialize>[0]['handle'] = {
       shapes: normalizeRenderShapes({ shape: library.makeCylinder(10, 20), material, name: 'Textured copper' }),
       images: [{ data: image, mimeType: 'image/png' }],
       textures: [{ source: 0 }],
     };
-    const serialized = serialize({ nativeHandle }, createMockKernelRuntime(), context);
-    const restored = deserialize(
-      { serializedNativeHandle: structuredClone(serialized) },
-      createMockKernelRuntime(),
-      context,
-    );
+    const serialized = serialize({ handle: nativeHandle }, createMockKernelRuntime(), context);
+    const restored = deserialize({ serialized: structuredClone(serialized) }, createMockKernelRuntime(), context);
     expect(restored.images?.[0]?.data).toEqual(image);
     expect(restored.shapes[0]?.material).toEqual(material);
     const geometries = render(normalizeRenderShapes(restored.shapes)).filter(

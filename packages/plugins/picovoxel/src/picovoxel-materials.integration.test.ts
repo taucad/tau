@@ -1,4 +1,5 @@
 /* eslint-disable @typescript-eslint/naming-convention -- Assert standardized glTF wire keys verbatim. */
+/* oxlint-disable typescript/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any. */
 import { readFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -10,18 +11,15 @@ import { createNodeIo } from '@taucad/geometry-core';
 import { geometryCache } from '@taucad/middleware';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineKernel } from '@taucad/runtime/kernel';
 import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
-import {
-  assertSuccess,
-  createMockKernelRuntime,
-  createTestRuntimeClient,
-  extractGltfFromResult,
-} from '@taucad/runtime-testing';
+import { createMockKernelRuntime, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { picovoxel, picovoxelKernel } from '@taucad/picovoxel';
 import type { Material } from '@taucad/picovoxel';
+import { picovoxelBuiltinModuleNames, picovoxelDetectPattern } from '#picovoxel.kernel.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const png = new Uint8Array(
@@ -151,6 +149,7 @@ const runtime = () =>
     plugins: [picovoxel({ kernels: { default: { wasm: 'serial' } } }), esbuild()],
     middleware: [geometryCache()],
   });
+const createClient = () => createTestRuntimeClient({ runtime: runtime() });
 const parse = async (bytes: Uint8Array<ArrayBuffer>) => {
   const io = await createNodeIo();
   const { json } = await io.binaryToJSON(bytes);
@@ -171,17 +170,16 @@ const expandedAttributes = (document: Awaited<ReturnType<typeof parse>>['documen
         );
       }),
     );
-const render = async (
-  client: ReturnType<typeof createTestRuntimeClient>,
-  main = source(),
-  lane: 'fast' | 'exact' = 'fast',
-) => {
-  const outcome = await client.render({ source: { entry: 'main.ts', files: files(main) }, renderOptions: { lane } });
+const render = async (client: ReturnType<typeof createClient>, main = source(), lane: 'fast' | 'exact' = 'fast') => {
+  const document = client.open({ source: { entry: 'main.ts', files: files(main) }, evaluateOptions: { lane } });
+  const outcome = await document.view('model').rendering();
   if (outcome.superseded) {
     throw new Error('Unexpected superseded PicoVoxel material render');
   }
-  assertSuccess(outcome.geometry);
-  return extractGltfFromResult(outcome.geometry)!;
+  if (!outcome.rendering.success || typeof outcome.rendering.artifact.content === 'string') {
+    throw new Error(outcome.rendering.issues.map(({ message }) => message).join('; '));
+  }
+  return { bytes: outcome.rendering.artifact.content, document };
 };
 
 const assertMaterialDelivery = async (bytes: Uint8Array<ArrayBuffer>, image = png) => {
@@ -232,20 +230,28 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
   it.each(['fast', 'exact'] as const)(
     'should preserve every factor, all 17 maps, codecs and geometry in the %s lane',
     async (lane) => {
-      const client = createTestRuntimeClient({ runtime: runtime() });
+      const client = createClient();
       try {
-        const plain = await parse(await render(client, source(false), lane));
-        const delivered = await assertMaterialDelivery(await render(client, source(), lane));
+        const plainRun = await render(client, source(false), lane);
+        const deliveredRun = await render(client, source(), lane);
+        const plain = await parse(plainRun.bytes);
+        const delivered = await assertMaterialDelivery(deliveredRun.bytes);
         expect(expandedAttributes(delivered.document)).toEqual(expandedAttributes(plain.document));
         expect(delivered.json.materials?.find((entry) => !entry.name)).toEqual(plain.json.materials?.[0]);
-        const exported = await client.export('glb');
-        assertSuccess(exported);
-        await assertMaterialDelivery(exported.data[0]!.bytes);
-        const gltf = await client.export('gltf');
-        assertSuccess(gltf);
-        expect(gltf.data).toHaveLength(1);
+        const exported = await deliveredRun.document.export('glb');
+        expect(exported.success).toBe(true);
+        if (!exported.success) {
+          throw new Error('GLB export failed');
+        }
+        await assertMaterialDelivery(exported.files[0].bytes);
+        const gltf = await deliveredRun.document.export('gltf');
+        expect(gltf.success).toBe(true);
+        if (!gltf.success) {
+          throw new Error('glTF export failed');
+        }
+        expect(gltf.files).toHaveLength(1);
         const io = await createNodeIo();
-        const json = JSON.parse(new TextDecoder().decode(gltf.data[0]!.bytes)) as Awaited<
+        const json = JSON.parse(new TextDecoder().decode(gltf.files[0].bytes)) as Awaited<
           ReturnType<typeof io.writeJSON>
         >['json'];
         const resolved = await io.readJSON({ json, resources: {} });
@@ -256,27 +262,41 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
             .map((entry) => new Uint8Array(entry.getImage()!)),
         ).toEqual([png, jpeg, webp]);
         expect(resolved.getRoot().listMeshes()).toHaveLength(3);
-        const scaled = await client.export('glb', {
-          exportOptions: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+        const scaled = await deliveredRun.document.export('glb', {
+          options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
         });
-        assertSuccess(scaled);
-        const { json: millimeters } = await parse(scaled.data[0]!.bytes);
+        expect(scaled.success).toBe(true);
+        if (!scaled.success) {
+          throw new Error('Scaled GLB export failed');
+        }
+        const { json: millimeters } = await parse(scaled.files[0].bytes);
         const expected = structuredClone(material);
         expected.extensions!.KHR_materials_volume!.thicknessFactor = 2;
         expected.extensions!.KHR_materials_volume!.attenuationDistance = 250;
         expect(millimeters.materials).toContainEqual(expected);
-        const stl = await client.export('stl');
-        assertSuccess(stl);
-        await render(client, source(false), 'exact');
-        const plainStl = await client.export('stl');
-        assertSuccess(plainStl);
-        expect(stl.data.map(({ bytes }) => bytes)).toEqual(plainStl.data.map(({ bytes }) => bytes));
+        const stl = await deliveredRun.document.export('stl');
+        expect(stl.success).toBe(true);
+        if (!stl.success) {
+          throw new Error('STL export failed');
+        }
+        const plainExact = await render(client, source(false), 'exact');
+        const plainStl = await plainExact.document.export('stl');
+        expect(plainStl.success).toBe(true);
+        if (!plainStl.success) {
+          throw new Error('Plain STL export failed');
+        }
+        expect(stl.files.map(({ bytes }) => bytes)).toEqual(plainStl.files.map(({ bytes }) => bytes));
         for (const format of ['glb', 'gltf'] as const) {
           // oxlint-disable-next-line eslint/no-await-in-loop -- One client owns one export request at a time.
-          const refused = await client.export(format, { exportOptions: { lane: 'fast' } });
+          const refused = await deliveredRun.document.export(format, { options: { lane: 'fast' } });
           expect(refused.success).toBe(false);
           expect(refused.issues).toEqual(
-            expect.arrayContaining([expect.objectContaining({ code: 'REPRESENTATION_UNSUPPORTED' })]),
+            expect.arrayContaining([
+              expect.objectContaining({
+                code: 'KERNEL_BINDING_FAILED',
+                message: expect.stringContaining('refuses a fast-lane GLB or glTF export'),
+              }),
+            ]),
           );
         }
       } finally {
@@ -288,10 +308,19 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
 
   it('should restore material snapshots from reopened SQLite and invalidate only the imported texture dependency', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tau-picovoxel-pbr-cache-'));
-    const plugin = picovoxelKernel({ wasm: 'serial' });
-    const definition = await resolveRuntimePluginDefinition('kernel', plugin);
-    const build = vi.spyOn(definition, 'createGeometry');
-    const restore = vi.spyOn(definition, 'deserializeNativeHandle');
+    const definition = await resolveRuntimePluginDefinition('kernel', picovoxelKernel({ wasm: 'serial' }));
+    const build = vi.fn(definition.evaluate);
+    const restore = vi.fn(definition.deserializeHandle);
+    const plugin = defineKernel({
+      ...definition,
+      id: 'picovoxel',
+      extensions: ['ts', 'js'],
+      detectImport: picovoxelDetectPattern,
+      builtinModuleNames: [...picovoxelBuiltinModuleNames],
+      evaluate: build,
+      serializeHandle: definition.serializeHandle!,
+      deserializeHandle: restore,
+    })({ wasm: 'serial' });
     const cachedRuntime = defineRuntime({ kernels: [plugin], plugins: [esbuild()], middleware: [geometryCache()] });
     const reopen = async (image: Uint8Array<ArrayBuffer>, format: 'glb' | 'gltf') => {
       const store = createSqliteComputeEngine({ directory });
@@ -303,22 +332,26 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
         }),
       });
       try {
-        const result = await client.render({
+        const document = client.open({
           source: { entry: 'main.ts', files: files(source(), image) },
-          renderOptions: { lane: 'exact' },
+          evaluateOptions: { lane: 'exact' },
         });
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential failures prove recovery of this same runtime.
+        const result = await document.view('model').rendering();
         if (result.superseded) {
           throw new Error('Unexpected superseded durable render');
         }
-        assertSuccess(result.geometry);
-        const exported = await client.export(format);
-        assertSuccess(exported);
-        if (format === 'glb') {
-          return exported.data[0]!.bytes;
+        expect(result.rendering.success).toBe(true);
+        const exported = await document.export(format);
+        if (!exported.success) {
+          throw new Error('Durable material export failed');
         }
-        expect(exported.data).toHaveLength(1);
+        if (format === 'glb') {
+          return exported.files[0].bytes;
+        }
+        expect(exported.files).toHaveLength(1);
         const io = await createNodeIo();
-        const json = JSON.parse(new TextDecoder().decode(exported.data[0]!.bytes)) as Awaited<
+        const json = JSON.parse(new TextDecoder().decode(exported.files[0].bytes)) as Awaited<
           ReturnType<typeof io.writeJSON>
         >['json'];
         return await io.writeBinary(await io.readJSON({ json, resources: {} }));
@@ -350,8 +383,6 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
       await assertMaterialDelivery(await reopen(changedPng, 'glb'), changedPng);
       expect(build).toHaveBeenCalledTimes(2);
     } finally {
-      build.mockRestore();
-      restore.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
   }, 120_000);
@@ -390,13 +421,13 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
     });
     const context = await definition.initialize({ wasm: 'serial' }, runtimeMock);
     try {
-      const result = await definition.createGeometry(
+      const result = await definition.evaluate(
         { entryPath: 'main.ts', parameters: { voxelSize: 1 }, options: { lane: 'exact' } },
         runtimeMock,
         context,
       );
-      const handle = result.nativeHandle;
-      const serialized = definition.serializeNativeHandle!({ nativeHandle: handle }, runtimeMock, context);
+      const { handle } = result;
+      const serialized = definition.serializeHandle!({ handle }, runtimeMock, context);
       authored.pbrMetallicRoughness!.baseColorFactor![0] = 0;
       authored.extensions!.KHR_materials_anisotropy!.anisotropyStrength = 0;
       authored.normalTexture!.extensions!['KHR_texture_transform'] = { offset: [9, 9] };
@@ -409,11 +440,7 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
       expect(handle.images?.[0]?.data.byteLength).toBe(png.byteLength);
       expect(handle.textures).toEqual(textures);
       expect(handle.samplers).toEqual(samplers);
-      const restored = definition.deserializeNativeHandle!(
-        { serializedNativeHandle: structuredClone(serialized) },
-        runtimeMock,
-        context,
-      );
+      const restored = definition.deserializeHandle!({ serialized: structuredClone(serialized) }, runtimeMock, context);
       expect(restored.shapes[0]!.material).toEqual(material);
       expect(restored.images?.[0]?.data).toEqual(png);
       const unalignedBytes = (bytes: Uint8Array<ArrayBuffer>) => {
@@ -429,7 +456,7 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
           triangles: unalignedBytes(shape.triangles),
         })),
       };
-      const copied = definition.deserializeNativeHandle!({ serializedNativeHandle: unaligned }, runtimeMock, context);
+      const copied = definition.deserializeHandle!({ serialized: unaligned }, runtimeMock, context);
       expect(copied.shapes[0]!.vertices).toEqual(handle.shapes[0]!.vertices);
       expect(copied.shapes[0]!.triangles).toEqual(handle.shapes[0]!.triangles);
       unaligned.shapes[0]!.vertices.fill(0);
@@ -438,21 +465,17 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
         ...serialized,
         shapes: serialized.shapes.map((shape) => ({ ...shape, vertices: shape.vertices.subarray(1) })),
       };
-      expect(() =>
-        definition.deserializeNativeHandle!({ serializedNativeHandle: malformed }, runtimeMock, context),
-      ).toThrow(TypeError);
-      expect(() =>
-        definition.deserializeNativeHandle!({ serializedNativeHandle: malformed }, runtimeMock, context),
-      ).toThrow('byte');
-      const meshed = await definition.meshGeometry!(
-        { nativeHandle: restored, options: { lane: 'exact' }, content: {} },
+      expect(() => definition.deserializeHandle!({ serialized: malformed }, runtimeMock, context)).toThrow(TypeError);
+      expect(() => definition.deserializeHandle!({ serialized: malformed }, runtimeMock, context)).toThrow('byte');
+      const meshed = await definition.render!(
+        { handle: restored, view: 'model', options: {}, content: {} },
         runtimeMock,
         context,
       );
-      if (meshed.geometry.format !== 'gltf') {
-        throw new Error('Expected restored GLB mesh');
+      if (typeof meshed.content === 'string') {
+        throw new TypeError('Expected restored GLB mesh');
       }
-      const { json, document } = await parse(meshed.geometry.content);
+      const { json, document } = await parse(meshed.content);
       expect(json.materials).toEqual([material]);
       expect(
         document
@@ -461,7 +484,7 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
           .map((entry) => new Uint8Array(entry.getImage()!)),
       ).toEqual([png, jpeg, webp]);
     } finally {
-      await definition.cleanup?.(context);
+      await definition.onDispose?.(context);
     }
   }, 120_000);
 
@@ -529,19 +552,21 @@ describe('PicoVoxel full physical materials through real WASM and runtime', () =
         'resources.textures[2].extensions.EXT_texture_webp.source = 0',
       ],
     ] as const;
-    const client = createTestRuntimeClient({ runtime: runtime() });
+    const client = createClient();
     try {
       for (const [property, mutation] of cases) {
+        const document = client.open({ source: { entry: 'main.ts', files: files(source(true, mutation)) } });
         // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential failures prove recovery of this same runtime.
-        const result = await client.render({ source: { entry: 'main.ts', files: files(source(true, mutation)) } });
+        const result = await document.view('model').rendering();
         expect(result.superseded, property).toBe(false);
         if (result.superseded) {
           throw new Error('Unexpected superseded invalid render');
         }
-        expect(result.geometry.success, property).toBe(false);
-        expect(result.geometry.issues.map(({ message }) => message).join('; '), property).toContain(property);
+        expect(result.rendering.success, property).toBe(false);
+        expect(result.rendering.issues.map(({ message }) => message).join('; '), property).toContain(property);
       }
-      await assertMaterialDelivery(await render(client));
+      const recovered = await render(client);
+      await assertMaterialDelivery(recovered.bytes);
     } finally {
       await client.shutdown();
     }

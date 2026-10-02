@@ -4,6 +4,7 @@
   "description": "Tau documentation site",
   "type": "module",
   "private": true,
+  "license": "Apache-2.0",
   "imports": {
     "#*": "./app/*"
   },
@@ -38,6 +39,7 @@
     "@types/node": "catalog:",
     "@types/react": "catalog:",
     "@types/react-dom": "catalog:",
+    "cheerio": "catalog:",
     "tailwindcss": "catalog:",
     "typescript": "catalog:",
     "vite": "catalog:",

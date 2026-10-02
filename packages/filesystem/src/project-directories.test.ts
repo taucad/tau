@@ -731,6 +731,73 @@ describe('WorkspaceFileService', () => {
       commitProvider = await providerRegistry.getProvider(scope);
     });
 
+    it.each(
+      ['main.ts', '.tau/workbench/layout.json', '.tau/workbench/views/v-abcd1234.json'].flatMap((heldPath) =>
+        [false, true].map((rejectWrite) => ({ heldPath, rejectWrite })),
+      ),
+    )(
+      'should keep the manifest unpublished while $heldPath is held (failure=$rejectWrite)',
+      async ({ heldPath, rejectWrite }) => {
+        const files = {
+          ...defaultFiles,
+          '.tau/workbench/layout.json': {
+            content: encoder.encode(
+              '{"version":1,"lanes":{"chat":true,"workbench":true},"viewer":{"kind":"group","tabs":[{"kind":"view","view":"v-abcd1234"}]},"workbench":{"kind":"group","tabs":[]}}\n',
+            ),
+          },
+          '.tau/workbench/views/v-abcd1234.json': { content: encoder.encode('{"version":1,"entryPath":"main.ts"}\n') },
+        };
+        const entered = Promise.withResolvers<void>();
+        const release = Promise.withResolvers<void>();
+        const originalWrite = commitProvider.writeFile.bind(commitProvider);
+        const writes: string[] = [];
+        let hold = true;
+        vi.spyOn(commitProvider, 'writeFile').mockImplementation(async (path, data) => {
+          writes.push(path);
+          if (path === `${directory}/${heldPath}` && hold) {
+            hold = false;
+            entered.resolve();
+            await release.promise;
+            if (rejectWrite) {
+              throw new Error('Initial input write failed.');
+            }
+          }
+          await originalWrite(path, data);
+        });
+        let settled = false;
+        const committing = (async () => {
+          try {
+            return await commit(files);
+          } finally {
+            settled = true;
+          }
+        })();
+        const result = rejectWrite
+          ? expect(committing).rejects.toThrow('Initial input write failed.')
+          : expect(committing).resolves.toEqual({ status: 'committed' });
+        try {
+          await entered.promise;
+          expect(settled).toBe(false);
+          expect(await commitProvider.exists(`${directory}/tau.json`)).toBe(false);
+          release.resolve();
+          await result;
+          if (rejectWrite) {
+            expect(await commitProvider.exists(`${directory}/tau.json`)).toBe(false);
+            await expect(commit(files)).resolves.toEqual({ status: 'committed' });
+          }
+          expect(writes.at(-1)).toBe(`${directory}/tau.json`);
+          await expect(commitProvider.readFile(`${directory}/tau.json`)).resolves.toEqual(manifest);
+          for (const [path, file] of Object.entries(files)) {
+            // oxlint-disable-next-line eslint/no-await-in-loop -- Every journaled file's exact bytes are checked after the same settled commit.
+            await expect(commitProvider.readFile(`${directory}/${path}`)).resolves.toEqual(file.content);
+          }
+          await expect(commit(files)).resolves.toEqual({ status: 'already-committed' });
+        } finally {
+          release.resolve();
+        }
+      },
+    );
+
     it('rejects a memory scope before storage-key resolution or provider access', async () => {
       const resolveStorageRootKey = vi.spyOn(providerRegistry, 'resolveStorageRootKey');
       const getProvider = vi.spyOn(providerRegistry, 'getProvider');

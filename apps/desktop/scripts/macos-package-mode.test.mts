@@ -10,6 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
 import { parseMacosPackageMode } from './macos-package-mode.mjs';
@@ -28,3 +29,12 @@ assert.throws(() => parseMacosPackageMode(['--zipped']), {
   message: 'Usage: <script> [--release | --unsigned] [--zip]',
 });
 console.log('✓ macOS package modes are mutually exclusive, and only release zips unless --zip is passed');
+
+const packageSource = readFileSync(new URL('package-macos.mts', import.meta.url), 'utf8');
+const licenceGate = packageSource.indexOf('if (zip) {');
+assert.ok(licenceGate > packageSource.indexOf('parseMacosPackageMode(process.argv.slice(2))'));
+assert.ok(
+  packageSource.slice(licenceGate).startsWith(`if (zip) {
+  execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')],`),
+);
+assert.ok(licenceGate < packageSource.indexOf('let geospecAssemblyInput'));

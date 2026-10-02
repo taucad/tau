@@ -1,10 +1,9 @@
 import { rpcClientErrorCode } from '@taucad/chat';
 import type {
   RpcGraphicsClient,
-  RpcGraphicsExportGeometryResult,
+  RpcGraphicsExportModelResult,
   RpcHandlerError,
   RpcImageClient,
-  RpcInvocationContext,
   RpcParameterClient,
   RpcRuntimeClient,
 } from '@taucad/chat/rpc';
@@ -14,7 +13,9 @@ import {
   getParametersOutputSchema,
   parameterManifestWireSchema,
 } from '@taucad/chat/schemas';
-import type { ExportFile, HashedGeometryResult, KernelIssue } from '@taucad/runtime/types';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { RuntimeClient, ViewOffer, WideViewRequest } from '@taucad/runtime';
+import type { ExportFile, KernelIssue } from '@taucad/runtime/types';
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { parameterSetMachine } from '@taucad/parameters/set-machine';
@@ -28,30 +29,17 @@ const glbMagic = 0x46_54_6c_67;
 const glbVersion = 2;
 
 /** Runtime surface required by request-scoped agent geometry operations. @public */
-export type RuntimeAgentClient = Readonly<{
-  evaluate(input: {
-    readonly source: { readonly path: string };
-    readonly parameters: Record<string, never>;
-    readonly content: { readonly includeEdges: boolean };
-    readonly signal?: AbortSignal;
-  }): Promise<HashedGeometryResult>;
-  export(
-    format: string,
-    options: {
-      readonly source: { readonly path: string };
-      /** Transcoder options; the runtime validates them against the export route's schema. */
-      readonly exportOptions?: Readonly<Record<string, unknown>>;
-      readonly signal?: AbortSignal;
-    },
-  ): Promise<
-    | {
-        readonly success: true;
-        readonly data: readonly ExportFile[];
-        readonly issues: readonly KernelIssue[];
-      }
-    | { readonly success: false; readonly issues: readonly KernelIssue[] }
-  >;
-}>;
+export type RuntimeAgentClient = Pick<RuntimeClient, 'describe' | 'capabilities'> & {
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'signal'>) => Pick<
+    ReturnType<RuntimeClient['open']>,
+    'evaluation' | 'export' | 'close'
+  > & {
+    view: (
+      id?: string,
+      request?: Pick<WideViewRequest, 'instance' | 'options'>,
+    ) => Pick<ReturnType<ReturnType<RuntimeClient['open']>['view']>, 'rendering' | 'close'>;
+  };
+};
 
 /** Existing image-service request injected by each runtime placement. @public */
 export type RuntimeAgentImageJob = (
@@ -69,7 +57,7 @@ export type RuntimeAgentImageJob = (
         background: string;
         axes: boolean;
         scaleBar: boolean;
-        lengthSymbol: string;
+        lengthSymbol?: string;
       }>;
     }>
   | Readonly<{
@@ -92,7 +80,7 @@ export type RuntimeAgentErrorMapper = (error: unknown, targetFile: string) => Rp
 
 /** Inputs for building request-scoped runtime-backed agent RPC clients. @public */
 export type CreateRuntimeAgentClientsInput = Readonly<{
-  runtime: RuntimeAgentClient;
+  runtime: RuntimeAgentClient | (() => Promise<RuntimeAgentClient>);
   exportImage: RuntimeAgentImageExporter;
   mapRuntimeError: RuntimeAgentErrorMapper;
 }>;
@@ -330,165 +318,249 @@ export const createRuntimeAgentClients = (
   graphics: RpcGraphicsClient;
   images: RpcImageClient;
 }> => {
-  const evaluate = async (targetFile: string, context?: RpcInvocationContext): Promise<HashedGeometryResult> => {
-    context?.signal?.throwIfAborted();
-    return input.runtime.evaluate({
-      source: { path: assertRootedPath(targetFile) },
-      parameters: {},
-      content: { includeEdges: true },
-      signal: context?.signal,
-    });
-  };
+  const runtimeFor = async (): Promise<RuntimeAgentClient> =>
+    typeof input.runtime === 'function' ? input.runtime() : input.runtime;
 
   const kernelClient: RpcRuntimeClient = {
-    async getKernelResult(targetFile, context) {
+    async evaluateModel({ targetFile, includeCapabilities }, context) {
+      const rooted = assertRootedPath(targetFile);
+      let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
-        const result = await evaluate(targetFile, context);
+        const runtime = await runtimeFor();
+        context?.signal?.throwIfAborted();
+        document = runtime.open({ source: { path: rooted }, signal: context?.signal });
+        const outcome = await document.evaluation({ signal: context?.signal });
+        if (outcome.superseded) {
+          throw new Error('Model evaluation was superseded');
+        }
+        const { evaluation } = outcome;
+        let issues = [...evaluation.issues];
+        let { sourceRevision } = evaluation;
+        let ready = evaluation.success;
+        if (evaluation.success && evaluation.views.length > 0) {
+          const view = document.view();
+          try {
+            const projected = await view.rendering({ signal: context?.signal });
+            if (projected.superseded) {
+              throw new Error('Default view rendering was superseded');
+            }
+            issues = [...issues, ...projected.rendering.issues];
+            sourceRevision = projected.rendering.sourceRevision ?? sourceRevision;
+            ready = projected.rendering.success;
+          } finally {
+            view.close();
+          }
+        }
+        const offered = evaluation.success
+          ? {
+              views: evaluation.views.map(({ id }) => id),
+              instances: Object.fromEntries(
+                evaluation.views
+                  .filter(({ instances }) => instances !== undefined)
+                  .map(({ id, instances }) => [id, [...(instances ?? [])]]),
+              ),
+              exports: Object.fromEntries(evaluation.exports.map(({ id, extension }) => [id, extension])),
+            }
+          : {};
+        let capabilities = {};
+        if (includeCapabilities && evaluation.success) {
+          const description = await runtime.describe({ source: { path: rooted }, signal: context?.signal });
+          const routes = runtime.capabilities?.routes.filter((route) => route.kernelId === description.kernelId) ?? [];
+          const metadata = (options: ViewOffer['options']) => ({
+            schema: Object.fromEntries(Object.entries(options?.schema ?? { type: 'object', properties: {} })),
+            defaults: { ...options?.defaults },
+          });
+          capabilities = {
+            capabilities: {
+              views: Object.fromEntries(evaluation.views.map(({ id, options }) => [id, metadata(options)])),
+              exports: Object.fromEntries(evaluation.exports.map(({ id, options }) => [id, metadata(options)])),
+              targets: [
+                ...new Set([
+                  ...evaluation.exports.map(({ id }) => id),
+                  ...evaluation.exports.map(({ extension }) => extension),
+                  ...routes.map(({ targetFormat }) => targetFormat),
+                ]),
+              ],
+            },
+          };
+        }
         context?.signal?.throwIfAborted();
         return {
           success: true,
-          status: result.success ? 'ready' : 'error',
-          kernelIssues: [...result.issues],
-          // R4/I5: the verdict names the source it was computed from, failures included.
-          ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
+          status: ready ? 'ready' : 'error',
+          kernelIssues: issues,
+          ...(sourceRevision === undefined ? {} : { sourceRevision }),
+          ...offered,
+          ...capabilities,
         };
       } catch (error) {
-        return input.mapRuntimeError(error, targetFile);
+        return input.mapRuntimeError(error, rooted);
+      } finally {
+        document?.close();
       }
     },
   };
 
   const graphics: RpcGraphicsClient = {
-    async exportGeometry({ targetFile, format, exportOptions }, context): Promise<RpcGraphicsExportGeometryResult> {
+    async exportModel({ targetFile, to, options }, context): Promise<RpcGraphicsExportModelResult> {
+      const rooted = assertRootedPath(targetFile);
+      let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
+        const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
-        const rooted = assertRootedPath(targetFile);
-        const result = await input.runtime.export(format, {
-          source: { path: rooted },
-          ...(exportOptions === undefined ? {} : { exportOptions }),
+        document = runtime.open({ source: { path: rooted }, signal: context?.signal });
+        const result = await document.export(to, {
+          ...(options === undefined ? {} : { options }),
           signal: context?.signal,
         });
         context?.signal?.throwIfAborted();
         return result.success
-          ? { success: true, files: [...result.data], issues: [...result.issues] }
+          ? {
+              success: true,
+              exportId: result.exportId,
+              files: [...result.files],
+              issues: [...result.issues],
+              ...(result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision }),
+            }
           : {
               success: false,
               errorCode: issueErrorCode(result.issues),
-              message: issueMessage(result.issues, 'Geometry export failed'),
+              message: issueMessage(result.issues, 'Model export failed'),
             };
       } catch (error) {
-        return input.mapRuntimeError(error, targetFile);
+        return input.mapRuntimeError(error, rooted);
+      } finally {
+        document?.close();
       }
     },
   };
 
   const images: RpcImageClient = {
     async captureImages(captureInput, context) {
+      const targetFile = assertRootedPath(captureInput.targetFile);
+      let document: ReturnType<RuntimeAgentClient['open']> | undefined;
       try {
-        const targetFile = assertRootedPath(captureInput.targetFile);
-        const result = await evaluate(targetFile, context);
+        const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
-        if (!result.success) {
+        document = runtime.open({ source: { path: targetFile }, signal: context?.signal });
+        const evaluated = await document.evaluation({ signal: context?.signal });
+        if (evaluated.superseded) {
+          throw new Error('Model evaluation was superseded');
+        }
+        const { evaluation } = evaluated;
+        if (!evaluation.success) {
           return {
             success: false,
-            errorCode: issueErrorCode(result.issues),
-            message: issueMessage(result.issues, 'Render failed'),
+            errorCode: issueErrorCode(evaluation.issues),
+            message: issueMessage(evaluation.issues, 'Evaluation failed'),
           };
         }
-        const geometry = result.data;
-        // R4/I5: an image is evidence about a revision, not about "the model".
-        const provenance = result.sourceRevision === undefined ? {} : { sourceRevision: result.sourceRevision };
-        if (geometry.format === 'webrtc') {
+        const selectedView = captureInput.view ?? evaluation.views[0]?.id;
+        if (selectedView === undefined) {
           return {
             success: false,
             errorCode: rpcClientErrorCode.unknown,
-            message: 'Live WebRTC geometry cannot be captured headlessly',
+            message: 'This model offers no view to capture',
           };
         }
-        if (geometry.format === 'svg') {
-          if (captureInput.mode === 'multi_angle') {
+        const view = document.view(selectedView, {
+          ...(captureInput.instance === undefined ? {} : { instance: captureInput.instance }),
+          ...(captureInput.options === undefined ? {} : { options: captureInput.options }),
+        });
+        try {
+          const projected = await view.rendering({ signal: context?.signal });
+          if (projected.superseded) {
+            throw new Error('View rendering was superseded');
+          }
+          const { rendering } = projected;
+          if (!rendering.success) {
+            return {
+              success: false,
+              errorCode: issueErrorCode(rendering.issues),
+              message: issueMessage(rendering.issues, 'Render failed'),
+            };
+          }
+          context?.signal?.throwIfAborted();
+          const artifact = asKnownArtifact(rendering.artifact);
+          if (artifact === undefined) {
             return {
               success: false,
               errorCode: rpcClientErrorCode.unknown,
-              message: 'Planar SVG drawings have one canonical view',
+              message: `Cannot capture ${rendering.artifact.mimeType}`,
             };
           }
-          if (geometry.units === undefined) {
-            return {
-              success: false,
-              errorCode: rpcClientErrorCode.unknown,
-              message: 'Annotated SVG capture requires the artifact coordinate length unit',
-            };
+          const provenance = rendering.sourceRevision === undefined ? {} : { sourceRevision: rendering.sourceRevision };
+          const echo = {
+            view: rendering.view,
+            ...(rendering.instance === undefined ? {} : { instance: rendering.instance }),
+          };
+          if (artifact.mimeType === 'image/svg+xml') {
+            const files = requireImageFiles(
+              await input.exportImage({
+                kind: 'capture',
+                identity: `agent-host:${targetFile}:${rendering.hash}:${rendering.view}:${rendering.instance ?? ''}`,
+                sourceFormat: 'svg',
+                sourcePath: targetFile,
+                content: artifact.content,
+                format: 'png',
+                signal: context?.signal,
+                exportOptions: {
+                  width: captureSize,
+                  height: captureSize,
+                  margin: 0.1,
+                  background: '#242424',
+                  axes: false,
+                  scaleBar: artifact.units !== undefined,
+                  ...(artifact.units === undefined ? {} : { lengthSymbol: artifact.units.length }),
+                },
+              }),
+              { count: 1, mimeType: 'image/png' },
+            );
+            context?.signal?.throwIfAborted();
+            return { success: true, images: [{ ...echo, dataUrl: captureFilesToDataUrls(files)[0]! }], ...provenance };
           }
+          assertGlb(artifact.content);
+          const exportOptions = buildCaptureExportOptions({
+            mode: captureInput.mode,
+            size: captureSize,
+            ...(captureInput.includeEdges === undefined ? {} : { includeEdges: captureInput.includeEdges }),
+          });
+          const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
+          const names =
+            captureInput.mode === 'multi_angle'
+              ? canonicalCaptureViews.map(({ id }) => `render-${id}.webp`)
+              : ['render.webp'];
           const files = requireImageFiles(
             await input.exportImage({
               kind: 'capture',
-              identity: `agent-host:${targetFile}:${geometry.hash}:drawing`,
-              sourceFormat: 'svg',
+              identity: `agent-host:${targetFile}:${rendering.hash}:${captureInput.mode}:${rendering.view}:${rendering.instance ?? ''}`,
+              sourceFormat: 'glb',
               sourcePath: targetFile,
-              content: geometry.content,
-              format: 'png',
+              geometryHash: rendering.hash,
+              content: artifact.content,
+              format: 'webp',
               signal: context?.signal,
-              exportOptions: {
-                width: captureSize,
-                height: captureSize,
-                margin: 0.1,
-                background: '#242424',
-                axes: true,
-                scaleBar: true,
-                lengthSymbol: geometry.units.length,
-              },
+              exportOptions,
             }),
-            { count: 1, mimeType: 'image/png' },
+            { count, mimeType: 'image/webp', names },
           );
           context?.signal?.throwIfAborted();
+          const dataUrls = captureFilesToDataUrls(files);
           return {
             success: true,
-            images: [{ view: 'drawing', dataUrl: captureFilesToDataUrls(files)[0]! }],
+            images:
+              captureInput.mode === 'multi_angle'
+                ? canonicalCaptureViews.map(({ id }, index) => ({ ...echo, angle: id, dataUrl: dataUrls[index]! }))
+                : [{ ...echo, angle: 'isometric', dataUrl: dataUrls[0]! }],
             ...provenance,
           };
+        } finally {
+          view.close();
         }
-
-        assertGlb(geometry.content);
-        const exportOptions = buildCaptureExportOptions({
-          mode: captureInput.mode,
-          size: captureSize,
-          ...(captureInput.includeEdges === undefined ? {} : { includeEdges: captureInput.includeEdges }),
-        });
-        const count = captureInput.mode === 'multi_angle' ? canonicalCaptureViews.length : 1;
-        const names =
-          captureInput.mode === 'multi_angle'
-            ? canonicalCaptureViews.map((view) => `render-${view.id}.webp`)
-            : ['render.webp'];
-        const files = requireImageFiles(
-          await input.exportImage({
-            kind: 'capture',
-            identity: `agent-host:${targetFile}:${geometry.hash}:${captureInput.mode}`,
-            sourceFormat: 'glb',
-            sourcePath: targetFile,
-            geometryHash: geometry.hash,
-            content: geometry.content,
-            format: 'webp',
-            signal: context?.signal,
-            exportOptions,
-          }),
-          { count, mimeType: 'image/webp', names },
-        );
-        context?.signal?.throwIfAborted();
-        const dataUrls = captureFilesToDataUrls(files);
-        return {
-          success: true,
-          images:
-            captureInput.mode === 'multi_angle'
-              ? canonicalCaptureViews.map((view, index) => ({
-                  view: view.id,
-                  dataUrl: dataUrls[index]!,
-                }))
-              : [{ view: 'isometric', dataUrl: dataUrls[0]! }],
-          ...provenance,
-        };
       } catch (error) {
-        return input.mapRuntimeError(error, captureInput.targetFile);
+        return input.mapRuntimeError(error, targetFile);
+      } finally {
+        document?.close();
       }
     },
   };

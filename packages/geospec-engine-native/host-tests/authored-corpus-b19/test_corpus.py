@@ -102,12 +102,7 @@ def _admit_subject(
         native_engine=native_engine,
         native_module=native_module,
     )
-    subject = GeoSpecSubject(
-        public_engine,
-        row["subjectSlot"],
-        expected_identity["field"],
-        actual_identity,
-    )
+    subject = public_engine._subject({"result": {"subject": {expected_identity["field"]: actual_identity}}}, row["subjectSlot"])
     return native_engine, subject, {
         "receipt": _utf8_record(receipt_bytes),
         "subject": {

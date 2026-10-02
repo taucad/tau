@@ -852,6 +852,7 @@ describe('ProjectLibrary', () => {
         expect(verifyProjectQuiescent).toHaveBeenCalledWith(mockProjects[0]!.id);
         expect(mockToastError).toHaveBeenCalledWith(
           `Could not delete ${mockProjects[0]!.name} permanently`,
+          // oxlint-disable-next-line typescript/no-unsafe-assignment -- Vitest's asymmetric matcher is typed any.
           expect.objectContaining({ description: expect.stringMatching(/Restore and open/u) }),
         );
       });

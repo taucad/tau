@@ -39,6 +39,9 @@ export function collectClippableTargets(rootGroup: THREE.Object3D): ClippableTar
     } else if (isPoints(child)) {
       points.push(child);
     } else if (isMesh(child)) {
+      if (child.matrixAutoUpdate) {
+        child.updateMatrix();
+      }
       child.matrixAutoUpdate = false;
       meshes.push(child);
     }

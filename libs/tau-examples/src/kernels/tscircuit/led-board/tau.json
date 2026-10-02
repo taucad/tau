@@ -1,0 +1,13 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_c5CdXg19CSYgK6o1L1PNY",
+  "name": "LED Board",
+  "description": "A small printed circuit board described in tscircuit TSX: two resistors, an LED and a SOIC-8 controller wired with explicit traces on a 30 mm by 20 mm board. Render the 3D board, or switch the output to the schematic or PCB layout, all from one component tree.",
+  "tags": ["electronics", "pcb", "tscircuit"],
+  "assets": {
+    "main": {
+      "entryPath": "main.tsx",
+      "thumbnail": "thumbnail.webp"
+    }
+  }
+}

@@ -8,11 +8,14 @@
  * - Workers or other JS runtimes
  */
 import type { RevisionChangeOutput, RevisionRowOutput } from '#schemas/tools/revisions.tool.schema.js';
+import type { SourceRevisionOutput } from '#schemas/tools/source-revision.schema.js';
+import type { DeterministicEditFileInput } from '#schemas/tools/edit-file.tool.schema.js';
 import type {
   CaptureImagesRpcResult,
   CaptureImagesRpcInput,
-  ExportGeometryRpcInput,
-  GetKernelResultRpcResult,
+  EvaluateModelRpcInput,
+  ExportModelRpcInput,
+  EvaluateModelRpcResult,
   RpcClientErrorCode,
   RunGeoSpecTestsRpcInput,
   RunGeoSpecTestsRpcResult,
@@ -88,6 +91,8 @@ export type RpcFileSystem = {
    * pattern — never call `readFile` on agent-supplied paths without bounds.
    */
   readFile(path: string): Promise<string>;
+  /** Exact owned bytes from a canonical rooted path; refuses files above 256 MiB. */
+  readBinaryFile(path: string): Promise<Uint8Array<ArrayBuffer>>;
   writeFile(path: string, content: string): Promise<void>;
   writeFileChecked(input: CheckedFileWrite): Promise<CheckedFileWriteResult>;
   deleteFileChecked(input: {
@@ -99,12 +104,7 @@ export type RpcFileSystem = {
   readdir(path: string): Promise<RpcDirectoryEntry[]>;
   exists(path: string): Promise<boolean>;
   appendFile(path: string, content: string): Promise<void>;
-  editFile(
-    path: string,
-    oldString: string,
-    newString: string,
-    replaceAll?: boolean,
-  ): Promise<{
+  editFile(input: DeterministicEditFileInput): Promise<{
     occurrences: number;
     staleRecovered?: true;
     diffStats: DiffStatsWithContent;
@@ -151,7 +151,7 @@ export type RpcFileStat =
  * @public
  */
 export type RpcRuntimeClient = {
-  getKernelResult(targetFile: string, context?: RpcInvocationContext): Promise<GetKernelResultRpcResult>;
+  evaluateModel(input: EvaluateModelRpcInput, context?: RpcInvocationContext): Promise<EvaluateModelRpcResult>;
 };
 
 /** Connected runtime's model-file predicate for workbench view entry paths. @public */
@@ -169,15 +169,17 @@ export type RpcParameterClient = {
 };
 
 /**
- * Success/failure surface for {@link RpcGraphicsClient.exportGeometry} before
+ * Success/failure surface for {@link RpcGraphicsClient.exportModel} before
  * the RPC handler persists bytes to `.tau/artifacts/`.
  *
  * @public
  */
-export type RpcGraphicsExportGeometryResult =
+export type RpcGraphicsExportModelResult =
   | {
       success: true;
+      exportId: string;
       files: ExportFile[];
+      sourceRevision?: SourceRevisionOutput;
       /** The non-fatal issues the runtime returned with the files; the handler hands the warnings to the agent. */
       issues?: KernelIssue[];
     }
@@ -196,10 +198,10 @@ export type RpcGraphicsExportGeometryResult =
  * @public
  */
 export type RpcGraphicsClient = {
-  exportGeometry(
-    args: Pick<ExportGeometryRpcInput, 'targetFile' | 'format' | 'exportOptions'>,
+  exportModel(
+    args: Pick<ExportModelRpcInput, 'targetFile' | 'to' | 'options'>,
     context?: RpcInvocationContext,
-  ): Promise<RpcGraphicsExportGeometryResult>;
+  ): Promise<RpcGraphicsExportModelResult>;
 };
 
 /** Browser/headless image capture client independent of a mounted viewport. @public */

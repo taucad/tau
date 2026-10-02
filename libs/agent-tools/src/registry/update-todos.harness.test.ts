@@ -21,6 +21,13 @@ const memoryFileSystem = (files: Map<string, string>): RpcFileSystem => ({
     }
     return content;
   },
+  readBinaryFile: async (path) => {
+    const content = files.get(path);
+    if (content === undefined) {
+      throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
+    }
+    return new TextEncoder().encode(content);
+  },
   writeFile: async (path, content) => {
     files.set(path, content);
   },

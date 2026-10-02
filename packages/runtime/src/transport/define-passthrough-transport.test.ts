@@ -11,11 +11,11 @@ import { z } from 'zod';
 import { definePassthroughTransport, defineRuntimeTransport } from '#transport/define-runtime-transport.js';
 import type { RuntimeTransportClient, TransportClientReady } from '#transport/runtime-transport.types.js';
 import type { TransportDescriptor } from '#transport/runtime-transport-descriptor.types.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 
 const stubClient = <const Id extends 'foo' | 'bar'>(
   id: Id,
-): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, Id> => {
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, Id> => {
   const closed = Promise.resolve({ cause: 'requested' } as const);
   return {
     id,
@@ -33,9 +33,9 @@ const stubClient = <const Id extends 'foo' | 'bar'>(
     async initialize() {
       throw new Error('stub');
     },
-    reservePreview: () => ({}),
-    renderTimeoutRecovery: { kind: 'unsupported' },
-    async resolveGeometry() {
+    signalDocumentAbort: () => false,
+    operationTimeoutRecovery: { kind: 'unsupported' },
+    async resolveBinary() {
       throw new Error('stub');
     },
     async close() {
@@ -47,7 +47,7 @@ const stubClient = <const Id extends 'foo' | 'bar'>(
 
 describe('definePassthroughTransport — callable TransportPlugin', () => {
   it('returns a callable transport with literal `id` and `materialize`', () => {
-    const clientFactory = (): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, 'foo'> =>
+    const clientFactory = (): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, 'foo'> =>
       stubClient('foo');
     clientFactory.describe = (): TransportDescriptor<'foo'> => stubClient('foo').describe();
 

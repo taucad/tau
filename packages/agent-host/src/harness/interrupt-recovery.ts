@@ -67,7 +67,7 @@ finished. Tools that mutate state (file writes, edits, deletes) may have
 partially executed.
 
 Before retrying, verify the current state of any file or resource you were
-operating on (read_file / list_directory / get_kernel_result) and only then
+operating on (read_file / list_directory / evaluate_model) and only then
 decide whether to repeat, adjust, or skip the cancelled work. Do NOT assume
 the cancelled tools left the system unchanged.`;
 };

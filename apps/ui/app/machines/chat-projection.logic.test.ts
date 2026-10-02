@@ -416,16 +416,19 @@ describe('chatProjectionLogic (PV-S7)', () => {
     expect(selectTurnRevision(project(rows.slice(0, 1), 1), first.turnId)).toBeUndefined();
     expect(selectTurnRevision(project(rows.slice(0, settledAt - 1), 1), first.turnId)).toEqual({
       attempt: 1,
+      hasChanges: false,
       isWaiting: false,
     });
     /* The terminal row is folded and the settlement row is not: the save is on its way. */
     expect(selectTurnRevision(project(rows.slice(0, settledAt), 1), first.turnId)).toEqual({
       attempt: 1,
+      hasChanges: false,
       terminal: 'completed',
       isWaiting: false,
     });
     expect(selectTurnRevision(project(rows, 7), first.turnId)).toEqual({
       attempt: 1,
+      hasChanges: false,
       terminal: 'completed',
       isWaiting: false,
       settlement: { type: 'turn.finalized', revisionId: first.revisionId },
@@ -433,6 +436,38 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const last = rows.findLast((row) => row.type === 'turn.finalized')!;
     expect(selectTurnRevision(project(rows, 7), last.turnId)?.settlement).toEqual({ type: 'turn.finalized' });
     expect(selectTurnRevision(project(rows, 7), 'another-turn')).toBeUndefined();
+  });
+
+  it.each([true, false])('retains only a verified earlier result across run IDs (proof=%s)', (verified) => {
+    const rows = [
+      lifecycleRow(0, 'admitted'),
+      logRow(1, { type: 'message.appended', message: { id: 'u1', role: 'user', content: 'Edit' } }),
+      lifecycleRow(2, 'running'),
+      logRow(
+        3,
+        verified
+          ? { type: 'turn.changed', chatId: 'chat-1', turnId: 'u1', attempt: 1, checkoutId: 'live' }
+          : { type: 'message.appended', message: { id: 'a1', role: 'assistant', content: 'Done' } },
+      ),
+      lifecycleRow(4, 'completed'),
+      logRow(5, {
+        type: 'turn.finalized',
+        chatId: 'chat-1',
+        projectId: 'p',
+        turnId: 'u1',
+        attempt: 1,
+        revisionId: 'rev-5',
+        changedPaths: [],
+        runIds: ['run_1'],
+        trigger: 'turn',
+      }),
+      lifecycleRow(6, 'admitted', 'run_2'),
+      logRow(7, { type: 'message.appended', runId: 'run_2', message: { id: 'u1', role: 'user', content: 'Edit' } }),
+      lifecycleRow(8, 'running', 'run_2'),
+    ];
+    const selected = selectTurnRevision(project(rows, 1), 'u1');
+    expect(selected?.hasChanges).toBe(false);
+    expect(selected?.previousRevisionId).toBe(verified ? 'rev-5' : undefined);
   });
 
   it('keeps a turn waiting while its attempt is paused on an interrupt (PV-S9)', () => {

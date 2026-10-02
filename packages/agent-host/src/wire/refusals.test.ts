@@ -51,6 +51,10 @@ describe('the refusal registry (D11, I17)', () => {
     expect(isResumable('A_CODE_FROM_A_NEWER_BUILD')).toBe(false);
   });
 
+  it('should retain the revision transfer limit owner without automatic retry', () => {
+    expect(refusalOf('FETCH_LIMIT_EXCEEDED')).toEqual({ owner: 'revisions', retry: 'never' });
+  });
+
   it('should end no run with a wait code: a wait code is never resumable', () => {
     const waits = Object.entries(refusals).filter(([, entry]) => entry.retry === 'wait');
     expect(waits.length).toBeGreaterThan(0);

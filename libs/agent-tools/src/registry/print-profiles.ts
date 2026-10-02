@@ -1,9 +1,11 @@
 import type { JsonObject } from '@taucad/agent-host';
 import type { RequestPrintInput } from '@taucad/chat';
-import type { RpcFileSystem } from '@taucad/chat/rpc';
+import type { MachineSettingsService, MachineSettingsRecord } from '@taucad/types';
+import { readMachineConfiguration, machineSettingsPath } from '@taucad/runtime/machine/settings';
+import type { SavedSettingsValues } from '@taucad/runtime/machine/settings';
+import { slicingPreferences } from '@taucad/slicer/preferences';
+import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
 import type { MachineDirectoryEntry, MachineObservedMaterial, MachineProvider } from '@taucad/runtime/machine';
-import { printIntentPath, readPrintIntent } from '@taucad/slicer/print-intent';
-import type { PrintIntent } from '@taucad/slicer/print-intent';
 import {
   bambuPlates,
   describeBambuStudioSettings,
@@ -12,7 +14,6 @@ import {
   resolveBambuStudioSelection,
 } from '@taucad/slicer/bambu-studio';
 import type { BambuMachineHints, BambuPresetSummary, BambuStudioSelection } from '@taucad/slicer/bambu-studio';
-import { getErrno } from '@taucad/utils/error';
 
 /**
  * The Bambu Studio functions the print tools use. `@taucad/slicer/bambu-studio`
@@ -97,7 +98,15 @@ const defined = (record: Readonly<Record<string, unknown>>): JsonObject =>
   Object.fromEntries(Object.entries(record).filter(([, value]) => value !== undefined)) as JsonObject;
 
 /** The project's print intent file as one call read it. @internal */
-export type PrintIntentFile = ReturnType<typeof readPrintIntent>;
+export type ResolvedMachinePreferences = Readonly<{
+  status: 'current';
+  preferences: SavedSettingsValues<typeof slicingPreferences.schema> &
+    Pick<ReturnType<typeof bambuSettingsConfiguration.schema.parse>, 'plate'>;
+  machine: ReturnType<typeof bambuSettingsConfiguration.schema.parse>;
+  record: MachineSettingsRecord;
+  profileId: string;
+}>;
+type PrintPreferences = ResolvedMachinePreferences['preferences'];
 
 /** The slicing choices a call makes itself: `request_print`'s own arguments. @internal */
 export type PrintChoices = Readonly<
@@ -107,34 +116,61 @@ export type PrintChoices = Readonly<
   }
 >;
 
-const textEncoder = new TextEncoder();
-/** The reader's own cap, so a larger file is refused without being read. */
-const maximumPrintIntentBytes = 65_536;
-
-/**
- * Read the project's print intent through the agent's own view of the
- * project, the same view the agent edits the file through.
- *
- * @param fileSystem - The agent's project filesystem.
- * @param signal - Cancels the call; an abort is rethrown, never read as no file.
- * @returns The file as read, where one that cannot be read counts as invalid,
- *   or undefined when the project has none.
- * @internal
- */
-export const readProjectPrintIntent = async (
-  fileSystem: RpcFileSystem,
-  signal: AbortSignal,
-): Promise<PrintIntentFile | undefined> => {
-  try {
-    const stat = await fileSystem.stat(printIntentPath);
-    if (stat.isDirectory || stat.size > maximumPrintIntentBytes) {
-      return { status: 'invalid-preserved' };
+/** Resolve the selected saved profile once through the root owner. Missing files use defaults; unreadable records refuse preparation. @internal */
+export const readProjectMachinePreferences = async (
+  service: Pick<MachineSettingsService, 'readMachineSettings'>,
+  provider: MachineProvider,
+  { signal, profileId }: Readonly<{ signal: AbortSignal; profileId?: string }>,
+): Promise<ResolvedMachinePreferences | undefined> => {
+  signal.throwIfAborted();
+  const { typeId } = provider.manifest.identity;
+  const file = await service.readMachineSettings(typeId);
+  signal.throwIfAborted();
+  if (file.status === 'absent') {
+    if (profileId !== undefined && profileId !== 'default') {
+      throw new Error(`Saved profile ${profileId} does not exist for ${typeId}.`);
     }
-    return readPrintIntent(textEncoder.encode(await fileSystem.readFile(printIntentPath)));
-  } catch (error) {
-    signal.throwIfAborted();
-    return getErrno(error) === 'ENOENT' ? undefined : { status: 'invalid-preserved' };
+    return undefined;
   }
+  if (file.status !== 'current') {
+    throw new Error(file.message);
+  }
+  const selected = profileId ?? file.record.activeProfile;
+  const unavailable = Object.keys(file.record.profiles[selected]?.configurations ?? {}).find(
+    (id) => id !== slicingPreferences.manifest.source.id && id !== bambuSettingsConfiguration.manifest.source.id,
+  );
+  if (unavailable) {
+    throw new Error(`Saved configuration source ${unavailable} is unavailable.`);
+  }
+  const slicing = await readMachineConfiguration({
+    settings: file.record,
+    profileId: selected,
+    definition: slicingPreferences,
+    signal,
+  });
+  const machine = await readMachineConfiguration({
+    settings: file.record,
+    profileId: selected,
+    definition: bambuSettingsConfiguration,
+    signal,
+  });
+  if (slicing.status === 'refused') {
+    throw new Error(slicing.message);
+  }
+  if (machine.status === 'refused') {
+    throw new Error(machine.message);
+  }
+  const values = machine.status === 'current' ? machine.values : {};
+  return {
+    status: 'current',
+    preferences: {
+      ...(slicing.status === 'current' ? slicing.values : {}),
+      ...(values.plate ? { plate: values.plate } : {}),
+    },
+    machine: values,
+    record: file.record,
+    profileId: selected,
+  };
 };
 
 /** The file's entries a call does not set itself, or undefined when there are none. */
@@ -154,7 +190,7 @@ const unsetEntries = (
  * @param choices - What the call chose itself.
  * @returns The file's values used, and the choices they change.
  */
-const referenceIntent = (intent: PrintIntent, choices: PrintChoices) => {
+const referenceIntent = (intent: PrintPreferences, choices: PrintChoices) => {
   const options = unsetEntries(intent.options, choices.options);
   return {
     supplied: { options },
@@ -170,7 +206,7 @@ const referenceIntent = (intent: PrintIntent, choices: PrintChoices) => {
  * @returns The slot's key in the file and the preset it names, when it names one.
  */
 const slotFilament = (
-  intent: PrintIntent,
+  intent: PrintPreferences,
   machine: MachineDirectoryEntry,
 ): Readonly<{ key: string; name: string }> | undefined => {
   const slot = loadedMaterial(machine)?.slot;
@@ -187,7 +223,7 @@ const slotFilament = (
  * @param machine - The machine as observed; its first loaded slot is the one a print uses.
  * @returns The file's values used, and the choices they change.
  */
-const bambuIntent = (intent: PrintIntent, choices: PrintChoices, machine: MachineDirectoryEntry) => {
+const bambuIntent = (intent: PrintPreferences, choices: PrintChoices, machine: MachineDirectoryEntry) => {
   const own = choices.profiles ?? {};
   /* Presets are picked for one printer: a call naming another keeps none of
    * the file's process or filaments, as the Print pane clears them. */
@@ -232,25 +268,16 @@ const bambuIntent = (intent: PrintIntent, choices: PrintChoices, machine: Machin
  *   it contributed, for the tool result.
  * @internal
  */
-export const applyPrintIntent = (
-  file: PrintIntentFile | undefined,
+export const applyMachinePreferences = (
+  file: ResolvedMachinePreferences | undefined,
   target: Readonly<{ provider: MachineProvider; machine: MachineDirectoryEntry; bambuStudio: boolean }>,
   choices: PrintChoices,
-): Readonly<{ choices: PrintChoices; printIntent?: JsonObject }> => {
+): Readonly<{ choices: PrintChoices; machinePreferences?: JsonObject }> => {
   if (file === undefined) {
     return { choices };
   }
-  const ignore = (reason: string) => ({ choices, printIntent: { path: printIntentPath, ignored: reason } });
-  if (file.status !== 'current') {
-    return ignore(
-      'It is not a valid print intent (broken JSON, an unknown key or a bad value), so none of its values apply.',
-    );
-  }
-  const { intent } = file;
-  const { model } = target.provider.manifest.identity;
-  if (intent.model !== model) {
-    return ignore(`It is for model ${intent.model}, not this printer's ${model}, so none of its values apply.`);
-  }
+  const intent = file.preferences;
+  const path = machineSettingsPath({ typeId: file.record.typeId });
   const { machine, bambuStudio } = target;
   /* What the file supplies either engine: each value the call leaves unset. */
   const preset = choices.preset === undefined ? intent.preset : undefined;
@@ -258,7 +285,18 @@ export const applyPrintIntent = (
   const { supplied, merged } = bambuStudio ? bambuIntent(intent, choices, machine) : referenceIntent(intent, choices);
   return {
     choices: { ...choices, ...merged, preset: choices.preset ?? preset, plate: choices.plate ?? plate },
-    printIntent: { path: printIntentPath, applied: defined({ preset, plate, ...supplied }) },
+    machinePreferences: {
+      path,
+      typeId: file.record.typeId,
+      profileId: file.profileId,
+      profileName: file.record.profiles[file.profileId]!.name,
+      configurationVersions: Object.fromEntries(
+        Object.entries(file.record.profiles[file.profileId]!.configurations).flatMap(([id, block]) =>
+          block ? [[id, block.version]] : [],
+        ),
+      ),
+      applied: defined({ preset, plate, ...supplied }),
+    },
   };
 };
 
@@ -266,15 +304,15 @@ export const applyPrintIntent = (
  * One sentence for a failure the project's print intent may have caused, so
  * the agent can edit the file or pass its own values instead.
  *
- * @param printIntent - What the file contributed to the call, when it did.
+ * @param machinePreferences - What the file contributed to the call, when it did.
  * @returns The sentence, with a leading space, or '' when the file supplied nothing.
  * @internal
  */
-export const printIntentHint = (printIntent: JsonObject | undefined): string => {
-  const applied = Object.keys(printIntent?.['applied'] ?? {});
+export const machinePreferencesHint = (machinePreferences: JsonObject | undefined): string => {
+  const applied = Object.keys(machinePreferences?.['applied'] ?? {});
   return applied.length === 0
     ? ''
-    : ` The project's ${printIntentPath} supplied ${applied.join(', ')}; edit it there, or pass your own.`;
+    : ` The project's ${typeof machinePreferences?.['path'] === 'string' ? machinePreferences['path'] : 'machine settings'} supplied ${applied.join(', ')}; edit it there, or pass your own.`;
 };
 
 /** One preset as an agent chooses it: its name and the facts that tell presets apart. */
@@ -376,15 +414,32 @@ export const describePrintProfiles = async (
     machine: MachineDirectoryEntry;
     profiles?: PrintChoices['profiles'];
     keys?: readonly string[] | undefined;
-    intentFile?: PrintIntentFile | undefined;
+    preferences?: ResolvedMachinePreferences | undefined;
   }>,
 ): Promise<JsonObject> => {
-  const { provider, machine, intentFile } = input;
+  const { provider, machine, preferences } = input;
   const { machineId } = machine;
   const { name } = machine.descriptor;
+  const availableProfiles: MachineSettingsRecord['profiles'] = preferences?.record.profiles ?? {
+    default: { name: 'Default', configurations: {} },
+  };
+  const savedProfiles = {
+    typeId: provider.manifest.identity.typeId,
+    activeProfile: preferences?.record.activeProfile ?? 'default',
+    selectedProfile: preferences?.profileId ?? 'default',
+    profiles: Object.entries(availableProfiles).flatMap(([id, profile]) =>
+      profile ? [{ id, name: profile.name }] : [],
+    ),
+  };
   const reference = (reason: string): JsonObject => {
-    const { printIntent } = applyPrintIntent(intentFile, { provider, machine, bambuStudio: false }, {});
-    return { machineId, engine: 'reference', reason, ...(printIntent === undefined ? {} : { printIntent }) };
+    const { machinePreferences } = applyMachinePreferences(preferences, { provider, machine, bambuStudio: false }, {});
+    return {
+      machineId,
+      savedProfiles,
+      engine: 'reference',
+      reason,
+      ...(machinePreferences === undefined ? {} : { machinePreferences }),
+    };
   };
   if (!isBambuProvider(provider)) {
     return reference(
@@ -397,8 +452,8 @@ export const describePrintProfiles = async (
       "Bambu Studio is not available on this host, so request_print slices with Tau's reference engine. A real Bambu printer refuses those prints: it needs the Tau desktop app with Bambu Studio installed. The Bambu simulator accepts them.",
     );
   }
-  const { choices, printIntent } = applyPrintIntent(
-    intentFile,
+  const { choices, machinePreferences } = applyMachinePreferences(
+    preferences,
     { provider, machine, bambuStudio: true },
     { profiles: input.profiles },
   );
@@ -416,18 +471,22 @@ export const describePrintProfiles = async (
   try {
     selection = resolveBambuStudioSelection(catalog, hints, choices.profiles);
   } catch (error) {
-    throw new Error(`${error instanceof Error ? error.message : String(error)}${printIntentHint(printIntent)}`, {
-      cause: error,
-    });
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}${machinePreferencesHint(machinePreferences)}`,
+      {
+        cause: error,
+      },
+    );
   }
   const { printer, process, filaments, plate } = selection;
   const described = await engine.describeBambuStudioSettings(install, { printer, process, filaments });
   return {
     machineId,
     engine: 'bambu-studio',
+    savedProfiles,
     version: install.version,
     defaults: { printer, process, filaments, ...(hints.plate === undefined ? {} : { plate }) },
-    ...(printIntent === undefined ? {} : { printIntent }),
+    ...(machinePreferences === undefined ? {} : { machinePreferences }),
     printers: catalog.printers.map((preset) => presetEntry(preset)),
     processes: catalog.processes.map((preset) => presetEntry(preset)),
     filaments: catalog.filaments.map((preset) => presetEntry(preset)),

@@ -50,13 +50,21 @@ export const quantity = (options: QuantitySchemaOptions): z.ZodNumber => {
   if (options.symbol?.length === 0) {
     throw new TypeError('A quantity symbol must not be empty.');
   }
-  return z.number().check(
-    z.meta({
-      'x-tau-unit': options.unit,
-      ...(options.quantityKind === undefined ? {} : { 'x-tau-quantity-kind': options.quantityKind }),
-      ...(options.space === undefined ? {} : { 'x-tau-space': options.space }),
-      ...(options.reference === undefined ? {} : { 'x-tau-reference': options.reference }),
-      ...(options.symbol === undefined ? {} : { 'x-tau-symbol': options.symbol }),
-    }),
-  );
+  const metadata: z.core.GlobalMeta = {
+    'x-tau-unit': options.unit,
+    ...(options.quantityKind === undefined ? {} : { 'x-tau-quantity-kind': options.quantityKind }),
+    ...(options.space === undefined ? {} : { 'x-tau-space': options.space }),
+    ...(options.reference === undefined ? {} : { 'x-tau-reference': options.reference }),
+    ...(options.symbol === undefined ? {} : { 'x-tau-symbol': options.symbol }),
+  };
+  // Attach to each refined schema so its immutable clones retain the annotation.
+  // Zod 4.0 exposes this core check before the later z.meta convenience function.
+  const annotation = new z.core.$ZodCheck({ check: 'meta' });
+  annotation._zod.onattach = [
+    (schema) => {
+      z.globalRegistry.add(schema, { ...z.globalRegistry.get(schema), ...metadata });
+    },
+  ];
+  annotation._zod.check = () => undefined;
+  return z.number().check(annotation);
 };

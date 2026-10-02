@@ -1,228 +1,207 @@
 import { describe, expectTypeOf, it } from 'vitest';
-import type { JSONSchema7 } from '@taucad/runtime/types';
-import type { ParameterManifest } from '@taucad/parameters';
+import { z } from 'zod';
+import { defineKernel, defineMiddleware, definePlugin, defineTranscoder } from '@taucad/runtime';
 import { defineRuntime } from '@taucad/runtime/worker';
-import type { ExportResult } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import type { ExportResult } from '@taucad/runtime';
 import { replicad } from '@taucad/replicad';
 import { esbuild } from '@taucad/esbuild';
 import { useRuntime } from '#hooks/use-runtime.js';
-import type {
-  RenderStatus,
-  RuntimeParameterRecord,
-  SetRuntimeParameters,
-  UseRuntimeClientOptionsProvider,
-  UseRuntimeOptions,
-  UseRuntimeResult,
-} from '#hooks/use-runtime.js';
+import type { UseRuntimeOptions } from '#hooks/use-runtime.js';
 
-const runtime = defineRuntime({
-  plugins: [replicad(), esbuild()],
-});
+const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
 const transport = inProcessTransport({ runtime, fileSystem: fromMemoryFs() });
 const clientOptions = { transport };
-const mainPath = 'main.ts';
-const utilityPath = 'util.ts';
-const scadPath = 'project/main.scad';
 
-describe('useRuntime source input types', () => {
-  it('accepts a single-key inline source map without an entry when generics are inferred', () => {
+const boardKernel = defineKernel({
+  id: 'react-board',
+  name: 'React board',
+  version: '1.0.0',
+  extensions: ['tsx'],
+  evaluateOptionsSchema: z.object({ precision: z.string().transform(Number) }),
+  views: {
+    schematic: { title: 'Schematic', mimeType: 'image/svg+xml' },
+    pcb: { title: 'PCB', mimeType: 'image/svg+xml', optionsSchema: z.object({ pinNumbers: z.boolean() }) },
+  },
+  exports: {
+    bom: { title: 'BOM', mimeType: 'text/csv', extension: 'csv', optionsSchema: z.object({ delimiter: z.string() }) },
+  },
+  async initialize() {
+    return {};
+  },
+  async resolve() {
+    return { resolved: [], unresolved: [] };
+  },
+  async describe() {
+    return { success: false, issues: [] };
+  },
+  async evaluate() {
+    return { handle: {} };
+  },
+  async render() {
+    return { content: '<svg/>' };
+  },
+  async export() {
+    return { files: [{ name: 'bom.csv', mimeType: 'text/csv', bytes: new Uint8Array([1]) }] as const };
+  },
+});
+const boardToolkit = definePlugin({
+  meta: { name: '@taucad/react-board-proof' },
+  kernels: { default: boardKernel },
+  presets: { default: ['kernels.default'] },
+});
+const boardRuntime = defineRuntime({ plugins: [boardToolkit()] });
+const boardTransport = inProcessTransport({ runtime: boardRuntime, fileSystem: fromMemoryFs() });
+const boardClientOptions = { transport: boardTransport };
+const boardMiddleware = defineMiddleware({
+  id: 'react-board-content',
+  name: 'React board content',
+  content: {
+    views: { 'image/svg+xml': ['includeEdges'] },
+    exports: { csv: ['includeTopology'] },
+  },
+});
+const boardPdf = defineTranscoder({
+  id: 'react-board-pdf',
+  name: 'React board PDF',
+  version: '1.0.0',
+  edges: [
+    {
+      from: 'csv',
+      to: 'pdf',
+      fidelity: 'mesh',
+      optionsSchema: z.object({ layout: z.enum(['portrait', 'landscape']) }),
+      sourceOptions: { delimiter: ',' },
+      content: ['includeTopology'],
+    },
+  ] as const,
+  async initialize() {
+    return {};
+  },
+  async transcode(input) {
+    return { success: true, data: input.files, issues: [] };
+  },
+});
+const routedBoardRuntime = defineRuntime({
+  plugins: [boardToolkit()],
+  middleware: [boardMiddleware()],
+  transcoders: [boardPdf()],
+});
+const routedBoardOptions = {
+  transport: inProcessTransport({ runtime: routedBoardRuntime, fileSystem: fromMemoryFs() }),
+};
+
+describe('useRuntime public inference', () => {
+  it('preserves literal files, view IDs and committed export IDs', () => {
     const result = useRuntime({
       clientOptions,
-      source: { files: { [mainPath]: 'export default () => null;' } },
+      source: { files: { 'main.ts': 'export default () => null', 'util.ts': '' }, entry: 'main.ts' },
+      view: { id: 'drawing', instance: 'front' },
     });
-
-    expectTypeOf(result.status).toEqualTypeOf<UseRuntimeResult['status']>();
-  });
-
-  it('accepts explicit runtime typing with a named inline entry path', () => {
-    const result = useRuntime<typeof runtime>({
-      clientOptions,
-      source: { files: { [mainPath]: 'export default () => null;' }, entry: mainPath },
-    });
-
-    expectTypeOf(result.geometry).toEqualTypeOf<UseRuntimeResult['geometry']>();
-    expectTypeOf(result.geometryStatus).toEqualTypeOf<'empty' | 'current' | 'stale'>();
-  });
-
-  it('requires entry for multi-key inline source maps and infers the entry key union', () => {
-    type MultiFileOptions = UseRuntimeOptions<
-      typeof runtime,
-      typeof transport,
-      { 'main.ts': string; 'util.ts': string }
-    >;
-
-    const valid: MultiFileOptions = {
-      clientOptions,
-      source: {
-        files: {
-          [mainPath]: 'export default () => helper();',
-          [utilityPath]: 'export const helper = () => null;',
-        },
-        entry: mainPath,
-      },
-    };
-    expectTypeOf(valid).toExtend<UseRuntimeOptions<typeof runtime, typeof transport>>();
-
-    const invalid = {
-      clientOptions,
-      source: {
-        files: {
-          [mainPath]: 'export default () => helper();',
-          [utilityPath]: 'export const helper = () => null;',
-        },
-      },
-    };
-    expectTypeOf(invalid).not.toExtend<MultiFileOptions>();
-  });
-
-  it('rejects literal empty inline source maps', () => {
-    type EmptyFileOptions = UseRuntimeOptions<typeof runtime, typeof transport, Record<never, never>>;
-    const invalid = {
-      clientOptions,
-      source: { files: {} },
-    };
-
-    expectTypeOf(invalid).not.toExtend<EmptyFileOptions>();
-  });
-
-  it('accepts binary inline source content', () => {
-    const result = useRuntime({
-      clientOptions,
-      source: { files: { [mainPath]: new Uint8Array([1, 2, 3]) } },
-    });
-
-    expectTypeOf(result.status).toEqualTypeOf<UseRuntimeResult['status']>();
-  });
-
-  it('accepts filesystem path source mode without inline files', () => {
-    const result = useRuntime<typeof runtime>({
-      clientOptions,
-      source: { path: scadPath },
-      initialParameters: { len: 200 },
-    });
-
-    expectTypeOf(result.status).toEqualTypeOf<UseRuntimeResult['status']>();
-  });
-
-  it('projects framework content onto render input from the composed runtime', () => {
+    expectTypeOf(result.artifactStatus).toEqualTypeOf<'empty' | 'current' | 'stale'>();
+    expectTypeOf(result.artifactHash).toEqualTypeOf<string | undefined>();
+    expectTypeOf(result.exportModel('glb')).toEqualTypeOf<Promise<ExportResult<'glb'>>>();
     useRuntime({
       clientOptions,
-      source: { files: { [mainPath]: 'export default () => null;' } },
-      content: { includeEdges: true, includeTopology: true },
+      source: { path: 'main.ts' },
+      view: { id: 'model', content: { includeEdges: true } },
     });
-
-    useRuntime({
-      clientOptions,
-      source: { files: { [mainPath]: 'export default () => null;' } },
-      content: {
-        // @ts-expect-error -- unknown framework content is rejected statically.
-        includeSketches: true,
-      },
-    });
+    // @ts-expect-error -- this runtime does not offer a PCB view.
+    useRuntime({ clientOptions, source: { path: 'main.ts' }, view: { id: 'pcb' } });
+    // @ts-expect-error -- inline entry remains a literal file key.
+    useRuntime({ clientOptions, source: { files: { 'main.ts': '', 'util.ts': '' }, entry: 'other.ts' } });
+    // @ts-expect-error -- multiple literal files require entry.
+    useRuntime({ clientOptions, source: { files: { 'main.ts': '', 'util.ts': '' } } });
+    // @ts-expect-error -- runtime export IDs remain narrow.
+    void result.exportModel('bom');
+    // @ts-expect-error -- the drawing view has no declared options.
+    useRuntime({ clientOptions, source: { path: 'main.ts' }, view: { id: 'drawing', options: { scale: 2 } } });
+    // @ts-expect-error -- the model view rejects unknown framework content.
+    useRuntime({ clientOptions, source: { path: 'main.ts' }, view: { id: 'model', content: { unknown: true } } });
   });
 
-  it('exposes hook-owned parameter state and setters', () => {
-    const { defaultParameters, parameters, setParameters, resetParameters, jsonSchema, parameterManifest } = useRuntime<
-      typeof runtime
-    >({
-      clientOptions,
-      source: { path: scadPath },
-      initialParameters: { len: 200 },
-      onParametersChange: (next) => {
-        expectTypeOf(next).toEqualTypeOf<RuntimeParameterRecord>();
-      },
-    });
-
-    expectTypeOf(defaultParameters).toEqualTypeOf<RuntimeParameterRecord>();
-    expectTypeOf(parameters).toEqualTypeOf<RuntimeParameterRecord>();
-    expectTypeOf(setParameters).toEqualTypeOf<SetRuntimeParameters>();
-    expectTypeOf(resetParameters).toEqualTypeOf<() => void>();
-    expectTypeOf(jsonSchema).toEqualTypeOf<JSONSchema7 | undefined>();
-    expectTypeOf<UseRuntimeResult['jsonSchema']>().toEqualTypeOf<JSONSchema7 | undefined>();
-    expectTypeOf(parameterManifest).toEqualTypeOf<ParameterManifest | undefined>();
-
-    setParameters({ len: 240 });
-    setParameters((current) => ({ ...current, len: 260 }));
-    resetParameters();
-  });
-
-  it('rejects controlled parameters on hook input', () => {
-    const invalid: UseRuntimeOptions<typeof runtime, typeof transport> = {
-      clientOptions,
-      source: { path: scadPath },
-      // @ts-expect-error -- useRuntime owns parameters; callers seed with initialParameters.
-      parameters: { len: 200 },
-    };
-
-    expectTypeOf(invalid).toEqualTypeOf<UseRuntimeOptions<typeof runtime, typeof transport>>();
-  });
-
-  it('accepts stable synchronous client option providers', () => {
-    const provider = (): typeof clientOptions => clientOptions;
+  it('retains typed wrapper options and hook-owned parameter state', () => {
     const options: UseRuntimeOptions<typeof runtime, typeof transport, { 'main.ts': string }> = {
-      clientOptions: provider,
-      source: { files: { [mainPath]: 'export default () => null;' } },
+      clientOptions: async () => clientOptions,
+      source: { files: { 'main.ts': '' } },
+      initialParameters: { size: 2 },
     };
-
-    expectTypeOf(options.clientOptions).toExtend<UseRuntimeClientOptionsProvider<typeof runtime, typeof transport>>();
+    const result = useRuntime(options);
+    result.setParameters((current) => ({ ...current, size: 3 }));
+    result.resetParameters();
+    // @ts-expect-error -- callers cannot control effective parameters.
+    options.parameters = { size: 4 };
+    // @ts-expect-error -- instance applies only to declared instance views.
+    useRuntime({ clientOptions, source: { path: 'main.ts' }, view: { id: 'model', instance: 'front' } });
   });
 
-  it('accepts stable asynchronous client option providers', () => {
-    const provider = async (): Promise<typeof clientOptions> => clientOptions;
+  it('keeps required evaluation, view, and export inputs through a real toolkit transport', () => {
     const result = useRuntime({
-      clientOptions: provider,
-      source: { files: { [mainPath]: 'export default () => null;' } },
+      clientOptions: boardClientOptions,
+      source: { files: { 'main.tsx': '', 'part.tsx': '' }, entry: 'main.tsx' },
+      evaluateOptions: { precision: '0.1' },
+      view: { id: 'pcb', options: { pinNumbers: true } },
     });
-
-    expectTypeOf(result.status).toEqualTypeOf<UseRuntimeResult['status']>();
+    expectTypeOf(result.exportModel('bom', { options: { delimiter: ',' } })).toEqualTypeOf<
+      Promise<ExportResult<'bom'>>
+    >();
+    // @ts-expect-error -- the kernel requires evaluation precision.
+    useRuntime({ clientOptions: boardClientOptions, source: { path: 'main.tsx' } });
+    // @ts-expect-error -- evaluate input uses the schema input type.
+    useRuntime({ clientOptions: boardClientOptions, source: { path: 'main.tsx' }, evaluateOptions: { precision: 1 } });
+    useRuntime({
+      clientOptions: boardClientOptions,
+      source: { path: 'main.tsx' },
+      evaluateOptions: { precision: '1' },
+      // @ts-expect-error -- the PCB view requires its own options.
+      view: { id: 'pcb' },
+    });
+    useRuntime({
+      clientOptions: boardClientOptions,
+      source: { path: 'main.tsx' },
+      evaluateOptions: { precision: '1' },
+      view: {
+        id: 'pcb',
+        options: {
+          // @ts-expect-error -- view-specific option type survives the hook.
+          pinNumbers: 'yes',
+        },
+      },
+    });
+    // @ts-expect-error -- direct export requires BOM delimiter.
+    void result.exportModel('bom');
+    // @ts-expect-error -- export option schema stays narrow.
+    void result.exportModel('bom', { options: { delimiter: 1 } });
+    useRuntime({
+      clientOptions: boardClientOptions,
+      source: {
+        files: { 'main.tsx': '', 'part.tsx': '' },
+        // @ts-expect-error -- inline entry must be one of the real file keys.
+        entry: 'missing.tsx',
+      },
+      evaluateOptions: { precision: '1' },
+    });
   });
 
-  it('rejects a raw promise for client options', () => {
-    const invalid = {
-      clientOptions: Promise.resolve(clientOptions),
-      source: { files: { [mainPath]: 'export default () => null;' } },
-    };
-
-    expectTypeOf(invalid).not.toExtend<UseRuntimeOptions<typeof runtime, typeof transport>>();
-  });
-
-  it('destructures cleanly with no reserved-word hook result member', () => {
-    const { geometry, status, exportGeometry } = useRuntime({
-      clientOptions,
-      source: { files: { [mainPath]: 'export default () => null;' } },
+  it('carries middleware content and pinned source options into routed hook exports', () => {
+    const result = useRuntime({
+      clientOptions: routedBoardOptions,
+      source: { path: 'main.tsx' },
+      evaluateOptions: { precision: '0.1' },
+      view: { id: 'pcb', options: { pinNumbers: true }, content: { includeEdges: true } },
     });
-
-    expectTypeOf(geometry).toEqualTypeOf<UseRuntimeResult['geometry']>();
-    expectTypeOf(status).toEqualTypeOf<RenderStatus>();
-    expectTypeOf(exportGeometry).toBeFunction();
-    expectTypeOf<Extract<keyof UseRuntimeResult, 'export'>>().toEqualTypeOf<never>();
-  });
-
-  it('types exportGeometry options through the runtime export option projection', () => {
-    const { exportGeometry } = useRuntime({
-      clientOptions,
-      source: { files: { [mainPath]: 'export default () => null;' } },
-    });
-
-    void exportGeometry('stl', { exportOptions: { binary: true } });
-    expectTypeOf(exportGeometry('glb')).toEqualTypeOf<Promise<ExportResult>>();
-    void exportGeometry('glb', { exportOptions: { coordinateSystem: 'y-up' } });
-    void exportGeometry('glb', { content: { includeEdges: true, includeTopology: true } });
-
-    // @ts-expect-error -- exportGeometry owns source/parameters and accepts only exportOptions.
-    void exportGeometry('glb', { source: { path: mainPath } });
-
-    // @ts-expect-error -- renderOptions belongs to render(), not exportGeometry().
-    void exportGeometry('glb', { renderOptions: { tessellation: { linearTolerance: 0.1 } } });
-
-    // @ts-expect-error -- options must be nested under exportOptions.
-    void exportGeometry('glb', { binary: true });
-
-    void exportGeometry('stl', {
-      // @ts-expect-error -- STL does not advertise framework content.
-      content: { includeEdges: true },
-    });
+    expectTypeOf(
+      result.exportModel('pdf', {
+        options: { layout: 'portrait' },
+        content: { includeTopology: true },
+      }),
+    ).toEqualTypeOf<Promise<ExportResult<'bom'>>>();
+    // @ts-expect-error -- pinned BOM delimiter cannot be overridden on the route.
+    void result.exportModel('pdf', { options: { layout: 'portrait', delimiter: ';' } });
+    // @ts-expect-error -- the route still requires its own layout option.
+    void result.exportModel('pdf');
+    // @ts-expect-error -- PDF route preserves topology, not edge content.
+    void result.exportModel('pdf', { options: { layout: 'portrait' }, content: { includeEdges: true } });
   });
 });

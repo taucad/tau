@@ -162,7 +162,7 @@
     "zod": "catalog:"
   },
   "devDependencies": {
-    "@gltf-transform/core": "^4.4.0"
+    "@gltf-transform/core": "catalog:"
   },
   "tau": {
     "skills": "./agent/skills.json"

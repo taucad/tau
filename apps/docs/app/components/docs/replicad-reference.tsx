@@ -28,7 +28,12 @@ export function ReplicadReference(): React.JSX.Element {
           requiring WebGPU.
         </p>
       </div>
-      <pre className='overflow-x-auto bg-muted p-5 font-mono text-sm leading-6 text-foreground'>
+      <pre
+        role='region'
+        aria-label='Replicad setup example'
+        tabIndex={0}
+        className='overflow-x-auto bg-muted p-5 font-mono text-sm leading-6 text-foreground'
+      >
         <code>{setupExample}</code>
       </pre>
     </section>

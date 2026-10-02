@@ -9,6 +9,7 @@ import type { HttpErrorResponse } from '@taucad/types';
 import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { httpHeader } from '#constants/http-header.constant.js';
+import { resolveRequestId } from '#middlewares/request-id.middleware.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
 
 /**
@@ -50,9 +51,8 @@ export class HttpExceptionFilter implements ExceptionFilter {
     const response = context.getResponse<FastifyReply>();
     const request = context.getRequest<FastifyRequest>();
 
-    // Extract request ID: prefer header if present, otherwise use Fastify's generated ID
-    const headerRequestId = request.headers[httpHeader.requestId] as string | undefined;
-    const requestId = headerRequestId ?? (request.id as string | undefined);
+    // Extract request ID: prefer a well-formed header, otherwise use Fastify's generated ID
+    const requestId = resolveRequestId(request.headers[httpHeader.requestId], request.id as string | undefined);
 
     // A streamed route (the model gateway) can fail after its response has left:
     // a second reply only produces `FST_ERR_REP_ALREADY_SENT` and hides the cause.

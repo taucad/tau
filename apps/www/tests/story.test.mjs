@@ -30,8 +30,9 @@ test('should preserve source provenance, 34 bounded meshes and three planets', a
     assert.equal(part.position.length % 3, 0);
     assert.equal(part.index.length % 3, 0);
     const indices = new Uint32Array(binary.buffer, binary.byteOffset + part.index.offset, part.index.length);
-    for (const index of indices)
+    for (const index of indices) {
       assert.ok(index < part.position.length / 3, 'Triangle must refer to an existing vertex');
+    }
   }
   assert.equal(cursor, binary.length);
 });

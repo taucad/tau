@@ -4,7 +4,9 @@ const { readFile, writeFile, cp } = require('node:fs/promises');
 const { spawnSync } = require('node:child_process');
 const { createHash } = require('node:crypto');
 const tools = process.env.WWW_RENDER_TOOLS;
-if (!tools) throw new Error('Set WWW_RENDER_TOOLS to the isolated tool installation.');
+if (!tools) {
+  throw new Error('Set WWW_RENDER_TOOLS to the isolated tool installation.');
+}
 const app = resolve(__dirname, '..');
 (async () => {
   const source = join(app, '../../libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts');
@@ -42,7 +44,9 @@ console.log('Exported',parts.length,'parts;',offset,'uncompressed bytes.');
     ['--import', join(tools, 'node_modules/tsx/dist/loader.mjs'), join(tools, 'export-story.mjs')],
     { stdio: 'inherit' },
   );
-  if (result.status !== 0) throw new Error('CAD export failed.');
+  if (result.status !== 0) {
+    throw new Error('CAD export failed.');
+  }
 })().catch((error) => {
   console.error(error);
   process.exitCode = 1;

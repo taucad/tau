@@ -42,6 +42,43 @@ const action: ComputeAction = {
 const value = (): Uint8Array<ArrayBuffer> => new Uint8Array([1, 2, 3]);
 
 describe('shared content codec publication', () => {
+  it('keeps verified root bytes when a store mutates its returned buffer during a leaf read', async () => {
+    const contentStore = createMemoryContentStore({ maxBytes: 4096 });
+    const actionStore = createMemoryActionStore({ maxBytes: 4096 });
+    const compute = vi.fn(async () => value());
+    await createComputeReuseService({ contentStore, actionStore }).evaluate({
+      action,
+      codec,
+      compute,
+      policy: 'best-effort',
+    });
+    const leafDigest = await digestContent({ bytes: value() });
+    let returnedRoot: Uint8Array<ArrayBuffer> | undefined;
+    const retainingStore: ContentStore = {
+      ...contentStore,
+      read: async (input) => {
+        const result = await contentStore.read(input);
+        if (result.status === 'hit') {
+          if (input.digest === leafDigest) {
+            returnedRoot?.fill(0);
+          } else {
+            returnedRoot = result.bytes;
+          }
+        }
+        return result;
+      },
+    };
+    const restored = await createComputeReuseService({ contentStore: retainingStore, actionStore }).evaluate({
+      action,
+      codec,
+      compute,
+      policy: 'best-effort',
+    });
+    expect(restored).toMatchObject({ source: 'cache', value: value() });
+    expect(compute).toHaveBeenCalledTimes(1);
+    expect(returnedRoot).toEqual(new Uint8Array(71));
+  });
+
   it('stops hashing the closure after cancellation', async () => {
     const controller = new AbortController();
     const actualDigest = crypto.subtle.digest.bind(crypto.subtle);

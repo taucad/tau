@@ -78,6 +78,7 @@ describe('closeGracefullyOnSignal', () => {
     child = started.child;
     // Long enough that the drain cannot finish before the second signal, however loaded the machine.
     const response = fetch(`${started.url}/slow?ms=20000`);
+    const responseRejection = expect(response).rejects.toThrow();
     await vi.waitFor(() => {
       expect(child!.lines).toContain('request entered');
     });
@@ -90,6 +91,6 @@ describe('closeGracefullyOnSignal', () => {
 
     await expect(child.exited).resolves.toEqual({ code: undefined, signal: 'SIGTERM' });
     expect(child.lines).not.toContain('database closed');
-    await expect(response).rejects.toThrow();
+    await responseRejection;
   }, 60_000);
 });

@@ -1,8 +1,9 @@
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import { DatabaseSync } from 'node:sqlite';
+import type { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
-import { describe, expect, it } from 'vitest';
+import { basename, join } from 'node:path';
+import { describe, expect, it, vi } from 'vitest';
 import { z } from 'zod';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
@@ -14,6 +15,27 @@ import { asKnownArtifact } from '@taucad/runtime/types';
 import { geometryCache } from '#geometry-cache.middleware.js';
 import { Document, NodeIO } from '@gltf-transform/core';
 import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
+
+vi.mock('node:fs/promises', async (importOriginal) => {
+  const actual = await importOriginal<{ statfs: typeof statfs }>();
+  return {
+    ...actual,
+    statfs: async (...arguments_: Parameters<typeof actual.statfs>) => {
+      const stats = await actual.statfs(...arguments_);
+      if (typeof arguments_[0] !== 'string' || !basename(arguments_[0]).startsWith('tau-geometry-reopen-')) {
+        return stats;
+      }
+      if (typeof stats.bsize === 'bigint') {
+        return { ...stats, bavail: (8n * 1024n ** 3n) / stats.bsize, blocks: (16n * 1024n ** 3n) / stats.bsize };
+      }
+      return {
+        ...stats,
+        bavail: Math.floor((8 * 1024 ** 3) / stats.bsize),
+        blocks: Math.floor((16 * 1024 ** 3) / stats.bsize),
+      };
+    },
+  };
+});
 
 describe('geometry cache with durable SQLite', () => {
   it('persists one shared GLB leaf for native build and display, and a distinct edge leaf when requested', async () => {

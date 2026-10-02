@@ -396,6 +396,55 @@ describe('picovoxel kernel', () => {
       },
     );
 
+    it('should reject a material made invalid by toJSON before caching its snapshot', async () => {
+      const issues = await buildIssues(
+        createGeometry({
+          module: {
+            default: (pico: Pico) => ({
+              shape: helloCube(pico),
+              name: 'Pin',
+              material: {
+                pbrMetallicRoughness: { roughnessFactor: 0.5 },
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify requires this method name.
+                toJSON() {
+                  return { pbrMetallicRoughness: { roughnessFactor: 2 } };
+                },
+              },
+            }),
+          },
+        }),
+      );
+
+      expect(issues.map((issue) => issue.message)).toContainEqual(
+        expect.stringContaining('Pin (output 1): material.pbrMetallicRoughness.roughnessFactor'),
+      );
+    });
+
+    it('should reject a sampler made invalid by toJSON before caching its snapshot', async () => {
+      const issues = await buildIssues(
+        createGeometry({
+          module: {
+            default: () => ({
+              shapes: [],
+              samplers: [
+                {
+                  wrapS: 10_497,
+                  // eslint-disable-next-line @typescript-eslint/naming-convention -- JSON.stringify requires this method name.
+                  toJSON() {
+                    return { wrapS: 42 };
+                  },
+                },
+              ],
+            }),
+          },
+        }),
+      );
+
+      expect(issues.map((issue) => issue.message)).toContainEqual(
+        expect.stringContaining('model resources: samplers[0].wrapS'),
+      );
+    });
+
     it('should retain context when user-authored metadata getters throw non-errors', async () => {
       const materialIssues = await buildIssues(
         evaluate({

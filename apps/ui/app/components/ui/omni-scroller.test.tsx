@@ -1,6 +1,7 @@
 import { render, screen } from '@testing-library/react';
+import type { RefCallback } from 'react';
 import { createRef } from 'react';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { OmniScroller } from '#components/ui/omni-scroller.js';
 
@@ -38,6 +39,29 @@ describe('OmniScroller', () => {
       '[will-change:scroll-position]',
       'snap-x',
     );
+  });
+
+  it('should keep a stable callback ref attached until its identity changes or the scroller unmounts', () => {
+    const firstCleanup = vi.fn();
+    const secondCleanup = vi.fn();
+    const firstRef = vi.fn<RefCallback<HTMLDivElement>>((element) => (element === null ? undefined : firstCleanup));
+    const secondRef = vi.fn<RefCallback<HTMLDivElement>>((element) => (element === null ? undefined : secondCleanup));
+    const { rerender, unmount } = render(<OmniScroller ref={firstRef} aria-label='Files' />);
+    const scroller = screen.getByLabelText('Files');
+
+    expect(firstRef).toHaveBeenCalledOnce();
+    expect(firstRef).toHaveBeenCalledWith(scroller);
+    rerender(<OmniScroller ref={firstRef} aria-label='Files' className='snap-x' />);
+    expect(screen.getByLabelText('Files')).toBe(scroller);
+    expect(firstRef).toHaveBeenCalledOnce();
+    expect(firstCleanup).not.toHaveBeenCalled();
+
+    rerender(<OmniScroller ref={secondRef} aria-label='Files' className='snap-x' />);
+    expect(firstCleanup).toHaveBeenCalledOnce();
+    expect(secondRef).toHaveBeenCalledOnce();
+    expect(secondRef).toHaveBeenCalledWith(scroller);
+    unmount();
+    expect(secondCleanup).toHaveBeenCalledOnce();
   });
 
   it('should translate vertically dominant wheel input in direct mode', () => {

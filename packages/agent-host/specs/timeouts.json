@@ -151,6 +151,15 @@
       "fixedBy": "W6"
     },
     {
+      "id": "B18",
+      "bound": "Geometry-runner port request to main (10 s)",
+      "site": "apps/desktop/src/tau/services-host.ts",
+      "token": "geometryPortTimeout",
+      "class": "Peer",
+      "owner": "GM",
+      "fixedBy": "outside this charter: desktop geometry-runner port ceremony"
+    },
+    {
       "id": "C1",
       "bound": "Leader heartbeat (M2 leading)",
       "site": "packages/agent-host/src/launchers/leadership/leadership.machine.ts",
@@ -607,6 +616,38 @@
       "token": "const timer = globalThis.setTimeout",
       "class": "External edge",
       "owner": "W9"
+    },
+    {
+      "id": "D21",
+      "bound": "GeoSpec candidate fetch remote transport abort after 15 s; local consent and filesystem work is not globally timed",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "candidateFetchTimeout = setTimeout",
+      "class": "External edge",
+      "owner": "GM"
+    },
+    {
+      "id": "D22",
+      "bound": "GeoSpec candidate publish remote transport abort after 15 s; local consent and filesystem work is not globally timed",
+      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
+      "token": "candidatePublishTimeout = setTimeout",
+      "class": "External edge",
+      "owner": "GM"
+    },
+    {
+      "id": "D23",
+      "bound": "TUI start admission: 20 s ceiling on retries of answered, not-applied settling refusals; unanswered execute remains channel-owned",
+      "site": "packages/cli/src/tui/app.ts",
+      "token": "// Start settling retry ceiling",
+      "class": "Backoff",
+      "owner": "W4"
+    },
+    {
+      "id": "D24",
+      "bound": "TUI approval admission: 20 s ceiling on retries of answered, not-applied settling refusals; unanswered execute remains channel-owned",
+      "site": "packages/cli/src/tui/app.ts",
+      "token": "// Approval settling retry ceiling",
+      "class": "Backoff",
+      "owner": "W4"
     },
     {
       "id": "A14",

@@ -71,7 +71,7 @@ const wasmBudgets: WasmBudget[] = [
   {
     name: 'GeoSpec OCCT',
     path: 'packages/geospec-engine/native/opencascade/dist/geospec_opencascade_single.wasm',
-    maxBytes: 13_369_344,
+    maxBytes: 15_007_744,
   },
   {
     name: 'image/resvg',

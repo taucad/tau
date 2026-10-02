@@ -58,8 +58,8 @@ const writeLicenses = (roots: ReadonlySet<string>): void => {
       },
     ];
   });
-  const unique = [...new Map(entries.map((entry) => [`${entry.name}@${entry.version}`, entry])).values()].sort((a, b) =>
-    a.name.localeCompare(b.name),
+  const unique = [...new Map(entries.map((entry) => [`${entry.name}@${entry.version}`, entry])).values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version, undefined, { numeric: true }),
   );
   const lines = [
     '# Vendored tscircuit engine licences',

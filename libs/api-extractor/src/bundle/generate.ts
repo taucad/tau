@@ -43,6 +43,23 @@ const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) 
 const resourcesModuleFile = 'resources.js';
 const resourcesTypesFile = 'resources.d.ts';
 
+const skillsTypesFile = 'skills.d.cts';
+
+const skillsTypes = `declare const manifest: {
+  readonly bundles: ReadonlyArray<{
+    readonly slug: string;
+    readonly name: string;
+    readonly description: string;
+    readonly version: string;
+    readonly whenToUse: string;
+    readonly directory: string;
+    readonly files: readonly string[];
+    readonly body: string;
+  }>;
+};
+export = manifest;
+`;
+
 const resourcesTypes = `declare const bundles: readonly {
   readonly slug: string;
   readonly name: string;
@@ -320,8 +337,8 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoVoxel authoring',
     title: 'PicoVoxel authoring',
     description:
-      'Guides PicoVoxel voxel, SDF and lattice CAD, PBR materials and mechanisms. Use for TypeScript geometry, textures or moving-part authoring.',
-    whenToUse: 'Use for TypeScript PicoVoxel models, materials, textures and moving mechanisms.',
+      'Guides PicoVoxel voxel, SDF and lattice CAD, named parts, PBR materials and mechanisms. For TypeScript geometry, appearance, textures or moving-part authoring.',
+    whenToUse: 'Use for TypeScript PicoVoxel models, named parts, physical materials, textures and moving mechanisms.',
     corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', 'picovoxel', 'packages/plugins/picovoxel'),
     groupBy: byKind,
     supplementalApi: {
@@ -459,6 +476,8 @@ export const generateBundles = async (
     const manifest: TauSkillsManifest = { bundles: [bundle.declaration] };
     // oxlint-disable-next-line no-await-in-loop -- See above.
     await writeFile(join(outputAgent, skillsManifestFile), `${JSON.stringify(manifest, undefined, 2)}\n`, 'utf8');
+    // oxlint-disable-next-line no-await-in-loop -- The declaration ships beside this owner's generated manifest.
+    await writeFile(join(outputAgent, skillsTypesFile), skillsTypes, 'utf8');
     // oxlint-disable-next-line no-await-in-loop -- The module describes files written by this owner iteration.
     const resourcesModule = await renderResourcesModule(outputAgent, bundle.declaration);
     // oxlint-disable-next-line no-await-in-loop -- See above.

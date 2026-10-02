@@ -24,6 +24,7 @@
       }
     },
     "lint": {
+      "dependsOn": ["generate-fumadocs"],
       "options": {
         "files": "app *.test.ts vite.config.ts vitest.config.ts react-router.config.ts vite-environment.d.ts"
       }

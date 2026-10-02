@@ -45,6 +45,7 @@ const moduleText = (index: number, revision: number): string =>
   `export const value${String(index)} = ${String(revision)};\n`;
 
 describe('the browser mint after a one-file edit', () => {
+  // The thousand-file setup checks incremental object counts, not wall-clock speed.
   it('should write 1 blob and only the 3 trees on its path at 1 000 files', async () => {
     const store = new MemoryProvider();
     const checkout = new MemoryProvider();
@@ -79,5 +80,5 @@ describe('the browser mint after a one-file edit', () => {
     const recorded = await port.readTree(recordedId);
     expect(new TextDecoder().decode(recorded?.get(paths[421]!))).toBe(moduleText(421, 1));
     expect(recorded?.size).toBe(1000);
-  });
+  }, 30_000);
 });

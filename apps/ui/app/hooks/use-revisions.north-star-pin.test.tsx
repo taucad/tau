@@ -26,6 +26,12 @@ vi.mock('#hooks/use-revision-status.js', async () => {
 
 const chatsRef: { current: readonly Chat[] } = { current: [] };
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: chatsRef.current }) }));
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({
+    observedChatIdsOf: () => [],
+    subscribeMembership: () => () => undefined,
+  }),
+}));
 
 const chat = (id: string): Chat =>
   ({ id, resourceId: 'p', name: id, messages: [], createdAt: 0, updatedAt: 0 }) satisfies Partial<Chat> as Chat;

@@ -1061,7 +1061,7 @@ export const ConverterPanelBody = function ({
     }
   }, [cuEntries, selectedEntryPath, mainEntryPath]);
 
-  const selectedOperationTimeout = entriesRecord?.entries[selectedEntryPath]?.operationTimeout;
+  const selectedOperationTimeout = entriesRecord?.entries[selectedEntryPath]?.renderTimeout;
   useEffect(() => {
     if (!isShown || !selectedEntryPath) {
       return;

@@ -65,7 +65,7 @@ export function ActorBridge(): ReactNode {
 
     const publish = (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
       const previous = lastPublicationRef.current;
-      const currentControls = get().controls;
+      const currentControls = controls;
       if (
         previous?.camera === camera &&
         previous.controls === currentControls &&

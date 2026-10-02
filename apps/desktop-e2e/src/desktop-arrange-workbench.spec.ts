@@ -143,9 +143,10 @@ test('opens a named view through the desktop utility MCP endpoint and renders it
     expect(await frontTab.locator('.dockview-tab-title').textContent()).toBe('main.scad');
     const arrangeCard = page
       .locator('[data-variant="minimal"][data-status="ready"]')
-      .filter({ hasText: 'Arranged: front view' });
+      .filter({ has: page.getByRole('button', { name: /^Arranged 1 view/u }) });
     await expectVisible(arrangeCard, 60_000);
-    await expectVisible(arrangeCard.getByRole('button', { name: 'Restore' }));
+    await arrangeCard.getByRole('button', { name: /^Arranged 1 view/u }).click();
+    await expectVisible(arrangeCard.getByRole('button', { name: 'Restore previous layout' }));
     await expect.poll(async () => arrangeCard.getByRole('status').textContent(), { timeout: 60_000 }).toBe('Shown');
     expect(await page.getByText(/Explored .*front/u).count()).toBe(0);
     expect(fixture.gatewayRequests.length).toBe(gatewayRequestsBefore);

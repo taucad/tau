@@ -701,7 +701,7 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
     if (read.status !== 'current') {
       throw new Error('Workbench entry settings need repair before rendering.');
     }
-    return read.record.entries[path]?.operationTimeout;
+    return read.record.entries[path]?.renderTimeout;
   };
   const fileSystem = createBrowserRpcFileSystem(fileManager);
   const skillResolver = createSkillResolver({

@@ -7,9 +7,9 @@
   "targets": {
     "build": {
       "executor": "nx:run-commands",
-      "dependsOn": ["^build"],
+      "dependsOn": ["copy-assets", "^copy-assets", "^build"],
       "options": {
-        "command": "tsdown",
+        "command": "tsdown --config-loader=tsx",
         "cwd": "{projectRoot}"
       }
     },

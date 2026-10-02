@@ -392,7 +392,7 @@ export class PartThumbnailService {
         this.activeAbort = controller;
         try {
           const content = work.source.renderContent?.() ?? work.source.content;
-          if (content.byteLength > maxSourceBytes) {
+          if (content.buffer.byteLength > maxSourceBytes) {
             throw new RangeError('Part thumbnail render source exceeds 64 MiB');
           }
           const files = await this.imageService.export({

@@ -20,7 +20,7 @@ import { createActor, createMachine } from 'xstate';
 
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { captureRevisionTree, ImmutableRevisionTree, revisionId } from '#algorithms/index.js';
-import type { FileStatEntry, RootedFileSystem } from '@taucad/filesystem';
+import type { FileStatEntry } from '@taucad/filesystem';
 import { classify, unlistedPathClassification } from '@taucad/filesystem/path-registry';
 
 import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
@@ -40,7 +40,7 @@ import {
   revisionTreeId,
   syncQuiesceMilliseconds,
 } from '#revision-effects.js';
-import type { RevisionActors, RevisionActorsOptions } from '#revision-effects.js';
+import type { RevisionActors, RevisionActorsOptions, RevisionFileSystem } from '#revision-effects.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
 
 import type { ParameterRecordCodec, RevisionId } from '#algorithms/index.js';
@@ -79,7 +79,7 @@ const createProjectRevisionsActor: typeof createProjectRevisionsActorUntracked =
 
 type Fixture = {
   readonly root: string;
-  readonly filesystem: RootedFileSystem;
+  readonly filesystem: RevisionFileSystem;
   readonly port: RevisionPort;
   readonly actors: RevisionActors;
 };
@@ -96,7 +96,7 @@ const actorSets: readonly ActorSet[] = [
   { name: 'native-git', enabled: gitToolchainOnPath },
 ];
 
-const captureMainAndLiveTrees = async (port: RevisionPort, filesystem: RootedFileSystem) => {
+const captureMainAndLiveTrees = async (port: RevisionPort, filesystem: RevisionFileSystem) => {
   const head = await port.readRef('main');
   const tree = await port.readTree(revisionId(head ?? ''));
   const live = await captureRevisionTree(filesystem, {
@@ -115,7 +115,7 @@ const captureMainAndLiveTrees = async (port: RevisionPort, filesystem: RootedFil
  */
 const fixture = async (
   files: Readonly<Record<string, string>> = {},
-  wrap: (filesystem: RootedFileSystem) => RootedFileSystem = (filesystem) => filesystem,
+  wrap: (filesystem: RevisionFileSystem) => RevisionFileSystem = (filesystem) => filesystem,
   options: FixtureOptions = {},
 ): Promise<Fixture> => {
   const { actorSet = 'isomorphic-git', ...extra } = options;
@@ -129,8 +129,8 @@ const fixture = async (
   if (linkedRoot !== undefined) {
     roots.push(linkedRoot);
   }
-  const linkedFilesystems = new Map<string, RootedFileSystem>();
-  const linkedFilesystem = async (id: string): Promise<RootedFileSystem> => {
+  const linkedFilesystems = new Map<string, RevisionFileSystem>();
+  const linkedFilesystem = async (id: string): Promise<RevisionFileSystem> => {
     const existing = linkedFilesystems.get(id);
     if (existing !== undefined) {
       return existing;
@@ -177,7 +177,7 @@ const recorderDevice = '00000000-0000-4000-8000-00000000000a';
  * @param filesystem - The records filesystem `.git/` lives in.
  * @param device - The record device id.
  */
-const ownRecordDevice = async (filesystem: RootedFileSystem, device: string): Promise<void> => {
+const ownRecordDevice = async (filesystem: RevisionFileSystem, device: string): Promise<void> => {
   await filesystem.writeFile('.git/ops-devices.json', JSON.stringify({ version: 1, devices: { host: device } }));
 };
 
@@ -249,7 +249,7 @@ describe('the capture memo', () => {
       (real) =>
         /* The memo engages only where the tree can be stat'ed in one call, as
          * the workspace views can and the bare provider cannot. */
-        Object.assign(Object.create(real) as RootedFileSystem, {
+        Object.assign(Object.create(real) as RevisionFileSystem, {
           statTree: async (): Promise<FileStatEntry[]> => {
             const stat = await real.stat('part.ts');
             return [{ ...stat, path: 'part.ts', name: 'part.ts' }];
@@ -514,7 +514,7 @@ describe('settling a turn', () => {
   it('refuses to publish when an applied write or deletion silently did not land', async () => {
     const swallowed = new Set(['notes.md']);
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
-      Object.assign(Object.create(real) as RootedFileSystem, {
+      Object.assign(Object.create(real) as RevisionFileSystem, {
         rename: async (from: string, to: string) => (swallowed.has(to) ? undefined : real.rename(from, to)),
       }),
     );
@@ -549,8 +549,8 @@ describe('settling a turn', () => {
 
   it('settles when something else writes its own files between the merge and its verification', async () => {
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
-      Object.assign(Object.create(real) as RootedFileSystem, {
-        writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) => {
+      Object.assign(Object.create(real) as RevisionFileSystem, {
+        writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
           await real.writeFile(path, content);
           /* The preview pipeline writes into the same root, unfenced, while the
            * settlement is applying its tree. A whole-tree comparison would fail
@@ -691,7 +691,7 @@ type TreeFact = Readonly<{ type: string; trigger?: string; revisionId?: string; 
  */
 const startTree = async (
   port: RevisionPort,
-  filesystem: RootedFileSystem,
+  filesystem: RevisionFileSystem,
   extra: Partial<RevisionActorsOptions> = {},
 ) => {
   const { actor } = createProjectRevisionsActor({
@@ -1391,8 +1391,8 @@ for (const actorSet of actorSets) {
     it('rolls the checkout back when application fails or the ref CAS loses', async () => {
       const context = await synchronized();
       let failWrite = true;
-      const wrapped = Object.assign(Object.create(context.filesystem) as RootedFileSystem, {
-        writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) => {
+      const wrapped = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, {
+        writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
           if (path.includes('.main.ts.') && path.endsWith('.tmp') && failWrite) {
             failWrite = false;
             throw new Error('injected write failure');
@@ -1510,7 +1510,7 @@ for (const actorSet of actorSets) {
     it('preserves a write that lands during replacement and rejects the stale fast-forward', async () => {
       const context = await synchronized();
       let injected = false;
-      const wrapped = Object.assign(Object.create(context.filesystem) as RootedFileSystem, {
+      const wrapped = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, {
         rename: async (from: string, to: string) => {
           if (from === 'main.ts' && to.includes('.main.ts.') && !injected) {
             injected = true;
@@ -2165,8 +2165,8 @@ describe('independent sync record failures', () => {
     const delayed = Promise.withResolvers<void>();
     const started = Promise.withResolvers<void>();
     const context = await fixture({ 'tau.json': '{"syncChats":true}\n' });
-    const projecting = Object.assign(Object.create(context.filesystem) as RootedFileSystem, {
-      writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) => {
+    const projecting = Object.assign(Object.create(context.filesystem) as RevisionFileSystem, {
+      writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
         if (path.endsWith('/broken/chat.json')) {
           throw new Error('broken chat cannot be written');
         }
@@ -3221,8 +3221,8 @@ describe('the durable queue’s writer', () => {
     const writes: string[] = [];
     let releaseFirst: (() => void) | undefined;
     const { port, actors, filesystem } = await fixture({ 'main.ts': 'export const size = 1;\n' }, (real) =>
-      Object.assign(Object.create(real) as RootedFileSystem, {
-        writeFile: async (path: string, content: Parameters<RootedFileSystem['writeFile']>[1]) => {
+      Object.assign(Object.create(real) as RevisionFileSystem, {
+        writeFile: async (path: string, content: Parameters<RevisionFileSystem['writeFile']>[1]) => {
           writes.push(path);
           if (writes.length === 1) {
             /* Hold the first write open: a keepalive answer landing while a push

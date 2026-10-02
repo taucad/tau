@@ -34,8 +34,6 @@ const updateFeedSchema = z.object({
   ),
 });
 
-export type UpdateFeed = z.infer<typeof updateFeedSchema>;
-
 /** An available update: the release's version, tag and page. */
 export type AvailableUpdate = { readonly version: string; readonly tag: string; readonly releasePage: string };
 

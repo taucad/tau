@@ -287,7 +287,8 @@ try {
     appBundleId: 'com.taucad.tau.desktop',
     appCategoryType: 'public.app-category.graphics-design',
     appVersion: metadata.version,
-    buildVersion: '1',
+    /* Squirrel.Mac compares bundle versions, so the build version is the release version. */
+    buildVersion: metadata.version,
     electronVersion: electron.version,
     icon: resolve(desktopRoot, 'resources/icon.icns'),
     extendInfo: hostInfo,

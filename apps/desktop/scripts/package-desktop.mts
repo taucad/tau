@@ -95,7 +95,7 @@ const packagePaths = await packager({
   arch: plan.arch,
   name: 'Tau',
   appVersion: metadata.version,
-  buildVersion: '1',
+  buildVersion: metadata.version,
   electronVersion: electron.version,
   ...(plan.icon === undefined ? {} : { icon: resolve(desktopRoot, 'resources', plan.icon) }),
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Windows version-resource field names.

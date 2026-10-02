@@ -109,8 +109,6 @@ export const desktopPackageOmissions = (
           ? `git payload: none at ${present.gitResourceRoot}; this package records with the machine's own git and git-lfs.`
           : "git payload: prepare-git builds git from kernel.org source, which is not how git ships on Windows; this package records with the machine's own git and git-lfs.",
       ]),
-  'Bundled esbuild: main sets ESBUILD_BINARY_PATH for darwin-arm64 only, so JavaScript kernel bundling falls back to the ' +
-    'path inside app.asar, which a child process cannot spawn.',
 ];
 
 /**

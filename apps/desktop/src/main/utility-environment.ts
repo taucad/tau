@@ -192,6 +192,13 @@ export const compileCacheEnvironment = (userDataPath: string): Readonly<{ TAU_CO
   TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
 });
 
+/** The esbuild platform executable each packaged target stages outside the ASAR (`runtime-stage.mts`). */
+const stagedEsbuildExecutables: Readonly<Record<string, string>> = {
+  'darwin-arm64': '@esbuild/darwin-arm64/bin/esbuild',
+  'linux-x64': '@esbuild/linux-x64/bin/esbuild',
+  'win32-x64': '@esbuild/win32-x64/esbuild.exe',
+};
+
 /**
  * Locate esbuild's staged executable for packaged utility processes.
  *
@@ -211,13 +218,9 @@ export const packagedEsbuildEnvironment = (
   target?: Readonly<{ architecture: string; platform: NodeJS.Platform }>,
 ): Readonly<Record<string, string>> => {
   const packagedTarget = target ?? { architecture: process.arch, platform: process.platform };
-  return packaged && packagedTarget.platform === 'darwin' && packagedTarget.architecture === 'arm64'
-    ? {
-        [esbuildBinaryPathVariable]: join(
-          resourcesPath,
-          'app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild',
-        ),
-      }
+  const staged = stagedEsbuildExecutables[`${packagedTarget.platform}-${packagedTarget.architecture}`];
+  return packaged && staged !== undefined
+    ? { [esbuildBinaryPathVariable]: join(resourcesPath, 'app.asar.unpacked/node_modules', staged) }
     : {};
 };
 

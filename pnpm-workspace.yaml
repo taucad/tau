@@ -14,7 +14,11 @@ allowBuilds:
   '@datadog/pprof': false
   '@parcel/watcher': true
   '@swc/core': true
-  canvas: true
+  # canvas is a root devDependency that jsdom loads only when it works. pnpm does not
+  # put its prebuild-install on the install script's PATH here, so building it means a
+  # node-gyp compile against cairo/pango/pixman on every machine. jsdom treats an
+  # unbuilt canvas as absent, which is what the suites expect.
+  canvas: false
   core-js: true
   electron: true
   esbuild: true

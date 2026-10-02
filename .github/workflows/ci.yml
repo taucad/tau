@@ -423,9 +423,16 @@ jobs:
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
       (needs.plan.outputs.e2e == 'true')
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
     steps:
+      # `nx affected` below diffs against the PR base, so the checkout needs its history.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -495,9 +502,15 @@ jobs:
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
       (needs.plan.outputs.e2e == 'true')
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx

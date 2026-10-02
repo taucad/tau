@@ -32,7 +32,7 @@ it.each([
   );
 
   await expect
-    .poll(() => container.querySelector('.view-line')?.textContent?.replaceAll('\u00a0', ' '), { timeout: 10_000 })
+    .poll(() => container.querySelector('.view-line')?.textContent.replaceAll('\u00A0', ' '), { timeout: 10_000 })
     .toContain(source.split('\n')[0]);
   await expect.poll(() => container.querySelector('.overflow-guard')?.getBoundingClientRect().height).toBe(300);
   const line = container.querySelector('.view-line')!;

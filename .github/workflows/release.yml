@@ -144,14 +144,15 @@ jobs:
         with:
           fetch-depth: 0
           ref: main
-          persist-credentials: true
-          token: ${{ steps.bot.outputs.token }}
+          persist-credentials: false
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
       - name: Generate the release commit
         id: generate
+        env:
+          BOT_TOKEN: ${{ steps.bot.outputs.token }}
         run: |
           set -euo pipefail
           node scripts/src/release-apps.ts prepare > "$RUNNER_TEMP/plan.json"
@@ -174,16 +175,19 @@ jobs:
           git config user.name "tau-release-bot[bot]"
           git config user.email "tau-release-bot[bot]@users.noreply.github.com"
           git commit --quiet -m "$subject"
-          git push --force origin HEAD:refs/heads/release/next
+          git push --force "https://x-access-token:${BOT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/release/next
 
+          # Commit subjects are contributor text: a random delimiter keeps one
+          # from ending the multiline output early.
+          delimiter="RELEASES_$(openssl rand -hex 16)"
           {
-            echo 'body<<BODYEOF'
+            echo "body<<$delimiter"
             jq -r '.releases[] | "### \(.tag)\n\n" +
               (if .bump == "first" then "First tracked release." else
                 "\(.bump) bump from \(.previousTag), \(.commits | length) commit(s):\n\n" +
                 ([.commits[] | "- \(.hash[0:9]) \(.subject)"] | .[0:60] | join("\n")) end) + "\n"' \
               "$RUNNER_TEMP/plan.json"
-            echo 'BODYEOF'
+            echo "$delimiter"
           } >> "$GITHUB_OUTPUT"
 
       - name: Upsert the release pull request
@@ -228,5 +232,6 @@ jobs:
           if [ -n "$pr_number" ]; then
             gh pr close "$pr_number" --comment "Nothing is left to release on \`main\`." --delete-branch
           else
-            git push origin --delete release/next 2>/dev/null || true
+            git push "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+              --delete release/next 2>/dev/null || true
           fi

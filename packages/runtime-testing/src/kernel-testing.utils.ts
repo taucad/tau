@@ -127,34 +127,34 @@ export async function createTestGeometry(
 }
 
 /**
- * Verify that two render projections and an optional write read one retained
+ * Verify that two render projections and an optional export read one retained
  * evaluation without changing the first projection or export evidence.
  * Callers close over the same native handle and choose semantically different
  * views, options or content for A and B.
  *
  * @public
  */
-export const expectKernelProjectionOrder = async <First, Intervening, Written = never>({
+export const expectKernelProjectionOrder = async <First, Intervening, Exported = never>({
   renderA,
   renderB,
-  write,
+  export: exportModel,
   freshB,
 }: {
   readonly renderA: () => First | Promise<First>;
   readonly renderB: () => Intervening | Promise<Intervening>;
-  readonly write?: () => Written | Promise<Written>;
+  readonly export?: () => Exported | Promise<Exported>;
   readonly freshB?: () => Intervening | Promise<Intervening>;
 }): Promise<{ first: First; intervening: Intervening; repeated: First }> => {
   const first = await renderA();
-  const writtenBefore = write ? await write() : undefined;
+  const exportedBefore = exportModel ? await exportModel() : undefined;
   const intervening = await renderB();
   if (freshB) {
     expect(intervening).toEqual(await freshB());
   }
   const repeated = await renderA();
   expect(repeated).toEqual(first);
-  if (write) {
-    expect(await write()).toEqual(writtenBefore);
+  if (exportModel) {
+    expect(await exportModel()).toEqual(exportedBefore);
   }
   return { first, intervening, repeated };
 };

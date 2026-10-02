@@ -10,11 +10,11 @@ export type {
   MiddlewareState,
   EvaluateRequest,
   RenderRequest,
-  WriteRequest,
+  ExportRequest,
   WrapDescribeHook,
   WrapEvaluateHook,
   WrapRenderHook,
-  WrapWriteHook,
+  WrapExportHook,
 } from '#types/runtime-middleware-v2.types.js';
 export type { MiddlewarePluginFactoryV2 as MiddlewarePluginFactory } from '#middleware/runtime-middleware-v2.js';
 export { nativeBuildInputSymbol } from '#framework/render-artifact.js';

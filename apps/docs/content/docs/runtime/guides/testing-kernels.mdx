@@ -100,7 +100,7 @@ it('exposes parameters and geometry', async () => {
 
 ### 3. Unit-test plugin definitions
 
-`resolveRuntimePluginDefinition` from `@taucad/runtime/plugin` exposes the definition behind a public factory for focused hook tests. Assert operation inputs and outputs directly: `evaluate` must offer only declared view/export IDs; `render` must return content without changing the handle; `write` must return at least one file; and `onDispose` releases context resources. Use `createMockKernelRuntime` from `@taucad/runtime-testing` for kernel services, and pass a fresh operation signal to each call. Keep caching, watch, disposal ordering, and transport invariants in runtime-owned integration tests.
+`resolveRuntimePluginDefinition` from `@taucad/runtime/plugin` exposes the definition behind a public factory for focused hook tests. Assert operation inputs and outputs directly: `evaluate` must offer only declared view/export IDs; `render` must return content without changing the handle; `export` must return at least one file; and `onDispose` releases context resources. Use `createMockKernelRuntime` from `@taucad/runtime-testing` for kernel services, and pass a fresh operation signal to each call. Keep caching, watch, disposal ordering, and transport invariants in runtime-owned integration tests.
 
 ```typescript
 import { expect, it } from 'vitest';

@@ -213,7 +213,7 @@ describe('Build123d kernel lifecycle errors', () => {
       ),
     ).rejects.toThrow(/stale/);
     await expect(
-      definition.write!(
+      definition.export!(
         { exportId: 'step', handle: { sessionGeneration: 1, handleId: 'stale' }, options: {} },
         runtime,
         context,
@@ -230,7 +230,7 @@ describe('Build123d kernel lifecycle errors', () => {
     ).rejects.toThrow(/mesh failed/);
 
     context.session.request.mockResolvedValueOnce({ artifactPath: '/private/model.glb', byteLength: 3 });
-    const exported = await definition.write!(
+    const exported = await definition.export!(
       {
         exportId: 'glb',
         handle,
@@ -249,7 +249,7 @@ describe('Build123d kernel lifecycle errors', () => {
     );
 
     context.session.request.mockRejectedValueOnce(new Error('export failed'));
-    await expect(definition.write!({ exportId: 'step', handle, options: {} }, runtime, context)).rejects.toThrow(
+    await expect(definition.export!({ exportId: 'step', handle, options: {} }, runtime, context)).rejects.toThrow(
       /export failed/,
     );
   });

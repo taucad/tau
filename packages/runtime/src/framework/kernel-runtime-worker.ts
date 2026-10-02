@@ -34,7 +34,7 @@ import type {
   KernelOffers,
   RenderResult,
   RenderOutput,
-  WriteOutput,
+  ExportOutput,
   KernelDefinitionV2,
   KernelExportDeclarations,
   KernelViewDeclarations,
@@ -820,7 +820,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     }
 
     const kernel = this.getActiveKernel();
-    return this.writeForKernel(kernel, input, runtime);
+    return this.exportForKernel(kernel, input, runtime);
   }
 
   // oxlint-disable-next-line max-params -- Implements the base owner-bound hook including its evaluation slot.
@@ -845,7 +845,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
       };
     }
 
-    return this.writeForKernel(kernel, input, runtime, slot);
+    return this.exportForKernel(kernel, input, runtime, slot);
   }
 
   protected override async isNativeHandleValidForOwner(
@@ -946,8 +946,8 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
   }
 
   /** Map the current client's extension route to the v2 export declaration. */
-  // oxlint-disable-next-line max-params -- The optional evaluation slot guards selected offers at the write boundary.
-  private async writeForKernel(
+  // oxlint-disable-next-line max-params -- The optional evaluation slot guards selected offers at the export boundary.
+  private async exportForKernel(
     kernel: LoadedKernel,
     input: ExportGeometryInput & { content?: RuntimeContentInput; exportId?: string },
     runtime: KernelRuntime,
@@ -972,7 +972,7 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
         },
       ]);
     }
-    if (!selected || !kernel.definition.write) {
+    if (!selected || !kernel.definition.export) {
       return createKernelError([
         {
           message:
@@ -1000,12 +1000,12 @@ class KernelRuntimeWorker extends KernelWorker<RuntimeWorkerOptions> {
     try {
       // The exact export union is erased at this dynamic boundary after declaration,
       // offer and option admission; preserve the selected provider content.
-      const writeSelected = kernel.definition.write as (
+      const exportSelected = kernel.definition.export as (
         input: { handle: unknown; exportId: string; options: Record<string, unknown>; content?: RuntimeContentInput },
         services: KernelRuntime,
         context: unknown,
-      ) => Promise<WriteOutput>;
-      const output = await writeSelected(
+      ) => Promise<ExportOutput>;
+      const output = await exportSelected(
         {
           handle: input.nativeHandle,
           exportId,

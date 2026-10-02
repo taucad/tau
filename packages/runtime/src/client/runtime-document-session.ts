@@ -945,11 +945,11 @@ export class RuntimeDocumentSessionClient {
       if (pinnedEvaluationId) {
         exportPins.set(operationId, pinnedEvaluationId);
       }
-      let exportPhase = 'write';
+      let exportPhase = 'export';
       const disposeProgress = channel.onNotify('progress', (value) => {
         if (value.operationId === operationId) {
-          exportPhase = value.phase === 'writing' ? 'write' : value.phase;
-          if (value.phase === 'write' && typeof value.detail?.['abortSequence'] === 'number') {
+          exportPhase = value.phase === 'exporting' ? 'export' : value.phase;
+          if (value.phase === 'export' && typeof value.detail?.['abortSequence'] === 'number') {
             exportAbortTargets.set(operationId, {
               sequence: String(value.detail['abortSequence']),
               ...(typeof value.detail['abortGeneration'] === 'number'

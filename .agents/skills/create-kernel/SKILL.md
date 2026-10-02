@@ -121,7 +121,7 @@ export const <alias>Kernel = defineKernel({
   async render({ handle }, _services, context) {
     return { content: await context.backend.renderGlb(handle) };
   },
-  async write({ handle }, _services, context) {
+  async export({ handle }, _services, context) {
     const bytes = await context.backend.writeStl(handle);
     return { files: nonemptyExportFiles([{ name: 'model.stl', mimeType: 'model/stl', bytes }]) };
   },
@@ -141,7 +141,7 @@ Key patterns:
 
 - Declare keyed `views` and `exports` with title and MIME type; exports also name a file extension. Add route-specific `optionsSchema` and `content` only when the route fulfills them.
 - `evaluate` returns one opaque handle and ordered offered view/export IDs; the first offered view is the default for the current client bridge. A kernel may offer exports without views. Optional `instances` on a declared view names alternatives for the same evaluated handle.
-- `render` reads the handle and must not mutate it or re-evaluate source. It returns content; the runtime attaches the declared MIME type. `write` returns at least one file with `nonemptyExportFiles` and can use an open MIME type.
+- `render` reads the handle and must not mutate it or re-evaluate source. It returns content; the runtime attaches the declared MIME type. `export` returns at least one file with `nonemptyExportFiles` and can use an open MIME type.
 - `services.bundler.registerModule(name, { code, version })`, `services.bundler.bundle(entryPath)` and `services.execute(code)` are available for JS/TS kernels. Services are operation-scoped; backend state stays in the context returned by `initialize`.
 - `describe` returns `createKernelSuccess({ parameters: declaration })` or `createKernelError(issues)`. `resolve` returns runtime paths.
 - Pair `serializeHandle` and `deserializeHandle` for retained handles; snapshots must be structured-cloneable. Use `releaseHandle` for per-handle resources and `onDispose` for backend teardown.
@@ -206,7 +206,7 @@ Callers own clients returned by `createTestRuntimeClient` and always shut them d
 
 - `describe` — defaults extraction + empty fallback
 - `evaluate` — handle, offers, parameterized and error cases
-- `render` / `write` — offered view and export IDs, route options, nonempty artifacts and no-handle failure
+- `render` / `export` — offered view and export IDs, route options, nonempty artifacts and no-handle failure
 - Geometry naming — parse GLB/glTF output and assert node/mesh parity, material/scene naming, component IDs/selectors, and artifact filenames per `docs/policy/geometry-naming-policy.md`
 
 Reference quality bar: `packages/plugins/openrscad/src/openrscad.kernel.test.ts`.

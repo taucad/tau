@@ -667,7 +667,7 @@ export const tscircuitKernel = defineKernel({
     return { circuitJson: parsed['circuitJson'], sheets: mappings };
   },
 
-  async write({ exportId, handle, options }) {
+  async export({ exportId, handle, options }) {
     const { circuitJson } = handle;
     const issues = collectCircuitIssues(circuitJson);
     switch (exportId) {

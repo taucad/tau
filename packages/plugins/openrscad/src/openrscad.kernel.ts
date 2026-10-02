@@ -668,7 +668,7 @@ export const createOpenrscadKernel = ({
       return { content: preview, issues: collectIssues(result, nativeHandle.source, nativeHandle.entryPath) };
     },
 
-    async write(input, { tracer }, context) {
+    async export(input, { tracer }, context) {
       const { exportId: format, handle: nativeHandle } = input;
       const exportNative = async (
         format: '3mf' | 'glb',

@@ -321,7 +321,7 @@ export const build123dKernel = defineKernel({
     }
   },
 
-  async write(input, runtime, context) {
+  async export(input, runtime, context) {
     if (!context.session.isHandleGenerationValid(input.handle.sessionGeneration)) {
       throw new Build123dKernelError(issuesFrom(new Error('Build123d native handle is stale.')));
     }

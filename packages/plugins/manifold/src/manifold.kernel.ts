@@ -369,7 +369,7 @@ export const manifoldKernel = defineKernel({
     return { content: handle.glb };
   },
 
-  async write(input) {
+  async export(input) {
     const { exportId, handle, options } = input;
 
     if (handle.glb.length === 0) {

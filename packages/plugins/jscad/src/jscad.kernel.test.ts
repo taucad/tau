@@ -226,8 +226,8 @@ describe('JscadWorker', () => {
       renderA: async () => render(handle, true),
       renderB: async () => render(handle, false),
       freshB: async () => render(fresh, false),
-      write: async () => {
-        const projected = await jscadDefinition.write!(
+      export: async () => {
+        const projected = await jscadDefinition.export!(
           { exportId: 'glb', handle, options: jscadGlbExportOptions, content: { includeEdges: true } },
           runtime,
           context,
@@ -920,7 +920,7 @@ module.exports = { main, getParameterDefinitions }
         ]);
         const nativeHandle = normalizeJscadParts(openCube, testModeling);
 
-        const { render, write } = jscadDefinition;
+        const { render, export: exportModel } = jscadDefinition;
         expect(render).toBeDefined();
         if (!render) {
           return;
@@ -945,7 +945,7 @@ module.exports = { main, getParameterDefinitions }
           .topology;
         expect(meshTopology).toMatchObject({ openBoundaryEdges: 4, irregularEdges: 4, nonManifoldEdges: 0 });
 
-        const exported = await write!(
+        const exported = await exportModel!(
           { exportId: 'glb', handle: nativeHandle, options: jscadGlbExportOptions, content: { includeEdges: true } },
           createMockKernelRuntime(),
           { modulesRegistered: true, modeling: testModeling },
@@ -1393,7 +1393,7 @@ module.exports = { main, getParameterDefinitions }
   // Tests: Export Geometry
   // ===========================================================================
 
-  describe('write', () => {
+  describe('export', () => {
     it('should return error for unsupported gltf format', async () => {
       const client = createClient({
         'cube.ts': `
@@ -2263,7 +2263,7 @@ describe('serializeHandle', () => {
   it('should deserialize MessagePack-decoded compact binary handles and export GLB bytes', async () => {
     const serialized = serializeShape(buildJscadCubeCutout());
 
-    const { deserializeHandle, write } = jscadDefinition;
+    const { deserializeHandle, export: exportModel } = jscadDefinition;
     expect(deserializeHandle).toBeDefined();
     if (!deserializeHandle) {
       return;
@@ -2281,7 +2281,7 @@ describe('serializeHandle', () => {
       createMockKernelRuntime(),
       { modulesRegistered: true, modeling: testModeling },
     );
-    const exportResult = await write!(
+    const exportResult = await exportModel!(
       {
         exportId: 'glb',
         handle: restoredHandle,

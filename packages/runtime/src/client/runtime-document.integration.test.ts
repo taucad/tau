@@ -41,7 +41,7 @@ it('opens, renders, and exports a document over the in-process protocol', async 
     async render() {
       return { content: '<svg xmlns="http://www.w3.org/2000/svg"/>' };
     },
-    async write() {
+    async export() {
       return {
         files: nonemptyExportFiles([
           { name: 'bom.csv', mimeType: 'text/csv', bytes: new TextEncoder().encode('part,count\nresistor,1') },
@@ -101,7 +101,7 @@ it('reports transport.closed as termination for pending document, view, and expo
         /* Pending host work. */
       });
     },
-    async write() {
+    async export() {
       return new Promise<never>(() => {
         /* Pending host work. */
       });

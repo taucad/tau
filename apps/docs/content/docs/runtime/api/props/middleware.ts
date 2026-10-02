@@ -8,11 +8,11 @@ export type {
   MiddlewareDependency,
   EvaluateRequest,
   RenderRequest,
-  WriteRequest,
+  ExportRequest,
   WrapDescribeHook,
   WrapEvaluateHook,
   WrapRenderHook,
-  WrapWriteHook,
+  WrapExportHook,
 } from '@taucad/runtime/middleware';
 export type { MiddlewarePlugin } from '@taucad/runtime';
 export type { ViewContentKeys, ExportContentKeys, ViewContentMap, ExportContentMap } from '@taucad/runtime/types';

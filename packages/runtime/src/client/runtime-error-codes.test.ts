@@ -15,11 +15,11 @@ import { RuntimeConfigError } from '#worker/runtime-definition.js';
 describe('public runtime error codes', () => {
   it('keeps exact operation discriminators and phases', () => {
     const aborted = new OperationAbortedError('evaluate');
-    const timedOut = new OperationTimeoutError('write', 'Export timed out.');
+    const timedOut = new OperationTimeoutError('export', 'Export timed out.');
     expect(aborted.code).toBe('RUNTIME_OPERATION_ABORTED');
     expect(timedOut.code).toBe('RUNTIME_OPERATION_TIMEOUT');
     expect(aborted.phase).toBe('evaluate');
-    expect(timedOut.phase).toBe('write');
+    expect(timedOut.phase).toBe('export');
     expectTypeOf(aborted.code).toEqualTypeOf<'RUNTIME_OPERATION_ABORTED'>();
     expectTypeOf(timedOut.code).toEqualTypeOf<'RUNTIME_OPERATION_TIMEOUT'>();
   });

@@ -3,7 +3,7 @@ import { z } from 'zod';
 import { IngestEntryName } from '@taucad/telemetry';
 import { reportToApi } from '#runtime/observability/report-to-api.js';
 
-/** Reports evaluation, selected-view rendering, and export writing from the worker. */
+/** Reports evaluation, selected-view rendering, and exports from the worker. */
 export const observabilityMiddleware = defineMiddleware({
   id: 'observability',
   name: 'Observability',
@@ -79,7 +79,7 @@ export const observabilityMiddleware = defineMiddleware({
     }
   },
 
-  async wrapWrite(input, next, { logger, options }) {
+  async wrapExport(input, next, { logger, options }) {
     if (!options.reportUrl) {
       return next(input);
     }

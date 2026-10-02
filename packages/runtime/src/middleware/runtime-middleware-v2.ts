@@ -54,7 +54,7 @@ export interface MiddlewarePluginFactoryV2<
 /* oxlint-enable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types */
 
 /**
- * Middleware authoring factory for the describe/evaluate/render/write contract.
+ * Middleware authoring factory for the describe/evaluate/render/export contract.
  * @param definition - Typed middleware hooks and declaration metadata.
  * @returns A branded factory with private executable hooks.
  * @public

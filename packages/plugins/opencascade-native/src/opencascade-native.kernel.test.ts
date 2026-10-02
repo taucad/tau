@@ -135,8 +135,8 @@ describe('OpenCascadeNativeKernel', () => {
       const rendered = await definition.render!({ handle: solids, view: 'model', options }, runtime, context);
       return rendered.content;
     };
-    const write = async () => {
-      const step = await definition.write!({ exportId: 'step', handle, options: {} }, runtime, context);
+    const exportModel = async () => {
+      const step = await definition.export!({ exportId: 'step', handle, options: {} }, runtime, context);
       return binding.readStep(step.files[0].bytes).map((solid) => solid.metrics());
     };
 
@@ -144,7 +144,7 @@ describe('OpenCascadeNativeKernel', () => {
       renderA: async () => project(handle, fine),
       renderB: async () => project(handle, coarse),
       freshB: async () => project(freshHandle, coarse),
-      write,
+      export: exportModel,
     });
     expect(binding.writeBrep(handle)).toEqual(brep);
   });
@@ -183,8 +183,8 @@ describe('OpenCascadeNativeKernel', () => {
       const rendered = await definition.render!({ handle, view: 'model', options }, runtime, context);
       return rendered.content;
     };
-    const write = async () => {
-      const exported = await definition.write!({ exportId: 'step', handle, options: {} }, runtime, context);
+    const exportModel = async () => {
+      const exported = await definition.export!({ exportId: 'step', handle, options: {} }, runtime, context);
       return exported.files[0].bytes;
     };
     await expectKernelProjectionOrder({
@@ -196,7 +196,7 @@ describe('OpenCascadeNativeKernel', () => {
           deflectionAngular: coarse.tessellation.angularTolerance * (Math.PI / 180),
           relativeLinear: false,
         }),
-      write,
+      export: exportModel,
     });
     expect(binding.readBrep).toHaveBeenCalledTimes(6);
   });

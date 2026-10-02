@@ -79,7 +79,7 @@ const definition = defineKernelV2({
     }
     return { content: new Uint8Array([1]) };
   },
-  async write(input) {
+  async export(input) {
     expectTypeOf(input.handle.connection).toEqualTypeOf<string>();
     if (input.exportId === 'board') {
       expectTypeOf(input.options.scale).toEqualTypeOf<number>();
@@ -205,7 +205,7 @@ describe('v2 kernel authoring', () => {
     void plugin.views.pcb.optionsSchema.parse;
   });
 
-  it('requires render and write only for declared maps', () => {
+  it('requires render and export only for declared maps', () => {
     const hoistedView = {
       title: 'Board',
       mimeType: 'model/gltf-binary',
@@ -231,7 +231,7 @@ describe('v2 kernel authoring', () => {
       async evaluate() {
         return { handle: { id: 1 } };
       },
-      async write() {
+      async export() {
         const mapped: ExportFile[] = ['data'].map((name) => ({
           name: `${name}.txt`,
           mimeType: 'text/plain',

@@ -24,7 +24,7 @@ const kernel = defineKernelV2({
   async evaluate() {
     return { handle: {}, views: [] as const, exports: ['native'] as const };
   },
-  async write() {
+  async export() {
     return { files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: new Uint8Array([1]) }] as const };
   },
 });
@@ -79,7 +79,7 @@ describe('runtime capability derivation', () => {
       async evaluate() {
         return { handle: {}, views: [] as const, exports: ['native'] as const };
       },
-      async write() {
+      async export() {
         return {
           files: [{ name: 'model.x-modern', mimeType: 'application/x-modern', bytes: new Uint8Array([1]) }] as const,
         };

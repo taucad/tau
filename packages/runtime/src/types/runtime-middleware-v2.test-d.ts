@@ -40,7 +40,7 @@ const factory = defineMiddleware({
     void input.content?.includeNormals;
     return next(input);
   },
-  async wrapWrite(input, next) {
+  async wrapExport(input, next) {
     expectTypeOf(input.mimeType).toEqualTypeOf<MediaType>();
     expectTypeOf(input.extension).toEqualTypeOf<string>();
     expectTypeOf(input.content).toEqualTypeOf<{ readonly includeTopology?: boolean } | undefined>();

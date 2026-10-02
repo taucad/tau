@@ -616,8 +616,8 @@ export default function main() {
               renderA: async () => render(curvedHandle, fine),
               renderB: async () => render(curvedHandle, coarse),
               freshB: async () => render(curvedFresh, coarse),
-              write: async () => {
-                const projected = await definition.write!(
+              export: async () => {
+                const projected = await definition.export!(
                   { exportId: 'step', handle: curvedHandle, options: opencascadeExportSchemas.step.parse({}) },
                   kernelRuntime,
                   context,

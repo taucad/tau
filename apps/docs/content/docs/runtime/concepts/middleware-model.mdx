@@ -9,11 +9,11 @@ Middleware in `@taucad/runtime` uses the onion model: each layer wraps the next,
 
 ## Context and Motivation
 
-Kernel operations (`describe`, `evaluate`, `render`, `write`) often need cross-cutting behavior: caching results, transforming coordinates, adding edge data for rendering. Hard-coding these into each kernel would duplicate logic and couple kernels to UI concerns. Middleware composes such behavior declaratively at one interception point -- and because the model is an onion, even short-circuited results flow back through outer layers for consistent post-processing.
+Kernel operations (`describe`, `evaluate`, `render`, `export`) often need cross-cutting behavior: caching results, transforming coordinates, adding edge data for rendering. Hard-coding these into each kernel would duplicate logic and couple kernels to UI concerns. Middleware composes such behavior declaratively at one interception point -- and because the model is an onion, even short-circuited results flow back through outer layers for consistent post-processing.
 
 ## How It Works
 
-A middleware defines wrap-style hooks: `wrapDescribe`, `wrapEvaluate`, `wrapRender`, and `wrapWrite`. A hook receives `(input, next, services)` and calls `next(input)` to continue the chain. Code before `next(input)` runs on the way down; code after runs on the way back up.
+A middleware defines wrap-style hooks: `wrapDescribe`, `wrapEvaluate`, `wrapRender`, and `wrapExport`. A hook receives `(input, next, services)` and calls `next(input)` to continue the chain. Code before `next(input)` runs on the way down; code after runs on the way back up.
 
 ```mermaid
 flowchart TB
@@ -64,7 +64,7 @@ export const metadataFiles = defineMiddleware({
 });
 ```
 
-Valid operations are `describe`, `evaluate`, `render`, and `write`. The runtime hashes and watches a declaration only for the listed operations; it never infers dependency scope from the middleware's wrap hooks.
+Valid operations are `describe`, `evaluate`, `render`, and `export`. The runtime hashes and watches a declaration only for the listed operations; it never infers dependency scope from the middleware's wrap hooks.
 
 ### KernelMiddlewareServices
 

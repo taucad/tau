@@ -325,7 +325,7 @@ describe('PicoVoxel packaged runtime', () => {
     }
   }, 300_000);
 
-  it('should stop synchronous native render and write hooks through the packaged Node worker', async () => {
+  it('should stop synchronous native render and export hooks through the packaged Node worker', async () => {
     const client = createRuntimeClient({
       transport: nodeWorkerTransport({
         url: new URL('fixtures/picovoxel-node-runtime.ts', import.meta.url),
@@ -369,16 +369,16 @@ describe('PicoVoxel packaged runtime', () => {
 
       const heavyEvaluation = await document.update({ parameters: { spin: true } });
       expect(heavyEvaluation.superseded).toBe(false);
-      const writeStarted = Promise.withResolvers<void>();
-      const stopWriteProgress = document.on('progress', ({ phase }) => {
-        if (phase === 'write') {
-          stopWriteProgress();
-          writeStarted.resolve();
+      const exportStarted = Promise.withResolvers<void>();
+      const stopExportProgress = document.on('progress', ({ phase }) => {
+        if (phase === 'export') {
+          stopExportProgress();
+          exportStarted.resolve();
         }
       });
       const controller = new AbortController();
       const slowExport = document.export('text', { signal: controller.signal });
-      await writeStarted.promise;
+      await exportStarted.promise;
       controller.abort();
       await expect(slowExport).rejects.toMatchObject({ name: 'OperationAbortedError' });
       const finalEvaluation = await document.update({ parameters: { spin: false } });
@@ -389,7 +389,7 @@ describe('PicoVoxel packaged runtime', () => {
         expect(new TextDecoder().decode(recoveredExport.files[0].bytes)).toBe('recovered');
       }
       expect(logs.some((message) => message.startsWith('Native render stopped after '))).toBe(true);
-      expect(logs.some((message) => message.startsWith('Native write stopped after '))).toBe(true);
+      expect(logs.some((message) => message.startsWith('Native export stopped after '))).toBe(true);
     } finally {
       stopLogs();
       client.terminate();

@@ -19,11 +19,11 @@ expectTypeOf(tscircuit).toEqualTypeOf(plugin);
 const resolve = async () => resolveRuntimePluginDefinition('kernel', tscircuitKernel());
 type Definition = Awaited<ReturnType<typeof resolve>>;
 type RenderRequest = Parameters<NonNullable<Definition['render']>>[0];
-type WriteRequest = Parameters<NonNullable<Definition['write']>>[0];
+type ExportRequest = Parameters<NonNullable<Definition['export']>>[0];
 expectTypeOf<Extract<RenderRequest, { view: 'board' }>['options']>().toEqualTypeOf<Readonly<Record<never, never>>>();
 expectTypeOf<Extract<RenderRequest, { view: 'schematic' }>['instance']>().toEqualTypeOf<string | undefined>();
 expectTypeOf<Extract<RenderRequest, { view: 'pcb' }>['options']>().toEqualTypeOf<{ pinNumbers?: boolean }>();
-expectTypeOf<Extract<WriteRequest, { exportId: 'board' }>['options']>().toExtend<{
+expectTypeOf<Extract<ExportRequest, { exportId: 'board' }>['options']>().toExtend<{
   coordinateSystem: 'y-up' | 'z-up';
 }>();
 expectTypeOf<(typeof selected.capabilities.kernels)[0]['exports']['board']['extension']>().toEqualTypeOf<'glb'>();

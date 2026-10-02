@@ -145,7 +145,7 @@ export const assimpKernel = defineKernel({
     return { content: handle };
   },
 
-  async write(input) {
+  async export(input) {
     if (input.handle.length === 0) {
       throw new Error('No geometry available for export.');
     }

@@ -482,7 +482,7 @@ export const jscadKernel = defineKernel({
     });
   },
 
-  async write(input, _runtime, context) {
+  async export(input, _runtime, context) {
     const { exportId, handle, options, content } = input;
 
     switch (exportId) {

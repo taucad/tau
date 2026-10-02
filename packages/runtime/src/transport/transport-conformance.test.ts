@@ -174,7 +174,7 @@ describe('transport conformance — in-process (C2)', () => {
       async render({ handle }) {
         return { content: encoder.encode(`mesh:${handle.label}`) };
       },
-      async write({ handle }) {
+      async export({ handle }) {
         return {
           files: [
             { name: 'model.glb', bytes: encoder.encode(`export:${handle.label}`), mimeType: 'model/gltf-binary' },

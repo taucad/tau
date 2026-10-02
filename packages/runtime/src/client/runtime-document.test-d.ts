@@ -132,7 +132,7 @@ const realKernel = defineKernelV2({
   async render() {
     return { content: '<svg/>' };
   },
-  async write() {
+  async export() {
     return { files: nonemptyExportFiles([{ name: 'bom.csv', mimeType: 'text/csv', bytes: new Uint8Array([1]) }]) };
   },
 });

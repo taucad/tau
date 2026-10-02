@@ -105,7 +105,7 @@ import type {
   MiddlewareContent,
   MiddlewareDependency as MiddlewareFileDependency,
   RenderRequest,
-  WriteRequest,
+  ExportRequest,
 } from '#types/runtime-middleware-v2.types.js';
 import { nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
 import { asKnownArtifact } from '#types/runtime-artifact.js';
@@ -115,7 +115,7 @@ import type {
   EvaluateResult,
   KernelOffers,
   RenderResult,
-  WriteResult,
+  KernelExportResult,
 } from '#types/runtime-kernel-v2.types.js';
 import type { BundlerPlugin, KernelPlugin, MiddlewarePlugin, TranscoderPlugin } from '#plugins/plugin-types.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
@@ -784,7 +784,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private activeDocumentNativeOperation:
     | {
         controller: AbortController;
-        progress: (phase: 'render' | 'write', sequence: number, generation?: number) => void;
+        progress: (phase: 'render' | 'export', sequence: number, generation?: number) => void;
       }
     | undefined;
 
@@ -1259,7 +1259,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
             ...(evaluation.result.sourceRevision ? { sourceRevision: evaluation.result.sourceRevision } : {}),
           };
         }
-        // A pinned evaluation stays fixed, while write-only dependencies must use bytes current at this export.
+        // A pinned evaluation stays fixed, while export-only dependencies must use bytes current at this export.
         await this.revalidateRetainedFiles();
         controller.signal.throwIfAborted();
         this.onDocumentProgressUpdate?.({
@@ -1267,7 +1267,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           intent: evaluation.intent,
           evaluationId: evaluation.id,
           operationId: input.operationId,
-          phase: 'writing',
+          phase: 'exporting',
         });
         const activeMiddleware = this.getOuterExportExecutionList(plan);
         this.activeDocumentNativeOperation = {
@@ -1328,7 +1328,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           intent: document.intent,
           operationId: input.operationId,
           code: 'OPERATION_TIMEOUT',
-          phase: 'write',
+          phase: 'export',
           message: 'Document export timed out.',
         });
       }
@@ -3347,7 +3347,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       phase: 'resolvingDeps',
     });
     const dependencies = await this.computeDependencies({
-      operations: ['evaluate', ...(entry.export ? (['write'] as const) : [])],
+      operations: ['evaluate', ...(entry.export ? (['export'] as const) : [])],
       parameters: entry.parameters,
       renderOptions: renderOptionsResult.options,
       content: renderContentResult.content,
@@ -4139,9 +4139,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     slot: EvaluationSlot,
   ): Promise<EvaluateResult>;
 
-  /** Expose an exact native render/write token only while its hook is running. */
+  /** Expose an exact native render/export token only while its hook is running. */
   private async withDocumentNativeAbort<Result>(
-    phase: 'render' | 'write',
+    phase: 'render' | 'export',
     hook: () => Promise<Result>,
   ): Promise<Result> {
     const active = this.activeDocumentNativeOperation;
@@ -5149,7 +5149,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       phase: 'resolvingDeps',
     });
     const dependencies = await this.computeDependencies({
-      operations: ['evaluate', 'write'],
+      operations: ['evaluate', 'export'],
       parameters: options.renderIdentity.parameters,
       renderOptions: options.renderIdentity.renderOptions,
       content: options.plan.route.content,
@@ -5189,7 +5189,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           ? this.getDocumentExportDeclaration(options.plan.owner, options.plan.route.exportId)
           : this.kernelExportMetadataMap.get(kernelId)?.[targetFormat]
         : undefined;
-    const writeRequest: WriteRequest = {
+    const exportRequest: ExportRequest = {
       exportId: options.plan.route.exportId ?? (declared && 'id' in declared ? declared.id : targetFormat),
       mimeType: declared?.mimeType ?? 'application/octet-stream',
       extension: targetFormat,
@@ -5209,19 +5209,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       });
 
     const { tracer } = this;
-    let chain: (input: WriteRequest) => Promise<WriteResult> = named(
+    let chain: (input: ExportRequest) => Promise<KernelExportResult> = named(
       'kernelHandler',
-      async (handlerInput: WriteRequest) => {
+      async (handlerInput: ExportRequest) => {
         const computeSpan = tracer.startSpan('kernel.export-compute');
         if (
-          handlerInput.exportId !== writeRequest.exportId ||
-          handlerInput.mimeType !== writeRequest.mimeType ||
-          handlerInput.extension !== writeRequest.extension
+          handlerInput.exportId !== exportRequest.exportId ||
+          handlerInput.mimeType !== exportRequest.mimeType ||
+          handlerInput.extension !== exportRequest.extension
         ) {
           computeSpan.end();
           return createKernelError([
             {
-              message: `Middleware changed the selected export ${writeRequest.exportId}.`,
+              message: `Middleware changed the selected export ${exportRequest.exportId}.`,
               code: 'MIDDLEWARE_FAILED',
               type: 'kernel',
               severity: 'error',
@@ -5259,9 +5259,9 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       const inner = chain;
       const runtime = runtimes.get(id)!;
       const middlewareName = middleware.name;
-      const wrapHook = middleware.wrapWrite!;
+      const wrapHook = middleware.wrapExport!;
 
-      chain = named(`middleware(${middlewareName})`, async (handlerInput: WriteRequest) => {
+      chain = named(`middleware(${middlewareName})`, async (handlerInput: ExportRequest) => {
         const span = tracer.startSpan(`middleware.wrap(${middlewareName})`, {
           middleware: middlewareName,
         });
@@ -5295,7 +5295,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       });
     }
 
-    const result = await chain(writeRequest);
+    const result = await chain(exportRequest);
     return result.success ? { ...result, data: [...result.data] } : result;
   }
 
@@ -6125,7 +6125,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): Promise<ExportGeometryResult> {
     const { input, runtime, renderIdentity, evaluationSlot } = execution;
     if (plan.route.kind === 'direct') {
-      return this.withDocumentNativeAbort('write', async () =>
+      return this.withDocumentNativeAbort('export', async () =>
         this.onExportGeometryForOwner(
           plan.owner,
           this.withProviderRuntimeContent(
@@ -6172,29 +6172,29 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const sourceMetadata = route.exportId
       ? this.getDocumentExportDeclaration(plan.owner, route.exportId)
       : this.kernelExportMetadataMap.get(route.kernelId)?.[route.sourceFormat];
-    const sourceWriteRequest: WriteRequest = {
+    const sourceExportRequest: ExportRequest = {
       exportId: route.exportId ?? (sourceMetadata && 'id' in sourceMetadata ? sourceMetadata.id : route.sourceFormat),
       mimeType: sourceMetadata?.mimeType ?? 'application/octet-stream',
       extension: route.sourceFormat,
       options: route.sourceOptions,
     };
     const contributors = this.getSourceContentContributors(plan.owner, route);
-    let sourceHandler: (input: WriteRequest) => Promise<WriteResult> = async (handlerInput) => {
+    let sourceHandler: (input: ExportRequest) => Promise<KernelExportResult> = async (handlerInput) => {
       if (
-        handlerInput.exportId !== sourceWriteRequest.exportId ||
-        handlerInput.mimeType !== sourceWriteRequest.mimeType ||
-        handlerInput.extension !== sourceWriteRequest.extension
+        handlerInput.exportId !== sourceExportRequest.exportId ||
+        handlerInput.mimeType !== sourceExportRequest.mimeType ||
+        handlerInput.extension !== sourceExportRequest.extension
       ) {
         return createKernelError([
           {
-            message: `Middleware changed the selected source export ${sourceWriteRequest.exportId}.`,
+            message: `Middleware changed the selected source export ${sourceExportRequest.exportId}.`,
             code: 'MIDDLEWARE_FAILED',
             type: 'kernel',
             severity: 'error',
           },
         ]);
       }
-      const result = await this.withDocumentNativeAbort('write', async () =>
+      const result = await this.withDocumentNativeAbort('export', async () =>
         this.onExportGeometryForOwner(
           plan.owner,
           this.withProviderRuntimeContent(
@@ -6243,7 +6243,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         });
         sourceHandler = async (handlerInput) => {
           try {
-            return await contributor.middleware.wrapWrite!(
+            return await contributor.middleware.wrapExport!(
               this.withProviderRuntimeContent(
                 handlerInput,
                 route.content,
@@ -6266,7 +6266,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         };
       }
     }
-    const sourceResult = await sourceHandler(sourceWriteRequest);
+    const sourceResult = await sourceHandler(sourceExportRequest);
     const kernelResult: ExportGeometryResult = sourceResult.success
       ? { ...sourceResult, data: [...sourceResult.data] }
       : sourceResult;
@@ -7355,7 +7355,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   private getOuterExportExecutionList(plan: Extract<OwnerBoundExportPlan, { success: true }>): ResolvedMiddleware[] {
     return this.getMiddleware().filter(
       (resolved) =>
-        resolved.enabled && Boolean(resolved.middleware.wrapWrite) && this.middlewareRunsInOuterExport(resolved, plan),
+        resolved.enabled && Boolean(resolved.middleware.wrapExport) && this.middlewareRunsInOuterExport(resolved, plan),
     );
   }
 
@@ -7422,7 +7422,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
   ): ResolvedMiddleware[] {
     const native = new Set(this.getNativeExportContentKeys(owner, format, exportId));
     return this.getMiddleware().filter(({ enabled, middleware }) => {
-      if (!enabled || !middleware.wrapWrite) {
+      if (!enabled || !middleware.wrapExport) {
         return false;
       }
       return (middleware.content?.exports?.[format] ?? []).some((key) => content[key] === true && !native.has(key));

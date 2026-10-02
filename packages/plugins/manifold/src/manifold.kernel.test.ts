@@ -94,7 +94,7 @@ const readGlbJson = (
 };
 
 describe('ManifoldWorker', () => {
-  it.each([false, true])('keeps %s geometry render and GLB write independent', async (empty) => {
+  it.each([false, true])('keeps %s geometry render and GLB export independent', async (empty) => {
     const result = await createGeometry(
       {
         'model.ts': empty
@@ -120,8 +120,8 @@ describe('ManifoldWorker', () => {
       const projected = await definition.render!({ handle: value, view: 'model', options: {} }, runtime, context);
       return projected.content;
     };
-    const write = async (value: typeof handle, coordinateSystem: 'y-up' | 'z-up') => {
-      const projected = await definition.write!(
+    const exportModel = async (value: typeof handle, coordinateSystem: 'y-up' | 'z-up') => {
+      const projected = await definition.export!(
         {
           exportId: 'glb',
           handle: value,
@@ -137,9 +137,9 @@ describe('ManifoldWorker', () => {
     };
     const ordered = await expectKernelProjectionOrder({
       renderA: async () => render(handle),
-      renderB: async () => write(handle, 'y-up'),
-      freshB: async () => write(fresh, 'y-up'),
-      write: async () => write(handle, 'z-up'),
+      renderB: async () => exportModel(handle, 'y-up'),
+      freshB: async () => exportModel(fresh, 'y-up'),
+      export: async () => exportModel(handle, 'z-up'),
     });
     expect(ordered.first).toEqual(glb);
   });

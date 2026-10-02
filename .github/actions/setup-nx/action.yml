@@ -47,11 +47,19 @@ runs:
         restore-keys: |
           ${{ runner.os }}-${{ runner.arch }}-pnpm-store-
 
-    # canvas has no macOS arm64 prebuild for this Node ABI, so its install script
-    # compiles against cairo and pango. Ubuntu images ship them; macOS images do not.
+    # pnpm does not put canvas's prebuild-install on its install script's PATH,
+    # so the script compiles against cairo, pango and pixman on every runner.
+    # Neither image ships all of their headers (Ubuntu lacks pixman-1).
     - name: Install canvas build libraries
       if: runner.os == 'macOS'
       run: brew install pkg-config cairo pango libpng jpeg giflib librsvg pixman
+      shell: bash
+
+    - name: Install canvas build libraries
+      if: runner.os == 'Linux'
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends build-essential pkg-config libcairo2-dev libpango1.0-dev libjpeg-dev libgif-dev librsvg2-dev libpixman-1-dev
       shell: bash
 
     - name: Install dependencies

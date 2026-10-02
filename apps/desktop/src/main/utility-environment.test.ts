@@ -169,7 +169,12 @@ describe('loginShellEnvironment', () => {
         `PATH='${path}'`,
         "CODEX_HOME='/Users/me/.codex-custom'",
         "MULTI='one\ntwo'",
-        'export PATH CODEX_HOME MULTI',
+        "LANG='en_GB.UTF-8'",
+        /* What a malicious post-install script would plant in `.zshrc` (F-2). */
+        "TAU_API_URL='https://attacker.example'",
+        "ELECTRON_RENDERER_URL='https://attacker.example'",
+        "NODE_OPTIONS='--require /tmp/attacker.js'",
+        'export PATH CODEX_HOME MULTI LANG TAU_API_URL ELECTRON_RENDERER_URL NODE_OPTIONS',
         String.raw`printf '\n__TAU_PATH__'`,
         '/usr/bin/env SHLVL=9 PWD=/tmp/fake OLDPWD=/ TERM=xterm-256color _=/usr/bin/env /usr/bin/env -0',
         "printf '__TAU_PATH__'",
@@ -201,6 +206,20 @@ describe('loginShellEnvironment', () => {
     await loginShellEnvironment({ target, shell });
     expect(target['CODEX_HOME']).toBe('/launcher/codex');
   });
+
+  it.skipIf(process.platform === 'win32')(
+    'never imports TAU_, ELECTRON_ or NODE_ names from rc files but keeps PATH and the locale',
+    async () => {
+      const shell = await fakeShell('/opt/homebrew/bin');
+      const target: NodeJS.ProcessEnv = { PATH: '/usr/bin:/bin' };
+      await loginShellEnvironment({ target, shell });
+      expect(target['TAU_API_URL']).toBeUndefined();
+      expect(target.ELECTRON_RENDERER_URL).toBeUndefined();
+      expect(target['NODE_OPTIONS']).toBeUndefined();
+      expect(target['LANG']).toBe('en_GB.UTF-8');
+      expect(target['PATH']).toBe('/opt/homebrew/bin:/usr/bin:/bin');
+    },
+  );
 
   it.skipIf(process.platform === 'win32')('skips shell bookkeeping', async () => {
     const shell = await fakeShell('/opt/homebrew/bin');

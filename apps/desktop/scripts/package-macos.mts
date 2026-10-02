@@ -24,12 +24,13 @@ import { basename, dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import { acpAgentProfiles } from '@taucad/host';
+import { flipFuses, FuseVersion } from '@electron/fuses';
 import { notarize } from '@electron/notarize';
 import { sign } from '@electron/osx-sign';
 import { packager } from '@electron/packager';
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { parseMacosPackageMode } from './macos-package-mode.mjs';
+import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import {
   copyGeoSpecNative,
@@ -400,6 +401,10 @@ try {
           version: metadata.version,
           main: metadata.main,
           type: metadata.type,
+          /* Ad-hoc and unsigned packages back the packaged e2e lane, which points
+           * the app at local services; a release ignores those overrides
+           * (`packagedOverridesEnabled` in src/main/environment.ts). */
+          ...(release ? {} : { tauDesktop: { environmentOverrides: true } }),
           dependencies: {
             ...geospecNativeDependencies,
             '@taulabs/openrscad-engine': openrscadMetadata.version,
@@ -491,6 +496,14 @@ try {
     await rm(geospecAssemblyRoot, { recursive: true, force: true });
   }
   console.log(`Removed Intel slices from ${String(await thinIntelSlices(appPath))} bundled Mach-O files`);
+
+  /* Before the first signature: flipping rewrites the Electron Framework binary.
+   * An unsigned arm64 binary must keep a valid ad-hoc signature to launch at all. */
+  await flipFuses(appPath, {
+    version: FuseVersion.V1,
+    resetAdHocDarwinSignature: unsigned,
+    ...macosPackageFuses({ release }),
+  });
 
   const identity = release ? developerIdentity() : '-';
   if (!unsigned) {

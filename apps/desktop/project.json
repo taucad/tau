@@ -22,6 +22,22 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts --target darwin-arm64"
       }
     },
+    "prepare-build123d-python-linux": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/python/linux-x64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts --target linux-x64"
+      }
+    },
+    "prepare-build123d-python-windows": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/python/win32-x64"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-build123d-python.mts --target win32-x64"
+      }
+    },
     "prepare-picogk-dotnet": {
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/resources/picogk"],
@@ -42,8 +58,20 @@
       "cache": true,
       "executor": "nx:run-commands",
       "outputs": ["{projectRoot}/dist"],
-      "inputs": ["production", "^production", { "env": "TAU_CLOUD_ENABLED" }],
-      "dependsOn": ["typecheck", { "projects": ["ui"], "target": "build:desktop" }],
+      "inputs": [
+        "production",
+        "^production",
+        {
+          "env": "TAU_CLOUD_ENABLED"
+        }
+      ],
+      "dependsOn": [
+        "typecheck",
+        {
+          "projects": ["ui"],
+          "target": "build:desktop"
+        }
+      ],
       "options": {
         "cwd": "{projectRoot}",
         "command": "electron-vite build"
@@ -55,8 +83,14 @@
       "dependsOn": [
         "prepare-build123d-python",
         "prepare-picogk-dotnet",
-        { "projects": ["scripts"], "target": "populate-ui-env" },
-        { "projects": ["ui"], "target": "dev:desktop" }
+        {
+          "projects": ["scripts"],
+          "target": "populate-ui-env"
+        },
+        {
+          "projects": ["ui"],
+          "target": "dev:desktop"
+        }
       ],
       "options": {
         "cwd": "{projectRoot}",
@@ -73,7 +107,10 @@
         "build",
         "prepare-build123d-python",
         "prepare-picogk-dotnet",
-        { "projects": ["scripts"], "target": "populate-ui-env" }
+        {
+          "projects": ["scripts"],
+          "target": "populate-ui-env"
+        }
       ],
       "options": {
         "cwd": "{projectRoot}",
@@ -99,6 +136,14 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts --target darwin-arm64"
       }
     },
+    "prepare-git-linux": {
+      "executor": "nx:run-commands",
+      "outputs": ["{projectRoot}/resources/git/linux-x64", "{projectRoot}/resources/git/SOURCES"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/prepare-git.mts --target linux-x64"
+      }
+    },
     "test-git-payload": {
       "executor": "nx:run-commands",
       "options": {
@@ -111,8 +156,14 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
-        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
-        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
+        {
+          "projects": ["geospec-engine-native"],
+          "target": "prepare-geospec-ci-artifacts"
+        },
+        {
+          "projects": ["desktop-quick-look"],
+          "target": "build-extensions"
+        },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos",
         "prepare-git-macos"
@@ -128,8 +179,14 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
-        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
-        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
+        {
+          "projects": ["geospec-engine-native"],
+          "target": "prepare-geospec-ci-artifacts"
+        },
+        {
+          "projects": ["desktop-quick-look"],
+          "target": "build-extensions"
+        },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos",
         "prepare-git-macos"
@@ -145,8 +202,14 @@
       "dependsOn": [
         "build",
         "check-renderer-payload",
-        { "projects": ["geospec-engine-native"], "target": "prepare-geospec-ci-artifacts" },
-        { "projects": ["desktop-quick-look"], "target": "build-extensions" },
+        {
+          "projects": ["geospec-engine-native"],
+          "target": "prepare-geospec-ci-artifacts"
+        },
+        {
+          "projects": ["desktop-quick-look"],
+          "target": "build-extensions"
+        },
         "prepare-build123d-python-macos",
         "prepare-picogk-dotnet-macos",
         "prepare-git-macos"
@@ -157,11 +220,36 @@
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-macos.mts --unsigned"
       }
     },
+    "package-linux": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build", "check-renderer-payload", "prepare-build123d-python-linux", "prepare-git-linux"],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-desktop.mts --platform linux-x64 --archive"
+      }
+    },
+    "package-windows": {
+      "executor": "nx:run-commands",
+      "dependsOn": ["build", "check-renderer-payload", "prepare-build123d-python-windows"],
+      "outputs": ["{projectRoot}/package-out"],
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/package-desktop.mts --platform win32-x64 --archive"
+      }
+    },
     "test-macos-package-mode": {
       "executor": "nx:run-commands",
       "options": {
         "cwd": ".",
         "command": "node --import @oxc-node/core/register apps/desktop/scripts/macos-package-mode.test.mts"
+      }
+    },
+    "test-desktop-package": {
+      "executor": "nx:run-commands",
+      "options": {
+        "cwd": ".",
+        "command": "node --import @oxc-node/core/register apps/desktop/scripts/desktop-package.test.mts"
       }
     },
     "verify-macos-package": {

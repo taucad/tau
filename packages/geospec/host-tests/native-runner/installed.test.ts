@@ -186,7 +186,7 @@ for (const route of routes) {
           throw new Error(JSON.stringify(refused.issues));
         }
         expect(refused.passed).toBe(false);
-        expect(refused.tests[0]?.status).toBe('failed');
+        expect(refused.tests[0]?.status).toBe('inconclusive');
         expect(refused.tests[0]?.assertions[0]?.report?.status).toBe('refused');
         const assertions: GeoSpecAssertion[] = [...run.tests, ...refused.tests].flatMap((test) => test.assertions);
         expect(assertions.map((assertion) => assertion.report?.status)).toEqual([

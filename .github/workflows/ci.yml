@@ -423,9 +423,16 @@ jobs:
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
       (needs.plan.outputs.e2e == 'true')
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
     steps:
+      # `nx affected` below diffs against the PR base, so the checkout needs its history.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -496,9 +503,15 @@ jobs:
       (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.plan.outputs.e2e == 'true')
+    permissions: # Required for nrwl/nx-set-shas to read workflow runs
+      contents: 'read'
+      actions: 'read'
+      pull-requests: 'read'
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
@@ -615,6 +628,23 @@ jobs:
     runs-on: ubuntu-latest
     needs: [plan]
     if: github.event_name == 'pull_request' && needs.plan.outputs.api == 'true'
+    # A production API refuses to boot without Redis, a reachable database and a schema at
+    # this build's migration head, so the smoke test brings both up and runs the image's
+    # own release command before starting it.
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: smoke
+          POSTGRES_DB: tau_smoke
+        ports: ['5432:5432']
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 2s --health-timeout 5s --health-retries 30
+      redis:
+        image: redis:7
+        ports: ['6379:6379']
+        options: >-
+          --health-cmd "redis-cli ping" --health-interval 2s --health-timeout 5s --health-retries 30
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -642,13 +672,22 @@ jobs:
           secrets: |
             nx_cloud_token=${{ secrets.NX_CLOUD_ACCESS_TOKEN }}
 
+      - name: Migrate the smoke database
+        run: |
+          docker run --rm --network host \
+            -e BILLING_DATABASE_URL=postgres://postgres:smoke@localhost:5432/tau_smoke \
+            -e BILLING_ENVIRONMENT=smoke \
+            tau-api:smoke node /app/dist/billing-command.js migrate --environment smoke
+
       - name: Start container
         run: |
-          docker run -d --name tau-api-smoke -p 3000:3000 \
+          docker run -d --name tau-api-smoke --network host \
             -e NODE_ENV=production \
             -e PORT=3000 \
-            -e DATABASE_URL=postgres://user:pass@localhost:5432/none \
+            -e DATABASE_URL=postgres://postgres:smoke@localhost:5432/tau_smoke \
+            -e DATABASE_RUNTIME_ROLE=tau_api_runtime \
             -e TAU_FRONTEND_URL=http://localhost \
+            -e TAU_API_URL=https://api.smoke.example \
             -e LOG_LEVEL=info \
             -e OPENAI_API_KEY=sk-smoke \
             -e ANTHROPIC_API_KEY=sk-ant-smoke \
@@ -718,7 +757,7 @@ jobs:
         run: cp apps/api/.env.example apps/api/.env
 
       - name: Start Postgres + Redis + MinIO
-        run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+        run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
       - name: MinIO smoke (seed + RW)
         run: bash infra/docker-compose.test.sh
@@ -833,7 +872,7 @@ jobs:
         run: cp apps/api/.env.example apps/api/.env
 
       - name: Start Postgres + Redis + MinIO
-        run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+        run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
       # `api:db-migrate` is the release migration job: DDL, the billing protections and
       # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in

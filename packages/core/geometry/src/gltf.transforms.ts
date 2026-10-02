@@ -1,5 +1,5 @@
-import { transformMesh, transformPrimitive } from '@gltf-transform/functions';
-import type { Accessor, mat4, vec4, Document, Mesh, Primitive, PrimitiveTarget } from '@gltf-transform/core';
+import { transformPrimitive } from '@gltf-transform/functions';
+import type { Accessor, mat4, vec4, Document, Primitive, PrimitiveTarget } from '@gltf-transform/core';
 import { resolveCoordinateTransform } from '@taucad/spatial';
 import type { Volume } from '@gltf-transform/extensions';
 
@@ -79,20 +79,97 @@ const gltfScalingMatrix: mat4 = [1000, 0, 0, 0, 0, 1000, 0, 0, 0, 0, 1000, 0, 0,
 const gltfReverseCoordinateTransformMatrix: mat4 = [...coordinateTransform.inverse];
 const reverseCoordinateQuat: Quat = [...coordinateTransform.inverseRotation];
 
-const transformMeshPreservingManifoldTopology = (mesh: Mesh, matrix: mat4): void => {
-  if (!mesh.getExtension('EXT_mesh_manifold')) {
-    transformMesh(mesh, matrix);
-    return;
+const transformTangentAccessor = (accessor: Accessor, matrix: mat4): void => {
+  // Preserve source components while computing the direction; retain handedness.
+  const element: number[] = [];
+  for (let index = 0; index < accessor.getCount(); index++) {
+    accessor.getElement(index, element);
+    const [x, y, z] = element;
+    const tx = matrix[0] * x! + matrix[4] * y! + matrix[8] * z!;
+    const ty = matrix[1] * x! + matrix[5] * y! + matrix[9] * z!;
+    const tz = matrix[2] * x! + matrix[6] * y! + matrix[10] * z!;
+    const length = Math.hypot(tx, ty, tz) || 1;
+    accessor.setElement(index, [tx / length, ty / length, tz / length, element[3]!]);
   }
+};
 
+const transformMorphDirectionAccessor = (accessor: Accessor, matrix: mat4): void => {
+  const element: number[] = [];
+  for (let index = 0; index < accessor.getCount(); index++) {
+    accessor.getElement(index, element);
+    const [x, y, z] = element;
+    accessor.setElement(index, [
+      matrix[0] * x! + matrix[4] * y! + matrix[8] * z!,
+      matrix[1] * x! + matrix[5] * y! + matrix[9] * z!,
+      matrix[2] * x! + matrix[6] * y! + matrix[10] * z!,
+    ]);
+  }
+};
+
+const transformDocumentMeshes = (document: Document, matrix: mat4, directionRotation?: mat4): void => {
+  if (
+    document
+      .getRoot()
+      .listNodes()
+      .some((node) => node.getExtension('EXT_mesh_gpu_instancing'))
+  ) {
+    throw new Error(
+      'Coordinate and unit transforms do not support EXT_mesh_gpu_instancing; use core shared mesh nodes.',
+    );
+  }
+  const primitives = new Set(
+    document
+      .getRoot()
+      .listMeshes()
+      .flatMap((mesh) => mesh.listPrimitives()),
+  );
+  const roles = new Map<Accessor, string>();
+  // Preflight all roles before writing shared storage or node placement.
+  for (const primitive of primitives) {
+    for (const owner of [primitive, ...primitive.listTargets()]) {
+      const isTarget = owner !== primitive;
+      for (const semantic of ['POSITION', 'NORMAL', 'TANGENT']) {
+        const accessor = owner.getAttribute(semantic);
+        if (!accessor) {
+          continue;
+        }
+        const expectedType = semantic === 'TANGENT' && !isTarget ? 'VEC4' : 'VEC3';
+        if (accessor.getType() !== expectedType) {
+          throw new Error(
+            `${semantic} requires ${expectedType} for ${isTarget ? 'morph targets' : 'base attributes'}.`,
+          );
+        }
+        const role = isTarget && semantic !== 'POSITION' ? `morph-${semantic}` : semantic;
+        const previousRole = roles.get(accessor);
+        if (previousRole !== undefined && previousRole !== role) {
+          throw new Error(`Shared accessor has incompatible transform roles: ${previousRole} and ${role}.`);
+        }
+        roles.set(accessor, role);
+      }
+    }
+  }
   const transformed = new Set<Accessor>();
-  for (const primitive of mesh.listPrimitives()) {
+  for (const primitive of primitives) {
     const detached: Array<{ owner: Primitive | PrimitiveTarget; semantic: string; accessor: Accessor }> = [];
     for (const owner of [primitive, ...primitive.listTargets()]) {
       for (const semantic of ['POSITION', 'NORMAL', 'TANGENT']) {
         const accessor = owner.getAttribute(semantic);
         if (!accessor) {
           continue;
+        }
+        const morphDirection = owner !== primitive && semantic !== 'POSITION';
+        if (morphDirection && !transformed.has(accessor)) {
+          // These factories only apply L=sR, with positive uniform s and orthogonal R.
+          // Normal inverse-transpose L^-T=R/s and tangent linear L=sR reduce to R
+          // in the normalized base direction frame. Deltas retain magnitude and have no W.
+          // Unit-only conversion leaves their bytes intact, including signed zero.
+          if (directionRotation) {
+            transformMorphDirectionAccessor(accessor, directionRotation);
+          }
+          transformed.add(accessor);
+        } else if (semantic === 'TANGENT' && !transformed.has(accessor)) {
+          transformTangentAccessor(accessor, matrix);
+          transformed.add(accessor);
         }
         if (transformed.has(accessor)) {
           owner.setAttribute(semantic, null);
@@ -102,9 +179,12 @@ const transformMeshPreservingManifoldTopology = (mesh: Mesh, matrix: mat4): void
         }
       }
     }
-    transformPrimitive(primitive, matrix);
-    for (const { owner, semantic, accessor } of detached) {
-      owner.setAttribute(semantic, accessor);
+    try {
+      transformPrimitive(primitive, matrix);
+    } finally {
+      for (const { owner, semantic, accessor } of detached) {
+        owner.setAttribute(semantic, accessor);
+      }
     }
   }
 };
@@ -117,7 +197,7 @@ const transformMeshPreservingManifoldTopology = (mesh: Mesh, matrix: mat4): void
  * Apply a rotation to the entire document: mesh vertices AND node TRS.
  *
  * For a rotation M with quaternion q:
- *   vertex  → M · vertex        (via transformMesh)
+ *   vertex  → M · vertex        (via transformPrimitive)
  *   t_node  → q · t_node · q⁻¹  (rotate translation vector)
  *   R_node  → q · R_node · q⁻¹  (similarity transform on rotation)
  *
@@ -126,13 +206,19 @@ const transformMeshPreservingManifoldTopology = (mesh: Mesh, matrix: mat4): void
  * @param quaternion - the rotation quaternion to apply to node TRS
  */
 function applyRotationToDocument(document: Document, matrix: mat4, quaternion: Quat): void {
-  for (const mesh of document.getRoot().listMeshes()) {
-    transformMeshPreservingManifoldTopology(mesh, matrix);
-  }
+  transformDocumentMeshes(document, matrix, matrix);
 
   for (const node of document.getRoot().listNodes()) {
     const t = node.getTranslation();
     node.setTranslation(rotateVec3ByQuat(t, quaternion));
+
+    // These coordinate rotations permute axes; keep signed, nonuniform scale on the matching axis.
+    const scale = node.getScale();
+    node.setScale([
+      Math.abs(matrix[0]) * scale[0] + Math.abs(matrix[4]) * scale[1] + Math.abs(matrix[8]) * scale[2],
+      Math.abs(matrix[1]) * scale[0] + Math.abs(matrix[5]) * scale[1] + Math.abs(matrix[9]) * scale[2],
+      Math.abs(matrix[2]) * scale[0] + Math.abs(matrix[6]) * scale[1] + Math.abs(matrix[10]) * scale[2],
+    ]);
 
     const r = node.getRotation();
     node.setRotation(conjugateQuaternionBy(r, quaternion));
@@ -149,9 +235,7 @@ function applyRotationToDocument(document: Document, matrix: mat4, quaternion: Q
  * @param factor - the uniform scale factor to apply to node translations
  */
 function applyUniformScaleToDocument(document: Document, matrix: mat4, factor: number): void {
-  for (const mesh of document.getRoot().listMeshes()) {
-    transformMeshPreservingManifoldTopology(mesh, matrix);
-  }
+  transformDocumentMeshes(document, matrix);
 
   for (const node of document.getRoot().listNodes()) {
     const t = node.getTranslation();

@@ -1,7 +1,7 @@
 // oxlint-disable-next-line import/consistent-type-specifier-style -- a separate type import trips import/no-duplicates.
-import { Primitive, type Document } from '@gltf-transform/core';
+import { Primitive, type Document, type JSONDocument } from '@gltf-transform/core';
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
-import { createNodeIo, detectEdges } from '@taucad/geometry-core';
+import { createNodeIo, detectEdges, embedGltfResources } from '@taucad/geometry-core';
 import { cadEdgeOverlayMaterialDefaults } from '@taucad/runtime/types';
 import type { GeometryGltf, CreateGeometryResult, RuntimeLogger } from '@taucad/runtime/types';
 
@@ -150,18 +150,43 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
  * @param thresholdDegrees - the dihedral angle threshold in degrees for edge detection
  * @returns The geometry with owner-local edges added, or the original if no work was needed
  */
-async function addEdgePrimitivesToGltf(geometry: GeometryGltf, thresholdDegrees: number): Promise<GeometryGltf> {
+async function addEdgePrimitivesToGltf(
+  geometry: GeometryGltf,
+  thresholdDegrees: number,
+  {
+    resources = {},
+    outputFormat = 'glb',
+  }: { resources?: JSONDocument['resources']; outputFormat?: 'glb' | 'gltf' } = {},
+): Promise<GeometryGltf> {
   const io = await createNodeIo();
   io.registerExtensions([KHRMaterialsUnlit]);
 
-  const document = await io.readBinary(geometry.content);
+  const binary =
+    geometry.content.length >= 4 &&
+    new DataView(geometry.content.buffer, geometry.content.byteOffset, geometry.content.byteLength).getUint32(
+      0,
+      true,
+    ) === 0x46_54_6c_67;
+  const document = binary
+    ? await io.readBinary(geometry.content)
+    : await io.readJSON({
+        json: JSON.parse(new TextDecoder().decode(geometry.content)) as JSONDocument['json'],
+        resources,
+      });
 
   const hadEdgesAdded = addEdgePrimitivesToDocument(document, thresholdDegrees);
   if (!hadEdgesAdded) {
     return geometry;
   }
 
-  const transformedContent = await io.writeBinary(document);
+  let transformedContent: Uint8Array<ArrayBuffer>;
+  if (outputFormat === 'gltf') {
+    const output = await io.writeJSON(document);
+    const json = embedGltfResources(output.json as unknown as Record<string, unknown>, output.resources);
+    transformedContent = new TextEncoder().encode(JSON.stringify(json));
+  } else {
+    transformedContent = await io.writeBinary(document);
+  }
 
   return {
     format: 'gltf',
@@ -238,6 +263,7 @@ export const gltfEdgeDetection = defineMiddleware({
       return result;
     }
 
+    const resources = Object.fromEntries(result.data.map((file) => [file.name, file.bytes]));
     const files = await Promise.all(
       result.data.map(async (file) => {
         if (!file.name.endsWith('.glb') && !file.name.endsWith('.gltf')) {
@@ -246,6 +272,7 @@ export const gltfEdgeDetection = defineMiddleware({
         const geometry = await addEdgePrimitivesToGltf(
           { format: 'gltf', content: file.bytes },
           options.thresholdDegrees,
+          { resources, outputFormat: file.name.endsWith('.gltf') ? 'gltf' : 'glb' },
         );
         return { ...file, bytes: geometry.content };
       }),

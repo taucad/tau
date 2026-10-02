@@ -41,6 +41,8 @@ jobs:
       formal: ${{ steps.plan.outputs.formal }}
       geospec-required: ${{ steps.geospec.outputs.geospec-required }}
       geospec-darwin-tests: ${{ steps.geospec.outputs.geospec-darwin-tests }}
+      geospec-key: ${{ steps.geospec-key.outputs.key }}
+      geospec-cached: ${{ steps.geospec-cache.outputs.cache-hit == 'true' }}
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -119,6 +121,23 @@ jobs:
           fi
           pnpm nx run scripts:plan-geospec-ci -- out/artifacts/geospec-native-engine/plan/*.json
 
+      # The engine products depend only on the native source closure, which `product-key`
+      # digests without building. When an earlier run on this ref, this pull request's base
+      # branch or `main` already produced that closure, every lane restores its products
+      # and the Mac producer is skipped: no runner queue and no OCCT build.
+      - name: Identify the GeoSpec engine product closure
+        id: geospec-key
+        if: steps.geospec.outputs.geospec-required == 'true'
+        run: echo "key=geospec-transport-v1-$(node packages/geospec-engine-native/scripts/ci-artifacts.mjs product-key)" >> "$GITHUB_OUTPUT"
+
+      - name: Look for GeoSpec engine products from an earlier run
+        id: geospec-cache
+        if: steps.geospec.outputs.geospec-required == 'true'
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ steps.geospec-key.outputs.key }}
+          mode: lookup
+
   # Every workspace invariant is a `scripts:validate-*` target; `scripts:validate`
   # is the wildcard umbrella over all of them (frontmatter, workspace root,
   # project names and tags, tsgo runtime references, quickstart budget, license
@@ -137,82 +156,29 @@ jobs:
       - name: Run workspace validators
         run: pnpm nx run scripts:validate
 
+  # Builds the products only when no earlier run produced this closure. Its Darwin
+  # host suites run here when it builds, and in `geospec-darwin` when it does not, so
+  # the Linux lanes never wait for a Mac merely to run those suites.
   geospec-producer:
     name: Produce current GeoSpec artifacts
     needs: [plan]
-    if: needs.plan.outputs.geospec-required == 'true'
+    if: needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
     runs-on: macos-15
     steps:
-      - name: Checkout
+      - &checkout-darwin
+        name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Setup Nx Environment
+      - &setup-nx-darwin
+        name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
         with:
           node-version: '24.10.0'
 
-      - name: Setup producer Python
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.13.14'
-
-      # The hosted label is not a capacity qualification. Fail before source/SDK
-      # downloads if the existing sources/tools/prefixes reserve (19 GiB) is unavailable.
-      - name: Check producer host, capacity and installed tools
-        run: |
-          test "$(uname -s)" = Darwin
-          test "$(uname -m)" = arm64
-          node --input-type=module -e 'import {statfsSync} from "node:fs"; const s=statfsSync("."); const available=s.bavail*s.bsize; const required=19*1024**3; console.log({available,required}); if(available<required) throw new Error("GeoSpec producer capacity unavailable");'
-          python3 -c 'import sys; assert sys.version_info >= (3, 12); print(sys.version)'
-          cmake --version
-          ninja --version
-          xcrun --find clang++
-
-      - name: Setup selected CPython 3.13 tooling
-        id: python313
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.13.14'
-          update-environment: false
-
-      - name: Setup selected CPython 3.14 tooling
-        id: python314
-        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
-        with:
-          python-version: '3.14.7'
-          update-environment: false
-
-      - name: Provision pinned Python wrapper tooling
-        env:
-          GEOSPEC_PYTHON313: ${{ steps.python313.outputs.python-path }}
-          GEOSPEC_PYTHON314: ${{ steps.python314.outputs.python-path }}
-        run: |
-          python3 - <<'PYTHON'
-          import os
-          from pathlib import Path
-          import re
-          import subprocess
-          import tomllib
-
-          project = Path('packages/geospec-engine-native/bindings/python/pyproject.toml')
-          requirements = tomllib.loads(project.read_text())['build-system']['requires']
-          assert len(requirements) == 1 and re.fullmatch(r'maturin==[0-9]+\.[0-9]+\.[0-9]+', requirements[0])
-          for selector, name in [('GEOSPEC_PYTHON313', 'python-venv'), ('GEOSPEC_PYTHON314', 'python314-venv')]:
-              environment = Path('node_modules/.cache/geospec-engine-native') / name
-              subprocess.run([os.environ[selector], '-m', 'venv', str(environment)], check=True)
-              subprocess.run([str(environment / 'bin/python'), '-m', 'pip', 'install',
-                              '--disable-pip-version-check', '--only-binary=:all:', '--no-deps', requirements[0]], check=True)
-              subprocess.run([str(environment / 'bin/python'), '--version'], check=True)
-              subprocess.run([str(environment / 'bin/maturin'), '--version'], check=True)
-          PYTHON
-
-      - name: Install the selected native Rust toolchain
-        run: |
-          rustup toolchain install 1.88 --profile minimal
-          rustup run 1.88 rustc --version
-
-      - name: Prepare complete current-source transport
-        run: pnpm nx run-many -t prepare-geospec-ci-artifacts --parallel=1
+      - &prepare-geospec
+        name: Prepare GeoSpec engine products
+        id: prepare
+        uses: ./.github/actions/geospec-producer
 
       - name: Upload complete current-source transport
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -228,7 +194,14 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
-      - name: Prepare current installed GeoSpec consumer
+      - name: Keep the products for later runs of this closure
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: save
+
+      - &prepare-geospec-consumer
+        name: Prepare current installed GeoSpec consumer
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
         env:
           GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
@@ -237,9 +210,43 @@ jobs:
           pnpm nx run scripts:prepare-geospec-test-consumer
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
 
-      - name: Run complete affected Darwin host suites
+      - &darwin-host-suites
+        name: Run complete affected Darwin host suites
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
         run: pnpm nx run-many -t test --projects tag:host:darwin-arm64 --exclude tag:scope:api --skip-nx-cache
+
+      - &retain-geospec-preparation
+        name: Retain the OCCT and toolchain preparation
+        if: always() && steps.prepare.outcome == 'success' && github.event_name != 'pull_request'
+        uses: ./.github/actions/geospec-preparation-save
+        with:
+          generation: ${{ steps.prepare.outputs.generation }}
+          preparation-hit: ${{ steps.prepare.outputs.preparation-hit }}
+          cargo-hit: ${{ steps.prepare.outputs.cargo-hit }}
+
+  # Restored products: the Darwin host suites still need a delivery assembled from this
+  # checkout's source kit, which `prepare-geospec-ci-artifacts` reassembles around them.
+  geospec-darwin:
+    name: Run GeoSpec Darwin host suites
+    needs: [plan]
+    if: >-
+      needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached == 'true' &&
+      needs.plan.outputs.geospec-darwin-tests == 'true'
+    runs-on: macos-15
+    steps:
+      - *checkout-darwin
+      - *setup-nx-darwin
+
+      - name: Restore GeoSpec engine products from an earlier run
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      - *prepare-geospec
+      - *prepare-geospec-consumer
+      - *darwin-host-suites
+      - *retain-geospec-preparation
 
   affected:
     name: Run affected tasks
@@ -253,15 +260,17 @@ jobs:
       pull-requests: 'read'
     steps:
       # Preserve failure in this existing required job when a needed producer
-      # (including its host suites) fails. An unneeded producer may be skipped.
+      # (including its host suites) fails. An unneeded producer may be skipped, and so
+      # may one whose products an earlier run already made (see `plan`).
       - name: Require artifact producer success
         env:
           PLAN_RESULT: ${{ needs.plan.result }}
           PRODUCER_RESULT: ${{ needs.geospec-producer.result }}
           PRODUCER_REQUIRED: ${{ needs.plan.outputs.geospec-required }}
+          PRODUCTS_CACHED: ${{ needs.plan.outputs.geospec-cached }}
         run: |
           test "$PLAN_RESULT" = success
-          if [ "$PRODUCER_REQUIRED" = true ]; then test "$PRODUCER_RESULT" = success; fi
+          if [ "$PRODUCER_REQUIRED" = true ] && [ "$PRODUCTS_CACHED" != true ]; then test "$PRODUCER_RESULT" = success; fi
 
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -275,16 +284,26 @@ jobs:
 
       - &download-geospec
         name: Download same-run GeoSpec transport
-        if: needs.plan.outputs.geospec-required == 'true'
+        if: needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
           path: .
 
+      - &restore-geospec
+        name: Restore GeoSpec engine products from an earlier run
+        if: needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached == 'true'
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      # Linux lanes consume the products, never the Darwin delivery archives, so they
+      # verify the products against this checkout's native source closure.
       - &verify-geospec
-        name: Verify GeoSpec transport against this checkout
+        name: Verify GeoSpec products against this checkout
         if: needs.plan.outputs.geospec-required == 'true'
-        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
+        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
       # Native kernel workers run inside the operating-system sandbox on every host,
       # including CI; a Linux runner needs the Bubblewrap toolchain and capability-bearing
@@ -431,7 +450,7 @@ jobs:
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       (needs.plan.outputs.e2e == 'true')
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
@@ -448,6 +467,7 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - *download-geospec
+      - *restore-geospec
       - *verify-geospec
 
       # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
@@ -510,7 +530,7 @@ jobs:
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       (needs.plan.outputs.e2e == 'true')
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
@@ -526,6 +546,7 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - *download-geospec
+      - *restore-geospec
       - *verify-geospec
 
       - name: Install managed Chromium for Vitest Browser
@@ -555,7 +576,7 @@ jobs:
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       (github.event_name == 'pull_request' && needs.plan.outputs.size == 'true')
     permissions:
       pull-requests: write
@@ -567,6 +588,7 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - *download-geospec
+      - *restore-geospec
       - *verify-geospec
 
       - name: Check bundle sizes
@@ -586,7 +608,7 @@ jobs:
     name: Runtime performance gates
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       (github.event_name == 'pull_request' && vars.TAU_BENCHMARK_RUNNER_ENABLED == 'true')
     runs-on: [self-hosted, tau-benchmark]
     steps:
@@ -599,6 +621,7 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - *download-geospec
+      - *restore-geospec
       - *verify-geospec
 
       - name: Run invariant and microbenchmark gates
@@ -749,7 +772,7 @@ jobs:
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       (needs.plan.outputs.api == 'true' || (github.ref == 'refs/heads/main' && github.event_name == 'push'))
     steps:
       - name: Checkout
@@ -759,6 +782,7 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - *download-geospec
+      - *restore-geospec
       - *verify-geospec
 
       - name: Prepare API env file
@@ -843,7 +867,7 @@ jobs:
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       ((github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.api == 'true'))
     concurrency:
       group: stripe-test-account
@@ -868,6 +892,7 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - *download-geospec
+      - *restore-geospec
       - *verify-geospec
 
       - name: Install Stripe CLI
@@ -904,7 +929,7 @@ jobs:
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
-      (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       ((github.event_name == 'push') || (github.event.pull_request.head.repo.full_name == github.repository && needs.plan.outputs.e2e == 'true'))
     env:
       OPENAI_API_KEY: ${{ secrets.TAU_E2E_OPENAI_API_KEY }}
@@ -928,15 +953,26 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - name: Download same-run GeoSpec transport
-        if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true'
+        if: >-
+          steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true' &&
+          needs.plan.outputs.geospec-cached != 'true'
         uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
         with:
           name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
           path: .
 
-      - name: Verify GeoSpec transport against this checkout
+      - name: Restore GeoSpec engine products from an earlier run
+        if: >-
+          steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true' &&
+          needs.plan.outputs.geospec-cached == 'true'
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      - name: Verify GeoSpec products against this checkout
         if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true'
-        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
+        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
       - name: Prepare API env file
         if: steps.gate.outputs.enabled == 'true'

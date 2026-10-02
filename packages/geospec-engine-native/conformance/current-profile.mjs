@@ -133,11 +133,14 @@ export const joinCurrentCorpus = async (originalBytes, profileBytes, bindingProf
         }
         expectedUtf8 = expectedUtf8.replace(coreBackends, '"backends":{"brep":true,"csg":true}');
         const capabilityEnd = '],"configuration":';
-        const minimumCapability = '{"implementation":"implemented","name":"minimumDistance","profile":"geospec-minimum-distance-v1","qualification":"unqualified","registryVersion":5,"scope":"declared-subject-profile"}';
+        const minimumCapability =
+          '{"implementation":"implemented","name":"minimumDistance","profile":"geospec-minimum-distance-v1","qualification":"unqualified","registryVersion":5,"scope":"declared-subject-profile"}';
         const result = /** @type {{result: {capabilities: Array<{name: string}>}}} */ (JSON.parse(expectedUtf8));
-        if (expectedUtf8.split(capabilityEnd).length !== 2 ||
+        if (
+          expectedUtf8.split(capabilityEnd).length !== 2 ||
           result.result.capabilities.at(-1)?.name !== 'queryPmi' ||
-          result.result.capabilities.some(({ name }) => name === 'minimumDistance')) {
+          result.result.capabilities.some(({ name }) => name === 'minimumDistance')
+        ) {
           throw new Error('Current conformance binding mismatch: minimum capability baseline');
         }
         expectedUtf8 = expectedUtf8.replace(capabilityEnd, `,${minimumCapability}${capabilityEnd}`);

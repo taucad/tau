@@ -7,9 +7,6 @@
     "moduleResolution": "Bundler",
     "lib": ["DOM", "DOM.Iterable", "ES2024"],
     "target": "ESNext",
-    "paths": {
-      "#*": ["./src/*"]
-    },
     "noEmit": true,
     "allowImportingTsExtensions": true,
     "allowJs": true

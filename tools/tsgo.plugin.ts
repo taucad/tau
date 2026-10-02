@@ -24,7 +24,7 @@
  * @see https://github.com/microsoft/typescript-go/issues/1182 — TS6305 with project references
  * @see https://github.com/microsoft/typescript-go/issues/506 — tsgo and composite project behavior
  */
-import { dirname, join } from 'node:path';
+import { dirname, join, relative } from 'node:path';
 import { existsSync } from 'node:fs';
 import { readJsonFile } from '@nx/devkit';
 import type { CreateNodesContextV2, CreateNodesResult, CreateNodesV2, ProjectConfiguration } from '@nx/devkit';
@@ -49,8 +49,6 @@ type TsgoPluginOptions = {
    */
   targetName?: string;
 };
-
-const tsGoFlags = '--noEmit --composite false --declaration false --declarationMap false --incremental';
 
 /**
  * Ordered list of tsconfig files to check for each project.
@@ -205,21 +203,18 @@ const createTsgoTarget = (
   const tsConfigInputs = getTsConfigInputs(workspaceRoot, projectRoot);
   const additionalInputPatterns = getAdditionalInputPatterns(workspaceRoot, projectRoot);
 
-  // Every tsconfig must report, even when an earlier one fails.
-  //
-  // `&&` short-circuits, so while the app/lib config had any error the spec
-  // config never ran and an entire test suite's type errors stayed invisible.
-  // Nx's own `parallel: true` is no better: `ParallelRunningTasks` terminates
-  // the sibling processes the moment one exits non-zero, truncating whatever
-  // the other was still printing. So the configs are chained with `;` and the
-  // failure is accumulated by hand — every config runs to completion, output
-  // stays sequential and unmangled, and the target still exits non-zero.
-  const checks = tsConfigs.map((config) => `tsgo -p ${config} ${tsGoFlags} || status=1`);
-  const command = `${checks.join('; ')}; exit \${status:-0}`;
+  // A Node runner preserves every config's diagnostics on POSIX and Windows.
+  // Nx parallel execution and shell short-circuiting both lose later failures.
+  const runner = relative(
+    join(workspaceRoot, projectRoot),
+    join(workspaceRoot, 'scripts/src/typecheck-projects.ts'),
+  ).replaceAll('\\', '/');
+  const command = `node "${runner}" ${tsConfigs.join(' ')}`;
 
   const inputs: Array<string | InputDefinition> = [
     '{projectRoot}/package.json',
     '{workspaceRoot}/tsconfig.base.json',
+    '{workspaceRoot}/scripts/src/typecheck-projects.ts',
     ...tsConfigInputs,
     ...sourcePatterns,
     ...additionalInputPatterns,

@@ -1,0 +1,42 @@
+name: Desktop tooling portability
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/desktop-tooling.yml'
+      - '.github/actions/setup-nx/**'
+      - 'tools/tsgo.plugin.ts'
+      - 'scripts/src/typecheck-projects*'
+      - 'scripts/src/tsgo-plugin-target.test.ts'
+      - 'pnpm-lock.yaml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  actions: read
+
+concurrency:
+  group: desktop-tooling-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  typecheck-runner:
+    name: Typecheck runner (${{ matrix.runner }})
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [ubuntu-24.04, windows-2025, macos-15, macos-15-intel]
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 20
+    env:
+      NX_DAEMON: 'false'
+      NX_NO_CLOUD: 'true'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+      # Real compiler subprocesses prove failure accumulation and paths with spaces.
+      # This is tooling qualification, not a desktop package or signing result.
+      - name: Exercise portable compiler runner
+        run: pnpm nx run scripts:test --watch=false src/typecheck-projects.test.ts src/tsgo-plugin-target.test.ts

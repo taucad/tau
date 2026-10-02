@@ -350,27 +350,27 @@ it.skipIf(process.env['GEOSPEC_TURBOFAN_NATIVE'] !== '1')(
       const admitted = await loader({ source: glb, format: 'glb' });
       const admission = performance.now();
       const assertions = createGeoSpecAssertionClient({ engine });
-      await assertions.expectGeo(admitted).toHaveBoundingBox({
+      assertions.expectGeo(admitted).toHaveBoundingBox({
         min: { x: 0, y: -1000, z: -1000 },
         max: { x: 3600, y: 1000, z: 1000 },
         tolerance: 0.1,
       });
-      await assertions.expectGeo(admitted).toHaveMeshIntegrity({
+      assertions.expectGeo(admitted).toHaveMeshIntegrity({
         finitePositions: true,
         degenerateTriangles: { maxCount: 0 },
         duplicateFaces: { maxCount: 0 },
       });
-      await assertions.expectGeo(admitted).toBeWatertight();
-      await assertions.expectGeo(admitted).toHaveVolume({ value: { greaterThan: 1e8, lessThan: 3e9 } });
+      assertions.expectGeo(admitted).toBeWatertight();
+      assertions.expectGeo(admitted).toHaveVolume({ value: { greaterThan: 1e8, lessThan: 3e9 } });
       const cutawayTopology = readTopology(cutawayGlb);
       expect(cutawayTopology.topology.components).toHaveLength(2173);
       const cutawaySubject = await loader({ source: cutawayGlb, format: 'glb' });
-      await assertions.expectGeo(cutawaySubject).toHaveMeshIntegrity({
+      assertions.expectGeo(cutawaySubject).toHaveMeshIntegrity({
         finitePositions: true,
         degenerateTriangles: { maxCount: 0 },
         duplicateFaces: { maxCount: 0 },
       });
-      await assertions.expectGeo(cutawaySubject).toBeWatertight();
+      assertions.expectGeo(cutawaySubject).toBeWatertight();
       const asserted = performance.now();
       await loader.releaseAll();
 

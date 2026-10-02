@@ -40,11 +40,8 @@ import { replicad } from '@taucad/replicad';
 
 const runtime = defineRuntime({ plugins: [esbuild(), replicad()] });
 const client = await createNodeClient({ runtime });
-const document = client.open({
-  source: {
-    files: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(30, 50, 10);' },
-  },
-});
+const code = 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(30, 50, 10);';
+const document = client.open({ source: { files: { 'main.ts': code } } });
 const result = await document.export('glb');
 if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
 console.log(`Exported ${result.files[0].name}: ${result.files[0].bytes.byteLength} bytes`);

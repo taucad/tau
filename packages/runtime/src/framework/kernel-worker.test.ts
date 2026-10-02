@@ -2021,6 +2021,95 @@ public static class Params
   // ---------------------------------------------------------------------------
 
   describe('document operation error cleanup', () => {
+    it('should recover a failed watched description when only its resolved helper changes', async () => {
+      const contents: Record<string, Uint8Array<ArrayBuffer>> = {
+        'main.ts': new Uint8Array([1, 2]),
+        'dep.ts': new Uint8Array([3, 4]),
+        'unrelated.ts': new Uint8Array([5, 6]),
+      };
+      const filesystem = createMockFileSystem({
+        existsResult: (path) => path in contents,
+        readFileResult: (path) => contents[path]!,
+      });
+      filesystem.mocks.readFiles.mockImplementation(async (paths: string[]) =>
+        Object.fromEntries(paths.map((path) => [path, contents[path]])),
+      );
+      let watchHandler: ((event: WatchEvent) => void) | undefined;
+      Object.assign(filesystem, {
+        watch: vi.fn((_request: unknown, handler: (event: WatchEvent) => void) => {
+          watchHandler = handler;
+          return vi.fn();
+        }),
+      });
+      const worker = new DependencyKernelWorker({ middleware: [], onLog: noopLog, filesystem });
+      // @ts-expect-error - install the watch-capable proxy seam exercised by production initialization
+      worker.fileSystem = filesystem;
+      const issue: KernelIssue = {
+        code: 'RUNTIME',
+        message: 'Resolved helper cannot be compiled',
+        type: 'kernel',
+        severity: 'error',
+      };
+      const describeParameters = vi.fn(
+        async (_input: GetParametersInput, runtime: KernelRuntime): Promise<GetParameterDeclarationsResult> => {
+          const helper = await runtime.filesystem.readFile('dep.ts');
+          return helper[0] === 3 ? { success: false, issues: [issue] } : createParameterDeclaration();
+        },
+      );
+      // @ts-expect-error - inject the producer description at the existing protected fixture seam
+      worker.onGetParameters = describeParameters;
+
+      try {
+        const failed = await openDocument(worker, {}, createGeometryFile('main.ts'), { watch: true });
+        expect(failed.success).toBe(false);
+        expect(failed.issues).toEqual([issue]);
+        // Soft assertion retains both missing provenance and failed recovery in the pre-fix regression.
+        expect.soft(failed.sourceRevision).toEqual({
+          entry: 'main.ts',
+          files: {
+            'main.ts': `sha256:${createHash('sha256').update(contents['main.ts']!).digest('hex')}`,
+            'dep.ts': `sha256:${createHash('sha256').update(contents['dep.ts']!).digest('hex')}`,
+          },
+        });
+        expect(describeParameters).toHaveBeenCalledOnce();
+        expect(worker.createGeometryCalls).toBe(0);
+        expect(watchHandler).toBeDefined();
+        const evaluated = vi.fn<NonNullable<MockKernelWorker['onEvaluated']>>();
+        worker.onEvaluated = evaluated;
+
+        contents['unrelated.ts'] = new Uint8Array([7, 8]);
+        watchHandler!({ type: 'change', path: 'unrelated.ts' });
+        // @ts-expect-error - await the existing exact-event reconciliation owner before the negative assertion
+        await worker.watchReconciliationTail;
+        // @ts-expect-error - await the existing operation FIFO before asserting no evaluation was scheduled
+        await worker.operationTail;
+        expect(evaluated).not.toHaveBeenCalled();
+        expect(describeParameters).toHaveBeenCalledOnce();
+
+        contents['dep.ts'] = new Uint8Array([9, 10]);
+        watchHandler!({ type: 'change', path: 'dep.ts' });
+        await vi.waitFor(() => {
+          expect(evaluated).toHaveBeenCalledOnce();
+        });
+        expect(evaluated.mock.calls[0]?.[0]).toMatchObject({
+          documentId: 'test-document',
+          success: true,
+          sourceRevision: {
+            entry: 'main.ts',
+            files: {
+              'main.ts': `sha256:${createHash('sha256').update(contents['main.ts']!).digest('hex')}`,
+              'dep.ts': `sha256:${createHash('sha256').update(contents['dep.ts']).digest('hex')}`,
+            },
+          },
+        });
+        expect(evaluated.mock.calls[0]?.[0].id).not.toBe(failed.id);
+        expect(describeParameters).toHaveBeenCalledTimes(2);
+        expect(worker.createGeometryCalls).toBe(1);
+      } finally {
+        await worker.cleanup();
+      }
+    });
+
     it('clears the internal progress relay when document evaluation throws', async () => {
       const filesystem = createMockFileSystem();
       filesystem.mocks.readFiles.mockResolvedValue({

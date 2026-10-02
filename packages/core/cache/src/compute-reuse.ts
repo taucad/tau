@@ -135,14 +135,15 @@ const readCache = async <T>(input: {
   if (contentResult.bytes.byteLength !== actionResult.record.output.size) {
     throw new CacheCorruptionError('Cached content size does not match its action record.');
   }
-  if ((await digestContent({ bytes: contentResult.bytes })) !== actionResult.record.output.digest) {
+  const rootBytes = new Uint8Array(contentResult.bytes);
+  if ((await digestContent({ bytes: rootBytes })) !== actionResult.record.output.digest) {
     throw new CacheCorruptionError('Cached content does not match its digest.');
   }
   throwIfAborted(signal);
   try {
     const requiredContent = new Set(actionResult.record.requiredContent ?? []);
     const leaves = new Map<ContentDigest, Uint8Array<ArrayBuffer>>();
-    let size = contentResult.bytes.byteLength;
+    let size = rootBytes.byteLength;
     for (const digest of requiredContent) {
       // oxlint-disable-next-line no-await-in-loop -- verify the entire declared closure once before decode
       const leaf = await contentStore.read({ digest, signal });
@@ -153,12 +154,13 @@ const readCache = async <T>(input: {
       if (size > maxEncodedBytes) {
         throw new CacheCorruptionError('Cached content closure exceeds the byte budget.');
       }
+      const leafBytes = new Uint8Array(leaf.bytes);
       // oxlint-disable-next-line no-await-in-loop -- each unique leaf has one integrity check
-      if ((await digestContent({ bytes: leaf.bytes })) !== digest) {
+      if ((await digestContent({ bytes: leafBytes })) !== digest) {
         throw new CacheCorruptionError('Cached leaf does not match its digest.');
       }
       throwIfAborted(signal);
-      leaves.set(digest, new Uint8Array(leaf.bytes));
+      leaves.set(digest, leafBytes);
     }
     const readContent = async ({
       digest,
@@ -168,7 +170,7 @@ const readCache = async <T>(input: {
       throwIfAborted(signal);
       contentDigest({ value: digest });
       if (digest === actionResult.record.output.digest) {
-        return new Uint8Array(contentResult.bytes);
+        return new Uint8Array(rootBytes);
       }
       if (!requiredContent.has(digest)) {
         throw new CacheCorruptionError('Codec requested undeclared content.');
@@ -176,7 +178,7 @@ const readCache = async <T>(input: {
       const leaf = leaves.get(digest);
       return leaf === undefined ? undefined : new Uint8Array(leaf);
     };
-    const value = await codec.decode({ bytes: new Uint8Array(contentResult.bytes), signal, readContent });
+    const value = await codec.decode({ bytes: new Uint8Array(rootBytes), signal, readContent });
     throwIfAborted(signal);
     return { status: 'hit', value, contentDigest: actionResult.record.output.digest };
   } catch (error) {

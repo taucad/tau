@@ -2,6 +2,7 @@
 
 1 top-level symbols. Signatures are verbatim python.
 
+// Category: RWGltf
 // glTF writer context from XCAF document
 RWGltf_CafWriter
 
@@ -9,66 +10,95 @@ RWGltf_CafWriter
   __init__(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theFile: OCP.OCP.TCollection.TCollection_AsciiString, theIsBinary: bool) -> None
 
   // SetCoordinateSystemConverter(self
+  // Remarks: Set transformation from OCCT to glTF coordinate system.
   SetCoordinateSystemConverter(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theConverter: OCP.OCP.RWMesh.RWMesh_CoordinateSystemConverter) -> None
 
   // IsBinary(self
+  // Remarks: Return flag to write into binary glTF format (.glb), specified within class constructor.
   IsBinary(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> bool
 
   // TransformationFormat(self
+  // Remarks: Return preferred transformation format for writing into glTF file; RWGltf_WriterTrsfFormat_Compact by default.
   TransformationFormat(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> OCP.OCP.RWGltf.RWGltf_WriterTrsfFormat
 
   // SetTransformationFormat(self
+  // Remarks: Set preferred transformation format for writing into glTF file.
   SetTransformationFormat(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theFormat: OCP.OCP.RWGltf.RWGltf_WriterTrsfFormat) -> None
 
   // NodeNameFormat(self
+  // Remarks: Return name format for exporting Nodes; RWMesh_NameFormat_InstanceOrProduct by default.
   NodeNameFormat(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> OCP.OCP.RWMesh.RWMesh_NameFormat
 
   // SetNodeNameFormat(self
+  // Remarks: Set name format for exporting Nodes.
   SetNodeNameFormat(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theFormat: OCP.OCP.RWMesh.RWMesh_NameFormat) -> None
 
   // MeshNameFormat(self
+  // Remarks: Return name format for exporting Meshes; RWMesh_NameFormat_Product by default.
   MeshNameFormat(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> OCP.OCP.RWMesh.RWMesh_NameFormat
 
   // SetMeshNameFormat(self
+  // Remarks: Set name format for exporting Meshes.
   SetMeshNameFormat(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theFormat: OCP.OCP.RWMesh.RWMesh_NameFormat) -> None
 
   // IsForcedUVExport(self
+  // Remarks: Return TRUE to export UV coordinates even if there are no mapped texture; FALSE by default.
   IsForcedUVExport(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> bool
 
   // SetForcedUVExport(self
+  // Remarks: Set flag to export UV coordinates even if there are no mapped texture; FALSE by default.
   SetForcedUVExport(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theToForce: bool) -> None
 
   // SetDefaultStyle(self
+  // Remarks: Set default material definition to be used for nodes with only color defined.
   SetDefaultStyle(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theStyle: OCP.OCP.XCAFPrs.XCAFPrs_Style) -> None
 
   // ToEmbedTexturesInGlb(self
+  // Remarks: Return flag to write image textures into GLB file (binary gltf export); TRUE by default. When set to FALSE, texture images will be written as separate files. Has no effect on writing into non-binary format.
   ToEmbedTexturesInGlb(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> bool
 
   // SetToEmbedTexturesInGlb(self
+  // Remarks: Set flag to write image textures into GLB file (binary gltf export).
   SetToEmbedTexturesInGlb(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theToEmbedTexturesInGlb: bool) -> None
 
   // ToMergeFaces(self
+  // Remarks: Return flag to merge faces within a single part; FALSE by default.
   ToMergeFaces(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> bool
 
   // SetMergeFaces(self
+  // Remarks: Set flag to merge faces within a single part. May reduce JSON size thanks to smaller number of primitive arrays.
   SetMergeFaces(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theToMerge: bool) -> None
 
   // ToSplitIndices16(self
+  // Remarks: Return flag to prefer keeping 16-bit indexes while merging face; FALSE by default.
   ToSplitIndices16(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> bool
 
   // SetSplitIndices16(self
+  // Remarks: Set flag to prefer keeping 16-bit indexes while merging face. Has effect only with ToMergeFaces() option turned ON. May reduce binary data size thanks to smaller triangle indexes.
   SetSplitIndices16(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theToSplit: bool) -> None
 
   // ToParallel(self
+  // Remarks: Return TRUE if multithreaded optimizations are allowed; FALSE by default.
   ToParallel(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> bool
 
   // SetParallel(self
+  // Remarks: Setup multithreaded execution.
   SetParallel(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theToParallel: bool) -> None
 
   // SetCompressionParameters(self
+  // Remarks: Set Draco parameters
   SetCompressionParameters(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDracoParameters: OCP.OCP.RWGltf.RWGltf_DracoParameters) -> None
 
   // Perform(*args, **kwargs)
+  // Remarks: Overloaded function.
+
+1. Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theRootLabels: OCP.OCP.TDF.TDF_LabelSequence, theLabelFilter: OCP.OCP.TColStd.TColStd_MapOfAsciiString, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool
+
+Write glTF file and associated binary file. Triangulation data should be precomputed within shapes!
+
+2. Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool
+
+Write glTF file and associated binary file. Triangulation data should be precomputed within shapes!
   Perform(*args, **kwargs)
   Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theRootLabels: OCP.OCP.TDF.TDF_LabelSequence, theLabelFilter: OCP.OCP.TColStd.TColStd_MapOfAsciiString, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool
   Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool
@@ -83,13 +113,17 @@ RWGltf_CafWriter
   DynamicType(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> OCP.OCP.Standard.Standard_Type
 
   // CoordinateSystemConverter(self
+  // Remarks: Return transformation from OCCT to glTF coordinate system.
   CoordinateSystemConverter(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> OCP.OCP.RWMesh.RWMesh_CoordinateSystemConverter
 
   // ChangeCoordinateSystemConverter(self
+  // Remarks: Return transformation from OCCT to glTF coordinate system.
   ChangeCoordinateSystemConverter(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> OCP.OCP.RWMesh.RWMesh_CoordinateSystemConverter
 
   // DefaultStyle(self
+  // Remarks: Return default material definition to be used for nodes with only color defined.
   DefaultStyle(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> OCP.OCP.XCAFPrs.XCAFPrs_Style
 
   // CompressionParameters(self
+  // Remarks: Return Draco parameters
   CompressionParameters(self: OCP.OCP.RWGltf.RWGltf_CafWriter) -> OCP.OCP.RWGltf.RWGltf_DracoParameters

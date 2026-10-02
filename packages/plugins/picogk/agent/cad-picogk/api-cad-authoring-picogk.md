@@ -1,48 +1,44 @@
-# PicoGK — PicoGK
+# PicoGK — CAD authoring — PicoGK
 
-42 top-level symbols. Signatures are verbatim csharp.
+34 top-level symbols. Signatures are verbatim csharp.
 
-ActiveVoxelCounterScalar
+// Category: CAD authoring
+public class ActiveVoxelCounterScalar : ITraverseScalarField
 
   public static int nCount(ScalarField oField)
 
-  protected ActiveVoxelCounterScalar(ScalarField oField)
-
-  protected void Run()
-
   public void InformActiveValue(in Vector3 vecPosition, float fValue)
 
-AddVectorFieldToViewer
+// Category: CAD authoring
+public class AddVectorFieldToViewer : ITraverseVectorField
 
-  public static void AddToViewer(Viewer oViewer, VectorField oField, ColorFloat clr, int nStep = 10, float fArrow = 1, int nGroup = 0)
-
-  protected AddVectorFieldToViewer(Viewer oViewer, VectorField oField, ColorFloat clr, int nStep, float fArrow, int nGroup)
-
-  protected void Run()
+  public static void AddToViewer(Viewer oViewer, VectorField oField, ColorFloat clr, int nStep = 10, float fArrow = 1f, int nGroup = 0)
 
   public void InformActiveValue(in Vector3 vecPosition, in Vector3 vecValue)
 
-Animation
+// Category: CAD authoring
+public class Animation
 
-  IAction
+  public interface IAction
 
     void Do(float fTime)
 
-  EType
+  public enum EType
 
-    Once: Once
+    Once
 
-    Repeat: Repeat
+    Repeat
 
-    Wiggle: Wiggle
+    Wiggle
 
-  public Animation(Animation.IAction xAction, float fDurationInSeconds, Animation.EType eType, Easing.EEasing eEasing)
+  public Animation(IAction xAction, float fDurationInSeconds, EType eType, Easing.EEasing eEasing)
 
   public void End()
 
   public bool bAnimate(float fCurrentTime)
 
-AnimationQueue
+// Category: CAD authoring
+public class AnimationQueue
 
   public AnimationQueue()
 
@@ -54,14 +50,16 @@ AnimationQueue
 
   public void Add(Animation oAnim)
 
+// Category: CAD authoring
 // 2D Bounding Box object
-BBox2
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BBox2
 
   // Minimum coordinate of the bounding box
-  vecMin: Vector2
+  public Vector2 vecMin = new();
 
   // Maximum coordinate of the bounding box
-  vecMax: Vector2
+  public Vector2 vecMax = new();
 
   // Creates an empty Bounding Box
   public BBox2()
@@ -90,14 +88,16 @@ BBox2
   // A string representation of the Bounding Box
   public override string ToString()
 
+// Category: CAD authoring
 // 3D bounding box
-BBox3
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BBox3
 
   // Minimum coordinate of the bounding box
-  vecMin: Vector3
+  public Vector3 vecMin = new();
 
   // Maximum coordinate of the bounding box
-  vecMax: Vector3
+  public Vector3 vecMax = new();
 
   // Create an empty Bounding Box
   public BBox3()
@@ -116,7 +116,7 @@ BBox3
   // Include the specified vector in the Bounding Box
   public void Include(Vector3 vec)
   public void Include(BBox3 oBox)
-  public void Include(BBox2 oBox, float fZ = 0)
+  public void Include(BBox2 oBox, float fZ = 0.0f)
 
   // Grows the bounding box by the specified value on each side I.E
   public void Grow(float fGrowBy)
@@ -140,50 +140,54 @@ BBox3
   // Return the Bounding Box as string
   public override string ToString()
 
+// Category: CAD authoring
 // ASCII CLI (Common Layer Interface) I/O based on https://www.hmilch.net/downloads/cli_format.html#:~:text=CLI%20is%20intended%20as%20a,data%20structure%20of%20the%20machine
-CliIo
+public static class CliIo
 
   // Format options for CLI writer
-  EFormat
+  public enum EFormat
 
     // Uses an intentionally-empty first layer to allow the CLI reader to infer the layer height
-    UseEmptyFirstLayer: UseEmptyFirstLayer
+    UseEmptyFirstLayer
 
     // The first layer contains outlines (default)
-    FirstLayerWithContent: FirstLayerWithContent
+    FirstLayerWithContent
 
   // Result of a CLI import
-  Result
+  public class Result
 
     // The stack of slices that were imported
-    oSlices: PolySliceStack
+    public PolySliceStack oSlices = new();
 
     // The bounding box of the slices contained in the file
-    oBBoxFile: BBox3
+    public BBox3 oBBoxFile = new();
 
     // Was the file binary?
-    bBinary: bool
+    public bool bBinary = false;
 
     // Units used in the header
-    fUnitsHeader: float
+    public float fUnitsHeader = 0.0f;
 
     // Was the file aligned at 32 bit boundaries?
-    b32BitAlign: bool
+    public bool b32BitAlign = false;
 
     // Version number of the CLI export
-    nVersion: uint
+    public UInt32 nVersion = 0;
 
     // Date string read from the header
-    strHeaderDate: string
+    public string strHeaderDate = "";
 
     // Number of layers in the file
-    nLayers: uint
+    public UInt32 nLayers = 0;
 
     // Warnings that were encountered during the file reading
-    strWarnings: string
+    public string strWarnings = "";
+
+    public Result()
 
   // Write a stack of PolySlices to a CLI file
-  public static void WriteSlicesToCliFile(PolySliceStack oSlices, string strFilePath, CliIo.EFormat eFormat, string strDate = "", float fUnitsInMM = 0, IProgress? xProgress = null)
+  // Throws: System.Exception: Throws and exception if no valid slices or file IO issues were encountered
+  public static void WriteSlicesToCliFile(PolySliceStack oSlices, string strFilePath, EFormat eFormat, string strDate = "", float fUnitsInMM = 0.0f, IProgress? xProgress = null)
   //   oSlices: Stack of PolySlice objects
   //   strFilePath: Path and filename of the CLI file
   //   eFormat: Format options
@@ -192,24 +196,29 @@ CliIo
   //   xProgress: Optional progress reporting interface
 
   // Read PolySlice objects from a CLI file
-  public static CliIo.Result oSlicesFromCliFile(string strFilePath)
+  // Throws: System.ArgumentException: Thrown if file contains invalid parameters
+  // Throws: System.NotSupportedException: Thrown if unsupported features encountered, notably binary is not supported
+  public static Result oSlicesFromCliFile(string strFilePath)
   //   strFilePath: Path and filename of the file to read
 
+// Category: CAD authoring
 // BGR 24 bit color value
-ColorBgr24
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorBgr24
 
   // Blue value (0..255)
-  B: byte
+  public byte B;
 
   // Green value (0..255)
-  G: byte
+  public byte G;
 
   // Red value (0..255)
-  R: byte
+  public byte R;
 
   // Construct a BGR value from 3 bytes
   public ColorBgr24(byte byB, byte byG, byte byR)
   public ColorBgr24(ColorFloat clr)
+  public ColorBgr24()
   //   byB: Blue value
   //   byG: Green value
   //   byR: Red value
@@ -218,24 +227,27 @@ ColorBgr24
   public static implicit operator ColorBgr24(ColorFloat clr)
   //   clr: The ColorFloat to use
 
+// Category: CAD authoring
 // BGRA 32 bit color value
-ColorBgra32
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorBgra32
 
   // Blue value (0..255)
-  B: byte
+  public byte B;
 
   // Green value (0..255)
-  G: byte
+  public byte G;
 
   // Red value (0..255)
-  R: byte
+  public byte R;
 
   // Alpha value (0..255)
-  A: byte
+  public byte A;
 
   // Construct a 32 bit BGRA color value from 4 bytes
   public ColorBgra32(byte byB, byte byG, byte byR, byte byA = 255)
   public ColorBgra32(ColorFloat clr)
+  public ColorBgra32()
   //   byB: Blue value (0..255)
   //   byG: Green value (0..255)
   //   byR: Red value (0..255)
@@ -245,25 +257,28 @@ ColorBgra32
   public static implicit operator ColorBgra32(ColorFloat clr)
   //   clr: The ColorFloat to use
 
+// Category: CAD authoring
 // A floating point color value with R,G,B,A values
-ColorFloat
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public partial struct ColorFloat
 
   // Red value (1 is full color)
-  R: float
+  public float R;
 
   // Green value (1 is full color)
-  G: float
+  public float G;
 
   // Blue value (1 is full color)
-  B: float
+  public float B;
 
   // Alpha value (1 is opaque, 0 is transparent)
-  A: float
+  public float A;
 
   // Create a color from a hex string #FF0000 is red, for example (# is optional) #FF000000 is a fully transparent color (0 is transparent FF/1.0 is full opaque) #FF is grayscale (white) #FF99 is semi-transparent white
+  // Throws: System.ArgumentException: Throws an exception if different sizes
   public ColorFloat(string strHex)
-  public ColorFloat(float fGray, float fAlpha = 1)
-  public ColorFloat(float fR, float fG, float fB, float fAlpha = 1)
+  public ColorFloat(float fGray, float fAlpha = 1.0f)
+  public ColorFloat(float fR, float fG, float fB, float fAlpha = 1.0f)
   public ColorFloat(ColorRgb24 clr)
   public ColorFloat(ColorRgba32 clr)
   public ColorFloat(ColorBgr24 clr)
@@ -271,6 +286,7 @@ ColorFloat
   public ColorFloat(ColorFloat clr, float fAlphaOverride)
   public ColorFloat(ColorHSV clrHSV)
   public ColorFloat(ColorHLS clrHLS)
+  public ColorFloat()
   //   strHex: A 6 character or 8 character string with the color
 
   // Allows you to pass a hex string to any function that requires a FloatColor
@@ -295,21 +311,23 @@ ColorFloat
   // Return a random color
   public static ColorFloat clrRandom(Random? oRand = null)
 
+// Category: CAD authoring
 // A color value in HSV space
-ColorHLS
+public struct ColorHLS
 
   // Hue value (0..360º)
-  H: float
+  public float H;
 
   // Lightness value (0..1)
-  L: float
+  public float L;
 
   // Saturation value (0..1)
-  S: float
+  public float S;
 
   // Create an HLS color from its three components
   public ColorHLS(float fH, float fL, float fS)
   public ColorHLS(ColorFloat clr)
+  public ColorHLS()
   //   fH: Hue (0..360º)
   //   fL: Lightness (0..1)
   //   fS: Saturation (0..1)
@@ -319,42 +337,48 @@ ColorHLS
   public static implicit operator ColorFloat(ColorHLS clrHLS)
   //   clr: ColorFloat to be converted to ColorHLS
 
+// Category: CAD authoring
 // Hue Saturation Value (HSV) color
-ColorHSV
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorHSV
 
   // Hue (0..360º)
-  H: float
+  public float H;
 
   // Saturation (0..1)
-  S: float
+  public float S;
 
   // Value component
-  V: float
+  public float V;
 
   // Create an HSV value from its three components
   public ColorHSV(float fH, float fS, float fV)
   public ColorHSV(ColorFloat clr)
+  public ColorHSV()
 
   // Implicit conversion that allows you to pass a ColorFloat to any function requiring and HSV color
   public static implicit operator ColorHSV(ColorFloat clr)
   public static implicit operator ColorFloat(ColorHSV clrHSV)
   //   clr: ColorFloat to be converted to HSV
 
+// Category: CAD authoring
 // 24 bit RGB color
-ColorRgb24
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorRgb24
 
   // Red value (0..255)
-  R: byte
+  public byte R;
 
   // Green value (0..255)
-  G: byte
+  public byte G;
 
   // Blue value (0..255)
-  B: byte
+  public byte B;
 
   // Construct a 24 bit RGB value from 3 byes
   public ColorRgb24(byte byR, byte byG, byte byB)
   public ColorRgb24(ColorFloat clr)
+  public ColorRgb24()
   //   byR: Red value
   //   byG: Green value
   //   byB: Blue value
@@ -363,24 +387,27 @@ ColorRgb24
   public static implicit operator ColorRgb24(ColorFloat clr)
   //   clr: The ColorFloat to use
 
+// Category: CAD authoring
 // 32 bit RGBA color
-ColorRgba32
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorRgba32
 
   // Red value (0..255)
-  R: byte
+  public byte R;
 
   // Green value (0..255)
-  G: byte
+  public byte G;
 
   // Blue value (0..255)
-  B: byte
+  public byte B;
 
   // Alpha value 0..255 (255 is opaque)
-  A: byte
+  public byte A;
 
   // Create a color from 3 or 4 bytes
   public ColorRgba32(byte byR, byte byG, byte byB, byte byA = 255)
   public ColorRgba32(ColorFloat clr)
+  public ColorRgba32()
   //   byR: Red color 0..255
   //   byG: Green color 0..255
   //   byB: Blue color 0..255
@@ -390,21 +417,15 @@ ColorRgba32
   public static implicit operator ColorRgba32(ColorFloat clr)
   //   clr: The ColorFloat to use
 
-Config
+// Category: CAD authoring
+public partial class Config
 
-  strPicoGKLib: string
+  public const string strPicoGKLib = "picogk.26.2";
 
-Coord
+  public Config()
 
-  X: int
-
-  Y: int
-
-  Z: int
-
-  public Coord(int x, int y, int z)
-
-CsvTable
+// Category: CAD authoring
+public class CsvTable : IDataTable
 
   public CsvTable(IEnumerable<string>? astrColumnIDs = null)
   public CsvTable(string strFilePath, string strDelimiters = ",")
@@ -430,30 +451,31 @@ CsvTable
 
   public void AddRow(IEnumerable<string> astrData)
 
+// Category: CAD authoring
 // Easing functions — they take a float value from 0..1 and output an "eased" curve of the values, also from 0..1
-Easing
+public class Easing
 
-  EEasing
+  public enum EEasing
 
-    LINEAR: LINEAR
+    LINEAR
 
-    SINE_IN: SINE_IN
+    SINE_IN
 
-    SINE_OUT: SINE_OUT
+    SINE_OUT
 
-    SINE_INOUT: SINE_INOUT
+    SINE_INOUT
 
-    QUAD_IN: QUAD_IN
+    QUAD_IN
 
-    QUAD_OUT: QUAD_OUT
+    QUAD_OUT
 
-    QUAD_INOUT: QUAD_INOUT
+    QUAD_INOUT
 
-    CUBIC_IN: CUBIC_IN
+    CUBIC_IN
 
-    CUBIC_OUT: CUBIC_OUT
+    CUBIC_OUT
 
-    CUBIC_INOUT: CUBIC_INOUT
+    CUBIC_INOUT
 
   public static float fEaseSineIn(float x)
 
@@ -473,23 +495,24 @@ Easing
 
   public static float fEaseCubicInOut(float x)
 
-  public static float fEasingFunction(float x, Easing.EEasing eEasing)
+  public static float fEasingFunction(float x, EEasing eEasing)
 
+  public Easing()
+
+// Category: CAD authoring
 // Metadata table containing parameters associated with field types like Voxels, ScalarFields, VectorFields
-FieldMetadata
+public partial class FieldMetadata : IDisposable
 
   // Type of the data items in the metadata table
-  EType
+  public enum EType
 
-    UNKNOWN: UNKNOWN
+    UNKNOWN = -1
 
-    STRING: STRING
+    STRING = 0
 
-    FLOAT: FLOAT
+    FLOAT
 
-    VECTOR: VECTOR
-
-  lib: Library
+    VECTOR
 
   // Number of items in the metadata table
   public int nCount()
@@ -500,7 +523,7 @@ FieldMetadata
   //   strValueName: Name of the parameter at this position
 
   // Returns the type of the value with the specified name
-  public FieldMetadata.EType eTypeAt(string strName)
+  public EType eTypeAt(string strName)
   //   strName: Name of the parameter to retrieve
 
   // Returns the human readable type of the parameter with the specified name
@@ -508,7 +531,7 @@ FieldMetadata
   //   strName: Name of the parameter
 
   // Translate the type enum to a string
-  public string strTypeName(FieldMetadata.EType eType)
+  public string strTypeName(EType eType)
   //   eType: Type to translate
 
   // Try to get the value of a parameter
@@ -532,37 +555,18 @@ FieldMetadata
   // Converts the contents of the metadata table to a string
   public override string? ToString()
 
-  // Internal constructor used by the Voxels, ScalarField and VectorField accessor function
-  public FieldMetadata(Library oLibrary, VdbMetaHandle hSource)
-  //   oLibrary: Library instance to use
-  //   hSource: This pointer
-
-  // This function tests whether you are attempting to set internal metadata fields from your code — this can mess up openvdb and internal PicoGK functionality
-  protected void GuardInternalFields(string strFieldName)
-  //   strFieldName: Field name you are trying to set
-
   public void Dispose()
   protected virtual void Dispose(bool bDisposing)
 
-GpuTexHandle
-
-  Value: nint
-
-  public GpuTexHandle(nint Value)
-
-GuiSideBarHandle
-
-  Value: nint
-
-  public GuiSideBarHandle(nint Value)
-
+// Category: CAD authoring
 // Interface for a bounded implicit function
-IBoundedImplicit
+public interface IBoundedImplicit : IImplicit
 
   // Access the bounding box of the implicit function
-  oBounds: BBox3
+  BBox3 oBounds { get; }
 
-IDataTable
+// Category: CAD authoring
+public interface IDataTable
 
   int nMaxColumnCount()
 
@@ -578,124 +582,69 @@ IDataTable
 
   void AddRow(IEnumerable<string> astrData)
 
-IFieldWithMetadata
+// Category: CAD authoring
+public interface IFieldWithMetadata
 
-  FieldMetadata oMetaData()
+  // Return metadata borrowed from this field owner
+  // Remarks: The field disposes its metadata. Keep the metadata within the field lifetime and leave its disposal to that field.
+  public FieldMetadata oMetaData()
 
+// Category: CAD authoring
 // Function signature for signed distance implicts
-IImplicit
+public interface IImplicit
 
   // Return the signed distance to the iso surface
-  float fSignedDistance(in Vector3 vec)
+  public abstract float fSignedDistance(in Vector3 vec)
   //   vec: Real world point to sample
 
-// Host for the process-global lifecycle established by PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String)
-ILibraryHost
-
-  // Log path used when callers keep PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String) 's default
-  DefaultLogFilePath: string
-
-  // Run one PicoGK task with the arguments supplied to PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String)
-  void Run(float fVoxelSizeMM, ThreadStart fnTask, string strLogFilePath, bool bEndAppWithTask, string strWindowTitle, string strLightsFile)
-
+// Category: CAD authoring
 // Logging interface which allows you to output diagnostics
-ILog
+public interface ILog
 
   // This function allows you to output information using the standard string functions, i.e
   void Log(in string strFormat, params object[] args)
 
+// Category: CAD authoring
 // A generic progress reporting interface
-IProgress
+public interface IProgress
 
   // Report progress from 0..1
   void Progress(float f)
 
+// Category: CAD authoring
 // An interface used to traverse the active values of a ScalarField
-ITraverseScalarField
+public interface ITraverseScalarField
 
   // Called for every active value in the ScalarField object
-  void InformActiveValue(in Vector3 vecPosition, float fValue)
+  public abstract void InformActiveValue(in Vector3 vecPosition, float fValue)
   //   vecPosition: Position in the field
   //   fValue: Value at the postion
 
+// Category: CAD authoring
 // An interface to allow traversal of all active values in a VectorField
-ITraverseVectorField
+public interface ITraverseVectorField
 
   // Called for every active value in the VectorField object
-  void InformActiveValue(in Vector3 vecPosition, in Vector3 vecValue)
+  public abstract void InformActiveValue(in Vector3 vecPosition, in Vector3 vecValue)
   //   vecPosition: Position in the VectorField
   //   vecValue: Value at position
 
-// Backend for embedding PicoGK's concrete PicoGK.Viewer API without a native window
-IViewerBackend
+// Category: CAD authoring
+public abstract partial class Image
 
-  IsIdle: bool
+  public enum EType
 
-  Orientation: Quaternion
+    BW
 
-  bool Poll()
+    GRAY
 
-  void RequestUpdate()
+    COLOR
 
-  void LoadLightSetup(byte[] abyDiffuseDds, byte[] abySpecularDds)
+  public readonly int nWidth;
 
-  void SetBackgroundColor(ColorFloat color)
+  public readonly int nHeight;
 
-  void SetFieldOfView(float radians)
-
-  void ZoomToFit()
-
-  void Add(Voxels vox, int nGroupID)
-  void Add(Voxels vox, string name, int nGroupID)
-  void Add(Mesh msh, int nGroupID)
-  void Add(Mesh msh, string name, int nGroupID)
-  void Add(PolyLine poly, int nGroupID)
-  void Add(PolyLine poly, string name, int nGroupID)
-
-  void Remove(Voxels vox)
-  void Remove(Mesh msh)
-  void Remove(PolyLine poly)
-
-  void SetObjectMatrix(Voxels vox, Matrix4x4 mat)
-  void SetObjectMatrix(Mesh msh, Matrix4x4 mat)
-  void SetObjectMatrix(PolyLine poly, Matrix4x4 mat)
-
-  void RemoveAllObjects()
-
-  void SetMechanism(object source)
-
-  void RequestScreenShot(string strScreenShotPath)
-
-  void EnableExperimental(bool bEnable)
-
-  void SetGroupVisible(int nGroupID, bool bVisible)
-
-  void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness)
-  void SetGroupMaterial(int groupId, Material material)
-
-  void SetGroupMatrix(int nGroupID, Matrix4x4 mat)
-
-  void EnableOverhangWarning(int nGroupID, Overhang uWarning, Overhang uError)
-
-  void DisableOverhangWarning(int nGroupID)
-
-  BBox3 GetBoundingBox()
-
-Image
-
-  EType
-
-    BW: BW
-
-    GRAY: GRAY
-
-    COLOR: COLOR
-
-  nWidth: int
-
-  nHeight: int
-
-  eType: Image.EType
+  public readonly EType eType;
 
   public abstract ColorFloat clrValue(int x, int y)
 
@@ -735,8 +684,6 @@ Image
   public void DrawLine(int x0, int y0, int x1, int y1, float fGrayscale)
   public void DrawLine(int x0, int y0, int x1, int y1, bool bValue)
 
-  protected Image(int _nWidth, int _nHeight, Image.EType _eType)
-
   public static ImageRgba32 imgFromSKBitmap(SKBitmap oSKBitmap)
 
   public static implicit operator SKBitmap(Image img)
@@ -749,7 +696,8 @@ Image
 
   public static Image imgLoadFromFile(string strFileName)
 
-ImageBWAbstract
+// Category: CAD authoring
+public abstract partial class ImageBWAbstract : Image
 
   public ImageBWAbstract(int _nWidth, int _nHeight)
 
@@ -760,7 +708,8 @@ ImageBWAbstract
   public override void SetValue(int x, int y, float fValue)
   public override void SetValue(int x, int y, in ColorFloat clr)
 
-ImageColor
+// Category: CAD authoring
+public partial class ImageColor : ImageColorAbstract
 
   public ImageColor(int _nWidth, int _nHeight)
   public ImageColor(Image imgSource)
@@ -769,7 +718,8 @@ ImageColor
 
   public override ColorFloat clrValue(int x, int y)
 
-ImageColorAbstract
+// Category: CAD authoring
+public abstract partial class ImageColorAbstract : Image
 
   public ImageColorAbstract(int _iWidth, int _iHeight)
 
@@ -780,9 +730,10 @@ ImageColorAbstract
   public override void SetValue(int x, int y, float f)
   public override void SetValue(int x, int y, bool bValue)
 
-ImageGrayScale
+// Category: CAD authoring
+public partial class ImageGrayScale : ImageGrayscaleAbstract
 
-  m_afValues: float[]
+  public float[] m_afValues;
 
   public ImageGrayScale(int _nWidth, int _nHeight)
 
@@ -792,9 +743,10 @@ ImageGrayScale
 
   public ImageColor imgGetColorCodedSDF(float fBackground)
 
-  public static ImageGrayScale imgGetInterpolated(ImageGrayScale oImg1, ImageGrayScale oImg2, float fWeight = 0.5)
+  public static ImageGrayScale imgGetInterpolated(ImageGrayScale oImg1, ImageGrayScale oImg2, float fWeight = 0.5f)
 
-ImageGrayscaleAbstract
+// Category: CAD authoring
+public abstract partial class ImageGrayscaleAbstract : Image
 
   public ImageGrayscaleAbstract(int _nWidth, int _nHeight)
 
@@ -806,9 +758,10 @@ ImageGrayscaleAbstract
   public override void SetValue(int x, int y, in ColorFloat clr)
 
   // Returns whether the image has any pixels set to a value smaller or equal to the specified value This is useful to find out if a signed distance field slice contains any active voxels
-  public bool bContainsActivePixels(float fThreshold = 0)
+  public bool bContainsActivePixels(float fThreshold = 0.0f)
 
-ImageRgb24
+// Category: CAD authoring
+public partial class ImageRgb24 : ImageColorAbstract
 
   public ImageRgb24(int _nWidth, int _nHeight)
   public ImageRgb24(Image imgSource)
@@ -821,7 +774,8 @@ ImageRgb24
 
   public override ColorRgb24 sGetRgb24(int x, int y)
 
-ImageRgba32
+// Category: CAD authoring
+public partial class ImageRgba32 : ImageColorAbstract
 
   public ImageRgba32(int _nWidth, int _nHeight)
   public ImageRgba32(Image imgSource)
@@ -833,41 +787,3 @@ ImageRgba32
   public override void SetRgba32(int x, int y, ColorRgba32 clr)
 
   public override ColorRgba32 sGetRgba32(int x, int y)
-
-LatHandle
-
-  Value: long
-
-  public LatHandle(long Value)
-
-// A lattice of beams (and spheres)
-Lattice
-
-  lib: Library
-
-  // Creates a new empty Lattice, using the global library instance
-  public Lattice()
-  public Lattice(Library libSet)
-
-  // Add a sphere to the lattice
-  public void AddSphere(in Vector3 vecCenter, float fRadius)
-  //   vecCenter: Center point
-  //   fRadius: Radius of the sphere
-
-  // Add a beam to the lattice
-  public void AddBeam(in Vector3 vecA, float fRadA, in Vector3 vecB, float fRadB, bool bRoundCap = true)
-  public void AddBeam(in Vector3 vecA, in Vector3 vecB, float fRadA, float fRadB, bool bRoundCap = true)
-  //   vecA: Starting point of the beam
-  //   fRadA: Radius at starting point
-  //   vecB: End point of the beam
-  //   fRadB: Radius at end point
-  //   bRoundCap: If true, beam has a hemispherical cap
-
-  public void Dispose()
-  protected virtual void Dispose(bool bDisposing)
-
-LibHandle
-
-  Value: long
-
-  public LibHandle(long Value)

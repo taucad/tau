@@ -1,37 +1,39 @@
-# PicoGK — System.Numerics
+# PicoGK — Selected BCL reference — System.Numerics
 
-5 top-level symbols. Signatures are verbatim csharp.
+4 top-level symbols. Signatures are verbatim csharp.
 
-Matrix3x2
+// Category: Selected BCL reference
+public struct Matrix3x2
 
-  M11: float
+  public float M11
 
-  M12: float
+  public float M12
 
-  M21: float
+  public float M21
 
-  M22: float
+  public float M22
 
-  M31: float
+  public float M31
 
-  M32: float
+  public float M32
 
-  Identity: Matrix3x2
+  public static Matrix3x2 Identity { get; }
 
-  IsIdentity: bool
+  public readonly bool IsIdentity { get; }
 
-  Translation: Vector2
+  public Vector2 Translation { get; set; }
 
-  X: Vector2
+  public Vector2 X { get; set; }
 
-  Y: Vector2
+  public Vector2 Y { get; set; }
 
-  Z: Vector2
+  public Vector2 Z { get; set; }
 
-  this[]: Vector2
+  public Vector2 this[int row] { get; set; }
 
-  this[]: float
+  public float this[int row, int column] { get; set; }
 
+  public Matrix3x2()
   public Matrix3x2(float m11, float m12, float m21, float m22, float m31, float m32)
 
   public static Matrix3x2 operator +(Matrix3x2 value1, Matrix3x2 value2)
@@ -98,58 +100,60 @@ Matrix3x2
 
   public readonly Matrix3x2 WithRow(int index, Vector2 value)
 
-Matrix4x4
+// Category: Selected BCL reference
+public struct Matrix4x4
 
-  M11: float
+  public float M11
 
-  M12: float
+  public float M12
 
-  M13: float
+  public float M13
 
-  M14: float
+  public float M14
 
-  M21: float
+  public float M21
 
-  M22: float
+  public float M22
 
-  M23: float
+  public float M23
 
-  M24: float
+  public float M24
 
-  M31: float
+  public float M31
 
-  M32: float
+  public float M32
 
-  M33: float
+  public float M33
 
-  M34: float
+  public float M34
 
-  M41: float
+  public float M41
 
-  M42: float
+  public float M42
 
-  M43: float
+  public float M43
 
-  M44: float
+  public float M44
 
-  Identity: Matrix4x4
+  public static Matrix4x4 Identity { get; }
 
-  IsIdentity: bool
+  public readonly bool IsIdentity { get; }
 
-  Translation: Vector3
+  public Vector3 Translation { get; set; }
 
-  X: Vector4
+  public Vector4 X { get; set; }
 
-  Y: Vector4
+  public Vector4 Y { get; set; }
 
-  Z: Vector4
+  public Vector4 Z { get; set; }
 
-  W: Vector4
+  public Vector4 W { get; set; }
 
-  this[]: Vector4
+  public Vector4 this[int row] { get; set; }
 
-  this[]: float
+  public float this[int row, int column] { get; set; }
 
+  public Matrix4x4()
   public Matrix4x4(float m11, float m12, float m13, float m14, float m21, float m22, float m23, float m24, float m31, float m32, float m33, float m34, float m41, float m42, float m43, float m44)
   public Matrix4x4(Matrix3x2 value)
 
@@ -279,12 +283,14 @@ Matrix4x4
 
   public readonly Matrix4x4 WithRow(int index, Vector4 value)
 
-Plane
+// Category: Selected BCL reference
+public struct Plane
 
-  Normal: Vector3
+  public Vector3 Normal
 
-  D: float
+  public float D
 
+  public Plane()
   public Plane(float x, float y, float z, float d)
   public Plane(Vector3 normal, float d)
   public Plane(Vector4 value)
@@ -317,24 +323,26 @@ Plane
 
   public override readonly string ToString()
 
-Quaternion
+// Category: Selected BCL reference
+public struct Quaternion
 
-  X: float
+  public float X
 
-  Y: float
+  public float Y
 
-  Z: float
+  public float Z
 
-  W: float
+  public float W
 
-  Zero: Quaternion
+  public static Quaternion Zero { get; }
 
-  Identity: Quaternion
+  public static Quaternion Identity { get; }
 
-  this[]: float
+  public float this[int index] { get; set; }
 
-  IsIdentity: bool
+  public readonly bool IsIdentity { get; }
 
+  public Quaternion()
   public Quaternion(float x, float y, float z, float w)
   public Quaternion(Vector3 vectorPart, float scalarPart)
 
@@ -397,297 +405,3 @@ Quaternion
   public readonly float LengthSquared()
 
   public override readonly string ToString()
-
-Vector2
-
-  X: float
-
-  Y: float
-
-  AllBitsSet: Vector2
-
-  E: Vector2
-
-  Epsilon: Vector2
-
-  NaN: Vector2
-
-  NegativeInfinity: Vector2
-
-  NegativeZero: Vector2
-
-  One: Vector2
-
-  Pi: Vector2
-
-  PositiveInfinity: Vector2
-
-  Tau: Vector2
-
-  UnitX: Vector2
-
-  UnitY: Vector2
-
-  Zero: Vector2
-
-  this[]: float
-
-  public Vector2(float value)
-  public Vector2(float x, float y)
-  public Vector2(ReadOnlySpan<float> values)
-
-  public static Vector2 operator +(Vector2 left, Vector2 right)
-
-  public static Vector2 operator /(Vector2 left, Vector2 right)
-  public static Vector2 operator /(Vector2 value1, float value2)
-
-  public static bool operator ==(Vector2 left, Vector2 right)
-
-  public static bool operator !=(Vector2 left, Vector2 right)
-
-  public static Vector2 operator *(Vector2 left, Vector2 right)
-  public static Vector2 operator *(Vector2 left, float right)
-  public static Vector2 operator *(float left, Vector2 right)
-
-  public static Vector2 operator -(Vector2 left, Vector2 right)
-
-  public static Vector2 operator -(Vector2 value)
-
-  public static Vector2 operator &(Vector2 left, Vector2 right)
-
-  public static Vector2 operator |(Vector2 left, Vector2 right)
-
-  public static Vector2 operator ^(Vector2 left, Vector2 right)
-
-  public static Vector2 operator <<(Vector2 value, int shiftAmount)
-
-  public static Vector2 operator ~(Vector2 value)
-
-  public static Vector2 operator >>(Vector2 value, int shiftAmount)
-
-  public static Vector2 operator +(Vector2 value)
-
-  public static Vector2 operator >>>(Vector2 value, int shiftAmount)
-
-  public static Vector2 Abs(Vector2 value)
-
-  public static Vector2 Add(Vector2 left, Vector2 right)
-
-  public static bool All(Vector2 vector, float value)
-
-  public static bool AllWhereAllBitsSet(Vector2 vector)
-
-  public static Vector2 AndNot(Vector2 left, Vector2 right)
-
-  public static bool Any(Vector2 vector, float value)
-
-  public static bool AnyWhereAllBitsSet(Vector2 vector)
-
-  public static Vector2 BitwiseAnd(Vector2 left, Vector2 right)
-
-  public static Vector2 BitwiseOr(Vector2 left, Vector2 right)
-
-  public static Vector2 Clamp(Vector2 value1, Vector2 min, Vector2 max)
-
-  public static Vector2 ClampNative(Vector2 value1, Vector2 min, Vector2 max)
-
-  public static Vector2 ConditionalSelect(Vector2 condition, Vector2 left, Vector2 right)
-
-  public static Vector2 CopySign(Vector2 value, Vector2 sign)
-
-  public static Vector2 Cos(Vector2 vector)
-
-  public static int Count(Vector2 vector, float value)
-
-  public static int CountWhereAllBitsSet(Vector2 vector)
-
-  public static Vector2 Create(float value)
-  public static Vector2 Create(float x, float y)
-  public static Vector2 Create(ReadOnlySpan<float> values)
-
-  public static Vector2 CreateScalar(float x)
-
-  public static Vector2 CreateScalarUnsafe(float x)
-
-  public static float Cross(Vector2 value1, Vector2 value2)
-
-  public static Vector2 DegreesToRadians(Vector2 degrees)
-
-  public static float Distance(Vector2 value1, Vector2 value2)
-
-  public static float DistanceSquared(Vector2 value1, Vector2 value2)
-
-  public static Vector2 Divide(Vector2 left, Vector2 right)
-  public static Vector2 Divide(Vector2 left, float divisor)
-
-  public static float Dot(Vector2 value1, Vector2 value2)
-
-  public static Vector2 Exp(Vector2 vector)
-
-  public static Vector2 Equals(Vector2 left, Vector2 right)
-  public override readonly bool Equals(object? obj)
-  public readonly bool Equals(Vector2 other)
-
-  public static bool EqualsAll(Vector2 left, Vector2 right)
-
-  public static bool EqualsAny(Vector2 left, Vector2 right)
-
-  public static Vector2 FusedMultiplyAdd(Vector2 left, Vector2 right, Vector2 addend)
-
-  public static Vector2 GreaterThan(Vector2 left, Vector2 right)
-
-  public static bool GreaterThanAll(Vector2 left, Vector2 right)
-
-  public static bool GreaterThanAny(Vector2 left, Vector2 right)
-
-  public static Vector2 GreaterThanOrEqual(Vector2 left, Vector2 right)
-
-  public static bool GreaterThanOrEqualAll(Vector2 left, Vector2 right)
-
-  public static bool GreaterThanOrEqualAny(Vector2 left, Vector2 right)
-
-  public static Vector2 Hypot(Vector2 x, Vector2 y)
-
-  public static int IndexOf(Vector2 vector, float value)
-
-  public static int IndexOfWhereAllBitsSet(Vector2 vector)
-
-  public static Vector2 IsEvenInteger(Vector2 vector)
-
-  public static Vector2 IsFinite(Vector2 vector)
-
-  public static Vector2 IsInfinity(Vector2 vector)
-
-  public static Vector2 IsInteger(Vector2 vector)
-
-  public static Vector2 IsNaN(Vector2 vector)
-
-  public static Vector2 IsNegative(Vector2 vector)
-
-  public static Vector2 IsNegativeInfinity(Vector2 vector)
-
-  public static Vector2 IsNormal(Vector2 vector)
-
-  public static Vector2 IsOddInteger(Vector2 vector)
-
-  public static Vector2 IsPositive(Vector2 vector)
-
-  public static Vector2 IsPositiveInfinity(Vector2 vector)
-
-  public static Vector2 IsSubnormal(Vector2 vector)
-
-  public static Vector2 IsZero(Vector2 vector)
-
-  public static int LastIndexOf(Vector2 vector, float value)
-
-  public static int LastIndexOfWhereAllBitsSet(Vector2 vector)
-
-  public static Vector2 Lerp(Vector2 value1, Vector2 value2, float amount)
-  public static Vector2 Lerp(Vector2 value1, Vector2 value2, Vector2 amount)
-
-  public static Vector2 LessThan(Vector2 left, Vector2 right)
-
-  public static bool LessThanAll(Vector2 left, Vector2 right)
-
-  public static bool LessThanAny(Vector2 left, Vector2 right)
-
-  public static Vector2 LessThanOrEqual(Vector2 left, Vector2 right)
-
-  public static bool LessThanOrEqualAll(Vector2 left, Vector2 right)
-
-  public static bool LessThanOrEqualAny(Vector2 left, Vector2 right)
-
-  public static Vector2 Load(float* source)
-
-  public static Vector2 LoadAligned(float* source)
-
-  public static Vector2 LoadAlignedNonTemporal(float* source)
-
-  public static Vector2 LoadUnsafe(ref readonly float source)
-  public static Vector2 LoadUnsafe(ref readonly float source, nuint elementOffset)
-
-  public static Vector2 Log(Vector2 vector)
-
-  public static Vector2 Log2(Vector2 vector)
-
-  public static Vector2 Max(Vector2 value1, Vector2 value2)
-
-  public static Vector2 MaxMagnitude(Vector2 value1, Vector2 value2)
-
-  public static Vector2 MaxMagnitudeNumber(Vector2 value1, Vector2 value2)
-
-  public static Vector2 MaxNative(Vector2 value1, Vector2 value2)
-
-  public static Vector2 MaxNumber(Vector2 value1, Vector2 value2)
-
-  public static Vector2 Min(Vector2 value1, Vector2 value2)
-
-  public static Vector2 MinMagnitude(Vector2 value1, Vector2 value2)
-
-  public static Vector2 MinMagnitudeNumber(Vector2 value1, Vector2 value2)
-
-  public static Vector2 MinNative(Vector2 value1, Vector2 value2)
-
-  public static Vector2 MinNumber(Vector2 value1, Vector2 value2)
-
-  public static Vector2 Multiply(Vector2 left, Vector2 right)
-  public static Vector2 Multiply(Vector2 left, float right)
-  public static Vector2 Multiply(float left, Vector2 right)
-
-  public static Vector2 MultiplyAddEstimate(Vector2 left, Vector2 right, Vector2 addend)
-
-  public static Vector2 Negate(Vector2 value)
-
-  public static bool None(Vector2 vector, float value)
-
-  public static bool NoneWhereAllBitsSet(Vector2 vector)
-
-  public static Vector2 Normalize(Vector2 value)
-
-  public static Vector2 OnesComplement(Vector2 value)
-
-  public static Vector2 RadiansToDegrees(Vector2 radians)
-
-  public static Vector2 Reflect(Vector2 vector, Vector2 normal)
-
-  public static Vector2 Round(Vector2 vector)
-  public static Vector2 Round(Vector2 vector, MidpointRounding mode)
-
-  public static Vector2 Shuffle(Vector2 vector, byte xIndex, byte yIndex)
-
-  public static Vector2 Sin(Vector2 vector)
-
-  public static (Vector2 Sin, Vector2 Cos) SinCos(Vector2 vector)
-
-  public static Vector2 SquareRoot(Vector2 value)
-
-  public static Vector2 Subtract(Vector2 left, Vector2 right)
-
-  public static float Sum(Vector2 value)
-
-  public static Vector2 Transform(Vector2 position, Matrix3x2 matrix)
-  public static Vector2 Transform(Vector2 position, Matrix4x4 matrix)
-  public static Vector2 Transform(Vector2 value, Quaternion rotation)
-
-  public static Vector2 TransformNormal(Vector2 normal, Matrix3x2 matrix)
-  public static Vector2 TransformNormal(Vector2 normal, Matrix4x4 matrix)
-
-  public static Vector2 Truncate(Vector2 vector)
-
-  public static Vector2 Xor(Vector2 left, Vector2 right)
-
-  public readonly void CopyTo(float[] array)
-  public readonly void CopyTo(float[] array, int index)
-  public readonly void CopyTo(Span<float> destination)
-
-  public readonly bool TryCopyTo(Span<float> destination)
-
-  public override readonly int GetHashCode()
-
-  public readonly float Length()
-
-  public readonly float LengthSquared()
-
-  public override readonly string ToString()
-  public readonly string ToString(string? format)
-  public readonly string ToString(string? format, IFormatProvider? formatProvider)

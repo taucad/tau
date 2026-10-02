@@ -2,7 +2,14 @@
 
 1 top-level symbols. Signatures are verbatim python.
 
+// Category: build_part
 // BuildPart
+// Remarks: The BuildPart class is another subclass of Builder for building parts
+(objects with the property of volume) from sketches or 3D objects.
+It has an _obj property that returns the current part being built, and
+several pending lists for storing faces, edges, and planes that will be
+integrated into the final part later. The class overrides the _add_to_pending
+method of Builder.
 BuildPart
 
   BuildPart(*workplanes: Face | Plane | Location, mode: Mode = Mode.ADD)

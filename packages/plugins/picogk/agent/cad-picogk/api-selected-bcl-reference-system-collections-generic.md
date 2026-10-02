@@ -1,26 +1,29 @@
-# PicoGK — System.Collections.Generic
+# PicoGK — Selected BCL reference — System.Collections.Generic
 
 3 top-level symbols. Signatures are verbatim csharp.
 
-Dictionary
+// Category: Selected BCL reference
+public class Dictionary<TKey, TValue> where TKey : notnull
 
-  Comparer: IEqualityComparer<TKey>
+  public IEqualityComparer<TKey> Comparer { get; }
 
-  Count: int
+  public int Count { get; }
 
-  Capacity: int
+  public int Capacity { get; }
 
-  Keys: Dictionary<TKey, TValue>.KeyCollection
+  public Dictionary<TKey, TValue>.KeyCollection Keys { get; }
 
-  Values: Dictionary<TKey, TValue>.ValueCollection
+  public Dictionary<TKey, TValue>.ValueCollection Values { get; }
 
-  this[]: TValue
+  public TValue this[TKey key] { get; set; }
 
-  AlternateLookup
+  public readonly struct AlternateLookup<TAlternateKey> where TAlternateKey : notnull, allows ref struct
 
-    Dictionary: Dictionary<TKey, TValue>
+    public Dictionary<TKey, TValue> Dictionary { get; }
 
-    this[]: TValue
+    public TValue this[TAlternateKey key] { get; set; }
+
+    public AlternateLookup()
 
     public bool TryGetValue(TAlternateKey key, out TValue value)
     public bool TryGetValue(TAlternateKey key, out TKey actualKey, out TValue value)
@@ -32,21 +35,25 @@ Dictionary
 
     public bool TryAdd(TAlternateKey key, TValue value)
 
-  Enumerator
+  public struct Enumerator
 
-    Current: KeyValuePair<TKey, TValue>
+    public KeyValuePair<TKey, TValue> Current { get; }
+
+    public Enumerator()
 
     public bool MoveNext()
 
     public void Dispose()
 
-  KeyCollection
+  public sealed class KeyCollection
 
-    Count: int
+    public int Count { get; }
 
-    Enumerator
+    public struct Enumerator
 
-      Current: TKey
+      public TKey Current { get; }
+
+      public Enumerator()
 
       public void Dispose()
 
@@ -60,13 +67,15 @@ Dictionary
 
     public bool Contains(TKey item)
 
-  ValueCollection
+  public sealed class ValueCollection
 
-    Count: int
+    public int Count { get; }
 
-    Enumerator
+    public struct Enumerator
 
-      Current: TValue
+      public TValue Current { get; }
+
+      public Enumerator()
 
       public void Dispose()
 
@@ -119,17 +128,20 @@ Dictionary
   public void TrimExcess()
   public void TrimExcess(int capacity)
 
-HashSet
+// Category: Selected BCL reference
+public class HashSet<T>
 
-  Count: int
+  public int Count { get; }
 
-  Capacity: int
+  public int Capacity { get; }
 
-  Comparer: IEqualityComparer<T>
+  public IEqualityComparer<T> Comparer { get; }
 
-  AlternateLookup
+  public struct AlternateLookup<TAlternate> where TAlternate : allows ref struct
 
-    Set: HashSet<T>
+    public readonly HashSet<T> Set { get; }
+
+    public AlternateLookup()
 
     public bool Add(TAlternate item)
 
@@ -139,9 +151,11 @@ HashSet
 
     public bool TryGetValue(TAlternate equalValue, out T actualValue)
 
-  Enumerator
+  public struct Enumerator
 
-    Current: T
+    public T Current { get; }
+
+    public Enumerator()
 
     public bool MoveNext()
 
@@ -209,17 +223,20 @@ HashSet
 
   public static IEqualityComparer<HashSet<T>> CreateSetComparer()
 
-List
+// Category: Selected BCL reference
+public class List<T>
 
-  Capacity: int
+  public int Capacity { get; set; }
 
-  Count: int
+  public int Count { get; }
 
-  this[]: T
+  public T this[int index] { get; set; }
 
-  Enumerator
+  public struct Enumerator
 
-    Current: T
+    public T Current { get; }
+
+    public Enumerator()
 
     public void Dispose()
 

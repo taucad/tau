@@ -684,7 +684,56 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -963,21 +956,9 @@
+@@ -846,7 +839,7 @@
+         /// <returns>True if inside or on the surface, False if outside</returns>
+         public bool bIsInside(Vector3 vecTestPoint)
+         {
+-            return _bIsInside(lib.hThis, hThis, vecTestPoint);
++            return TauSurfaceQuery(0, vecTestPoint, Vector3.Zero, out _);
+         }
+ 
+         /// <summary>
+@@ -860,11 +853,7 @@
+         /// <returns>The normal vector of the surface at the point</returns>
+         public Vector3 vecSurfaceNormal(in Vector3 vecSurfacePoint)
+         {
+-            Vector3 vecNormal = Vector3.Zero;
+-            _GetSurfaceNormal(  lib.hThis, 
+-                                hThis, 
+-                                vecSurfacePoint, 
+-                                ref vecNormal);
++            TauSurfaceQuery(1, vecSurfacePoint, Vector3.Zero, out var vecNormal);
+             return vecNormal;
+         }
+ 
+@@ -879,11 +868,7 @@
+         public bool bClosestPointOnSurface( in  Vector3 vecSearch,
+                                             out Vector3 vecSurfacePoint)
+         {
+-            vecSurfacePoint = new();
+-            return _bClosestPointOnSurface( lib.hThis,
+-                                            hThis,
+-                                            in  vecSearch,
+-                                            ref vecSurfacePoint);
++            return TauSurfaceQuery(2, vecSearch, Vector3.Zero, out vecSurfacePoint);
+         }
+ 
+         /// <summary>
+@@ -917,12 +902,7 @@
+                                         in  Vector3 vecDirection,
+                                         out Vector3 vecSurfacePoint)
+         {
+-            vecSurfacePoint     = new();
+-            return _bRayCastToSurface(  lib.hThis,
+-                                        hThis,
+-                                        in  vecSearch,
+-                                        in  vecDirection,
+-                                        ref vecSurfacePoint);
++            return TauSurfaceQuery(3, vecSearch, vecDirection, out vecSurfacePoint);
+         }
+ 
+         /// <summary>
+@@ -963,21 +943,9 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -709,7 +758,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
          /// <summary>
-@@ -990,21 +971,8 @@
+@@ -990,21 +958,8 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -733,7 +782,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          }
  
           /// <summary>
-@@ -1066,30 +1034,28 @@
+@@ -1066,30 +1021,28 @@
              {
              case ESliceAxis.Z:
                  nSliceCount = nZSize;
@@ -772,7 +821,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1101,32 +1067,8 @@
+@@ -1101,32 +1054,8 @@
                                      ESliceMode eMode = ESliceMode.SignedDistance,
                                      ESliceAxis eAxis = ESliceAxis.Z)
          {
@@ -807,7 +856,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
  
              switch (eMode)
              {
-@@ -1176,15 +1118,13 @@
+@@ -1176,15 +1105,13 @@
  
          /// <summary>
          /// Returns a signed distance-field-encoded slice of the voxel field
@@ -828,7 +877,7 @@ diff --git a/Base/Voxels.cs b/Base/Voxels.cs
          /// <param name="eMode">Encoding mode of the image, defaults to signed distance, 
          /// which is the native narrow band distance encoded in the float image. You
          /// can also speciy black/white, which encodes the inside of the field as black
-@@ -1193,17 +1133,7 @@
+@@ -1193,17 +1120,7 @@
                                                  ref ImageGrayScale img,
                                                  ESliceMode eMode = ESliceMode.SignedDistance)
          {
@@ -1368,7 +1417,40 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
                                                      VoxHandle   hThis,
                                                      LatHandle   hLattice);
  
-@@ -501,7 +487,7 @@
+@@ -412,29 +398,9 @@
+         private extern static float _fCalculateVolume(  LibHandle   hLib,
+                                                         VoxHandle   hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bIsInside")]
+-        private static extern bool _bIsInside(      LibHandle   hLib,
+-                                                    VoxHandle   hThis,
+-                                                    in Vector3 vecTestPoint);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_GetSurfaceNormal")]
+-        private extern static void _GetSurfaceNormal(   LibHandle   hLib,
+-                                                        VoxHandle   hThis,
+-                                                        in  Vector3 vecSurfacePoint,
+-                                                        ref Vector3 vecSurfaceNormal);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bClosestPointOnSurface")]
+-        private extern static bool _bClosestPointOnSurface( LibHandle   hLib,
+-                                                            VoxHandle   hThis,
+-                                                            in  Vector3 vecSearch,
+-                                                            ref Vector3 vecSurfacePoint);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_bRayCastToSurface")]
+-        private extern static bool _bRayCastToSurface(  LibHandle   hLib,
+-                                                        VoxHandle   hThis,
+-                                                        in  Vector3 vecSearch,
+-                                                        in  Vector3 vecNormal,
+-                                                        ref Vector3 vecSurfacePoint);
++
++
++
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Voxels_GetVoxelDimensions")]
+         private extern static void _GetVoxelDimensions( LibHandle   hLib,
+@@ -501,7 +467,7 @@
                  m_oMetadata.Dispose();
              }
  
@@ -1377,7 +1459,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -578,7 +564,7 @@
+@@ -578,7 +544,7 @@
                  // Nothing to do in this class
              }
  
@@ -1386,7 +1468,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
              m_bDisposed = true;
          }
-@@ -793,7 +779,10 @@
+@@ -793,7 +759,10 @@
                  // Nothing to do in this class
              }
  
@@ -1398,7 +1480,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -996,10 +985,7 @@
+@@ -996,10 +965,7 @@
                                                      VdbHandle  hThis,
                                                      string strFileName);
  
@@ -1410,7 +1492,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVoxels", CharSet = CharSet.Ansi)]
-@@ -1008,10 +994,7 @@
+@@ -1008,10 +974,7 @@
                                                  string      strFieldName,
                                                  VoxHandle   hVoxels);
  
@@ -1422,7 +1504,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddScalarField", CharSet = CharSet.Ansi)]
-@@ -1020,10 +1003,7 @@
+@@ -1020,10 +983,7 @@
                                                      string              strFieldName,
                                                      ScalarFieldHandle   hField);
  
@@ -1434,7 +1516,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVectorField", CharSet = CharSet.Ansi)]
-@@ -1075,7 +1055,7 @@
+@@ -1075,7 +1035,7 @@
                  // Nothing to do in this class
              }
  
@@ -1443,7 +1525,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1174,11 +1154,11 @@
+@@ -1174,11 +1134,11 @@
  
              if (bDisposing)
              {
@@ -1460,7 +1542,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
          }
  
          bool m_bDisposed = false;
-@@ -1259,11 +1239,10 @@
+@@ -1259,11 +1219,10 @@
  
              if (bDisposing)
              {
@@ -1476,7 +1558,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1383,7 +1362,7 @@
+@@ -1383,7 +1342,7 @@
                  // Nothing to do in this class
              }
  
@@ -1485,7 +1567,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1370,4 @@
+@@ -1391,4 +1350,4 @@
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }
@@ -2497,9 +2579,10 @@ diff --git a/Library/Queries.cs b/Library/Queries.cs
 new file mode 100644
 --- /dev/null
 +++ b/Library/Queries.cs
-@@ -0,0 +1,35 @@
+@@ -0,0 +1,52 @@
 +// SPDX-License-Identifier: Apache-2.0
 +using System.Runtime.InteropServices;
++using System.Numerics;
 +namespace PicoGK;
 +public partial class Voxels
 +{
@@ -2507,6 +2590,22 @@ new file mode 100644
 +    private static extern int TauIsEmptyNative(LibHandle library, VoxHandle voxels, out int output);
 +    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_IsEqual")]
 +    private static extern int TauIsEqualNative(LibHandle library, VoxHandle voxels, VoxHandle other, out int output);
++    [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauVoxels_SurfaceQuery")]
++    private static extern int TauSurfaceQueryNative(LibHandle library, VoxHandle voxels, int mode,
++        in Vector3 point, in Vector3 direction, out int hit, out Vector3 output);
++
++    private bool TauSurfaceQuery(int mode, in Vector3 point, in Vector3 direction, out Vector3 output)
++    {
++        ObjectDisposedException.ThrowIf(m_bDisposed, this);
++        try
++        {
++            var status = TauSurfaceQueryNative(lib.hThis, hThis, mode, point, direction, out var hit, out output);
++            TauCheckedCallbacks.Check(status, null, this);
++            return hit != 0;
++        }
++        finally { GC.KeepAlive(this); }
++    }
++
 +    private bool TauIsEmpty()
 +    {
 +        ObjectDisposedException.ThrowIf(m_bDisposed, this);

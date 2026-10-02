@@ -1,7 +1,7 @@
 diff --git a/API/PicoGK.h b/API/PicoGK.h
 --- a/API/PicoGK.h
 +++ b/API/PicoGK.h
-@@ -747,6 +747,87 @@
+@@ -747,6 +747,97 @@
  PICOGK_API void             Viewer_SideBar_Destroy(         PKVIEWER            hThis,
                                                              PKGUI               hSideBar);
  
@@ -11,6 +11,9 @@ diff --git a/API/PicoGK.h b/API/PicoGK.h
 +// 0 success; -1 invalid input/count; -2 native failure; -3 invalid lifetime.
 +PICOGK_API int32_t TauCapture_Acquire(PKINSTANCE library, int32_t kind, uint64_t object,
 +    uint64_t* snapshot, uint64_t* generation, int32_t* positions, int32_t* indices, PKColorFloat* color);
++PICOGK_API int32_t TauViewer_PollChecked(PKVIEWER viewer, bool* alive);
++PICOGK_API int32_t TauViewer_AddCaptured(PKINSTANCE library, PKVIEWER viewer, int32_t group,
++    int32_t kind, uint64_t identity, uint64_t snapshot);
 +PICOGK_API int32_t TauCapture_Copy(PKINSTANCE library, uint64_t snapshot,
 +    float* positions, int32_t positionCapacity, uint32_t* indices, int32_t indexCapacity);
 +PICOGK_API int32_t TauCapture_Release(PKINSTANCE library, uint64_t snapshot);
@@ -87,6 +90,13 @@ diff --git a/API/PicoGK.h b/API/PicoGK.h
 +// Private checked query bridge. Modes: 0 inside, 1 normal, 2 discrete closest, 3 ray.
 +PICOGK_API int32_t TauVoxels_SurfaceQuery(PKINSTANCE library, PKVOXELS voxels, int32_t mode,
 +    const PKVector3* point, const PKVector3* direction, int32_t* hit, PKVector3* output) TAU_NOEXCEPT;
++
++PICOGK_API int32_t Tau_ScalarField_SetValueChecked(PKINSTANCE library, PKSCALARFIELD field, const PKVector3* position, float value) TAU_NOEXCEPT;
++PICOGK_API int32_t Tau_ScalarField_bGetValueChecked(PKINSTANCE library, PKSCALARFIELD field, const PKVector3* position, float* value, uint8_t* active) TAU_NOEXCEPT;
++PICOGK_API int32_t Tau_ScalarField_RemoveValueChecked(PKINSTANCE library, PKSCALARFIELD field, const PKVector3* position) TAU_NOEXCEPT;
++PICOGK_API int32_t Tau_VectorField_SetValueChecked(PKINSTANCE library, PKVECTORFIELD field, const PKVector3* position, const PKVector3* value) TAU_NOEXCEPT;
++PICOGK_API int32_t Tau_VectorField_bGetValueChecked(PKINSTANCE library, PKVECTORFIELD field, const PKVector3* position, PKVector3* value, uint8_t* active) TAU_NOEXCEPT;
++PICOGK_API int32_t Tau_VectorField_RemoveValueChecked(PKINSTANCE library, PKVECTORFIELD field, const PKVector3* position) TAU_NOEXCEPT;
 +
 +#undef TAU_NOEXCEPT
 +
@@ -252,7 +262,7 @@ diff --git a/Source/PicoGKCapture.h b/Source/PicoGKCapture.h
 new file mode 100644
 --- /dev/null
 +++ b/Source/PicoGKCapture.h
-@@ -0,0 +1,17 @@
+@@ -0,0 +1,19 @@
 +// SPDX-License-Identifier: Apache-2.0
 +#ifndef PICOGK_CAPTURE_H
 +#define PICOGK_CAPTURE_H
@@ -263,6 +273,8 @@ new file mode 100644
 +    Mesh::Ptr mesh;
 +    PolyLine::Ptr line;
 +    uint64_t generation = 0;
++    int32_t kind = -1;
++    uint64_t identity = 0;
 +    void TauAccountMemory(TauOwnedMemory& memory) const {
 +        memory.Add(sizeof(TauCapturedGeometry)); memory.Object(mesh); memory.Object(line);
 +    }
@@ -295,43 +307,1794 @@ new file mode 100644
 +}
 +}
 +#endif
+diff --git a/Source/PicoGKGLObjects.h b/Source/PicoGKGLObjects.h
+--- a/Source/PicoGKGLObjects.h
++++ b/Source/PicoGKGLObjects.h
+@@ -37,6 +37,7 @@
+ #define PICOGKGLOBJECTS_H_
+ 
+ #include <cstddef>
++#include <limits>
+ #include <vector>
+ #include "PicoGKTypes.h"
+ #include <stdexcept>
+@@ -109,10 +110,14 @@
+         
+         PKTRACE(GlVertexBuffer_GlVertexBuffer_1);
+         
++        if (vVertices.size() > static_cast<size_t>(std::numeric_limits<GLsizei>::max()) ||
++            vVertices.size() > static_cast<size_t>(std::numeric_limits<GLsizeiptr>::max()) / sizeof(T))
++            throw std::overflow_error("vertex buffer exceeds OpenGL capacity");
+         m_nVertexCount = static_cast<GLsizei>(vVertices.size());
+         
+         PKTRACE(GlVertexBuffer_GlVertexBuffer_2);
+         
++        try {
+         glGenVertexArrays(1, &m_nVAO);
+         glBindVertexArray(m_nVAO);
+         
+@@ -136,6 +141,13 @@
+ 
+         glBindBuffer(GL_ARRAY_BUFFER, 0);
+         glBindVertexArray(0);
++        if (glGetError() != GL_NO_ERROR) throw std::runtime_error("unable to allocate vertex buffer");
++        } catch (...) {
++            glBindBuffer(GL_ARRAY_BUFFER, 0); glBindVertexArray(0);
++            if (m_nVBO) glDeleteBuffers(1, &m_nVBO);
++            if (m_nVAO) glDeleteVertexArrays(1, &m_nVAO);
++            throw;
++        }
+     }
+     
+     ~GlVertexBuffer()
+@@ -161,6 +173,7 @@
+     
+     template<typename> friend class GlBind;
+     template<typename> friend class GlVertexBuffer;
++    template<typename> friend class GlElementBuffer;
+    
+ public:
+     void Bind() const
+@@ -194,6 +207,8 @@
+             throw std::invalid_argument("Cannot build an element buffer for an empty element array");
+         
+         static_assert(sizeof(Triangle) == 3 * sizeof(uint32_t), "Triangle size mismatch");
++        if (vIndices.size() > static_cast<size_t>(std::numeric_limits<GLsizei>::max()) / 3)
++            throw std::overflow_error("element buffer exceeds OpenGL capacity");
+         m_nIndexCount = static_cast<GLsizei>(vIndices.size() * 3); // three int32 values in a triangle
+         
+         GlBind oBind(m_oVertexBuffer);
+@@ -203,6 +218,10 @@
+         glBufferData(GL_ELEMENT_ARRAY_BUFFER, m_nIndexCount * sizeof(uint32_t), vIndices.data(), eUsage);
+ 
+         glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, 0);
++        if (glGetError() != GL_NO_ERROR) {
++            if (m_nEBO) glDeleteBuffers(1, &m_nEBO);
++            throw std::runtime_error("unable to allocate element buffer");
++        }
+     }
+     
+     ~GlElementBuffer()
+@@ -211,6 +230,28 @@
+             glDeleteBuffers(1, &m_nEBO);
+     }
+     
++    void BindInstanceMatrices(GLuint buffer, size_t offset) const {
++        glBindBuffer(GL_ARRAY_BUFFER, buffer);
++        for (GLuint column = 0; column < 4; ++column) {
++            glEnableVertexAttribArray(1 + column);
++            glVertexAttribPointer(1 + column, 4, GL_FLOAT, GL_FALSE, 16 * sizeof(float),
++                reinterpret_cast<void*>(offset + column * 4 * sizeof(float)));
++            glVertexAttribDivisor(1 + column, 1);
++        }
++        glBindBuffer(GL_ARRAY_BUFFER, 0);
++    }
++    void ClearInstanceMatrices() const {
++        // Detach this context-owned VAO from the group's instance buffer before deletion.
++        glBindBuffer(GL_ARRAY_BUFFER, m_oVertexBuffer.m_nVBO);
++        for (GLuint column = 0; column < 4; ++column) {
++            glDisableVertexAttribArray(1 + column);
++            glVertexAttribDivisor(1 + column, 0);
++            glVertexAttribPointer(1 + column, GlVertexAttribTraits<VertexT>::nComponents,
++                GL_FLOAT, GL_FALSE, sizeof(VertexT), nullptr);
++        }
++        glBindBuffer(GL_ARRAY_BUFFER, 0);
++    }
++
+     GLsizei nVertexCount() const
+     {
+         return m_oVertexBuffer.nVertexCount();
+diff --git a/Source/PicoGKGLShader.cpp b/Source/PicoGKGLShader.cpp
+--- a/Source/PicoGKGLShader.cpp
++++ b/Source/PicoGKGLShader.cpp
+@@ -54,39 +54,28 @@
+         throw ShaderProgramException("Unable to create OpenGL program");
+     }
+     
+-    GLuint hVertShader = hCompileShader(EShaderType::Vertex,    strVertShader);
+-    GLuint hFragShader = hCompileShader(EShaderType::Fragment,  strFragShader);
+-    
+-    // CompileShader throws exception if it didn't work, so we have valid shaders now
+-    
+-    // Attach and link the shaders into the program
+-    glAttachShader(m_hProgram, hVertShader);
+-    glAttachShader(m_hProgram, hFragShader);
+-    glLinkProgram(m_hProgram);
+-    
+-    // After linking, the separate shader objects are
+-    // no longer needed. The program retains the linked
+-    // shaders internally
+-    
+-    glDetachShader(m_hProgram, hVertShader);
+-    glDeleteShader(hVertShader);
+-    glDetachShader(m_hProgram, hFragShader);
+-    glDeleteShader(hFragShader);
+-    
+-    GLint nLinkStatus;
+-    glGetProgramiv(m_hProgram, GL_LINK_STATUS, &nLinkStatus);
+-            
+-    if (!nLinkStatus)
+-    {
+-        GLchar pszLog[1024];
+-        glGetProgramInfoLog(m_hProgram, sizeof(pszLog), nullptr, pszLog);
+-        
+-        glDeleteProgram(m_hProgram);
+-        
+-        std::string strError = "Error linking shader program ";
+-        strError += pszLog;
+-        
+-        throw ShaderProgramException(strError);
++    GLuint hVertShader = 0, hFragShader = 0;
++    try {
++        hVertShader = hCompileShader(EShaderType::Vertex, strVertShader);
++        hFragShader = hCompileShader(EShaderType::Fragment, strFragShader);
++        glAttachShader(m_hProgram, hVertShader);
++        glAttachShader(m_hProgram, hFragShader);
++        glLinkProgram(m_hProgram);
++        GLint nLinkStatus;
++        glGetProgramiv(m_hProgram, GL_LINK_STATUS, &nLinkStatus);
++        if (!nLinkStatus) {
++            GLchar pszLog[1024];
++            glGetProgramInfoLog(m_hProgram, sizeof(pszLog), nullptr, pszLog);
++            throw ShaderProgramException(std::string("Error linking shader program ") + pszLog);
++        }
++        glDetachShader(m_hProgram, hVertShader);
++        glDetachShader(m_hProgram, hFragShader);
++        glDeleteShader(hVertShader); glDeleteShader(hFragShader);
++    } catch (...) {
++        if (hVertShader) glDeleteShader(hVertShader);
++        if (hFragShader) glDeleteShader(hFragShader);
++        glDeleteProgram(m_hProgram); m_hProgram = 0;
++        throw;
+     }
+ }
+     
+diff --git a/Source/PicoGKGLTexture.cpp b/Source/PicoGKGLTexture.cpp
+--- a/Source/PicoGKGLTexture.cpp
++++ b/Source/PicoGKGLTexture.cpp
+@@ -40,6 +40,7 @@
+ #include <fstream>
+ #include <vector>
+ #include <cstring>
++#include <limits>
+ 
+ #pragma pack(1)
+ 
+@@ -101,15 +102,16 @@
+ };
+ 
+ static void FlipUpsideDown( void* pBuffer,
+-                            uint32_t nLineStride,
++                            size_t nLineStride,
+                             uint32_t nHeight)
+ {
++    if (nHeight < 2) return;
+     uint8_t* pbyTop        = (uint8_t*)pBuffer;
+     uint8_t* pbyBottom    = pbyTop + nLineStride * (nHeight - 1);
+ 
+     for (uint32_t nY = 0; nY < (nHeight >> 1); nY++)
+     {
+-        for (uint32_t nX = 0; nX < nLineStride; nX++)
++        for (size_t nX = 0; nX < nLineStride; nX++)
+         {
+             uint8_t byTemp    = *pbyTop;
+             *pbyTop            = *pbyBottom;
+@@ -123,6 +125,24 @@
+     }
+ }
+ 
++// DDS staging is tightly packed CPU memory, independent of the caller's unpack state.
++struct PixelUnpackRestore {
++    const GLenum names[5] = {GL_UNPACK_ALIGNMENT, GL_UNPACK_ROW_LENGTH, GL_UNPACK_SKIP_ROWS, GL_UNPACK_SKIP_PIXELS, GL_UNPACK_SWAP_BYTES};
++    GLint values[5], buffer;
++    PixelUnpackRestore() {
++        for (size_t i = 0; i < 5; ++i) glGetIntegerv(names[i], &values[i]);
++        glGetIntegerv(GL_PIXEL_UNPACK_BUFFER_BINDING, &buffer);
++        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, 0);
++        glPixelStorei(GL_UNPACK_ALIGNMENT, 1); glPixelStorei(GL_UNPACK_ROW_LENGTH, 0);
++        glPixelStorei(GL_UNPACK_SKIP_ROWS, 0); glPixelStorei(GL_UNPACK_SKIP_PIXELS, 0);
++        glPixelStorei(GL_UNPACK_SWAP_BYTES, GL_FALSE);
++    }
++    ~PixelUnpackRestore() {
++        for (size_t i = 0; i < 5; ++i) glPixelStorei(names[i], values[i]);
++        glBindBuffer(GL_PIXEL_UNPACK_BUFFER, buffer);
++    }
++};
++
+ }    //namespace
+ 
+ namespace PicoGK
+@@ -132,7 +152,7 @@
+                         int32_t nSize,
+                         GLenum eTarget)
+ {
+-    if (nSize < (4 + sizeof(SDDSHeader))) // Check if the buffer is too small to contain DDS header
++    if (!pBuffer || nSize < 0 || static_cast<size_t>(nSize) < (4 + sizeof(SDDSHeader))) // Check if the buffer is too small to contain DDS header
+     {
+         return false;
+     }
+@@ -143,7 +163,9 @@
+         return false;
+     }
+ 
+-    const SDDSHeader* psHeader = reinterpret_cast<const SDDSHeader*>(pBuffer + 4);
++    SDDSHeader header;
++    std::memcpy(&header, pBuffer + 4, sizeof(header));
++    const SDDSHeader* psHeader = &header;
+ 
+     if ((eTarget == GL_TEXTURE_CUBE_MAP) != !!(psHeader->nCaps2 & DDSFLAGS_CUBEMAP) || psHeader->nCaps2 & DDSFLAGS_VOLUME)
+     {
+@@ -197,15 +219,32 @@
+         return false;
+     }
+     
+-    if (psHeader->nMipMapCount < 1)
+-    {
+-        return false;
+-    }
+-    
+-    uint32_t nMaxReadSize = psHeader->nWidth * psHeader->nHeight * nComponents * nBytesPerComponent;
++    if (!psHeader->nWidth || !psHeader->nHeight || !psHeader->nMipMapCount ||
++        psHeader->nWidth > static_cast<uint32_t>(std::numeric_limits<GLsizei>::max()) ||
++        psHeader->nHeight > static_cast<uint32_t>(std::numeric_limits<GLsizei>::max())) return false;
++
++    uint32_t maxMipCount = 1;
++    for (auto extent = std::max(psHeader->nWidth, psHeader->nHeight); extent > 1; extent >>= 1) ++maxMipCount;
++    if (psHeader->nMipMapCount > maxMipCount) return false;
++    const size_t bytesPerPixel = nComponents * nBytesPerComponent;
++    const size_t available = static_cast<size_t>(nSize) - nTotalHeaderSize;
++    const uint32_t sideCount = eTarget == GL_TEXTURE_CUBE_MAP ? 6 : 1;
++    size_t required = 0;
++    size_t nMaxReadSize = 0;
++    auto width = psHeader->nWidth, height = psHeader->nHeight;
++    for (uint32_t level = 0; level < psHeader->nMipMapCount; ++level) {
++        // Divide against the actual admitted payload bound before either multiplication.
++        if (width > available / bytesPerPixel || height > available / (size_t(width) * bytesPerPixel)) return false;
++        const size_t bytes = size_t(width) * height * bytesPerPixel;
++        if (bytes > (available - required) / sideCount) return false;
++        required += bytes * sideCount;
++        if (!level) nMaxReadSize = bytes;
++        width = std::max(uint32_t(1), width >> 1); height = std::max(uint32_t(1), height >> 1);
++    }
+ 
+     std::vector<uint8_t> oBuffer(nMaxReadSize);
+ 
++    PixelUnpackRestore unpack;
+     size_t nBufferOffset = nTotalHeaderSize; // Start offset within the buffer
+ 
+     for (uint32_t nSide = 0; nSide < uint32_t(eTarget == GL_TEXTURE_CUBE_MAP ? 6 : 1); nSide++)
+@@ -217,7 +256,7 @@
+ 
+         for (uint32_t nMipLevel = 0; nMipLevel < psHeader->nMipMapCount; nMipLevel++)
+         {
+-            uint32_t nMipSize = nWidth * nHeight * nComponents * nBytesPerComponent;
++            size_t nMipSize = size_t(nWidth) * nHeight * bytesPerPixel;
+ 
+             if (nBufferOffset + nMipSize > nSize)
+             {
+@@ -227,7 +266,7 @@
+             std::memcpy(oBuffer.data(), pBuffer + nBufferOffset, nMipSize);
+             nBufferOffset += nMipSize;
+ 
+-            FlipUpsideDown(oBuffer.data(), nWidth * nComponents * nBytesPerComponent, nHeight);
++            FlipUpsideDown(oBuffer.data(), size_t(nWidth) * bytesPerPixel, nHeight);
+ 
+             glTexImage2D(
+                 eTexImageTarget,
+@@ -275,9 +314,10 @@
+     // Seek back to the beginning
+     oIn.seekg(0, std::ios::beg);
+     
+-    std::vector<char> oBuffer(nSize);
+-    
+-    oIn.read(oBuffer.data(), nSize);
++    if (nSize < 0 || nSize > std::numeric_limits<int32_t>::max()) return false;
++    std::vector<char> oBuffer(static_cast<size_t>(nSize));
++
++    if (!oIn.read(oBuffer.data(), nSize)) return false;
+     
+     return bLoadDdsTexture(oBuffer.data(), (int32_t) nSize, eTarget);
+ }
+diff --git a/Source/PicoGKGLViewer.cpp b/Source/PicoGKGLViewer.cpp
+--- a/Source/PicoGKGLViewer.cpp
++++ b/Source/PicoGKGLViewer.cpp
+@@ -121,13 +121,23 @@
+     
+     m_roShaderProgQuad = std::make_unique<ShaderProgQuad>();
+     
+-    m_psImGuiContext = psSharedImGuiContext;
++    ImGui::SetCurrentContext(psSharedImGuiContext);
++    const auto style = ImGui::GetStyle();
++    m_psImGuiContext = ImGui::CreateContext();
+     ImGui::SetCurrentContext(m_psImGuiContext);
+-    
+-    ImGui_ImplGlfw_InitForOpenGL(pTheWindow, true);
+-    ImGui_ImplOpenGL3_Init("#version 330");
+-    
+-    ImGuiIO& io = ImGui::GetIO(); (void)io;
++    ImGui::GetStyle() = style;
++
++    try {
++        if (!ImGui_ImplGlfw_InitForOpenGL(pTheWindow, true))
++            throw std::runtime_error("Unable to initialize viewer platform backend");
++        if (!ImGui_ImplOpenGL3_Init("#version 330"))
++            throw std::runtime_error("Unable to initialize viewer renderer backend");
++    } catch (...) {
++        if (ImGui::GetIO().BackendRendererUserData) ImGui_ImplOpenGL3_Shutdown();
++        if (ImGui::GetIO().BackendPlatformUserData) ImGui_ImplGlfw_Shutdown();
++        ImGui::DestroyContext(m_psImGuiContext); m_psImGuiContext = nullptr;
++        throw;
++    }
+ 
+     CHECKGLERRORS;
+ }
+@@ -142,10 +152,11 @@
+     
+     glfwMakeContextCurrent(m_pTheWindow);
+     
+-    m_roShaderProgMeshPoly->SetLightingTextures(    pDiffuseTextureDDS,
++    try { m_roShaderProgMeshPoly->SetLightingTextures(    pDiffuseTextureDDS,
+                                                     nDiffuseBufferSize,
+                                                     pSpecularTextureDDS,
+-                                                    nSpecularBufferSize);
++                                                    nSpecularBufferSize); }
++    catch (...) { return false; }
+     
+     CHECKGLERRORS;
+     
+@@ -156,27 +167,28 @@
+ 
+ Viewer::~Viewer()
+ {
++    auto* previousWindow = glfwGetCurrentContext();
++    auto* previousGui = ImGui::GetCurrentContext();
+     glfwMakeContextCurrent(m_pTheWindow);
+-
++    ImGui::SetCurrentContext(m_psImGuiContext);
++    RemoveAllObjects();
++    m_oGroups.clear();
++    m_oMeshGeometry.clear(); m_oLineGeometry.clear();
+     ImGui_ImplOpenGL3_Shutdown();
+     ImGui_ImplGlfw_Shutdown();
+-    
++    ImGui::DestroyContext(m_psImGuiContext); m_psImGuiContext = nullptr;
+     m_oTextures.CleanupAllTextures();
+-
+-    m_roShaderProgMeshPoly.reset();
+-
+-    if (m_nSceneTex != 0)
+-        glDeleteTextures(1, &m_nSceneTex);
+-    
+-    if (m_nSceneFBO != 0)
+-        glDeleteFramebuffers(1, &m_nSceneFBO);
+-
+-    // Destroy GLFW window
+-    if (m_pTheWindow != nullptr)
+-    {
+-        glfwDestroyWindow(m_pTheWindow);
+-        m_pTheWindow = nullptr;
+-    }
++    m_roShaderProgMeshPolyOit.reset(); m_roShaderProgOitComposite.reset();
++    m_roShaderProgQuad.reset(); m_roShaderProgMeshPoly.reset();
++    const GLuint textures[] = {m_nSceneTex, m_nOitAccumTex, m_nOitRevealTex};
++    glDeleteTextures(3, textures);
++    const GLuint buffers[] = {m_nSceneFBO, m_nOitFBO}; glDeleteFramebuffers(2, buffers);
++    if (m_nSceneDepth) glDeleteRenderbuffers(1, &m_nSceneDepth);
++    const auto destroyedWindow = m_pTheWindow;
++    if (m_pTheWindow) { glfwDestroyWindow(m_pTheWindow); m_pTheWindow = nullptr; }
++    if (previousWindow != destroyedWindow && ViewerManager::oMgr().bOwnsWindow(previousWindow)) {
++        glfwMakeContextCurrent(previousWindow); ImGui::SetCurrentContext(previousGui);
++    } else { glfwMakeContextCurrent(nullptr); ImGui::SetCurrentContext(nullptr); }
+ }
+ 
+ namespace
+@@ -219,7 +231,7 @@
+     }
+     
+     glfwPollEvents();
+-    return !glfwWindowShouldClose(m_pTheWindow);
++    return !bClosing() && !glfwWindowShouldClose(m_pTheWindow);
+ }
+ 
+ void Viewer::RequestScreenShot(const std::string &strScreenShotPath)
+@@ -233,28 +245,79 @@
+     glfwSetWindowShouldClose(m_pTheWindow, GLFW_TRUE);
+ }
+ 
+-void Viewer::AddMesh(   int32_t         nGroupID,
+-                        int64_t         hLib,
+-                        int64_t         hMesh)
+-{
+-    // Remove Mesh if already there
+-    RemoveMesh(hLib, hMesh);
+-    
+-    RecalcNeeded();
+-    roGroupAt(nGroupID)->AddMesh(hLib, hMesh, *m_roShaderProgMeshPoly);
+-    RequestUpdate();
++std::shared_ptr<Viewer::MeshGeometry> Viewer::roMeshGeometry(Mesh::Ptr snapshot) {
++    const auto generation = snapshot->TauGeneration();
++    auto found = m_oMeshGeometry.find(generation);
++    if (found != m_oMeshGeometry.end()) return found->second;
++    auto resource = std::make_shared<MeshGeometry>(*m_roShaderProgMeshPoly, std::move(snapshot));
++    m_oMeshGeometry.emplace(generation, resource); return resource;
++}
++void Viewer::RetireGeometry(uint64_t generation, bool line) {
++    if (!generation) return;
++    if (line) {
++        const auto entry = m_oLineGeometry.find(generation);
++        if (entry != m_oLineGeometry.end() && entry->second.use_count() == 1) m_oLineGeometry.erase(entry);
++    } else {
++        const auto entry = m_oMeshGeometry.find(generation);
++        if (entry != m_oMeshGeometry.end() && entry->second.use_count() == 1) m_oMeshGeometry.erase(entry);
++    }
++}
++std::shared_ptr<Viewer::LineGeometry> Viewer::roLineGeometry(PolyLine::Ptr snapshot) {
++    const auto generation = snapshot->TauGeneration();
++    auto found = m_oLineGeometry.find(generation);
++    if (found != m_oLineGeometry.end()) return found->second;
++    auto resource = std::make_shared<LineGeometry>(*m_roShaderProgMeshPoly, std::move(snapshot));
++    m_oLineGeometry.emplace(generation, resource); return resource;
++}
++
++void Viewer::AddCaptured(int32_t groupID, int64_t library, int64_t identity, int32_t kind,
++                         Mesh::Ptr mesh, PolyLine::Ptr line) {
++    if ((kind == 2 ? !line || mesh : !mesh || line) || kind < 0 || kind > 2)
++        throw std::invalid_argument("captured viewer geometry kind");
++    glfwMakeContextCurrent(m_pTheWindow);
++    auto group = roGroupAt(groupID);
++    if (kind == 1 && mesh->vVertices().empty()) { RemoveVoxels(library, identity); RequestUpdate(); return; }
++    if (kind == 2 && line->vVertices().empty()) { RemovePolyLine(library, identity); RequestUpdate(); return; }
++    const auto generation = kind == 2 ? line->TauGeneration() : mesh->TauGeneration();
++    const auto oldGeneration = kind == 2 ? group->LineGeneration(library, identity) :
++        group->MeshGeneration(library, identity, kind == 0 ? Group::ObjectKind::Mesh : Group::ObjectKind::Voxels);
++    try {
++        if (kind == 0) group->AddMesh(library, identity, roMeshGeometry(std::move(mesh)));
++        else if (kind == 1) group->AddVoxels(library, identity, roMeshGeometry(std::move(mesh)));
++        else group->AddPolyLine(library, identity, roLineGeometry(std::move(line)));
++    } catch (...) { RetireGeometry(generation, kind == 2); throw; }
++    RetireGeometry(oldGeneration, kind == 2);
++    for (const auto& entry : m_oGroups) {
++        if (entry.second == group) continue;
++        const auto displaced = kind == 2 ? entry.second->LineGeneration(library, identity) :
++            entry.second->MeshGeneration(library, identity, kind == 0 ? Group::ObjectKind::Mesh : Group::ObjectKind::Voxels);
++        if (!displaced) continue;
++        if (kind == 0) entry.second->RemoveMesh(library, identity);
++        else if (kind == 1) entry.second->RemoveVoxels(library, identity);
++        else entry.second->RemovePolyLine(library, identity);
++        RetireGeometry(displaced, kind == 2);
++    }
++    RecalcNeeded(); RequestUpdate();
++}
++
++void Viewer::AddMesh(int32_t groupID, int64_t library, int64_t handle) {
++    auto source = Library::oLib().roGetInstance(library)->m_oMeshes.roGet(handle)->TauCapture();
++    AddCaptured(groupID, library, handle, 0, std::move(source), nullptr);
+ }
+ 
+ void Viewer::RemoveMesh(    int64_t         hLib,
+                             int64_t         hMesh)
+ {
++    glfwMakeContextCurrent(m_pTheWindow);
+     RecalcNeeded();
+     for (auto Pair : m_oGroups)
+     {
+         Group::Ptr poGroup = Pair.second;
+         if (poGroup->bFindMesh(hLib, hMesh))
+         {
++            const auto generation = poGroup->MeshGeneration(hLib, hMesh, Group::ObjectKind::Mesh);
+             poGroup->RemoveMesh(hLib, hMesh);
++            RetireGeometry(generation, false);
+             RequestUpdate();
+             return;
+         }
+@@ -271,34 +334,31 @@
+         if (poGroup->bFindMesh(hLib, hMesh))
+         {
+             poGroup->SetMeshMatrix(hLib, hMesh, mat);
++            RecalcNeeded();
+             RequestUpdate();
+             return;
+         }
+     }
+ }
+ 
+-void Viewer::AddVoxels(     int32_t         nGroupID,
+-                            int64_t         hLib,
+-                            int64_t         hVoxels)
+-{
+-    // Remove Voxels if already there
+-    RemoveVoxels(hLib, hVoxels);
+-    
+-    RecalcNeeded();
+-    roGroupAt(nGroupID)->AddVoxels(hLib, hVoxels, *m_roShaderProgMeshPoly);
+-    RequestUpdate();
++void Viewer::AddVoxels(int32_t groupID, int64_t library, int64_t handle) {
++    auto source = Library::oLib().roGetInstance(library)->m_oVoxels.roGet(handle)->roAsMesh();
++    AddCaptured(groupID, library, handle, 1, std::move(source), nullptr);
+ }
+ 
+ void Viewer::RemoveVoxels(  int64_t hLib,
+                             int64_t hVoxels)
+ {
++    glfwMakeContextCurrent(m_pTheWindow);
+     RecalcNeeded();
+     for (auto Pair : m_oGroups)
+     {
+         Group::Ptr poGroup = Pair.second;
+         if (poGroup->bFindVoxels(hLib, hVoxels))
+         {
++            const auto generation = poGroup->MeshGeneration(hLib, hVoxels, Group::ObjectKind::Voxels);
+             poGroup->RemoveVoxels(hLib, hVoxels);
++            RetireGeometry(generation, false);
+             RequestUpdate();
+             return;
+         }
+@@ -315,33 +375,31 @@
+         if (poGroup->bFindVoxels(hLib, hVoxels))
+         {
+             poGroup->SetVoxelsMatrix(hLib, hVoxels, mat);
++            RecalcNeeded();
+             RequestUpdate();
+             return;
+         }
+     }
+ }
+ 
+-void Viewer::AddPolyLine(   int32_t nGroupID,
+-                            int64_t hLib,
+-                            int64_t hPoly)
+-{
+-    // Remove PolyLine if already there
+-    RemovePolyLine(hLib, hPoly);
+-    RecalcNeeded();
+-    roGroupAt(nGroupID)->AddPolyLine(hLib, hPoly, *m_roShaderProgMeshPoly);
+-    RequestUpdate();
++void Viewer::AddPolyLine(int32_t groupID, int64_t library, int64_t handle) {
++    auto source = Library::oLib().roGetInstance(library)->m_oPolyLines.roGet(handle)->TauCapture();
++    AddCaptured(groupID, library, handle, 2, nullptr, std::move(source));
+ }
+ 
+ void Viewer::RemovePolyLine(    int64_t hLib,
+                                 int64_t hPoly)
+ {
++    glfwMakeContextCurrent(m_pTheWindow);
+     RecalcNeeded();
+     for (auto Pair : m_oGroups)
+     {
+         Group::Ptr poGroup = Pair.second;
+         if (poGroup->bFindPolyLine(hLib, hPoly))
+         {
++            const auto generation = poGroup->LineGeneration(hLib, hPoly);
+             poGroup->RemovePolyLine(hLib, hPoly);
++            RetireGeometry(generation, true);
+             RequestUpdate();
+             return;
+         }
+@@ -358,6 +416,7 @@
+         if (poGroup->bFindPolyLine(hLib, hPolyLine))
+         {
+             poGroup->SetPolyLineMatrix(hLib, hPolyLine, mat);
++            RecalcNeeded();
+             RequestUpdate();
+             return;
+         }
+@@ -366,11 +425,13 @@
+ 
+ void Viewer::RemoveAllObjects()
+ {
++    glfwMakeContextCurrent(m_pTheWindow);
+     for (auto Pair : m_oGroups)
+     {
+         Pair.second->RemoveAllObjects();
+     }
+     
++    m_oMeshGeometry.clear(); m_oLineGeometry.clear();
+     RecalcNeeded();
+     RequestUpdate();
+ }
+@@ -404,12 +465,15 @@
+     roGroupAt(nGroupID)->SetMaterial(   clr,
+                                         fMetallic,
+                                         fRoughness);
++    RequestUpdate();
+ }
+ 
+ void Viewer::SetGroupMatrix(    int32_t             nGroupID,
+                                 const Matrix4x4&    mat)
+ {
+     roGroupAt(nGroupID)->SetMatrix(mat);
++    RecalcNeeded();
++    RequestUpdate();
+ }
+ 
+ void Viewer::OnKeyPressed(  int iKey,
+@@ -423,7 +487,7 @@
+     
+     if (m_pfnKeyPressedCallback != nullptr)
+     {
+-        m_pfnKeyPressedCallback(    this,
++        m_pfnKeyPressedCallback(    m_hHandle,
+                                     iKey,
+                                     iScanCode,
+                                     iAction,
+@@ -455,7 +519,7 @@
+ 
+     if (m_pfnMouseMoveCallback != nullptr)
+     {
+-        m_pfnMouseMoveCallback(this, &m_vecMousePos, bShift, bCtrl, bAlt, bSuper);
++        m_pfnMouseMoveCallback(m_hHandle, &m_vecMousePos, bShift, bCtrl, bAlt, bSuper);
+     }
+ }
+ 
+@@ -469,7 +533,7 @@
+             
+     if (m_pfnMouseButtonCallback != nullptr)
+     {
+-        m_pfnMouseButtonCallback(   this,
++        m_pfnMouseButtonCallback(   m_hHandle,
+                                     iButton,
+                                     iAction,
+                                     iModifiers,
+@@ -501,7 +565,7 @@
+         Vector2 vec;
+         vec.X = dX;
+         vec.Y = dY;
+-        m_pfnScrollWheelCallback(   this,
++        m_pfnScrollWheelCallback(   m_hHandle,
+                                     &vec,
+                                     &m_vecMousePos,
+                                     bShift,
+@@ -519,7 +583,7 @@
+         Vector2 vec;
+         vec.X = nWidth;
+         vec.Y = nHeight;
+-        m_pfnWindowSizeCallback(this, &vec);
++        m_pfnWindowSizeCallback(m_hHandle, &vec);
+     }
+ }
+ 
+@@ -618,6 +682,7 @@
+     {
+         glfwMakeContextCurrent(m_pTheWindow);
+         
++        ImGui::SetCurrentContext(m_psImGuiContext);
+         m_oTextures.ManageTextureState();
+         
+         int iWidth, iHeight;
+@@ -631,6 +696,7 @@
+         
+         if (bRedraw3dScane)
+             DrawScene();
++        if (bClosing()) return;
+         
+         ImVec2 vScale   = ImGui::GetIO().DisplayFramebufferScale;
+         ImVec2 vSize    = ImVec2(iWidth / vScale.x, iHeight / vScale.y);
+@@ -685,11 +751,13 @@
+         vecViewSize.X = (float) m_nSceneWidth;
+         vecViewSize.Y = (float) m_nSceneHeight;
+         
+-        m_pfnUpdateCallback(    this,
++        m_pfnUpdateCallback(    m_hHandle,
+                                 &vecViewSize,
+                                 &clrBackground,
+                                 &matVP,
+                                 &vecEye);
++        if (bClosing()) return;
++        glfwMakeContextCurrent(m_pTheWindow); ImGui::SetCurrentContext(m_psImGuiContext);
+     }
+ 
+     CHECKGLERRORS;
+@@ -832,6 +900,7 @@
+         Group::Ptr poGroup = Pair.second;
+         m_oBBox.Include(poGroup->oCalculateBBox());
+     }
++    m_bRecalcNeeded = false;
+ }
+ 
+ uint64_t Viewer::hCreateSideBar(    bool                bLeft,
+diff --git a/Source/PicoGKGLViewer.h b/Source/PicoGKGLViewer.h
+--- a/Source/PicoGKGLViewer.h
++++ b/Source/PicoGKGLViewer.h
+@@ -36,12 +36,15 @@
+ #ifndef PICOGKGLVIEWER_H_
+ #define PICOGKGLVIEWER_H_
+ 
++#include "PicoGKTypes.h"
++#include "PicoGK.h"
+ #include "PicoGKTypes.h"
+ #include "PicoGKApiTypes.h"
+ #include "PicoGKPolyLine.h"
+ #include "PicoGKMesh.h"
+ #include <string>
+ #include <map>
++#include <tuple>
+ #include "PicoGKLibraryMgr.h"
+ #include "PicoGKGLTexture.h"
+ #include "PicoGKGLViewerShaders.h"
+@@ -60,12 +63,8 @@
+     
+     friend class ViewerManager;
+     
+-    // PKSHAREDPTR(Viewer);
+-    // Intentionally not using shared pointers with Viewers
+-    // it's much simpler to pass "this" to the callbacks than
+-    // a handle that's based on an allocated shared pointer
+-    // Plus viewers are never shared, so shared pointers are
+-    // just overkill
++    PKVIEWER hHandle() const { return m_hHandle; }
++    bool bClosing() const { return m_bDestroyRequested.load(); }
+ 
+     Viewer( GLFWwindow*             pTheWindow,
+             ImGuiContext*           psSharedImGuiContext,
+@@ -103,6 +102,9 @@
+     
+     void RequestClose();
+     
++    void AddCaptured(int32_t group, int64_t library, int64_t identity, int32_t kind,
++                     Mesh::Ptr mesh, PolyLine::Ptr line);
++
+     void AddMesh(   int32_t nGroupID,
+                     int64_t hLib,
+                     int64_t hMesh);
+@@ -146,7 +148,7 @@
+     {
+         PKTRACE(Viewer_hAddQuad);
+         
+-        return m_oQuads.hAdd(std::make_shared<ViewQuad>(    *m_roShaderProgQuad,
++        const auto handle = m_oQuads.hAdd(std::make_shared<ViewQuad>(    *m_roShaderProgQuad,
+                                                             hTexObject,
+                                                             clrDefault,
+                                                             fAlpha,
+@@ -156,6 +158,7 @@
+                                                             bDoubleSided));
+         
+         RequestUpdate();
++        return handle;
+     }
+     
+     void SetQuadMatrix(uint64_t hQuad, const Matrix4x4& mat)
+@@ -209,6 +212,9 @@
+     
+     std::string                         m_strScreenShotPath         = "";
+     
++    PKFInfo                             m_pfnInfoCallback = nullptr;
++    PKVIEWER                            m_hHandle = nullptr;
++    std::atomic<bool>                   m_bDestroyRequested{false};
+     PKPFUpdateRequested                 m_pfnUpdateCallback         = nullptr;
+     PKPFKeyPressed                      m_pfnKeyPressedCallback     = nullptr;
+     PKPFMouseMoved                      m_pfnMouseMoveCallback      = nullptr;
+@@ -257,123 +263,84 @@
+     int             m_nSceneHeight      = 0;
+     ImGuiContext*   m_psImGuiContext    = nullptr;
+     
++    struct MeshGeometry {
++        Mesh::Ptr snapshot;
++        std::unique_ptr<GlElementBuffer<Vector3>> buffer;
++        explicit MeshGeometry(const ShaderProgMeshPoly& shader, Mesh::Ptr frozen)
++            : snapshot(std::move(frozen)) {
++            if (!snapshot->TauValidate()) throw std::invalid_argument("invalid viewer mesh");
++            if (snapshot->vTriangles().size() > static_cast<size_t>(INT32_MAX / 3))
++                throw std::overflow_error("viewer mesh exceeds GL index count");
++            if (!snapshot->vTriangles().empty())
++                shader.CreateBufferInstance(snapshot->vVertices(), snapshot->vTriangles(), &buffer);
++        }
++    };
++    std::map<uint64_t, std::shared_ptr<MeshGeometry>> m_oMeshGeometry;
++    std::shared_ptr<MeshGeometry> roMeshGeometry(Mesh::Ptr snapshot);
++    void RetireGeometry(uint64_t generation, bool line);
++
++    struct LineGeometry {
++        PolyLine::Ptr snapshot;
++        std::unique_ptr<GlVertexBuffer<Vector3>> buffer;
++        explicit LineGeometry(const ShaderProgMeshPoly& shader, PolyLine::Ptr frozen)
++            : snapshot(std::move(frozen)) {
++            if (!snapshot->TauValidate()) throw std::invalid_argument("invalid viewer polyline");
++            if (!snapshot->vVertices().empty()) shader.CreateBufferInstance(snapshot->vVertices(), &buffer);
++        }
++    };
++    std::map<uint64_t, std::shared_ptr<LineGeometry>> m_oLineGeometry;
++    std::shared_ptr<LineGeometry> roLineGeometry(PolyLine::Ptr snapshot);
++
+     class Group
+     {
+     public:
+         PKSHAREDPTR(Group);
+         
+-        void AddMesh(   int64_t hLib,
+-                        int64_t hMesh,
+-                        const ShaderProgMeshPoly& oShader)
+-        {
+-            PKTRACE(AddMesh);
+-            
+-            auto roLib  = Library::oLib().roGetInstance(hLib);
+-            auto roMesh = roLib->m_oMeshes.roGet(hMesh);
+-            
+-            m_oViewMeshes[std::make_pair(hLib, hMesh)] = std::make_unique<ViewMesh>(oShader, *roMesh);
+-        }
+-        
+-        void RemoveMesh(int64_t hLib, int64_t hMesh)
+-        {
+-            PKTRACE(RemoveMesh);
+-            
+-            auto it = m_oViewMeshes.find(std::make_pair(hLib, hMesh));
+-            
+-            if (it == m_oViewMeshes.end())
+-            {
+-                assert(false);
+-                // Trying to remove a Mesh object that doesn't exist
+-            }
+-            else
+-            {
+-                m_oViewMeshes.erase(it);
+-            }
+-        }
+-        
+-        void SetMeshMatrix( int64_t hLib,
+-                            int64_t hMesh,
+-                            const Matrix4x4& mat)
+-        {
+-            PKTRACE(SetMeshMatrix);
+-            
+-            auto it = m_oViewMeshes.find(std::make_pair(hLib, hMesh));
+-            
+-            if (it == m_oViewMeshes.end())
+-            {
+-                assert(false);
+-                // Trying to operate on a Mesh object that doesn't exist
+-            }
+-            else
+-            {
+-                it->second->SetMatrix(mat);
+-            }
+-        }
+-        
+-        bool bFindMesh(int64_t hLib, int64_t hMesh)
+-        {
+-            return !(m_oViewMeshes.find(std::make_pair(hLib, hMesh)) == m_oViewMeshes.end());
+-        }
+-        
+-        void AddVoxels( int64_t hLib, int64_t hVoxels,
+-                       const ShaderProgMeshPoly& oShader)
+-        {
+-            PKTRACE(AddVoxels);
+-            
+-            auto roLib      = Library::oLib().roGetInstance(hLib);
+-            auto roVoxels   = roLib->m_oVoxels.roGet(hVoxels);
+-            
+-            // Transform to Mesh
+-            Mesh::Ptr roNew = roVoxels->roAsMesh();
+-            if (roNew->nVertexCount() == 0)
+-                return; // Empty Voxel Field cannot be added
+-
+-            m_oViewMeshes[std::make_pair(hLib, hVoxels)] = std::make_unique<ViewMesh>(oShader, *roNew);
+-        }
+-        
+-        void RemoveVoxels(int64_t hLib, int64_t hVoxels)
+-        {
+-            PKTRACE(RemoveVoxels);
+-            
+-            // Find a mesh that is stored with the voxel ID
+-            auto it = m_oViewMeshes.find(std::make_pair(hLib, hVoxels));
+-            
+-            if (it == m_oViewMeshes.end())
+-            {
+-                assert(false);
+-                // Trying to remove a Voxels object that doesn't exist
+-            }
+-            else
+-            {
+-                m_oViewMeshes.erase(it);
+-            }
+-        }
+-        
+-        void SetVoxelsMatrix(   int64_t hLib,
+-                                int64_t hVoxels,
+-                                const Matrix4x4& mat)
+-        {
+-            SetMeshMatrix(hLib, hVoxels, mat);
+-        }
+-        
+-        bool bFindVoxels(int64_t hLib, int64_t hVoxels)
+-        {
+-            return !(m_oViewMeshes.find(std::make_pair(hLib, hVoxels)) == m_oViewMeshes.end());
+-        }
+-        
+-        void AddPolyLine(   int64_t hLib,
+-                            int64_t hPoly,
+-                            const ShaderProgMeshPoly& oShader)
+-        {
+-            auto roLib  = Library::oLib().roGetInstance(hLib);
+-            auto roPoly = roLib->m_oPolyLines.roGet(hPoly);
+-            
+-            if (roPoly->nVertexCount() == 0)
+-                return; // nothing to do
+-            
+-            m_oViewPolyLines[std::make_pair(hLib, hPoly)] = std::make_unique<ViewPolyLine>(oShader, *roPoly);
+-        }
+-        
++        enum class ObjectKind { Mesh, Voxels };
++        using ObjectKey = std::tuple<int64_t, int64_t, ObjectKind>;
++        void AddMesh(int64_t library, int64_t handle, std::shared_ptr<MeshGeometry> geometry) {
++            AddGeometry(library, handle, ObjectKind::Mesh, std::move(geometry));
++        }
++        void AddVoxels(int64_t library, int64_t handle, std::shared_ptr<MeshGeometry> geometry) {
++            AddGeometry(library, handle, ObjectKind::Voxels, std::move(geometry));
++        }
++        uint64_t MeshGeneration(int64_t library, int64_t handle, ObjectKind kind) const {
++            auto found = m_oViewMeshes.find(ObjectKey(library, handle, kind));
++            return found == m_oViewMeshes.end() ? 0 : found->second->m_roGeometry->snapshot->TauGeneration();
++        }
++        uint64_t LineGeneration(int64_t library, int64_t handle) const {
++            auto found = m_oViewPolyLines.find(std::make_pair(library, handle));
++            return found == m_oViewPolyLines.end() ? 0 : found->second->m_roGeometry->snapshot->TauGeneration();
++        }
++        void InvalidateBindings() { m_vDrawBindings.clear(); m_vInstanceMatrices.clear(); m_bInstancesDirty = true; }
++        void AddGeometry(int64_t library, int64_t handle, ObjectKind kind, std::shared_ptr<MeshGeometry> geometry) {
++            auto occurrence = std::make_unique<ViewMesh>(std::move(geometry));
++            m_oViewMeshes.insert_or_assign(ObjectKey(library, handle, kind), std::move(occurrence));
++            InvalidateBindings();
++        }
++        bool bFindMesh(int64_t library, int64_t handle) { return m_oViewMeshes.contains(ObjectKey(library, handle, ObjectKind::Mesh)); }
++        bool bFindVoxels(int64_t library, int64_t handle) { return m_oViewMeshes.contains(ObjectKey(library, handle, ObjectKind::Voxels)); }
++        void RemoveMesh(int64_t library, int64_t handle) { m_oViewMeshes.erase(ObjectKey(library, handle, ObjectKind::Mesh)); if (m_oViewMeshes.empty()) ReleaseGL(); InvalidateBindings(); }
++        void RemoveVoxels(int64_t library, int64_t handle) { m_oViewMeshes.erase(ObjectKey(library, handle, ObjectKind::Voxels)); if (m_oViewMeshes.empty()) ReleaseGL(); InvalidateBindings(); }
++        void SetMeshMatrix(int64_t library, int64_t handle, const Matrix4x4& matrix) {
++            SetObjectMatrix(ObjectKey(library, handle, ObjectKind::Mesh), matrix);
++        }
++        void SetVoxelsMatrix(int64_t library, int64_t handle, const Matrix4x4& matrix) {
++            SetObjectMatrix(ObjectKey(library, handle, ObjectKind::Voxels), matrix);
++        }
++        void SetObjectMatrix(const ObjectKey& key, const Matrix4x4& matrix) {
++            auto found = m_oViewMeshes.find(key);
++            if (found != m_oViewMeshes.end()) { found->second->SetMatrix(matrix); InvalidateBindings(); }
++        }
++        void ReleaseGL();
++        void BuildDrawBindings();
++        ~Group() { ReleaseGL(); }
++
++        void AddPolyLine(int64_t library, int64_t handle, std::shared_ptr<LineGeometry> geometry) {
++            auto occurrence = std::make_unique<ViewPolyLine>(std::move(geometry));
++            m_oViewPolyLines.insert_or_assign(std::make_pair(library, handle), std::move(occurrence));
++        }
++
+         void SetPolyLineMatrix( int64_t hLib,
+                                 int64_t hPoly,
+                                 const Matrix4x4& mat)
+@@ -416,6 +383,8 @@
+         {
+             m_oViewMeshes.clear();
+             m_oViewPolyLines.clear();
++            ReleaseGL();
++            m_bInstancesDirty = true;
+         }
+         
+         inline void SetVisible(bool bVisible)
+@@ -454,6 +423,7 @@
+         void SetMatrix(const Matrix4x4& mat)
+         {
+             m_mat = mat;
++            m_bInstancesDirty = true;
+         }
+         
+         void Draw(const ShaderProgMeshPoly& oShaderProg);
+@@ -491,19 +461,12 @@
+         {
+             PKSHAREDPTR(ViewMesh);
+             
+-            ViewMesh(   const ShaderProgMeshPoly& oShader,
+-                        const Mesh& oMesh);
++            explicit ViewMesh(std::shared_ptr<MeshGeometry> geometry)
++                : m_roGeometry(std::move(geometry)), m_oBBox(m_roGeometry->snapshot->oBBox()) {}
+             
+             void SetMatrix(const Matrix4x4& mat);
+             
+-            void Draw(  const ShaderProgMeshPoly& oShader,
+-                        const Material& sMaterial,
+-                        const Matrix4x4& mat,
+-                        bool    bWarnOverhang,
+-                        float   fWarning,
+-                        float   fError);
+-            
+-            std::unique_ptr<GlElementBuffer<Vector3>>   m_roElementBuffer;
++            std::shared_ptr<MeshGeometry>                m_roGeometry;
+             BBox3                                       m_oBBox;
+             Matrix4x4                                   m_mat;
+         };
+@@ -512,8 +475,9 @@
+         {
+             PKSHAREDPTR(ViewPolyLine);
+             
+-            ViewPolyLine(   const ShaderProgMeshPoly& oShader,
+-                            const PolyLine& oPoly);
++            explicit ViewPolyLine(std::shared_ptr<LineGeometry> geometry)
++                : m_roGeometry(std::move(geometry)), m_clrLine(m_roGeometry->snapshot->clrLines()),
++                  m_oBBox(m_roGeometry->snapshot->oBBox()) {}
+             
+             void SetMatrix(const Matrix4x4& mat);
+             
+@@ -521,13 +485,19 @@
+                         const Material& sMaterial,
+                         const Matrix4x4& mat);
+             
+-            std::unique_ptr<GlVertexBuffer<Vector3>>    m_roVertexBuffer;
++            std::shared_ptr<LineGeometry>               m_roGeometry;
+             ColorFloat                                  m_clrLine;
+             BBox3                                       m_oBBox;
+             Matrix4x4                                   m_mat;
+         };
+         
+-        std::map<std::pair<int64_t, int64_t>, std::unique_ptr<ViewMesh>>        m_oViewMeshes;
++        struct DrawBinding { MeshGeometry* geometry; size_t first; GLsizei count; bool reflected; };
++        std::vector<DrawBinding> m_vDrawBindings;
++        std::vector<Matrix4x4> m_vInstanceMatrices;
++        GLuint m_nInstanceBuffer = 0;
++        size_t m_nInstanceCapacity = 0;
++        bool m_bInstancesDirty = true;
++        std::map<ObjectKey, std::unique_ptr<ViewMesh>> m_oViewMeshes;
+         std::map<std::pair<int64_t, int64_t>, std::unique_ptr<ViewPolyLine>>    m_oViewPolyLines;
+     };
+     
+diff --git a/Source/PicoGKGLViewerManager.cpp b/Source/PicoGKGLViewerManager.cpp
+--- a/Source/PicoGKGLViewerManager.cpp
++++ b/Source/PicoGKGLViewerManager.cpp
+@@ -38,13 +38,15 @@
+ #include "PicoGKGLViewerManager.h"
+ #include <GLFW/glfw3.h>
+ #include "PicoGKGLViewer.h"
++#include "PicoGKCaptureIdentity.h"
++#include <limits>
+ 
+ namespace PicoGK
+ {
+ 
+ static void ErrorCallback(int iError, const char* pszDescription)
+ {
+-    ViewerManager::Info("GL Callback Error: " + std::string(pszDescription));
++    try { ViewerManager::Info("GL Callback Error: " + std::string(pszDescription)); } catch (...) {}
+ }
+ 
+ ViewerManager::ViewerManager()
+@@ -58,18 +60,14 @@
+     }
+     
+     IMGUI_CHECKVERSION();
+-    m_psSharedImGuiContext = ImGui::CreateContext(); // optional, shared fonts
++    m_psSharedImGuiContext = ImGui::CreateContext(); // style seed; every viewer owns its backend and atlas
+     ImGui::StyleColorsDark();
+ }
+ 
+ ViewerManager::~ViewerManager()
+ {
+-    for (auto& it : m_oViewers)
+-    {
+-        delete it.second;
+-    }
+-        
+-    m_oViewers.clear();
++    RequireOwnerThread();
++    while (!m_oViewers.empty()) Destroy(m_oViewers.begin()->second->hHandle());
+ 
+     if (m_psSharedImGuiContext)
+     {
+@@ -106,7 +104,7 @@
+         nullptr);
+ }
+ 
+-Viewer* ViewerManager::poCreate(    const std::string&  strWindowTitle,
++PKVIEWER ViewerManager::hCreate(    const std::string&  strWindowTitle,
+                                     const Vector2&      vecSize,
+                                     PKFInfo             pfnInfoCallback,
+                                     PKPFUpdateRequested pfnUpdateCallback,
+@@ -116,11 +114,19 @@
+                                     PKPFScrollWheel     pfnScrollWheelCallback,
+                                     PKPFWindowSize      pfnWindowSizeCallback)
+ {
+-    {
+-        std::unique_lock lk(m_mtx);
+-        m_pfnInfoCallback = pfnInfoCallback;
+-    }
+-    
++    RequireOwnerThread();
++    DrainPendingClose();
++    const auto identity = TauNextGeneration();
++    if (identity > std::numeric_limits<uintptr_t>::max())
++        throw std::overflow_error("viewer handle is not representable");
++    const auto handle = reinterpret_cast<PKVIEWER>(static_cast<uintptr_t>(identity));
++    struct RestoreCreationInfo {
++        PKFInfo& slot;
++        PKFInfo previous;
++        ~RestoreCreationInfo() { slot = previous; }
++    } restoreInfo{m_pfnInfoCallback, m_pfnInfoCallback};
++    m_pfnInfoCallback = pfnInfoCallback;
++
+     glfwSetErrorCallback(ErrorCallback);
+     
+      // Try OpenGL 4.1
+@@ -145,6 +151,7 @@
+         return nullptr;
+     }
+     
++    std::unique_ptr<GLFWwindow, decltype(&glfwDestroyWindow)> windowOwner(pWindow, glfwDestroyWindow);
+     glfwMakeContextCurrent(pWindow);
+ 
+     if (!gladLoadGLLoader((GLADloadproc)glfwGetProcAddress))
+@@ -167,7 +174,6 @@
+         false);
+     
+     {
+-        std::unique_lock lk(m_mtx);
+         glfwSetKeyCallback(         pWindow, KeyPressed);
+         glfwSetCursorPosCallback(   pWindow, MouseMoved);
+         glfwSetMouseButtonCallback( pWindow, MouseButton);
+@@ -175,64 +181,121 @@
+         glfwSetWindowSizeCallback(  pWindow, WindowSize);
+     }
+     
+-    Viewer* poViewer = new Viewer(  pWindow,
+-                                    m_psSharedImGuiContext,
+-                                    pfnUpdateCallback,
+-                                    pfnKeyPressedCallback,
+-                                    pfnMouseMoveCallback,
+-                                    pfnMouseButtonCallback,
+-                                    pfnScrollWheelCallback,
+-                                    pfnWindowSizeCallback);
+-
+-    {
++    std::shared_ptr<Viewer> viewer;
++    try {
++        viewer = std::make_shared<Viewer>(pWindow, m_psSharedImGuiContext,
++            pfnUpdateCallback, pfnKeyPressedCallback, pfnMouseMoveCallback,
++            pfnMouseButtonCallback, pfnScrollWheelCallback, pfnWindowSizeCallback);
++        windowOwner.release();
++        viewer->m_pfnInfoCallback = pfnInfoCallback;
++        viewer->m_hHandle = handle;
+         std::unique_lock lk(m_mtx);
+-        m_oViewers[pWindow] = poViewer;
+-    }
+-    
+-    poViewer->RequestUpdate();
+-    return poViewer;
+-}
+-
+-void ViewerManager::Destroy(Viewer* poViewer)
+-{
+-    std::unique_lock lk(m_mtx);
+-    
+-    for (auto Entry : m_oViewers)
+-    {
+-        if (Entry.second == poViewer)
++        m_oViewers.emplace(pWindow, viewer);
++    } catch (...) {
++        return nullptr;
++    }
++    viewer->RequestUpdate();
++    return handle;
++}
++
++void ViewerManager::RequireOwnerThread() const {
++    if (std::this_thread::get_id() != m_ownerThread)
++        throw std::invalid_argument("viewer operation requires the context-owning thread");
++}
++
++void ViewerManager::Destroy(PKVIEWER handle) {
++    std::shared_ptr<Viewer> owner;
++    {
++        std::unique_lock lock(m_mtx);
++        for (auto entry = m_oViewers.begin(); entry != m_oViewers.end(); ++entry) {
++            if (entry->second->hHandle() != handle) continue;
++            entry->second->m_bDestroyRequested = true;
++            // ponytail: no later owner pump defers finalizer cleanup until manager teardown.
++            if (std::this_thread::get_id() != m_ownerThread || m_bPolling) return;
++            owner = std::move(entry->second); m_oViewers.erase(entry); break;
++        }
++    }
++    // The last owner deletes GPU resources/window outside the manager lock, on this thread.
++}
++
++void ViewerManager::DrainPendingClose() {
++    RequireOwnerThread();
++    { std::shared_lock lock(m_mtx); if (m_bPolling) return; }
++    for (;;) {
++        PKVIEWER handle = nullptr;
+         {
+-            m_oViewers.erase(Entry.first);
+-            delete poViewer;
+-            return;
++            std::shared_lock lock(m_mtx);
++            for (const auto& entry : m_oViewers)
++                if (entry.second->bClosing()) { handle = entry.second->hHandle(); break; }
+         }
+-    }
+-}
+-
+-bool ViewerManager::bIsValid(const Viewer* poViewer) const
+-{
+-    if (poViewer == nullptr)
+-        return false;
+-    
+-    return bExists(poViewer);
+-}
+-
+-bool ViewerManager::bExists(const Viewer* poViewer) const
+-{
+-    std::shared_lock lk(m_mtx);
+-    for (auto Entry : m_oViewers)
+-    {
+-        if (Entry.second == poViewer)
+-            return true;
+-    }
+-    
++        if (!handle) return;
++        Destroy(handle);
++    }
++}
++
++bool ViewerManager::Poll(PKVIEWER handle) {
++    RequireOwnerThread();
++    auto owner = roGet(handle);
++    {
++        std::unique_lock lock(m_mtx);
++        if (m_bPolling) throw std::invalid_argument("reentrant native viewer polling");
++        m_bPolling = true;
++    }
++    // ImGui's frame and GLFW's chained callback both outlive individual author callbacks.
++    // Keep closing entries alive until the outer frame/event pump returns.
++    bool alive;
++    try { alive = owner->bPoll(); }
++    catch (...) {
++        { std::unique_lock lock(m_mtx); m_bPolling = false; }
++        DrainPendingClose(); throw;
++    }
++    { std::unique_lock lock(m_mtx); m_bPolling = false; }
++    DrainPendingClose();
++    return alive;
++}
++
++std::shared_ptr<Viewer> ViewerManager::roGet(PKVIEWER handle) {
++    RequireOwnerThread(); DrainPendingClose();
++    std::shared_lock lock(m_mtx);
++    for (const auto& entry : m_oViewers)
++        if (entry.second->hHandle() == handle && !entry.second->bClosing()) return entry.second;
++    throw std::out_of_range("viewer handle is closed");
++}
++
++bool ViewerManager::bIsValid(PKVIEWER handle) const {
++    if (!handle) return false;
++    std::shared_lock lock(m_mtx);
++    for (const auto& entry : m_oViewers)
++        if (entry.second->hHandle() == handle) return !entry.second->bClosing();
+     return false;
+ }
+ 
+-void ViewerManager::ReportInfo(const std::string strInfo, bool bFatal)
+-{
+-    std::shared_lock lk(m_mtx);
+-    if (m_pfnInfoCallback != nullptr)
+-        m_pfnInfoCallback(strInfo.c_str(), bFatal);
++bool ViewerManager::bOwnsWindow(GLFWwindow* window) const {
++    std::shared_lock lock(m_mtx);
++    const auto found = m_oViewers.find(window);
++    return found != m_oViewers.end() && !found->second->bClosing();
++}
++
++std::shared_ptr<Viewer> ViewerManager::roForWindow(GLFWwindow* window) {
++    RequireOwnerThread();
++    std::shared_lock lock(m_mtx);
++    const auto found = m_oViewers.find(window);
++    return found == m_oViewers.end() || found->second->bClosing() ? nullptr : found->second;
++}
++
++void ViewerManager::ReportInfo(const std::string strInfo, bool bFatal) {
++    RequireOwnerThread();
++    PKFInfo callback = m_pfnInfoCallback; // creation callback is borrowed only on the hCreate stack
++    std::shared_ptr<Viewer> owner;
++    if (!callback) {
++        std::shared_lock lock(m_mtx);
++        // Preserve the manager's last-created live logger selection, without a dangling callback.
++        for (const auto& entry : m_oViewers)
++            if (!entry.second->bClosing() && (!owner || uintptr_t(entry.second->hHandle()) > uintptr_t(owner->hHandle())))
++                owner = entry.second;
++        if (owner) callback = owner->m_pfnInfoCallback;
++    }
++    if (callback) callback(strInfo.c_str(), bFatal);
+ }
+ 
+ void ViewerManager::KeyPressed(  GLFWwindow* pWindow,
+@@ -241,24 +304,28 @@
+                                  int iAction,
+                                  int iModifiers)
+ {
+-    Viewer* poViewer = oMgr().m_oViewers[pWindow];
++    try {
++    auto poViewer = oMgr().roForWindow(pWindow);
+     
+     if (poViewer == nullptr)
+         return;
+     
+     poViewer->OnKeyPressed(iKey, iScanCode, iAction, iModifiers);
++    } catch (...) {}
+ }
+ 
+ void ViewerManager::MouseMoved(  GLFWwindow* pWindow,
+                                  double dMouseX,
+                                  double dMouseY)
+ {
+-    Viewer* poViewer = oMgr().m_oViewers[pWindow];
++    try {
++    auto poViewer = oMgr().roForWindow(pWindow);
+     
+     if (poViewer == nullptr)
+         return;
+     
+     poViewer->OnMouseMoved(dMouseX, dMouseY);
++    } catch (...) {}
+ }
+ 
+ void ViewerManager::MouseButton( GLFWwindow* pWindow,
+@@ -266,36 +333,42 @@
+                                  int iAction,
+                                  int iModifiers)
+ {
+-    Viewer* poViewer = oMgr().m_oViewers[pWindow];
++    try {
++    auto poViewer = oMgr().roForWindow(pWindow);
+     
+     if (poViewer == nullptr)
+         return;
+     
+     poViewer->OnMouseButton(iButton, iAction, iModifiers);
++    } catch (...) {}
+ }
+ 
+ void ViewerManager::ScrollWheel(    GLFWwindow* pWindow,
+                                     double dX,
+                                     double dY)
+ {
+-    Viewer* poViewer = oMgr().m_oViewers[pWindow];
++    try {
++    auto poViewer = oMgr().roForWindow(pWindow);
+     
+     if (poViewer == nullptr)
+         return;
+ 
+     poViewer->OnScrollWheel(dX, dY);
++    } catch (...) {}
+ }
+ 
+ void ViewerManager::WindowSize(    GLFWwindow* pWindow,
+                                    int nWidth,
+                                    int nHeight)
+ {
+-    Viewer* poViewer = oMgr().m_oViewers[pWindow];
++    try {
++    auto poViewer = oMgr().roForWindow(pWindow);
+     
+     if (poViewer == nullptr)
+         return;
+     
+     poViewer->OnWindowSize(nWidth, nHeight);
++    } catch (...) {}
+ }
+ 
+ } // namespace PicoGK
+diff --git a/Source/PicoGKGLViewerManager.h b/Source/PicoGKGLViewerManager.h
+--- a/Source/PicoGKGLViewerManager.h
++++ b/Source/PicoGKGLViewerManager.h
+@@ -40,11 +40,15 @@
+ struct ImGuiContext;
+ 
+ #include "PicoGKTypes.h"
++#include "PicoGK.h"
++#include "PicoGKTypes.h"
+ #include "PicoGKApiTypes.h"
+ 
+ #include <string>
+ #include <shared_mutex>
+ #include <map>
++#include <memory>
++#include <thread>
+ 
+ struct GLFWwindow;
+ struct ImGuiContext;
+@@ -58,7 +62,7 @@
+ {
+ public:
+     
+-    Viewer* poCreate(   const std::string&      strWindowTitle,
++    PKVIEWER hCreate(   const std::string&      strWindowTitle,
+                         const Vector2&          vecSize,
+                         PKFInfo                 pfnInfoCallback,
+                         PKPFUpdateRequested     pfnUpdateCallback,
+@@ -68,12 +72,14 @@
+                         PKPFScrollWheel         pfnScrollWheelCallback,
+                         PKPFWindowSize          pfnWindowSizeCallback);
+ 
+-    void Destroy(Viewer* poViewer);
+-    
+-    bool bIsValid(const Viewer* poViewer) const;
+-    
+-    bool bExists(const Viewer* poViewer) const;
+-    
++    void Destroy(PKVIEWER handle);
++    std::shared_ptr<Viewer> roGet(PKVIEWER handle);
++    bool bIsValid(PKVIEWER handle) const;
++    bool bOwnsWindow(GLFWwindow* window) const;
++    void DrainPendingClose();
++    bool Poll(PKVIEWER handle);
++    void RequireOwnerThread() const;
++
+     void ReportInfo(const std::string strInfo, bool bFatal);
+     
+     static ViewerManager& oMgr()
+@@ -115,6 +121,7 @@
+     ViewerManager& operator = (const ViewerManager&)    = delete;
+     
+ private:
++    std::shared_ptr<Viewer> roForWindow(GLFWwindow* window);
+     ViewerManager();
+     
+     ~ViewerManager();
+@@ -123,7 +130,9 @@
+     ImGuiContext*                   m_psSharedImGuiContext  = nullptr;
+     PKFInfo                         m_pfnInfoCallback       = nullptr;
+     mutable std::shared_mutex       m_mtx;
+-    std::map<GLFWwindow*, Viewer*>  m_oViewers;
++    bool                            m_bPolling = false;
++    const std::thread::id           m_ownerThread = std::this_thread::get_id();
++    std::map<GLFWwindow*, std::shared_ptr<Viewer>> m_oViewers;
+ };
+ 
+ } // namespace PicoGK
 diff --git a/Source/PicoGKGLViewerObjects.cpp b/Source/PicoGKGLViewerObjects.cpp
 --- a/Source/PicoGKGLViewerObjects.cpp
 +++ b/Source/PicoGKGLViewerObjects.cpp
-@@ -43,9 +43,10 @@
- Viewer::Group::ViewPolyLine::ViewPolyLine(  const ShaderProgMeshPoly& oShader,
-                                             const PicoGK::PolyLine& oPoly)
+@@ -40,14 +40,6 @@
+ namespace PicoGK
  {
+ 
+-Viewer::Group::ViewPolyLine::ViewPolyLine(  const ShaderProgMeshPoly& oShader,
+-                                            const PicoGK::PolyLine& oPoly)
+-{
 -    oShader.CreateBufferInstance(oPoly.vVertices(), &m_roVertexBuffer);
 -    m_clrLine           = oPoly.clrLines();
 -    m_oBBox             = oPoly.oBBox();
-+    auto snapshot = oPoly.TauCapture();
-+    oShader.CreateBufferInstance(snapshot->vVertices(), &m_roVertexBuffer);
-+    m_clrLine           = snapshot->clrLines();
-+    m_oBBox             = snapshot->oBBox();
- }
- 
+-}
+-
  void Viewer::Group::ViewPolyLine::SetMatrix(const Matrix4x4& mat)
-@@ -111,10 +112,11 @@
- Viewer::Group::ViewMesh::ViewMesh(  const ShaderProgMeshPoly& oShader,
-                                     const Mesh& oMesh)
  {
--    oShader.CreateBufferInstance(   oMesh.vVertices(),
--                                    oMesh.vTriangles(),
-+    auto snapshot = oMesh.TauCapture();
-+    oShader.CreateBufferInstance(   snapshot->vVertices(),
-+                                    snapshot->vTriangles(),
-                                     &m_roElementBuffer);
--    m_oBBox = oMesh.oBBox();
-+    m_oBBox = snapshot->oBBox();
+     m_mat = mat;
+@@ -64,88 +56,112 @@
+     oShader.SetValues(  matResult,
+                         m_clrLine);
+     
+-    GlBind oBind(*m_roVertexBuffer);
+-    glDrawArrays(GL_LINE_STRIP, 0, m_roVertexBuffer->nVertexCount());
++    if (!m_roGeometry->buffer) return;
++    GlBind oBind(*m_roGeometry->buffer);
++    glDrawArrays(GL_LINE_STRIP, 0, m_roGeometry->buffer->nVertexCount());
+     
      CHECKGLERRORS;
  }
  
+-void Viewer::Group::Draw(const ShaderProgMeshPoly& oShader)
+-{
+-    if (!m_bVisible)
+-        return;
+-    
+-    for (auto& oMapEntry : m_oViewPolyLines)
+-    {
+-        oMapEntry.second->Draw(oShader, m_sMaterial, m_mat);
+-    }
+-    
+-    for (auto& oMapEntry : m_oViewMeshes)
+-    {
+-        oMapEntry.second->Draw( oShader,
+-                                m_sMaterial,
+-                                m_mat,
+-                                m_bWarnOverhang,
+-                                m_fWarningOverhang,
+-                                m_fErrorOverhang);
+-    }
+-}
+-
+-BBox3 Viewer::Group::oCalculateBBox() const
+-{
+-    BBox3 oBBox;
+-    
+-    for (auto& oMapEntry : m_oViewPolyLines)
+-    {
+-        oBBox.Include(oMapEntry.second->m_oBBox);
+-    }
+-    
+-    for (auto& oMapEntry : m_oViewMeshes)
+-    {
+-        oBBox.Include(oMapEntry.second->m_oBBox);
+-    }
+-    
+-    return oBBox;
+-}
+-
+-Viewer::Group::ViewMesh::ViewMesh(  const ShaderProgMeshPoly& oShader,
+-                                    const Mesh& oMesh)
+-{
+-    oShader.CreateBufferInstance(   oMesh.vVertices(),
+-                                    oMesh.vTriangles(),
+-                                    &m_roElementBuffer);
+-    m_oBBox = oMesh.oBBox();
++namespace {
++Matrix4x4 ObjectMatrix(const Matrix4x4& group, const Matrix4x4& object) {
++    auto result = group; result *= object; return result;
++}
++bool Reflected(const Matrix4x4& matrix) {
++    const auto* m = matrix.matrix.m;
++    return double(m[0]) * (double(m[5]) * m[10] - double(m[9]) * m[6])
++         - double(m[4]) * (double(m[1]) * m[10] - double(m[9]) * m[2])
++         + double(m[8]) * (double(m[1]) * m[6] - double(m[5]) * m[2]) < 0;
++}
++void IncludeTransformed(BBox3& output, const BBox3& bounds, const Matrix4x4& matrix) {
++    if (bounds.bIsEmpty()) return;
++    const auto* m = matrix.matrix.m;
++    for (int n = 0; n < 8; ++n) {
++        const float x = n & 1 ? bounds.vecMax.X : bounds.vecMin.X;
++        const float y = n & 2 ? bounds.vecMax.Y : bounds.vecMin.Y;
++        const float z = n & 4 ? bounds.vecMax.Z : bounds.vecMin.Z;
++        output.Include(Vector3(m[0]*x+m[4]*y+m[8]*z+m[12],
++                               m[1]*x+m[5]*y+m[9]*z+m[13],
++                               m[2]*x+m[6]*y+m[10]*z+m[14]));
++    }
++}
++}
++void Viewer::Group::ReleaseGL() {
++    if (m_nInstanceBuffer) glDeleteBuffers(1, &m_nInstanceBuffer);
++    m_nInstanceBuffer = 0; m_nInstanceCapacity = 0;
++    std::vector<DrawBinding>().swap(m_vDrawBindings);
++    std::vector<Matrix4x4>().swap(m_vInstanceMatrices);
++}
++void Viewer::Group::BuildDrawBindings() {
++    if (!m_bInstancesDirty) return;
++    m_vDrawBindings.clear(); m_vInstanceMatrices.clear();
++    for (const auto& [key, occurrence] : m_oViewMeshes) {
++        auto* geometry = occurrence->m_roGeometry.get();
++        if (!geometry->buffer) continue;
++        const auto matrix = ObjectMatrix(m_mat, occurrence->m_mat);
++        const bool reflected = Reflected(matrix);
++        const auto first = m_vInstanceMatrices.size();
++        if (first >= static_cast<size_t>(INT32_MAX))
++            throw std::overflow_error("viewer exceeds GL instance count");
++        m_vInstanceMatrices.push_back(matrix);
++        if (!m_vDrawBindings.empty() && m_vDrawBindings.back().geometry == geometry &&
++            m_vDrawBindings.back().reflected == reflected) ++m_vDrawBindings.back().count;
++        else m_vDrawBindings.push_back({geometry, first, 1, reflected});
++    }
++    const bool instanced = std::any_of(m_vDrawBindings.begin(), m_vDrawBindings.end(),
++        [](const auto& binding) { return binding.count > 1; });
++    if (instanced) {
++        if (!m_nInstanceBuffer) glGenBuffers(1, &m_nInstanceBuffer);
++        glBindBuffer(GL_ARRAY_BUFFER, m_nInstanceBuffer);
++        const auto size = m_vInstanceMatrices.size() * sizeof(Matrix4x4);
++        if (size > m_nInstanceCapacity) {
++            glBufferData(GL_ARRAY_BUFFER, size, m_vInstanceMatrices.data(), GL_DYNAMIC_DRAW);
++            if (glGetError() != GL_NO_ERROR) {
++                glBindBuffer(GL_ARRAY_BUFFER, 0);
++                throw std::runtime_error("unable to allocate instance buffer");
++            }
++            m_nInstanceCapacity = size;
++        } else glBufferSubData(GL_ARRAY_BUFFER, 0, size, m_vInstanceMatrices.data());
++        glBindBuffer(GL_ARRAY_BUFFER, 0);
++        if (glGetError() != GL_NO_ERROR) throw std::runtime_error("unable to upload instance buffer");
++    } else if (m_nInstanceBuffer) {
++        glDeleteBuffers(1, &m_nInstanceBuffer); m_nInstanceBuffer = 0; m_nInstanceCapacity = 0;
++    }
++    m_bInstancesDirty = false;
++}
++void Viewer::Group::Draw(const ShaderProgMeshPoly& shader) {
++    if (!m_bVisible) return;
++    for (auto& entry : m_oViewPolyLines) entry.second->Draw(shader, m_sMaterial, m_mat);
++    BuildDrawBindings();
++    for (const auto& binding : m_vDrawBindings) {
++        const bool instanced = binding.count > 1;
++        shader.SetValues(instanced ? Matrix4x4() : m_vInstanceMatrices[binding.first],
++            m_sMaterial.clr, m_sMaterial.fMetallic, m_sMaterial.fRoughness,
++            m_bWarnOverhang, m_fWarningOverhang, m_fErrorOverhang);
++        shader.SetInstanced(instanced);
++        glFrontFace(binding.reflected ? GL_CW : GL_CCW);
++        GlBind bind(*binding.geometry->buffer);
++        if (instanced) {
++            binding.geometry->buffer->BindInstanceMatrices(m_nInstanceBuffer, binding.first * sizeof(Matrix4x4));
++            glDrawElementsInstanced(GL_TRIANGLES, binding.geometry->buffer->nIndexCount(), GL_UNSIGNED_INT, nullptr, binding.count);
++            binding.geometry->buffer->ClearInstanceMatrices();
++        } else glDrawElements(GL_TRIANGLES, binding.geometry->buffer->nIndexCount(), GL_UNSIGNED_INT, nullptr);
++    }
++    shader.SetInstanced(false); glFrontFace(GL_CCW);
+     CHECKGLERRORS;
+ }
++BBox3 Viewer::Group::oCalculateBBox() const {
++    BBox3 bounds;
++    for (const auto& entry : m_oViewPolyLines)
++        IncludeTransformed(bounds, entry.second->m_oBBox, ObjectMatrix(m_mat, entry.second->m_mat));
++    for (const auto& entry : m_oViewMeshes)
++        IncludeTransformed(bounds, entry.second->m_oBBox, ObjectMatrix(m_mat, entry.second->m_mat));
++    return bounds;
++}
+ 
+ void Viewer::Group::ViewMesh::SetMatrix(const Matrix4x4& mat)
+ {
+     m_mat = mat;
+-}
+-
+-void Viewer::Group::ViewMesh::Draw( const ShaderProgMeshPoly& oShader,
+-                                    const Material& sMaterial,
+-                                    const Matrix4x4& mat,
+-                                    bool bWarnOverhang,
+-                                    float fWarning,
+-                                    float fError)
+-{
+-    // Apply object matrix first, then apply group matrix
+-    Matrix4x4 matResult = mat;
+-    matResult *= m_mat;
+-    
+-    oShader.SetValues(  matResult,
+-                        sMaterial.clr,
+-                        sMaterial.fMetallic,
+-                        sMaterial.fRoughness,
+-                        bWarnOverhang,
+-                        fWarning,
+-                        fError);
+-    
+-    GlBind oBind(*m_roElementBuffer);
+-    glDrawElements(GL_TRIANGLES, m_roElementBuffer->nIndexCount(), GL_UNSIGNED_INT, nullptr);
+-
+-    CHECKGLERRORS;
+ }
+ 
+ //
+diff --git a/Source/PicoGKGLViewerShaders.cpp b/Source/PicoGKGLViewerShaders.cpp
+--- a/Source/PicoGKGLViewerShaders.cpp
++++ b/Source/PicoGKGLViewerShaders.cpp
+@@ -61,8 +61,14 @@
+     Init();
+ }
+ 
++ShaderProgMeshPoly::~ShaderProgMeshPoly() {
++    if (m_hTexDiffuse) glDeleteTextures(1, &m_hTexDiffuse);
++    if (m_hTexSpecular) glDeleteTextures(1, &m_hTexSpecular);
++}
++
+ void ShaderProgMeshPoly::Init()
+ {
++    m_nUbInstanced = nUniformLoc("bInstanced");
+     m_nUmat4VP                      = nUniformLoc("mat4VP");
+     m_nUmat4OtoW                    = nUniformLoc("mat4OtoW");
+     m_nUvec3Eye                     = nUniformLoc("vec3Eye");
+@@ -112,6 +118,7 @@
+                                     float               fError) const
+ {
+     
++    SetInstanced(false);
+     glUniformMatrix4fv( m_nUmat4OtoW,
+                         1,
+                         GL_FALSE,
+@@ -141,11 +148,12 @@
+                                                 const char* pSpecularTextureDDS,
+                                                 uint32_t nSpecularBufferSize)
+ {
+-    /// TODO clean this up and encapsulate the cubemapped texture properly
+-    
+-    glGenTextures(1, &m_hTexDiffuse);
++    GLuint diffuse = 0, specular = 0;
++    try {
++
++    glGenTextures(1, &diffuse);
+     glActiveTexture(GL_TEXTURE0);
+-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_hTexDiffuse);
++    glBindTexture(GL_TEXTURE_CUBE_MAP, diffuse);
+     
+     if (!bLoadDdsTexture(pDiffuseTextureDDS, nDiffuseBufferSize, GL_TEXTURE_CUBE_MAP))
+         throw ShaderProgramException("Failed to load diffuse texture dds");
+@@ -158,9 +166,9 @@
+     
+     // Texture 1 is the specular cube map for lighting
+ 
+-    glGenTextures(1, &m_hTexSpecular);
++    glGenTextures(1, &specular);
+     glActiveTexture(GL_TEXTURE1);
+-    glBindTexture(GL_TEXTURE_CUBE_MAP, m_hTexSpecular);
++    glBindTexture(GL_TEXTURE_CUBE_MAP, specular);
+ 
+     if (!bLoadDdsTexture(pSpecularTextureDDS, nSpecularBufferSize, GL_TEXTURE_CUBE_MAP))
+         throw ShaderProgramException("Failed to load specular texture dds");
+@@ -170,13 +178,26 @@
+     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+     glTexParameteri(GL_TEXTURE_CUBE_MAP, GL_TEXTURE_WRAP_R, GL_CLAMP_TO_EDGE);
+-}
+-    
++    if (glGetError() != GL_NO_ERROR) throw ShaderProgramException("Failed to allocate lighting textures");
++    } catch (...) {
++        if (diffuse) glDeleteTextures(1, &diffuse);
++        if (specular) glDeleteTextures(1, &specular);
++        glActiveTexture(GL_TEXTURE0); glBindTexture(GL_TEXTURE_CUBE_MAP, m_hTexDiffuse);
++        glActiveTexture(GL_TEXTURE1); glBindTexture(GL_TEXTURE_CUBE_MAP, m_hTexSpecular);
++        throw;
++    }
++    if (m_hTexDiffuse) glDeleteTextures(1, &m_hTexDiffuse);
++    if (m_hTexSpecular) glDeleteTextures(1, &m_hTexSpecular);
++    m_hTexDiffuse = diffuse; m_hTexSpecular = specular;
++}
++
+ const std::string ShaderProgMeshPoly::c_strVertShader =
+ R"VS(
+ #version 330 core
+ 
+-in  vec3 vec3Pos;
++layout(location = 0) in vec3 vec3Pos;
++layout(location = 1) in mat4 mat4Instance;
++uniform bool bInstanced;
+ out vec3 vec3World;
+ 
+ uniform mat4 mat4OtoW;
+@@ -184,7 +205,7 @@
+ 
+ void main()
+ {
+-    vec3World   = (mat4OtoW * vec4(vec3Pos, 1)).xyz;
++    vec3World   = ((bInstanced ? mat4Instance : mat4OtoW) * vec4(vec3Pos, 1)).xyz;
+     gl_Position = mat4VP * vec4(vec3World, 1);
+ }
+ 
+diff --git a/Source/PicoGKGLViewerShaders.h b/Source/PicoGKGLViewerShaders.h
+--- a/Source/PicoGKGLViewerShaders.h
++++ b/Source/PicoGKGLViewerShaders.h
+@@ -48,6 +48,7 @@
+ {
+ public:
+     ShaderProgMeshPoly();
++    ~ShaderProgMeshPoly() override;
+     
+     ShaderProgMeshPoly(const std::string& strFragmentShader);
+     
+@@ -63,6 +64,8 @@
+                                 const std::vector<Triangle>& vTriangles,
+                                 std::unique_ptr<GlElementBuffer<Vector3>>* prResult) const;
+     
++    void SetInstanced(bool enabled) const { glUniform1i(m_nUbInstanced, enabled); }
++
+     void Use(   const Matrix4x4&    matVP,
+                 const Vector3&      vecEye) const;
+     
+@@ -83,6 +86,7 @@
+     GLuint  m_hTexSpecular              = 0;
+     GLuint  m_hTexDiffuse               = 0;
+     
++    GLint m_nUbInstanced                = -1;
+     GLint m_nUmat4VP                    =-1;
+     GLint m_nUmat4OtoW                  =-1;
+     GLint m_nUvec3Eye                   =-1;
 diff --git a/Source/PicoGKGridState.h b/Source/PicoGKGridState.h
 new file mode 100644
 --- /dev/null
 +++ b/Source/PicoGKGridState.h
-@@ -0,0 +1,304 @@
+@@ -0,0 +1,310 @@
 +// SPDX-License-Identifier: Apache-2.0
 +#ifndef PICOGK_GRID_STATE_H
 +#define PICOGK_GRID_STATE_H
@@ -496,6 +2259,12 @@ new file mode 100644
 +    std::unique_lock<std::recursive_mutex> lock;
 +public:
 +    explicit TauGridMutation(std::shared_ptr<TauGridState> value) : state(std::move(value)), lock(state->gate) {
++        TauAdvanceGridGeneration(*state);
++    }
++    TauGridMutation(std::shared_ptr<TauGridState> value, std::unique_lock<std::recursive_mutex> acquired)
++        : state(std::move(value)), lock(std::move(acquired)) {
++        if (!lock.owns_lock() || lock.mutex() != &state->gate)
++            throw std::invalid_argument("mutation lock does not own grid state");
 +        TauAdvanceGridGeneration(*state);
 +    }
 +    void Unlock() { lock.unlock(); }
@@ -1576,7 +3345,42 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void ScalarField_SetValue(   PKINSTANCE hLib,
-@@ -1122,13 +1104,11 @@
+@@ -1034,11 +1016,7 @@
+                                         const PKVector3*    pvecPosition,
+                                         float               fValue)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    
+-    roLib->m_oScalarFields.roGet(hThis)
+-        ->SetValue(     *pvecPosition,
+-                        fValue);
++    (void)Tau_ScalarField_SetValueChecked(hLib, hThis, pvecPosition, fValue);
+ }
+ 
+ PICOGK_API bool ScalarField_bGetValue(  PKINSTANCE hLib,
+@@ -1046,18 +1024,15 @@
+                                         const PKVector3*    pvecPosition,
+                                         float*              pfValue)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    return roLib->m_oScalarFields.roGet(hThis)
+-        ->bGetValue(    *pvecPosition,
+-                        pfValue);
++    uint8_t active = 0;
++    return Tau_ScalarField_bGetValueChecked(hLib, hThis, pvecPosition, pfValue, &active) == 0 && active != 0;
+ }
+ 
+ PICOGK_API void ScalarField_RemoveValue(    PKINSTANCE          hLib,
+                                             PKSCALARFIELD       hThis,
+                                             const PKVector3*    pvecPosition)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    roLib->m_oScalarFields.roGet(hThis)->RemoveValue(   *pvecPosition);
++    (void)Tau_ScalarField_RemoveValueChecked(hLib, hThis, pvecPosition);
+ }
+ 
+ PICOGK_API void ScalarField_GetVoxelDimensions( PKINSTANCE hLib,
+@@ -1122,13 +1097,11 @@
  PICOGK_API void VectorField_Destroy(    PKINSTANCE hLib,
                                          PKVECTORFIELD hThis)
  {
@@ -1595,7 +3399,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKVECTORFIELD VectorField_hCreateFromVoxels( PKINSTANCE hLib,
-@@ -1160,8 +1140,10 @@
+@@ -1160,8 +1133,10 @@
  PICOGK_API int64_t VectorField_nMemUsage(   PKINSTANCE hLib,
                                              PKVECTORFIELD hThis)
  {
@@ -1606,7 +3410,45 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API void VectorField_SetValue(   PKINSTANCE hLib,
-@@ -1212,7 +1194,8 @@
+@@ -1169,11 +1144,7 @@
+                                         const PKVector3*    pvecPosition,
+                                         const PKVector3*    pvecValue)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    
+-    roLib->m_oVectorFields.roGet(hThis)
+-        ->SetValue( *pvecPosition,
+-                    *pvecValue);
++    (void)Tau_VectorField_SetValueChecked(hLib, hThis, pvecPosition, pvecValue);
+ }
+ 
+ PICOGK_API bool VectorField_bGetValue(  PKINSTANCE          hLib,
+@@ -1181,21 +1152,15 @@
+                                         const PKVector3*    pvecPosition,
+                                         PKVector3*          pvecValue)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    
+-    return roLib->m_oVectorFields.roGet(hThis)
+-        ->bGetValue(    *pvecPosition,
+-                        pvecValue);
++    uint8_t active = 0;
++    return Tau_VectorField_bGetValueChecked(hLib, hThis, pvecPosition, pvecValue, &active) == 0 && active != 0;
+ }
+ 
+ PICOGK_API void VectorField_RemoveValue(    PKINSTANCE          hLib,
+                                             PKVECTORFIELD       hThis,
+                                             const PKVector3*    pvecPosition)
+ {
+-    Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
+-    
+-    roLib->m_oVectorFields.roGet(hThis)
+-        ->RemoveValue(*pvecPosition);
++    (void)Tau_VectorField_RemoveValueChecked(hLib, hThis, pvecPosition);
+ }
+ 
+ PICOGK_API void VectorField_TraverseActive( PKINSTANCE hLib,
+@@ -1212,7 +1177,8 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVoxels.roGet(hField);
@@ -1616,7 +3458,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKMETADATA Metadata_hFromScalarField(    PKINSTANCE hLib,
-@@ -1220,7 +1203,7 @@
+@@ -1220,7 +1186,7 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oScalarFields.roGet(hField);
@@ -1625,7 +3467,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKMETADATA Metadata_hFromVectorField(    PKINSTANCE hLib,
-@@ -1228,19 +1211,17 @@
+@@ -1228,19 +1194,17 @@
  {
      Library::Instance::Ptr roLib = Library::oLib().roGetInstance(hLib);
      auto roField = roLib->m_oVectorFields.roGet(hField);
@@ -1651,10 +3493,554 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API int32_t Metadata_nCount( PKINSTANCE hLib,
-@@ -1796,3 +1777,599 @@
+@@ -1390,7 +1354,12 @@
+ {
+     PKTRACE(Viewer_hCreate);
+     
+-    return (PKVIEWER) ViewerManager::oMgr().poCreate(
++    PKVIEWER result = nullptr;
++    TauCheckedInvoke([&] {
++    if (!pszWindowTitle || !pvecSize || !std::isfinite(pvecSize->X) || !std::isfinite(pvecSize->Y) ||
++        pvecSize->X < 1 || pvecSize->Y < 1 || double(pvecSize->X) > INT32_MAX || double(pvecSize->Y) > INT32_MAX)
++        throw std::invalid_argument("invalid viewer window size");
++    result = ViewerManager::oMgr().hCreate(
+                 pszWindowTitle,
+                 *pvecSize,
+                 pfnInfoCallback,
+@@ -1400,89 +1369,91 @@
+                 pfnMouseButtonCallback,
+                 pfnScrollWheelCallback,
+                 pfnWindowSize);
+-}
+-
+-PICOGK_API bool Viewer_bIsValid(PKVIEWER hThis)
+-{
+-    //PKTRACE(Viewer_bIsValid);
+-    
+-    Viewer* poThis = (Viewer*) hThis;
+-    return ViewerManager::oMgr().bIsValid(poThis);
+-}
+-
+-PICOGK_API void Viewer_Destroy(PKVIEWER hThis)
+-{
+-    PKTRACE(Viewer_Destroy);
+-    
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    PicoGK::ViewerManager::oMgr().Destroy(poThis);
++    });
++    return result;
++}
++
++PICOGK_API bool Viewer_bIsValid(PKVIEWER hThis) {
++    bool result = false;
++    TauCheckedInvoke([&] { result = ViewerManager::oMgr().bIsValid(hThis); });
++    return result;
++}
++
++PICOGK_API void Viewer_Destroy(PKVIEWER hThis) {
++    TauCheckedInvoke([&] { ViewerManager::oMgr().Destroy(hThis); });
+ }
+ 
+ PICOGK_API void Viewer_RequestUpdate(PKVIEWER hThis)
+ {
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    TauCheckedInvoke([&] {
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->RequestUpdate();
+-}
+-
+-PICOGK_API bool Viewer_bPoll(PKVIEWER hThis)
+-{
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    return poThis->bPoll();
++    });
++}
++
++PICOGK_API int32_t TauViewer_PollChecked(PKVIEWER viewer, bool* alive) {
++    if (!alive) return -1;
++    *alive = false;
++    return TauCheckedInvoke([&] { *alive = ViewerManager::oMgr().Poll(viewer); });
++}
++PICOGK_API bool Viewer_bPoll(PKVIEWER hThis) {
++    bool alive = false;
++    return TauViewer_PollChecked(hThis, &alive) == 0 && alive;
+ }
+ 
+ PICOGK_API  void Viewer_RequestScreenShot(  PKVIEWER        hThis,
+                                             const char*     pszScreenShotPath)
+ {
++    TauCheckedInvoke([&] {
++    if (!pszScreenShotPath) throw std::invalid_argument("null viewer screenshot path");
+     PKTRACE(Viewer_RequestScreenShot);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->RequestScreenShot(pszScreenShotPath);
++    });
+ }
+ 
+ PICOGK_API void Viewer_EnableExperimental(  PKVIEWER    hThis,
+                                             bool        bEnable)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_EnableExperimental);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->EnableExperimental(bEnable);
++    });
+ }
+ 
+ PICOGK_API void Viewer_RequestClose(PKVIEWER hThis)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_RequestClose);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->RequestClose();
+-}
+-
+-PICOGK_API bool Viewer_bLoadLightSetup( PKVIEWER        hThis,
+-                                        const char*     pDiffTextureDDS,
+-                                        int32_t         nDiffTextureSize,
+-                                        const char*     pSpecTextureDDS,
+-                                        int32_t         nSpecTextureSize)
+-{
+-    PKTRACE(Viewer_bLoadLightSetup);
+-    
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    return poThis->bLoadLightSetup( pDiffTextureDDS,
+-                                    nDiffTextureSize,
+-                                    pSpecTextureDDS,
+-                                    nSpecTextureSize);
++    });
++}
++
++PICOGK_API bool Viewer_bLoadLightSetup( PKVIEWER hThis,
++                                        const char* pDiffTextureDDS,
++                                        int32_t nDiffTextureSize,
++                                        const char* pSpecTextureDDS,
++                                        int32_t nSpecTextureSize)
++{
++    bool result = false;
++    const auto status = TauCheckedInvoke([&] {
++        auto viewer = ViewerManager::oMgr().roGet(hThis);
++        if (!pDiffTextureDDS || !pSpecTextureDDS ||
++            nDiffTextureSize < 0 || nSpecTextureSize < 0)
++            throw std::invalid_argument("invalid viewer lighting input");
++        result = viewer->bLoadLightSetup(pDiffTextureDDS, nDiffTextureSize,
++            pSpecTextureDDS, nSpecTextureSize);
++    });
++    return status == 0 && result;
+ }
+ 
+ PICOGK_API void Viewer_AddMesh( PKINSTANCE hLib,
+@@ -1492,22 +1463,23 @@
+ {
+     PKTRACE(Viewer_AddMesh);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    poThis->AddMesh(nGroupID, hLib, hMesh);
++    TauCheckedInvoke([&] {
++        auto poThis = ViewerManager::oMgr().roGet(hThis);
++        poThis->AddMesh(nGroupID, hLib, hMesh);
++    });
+ }
+ 
+ PICOGK_API void Viewer_RemoveMesh(  PKINSTANCE hLib,
+                                     PKVIEWER    hThis,
+                                     PKMESH      hMesh)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_RemoveMesh);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->RemoveMesh(hLib, hMesh);
++    });
+ }
+ 
+ PICOGK_API  void Viewer_SetMeshMatrix(  PKINSTANCE          hLib,
+@@ -1515,12 +1487,14 @@
+                                         PKMESH              hMesh,
+                                         const PKMatrix4x4*  pmat)
+ {
++    TauCheckedInvoke([&] {
++    if (!pmat) throw std::invalid_argument("null viewer matrix");
+     PKTRACE(Viewer_SetMeshMatrix);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->SetMeshMatrix(hLib, hMesh, *pmat);
++    });
+ }
+ 
+ PICOGK_API void Viewer_AddVoxels(   PKINSTANCE hLib,
+@@ -1530,22 +1504,23 @@
+ {
+     PKTRACE(Viewer_AddVoxels);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    poThis->AddVoxels(nGroupID, hLib, hVoxels);
++    TauCheckedInvoke([&] {
++        auto poThis = ViewerManager::oMgr().roGet(hThis);
++        poThis->AddVoxels(nGroupID, hLib, hVoxels);
++    });
+ }
+ 
+ PICOGK_API void Viewer_RemoveVoxels(    PKINSTANCE  hLib,
+                                         PKVIEWER    hThis,
+                                         PKVOXELS    hVoxels)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_RemoveVoxels);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->RemoveVoxels(hLib, hVoxels);
++    });
+ }
+ 
+ PICOGK_API  void Viewer_SetVoxelsMatrix(    PKINSTANCE          hLib,
+@@ -1553,12 +1528,14 @@
+                                             PKVOXELS            hVoxels,
+                                             const PKMatrix4x4*  pmat)
+ {
++    TauCheckedInvoke([&] {
++    if (!pmat) throw std::invalid_argument("null viewer matrix");
+     PKTRACE(Viewer_SetVoxelsMatrix);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->SetVoxelsMatrix(hLib, hVoxels, *pmat);
++    });
+ }
+ 
+ 
+@@ -1569,22 +1546,23 @@
+ {
+     PKTRACE(Viewer_AddPolyLine);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    poThis->AddPolyLine(nGroupID, hLib, hPolyLine);
++    TauCheckedInvoke([&] {
++        auto poThis = ViewerManager::oMgr().roGet(hThis);
++        poThis->AddPolyLine(nGroupID, hLib, hPolyLine);
++    });
+ }
+ 
+ PICOGK_API void Viewer_RemovePolyLine(  PKINSTANCE hLib,
+                                         PKVIEWER    hThis,
+                                         PKPOLYLINE  hPolyLine)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_RemovePolyLine);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->RemovePolyLine(hLib, hPolyLine);
++    });
+ }
+ 
+ PICOGK_API  void Viewer_SetPolyLineMatrix(  PKINSTANCE          hLib,
+@@ -1592,34 +1570,38 @@
+                                             PKPOLYLINE          hPolyLine,
+                                             const PKMatrix4x4*  pmat)
+ {
++    TauCheckedInvoke([&] {
++    if (!pmat) throw std::invalid_argument("null viewer matrix");
+     PKTRACE(Viewer_SetPolyLineMatrix);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->SetPolyLineMatrix(hLib, hPolyLine, *pmat);
++    });
+ }
+ 
+ PICOGK_API void Viewer_RemoveAllObjects(PKVIEWER hThis)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_RemoveAllObjects);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->RemoveAllObjects();
++    });
+ }
+ 
+ PICOGK_API void Viewer_SetGroupVisible( PKVIEWER    hThis,
+                                         int32_t     nGroupID,
+                                         bool        bVisible)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_SetGroupVisible);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->SetGroupVisible(nGroupID, bVisible);
++    });
+ }
+ 
+ PICOGK_API  void Viewer_SetGroupMaterial(   PKVIEWER            hThis,
+@@ -1628,24 +1610,28 @@
+                                             float               fMetallic,
+                                             float               fRoughness)
+ {
++    TauCheckedInvoke([&] {
++    if (!pclr) throw std::invalid_argument("null viewer material");
+     PKTRACE(Viewer_SetGroupMaterial);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->SetGroupMaterial(nGroupID, *pclr, fMetallic, fRoughness);
++    });
+ }
+ 
+ PICOGK_API void Viewer_SetGroupMatrix(  PKVIEWER            hThis,
+                                         int32_t             nGroupID,
+                                         const PKMatrix4x4*  pmat)
+ {
++    TauCheckedInvoke([&] {
++    if (!pmat) throw std::invalid_argument("null viewer matrix");
+     PKTRACE(Viewer_SetGroupMatrix);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->SetGroupMatrix(nGroupID, *pmat);
++    });
+ }
+ 
+ PICOGK_API void Viewer_EnableGroupWarnOverhang( PKVIEWER    hThis,
+@@ -1653,34 +1639,38 @@
+                                                 float       fWarning,
+                                                 float       fError)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_EnableGroupWarnOverhang);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->EnableGroupWarnOverhang(nGroupID, fWarning, fError);
++    });
+ }
+ 
+ PICOGK_API void Viewer_DisableGroupWarnOverhang(    PKVIEWER    hThis,
+                                                     int32_t     nGroupID)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_DisableGroupWarnOverhang);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->DisableGroupWarnOverhang(nGroupID);
++    });
+ }
+ 
+ PICOGK_API void Viewer_GetBoundingBox(  PKVIEWER hThis,
+                                         PKBBox3* poBox)
+ {
++    TauCheckedInvoke([&] {
++    if (!poBox) throw std::invalid_argument("null viewer bounds output");
+     PKTRACE(Viewer_GetBoundingBox);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     *poBox = poThis->oBBox();
++    });
+ }
+ 
+ PICOGK_API PKGPUTEX Viewer_GpuTex_hCreate(      PKVIEWER    hThis,
+@@ -1688,35 +1678,40 @@
+                                                 int         nHeight,
+                                                 const char* pRgba8)
+ {
++    PKGPUTEX result = 0;
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_hCreateGpuTex);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    return poThis->hGpuTexCreate(nWidth, nHeight, pRgba8);
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
++
++    result = poThis->hGpuTexCreate(nWidth, nHeight, pRgba8);
++    });
++    return result;
+ }
+ 
+ PICOGK_API void Viewer_GpuTex_Refresh(          PKVIEWER    hThis,
+                                                 PKGPUTEX    hTex,
+                                                 const char* pRgba8)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_GpuTex_Refresh);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     return poThis->GpuTexRefresh(hTex, pRgba8);
++    });
+ }
+ 
+ PICOGK_API void Viewer_GpuTex_MarkForCleanup(   PKVIEWER hThis,
+                                                 PKGPUTEX hTex)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_GpuTex_MarkForCleanup);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->GpuTexMarkForCleanup(hTex);
++    });
+ }
+ 
+ PICOGK_API PKQUAD Viewer_Quad_hCreate(  PKVIEWER            hThis,
+@@ -1728,41 +1723,48 @@
+                                         bool                bFlipY,
+                                         bool                bDoubleSided)
+ {
++    PKQUAD result = 0;
++    TauCheckedInvoke([&] {
++    if (!pmat) throw std::invalid_argument("null viewer matrix");
+     PKTRACE(Viewer_Quad_hCreate);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    return poThis->hAddQuad(    hTexDefault,
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
++
++    result = poThis->hAddQuad(    hTexDefault,
+                                 clrDefault,
+                                 fAlpha,
+                                 *pmat,
+                                 bFlipX,
+                                 bFlipY,
+                                 bDoubleSided);
++    });
++    return result;
+ }
+ 
+ PICOGK_API void Viewer_Quad_Destroy(    PKVIEWER    hThis,
+                                         PKQUAD      hQuad)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_Quad_Destroy);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->RemoveQuad(hQuad);
++    });
+ }
+ 
+ PICOGK_API void Viewer_Quad_SetMatrix(  PKVIEWER            hThis,
+                                         PKQUAD              hQuad,
+                                         const PKMatrix4x4*  pmat)
+ {
++    TauCheckedInvoke([&] {
++    if (!pmat) throw std::invalid_argument("null viewer matrix");
+     PKTRACE(Viewer_Quad_SetMatrix);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
+     
+     poThis->SetQuadMatrix(hQuad, *pmat);
++    });
+ }
+ 
+ PICOGK_API PKGUI Viewer_SideBar_hCreate(    PKVIEWER        hThis,
+@@ -1773,26 +1775,687 @@
+                                             PKColorFloat    clrBackground,
+                                             PKColorFloat    clrBackgroundHv)
+ {
++    PKGUI result = 0;
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_SideBar_hCreate);
+     
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
+-    
+-    return poThis->hCreateSideBar(  bLeft,
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
++
++    result = poThis->hCreateSideBar(  bLeft,
+                                     nMin,
+                                     nMax,
+                                     nDef,
+                                     clrBackground,
+                                     clrBackgroundHv);
++    });
++    return result;
+ }
+ 
+ PICOGK_API void Viewer_SideBar_Destroy( PKVIEWER hThis,
+                                         PKGUI hSideBar)
+ {
++    TauCheckedInvoke([&] {
+     PKTRACE(Viewer_SideBar_Destroy);
+ 
+-    Viewer* poThis = (Viewer*) hThis;
+-    assert(ViewerManager::oMgr().bIsValid(poThis));
++    auto poThis = ViewerManager::oMgr().roGet(hThis);
      
      poThis->DestroySideBar(hSideBar);
- }
+-}
++    });
++}
 +
 +// Immutable copies retain COW vector backing without retaining the source handle/library.
 +static int32_t TauCapturePositionCount(const TauCapturedGeometry& value) {
@@ -1676,6 +4062,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 +    try {
 +        auto owner = Library::oLib().roGetInstance(library);
 +        auto result = std::make_shared<TauCapturedGeometry>();
++        result->kind = kind; result->identity = object;
 +        if (kind == 0) {
 +            result->mesh = owner->m_oMeshes.roGet(object)->TauCapture();
 +            result->generation = result->mesh->TauGeneration();
@@ -1698,6 +4085,17 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 +      catch (const std::invalid_argument&) { return -1; }
 +      catch (const std::overflow_error&) { return -1; }
 +      catch (...) { return -2; }
++}
++PICOGK_API int32_t TauViewer_AddCaptured(PKINSTANCE library, PKVIEWER viewer, int32_t group,
++    int32_t kind, uint64_t identity, uint64_t snapshot) {
++    return TauCheckedInvoke([&] {
++        auto target = ViewerManager::oMgr().roGet(viewer);
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_tauCaptures.roGet(snapshot);
++        if (source->kind != kind || source->identity != identity)
++            throw std::invalid_argument("capture does not match viewer occurrence identity");
++        target->AddCaptured(group, library, identity, kind, source->mesh, source->line);
++    });
 +}
 +PICOGK_API int32_t TauCapture_Copy(PKINSTANCE library, uint64_t snapshot,
 +    float* positions, int32_t positionCapacity, uint32_t* indices, int32_t indexCapacity) {
@@ -2249,6 +4647,55 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 +        else found = source->bRayCastToSurface(input, rayDirection, &observed);
 +        *output = observed;
 +        *hit = found ? 1 : 0;
++    });
++}
++
++PICOGK_API int32_t Tau_ScalarField_SetValueChecked(PKINSTANCE library, PKSCALARFIELD field, const PKVector3* position, float value) noexcept {
++    if (!position) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oScalarFields.roGet(field);
++        source->SetValue(*position, value);
++    });
++}
++PICOGK_API int32_t Tau_ScalarField_bGetValueChecked(PKINSTANCE library, PKSCALARFIELD field, const PKVector3* position, float* value, uint8_t* active) noexcept {
++    if (!position || !value || !active) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oScalarFields.roGet(field);
++        float result = 0; const bool on = source->bGetValue(*position, &result); *value = result; *active = on ? 1 : 0;
++    });
++}
++PICOGK_API int32_t Tau_ScalarField_RemoveValueChecked(PKINSTANCE library, PKSCALARFIELD field, const PKVector3* position) noexcept {
++    if (!position) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oScalarFields.roGet(field);
++        source->RemoveValue(*position);
++    });
++}
++PICOGK_API int32_t Tau_VectorField_SetValueChecked(PKINSTANCE library, PKVECTORFIELD field, const PKVector3* position, const PKVector3* value) noexcept {
++    if (!position || !value) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVectorFields.roGet(field);
++        source->SetValue(*position, *value);
++    });
++}
++PICOGK_API int32_t Tau_VectorField_bGetValueChecked(PKINSTANCE library, PKVECTORFIELD field, const PKVector3* position, PKVector3* value, uint8_t* active) noexcept {
++    if (!position || !value || !active) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVectorFields.roGet(field);
++        PKVector3 result(0.f, 0.f, 0.f); const bool on = source->bGetValue(*position, &result); *value = result; *active = on ? 1 : 0;
++    });
++}
++PICOGK_API int32_t Tau_VectorField_RemoveValueChecked(PKINSTANCE library, PKVECTORFIELD field, const PKVector3* position) noexcept {
++    if (!position) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner = Library::oLib().roGetInstance(library);
++        auto source = owner->m_oVectorFields.roGet(field);
++        source->RemoveValue(*position);
 +    });
 +}
 diff --git a/Source/PicoGKLibraryMgr.h b/Source/PicoGKLibraryMgr.h
@@ -2942,7 +5389,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
  
  using namespace openvdb;
  
-@@ -53,46 +58,62 @@
+@@ -53,46 +58,80 @@
      {
          m_roGrid = TFieldType::create();
          m_roGrid->setTransform(openvdb::math::Transform::createLinearTransform(fVoxelSizeMM));
@@ -3008,6 +5455,24 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
      }
      
  protected:
++    openvdb::Coord TauWorldCoordinate(Vector3 position) const {
++        if (!TauHasSupportedGridTransform(*m_roGrid))
++            throw std::invalid_argument("field has an unsupported transformation");
++        const VoxelSize size(static_cast<float>(m_roGrid->voxelSize().x()));
++        openvdb::Coord xyz;
++        const float values[] = {position.X, position.Y, position.Z};
++        for (int axis = 0; axis < 3; ++axis) {
++            const float value = values[axis];
++            const double rounded = std::round(size.fToVoxels(value));
++            if (!std::isfinite(value) || !std::isfinite(rounded) ||
++                rounded < double(std::numeric_limits<int32_t>::min()) ||
++                rounded > double(std::numeric_limits<int32_t>::max()))
++                throw std::invalid_argument("field coordinate exceeds native range");
++            xyz[axis] = static_cast<int32_t>(rounded);
++        }
++        return xyz;
++    }
++
      typename TFieldType::Ptr             m_roGrid;
 +    std::shared_ptr<TauGridState> m_tauState;
      
@@ -3027,7 +5492,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
      }
  };
  
-@@ -105,32 +126,43 @@
+@@ -105,32 +144,43 @@
      : Field(fVoxelSizeMM)
      {
          m_roGrid->setGridClass(GRID_FOG_VOLUME);
@@ -3086,58 +5551,50 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          
          for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
          for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
-@@ -148,11 +180,13 @@
+@@ -148,11 +198,10 @@
      void SetValue(  Vector3     vecPos,
                      float       fValue)
      {
-+        TauGridMutation tauMutation(m_tauState);
++        std::unique_lock<std::recursive_mutex> tauLock(m_tauState->gate);
++        const auto xyz = TauWorldCoordinate(vecPos);
++        TauGridMutation tauMutation(m_tauState, std::move(tauLock));
          auto oAccess = m_roGrid->getAccessor();
 -        
 -        openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
 -                                oVoxelSize().iToVoxels(vecPos.Y),
 -                                oVoxelSize().iToVoxels(vecPos.Z));
-+        const auto voxelSize = oVoxelSize();
-+
-+        openvdb::Coord xyz(     voxelSize.iToVoxels(vecPos.X),
-+                                voxelSize.iToVoxels(vecPos.Y),
-+                                voxelSize.iToVoxels(vecPos.Z));
          
          oAccess.setValue(xyz, fValue);
      }
-@@ -160,11 +194,13 @@
+@@ -160,27 +209,28 @@
      bool bGetValue( Vector3 vecPos,
                      float* pfValue)
      {
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
++        const auto xyz = TauWorldCoordinate(vecPos);
          auto oAccess = m_roGrid->getConstAccessor();
 -    
 -        openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
 -                            oVoxelSize().iToVoxels(vecPos.Y),
 -                            oVoxelSize().iToVoxels(vecPos.Z));
-+        const auto voxelSize = oVoxelSize();
+-        
+-        *pfValue = oAccess.getValue(xyz);
+-        return oAccess.isValueOn(xyz);
 +
-+        openvdb::Coord xyz( voxelSize.iToVoxels(vecPos.X),
-+                            voxelSize.iToVoxels(vecPos.Y),
-+                            voxelSize.iToVoxels(vecPos.Z));
-         
-         *pfValue = oAccess.getValue(xyz);
-         return oAccess.isValueOn(xyz);
-@@ -172,15 +208,22 @@
++        return oAccess.probeValue(xyz, *pfValue);
+     }
      
      void RemoveValue(Vector3 vecPos)
      {
-+        TauGridMutation tauMutation(m_tauState);
++        std::unique_lock<std::recursive_mutex> tauLock(m_tauState->gate);
++        const auto xyz = TauWorldCoordinate(vecPos);
++        TauGridMutation tauMutation(m_tauState, std::move(tauLock));
          auto oAccess = m_roGrid->getAccessor();
--        
+         
 -        openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
 -                                oVoxelSize().iToVoxels(vecPos.Y),
 -                                oVoxelSize().iToVoxels(vecPos.Z));
-+        const auto voxelSize = oVoxelSize();
-+
-+        openvdb::Coord xyz(     voxelSize.iToVoxels(vecPos.X),
-+                                voxelSize.iToVoxels(vecPos.Y),
-+                                voxelSize.iToVoxels(vecPos.Z));
-         
+-        
          oAccess.setValueOff(xyz);
      }
      
@@ -3149,7 +5606,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
      void GetVoxelDimensions(    int32_t* pnXMin,
                                  int32_t* pnYMin,
                                  int32_t* pnZMin,
-@@ -188,7 +231,8 @@
+@@ -188,7 +238,8 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -3159,7 +5616,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          
          *pnXMin     = oBBox.min().x();
          *pnYMin     = oBBox.min().y();
-@@ -201,7 +245,8 @@
+@@ -201,7 +252,8 @@
      void GetSlice( int32_t nZSlice,
                     float* pfBuffer)
      {
@@ -3169,7 +5626,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -215,23 +260,23 @@
+@@ -215,23 +267,23 @@
          }
      }
      
@@ -3208,7 +5665,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
  };
  
  class VectorField : public Field<Vec3SGrid>
-@@ -242,20 +287,90 @@
+@@ -242,20 +294,90 @@
      VectorField(float fVoxelSizeMM)
      : Field(fVoxelSizeMM)
      {
@@ -3310,7 +5767,7 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          
          for (auto x=oBBox.min().x(); x<=oBBox.max().x(); x++)
          for (auto y=oBBox.min().y(); y<=oBBox.max().y(); y++)
-@@ -276,9 +391,12 @@
+@@ -276,9 +398,12 @@
                              Vector3 vecValue,
                              float fThreshold)
      {
@@ -3325,58 +5782,58 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
          
          openvdb::Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
          
-@@ -298,12 +416,14 @@
+@@ -298,12 +423,11 @@
      void SetValue(  Vector3 vecPos,
                      Vector3 vecValue)
      {
-+        TauGridMutation tauMutation(m_tauState);
++        std::unique_lock<std::recursive_mutex> tauLock(m_tauState->gate);
++        const auto xyz = TauWorldCoordinate(vecPos);
++        TauGridMutation tauMutation(m_tauState, std::move(tauLock));
          auto oAccess = m_roGrid->getAccessor();
-+        const auto voxelSize = oVoxelSize();
-         
+-        
          Vec3s vec(vecValue.X, vecValue.Y, vecValue.Z);
 -        openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
 -                            oVoxelSize().iToVoxels(vecPos.Y),
 -                            oVoxelSize().iToVoxels(vecPos.Z));
-+        openvdb::Coord xyz( voxelSize.iToVoxels(vecPos.X),
-+                            voxelSize.iToVoxels(vecPos.Y),
-+                            voxelSize.iToVoxels(vecPos.Z));
          
          oAccess.setValue(xyz, vec);
      }
-@@ -311,11 +431,13 @@
+@@ -311,49 +435,36 @@
      bool bGetValue( Vector3 vecPos,
                      Vector3* pvecValue)
      {
 +        std::lock_guard<std::recursive_mutex> tauLock(m_tauState->gate);
++        const auto xyz = TauWorldCoordinate(vecPos);
          auto oAccess = m_roGrid->getConstAccessor();
 -    
 -        openvdb::Coord xyz( oVoxelSize().iToVoxels(vecPos.X),
 -                            oVoxelSize().iToVoxels(vecPos.Y),
 -                            oVoxelSize().iToVoxels(vecPos.Z));
-+        const auto voxelSize = oVoxelSize();
+-        
+-        Vec3s vec = oAccess.getValue(xyz);
 +
-+        openvdb::Coord xyz( voxelSize.iToVoxels(vecPos.X),
-+                            voxelSize.iToVoxels(vecPos.Y),
-+                            voxelSize.iToVoxels(vecPos.Z));
++        Vec3s vec;
++        const bool active = oAccess.probeValue(xyz, vec);
          
-         Vec3s vec = oAccess.getValue(xyz);
+         pvecValue->X = vec.x();
+         pvecValue->Y = vec.y();
+         pvecValue->Z = vec.z();
          
-@@ -328,32 +450,23 @@
+-        return oAccess.isValueOn(xyz);
++        return active;
+     }
      
      void RemoveValue(Vector3 vecPos)
      {
-+        TauGridMutation tauMutation(m_tauState);
++        std::unique_lock<std::recursive_mutex> tauLock(m_tauState->gate);
++        const auto xyz = TauWorldCoordinate(vecPos);
++        TauGridMutation tauMutation(m_tauState, std::move(tauLock));
          auto oAccess = m_roGrid->getAccessor();
--        
+         
 -        openvdb::Coord xyz(     oVoxelSize().iToVoxels(vecPos.X),
 -                                oVoxelSize().iToVoxels(vecPos.Y),
 -                                oVoxelSize().iToVoxels(vecPos.Z));
-+        const auto voxelSize = oVoxelSize();
-+
-+        openvdb::Coord xyz(     voxelSize.iToVoxels(vecPos.X),
-+                                voxelSize.iToVoxels(vecPos.Y),
-+                                voxelSize.iToVoxels(vecPos.Z));
-         
+-        
          oAccess.setValueOff(xyz);
      }
      
@@ -4149,7 +6606,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_TripleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -331,35 +470,59 @@
+@@ -331,38 +470,63 @@
  
      void RenderMesh(const Mesh& oMesh)
      {
@@ -4222,8 +6679,13 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +        TauGridMutation tauMutation(m_tauState);
          PKTRACE(Voxels_RenderImplicit);
          
-         auto oAccess = m_roGrid->getAccessor();
-@@ -374,8 +537,14 @@
+-        auto oAccess = m_roGrid->getAccessor();
++        auto tauAccessorGrid = m_roGrid;
++        auto oAccess = tauAccessorGrid->getAccessor();
+         
+         Coord xyzMin = oVoxelSize().xyzToVoxels(oBBox.vecMin);
+         Coord xyzMax = oVoxelSize().xyzToVoxels(oBBox.vecMax);
+@@ -374,8 +538,17 @@
              Vector3 vecSample = oVoxelSize().vecToMM(Coord(x,y,z));
              openvdb::Coord xyz(x,y,z);
              
@@ -4234,13 +6696,16 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +            float sample = (*pfn)(&vecSample);
 +            tauObject.lock(); tauMutation.Lock(); tauMutation.Retarget(m_tauState);
 +            std::lock_guard<std::recursive_mutex> currentState(m_tauState->gate);
-+            if (observedGeneration != m_tauState->generation->identity) oAccess = m_roGrid->getAccessor();
++            if (tauAccessorGrid != m_roGrid || observedGeneration != m_tauState->generation->identity) {
++                oAccess = m_roGrid->getAccessor();
++                tauAccessorGrid = m_roGrid;
++            }
 +            if (TauHasCachedGridRead(m_tauState)) TauAdvanceGridGeneration(*m_tauState);
 +            float fValue = std::min(sample, oAccess.getValue(xyz));
              
              SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
          }
-@@ -387,18 +556,37 @@
+@@ -387,18 +560,37 @@
      {
          PKTRACE(Voxels_IntersectImplicit);
          
@@ -4288,7 +6753,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          oVox.RenderImplicit(oBBoxMM, pfn);
          
-@@ -406,16 +594,105 @@
+@@ -406,16 +598,105 @@
          // implict grid, and use our grid just as the mask
          // Not sure if this is really necessary, but the
          // implicit grid is "perfect"
@@ -4401,7 +6866,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
      	std::vector< openvdb::Vec3s > oPoints;
      	std::vector< openvdb::Vec3I > oTriangles;
-@@ -429,143 +706,187 @@
+@@ -429,143 +710,187 @@
                                                           0.0,
                                                           false);
  
@@ -4707,7 +7172,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          return (oAccess.getValue(xyz) <= 0.0f);
      }
-@@ -573,8 +894,10 @@
+@@ -573,8 +898,10 @@
      inline void GetSurfaceNormal(   Vector3 vecPt,
                                      Vector3* pvecNormal)
      {
@@ -4719,7 +7184,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      
          oStencil.moveTo(    openvdb::Coord( xyz.X,
                                              xyz.Y,
-@@ -591,20 +914,28 @@
+@@ -591,20 +918,28 @@
      inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
                                              Vector3* pvecSurfacePoint)
      {
@@ -4756,7 +7221,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          bool bStartInside = oAccess.getValue(   
                                  openvdb::Coord( xyzSearch.X,
                                                  xyzSearch.Y,
-@@ -638,31 +969,53 @@
+@@ -638,31 +973,53 @@
                                      const Vector3& vecDirection,
                                      Vector3* pvecSurfacePoint)
      {
@@ -4835,7 +7300,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      void GetVoxelDimensions(    int32_t* pnXMin,
                                  int32_t* pnYMin,
                                  int32_t* pnZMin,
-@@ -670,7 +1023,9 @@
+@@ -670,7 +1027,9 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -4846,7 +7311,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          *pnXMin     = oBBox.min().x();
          *pnYMin     = oBBox.min().y();
-@@ -683,7 +1038,9 @@
+@@ -683,7 +1042,9 @@
      void GetZSlice( int32_t nZSlice,
                      float* pfBuffer)
      {
@@ -4857,7 +7322,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -700,7 +1057,9 @@
+@@ -700,7 +1061,9 @@
      void GetXSlice( int32_t nXSlice,
                      float* pfBuffer)
      {
@@ -4868,7 +7333,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -717,7 +1076,9 @@
+@@ -717,7 +1080,9 @@
      void GetYSlice( int32_t nYSlice,
                      float* pfBuffer)
      {
@@ -4879,7 +7344,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -734,7 +1095,9 @@
+@@ -734,7 +1099,9 @@
      void GetInterpolatedZSlice( float fZSlice,
                                  float* pfBuffer)
      {
@@ -4890,7 +7355,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          auto oAccess = m_roGrid->getConstAccessor();
          
-@@ -750,18 +1113,39 @@
+@@ -750,18 +1117,39 @@
          }
      }
      
@@ -4934,7 +7399,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      int32_t             m_nSdfNarrowBand;
      
      bool bLevelSetNeedsRebuild() const
-@@ -826,40 +1210,76 @@
+@@ -826,40 +1214,76 @@
          }
      }
      
@@ -5045,7 +7510,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      template <class TAccessor>
      inline bool bBresenhamSphereHitTest(    bool bReferenceInside,
                                              Coord xyzCenter,
-@@ -870,47 +1290,83 @@
+@@ -870,47 +1294,83 @@
                                              bool* pbOutsideActiveBounds)
      {
          *pbOutsideActiveBounds = true;
@@ -5159,7 +7624,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          poAccess->setValue(xyz, std::clamp( fValue,
                                              -fBackground,
                                              fBackground));
-@@ -921,16 +1377,7 @@
+@@ -921,16 +1381,7 @@
      
      static bool bHasValidPicoGKTransform(const FloatGrid::Ptr roGrid)
      {
@@ -5177,3 +7642,66 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      }
      
  };
+diff --git a/openvdb/openvdb/openvdb/io/Archive.cc b/openvdb/openvdb/openvdb/io/Archive.cc
+--- a/openvdb/openvdb/openvdb/io/Archive.cc
++++ b/openvdb/openvdb/openvdb/io/Archive.cc
+@@ -475,17 +475,22 @@
+ 
+     ~Impl()
+     {
+-        std::string filename;
+-        if (const char* s = mMap.get_name()) filename = s;
+-        OPENVDB_LOG_DEBUG_RUNTIME("closing memory-mapped file " << filename);
+-        if (mNotifier) mNotifier(filename);
++        const char* filename = mMap.get_name();
++        if (!filename) filename = "";
++        // Teardown logging and author notification must not escape noexcept cleanup.
++        try { OPENVDB_LOG_DEBUG_RUNTIME("closing memory-mapped file " << filename); } catch (...) {}
++        if (mNotifier) {
++            try { mNotifier(std::move(mNotifierFilename)); } catch (...) {}
++        }
+         if (mAutoDelete) {
+-            if (!boost::interprocess::file_mapping::remove(filename.c_str())) {
++            if (!boost::interprocess::file_mapping::remove(filename)) {
+                 if (errno != ENOENT) {
+                     // Warn if the file exists but couldn't be removed.
+-                    std::string mesg = getErrorString();
+-                    if (!mesg.empty()) mesg = " (" + mesg + ")";
+-                    OPENVDB_LOG_WARN("failed to remove temporary file " << filename << mesg);
++                    try {
++                        std::string mesg = getErrorString();
++                        if (!mesg.empty()) mesg = " (" + mesg + ")";
++                        OPENVDB_LOG_WARN("failed to remove temporary file " << filename << mesg);
++                    } catch (...) {}
+                 }
+             }
+         }
+@@ -495,6 +500,7 @@
+     boost::interprocess::mapped_region mRegion;
+     bool mAutoDelete;
+     Notifier mNotifier;
++    std::string mNotifierFilename;
+ #if OPENVDB_ABI_VERSION_NUMBER <= 12
+     mutable std::atomic<Index64> mLastWriteTime;
+ #endif
+@@ -537,6 +543,8 @@
+ void
+ MappedFile::setNotifier(const Notifier& notifier)
+ {
++    // Prepare the by-value notifier argument while allocation failure can propagate.
++    if (notifier) mImpl->mNotifierFilename = this->filename();
+     mImpl->mNotifier = notifier;
+ }
+ 
+diff --git a/openvdb/openvdb/openvdb/tree/Tree.h b/openvdb/openvdb/openvdb/tree/Tree.h
+--- a/openvdb/openvdb/openvdb/tree/Tree.h
++++ b/openvdb/openvdb/openvdb/tree/Tree.h
+@@ -282,7 +282,7 @@
+     /// Empty tree constructor
+     Tree(const ValueType& background): mRoot(background) {}
+ 
+-    ~Tree() override { this->clear(); releaseAllAccessors(); }
++    ~Tree() override { releaseAllAccessors(); mRoot.clear(); }
+ 
+     /// Return a pointer to a deep copy of this tree
+     TreeBase::Ptr copy() const override { return TreeBase::Ptr(new Tree(*this)); }

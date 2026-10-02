@@ -262,7 +262,35 @@ diff --git a/Base/Mesh.cs b/Base/Mesh.cs
 diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
 --- a/Base/ScalarField.cs
 +++ b/Base/ScalarField.cs
-@@ -184,21 +184,9 @@
+@@ -138,7 +138,7 @@
+         public void SetValue(   Vector3 vecPosition,
+                                 float   fValue)
+         {
+-            _SetValue(lib.hThis, hThis, vecPosition, fValue);
++            TauCheckedCallbacks.Check(_SetValue(lib.hThis, hThis, vecPosition, fValue), null, this);
+         }
+ 
+         /// <summary>
+@@ -156,7 +156,8 @@
+                                 out float fValue)
+         {
+             fValue = 0.0f;
+-            return _bGetValue(lib.hThis, hThis, vecPosition, ref fValue);
++            TauCheckedCallbacks.Check(_bGetValue(lib.hThis, hThis, vecPosition, ref fValue, out byte active), null, this);
++            return active != 0;
+         }
+ 
+         /// <summary>
+@@ -165,7 +166,7 @@
+         /// <param name="vecPosition">Position of the value in space</param>
+         public void RemoveValue(Vector3 vecPosition)
+         {
+-            _RemoveValue(lib.hThis, hThis, vecPosition);
++            TauCheckedCallbacks.Check(_RemoveValue(lib.hThis, hThis, vecPosition), null, this);
+         }
+ 
+         /// <summary>
+@@ -184,21 +185,9 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -287,7 +315,7 @@ diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
          }
  
          /// <summary>
-@@ -211,47 +199,23 @@
+@@ -211,47 +200,23 @@
                                          out int nYSize,
                                          out int nZSize)
          {
@@ -343,7 +371,7 @@ diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
          }
  
          /// <summary>
-@@ -261,7 +225,7 @@
+@@ -261,7 +226,7 @@
          /// <param name="xTraverse">The interface containing the callback</param>
          public void TraverseActive(ITraverseScalarField xTraverse)
          {
@@ -352,7 +380,7 @@ diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
          }
  
          /// <summary>
-@@ -272,14 +236,14 @@
+@@ -272,14 +237,14 @@
          /// </summary>
          /// <param name="vecPosition">Position to sample</param>
          /// <returns>
@@ -372,7 +400,46 @@ diff --git a/Base/ScalarField.cs b/Base/ScalarField.cs
 diff --git a/Base/VectorField.cs b/Base/VectorField.cs
 --- a/Base/VectorField.cs
 +++ b/Base/VectorField.cs
-@@ -194,9 +194,7 @@
+@@ -149,10 +149,10 @@
+         public void SetValue(   Vector3 vecPosition,
+                                 Vector3 vecValue)
+         {
+-            _SetValue(  lib.hThis, 
++            TauCheckedCallbacks.Check(_SetValue(  lib.hThis,
+                         hThis, 
+                         vecPosition, 
+-                        vecValue);
++                        vecValue), null, this);
+         }
+ 
+         /// <summary>
+@@ -170,10 +170,11 @@
+                                 out Vector3 vecValue)
+         {
+             vecValue = Vector3.Zero;
+-            return _bGetValue(  lib.hThis, 
++            TauCheckedCallbacks.Check(_bGetValue(  lib.hThis,
+                                 hThis, 
+                                 vecPosition, 
+-                                ref vecValue);
++                                ref vecValue, out byte active), null, this);
++            return active != 0;
+         }
+ 
+         /// <summary>
+@@ -182,9 +183,9 @@
+         /// <param name="vecPosition">Position of the value in space</param>
+         public void RemoveValue(Vector3 vecPosition)
+         {
+-            _RemoveValue(   lib.hThis, 
++            TauCheckedCallbacks.Check(_RemoveValue(   lib.hThis,
+                             hThis, 
+-                            vecPosition);
++                            vecPosition), null, this);
+         }
+ 
+         /// <summary>
+@@ -194,9 +195,7 @@
          /// <param name="xTraverse">The interface containing the callback</param>
          public void TraverseActive(ITraverseVectorField xTraverse)
          {
@@ -1468,19 +1535,94 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
              m_bDisposed = true;
          }
-@@ -793,7 +759,10 @@
-                 // Nothing to do in this class
-             }
+@@ -658,8 +624,8 @@
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestUpdate")]
+         private static extern void _RequestUpdate(IntPtr hThis);
  
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_bPoll")]
+-        private static extern bool _bPoll(IntPtr hThis);
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauViewer_PollChecked")]
++        private static extern int _PollChecked(IntPtr hThis, [MarshalAs(UnmanagedType.I1)] out bool alive);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestScreenShot")]
+         private static extern bool _RequestScreenShot(  IntPtr hThis,
+@@ -679,11 +645,9 @@
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RequestClose")]
+         private static extern void _RequestClose(IntPtr hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_AddMesh")]
+-        private static extern void _AddMesh(    LibHandle   hLib,
+-                                                IntPtr      hThis,
+-                                                int         nGroup,
+-                                                MshHandle   hMesh);
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "TauViewer_AddCaptured")]
++        private static extern int _AddCaptured(LibHandle library, IntPtr viewer, int group,
++            int kind, long identity, ulong snapshot);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveMesh")]
+         private static extern void _RemoveMesh( LibHandle   hLib,
+@@ -696,12 +660,6 @@
+                                                     MshHandle       hMesh,
+                                                     in Matrix4x4    mat);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_AddVoxels")]
+-        private static extern void _AddVoxels(  LibHandle   hLib,
+-                                                IntPtr      hThis,
+-                                                int         nGroup,
+-                                                VoxHandle   hMox);
+-
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemoveVoxels")]
+         private static extern void _RemoveVoxels(   LibHandle   hLib,
+                                                     IntPtr      hThis,
+@@ -712,12 +670,6 @@
+                                                         IntPtr          hThis,
+                                                         VoxHandle       hVoxels,
+                                                         in Matrix4x4    mat);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_AddPolyLine")]
+-        private static extern void _AddPolyLine(    LibHandle   hLib,
+-                                                    IntPtr      hThis,
+-                                                    int         nGroupID,
+-                                                    PolyHandle  hPolyLine);
+ 
+         [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Viewer_RemovePolyLine")]
+         private static extern void _RemovePolyLine( LibHandle   hLib,
+@@ -781,20 +733,20 @@
+ 
+         protected virtual void Dispose(bool bDisposing)
+         {
+-            
+-            if (m_bDisposed)
+-            {
+-                return;
+-            }
+-
+-            if (bDisposing)
+-            {
+-                // dispose managed state (managed objects).
+-                // Nothing to do in this class
+-            }
+-
 -            _Destroy(hThis);
-+            if (m_xBackend is not null)
-+                m_xBackend.Dispose();
-+            else
-+                _Destroy(hThis);
-             m_bDisposed = true;
+-            m_bDisposed = true;
++            System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure;
++            lock (m_oActions)
++            {
++                if (m_bDisposed) return;
++                m_bDisposed = true;
++                failure = ReleaseNativeActions();
++            }
++            try
++            {
++                if (m_xBackend is not null) m_xBackend.Dispose();
++                else if (hThis != IntPtr.Zero) _Destroy(hThis);
++            }
++            catch (Exception error) { failure ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
++            if (bDisposing) failure?.Throw();
          }
  
-@@ -996,10 +965,7 @@
+         InfoCallback        m_fnInfoCB;
+@@ -996,10 +948,7 @@
                                                      VdbHandle  hThis,
                                                      string strFileName);
  
@@ -1492,7 +1634,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVoxels", CharSet = CharSet.Ansi)]
-@@ -1008,10 +974,7 @@
+@@ -1008,10 +957,7 @@
                                                  string      strFieldName,
                                                  VoxHandle   hVoxels);
  
@@ -1504,7 +1646,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddScalarField", CharSet = CharSet.Ansi)]
-@@ -1020,10 +983,7 @@
+@@ -1020,10 +966,7 @@
                                                      string              strFieldName,
                                                      ScalarFieldHandle   hField);
  
@@ -1516,7 +1658,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
  
  
          [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VdbFile_nAddVectorField", CharSet = CharSet.Ansi)]
-@@ -1075,7 +1035,7 @@
+@@ -1075,7 +1018,7 @@
                  // Nothing to do in this class
              }
  
@@ -1525,7 +1667,36 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1174,11 +1134,11 @@
+@@ -1111,20 +1054,20 @@
+         private static extern void _Destroy(    LibHandle           hLib,
+                                                 ScalarFieldHandle   hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_SetValue")]
+-        private static extern void _SetValue(   LibHandle           hLib,
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_SetValueChecked")]
++        private static extern int _SetValue(   LibHandle           hLib,
+                                                 ScalarFieldHandle   hThis,
+                                                 in Vector3          vecPosition,
+                                                 float               fValue);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_bGetValue")]
+-        private static extern bool _bGetValue(  LibHandle           hLib, 
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_bGetValueChecked")]
++        private static extern int _bGetValue(  LibHandle           hLib,
+                                                 ScalarFieldHandle   hThis,
+                                                 in  Vector3         vecPosition,
+-                                                ref float           fValue);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "ScalarField_RemoveValue")]
+-        private static extern bool _RemoveValue(    LibHandle           hLib,
++                                                ref float           fValue, out byte active);
++
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_ScalarField_RemoveValueChecked")]
++        private static extern int _RemoveValue(    LibHandle           hLib,
+                                                     ScalarFieldHandle   hThis,
+                                                     in  Vector3         vecPosition);
+ 
+@@ -1174,11 +1117,11 @@
  
              if (bDisposing)
              {
@@ -1542,7 +1713,36 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
          }
  
          bool m_bDisposed = false;
-@@ -1259,11 +1219,10 @@
+@@ -1213,20 +1156,20 @@
+         private static extern void _Destroy(    LibHandle  hLib,
+                                                 VectorFieldHandle hThis);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_SetValue")]
+-        private static extern void _SetValue(   LibHandle  hLib,
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_SetValueChecked")]
++        private static extern int _SetValue(   LibHandle  hLib,
+                                                 VectorFieldHandle  hThis,
+                                                 in Vector3 vecPosition,
+                                                 in Vector3 vecValue);
+ 
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_bGetValue")]
+-        private static extern bool _bGetValue(  LibHandle  hLib, 
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_bGetValueChecked")]
++        private static extern int _bGetValue(  LibHandle  hLib,
+                                                 VectorFieldHandle  hThis,
+                                                  in  Vector3 vecPosition,
+-                                                 ref Vector3 vecValue);
+-
+-        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "VectorField_RemoveValue")]
+-        private static extern bool _RemoveValue(    LibHandle  hLib,
++                                                 ref Vector3 vecValue, out byte active);
++
++        [DllImport(Config.strPicoGKLib, CallingConvention = CallingConvention.Cdecl, EntryPoint = "Tau_VectorField_RemoveValueChecked")]
++        private static extern int _RemoveValue(    LibHandle  hLib,
+                                                     VectorFieldHandle  hThis,
+                                                     in  Vector3 vecPosition);
+ 
+@@ -1259,11 +1202,10 @@
  
              if (bDisposing)
              {
@@ -1558,7 +1758,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1383,7 +1342,7 @@
+@@ -1383,7 +1325,7 @@
                  // Nothing to do in this class
              }
  
@@ -1567,7 +1767,7 @@ diff --git a/Internals/Interop.cs b/Internals/Interop.cs
              m_bDisposed = true;
          }
  
-@@ -1391,4 +1350,4 @@
+@@ -1391,4 +1333,4 @@
          internal readonly VdbMetaHandle hThis;
          public readonly Library lib;
      }
@@ -3148,10 +3348,26 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
          /// Initialize a new Viewer
          /// </summary>
          /// <param name="strTitle">Window title</param>
-@@ -195,6 +240,22 @@
+@@ -187,7 +232,13 @@
+                                 m_fnScrollWheelCB,
+                                 m_fnWindowSizeCB);
+          
+-            Debug.Assert(hThis != IntPtr.Zero);
++            if (m_tauCallbackFailure is not null)
++            {
++                lock (m_oActions) { m_bDisposed = true; ReleaseNativeActions(); }
++                _Destroy(hThis);
++                m_tauCallbackFailure.Throw();
++            }
++            if (hThis == IntPtr.Zero) throw new InvalidOperationException("PicoGK native viewer creation failed.");
+         }
+ 
+         /// <summary>
+@@ -195,7 +246,29 @@
          /// </summary>
          public bool bPoll()
          {
+-            Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
 +            if (m_xBackend is not null)
 +            {
 +                bool bAnimated;
@@ -3168,31 +3384,82 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
 +                return bAnimated;
 +            }
 +
-             Debug.Assert(m_iMainThreadID == Environment.CurrentManagedThreadId);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            if (m_iMainThreadID != Environment.CurrentManagedThreadId)
++                throw new InvalidOperationException("Poll requires the viewer's context-owning thread.");
++            if (s_tauNativePolling) throw new ArgumentException("Native viewer Poll cannot be called recursively.");
++            s_tauNativePolling = true;
++            try
++            {
              // Call this function only from the main() thread of the application
  
-@@ -247,6 +308,11 @@
+             Thread.Yield();
+@@ -218,7 +291,7 @@
+                 while (m_oActions.Count > 0)
+                 {
+                     IViewerAction oAction = m_oActions.Dequeue();
+-                    oAction.Do(this);
++                    ExecuteNativeAction(oAction);
+                     bUpdateNeeded = true;
+                 }
+             }
+@@ -235,11 +308,25 @@
+                 }
+             }
+ 
++            if (m_bDisposed) return false;
+             if (bUpdateNeeded)
+                 _RequestUpdate(hThis);
+ 
+-            Debug.Assert(_bIsValid(hThis));
+-            return _bPoll(hThis);
++            int status = _PollChecked(hThis, out bool keepPolling);
++            if (status == -1) throw new ArgumentException("Native viewer Poll must run on its owner thread and cannot be called recursively.");
++            m_tauCallbackFailure?.Throw();
++            TauCheckedCallbacks.Check(status, null, this);
++            if (!keepPolling) Dispose();
++            return keepPolling;
++            }
++            catch (Exception error)
++            {
++                var failure = m_tauCallbackFailure ?? System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error);
++                try { Dispose(); } catch { }
++                failure.Throw();
++                throw;
++            }
++            finally { s_tauNativePolling = false; }
+         }
+ 
+         /// <summary>
+@@ -247,9 +334,14 @@
          /// </summary>
          public void RequestUpdate()
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RequestUpdateAction());
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.RequestUpdate();
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RequestUpdateAction());
-@@ -307,13 +373,18 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RequestUpdateAction());
+             }
+         }
+ 
+@@ -307,13 +399,18 @@
  
                      lock (m_oActions)
                      {
+-                        m_oActions.Enqueue(new LoadLightSetupAction(    m_xLog,
 +                        if (m_xBackend is not null)
 +                        {
 +                            m_xBackend.LoadLightSetup(abyDiffuseData, abySpecularData);
 +                            return;
 +                        }
-                         m_oActions.Enqueue(new LoadLightSetupAction(    m_xLog,
++                        EnqueueNativeAction(new LoadLightSetupAction(    m_xLog,
                                                                          abyDiffuseData,
                                                                          abySpecularData));
                      }
@@ -3203,7 +3470,7 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
                  {
                      Console.WriteLine("Unable to load lights");
                  }
-@@ -323,9 +394,23 @@
+@@ -323,13 +420,26 @@
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -3219,39 +3486,57 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
          public void Add(    in Voxels vox,
                              int nGroupID = 0)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
+-            }
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Add(vox, nGroupID);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddVoxelsAction(vox, nGroupID));
-@@ -337,6 +422,11 @@
++            ArgumentNullException.ThrowIfNull(vox);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            EnqueueNativeAction(new AddVoxelsAction(vox, nGroupID));
+         }
+ 
+         /// <summary>
+@@ -337,9 +447,14 @@
          /// </summary>
          public void Remove(Voxels vox)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RemoveVoxelsAction(vox));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Remove(vox);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveVoxelsAction(vox));
-@@ -349,6 +439,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RemoveVoxelsAction(vox));
+             }
+         }
+ 
+@@ -349,22 +464,40 @@
          public void SetObjectMatrix(    Voxels vox,
                                          in Matrix4x4 mat)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetObjectMatrix(vox, mat);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetVoxelsMatrixAction(vox, mat));
-@@ -358,9 +453,23 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetVoxelsMatrixAction(vox, mat));
+             }
+         }
+ 
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -3267,39 +3552,57 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
          public void Add(    Mesh msh,
                              int nGroupID = 0)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
+-            }
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Add(msh, nGroupID);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddMeshAction(msh, nGroupID));
-@@ -372,6 +481,11 @@
++            ArgumentNullException.ThrowIfNull(msh);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            EnqueueNativeAction(new AddMeshAction(msh, nGroupID));
+         }
+ 
+         /// <summary>
+@@ -372,9 +505,14 @@
          /// </summary>
          public void Remove(Mesh msh)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RemoveMeshAction(msh));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Remove(msh);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveMeshAction(msh));
-@@ -384,6 +498,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RemoveMeshAction(msh));
+             }
+         }
+ 
+@@ -384,22 +522,40 @@
          public void SetObjectMatrix(    Mesh msh,
                                          in Matrix4x4 mat)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetObjectMatrix(msh, mat);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetMeshMatrixAction(msh, mat));
-@@ -393,9 +512,23 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetMeshMatrixAction(msh, mat));
+             }
+         }
+ 
          /// <summary>
          /// Add the object to the viewer, using the specified viewer group
          /// </summary>
@@ -3315,63 +3618,94 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
          public void Add(    PolyLine oPoly,
                              int nGroupID = 0)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
+-            }
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Add(oPoly, nGroupID);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new AddPolyLineAction(oPoly, nGroupID));
-@@ -407,6 +540,11 @@
++            ArgumentNullException.ThrowIfNull(oPoly);
++            ObjectDisposedException.ThrowIf(m_bDisposed, this);
++            EnqueueNativeAction(new AddPolyLineAction(oPoly, nGroupID));
+         }
+ 
+         /// <summary>
+@@ -407,9 +563,14 @@
          /// </summary>
          public void Remove(PolyLine oPoly)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.Remove(oPoly);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemovePolyLineAction(oPoly));
-@@ -419,6 +557,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RemovePolyLineAction(oPoly));
+             }
+         }
+ 
+@@ -419,9 +580,14 @@
          public void SetObjectMatrix(    PolyLine poly,
                                          in Matrix4x4 mat)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetObjectMatrix(poly, mat);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetPolyLineMatrixAction(poly, mat));
-@@ -430,6 +573,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetPolyLineMatrixAction(poly, mat));
+             }
+         }
+ 
+@@ -430,9 +596,14 @@
          /// </summary>
          public void RemoveAllObjects()
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RemoveAllObjectsAction());
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.RemoveAllObjects();
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RemoveAllObjectsAction());
-@@ -442,6 +590,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RemoveAllObjectsAction());
+             }
+         }
+ 
+@@ -442,9 +613,14 @@
          /// </summary>
          public void RequestScreenShot(string strScreenShotPath)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.RequestScreenShot(strScreenShotPath);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new RequestScreenShotAction(strScreenShotPath));
-@@ -453,6 +606,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new RequestScreenShotAction(strScreenShotPath));
+             }
+         }
+ 
+@@ -453,6 +629,11 @@
          /// </summary>
          public void EnableExperimental(bool bEnable)
          {
@@ -3383,19 +3717,23 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
              _EnableExperimental(hThis, bEnable);
          }
  
-@@ -462,10 +620,26 @@
+@@ -462,10 +643,26 @@
          public void SetGroupVisible(int nGroupID,
                                          bool bVisible)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
+-            }
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetGroupVisible(nGroupID, bVisible);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupVisibleAction(nGroupID, bVisible));
-             }
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetGroupVisibleAction(nGroupID, bVisible));
++            }
 +        }
 +
 +        /// <summary>Assign a typed physical material to every object in the hosted group.</summary>
@@ -3410,55 +3748,79 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
          }
  
          /// <summary>
-@@ -480,6 +654,11 @@
+@@ -480,9 +677,14 @@
                                          float       fMetallic,
                                          float       fRoughness)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetGroupMaterial(nGroupID, clr, fMetallic, fRoughness);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupMaterialAction(  nGroupID,
-@@ -495,6 +674,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetGroupMaterialAction(  nGroupID,
+                                                                 clr,
+                                                                 fMetallic,
+                                                                 fRoughness));
+@@ -495,9 +697,14 @@
          public void SetGroupMatrix( int nGroupID,
                                      Matrix4x4 mat)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.SetGroupMatrix(nGroupID, mat);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new SetGroupMatrixAction(    nGroupID,
-@@ -512,6 +696,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new SetGroupMatrixAction(    nGroupID,
+                                                                 mat));
+             }
+         }
+@@ -512,9 +719,14 @@
                                              Overhang uWarning,
                                              Overhang uError)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.EnableOverhangWarning(nGroupID, uWarning, uError);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new EnableGroupOverhangWarningAction(    nGroupID, 
-@@ -542,6 +731,11 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new EnableGroupOverhangWarningAction(    nGroupID,
+                                                                             uWarning, 
+                                                                             uError));
+             }   
+@@ -542,9 +754,14 @@
          /// </summary>
          public void DisableOverhangWarning(int nGroupID)
          {
+-            lock (m_oActions)
+-            {
+-                m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
 +            if (m_xBackend is not null)
 +            {
 +                m_xBackend.DisableOverhangWarning(nGroupID);
 +                return;
 +            }
-             lock (m_oActions)
-             {
-                 m_oActions.Enqueue(new DisableGroupOverhangWarningAction(nGroupID));
-@@ -553,6 +747,8 @@
++            lock (m_oActions)
++            {
++                EnqueueNativeAction(new DisableGroupOverhangWarningAction(nGroupID));
+             }   
+         }
+ 
+@@ -553,6 +770,8 @@
          /// </summary>
          public BBox3 oBBox()
          {
@@ -3467,7 +3829,7 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
              BBox3 oBBox = new();
              _GetBoundingBox(hThis, ref oBBox);
              return oBBox;
-@@ -563,6 +759,11 @@
+@@ -563,6 +782,11 @@
          /// </summary>
          public void SetBackgroundColor(ColorFloat clr)
          {
@@ -3479,7 +3841,7 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
              m_clrBackground = clr;
              RequestUpdate();
          }
-@@ -572,6 +773,11 @@
+@@ -572,6 +796,11 @@
          /// </summary>
          public void ZoomToFit()
          {
@@ -3491,7 +3853,7 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
              m_bForceZoomToFit = true;
              RequestUpdate();
          }
-@@ -581,6 +787,11 @@
+@@ -581,6 +810,11 @@
          /// </summary>
          public void SetFov(float fAngle)
          {
@@ -3503,7 +3865,7 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
              m_oCamera.SetVerticalFov(fAngle);
              RequestUpdate();
          }
-@@ -590,9 +801,14 @@
+@@ -590,9 +824,14 @@
          /// </summary>
          public Quaternion qOrientation
          {
@@ -3519,7 +3881,7 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
                  m_oCamera.qOrientation = value; 
                  RequestUpdate();
              }
-@@ -614,6 +830,8 @@
+@@ -614,6 +853,8 @@
          /// false: Viewer actions still pending (busy)</returns>
          public bool bIsIdle()
          {
@@ -3528,7 +3890,7 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
              lock (m_oActions)
              {
                  if (m_oActions.Count() > 0)
-@@ -625,11 +843,13 @@
+@@ -625,11 +866,13 @@
  
          bool m_bIdle = false;
  
@@ -3543,12 +3905,606 @@ diff --git a/Viewer/Viewer.cs b/Viewer/Viewer.cs
                 void DoRemove(Mesh msh)
          {
              _RemoveMesh(    msh.lib.hThis,
-@@ -822,4 +1042,3 @@
+@@ -650,10 +893,23 @@
+ 
+         ///////// Internals
+ 
++        [ThreadStatic] static bool s_tauNativePolling;
++        System.Runtime.ExceptionServices.ExceptionDispatchInfo? m_tauCallbackFailure;
++        void TauRecordCallbackFailure(Exception error)
++        {
++            Interlocked.CompareExchange(ref m_tauCallbackFailure,
++                System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error), null);
++        }
++
+         void InfoCB(    string strMessage,
+                         bool bFatalError)
+         {
+-            m_xLog.Log(strMessage);
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                m_xLog.Log(strMessage);
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void UpdateCB(  IntPtr          hViewer,
+@@ -662,6 +918,7 @@
+                         ref Matrix4x4   matVP,
+                         ref Vector3     vecEye)
+         {
++            if (m_tauCallbackFailure is not null) return;
+             try
+             {
+                 Debug.Assert(hViewer == hThis);
+@@ -692,11 +949,7 @@
+                 vecEye          =   m_oCamera.vecEye;
+                 clrBackground   =   m_clrBackground;
+             }
+-
+-            catch (Exception e)
+-            {
+-                m_xLog.Log($"Caught exception in Viewer update callback:\n{e.ToString()}\n");
+-            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void KeyPressedCB(  IntPtr hViewer,
+@@ -705,23 +958,28 @@
+                             int iAction,
+                             int iModifiers)
+         {
+-            Debug.Assert(hViewer == hThis);
+-
+-            EKeys eKey = (EKeys)iKey;
+-
+-            if ((iAction == 0) || (iAction == 1)) // ignore 2, which is repeat, only down and up
+-            {
+-                foreach (IKeyHandler xHandler in m_oKeyHandlers)
+-                {
+-                    if (xHandler.bHandleEvent(  this,
+-                                                eKey, iAction == 1, // Pressed
+-                                                (iModifiers & 0x0001) != 0,
+-                                                (iModifiers & 0x0002) != 0,
+-                                                (iModifiers & 0x0004) != 0,
+-                                                (iModifiers & 0x0008) != 0))
+-                        return; // Handled
+-                }
+-            }
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++
++                EKeys eKey = (EKeys)iKey;
++
++                if ((iAction == 0) || (iAction == 1)) // ignore 2, which is repeat, only down and up
++                {
++                    foreach (IKeyHandler xHandler in m_oKeyHandlers)
++                    {
++                        if (xHandler.bHandleEvent(  this,
++                                                    eKey, iAction == 1, // Pressed
++                                                    (iModifiers & 0x0001) != 0,
++                                                    (iModifiers & 0x0002) != 0,
++                                                    (iModifiers & 0x0004) != 0,
++                                                    (iModifiers & 0x0008) != 0))
++                            return; // Handled
++                    }
++                }
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void MouseMovedCB(  IntPtr hViewer,
+@@ -731,30 +989,35 @@
+                             bool        bAlt,
+                             bool        bCmd)
+         {
+-            Debug.Assert(hViewer == hThis);
+-
+-            if (m_bMouseDrag)
+-            {
+-                Vector2 vecDist         = vecMousePos - m_vecMousePos;
+-                Camera.EDragType eType  = Camera.EDragType.Rotate;
+-
+-                if (bShift)
+-                    eType = Camera.EDragType.Pan;
+-                else if (bAlt)
+-                    eType = Camera.EDragType.Spin;
+-
+-                m_oCamera.MouseDrag(vecDist, eType);
+-                m_bHadCamInteractions = true;
+-
+-                lock (m_oAnims)
+-                {
+-                    m_oAnims.Clear();
+-                }
+-
+-                RequestUpdate();
+-            }
+-
+-            m_vecMousePos = vecMousePos;
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++
++                if (m_bMouseDrag)
++                {
++                    Vector2 vecDist         = vecMousePos - m_vecMousePos;
++                    Camera.EDragType eType  = Camera.EDragType.Rotate;
++
++                    if (bShift)
++                        eType = Camera.EDragType.Pan;
++                    else if (bAlt)
++                        eType = Camera.EDragType.Spin;
++
++                    m_oCamera.MouseDrag(vecDist, eType);
++                    m_bHadCamInteractions = true;
++
++                    lock (m_oAnims)
++                    {
++                        m_oAnims.Clear();
++                    }
++
++                    RequestUpdate();
++                }
++
++                m_vecMousePos = vecMousePos;
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void MouseButtonCB( IntPtr hViewer,
+@@ -763,24 +1026,29 @@
+                             int iModifiers,
+                             in Vector2 vecMousePos)
+         {
+-            Debug.Assert(hViewer == hThis);
+-            m_vecMousePos = vecMousePos;
+-
+-            if (iAction == 1)
+-            {
+-                m_bMouseDrag = true;
+-                
+-                lock (m_oAnims)
+-                {
+-                    m_oAnims.Clear();
+-                }
+-
+-                RequestUpdate();
+-            }
+-            else if (iAction == 0)
+-            {
+-                m_bMouseDrag = false;
+-            }
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++                m_vecMousePos = vecMousePos;
++
++                if (iAction == 1)
++                {
++                    m_bMouseDrag = true;
++
++                    lock (m_oAnims)
++                    {
++                        m_oAnims.Clear();
++                    }
++
++                    RequestUpdate();
++                }
++                else if (iAction == 0)
++                {
++                    m_bMouseDrag = false;
++                }
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void ScrollWheelCB( IntPtr      hViewer,
+@@ -791,35 +1059,44 @@
+                             bool        bAlt,
+                             bool        bCmd)
+         {
+-            Debug.Assert(hViewer == hThis);
+-
+-            if (bCtrl || bCmd)
+-            {
+-                m_oCamera.Scroll(vecScrollWheel);
+-            }
+-            else
+-            {
+-                Camera.EDragType eType = Camera.EDragType.Rotate;
+-
+-                if (bShift)
+-                    eType = Camera.EDragType.Pan;
+-                else if (bAlt)
+-                    eType = Camera.EDragType.Spin;
+-
+-                m_oCamera.MouseDrag(vecScrollWheel * 3, eType);
+-            }
+-
+-            m_bHadCamInteractions = true;
+-            RequestUpdate();
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++
++                if (bCtrl || bCmd)
++                {
++                    m_oCamera.Scroll(vecScrollWheel);
++                }
++                else
++                {
++                    Camera.EDragType eType = Camera.EDragType.Rotate;
++
++                    if (bShift)
++                        eType = Camera.EDragType.Pan;
++                    else if (bAlt)
++                        eType = Camera.EDragType.Spin;
++
++                    m_oCamera.MouseDrag(vecScrollWheel * 3, eType);
++                }
++
++                m_bHadCamInteractions = true;
++                RequestUpdate();
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
+         }
+ 
+         void WindowSizeCB(  IntPtr hViewer,
+                             in Vector2 vecWindowSize)
+         {
+-            Debug.Assert(hViewer == hThis);
+-            // Vieport size will be updated in Update Callback
+-            RequestUpdate();
++            if (m_tauCallbackFailure is not null) return;
++            try
++            {
++                Debug.Assert(hViewer == hThis);
++                // Vieport size will be updated in Update Callback
++                RequestUpdate();
++            }
++            catch (Exception error) { TauRecordCallbackFailure(error); }
          }
      }
  }
 -    
 \ No newline at end of file
+diff --git a/Viewer/ViewerActions.cs b/Viewer/ViewerActions.cs
+--- a/Viewer/ViewerActions.cs
++++ b/Viewer/ViewerActions.cs
+@@ -54,6 +54,53 @@
+ 
+         Queue<IViewerAction> m_oActions = new();
+ 
++        void EnqueueNativeAction(IViewerAction action)
++        {
++            try
++            {
++                lock (m_oActions)
++                {
++                    ObjectDisposedException.ThrowIf(m_bDisposed, this);
++                    m_oActions.Enqueue(action);
++                }
++            }
++            catch
++            {
++                if (action is AddGeometryAction captured) captured.Dispose();
++                throw;
++            }
++        }
++
++        System.Runtime.ExceptionServices.ExceptionDispatchInfo? ReleaseNativeActions()
++        {
++            System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
++            while (m_oActions.Count > 0)
++            {
++                if (m_oActions.Dequeue() is not AddGeometryAction captured) continue;
++                try { captured.Dispose(); }
++                catch (Exception error) { failure ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
++            }
++            return failure;
++        }
++
++        void ExecuteNativeAction(IViewerAction action)
++        {
++            System.Runtime.ExceptionServices.ExceptionDispatchInfo? failure = null;
++            try { action.Do(this); }
++            catch (Exception error) { failure = m_tauCallbackFailure ?? System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
++            failure ??= m_tauCallbackFailure;
++            if (action is AddGeometryAction captured)
++            {
++                try { captured.Dispose(); }
++                catch (Exception error) { failure ??= System.Runtime.ExceptionServices.ExceptionDispatchInfo.Capture(error); }
++            }
++            if (failure is not null)
++            {
++                ReleaseNativeActions();
++                failure.Throw();
++            }
++        }
++
+         class SetGroupVisibleAction : IViewerAction
+         {
+             public SetGroupVisibleAction(   int nGroupID,
+@@ -192,183 +239,125 @@
+         }
+ 
+         
+-        class AddVoxelsAction : IViewerAction
+-        {
+-            public AddVoxelsAction( Voxels vox,
+-                                    int nGroupID)
+-            {
+-                m_vox = vox;
+-                m_nGroupID = nGroupID;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _AddVoxels( m_vox.lib.hThis,
+-                            oViewer.hThis,
+-                            m_nGroupID,
+-                            m_vox.hThis);
+-            }
+-         
+-            Voxels m_vox;
+-            int m_nGroupID;
++        // Native actions own the call-time frozen lease, never deferred mutable source reads.
++        abstract class AddGeometryAction : IViewerAction, IDisposable
++        {
++            TauGeometryCapture m_capture = null!;
++            readonly int m_kind;
++            readonly long m_identity;
++            readonly int m_group;
++            protected AddGeometryAction(int kind, long identity, int group)
++            {
++                m_kind = kind;
++                m_identity = identity;
++                m_group = group;
++            }
++            // Acquire only after this action has been allocated; a failed acquisition publishes nothing.
++            protected void Capture(TauGeometryCapture capture) => m_capture = capture;
++            public void Do(Viewer viewer)
++            {
++                int status = _AddCaptured(m_capture.Library.hThis, viewer.hThis,
++                    m_group, m_kind, m_identity, m_capture.Snapshot);
++                GC.KeepAlive(m_capture);
++                TauCheckedCallbacks.Check(status, null, viewer);
++            }
++            public void Dispose() => m_capture.Dispose();
++        }
++
++        class AddVoxelsAction : AddGeometryAction
++        {
++            public AddVoxelsAction(Voxels vox, int group)
++                : base(1, vox.hThis.Value, group) { Capture(vox.TauAcquireGeometry()); }
+         }
+ 
+         class RemoveVoxelsAction : IViewerAction
+         {
++            readonly LibHandle m_library;
++            readonly VoxHandle m_identity;
+             public RemoveVoxelsAction(Voxels vox)
+             {
+-                m_vox = vox;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _RemoveVoxels(  m_vox.lib.hThis,
+-                                oViewer.hThis,
+-                                m_vox.hThis);
+-            }
+-
+-            Voxels m_vox;
+-
++                m_library = vox.lib.hThis;
++                m_identity = vox.hThis;
++            }
++            public void Do(Viewer viewer) => _RemoveVoxels(m_library, viewer.hThis, m_identity);
+         }
+ 
+         class SetVoxelsMatrixAction : IViewerAction
+         {
+-            public SetVoxelsMatrixAction(   Voxels vox,
+-                                            in Matrix4x4 mat)
+-            {
+-                m_vox   = vox;
+-                m_mat   = mat;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _SetVoxelsMatrix(   m_vox.lib.hThis,
+-                                    oViewer.hThis,
+-                                    m_vox.hThis,
+-                                    m_mat);
+-            }
+-
+-            Voxels      m_vox;
+-            Matrix4x4   m_mat;
+-        }
+-
+-        class AddMeshAction : IViewerAction
+-        {
+-            public AddMeshAction(   Mesh msh,
+-                                    int nGroupID)
+-            {
+-                m_msh = msh;
+-                m_nGroupID = nGroupID;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _AddMesh(   m_msh.lib.hThis,
+-                            oViewer.hThis,
+-                            m_nGroupID,
+-                            m_msh.hThis);
+-            }
+-
+-            Mesh m_msh;
+-            int m_nGroupID;
++            readonly LibHandle m_library;
++            readonly VoxHandle m_identity;
++            readonly Matrix4x4 m_matrix;
++            public SetVoxelsMatrixAction(Voxels vox, in Matrix4x4 matrix)
++            {
++                m_library = vox.lib.hThis;
++                m_identity = vox.hThis;
++                m_matrix = matrix;
++            }
++            public void Do(Viewer viewer) => _SetVoxelsMatrix(m_library, viewer.hThis, m_identity, m_matrix);
++        }
++
++        class AddMeshAction : AddGeometryAction
++        {
++            public AddMeshAction(Mesh msh, int group)
++                : base(0, msh.hThis.Value, group) { Capture(msh.TauAcquireGeometry()); }
+         }
+ 
+         class RemoveMeshAction : IViewerAction
+         {
++            readonly LibHandle m_library;
++            readonly MshHandle m_identity;
+             public RemoveMeshAction(Mesh msh)
+             {
+-                m_msh = msh;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _RemoveMesh(    m_msh.lib.hThis,
+-                                oViewer.hThis,
+-                                m_msh.hThis);
+-            }
+-
+-            Mesh m_msh;
++                m_library = msh.lib.hThis;
++                m_identity = msh.hThis;
++            }
++            public void Do(Viewer viewer) => _RemoveMesh(m_library, viewer.hThis, m_identity);
+         }
+ 
+         class SetMeshMatrixAction : IViewerAction
+         {
+-            public SetMeshMatrixAction(   Mesh msh,
+-                                          in Matrix4x4 mat)
+-            {
+-                m_msh   = msh;
+-                m_mat   = mat;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _SetMeshMatrix( m_msh.lib.hThis,
+-                                oViewer.hThis,
+-                                m_msh.hThis,
+-                                m_mat);
+-            }
+-
+-            Mesh        m_msh;
+-            Matrix4x4   m_mat;
+-        }
+-
+-        class AddPolyLineAction : IViewerAction
+-        {
+-            public AddPolyLineAction(   PolyLine poly,
+-                                        int nGroupID)
+-            {
+-                m_poly = poly;
+-                m_nGroupID = nGroupID;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _AddPolyLine(   m_poly.lib.hThis,
+-                                oViewer.hThis,
+-                                m_nGroupID,
+-                                m_poly.hThis);
+-
+-            }
+-
+-            PolyLine m_poly;
+-            int m_nGroupID;
++            readonly LibHandle m_library;
++            readonly MshHandle m_identity;
++            readonly Matrix4x4 m_matrix;
++            public SetMeshMatrixAction(Mesh msh, in Matrix4x4 matrix)
++            {
++                m_library = msh.lib.hThis;
++                m_identity = msh.hThis;
++                m_matrix = matrix;
++            }
++            public void Do(Viewer viewer) => _SetMeshMatrix(m_library, viewer.hThis, m_identity, m_matrix);
++        }
++
++        class AddPolyLineAction : AddGeometryAction
++        {
++            public AddPolyLineAction(PolyLine poly, int group)
++                : base(2, poly.hThis.Value, group) { Capture(poly.TauAcquireGeometry()); }
+         }
+ 
+         class RemovePolyLineAction : IViewerAction
+         {
++            readonly LibHandle m_library;
++            readonly PolyHandle m_identity;
+             public RemovePolyLineAction(PolyLine poly)
+             {
+-                m_poly = poly;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _RemovePolyLine(    m_poly.lib.hThis,
+-                                    oViewer.hThis,
+-                                    m_poly.hThis);
+-            }
+-
+-            PolyLine m_poly;
++                m_library = poly.lib.hThis;
++                m_identity = poly.hThis;
++            }
++            public void Do(Viewer viewer) => _RemovePolyLine(m_library, viewer.hThis, m_identity);
+         }
+ 
+         class SetPolyLineMatrixAction : IViewerAction
+         {
+-            public SetPolyLineMatrixAction( PolyLine poly,
+-                                            in Matrix4x4 mat)
+-            {
+-                m_poly  = poly;
+-                m_mat   = mat;
+-            }
+-
+-            public void Do(Viewer oViewer)
+-            {
+-                _SetPolyLineMatrix( m_poly.lib.hThis,
+-                                    oViewer.hThis,
+-                                    m_poly.hThis,
+-                                    m_mat);
+-            }
+-
+-            PolyLine    m_poly;
+-            Matrix4x4   m_mat;
++            readonly LibHandle m_library;
++            readonly PolyHandle m_identity;
++            readonly Matrix4x4 m_matrix;
++            public SetPolyLineMatrixAction(PolyLine poly, in Matrix4x4 matrix)
++            {
++                m_library = poly.lib.hThis;
++                m_identity = poly.hThis;
++                m_matrix = matrix;
++            }
++            public void Do(Viewer viewer) => _SetPolyLineMatrix(m_library, viewer.hThis, m_identity, m_matrix);
+         }
+ 
+         class RemoveAllObjectsAction : IViewerAction
 diff --git a/Viewer/ViewerBackend.cs b/Viewer/ViewerBackend.cs
 new file mode 100644
 --- /dev/null

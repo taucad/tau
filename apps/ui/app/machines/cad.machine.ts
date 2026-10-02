@@ -1,3 +1,4 @@
+import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import { markGeometryReceipt } from '#lib/renderer-telemetry.js';
 import { setup, types, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
@@ -96,16 +97,27 @@ type CadEvent =
   | { type: 'setCodeIssues'; errors: CadContext['codeIssues'] }
   | { type: 'defaultRendered'; rendering: Rendering }
   | { type: 'documentEvaluated'; evaluation: Evaluation }
+  | {
+      type: 'defaultViewChanged';
+      document: RuntimeDocument;
+      view: ViewSubscription | undefined;
+    }
   | { type: 'documentDescribed'; description: Description }
   | {
       type: 'documentOpened';
       document: RuntimeDocument;
-      defaultView: ViewSubscription;
+      defaultView: ViewSubscription | undefined;
       cleanups: Array<() => void>;
       requestId: number;
     }
-  | { type: 'documentStatusChanged'; status: 'evaluating' | 'ready' | 'error' | 'closed' }
-  | { type: 'defaultViewStatusChanged'; status: 'rendering' | 'ready' | 'error' | 'closed' }
+  | {
+      type: 'documentStatusChanged';
+      status: 'evaluating' | 'ready' | 'error' | 'closed';
+    }
+  | {
+      type: 'defaultViewStatusChanged';
+      status: 'rendering' | 'ready' | 'error' | 'closed';
+    }
   | { type: 'parametersParsed'; manifest: ParameterManifest }
   | { type: 'kernelIssue'; errors: KernelIssue[] }
   | { type: 'kernelProgress'; phase: string }
@@ -370,13 +382,57 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
       ...(initial?.stage === undefined ? {} : { stage: initial.stage }),
       watch: true,
     });
-    const defaultView = document.view();
+    let defaultView: ViewSubscription | undefined;
+    let kernelId: string | undefined;
+    let selectedViewKey = '';
+    let viewCleanups: Array<() => void> = [];
+    const subscribeView = (view: ViewSubscription): void => {
+      viewCleanups = [
+        view.on('rendered', (rendering) => {
+          const artifact = rendering.success ? asKnownArtifact(rendering.artifact) : undefined;
+          if (artifact?.mimeType === 'model/gltf-binary') {
+            markGeometryReceipt(artifact.content);
+          }
+          input.machineRef.send({ type: 'defaultRendered', rendering });
+        }),
+        view.on('status', (status) => {
+          input.machineRef.send({ type: 'defaultViewStatusChanged', status });
+        }),
+      ];
+    };
+    const followDefaultOffer = (evaluation: Evaluation): void => {
+      if (!evaluation.success) {
+        return;
+      }
+      const offer = evaluation.views[0];
+      const content = interactiveViewContent(offer?.mimeType, kernelId, input.client?.capabilities);
+      const key = `${offer?.id ?? ''}:${Boolean(content)}`;
+      if (key === selectedViewKey) {
+        return;
+      }
+      selectedViewKey = key;
+      for (const cleanup of viewCleanups) {
+        cleanup();
+      }
+      defaultView?.close();
+      defaultView = offer ? document.view(offer.id, content ? { content } : {}) : undefined;
+      input.machineRef.send({
+        type: 'defaultViewChanged',
+        document,
+        view: defaultView,
+      });
+      if (defaultView) {
+        subscribeView(defaultView);
+      }
+    };
     const cleanups = [
       document.on('described', (description) => {
+        kernelId = description.kernelId;
         input.machineRef.send({ type: 'documentDescribed', description });
       }),
       document.on('evaluated', (evaluation) => {
         input.machineRef.send({ type: 'documentEvaluated', evaluation });
+        followDefaultOffer(evaluation);
       }),
       document.on('progress', ({ phase }) => {
         input.machineRef.send({ type: 'kernelProgress', phase });
@@ -384,20 +440,24 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
       document.on('status', (status) => {
         input.machineRef.send({ type: 'documentStatusChanged', status });
       }),
-      defaultView.on('rendered', (rendering) => {
-        const artifact = rendering.success ? asKnownArtifact(rendering.artifact) : undefined;
-        if (artifact?.mimeType === 'model/gltf-binary') {
-          markGeometryReceipt(artifact.content);
+      () => {
+        for (const cleanup of viewCleanups) {
+          cleanup();
         }
-        input.machineRef.send({ type: 'defaultRendered', rendering });
-      }),
-      defaultView.on('status', (status) => {
-        input.machineRef.send({ type: 'defaultViewStatusChanged', status });
-      }),
+      },
     ];
     signal.throwIfAborted();
-    input.machineRef.send({ type: 'documentOpened', document, defaultView, cleanups, requestId: input.requestId });
-    await document.evaluation({ signal });
+    input.machineRef.send({
+      type: 'documentOpened',
+      document,
+      defaultView,
+      cleanups,
+      requestId: input.requestId,
+    });
+    const outcome = await document.evaluation({ signal });
+    if (!outcome.superseded) {
+      followDefaultOffer(outcome.evaluation);
+    }
     return;
   }
 
@@ -460,7 +520,9 @@ type CadArgs<EventType extends CadEvent['type']> = Readonly<{
 }>;
 type RenderTrigger = Extract<
   CadEvent,
-  { type: 'initializeModel' | 'setEntryPath' | 'commitParameters' | 'setPreviewParameters' | 'scrubParameters' }
+  {
+    type: 'initializeModel' | 'setEntryPath' | 'commitParameters' | 'setPreviewParameters' | 'scrubParameters';
+  }
 >;
 
 /*
@@ -794,15 +856,21 @@ export const cadMachine = setup({
           for (const cleanup of event.cleanups) {
             safeDispose(cleanup);
           }
-          event.defaultView.close();
+          event.defaultView?.close();
           event.document.close();
         });
         return {};
       }
       return {
-        context: { document: event.document, defaultView: event.defaultView, documentCleanups: event.cleanups },
+        context: {
+          document: event.document,
+          defaultView: event.defaultView,
+          documentCleanups: event.cleanups,
+        },
       };
     },
+    defaultViewChanged: ({ context, event }) =>
+      context.document === event.document ? { context: { defaultView: event.view } } : {},
     documentStatusChanged: ({ event }) => {
       if (event.status === 'evaluating') {
         return { target: '.rendering.active' };
@@ -1095,3 +1163,9 @@ export const selectCadUnits = (snapshot: CadSnapshot): CadContext['units'] => sn
 export const selectCadKernelClient = (snapshot: CadSnapshot): AppRuntimeClient | undefined =>
   snapshot.context.kernelClient;
 export const selectIsCadLoading = (snapshot: CadSnapshot): boolean => snapshot.hasTag('cad-loading');
+
+/** Capabilities advertised by the connected runtime. */
+export const selectCadCapabilities = (snapshot: CadSnapshot): AppCapabilitiesManifest | undefined =>
+  snapshot.context.capabilities;
+/** Kernel owning the current document description. */
+export const selectCadActiveKernelId = (snapshot: CadSnapshot): string | undefined => snapshot.context.activeKernelId;

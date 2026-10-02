@@ -1,5 +1,9 @@
 /* oxlint-disable no-bitwise, typescript/consistent-type-assertions -- Binary header fixtures and partial XState snapshots intentionally use low-level encoding and test-only casts. */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import { Matrix4 } from 'three';
+import { writeGlb } from '@taucad/geometry-core';
+import type { Mechanism } from '@taucad/kinematics';
 import type { ExportFile } from '@taucad/types';
 import type { Artifact, Rendering } from '@taucad/runtime';
 import type { CameraState } from '@taucad/camera';
@@ -13,6 +17,7 @@ import type { HeadlessImageJob } from '#services/headless-image.service.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
+import { parseGltfBytes } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import {
   isSectionRemoved,
   maxSectionPieces,
@@ -345,6 +350,7 @@ describe('headless capture adapter', () => {
       modelInteractionRef: {
         getSnapshot: () => ({ context: { unitsById: { unit: liveUnit } } }),
       },
+      kinematicsRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
     };
     const graphicsRef = {
       getSnapshot: () => ({
@@ -415,6 +421,119 @@ describe('headless capture adapter', () => {
     const orthographicJob = exportImage.mock.calls[1]![0];
     expect(orthographicJob).toMatchObject({ sourceFormat: 'svg', content: svg.content, format: 'png' });
     expect(orthographicJob.exportOptions).toMatchObject({ width: 1600, height: 1600, axes: true, scaleBar: true });
+  });
+
+  it('should capture the selected fresh drawing in its units despite a failed default view', async () => {
+    vi.mocked(awaitFreshRender).mockClear();
+    const defaultSnapshot = snapshot(gltf);
+    defaultSnapshot.context.latestRenderingOutcome = 'failure';
+    const cadRef = mock<Parameters<typeof captureCadImages>[0]['cadRef']>({ getSnapshot: () => defaultSnapshot });
+    const selected: Rendering = {
+      success: true,
+      artifact: { ...svg, units: { length: 'cm' } },
+      hash: 'selected-drawing',
+      view: 'schematic',
+      requestId: 'selected-request',
+      evaluationId: 'selected-evaluation',
+      transient: false,
+      issues: [],
+    };
+    let resolveRendering!: (rendering: Rendering) => void;
+    const captureRendering = vi.fn(
+      async () =>
+        new Promise<Rendering>((resolve) => {
+          resolveRendering = resolve;
+        }),
+    );
+    const exportImage = vi.fn<ExportImage>(async () => [png(2400, 1350)]);
+    const capture = captureCadImages({
+      cadRef,
+      captureRendering,
+      imageService: { export: exportImage },
+      recipe: { purpose: 'chat', mode: 'current' },
+    });
+    expect(exportImage).not.toHaveBeenCalled();
+    resolveRendering(selected);
+    await capture;
+    expect(awaitFreshRender).not.toHaveBeenCalled();
+    expect(exportImage.mock.calls[0]?.[0]).toMatchObject({
+      sourceFormat: 'svg',
+      content: svg.content,
+      exportOptions: { lengthSymbol: 'cm' },
+    });
+    expect(exportImage.mock.calls[0]?.[0].identity).toContain('selected-drawing');
+  });
+
+  it('should reject a selected transient projection instead of capturing the default model', async () => {
+    const cadRef = mock<Parameters<typeof captureCadImages>[0]['cadRef']>({ getSnapshot: () => snapshot(gltf) });
+    const { rendering } = snapshot(svg).context;
+    if (!rendering) {
+      throw new Error('Missing rendering fixture');
+    }
+    const exportImage = vi.fn<ExportImage>();
+    await expect(
+      captureCadImages({
+        cadRef,
+        captureRendering: async () => ({ ...rendering, transient: true }),
+        imageService: { export: exportImage },
+        recipe: { purpose: 'chat', mode: 'current' },
+      }),
+    ).rejects.toThrow('The selected CAD view has no committed rendering');
+    expect(exportImage).not.toHaveBeenCalled();
+  });
+
+  it('should send posed transparent capture bytes with a distinct cache identity', async () => {
+    const content = writeGlb({
+      nodes: [
+        {
+          primitives: [
+            {
+              mode: 4,
+              positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+              material: {},
+            },
+          ],
+        },
+      ],
+    });
+    const original = new Uint8Array(content);
+    const delta = new Matrix4().makeRotationZ(Math.PI / 2);
+    const mechanism: Mechanism = {
+      schemaVersion: 1,
+      units: { length: 'm', angle: 'rad' },
+      root: 'base',
+      links: { base: { components: [] }, arm: { components: ['component:node-0'] } },
+      joints: { hinge: { type: 'revolute', parent: 'base', child: 'arm', origin: [0, 0, 0], axis: [0, 0, 1] } },
+    };
+    const exportImage = vi.fn<ExportImage>(async () => [webp(2400, 1350)]);
+    await captureSettledCadImages({
+      cadSnapshot: snapshot({ ...gltf, content }),
+      cameraState,
+      imageService: { export: exportImage },
+      recipe: { purpose: 'chat', mode: 'current' },
+      presentation: {
+        upDirection: 'z',
+        enableSurfaces: true,
+        enableLines: true,
+        hiddenComponentIds: [],
+        isolatedComponentIds: [],
+        model: {
+          mechanism,
+          pose: { coordinates: { hinge: Math.PI / 2 }, linkTransforms: { arm: delta.toArray() } },
+          opacityByComponentId: { 'component:node-0': 0.25 },
+        },
+      },
+    });
+    const job = exportImage.mock.calls[0]?.[0];
+    if (job?.sourceFormat !== 'glb') {
+      throw new Error('Expected a GLB capture');
+    }
+    expect(job.geometryHash).not.toBe(gltf.hash);
+    const { json } = parseGltfBytes(job.content);
+    expect(json.nodes?.[0]?.matrix).toEqual(delta.toArray());
+    const surface = json.meshes?.[json.nodes?.[0]?.mesh ?? 0]?.primitives?.[0];
+    expect(json.materials?.[surface?.material ?? 0]?.pbrMetallicRoughness?.baseColorFactor?.[3]).toBe(0.25);
+    expect(content).toEqual(original);
   });
 
   it('rejects malformed output before dispatch and encodes MIME-aware data URLs', async () => {
@@ -530,6 +649,7 @@ describe('headless capture of section cuts', () => {
           committedSectionCuts: cuts,
           modelInteractionUnitId: undefined,
           modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+          kinematicsRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
         },
       }),
     }) as unknown as Parameters<typeof captureCadImages>[0]['graphicsRef'];

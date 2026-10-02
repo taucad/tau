@@ -142,6 +142,28 @@ describe('graphics GLTF presentation projection', () => {
     }
   });
 
+  it('keeps artifact source identity atomic through replacement and clearing', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      const first = artifact();
+      const second = artifact();
+      actor.send({ type: 'updateArtifact', artifact: first, hash: 'first', sourceFile: 'first.scad' });
+      actor.send({ type: 'updateArtifact', artifact: second, hash: 'second', sourceFile: 'second.scad' });
+      expect(actor.getSnapshot().context).toMatchObject({
+        artifact: second,
+        artifactKey: 'second',
+        artifactSourceFile: 'second.scad',
+        gltfPresentation: { requestedRevision: 2, requestedKey: 'second' },
+      });
+      actor.send({ type: 'clearArtifact' });
+      expect(actor.getSnapshot().context.artifactSourceFile).toBeUndefined();
+      expect(actor.getSnapshot().context.artifact).toBeUndefined();
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('measures a presentation onto the shared span model rather than a private ring', () => {
     clearRendererSpans();
     const actor = createGraphicsActor();

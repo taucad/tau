@@ -256,6 +256,8 @@ export type GraphicsContext = {
   artifact: KnownArtifact | undefined;
   /** Runtime-stamped projection hash, used for skip-when-unchanged optimizations. */
   artifactKey: string;
+  /** Source identity travels with the artifact through the renderer handoff. */
+  artifactSourceFile?: string;
   /** Requested-versus-presented GLTF identity and bounded renderer handoff measurements. */
   gltfPresentation: GltfPresentationProjection;
 };
@@ -1052,6 +1054,7 @@ export const graphicsMachine = setup({
             context: {
               artifact: undefined,
               artifactKey: '',
+              artifactSourceFile: undefined,
               gltfPresentation: { requestedRevision: revision, presentedRevision: revision, phase: 'idle' },
               modelInteractionUnitId: undefined,
               pickableMeshesVersion: context.pickableMeshesVersion + 1,
@@ -1079,6 +1082,7 @@ export const graphicsMachine = setup({
             context: {
               artifact: event.artifact,
               artifactKey: event.hash,
+              artifactSourceFile: event.sourceFile,
               gltfPresentation:
                 event.artifact.mimeType === 'model/gltf-binary'
                   ? withGltfPresentationPhase(

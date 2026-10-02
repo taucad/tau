@@ -2,7 +2,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { createActor, waitFor } from 'xstate';
-import type { Evaluation, KernelIssue, Rendering } from '@taucad/runtime';
+import type { AnyRuntimeDefinition, Evaluation, KernelIssue, Rendering, RuntimeContentInput } from '@taucad/runtime';
+import { createRuntimeClient, defineRuntime } from '@taucad/runtime';
+import { defineKernel, createKernelSuccess } from '@taucad/runtime/kernel';
+import { inProcessTransport } from '@taucad/runtime/transport/in-process';
+import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { gltfEdgeDetection } from '@taucad/middleware';
+import { writeGlb } from '@taucad/geometry-core';
+import { z } from 'zod';
 import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import { defaultOperationTimeout } from '#constants/editor.constants.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
@@ -77,17 +84,173 @@ describe('cadMachine watched document', () => {
 
   it('opens one watched source and subscribes the default view', async () => {
     const f = await opened(fixture());
-    expect(f.client.open).toHaveBeenCalledWith({ source: { path: 'main.ts' }, watch: true });
-    expect(f.runtime.viewSpy).toHaveBeenCalledWith(undefined, undefined);
+    expect(f.client.open).toHaveBeenCalledWith({
+      source: { path: 'main.ts' },
+      watch: true,
+    });
+    expect(f.runtime.viewSpy).toHaveBeenLastCalledWith('model', {});
     expect(f.actor.getSnapshot().context.defaultView).toBe(f.runtime.view);
     f.actor.stop();
   });
+
+  it('follows changing default offers and closes an export-only projection', async () => {
+    const f = await opened(fixture());
+    const initialCalls = f.runtime.viewSpy.mock.calls.length;
+    f.runtime.emitEvaluated({
+      ...f.runtime.evaluation,
+      id: 'same-offer-next-evaluation',
+    });
+    expect(f.runtime.viewSpy).toHaveBeenCalledTimes(initialCalls);
+    f.runtime.emitEvaluated({
+      ...noViews,
+      views: [{ id: 'drawing', title: 'Drawing', mimeType: 'image/svg+xml' }],
+    });
+    expect(f.runtime.viewSpy).toHaveBeenLastCalledWith('drawing', {});
+    f.runtime.emitEvaluated(noViews);
+    expect(f.actor.getSnapshot().context.defaultView).toBeUndefined();
+    f.runtime.emitEvaluated(f.runtime.evaluation);
+    expect(f.runtime.viewSpy).toHaveBeenLastCalledWith('model', {});
+    expect(f.actor.getSnapshot().context.defaultView).toBe(f.runtime.view);
+    f.actor.stop();
+  });
+
+  it.each(['native', 'middleware'] as const)(
+    'requests %s GLB edges through the actual CAD subscription',
+    async (provider) => {
+      const kernel = defineKernel({
+        id: 'interactive-edges',
+        name: 'Interactive edges',
+        version: '1.0.0',
+        extensions: ['edges'],
+        views: {
+          model: {
+            title: 'Model',
+            mimeType: 'model/gltf-binary',
+            ...(provider === 'native' ? { content: ['includeEdges'] as const } : {}),
+          },
+        },
+        exports: {},
+        async initialize() {
+          return {};
+        },
+        async resolve({ entryPath }) {
+          return { resolved: [entryPath], unresolved: [] };
+        },
+        async describe() {
+          return createKernelSuccess({
+            parameters: {
+              schema: {
+                $schema: 'https://json-structure.org/meta/extended/v0/#',
+                $id: 'urn:taucad:test:interactive-edges',
+                $uses: ['JSONSchemaUnits'],
+                name: 'InteractiveEdgesParameters',
+                type: 'object',
+              },
+              defaults: {},
+            },
+          });
+        },
+        async evaluate() {
+          return { handle: {}, views: ['model'] };
+        },
+        async render({ content }: { handle: Record<string, unknown>; content?: RuntimeContentInput }) {
+          return {
+            content: writeGlb({
+              nodes: [
+                {
+                  primitives: [
+                    {
+                      mode: 4,
+                      positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+                      material: {},
+                    },
+                    ...(content?.includeEdges
+                      ? [
+                          {
+                            mode: 1,
+                            positions: new Float32Array([0, 0, 0, 1, 0, 0]),
+                            material: {},
+                          },
+                        ]
+                      : []),
+                  ],
+                },
+              ],
+            }),
+          };
+        },
+      })();
+      const runtime: AnyRuntimeDefinition = defineRuntime({
+        kernels: [kernel],
+        middleware: provider === 'middleware' ? [gltfEdgeDetection()] : [],
+      });
+      const client = createRuntimeClient({
+        transport: inProcessTransport({
+          runtime,
+          fileSystem: fromMemoryFs({ 'main.edges': '' }),
+        }),
+      });
+      const actor = createActor(
+        cadMachine.provide({
+          actors: {
+            connectKernelActor: fromSafeAsync(
+              async (): Promise<{
+                type: 'kernelConnected';
+                client: AppRuntimeClient;
+                cleanups: Array<() => void>;
+              }> => {
+                await client.connect();
+                return { type: 'kernelConnected', client, cleanups: [] };
+              },
+            ),
+          },
+        }),
+        {
+          input: {
+            shouldInitializeKernelOnStart: false,
+            fileSystemRoot: '',
+            kernelOptionsFactory,
+            operationTimeout: 0,
+          },
+        },
+      );
+      actor.start();
+      try {
+        await waitFor(actor, (snapshot) => snapshot.value === 'idle');
+        actor.send({ type: 'initializeModel', entryPath: 'main.edges' });
+        const snapshot = await waitFor(
+          actor,
+          (state) =>
+            state.context.rendering?.success === true &&
+            state.context.defaultView?.request.content?.includeEdges === true,
+        );
+        const { rendering } = snapshot.context;
+        if (!rendering?.success || rendering.artifact.mimeType !== 'model/gltf-binary') {
+          throw new Error('Expected an edge-enabled GLB rendering');
+        }
+        const bytes = rendering.artifact.content;
+        if (typeof bytes === 'string') {
+          throw new TypeError('Expected binary GLB');
+        }
+        const jsonLength = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(12, true);
+        const json = z
+          .object({ meshes: z.array(z.object({ primitives: z.array(z.object({ mode: z.number().optional() })) })) })
+          .parse(JSON.parse(new TextDecoder().decode(bytes.subarray(20, 20 + jsonLength))));
+        expect(json.meshes.some((mesh) => mesh.primitives.some((primitive) => primitive.mode === 1))).toBe(true);
+      } finally {
+        disposeCadRuntime(actor.getSnapshot().context);
+        actor.stop();
+      }
+    },
+  );
 
   it('commits preview parameters on the existing document', async () => {
     const f = await opened(fixture());
     f.actor.send({ type: 'setPreviewParameters', parameters: { width: 42 } });
     await vi.waitFor(() => {
-      expect(f.runtime.document.update).toHaveBeenCalledWith({ parameters: { width: 42 } });
+      expect(f.runtime.document.update).toHaveBeenCalledWith({
+        parameters: { width: 42 },
+      });
     });
     expect(f.client.open).toHaveBeenCalledOnce();
     f.actor.stop();

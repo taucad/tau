@@ -45,9 +45,8 @@ COPY patches/ ./patches/
 # workspace package.json lands at its real path. Matches pnpm-workspace.yaml
 # globs apps/*, libs/*, packages/*, packages/plugins/*, packages/core/*, and
 # tools/*. Nested workspace placements need explicit patterns because
-# `*/*/package.json` is only two levels deep. (`scripts/` is one level deep
-# and intentionally dockerignored — pnpm tolerates it.)
-COPY --parents */*/package.json apps/libs/*/package.json apps/react-e2e/apps/*/package.json packages/plugins/*/package.json packages/core/*/package.json ./
+# `*/*/package.json` is only two levels deep, and `scripts/` is one level deep.
+COPY --parents scripts/package.json */*/package.json apps/libs/*/package.json apps/react-e2e/apps/*/package.json packages/plugins/*/package.json packages/core/*/package.json ./
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline
 

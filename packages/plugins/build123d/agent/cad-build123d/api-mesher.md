@@ -2,7 +2,9 @@
 
 1 top-level symbols. Signatures are verbatim python.
 
+// Category: mesher
 // Mesher
+// Remarks: Tool for exporting and importing meshed objects stored in 3MF or STL files.
 Mesher
 
   // build123d.mesher.Mesher.__init__ (constructor)
@@ -25,6 +27,7 @@ Mesher
   library_version: str
 
   // add_meta_data
+  // Remarks: Add meta data to the models
   // build123d.mesher.Mesher.add_meta_data (method)
   add_meta_data(name_space: str, name: str, value: str, metadata_type: str, must_preserve: bool)
   //   name_space: categorizer of different metadata entries
@@ -34,6 +37,7 @@ Mesher
   //   must_preserve: metadata must not be removed if unused
 
   // Add the code calling this method to the 3MF metadata with the custom
+  // Remarks: name space `build123d`, name equal to the base file name and the type as `python`
   // build123d.mesher.Mesher.add_code_to_metadata (method)
   add_code_to_metadata()
 
@@ -50,6 +54,10 @@ Mesher
   get_mesh_properties() -> list[dict]
 
   // add_shape
+  // Remarks: Add a shape to the 3MF/STL file.
+  // Throws: RuntimeError: 3mf mesh is invalid
+  // Throws: Warning: Degenerate shape skipped
+  // Throws: Warning: 3mf mesh is not manifold
   // build123d.mesher.Mesher.add_shape (method)
   add_shape(shape: Shape | Iterable[Shape], linear_deflection: float = 0.001, angular_deflection: float = 0.1, mesh_type: MeshType = MeshType.MODEL, part_number: str | None = None, uuid_value: UUID | None = None)
   //   shape: build123d object
@@ -60,14 +68,18 @@ Mesher
   //   uuid_value: value from uuid package
 
   // read
+  // Remarks: Returns: list[Shape]: build123d shapes extracted from mesh file
+  // Throws: ValueError: Unknown file format - must be 3mf or stl
   // build123d.mesher.Mesher.read (method)
   read(file_name: PathLike | str | bytes) -> list[Shape]
 
   // write
+  // Throws: ValueError: Unknown file format - must be 3mf or stl
   // build123d.mesher.Mesher.write (method)
   write(file_name: PathLike | str | bytes)
 
   // write_stream
+  // Throws: ValueError: Unknown file format - must be 3mf or stl
   // build123d.mesher.Mesher.write_stream (method)
   write_stream(stream: BytesIO, file_type: Literal['3mf', 'stl'])
   //   stream: byte stream

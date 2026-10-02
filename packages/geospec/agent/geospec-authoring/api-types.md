@@ -22,6 +22,7 @@ GeoSpecSubject: {
   [subjectBrand]: true
 
 // Geometry units accepted at GeoSpec evidence-loading boundaries
+// Remarks: Loaded subjects normalize coordinates into canonical millimetres; this type describes source and provenance units, not a project-wide configuration.
 GeoSpecUnit: 'mm' | 'cm' | 'm' | 'in' | 'ft' | (string & {})
 
 // Geometry assertion collected from a GeoSpec test module
@@ -210,6 +211,7 @@ GeoSpecComponentInterferenceAllowance: {
   reason: string
 
 // Component-interference expectation accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
+// Remarks: GeoSpec checks for positive solid intersection volume between assembly components. Tangent contact and correctly meshed gears are allowed. `pairs` narrows the check to specific component-label pairs while preserving exact positive-volume evidence for every selected pair. `allowances` documents explicitly intentional positive-volume interference such as gasket compression, press fits, or simplified thread engagement.
 GeoSpecComponentInterferenceExpectation: {
     tolerance?: number;
     pairs?: GeoSpecComponentInterferencePairExpectation[];
@@ -543,6 +545,7 @@ GeoSpecMeshIntegrityExpectation: {
   triangleCount: GeoSpecNumericExpectation
 
 // Diagnostic severities rejected by `expectGeo(...).toHaveNoDiagnostics(...)`
+// Remarks: Defaults to `error` and `warning` when omitted.
 GeoSpecNoDiagnosticsExpectation: {
     severities?: Array<GeometryDiagnostic['severity']>;
 }
@@ -633,6 +636,7 @@ GeoSpecProductStructureExpectation: {
   count: GeoSpecNumericExpectation
 
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
+// Remarks: Verdicts are decided by exact BRep evidence only (D3): extrema for `contact`/`clearance`, analytic fact comparison for `coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`, exact solid classification for `containment`/`insertion`, and exact boolean common volume for `interference` (positive volume outside the `minVolume`/`maxVolume` allowance band fails).
 GeoSpecSpatialRelationshipExpectation: {
     id?: string;
     kind: 'contact' | 'clearance' | 'coaxial' | 'concentric' | 'coplanar' | 'parallel' | 'perpendicular' | 'angle' | 'containment' | 'insertion' | 'interference';
@@ -758,6 +762,7 @@ GeoSpecValidBrepExpectation: {
   closedWires: boolean
 
 // Void-continuity expectation accepted by `expectGeo(...).toHaveVoidContinuity(...)`
+// Remarks: A whole-assembly negative-space claim: the ordered `path` waypoints must all lie in ONE connected open-void component (void = outside every `material` solid), that component must not reach any `isolatedFrom` point, and its tightest sampled cross-section must meet `minCrossSection`. Connectivity and isolation are proven from Boolean shell topology, generalized winding-number body identity, and deterministic cross-sections.
 GeoSpecVoidContinuityExpectation: {
     /** Ordered waypoints (>= 1) known to lie in the void being proven. */
     path: GeoSpecVoidWaypoint[];
@@ -1135,6 +1140,7 @@ GeometrySource: {
   byteLength: number
 
 // Canonical P0 object under test for GeoSpec
+// Remarks: This is intentionally a GeoSpec-loaded subject rather than a Tau runtime contract. Runtime integrations pass GLB/glTF bytes or files into loaders.
 GeometrySubject: {
     kind: 'geometry-subject';
     /** Opaque engine-owned identifier used by every protocol claim. */
@@ -1188,6 +1194,7 @@ MeshEvidence: {
 MeshFileFormat: 'glb' | 'gltf' | 'mesh-buffer'
 
 // Triangle quality and scalar mesh metrics used by P0 GeoSpec matchers
+// Remarks: Values are reported in the glTF document coordinate units.
 MeshQualityStats: {
     triangleCount: number;
     nonFiniteVertices: Array<{
@@ -1534,6 +1541,7 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
   dispose(): Promise<void>;
 
 // Runtime client surface consumed by `geospec/model`
+// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL.
 GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
     open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {

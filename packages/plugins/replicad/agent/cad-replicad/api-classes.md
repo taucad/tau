@@ -1,6 +1,6 @@
 # replicad — Classes
 
-29 top-level symbols. Signatures are verbatim typescript.
+26 top-level symbols. Signatures are verbatim typescript.
 
 _1DShape: export declare abstract class _1DShape<Type extends TopoDS_Shape> extends Shape<Type>
 
@@ -74,14 +74,17 @@ _3DShape: export declare class _3DShape<Type extends TopoDS_Shape> extends Shape
   shell(thickness: number, finderFcn: (f: FaceFinder) => FaceFinder, tolerance?: number): Shape3D;
 
   // Creates a new shapes with some edges filletted, as specified in the radius config
+  // Remarks: If the radius is a filter finder object (with an EdgeFinder as filter, and a radius to specifiy the fillet radius), the fillet will only be applied to the edges as selected by the finder. The finder will be deleted unless it is explicitly specified to `keep` it. If the radius is a number all the edges will be filletted. If the radius is a function edges will be filletted according to the value returned by the function (0 or null will not add any fillet).
   // _3DShape.fillet (method)
   fillet(radiusConfig: RadiusConfig<FilletRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
 
   // Creates a new shapes with some edges chamfered, as specified in the radius config
+  // Remarks: If the radius is a filter finder object (with an EdgeFinder as filter, and a radius to specifiy the chamfer radius), the fillet will only be applied to the edges as selected by the finder. The finder will be deleted unless it is explicitly specified to `keep` it. If the radius is a number all the edges will be chamfered. If the radius is a function edges will be chamfered according to the value returned by the function (0 or null will not add any chamfer).
   // _3DShape.chamfer (method)
   chamfer(radiusConfig: RadiusConfig<ChamferRadius>, filter?: (e: EdgeFinder) => EdgeFinder): Shape3D;
 
   // Applies a draft angle to selected faces of the shape
+  // Remarks: A draft angle is a taper applied to faces, commonly used in moulding and casting to allow parts to be released from a mould. The selected faces are tilted by the given angle relative to the neutral plane. The face finder function receives a `FaceFinder` and should return it with the desired filters applied to select which faces to draft. The neutral plane defines the reference from which the draft angle is measured — faces are unchanged where they intersect this plane and taper away from it.
   // _3DShape.draft (method)
   draft(angle: number, faceFinder: (e: FaceFinder) => FaceFinder, neutralPlane?: Plane | PlaneName): AnyShape;
 
@@ -99,9 +102,11 @@ BaseSketcher2d: export declare class BaseSketcher2d
   constructor(origin?: Point2D);
 
   // Returns the current pen position as [x, y] coordinates
+  // Remarks: Added By Ben Harper 5/12/2025
   penPosition
 
   // Returns the current pen angle in degrees
+  // Remarks: The angle represents the tangent direction at the current pen position, based on the last drawing operation (line, arc, bezier, etc.). Returns 0 if nothing has been drawn yet.
   penAngle
 
   // BaseSketcher2d.movePointerTo (method)
@@ -205,6 +210,7 @@ BaseSketcher2d: export declare class BaseSketcher2d
   customCorner(radius: number | ((first: Curve2D, second: Curve2D) => Curve2D[]), mode?: "fillet" | "chamfer" | "dogbone"): this;
 
 // A Blueprint is an abstract Sketch, a 2D set of curves that can then be sketched on different surfaces (faces or planes)
+// Remarks: You should create them by "sketching" with a `BlueprintSketcher`
 Blueprint: export declare class Blueprint implements DrawingInterface
 
   curves: Curve2D[]
@@ -246,6 +252,7 @@ Blueprint: export declare class Blueprint implements DrawingInterface
   sketchOnPlane(inputPlane?: PlaneName | Plane, origin?: Point | number): Sketch;
 
   // Returns the sketched version of the drawing, on a face
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   // Blueprint.sketchOnFace (method)
   sketchOnFace(face: Face, scaleMode?: ScaleMode): Sketch;
 
@@ -326,6 +333,7 @@ Blueprints: export declare class Blueprints implements DrawingInterface
   sketchOnPlane(plane?: PlaneName | Plane, origin?: Point | number): Sketches;
 
   // Returns the sketched version of the drawing, on a face
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   // Blueprints.sketchOnFace (method)
   sketchOnFace(face: Face, scaleMode?: ScaleMode): Sketches;
 
@@ -460,6 +468,7 @@ CompoundBlueprint: export declare class CompoundBlueprint implements DrawingInte
   sketchOnPlane(plane?: PlaneName | Plane, origin?: Point | number): CompoundSketch;
 
   // Returns the sketched version of the drawing, on a face
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   // CompoundBlueprint.sketchOnFace (method)
   sketchOnFace(face: Face, scaleMode?: ScaleMode): CompoundSketch;
 
@@ -486,6 +495,7 @@ CompoundBlueprint: export declare class CompoundBlueprint implements DrawingInte
   toSVG(margin?: number): string;
 
 // A group of sketches that should correspond to a unique face (i.e
+// Remarks: All the sketches should share the same base face (or surface) Ideally generated from a `CompoundBlueprint`
 CompoundSketch: export declare class CompoundSketch implements SketchInterface
 
   sketches: Sketch[]
@@ -507,6 +517,7 @@ CompoundSketch: export declare class CompoundSketch implements SketchInterface
   face(): Face;
 
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
+  // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).
   // CompoundSketch.extrude (method)
   extrude(extrusionDistance: number, { extrusionDirection, extrusionProfile, twistAngle, origin, }?: {
           extrusionDirection?: Point;
@@ -523,6 +534,7 @@ CompoundSketch: export declare class CompoundSketch implements SketchInterface
       }): Shape3D;
 
   // Loft between this sketch and another sketch (or an array of them)
+  // Remarks: You can also define a `startPoint` for the loft (that will be placed before this sketch) and an `endPoint` after the last one. You can also define if you want the loft to result in a ruled surface. Note that all sketches will be deleted by this operation
   // CompoundSketch.loftWith (method)
   loftWith(otherCompound: this, loftConfig: LoftConfig): Shape3D;
 
@@ -707,6 +719,7 @@ Drawing: export declare class Drawing implements DrawingInterface
   sketchOnPlane(inputPlane?: PlaneName, origin?: Point | number): SketchInterface | Sketches;
 
   // Returns the sketched version of the drawing, on a face
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   // Drawing.sketchOnFace (method)
   sketchOnFace(face: Face, scaleMode: ScaleMode): SketchInterface | Sketches;
 
@@ -780,10 +793,12 @@ EdgeFinder: export declare class EdgeFinder extends Finder3d<Edge>
   ofCurveType(curveType: CurveType): this;
 
   // Filter to find edges that are parallel to a plane
+  // Remarks: Note that this will work only in lines (but the method does not check this assumption).
   // EdgeFinder.parallelTo (method)
   parallelTo(plane: Plane | StandardPlane | Face): this;
 
   // Filter to find edges that within a plane
+  // Remarks: Note that this will work only in lines (but the method does not check this assumption).
   // EdgeFinder.inPlane (method)
   inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
 
@@ -834,6 +849,7 @@ FaceFinder: export declare class FaceFinder extends Finder3d<Face>
   clone(): FaceFinder;
 
   // Filter to find faces that are parallel to plane or another face
+  // Remarks: Note that this will work only in planar faces (but the method does not check this assumption).
   // FaceFinder.parallelTo (method)
   parallelTo(plane: Plane | StandardPlane | Face): this;
 
@@ -842,6 +858,7 @@ FaceFinder: export declare class FaceFinder extends Finder3d<Face>
   ofSurfaceType(surfaceType: SurfaceType): this;
 
   // Filter to find faces that are contained in a plane
+  // Remarks: Note that this will work only in planar faces (but the method does not check this assumption).
   // FaceFinder.inPlane (method)
   inPlane(inputPlane: PlaneName | Plane, origin?: Point | number): this;
 
@@ -853,6 +870,7 @@ FaceFinder: export declare class FaceFinder extends Finder3d<Face>
   protected applyFilter(shape: AnyShape): Face[];
 
 // The FaceSketcher allows you to sketch on a face that is not planar, for instance the sides of a cylinder
+// Remarks: The coordinates passed to the methods corresponds to normalised distances on this surface, between 0 and 1 in both direction. Note that if you are drawing on a closed surface (typically a revolution surface or a cylinder), the first parameters represents the angle and can be smaller than 0 or bigger than 1.
 FaceSketcher: export declare class FaceSketcher extends BaseSketcher2d implements GenericSketcher<Sketch>
 
   face: Face
@@ -882,171 +900,3 @@ FaceSketcher: export declare class FaceSketcher extends BaseSketcher2d implement
 LinearPhysicalProperties: export declare class LinearPhysicalProperties extends PhysicalProperties
 
   length
-
-MeshShape: export declare class MeshShape extends WrappingObj<ManifoldInstance> implements Shape3DLike<MeshShape, MeshShapeMesh, MeshShape, number>
-
-  // MeshShape.constructor (constructor)
-  constructor(manifoldShape: ManifoldInstance);
-
-  // MeshShape.clone (method)
-  clone(): MeshShape;
-
-  // MeshShape.fuse (method)
-  fuse(other: MeshShape, _options?: any): MeshShape;
-
-  // MeshShape.cut (method)
-  cut(other: MeshShape, _options?: any): MeshShape;
-
-  // MeshShape.intersect (method)
-  intersect(other: MeshShape): MeshShape;
-
-  // MeshShape.translate (method)
-  translate(xDist: number, yDist: number, zDist: number): MeshShape;
-  translate(vector: Point): MeshShape;
-
-  // MeshShape.translateX (method)
-  translateX(distance: number): MeshShape;
-
-  // MeshShape.translateY (method)
-  translateY(distance: number): MeshShape;
-
-  // MeshShape.translateZ (method)
-  translateZ(distance: number): MeshShape;
-
-  // MeshShape.rotate (method)
-  rotate(angle: number, position?: Point, direction?: Point): MeshShape;
-  rotate(vector: Point): MeshShape;
-
-  // MeshShape.scale (method)
-  scale(scale: number, center?: Point): MeshShape;
-
-  // MeshShape.mirror (method)
-  mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): MeshShape;
-
-  // MeshShape.simplify (method)
-  simplify(tolerance?: number): MeshShape;
-
-  // MeshShape.refine (method)
-  refine(n: number): MeshShape;
-
-  // MeshShape.refineToLength (method)
-  refineToLength(length: number): MeshShape;
-
-  // MeshShape.refineToTolerance (method)
-  refineToTolerance(tolerance: number): MeshShape;
-
-  // MeshShape.hull (method)
-  hull(): MeshShape;
-
-  // MeshShape.asOriginal (method)
-  asOriginal(): MeshShape;
-
-  // MeshShape.mesh (method)
-  mesh(): MeshShapeMesh;
-
-  boundingBox
-
-  // MeshShape.volume (method)
-  volume(): number;
-
-  // MeshShape.surfaceArea (method)
-  surfaceArea(): number;
-
-  // MeshShape.numTri (method)
-  numTri(): number;
-
-  // MeshShape.numVert (method)
-  numVert(): number;
-
-  // MeshShape.numEdge (method)
-  numEdge(): number;
-
-  isEmpty
-
-  // Exports the mesh shape as an STL file Blob
-  // MeshShape.blobSTL (method)
-  blobSTL({ binary }?: {
-          binary?: boolean | undefined;
-      }): Blob;
-
-Plane: export declare class Plane
-
-  oc: OpenCascadeInstance
-
-  xDir: Vector
-
-  yDir: Vector
-
-  zDir: Vector
-
-  // Plane.constructor (constructor)
-  constructor(origin: Point, xDirection?: Point | null, normal?: Point);
-
-  // Plane.delete (method)
-  delete(): void;
-
-  // Plane.clone (method)
-  clone(): Plane;
-
-  origin
-
-  // Plane.translateTo (method)
-  translateTo(point: Point): Plane;
-
-  // Plane.translate (method)
-  translate(xDist: number, yDist: number, zDist: number): Plane;
-  translate(vector: Point): Plane;
-
-  // Plane.translateX (method)
-  translateX(xDist: number): Plane;
-
-  // Plane.translateY (method)
-  translateY(yDist: number): Plane;
-
-  // Plane.translateZ (method)
-  translateZ(zDist: number): Plane;
-
-  // Plane.pivot (method)
-  pivot(angle: number, direction?: Direction): Plane;
-
-  // Plane.rotate2DAxes (method)
-  rotate2DAxes(angle: number): Plane;
-
-  // Plane.setOrigin2d (method)
-  setOrigin2d(x: number, y: number): void;
-
-  // Plane.toLocalCoords (method)
-  toLocalCoords(vec: Vector): Vector;
-
-  // Plane.toWorldCoords (method)
-  toWorldCoords(v: Point): Vector;
-
-ProjectionCamera: export declare class ProjectionCamera extends WrappingObj<gp_Ax2>
-
-  // ProjectionCamera.constructor (constructor)
-  constructor(position?: Point, direction?: Point, xAxis?: Point);
-
-  position
-
-  direction
-
-  xAxis
-
-  yAxis
-
-  // ProjectionCamera.autoAxes (method)
-  autoAxes(): void;
-
-  // ProjectionCamera.setPosition (method)
-  setPosition(position: Point): this;
-
-  // ProjectionCamera.setXAxis (method)
-  setXAxis(xAxis: Point): this;
-
-  // ProjectionCamera.setYAxis (method)
-  setYAxis(yAxis: Point): this;
-
-  // ProjectionCamera.lookAt (method)
-  lookAt(shape: {
-          boundingBox: BoundingBox;
-      } | Point): this;

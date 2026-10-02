@@ -1,52 +1,51 @@
-# PicoGK — PicoGK
+# PicoGK — CAD authoring — PicoGK
 
-42 top-level symbols. Signatures are verbatim csharp.
+34 top-level symbols. Signatures are verbatim csharp.
 
-ActiveVoxelCounterScalar
+// Category: CAD authoring
+// PicoGK.ActiveVoxelCounterScalar (class)
+public class ActiveVoxelCounterScalar : ITraverseScalarField
 
   // PicoGK.ActiveVoxelCounterScalar.nCount (method)
   public static int nCount(ScalarField oField)
 
-  // PicoGK.ActiveVoxelCounterScalar.ActiveVoxelCounterScalar (constructor)
-  protected ActiveVoxelCounterScalar(ScalarField oField)
-
-  // PicoGK.ActiveVoxelCounterScalar.Run (method)
-  protected void Run()
-
   // PicoGK.ActiveVoxelCounterScalar.InformActiveValue (method)
   public void InformActiveValue(in Vector3 vecPosition, float fValue)
 
-AddVectorFieldToViewer
+// Category: CAD authoring
+// PicoGK.AddVectorFieldToViewer (class)
+public class AddVectorFieldToViewer : ITraverseVectorField
 
   // PicoGK.AddVectorFieldToViewer.AddToViewer (method)
-  public static void AddToViewer(Viewer oViewer, VectorField oField, ColorFloat clr, int nStep = 10, float fArrow = 1, int nGroup = 0)
-
-  // PicoGK.AddVectorFieldToViewer.AddVectorFieldToViewer (constructor)
-  protected AddVectorFieldToViewer(Viewer oViewer, VectorField oField, ColorFloat clr, int nStep, float fArrow, int nGroup)
-
-  // PicoGK.AddVectorFieldToViewer.Run (method)
-  protected void Run()
+  public static void AddToViewer(Viewer oViewer, VectorField oField, ColorFloat clr, int nStep = 10, float fArrow = 1f, int nGroup = 0)
 
   // PicoGK.AddVectorFieldToViewer.InformActiveValue (method)
   public void InformActiveValue(in Vector3 vecPosition, in Vector3 vecValue)
 
-Animation
+// Category: CAD authoring
+// PicoGK.Animation (class)
+public class Animation
 
-  IAction
+  // PicoGK.Animation.IAction (interface)
+  public interface IAction
 
     // PicoGK.Animation.IAction.Do (method)
     void Do(float fTime)
 
-  EType
+  // PicoGK.Animation.EType (enum)
+  public enum EType
 
-    Once: Once
+    // PicoGK.Animation.EType.Once (enumMember)
+    Once
 
-    Repeat: Repeat
+    // PicoGK.Animation.EType.Repeat (enumMember)
+    Repeat
 
-    Wiggle: Wiggle
+    // PicoGK.Animation.EType.Wiggle (enumMember)
+    Wiggle
 
   // PicoGK.Animation.Animation (constructor)
-  public Animation(Animation.IAction xAction, float fDurationInSeconds, Animation.EType eType, Easing.EEasing eEasing)
+  public Animation(IAction xAction, float fDurationInSeconds, EType eType, Easing.EEasing eEasing)
 
   // PicoGK.Animation.End (method)
   public void End()
@@ -54,7 +53,9 @@ Animation
   // PicoGK.Animation.bAnimate (method)
   public bool bAnimate(float fCurrentTime)
 
-AnimationQueue
+// Category: CAD authoring
+// PicoGK.AnimationQueue (class)
+public class AnimationQueue
 
   // PicoGK.AnimationQueue.AnimationQueue (constructor)
   public AnimationQueue()
@@ -71,14 +72,19 @@ AnimationQueue
   // PicoGK.AnimationQueue.Add (method)
   public void Add(Animation oAnim)
 
+// Category: CAD authoring
 // 2D Bounding Box object
-BBox2
+// PicoGK.BBox2 (struct)
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BBox2
 
   // Minimum coordinate of the bounding box
-  vecMin: Vector2
+  // PicoGK.BBox2.vecMin (field)
+  public Vector2 vecMin = new();
 
   // Maximum coordinate of the bounding box
-  vecMax: Vector2
+  // PicoGK.BBox2.vecMax (field)
+  public Vector2 vecMax = new();
 
   // Creates an empty Bounding Box
   // PicoGK.BBox2.BBox2 (constructor)
@@ -115,14 +121,19 @@ BBox2
   // PicoGK.BBox2.ToString (method)
   public override string ToString()
 
+// Category: CAD authoring
 // 3D bounding box
-BBox3
+// PicoGK.BBox3 (struct)
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct BBox3
 
   // Minimum coordinate of the bounding box
-  vecMin: Vector3
+  // PicoGK.BBox3.vecMin (field)
+  public Vector3 vecMin = new();
 
   // Maximum coordinate of the bounding box
-  vecMax: Vector3
+  // PicoGK.BBox3.vecMax (field)
+  public Vector3 vecMax = new();
 
   // Create an empty Bounding Box
   // PicoGK.BBox3.BBox3 (constructor)
@@ -146,7 +157,7 @@ BBox3
   // PicoGK.BBox3.Include (method)
   public void Include(Vector3 vec)
   public void Include(BBox3 oBox)
-  public void Include(BBox2 oBox, float fZ = 0)
+  public void Include(BBox2 oBox, float fZ = 0.0f)
 
   // Grows the bounding box by the specified value on each side I.E
   // PicoGK.BBox3.Grow (method)
@@ -176,51 +187,70 @@ BBox3
   // PicoGK.BBox3.ToString (method)
   public override string ToString()
 
+// Category: CAD authoring
 // ASCII CLI (Common Layer Interface) I/O based on https://www.hmilch.net/downloads/cli_format.html#:~:text=CLI%20is%20intended%20as%20a,data%20structure%20of%20the%20machine
-CliIo
+// PicoGK.CliIo (class)
+public static class CliIo
 
   // Format options for CLI writer
-  EFormat
+  // PicoGK.CliIo.EFormat (enum)
+  public enum EFormat
 
     // Uses an intentionally-empty first layer to allow the CLI reader to infer the layer height
-    UseEmptyFirstLayer: UseEmptyFirstLayer
+    // PicoGK.CliIo.EFormat.UseEmptyFirstLayer (enumMember)
+    UseEmptyFirstLayer
 
     // The first layer contains outlines (default)
-    FirstLayerWithContent: FirstLayerWithContent
+    // PicoGK.CliIo.EFormat.FirstLayerWithContent (enumMember)
+    FirstLayerWithContent
 
   // Result of a CLI import
-  Result
+  // PicoGK.CliIo.Result (class)
+  public class Result
 
     // The stack of slices that were imported
-    oSlices: PolySliceStack
+    // PicoGK.CliIo.Result.oSlices (field)
+    public PolySliceStack oSlices = new();
 
     // The bounding box of the slices contained in the file
-    oBBoxFile: BBox3
+    // PicoGK.CliIo.Result.oBBoxFile (field)
+    public BBox3 oBBoxFile = new();
 
     // Was the file binary?
-    bBinary: bool
+    // PicoGK.CliIo.Result.bBinary (field)
+    public bool bBinary = false;
 
     // Units used in the header
-    fUnitsHeader: float
+    // PicoGK.CliIo.Result.fUnitsHeader (field)
+    public float fUnitsHeader = 0.0f;
 
     // Was the file aligned at 32 bit boundaries?
-    b32BitAlign: bool
+    // PicoGK.CliIo.Result.b32BitAlign (field)
+    public bool b32BitAlign = false;
 
     // Version number of the CLI export
-    nVersion: uint
+    // PicoGK.CliIo.Result.nVersion (field)
+    public UInt32 nVersion = 0;
 
     // Date string read from the header
-    strHeaderDate: string
+    // PicoGK.CliIo.Result.strHeaderDate (field)
+    public string strHeaderDate = "";
 
     // Number of layers in the file
-    nLayers: uint
+    // PicoGK.CliIo.Result.nLayers (field)
+    public UInt32 nLayers = 0;
 
     // Warnings that were encountered during the file reading
-    strWarnings: string
+    // PicoGK.CliIo.Result.strWarnings (field)
+    public string strWarnings = "";
+
+    // PicoGK.CliIo.Result.Result (constructor)
+    public Result()
 
   // Write a stack of PolySlices to a CLI file
+  // Throws: System.Exception: Throws and exception if no valid slices or file IO issues were encountered
   // PicoGK.CliIo.WriteSlicesToCliFile (method)
-  public static void WriteSlicesToCliFile(PolySliceStack oSlices, string strFilePath, CliIo.EFormat eFormat, string strDate = "", float fUnitsInMM = 0, IProgress? xProgress = null)
+  public static void WriteSlicesToCliFile(PolySliceStack oSlices, string strFilePath, EFormat eFormat, string strDate = "", float fUnitsInMM = 0.0f, IProgress? xProgress = null)
   //   oSlices: Stack of PolySlice objects
   //   strFilePath: Path and filename of the CLI file
   //   eFormat: Format options
@@ -229,26 +259,35 @@ CliIo
   //   xProgress: Optional progress reporting interface
 
   // Read PolySlice objects from a CLI file
+  // Throws: System.ArgumentException: Thrown if file contains invalid parameters
+  // Throws: System.NotSupportedException: Thrown if unsupported features encountered, notably binary is not supported
   // PicoGK.CliIo.oSlicesFromCliFile (method)
-  public static CliIo.Result oSlicesFromCliFile(string strFilePath)
+  public static Result oSlicesFromCliFile(string strFilePath)
   //   strFilePath: Path and filename of the file to read
 
+// Category: CAD authoring
 // BGR 24 bit color value
-ColorBgr24
+// PicoGK.ColorBgr24 (struct)
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorBgr24
 
   // Blue value (0..255)
-  B: byte
+  // PicoGK.ColorBgr24.B (field)
+  public byte B;
 
   // Green value (0..255)
-  G: byte
+  // PicoGK.ColorBgr24.G (field)
+  public byte G;
 
   // Red value (0..255)
-  R: byte
+  // PicoGK.ColorBgr24.R (field)
+  public byte R;
 
   // Construct a BGR value from 3 bytes
   // PicoGK.ColorBgr24.ColorBgr24 (constructor)
   public ColorBgr24(byte byB, byte byG, byte byR)
   public ColorBgr24(ColorFloat clr)
+  public ColorBgr24()
   //   byB: Blue value
   //   byG: Green value
   //   byR: Red value
@@ -258,25 +297,33 @@ ColorBgr24
   public static implicit operator ColorBgr24(ColorFloat clr)
   //   clr: The ColorFloat to use
 
+// Category: CAD authoring
 // BGRA 32 bit color value
-ColorBgra32
+// PicoGK.ColorBgra32 (struct)
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorBgra32
 
   // Blue value (0..255)
-  B: byte
+  // PicoGK.ColorBgra32.B (field)
+  public byte B;
 
   // Green value (0..255)
-  G: byte
+  // PicoGK.ColorBgra32.G (field)
+  public byte G;
 
   // Red value (0..255)
-  R: byte
+  // PicoGK.ColorBgra32.R (field)
+  public byte R;
 
   // Alpha value (0..255)
-  A: byte
+  // PicoGK.ColorBgra32.A (field)
+  public byte A;
 
   // Construct a 32 bit BGRA color value from 4 bytes
   // PicoGK.ColorBgra32.ColorBgra32 (constructor)
   public ColorBgra32(byte byB, byte byG, byte byR, byte byA = 255)
   public ColorBgra32(ColorFloat clr)
+  public ColorBgra32()
   //   byB: Blue value (0..255)
   //   byG: Green value (0..255)
   //   byR: Red value (0..255)
@@ -287,26 +334,34 @@ ColorBgra32
   public static implicit operator ColorBgra32(ColorFloat clr)
   //   clr: The ColorFloat to use
 
+// Category: CAD authoring
 // A floating point color value with R,G,B,A values
-ColorFloat
+// PicoGK.ColorFloat (struct)
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public partial struct ColorFloat
 
   // Red value (1 is full color)
-  R: float
+  // PicoGK.ColorFloat.R (field)
+  public float R;
 
   // Green value (1 is full color)
-  G: float
+  // PicoGK.ColorFloat.G (field)
+  public float G;
 
   // Blue value (1 is full color)
-  B: float
+  // PicoGK.ColorFloat.B (field)
+  public float B;
 
   // Alpha value (1 is opaque, 0 is transparent)
-  A: float
+  // PicoGK.ColorFloat.A (field)
+  public float A;
 
   // Create a color from a hex string #FF0000 is red, for example (# is optional) #FF000000 is a fully transparent color (0 is transparent FF/1.0 is full opaque) #FF is grayscale (white) #FF99 is semi-transparent white
+  // Throws: System.ArgumentException: Throws an exception if different sizes
   // PicoGK.ColorFloat.ColorFloat (constructor)
   public ColorFloat(string strHex)
-  public ColorFloat(float fGray, float fAlpha = 1)
-  public ColorFloat(float fR, float fG, float fB, float fAlpha = 1)
+  public ColorFloat(float fGray, float fAlpha = 1.0f)
+  public ColorFloat(float fR, float fG, float fB, float fAlpha = 1.0f)
   public ColorFloat(ColorRgb24 clr)
   public ColorFloat(ColorRgba32 clr)
   public ColorFloat(ColorBgr24 clr)
@@ -314,6 +369,7 @@ ColorFloat
   public ColorFloat(ColorFloat clr, float fAlphaOverride)
   public ColorFloat(ColorHSV clrHSV)
   public ColorFloat(ColorHLS clrHLS)
+  public ColorFloat()
   //   strHex: A 6 character or 8 character string with the color
 
   // Allows you to pass a hex string to any function that requires a FloatColor
@@ -344,22 +400,28 @@ ColorFloat
   // PicoGK.ColorFloat.clrRandom (method)
   public static ColorFloat clrRandom(Random? oRand = null)
 
+// Category: CAD authoring
 // A color value in HSV space
-ColorHLS
+// PicoGK.ColorHLS (struct)
+public struct ColorHLS
 
   // Hue value (0..360º)
-  H: float
+  // PicoGK.ColorHLS.H (field)
+  public float H;
 
   // Lightness value (0..1)
-  L: float
+  // PicoGK.ColorHLS.L (field)
+  public float L;
 
   // Saturation value (0..1)
-  S: float
+  // PicoGK.ColorHLS.S (field)
+  public float S;
 
   // Create an HLS color from its three components
   // PicoGK.ColorHLS.ColorHLS (constructor)
   public ColorHLS(float fH, float fL, float fS)
   public ColorHLS(ColorFloat clr)
+  public ColorHLS()
   //   fH: Hue (0..360º)
   //   fL: Lightness (0..1)
   //   fS: Saturation (0..1)
@@ -370,22 +432,29 @@ ColorHLS
   public static implicit operator ColorFloat(ColorHLS clrHLS)
   //   clr: ColorFloat to be converted to ColorHLS
 
+// Category: CAD authoring
 // Hue Saturation Value (HSV) color
-ColorHSV
+// PicoGK.ColorHSV (struct)
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorHSV
 
   // Hue (0..360º)
-  H: float
+  // PicoGK.ColorHSV.H (field)
+  public float H;
 
   // Saturation (0..1)
-  S: float
+  // PicoGK.ColorHSV.S (field)
+  public float S;
 
   // Value component
-  V: float
+  // PicoGK.ColorHSV.V (field)
+  public float V;
 
   // Create an HSV value from its three components
   // PicoGK.ColorHSV.ColorHSV (constructor)
   public ColorHSV(float fH, float fS, float fV)
   public ColorHSV(ColorFloat clr)
+  public ColorHSV()
 
   // Implicit conversion that allows you to pass a ColorFloat to any function requiring and HSV color
   // PicoGK.ColorHSV.op_Implicit (method)
@@ -393,22 +462,29 @@ ColorHSV
   public static implicit operator ColorFloat(ColorHSV clrHSV)
   //   clr: ColorFloat to be converted to HSV
 
+// Category: CAD authoring
 // 24 bit RGB color
-ColorRgb24
+// PicoGK.ColorRgb24 (struct)
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorRgb24
 
   // Red value (0..255)
-  R: byte
+  // PicoGK.ColorRgb24.R (field)
+  public byte R;
 
   // Green value (0..255)
-  G: byte
+  // PicoGK.ColorRgb24.G (field)
+  public byte G;
 
   // Blue value (0..255)
-  B: byte
+  // PicoGK.ColorRgb24.B (field)
+  public byte B;
 
   // Construct a 24 bit RGB value from 3 byes
   // PicoGK.ColorRgb24.ColorRgb24 (constructor)
   public ColorRgb24(byte byR, byte byG, byte byB)
   public ColorRgb24(ColorFloat clr)
+  public ColorRgb24()
   //   byR: Red value
   //   byG: Green value
   //   byB: Blue value
@@ -418,25 +494,33 @@ ColorRgb24
   public static implicit operator ColorRgb24(ColorFloat clr)
   //   clr: The ColorFloat to use
 
+// Category: CAD authoring
 // 32 bit RGBA color
-ColorRgba32
+// PicoGK.ColorRgba32 (struct)
+[StructLayout(LayoutKind.Sequential, Pack = 1)]
+public struct ColorRgba32
 
   // Red value (0..255)
-  R: byte
+  // PicoGK.ColorRgba32.R (field)
+  public byte R;
 
   // Green value (0..255)
-  G: byte
+  // PicoGK.ColorRgba32.G (field)
+  public byte G;
 
   // Blue value (0..255)
-  B: byte
+  // PicoGK.ColorRgba32.B (field)
+  public byte B;
 
   // Alpha value 0..255 (255 is opaque)
-  A: byte
+  // PicoGK.ColorRgba32.A (field)
+  public byte A;
 
   // Create a color from 3 or 4 bytes
   // PicoGK.ColorRgba32.ColorRgba32 (constructor)
   public ColorRgba32(byte byR, byte byG, byte byB, byte byA = 255)
   public ColorRgba32(ColorFloat clr)
+  public ColorRgba32()
   //   byR: Red color 0..255
   //   byG: Green color 0..255
   //   byB: Blue color 0..255
@@ -447,22 +531,19 @@ ColorRgba32
   public static implicit operator ColorRgba32(ColorFloat clr)
   //   clr: The ColorFloat to use
 
-Config
+// Category: CAD authoring
+// PicoGK.Config (class)
+public partial class Config
 
-  strPicoGKLib: string
+  // PicoGK.Config.strPicoGKLib (constant)
+  public const string strPicoGKLib = "picogk.26.2";
 
-Coord
+  // PicoGK.Config.Config (constructor)
+  public Config()
 
-  X: int
-
-  Y: int
-
-  Z: int
-
-  // PicoGK.Coord.Coord (constructor)
-  public Coord(int x, int y, int z)
-
-CsvTable
+// Category: CAD authoring
+// PicoGK.CsvTable (class)
+public class CsvTable : IDataTable
 
   // PicoGK.CsvTable.CsvTable (constructor)
   public CsvTable(IEnumerable<string>? astrColumnIDs = null)
@@ -499,30 +580,43 @@ CsvTable
   // PicoGK.CsvTable.AddRow (method)
   public void AddRow(IEnumerable<string> astrData)
 
+// Category: CAD authoring
 // Easing functions — they take a float value from 0..1 and output an "eased" curve of the values, also from 0..1
-Easing
+// PicoGK.Easing (class)
+public class Easing
 
-  EEasing
+  // PicoGK.Easing.EEasing (enum)
+  public enum EEasing
 
-    LINEAR: LINEAR
+    // PicoGK.Easing.EEasing.LINEAR (enumMember)
+    LINEAR
 
-    SINE_IN: SINE_IN
+    // PicoGK.Easing.EEasing.SINE_IN (enumMember)
+    SINE_IN
 
-    SINE_OUT: SINE_OUT
+    // PicoGK.Easing.EEasing.SINE_OUT (enumMember)
+    SINE_OUT
 
-    SINE_INOUT: SINE_INOUT
+    // PicoGK.Easing.EEasing.SINE_INOUT (enumMember)
+    SINE_INOUT
 
-    QUAD_IN: QUAD_IN
+    // PicoGK.Easing.EEasing.QUAD_IN (enumMember)
+    QUAD_IN
 
-    QUAD_OUT: QUAD_OUT
+    // PicoGK.Easing.EEasing.QUAD_OUT (enumMember)
+    QUAD_OUT
 
-    QUAD_INOUT: QUAD_INOUT
+    // PicoGK.Easing.EEasing.QUAD_INOUT (enumMember)
+    QUAD_INOUT
 
-    CUBIC_IN: CUBIC_IN
+    // PicoGK.Easing.EEasing.CUBIC_IN (enumMember)
+    CUBIC_IN
 
-    CUBIC_OUT: CUBIC_OUT
+    // PicoGK.Easing.EEasing.CUBIC_OUT (enumMember)
+    CUBIC_OUT
 
-    CUBIC_INOUT: CUBIC_INOUT
+    // PicoGK.Easing.EEasing.CUBIC_INOUT (enumMember)
+    CUBIC_INOUT
 
   // PicoGK.Easing.fEaseSineIn (method)
   public static float fEaseSineIn(float x)
@@ -552,23 +646,31 @@ Easing
   public static float fEaseCubicInOut(float x)
 
   // PicoGK.Easing.fEasingFunction (method)
-  public static float fEasingFunction(float x, Easing.EEasing eEasing)
+  public static float fEasingFunction(float x, EEasing eEasing)
 
+  // PicoGK.Easing.Easing (constructor)
+  public Easing()
+
+// Category: CAD authoring
 // Metadata table containing parameters associated with field types like Voxels, ScalarFields, VectorFields
-FieldMetadata
+// PicoGK.FieldMetadata (class)
+public partial class FieldMetadata : IDisposable
 
   // Type of the data items in the metadata table
-  EType
+  // PicoGK.FieldMetadata.EType (enum)
+  public enum EType
 
-    UNKNOWN: UNKNOWN
+    // PicoGK.FieldMetadata.EType.UNKNOWN (enumMember)
+    UNKNOWN = -1
 
-    STRING: STRING
+    // PicoGK.FieldMetadata.EType.STRING (enumMember)
+    STRING = 0
 
-    FLOAT: FLOAT
+    // PicoGK.FieldMetadata.EType.FLOAT (enumMember)
+    FLOAT
 
-    VECTOR: VECTOR
-
-  lib: Library
+    // PicoGK.FieldMetadata.EType.VECTOR (enumMember)
+    VECTOR
 
   // Number of items in the metadata table
   // PicoGK.FieldMetadata.nCount (method)
@@ -582,7 +684,7 @@ FieldMetadata
 
   // Returns the type of the value with the specified name
   // PicoGK.FieldMetadata.eTypeAt (method)
-  public FieldMetadata.EType eTypeAt(string strName)
+  public EType eTypeAt(string strName)
   //   strName: Name of the parameter to retrieve
 
   // Returns the human readable type of the parameter with the specified name
@@ -592,7 +694,7 @@ FieldMetadata
 
   // Translate the type enum to a string
   // PicoGK.FieldMetadata.strTypeName (method)
-  public string strTypeName(FieldMetadata.EType eType)
+  public string strTypeName(EType eType)
   //   eType: Type to translate
 
   // Try to get the value of a parameter
@@ -620,42 +722,22 @@ FieldMetadata
   // PicoGK.FieldMetadata.ToString (method)
   public override string? ToString()
 
-  // Internal constructor used by the Voxels, ScalarField and VectorField accessor function
-  // PicoGK.FieldMetadata.FieldMetadata (constructor)
-  public FieldMetadata(Library oLibrary, VdbMetaHandle hSource)
-  //   oLibrary: Library instance to use
-  //   hSource: This pointer
-
-  // This function tests whether you are attempting to set internal metadata fields from your code — this can mess up openvdb and internal PicoGK functionality
-  // PicoGK.FieldMetadata.GuardInternalFields (method)
-  protected void GuardInternalFields(string strFieldName)
-  //   strFieldName: Field name you are trying to set
-
   // PicoGK.FieldMetadata.Dispose (method)
   public void Dispose()
   protected virtual void Dispose(bool bDisposing)
 
-GpuTexHandle
-
-  Value: nint
-
-  // PicoGK.GpuTexHandle.GpuTexHandle (constructor)
-  public GpuTexHandle(nint Value)
-
-GuiSideBarHandle
-
-  Value: nint
-
-  // PicoGK.GuiSideBarHandle.GuiSideBarHandle (constructor)
-  public GuiSideBarHandle(nint Value)
-
+// Category: CAD authoring
 // Interface for a bounded implicit function
-IBoundedImplicit
+// PicoGK.IBoundedImplicit (interface)
+public interface IBoundedImplicit : IImplicit
 
   // Access the bounding box of the implicit function
-  oBounds: BBox3
+  // PicoGK.IBoundedImplicit.oBounds (property)
+  BBox3 oBounds { get; }
 
-IDataTable
+// Category: CAD authoring
+// PicoGK.IDataTable (interface)
+public interface IDataTable
 
   // PicoGK.IDataTable.nMaxColumnCount (method)
   int nMaxColumnCount()
@@ -678,150 +760,89 @@ IDataTable
   // PicoGK.IDataTable.AddRow (method)
   void AddRow(IEnumerable<string> astrData)
 
-IFieldWithMetadata
+// Category: CAD authoring
+// PicoGK.IFieldWithMetadata (interface)
+public interface IFieldWithMetadata
 
+  // Return metadata borrowed from this field owner
+  // Remarks: The field disposes its metadata. Keep the metadata within the field lifetime and leave its disposal to that field.
   // PicoGK.IFieldWithMetadata.oMetaData (method)
-  FieldMetadata oMetaData()
+  public FieldMetadata oMetaData()
 
+// Category: CAD authoring
 // Function signature for signed distance implicts
-IImplicit
+// PicoGK.IImplicit (interface)
+public interface IImplicit
 
   // Return the signed distance to the iso surface
   // PicoGK.IImplicit.fSignedDistance (method)
-  float fSignedDistance(in Vector3 vec)
+  public abstract float fSignedDistance(in Vector3 vec)
   //   vec: Real world point to sample
 
-// Host for the process-global lifecycle established by PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String)
-ILibraryHost
-
-  // Log path used when callers keep PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String) 's default
-  DefaultLogFilePath: string
-
-  // Run one PicoGK task with the arguments supplied to PicoGK.Library.Go(System.Single,System.Threading.ThreadStart,System.String,System.Boolean,System.String,System.String)
-  // PicoGK.ILibraryHost.Run (method)
-  void Run(float fVoxelSizeMM, ThreadStart fnTask, string strLogFilePath, bool bEndAppWithTask, string strWindowTitle, string strLightsFile)
-
+// Category: CAD authoring
 // Logging interface which allows you to output diagnostics
-ILog
+// PicoGK.ILog (interface)
+public interface ILog
 
   // This function allows you to output information using the standard string functions, i.e
   // PicoGK.ILog.Log (method)
   void Log(in string strFormat, params object[] args)
 
+// Category: CAD authoring
 // A generic progress reporting interface
-IProgress
+// PicoGK.IProgress (interface)
+public interface IProgress
 
   // Report progress from 0..1
   // PicoGK.IProgress.Progress (method)
   void Progress(float f)
 
+// Category: CAD authoring
 // An interface used to traverse the active values of a ScalarField
-ITraverseScalarField
+// PicoGK.ITraverseScalarField (interface)
+public interface ITraverseScalarField
 
   // Called for every active value in the ScalarField object
   // PicoGK.ITraverseScalarField.InformActiveValue (method)
-  void InformActiveValue(in Vector3 vecPosition, float fValue)
+  public abstract void InformActiveValue(in Vector3 vecPosition, float fValue)
   //   vecPosition: Position in the field
   //   fValue: Value at the postion
 
+// Category: CAD authoring
 // An interface to allow traversal of all active values in a VectorField
-ITraverseVectorField
+// PicoGK.ITraverseVectorField (interface)
+public interface ITraverseVectorField
 
   // Called for every active value in the VectorField object
   // PicoGK.ITraverseVectorField.InformActiveValue (method)
-  void InformActiveValue(in Vector3 vecPosition, in Vector3 vecValue)
+  public abstract void InformActiveValue(in Vector3 vecPosition, in Vector3 vecValue)
   //   vecPosition: Position in the VectorField
   //   vecValue: Value at position
 
-// Backend for embedding PicoGK's concrete PicoGK.Viewer API without a native window
-IViewerBackend
+// Category: CAD authoring
+// PicoGK.Image (class)
+public abstract partial class Image
 
-  IsIdle: bool
+  // PicoGK.Image.EType (enum)
+  public enum EType
 
-  Orientation: Quaternion
+    // PicoGK.Image.EType.BW (enumMember)
+    BW
 
-  // PicoGK.IViewerBackend.Poll (method)
-  bool Poll()
+    // PicoGK.Image.EType.GRAY (enumMember)
+    GRAY
 
-  // PicoGK.IViewerBackend.RequestUpdate (method)
-  void RequestUpdate()
+    // PicoGK.Image.EType.COLOR (enumMember)
+    COLOR
 
-  // PicoGK.IViewerBackend.LoadLightSetup (method)
-  void LoadLightSetup(byte[] abyDiffuseDds, byte[] abySpecularDds)
+  // PicoGK.Image.nWidth (field)
+  public readonly int nWidth;
 
-  // PicoGK.IViewerBackend.SetBackgroundColor (method)
-  void SetBackgroundColor(ColorFloat color)
+  // PicoGK.Image.nHeight (field)
+  public readonly int nHeight;
 
-  // PicoGK.IViewerBackend.SetFieldOfView (method)
-  void SetFieldOfView(float radians)
-
-  // PicoGK.IViewerBackend.ZoomToFit (method)
-  void ZoomToFit()
-
-  // PicoGK.IViewerBackend.Add (method)
-  void Add(Voxels vox, int nGroupID)
-  void Add(Voxels vox, string name, int nGroupID)
-  void Add(Mesh msh, int nGroupID)
-  void Add(Mesh msh, string name, int nGroupID)
-  void Add(PolyLine poly, int nGroupID)
-  void Add(PolyLine poly, string name, int nGroupID)
-
-  // PicoGK.IViewerBackend.Remove (method)
-  void Remove(Voxels vox)
-  void Remove(Mesh msh)
-  void Remove(PolyLine poly)
-
-  // PicoGK.IViewerBackend.SetObjectMatrix (method)
-  void SetObjectMatrix(Voxels vox, Matrix4x4 mat)
-  void SetObjectMatrix(Mesh msh, Matrix4x4 mat)
-  void SetObjectMatrix(PolyLine poly, Matrix4x4 mat)
-
-  // PicoGK.IViewerBackend.RemoveAllObjects (method)
-  void RemoveAllObjects()
-
-  // PicoGK.IViewerBackend.SetMechanism (method)
-  void SetMechanism(object source)
-
-  // PicoGK.IViewerBackend.RequestScreenShot (method)
-  void RequestScreenShot(string strScreenShotPath)
-
-  // PicoGK.IViewerBackend.EnableExperimental (method)
-  void EnableExperimental(bool bEnable)
-
-  // PicoGK.IViewerBackend.SetGroupVisible (method)
-  void SetGroupVisible(int nGroupID, bool bVisible)
-
-  // PicoGK.IViewerBackend.SetGroupMaterial (method)
-  void SetGroupMaterial(int nGroupID, ColorFloat clr, float fMetallic, float fRoughness)
-  void SetGroupMaterial(int groupId, Material material)
-
-  // PicoGK.IViewerBackend.SetGroupMatrix (method)
-  void SetGroupMatrix(int nGroupID, Matrix4x4 mat)
-
-  // PicoGK.IViewerBackend.EnableOverhangWarning (method)
-  void EnableOverhangWarning(int nGroupID, Overhang uWarning, Overhang uError)
-
-  // PicoGK.IViewerBackend.DisableOverhangWarning (method)
-  void DisableOverhangWarning(int nGroupID)
-
-  // PicoGK.IViewerBackend.GetBoundingBox (method)
-  BBox3 GetBoundingBox()
-
-Image
-
-  EType
-
-    BW: BW
-
-    GRAY: GRAY
-
-    COLOR: COLOR
-
-  nWidth: int
-
-  nHeight: int
-
-  eType: Image.EType
+  // PicoGK.Image.eType (field)
+  public readonly EType eType;
 
   // PicoGK.Image.clrValue (method)
   public abstract ColorFloat clrValue(int x, int y)
@@ -876,9 +897,6 @@ Image
   public void DrawLine(int x0, int y0, int x1, int y1, float fGrayscale)
   public void DrawLine(int x0, int y0, int x1, int y1, bool bValue)
 
-  // PicoGK.Image.Image (constructor)
-  protected Image(int _nWidth, int _nHeight, Image.EType _eType)
-
   // PicoGK.Image.imgFromSKBitmap (method)
   public static ImageRgba32 imgFromSKBitmap(SKBitmap oSKBitmap)
 
@@ -897,7 +915,9 @@ Image
   // PicoGK.Image.imgLoadFromFile (method)
   public static Image imgLoadFromFile(string strFileName)
 
-ImageBWAbstract
+// Category: CAD authoring
+// PicoGK.ImageBWAbstract (class)
+public abstract partial class ImageBWAbstract : Image
 
   // PicoGK.ImageBWAbstract.ImageBWAbstract (constructor)
   public ImageBWAbstract(int _nWidth, int _nHeight)
@@ -912,7 +932,9 @@ ImageBWAbstract
   public override void SetValue(int x, int y, float fValue)
   public override void SetValue(int x, int y, in ColorFloat clr)
 
-ImageColor
+// Category: CAD authoring
+// PicoGK.ImageColor (class)
+public partial class ImageColor : ImageColorAbstract
 
   // PicoGK.ImageColor.ImageColor (constructor)
   public ImageColor(int _nWidth, int _nHeight)
@@ -924,7 +946,9 @@ ImageColor
   // PicoGK.ImageColor.clrValue (method)
   public override ColorFloat clrValue(int x, int y)
 
-ImageColorAbstract
+// Category: CAD authoring
+// PicoGK.ImageColorAbstract (class)
+public abstract partial class ImageColorAbstract : Image
 
   // PicoGK.ImageColorAbstract.ImageColorAbstract (constructor)
   public ImageColorAbstract(int _iWidth, int _iHeight)
@@ -939,9 +963,12 @@ ImageColorAbstract
   public override void SetValue(int x, int y, float f)
   public override void SetValue(int x, int y, bool bValue)
 
-ImageGrayScale
+// Category: CAD authoring
+// PicoGK.ImageGrayScale (class)
+public partial class ImageGrayScale : ImageGrayscaleAbstract
 
-  m_afValues: float[]
+  // PicoGK.ImageGrayScale.m_afValues (field)
+  public float[] m_afValues;
 
   // PicoGK.ImageGrayScale.ImageGrayScale (constructor)
   public ImageGrayScale(int _nWidth, int _nHeight)
@@ -956,9 +983,11 @@ ImageGrayScale
   public ImageColor imgGetColorCodedSDF(float fBackground)
 
   // PicoGK.ImageGrayScale.imgGetInterpolated (method)
-  public static ImageGrayScale imgGetInterpolated(ImageGrayScale oImg1, ImageGrayScale oImg2, float fWeight = 0.5)
+  public static ImageGrayScale imgGetInterpolated(ImageGrayScale oImg1, ImageGrayScale oImg2, float fWeight = 0.5f)
 
-ImageGrayscaleAbstract
+// Category: CAD authoring
+// PicoGK.ImageGrayscaleAbstract (class)
+public abstract partial class ImageGrayscaleAbstract : Image
 
   // PicoGK.ImageGrayscaleAbstract.ImageGrayscaleAbstract (constructor)
   public ImageGrayscaleAbstract(int _nWidth, int _nHeight)
@@ -975,9 +1004,11 @@ ImageGrayscaleAbstract
 
   // Returns whether the image has any pixels set to a value smaller or equal to the specified value This is useful to find out if a signed distance field slice contains any active voxels
   // PicoGK.ImageGrayscaleAbstract.bContainsActivePixels (method)
-  public bool bContainsActivePixels(float fThreshold = 0)
+  public bool bContainsActivePixels(float fThreshold = 0.0f)
 
-ImageRgb24
+// Category: CAD authoring
+// PicoGK.ImageRgb24 (class)
+public partial class ImageRgb24 : ImageColorAbstract
 
   // PicoGK.ImageRgb24.ImageRgb24 (constructor)
   public ImageRgb24(int _nWidth, int _nHeight)
@@ -995,7 +1026,9 @@ ImageRgb24
   // PicoGK.ImageRgb24.sGetRgb24 (method)
   public override ColorRgb24 sGetRgb24(int x, int y)
 
-ImageRgba32
+// Category: CAD authoring
+// PicoGK.ImageRgba32 (class)
+public partial class ImageRgba32 : ImageColorAbstract
 
   // PicoGK.ImageRgba32.ImageRgba32 (constructor)
   public ImageRgba32(int _nWidth, int _nHeight)
@@ -1012,47 +1045,3 @@ ImageRgba32
 
   // PicoGK.ImageRgba32.sGetRgba32 (method)
   public override ColorRgba32 sGetRgba32(int x, int y)
-
-LatHandle
-
-  Value: long
-
-  // PicoGK.LatHandle.LatHandle (constructor)
-  public LatHandle(long Value)
-
-// A lattice of beams (and spheres)
-Lattice
-
-  lib: Library
-
-  // Creates a new empty Lattice, using the global library instance
-  // PicoGK.Lattice.Lattice (constructor)
-  public Lattice()
-  public Lattice(Library libSet)
-
-  // Add a sphere to the lattice
-  // PicoGK.Lattice.AddSphere (method)
-  public void AddSphere(in Vector3 vecCenter, float fRadius)
-  //   vecCenter: Center point
-  //   fRadius: Radius of the sphere
-
-  // Add a beam to the lattice
-  // PicoGK.Lattice.AddBeam (method)
-  public void AddBeam(in Vector3 vecA, float fRadA, in Vector3 vecB, float fRadB, bool bRoundCap = true)
-  public void AddBeam(in Vector3 vecA, in Vector3 vecB, float fRadA, float fRadB, bool bRoundCap = true)
-  //   vecA: Starting point of the beam
-  //   fRadA: Radius at starting point
-  //   vecB: End point of the beam
-  //   fRadB: Radius at end point
-  //   bRoundCap: If true, beam has a hemispherical cap
-
-  // PicoGK.Lattice.Dispose (method)
-  public void Dispose()
-  protected virtual void Dispose(bool bDisposing)
-
-LibHandle
-
-  Value: long
-
-  // PicoGK.LibHandle.LibHandle (constructor)
-  public LibHandle(long Value)

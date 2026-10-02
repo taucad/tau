@@ -1,38 +1,55 @@
-# PicoGK — System.Numerics
+# PicoGK — Selected BCL reference — System.Numerics
 
-5 top-level symbols. Signatures are verbatim csharp.
+4 top-level symbols. Signatures are verbatim csharp.
 
-Matrix3x2
+// Category: Selected BCL reference
+// System.Numerics.Matrix3x2 (struct)
+public struct Matrix3x2
 
-  M11: float
+  // System.Numerics.Matrix3x2.M11 (field)
+  public float M11
 
-  M12: float
+  // System.Numerics.Matrix3x2.M12 (field)
+  public float M12
 
-  M21: float
+  // System.Numerics.Matrix3x2.M21 (field)
+  public float M21
 
-  M22: float
+  // System.Numerics.Matrix3x2.M22 (field)
+  public float M22
 
-  M31: float
+  // System.Numerics.Matrix3x2.M31 (field)
+  public float M31
 
-  M32: float
+  // System.Numerics.Matrix3x2.M32 (field)
+  public float M32
 
-  Identity: Matrix3x2
+  // System.Numerics.Matrix3x2.Identity (property)
+  public static Matrix3x2 Identity { get; }
 
-  IsIdentity: bool
+  // System.Numerics.Matrix3x2.IsIdentity (property)
+  public readonly bool IsIdentity { get; }
 
-  Translation: Vector2
+  // System.Numerics.Matrix3x2.Translation (property)
+  public Vector2 Translation { get; set; }
 
-  X: Vector2
+  // System.Numerics.Matrix3x2.X (property)
+  public Vector2 X { get; set; }
 
-  Y: Vector2
+  // System.Numerics.Matrix3x2.Y (property)
+  public Vector2 Y { get; set; }
 
-  Z: Vector2
+  // System.Numerics.Matrix3x2.Z (property)
+  public Vector2 Z { get; set; }
 
-  this[]: Vector2
+  // System.Numerics.Matrix3x2.this[int row] (property)
+  public Vector2 this[int row] { get; set; }
 
-  this[]: float
+  // System.Numerics.Matrix3x2.this[int row, int column] (property)
+  public float this[int row, int column] { get; set; }
 
   // System.Numerics.Matrix3x2.Matrix3x2 (constructor)
+  public Matrix3x2()
   public Matrix3x2(float m11, float m12, float m21, float m22, float m31, float m32)
 
   // System.Numerics.Matrix3x2.op_Addition (method)
@@ -124,59 +141,87 @@ Matrix3x2
   // System.Numerics.Matrix3x2.WithRow (method)
   public readonly Matrix3x2 WithRow(int index, Vector2 value)
 
-Matrix4x4
+// Category: Selected BCL reference
+// System.Numerics.Matrix4x4 (struct)
+public struct Matrix4x4
 
-  M11: float
+  // System.Numerics.Matrix4x4.M11 (field)
+  public float M11
 
-  M12: float
+  // System.Numerics.Matrix4x4.M12 (field)
+  public float M12
 
-  M13: float
+  // System.Numerics.Matrix4x4.M13 (field)
+  public float M13
 
-  M14: float
+  // System.Numerics.Matrix4x4.M14 (field)
+  public float M14
 
-  M21: float
+  // System.Numerics.Matrix4x4.M21 (field)
+  public float M21
 
-  M22: float
+  // System.Numerics.Matrix4x4.M22 (field)
+  public float M22
 
-  M23: float
+  // System.Numerics.Matrix4x4.M23 (field)
+  public float M23
 
-  M24: float
+  // System.Numerics.Matrix4x4.M24 (field)
+  public float M24
 
-  M31: float
+  // System.Numerics.Matrix4x4.M31 (field)
+  public float M31
 
-  M32: float
+  // System.Numerics.Matrix4x4.M32 (field)
+  public float M32
 
-  M33: float
+  // System.Numerics.Matrix4x4.M33 (field)
+  public float M33
 
-  M34: float
+  // System.Numerics.Matrix4x4.M34 (field)
+  public float M34
 
-  M41: float
+  // System.Numerics.Matrix4x4.M41 (field)
+  public float M41
 
-  M42: float
+  // System.Numerics.Matrix4x4.M42 (field)
+  public float M42
 
-  M43: float
+  // System.Numerics.Matrix4x4.M43 (field)
+  public float M43
 
-  M44: float
+  // System.Numerics.Matrix4x4.M44 (field)
+  public float M44
 
-  Identity: Matrix4x4
+  // System.Numerics.Matrix4x4.Identity (property)
+  public static Matrix4x4 Identity { get; }
 
-  IsIdentity: bool
+  // System.Numerics.Matrix4x4.IsIdentity (property)
+  public readonly bool IsIdentity { get; }
 
-  Translation: Vector3
+  // System.Numerics.Matrix4x4.Translation (property)
+  public Vector3 Translation { get; set; }
 
-  X: Vector4
+  // System.Numerics.Matrix4x4.X (property)
+  public Vector4 X { get; set; }
 
-  Y: Vector4
+  // System.Numerics.Matrix4x4.Y (property)
+  public Vector4 Y { get; set; }
 
-  Z: Vector4
+  // System.Numerics.Matrix4x4.Z (property)
+  public Vector4 Z { get; set; }
 
-  W: Vector4
+  // System.Numerics.Matrix4x4.W (property)
+  public Vector4 W { get; set; }
 
-  this[]: Vector4
+  // System.Numerics.Matrix4x4.this[int row] (property)
+  public Vector4 this[int row] { get; set; }
 
-  this[]: float
+  // System.Numerics.Matrix4x4.this[int row, int column] (property)
+  public float this[int row, int column] { get; set; }
 
   // System.Numerics.Matrix4x4.Matrix4x4 (constructor)
+  public Matrix4x4()
   public Matrix4x4(float m11, float m12, float m13, float m14, float m21, float m22, float m23, float m24, float m31, float m32, float m33, float m34, float m41, float m42, float m43, float m44)
   public Matrix4x4(Matrix3x2 value)
 
@@ -361,13 +406,18 @@ Matrix4x4
   // System.Numerics.Matrix4x4.WithRow (method)
   public readonly Matrix4x4 WithRow(int index, Vector4 value)
 
-Plane
+// Category: Selected BCL reference
+// System.Numerics.Plane (struct)
+public struct Plane
 
-  Normal: Vector3
+  // System.Numerics.Plane.Normal (field)
+  public Vector3 Normal
 
-  D: float
+  // System.Numerics.Plane.D (field)
+  public float D
 
   // System.Numerics.Plane.Plane (constructor)
+  public Plane()
   public Plane(float x, float y, float z, float d)
   public Plane(Vector3 normal, float d)
   public Plane(Vector4 value)
@@ -412,25 +462,36 @@ Plane
   // System.Numerics.Plane.ToString (method)
   public override readonly string ToString()
 
-Quaternion
+// Category: Selected BCL reference
+// System.Numerics.Quaternion (struct)
+public struct Quaternion
 
-  X: float
+  // System.Numerics.Quaternion.X (field)
+  public float X
 
-  Y: float
+  // System.Numerics.Quaternion.Y (field)
+  public float Y
 
-  Z: float
+  // System.Numerics.Quaternion.Z (field)
+  public float Z
 
-  W: float
+  // System.Numerics.Quaternion.W (field)
+  public float W
 
-  Zero: Quaternion
+  // System.Numerics.Quaternion.Zero (property)
+  public static Quaternion Zero { get; }
 
-  Identity: Quaternion
+  // System.Numerics.Quaternion.Identity (property)
+  public static Quaternion Identity { get; }
 
-  this[]: float
+  // System.Numerics.Quaternion.this[int index] (property)
+  public float this[int index] { get; set; }
 
-  IsIdentity: bool
+  // System.Numerics.Quaternion.IsIdentity (property)
+  public readonly bool IsIdentity { get; }
 
   // System.Numerics.Quaternion.Quaternion (constructor)
+  public Quaternion()
   public Quaternion(float x, float y, float z, float w)
   public Quaternion(Vector3 vectorPart, float scalarPart)
 
@@ -521,416 +582,3 @@ Quaternion
 
   // System.Numerics.Quaternion.ToString (method)
   public override readonly string ToString()
-
-Vector2
-
-  X: float
-
-  Y: float
-
-  AllBitsSet: Vector2
-
-  E: Vector2
-
-  Epsilon: Vector2
-
-  NaN: Vector2
-
-  NegativeInfinity: Vector2
-
-  NegativeZero: Vector2
-
-  One: Vector2
-
-  Pi: Vector2
-
-  PositiveInfinity: Vector2
-
-  Tau: Vector2
-
-  UnitX: Vector2
-
-  UnitY: Vector2
-
-  Zero: Vector2
-
-  this[]: float
-
-  // System.Numerics.Vector2.Vector2 (constructor)
-  public Vector2(float value)
-  public Vector2(float x, float y)
-  public Vector2(ReadOnlySpan<float> values)
-
-  // System.Numerics.Vector2.op_Addition (method)
-  public static Vector2 operator +(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.op_Division (method)
-  public static Vector2 operator /(Vector2 left, Vector2 right)
-  public static Vector2 operator /(Vector2 value1, float value2)
-
-  // System.Numerics.Vector2.op_Equality (method)
-  public static bool operator ==(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.op_Inequality (method)
-  public static bool operator !=(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.op_Multiply (method)
-  public static Vector2 operator *(Vector2 left, Vector2 right)
-  public static Vector2 operator *(Vector2 left, float right)
-  public static Vector2 operator *(float left, Vector2 right)
-
-  // System.Numerics.Vector2.op_Subtraction (method)
-  public static Vector2 operator -(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.op_UnaryNegation (method)
-  public static Vector2 operator -(Vector2 value)
-
-  // System.Numerics.Vector2.op_BitwiseAnd (method)
-  public static Vector2 operator &(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.op_BitwiseOr (method)
-  public static Vector2 operator |(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.op_ExclusiveOr (method)
-  public static Vector2 operator ^(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.op_LeftShift (method)
-  public static Vector2 operator <<(Vector2 value, int shiftAmount)
-
-  // System.Numerics.Vector2.op_OnesComplement (method)
-  public static Vector2 operator ~(Vector2 value)
-
-  // System.Numerics.Vector2.op_RightShift (method)
-  public static Vector2 operator >>(Vector2 value, int shiftAmount)
-
-  // System.Numerics.Vector2.op_UnaryPlus (method)
-  public static Vector2 operator +(Vector2 value)
-
-  // System.Numerics.Vector2.op_UnsignedRightShift (method)
-  public static Vector2 operator >>>(Vector2 value, int shiftAmount)
-
-  // System.Numerics.Vector2.Abs (method)
-  public static Vector2 Abs(Vector2 value)
-
-  // System.Numerics.Vector2.Add (method)
-  public static Vector2 Add(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.All (method)
-  public static bool All(Vector2 vector, float value)
-
-  // System.Numerics.Vector2.AllWhereAllBitsSet (method)
-  public static bool AllWhereAllBitsSet(Vector2 vector)
-
-  // System.Numerics.Vector2.AndNot (method)
-  public static Vector2 AndNot(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.Any (method)
-  public static bool Any(Vector2 vector, float value)
-
-  // System.Numerics.Vector2.AnyWhereAllBitsSet (method)
-  public static bool AnyWhereAllBitsSet(Vector2 vector)
-
-  // System.Numerics.Vector2.BitwiseAnd (method)
-  public static Vector2 BitwiseAnd(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.BitwiseOr (method)
-  public static Vector2 BitwiseOr(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.Clamp (method)
-  public static Vector2 Clamp(Vector2 value1, Vector2 min, Vector2 max)
-
-  // System.Numerics.Vector2.ClampNative (method)
-  public static Vector2 ClampNative(Vector2 value1, Vector2 min, Vector2 max)
-
-  // System.Numerics.Vector2.ConditionalSelect (method)
-  public static Vector2 ConditionalSelect(Vector2 condition, Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.CopySign (method)
-  public static Vector2 CopySign(Vector2 value, Vector2 sign)
-
-  // System.Numerics.Vector2.Cos (method)
-  public static Vector2 Cos(Vector2 vector)
-
-  // System.Numerics.Vector2.Count (method)
-  public static int Count(Vector2 vector, float value)
-
-  // System.Numerics.Vector2.CountWhereAllBitsSet (method)
-  public static int CountWhereAllBitsSet(Vector2 vector)
-
-  // System.Numerics.Vector2.Create (method)
-  public static Vector2 Create(float value)
-  public static Vector2 Create(float x, float y)
-  public static Vector2 Create(ReadOnlySpan<float> values)
-
-  // System.Numerics.Vector2.CreateScalar (method)
-  public static Vector2 CreateScalar(float x)
-
-  // System.Numerics.Vector2.CreateScalarUnsafe (method)
-  public static Vector2 CreateScalarUnsafe(float x)
-
-  // System.Numerics.Vector2.Cross (method)
-  public static float Cross(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.DegreesToRadians (method)
-  public static Vector2 DegreesToRadians(Vector2 degrees)
-
-  // System.Numerics.Vector2.Distance (method)
-  public static float Distance(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.DistanceSquared (method)
-  public static float DistanceSquared(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.Divide (method)
-  public static Vector2 Divide(Vector2 left, Vector2 right)
-  public static Vector2 Divide(Vector2 left, float divisor)
-
-  // System.Numerics.Vector2.Dot (method)
-  public static float Dot(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.Exp (method)
-  public static Vector2 Exp(Vector2 vector)
-
-  // System.Numerics.Vector2.Equals (method)
-  public static Vector2 Equals(Vector2 left, Vector2 right)
-  public override readonly bool Equals(object? obj)
-  public readonly bool Equals(Vector2 other)
-
-  // System.Numerics.Vector2.EqualsAll (method)
-  public static bool EqualsAll(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.EqualsAny (method)
-  public static bool EqualsAny(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.FusedMultiplyAdd (method)
-  public static Vector2 FusedMultiplyAdd(Vector2 left, Vector2 right, Vector2 addend)
-
-  // System.Numerics.Vector2.GreaterThan (method)
-  public static Vector2 GreaterThan(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.GreaterThanAll (method)
-  public static bool GreaterThanAll(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.GreaterThanAny (method)
-  public static bool GreaterThanAny(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.GreaterThanOrEqual (method)
-  public static Vector2 GreaterThanOrEqual(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.GreaterThanOrEqualAll (method)
-  public static bool GreaterThanOrEqualAll(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.GreaterThanOrEqualAny (method)
-  public static bool GreaterThanOrEqualAny(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.Hypot (method)
-  public static Vector2 Hypot(Vector2 x, Vector2 y)
-
-  // System.Numerics.Vector2.IndexOf (method)
-  public static int IndexOf(Vector2 vector, float value)
-
-  // System.Numerics.Vector2.IndexOfWhereAllBitsSet (method)
-  public static int IndexOfWhereAllBitsSet(Vector2 vector)
-
-  // System.Numerics.Vector2.IsEvenInteger (method)
-  public static Vector2 IsEvenInteger(Vector2 vector)
-
-  // System.Numerics.Vector2.IsFinite (method)
-  public static Vector2 IsFinite(Vector2 vector)
-
-  // System.Numerics.Vector2.IsInfinity (method)
-  public static Vector2 IsInfinity(Vector2 vector)
-
-  // System.Numerics.Vector2.IsInteger (method)
-  public static Vector2 IsInteger(Vector2 vector)
-
-  // System.Numerics.Vector2.IsNaN (method)
-  public static Vector2 IsNaN(Vector2 vector)
-
-  // System.Numerics.Vector2.IsNegative (method)
-  public static Vector2 IsNegative(Vector2 vector)
-
-  // System.Numerics.Vector2.IsNegativeInfinity (method)
-  public static Vector2 IsNegativeInfinity(Vector2 vector)
-
-  // System.Numerics.Vector2.IsNormal (method)
-  public static Vector2 IsNormal(Vector2 vector)
-
-  // System.Numerics.Vector2.IsOddInteger (method)
-  public static Vector2 IsOddInteger(Vector2 vector)
-
-  // System.Numerics.Vector2.IsPositive (method)
-  public static Vector2 IsPositive(Vector2 vector)
-
-  // System.Numerics.Vector2.IsPositiveInfinity (method)
-  public static Vector2 IsPositiveInfinity(Vector2 vector)
-
-  // System.Numerics.Vector2.IsSubnormal (method)
-  public static Vector2 IsSubnormal(Vector2 vector)
-
-  // System.Numerics.Vector2.IsZero (method)
-  public static Vector2 IsZero(Vector2 vector)
-
-  // System.Numerics.Vector2.LastIndexOf (method)
-  public static int LastIndexOf(Vector2 vector, float value)
-
-  // System.Numerics.Vector2.LastIndexOfWhereAllBitsSet (method)
-  public static int LastIndexOfWhereAllBitsSet(Vector2 vector)
-
-  // System.Numerics.Vector2.Lerp (method)
-  public static Vector2 Lerp(Vector2 value1, Vector2 value2, float amount)
-  public static Vector2 Lerp(Vector2 value1, Vector2 value2, Vector2 amount)
-
-  // System.Numerics.Vector2.LessThan (method)
-  public static Vector2 LessThan(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.LessThanAll (method)
-  public static bool LessThanAll(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.LessThanAny (method)
-  public static bool LessThanAny(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.LessThanOrEqual (method)
-  public static Vector2 LessThanOrEqual(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.LessThanOrEqualAll (method)
-  public static bool LessThanOrEqualAll(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.LessThanOrEqualAny (method)
-  public static bool LessThanOrEqualAny(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.Load (method)
-  public static Vector2 Load(float* source)
-
-  // System.Numerics.Vector2.LoadAligned (method)
-  public static Vector2 LoadAligned(float* source)
-
-  // System.Numerics.Vector2.LoadAlignedNonTemporal (method)
-  public static Vector2 LoadAlignedNonTemporal(float* source)
-
-  // System.Numerics.Vector2.LoadUnsafe (method)
-  public static Vector2 LoadUnsafe(ref readonly float source)
-  public static Vector2 LoadUnsafe(ref readonly float source, nuint elementOffset)
-
-  // System.Numerics.Vector2.Log (method)
-  public static Vector2 Log(Vector2 vector)
-
-  // System.Numerics.Vector2.Log2 (method)
-  public static Vector2 Log2(Vector2 vector)
-
-  // System.Numerics.Vector2.Max (method)
-  public static Vector2 Max(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.MaxMagnitude (method)
-  public static Vector2 MaxMagnitude(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.MaxMagnitudeNumber (method)
-  public static Vector2 MaxMagnitudeNumber(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.MaxNative (method)
-  public static Vector2 MaxNative(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.MaxNumber (method)
-  public static Vector2 MaxNumber(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.Min (method)
-  public static Vector2 Min(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.MinMagnitude (method)
-  public static Vector2 MinMagnitude(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.MinMagnitudeNumber (method)
-  public static Vector2 MinMagnitudeNumber(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.MinNative (method)
-  public static Vector2 MinNative(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.MinNumber (method)
-  public static Vector2 MinNumber(Vector2 value1, Vector2 value2)
-
-  // System.Numerics.Vector2.Multiply (method)
-  public static Vector2 Multiply(Vector2 left, Vector2 right)
-  public static Vector2 Multiply(Vector2 left, float right)
-  public static Vector2 Multiply(float left, Vector2 right)
-
-  // System.Numerics.Vector2.MultiplyAddEstimate (method)
-  public static Vector2 MultiplyAddEstimate(Vector2 left, Vector2 right, Vector2 addend)
-
-  // System.Numerics.Vector2.Negate (method)
-  public static Vector2 Negate(Vector2 value)
-
-  // System.Numerics.Vector2.None (method)
-  public static bool None(Vector2 vector, float value)
-
-  // System.Numerics.Vector2.NoneWhereAllBitsSet (method)
-  public static bool NoneWhereAllBitsSet(Vector2 vector)
-
-  // System.Numerics.Vector2.Normalize (method)
-  public static Vector2 Normalize(Vector2 value)
-
-  // System.Numerics.Vector2.OnesComplement (method)
-  public static Vector2 OnesComplement(Vector2 value)
-
-  // System.Numerics.Vector2.RadiansToDegrees (method)
-  public static Vector2 RadiansToDegrees(Vector2 radians)
-
-  // System.Numerics.Vector2.Reflect (method)
-  public static Vector2 Reflect(Vector2 vector, Vector2 normal)
-
-  // System.Numerics.Vector2.Round (method)
-  public static Vector2 Round(Vector2 vector)
-  public static Vector2 Round(Vector2 vector, MidpointRounding mode)
-
-  // System.Numerics.Vector2.Shuffle (method)
-  public static Vector2 Shuffle(Vector2 vector, byte xIndex, byte yIndex)
-
-  // System.Numerics.Vector2.Sin (method)
-  public static Vector2 Sin(Vector2 vector)
-
-  // System.Numerics.Vector2.SinCos (method)
-  public static (Vector2 Sin, Vector2 Cos) SinCos(Vector2 vector)
-
-  // System.Numerics.Vector2.SquareRoot (method)
-  public static Vector2 SquareRoot(Vector2 value)
-
-  // System.Numerics.Vector2.Subtract (method)
-  public static Vector2 Subtract(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.Sum (method)
-  public static float Sum(Vector2 value)
-
-  // System.Numerics.Vector2.Transform (method)
-  public static Vector2 Transform(Vector2 position, Matrix3x2 matrix)
-  public static Vector2 Transform(Vector2 position, Matrix4x4 matrix)
-  public static Vector2 Transform(Vector2 value, Quaternion rotation)
-
-  // System.Numerics.Vector2.TransformNormal (method)
-  public static Vector2 TransformNormal(Vector2 normal, Matrix3x2 matrix)
-  public static Vector2 TransformNormal(Vector2 normal, Matrix4x4 matrix)
-
-  // System.Numerics.Vector2.Truncate (method)
-  public static Vector2 Truncate(Vector2 vector)
-
-  // System.Numerics.Vector2.Xor (method)
-  public static Vector2 Xor(Vector2 left, Vector2 right)
-
-  // System.Numerics.Vector2.CopyTo (method)
-  public readonly void CopyTo(float[] array)
-  public readonly void CopyTo(float[] array, int index)
-  public readonly void CopyTo(Span<float> destination)
-
-  // System.Numerics.Vector2.TryCopyTo (method)
-  public readonly bool TryCopyTo(Span<float> destination)
-
-  // System.Numerics.Vector2.GetHashCode (method)
-  public override readonly int GetHashCode()
-
-  // System.Numerics.Vector2.Length (method)
-  public readonly float Length()
-
-  // System.Numerics.Vector2.LengthSquared (method)
-  public readonly float LengthSquared()
-
-  // System.Numerics.Vector2.ToString (method)
-  public override readonly string ToString()
-  public readonly string ToString(string? format)
-  public readonly string ToString(string? format, IFormatProvider? formatProvider)

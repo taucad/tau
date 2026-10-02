@@ -4391,6 +4391,9 @@ importers:
         specifier: workspace:*
         version: link:../../parameters
     devDependencies:
+      '@gltf-transform/core':
+        specifier: 'catalog:'
+        version: 4.5.1
       '@taucad/assimp':
         specifier: workspace:*
         version: link:../assimp

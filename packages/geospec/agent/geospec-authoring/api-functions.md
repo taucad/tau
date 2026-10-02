@@ -3,6 +3,7 @@
 8 top-level symbols. Signatures are verbatim typescript.
 
 // Create a GeoSpec instance
+// Remarks: The root factory stays lazy: mesh parsing code is loaded only when a mesh method is called.
 // createGeoSpec (function)
 export declare function createGeoSpec(): GeoSpec;
 
@@ -38,6 +39,8 @@ export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
 //   defaults: Model loading defaults
 
 // Load a CAD model into GeoSpec evidence
+// Remarks: Direct geometry sources are parsed immediately. Code and project files are exported through the required `@taucad/runtime` integration on this subpath.
+// Throws: {@link GeoSpecModelLoadError} when the model cannot be exported or parsed, or when no GeoSpec engine is registered.
 // loadModel (function)
 export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
 //   options: Source, code, or file model load options

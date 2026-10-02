@@ -1,6 +1,6 @@
 # geospec — Types
 
-113 top-level symbols. Signatures are verbatim typescript.
+104 top-level symbols. Signatures are verbatim typescript.
 
 // Stateful GeoSpec API created by {@link createGeoSpec}
 GeoSpec: {
@@ -22,6 +22,7 @@ GeoSpecSubject: {
   [subjectBrand]: true
 
 // Geometry units accepted at GeoSpec evidence-loading boundaries
+// Remarks: Loaded subjects normalize coordinates into canonical millimetres; this type describes source and provenance units, not a project-wide configuration.
 GeoSpecUnit: 'mm' | 'cm' | 'm' | 'in' | 'ft' | (string & {})
 
 // Geometry assertion collected from a GeoSpec test module
@@ -210,6 +211,7 @@ GeoSpecComponentInterferenceAllowance: {
   reason: string
 
 // Component-interference expectation accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
+// Remarks: GeoSpec checks for positive solid intersection volume between assembly components. Tangent contact and correctly meshed gears are allowed. `pairs` narrows the check to specific component-label pairs while preserving exact positive-volume evidence for every selected pair. `allowances` documents explicitly intentional positive-volume interference such as gasket compression, press fits, or simplified thread engagement.
 GeoSpecComponentInterferenceExpectation: {
     tolerance?: number;
     pairs?: GeoSpecComponentInterferencePairExpectation[];
@@ -543,6 +545,7 @@ GeoSpecMeshIntegrityExpectation: {
   triangleCount: GeoSpecNumericExpectation
 
 // Diagnostic severities rejected by `expectGeo(...).toHaveNoDiagnostics(...)`
+// Remarks: Defaults to `error` and `warning` when omitted.
 GeoSpecNoDiagnosticsExpectation: {
     severities?: Array<GeometryDiagnostic['severity']>;
 }
@@ -633,6 +636,7 @@ GeoSpecProductStructureExpectation: {
   count: GeoSpecNumericExpectation
 
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
+// Remarks: Verdicts are decided by exact BRep evidence only (D3): extrema for `contact`/`clearance`, analytic fact comparison for `coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`, exact solid classification for `containment`/`insertion`, and exact boolean common volume for `interference` (positive volume outside the `minVolume`/`maxVolume` allowance band fails).
 GeoSpecSpatialRelationshipExpectation: {
     id?: string;
     kind: 'contact' | 'clearance' | 'coaxial' | 'concentric' | 'coplanar' | 'parallel' | 'perpendicular' | 'angle' | 'containment' | 'insertion' | 'interference';
@@ -758,6 +762,7 @@ GeoSpecValidBrepExpectation: {
   closedWires: boolean
 
 // Void-continuity expectation accepted by `expectGeo(...).toHaveVoidContinuity(...)`
+// Remarks: A whole-assembly negative-space claim: the ordered `path` waypoints must all lie in ONE connected open-void component (void = outside every `material` solid), that component must not reach any `isolatedFrom` point, and its tightest sampled cross-section must meet `minCrossSection`. Connectivity and isolation are proven from Boolean shell topology, generalized winding-number body identity, and deterministic cross-sections.
 GeoSpecVoidContinuityExpectation: {
     /** Ordered waypoints (>= 1) known to lie in the void being proven. */
     path: GeoSpecVoidWaypoint[];
@@ -1135,6 +1140,7 @@ GeometrySource: {
   byteLength: number
 
 // Canonical P0 object under test for GeoSpec
+// Remarks: This is intentionally a GeoSpec-loaded subject rather than a Tau runtime contract. Runtime integrations pass GLB/glTF bytes or files into loaders.
 GeometrySubject: {
     kind: 'geometry-subject';
     /** Opaque engine-owned identifier used by every protocol claim. */
@@ -1188,6 +1194,7 @@ MeshEvidence: {
 MeshFileFormat: 'glb' | 'gltf' | 'mesh-buffer'
 
 // Triangle quality and scalar mesh metrics used by P0 GeoSpec matchers
+// Remarks: Values are reported in the glTF document coordinate units.
 MeshQualityStats: {
     triangleCount: number;
     nonFiniteVertices: Array<{
@@ -1436,6 +1443,7 @@ GeoSpecMatcherDescriptor: {
   mode: GeoSpecMatcherMode
 
 // How the substrate derives an assertion's recorded `expected` value from the arguments the spec author passed
+// Remarks: - `first` — the first argument verbatim. - `first-or-empty` — the first argument, defaulting to `{}`. - `bounds` — `(min, max)` pairs collapse to `{ min, max }`; a lone object argument passes through. - `true` — nullary matchers record the literal `true`.
 GeoSpecMatcherExpectedShape: 'first' | 'first-or-empty' | 'bounds' | 'true'
 
 // Whether a matcher settles synchronously (throwing its `GeoSpecAssertionError` inside the `it()` body) or asynchronously (settled before the test completes)
@@ -1509,6 +1517,7 @@ GeoSpecClaimResult: {
 GeoSpecDeterminismClass: 'reference-wasm' | 'bit-parity-verified' | 'defers-to-reference'
 
 // First TypeScript binding of Contract B
+// Remarks: The methods are transport operations; every data type they exchange is a protocol DTO above. `Uint8Array` is the one ratified bulk lane.
 GeoSpecEngineProtocol: {
     initialize(request: GeoSpecInitializeRequest): GeoSpecInitializeResult;
     ingestSubject(request: GeoSpecIngestSubjectRequest, bytes: Uint8Array<ArrayBuffer>): Promise<GeoSpecIngestSubjectResult>;
@@ -2074,171 +2083,3 @@ BoundingBoxAxisFailure: {
   minExtremum: BoundingBoxAxisExtremum
 
   maxExtremum: BoundingBoxAxisExtremum
-
-// Structured payload when `boundingBox` fails
-BoundingBoxFailure: {
-    axisFailures: BoundingBoxAxisFailure[];
-}
-
-  axisFailures: BoundingBoxAxisFailure[]
-
-// Scene bounding box with per-primitive contributors in the subject's unit and frame
-BoundingBoxStats: {
-    size: [number, number, number];
-    center: [number, number, number];
-    primitives: PrimitiveRecord[];
-}
-
-  size: [number, number, number]
-
-  center: [number, number, number]
-
-  primitives: PrimitiveRecord[]
-
-// Result of evaluating a single test requirement against geometry stats
-CheckResult: {
-    passed: true;
-} | {
-    passed: false;
-    check: 'boundingBox';
-    reason: string;
-    suggestion: string;
-    failure: BoundingBoxFailure;
-} | {
-    passed: false;
-    check: 'connectedComponents';
-    reason: string;
-    suggestion: string;
-    failure: ConnectedComponentsFailure;
-} | {
-    passed: false;
-    check: 'watertight';
-    reason: string;
-    suggestion: string;
-    failure: WatertightFailure;
-} | {
-    passed: false;
-    check: 'invalid';
-    reason: string;
-    suggestion: string;
-}
-
-  passed: true
-
-// Smallest clearance between two clusters along the dominant separation axis
-ClusterGap: {
-    fromLabel: string;
-    toLabel: string;
-    axis: 'x' | 'y' | 'z';
-    /** Millimetres — clearance between the two named primitives' AABBs. */
-    gapMm: number;
-    fromPrimitive: string;
-    toPrimitive: string;
-}
-
-  fromLabel: string
-
-  toLabel: string
-
-  axis: 'x' | 'y' | 'z'
-
-  // Millimetres — clearance between the two named primitives' AABBs
-  gapMm: number
-
-  fromPrimitive: string
-
-  toPrimitive: string
-
-// One spatial cluster from AABB overlap grouping
-ClusterReport: {
-    label: string;
-    primitives: PrimitiveRecord[];
-    aabb: AabbMeters;
-    centroid: [number, number, number];
-    totalVertices: number;
-}
-
-  label: string
-
-  primitives: PrimitiveRecord[]
-
-  aabb: AabbMeters
-
-  centroid: [number, number, number]
-
-  totalVertices: number
-
-// Structured payload when `connectedComponents` fails
-ConnectedComponentsFailure: {
-    expected: number;
-    got: number;
-    toleranceMm: number;
-    clusters: ClusterReport[];
-    gaps: ClusterGap[];
-}
-
-  expected: number
-
-  got: number
-
-  toleranceMm: number
-
-  clusters: ClusterReport[]
-
-  gaps: ClusterGap[]
-
-// Full connected-components analysis at one tolerance
-ConnectedComponentsResult: {
-    count: number;
-    clusters: ClusterReport[];
-    gaps: ClusterGap[];
-}
-
-  count: number
-
-  clusters: ClusterReport[]
-
-  gaps: ClusterGap[]
-
-// Diagnostic form permitted inside a wire-safe subject snapshot
-GeometryEvidenceDiagnostic: Omit<GeometryDiagnostic, 'details'> & {
-    details?: JSONValue;
-}
-
-  code: KernelIssueCode | (string & {})
-
-  severity: 'error' | 'warning' | 'info'
-
-  message: string
-
-  suggestion: string
-
-  spatial: {
-          min?: Vec3;
-          max?: Vec3;
-          center?: Vec3;
-      }
-
-  details: JSONValue
-
-// Statistics about a parsed GLB geometry
-GeometryStats: {
-    vertexCount: number;
-    meshCount: number;
-    triangleCount: number;
-    meshQuality: MeshQualityStats;
-    watertight: boolean;
-    boundingBox?: BoundingBoxStats;
-}
-
-  vertexCount: number
-
-  meshCount: number
-
-  triangleCount: number
-
-  meshQuality: MeshQualityStats
-
-  watertight: boolean
-
-  boundingBox: BoundingBoxStats

@@ -63,6 +63,44 @@ public sealed partial class WorkerTests
         Assert.Throws<ObjectDisposedException>(() => source.oCalculateBoundingBox());
     }
 
+    [Fact]
+    public void LoadedCavityPropertiesUseTheRetainedSourceTransformAtDifferentLibraryResolution()
+    {
+        var path = Path.Combine(root, "cross-resolution-shell.vdb");
+        var center = new Vector3(.25f, -.125f, .25f);
+        using var sourceLibrary = new Library(1f);
+        using var outer = Voxels.voxSphere(sourceLibrary, center, 24);
+        using var inner = Voxels.voxSphere(sourceLibrary, center, 20);
+        using var source = outer - inner;
+        using (var output = new OpenVdbFile(sourceLibrary))
+        {
+            output.nAdd(source, "Shell");
+            output.SaveToFile(path);
+        }
+        using var targetLibrary = new Library(.5f);
+        using var input = new OpenVdbFile(targetLibrary, path);
+        Assert.Equal(1f, input.fPicoGKVoxelSizeMM());
+        using var loaded = input.voxGet("Shell");
+        using var originalMesh = source.mshAsMesh();
+        using var loadedMesh = loaded.mshAsMesh();
+        Assert.Equal(originalMesh.nVertexCount(), loadedMesh.nVertexCount());
+        Assert.Equal(originalMesh.nTriangleCount(), loadedMesh.nTriangleCount());
+        for (var index = 0; index < originalMesh.nVertexCount(); index++)
+            Assert.Equal(VectorBits(originalMesh.vecVertexAt(index)), VectorBits(loadedMesh.vecVertexAt(index)));
+        var before = ScalarRecords(loaded);
+        Assert.False(loaded.bIsInside(center));
+        Assert.True(loaded.bIsInside(center + new Vector3(22, 0, 0)));
+        loaded.CalculateProperties(out var volume, out var bounds);
+        var analyticVolume = 4 * Math.PI / 3 * (24 * 24 * 24 - 20 * 20 * 20);
+        Assert.InRange(volume / analyticVolume, .98, 1.02);
+        Assert.Equal(PropertyBoundsBits(loadedMesh.oBoundingBox()), PropertyBoundsBits(bounds));
+        loaded.CalculateProperties(out var cachedVolume, out var cachedBounds);
+        Assert.Equal(BitConverter.SingleToInt32Bits(volume), BitConverter.SingleToInt32Bits(cachedVolume));
+        Assert.Equal(PropertyBoundsBits(bounds), PropertyBoundsBits(cachedBounds));
+        Assert.Equal(before, ScalarRecords(loaded));
+        Assert.False(loaded.bIsInside(center));
+    }
+
     private static void AssertLegacyProperties(Voxels source, Library library)
     {
         using var mesh = new Mesh(source);

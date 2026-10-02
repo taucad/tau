@@ -2,7 +2,9 @@
 
 31 top-level symbols. Signatures are verbatim python.
 
+// Category: objects_curve
 // Create an airfoil described by a 4-digit (or fractional) NACA airfoil
+// Remarks: (e.g. '2412' or '2213.323'). The NACA four-digit wing sections define the airfoil_code by: - First digit describing maximum camber as percentage of the chord. - Second digit describing the distance of maximum camber from the airfoil leading edge in tenths of the chord. - Last two digits describing maximum thickness of the airfoil as percent of the chord.
 Airfoil
 
   // Parse NACA 4-digit (or fractional) airfoil code into parameters
@@ -19,7 +21,9 @@ Airfoil
   // Camber line of the airfoil as an Edge
   camber_line: Edge
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create an arc tangent to two arcs and a radius. keep specifies tangent arc position with a Keep pair: (placement, type) - placement: start_arc is tangent INSIDE or OUTSIDE the tangent arc. BOTH is a special case for overlapping arcs with type INSIDE - type: tangent arc is INSIDE or OUTSIDE start_arc and end_arc
 ArcArcTangentArc
 
   // build123d.objects_curve.ArcArcTangentArc.__init__ (constructor)
@@ -32,7 +36,9 @@ ArcArcTangentArc
   //   short_sagitta: If True selects the short sagitta (height of arc from chord), else the long sagitta crossing the center
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a straight line tangent to two arcs.
 ArcArcTangentLine
 
   // build123d.objects_curve.ArcArcTangentLine.__init__ (constructor)
@@ -43,7 +49,9 @@ ArcArcTangentLine
   //   keep: which tangent arc to keep, INSIDE or OUTSIDE
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: An exact B-spline edge defined directly from control points and knot data. BSpline creates an exact B-spline from control points, a knot sequence, and optional weights. Control points define the control polygon that pulls the curve, but the curve does not generally pass through them. Knots define the parameter-space structure of the spline: they determine where polynomial spans begin and end and how smoothly those spans join. Repeated knot values indicate knot multiplicity. For a spline of degree p, a knot with multiplicity m has continuity C^(p-m) at that location, so increasing multiplicity reduces smoothness. Repeating the first and last knots degree + 1 times creates a clamped spline that starts and ends at the first and last control points. Optional weights create a rational B-spline, allowing some control points to pull more strongly than others and enabling exact representation of conic sections.` Unlike :class:`~build123d.objects_curve.Spline`, which creates an interpolated curve through a set of points using ``GeomAPI_Interpolate``, ``BSpline`` preserves the supplied spline definition by building the underlying OCCT ``Geom_BSplineCurve`` from its poles, knot vector, optional weights, degree, and periodic flag.
 BSpline
 
   // build123d.objects_curve.BSpline.__init__ (constructor)
@@ -55,6 +63,7 @@ BSpline
   //   periodic: Whether to create a periodic spline
   //   mode: Builder combination mode
 
+// Category: objects_curve
 // BaseCurveObject specialized for Curve
 BaseCurveObject
 
@@ -63,6 +72,7 @@ BaseCurveObject
   //   curve: wire to create
   //   mode: combination mode
 
+// Category: objects_curve
 // BaseEdgeObject specialized for Edge
 BaseEdgeObject
 
@@ -71,6 +81,7 @@ BaseEdgeObject
   //   curve: edge to create
   //   mode: combination mode
 
+// Category: objects_curve
 // BaseLineObject specialized for Wire
 BaseLineObject
 
@@ -79,7 +90,9 @@ BaseLineObject
   //   curve: wire to create
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a non-rational bezier curve defined by a sequence of points and include optional weights to create a rational bezier curve. The number of weights must match the number of control points.
 Bezier
 
   // build123d.objects_curve.Bezier.__init__ (constructor)
@@ -88,7 +101,12 @@ Bezier
   //   weights: control point weights
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a smooth Bézier-based transition curve between two existing edges. The blend is constructed as a cubic (C1) or quintic (C2) Bézier curve whose control points are determined from the position, first derivative, and (for C2) second derivative of the input curves at the chosen endpoints. Optional scalar multipliers can be applied to the endpoint tangents to control the "tension" of the blend. Example: >>> blend = BlendCurve(curve_a, curve_b, ContinuityLevel.C1, tangent_scalars=(1.2, 0.8)) >>> show(blend)
+// Throws: ValueError: `tangent_scalars` must be a pair of float values.
+// Throws: ValueError: If specified `end_points` are not coincident with the start
+// Throws: or end of their respective curves.
 BlendCurve
 
   // build123d.objects_curve.BlendCurve.__init__ (constructor)
@@ -100,7 +118,9 @@ BlendCurve
   //   tangent_scalars: Scalar multipliers applied to the first derivatives at the start of `curve0` and the end of `curve1` before computing control points
   //   mode: Boolean operation mode when used in a BuildLine context
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a circular arc defined by a center point and radius.
 CenterArc
 
   // build123d.objects_curve.CenterArc.__init__ (constructor)
@@ -111,7 +131,9 @@ CenterArc
   //   arc_size: angular size of arc or an arc limit
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: The result is always a Curve containing one or more Edges. If you need to access Edge-specific properties or methods (such as ``arc_center``), extract the edge or edges first:: result = ConstrainedArcs(...) arc = result.edge() # extract the Edge center = arc.arc_center # now Edge methods are available Note that in Builder mode the ``selector`` parameter must be provided or all results will be combined into the BuildLine context. In Algebra mode the selector can be applied as a parameter or in the normal way to the ConstrainedArcs object. The content of the selector is the same in both cases. Examples: An arc built from three edge constraints. Algebra:: l4 = PolarLine((0, 0), 4, 60) l5 = PolarLine((0, 0), 4, 40) a3 = CenterArc((0, 0), 4, 0, 90) ex_a3 = ( ConstrainedArcs(l4, l5, a3, sagitta=Sagitta.BOTH).edges().sort_by(Edge.length)[0] ) Builder:: with BuildLine() as arc_ex3: l4 = PolarLine((0, 0), 4, 60) l5 = PolarLine((0, 0), 4, 40) a3 = CenterArc((0, 0), 4, 0, 90) ex_a3 = ConstrainedArcs( l4, l5, a3, sagitta=Sagitta.BOTH, selector=lambda arcs: arcs.sort_by(Edge.length)[0], )
 ConstrainedArcs
 
   // build123d.objects_curve.ConstrainedArcs.__init__ (constructor)
@@ -125,10 +147,13 @@ ConstrainedArcs
   //   selector: typically a lambda which chooses one or more of the results
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: The result is always a Curve containing one or more Edges. If you need to access Edge-specific properties or methods (such as ``length``), extract the edge or edges first:: result = ConstrainedLines(...) lines = result.edges() # extract the Edges length = lines[1].length # now Edge methods are available Note that in Builder mode the ``selector`` parameter must be provided or all results will be combined into the BuildLine context. In Algebra mode the selector can be applied as a parameter or in the normal way to the ConstrainedArcs object. The content of the selector is the same in both cases.
 ConstrainedLines
 
   // Create planar line(s) on XY subject to tangency/contact constraints
+  // Remarks: Supported cases --------------- 1. Tangent to two curves 2. Tangent to one curve and passing through a given point
   // build123d.objects_curve.ConstrainedLines.__init__ (constructor)
   ConstrainedLines(tangency_one: tuple[Edge, Tangency] | Axis | Edge, tangency_two: tuple[Edge, Tangency] | Axis | Edge, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda lines: lines, mode: Mode = Mode.ADD)
   ConstrainedLines(tangency_one: tuple[Edge, Tangency] | Edge, tangency_two: VectorLike, selector: Callable[[ShapeList[Edge]], Edge | ShapeList[Edge]] = lambda lines: lines, mode: Mode = Mode.ADD)
@@ -136,7 +161,10 @@ ConstrainedLines
   //   selector: typically a lambda which chooses one or more of the results
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a circular arc defined by a point/tangent pair and another line find a tangent to. The arc specified with TOP or BOTTOM depends on the geometry and isn't predictable. Contains a solver.
+// Throws: RunTimeError: no double tangent arcs found
 DoubleTangentArc
 
   // build123d.objects_curve.DoubleTangentArc.__init__ (constructor)
@@ -147,7 +175,9 @@ DoubleTangentArc
   //   keep: specify which arc if more than one, TOP or BOTTOM
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create an elliptical arc defined by a center point, x- and y- radii.
 EllipticalCenterArc
 
   // build123d.objects_curve.EllipticalCenterArc.__init__ (constructor)
@@ -162,7 +192,9 @@ EllipticalCenterArc
   //   angular_direction: arc direction
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a circular arc defined by a start point/tangent pair, radius and arc size. Note: One of start_angle or major_axis_dir must be provided.
 EllipticalStartArc
 
   // build123d.objects_curve.EllipticalStartArc.__init__ (constructor)
@@ -176,7 +208,11 @@ EllipticalStartArc
   //   major_axis_dir: direction of ellipse x-axis
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a sequence of straight lines defined by successive points that are filleted to a given radius.
+// Throws: ValueError: Two or more points not provided
+// Throws: ValueError: radius must be non-negative
 FilletPolyline
 
   // build123d.objects_curve.FilletPolyline.__init__ (constructor)
@@ -186,7 +222,9 @@ FilletPolyline
   //   close: close end points with extra Edge and corner fillets
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a helix defined by pitch, height, and radius. The helix may have a taper defined by cone_angle. If cone_angle is not 0, radius is the initial helix radius at center. cone_angle > 0 increases the final radius. cone_angle < 0 decreases the final radius.
 Helix
 
   // build123d.objects_curve.Helix.__init__ (constructor)
@@ -200,7 +238,9 @@ Helix
   //   lefthand: left handed helix
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a hyperbolic arc defined by a center point and focal length (distance from focus to vertex).
 HyperbolicCenterArc
 
   // build123d.objects_curve.HyperbolicCenterArc.__init__ (constructor)
@@ -215,7 +255,9 @@ HyperbolicCenterArc
   //   angular_direction: arc direction
   //   mode: combination mode
 
+// Category: objects_curve
 // Intersecting Line Object
+// Remarks: Create a straight line defined by a point/direction pair and another line to intersect.
 IntersectingLine
 
   // build123d.objects_curve.IntersectingLine.__init__ (constructor)
@@ -225,7 +267,9 @@ IntersectingLine
   //   other: line object to intersect
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a circular arc defined by a start point/tangent pair, radius and arc size or arc limit. Attributes: start (Vector): start point end_of_arc (Vector): end point of arc center_point (Vector): center of arc
 JernArc
 
   // build123d.objects_curve.JernArc.__init__ (constructor)
@@ -236,7 +280,10 @@ JernArc
   //   arc_size: angular size of arc (negative to change direction) or an arc limit
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a straight line defined by two points.
+// Throws: ValueError: Two point not provided
 Line
 
   // build123d.objects_curve.Line.__init__ (constructor)
@@ -244,7 +291,9 @@ Line
   //   pts: sequence of two points
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a parabolic arc defined by a vertex point and focal length (distance from focus to vertex).
 ParabolicCenterArc
 
   // build123d.objects_curve.ParabolicCenterArc.__init__ (constructor)
@@ -258,7 +307,12 @@ ParabolicCenterArc
   //   angular_direction: arc direction
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create an arc defined by a point/tangent pair and another line which the other end is tangent to.
+// Throws: ValueError: Arc must have GeomType.CIRCLE
+// Throws: ValueError: Point is already tangent to arc
+// Throws: RuntimeError: No tangent arc found
 PointArcTangentArc
 
   // build123d.objects_curve.PointArcTangentArc.__init__ (constructor)
@@ -269,7 +323,9 @@ PointArcTangentArc
   //   side: select which arc to keep Defaults to Side.LEFT
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a straight, tangent line from a point to a circular arc.
 PointArcTangentLine
 
   // build123d.objects_curve.PointArcTangentLine.__init__ (constructor)
@@ -279,7 +335,11 @@ PointArcTangentLine
   //   side: side of arcs to place tangent arc center, LEFT or RIGHT
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a straight line defined by a start point, length, and angle. The length can specify the DIAGONAL, HORIZONTAL, or VERTICAL component of the triangle defined by the angle. Alternatively, the length parameter can contain a limit to the length of the line in the form of another object. If the PolarLine doesn't contact the limit an error will be generated. Example: p = PolarLine(start=(2, 0), length=Axis.Y, angle=135)
+// Throws: ValueError: Either angle or direction must be provided
+// Throws: ValueError: Polar line doesn't intersect length limit
 PolarLine
 
   // build123d.objects_curve.PolarLine.__init__ (constructor)
@@ -291,7 +351,10 @@ PolarLine
   //   length_mode: how length defines the line
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a sequence of straight lines defined by successive points.
+// Throws: ValueError: Two or more points not provided
 Polyline
 
   // build123d.objects_curve.Polyline.__init__ (constructor)
@@ -300,7 +363,10 @@ Polyline
   //   close: close by generating an extra Edge
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a circular arc defined by two points and a radius.
+// Throws: ValueError: Insufficient radius to connect end points
 RadiusArc
 
   // build123d.objects_curve.RadiusArc.__init__ (constructor)
@@ -311,7 +377,9 @@ RadiusArc
   //   short_sagitta: If True selects the short sagitta (height of arc from chord), else the long sagitta crossing the center
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a circular arc defined by two points and the sagitta (height of the arc from chord).
 SagittaArc
 
   // build123d.objects_curve.SagittaArc.__init__ (constructor)
@@ -321,7 +389,9 @@ SagittaArc
   //   sagitta: arc height from chord between points
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a spline defined by a sequence of points, optionally constrained by tangents. Tangents and tangent scalars must have length of 2 for only the end points or a length of the number of points.
 Spline
 
   // build123d.objects_curve.Spline.__init__ (constructor)
@@ -332,7 +402,10 @@ Spline
   //   periodic: make the spline periodic (closed)
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a circular arc defined by two points and a tangent.
+// Throws: ValueError: Two points are required
 TangentArc
 
   // build123d.objects_curve.TangentArc.__init__ (constructor)
@@ -342,7 +415,10 @@ TangentArc
   //   tangent_from_first: apply tangent to first point
   //   mode: combination mode
 
+// Category: objects_curve
 // Line Object
+// Remarks: Create a circular arc defined by three points.
+// Throws: ValueError: Three points must be provided
 ThreePointArc
 
   // build123d.objects_curve.ThreePointArc.__init__ (constructor)

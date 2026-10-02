@@ -1,6 +1,264 @@
 # geospec — Types (3)
 
-85 top-level symbols. Signatures are verbatim typescript.
+90 top-level symbols. Signatures are verbatim typescript.
+
+// Shared options for Node and browser GeoSpec runner factories
+GeoSpecRunnerOptions: {
+    /** Filesystem containing the project and test modules. */
+    filesystem: VmFileSystem;
+    /** Model loader exposed to authored tests through `geospec/model`. */
+    modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
+    /** Protocol-3 assertion client used by explicitly native runners. */
+    nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions'];
+    /** Managed native model loader released after each settled run. */
+    nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
+    /** STEP loader exposed to authored tests through `geospec/step`. */
+    stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
+    /** Additional in-memory modules made available to the VM. */
+    builtinModules?: RunGeoSpecModuleOptions['builtinModules'];
+    /** Internal profile counters used by opt-in benchmark tooling. */
+    internalProfile?: GeoSpecRunProfile;
+}
+
+  // Filesystem containing the project and test modules
+  filesystem: VmFileSystem
+
+  // Model loader exposed to authored tests through `geospec/model`
+  modelLoader: RunGeoSpecModuleOptions['modelLoader']
+
+  // Protocol-3 assertion client used by explicitly native runners
+  nativeAssertions: RunGeoSpecModuleOptions['nativeAssertions']
+
+  // Managed native model loader released after each settled run
+  nativeModelLoader: ManagedGeoSpecNativeModelLoader
+
+  // STEP loader exposed to authored tests through `geospec/step`
+  stepLoader: RunGeoSpecModuleOptions['stepLoader']
+
+  // Additional in-memory modules made available to the VM
+  builtinModules: RunGeoSpecModuleOptions['builtinModules']
+
+  // Internal profile counters used by opt-in benchmark tooling
+  internalProfile: GeoSpecRunProfile
+
+// Aggregate result returned by GeoSpec worker-style runners
+GeoSpecRunnerResult: {
+    /** True when no files or tests failed and at least one test was selected. */
+    success: boolean;
+    /** Number of non-skipped tests that passed. */
+    passed: number;
+    /** Number of file-level or test-level failures. */
+    failed: number;
+    /** Number of collected tests after filters were applied. */
+    selectedTests: number;
+    /** Per-file module execution results. */
+    files: GeoSpecRunnerFileResult[];
+    /** Run-level issues such as aborts or empty filter selections. */
+    issues?: VmIssue[];
+    /** Wall-clock cost of the whole run, in milliseconds (R1). */
+    durationMs?: number;
+    /** Complete requested-file accounting; discovery may remain unknown in unstarted or broken modules. */
+    accounting?: GeoSpecRunnerAccounting;
+    /** Coherence of the consumed source graphs, not a geometry verdict. */
+    lineageStatus?: 'complete' | 'unavailable' | 'mixed';
+}
+
+  // True when no files or tests failed and at least one test was selected
+  success: boolean
+
+  // Number of non-skipped tests that passed
+  passed: number
+
+  // Number of file-level or test-level failures
+  failed: number
+
+  // Number of collected tests after filters were applied
+  selectedTests: number
+
+  // Per-file module execution results
+  files: GeoSpecRunnerFileResult[]
+
+  // Run-level issues such as aborts or empty filter selections
+  issues: VmIssue[]
+
+  // Wall-clock cost of the whole run, in milliseconds (R1)
+  durationMs: number
+
+  // Complete requested-file accounting
+  accounting: GeoSpecRunnerAccounting
+
+  // Coherence of the consumed source graphs, not a geometry verdict
+  lineageStatus: 'complete' | 'unavailable' | 'mixed'
+
+// Options accepted by a GeoSpec worker-style runner run
+GeoSpecRunnerRunOptions: {
+    /** GeoSpec test files to execute. Files run serially by default. */
+    files: readonly string[];
+    /** JavaScript regular expression matched against full `suite > test` names. */
+    testNamePattern?: string | RegExp;
+    /** Timeout for each async test callback, in milliseconds. */
+    testTimeout?: number;
+    /** Non-verdict matcher wall backstop. Milliseconds. */
+    matcherWallBackstop?: number;
+    /** Emit structured forensic measurements for this run. */
+    forensic?: boolean;
+    /**
+     * Stop after the first failing file (R1). Interactive fail-fast only —
+     * never the default for reward runs, which want the complete red set.
+     */
+    bail?: boolean;
+}
+
+  // GeoSpec test files to execute
+  files: readonly string[]
+
+  // JavaScript regular expression matched against full `suite > test` names
+  testNamePattern: string | RegExp
+
+  // Timeout for each async test callback, in milliseconds
+  testTimeout: number
+
+  // Non-verdict matcher wall backstop
+  matcherWallBackstop: number
+
+  // Emit structured forensic measurements for this run
+  forensic: boolean
+
+  // Stop after the first failing file (R1)
+  bail: boolean
+
+// One parsed segment of a selector path (`name`, `name[3]`, or selector-side `name[*]`)
+SelectorPathSegment: {
+    /** Bare segment name without index. */
+    name: string;
+    /** 1-based member index when the segment is `name[n]`. */
+    index?: number;
+    /** True when the segment is the selector-side wildcard `name[*]`. */
+    wildcard?: boolean;
+}
+
+  // Bare segment name without index
+  name: string
+
+  // 1-based member index when the segment is `name[n]`
+  index: number
+
+  // True when the segment is the selector-side wildcard `name[*]`
+  wildcard: boolean
+
+// Tolerance vocabulary consumed by selector predicates
+SelectorTolerances: {
+    /** Linear/contact tolerance in millimetres (offset bands, `near`, radii). */
+    linearMm: number;
+    /** Angular tolerance in degrees for normal/axis/parallelism predicates. */
+    angularToleranceDegrees: number;
+}
+
+  // Linear/contact tolerance in millimetres (offset bands, `near`, radii)
+  linearMm: number
+
+  // Angular tolerance in degrees for normal/axis/parallelism predicates
+  angularToleranceDegrees: number
+
+// Axis query predicates over cylindrical/conical face facts
+AxisQuery: {
+    /** Axis direction parallelism. */
+    axis?: DirectionPredicate;
+    radius?: NumericRange;
+    near?: Partial<Vec3Record> & {
+        tolerance?: number;
+    };
+    containsPoint?: Vec3;
+    nearestTo?: Vec3;
+    within?: GeometrySelector;
+    orderBy?: 'radius' | 'offsetAlong';
+    along?: Vec3;
+    pick?: 'first' | 'last' | number;
+    allOf?: AxisQuery[];
+    anyOf?: AxisQuery[];
+    not?: AxisQuery;
+}
+
+  // Axis direction parallelism
+  axis: DirectionPredicate
+
+  radius: NumericRange
+
+  near: Partial<Vec3Record> & {
+          tolerance?: number;
+      }
+
+  containsPoint: Vec3
+
+  nearestTo: Vec3
+
+  within: GeometrySelector
+
+  orderBy: 'radius' | 'offsetAlong'
+
+  along: Vec3
+
+  pick: 'first' | 'last' | number
+
+  allOf: AxisQuery[]
+
+  anyOf: AxisQuery[]
+
+  not: AxisQuery
+
+// Axis selector resolved from cylindrical/conical face facts
+AxisSelector: {
+    kind: 'axis';
+    of?: string | RegExp;
+    query?: AxisQuery;
+    expect?: Cardinality;
+}
+
+  kind: 'axis'
+
+  of: string | RegExp
+
+  query: AxisQuery
+
+  expect: Cardinality
+
+// Body query predicates over available source facts
+BodyQuery: {
+    area?: NumericRange;
+    near?: Partial<Vec3Record> & {
+        tolerance?: number;
+    };
+    nearestTo?: Vec3;
+    within?: GeometrySelector;
+    orderBy?: 'area' | 'offsetAlong';
+    along?: Vec3;
+    pick?: 'first' | 'last' | number;
+    allOf?: BodyQuery[];
+    anyOf?: BodyQuery[];
+    not?: BodyQuery;
+}
+
+  area: NumericRange
+
+  near: Partial<Vec3Record> & {
+          tolerance?: number;
+      }
+
+  nearestTo: Vec3
+
+  within: GeometrySelector
+
+  orderBy: 'area' | 'offsetAlong'
+
+  along: Vec3
+
+  pick: 'first' | 'last' | number
+
+  allOf: BodyQuery[]
+
+  anyOf: BodyQuery[]
+
+  not: BodyQuery
 
 // Body selector over source-backed solid evidence
 BodySelector: {
@@ -766,6 +1024,7 @@ SelectorDiagnosticOptions: {
 GeoSpecStepLoader: (options: LoadStepOptions) => Promise<GeometrySubject>
 
 // The five lazily materialized BRep evidence facets
+// Remarks: Facet → evidence-field ownership: - `summary` → `topologyCounts`, `boundingBox` - `massProperties` → `massProperties` - `validity` → `validity` - `faceFeatures` → `planarFaces`, `cylindricalFaces`, `circularHoles`, `circularHolePatterns`, `chamferFeatures`, `filletFeatures` - `wallThickness` → `minimumWallThickness`
 BrepFacetName: 'summary' | 'massProperties' | 'validity' | 'faceFeatures' | 'wallThickness'
 
 // Defaults accepted by {@link import ('./load-step.js').createStepLoader}
@@ -850,6 +1109,7 @@ StepSource: string | URL | Uint8Array<ArrayBuffer> | ArrayBuffer | Blob | File |
 StepStreamingMode: 'auto' | 'native-stream' | 'filesystem'
 
 // One native AP242 datum placement row (a coordinate *frame* from the supplemental-geometry channel), expanded per occurrence like subshape names and expressed in subject-frame coordinates
+// Remarks: Distinct from {@link XdeSemanticDatum}: this is supplemental geometry (`AXIS2_PLACEMENT_3D` items in a CONSTRUCTIVE_GEOMETRY_REPRESENTATION), not the GD&T `DATUM` family.
 XdeDatumPlacement: {
     occurrencePath: string;
     name: string;
@@ -884,6 +1144,7 @@ XdeDatumSystem: {
   references: string[][]
 
 // One placed occurrence recovered from an AP242 STEP structure read
+// Remarks: `path` is dot-joined instance-name segments from the root (root omitted) per the GeoSpec AP242 profile; repeated names under one parent are disambiguated `name[k]` in the parent's stored component order.
 XdeOccurrence: {
     path: string;
     productName: string;
@@ -1076,6 +1337,7 @@ GeoSpecMatcherMethods: {
 }
 
 // One positive-only ancillary query
+// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports, including failed/refused reports, without assertion errors.
 GeoSpecQueryOptions: {
     readonly capability: GeoSpecQueryCapability;
     readonly claimId?: string;
@@ -1550,6 +1812,7 @@ GeoSpecTauProjectRuntime: RuntimeClientWithRoutes & Pick<RuntimeClient, 'shutdow
       }): GeoSpecExportRoute | undefined;
 
 // Trusted project configuration using existing discovery and runner options
+// Remarks: Omitted values keep their existing owner's defaults. Defined overrides replace whole fields, including empty arrays, false and the subjects map. Existing discovery currently treats an absent or empty include array as its default pattern. Preserving [] here does not change that consumer behavior. This is configuration data, not a canonical engine plan or a geometry result.
 GeoSpecConfig: {
     include?: readonly string[];
     exclude?: readonly string[];
@@ -1588,51 +1851,3 @@ GeoSpecConfig: {
   cacheDirectory: string
 
   subjects: Readonly<Record<string, GeoSpecTauProjectDescriptor>>
-
-// Imported Tau project data for later host resolution
-GeoSpecTauProjectDescriptor: {
-    readonly kind: 'tau-project';
-    /** Normalized project-relative POSIX path identifying the imported manifest. */
-    readonly manifestPath: string;
-    readonly manifest: Readonly<Record<string, JSONValue>>;
-    readonly format: 'step' | 'glb';
-    readonly parameters?: Readonly<Record<string, JSONValue>>;
-}
-
-  kind: 'tau-project'
-
-  // Normalized project-relative POSIX path identifying the imported manifest
-  manifestPath: string
-
-  manifest: Readonly<Record<string, JSONValue>>
-
-  format: 'step' | 'glb'
-
-  parameters: Readonly<Record<string, JSONValue>>
-
-// Resolved file identity and validated configuration data
-LoadedGeoSpecConfig: {
-    readonly configPath?: string;
-    readonly options: GeoSpecConfig;
-}
-
-  configPath: string
-
-  options: GeoSpecConfig
-
-// Options for one trusted Node configuration load
-LoadGeoSpecConfigOptions: {
-    readonly projectPath: string;
-    /** Explicit file, resolved relative to the project unless absolute. */
-    readonly configPath?: string;
-    /** Own defined fields override configuration without deep merging. */
-    readonly overrides?: GeoSpecConfig;
-}
-
-  projectPath: string
-
-  // Explicit file, resolved relative to the project unless absolute
-  configPath: string
-
-  // Own defined fields override configuration without deep merging
-  overrides: GeoSpecConfig

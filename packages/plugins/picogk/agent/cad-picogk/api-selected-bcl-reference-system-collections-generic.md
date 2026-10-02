@@ -1,26 +1,40 @@
-# PicoGK — System.Collections.Generic
+# PicoGK — Selected BCL reference — System.Collections.Generic
 
 3 top-level symbols. Signatures are verbatim csharp.
 
-Dictionary
+// Category: Selected BCL reference
+// System.Collections.Generic.Dictionary (class)
+public class Dictionary<TKey, TValue> where TKey : notnull
 
-  Comparer: IEqualityComparer<TKey>
+  // System.Collections.Generic.Dictionary.Comparer (property)
+  public IEqualityComparer<TKey> Comparer { get; }
 
-  Count: int
+  // System.Collections.Generic.Dictionary.Count (property)
+  public int Count { get; }
 
-  Capacity: int
+  // System.Collections.Generic.Dictionary.Capacity (property)
+  public int Capacity { get; }
 
-  Keys: Dictionary<TKey, TValue>.KeyCollection
+  // System.Collections.Generic.Dictionary.Keys (property)
+  public Dictionary<TKey, TValue>.KeyCollection Keys { get; }
 
-  Values: Dictionary<TKey, TValue>.ValueCollection
+  // System.Collections.Generic.Dictionary.Values (property)
+  public Dictionary<TKey, TValue>.ValueCollection Values { get; }
 
-  this[]: TValue
+  // System.Collections.Generic.Dictionary.this[TKey key] (property)
+  public TValue this[TKey key] { get; set; }
 
-  AlternateLookup
+  // System.Collections.Generic.Dictionary.AlternateLookup (struct)
+  public readonly struct AlternateLookup<TAlternateKey> where TAlternateKey : notnull, allows ref struct
 
-    Dictionary: Dictionary<TKey, TValue>
+    // System.Collections.Generic.Dictionary.AlternateLookup.Dictionary (property)
+    public Dictionary<TKey, TValue> Dictionary { get; }
 
-    this[]: TValue
+    // System.Collections.Generic.Dictionary.AlternateLookup.this[TAlternateKey key] (property)
+    public TValue this[TAlternateKey key] { get; set; }
+
+    // System.Collections.Generic.Dictionary.AlternateLookup.AlternateLookup (constructor)
+    public AlternateLookup()
 
     // System.Collections.Generic.Dictionary.AlternateLookup.TryGetValue (method)
     public bool TryGetValue(TAlternateKey key, out TValue value)
@@ -36,9 +50,14 @@ Dictionary
     // System.Collections.Generic.Dictionary.AlternateLookup.TryAdd (method)
     public bool TryAdd(TAlternateKey key, TValue value)
 
-  Enumerator
+  // System.Collections.Generic.Dictionary.Enumerator (struct)
+  public struct Enumerator
 
-    Current: KeyValuePair<TKey, TValue>
+    // System.Collections.Generic.Dictionary.Enumerator.Current (property)
+    public KeyValuePair<TKey, TValue> Current { get; }
+
+    // System.Collections.Generic.Dictionary.Enumerator.Enumerator (constructor)
+    public Enumerator()
 
     // System.Collections.Generic.Dictionary.Enumerator.MoveNext (method)
     public bool MoveNext()
@@ -46,13 +65,20 @@ Dictionary
     // System.Collections.Generic.Dictionary.Enumerator.Dispose (method)
     public void Dispose()
 
-  KeyCollection
+  // System.Collections.Generic.Dictionary.KeyCollection (class)
+  public sealed class KeyCollection
 
-    Count: int
+    // System.Collections.Generic.Dictionary.KeyCollection.Count (property)
+    public int Count { get; }
 
-    Enumerator
+    // System.Collections.Generic.Dictionary.KeyCollection.Enumerator (struct)
+    public struct Enumerator
 
-      Current: TKey
+      // System.Collections.Generic.Dictionary.KeyCollection.Enumerator.Current (property)
+      public TKey Current { get; }
+
+      // System.Collections.Generic.Dictionary.KeyCollection.Enumerator.Enumerator (constructor)
+      public Enumerator()
 
       // System.Collections.Generic.Dictionary.KeyCollection.Enumerator.Dispose (method)
       public void Dispose()
@@ -72,13 +98,20 @@ Dictionary
     // System.Collections.Generic.Dictionary.KeyCollection.Contains (method)
     public bool Contains(TKey item)
 
-  ValueCollection
+  // System.Collections.Generic.Dictionary.ValueCollection (class)
+  public sealed class ValueCollection
 
-    Count: int
+    // System.Collections.Generic.Dictionary.ValueCollection.Count (property)
+    public int Count { get; }
 
-    Enumerator
+    // System.Collections.Generic.Dictionary.ValueCollection.Enumerator (struct)
+    public struct Enumerator
 
-      Current: TValue
+      // System.Collections.Generic.Dictionary.ValueCollection.Enumerator.Current (property)
+      public TValue Current { get; }
+
+      // System.Collections.Generic.Dictionary.ValueCollection.Enumerator.Enumerator (constructor)
+      public Enumerator()
 
       // System.Collections.Generic.Dictionary.ValueCollection.Enumerator.Dispose (method)
       public void Dispose()
@@ -151,17 +184,27 @@ Dictionary
   public void TrimExcess()
   public void TrimExcess(int capacity)
 
-HashSet
+// Category: Selected BCL reference
+// System.Collections.Generic.HashSet (class)
+public class HashSet<T>
 
-  Count: int
+  // System.Collections.Generic.HashSet.Count (property)
+  public int Count { get; }
 
-  Capacity: int
+  // System.Collections.Generic.HashSet.Capacity (property)
+  public int Capacity { get; }
 
-  Comparer: IEqualityComparer<T>
+  // System.Collections.Generic.HashSet.Comparer (property)
+  public IEqualityComparer<T> Comparer { get; }
 
-  AlternateLookup
+  // System.Collections.Generic.HashSet.AlternateLookup (struct)
+  public struct AlternateLookup<TAlternate> where TAlternate : allows ref struct
 
-    Set: HashSet<T>
+    // System.Collections.Generic.HashSet.AlternateLookup.Set (property)
+    public readonly HashSet<T> Set { get; }
+
+    // System.Collections.Generic.HashSet.AlternateLookup.AlternateLookup (constructor)
+    public AlternateLookup()
 
     // System.Collections.Generic.HashSet.AlternateLookup.Add (method)
     public bool Add(TAlternate item)
@@ -175,9 +218,14 @@ HashSet
     // System.Collections.Generic.HashSet.AlternateLookup.TryGetValue (method)
     public bool TryGetValue(TAlternate equalValue, out T actualValue)
 
-  Enumerator
+  // System.Collections.Generic.HashSet.Enumerator (struct)
+  public struct Enumerator
 
-    Current: T
+    // System.Collections.Generic.HashSet.Enumerator.Current (property)
+    public T Current { get; }
+
+    // System.Collections.Generic.HashSet.Enumerator.Enumerator (constructor)
+    public Enumerator()
 
     // System.Collections.Generic.HashSet.Enumerator.MoveNext (method)
     public bool MoveNext()
@@ -273,17 +321,27 @@ HashSet
   // System.Collections.Generic.HashSet.CreateSetComparer (method)
   public static IEqualityComparer<HashSet<T>> CreateSetComparer()
 
-List
+// Category: Selected BCL reference
+// System.Collections.Generic.List (class)
+public class List<T>
 
-  Capacity: int
+  // System.Collections.Generic.List.Capacity (property)
+  public int Capacity { get; set; }
 
-  Count: int
+  // System.Collections.Generic.List.Count (property)
+  public int Count { get; }
 
-  this[]: T
+  // System.Collections.Generic.List.this[int index] (property)
+  public T this[int index] { get; set; }
 
-  Enumerator
+  // System.Collections.Generic.List.Enumerator (struct)
+  public struct Enumerator
 
-    Current: T
+    // System.Collections.Generic.List.Enumerator.Current (property)
+    public T Current { get; }
+
+    // System.Collections.Generic.List.Enumerator.Enumerator (constructor)
+    public Enumerator()
 
     // System.Collections.Generic.List.Enumerator.Dispose (method)
     public void Dispose()

@@ -3,6 +3,7 @@
 11 top-level symbols. Signatures are verbatim typescript.
 
 // A shape with optional display and material metadata for rendering
+// Remarks: Returned from a Replicad model's `main()` function to control per-shape appearance in both GLTF preview rendering and STEP export.
 ShapeConfig: {
     shape: AnyShape;
     name?: string;

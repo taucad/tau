@@ -33,7 +33,12 @@ vi.mock('@taucad/native-process-core', async (importOriginal) => {
     },
   };
 });
-const issue = { message: 'bad model', code: 'CS1', type: 'syntax', severity: 'error' } as const;
+const issue = {
+  message: 'bad model',
+  code: 'CS1',
+  type: 'syntax',
+  severity: 'error',
+} as const;
 const options = {
   workerExecutable: '/worker',
   workerSha256: 'a'.repeat(64),
@@ -71,20 +76,31 @@ describe('PicogkSession', () => {
       });
     }).not.toThrow();
     expect(
-      configured.parseResponse({ protocolVersion: picogkProtocolVersion, requestId: '1', result: { ok: true } }),
+      configured.parseResponse({
+        protocolVersion: picogkProtocolVersion,
+        requestId: '1',
+        result: { ok: true },
+      }),
     ).toEqual({
       requestId: '1',
       result: { ok: true },
     });
     expect(
-      configured.parseResponse({ protocolVersion: picogkProtocolVersion, requestId: '2', error: { issues: [issue] } }),
+      configured.parseResponse({
+        protocolVersion: picogkProtocolVersion,
+        requestId: '2',
+        error: { issues: [issue] },
+      }),
     ).toEqual({
       requestId: '2',
       issues: [issue],
     });
-    expect(() => configured.parseResponse({ protocolVersion: picogkProtocolVersion, requestId: '3' })).toThrow(
-      /exactly one/,
-    );
+    expect(() =>
+      configured.parseResponse({
+        protocolVersion: picogkProtocolVersion,
+        requestId: '3',
+      }),
+    ).toThrow(/exactly one/);
     expect(() =>
       configured.parseResponse({
         protocolVersion: picogkProtocolVersion,
@@ -93,7 +109,9 @@ describe('PicogkSession', () => {
         error: { issues: [issue] },
       }),
     ).toThrow(/exactly one/);
-    expect(configured.shutdown.parseResult({ shutdown: true })).toEqual({ shutdown: true });
+    expect(configured.shutdown.parseResult({ shutdown: true })).toEqual({
+      shutdown: true,
+    });
 
     sessionMock.request.mockResolvedValueOnce('value');
     await expect(
@@ -104,7 +122,9 @@ describe('PicogkSession', () => {
         signal: new AbortController().signal,
       }),
     ).resolves.toBe('value');
-    const request = sessionMock.request.mock.calls.at(-1)?.[0] as { parseResult: (value: unknown) => unknown };
+    const request = sessionMock.request.mock.calls.at(-1)?.[0] as {
+      parseResult: (value: unknown) => unknown;
+    };
     expect(request.parseResult('value')).toBe('value');
     expect(() => request.parseResult('wrong')).toThrow();
   });
@@ -112,20 +132,37 @@ describe('PicogkSession', () => {
   it('maps worker issues and delegates artifact/lifecycle operations', async () => {
     const session = new PicogkSession(options);
     const workerError = new PicogkWorkerError([issue]);
-    expect(workerError).toMatchObject({ name: 'PicogkWorkerError', message: 'bad model', issues: [issue] });
+    expect(workerError).toMatchObject({
+      name: 'PicogkWorkerError',
+      message: 'bad model',
+      issues: [issue],
+    });
     sessionMock.request.mockRejectedValueOnce(new NativeWorkerReportedError([issue]));
     await expect(
-      session.request({ method: 'build', params: {}, schema: z.object({}), signal: new AbortController().signal }),
+      session.request({
+        method: 'build',
+        params: {},
+        schema: z.object({}),
+        signal: new AbortController().signal,
+      }),
     ).rejects.toMatchObject({ name: 'PicogkWorkerError', issues: [issue] });
     sessionMock.request.mockRejectedValueOnce(new Error('transport'));
     await expect(
-      session.request({ method: 'build', params: {}, schema: z.object({}), signal: new AbortController().signal }),
+      session.request({
+        method: 'build',
+        params: {},
+        schema: z.object({}),
+        signal: new AbortController().signal,
+      }),
     ).rejects.toThrow('transport');
 
     await session.readArtifact({ artifactPath: '/artifacts/a', byteLength: 1 });
     await session.recycle();
     await session.cleanup();
-    expect(sessionMock.readArtifact).toHaveBeenCalledWith({ artifactPath: '/artifacts/a', byteLength: 1 });
+    expect(sessionMock.readArtifact).toHaveBeenCalledWith({
+      artifactPath: '/artifacts/a',
+      byteLength: 1,
+    });
     expect(sessionMock.recycle).toHaveBeenCalled();
     expect(sessionMock.cleanup).toHaveBeenCalled();
   });

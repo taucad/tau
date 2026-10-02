@@ -33,10 +33,12 @@ export declare function downcast(shape: TopoDS_Shape): GenericTopo;
 export declare function draw(initialPoint?: Point2D): DrawingPen;
 
 // Creates the `Drawing` of a circle
+// Remarks: The circle is centered on [0, 0]
 // drawCircle (function)
 export declare function drawCircle(radius: number): Drawing;
 
 // Creates the `Drawing` of an ellipse
+// Remarks: The ellipse is centered on [0, 0], with axes aligned with the coordinates.
 // drawEllipse (function)
 export declare function drawEllipse(majorRadius: number, minorRadius: number): Drawing;
 
@@ -45,10 +47,12 @@ export declare function drawEllipse(majorRadius: number, minorRadius: number): D
 export declare function drawFaceOutline(face: Face): Drawing;
 
 // Creates the `Drawing` of an polygon in a defined plane
+// Remarks: The sides of the polygon can be arcs of circle with a defined sagitta. The radius defines the out radius of the polygon without sagitta
 // drawPolysides (function)
 export declare function drawPolysides(radius: number, sidesCount: number, sagitta?: number): Drawing;
 
 // Creates the `Drawing` of a projection of a shape on a plane
+// Remarks: The projection is done by projecting the edges of the shape on the plane.
 // drawProjection (function)
 export declare function drawProjection(shape: AnyShape, projectionCamera?: ProjectionPlane | ProjectionCamera): {
     visible: Drawing;
@@ -56,6 +60,7 @@ export declare function drawProjection(shape: AnyShape, projectionCamera?: Proje
 };
 
 // Creates the `Drawing` of a rectangle with (optional) rounded corners
+// Remarks: The rectangle is centered on [0, 0]
 // drawRoundedRectangle (function)
 export declare function drawRoundedRectangle(width: number, height: number, r?: number | {
     rx?: number;
@@ -63,10 +68,12 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 }): Drawing;
 
 // Creates the `Drawing` of a circle as one single curve
+// Remarks: The circle is centered on [0, 0]
 // drawSingleCircle (function)
 export declare function drawSingleCircle(radius: number): Drawing;
 
 // Creates the `Drawing` of an ellipse as one single curve
+// Remarks: The ellipse is centered on [0, 0], with axes aligned with the coordinates.
 // drawSingleEllipse (function)
 export declare function drawSingleEllipse(majorRadius: number, minorRadius: number): Drawing;
 
@@ -97,10 +104,12 @@ export declare function getSingleFace(f: SingleFace, shape: AnyShape): Face;
 export declare function importSTEP(STLBlob: Blob): Promise<AnyShape>;
 
 // Creates a new shapes from a STL file (as a Blob or a File)
+// Remarks: This process can be relatively long depending on how much tesselation has been done to your STL. This function tries to clean a bit the triangulation of faces, but can fail in bad ways.
 // importSTL (function)
 export declare function importSTL(STLBlob: Blob): Promise<AnyShape>;
 
 // Imports an STL file (as a Blob or a File) and creates a MeshShape
+// Remarks: Unlike `importSTL` which converts through OpenCascade's BRep representation, this function directly creates a MeshShape from the triangle data, which is faster and preserves the original mesh. Supports both binary and ASCII STL formats.
 // importSTLAsMesh (function)
 export declare function importSTLAsMesh(stlBlob: Blob): Promise<MeshShape>;
 
@@ -120,6 +129,7 @@ export declare function isShape3D(shape: AnyShape): shape is Shape3D;
 export declare function isWire(shape: AnyShape): shape is Wire;
 
 // Import a font in the text system
+// Remarks: The font should be in TTF
 // loadFont (function)
 export declare function loadFont(fontPath: string | ArrayBuffer, fontFamily?: string, force?: boolean): Promise<opentype_2.Font>;
 
@@ -250,6 +260,7 @@ export declare function weldShellsAndFaces(facesOrShells: Array<Face | Shell>, i
 (first: Blueprint, second: Blueprint) => null | Blueprint | Blueprints
 
 // Creates the `Drawing` of parametric function
+// Remarks: The drawing will be a spline approximating the function. Note that the degree should be at maximum 3 if you need to export the drawing as an SVG.
 // drawParametricFunction (function)
 (func: (t: number) => Point2D, { pointsCount, start, stop, closeShape }?: {
     pointsCount?: number | undefined;
@@ -259,6 +270,7 @@ export declare function weldShellsAndFaces(facesOrShells: Array<Face | Shell>, i
 }, approximationConfig?: BSplineApproximationConfig) => Drawing
 
 // Creates the `Drawing` by interpolating points as a curve
+// Remarks: The drawing will be a spline approximating the points. Note that the degree should be at maximum 3 if you need to export the drawing as an SVG.
 // drawPointsInterpolation (function)
 (points: Point2D[], approximationConfig?: BSplineApproximationConfig, options?: {
     closeShape?: boolean;
@@ -383,6 +395,7 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 (point: Point) => Vertex
 
 // Groups an array of blueprints such that blueprints that correspond to holes in other blueprints are set in a `CompoundBlueprint`
+// Remarks: The current algorithm does not handle cases where blueprints cross each other
 // organiseBlueprints (function)
 (blueprints: Blueprint[]) => Blueprints
 
@@ -428,6 +441,7 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 (pitch: number, height: number, radius: number, center?: Point, dir?: Point, lefthand?: boolean) => Sketch
 
 // Creates the `Sketch` of parametric function in a specified plane
+// Remarks: The sketch will be a spline approximating the function
 // sketchParametricFunction (function)
 (func: (t: number) => Point2D, planeConfig?: PlaneConfig, { pointsCount, start, stop }?: {
     pointsCount?: number | undefined;
@@ -436,6 +450,7 @@ export declare function drawRoundedRectangle(width: number, height: number, r?: 
 }, approximationConfig?: BSplineApproximationConfig) => Sketch
 
 // Creates the `Sketch` of an polygon in a defined plane
+// Remarks: The sides of the polygon can be arcs of circle with a defined sagitta. The radius defines the out radius of the polygon without sagitta
 // sketchPolysides (function)
 (radius: number, sidesCount: number, sagitta?: number, planeConfig?: PlaneConfig) => Sketch
 

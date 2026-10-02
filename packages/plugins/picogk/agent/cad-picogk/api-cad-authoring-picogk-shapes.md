@@ -1,45 +1,59 @@
-# PicoGK — PicoGK.Shapes
+# PicoGK — CAD authoring — PicoGK.Shapes
 
 15 top-level symbols. Signatures are verbatim csharp.
 
+// Category: CAD authoring
 // A circular arc in 2D space
-Arc2d
+// PicoGK.Shapes.Arc2d (struct)
+public readonly struct Arc2d : IPath2d
 
   // Start coordinate
-  vecStart: Vector2
+  // PicoGK.Shapes.Arc2d.vecStart (property)
+  public Vector2 vecStart { get; }
 
   // End coordinate
-  vecEnd: Vector2
+  // PicoGK.Shapes.Arc2d.vecEnd (property)
+  public Vector2 vecEnd { get; }
 
   // Center point
-  vecCenter: Vector2
+  // PicoGK.Shapes.Arc2d.vecCenter (property)
+  public Vector2 vecCenter { get; }
 
   // Angle in radians (positive is counter clockwise)
-  rAngle: Rad
+  // PicoGK.Shapes.Arc2d.rAngle (property)
+  public Rad rAngle { get; }
 
   // Radius of the arc
-  fRadius: float
+  // PicoGK.Shapes.Arc2d.fRadius (property)
+  public float fRadius { get; }
 
-  fLength: float
+  // PicoGK.Shapes.Arc2d.fLength (property)
+  public float fLength { get; }
 
   // Construct a new 2D arc with the specified start point, around the specified center and with the supplied angle in radians
   // PicoGK.Shapes.Arc2d.Arc2d (constructor)
   public Arc2d(Vector2 vecStart, Vector2 vecCenter, Rad rAngle)
+  public Arc2d()
 
   // PicoGK.Shapes.Arc2d.vecPtAtT (method)
   public Vector2 vecPtAtT(float fT)
 
+// Category: CAD authoring
 // Class to represent an circle as a normalized path/contour
-Circle
+// PicoGK.Shapes.Circle (struct)
+public readonly struct Circle : IContour2d
 
   // Radius of the circle
-  fR: float
+  // PicoGK.Shapes.Circle.fR (property)
+  public float fR { get; }
 
-  fLength: float
+  // PicoGK.Shapes.Circle.fLength (property)
+  public float fLength { get; }
 
   // Create a Circle contour with radius fR
   // PicoGK.Shapes.Circle.Circle (constructor)
   public Circle(float fR)
+  public Circle()
 
   // PicoGK.Shapes.Circle.vecPtAtT (method)
   public Vector2 vecPtAtT(float t)
@@ -47,10 +61,13 @@ Circle
   // PicoGK.Shapes.Circle.PtAtT (method)
   public void PtAtT(in float t, out Vector2 vecPt, out Vector2 vecNormal)
 
+// Category: CAD authoring
 // This class allows you to use a closed path as a contour
-ContourFromPath
+// PicoGK.Shapes.ContourFromPath (class)
+public sealed class ContourFromPath : IContour2d, ContourSampler2d.ISampleable
 
-  fLength: float
+  // PicoGK.Shapes.ContourFromPath.fLength (property)
+  public float fLength { get; }
 
   // Create a IContour2d-compatible contour from an existing closed path The first point in the path and the last point in the path need to be identical
   // PicoGK.Shapes.ContourFromPath.ContourFromPath (constructor)
@@ -62,22 +79,26 @@ ContourFromPath
   // PicoGK.Shapes.ContourFromPath.vecPtAtTLinear (method)
   public Vector2 vecPtAtTLinear(float t)
 
+// Category: CAD authoring
 // Implements a way to adaptively sample a contour to retrieve a) the correct length b) sample the contour in adaptive arc T vs
-ContourSampler2d
+// PicoGK.Shapes.ContourSampler2d (class)
+public class ContourSampler2d
 
   // This interface enables a contour to be sampled in linear time
-  ISampleable
+  // PicoGK.Shapes.ContourSampler2d.ISampleable (interface)
+  public interface ISampleable
 
     // Return the uncorrected position at linear t (uncorrected)
     // PicoGK.Shapes.ContourSampler2d.ISampleable.vecPtAtTLinear (method)
     Vector2 vecPtAtTLinear(float t)
 
   // Return sum of all arc segement lengths
-  fTotalLength: float
+  // PicoGK.Shapes.ContourSampler2d.fTotalLength (property)
+  public float fTotalLength { get; }
 
   // Adaptively sample the contour to map the linear time to corrected arc-length t, for constant speed
   // PicoGK.Shapes.ContourSampler2d.ContourSampler2d (constructor)
-  public ContourSampler2d(ContourSampler2d.ISampleable xContour, float fPrecision = 0.01, int nMaxDepth = 100)
+  public ContourSampler2d(ISampleable xContour, float fPrecision = 0.01f, int nMaxDepth = 100)
   //   xContour: Contour to sample
   //   fPrecision: Precision (distance between points)
   //   nMaxDepth: Maximum recursion depth
@@ -86,24 +107,32 @@ ContourSampler2d
   // PicoGK.Shapes.ContourSampler2d.fArcTFromLinearT (method)
   public float fArcTFromLinearT(float fLinearT)
 
+// Category: CAD authoring
 // Class to represent an ellipse as a normalized path/contour
-Ellipse
+// PicoGK.Shapes.Ellipse (class)
+public sealed class Ellipse : IContour2d, ContourSampler2d.ISampleable
 
   // Rotation angle of the ellipse
-  fPhi: float
+  // PicoGK.Shapes.Ellipse.fPhi (property)
+  public float fPhi { get; }
 
   // Rotation angle of the ellipse
-  rPhi: Rad
+  // PicoGK.Shapes.Ellipse.rPhi (property)
+  public Rad rPhi { get; }
 
   // Half-length of the ellipse in A
-  fA: float
+  // PicoGK.Shapes.Ellipse.fA (property)
+  public float fA { get; }
 
   // Half-length of the ellipse in B
-  fB: float
+  // PicoGK.Shapes.Ellipse.fB (property)
+  public float fB { get; }
 
-  fLength: float
+  // PicoGK.Shapes.Ellipse.fLength (property)
+  public float fLength { get; }
 
   // Constructor using axis A vector and axis B length
+  // Throws: System.ArgumentException
   // PicoGK.Shapes.Ellipse.Ellipse (constructor)
   public Ellipse(Vector2 vecAxisA, float fLengthB)
   public Ellipse(float a, float b, float fAngle = 0)
@@ -116,23 +145,31 @@ Ellipse
   // PicoGK.Shapes.Ellipse.vecPtAtT (method)
   public Vector2 vecPtAtT(float t)
 
+// Category: CAD authoring
 // The Frame3d object stores a local coordinate system, i.e
-Frame3d
+// PicoGK.Shapes.Frame3d (struct)
+[DebuggerDisplay("O=({vecPos.X:n3},{vecPos.Y:n3},{vecPos.Z:n3})")]
+public readonly struct Frame3d : IEquatable<Frame3d>
 
   // Local frame representing the world coordinate system
-  frmWorld: Frame3d
+  // PicoGK.Shapes.Frame3d.frmWorld (field)
+  public static readonly Frame3d frmWorld = new(Vector3.Zero, Vector3.UnitZ, Vector3.UnitX);
 
   // Position of the origin of the Frame3d
-  vecPos: Vector3
+  // PicoGK.Shapes.Frame3d.vecPos (property)
+  public Vector3 vecPos { get; }
 
   // Direction of the local X axis in world coordinates
-  vecLx: Vector3
+  // PicoGK.Shapes.Frame3d.vecLx (property)
+  public Vector3 vecLx { get; }
 
   // Direction of the local Y axis in world coordinates
-  vecLy: Vector3
+  // PicoGK.Shapes.Frame3d.vecLy (property)
+  public Vector3 vecLy { get; }
 
   // Direction of the local Z axis in world coordinates
-  vecLz: Vector3
+  // PicoGK.Shapes.Frame3d.vecLz (property)
+  public Vector3 vecLz { get; }
 
   // Create a Frame3d at the specified position with axes aligned with world X,Y,Z
   // PicoGK.Shapes.Frame3d.frmFromPos (method)
@@ -146,6 +183,7 @@ Frame3d
   // PicoGK.Shapes.Frame3d.Frame3d (constructor)
   public Frame3d(Vector3 vecPos)
   public Frame3d(Vector3 vecOrigin, Vector3 vecApproxZ, Vector3 vecApproxX)
+  public Frame3d()
   //   vecPos: Position of the origin
 
   // Creates a Frame3d from a System.Numerics row-vector rigid transform
@@ -267,66 +305,85 @@ Frame3d
   // PicoGK.Shapes.Frame3d.GetHashCode (method)
   public override int GetHashCode()
 
+// Category: CAD authoring
 // Interface to represent a normalized closed contour in 2D which travels from 0..1 - Position at 0 and 1 are identical - The contour is centered around the coordinate 0/0 - The contour is in counter-clockwise winding order
-IContour2d
+// PicoGK.Shapes.IContour2d (interface)
+public interface IContour2d : IPath2d
 
   // Function to return both point and normal at t
   // PicoGK.Shapes.IContour2d.PtAtT (method)
-  void PtAtT(in float t, out Vector2 vecPt, out Vector2 vecNormal)
+  public void PtAtT(in float t, out Vector2 vecPt, out Vector2 vecNormal)
 
   // Sample the normal at fT Helper function used by PtAtT
   // PicoGK.Shapes.IContour2d.vecSampleNormalAt (method)
-  Vector2 vecSampleNormalAt(float fT, float fSampleDist = 1E-05)
+  public Vector2 vecSampleNormalAt(float fT, float fSampleDist = 1e-5f)
 
+// Category: CAD authoring
 // A two dimensional closed contour aligned in a plane in 3D space Note
-IContour3d
+// PicoGK.Shapes.IContour3d (interface)
+public interface IContour3d : IPath3d
 
   // Returns the point and normal at position t (0..1) As t increases monotonically, the point moves along the contour at constant speed with respect to arc length
   // PicoGK.Shapes.IContour3d.PtAtT (method)
-  void PtAtT(float t, out Vector3 vecPt, out Vector3 vecNormal)
+  public void PtAtT(float t, out Vector3 vecPt, out Vector3 vecNormal)
 
+// Category: CAD authoring
 // Interface to represent a normalized path in 2D space which travels from 0..1
-IPath2d
+// PicoGK.Shapes.IPath2d (interface)
+public interface IPath2d
 
   // Length of the entire contour
-  fLength: float
+  // PicoGK.Shapes.IPath2d.fLength (property)
+  public float fLength { get; }
 
   // Returns the point at position t (0..1) As t increases monotonically, the point moves along the contour at constant speed with respect to arc length
   // PicoGK.Shapes.IPath2d.vecPtAtT (method)
-  Vector2 vecPtAtT(float t)
+  public Vector2 vecPtAtT(float t)
 
+// Category: CAD authoring
 // Interface to represent a normalized path in 2D space which travels from 0..1
-IPath3d
+// PicoGK.Shapes.IPath3d (interface)
+public interface IPath3d
 
   // Length of the entire contour
-  fLength: float
+  // PicoGK.Shapes.IPath3d.fLength (property)
+  public float fLength { get; }
 
   // Returns the point at position t (0..1) As t increases monotonically, the point moves along the contour at constant speed with respect to arc length
   // PicoGK.Shapes.IPath3d.vecPtAtT (method)
-  Vector3 vecPtAtT(float t)
+  public Vector3 vecPtAtT(float t)
 
+// Category: CAD authoring
 // A 2d line
-Line2d
+// PicoGK.Shapes.Line2d (struct)
+public readonly struct Line2d : IPath2d
 
   // Start coordinate
-  vecA: Vector2
+  // PicoGK.Shapes.Line2d.vecA (property)
+  public Vector2 vecA { get; }
 
   // End coordinate
-  vecB: Vector2
+  // PicoGK.Shapes.Line2d.vecB (property)
+  public Vector2 vecB { get; }
 
-  fLength: float
+  // PicoGK.Shapes.Line2d.fLength (property)
+  public float fLength { get; }
 
   // Construct a line with the specified start and end coordinates
   // PicoGK.Shapes.Line2d.Line2d (constructor)
   public Line2d(Vector2 vecA, Vector2 vecB)
+  public Line2d()
 
   // PicoGK.Shapes.Line2d.vecPtAtT (method)
   public Vector2 vecPtAtT(float fT)
 
+// Category: CAD authoring
 // Represents an oriented 2D contour placed in 3D space by a Frame3d
-OrientedContour
+// PicoGK.Shapes.OrientedContour (class)
+public sealed class OrientedContour : IContour3d
 
-  fLength: float
+  // PicoGK.Shapes.OrientedContour.fLength (property)
+  public float fLength { get; }
 
   // Create an oriented contour from a 2D contour and a local coordinate system
   // PicoGK.Shapes.OrientedContour.OrientedContour (constructor)
@@ -338,10 +395,13 @@ OrientedContour
   // PicoGK.Shapes.OrientedContour.PtAtT (method)
   public void PtAtT(float t, out Vector3 vecPt, out Vector3 vecNormal)
 
+// Category: CAD authoring
 // Interface to represent a normalized 2D path oriented in space which travels from 0..1 - Position at 0 and 1 are identical - The contour is centered around the coordinate 0/0 - The contour is in counter-clockwise winding order
-OrientedPath
+// PicoGK.Shapes.OrientedPath (class)
+public sealed class OrientedPath : IPath3d
 
-  fLength: float
+  // PicoGK.Shapes.OrientedPath.fLength (property)
+  public float fLength { get; }
 
   // PicoGK.Shapes.OrientedPath.OrientedPath (constructor)
   public OrientedPath(IPath2d xPath, Frame3d frm)
@@ -349,10 +409,13 @@ OrientedPath
   // PicoGK.Shapes.OrientedPath.vecPtAtT (method)
   public Vector3 vecPtAtT(float t)
 
+// Category: CAD authoring
 // A compound path which consists of a list of other paths
-Path2d
+// PicoGK.Shapes.Path2d (class)
+public sealed class Path2d : IPath2d
 
-  fLength: float
+  // PicoGK.Shapes.Path2d.fLength (property)
+  public float fLength { get; }
 
   // Add another path to the compound path Note, the start coordinate of the added path needs to be coincide with the current end point
   // PicoGK.Shapes.Path2d.Add (method)
@@ -377,14 +440,20 @@ Path2d
   // PicoGK.Shapes.Path2d.vecPtAtT (method)
   public Vector2 vecPtAtT(float fT)
 
-// Implements the supershape formula for interesting 2D contours
-Supershape
+  // PicoGK.Shapes.Path2d.Path2d (constructor)
+  public Path2d()
 
-  fLength: float
+// Category: CAD authoring
+// Implements the supershape formula for interesting 2D contours
+// PicoGK.Shapes.Supershape (class)
+public sealed class Supershape : IContour2d, ContourSampler2d.ISampleable
+
+  // PicoGK.Shapes.Supershape.fLength (property)
+  public float fLength { get; }
 
   // Helper function to create simple rounded polygons based on the Supershape https://en.wikipedia.org/wiki/Superformula
   // PicoGK.Shapes.Supershape.oRoundedPolygon (method)
-  public static Supershape oRoundedPolygon(float fRadius, float fPolySymmery, float fOutwardCurve = 5, float fRoundness = 5)
+  static public Supershape oRoundedPolygon(float fRadius, float fPolySymmery, float fOutwardCurve = 5f, float fRoundness = 5f)
   //   fRadius: Radius
   //   fPolySymmery: Number of polygonal sides, for example 4 for a square
   //   fOutwardCurve: Higher values curve the sides outwards, smaller values create lobes

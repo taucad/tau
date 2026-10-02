@@ -1,4 +1,5 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { DatabaseSync } from 'node:sqlite';
 import type { statfs } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { basename, join } from 'node:path';
@@ -12,6 +13,8 @@ import { defineRuntime } from '@taucad/runtime/worker';
 import { defineKernel } from '@taucad/runtime';
 import { asKnownArtifact } from '@taucad/runtime/types';
 import { geometryCache } from '#geometry-cache.middleware.js';
+import { Document, NodeIO } from '@gltf-transform/core';
+import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
 
 vi.mock('node:fs/promises', async (importOriginal) => {
   const actual = await importOriginal<{ statfs: typeof statfs }>();
@@ -35,6 +38,160 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 });
 
 describe('geometry cache with durable SQLite', () => {
+  it('persists one shared GLB leaf for native build and display, and a distinct edge leaf when requested', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'tau-geometry-parts-'));
+    const document = new Document();
+    const buffer = document.createBuffer();
+    const positions = document
+      .createAccessor()
+      .setType('VEC3')
+      .setArray(new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]))
+      .setBuffer(buffer);
+    const indices = document
+      .createAccessor()
+      .setType('SCALAR')
+      .setArray(new Uint16Array([0, 1, 2]))
+      .setBuffer(buffer);
+    const material = document.createMaterial('Authored copper').setBaseColorFactor([0.7, 0.3, 0.1, 1]);
+    const mesh = document
+      .createMesh('Authored surface')
+      .addPrimitive(
+        document.createPrimitive().setAttribute('POSITION', positions).setIndices(indices).setMaterial(material),
+      );
+    document.createScene().addChild(document.createNode('Authored occurrence').setMesh(mesh));
+    const glb = await new NodeIO().writeBinary(document);
+    let builds = 0;
+    let snapshots = 0;
+    const kernel = defineKernel({
+      id: 'shared-parts',
+      name: 'Shared parts fixture',
+      version: '1.0.0',
+      extensions: ['probe'],
+      views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+      exports: { glb: { title: 'GLB', mimeType: 'model/gltf-binary', extension: 'glb', optionsSchema: z.object({}) } },
+      async initialize() {
+        return {};
+      },
+      async resolve({ entryPath }) {
+        return { resolved: [entryPath], unresolved: [] };
+      },
+      async describe() {
+        return {
+          success: true,
+          data: {
+            parameters: {
+              schema: {
+                $schema: 'https://json-structure.org/meta/extended/v0/#',
+                $id: 'urn:taucad:shared-parts',
+                $uses: ['JSONSchemaUnits'],
+                name: 'SharedPartsParameters',
+                type: 'object',
+              },
+              defaults: {},
+            },
+          },
+          issues: [],
+        };
+      },
+      async evaluate() {
+        builds++;
+        return { handle: { glb, label: 'Authored assembly' }, views: ['model'], exports: ['glb'], issues: [] };
+      },
+      async render({ handle }) {
+        return { content: handle.glb };
+      },
+      serializeHandle({ handle }) {
+        snapshots++;
+        return handle;
+      },
+      deserializeHandle({ serialized }) {
+        return z.object({ glb: z.instanceof(Uint8Array), label: z.string() }).parse(serialized);
+      },
+      async export({ handle }) {
+        return { files: [{ name: 'authored.glb', mimeType: 'model/gltf-binary', bytes: handle.glb }] };
+      },
+    })();
+    const render = async (edges: boolean) => {
+      const store = createSqliteComputeEngine({ directory });
+      const runtime = defineRuntime({
+        kernels: [kernel],
+        middleware: [geometryCache(), gltfEdgeDetection()],
+      });
+      const client = createRuntimeClient({
+        transport: inProcessTransport({
+          runtime,
+          fileSystem: fromMemoryFs(),
+          compute: { mode: 'durable', store: fromSqlite({ store, workspace: '/shared-parts' }) },
+        }),
+      });
+      const opened = client.open({
+        source: { entry: 'main.probe', files: { 'main.probe': 'unchanged' } },
+        watch: false,
+      });
+      const view = opened.view('model', { content: { includeEdges: edges } });
+      try {
+        const rendered = await view.rendering();
+        if (rendered.superseded || !rendered.rendering.success) {
+          throw new Error(`Expected shared display: ${JSON.stringify(rendered)}`);
+        }
+        const artifact = asKnownArtifact(rendered.rendering.artifact);
+        if (artifact?.mimeType !== 'model/gltf-binary') {
+          throw new Error('Expected GLB');
+        }
+        const exported = await opened.export('glb', { content: { includeEdges: edges } });
+        if (!exported.success) {
+          throw new Error('Expected GLB export');
+        }
+        return { bytes: artifact.content, exported: exported.files[0] };
+      } finally {
+        view.close();
+        opened.close();
+        await client.shutdown();
+        await store.dispose();
+      }
+    };
+    const readPayloads = async () => {
+      const files = await readdir(directory);
+      const file = files.find((name) => name.endsWith('.sqlite'));
+      if (!file) {
+        throw new Error('Expected persisted SQLite store');
+      }
+      const db = new DatabaseSync(join(directory, file), { readOnly: true });
+      try {
+        return z
+          .array(z.object({ bytes: z.instanceof(Uint8Array), byteLength: z.number() }))
+          .parse(db.prepare('SELECT bytes, byte_length AS byteLength FROM content').all());
+      } finally {
+        db.close();
+      }
+    };
+    try {
+      const cold = await render(false);
+      const warm = await render(false);
+      expect(cold).toEqual(warm);
+      expect(cold.bytes).toEqual(glb);
+      expect(cold.exported.name).toBe('authored.glb');
+      expect(builds).toBe(1);
+      expect(snapshots).toBe(1);
+      const payloads = await readPayloads();
+      expect(payloads.filter((row) => Buffer.from(row.bytes).equals(glb))).toHaveLength(1);
+      const roots = payloads.filter((row) => !Buffer.from(row.bytes).equals(glb));
+      // Export codec remains self-contained; exclude its separately measured payload from build/display accounting.
+      const metadata = roots.filter((row) => !Buffer.from(row.bytes).includes(Buffer.from(glb)));
+      expect(metadata.reduce((sum, row) => sum + row.byteLength, 0)).toBeLessThan(glb.byteLength);
+      const edgeCold = await render(true);
+      const edgeWarm = await render(true);
+      expect(edgeCold).toEqual(edgeWarm);
+      expect(edgeCold.bytes).not.toEqual(glb);
+      expect(builds).toBe(1);
+      expect(snapshots).toBe(1);
+      const withEdges = await readPayloads();
+      expect(withEdges.filter((row) => Buffer.from(row.bytes).equals(glb))).toHaveLength(1);
+      expect(withEdges.filter((row) => Buffer.from(row.bytes).equals(edgeCold.bytes))).toHaveLength(1);
+    } finally {
+      await rm(directory, { recursive: true, force: true });
+    }
+  });
   it('should reuse geometry after reopening, invalidate a changed dependency, and restore a cached native handle for export', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tau-geometry-reopen-'));
     let builds = 0;

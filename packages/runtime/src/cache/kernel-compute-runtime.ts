@@ -9,6 +9,8 @@
  */
 
 import {
+  CacheCorruptionError,
+  contentDigest,
   createComputeReuseService,
   createMemoryActionStore,
   createMemoryContentStore,
@@ -23,8 +25,10 @@ import type {
   ComputeAction,
   ComputeActionRecord,
   ComputeReuseService,
+  ContentDigest,
   ContentStore,
 } from '@taucad/cache-core';
+import { validateComputeEntry } from '#cache/compute-store-records.js';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import type {
   ComputeAnnounceResult,
@@ -67,6 +71,7 @@ const readCacheBytes = 64 * 1024 * 1024;
 type PublicationSource = {
   readonly action: ComputeAction;
   readonly determinism: 'byte-exact' | 'equivalent';
+  readonly generation: ComputeGeneration;
   callers: number;
 };
 
@@ -150,6 +155,22 @@ const emptySettlement = (status: ComputeScopeSettlement['status'], reason?: stri
  * Whole-action reuse and kernel-scope reuse therefore share one physical store,
  * one generation and one poisoning rule instead of being implemented twice.
  */
+/**
+ * Fixed identity for an opaque owned byte leaf; independent of codec metadata.
+ * @param digest - Validated identity of the owned payload.
+ * @returns Its canonical store action.
+ */
+const contentAction = (digest: ContentDigest): ComputeAction => ({
+  schemaVersion: 1,
+  namespace: 'tau.compute.content',
+  producer: { id: 'tau.runtime.content', version: '1', implementationAssets: [] },
+  operation: 'bytes',
+  inputs: [{ kind: 'content', role: 'bytes', digest: contentDigest({ value: digest }) }],
+  arguments: {},
+  environment: {},
+  codec: { id: 'tau.runtime.bytes', version: '1' },
+});
+
 const adaptSession = (
   session: ComputeStoreSession,
   publications: ReadonlyMap<ActionDigest, PublicationSource>,
@@ -168,14 +189,83 @@ const adaptSession = (
     }
     return current;
   };
+  const isCurrent = async (expected: ComputeGeneration): Promise<boolean> => {
+    if ((await refreshGeneration()) === expected) {
+      return true;
+    }
+    // Another request may have refreshed before this request finished its writes.
+    // Clear again so late writes from the old generation cannot become new hits.
+    await contentCache.maintenance.clear({});
+    await actionCache.maintenance.clear({});
+    return false;
+  };
+  const fetchLeaf = async (input: {
+    readonly digest: ContentDigest;
+    readonly generation: ComputeGeneration;
+    readonly maxBytes?: number;
+    readonly signal?: AbortSignal;
+  }): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+    const action = contentAction(input.digest);
+    const digest = await digestAction({ action });
+    const result = await session.get({
+      digests: [digest],
+      maxEntries: 1,
+      maxBytes: input.maxBytes ?? defaultWarmBytes,
+      generation: input.generation,
+      ...(input.signal ? { signal: input.signal } : {}),
+    });
+    const entry = result.status === 'ok' ? result.entries[0] : undefined;
+    if (
+      !entry ||
+      entry.bytes.byteLength > (input.maxBytes ?? defaultWarmBytes) ||
+      entry.actionDigest !== digest ||
+      entry.contentDigest !== input.digest ||
+      (entry.requiredContent?.length ?? 0) !== 0 ||
+      entry.mediaType !== 'application/octet-stream' ||
+      (await digestAction({ action: entry.action })) !== digest ||
+      (await digestContent({ bytes: entry.bytes })) !== input.digest ||
+      !(await isCurrent(input.generation))
+    ) {
+      return undefined;
+    }
+    input.signal?.throwIfAborted();
+    return entry.bytes;
+  };
+  const validRoot = async (entry: ComputeStoreEntry, digest: ActionDigest): Promise<boolean> =>
+    entry.bytes.byteLength <= defaultWarmBytes &&
+    entry.actionDigest === digest &&
+    (await validateComputeEntry(entry)) !== undefined;
+  const publishedContent = async (
+    record: ComputeActionRecord,
+    signal?: AbortSignal,
+  ): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+    const content = await contentCache.read({ digest: record.output.digest, ...(signal ? { signal } : {}) });
+    return content.status === 'hit' && content.bytes.byteLength === record.output.size ? content.bytes : undefined;
+  };
+  const contentStore: ContentStore = {
+    ...contentCache,
+    read: async (input) => {
+      const current = await refreshGeneration();
+      const cached = await contentCache.read(input);
+      if (cached.status === 'hit') {
+        return (await isCurrent(current)) ? cached : { status: 'miss' };
+      }
+      const bytes = await fetchLeaf({ ...input, generation: current });
+      if (!bytes) {
+        return { status: 'miss' };
+      }
+      await contentCache.write({ ...input, bytes });
+      return (await isCurrent(current)) ? { status: 'hit', bytes: new Uint8Array(bytes) } : { status: 'miss' };
+    },
+  };
   return {
-    contentStore: contentCache,
+    contentStore,
     actionStore: {
       read: async ({ digest, signal }) => {
         const current = await refreshGeneration();
         const cached = await actionCache.read({ digest, ...(signal ? { signal } : {}) });
         if (cached.status === 'hit') {
-          return cached;
+          return (await isCurrent(current)) ? cached : { status: 'miss' };
         }
         const result = await session.get({
           digests: [digest],
@@ -185,7 +275,37 @@ const adaptSession = (
           ...(signal ? { signal } : {}),
         });
         const entry = result.status === 'ok' ? result.entries[0] : undefined;
-        if (!entry) {
+        if (!entry || !(await validRoot(entry, digest)) || !(await isCurrent(current))) {
+          return { status: 'miss' };
+        }
+        const requiredContent = [...new Set(entry.requiredContent ?? [])].sort();
+        if (requiredContent.length + 1 > maxPendingEntries) {
+          return { status: 'miss' };
+        }
+        let bytes = entry.bytes.byteLength;
+        const leaves: Array<{ digest: ContentDigest; bytes: Uint8Array<ArrayBuffer> }> = [];
+        for (const required of requiredContent) {
+          // oxlint-disable-next-line no-await-in-loop -- reuse the verified leaf tier before loading another metadata root.
+          const cachedLeaf = await contentCache.read({ digest: required, ...(signal ? { signal } : {}) });
+          const leaf =
+            cachedLeaf.status === 'hit'
+              ? cachedLeaf.bytes
+              : // oxlint-disable-next-line no-await-in-loop -- bound aggregate bytes before admitting the next owned leaf.
+                await fetchLeaf({
+                  digest: required,
+                  generation: current,
+                  maxBytes: defaultWarmBytes - bytes,
+                  ...(signal ? { signal } : {}),
+                });
+          if (!leaf || bytes + leaf.byteLength > defaultWarmBytes) {
+            return { status: 'miss' };
+          }
+          bytes += leaf.byteLength;
+          if (cachedLeaf.status === 'miss') {
+            leaves.push({ digest: required, bytes: leaf });
+          }
+        }
+        if (!(await isCurrent(current))) {
           return { status: 'miss' };
         }
         const record: ComputeActionRecord = {
@@ -194,32 +314,61 @@ const adaptSession = (
           codec: entry.action.codec,
           output: { digest: entry.contentDigest, size: entry.bytes.byteLength, mediaType: entry.mediaType },
           dependencies: entry.action.inputs.filter((input) => input.kind === 'action').map((input) => input.digest),
+          ...(requiredContent.length > 0 ? { requiredContent } : {}),
         };
+        await Promise.all(leaves.map(async (leaf) => contentCache.write({ ...leaf, ...(signal ? { signal } : {}) })));
         await contentCache.write({ digest: entry.contentDigest, bytes: entry.bytes, ...(signal ? { signal } : {}) });
         await actionCache.publish({ record, ...(signal ? { signal } : {}) });
-        return { status: 'hit', record };
+        return (await isCurrent(current)) ? { status: 'hit', record } : { status: 'miss' };
       },
       publish: async ({ record, signal }) => {
         const current = await refreshGeneration();
-        // D5: `evaluate` writes to the same store session as the kernel scope, so a
-        // durable engine can pin what it published. The action record alone cannot
-        // name a store entry, so the canonical action is carried from `evaluate`.
         const source = publications.get(record.actionDigest);
-        const content = await contentCache.read({ digest: record.output.digest, ...(signal ? { signal } : {}) });
-        if (!source || content.status === 'miss') {
+        const content = await publishedContent(record, signal);
+        if (!source || source.generation !== current || !content) {
           return { status: 'rejected', reason: 'unavailable' };
         }
+        const requiredContent = [...new Set(record.requiredContent ?? [])].sort();
+        if (requiredContent.length + 1 > maxPendingEntries) {
+          return { status: 'rejected', reason: 'entry-too-large' };
+        }
+        let bytes = content.byteLength;
+        const entries: ComputeStoreEntry[] = [];
+        for (const required of requiredContent) {
+          // oxlint-disable-next-line no-await-in-loop -- read only already-owned parts before atomic session publication.
+          const leaf = await contentCache.read({ digest: required, ...(signal ? { signal } : {}) });
+          if (leaf.status === 'miss') {
+            return { status: 'rejected', reason: 'unavailable' };
+          }
+          bytes += leaf.bytes.byteLength;
+          if (bytes > maxPendingBytes) {
+            return { status: 'rejected', reason: 'entry-too-large' };
+          }
+          const action = contentAction(required);
+          entries.push({
+            action,
+            // oxlint-disable-next-line no-await-in-loop -- leaf identity is verified in the bounded publication order.
+            actionDigest: await digestAction({ action }),
+            contentDigest: required,
+            mediaType: 'application/octet-stream',
+            bytes: leaf.bytes,
+            determinism: 'byte-exact',
+          });
+        }
+        if (bytes > maxPendingBytes || !(await isCurrent(current))) {
+          return { status: 'rejected', reason: 'unavailable' };
+        }
+        entries.push({
+          action: source.action,
+          actionDigest: record.actionDigest,
+          contentDigest: record.output.digest,
+          mediaType: record.output.mediaType,
+          bytes: content,
+          determinism: source.determinism,
+          ...(requiredContent.length > 0 ? { requiredContent } : {}),
+        });
         const result = await session.put({
-          entries: [
-            {
-              action: source.action,
-              actionDigest: record.actionDigest,
-              contentDigest: record.output.digest,
-              mediaType: record.output.mediaType,
-              bytes: content.bytes,
-              determinism: source.determinism,
-            },
-          ],
+          entries,
           generation: current,
           durability: 'disposable',
           ...(signal ? { signal } : {}),
@@ -231,6 +380,9 @@ const adaptSession = (
         }
         if (!result.published.includes(record.actionDigest)) {
           return { status: 'rejected', reason: 'conflict' };
+        }
+        if (!(await isCurrent(current))) {
+          return { status: 'rejected', reason: 'stale-generation' };
         }
         return actionCache.publish({ record, ...(signal ? { signal } : {}) });
       },
@@ -697,6 +849,7 @@ export const createComputeCapabilityHost = (input: {
         status: 'on',
         mode,
         evaluate: async (evaluation) => {
+          const generation = await liveGeneration();
           const service = await openService();
           const digest = await digestAction({ action: evaluation.action });
           const existing = publications.get(digest);
@@ -706,11 +859,28 @@ export const createComputeCapabilityHost = (input: {
             publications.set(digest, {
               action: evaluation.action,
               determinism: evaluation.codec.determinism ?? 'byte-exact',
+              generation,
               callers: 1,
             });
           }
           try {
-            return await service.evaluate({ ...evaluation, signal: evaluation.signal ?? signal });
+            return await service.evaluate({
+              ...evaluation,
+              codec: {
+                ...evaluation.codec,
+                decode: async (input) => {
+                  if ((await liveGeneration()) !== generation) {
+                    throw new CacheCorruptionError('Compute generation changed before cached decoding.');
+                  }
+                  const value = await evaluation.codec.decode(input);
+                  if ((await liveGeneration()) !== generation) {
+                    throw new CacheCorruptionError('Compute generation changed during cached decoding.');
+                  }
+                  return value;
+                },
+              },
+              signal: evaluation.signal ?? signal,
+            });
           } finally {
             const source = publications.get(digest);
             if (source && --source.callers === 0) {

@@ -12,8 +12,10 @@
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 
+import { FuseV1Options } from '@electron/fuses';
+
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { parseMacosPackageMode } from './macos-package-mode.mjs';
+import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 
 assert.deepEqual(parseMacosPackageMode([]), { release: false, unsigned: false, zip: false });
 assert.deepEqual(parseMacosPackageMode(['--release']), { release: true, unsigned: false, zip: true });
@@ -38,3 +40,19 @@ assert.ok(
   execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')],`),
 );
 assert.ok(licenceGate < packageSource.indexOf('let geospecAssemblyInput'));
+
+/* Security assessment 2026-10 desktop F-3: the hardening fuses are on in every mode,
+ * RunAsNode is never touched (ACP adapters need it), and only a release refuses --inspect. */
+for (const release of [false, true]) {
+  const fuses = macosPackageFuses({ release });
+  assert.equal(fuses[FuseV1Options.RunAsNode], undefined);
+  assert.equal(fuses[FuseV1Options.EnableCookieEncryption], true);
+  assert.equal(fuses[FuseV1Options.EnableNodeOptionsEnvironmentVariable], false);
+  assert.equal(fuses[FuseV1Options.EnableNodeCliInspectArguments], !release);
+  assert.equal(fuses[FuseV1Options.EnableEmbeddedAsarIntegrityValidation], true);
+  assert.equal(fuses[FuseV1Options.OnlyLoadAppFromAsar], true);
+}
+const fuseFlip = packageSource.indexOf('await flipFuses(appPath');
+assert.ok(fuseFlip !== -1 && fuseFlip < packageSource.indexOf('await sign({'));
+assert.ok(packageSource.includes('...(release ? {} : { tauDesktop: { environmentOverrides: true } }),'));
+console.log('✓ macOS packages flip the hardening fuses before signing, and only a release refuses --inspect');

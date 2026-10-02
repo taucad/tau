@@ -51,6 +51,8 @@ import {
   desktopAgentGatewayBaseUrl,
   desktopAgentSystemPrompt,
   desktopEnvironment,
+  packagedOverridesEnabled,
+  stripPackagedOverrides,
 } from '#main/environment.js';
 import { installTauHeaderInjection, originOf } from '#main/header-injection.js';
 import {
@@ -105,6 +107,14 @@ import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'jso
  * privileges once the network service has started. */
 protocol.registerSchemesAsPrivileged([...appSchemePrivileges]);
 
+/* A packaged build ignores endpoint, renderer, client-root, executable-path and
+ * `TAU_E2E_*` overrides unless it was packaged to honour them (ad-hoc and
+ * unsigned e2e packages; never a release). Scrubbed before anything below
+ * reads `process.env`, so every later read and every child sees the result. */
+const environmentLocked = app.isPackaged && !packagedOverridesEnabled(app.getAppPath());
+if (environmentLocked) {
+  stripPackagedOverrides(process.env);
+}
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
 /* Packaged executable launches skip Playwright's readiness loader. Hold window
@@ -336,7 +346,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   }
   app.dock?.setIcon(applicationIcon);
   const loginShell = await loginShellApplied;
-  const environment = desktopEnvironment();
+  const environment = desktopEnvironment(process.env, { locked: environmentLocked });
 
   const logDirectory = join(app.getPath('userData'), 'logs');
   const build123dResourceRoot = app.isPackaged
@@ -1053,6 +1063,9 @@ const bootstrapElectronApp = async (): Promise<void> => {
       titleBarStyle: process.platform === 'darwin' ? 'hiddenInset' : 'default',
       webPreferences: {
         focusOnNavigation: !hideTestWindow,
+        /* No DevTools in a packaged build: they run script in the `app://tau`
+         * main world, which holds the whole preload bridge. */
+        devTools: !app.isPackaged,
         contextIsolation: true,
         nodeIntegration: false,
         /* `sandbox: false` because the preload is ESM; the CJS-preload fix is

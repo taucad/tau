@@ -8,8 +8,8 @@
 #
 # Triggers:
 #   - staging: pushes to `main` (production context) + PR previews (`taucad` site).
-#   - prod: pushes to Git branch `production` after merging the bot-managed trail PR
-#     (see `.github/workflows/prepare-prod-release.yml`).
+#   - prod: pushes to Git branch `production`, made only by dispatching
+#     `.github/workflows/deploy-production.yml` with a release tag.
 #
 # SOURCE MAPS (`pnpm nx run ui:sourcemaps`): run inside the Netlify build for
 # **production context** only (`[build]` + `[context.production]` include them);

@@ -1,0 +1,147 @@
+# Deploy a release to production.
+#
+# Production is never deployed by a merge. A person dispatches this workflow
+# with a release tag (`ui@x.y.z` or `api@x.y.z`, from GitHub's Actions tab, `gh
+# workflow run`, or the Command Center's deploy centre) and it promotes that
+# release's commit to the `production` branch:
+#
+#   - Netlify builds tau.new from `production`.
+#   - `prod-deploy-on-merge.yml` deploys the API from `production`.
+#
+# Both applications therefore move to the tagged commit together; a release tag
+# names the train, and its notes say what changed for that application.
+#
+# Before promoting, the release must be a published GitHub Release whose commit
+# is on `main`, and `release-build.yml` must have succeeded for every application
+# release on that commit. Moving production to an older commit is a rollback and
+# needs `rollback: true`.
+#
+# Command Center contract: POST /repos/taucad/tau/actions/workflows/deploy-production.yml/dispatches
+# with {"ref": "main", "inputs": {"release": "<tag>", "rollback": "false"}}.
+name: Deploy release to production
+
+on:
+  workflow_dispatch:
+    inputs:
+      release:
+        description: 'Release tag to deploy, e.g. ui@0.3.0'
+        required: true
+        type: string
+      rollback:
+        description: 'Allow moving production to an older release'
+        required: false
+        type: boolean
+        default: false
+
+permissions: {}
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  promote:
+    name: Promote ${{ inputs.release }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    environment:
+      name: production-promotion
+      deployment: false
+    steps:
+      - name: Require a dispatch from main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Dispatch this workflow from main; the release to deploy is the input."
+          exit 1
+
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          fetch-depth: 0
+          ref: main
+          persist-credentials: false
+
+      - name: Check the release
+        id: release
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          RELEASE: ${{ inputs.release }}
+          ROLLBACK: ${{ inputs.rollback }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$RELEASE" =~ ^(ui|api)@[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::$RELEASE is not a UI or API release tag (desktop releases ship through their update feed)."
+            exit 1
+          fi
+          draft=$(gh release view "$RELEASE" --json isDraft --jq .isDraft) \
+            || { echo "::error::$RELEASE has no GitHub Release"; exit 1; }
+          test "$draft" = false || { echo "::error::$RELEASE is still a draft"; exit 1; }
+
+          git fetch --quiet origin "refs/tags/$RELEASE:refs/tags/$RELEASE" production
+          commit=$(git rev-list -n 1 "refs/tags/$RELEASE")
+          git merge-base --is-ancestor "$commit" origin/main \
+            || { echo "::error::$RELEASE ($commit) is not on main"; exit 1; }
+
+          # Every application release on this commit must have built green. A
+          # release run's title is its release's name, which release.yml sets
+          # to the tag; the newest run for each tag decides.
+          for tag in $(git tag --points-at "$commit" | grep -E '^(ui|api|desktop)@' || true); do
+            conclusion=$(gh run list --workflow release-build.yml --commit "$commit" --limit 50 \
+              --json conclusion,displayTitle \
+              --jq "[.[] | select(.displayTitle == \"$tag\")][0].conclusion // empty")
+            test "$conclusion" = success \
+              || { echo "::error::release-build.yml has not succeeded for $tag (${conclusion:-no run})"; exit 1; }
+          done
+
+          current=$(git rev-parse origin/production)
+          if [ "$current" = "$commit" ]; then
+            echo "::notice::production is already at $RELEASE ($commit)"
+            echo "action=none" >> "$GITHUB_OUTPUT"
+          elif git merge-base --is-ancestor "$current" "$commit"; then
+            echo "action=forward" >> "$GITHUB_OUTPUT"
+          elif [ "$ROLLBACK" = true ]; then
+            echo "action=rollback" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::$RELEASE is not ahead of production ($current). Re-run with rollback: true to move production back."
+            exit 1
+          fi
+          echo "commit=$commit" >> "$GITHUB_OUTPUT"
+          echo "previous=$current" >> "$GITHUB_OUTPUT"
+
+      - name: Promote to production
+        if: steps.release.outputs.action != 'none'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+          ACTION: ${{ steps.release.outputs.action }}
+        run: |
+          set -euo pipefail
+          force=""
+          if [ "$ACTION" = rollback ]; then force="--force"; fi
+          # The bot bypasses the production ruleset; a push made with its token
+          # starts prod-deploy-on-merge.yml, which a GITHUB_TOKEN push would not.
+          git push $force "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" \
+            "$COMMIT:refs/heads/production"
+
+      - name: Summarise
+        env:
+          RELEASE: ${{ inputs.release }}
+          ACTION: ${{ steps.release.outputs.action }}
+          COMMIT: ${{ steps.release.outputs.commit }}
+          PREVIOUS: ${{ steps.release.outputs.previous }}
+        run: |
+          {
+            echo "### Production: $RELEASE"
+            echo
+            echo "- Action: $ACTION"
+            echo "- Commit: \`$COMMIT\` (was \`$PREVIOUS\`)"
+            echo "- Netlify builds tau.new and prod-deploy-on-merge.yml deploys the API from this push."
+          } >> "$GITHUB_STEP_SUMMARY"

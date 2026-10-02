@@ -18,7 +18,6 @@ import type { RevisionPort } from '@taucad/revisions';
 import { revisionId } from '@taucad/revisions/algorithms';
 import { ChangeEventBus, MountTable, ProviderRegistry, ResourceQueue, WorkspaceFileService } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
-import { sha256Bytes } from '@taucad/utils/hash';
 import {
   createCheckoutRoutes,
   createRemoteAttention,
@@ -810,7 +809,11 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
   });
 
   it('should compare a recorded revision against the files as they are now (S38)', async () => {
-    const fixture = harness(['alpha']);
+    let unavailableHead: string | undefined;
+    const fixture = harness(['alpha'], (port) => ({
+      ...port,
+      readTree: async (id) => (id === unavailableHead ? undefined : port.readTree(id)),
+    }));
     const project = fixture.service.createRootedFileSystem('/projects/alpha');
     await project.writeFile('main.scad', 'cube(10);');
     const alpha = await fixture.open('alpha');
@@ -846,22 +849,47 @@ describe('the file-manager worker revision root (north star S48 jsdom 1–4)', (
       modified: '',
     });
     const missing = await root.compare(head!, 'main.scad', { against: 'checkout' });
-    expect(missing).toHaveProperty('modifiedBytes', { digest: 'missing', byteLength: null });
+    expect(missing).toMatchObject({ change: 'deleted', kind: 'text' });
     await project.writeFile('main.scad', new Uint8Array());
     const empty = await root.compare(head!, 'main.scad', { against: 'checkout' });
-    expect(empty).toHaveProperty('modifiedBytes', {
-      digest: 'sha256:e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855',
-      byteLength: 0,
-    });
+    expect(empty).toMatchObject({ change: 'modified', modified: '' });
     const bom = new Uint8Array([0xef, 0xbb, 0xbf, ...new TextEncoder().encode('cube(20);')]);
     await project.writeFile('main.scad', bom);
     const comparison = await root.compare(head!, 'main.scad', { against: 'checkout' });
     expect(comparison.original).toBe(comparison.modified);
-    expect(comparison.originalBytes).toEqual({
-      digest: `sha256:${await sha256Bytes(new TextEncoder().encode('cube(20);'))}`,
-      byteLength: 9,
+    expect(comparison).toMatchObject({ change: 'modified', kind: 'text', notices: ['encoding'] });
+    const staged = '.main.scad.tau-staged.00000000-0000-0000-0000-000000000001.tmp';
+    const backup = '.main.scad.tau-backup.00000000-0000-0000-0000-000000000001.tmp';
+    await project.writeFile(staged, 'staging');
+    await project.writeFile(backup, 'backup');
+    await project.writeFile('new.scad', 'sphere(2);');
+    const live = await root.diff(head!, undefined, { against: 'checkout' });
+    expect(live.map(({ path }) => path)).not.toContain(staged);
+    expect(live.map(({ path }) => path)).not.toContain(backup);
+    expect(live).toContainEqual({ path: 'new.scad', kind: 'added' });
+    expect(live).toContainEqual({ path: 'main.scad', kind: 'modified' });
+    await project.writeFile('main.scad', 'cube(20);');
+    expect(await root.diff(head!, undefined, { against: 'checkout' })).not.toContainEqual({
+      path: 'main.scad',
+      kind: 'modified',
     });
-    expect(comparison.modifiedBytes).toEqual({ digest: `sha256:${await sha256Bytes(bom)}`, byteLength: 12 });
+    await project.unlink('main.scad');
+    await project.mkdir('main.scad');
+    await project.writeFile('main.scad/child.scad', 'cube(1);');
+    const directoryPaths = await root.diff(head!, undefined, { against: 'checkout' });
+    expect(directoryPaths).toContainEqual({ path: 'main.scad', kind: 'deleted' });
+    expect(directoryPaths).toContainEqual({ path: 'main.scad/child.scad', kind: 'added' });
+    expect(await root.compare(head!, 'main.scad', { against: 'checkout' })).toMatchObject({
+      change: 'deleted',
+      original: 'cube(20);',
+      modified: '',
+    });
+    unavailableHead = head;
+    await expect(root.compare(older!.revisionId, 'main.scad', { against: 'checkout' })).rejects.toThrow(
+      'checkout head',
+    );
+    await expect(root.diff(older!.revisionId, undefined, { against: 'checkout' })).rejects.toThrow('checkout head');
+    unavailableHead = undefined;
     await expect(root.compare('unknown-revision', 'main.scad', { against: 'checkout' })).rejects.toThrow();
     await expect(root.compare('unknown-revision', 'main.scad')).rejects.toThrow();
     const failure = new Error('Device read failed');

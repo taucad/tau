@@ -4,28 +4,11 @@ import type { RpcExecutionError, RpcValidationError } from '#types/rpc.types.js'
 import type { RpcClientError } from '#schemas/rpc.schema.js';
 import { isRpcExecutionError, isRpcClientError } from '#types/rpc.types.js';
 
-/**
- * All possible tool execution error codes.
- * @public
- */
-export const toolErrorCodes = [
-  'TOOL_EXECUTION_TIMEOUT',
-  'CLIENT_DISCONNECTED',
-  'NO_CLIENT_CONNECTION',
-  'TOOL_INPUT_VALIDATION_FAILED',
-  'TOOL_OUTPUT_VALIDATION_FAILED',
-  'TOOL_EXECUTION_ERROR',
-  'USER_INTERRUPTED',
-  'STREAM_ERROR',
-  'ORPHANED_TOOL_CALL',
-  'TOOL_NO_RESULTS',
-] as const;
+import { toolExecutionErrorSchema } from '#schemas/tool-error.schema.js';
+import type { toolErrorCodes } from '#schemas/tool-error.schema.js';
 
 /** @public */
 export type ToolErrorCode = (typeof toolErrorCodes)[number];
-
-/** Runtime schema for tool execution error codes. @public */
-export const toolErrorCodeSchema = z.enum(toolErrorCodes);
 
 /** Shared envelope for structured tool-result errors. @public */
 export const toolErrorEnvelopeSchema = z.looseObject({
@@ -45,10 +28,6 @@ export const parseToolErrorEnvelope = (content: string): ToolErrorEnvelope | und
     return undefined;
   }
 };
-
-const toolExecutionErrorSchema = z.looseObject({
-  errorCode: toolErrorCodeSchema,
-});
 
 /**
  * Type guard to check if a value is a ToolExecutionError.

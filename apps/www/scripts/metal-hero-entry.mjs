@@ -33,7 +33,7 @@ const renderer = new WebGPURenderer({ forceWebGL: true, alpha: true, antialias: 
 renderer.setSize(1100, 1100);
 renderer.setPixelRatio(2);
 await renderer.init();
-renderer.setClearColor(0xffffff, 0);
+renderer.setClearColor(0xff_ff_ff, 0);
 document.body.append(renderer.domElement);
 const scene = new Scene();
 const camera = new PerspectiveCamera(26, 1, 0.1, 40);

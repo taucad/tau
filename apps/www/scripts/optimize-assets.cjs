@@ -15,17 +15,19 @@ const app = resolve(__dirname, '..');
   };
   for (const [name, source] of Object.entries(sources)) {
     const bytes = await readFile(resolve(app, '../..', source));
-    for (const width of name === 'workspace' ? [640, 1280] : [480, 768])
+    for (const width of name === 'workspace' ? [640, 1280] : [480, 768]) {
       await sharp(bytes)
         .resize({ width, withoutEnlargement: true })
         .webp({ quality: 80 })
         .toFile(join(app, 'public', `${name}-${width}.webp`));
+    }
   }
-  for (const name of ['assembly', 'exploded'])
+  for (const name of ['assembly', 'exploded']) {
     await sharp(join(app, 'public', `${name}.webp`))
       .resize(640)
       .webp({ quality: 85 })
       .toFile(join(app, 'public', `${name}-640.webp`));
+  }
   const browser = await chromium.launch({
     executablePath: process.env.CHROME_PATH || '/usr/bin/chromium',
     args: ['--no-sandbox'],

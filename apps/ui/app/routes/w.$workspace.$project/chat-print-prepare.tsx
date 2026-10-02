@@ -430,7 +430,7 @@ export const usePrintPrepare = ({
   );
   const entryPath =
     chosenEntryPath !== undefined && entryPaths.includes(chosenEntryPath) ? chosenEntryPath : mainEntryPath;
-  const operationTimeout = entriesRecord?.entries[entryPath]?.operationTimeout;
+  const operationTimeout = entriesRecord?.entries[entryPath]?.renderTimeout;
   useEffect(() => {
     if (!isShown || !entryPath) {
       return;
@@ -475,15 +475,17 @@ export const usePrintPrepare = ({
     useState<Readonly<{ key: string; values: Record<string, unknown> }>>();
   const [slice, setSlice] = useState<SlicedArtifact>();
   const [isSlicing, setIsSlicing] = useState(false);
-  const sliceController = useRef<AbortController | undefined>(undefined);
+  const sliceController = useRef<
+    { readonly controller: AbortController; readonly entryPath: string; readonly optionsKey: string } | undefined
+  >(undefined);
   const cancelSlice = useCallback(() => {
-    sliceController.current?.abort();
+    sliceController.current?.controller.abort();
     sliceController.current = undefined;
     setIsSlicing(false);
   }, []);
   useEffect(
     () => () => {
-      sliceController.current?.abort();
+      sliceController.current?.controller.abort();
     },
     [],
   );
@@ -688,7 +690,10 @@ export const usePrintPrepare = ({
   const optionsKey = JSON.stringify([sliceOptions ?? null, submission]);
   useEffect(
     () => () => {
-      cancelSlice();
+      const active = sliceController.current;
+      if (active?.entryPath === entryPath && active.optionsKey === optionsKey) {
+        cancelSlice();
+      }
     },
     [entryPath, optionsKey, cancelSlice],
   );
@@ -722,9 +727,10 @@ export const usePrintPrepare = ({
     if (!actor || !kernelClient || !route || sliceOptions === undefined) {
       return;
     }
-    sliceController.current?.abort();
+    sliceController.current?.controller.abort();
     const controller = new AbortController();
-    sliceController.current = controller;
+    const activeSlice = { controller, entryPath, optionsKey };
+    sliceController.current = activeSlice;
     const started = performance.now();
     const claimId = randomUuid();
     projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath, operationTimeout });
@@ -872,7 +878,7 @@ export const usePrintPrepare = ({
       }
     } finally {
       releaseRenderWatch?.();
-      if (sliceController.current === controller) {
+      if (sliceController.current === activeSlice) {
         sliceController.current = undefined;
         setIsSlicing(false);
       }

@@ -1,7 +1,7 @@
 [
   {
-    "name": "measure before release — placeholder budget",
+    "name": "Revisions ES module outputs",
     "path": "dist/**/*.mjs",
-    "limit": "100 kB"
+    "limit": "101 kB"
   }
 ]

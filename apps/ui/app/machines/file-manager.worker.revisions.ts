@@ -16,7 +16,6 @@
  */
 
 import { Topic } from '@taucad/events';
-import { sha256Bytes } from '@taucad/utils/hash';
 import {
   awaitCheckoutCuts,
   awaitSyncSettled,
@@ -69,8 +68,9 @@ import {
   watchRevisionStream,
 } from '@taucad/revisions';
 import { requireParameterRecord, serializeParameterRecord } from '@taucad/parameters';
-import { revisionId } from '@taucad/revisions/algorithms';
-import type { MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
+import { revisionId, compareRevisionFile, captureRevisionTree, diffRevisionTrees } from '@taucad/revisions/algorithms';
+import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
+import type { FileMode, MountTable, RootedFileSystem, WorkspaceFileService } from '@taucad/filesystem';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ChangeEvent } from '@taucad/types';
 import { describeRevisionFailure } from '#lib/revision-failure-copy.js';
@@ -252,7 +252,7 @@ export type WorkerRevisionCommand =
   | Readonly<{ command: 'deleteTag'; name: string }>
   | Readonly<{ command: 'log'; branch?: string; limit?: number; from?: string }>
   | Readonly<{ command: 'divergence'; head: string; base: string }>
-  | Readonly<{ command: 'diff'; revisionId: string; from?: string }>
+  | Readonly<{ command: 'diff'; revisionId: string; from?: string; against?: 'checkout' }>
   | Readonly<{ command: 'compare'; revisionId: string; path: string; from?: string; against?: 'checkout' }>;
 
 /**
@@ -269,17 +269,8 @@ export type WorkerRevisionEvent =
   | TurnConflictedEvent
   | TurnFailedEvent
   | TurnFinalizedEvent
-  | Readonly<{ type: 'chats.projected'; projectId: string; chatIds: readonly string[] }>;
-
-/** One file's decoded text and exact byte identities on both sides of a revision. @public */
-export type RevisionFileComparison = Readonly<{
-  original: string;
-  modified: string;
-  // oxlint-disable-next-line typescript/no-restricted-types -- approved JSON wire contract distinguishes absent bytes (null) from an empty file (0).
-  originalBytes: Readonly<{ digest: string; byteLength: number | null }>;
-  // oxlint-disable-next-line typescript/no-restricted-types -- approved JSON wire contract distinguishes absent bytes (null) from an empty file (0).
-  modifiedBytes: Readonly<{ digest: string; byteLength: number | null }>;
-}>;
+  | Readonly<{ type: 'chats.projected'; projectId: string; chatIds: readonly string[] }>
+  | Readonly<{ type: 'checkout.changed'; checkoutId: string; paths: readonly string[] }>;
 
 /**
  * What a child of the tree asked the page to say.
@@ -448,7 +439,11 @@ export type WorkerProjectRevisions = Readonly<{
   /** How far two heads have gone apart, counted by the port rather than by listing both histories. */
   divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
-  diff: (revision: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
+  diff: (
+    revision: string,
+    from?: string,
+    options?: Readonly<{ against?: 'checkout' }>,
+  ) => Promise<readonly RevisionDiffEntry[]>;
   /** One file's text before and after a revision, for *Compare* (S38). */
   compare: (
     revision: string,
@@ -842,6 +837,7 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     const generation = (generations.get(checkoutId) ?? 0) + 1;
     generations.set(checkoutId, generation);
     actor.send({ type: 'changed', checkoutId, paths, generation });
+    events.emit({ type: 'checkout.changed', checkoutId, paths });
   };
   /*
    * L2-F4: one observation per checkout, each raising against its own id.
@@ -1165,6 +1161,23 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     }
   };
 
+  const comparisonCheckout = async () => {
+    const snapshot = actor.getSnapshot();
+    const status = selectRevisionStatus(snapshot);
+    const checkout = snapshot.context.checkouts.find((entry) => entry.id === status.checkoutId);
+    if (checkout === undefined) {
+      throw new Error('The selected checkout is unavailable.');
+    }
+    const [filesystem, basis] = await Promise.all([
+      options.filesystem(checkout.root),
+      status.headRevisionId === undefined ? undefined : options.port.readTree(revisionId(status.headRevisionId)),
+    ]);
+    if (status.headRevisionId !== undefined && basis === undefined) {
+      throw new Error('The checkout head tree is unavailable.');
+    }
+    return { filesystem, mode: (path: string): FileMode => basis?.mode(path) ?? '100644' };
+  };
+
   return {
     fetchGeoSpecCandidates: async () => {
       if (options.candidatePort === undefined) {
@@ -1437,7 +1450,20 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
     deleteTag: async (name) => options.port.deleteTag(name),
     log: async (request) => readRevisionLog(options.port, request),
     divergence: async (head, base) => options.port.divergence({ head: revisionId(head), base: revisionId(base) }),
-    diff: async (revision, from) => {
+    diff: async (revision, from, compareOptions) => {
+      if (compareOptions?.against === 'checkout') {
+        const original = await options.port.readTree(revisionId(revision));
+        if (original === undefined) {
+          throw new Error('The selected revision is unavailable.');
+        }
+        const checkout = await comparisonCheckout();
+        // ponytail: one bounded capture per live list refresh; reuse the checkout capture memo if large projects make this hot.
+        const modified = await captureRevisionTree(checkout.filesystem, {
+          exclude: (path) => !tauPathPolicy.classify(path).versioned,
+          inheritedMode: checkout.mode,
+        });
+        return diffRevisionTrees({ original, modified });
+      }
       /* Against the revision's own first parent by default, which the store
        * knows: a caller that remembered a base would diff the wrong tree when a
        * dirty checkout was minted between placement and settlement. */
@@ -1445,55 +1471,39 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       return readRevisionDiff(options.port, from ?? record?.parents[0], revision);
     },
     compare: async (revision, path, compareOptions) => {
-      const compareBytes = async (
-        original: Uint8Array<ArrayBuffer> | undefined,
-        modified: Uint8Array<ArrayBuffer> | undefined,
-      ): Promise<RevisionFileComparison> => {
-        const metadata = async (
-          bytes: Uint8Array<ArrayBuffer> | undefined,
-        ): Promise<RevisionFileComparison['originalBytes']> =>
-          bytes === undefined
-            ? { digest: 'missing', byteLength: null }
-            : { digest: `sha256:${await sha256Bytes(bytes)}`, byteLength: bytes.byteLength };
-        const [originalBytes, modifiedBytes] = await Promise.all([metadata(original), metadata(modified)]);
-        const decoder = new TextDecoder();
-        return {
-          original: original === undefined ? '' : decoder.decode(original),
-          modified: modified === undefined ? '' : decoder.decode(modified),
-          originalBytes,
-          modifiedBytes,
-        };
-      };
       /* S38's second half: the right-hand side is the working copy rather than
        * another revision, so a reader can see what they have changed since the
        * revision they are looking at. One round trip, same viewer. */
       if (compareOptions?.against === 'checkout') {
-        const { checkoutId } = published;
-        const checkout = actor.getSnapshot().context.checkouts.find((entry) => entry.id === checkoutId);
-        const [tree, filesystem] = await Promise.all([
-          options.port.readTree(revisionId(revision)),
-          checkout === undefined ? undefined : options.filesystem(checkout.root),
-        ]);
-        if (tree === undefined || filesystem === undefined) {
-          throw new Error('The selected revision or checkout is unavailable.');
+        const tree = await options.port.readTree(revisionId(revision));
+        if (tree === undefined) {
+          throw new Error('The selected revision is unavailable.');
         }
+        const checkout = await comparisonCheckout();
+        const { filesystem } = checkout;
         const recorded = tree.get(path);
         let working: Uint8Array<ArrayBuffer> | undefined;
+        let mode = checkout.mode(path);
         try {
           working = await filesystem.readFile(path);
+          mode = (await filesystem.getFileMode?.(path)) ?? mode;
         } catch (error) {
           if (
             !(
               typeof error === 'object' &&
               error !== null &&
-              (('code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR')) ||
+              (('code' in error && (error.code === 'ENOENT' || error.code === 'ENOTDIR' || error.code === 'EISDIR')) ||
                 ('name' in error && error.name === 'NotFoundError'))
             )
           ) {
             throw error;
           }
+          working = undefined;
         }
-        return compareBytes(recorded, working);
+        return compareRevisionFile({
+          original: recorded === undefined ? undefined : { content: recorded, mode: tree.mode(path) ?? '100644' },
+          modified: working === undefined ? undefined : { content: working, mode },
+        });
       }
       const record = await options.port.readRevision(revisionId(revision));
       if (record === undefined) {
@@ -1507,7 +1517,12 @@ export const createWorkerProjectRevisions = (options: WorkerProjectRevisionsOpti
       if (after === undefined || (base !== undefined && before === undefined)) {
         throw new Error('The selected revision tree is unavailable.');
       }
-      return compareBytes(before?.get(path), after.get(path));
+      const original = before?.get(path);
+      const modified = after.get(path);
+      return compareRevisionFile({
+        original: original === undefined ? undefined : { content: original, mode: before?.mode(path) ?? '100644' },
+        modified: modified === undefined ? undefined : { content: modified, mode: after.mode(path) ?? '100644' },
+      });
     },
     status: () => published,
     subscribe: (listener) => listeners.subscribe(listener),
@@ -1821,7 +1836,9 @@ const answerOf = (
         .then((divergence) => ({ kind: 'divergence', divergence }) as const);
     }
     case 'diff': {
-      return tree.diff(request.revisionId, request.from).then((entries) => ({ kind: 'diff', entries }) as const);
+      return tree
+        .diff(request.revisionId, request.from, { against: request.against })
+        .then((entries) => ({ kind: 'diff', entries }) as const);
     }
     case 'tag': {
       const { command: _verb, id: _id, ...input } = request;

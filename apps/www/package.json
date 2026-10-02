@@ -16,5 +16,10 @@
   },
   "devDependencies": {
     "esbuild": "catalog:"
+  },
+  "imports": {
+    "#www/*.js": "./src/*.mjs",
+    "#tools/*.js": "./scripts/*.mjs",
+    "#tools/tooling.js": "./scripts/tooling.js"
   }
 }

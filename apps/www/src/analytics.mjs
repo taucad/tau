@@ -1,3 +1,4 @@
+/** @typedef {{event: string, event_id: string, page: string, placement?: string, campaign?: string, returning?: boolean}} MarketingEvent */
 /** Keep all analytics payloads enumerated. Never serialize location or DOM text. */
 export const allowedPages = new Set([
   '/',
@@ -14,8 +15,20 @@ export const allowedPages = new Set([
   '/use-cases/learning/',
 ]);
 export const campaignCodes = new Set(['launch', 'journal', 'github', 'docs']);
+/**
+ * @typedef {{name: unknown, page: unknown, placement?: unknown, campaign?: unknown, returning?: unknown, eventId: unknown}} EventInput
+ */
+
+/**
+ * Keep optional event properties within the first-party contract.
+ * @internal
+ * @param input - Untrusted caller values.
+ * @type {(input: EventInput) => MarketingEvent | undefined}
+ */
 export const sanitizeEvent = ({ name, page, placement, campaign, returning, eventId }) => {
   if (
+    typeof name !== 'string' ||
+    typeof page !== 'string' ||
     !['marketing_page_view', 'marketing_cta_click', 'marketing_download_click'].includes(name) ||
     !allowedPages.has(page)
   ) {
@@ -28,8 +41,8 @@ export const sanitizeEvent = ({ name, page, placement, campaign, returning, even
     event: name,
     event_id: eventId,
     page,
-    ...(['header', 'primary', 'download'].includes(placement) ? { placement } : {}),
-    ...(campaignCodes.has(campaign) ? { campaign } : {}),
+    ...(typeof placement === 'string' && ['header', 'primary', 'download'].includes(placement) ? { placement } : {}),
+    ...(typeof campaign === 'string' && campaignCodes.has(campaign) ? { campaign } : {}),
     ...(typeof returning === 'boolean' ? { returning } : {}),
   };
 };

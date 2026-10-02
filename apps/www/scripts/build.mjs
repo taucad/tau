@@ -1,10 +1,11 @@
+import { loadEsbuild } from '#tools/tooling.js';
 import { readFile, writeFile, mkdir, cp, rm, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { pages, renderPage, escapeHtml } from '../src/templates.mjs';
-import { validateArticles } from '../src/editorial.mjs';
+import { pages, renderPage, escapeHtml } from '#www/templates.js';
+import { validateArticles } from '#www/editorial.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = join(root, 'dist');
 const launch = process.env.WWW_LAUNCH === 'true';
@@ -43,6 +44,7 @@ for (const required of ['assembly.webp', 'exploded.webp', 'social.png']) {
 await rm(output, { recursive: true, force: true });
 await mkdir(join(output, '_www/assets'), { recursive: true });
 await cp(publicDirectory, join(output, '_www/assets'), { recursive: true });
+/** @type {(content: string) => string} */
 const hash = (content) => createHash('sha256').update(content).digest('hex').slice(0, 12);
 const baseTokens = await readFile(resolve(root, '../../packages/ui/src/styles/tokens.css'), 'utf8');
 // Native CSS supports custom properties; Tailwind-only directives are omitted.
@@ -56,7 +58,7 @@ const dependencyRoot = process.env.WWW_RENDER_TOOLS;
 const dependencyRequire = createRequire(
   dependencyRoot ? join(resolve(dependencyRoot), 'package.json') : import.meta.url,
 );
-const { build } = dependencyRequire('esbuild');
+const { build } = await loadEsbuild();
 await cp(resolve(dependencyRequire.resolve('three'), '../../LICENSE'), join(output, '_www/assets/three-LICENSE.txt'));
 const bundled = await build({
   entryPoints: { site: join(root, 'src/client.mjs') },
@@ -78,7 +80,9 @@ if (!entry) {
 }
 const asset = { css: `/_www/assets/site.${hash(css)}.css`, js: `/_www/assets/${entry[0].split('/').pop()}` };
 await writeFile(join(output, asset.css), css);
-const published = JSON.parse(await readFile(join(root, 'content/articles.json'), 'utf8'));
+const publishedText = await readFile(join(root, 'content/articles.json'), 'utf8');
+/** @type {unknown} */
+const published = JSON.parse(publishedText);
 const articlePages = validateArticles(published).map((article) => {
   return {
     path: `/blog/${article.slug}/`,
@@ -92,20 +96,22 @@ if (new Set(articlePages.map((p) => p.path)).size !== articlePages.length) {
   throw new Error('Duplicate article slug.');
 }
 const allPages = [...pages, ...articlePages];
-for (const page of allPages) {
-  let html = renderPage({ page, origin, launch, asset, analyticsEndpoint });
-  if (page.path === '/blog/' && articlePages.length > 0) {
-    html = html
-      .replace(/<section class="journal-empty">.*?<\/section>/su, '')
-      .replace(
-        '<div id="articles"></div>',
-        `<div class="feature-rows">${articlePages.map((article) => `<article><h2><a href="${article.path}">${escapeHtml(article.title.replace(' · Tau', ''))}</a></h2><p>${escapeHtml(article.description)}</p></article>`).join('')}</div>`,
-      );
-  }
-  const filename = page.path.endsWith('.html') ? join(output, page.path) : join(output, page.path, 'index.html');
-  await mkdir(resolve(filename, '..'), { recursive: true });
-  await writeFile(filename, html);
-}
+await Promise.all(
+  allPages.map(async (page) => {
+    let html = renderPage({ page, origin, launch, asset, analyticsEndpoint });
+    if (page.path === '/blog/' && articlePages.length > 0) {
+      html = html
+        .replace(/<section class="journal-empty">.*?<\/section>/su, '')
+        .replace(
+          '<div id="articles"></div>',
+          `<div class="feature-rows">${articlePages.map((article) => `<article><h2><a href="${article.path}">${escapeHtml(article.title.replace(' · Tau', ''))}</a></h2><p>${escapeHtml(article.description)}</p></article>`).join('')}</div>`,
+        );
+    }
+    const filename = page.path.endsWith('.html') ? join(output, page.path) : join(output, page.path, 'index.html');
+    await mkdir(resolve(filename, '..'), { recursive: true });
+    await writeFile(filename, html);
+  }),
+);
 await writeFile(
   join(output, 'robots.txt'),
   launch ? `User-agent: *\nAllow: /\nSitemap: ${origin}/sitemap.xml\n` : 'User-agent: *\nAllow: /\n',

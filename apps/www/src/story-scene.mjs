@@ -1,13 +1,18 @@
-import { partPose } from './story-kinematics.mjs';
+import { parseStoryManifest } from '#www/story-geometry.js';
+import { partPose } from '#www/story-kinematics.js';
 import * as THREE from 'three';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 
+/** @type {(value: number, min?: number, max?: number) => number} */
 const clamp = (value, min = 0, max = 1) => Math.min(max, Math.max(min, value));
+/** @type {(value: number) => number} */
 const ease = (value) => {
   const t = clamp(value);
   return t * t * (3 - 2 * t);
 };
+/** @type {(from: number, to: number, progress: number) => number} */
 const blend = (from, to, progress) => from + (to - from) * progress;
+/** @type {(response: Response) => Promise<ArrayBuffer>} */
 const decodeGeometry = async (response) => {
   const bytes = await response.arrayBuffer();
   const magic = new Uint8Array(bytes, 0, Math.min(2, bytes.byteLength));
@@ -15,6 +20,8 @@ const decodeGeometry = async (response) => {
     ? new Response(new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip'))).arrayBuffer()
     : bytes;
 };
+/** @type {(response: Response) => Promise<unknown>} */
+const readManifest = async (response) => response.json();
 const labels = [
   'A specification becomes a starting point',
   'Ring · Gears · Carrier & hardware',
@@ -26,22 +33,49 @@ const labels = [
   'Your browser. Your next idea.',
 ];
 
-/** Shared owner of the marketing canvas, demand scheduler and GPU resources. */
-export async function mountStory(stage) {
+/**
+ * Shared owner of the marketing canvas, demand scheduler and GPU resources.
+ * @internal
+ * @type {(stage: HTMLElement) => Promise<(() => void) | undefined>}
+ */
+export const mountStory = async (stage) => {
   const surface = stage.querySelector('.story-surface');
   const section = stage.closest('.story-section');
-  const chapters = [...section.querySelectorAll('[data-story-chapter]')];
   const toggle = stage.querySelector('[data-story-toggle]');
+  const sceneLabel = stage.querySelector('[data-scene-label]');
+  const sceneCaption = stage.querySelector('[data-scene-caption]');
+  if (
+    !(surface instanceof HTMLElement) ||
+    !section ||
+    !(toggle instanceof HTMLButtonElement) ||
+    !sceneLabel ||
+    !sceneCaption
+  ) {
+    return;
+  }
+  const chapters = [...section.querySelectorAll('[data-story-chapter]')];
+  if (chapters.length !== 8) {
+    return;
+  }
   const reduced = matchMedia('(prefers-reduced-motion: reduce)');
   const controller = new AbortController();
+  /** @type {Set<{dispose: () => void}>} */
   const resources = new Set();
-  let renderer, environment, observer, resizeObserver;
+  /** @type {THREE.WebGLRenderer | undefined} */
+  let rendererOwner;
+  /** @type {THREE.WebGLRenderTarget | undefined} */
+  let environment;
+  /** @type {IntersectionObserver | undefined} */
+  let observer;
+  /** @type {ResizeObserver | undefined} */
+  let resizeObserver;
   let disposed = false,
     active = false,
     paused = false,
     frame = 0,
     rendered = 0,
     lastProgress = -1;
+  /** @type {<T extends {dispose: () => void}>(resource: T) => T} */
   const own = (resource) => {
     resources.add(resource);
     return resource;
@@ -59,12 +93,22 @@ export async function mountStory(stage) {
     for (const resource of resources) {
       resource.dispose();
     }
-    renderer?.dispose();
-    renderer?.forceContextLoss();
-    renderer?.domElement.remove();
+    rendererOwner?.dispose();
+    rendererOwner?.forceContextLoss();
+    rendererOwner?.domElement.remove();
     stage.classList.remove('is-live');
     toggle.hidden = true;
   };
+  globalThis.addEventListener('pagehide', cleanup, { once: true, signal: controller.signal });
+  reduced.addEventListener(
+    'change',
+    () => {
+      if (reduced.matches) {
+        cleanup();
+      }
+    },
+    { signal: controller.signal },
+  );
   try {
     const responses = await Promise.all([
       fetch('/_www/assets/planetary.json', { signal: controller.signal }),
@@ -73,15 +117,14 @@ export async function mountStory(stage) {
     if (responses.some((response) => !response.ok)) {
       throw new Error('Geometry unavailable');
     }
-    const [manifest, binary] = await Promise.all([responses[0].json(), decodeGeometry(responses[1])]);
-    if (manifest.parts !== 34 || manifest.meshes.length !== 34) {
-      throw new Error('Unexpected assembly');
-    }
-    if (reduced.matches || document.hidden) {
+    const [rawManifest, binary] = await Promise.all([readManifest(responses[0]), decodeGeometry(responses[1])]);
+    const manifest = parseStoryManifest(rawManifest, binary.byteLength);
+    if (controller.signal.aborted || reduced.matches || document.hidden) {
       cleanup();
       return;
     }
-    renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
+    const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'low-power' });
+    rendererOwner = renderer;
     renderer.setPixelRatio(Math.min(devicePixelRatio, 1.5));
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
@@ -92,9 +135,12 @@ export async function mountStory(stage) {
     const scene = new THREE.Scene();
     const studio = new RoomEnvironment();
     const pmrem = new THREE.PMREMGenerator(renderer);
-    environment = pmrem.fromScene(studio, 0.04);
-    studio.dispose();
-    pmrem.dispose();
+    try {
+      environment = pmrem.fromScene(studio, 0.04);
+    } finally {
+      studio.dispose();
+      pmrem.dispose();
+    }
     scene.environment = environment.texture;
     const camera = new THREE.PerspectiveCamera(32, 1, 0.1, 2000);
     const printPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1000);
@@ -135,10 +181,10 @@ export async function mountStory(stage) {
       const group = new THREE.Group();
       group.add(mesh);
       root.add(group);
-      const positions = geometry.attributes.position.array;
+      const positions = geometry.getAttribute('position');
       const samples = [];
-      for (let i = 0; i < positions.length; i += 24) {
-        samples.push(positions[i], positions[i + 1], positions[i + 2]);
+      for (let i = 0; i < positions.count; i += 8) {
+        samples.push(positions.getX(i), positions.getY(i), positions.getZ(i));
       }
       const dotsGeometry = own(new THREE.BufferGeometry());
       dotsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(samples, 3));
@@ -174,6 +220,7 @@ export async function mountStory(stage) {
     const printer = new THREE.Group();
     scene.add(printer);
     const frameMaterial = own(new THREE.MeshStandardMaterial({ color: 0x69_73_7a, metalness: 0.65, roughness: 0.4 }));
+    /** @type {(position: [number, number, number], size: [number, number, number]) => THREE.Mesh<THREE.BoxGeometry, THREE.MeshStandardMaterial>} */
     const beam = ([x, y, z], [width, height, depth]) => {
       const geometry = own(new THREE.BoxGeometry(width, height, depth));
       const mesh = new THREE.Mesh(geometry, frameMaterial);
@@ -187,7 +234,8 @@ export async function mountStory(stage) {
     beam([0, 157, 0], [217, 7, 7]);
     const gantry = beam([0, 40, 0], [210, 6, 6]);
     const nozzle = beam([0, 31, 0], [14, 16, 14]);
-    const bounds = own(new THREE.EdgesGeometry(new THREE.BoxGeometry(182, 76, 182)));
+    const boundsSource = own(new THREE.BoxGeometry(182, 76, 182));
+    const bounds = own(new THREE.EdgesGeometry(boundsSource));
     const outline = new THREE.LineSegments(
       bounds,
       own(
@@ -216,15 +264,20 @@ export async function mountStory(stage) {
       const anchor = innerHeight * (innerWidth <= 760 ? 0.76 : 0.52);
       const tops = chapters.map((chapter) => chapter.getBoundingClientRect().top);
       let index = 0;
-      for (let i = 1; i < tops.length; i++) {
-        if (tops[i] <= anchor) {
+      for (const [i, top] of tops.entries()) {
+        if (i > 0 && top <= anchor) {
           index = i;
         }
       }
       if (index === 7) {
         return 7;
       }
-      return clamp(index + (anchor - tops[index]) / (tops[index + 1] - tops[index]), 0, 7);
+      const currentTop = tops[index];
+      const nextTop = tops[index + 1];
+      if (currentTop === undefined || nextTop === undefined || currentTop === nextTop) {
+        return index;
+      }
+      return clamp(index + (anchor - currentTop) / (nextTop - currentTop), 0, 7);
     };
     const draw = () => {
       frame = 0;
@@ -237,10 +290,9 @@ export async function mountStory(stage) {
       }
       lastProgress = p;
       const chapter = Math.min(7, Math.floor(p + 0.15));
-      stage.dataset.chapter = String(chapter);
-      stage.querySelector('[data-scene-label]').textContent = labels[chapter];
-      stage.querySelector('[data-scene-caption]').textContent =
-        `${String(chapter + 1).padStart(2, '0')} / ${['Describe', 'Create', 'Shape', 'Assemble', 'Refine', 'Verify', 'Print', 'Everywhere'][chapter]}`;
+      stage.dataset['chapter'] = String(chapter);
+      sceneLabel.textContent = labels[chapter] ?? '';
+      sceneCaption.textContent = `${String(chapter + 1).padStart(2, '0')} / ${['Describe', 'Create', 'Shape', 'Assemble', 'Refine', 'Verify', 'Print', 'Everywhere'][chapter]}`;
       const formed = ease((p - 0.55) / 1.2);
       const assembled = ease(p - 2.15);
       const print = ease((p - 5.7) / 0.7) * (1 - ease((p - 6.7) / 0.3));
@@ -252,7 +304,8 @@ export async function mountStory(stage) {
         const pose = partPose(part.name, sun);
         group.position.set(pose.x, pose.y, lift * explode);
         group.rotation.set(0, 0, pose.rotation);
-        const lane = part.name.startsWith('Internal') ? -1 : part.name.startsWith('Sun') || planet !== null ? 0 : 1;
+        const gearPart = part.name.startsWith('Sun') ? true : planet !== null;
+        const lane = part.name.startsWith('Internal') ? -1 : gearPart ? 0 : 1;
         group.position.x += lane * 115 * (1 - formed);
         group.position.z += ((index % 4) - 1.5) * 18 * (1 - formed);
         const growth = blend(0.75, 1, formed);
@@ -279,7 +332,7 @@ export async function mountStory(stage) {
       camera.lookAt(0, blend(blend(10, -6, assembled), 35, print), 0);
       renderer.render(scene, camera);
       rendered++;
-      stage.dataset.frames = String(rendered);
+      stage.dataset['frames'] = String(rendered);
       stage.classList.add('is-live');
     };
     const request = () => {
@@ -289,7 +342,7 @@ export async function mountStory(stage) {
     };
     observer = new IntersectionObserver(
       ([entry]) => {
-        active = entry.isIntersecting;
+        active = entry?.isIntersecting === true;
         if (active) {
           lastProgress = -1;
           request();
@@ -303,8 +356,8 @@ export async function mountStory(stage) {
     observer.observe(stage);
     resizeObserver = new ResizeObserver(fit);
     resizeObserver.observe(surface);
-    window.addEventListener('scroll', request, { passive: true, signal: controller.signal });
-    window.addEventListener('resize', fit, { passive: true, signal: controller.signal });
+    globalThis.addEventListener('scroll', request, { passive: true, signal: controller.signal });
+    globalThis.addEventListener('resize', fit, { passive: true, signal: controller.signal });
     document.addEventListener(
       'visibilitychange',
       () => {
@@ -313,15 +366,6 @@ export async function mountStory(stage) {
         if (!document.hidden) {
           lastProgress = -1;
           request();
-        }
-      },
-      { signal: controller.signal },
-    );
-    reduced.addEventListener(
-      'change',
-      () => {
-        if (reduced.matches) {
-          cleanup();
         }
       },
       { signal: controller.signal },
@@ -351,11 +395,10 @@ export async function mountStory(stage) {
       },
       { signal: controller.signal },
     );
-    window.addEventListener('pagehide', cleanup, { once: true, signal: controller.signal });
     fit();
     return cleanup;
   } catch (error) {
     cleanup();
     throw error;
   }
-}
+};

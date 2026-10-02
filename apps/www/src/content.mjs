@@ -73,6 +73,7 @@ export const useCases = [
     ],
   },
 ];
+/** @type {Array<[string, string, string]>} */
 export const visionChapters = [
   [
     'Today',

@@ -1,14 +1,15 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
 import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
-import { sanitizeEvent } from '../src/analytics.mjs';
-import { pages, renderPage } from '../src/templates.mjs';
+import { sanitizeEvent } from '#www/analytics.js';
+import { pages, renderPage } from '#www/templates.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const eventId = '83efb3b9-a92c-444f-99ef-c67f8c9573d7';
-test('analytics allowlists data and drops secrets, identifiers and unknown events', () => {
+await test('analytics allowlists data and drops secrets, identifiers and unknown events', () => {
   assert.deepEqual(
     sanitizeEvent({
       name: 'marketing_page_view',
@@ -25,7 +26,7 @@ test('analytics allowlists data and drops secrets, identifiers and unknown event
   assert.equal(sanitizeEvent({ name: 'marketing_page_view', page: '/invitations/bearer', eventId }), undefined);
   assert.equal(sanitizeEvent({ name: 'marketing_page_view', page: '/', eventId: 'user@example.com' }), undefined);
 });
-test('every page has one main, one heading, noindex and escaped metadata', () => {
+await test('every page has one main, one heading, noindex and escaped metadata', () => {
   for (const page of pages) {
     const html = renderPage({
       page,
@@ -40,20 +41,25 @@ test('every page has one main, one heading, noindex and escaped metadata', () =>
     assert.ok(html.includes('<link rel="canonical"'));
   }
 });
-test('preview build has empty sitemap and excludes editorial drafts', async () => {
+await test('preview build has empty sitemap and excludes editorial drafts', async () => {
   const result = spawnSync(process.execPath, [join(root, 'scripts/build.mjs')], {
     env: { ...process.env, WWW_ORIGIN: 'https://preview.example', WWW_LAUNCH: 'false' },
     encoding: 'utf8',
   });
   assert.equal(result.status, 0, result.stderr);
-  assert.equal((await readFile(join(root, 'dist/sitemap.xml'), 'utf8')).includes('<loc>'), false);
-  assert.equal((await readdir(join(root, 'dist'))).includes('content'), false);
-  assert.equal((await readdir(join(root, 'dist'))).includes('assets'), false);
-  assert.ok((await readdir(join(root, 'dist/_www/assets'))).includes('planetary.bin.gz'));
-  assert.equal((await readFile(join(root, 'dist/index.html'), 'utf8')).includes('="/assets/'), false);
-  assert.ok((await readFile(join(root, 'dist/_headers'), 'utf8')).includes('X-Robots-Tag: noindex'));
+  const sitemap = await readFile(join(root, 'dist/sitemap.xml'), 'utf8');
+  const files = await readdir(join(root, 'dist'));
+  const assets = await readdir(join(root, 'dist/_www/assets'));
+  const home = await readFile(join(root, 'dist/index.html'), 'utf8');
+  const headers = await readFile(join(root, 'dist/_headers'), 'utf8');
+  assert.equal(sitemap.includes('<loc>'), false);
+  assert.equal(files.includes('content'), false);
+  assert.equal(files.includes('assets'), false);
+  assert.ok(assets.includes('planetary.bin.gz'));
+  assert.equal(home.includes('="/assets/'), false);
+  assert.ok(headers.includes('X-Robots-Tag: noindex'));
 });
-test('build rejects credential-bearing origins and off-origin analytics sinks', () => {
+await test('build rejects credential-bearing origins and off-origin analytics sinks', () => {
   for (const overrides of [
     { WWW_ORIGIN: 'https://name:secret@example.com/' },
     { WWW_ANALYTICS_ENDPOINT: 'https://tracker.example/collect' },
@@ -67,8 +73,8 @@ test('build rejects credential-bearing origins and off-origin analytics sinks', 
   }
 });
 
-test('publication rejects unreviewed prose, unsafe slugs, invalid dates and duplicate articles', async () => {
-  const { validateArticles } = await import('../src/editorial.mjs');
+await test('publication rejects unreviewed prose, unsafe slugs, invalid dates and duplicate articles', async () => {
+  const { validateArticles } = await import('#www/editorial.js');
   const article = {
     status: 'published',
     authorship: 'human',
@@ -96,16 +102,19 @@ test('publication rejects unreviewed prose, unsafe slugs, invalid dates and dupl
   assert.throws(() => validateArticles([article, article], now));
 });
 
-test('a reviewed article builds an escaped detail page and journal entry without publishing fixtures', async () => {
+await test('a reviewed article builds an escaped detail page and journal entry without publishing fixtures', async () => {
   const { mkdtemp, cp, mkdir, writeFile, rm } = await import('node:fs/promises');
   const { tmpdir } = await import('node:os');
   const scratch = await mkdtemp(join(tmpdir(), 'tau-www-editorial-test-'));
   try {
     const fixture = join(scratch, 'apps/www');
     await mkdir(fixture, { recursive: true });
-    for (const folder of ['src', 'scripts', 'public']) {
-      await cp(join(root, folder), join(fixture, folder), { recursive: true });
-    }
+    await Promise.all(
+      ['src', 'scripts', 'public'].map(async (folder) => {
+        await cp(join(root, folder), join(fixture, folder), { recursive: true });
+      }),
+    );
+    await cp(join(root, 'package.json'), join(fixture, 'package.json'));
     await mkdir(join(scratch, 'packages/ui/src/styles'), { recursive: true });
     await cp(join(root, '../../packages/ui/src/styles/tokens.css'), join(scratch, 'packages/ui/src/styles/tokens.css'));
     await mkdir(join(fixture, 'content'));
@@ -126,7 +135,12 @@ test('a reviewed article builds an escaped detail page and journal entry without
       ]),
     );
     const result = spawnSync(process.execPath, [join(fixture, 'scripts/build.mjs')], {
-      env: { ...process.env, WWW_LAUNCH: 'false' },
+      env: {
+        ...process.env,
+        WWW_LAUNCH: 'false',
+        WWW_RENDER_TOOLS:
+          process.env.WWW_RENDER_TOOLS ?? (existsSync(join(root, 'node_modules')) ? root : join(root, '../..')),
+      },
       encoding: 'utf8',
     });
     assert.equal(result.status, 0, result.stderr);

@@ -512,7 +512,7 @@ export const TauMetrics = {
   // --- Billing / credit ledger (blueprint C11/C12; no per-user labels — cardinality) ---
 
   billingAttemptResolutions: defineCounter({
-    name: 'tau.billing.attempt_resolution',
+    name: 'tau.billing.attempt_resolutions',
     unit: '{resolution}',
     description: 'Owner attempt lookups by bounded found or voided outcome',
     attributes: z.object({

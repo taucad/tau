@@ -38,5 +38,46 @@
   "renderRecipe": "scripts/render-assets.cjs",
   "responsiveAndSocialRecipe": "scripts/optimize-assets.cjs",
   "firstPartySourceLicense": "Apache-2.0",
-  "notes": "Views are offline raster renders from authored CAD. No client CAD/WebGL runtime or continuous animation. Comparing asset transfer bytes does not benchmark the old application or prove geometric correctness."
+  "notes": "Static chrome hero captures existing Tau geometry, TSL material and studio. Below-fold Three.js geometry is a compressed tessellation of the 34-part authored Replicad model; rigid kinematics are prescribed, not physics. No fresh GeoSpec result or live print is represented. Static images and all text remain usable without a GPU.",
+  "refreshedAssets": [
+    {
+      "path": "apps/www/public/metal-hero.webp",
+      "bytes": 37170,
+      "sha256": "9c8d5e4403992eeda6b25177555966575b437b05bfdb4e29ea71a6ce353571cb"
+    },
+    {
+      "path": "apps/www/public/metal-hero-640.webp",
+      "bytes": 19768,
+      "sha256": "0a4c9b305f516f08a4f34b31cf82b329d7eee2d89a4b1c6d31ee582468d60985"
+    },
+    {
+      "path": "apps/www/public/planetary.bin.gz",
+      "bytes": 876329,
+      "sha256": "8062b780dfb01a2ddc0841a4504843ca69587935f252f97df9d504c1f175a8ca"
+    },
+    {
+      "path": "apps/www/public/planetary.json",
+      "bytes": 7300,
+      "sha256": "793af432bf219809fa2561fd86d5dc0de11f35ab6053d145086f863e16c7840d"
+    },
+    {
+      "path": "apps/www/public/social.png",
+      "bytes": 80890,
+      "sha256": "9d36820b616e12cba6c5832cfc99f3ed771bd9a76b10239410987f9f4e573ba8"
+    }
+  ],
+  "metalHero": {
+    "source": [
+      "apps/ui/app/components/geometry/loader/metal-morph-shapes.ts",
+      "apps/ui/app/components/geometry/loader/metal-morph-material.node.ts",
+      "apps/ui/app/components/geometry/loader/metal-morph-environment.ts"
+    ],
+    "recipe": "scripts/capture-metal-hero.cjs",
+    "shape": "escher-star",
+    "detail": 6,
+    "capturePixelRatio": 2,
+    "static": true
+  },
+  "storyRecipe": "scripts/export-story-assets.cjs",
+  "modelUnchangedThrough": "df1966a64f28dac856d514cb4030ef26a707151a"
 }

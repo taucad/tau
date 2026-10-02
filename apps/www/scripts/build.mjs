@@ -2,6 +2,7 @@ import { readFile, writeFile, mkdir, cp, rm, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
+import { createRequire } from 'node:module';
 import { pages, renderPage, escapeHtml } from '../src/templates.mjs';
 import { validateArticles } from '../src/editorial.mjs';
 const root = fileURLToPath(new URL('../', import.meta.url));
@@ -41,13 +42,31 @@ const rootTokens = baseTokens.slice(
   baseTokens.indexOf('\n}', baseTokens.indexOf(':root {')) + 2,
 );
 const css = rootTokens + '\n' + (await readFile(join(root, 'src/site.css'), 'utf8'));
-const analytics = await readFile(join(root, 'src/analytics.mjs'), 'utf8');
-const analyticsName = `analytics.${hash(analytics)}.mjs`;
-await writeFile(join(output, 'assets', analyticsName), analytics);
-const js = (await readFile(join(root, 'src/client.mjs'), 'utf8')).replace("'./analytics.mjs'", `'./${analyticsName}'`);
-const asset = { css: `/assets/site.${hash(css)}.css`, js: `/assets/site.${hash(js)}.mjs` };
+// esbuild and Three are declared by this app. Isolated tooling supports source-only review.
+const dependencyRoot = process.env.WWW_RENDER_TOOLS;
+const dependencyRequire = createRequire(
+  dependencyRoot ? join(resolve(dependencyRoot), 'package.json') : import.meta.url,
+);
+const { build } = dependencyRequire('esbuild');
+await cp(resolve(dependencyRequire.resolve('three'), '../../LICENSE'), join(output, 'assets/three-LICENSE.txt'));
+const bundled = await build({
+  entryPoints: { site: join(root, 'src/client.mjs') },
+  outdir: join(output, 'assets'),
+  bundle: true,
+  splitting: true,
+  format: 'esm',
+  minify: true,
+  target: 'es2022',
+  entryNames: '[name].[hash]',
+  chunkNames: '[name].[hash]',
+  outExtension: { '.js': '.mjs' },
+  metafile: true,
+  ...(dependencyRoot ? { nodePaths: [join(resolve(dependencyRoot), 'node_modules')] } : {}),
+});
+const entry = Object.entries(bundled.metafile.outputs).find(([, value]) => value.entryPoint?.endsWith('/client.mjs'));
+if (!entry) throw new Error('Missing client entry');
+const asset = { css: `/assets/site.${hash(css)}.css`, js: `/assets/${entry[0].split('/').pop()}` };
 await writeFile(join(output, asset.css), css);
-await writeFile(join(output, asset.js), js);
 const published = JSON.parse(await readFile(join(root, 'content/articles.json'), 'utf8'));
 const articlePages = validateArticles(published).map((article) => {
   return {

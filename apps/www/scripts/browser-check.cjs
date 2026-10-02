@@ -36,6 +36,7 @@ const origin = process.env.WWW_TEST_URL || 'http://127.0.0.1:4173';
         '/use-cases/learning/',
         '/vision/',
         '/pricing/',
+        '/contact/',
         '/download/',
         '/blog/',
         '/privacy/',
@@ -68,7 +69,7 @@ const origin = process.env.WWW_TEST_URL || 'http://127.0.0.1:4173';
           `${name} ${path}`,
         );
       }
-      await page.goto(origin);
+      await page.goto(origin + '/vision/');
       await page.getByRole('button', { name: 'Assembled', exact: true }).click();
       await page.waitForFunction(() => document.querySelector('#assembly-image').src.endsWith('/assembly.webp'));
       assert.equal(
@@ -77,6 +78,7 @@ const origin = process.env.WWW_TEST_URL || 'http://127.0.0.1:4173';
       );
       await page.getByRole('button', { name: 'Exploded', exact: true }).click();
       await page.waitForFunction(() => document.querySelector('#assembly-image').src.endsWith('/exploded.webp'));
+      await page.goto(origin);
       if (width < 760) {
         await page.getByText('Menu', { exact: true }).click();
         assert.equal(await page.getByRole('navigation', { name: 'Mobile navigation' }).isVisible(), true);
@@ -183,7 +185,7 @@ const origin = process.env.WWW_TEST_URL || 'http://127.0.0.1:4173';
         {
           results,
           checks: [
-            '48 route/viewport accessibility audits',
+            `${results.length} route/viewport accessibility audits`,
             'assembled/exploded view switching',
             'menu and Escape',
             'no-JS navigation',

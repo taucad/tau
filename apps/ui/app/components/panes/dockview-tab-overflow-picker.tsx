@@ -1,11 +1,12 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react';
-import { Check, ChevronDown } from 'lucide-react';
+import { Check, Square } from 'lucide-react';
 import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
-import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { PaneButton } from '#components/ui/pane-button.js';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
+import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@taucad/ui/components/command';
+import { menuContentVariants, menuLabelVariants } from '@taucad/ui/components/menu.variants';
 
 export type DockviewTabOverflowPickerProperties = IDockviewHeaderActionsProps & {
   readonly getIcon?: DockviewTabIconRenderer;
@@ -24,9 +25,6 @@ const getPanelPath = (panel: IDockviewPanel): string | undefined => {
 };
 
 const getPanelTitle = (panel: IDockviewPanel): string => panel.api.title ?? panel.id;
-
-const getPanelSearchValue = (panel: IDockviewPanel): string =>
-  [getPanelTitle(panel), getPanelPath(panel), panel.id].filter(Boolean).join(' ');
 
 const renderPanelLabel = (
   panel: IDockviewPanel,
@@ -48,83 +46,141 @@ const renderPanelLabel = (
   );
 };
 
-const useTabsOverflow = ({
-  group,
-  panelCount,
-}: {
-  readonly group: IDockviewHeaderActionsProps['group'];
-  readonly panelCount: number;
-}): boolean => {
-  const [isOverflowing, setIsOverflowing] = useState(false);
-
-  useEffect(() => {
-    const tabs = group.element.querySelector<HTMLElement>('.dv-tabs-container');
-    if (!tabs) {
-      return;
-    }
-
-    let frame: number | undefined;
-    const measure = (): void => {
-      if (frame !== undefined) {
-        cancelAnimationFrame(frame);
-      }
-      frame = requestAnimationFrame(() => {
-        frame = undefined;
-        setIsOverflowing(panelCount > 0 && tabs.scrollWidth > tabs.clientWidth + 1);
-      });
-    };
-
-    const observer = new ResizeObserver(measure);
-    observer.observe(tabs);
-    measure();
-
-    return () => {
-      if (frame !== undefined) {
-        cancelAnimationFrame(frame);
-      }
-      observer.disconnect();
-    };
-  }, [group, panelCount]);
-
-  return isOverflowing;
-};
-
 export function DockviewTabOverflowPicker(
   properties: DockviewTabOverflowPickerProperties,
 ): React.JSX.Element | undefined {
   const { activePanel, getIcon, leadingIcon, panels } = properties;
-  const isOverflowing = useTabsOverflow({ group: properties.group, panelCount: panels.length });
-  const groupedItems = useMemo(() => [{ name: 'Open tabs', items: panels }], [panels]);
+  const [isOpen, setIsOpen] = useState(false);
+  const isHoverOpen = useRef(false);
+  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
 
-  if (!isOverflowing) {
+  const cancelClose = (): void => {
+    clearTimeout(closeTimer.current);
+    closeTimer.current = undefined;
+  };
+
+  const scheduleClose = (): void => {
+    cancelClose();
+    if (isHoverOpen.current) {
+      // Milliseconds: allow the pointer to cross the gap between the button and portal.
+      closeTimer.current = setTimeout(() => {
+        setIsOpen(false);
+      }, 150);
+    }
+  };
+
+  useEffect(
+    () => () => {
+      clearTimeout(closeTimer.current);
+    },
+    [],
+  );
+
+  if (panels.length === 0) {
     return undefined;
   }
 
   return (
-    <Tooltip>
-      <ComboBoxResponsive<IDockviewPanel>
-        groupedItems={groupedItems}
-        value={activePanel}
-        getValue={getPanelSearchValue}
-        renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
-        className='w-72'
-        popoverProperties={{ align: 'end' }}
-        searchPlaceHolder='Search open tabs…'
-        emptyListMessage='No open tabs found.'
-        title='Open tabs'
-        description='Search and activate an open tab in this pane.'
-        onSelect={(value) => {
-          panels.find((panel) => getPanelSearchValue(panel) === value)?.api.setActive();
+    <Popover
+      modal={false}
+      open={isOpen}
+      onOpenChange={(nextOpen) => {
+        cancelClose();
+        setIsOpen(nextOpen);
+      }}
+    >
+      <PopoverTrigger asChild>
+        <PaneButton
+          aria-label='Open tabs'
+          aria-description={`${panels.length} open tabs in this pane`}
+          className='relative'
+          onPointerEnter={(event) => {
+            if (event.pointerType === 'touch') {
+              return;
+            }
+            cancelClose();
+            if (!isOpen) {
+              isHoverOpen.current = true;
+              setIsOpen(true);
+            }
+          }}
+          onPointerLeave={scheduleClose}
+          onClick={(event) => {
+            if (isOpen && isHoverOpen.current && event.button === 0) {
+              // A click after hover keeps the already-visible menu open.
+              event.preventDefault();
+            }
+            isHoverOpen.current = false;
+            cancelClose();
+          }}
+          onKeyDown={() => {
+            isHoverOpen.current = false;
+            cancelClose();
+          }}
+        >
+          <Square aria-hidden className='size-5' />
+          <span aria-hidden className='absolute text-xs leading-none tabular-nums'>
+            {panels.length > 9 ? '9+' : panels.length}
+          </span>
+        </PaneButton>
+      </PopoverTrigger>
+      <PopoverContent
+        aria-label='Open tabs'
+        align='end'
+        side='bottom'
+        collisionPadding={8}
+        className={menuContentVariants({
+          className: 'h-(--radix-popover-content-available-height) w-80 max-w-[calc(100vw-1rem)] overflow-hidden',
+        })}
+        onPointerDown={() => {
+          isHoverOpen.current = false;
+          cancelClose();
+        }}
+        onKeyDown={() => {
+          isHoverOpen.current = false;
+          cancelClose();
+        }}
+        onPointerEnter={cancelClose}
+        onPointerLeave={scheduleClose}
+        onOpenAutoFocus={(event) => {
+          if (isHoverOpen.current) {
+            event.preventDefault();
+          }
+        }}
+        onCloseAutoFocus={(event) => {
+          if (isHoverOpen.current) {
+            event.preventDefault();
+          }
         }}
       >
-        <TooltipTrigger asChild>
-          {/* Not a hover-revealed pane action: while tabs overflow, this is their visible route. */}
-          <PaneButton aria-label='Open tabs'>
-            <ChevronDown aria-hidden className='size-3.5' />
-          </PaneButton>
-        </TooltipTrigger>
-      </ComboBoxResponsive>
-      <TooltipContent>Open tabs</TooltipContent>
-    </Tooltip>
+        <Command label='Open tabs' defaultValue={activePanel?.id} className='bg-transparent'>
+          <div className={menuLabelVariants({ className: 'flex shrink-0 items-center justify-between font-normal' })}>
+            <span>Open tabs</span>
+            <span className='tabular-nums'>{panels.length}</span>
+          </div>
+          <CommandInput aria-label='Search open tabs' placeholder='Search open tabs…' />
+          <CommandList label='Open tabs' className='max-h-none min-h-0 flex-1 overscroll-contain'>
+            <CommandEmpty className='border-none'>No open tabs found.</CommandEmpty>
+            {panels.map((panel) => (
+              <CommandItem
+                key={panel.id}
+                value={panel.id}
+                keywords={[getPanelTitle(panel), getPanelPath(panel) ?? '']}
+                title={getPanelPath(panel) ?? getPanelTitle(panel)}
+                aria-current={activePanel?.id === panel.id ? 'page' : undefined}
+                className='min-h-9 shrink-0 py-2 aria-current:bg-menu-highlight'
+                onSelect={() => {
+                  panel.api.setActive();
+                  cancelClose();
+                  setIsOpen(false);
+                }}
+              >
+                {renderPanelLabel(panel, activePanel, { getIcon, leadingIcon })}
+              </CommandItem>
+            ))}
+          </CommandList>
+        </Command>
+      </PopoverContent>
+    </Popover>
   );
 }

@@ -7,6 +7,9 @@ import { formatKeyCombination } from '#utils/keys.utils.js';
 import { Loader } from '#components/ui/loader.js';
 import { cn } from '#utils/ui.utils.js';
 
+const chatComposerActionButtonClassName =
+  'rounded-full bg-foreground text-background shadow-xs hover:bg-foreground/85 hover:text-background dark:bg-foreground dark:text-background dark:hover:bg-foreground/85 dark:hover:text-background';
+
 type ChatStreamingStopButtonProperties = {
   readonly formattedCancelKeyCombination: string;
   readonly onCancel: () => void;
@@ -30,14 +33,15 @@ export const ChatStreamingStopButton = memo(function ({
       <TooltipTrigger asChild>
         <Button
           type='button'
+          variant='ghost'
           size='icon'
-          className={cn('rounded-full', isCompact ? 'size-6' : 'size-7')}
+          className={cn(chatComposerActionButtonClassName, isCompact ? 'size-6' : 'size-7')}
           onClick={(event) => {
             event.stopPropagation();
             onCancel();
           }}
         >
-          <Square className={cn('fill-primary-foreground', isCompact ? 'size-3' : 'size-4')} />
+          <Square className={cn('fill-background', isCompact ? 'size-3' : 'size-4')} />
         </Button>
       </TooltipTrigger>
       <TooltipContent className='flex items-center gap-2 align-baseline'>
@@ -77,7 +81,13 @@ export const ChatTextareaSubmitButton = memo(function ({
   return (
     <Tooltip>
       <TooltipTrigger asChild>
-        <Button size='icon' className='size-7 rounded-full' disabled={isDisabled || isSubmitting} onClick={onSubmit}>
+        <Button
+          variant='ghost'
+          size='icon'
+          className={cn(chatComposerActionButtonClassName, 'size-7')}
+          disabled={isDisabled || isSubmitting}
+          onClick={onSubmit}
+        >
           {isSubmitting ? <Loader className='size-4' /> : <ArrowUp className='size-5' />}
         </Button>
       </TooltipTrigger>

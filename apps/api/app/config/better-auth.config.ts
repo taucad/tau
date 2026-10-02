@@ -1,6 +1,7 @@
 import type { BetterAuthOptions, LogLevel as BetterAuthLogLevel, ModelNames } from 'better-auth';
 import { drizzleAdapter } from 'better-auth/adapters/drizzle';
-import { apiKey, magicLink } from 'better-auth/plugins';
+import { apiKey } from '@better-auth/api-key';
+import { magicLink } from 'better-auth/plugins';
 import type { ConfigService } from '@nestjs/config';
 import type { LogLevel } from '@nestjs/common';
 import { Logger } from '@nestjs/common';
@@ -11,6 +12,7 @@ import type { DatabaseService } from '#database/database.service.js';
 import type { AuthService } from '#auth/auth.service.js';
 import type { Environment } from '#config/environment.config.js';
 import { staticAuthConfig } from '#config/auth.js';
+import type { EmailService } from '#email/email.service.js';
 
 /**
  * Mapping between BetterAuth models and ID prefixes.
@@ -45,6 +47,58 @@ type BetterAuthConfigOptions = {
   databaseService: DatabaseService;
   configService: ConfigService<Environment, true>;
   authService: AuthService;
+  emailService: EmailService;
+};
+
+const sanitizeFrontendRedirectPath = ({
+  callbackURL,
+  frontendURL,
+}: {
+  readonly callbackURL?: string;
+  readonly frontendURL: string;
+}): string => {
+  if (!callbackURL) {
+    return '/';
+  }
+
+  if (callbackURL.startsWith('/') && !callbackURL.startsWith('//')) {
+    return callbackURL;
+  }
+
+  try {
+    const frontendOrigin = new URL(frontendURL).origin;
+    const callback = new URL(callbackURL);
+
+    if (callback.origin !== frontendOrigin) {
+      return '/';
+    }
+
+    return `${callback.pathname}${callback.search}${callback.hash}` || '/';
+  } catch {
+    return '/';
+  }
+};
+
+const buildFrontendVerificationUrl = ({
+  frontendURL,
+  generatedUrl,
+  token,
+}: {
+  readonly frontendURL: string;
+  readonly generatedUrl: string;
+  readonly token: string;
+}): string => {
+  const verificationUrl = new URL('/auth/verify-email', frontendURL);
+  const generatedVerificationUrl = new URL(generatedUrl);
+  const redirectTo = sanitizeFrontendRedirectPath({
+    callbackURL: generatedVerificationUrl.searchParams.get('callbackURL') ?? undefined,
+    frontendURL,
+  });
+
+  verificationUrl.searchParams.set('token', token);
+  verificationUrl.searchParams.set('redirectTo', redirectTo);
+
+  return verificationUrl.toString();
 };
 
 /**
@@ -54,7 +108,7 @@ type BetterAuthConfigOptions = {
  */
 export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAuthOptions {
   const logger = new Logger('BetterAuth');
-  const { databaseService, configService } = options;
+  const { databaseService, configService, emailService } = options;
 
   /**
    * Runtime plugin configuration with custom options.
@@ -69,8 +123,8 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
       },
     }),
     magicLink({
-      sendMagicLink({ email, url, token }) {
-        logger.log(`Sending magic link to ${email} with url ${url} and token ${token}`);
+      async sendMagicLink({ email, url }) {
+        await emailService.sendMagicLink({ email, url });
       },
     }),
   ];
@@ -110,22 +164,31 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
 
     emailAndPassword: {
       ...staticAuthConfig.emailAndPassword,
-      async sendResetPassword({ user, url, token }) {
-        logger.log(`Sending reset password email to ${user.email} with url ${url} and token ${token}`);
+      requireEmailVerification: true,
+      revokeSessionsOnPasswordReset: true,
+      async sendResetPassword({ user, url }) {
+        await emailService.sendResetPassword({ email: user.email, url });
       },
       async onPasswordReset(data) {
         logger.log(`Password reset requested for ${data.user.email}`);
       },
     },
     emailVerification: {
+      sendOnSignUp: true,
+      sendOnSignIn: true,
+      autoSignInAfterVerification: true,
       async sendVerificationEmail({ user, url, token }) {
-        logger.log(`Sending verification email to ${user.email} with url ${url} and token ${token}`);
+        await emailService.sendVerification({
+          email: user.email,
+          url: buildFrontendVerificationUrl({
+            frontendURL: configService.get('TAU_FRONTEND_URL', { infer: true }),
+            generatedUrl: url,
+            token,
+          }),
+        });
       },
       async afterEmailVerification(user) {
         logger.log(`User ${user.email} has been verified`);
-      },
-      async onEmailVerification(user) {
-        logger.log(`Email verification requested for ${user.email}`);
       },
     },
 

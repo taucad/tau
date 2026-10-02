@@ -74,9 +74,7 @@ export function ChatMessageToolEditTests({
     }
 
     case 'output-error': {
-      return (
-        <ChatToolError errorText={part.errorText} fallbackIcon={FlaskConical} fallbackTitle='Failed to edit tests' />
-      );
+      return <ChatToolError errorText={part.errorText} icon={FlaskConical} noun='test edit' />;
     }
 
     case 'approval-requested':

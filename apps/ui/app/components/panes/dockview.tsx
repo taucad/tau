@@ -155,27 +155,31 @@ const dockviewTailwindOverrides = cn(
   '[&_.dv-tab:focus::after]:![outline:none]',
   '[&_.dv-tab:focus-within::after]:![outline:none]',
 
-  // ── Tab divider height fix ──
-  // Dockview's tab dividers (::before on :not(:first-child)) use height: 100%
-  // which resolves to the padding-box. Our border-top/bottom sit outside it,
-  // making dividers 2px shorter. Extend into the border areas.
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:not(:first-child)::before]:[top:-1px]',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:not(:first-child)::before]:[bottom:-1px]',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:not(:first-child)::before]:h-auto',
+  // ── Inter-tab divider (v6 no longer adds .dv-horizontal on .dv-tabs-container,
+  // so upstream's divider rule never matches; paint ::before ourselves.)
+  "[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:content-['_']",
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:absolute',
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:[top:-1px]',
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:[bottom:-1px]',
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:left-0',
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:w-px',
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:h-auto',
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:z-5',
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:pointer-events-none',
+  '[&_.dv-tabs-container_.dv-tab:not(:first-child)::before]:[background-color:var(--dv-tab-divider-color)]',
 
   // ── Last-tab right divider ──
-  // Dockview only creates left-side dividers. Add a right-side ::after on the
-  // last tab so there is a visible separator between the tab and the void area.
-  "[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:content-['_']",
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:absolute',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:[top:-1px]',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:[bottom:-1px]',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:right-0',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:z-5',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:pointer-events-none',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:[background-color:var(--dv-tab-divider-color)]',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:w-px',
-  '[&_.dv-tabs-container.dv-horizontal_.dv-tab:last-child::after]:h-auto',
+  // Separator between the last tab and the void / actions area.
+  "[&_.dv-tabs-container_.dv-tab:last-child::after]:content-['_']",
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:absolute',
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:[top:-1px]',
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:[bottom:-1px]',
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:right-0',
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:z-5',
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:pointer-events-none',
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:[background-color:var(--dv-tab-divider-color)]',
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:w-px',
+  '[&_.dv-tabs-container_.dv-tab:last-child::after]:h-auto',
 
   // ── Active tab bottom border → seamless with content ──
   '[&_.dv-tab.dv-active-tab]:border-b-background',

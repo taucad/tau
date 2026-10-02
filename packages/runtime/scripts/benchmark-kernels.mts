@@ -66,7 +66,7 @@ const { values } = parseArgs({
     output: { type: 'string', short: 'o', default: 'reports' },
     provenance: { type: 'string', short: 'p' },
     'wasm-dir': { type: 'string' },
-    'wasm-variant': { type: 'string', default: 'single' },
+    'wasm-variant': { type: 'string', default: 'auto' },
     ocProfile: { type: 'boolean', default: false },
     noTracing: { type: 'boolean', default: false },
     cpuProfile: { type: 'boolean', default: false },
@@ -86,12 +86,13 @@ ${c.dim}Usage:${c.reset}
 
 ${c.dim}Options:${c.reset}
   ${c.cyan}-n${c.reset}, ${c.cyan}--iterations${c.reset} <n>    Number of iterations per benchmark (default: 5)
-  ${c.cyan}-f${c.reset}, ${c.cyan}--filter${c.reset} <cats>     Comma-separated categories: ${benchmarkCategories.join(', ')}
+  ${c.cyan}-f${c.reset}, ${c.cyan}--filter${c.reset} <items>    Comma-separated categories or benchmark names.
+                                      Categories: ${benchmarkCategories.join(', ')}
   ${c.cyan}-c${c.reset}, ${c.cyan}--compare${c.reset} <files>   Compare two JSON report files (provide two paths)
   ${c.cyan}-o${c.reset}, ${c.cyan}--output${c.reset} <dir>      Output directory (default: reports)
   ${c.cyan}-p${c.reset}, ${c.cyan}--provenance${c.reset} <file> Attach build provenance JSON to results
       ${c.cyan}--wasm-dir${c.reset} <path>   Inject custom WASM from directory (contains .wasm + .js files)
-      ${c.cyan}--wasm-variant${c.reset} <v>  WASM variant name: single (default)
+      ${c.cyan}--wasm-variant${c.reset} <v>  WASM variant: auto (default) | single | multi
       ${c.cyan}--ocProfile${c.reset}         Use per-call OC tracing for deep profiling
       ${c.cyan}--noTracing${c.reset}         Disable OC tracing entirely for pure timing
       ${c.cyan}--cpuProfile${c.reset}        Enable V8 CPU profiling for per-function timing breakdown
@@ -142,14 +143,21 @@ function formatFileSize(bytes: number): string {
 
 // ── WASM resolution ─────────────────────────────────────────────────
 
-type WasmOptionResult = 'single' | { wasmUrl: string; wasmBindingsUrl: string };
+type WasmOptionResult = 'auto' | 'single' | 'multi' | { wasmUrl: string; wasmBindingsUrl: string };
 
 function resolveWasmOption(): WasmOptionResult {
-  const wasmVariant = values['wasm-variant'] as 'single' | undefined;
+  const rawVariant = values['wasm-variant'];
   const wasmDirectory = values['wasm-dir'];
 
+  const allowed = new Set(['auto', 'single', 'multi']);
+  if (!allowed.has(rawVariant)) {
+    console.error(`${c.red}Invalid --wasm-variant: ${rawVariant} (expected: auto | single | multi)${c.reset}`);
+    process.exit(1);
+  }
+  const wasmVariant = rawVariant as 'auto' | 'single' | 'multi';
+
   if (!wasmDirectory) {
-    return wasmVariant ?? 'single';
+    return wasmVariant;
   }
 
   const absDirectory = resolve(wasmDirectory);
@@ -158,7 +166,11 @@ function resolveWasmOption(): WasmOptionResult {
     process.exit(1);
   }
 
-  const variant = 'replicad_single';
+  if (wasmVariant === 'auto') {
+    console.error(`${c.red}--wasm-dir requires an explicit --wasm-variant (single | multi)${c.reset}`);
+    process.exit(1);
+  }
+  const variant = wasmVariant === 'multi' ? 'replicad_multi' : 'replicad_single';
   const wasmPath = join(absDirectory, `${variant}.wasm`);
   const jsPath = join(absDirectory, `${variant}.js`);
 
@@ -211,6 +223,27 @@ function onBenchmarkProgress(completed: number, total: number, caseName: string)
   console.log(`  ${progress} ${caseName}${c.dim}... (${pct}%)${c.reset}`);
 }
 
+function onBenchmarkIterationProgress(progress: {
+  caseName: string;
+  iteration: number;
+  totalRuns: number;
+  warmupRuns: number;
+  elapsed: number;
+}): void {
+  if (progress.elapsed < 1000) {
+    return;
+  }
+
+  const phase = progress.iteration <= progress.warmupRuns ? 'warmup' : 'sample';
+  const sampleIndex =
+    progress.iteration <= progress.warmupRuns ? progress.iteration : progress.iteration - progress.warmupRuns;
+  const sampleTotal =
+    progress.iteration <= progress.warmupRuns ? progress.warmupRuns : progress.totalRuns - progress.warmupRuns;
+  console.log(
+    `    ${c.dim}↳ ${progress.caseName} ${phase} ${sampleIndex}/${sampleTotal}: ${formatMs(progress.elapsed)}${c.reset}`,
+  );
+}
+
 function writeResults(result: BenchmarkRunResult): void {
   const outputDirectory = resolve(values.output);
   if (!existsSync(outputDirectory)) {
@@ -234,6 +267,11 @@ function writeResults(result: BenchmarkRunResult): void {
     const singleSize = formatFileSize(result.wasmSizes.singleWasmBytes);
     const singleJs = formatFileSize(result.wasmSizes.singleJsBytes);
     label('single.wasm', `${singleSize} ${c.dim}(JS: ${singleJs})${c.reset}`);
+    if (result.wasmSizes.multiWasmBytes) {
+      const multiSize = formatFileSize(result.wasmSizes.multiWasmBytes);
+      const multiJs = result.wasmSizes.multiJsBytes ? formatFileSize(result.wasmSizes.multiJsBytes) : '—';
+      label('multi.wasm', `${multiSize} ${c.dim}(JS: ${multiJs})${c.reset}`);
+    }
   }
 }
 
@@ -328,6 +366,9 @@ async function runSuite(): Promise<void> {
   label('Iterations', `${iterations}`);
   label('Tracing', ocTracing);
   label('WASM', typeof wasmOption === 'string' ? wasmOption : 'custom');
+  if (typeof wasmOption === 'string' && wasmOption === 'auto') {
+    label('Auto', 'kernel will pick multi when SAB available, else single');
+  }
   if (enableCpuProfile) {
     label('CPU Profile', `enabled (${cpuProfileInterval}us interval)`);
   }
@@ -339,6 +380,7 @@ async function runSuite(): Promise<void> {
     ocTracing,
     wasm: wasmOption,
     onProgress: onBenchmarkProgress,
+    onIterationProgress: onBenchmarkIterationProgress,
     cpuProfile: enableCpuProfile,
     cpuProfileInterval,
   });

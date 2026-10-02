@@ -3,7 +3,8 @@ import type { ReactNode } from 'react';
 import type * as THREE from 'three';
 import { PerspectiveCamera } from '@react-three/drei';
 import { Lights } from '#components/geometry/graphics/three/react/lights.js';
-import { SectionView } from '#components/geometry/graphics/three/react/section-view.js';
+import { SectionContourFills } from '#components/geometry/graphics/three/react/section-contour-fill.js';
+import { SectionClippingGroup } from '#components/geometry/graphics/three/react/section-clipping-group.js';
 import { useSectionView } from '#components/geometry/graphics/three/use-section-view.js';
 import { useGeometryBounds } from '#components/geometry/graphics/three/use-geometry-bounds.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
@@ -69,34 +70,39 @@ export function Stage({
   ...properties
 }: StageProperties): React.JSX.Element {
   const outer = React.useRef<THREE.Group>(null);
-  const inner = React.useRef<THREE.Group>(null);
+  // oxlint-disable-next-line typescript/no-restricted-types -- valid React ref type
+  const innerRef = React.useRef<THREE.Group | null>(null);
 
   const enableMatcap = useGraphicsSelector((state) => state.context.enableMatcap);
   const environmentPreset = useGraphicsSelector((state) => state.context.environmentPreset);
   const upDirection = useGraphicsSelector((state) => state.context.upDirection);
 
-  // Section view (clipping plane + capping material)
   const sectionView = useSectionView();
 
-  // Geometry bounds tracking (per-frame bounding sphere + optional centering)
-  const { geometryRadius, geometryCenter } = useGeometryBounds(inner, outer, { enableCentering });
+  const { geometryRadius, geometryCenter } = useGeometryBounds(innerRef, outer, { enableCentering });
 
-  // Camera framing policy (auto-reset on significant geometry changes)
   useCameraFraming(geometryRadius, geometryCenter, stageOptions);
 
   return (
     <group {...properties}>
       <PerspectiveCamera makeDefault />
       <group ref={outer}>
-        <SectionView
-          plane={sectionView.plane}
-          enableSection={sectionView.isActive}
+        <SectionClippingGroup
           enableLines={sectionView.enableLines}
           enableMesh={sectionView.enableMesh}
-          cappingMaterial={sectionView.cappingMaterial}
+          enabled={sectionView.isActive}
+          innerRef={innerRef}
+          plane={sectionView.plane}
         >
-          <group ref={inner}>{children}</group>
-        </SectionView>
+          <group ref={innerRef}>{children}</group>
+        </SectionClippingGroup>
+        <SectionContourFills
+          enabled={sectionView.isActive && sectionView.enableMesh}
+          innerRef={innerRef}
+          plane={sectionView.plane}
+          stripeFrequency={sectionView.stripeFrequency}
+          stripeWidth={sectionView.stripeWidth}
+        />
       </group>
       <Lights
         enableMatcap={enableMatcap}

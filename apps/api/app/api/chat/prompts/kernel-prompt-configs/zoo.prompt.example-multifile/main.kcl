@@ -1,0 +1,5 @@
+@settings(defaultLengthUnit = mm)
+
+import widget from "widget.kcl"
+
+widget()

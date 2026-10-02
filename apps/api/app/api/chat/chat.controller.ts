@@ -68,34 +68,33 @@ export class ChatController {
   public async createChat(@Body() body: CreateChatDto, @Res() response: FastifyReply): Promise<void> {
     this.logger.debug(`Creating chat: ${body.id}`);
 
-    const { modelId, kernel, snapshot, contextPayload, mode, tools } = this.extractRequestConfig(body);
+    switch (body.agent.profile) {
+      case 'project_name': {
+        const modelMessages = await convertToModelMessages(body.messages);
+        const result = this.chatService.getBuildNameGenerator(modelMessages);
+        return sendSimpleModelStream(response, result);
+      }
+      case 'commit_name': {
+        const modelMessages = await convertToModelMessages(body.messages);
+        const result = this.chatService.getCommitMessageGenerator(modelMessages);
+        return sendSimpleModelStream(response, result);
+      }
+      case 'cad': {
+        const { agent } = body;
+        const langchainMessages = await this.prepareMessages(body.id, body.messages, agent.snapshot);
 
-    // Handle simple model streams (name generator, commit generator).
-    // These use AI SDK's streamText, so they need ModelMessage[] from convertToModelMessages.
-    if (modelId === 'name-generator') {
-      const modelMessages = await convertToModelMessages(body.messages);
-      const result = this.chatService.getBuildNameGenerator(modelMessages);
-      return sendSimpleModelStream(response, result);
+        return this.streamAgentResponse({
+          chatId: body.id,
+          messages: langchainMessages,
+          modelId: agent.model,
+          kernel: agent.kernel,
+          mode: agent.mode,
+          tools: { choice: agent.toolChoice, testingEnabled: agent.testingEnabled },
+          contextPayload: agent.contextPayload,
+          response,
+        });
+      }
     }
-
-    if (modelId === 'commit-name-generator') {
-      const modelMessages = await convertToModelMessages(body.messages);
-      const result = this.chatService.getCommitMessageGenerator(modelMessages);
-      return sendSimpleModelStream(response, result);
-    }
-
-    const langchainMessages = await this.prepareMessages(body.id, body.messages, snapshot);
-
-    return this.streamAgentResponse({
-      chatId: body.id,
-      messages: langchainMessages,
-      modelId,
-      kernel,
-      mode,
-      tools,
-      contextPayload,
-      response,
-    });
   }
 
   /**
@@ -230,35 +229,6 @@ export class ChatController {
     } finally {
       this.metricsService.sseActiveConnections.add(-1);
     }
-  }
-
-  /**
-   * Parses and validates the last user message to extract model configuration.
-   */
-  private extractRequestConfig(body: CreateChatDto): ChatRequestConfig {
-    const lastHumanMessage = body.messages.findLast((message) => message.role === 'user');
-
-    if (lastHumanMessage?.role !== 'user') {
-      throw new Error('Last message is not a user message');
-    }
-
-    const messageModel = lastHumanMessage.metadata?.model;
-
-    if (!messageModel) {
-      throw new Error('Message model is required');
-    }
-
-    return {
-      modelId: messageModel,
-      kernel: lastHumanMessage.metadata?.kernel ?? 'openscad',
-      snapshot: lastHumanMessage.metadata?.snapshot,
-      contextPayload: lastHumanMessage.metadata?.contextPayload,
-      mode: lastHumanMessage.metadata?.mode ?? 'agent',
-      tools: {
-        choice: lastHumanMessage.metadata?.toolChoice ?? 'auto',
-        testingEnabled: lastHumanMessage.metadata?.testingEnabled ?? true,
-      },
-    };
   }
 
   /**

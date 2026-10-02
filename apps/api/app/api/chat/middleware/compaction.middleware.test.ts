@@ -261,7 +261,7 @@ describe('createCompactionMiddleware', () => {
     expect(compactionService.compact).toHaveBeenCalled();
   });
 
-  it('should return handler result after compaction (stream continues)', async () => {
+  it('should return handler result unchanged after compaction (stream continues)', async () => {
     const middleware = createMiddlewareInstance();
     const { wrapModelCall } = middleware;
     if (!wrapModelCall) {
@@ -303,6 +303,9 @@ describe('createCompactionMiddleware', () => {
 
     expect(compactionService.compact).toHaveBeenCalled();
     expect(handler).toHaveBeenCalledTimes(1);
+    // Compaction is now a transparent pass-through: the handler's result is
+    // returned verbatim and the dedup reset is a side-effect on the auxiliary
+    // store (asserted in the dedicated describe block below).
     expect(result).toBe(streamResult);
   });
 
@@ -1130,5 +1133,220 @@ describe('stripExcessMedia', () => {
       type: 'text',
       text: '[image removed — media limit]',
     });
+  });
+});
+
+/**
+ * Dedup pointers persisted in the LangGraph auxiliary store reference
+ * `tool_call_id`s on prior `ToolMessage`s. When compaction (or emergency
+ * truncation) summarises away the message tail, those `tool_call_id`s
+ * vanish, so the dedup namespace for the chat must be cleared as a
+ * side effect. The middleware delegates to `clearReadDedupForChat`, which
+ * dispatches to the Redis `clearChat` shortcut when available and falls
+ * back to `search` + parallel `delete` on `InMemoryStore`.
+ */
+describe('createCompactionMiddleware — read-dedup clear on eviction', () => {
+  let compactionService: ReturnType<typeof mock<CompactionService>>;
+  let rpcBackendFactory: ReturnType<typeof mock<TauRpcBackendFactory>>;
+  let mockBackend: ReturnType<typeof mock<TauRpcBackend>>;
+  let chatRpcService: ReturnType<typeof mock<ChatRpcService>>;
+  let mockModelService: { getContextWindow: ReturnType<typeof vi.fn> };
+  let writer: ReturnType<typeof vi.fn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    compactionService = mock<CompactionService>();
+    rpcBackendFactory = mock<TauRpcBackendFactory>();
+    mockBackend = mock<TauRpcBackend>();
+    chatRpcService = mock<ChatRpcService>();
+    rpcBackendFactory.create.mockReturnValue(mockBackend);
+    mockBackend.append.mockResolvedValue({ path: 'test', filesUpdate: null });
+    mockModelService = { getContextWindow: vi.fn().mockReturnValue(1000) };
+    writer = vi.fn();
+  });
+
+  const buildContext = () => ({
+    chatId: 'chat-recent-reads',
+    modelId: 'test-model',
+    modelService: mockModelService as unknown as ModelService,
+  });
+
+  const buildLongMessages = (): BaseMessage[] => {
+    const longContent = 'A'.repeat(4000);
+    return [
+      new HumanMessage(longContent),
+      new AIMessage(longContent),
+      new HumanMessage('middle question'),
+      new AIMessage('middle answer'),
+      new HumanMessage('recent'),
+      new AIMessage('recent reply'),
+    ];
+  };
+
+  const buildStoreStub = () => ({
+    clearChat: vi.fn().mockResolvedValue(0),
+  });
+
+  it('clears the dedup namespace after a successful Morph compaction', async () => {
+    const middleware = createCompactionMiddleware(compactionService, rpcBackendFactory, chatRpcService);
+    const { wrapModelCall } = middleware;
+    if (!wrapModelCall) {
+      throw new Error('wrapModelCall not defined');
+    }
+
+    compactionService.compact.mockResolvedValue({
+      compactedMessages: [new HumanMessage('[Compacted history]')],
+      stats: {
+        tokensBeforeCompaction: 2000,
+        tokensAfterCompaction: 50,
+        compressionRatio: 0.025,
+        messagesEvicted: 2,
+      },
+    });
+
+    const aiResponse = new AIMessage('post-compaction reply');
+    const handler = vi.fn().mockResolvedValue(aiResponse);
+    const store = buildStoreStub();
+
+    const result = await wrapModelCall(
+      {
+        messages: buildLongMessages(),
+        tools: [],
+        systemMessage: '',
+        runtime: { context: buildContext(), writer, store },
+      } as unknown as Parameters<typeof wrapModelCall>[0],
+      handler,
+    );
+
+    expect(compactionService.compact).toHaveBeenCalled();
+    expect(store.clearChat).toHaveBeenCalledWith('chat-recent-reads');
+    expect(result).toBe(aiResponse);
+  });
+
+  it('does not touch the dedup namespace when compaction does not fire', async () => {
+    mockModelService.getContextWindow.mockReturnValue(200_000);
+    const middleware = createCompactionMiddleware(compactionService, rpcBackendFactory, chatRpcService);
+    const { wrapModelCall } = middleware;
+    if (!wrapModelCall) {
+      throw new Error('wrapModelCall not defined');
+    }
+
+    const aiResponse = new AIMessage('untouched reply');
+    const handler = vi.fn().mockResolvedValue(aiResponse);
+    const store = buildStoreStub();
+
+    const result = await wrapModelCall(
+      {
+        messages: [new HumanMessage('short'), new AIMessage('reply')],
+        tools: [],
+        systemMessage: '',
+        runtime: { context: buildContext(), writer, store },
+      } as unknown as Parameters<typeof wrapModelCall>[0],
+      handler,
+    );
+
+    expect(compactionService.compact).not.toHaveBeenCalled();
+    expect(store.clearChat).not.toHaveBeenCalled();
+    expect(result).toBe(aiResponse);
+  });
+
+  it('does not touch the dedup namespace when Morph compaction throws (truncated-args fallback path)', async () => {
+    const middleware = createCompactionMiddleware(compactionService, rpcBackendFactory, chatRpcService);
+    const { wrapModelCall } = middleware;
+    if (!wrapModelCall) {
+      throw new Error('wrapModelCall not defined');
+    }
+
+    compactionService.compact.mockRejectedValue(new Error('Morph API down'));
+
+    const aiResponse = new AIMessage('fallback reply');
+    const handler = vi.fn().mockResolvedValue(aiResponse);
+    const store = buildStoreStub();
+
+    const result = await wrapModelCall(
+      {
+        messages: buildLongMessages(),
+        tools: [],
+        systemMessage: '',
+        runtime: { context: buildContext(), writer, store },
+      } as unknown as Parameters<typeof wrapModelCall>[0],
+      handler,
+    );
+
+    expect(compactionService.compact).toHaveBeenCalled();
+    expect(store.clearChat).not.toHaveBeenCalled();
+    expect(result).toBe(aiResponse);
+  });
+
+  it('clears the dedup namespace after emergency re-compaction on ContextOverflowError', async () => {
+    const middleware = createCompactionMiddleware(compactionService, rpcBackendFactory, chatRpcService);
+    const { wrapModelCall } = middleware;
+    if (!wrapModelCall) {
+      throw new Error('wrapModelCall not defined');
+    }
+
+    compactionService.compact.mockResolvedValue({
+      compactedMessages: [new HumanMessage('[Compacted history]')],
+      stats: {
+        tokensBeforeCompaction: 2000,
+        tokensAfterCompaction: 50,
+        compressionRatio: 0.025,
+        messagesEvicted: 2,
+      },
+    });
+
+    const aiResponse = new AIMessage('emergency reply');
+    const handler = vi
+      .fn()
+      .mockRejectedValueOnce(new ContextOverflowError('overflow'))
+      .mockResolvedValueOnce(aiResponse);
+    const store = buildStoreStub();
+
+    const result = await wrapModelCall(
+      {
+        messages: buildLongMessages(),
+        tools: [],
+        systemMessage: '',
+        runtime: { context: buildContext(), writer, store },
+      } as unknown as Parameters<typeof wrapModelCall>[0],
+      handler,
+    );
+
+    expect(handler).toHaveBeenCalledTimes(2);
+    expect(store.clearChat).toHaveBeenCalledWith('chat-recent-reads');
+    expect(result).toBe(aiResponse);
+  });
+
+  it('no-ops gracefully when no store is wired (defensive)', async () => {
+    const middleware = createCompactionMiddleware(compactionService, rpcBackendFactory, chatRpcService);
+    const { wrapModelCall } = middleware;
+    if (!wrapModelCall) {
+      throw new Error('wrapModelCall not defined');
+    }
+
+    compactionService.compact.mockResolvedValue({
+      compactedMessages: [new HumanMessage('[Compacted history]')],
+      stats: {
+        tokensBeforeCompaction: 2000,
+        tokensAfterCompaction: 50,
+        compressionRatio: 0.025,
+        messagesEvicted: 2,
+      },
+    });
+
+    const aiResponse = new AIMessage('store-less reply');
+    const handler = vi.fn().mockResolvedValue(aiResponse);
+
+    const result = await wrapModelCall(
+      {
+        messages: buildLongMessages(),
+        tools: [],
+        systemMessage: '',
+        runtime: { context: buildContext(), writer },
+      } as unknown as Parameters<typeof wrapModelCall>[0],
+      handler,
+    );
+
+    expect(result).toBe(aiResponse);
   });
 });

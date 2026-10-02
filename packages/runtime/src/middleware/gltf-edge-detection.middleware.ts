@@ -4,6 +4,7 @@ import { createNodeIo } from '@taucad/converter';
 import type { GeometryGltf } from '@taucad/types';
 import { z } from 'zod';
 import { detectEdges } from '#utils/edge-detection.js';
+import { mergeGltfLineSegments } from '#utils/merge-gltf-edges.js';
 import { defineMiddleware } from '#middleware/runtime-middleware.js';
 
 /**
@@ -133,32 +134,43 @@ function addEdgePrimitivesToDocument(document: Document, thresholdDegrees: numbe
 }
 
 /**
- * Add edge primitives to a GLTF geometry.
+ * Add edge primitives to a GLTF geometry, then merge every LINES primitive in the
+ * document into a single `tau-merged-edges` mesh under the scene root.
  *
- * If all meshes already contain LINE primitives (e.g., from replicad's meshEdges),
- * the original geometry is returned unchanged to avoid unnecessary re-serialization.
+ * Stages:
+ *
+ * 1. {@link addEdgePrimitivesToDocument} runs dihedral edge detection on triangle meshes
+ *    that lack native LINES primitives.
+ * 2. {@link mergeGltfLineSegments} consolidates every remaining LINES primitive (both
+ *    detection-generated and replicad's `meshEdges`-style native edges) into one
+ *    primitive with world matrices baked into the positions.
+ *
+ * The merge step is responsible for the perf delta documented in
+ * `docs/research/gltf-edges-fat-line-performance.md` — the UI fat-line conversion path
+ * then wraps a single `LineSegments` into a single `LineSegments2`, collapsing N draw
+ * calls (one per part in a CAD assembly) into one.
+ *
+ * If neither stage mutates the document (no triangle meshes needing detection AND no
+ * pre-existing LINES primitives to merge), the original geometry is returned unchanged
+ * to skip the @gltf-transform re-serialisation roundtrip.
  *
  * @param geometry - The GLTF geometry to process
  * @param thresholdDegrees - the dihedral angle threshold in degrees for edge detection
- * @returns The geometry with edge primitives added, or the original if no edges were needed
+ * @returns The geometry with edges added + merged, or the original if no work was needed
  */
 async function addEdgePrimitivesToGltf(geometry: GeometryGltf, thresholdDegrees: number): Promise<GeometryGltf> {
   const io = await createNodeIo();
   io.registerExtensions([KHRMaterialsUnlit]);
 
-  // Read the GLTF document from the binary data
   const document = await io.readBinary(geometry.content);
 
-  // Add edge primitives to meshes that don't already have them
   const hadEdgesAdded = addEdgePrimitivesToDocument(document, thresholdDegrees);
+  const mergeResult = mergeGltfLineSegments(document);
 
-  // If no edges were added (all meshes had native edges), return the original
-  // geometry to avoid unnecessary re-serialization through @gltf-transform
-  if (!hadEdgesAdded) {
+  if (!hadEdgesAdded && !mergeResult.merged) {
     return geometry;
   }
 
-  // Write back to binary format
   const transformedContent = await io.writeBinary(document);
 
   return {

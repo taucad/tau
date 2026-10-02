@@ -1,10 +1,10 @@
-import { useContext } from 'react';
-import { AuthUIContext } from '@daveyplate/better-auth-ui';
+import { useSession } from '@better-auth-ui/react';
 import { Lock } from 'lucide-react';
 import { NavLink } from 'react-router';
 import { Button } from '#components/ui/button.js';
 import { useAuthLinks } from '#hooks/use-auth-links.js';
 import { Loader } from '#components/ui/loader.js';
+import { authClient } from '#lib/auth-client.js';
 
 /**
  * Wraps settings content that requires authentication.
@@ -12,8 +12,7 @@ import { Loader } from '#components/ui/loader.js';
  * instead of redirecting to the auth page.
  */
 export function SettingsAuthGate({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
-  const { hooks } = useContext(AuthUIContext);
-  const { data: session, isPending } = hooks.useSession();
+  const { data: session, isPending } = useSession(authClient);
   const { signIn } = useAuthLinks();
 
   if (isPending) {

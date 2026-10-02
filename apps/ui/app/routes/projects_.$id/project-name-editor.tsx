@@ -1,11 +1,10 @@
-import { useChat } from '@ai-sdk/react';
 import { useState, useEffect, useCallback } from 'react';
 import { useSelector } from '@xstate/react';
 import type { MyUIMessage } from '@taucad/chat';
 import { defaultProjectName } from '#constants/project-names.js';
 import { useProject } from '#hooks/use-project.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
-import { useChatConstants } from '#utils/chat.utils.js';
+import { useProjectNameClient } from '#chat-clients/use-project-name-client.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { Loader } from '#components/ui/loader.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
@@ -24,21 +23,10 @@ export function ProjectNameEditor(): React.JSX.Element {
   const [isNameAnimating, setIsNameAnimating] = useState(false);
   const [activeChatFirstMessage, setActiveChatFirstMessage] = useState<MyUIMessage | undefined>(undefined);
 
-  const { sendMessage } = useChat({
-    ...useChatConstants,
-    onFinish({ message }) {
-      const textPart = message.parts.find((part) => part.type === 'text');
-      if (textPart) {
-        updateName(textPart.text);
-        setDisplayName(textPart.text);
-        setIsNameAnimating(true);
-        // Reset the animation flag after animation completes
-        setTimeout(() => {
-          setIsNameAnimating(false);
-        }, animationDuration);
-      }
-    },
-  });
+  // Routes through the `project_name` profile-scoped chat-client so the
+  // wire body's `agent` block is `{ profile: 'project_name' }` — no
+  // `metadata.model = 'name-generator'` stamping survives.
+  const projectNameClient = useProjectNameClient();
 
   // Load active chat's first message for name generation
   const loadActiveChatFirstMessage = useCallback(async () => {
@@ -62,24 +50,37 @@ export function ProjectNameEditor(): React.JSX.Element {
     }
 
     if (projectName === defaultProjectName && activeChatFirstMessage) {
-      // Create and send message for name generation
-      const message = {
-        ...activeChatFirstMessage,
-        metadata: {
-          model: 'name-generator',
-        },
-      } as const satisfies MyUIMessage;
-      void sendMessage(message);
+      const firstText = activeChatFirstMessage.parts.find((part) => part.type === 'text');
+      const promptText = firstText?.type === 'text' ? firstText.text : '';
+      const generateAndApplyProjectName = async (): Promise<void> => {
+        try {
+          const generatedName = await projectNameClient.generate(promptText);
+          const trimmed = generatedName.trim();
+          if (trimmed.length === 0) {
+            setDisplayName(projectName);
+            return;
+          }
+          updateName(trimmed);
+          setDisplayName(trimmed);
+          setIsNameAnimating(true);
+          setTimeout(() => {
+            setIsNameAnimating(false);
+          }, animationDuration);
+        } catch (error) {
+          console.error('Failed to generate project name:', error);
+          setDisplayName(projectName);
+        }
+      };
+      void generateAndApplyProjectName();
     } else {
       setDisplayName(projectName);
     }
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- only run after loading completes
   }, [projectName, isLoading, activeChatFirstMessage]);
 
-  // Render display content based on state
   const renderDisplayContent = (value: string): React.ReactNode => {
     if (isProjectError) {
-      return 'Build not found';
+      return 'Project not found';
     }
 
     if (value === '') {
@@ -107,7 +108,7 @@ export function ProjectNameEditor(): React.JSX.Element {
           }}
         />
       </TooltipTrigger>
-      <TooltipContent>{isProjectError ? 'Build not found' : 'Edit name'}</TooltipContent>
+      <TooltipContent>{isProjectError ? 'Project not found' : 'Edit name'}</TooltipContent>
     </Tooltip>
   );
 }

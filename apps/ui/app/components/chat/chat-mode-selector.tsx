@@ -112,7 +112,7 @@ export const ChatAgentSelector = memo(function ({
         );
       }}
       getValue={(item) => item.id}
-      defaultValue={modeConfigs[effectiveMode]}
+      value={modeConfigs[effectiveMode]}
       onSelect={handleSelect}
       onClose={onClose}
       title='Switch agent mode'

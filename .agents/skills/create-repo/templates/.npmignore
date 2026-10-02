@@ -1,0 +1,10 @@
+*
+!dist/
+!dist/**
+!README.md
+!compatibility.md
+!CHANGELOG.md
+!BREAKING_CHANGES.md
+!NOTICE
+!license
+!package.json

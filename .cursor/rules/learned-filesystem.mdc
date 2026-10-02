@@ -1,0 +1,25 @@
+---
+description: Auto-curated learned facts and preferences for the `filesystem` package (packages/filesystem)
+globs:
+  - "packages/filesystem/**"
+alwaysApply: false
+---
+
+# Learned: filesystem
+
+Auto-maintained by the `agents-memory-updater` subagent. New bullets are
+capped at 200 chars and 12 bullets per section.
+
+## Learned User Preferences
+
+- Filter browser-native swap-file artifacts (`*.crswap`, etc.) at the provider boundary in `packages/filesystem`, never at UI consumers — readers must see a clean directory snapshot.
+- Once the structural routing fix lands, strip the heuristic tombstone caches added during the regression — leaving the band-aid behind hides future bugs (`_recentlyUnmounted` Option-3 full cleanup pattern).
+- `WorkspaceFileService.mount/unmount(prefix, config)` is the only configuration surface — callers compose domain paths; mount-table fall-through to a broader prefix must NEVER silently swallow an unmount of a more specific prefix.
+- `normalize*`-style helpers inside a service module are a smell — investigate whether the inputs can be made canonical at their source (caller, schema, mount-table key) rather than papering over inconsistencies at the consumer boundary.
+
+## Learned Workspace Facts
+
+- `.crswap` files in the UI file explorer are Chromium File System Access API atomic write-swap artifacts emitted by `createWritable()` — not a Tau bug; `FileSystemAccessProvider.readdir`/`readdirWithStats` must filter them so they never leak into the tree.
+- `WorkspaceFileService` owns mount lifecycle: `_resolveProvider` consults the mount table for the longest matching prefix; tombstone caches like `_recentlyUnmounted` were removed after the explicit-workspace-boundaries fix made provider routing deterministic.
+- Two filesystem watch planes coexist: the kernel fast path (dependency-scoped) and the UI tree path (directory-scoped) — keep them separate; merging into one coarse stream regresses both surfaces.
+- `InMemoryFileTree` (O(1) stat/readdir), `ResourceWriteQueue` (per-parent-dir serialisation), and the dedicated import worker (off-thread fetch+extract+write) are the large-repo perf primitives — never re-implement on top of provider primitives in UI code.

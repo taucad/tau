@@ -52,7 +52,7 @@ When you choose to sign in using third-party authentication, we receive certain 
 
 | Sub-processor | Purpose | Data Processed | Location | Certifications |
 |---------------|---------|----------------|----------|----------------|
-| **GitHub** | OAuth authentication | Email, username, profile picture (if authorized) | USA | SOC 1/2, ISO 27001 |
+| **GitHub** | OAuth authentication | Email, display name, profile picture (if authorized) | USA | SOC 1/2, ISO 27001 |
 | **Google** | OAuth authentication | Email, name, profile picture (if authorized) | USA | SOC 1/2/3, ISO 27001 |
 
 ## Changes to This List
@@ -70,5 +70,4 @@ We will provide at least 30 days' notice before engaging new sub-processors that
 ## Contact Us
 
 If you have questions about our sub-processors or data processing practices, please contact us at [privacy@tau.new](mailto:privacy@tau.new).
-
 

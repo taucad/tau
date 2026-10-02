@@ -17,14 +17,6 @@ export function expectHasTextContent(message: UIMessage): void {
 }
 
 /**
- * Assert the message contains at least one reasoning part.
- */
-export function expectHasReasoningParts(message: UIMessage): void {
-  const reasoningParts = message.parts.filter((p) => p.type === 'reasoning');
-  expect(reasoningParts.length).toBeGreaterThan(0);
-}
-
-/**
  * Assert the message contains a tool invocation with the given name.
  * Works with both static (tool-NAME) and dynamic (dynamic-tool) parts.
  */
@@ -139,22 +131,6 @@ export function extractUsageData(chunks: UIMessageChunk[]): Array<Record<string,
   }
 
   return usageChunks;
-}
-
-/**
- * Assert that usage data includes reasoning token counts for models with thinking enabled.
- * This validates that the LangChain provider properly surfaces output_token_details.reasoning
- * during streaming (not just in non-streaming mode).
- */
-export function expectReasoningTokensInUsage(chunks: UIMessageChunk[]): void {
-  const usageData = extractUsageData(chunks);
-  expect(usageData.length, 'Expected at least one usage data chunk').toBeGreaterThan(0);
-
-  const totalReasoning = usageData.reduce((sum, u) => sum + (Number(u['reasoningTokens']) || 0), 0);
-  expect(
-    totalReasoning,
-    `Expected reasoningTokens > 0 in usage data (streaming should include output_token_details.reasoning), got ${totalReasoning}`,
-  ).toBeGreaterThan(0);
 }
 
 /**

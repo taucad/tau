@@ -6,10 +6,13 @@
   },
   "references": [
     {
-      "path": "../../libs/utils/tsconfig.lib.json"
+      "path": "../utils/tsconfig.lib.json"
     },
     {
-      "path": "../../libs/types/tsconfig.lib.json"
+      "path": "../vm/tsconfig.lib.json"
+    },
+    {
+      "path": "../types/tsconfig.lib.json"
     },
     {
       "path": "../../libs/tau-examples/tsconfig.lib.json"

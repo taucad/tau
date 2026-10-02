@@ -1,6 +1,6 @@
 import { FileText } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
-import { toolName } from '@taucad/chat/constants';
+import { toolName, fileUnchangedMarker } from '@taucad/chat/constants';
 import { FileLink } from '#components/files/file-link.js';
 import {
   ChatToolCard,
@@ -61,14 +61,15 @@ export function ChatMessageToolReadFile({
       const { targetFile } = input;
       const lineRange = formatLineRange(input.offset, input.limit);
       const startLine = input.offset ?? 1;
+      const isCached = fileUnchangedMarker.matches(part.output.content);
 
       return (
         <ChatToolCard variant='minimal' status='ready' isCollapsible={false}>
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={FileText} />
             <ChatToolCardTitle>
-              <ChatToolLabel verb='Read'>
-                <ChatToolDescription>
+              <ChatToolLabel verb={isCached ? 'Re-read, cached' : 'Read'}>
+                <ChatToolDescription className={isCached ? 'text-muted-foreground' : undefined}>
                   <FileLink path={targetFile} lineNumber={startLine}>
                     {targetFile}
                     {lineRange}
@@ -82,7 +83,7 @@ export function ChatMessageToolReadFile({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={FileText} fallbackTitle='Failed to read file' />;
+      return <ChatToolError errorText={part.errorText} icon={FileText} noun='file read' />;
     }
 
     case 'approval-requested':

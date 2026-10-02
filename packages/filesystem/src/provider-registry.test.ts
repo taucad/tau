@@ -1,9 +1,20 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { ProviderRegistry } from '#provider-registry.js';
+import { isMissingWorkspaceHandleError } from '#workspace-errors.js';
 import type { FileSystemProvider } from '#types.js';
+import type { WorkspaceScope } from '#mount-table.js';
 
 const createMockHandle = (name: string): FileSystemDirectoryHandle => mock<FileSystemDirectoryHandle>({ name });
+
+const memoryScope: WorkspaceScope = { backend: 'memory' };
+const indexeddbScope: WorkspaceScope = { backend: 'indexeddb' };
+const opfsScope: WorkspaceScope = { backend: 'opfs' };
+const webaccessScope = (workspaceId: string, handleName = 'mount-dir'): WorkspaceScope => ({
+  backend: 'webaccess',
+  directoryHandle: createMockHandle(handleName),
+  workspaceId,
+});
 
 vi.mock('#backend/direct-idb-provider.js', () => {
   class MockDirectIdbProvider {
@@ -98,53 +109,87 @@ describe('ProviderRegistry', () => {
   describe('constructor', () => {
     it('should accept custom databasePrefix', async () => {
       const custom = new ProviderRegistry({ databasePrefix: 'custom' });
-      const provider = await custom.createMountProvider('indexeddb');
+      const provider = await custom.createMountProvider(indexeddbScope);
       expect(provider.id).toBe('indexeddb');
     });
   });
 
   describe('getStandaloneProvider', () => {
     it('should return a standalone provider cached separately from mount providers', async () => {
-      const mount = await registry.createMountProvider('memory');
-      const standalone = await registry.getStandaloneProvider('memory');
+      const mount = await registry.createMountProvider(memoryScope);
+      const standalone = await registry.getStandaloneProvider(memoryScope);
       expect(mount).not.toBe(standalone);
     });
 
     it('should cache standalone providers', async () => {
-      const first = await registry.getStandaloneProvider('memory');
-      const second = await registry.getStandaloneProvider('memory');
+      const first = await registry.getStandaloneProvider(memoryScope);
+      const second = await registry.getStandaloneProvider(memoryScope);
       expect(first).toBe(second);
+    });
+
+    it('should cache webaccess standalone providers per workspaceId', async () => {
+      const scopeA = webaccessScope('wsp_aaa', 'A');
+      const scopeB = webaccessScope('wsp_bbb', 'B');
+      const a1 = await registry.getStandaloneProvider(scopeA);
+      const a2 = await registry.getStandaloneProvider(scopeA);
+      const b1 = await registry.getStandaloneProvider(scopeB);
+      expect(a1).toBe(a2);
+      expect(a1).not.toBe(b1);
     });
   });
 
   describe('invalidateStandaloneProvider', () => {
     it('should dispose and remove standalone provider for a backend', async () => {
-      const standalone = await registry.getStandaloneProvider('memory');
+      const standalone = await registry.getStandaloneProvider(memoryScope);
       registry.invalidateStandaloneProvider('memory');
       expect(standalone.dispose).toHaveBeenCalled();
 
-      const renewed = await registry.getStandaloneProvider('memory');
+      const renewed = await registry.getStandaloneProvider(memoryScope);
       expect(renewed).not.toBe(standalone);
     });
 
     it('should not affect subsequent provider creation when no standalone exists', async () => {
       registry.invalidateStandaloneProvider('memory');
-      const provider = await registry.getStandaloneProvider('memory');
+      const provider = await registry.getStandaloneProvider(memoryScope);
       expect(provider).toBeDefined();
       expect(provider.id).toBe('memory');
+    });
+
+    it('should drop only the targeted webaccess workspaceId entry', async () => {
+      const scopeA = webaccessScope('wsp_aaa', 'A');
+      const scopeB = webaccessScope('wsp_bbb', 'B');
+      const a = await registry.getStandaloneProvider(scopeA);
+      const b = await registry.getStandaloneProvider(scopeB);
+
+      registry.invalidateStandaloneProvider('webaccess', 'wsp_aaa');
+      expect(a.dispose).toHaveBeenCalled();
+      expect(b.dispose).not.toHaveBeenCalled();
+
+      const aNext = await registry.getStandaloneProvider(scopeA);
+      const bNext = await registry.getStandaloneProvider(scopeB);
+      expect(aNext).not.toBe(a);
+      expect(bNext).toBe(b);
+    });
+
+    it('should drop every webaccess entry when called without a workspaceId', async () => {
+      const a = await registry.getStandaloneProvider(webaccessScope('wsp_aaa', 'A'));
+      const b = await registry.getStandaloneProvider(webaccessScope('wsp_bbb', 'B'));
+      registry.invalidateStandaloneProvider('webaccess');
+      expect(a.dispose).toHaveBeenCalled();
+      expect(b.dispose).toHaveBeenCalled();
     });
   });
 
   describe('disposeAll', () => {
     it('should dispose all standalone providers', async () => {
-      const standalone = await registry.getStandaloneProvider('memory');
+      const standalone = await registry.getStandaloneProvider(memoryScope);
       registry.disposeAll();
       expect(standalone.dispose).toHaveBeenCalled();
     });
 
     it('should allow new provider creation after disposing empty registry', async () => {
       registry.disposeAll();
-      const provider = await registry.createMountProvider('memory');
+      const provider = await registry.createMountProvider(memoryScope);
       expect(provider).toBeDefined();
       expect(provider.id).toBe('memory');
     });
@@ -152,69 +197,56 @@ describe('ProviderRegistry', () => {
 
   describe('createMountProvider', () => {
     it('should create a provider for the given backend', async () => {
-      const provider = await registry.createMountProvider('memory');
+      const provider = await registry.createMountProvider(memoryScope);
       expect(provider.id).toBe('memory');
     });
 
     it('should create multiple providers of the same backend type', async () => {
-      const first = await registry.createMountProvider('memory');
-      const second = await registry.createMountProvider('memory');
+      const first = await registry.createMountProvider(memoryScope);
+      const second = await registry.createMountProvider(memoryScope);
       expect(first.id).toBe('memory');
       expect(second.id).toBe('memory');
       expect(first).not.toBe(second);
     });
 
-    it('should create webaccess mount provider when handle is provided', async () => {
-      const mockHandle = createMockHandle('mount-dir');
-      const provider = await registry.createMountProvider('webaccess', mockHandle);
+    it('should create webaccess mount provider when scope carries an explicit handle', async () => {
+      const provider = await registry.createMountProvider(webaccessScope('wsp_explicit'));
       expect(provider.id).toBe('webaccess');
     });
 
     it('should throw for unknown backend', async () => {
       // oxlint-disable-next-line no-explicit-any,no-unsafe-argument -- intentionally testing invalid input
-      await expect(registry.createMountProvider('nonexistent' as any)).rejects.toThrow('Unknown backend: nonexistent');
+      await expect(registry.createMountProvider({ backend: 'nonexistent' } as any)).rejects.toThrow(
+        'Unknown backend: nonexistent',
+      );
     });
   });
 
   describe('webaccess backend', () => {
-    it('should throw when no directory handle is set', async () => {
-      await expect(registry.createMountProvider('webaccess')).rejects.toThrow('No directory handle set');
-    });
-
-    it('should return provider after setDirectoryHandle', async () => {
-      const mockHandle = createMockHandle('test-dir');
-      registry.setDirectoryHandle(mockHandle);
-      const provider = await registry.createMountProvider('webaccess');
-      expect(provider.id).toBe('webaccess');
-    });
-
-    it('should invalidate webaccess standalone providers when setDirectoryHandle is called', async () => {
-      const mockHandle = createMockHandle('test-dir');
-      registry.setDirectoryHandle(mockHandle);
-      const standalone = await registry.getStandaloneProvider('webaccess', mockHandle);
-      const newHandle = createMockHandle('new-dir');
-      registry.setDirectoryHandle(newHandle);
-      expect(standalone.dispose).toHaveBeenCalled();
+    it('should throw a structured MissingWorkspaceHandleError when scope omits the handle', async () => {
+      const error = await registry
+        // oxlint-disable-next-line no-explicit-any,no-unsafe-argument -- intentionally invalid scope
+        .createMountProvider({ backend: 'webaccess', workspaceId: 'wsp_oops' } as any)
+        .catch((caughtError: unknown) => caughtError);
+      expect(isMissingWorkspaceHandleError(error)).toBe(true);
     });
   });
 
   describe('native provider instantiation', () => {
     it('should create DirectIdbProvider for indexeddb backend', async () => {
-      const provider = await registry.createMountProvider('indexeddb');
+      const provider = await registry.createMountProvider(indexeddbScope);
       expect(provider.id).toBe('indexeddb');
       expect(provider.capabilities).toEqual({ persistent: true, writable: true, quotaBased: true });
     });
 
     it('should create OPFSProvider for opfs backend', async () => {
-      const provider = await registry.createMountProvider('opfs');
+      const provider = await registry.createMountProvider(opfsScope);
       expect(provider.id).toBe('opfs');
       expect(provider.capabilities).toEqual({ persistent: true, writable: true, quotaBased: true });
     });
 
     it('should create FileSystemAccessProvider for webaccess backend with handle', async () => {
-      const mockHandle = createMockHandle('local-dir');
-      registry.setDirectoryHandle(mockHandle);
-      const provider = await registry.createMountProvider('webaccess');
+      const provider = await registry.createMountProvider(webaccessScope('wsp_local', 'local-dir'));
       expect(provider.id).toBe('webaccess');
       expect(provider.capabilities).toEqual({ persistent: true, writable: true, quotaBased: false });
     });

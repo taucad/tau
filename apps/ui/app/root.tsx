@@ -4,6 +4,7 @@ import { PreventFlashOnWrongTheme, ThemeProvider } from 'remix-themes';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { useEffect, useMemo } from 'react';
 import type { ReactNode } from 'react';
+import { toast } from 'sonner';
 import { throwRedirectIfSubdomain } from '#lib/react-router.lib.js';
 import { useTheme } from '#hooks/use-theme.js';
 import type { ThemeWithSystem } from '#hooks/use-theme.js';
@@ -69,26 +70,67 @@ export async function loader({ request }: LoaderFunctionArgs) {
   };
 }
 
+/**
+ * Extracts a human-readable string from the `error.error.message` payload of a
+ * `BetterFetchError` (e.g. `"You can't unlink your last account"`). Falls back
+ * to the outer `Error.message` when the inner shape is missing.
+ *
+ * `BetterFetchError.error` is typed as `any` upstream, so we duck-type the
+ * shape here to satisfy the linter without dragging in unsafe-argument noise.
+ */
+const extractAuthErrorMessage = (error: Error): string => {
+  const fromBody = extractBetterFetchErrorBodyMessage(error);
+  return fromBody ?? error.message;
+};
+
+const extractBetterFetchErrorBodyMessage = (error: unknown): string | undefined => {
+  if (!error || typeof error !== 'object') {
+    return undefined;
+  }
+  const candidate = (error as { error?: unknown }).error;
+  if (!candidate || typeof candidate !== 'object' || !('message' in candidate)) {
+    return undefined;
+  }
+  const { message } = candidate as { message?: unknown };
+  return typeof message === 'string' ? message : undefined;
+};
+
 export function Layout({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const data = useRouteLoaderData<typeof loader>('root');
   // Preserve null for system theme - remix-themes needs null to detect system preference
   const ssrTheme = data?.theme ?? null;
-  const queryClient = useMemo(
-    () =>
-      new QueryClient({
-        defaultOptions: {
-          queries: { networkMode: 'offlineFirst' },
-          mutations: { networkMode: 'offlineFirst' },
-        },
-      }),
-    [],
-  );
+  const queryClient = useMemo(() => {
+    const client = new QueryClient({
+      defaultOptions: {
+        queries: { networkMode: 'offlineFirst' },
+        mutations: { networkMode: 'offlineFirst' },
+      },
+    });
+
+    // Surface unhandled better-auth-ui mutation/query errors as toasts. Inline
+    // `onError` handlers on individual `useMutation` calls (e.g. sign-in) take
+    // precedence and override this default, so we never double-toast.
+    client.setMutationDefaults([], {
+      onError: (error) => {
+        toast.error(extractAuthErrorMessage(error));
+      },
+    });
+
+    client.getQueryCache().config.onError = (error) => {
+      const message = extractBetterFetchErrorBodyMessage(error);
+      if (message !== undefined) {
+        toast.error(message);
+      }
+    };
+
+    return client;
+  }, []);
 
   return (
     <AuthConfigProvider>
       <QueryClientProvider client={queryClient}>
         <AnalyticsProvider>
-          <FileManagerProvider rootDirectory='/'>
+          <FileManagerProvider rootDirectory='/' initialBackend='indexeddb'>
             <ProjectManagerProvider>
               <ThemeProvider specifiedTheme={ssrTheme} themeAction='/action/set-theme'>
                 <ColorProvider>

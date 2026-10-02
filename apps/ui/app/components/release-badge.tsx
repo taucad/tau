@@ -1,4 +1,5 @@
 import { Badge } from '#components/ui/badge.js';
+import { cn } from '#utils/ui.utils.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 
 export function ReleaseBadge(): React.JSX.Element {
@@ -14,5 +15,27 @@ export function ReleaseBadge(): React.JSX.Element {
         <p className='mt-1 text-white/80'>Some features may be unstable and change without notice.</p>
       </TooltipContent>
     </Tooltip>
+  );
+}
+
+type BetaBadgeProps = {
+  readonly className?: string;
+};
+
+/**
+ * Compact inline beta marker reusing the purple ramp from `ReleaseBadge`.
+ * Intended for tagging individual features (e.g. WebGPU option in the viewer
+ * backend selector) where a tooltip wrapper would be redundant.
+ */
+export function BetaBadge({ className }: BetaBadgeProps): React.JSX.Element {
+  return (
+    <Badge
+      className={cn(
+        'h-4 border-purple/30 bg-purple/10 px-1 text-[10px] leading-none font-medium tracking-wide text-purple uppercase dark:text-purple/70',
+        className,
+      )}
+    >
+      Beta
+    </Badge>
   );
 }

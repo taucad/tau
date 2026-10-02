@@ -7,7 +7,7 @@ import type { FileSystemClient } from '#file-system-client.js';
 import { SharedPool } from '@taucad/memory';
 import type { ChangeEvent } from '@taucad/types';
 import { WorkerChangeChannel } from '#worker-change-channel.js';
-import { WorkspacePathResolver } from '#workspace-path-resolver.js';
+import { WorkspacePathResolver, WorkspaceScopeViolationError } from '#workspace-path-resolver.js';
 import { RefreshGenerationGuard } from '#refresh-generation-guard.js';
 
 function createMockProxy(overrides?: Partial<FileSystemClient>): FileSystemClient {
@@ -110,6 +110,36 @@ describe('FileContentService', () => {
     proxy = harness.proxy;
     service = harness.service;
     emitFileChanged = harness.emitFileChanged;
+  });
+
+  it('resolve reads bundled typings from the global /node_modules mount, not under the project root', async () => {
+    const harness = createHarness({ workspaceRoot: '/projects/abc' });
+    const localService = harness.service;
+    const localProxy = harness.proxy;
+    const dts = new TextEncoder().encode('export declare const x: 1;');
+    vi.mocked(localProxy.readFile).mockImplementation(async (absolutePath: string) => {
+      if (absolutePath === '/node_modules/replicad/index.d.ts') {
+        return dts;
+      }
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+
+    const result = await localService.resolve('node_modules/replicad/index.d.ts');
+    expectTextContent(result, dts);
+    expect(localProxy.readFile).toHaveBeenCalledWith('/node_modules/replicad/index.d.ts');
+    expect(localProxy.readFile).not.toHaveBeenCalledWith('/projects/abc/node_modules/replicad/index.d.ts');
+    harness.disposeChannel();
+  });
+
+  it('populateText sets text outcome and cache without worker read', async () => {
+    vi.mocked(proxy.readFile).mockClear();
+    const data = new TextEncoder().encode('manual');
+    service.populateText('typed.ts', data);
+
+    expect(service.peekOutcome('typed.ts').kind).toBe('text');
+    const result = await service.resolve('typed.ts');
+    expect(proxy.readFile).not.toHaveBeenCalled();
+    expectTextContent(result, data);
   });
 
   it('should resolve text content from worker on cache miss', async () => {
@@ -1101,6 +1131,40 @@ describe('FileContentService', () => {
 
       expect(service.has('main.ts')).toBe(true);
     });
+
+    it('should emit a directoryCreated ContentChangeEvent when the worker reports a directoryCreated change', async () => {
+      const handler = vi.fn();
+      service.onDidContentChange(handler);
+
+      emitFileChanged({ type: 'directoryCreated', path: '/project/newdir', backend: 'indexeddb' });
+
+      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'directoryCreated', path: 'newdir' }));
+    });
+
+    it('should emit a directoryDeleted ContentChangeEvent when the worker reports a directoryDeleted change', async () => {
+      const handler = vi.fn();
+      service.onDidContentChange(handler);
+
+      emitFileChanged({ type: 'directoryDeleted', path: '/project/old', backend: 'indexeddb' });
+
+      expect(handler).toHaveBeenCalledWith(expect.objectContaining({ type: 'directoryDeleted', path: 'old' }));
+    });
+
+    it('should emit a directoryRenamed ContentChangeEvent when the worker reports a directoryRenamed change', async () => {
+      const handler = vi.fn();
+      service.onDidContentChange(handler);
+
+      emitFileChanged({
+        type: 'directoryRenamed',
+        oldPath: '/project/old',
+        newPath: '/project/new',
+        backend: 'indexeddb',
+      });
+
+      expect(handler).toHaveBeenCalledWith(
+        expect.objectContaining({ type: 'directoryRenamed', oldPath: 'old', newPath: 'new' }),
+      );
+    });
   });
 
   describe('cache capacity', () => {
@@ -1118,6 +1182,141 @@ describe('FileContentService', () => {
       for (let i = 0; i < 500; i++) {
         expect(svc.peek(`file-${i}.ts`)).toBeDefined();
       }
+    });
+  });
+
+  describe('workspace scope contract', () => {
+    it('write rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
+      const harness = createHarness({ workspaceRoot: '/' });
+      const data = new Uint8Array([1, 2, 3]);
+
+      await expect(harness.service.write('/projects/x/main.ts', data, 'machine')).rejects.toBeInstanceOf(
+        WorkspaceScopeViolationError,
+      );
+      expect(harness.proxy.writeFile).not.toHaveBeenCalled();
+      harness.disposeChannel();
+    });
+
+    it('writeFiles rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
+      const harness = createHarness({ workspaceRoot: '/' });
+      const foreignKey = '/projects/x/main.ts';
+
+      await expect(
+        harness.service.writeFiles({ [foreignKey]: { content: new Uint8Array([1, 2, 3]) } }, 'machine'),
+      ).rejects.toBeInstanceOf(WorkspaceScopeViolationError);
+      expect(harness.proxy.writeFiles).not.toHaveBeenCalled();
+      harness.disposeChannel();
+    });
+
+    it('delete rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
+      const harness = createHarness({ workspaceRoot: '/' });
+
+      await expect(harness.service.delete('/projects/x/main.ts', 'machine')).rejects.toBeInstanceOf(
+        WorkspaceScopeViolationError,
+      );
+      expect(harness.proxy.unlink).not.toHaveBeenCalled();
+      harness.disposeChannel();
+    });
+
+    it('rename rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+
+      await expect(harness.service.rename('main.ts', '/projects/other/main.ts')).rejects.toBeInstanceOf(
+        WorkspaceScopeViolationError,
+      );
+      expect(harness.proxy.rename).not.toHaveBeenCalled();
+      harness.disposeChannel();
+    });
+
+    it('duplicate rejects foreign-absolute keys with WorkspaceScopeViolationError before touching the proxy', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+
+      await expect(harness.service.duplicate('main.ts', '/projects/other/copy.ts')).rejects.toBeInstanceOf(
+        WorkspaceScopeViolationError,
+      );
+      expect(harness.proxy.duplicateFile).not.toHaveBeenCalled();
+      expect(harness.proxy.writeFile).not.toHaveBeenCalled();
+      harness.disposeChannel();
+    });
+
+    it('writeFiles normalizes absolute-but-in-scope keys to workspace-relative paths in batchWritten', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+      const events: ContentChangeEvent[] = [];
+      harness.service.onDidContentChange((event) => {
+        events.push(event);
+      });
+
+      const absoluteKey = '/projects/abc/main.ts';
+      const relativeKey = 'lib/util.ts';
+      await harness.service.writeFiles(
+        {
+          [absoluteKey]: { content: new Uint8Array([1, 2, 3]) },
+          [relativeKey]: { content: new Uint8Array([4, 5, 6]) },
+        },
+        'machine',
+      );
+
+      const batchWritten = events.find((event) => event.type === 'batchWritten');
+      expect(batchWritten).toBeDefined();
+      if (batchWritten?.type === 'batchWritten') {
+        expect(batchWritten.paths).toEqual(['main.ts', 'lib/util.ts']);
+      }
+      harness.disposeChannel();
+    });
+
+    it('write normalizes absolute-but-in-scope keys to workspace-relative paths in written events', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+      const events: ContentChangeEvent[] = [];
+      harness.service.onDidContentChange((event) => {
+        events.push(event);
+      });
+
+      await harness.service.write('/projects/abc/main.ts', new Uint8Array([1, 2, 3]), 'machine');
+
+      const written = events.find((event) => event.type === 'written');
+      expect(written).toBeDefined();
+      if (written?.type === 'written') {
+        expect(written.path).toBe('main.ts');
+      }
+      // Cache is keyed by the normalized workspace-relative form.
+      expect(harness.service.has('main.ts')).toBe(true);
+      expect(harness.service.has('/projects/abc/main.ts')).toBe(false);
+      harness.disposeChannel();
+    });
+
+    it('delete normalizes absolute-but-in-scope keys to workspace-relative paths in deleted events', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+      const events: ContentChangeEvent[] = [];
+      harness.service.onDidContentChange((event) => {
+        events.push(event);
+      });
+
+      await harness.service.delete('/projects/abc/main.ts', 'machine');
+
+      const deleted = events.find((event) => event.type === 'deleted');
+      expect(deleted).toBeDefined();
+      if (deleted?.type === 'deleted') {
+        expect(deleted.path).toBe('main.ts');
+      }
+      harness.disposeChannel();
+    });
+
+    it('rename normalizes absolute-but-in-scope keys to workspace-relative paths in renamed events', async () => {
+      const harness = createHarness({ workspaceRoot: '/projects/abc' });
+      const events: ContentChangeEvent[] = [];
+      harness.service.onDidContentChange((event) => {
+        events.push(event);
+      });
+
+      await harness.service.rename('/projects/abc/old.ts', '/projects/abc/new.ts');
+
+      const renamed = events.find((event) => event.type === 'renamed');
+      expect(renamed).toBeDefined();
+      if (renamed?.type === 'renamed') {
+        expect(renamed.oldPath).toBe('old.ts');
+        expect(renamed.newPath).toBe('new.ts');
+      }
+      harness.disposeChannel();
     });
   });
 });

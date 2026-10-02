@@ -1,0 +1,6 @@
+extends: existence
+message: "Avoid 'Welcome to' filler — state the page purpose directly."
+level: error
+ignorecase: true
+tokens:
+  - '\bWelcome to\b'

@@ -5,11 +5,17 @@ import type { ChatEditorViewerProps } from '#routes/projects_.$id/chat-editor-vi
 import { createMonacoPath } from '#routes/projects_.$id/chat-editor-viewer.types.js';
 
 export function ChatEditorCodeViewer({
+  // `paneId` is accepted to satisfy the shared `ChatEditorViewerProps`
+  // contract — the plain code viewer has no internal tab state so it
+  // does not need to key on the pane identity. Multi-tab viewers (e.g.
+  // markdown) DO use it as a React `key` to survive renames.
+  paneId: _paneId,
   filePath,
   content,
   language,
   onChange,
   onValidate,
+  readOnly,
 }: ChatEditorViewerProps): React.JSX.Element {
   return (
     <>
@@ -22,6 +28,7 @@ export function ChatEditorCodeViewer({
         path={createMonacoPath(filePath)}
         onChange={onChange}
         onValidate={onValidate}
+        options={readOnly === true ? { readOnly: true } : undefined}
       />
     </>
   );

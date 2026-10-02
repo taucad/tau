@@ -71,7 +71,7 @@ export function ChatMessageToolDeleteFile({
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={X} fallbackTitle='Failed to delete file' />;
+      return <ChatToolError errorText={part.errorText} icon={X} noun='file deletion' />;
     }
 
     case 'approval-requested':

@@ -10,12 +10,11 @@ import { useColor } from '#hooks/use-color.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
 import { createViewportGizmoCubeAxes } from '#components/geometry/graphics/three/controls/viewport-gizmo-cube-axes.js';
 import { useGraphicsSelector } from '#hooks/use-graphics.js';
+import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import {
-  syncGizmoFov,
   resolveGizmoContainer,
-  createGizmoCanvas,
-  createGizmoRenderer,
-  disposeGizmoResources,
+  syncGizmoFov,
+  useGizmoResizeSync,
 } from '#components/geometry/graphics/three/utils/gizmo.utils.js';
 
 type ViewportGizmoOnshapeProps = {
@@ -41,7 +40,7 @@ export function ViewportGizmoOnshape({
   container,
   dependencies = emptyDependencies,
 }: ViewportGizmoOnshapeProps): ReactNode {
-  const camera = useThree((state) => state.camera);
+  const camera = useThree((state) => state.camera) as THREE.PerspectiveCamera;
   const gl = useThree((state) => state.gl);
   const controls = useThree((state) => state.controls) as OrbitControls;
   const scene = useThree((state) => state.scene);
@@ -53,49 +52,47 @@ export function ViewportGizmoOnshape({
   // Subscribe to the viewport FOV from the per-view graphics machine
   const cameraFovAngle = useGraphicsSelector((state) => state.context.cameraFovAngle);
 
-  // Keep a ref to the current angle so the creation effect can read it without
-  // adding cameraFovAngle as a dependency (which would cause expensive recreation)
   const cameraFovAngleRef = useRef(cameraFovAngle);
   cameraFovAngleRef.current = cameraFovAngle;
 
-  // Ref to the live gizmo instance for the FOV sync effect
-  const gizmoRef = useRef<ViewportGizmo | undefined>(null);
-  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref
-  const rendererRef = useRef<THREE.WebGLRenderer | null>(null);
+  const gizmoRef = useRef<ViewportGizmo | undefined>(undefined);
+
+  const graphicsBackendThree = useThreeGraphicsBackend();
 
   const handleChange = useCallback((): void => {
     invalidate();
   }, [invalidate]);
 
-  // Demand-based gizmo rendering: only render when the R3F frame loop fires (on invalidation).
-  // The gizmo uses a dedicated renderer, but three-viewport-gizmo's render() only clears
-  // the depth buffer (designed for shared-renderer overlays). We must clear the color buffer
-  // ourselves to prevent ghosting from previous frames.
   useFrame(() => {
-    if (rendererRef.current && gizmoRef.current) {
-      rendererRef.current.toneMapping = THREE.NoToneMapping;
-      rendererRef.current.clear();
-      gizmoRef.current.render();
-    }
-  });
-
-  // Create DOM overlay for gizmo
-  useEffect(() => {
-    // Early return if we don't have the required components
-    if (!camera || !gl || !controls) {
+    const gizmo = gizmoRef.current;
+    if (!gizmo) {
       return;
     }
 
-    const canvas = createGizmoCanvas(className);
+    const supportsTone = 'toneMapping' in gl;
+    const previousTone = supportsTone ? gl.toneMapping : undefined;
+    if (supportsTone) {
+      gl.toneMapping = THREE.NoToneMapping;
+    }
+
+    gizmo.render();
+
+    if (supportsTone && previousTone !== undefined) {
+      gl.toneMapping = previousTone;
+    }
+  }, 3);
+
+  useGizmoResizeSync(gizmoRef);
+
+  useEffect(() => {
+    if (!camera || !gl || !controls) {
+      return;
+    }
 
     const containerToUse = resolveGizmoContainer(container, gl.domElement);
     if (!containerToUse) {
       return;
     }
-
-    containerToUse.append(canvas);
-
-    const renderer = createGizmoRenderer(canvas, size);
 
     const backgroundColor = theme === Theme.DARK ? 0x44_44_44 : 0xcc_cc_cc;
     const faceConfig = {
@@ -120,7 +117,6 @@ export function ViewportGizmoOnshape({
       },
     } as const satisfies GizmoAxisOptions;
 
-    // Configure the gizmo options
     const gizmoConfig: GizmoOptions = {
       type: 'cube',
       placement: 'bottom-right',
@@ -150,15 +146,11 @@ export function ViewportGizmoOnshape({
       bottom: faceConfig,
     };
 
-    // Create the gizmo
-    const gizmo = new ViewportGizmo(camera, renderer, gizmoConfig);
+    const gizmo = new ViewportGizmo(camera, gl, gizmoConfig);
     gizmoRef.current = gizmo;
-    rendererRef.current = renderer;
 
-    // Synchronize the gizmo's internal camera FOV with the current viewport FOV
     syncGizmoFov(gizmo, cameraFovAngleRef.current);
 
-    // Add event listeners for the gizmo
     gizmo.addEventListener('change', handleChange);
     gizmo.addEventListener('hoverchange', handleChange);
 
@@ -176,25 +168,40 @@ export function ViewportGizmoOnshape({
         // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Three.js axis color
         zLabelColor: 'rgb(37, 78, 136)',
         lineWidth: 2,
+        renderingBackend: graphicsBackendThree,
       }),
     );
 
-    // Attach the controls to enable proper interaction
     gizmo.attachControls(controls);
 
-    // Cleanup function
-    return () => {
-      // Clear refs so the useFrame and FOV sync effect cannot operate on disposed objects
-      gizmoRef.current = null;
-      rendererRef.current = null;
+    invalidate();
 
-      disposeGizmoResources({ gizmo, renderer, canvas, handleChange });
+    return () => {
+      const existing = gizmoRef.current;
+      gizmoRef.current = undefined;
+
+      if (existing) {
+        existing.removeEventListener('change', handleChange);
+        existing.removeEventListener('hoverchange', handleChange);
+        existing.dispose();
+      }
     };
     // oxlint-disable-next-line react-hooks/exhaustive-deps -- dependencies array is user-provided for custom recreation triggers
-  }, [camera, gl, controls, scene, serialized.hex, theme, size, handleChange, container, ...dependencies]);
+  }, [
+    camera,
+    gl,
+    controls,
+    graphicsBackendThree,
+    scene,
+    serialized.hex,
+    theme,
+    size,
+    handleChange,
+    container,
+    invalidate,
+    ...dependencies,
+  ]);
 
-  // Real-time FOV sync: update the gizmo's internal camera when the viewport FOV changes.
-  // This is a separate effect to avoid expensive gizmo recreation on every slider tick.
   useEffect(() => {
     if (gizmoRef.current) {
       syncGizmoFov(gizmoRef.current, cameraFovAngle);

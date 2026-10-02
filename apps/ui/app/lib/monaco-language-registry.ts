@@ -23,26 +23,29 @@
  */
 
 import type * as Monaco from 'monaco-editor';
+import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { MonacoModelService } from '#lib/monaco-model-service.js';
 import type { MonacoMarkerService } from '#lib/monaco-marker-service.js';
 import type { FileManagerRef, FileManagerApi } from '#machines/file-manager.machine.types.js';
-
-export type NavigationHandler = {
-  canHandle(path: string): boolean;
-  isReadOnly?(path: string): boolean;
-};
+import type { MonacoWorkspaceFs } from '#lib/monaco-workspace-fs/monaco-workspace-fs.types.js';
+import type { TauLanguageHostInit } from '@taucad/lsp/language-fs-sync-host';
 
 export type ActivationContext = {
   monaco: typeof Monaco;
   modelService: MonacoModelService;
   markerService: MonacoMarkerService;
+  workspaceFs: MonacoWorkspaceFs;
   fileManager: FileManagerApi;
   fileManagerRef: FileManagerRef;
+  treeService: FileTreeService;
+  /** FM-owned file pool SAB (optional when cross-origin isolated / SAB unavailable). */
+  filePoolBuffer?: SharedArrayBuffer;
+  /** Tier-2 sync FS init for Monaco TS worker; see {@link openTauLanguageHostPort}. */
+  openLanguageHostPort?: () => TauLanguageHostInit | undefined;
 };
 
 export type ActivationResult = {
   disposables: Monaco.IDisposable[];
-  navigationHandler?: NavigationHandler;
 };
 
 export type LanguageContribution = {
@@ -108,9 +111,6 @@ export class LanguageContributionRegistry {
   /** Disposables from the current activation cycle (per-contribution + onLanguage subscriptions). */
   private activationDisposables: Monaco.IDisposable[] = [];
 
-  /** Navigation handlers from the current activation cycle (mutated as deferred activations land). */
-  private currentHandlers: NavigationHandler[] = [];
-
   private onActivationError?: ActivationErrorCallback;
 
   /** Languages already prefetched this activation cycle so prefetch stays idempotent. */
@@ -160,18 +160,15 @@ export class LanguageContributionRegistry {
 
   /**
    * Phase 2: Wire each contribution's deferred activation to its
-   * `activationLanguageIds` via `monaco.languages.onLanguage`. Returns the
-   * navigation-handler array, which is mutated as deferred activations land
-   * (callers retain the reference).
+   * `activationLanguageIds` via `monaco.languages.onLanguage`.
    */
-  public activate(context: ActivationContext): NavigationHandler[] {
+  public activate(context: ActivationContext): void {
     if (this.lastActivatedEpoch >= this.activationEpoch) {
-      return this.currentHandlers;
+      return;
     }
 
     this.disposeActivation();
 
-    this.currentHandlers = [];
     this.prefetchedLanguageIds = new Set();
     this.activeMonaco = context.monaco;
 
@@ -197,9 +194,6 @@ export class LanguageContributionRegistry {
           const result = contribution.activate(context);
 
           this.activationDisposables.push(...result.disposables);
-          if (result.navigationHandler) {
-            this.currentHandlers.push(result.navigationHandler);
-          }
         } catch (error) {
           // oxlint-disable-next-line no-console -- fail-open: surface activation failure without breaking other contributions
           console.error(`Failed to activate language contribution "${contribution.languageId}":`, error);
@@ -229,8 +223,6 @@ export class LanguageContributionRegistry {
     }
 
     this.lastActivatedEpoch = this.activationEpoch;
-
-    return this.currentHandlers;
   }
 
   /**
@@ -284,7 +276,6 @@ export class LanguageContributionRegistry {
     this.registered = false;
     this.lastActivatedEpoch = -1;
     this.activationEpoch = 0;
-    this.currentHandlers = [];
     this.prefetchedLanguageIds = new Set();
     this.activeMonaco = undefined;
   }

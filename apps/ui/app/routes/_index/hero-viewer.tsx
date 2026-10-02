@@ -24,7 +24,7 @@ import { Loader } from '#components/ui/loader.js';
 import type { Units } from '#components/geometry/parameters/rjsf-context.js';
 import qrcodeScad from '#routes/_index/qrcode.scad?raw';
 
-const heroBuildId = 'hero-qrcode-v2';
+const heroProjectId = 'hero-qrcode-v2';
 const heroMainFile = 'main.scad';
 
 const heroCode = { [heroMainFile]: qrcodeScad };
@@ -44,7 +44,7 @@ export function HeroViewer(): React.JSX.Element {
   const projectManager = useProjectManager();
 
   const [currentParams, setCurrentParams] = useState<Record<string, unknown>>({});
-  const [isCreatingBuild, setIsCreatingBuild] = useState(false);
+  const [isCreatingProject, setIsCreatingProject] = useState(false);
   const [isExporting, setIsExporting] = useState(false);
 
   const renderParams = useMemo(
@@ -112,11 +112,11 @@ export function HeroViewer(): React.JSX.Element {
   );
 
   const handleContinueInEditor = useCallback(async () => {
-    if (isCreatingBuild) {
+    if (isCreatingProject) {
       return;
     }
 
-    setIsCreatingBuild(true);
+    setIsCreatingProject(true);
 
     try {
       const createProject = await projectManager.createProject({
@@ -135,7 +135,7 @@ export function HeroViewer(): React.JSX.Element {
               parameters: currentParams,
             },
           },
-          forkedFrom: heroBuildId,
+          forkedFrom: heroProjectId,
         },
         files: { [heroMainFile]: { content: encodeTextFile(qrcodeScad) } },
       });
@@ -144,9 +144,9 @@ export function HeroViewer(): React.JSX.Element {
     } catch (error) {
       console.error('Failed to create project:', error);
       toast.error('Failed to create project');
-      setIsCreatingBuild(false);
+      setIsCreatingProject(false);
     }
-  }, [isCreatingBuild, currentParams, projectManager, navigate]);
+  }, [isCreatingProject, currentParams, projectManager, navigate]);
 
   return (
     <div className='space-y-6'>
@@ -166,11 +166,11 @@ export function HeroViewer(): React.JSX.Element {
             variant='outline'
             size='sm'
             className='absolute top-2 right-2 z-10 gap-1.5 bg-background/80 backdrop-blur-sm'
-            disabled={isCreatingBuild}
+            disabled={isCreatingProject}
             onClick={handleContinueInEditor}
           >
             <span>Continue in Editor</span>
-            {isCreatingBuild ? <Loader className='size-4' /> : <ArrowUpRight className='size-4' />}
+            {isCreatingProject ? <Loader className='size-4' /> : <ArrowUpRight className='size-4' />}
           </Button>
 
           <ModelViewer
@@ -213,7 +213,7 @@ export function HeroViewer(): React.JSX.Element {
                             items: exportFormatOptions,
                           },
                         ]}
-                        defaultValue={activeFormat}
+                        value={activeFormat}
                         getValue={(item) => item.format}
                         renderLabel={(item, selected) => (
                           <span className='flex w-full items-center justify-between'>

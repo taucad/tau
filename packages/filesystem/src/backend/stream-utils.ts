@@ -10,7 +10,7 @@
  * Balanced between memory overhead and IPC/context-switch cost.
  * @public
  */
-export const streamChunkSize = 256 * 1024;
+export const streamChunkSize: number = 256 * 1024;
 
 /**
  * Options for streaming file reads.

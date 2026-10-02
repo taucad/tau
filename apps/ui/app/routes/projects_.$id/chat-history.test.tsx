@@ -1,40 +1,60 @@
 // @vitest-environment jsdom
+import { useImperativeHandle } from 'react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { act, render, screen } from '@testing-library/react';
 import type { MyUIMessage } from '@taucad/chat';
-import type { KernelId } from '@taucad/types/constants';
-
-// The user-message metadata stamp inside ChatHistory.onSubmit must read the
-// chat-scoped kernel from useActiveChatKernel — never the global cookie via
-// useKernel — so a cookie change in another tab cannot silently retag the
-// kernel for the active chat.
-
-const activeKernelState: { current: KernelId } = { current: 'manifold' };
-const useActiveChatKernelMock = vi.fn(() => ({
-  kernelId: activeKernelState.current,
-  kernel: { id: activeKernelState.current, name: activeKernelState.current },
-  setActiveKernel: vi.fn(),
-}));
-
-vi.mock('#hooks/use-active-chat-kernel.js', () => ({
-  useActiveChatKernel: () => useActiveChatKernelMock(),
-}));
+import { chatTurnRequestSchema } from '@taucad/chat/schemas';
+import type { ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 
 // `useKernel` must NOT be called from chat-history anymore — guard with a
 // throwing mock so any regression is caught loudly.
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => {
-    throw new Error('chat-history should no longer call useKernel — switch to useActiveChatKernel');
+    throw new Error('chat-history should no longer call useKernel — switch to useCadChatClient');
   },
 }));
 
-const sendMessage = vi.fn();
+// Chat-history only reads `messageOrder` / `messages` selectors from useChat
+// now; sendMessage / retryMessage / etc. flow through useCadChatClient.
 const chatStateRef: { current: { messages: readonly MyUIMessage[] } } = { current: { messages: [] } };
 const setMockMessages = (messages: readonly MyUIMessage[]): void => {
   chatStateRef.current = { messages };
 };
+// Fake persistence actor — `chat-history.tsx` subscribes to
+// `restoreCancelledDraft` emits to refocus the composer after the
+// persistence machine lifts a cancelled user message back into the draft.
+// The fake captures registered callbacks so the empty-cancel test below
+// can drive the emit synchronously.
+type FakePersistenceListener = (payload: unknown) => void;
+const persistenceListeners = new Map<string, Set<FakePersistenceListener>>();
+const fakePersistenceActorRef = {
+  on: (type: string, callback: FakePersistenceListener) => {
+    let bucket = persistenceListeners.get(type);
+    if (!bucket) {
+      bucket = new Set();
+      persistenceListeners.set(type, bucket);
+    }
+    bucket.add(callback);
+    const ownedBucket = bucket;
+    return {
+      unsubscribe: () => {
+        ownedBucket.delete(callback);
+      },
+    };
+  },
+};
+
+const emitRestoreCancelledDraft = (payload: unknown): void => {
+  const bucket = persistenceListeners.get('restoreCancelledDraft');
+  if (!bucket) {
+    return;
+  }
+  for (const listener of bucket) {
+    listener(payload);
+  }
+};
+
 vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ sendMessage }),
   useChatSelector: (selector: (state: unknown) => unknown) => {
     const { messages } = chatStateRef.current;
     return selector({
@@ -42,14 +62,50 @@ vi.mock('#hooks/use-chat.js', () => ({
       messageOrder: messages.map((m) => m.id),
     });
   },
+  useChatContext: () => ({ persistenceActorRef: fakePersistenceActorRef }),
 }));
 
-// Capture the textarea onSubmit callback so the test can invoke it
-// directly without driving the full draft pipeline.
-const capturedTextarea: { onSubmit?: (payload: unknown) => Promise<void> } = {};
+// Capture the body the chat client receives on submit so the wire-format
+// invariant test below can validate it against the shared API schema.
+const submitMock = vi.fn();
+const cadChatRef: {
+  current: {
+    submit: (input: { readonly text: string; readonly imageUrls?: readonly string[] }) => void;
+    agent: unknown;
+  };
+} = {
+  current: {
+    submit: submitMock,
+    agent: {
+      profile: 'cad',
+      model: 'openai-gpt-5.5',
+      kernel: 'replicad',
+      mode: 'agent',
+      toolChoice: 'auto',
+      testingEnabled: true,
+    },
+  },
+};
+vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
+  useCadChatClient: () => cadChatRef.current,
+}));
+
+// Capture the textarea onSubmit callback and focus handle so the tests
+// can both invoke onSubmit directly and assert that empty-cancel
+// recoveries refocus the composer.
+const capturedTextarea: {
+  onSubmit?: (payload: { content: string; imageUrls: string[] }) => Promise<void>;
+  focus: ReturnType<typeof vi.fn<() => void>>;
+} = {
+  focus: vi.fn<() => void>(),
+};
 vi.mock('#components/chat/chat-textarea.js', () => ({
-  ChatTextarea: (properties: { readonly onSubmit?: (payload: unknown) => Promise<void> }): React.JSX.Element => {
+  ChatTextarea: (properties: {
+    readonly ref?: React.Ref<ChatTextareaHandle>;
+    readonly onSubmit?: (payload: { content: string; imageUrls: string[] }) => Promise<void>;
+  }): React.JSX.Element => {
     capturedTextarea.onSubmit = properties.onSubmit;
+    useImperativeHandle(properties.ref, () => ({ focus: capturedTextarea.focus }), []);
     return <div data-testid='chat-textarea' />;
   },
 }));
@@ -97,10 +153,6 @@ vi.mock('#hooks/use-keyboard.js', () => ({
   useKeybinding: () => ({ formattedKeyCombination: 'Ctrl+C' }),
 }));
 
-vi.mock('#hooks/use-cookie.js', () => ({
-  useCookie: () => [true, vi.fn()],
-}));
-
 vi.mock('#components/chat/at-reference-context.js', () => ({
   AtReferenceProvider: ({ children }: { readonly children: React.ReactNode }) => <div>{children}</div>,
 }));
@@ -141,11 +193,9 @@ vi.mock('react-virtuoso', () => ({
 
 const { ChatHistory } = await import('#routes/projects_.$id/chat-history.js');
 
-const submitDraft = async (model = 'cookie-model') => {
+const submitDraft = async (content = 'hello') => {
   await capturedTextarea.onSubmit?.({
-    content: 'hello',
-    model,
-    metadata: {},
+    content,
     imageUrls: [],
   });
 };
@@ -156,61 +206,50 @@ const message = (id: string, role: MyUIMessage['role']): MyUIMessage => ({
   parts: [{ type: 'text', text: id }],
 });
 
-describe('ChatHistory — chat-scoped kernel stamp', () => {
+describe('ChatHistory — submit routes through useCadChatClient', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    activeKernelState.current = 'manifold';
     capturedTextarea.onSubmit = undefined;
     setMockMessages([]);
   });
 
-  it('stamps user-message metadata.kernel from useActiveChatKernel (manifold)', async () => {
+  it('calls cadChat.submit with the text and imageUrls payload from the textarea', async () => {
     render(<ChatHistory />);
-    await submitDraft();
+    await submitDraft('design a desk');
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const sent = sendMessage.mock.calls[0]?.[0] as { metadata: { kernel: string } };
-    expect(sent.metadata.kernel).toBe('manifold');
+    expect(submitMock).toHaveBeenCalledTimes(1);
+    expect(submitMock).toHaveBeenCalledWith({ text: 'design a desk', imageUrls: [] });
   });
 
-  it('reflects the chat-scoped kernel switch on subsequent submits (jscad)', async () => {
-    // ChatHistory is wrapped in `memo` and takes no props, so the only way to
-    // re-evaluate its hooks is to force a fresh mount via key changes — that
-    // also exercises the `kernelRef` re-initialisation path.
-    activeKernelState.current = 'jscad';
-    render(<ChatHistory key='second-mount' />);
-    await submitDraft();
-
-    const sent = sendMessage.mock.calls[0]?.[0] as { metadata: { kernel: string } };
-    expect(sent.metadata.kernel).toBe('jscad');
-  });
-
-  // Wire-format invariant. Every outgoing user message must carry BOTH
-  // `metadata.model` and `metadata.kernel`, both resolved from chat-scoped
-  // active values. The API (`apps/api/app/api/chat/chat.controller.ts`)
-  // depends on these two fields together; if either drops or drifts to the
-  // cookie source, the agent silently runs with the wrong system prompt or
-  // tool surface — the regression that motivated this whole refactor.
-  it('stamps BOTH metadata.model and metadata.kernel together (wire-format invariant)', async () => {
-    activeKernelState.current = 'replicad';
+  // Wire-format invariant. The chat-client builds the per-request `agent`
+  // payload from `useCadAgentConfig`. We verify the request body the API
+  // would receive (synthesised here from the captured agent identity + AI
+  // SDK envelope fields) parses cleanly through the shared
+  // `chatTurnRequestSchema`. This is the regression coverage for the
+  // original "missing kernel on resubmit" bug — the chat-client owns the
+  // wire body, not the chat-history component.
+  it('produces a wire body satisfying chatTurnRequestSchema when submit fires', async () => {
     render(<ChatHistory />);
-    await submitDraft('chat-scoped-model');
+    await submitDraft('build a vase');
 
-    expect(sendMessage).toHaveBeenCalledTimes(1);
-    const sent = sendMessage.mock.calls[0]?.[0] as {
-      metadata: { kernel?: string; model?: string };
+    const userMessage: MyUIMessage = {
+      id: 'msg_test',
+      role: 'user',
+      parts: [{ type: 'text', text: 'build a vase' }],
     };
-    expect(sent.metadata.kernel).toBe('replicad');
-    expect(sent.metadata.model).toBe('chat-scoped-model');
-    expect(sent.metadata.model).toBeDefined();
-    expect(sent.metadata.kernel).toBeDefined();
+    const wireBody = {
+      id: 'chat_test',
+      messages: [userMessage],
+      agent: cadChatRef.current.agent,
+    };
+
+    expect(() => chatTurnRequestSchema.parse(wireBody)).not.toThrow();
   });
 });
 
 describe('ChatHistory — turn group rendering', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    activeKernelState.current = 'manifold';
     capturedTextarea.onSubmit = undefined;
     capturedVirtuoso.totalCount = undefined;
     capturedVirtuoso.itemContent = undefined;
@@ -296,5 +335,60 @@ describe('ChatHistory — turn group rendering', () => {
 
     expect(capturedVirtuoso.totalCount).toBe(3);
     expect(typeof capturedVirtuoso.itemContent).toBe('function');
+  });
+});
+
+describe('ChatHistory — empty-cancel composer refocus', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    capturedTextarea.onSubmit = undefined;
+    capturedTextarea.focus = vi.fn<() => void>();
+    persistenceListeners.clear();
+    setMockMessages([]);
+  });
+
+  it('refocuses the composer on the next animation frame when persistence emits restoreCancelledDraft', async () => {
+    const requestAnimationFrameSpy = vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => {
+      callback(0);
+      return 0;
+    });
+
+    try {
+      render(<ChatHistory />);
+
+      const userMessage: MyUIMessage = {
+        id: 'msg_user_cancelled',
+        role: 'user',
+        parts: [{ type: 'text', text: 'design a bracket' }],
+      };
+
+      // Subscriber registers during the mount effect.
+      expect(persistenceListeners.get('restoreCancelledDraft')?.size).toBe(1);
+      expect(capturedTextarea.focus).not.toHaveBeenCalled();
+
+      act(() => {
+        emitRestoreCancelledDraft({
+          type: 'restoreCancelledDraft',
+          userMessage,
+          truncatedMessages: [],
+          cause: 'user_stop',
+        });
+      });
+
+      expect(requestAnimationFrameSpy).toHaveBeenCalledTimes(1);
+      expect(capturedTextarea.focus).toHaveBeenCalledTimes(1);
+    } finally {
+      requestAnimationFrameSpy.mockRestore();
+    }
+  });
+
+  it('unsubscribes the restore listener on unmount', () => {
+    const { unmount } = render(<ChatHistory />);
+
+    expect(persistenceListeners.get('restoreCancelledDraft')?.size).toBe(1);
+
+    unmount();
+
+    expect(persistenceListeners.get('restoreCancelledDraft')?.size ?? 0).toBe(0);
   });
 });

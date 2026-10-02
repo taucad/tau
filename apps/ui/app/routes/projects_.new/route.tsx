@@ -1,6 +1,7 @@
 import { useState, useCallback } from 'react';
 import { Link, useNavigate } from 'react-router';
-import { useAuthenticate } from '@daveyplate/better-auth-ui';
+import { useSession } from '@better-auth-ui/react';
+import { authClient } from '#lib/auth-client.js';
 import type { KernelProvider } from '@taucad/runtime';
 import type { FileSystemBackend } from '@taucad/types';
 import { kernelConfigurations } from '@taucad/types/constants';
@@ -13,7 +14,9 @@ import { SvgIcon } from '#components/icons/svg-icon.js';
 import { RadioGroup, RadioGroupItem } from '#components/ui/radio-group.js';
 
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from '#components/ui/accordion.js';
+import { getKernelRequiredTier } from '@taucad/billing';
 import { getKernelOption } from '#utils/kernel.utils.js';
+import { KernelTierBadge, TierBadge } from '#components/tier-badge.js';
 import { toast } from '#components/ui/sonner.js';
 import { encodeTextFile } from '#utils/filesystem.utils.js';
 import type { Handle } from '#types/matches.types.js';
@@ -21,9 +24,14 @@ import { cn } from '#utils/ui.utils.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProjectManager } from '#hooks/use-project-manager.js';
 import { useKernel } from '#hooks/use-kernel.js';
-import { BackendSelector } from '#components/filesystem/backend-selector.js';
+import { BackendSelector, coerceFilesystemBackendCookie } from '#components/filesystem/backend-selector.js';
+import type { SelectableFilesystemBackend } from '#components/filesystem/backend-selector.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
+import { isWorkspaceDirectoryRequiredError } from '#filesystem/workspace-errors.js';
+import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
+import { useNewProjectWorkspacePicker } from '#routes/projects_.new/use-new-project-workspace-picker.js';
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '#components/ui/select.js';
 
 export const handle: Handle = {
   breadcrumb() {
@@ -42,6 +50,7 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
   const selectedOption = getKernelOption(kernelId);
   return (
     <div className='space-y-4'>
+      <TierBadge tier={getKernelRequiredTier(kernelId)} />
       <p className='text-sm leading-relaxed text-muted-foreground'>{selectedOption.longDescription}</p>
 
       <div className='space-y-3'>
@@ -80,11 +89,18 @@ function KernelDetailsContent({ kernelId }: { readonly kernelId: KernelProvider 
 function useProjectCreation() {
   const navigate = useNavigate();
   const [isCreating, setIsCreating] = useState(false);
-  const { user } = useAuthenticate({ enabled: false });
+  const { data: sessionData } = useSession(authClient);
+  const user = sessionData?.user;
   const projectManager = useProjectManager();
 
   const createProject = useCallback(
-    async (projectData: { name: string; description: string; kernel: KernelProvider; backend: FileSystemBackend }) => {
+    async (projectData: {
+      name: string;
+      description: string;
+      kernel: KernelProvider;
+      backend: FileSystemBackend;
+      workspaceId?: string;
+    }) => {
       setIsCreating(true);
       try {
         const selectedOption = getKernelOption(projectData.kernel);
@@ -113,6 +129,7 @@ function useProjectCreation() {
           },
           chatName: 'Initial design',
           backend: projectData.backend,
+          workspaceId: projectData.workspaceId,
           // Set initial panel state: editor open
           editorState: {
             panelState: { openPanels: { editor: true, files: true } },
@@ -135,12 +152,20 @@ function useProjectCreation() {
 export default function ProjectsNew(): React.JSX.Element {
   const navigate = useNavigate();
   const { createProject, isCreating } = useProjectCreation();
+  const telemetry = useWorkspaceTelemetry();
 
   const { kernel, setKernel: setSelectedKernel } = useKernel();
   const [projectName, setProjectName] = useState('');
   const [projectDescription, setProjectDescription] = useState('');
   const [backendCookie] = useCookie(cookieName.filesystemBackend, 'indexeddb');
-  const [selectedBackend, setSelectedBackend] = useState<FileSystemBackend>(backendCookie as FileSystemBackend);
+  const [selectedBackend, setSelectedBackend] = useState<SelectableFilesystemBackend>(
+    coerceFilesystemBackendCookie(backendCookie),
+  );
+
+  const { workspaces, selectedWorkspaceId, setSelectedWorkspaceId, workspaceStatus } = useNewProjectWorkspacePicker();
+
+  const activeWorkspace = workspaces.find((workspace) => workspace.workspaceId === selectedWorkspaceId);
+  const backendBadge = selectedBackend === 'webaccess' && activeWorkspace ? activeWorkspace.name : undefined;
 
   const handleCreateProject = useCallback(async () => {
     try {
@@ -149,17 +174,59 @@ export default function ProjectsNew(): React.JSX.Element {
         description: projectDescription,
         kernel,
         backend: selectedBackend,
+        workspaceId: selectedBackend === 'webaccess' ? selectedWorkspaceId : undefined,
       });
-    } catch {
+    } catch (error) {
+      // Structured workspace errors route to an actionable toast that
+      // explains what the user must do next (Audit R2/R3). Anything else
+      // is treated as a generic creation failure. Workspace management
+      // (connect / grant access / change folder) is owned by Settings +
+      // `/files` — this route only surfaces the picker, so the toast
+      // routes the user there for any recoverable workspace failure.
+      if (isWorkspaceDirectoryRequiredError(error)) {
+        telemetry.projectCreateWebaccessBlocked({ reason: error.code });
+        const toastLabelByCode = {
+          missing: 'Connect a workspace folder to use the File System backend.',
+          permission: 'Workspace access was revoked. Re-grant permission to continue.',
+          unsupported: 'This browser does not support the File System Access API. Pick a different storage backend.',
+        } as const;
+        toast.error(toastLabelByCode[error.code], {
+          action:
+            error.code === 'unsupported'
+              ? undefined
+              : {
+                  label: 'Manage Workspaces',
+                  onClick: () => {
+                    void navigate('/files');
+                  },
+                },
+        });
+        return;
+      }
       toast.error('Failed to create project. Please try again.');
     }
-  }, [projectName, projectDescription, kernel, selectedBackend, createProject]);
+  }, [
+    projectName,
+    projectDescription,
+    kernel,
+    selectedBackend,
+    selectedWorkspaceId,
+    createProject,
+    navigate,
+    telemetry,
+  ]);
 
   const handleCancel = useCallback(() => {
     void navigate('/');
   }, [navigate]);
 
-  const isCreateButtonDisabled = !projectName.trim() || isCreating;
+  // Block submit when webaccess is chosen but the workspace can't currently
+  // accept writes. Mirrors the `WorkspaceDirectoryRequiredError` surface so
+  // the user is never able to click Create and get a toast — the inline
+  // picker below has already prompted them to recover (R7).
+  const isWebAccessBlocked =
+    selectedBackend === 'webaccess' && (workspaceStatus !== 'connected' || !selectedWorkspaceId);
+  const isCreateButtonDisabled = !projectName.trim() || isCreating || isWebAccessBlocked;
 
   // Add keyboard shortcut for Enter to submit
   const { formattedKeyCombination } = useKeybinding(
@@ -215,14 +282,38 @@ export default function ProjectsNew(): React.JSX.Element {
               <Label>Storage Backend</Label>
               <BackendSelector
                 value={selectedBackend}
+                badge={backendBadge}
                 onSelect={(value) => {
-                  setSelectedBackend(value as FileSystemBackend);
+                  setSelectedBackend(value as SelectableFilesystemBackend);
                 }}
-                isInternalHidden
               />
               <p className='text-xs text-muted-foreground'>
                 Where project files are stored. Can be changed later in project settings.
               </p>
+
+              {selectedBackend === 'webaccess' && workspaces.length > 1 ? (
+                <div className='flex flex-col gap-1.5 pt-2'>
+                  <Label className='text-xs text-muted-foreground'>Workspace</Label>
+                  <Select
+                    value={selectedWorkspaceId ?? undefined}
+                    onValueChange={(value) => {
+                      setSelectedWorkspaceId(value);
+                    }}
+                  >
+                    <SelectTrigger className='w-full bg-background'>
+                      <SelectValue placeholder='Pick a workspace' />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {workspaces.map((workspace) => (
+                        <SelectItem key={workspace.workspaceId} value={workspace.workspaceId}>
+                          {workspace.name}
+                          {workspace.isDefault ? ' (default)' : ''}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : undefined}
             </div>
           </CardContent>
 
@@ -270,7 +361,10 @@ export default function ProjectsNew(): React.JSX.Element {
                               <SvgIcon id={option.id} className='mt-0.5 size-6 shrink-0' />
                               <div className='flex w-full min-w-0 flex-col gap-1'>
                                 <div className='flex w-full items-start justify-between gap-2'>
-                                  <span className='text-sm font-medium'>{option.name}</span>
+                                  <span className='flex items-center gap-1.5 text-sm font-medium'>
+                                    {option.name}
+                                    <KernelTierBadge kernelId={option.id} />
+                                  </span>
                                   <span className='font-mono text-xs text-muted-foreground/70'>
                                     {option.backendProvider}
                                   </span>
@@ -316,7 +410,10 @@ export default function ProjectsNew(): React.JSX.Element {
                         <SvgIcon id={option.id} className='mt-0.5 size-6 shrink-0' />
                         <div className='flex w-full min-w-0 flex-col gap-1'>
                           <div className='flex w-full items-start justify-between gap-2'>
-                            <span className='text-sm font-medium'>{option.name}</span>
+                            <span className='flex items-center gap-1.5 text-sm font-medium'>
+                              {option.name}
+                              <KernelTierBadge kernelId={option.id} />
+                            </span>
                             <span className='font-mono text-xs text-muted-foreground/70'>{option.backendProvider}</span>
                           </div>
                           <span className='text-xs leading-relaxed text-muted-foreground'>{option.description}</span>

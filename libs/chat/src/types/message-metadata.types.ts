@@ -3,7 +3,12 @@ import type z from 'zod';
 import type { messageMetadataSchema, snapshotSchema } from '#schemas/metadata.schema.js';
 import type { contextPayloadSchema, skillMetadataSchema } from '#schemas/context-payload.schema.js';
 
-/** @public */
+/**
+ * Per-message metadata stamped onto `MyUIMessage` rows for UI display
+ * (creation timestamp + lifecycle status). Per-turn agent config lives on
+ * `body.agent`, not here.
+ * @public
+ */
 export type MyMetadata = z.infer<typeof messageMetadataSchema>;
 
 /**

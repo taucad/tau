@@ -1,9 +1,8 @@
 import { useEffect } from 'react';
 import type { ReactNode } from 'react';
 import { useThree } from '@react-three/fiber';
-import { useActorRef } from '@xstate/react';
 import type { OrbitControls } from 'three/addons';
-import { controlsListenerMachine } from '#machines/controls-listener.machine.js';
+import { ControlsListenerBridge } from '#components/geometry/graphics/three/controls-listener-bridge.js';
 import { updateCameraFov } from '#components/geometry/graphics/three/utils/camera.utils.js';
 import { useGraphics, useGraphicsSelector, useScreenshotCapability } from '#hooks/use-graphics.js';
 
@@ -40,13 +39,9 @@ export function ActorBridge(): ReactNode {
     updateCameraFov({ camera, cameraFovAngle, invalidate });
   }, [cameraFovAngle, camera, invalidate]);
 
-  // Setup controls listener
-  useActorRef(controlsListenerMachine, {
-    input: {
-      graphicsActorRef: graphicsActor,
-      controls: controls as OrbitControls,
-    },
-  });
+  if (!controls) {
+    return null;
+  }
 
-  return null;
+  return <ControlsListenerBridge controls={controls as OrbitControls} graphicsActor={graphicsActor} />;
 }

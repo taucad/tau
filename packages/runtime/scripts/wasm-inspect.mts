@@ -44,7 +44,7 @@ function findWasmFile(): string {
     return resolve(values.wasm);
   }
 
-  const candidates = [join(wasmDirectory, 'replicad_single.wasm'), join(symbolsDirectory, 'replicad_single.wasm')];
+  const candidates = [join(wasmDirectory, 'replicad_single.wasm'), join(symbolsDirectory, 'dist/replicad_single.wasm')];
 
   for (const candidate of candidates) {
     if (existsSync(candidate)) {
@@ -63,7 +63,7 @@ function findSymbolsFile(wasmPath: string): string | undefined {
 
   const base = basename(wasmPath, '.wasm');
   const candidates = [
-    join(symbolsDirectory, `${base}.js.symbols`),
+    join(symbolsDirectory, `dist/${base}.js.symbols`),
     wasmPath.replace('.wasm', '.js.symbols'),
     wasmPath.replace('.wasm', '.symbols'),
   ];

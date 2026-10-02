@@ -29,6 +29,7 @@
  */
 
 import type { MyMessagePart } from '@taucad/chat';
+import { fileUnchangedMarker } from '@taucad/chat/constants';
 
 // ── Categories ───────────────────────────────────────────────────────────────
 
@@ -203,8 +204,20 @@ const countTestCases = (part: MyMessagePart): number => {
  * Segments are emitted in the stable order
  * `files → searches → fetches → renders → screenshots → tests`.
  */
+const isCachedReadFilePart = (part: MyMessagePart): boolean => {
+  if (part.type !== 'tool-read_file') {
+    return false;
+  }
+  if (part.state !== 'output-available') {
+    return false;
+  }
+  const { content } = part.output;
+  return typeof content === 'string' && fileUnchangedMarker.matches(content);
+};
+
 const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts => {
   let files = 0;
+  let cachedReads = 0;
   let searches = 0;
   let fetches = 0;
   let renders = 0;
@@ -213,7 +226,13 @@ const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts 
 
   for (const part of parts) {
     switch (part.type) {
-      case 'tool-read_file':
+      case 'tool-read_file': {
+        files++;
+        if (isCachedReadFilePart(part)) {
+          cachedReads++;
+        }
+        break;
+      }
       case 'tool-list_directory': {
         files++;
         break;
@@ -245,7 +264,8 @@ const generateResearchSummary = (parts: readonly MyMessagePart[]): SummaryParts 
 
   const segments: string[] = [];
   if (files > 0) {
-    segments.push(pluralize(files, 'file'));
+    const filesSegment = pluralize(files, 'file');
+    segments.push(cachedReads > 0 ? `${filesSegment} (${cachedReads} cached)` : filesSegment);
   }
   if (searches > 0) {
     segments.push(pluralize(searches, 'search', 'searches'));

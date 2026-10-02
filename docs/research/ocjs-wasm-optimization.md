@@ -565,4 +565,4 @@ The current build binds ~241 symbols. Audit work (see `docs/research/replicad-oc
 - [OCCT V8 Migration](occt-v8-migration.md) — Migration notes and build configuration
 - [OCCT V7.6.2 → V8 RC4 Changelog](opencascade-v7.62-v8rc4-changelog.md) — Detailed changelog with 1,085 commits
 - [Replicad Symbol Audit](replicad-occt-usage-refinement.md) — Symbol usage and pruning candidates
-- [WASM Build Skill](../../.cursor/skills/occt-wasm-build/SKILL.md) — Build harness reference
+- [WASM Build Skill](../../.agent/skills/occt-wasm-build/SKILL.md) — Build harness reference

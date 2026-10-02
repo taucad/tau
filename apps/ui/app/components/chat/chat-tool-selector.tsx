@@ -240,8 +240,8 @@ export const ChatToolSelector = memo(function ({
     [isItemSelected],
   );
 
-  // Find the currently selected item for defaultValue
-  const defaultValue = useMemo(() => {
+  // Controlled row for ComboBoxResponsive checkmarks when a mode preset is selected
+  const selectedModeRow = useMemo(() => {
     // If we're in a mode, return the mode item
     if (mode !== 'custom') {
       return modeItems.find((item) => item.type === 'mode' && item.mode === mode);
@@ -264,7 +264,7 @@ export const ChatToolSelector = memo(function ({
       renderLabel={renderLabel}
       getValue={getValue}
       placeholder='Select tools'
-      defaultValue={defaultValue}
+      value={selectedModeRow}
       isNested={isNested}
       isSearchEnabled={false}
       shouldCloseOnSelect={() => false}

@@ -3,7 +3,7 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers ZenFS, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-05-03'
+updated: '2026-05-19'
 related:
   - docs/research/filesystem-architecture.md
   - docs/research/fs-capabilities.md
@@ -36,7 +36,7 @@ A single-writer topology with zero-copy binary transfer and bounded caches preve
 
 Self-write suppression (so an editor port does not receive its own `fileChanged` echo) is enforced in `packages/runtime` at `filesystem-bridge.exposeFileSystem`: `deliverToHandles` reads the origin via `getEventOrigin(event)` and skips the recipient whose port id matches.
 
-- **Author boundary:** `WorkspaceFileService` mutating methods accept optional `context?: { originClientId?: string }` (from the RPC bridge's `methodContextProvider`). Before `ChangeEventBus.emit(event)`, the worker calls `tagEventOrigin(event, id)` when context is present.
+- **Author boundary:** `WorkspaceFileService` mutating methods accept optional `context?: { originClientId?: string }`. Context is bound at port-connect time via `bindMutationContextForPort` (in `filesystem-bridge.ts`), which wraps each connection's handler with a per-port closure that injects `{ originClientId: portId }` as the trailing argument on every mutating call. Before `ChangeEventBus.emit(event)`, the worker calls `tagEventOrigin(event, id)` when context is present. The bridge primitive (`createBridgeServer`) is unaware of context — it dispatches user args verbatim.
 - **Merge rule:** `EventCoalescer` / `coalesceChangeEvents` reads origins via `getEventOrigin` so mixed-origin batches clear the tag (every port receives the merged event), matching the blueprint Finding 14 rule.
 - **Forwarders:** `ChangeEventBus`, `WatchRegistry`, and `ThrottledWorker` chunk paths do not take a parallel `originClientId` parameter; the event object is the sole carrier.
 - **Registry:** `packages/filesystem/src/event-origin-registry.ts` (`WeakMap<ChangeEvent, string>`) plus `clearEventOrigin` when a coalesced survivor must lose its tag.
@@ -60,7 +60,7 @@ Main Thread                       File Manager Worker              Kernel Worker
 
 All filesystem I/O runs on the file manager worker. The main thread and kernel workers access it exclusively via MessagePort RPC using the **same bridge mechanism** (`createFileSystemBridge` → `MessageChannel` → `createBridgeProxy`). The only difference is the TypeScript type used for the proxy:
 
-- **Main thread**: `createBridgeProxy<FileManagerProtocol>` — full API including worker management (`mount`, `unmount`, `setDirectoryHandle`), diagnostics (`readBackendFileTree`), and higher-level operations (`copyDirectory`, `getZippedDirectory`)
+- **Main thread**: `createBridgeProxy<FileManagerProtocol>` — full API including worker management (`mount(prefix, MountConfig)`, `unmount`, `invalidateStandaloneProvider`), workspace-scoped operations via the `{ scope }` options bag (`readFile`, `unlink`, `rmdir`, `getZippedDirectory`, `readShallowDirectory`), diagnostics (`readBackendFileTree`), and higher-level operations (`copyDirectory`)
 - **Kernel worker**: `createBridgeProxy<RuntimeFileSystemBase>` — 11 base primitives only (`readFile`, `writeFile`, `stat`, `readdir`, `exists`, etc.)
 
 This is the Interface Segregation Principle (ISP): kernels receive a narrow API surface matching their needs. Both proxies talk to the same worker, same `fileManager` object, same bridge server. No thread may import or use ZenFS directly outside the worker.
@@ -218,9 +218,55 @@ const fs = await resolveMountConfig({ backend: IndexedDB, storeName }); // New c
 
 **Write prohibition**: Standalone instances must never be used for writes. All writes must go through the main mounted FS and its serialization queue.
 
-### Rule 13: WebAccess handle lifecycle
+### Rule 13: WebAccess handle lifecycle is workspace-scoped
 
-`FileSystemDirectoryHandle` is structured-clonable (not transferable). It must be explicitly passed from the main thread to the worker via `setDirectoryHandle` before mounting a webaccess backend. Permission must be re-requested from a user gesture after page reload.
+The `webaccess` backend is multi-workspace: every `FileSystemDirectoryHandle` lives behind a first-class `workspaceId` (plain `string`, `wsp_*` prefix) and is owned by the multi-store `tau-fs-handles` IndexedDB schema (`workspaces`, `handles`, `configs`, `meta`). The legacy single-`'root'` handle pattern is forbidden.
+
+- Hand-off to the worker still uses structured clone (handles are not transferable). The FM machine resolves the project's bound `workspaceId` from `configs[projectId]`, reads its handle from `handles[workspaceId]`, then mounts the webaccess prefix in a single discriminated call: `proxy.mount(prefix, { backend: 'webaccess', directoryHandle, workspaceId, preservePath: true })`. The worker is stateless w.r.t. webaccess identity — there is no `setDirectoryHandle` knob and no ambient "active handle" between RPCs.
+- Permission must be re-requested from a user gesture after page reload. The FM machine surfaces a structured `unavailableReason` (`'missing' | 'permission'`) — silent downgrade to IndexedDB is forbidden (see Rule 13a).
+- Cross-workspace project access is forbidden. If a project's bound `workspaceId` does not match the currently active workspace, the FM machine must refuse to open and route through the `webAccessUnavailable` state (no implicit re-binding).
+
+### Rule 13a: No silent backend downgrade
+
+Every code path that fails to resolve a webaccess workspace (handle missing from IDB, permission revoked, `showDirectoryPicker` unsupported, picker aborted) must throw `WorkspaceDirectoryRequiredError` with one of the typed `code`s (`'missing' | 'permission' | 'unsupported'`). Call sites translate the error to actionable UI:
+
+- `/projects/new`: `toast.error` with a "Manage Workspaces" action, plus an inline `WorkspaceDirectoryPanel` that prevents submission until the workspace is connected.
+- `/projects/$id`: the `ProjectUnavailableOverlay` indirection renders `WorkspaceUnavailableRecovery` (full-shell overlay, not a banner — the dockview underneath must be fully covered).
+- Settings + `/files`: the relevant workspace row renders `WorkspaceDirectoryPanel` (row / banner variant) with `[Connect]` / `[Grant Access]` / `[Change Folder]` controls scoped to that workspace.
+
+It is forbidden to catch a `WorkspaceDirectoryRequiredError` and fall back to `indexeddb` — a project's backend binding is immutable once written to `configs[projectId]`.
+
+### Rule 13b: Workspace IDs are generated; project bindings live in one place
+
+Workspace identifiers must be minted via `generatePrefixedId(idPrefix.workspace)` from `@taucad/utils`. They are plain `string`s — there is no branded `WorkspaceId` type. Treat them as opaque identifiers: do not derive them from `handle.name`, content hashes, or any other property of the underlying directory (those values change as the user re-points or renames the folder).
+
+`ProjectFileSystemConfig.workspaceId` is the **single source of truth** for the project ↔ workspace binding. The `fileManagerMachine` MUST NOT carry that identity as ambient context; the machine's `activeWorkspaceId` / `activeWorkspaceName` fields are per-init _outputs_ populated by `initializeServicesActor` and cleared on every `setRoot` transition. The machine MUST NOT mutate `ProjectFileSystemConfig` directly — there is no actor-side self-persist branch.
+
+Any user-driven workspace change MUST go through the binding-transaction helper `bindProjectToWorkspace` on `useFileManager` (currently the only caller is `WorkspaceUnavailableRecovery`; the deferred Phase 10 per-project switcher will use the same helper). The helper performs three steps in order: (1) write `ProjectFileSystemConfig` with the new `{ projectId, backend: 'webaccess', workspaceId }`, (2) emit the `workspaceSwap` telemetry event, (3) dispatch `reloadWorkspace` (no payload) on the FM machine. The machine then re-runs `initializeServicesActor`, which reads the fresh persistent record. Subsequent project loads (or back-nav across projects) are silent because the persistent record already has the right binding.
+
+Missing or stale bindings surface `WorkspaceDirectoryRequiredError('missing')` via the recovery overlay; legacy projects without an explicit `workspaceId` are prompted on first load. The v2 → v3 IDB migration only promotes the legacy `'root'` handle to a regular workspace row — it does not auto-bind projects.
+
+### Rule 13c: Project creation is a single mount → write → unmount transaction
+
+Project creation MUST mount the project prefix on the workspace's storage, persist the file set, then unmount — atomically, inside `useProjectManager.createProject`. Webaccess creation MUST pass `(directoryHandle, workspaceId)` together via `MountConfig`; there is no separate handle-priming step. `memory` is rejected outright with `WorkspaceDirectoryRequiredError('unsupported')` — projects must commit to a durable backend at creation.
+
+The transaction is the only legitimate way to write a project's seed files. UI surfaces (`/projects/new`, "duplicate", remix-from-publication) MUST go through `createProject`; ad-hoc `fileManager.mount` + `writeFiles` flows from non-creation call sites are forbidden because they don't perform the `setProjectFileSystemConfig` write that binds the project to its backend.
+
+### Rule 13d: Root FM is pinned to `indexeddb`; `initialBackend` is required
+
+The root `<FileManagerProvider rootDirectory='/'>` MUST be instantiated with `initialBackend='indexeddb'`. `initialBackend` is a required prop; the provider's TypeScript surface compile-time-rejects `webaccess` without an accompanying `projectId` (Audit R15) so a workspace-bound FM can only be mounted inside a project route.
+
+The root provider MUST NOT consume the `filesystem-backend` cookie at mount time. The cookie is a _project-creation default_ read by `/projects/new` and `/files`, never the seed for the root machine. Cross-tab cookie flips therefore cannot break the root FM, and a stale `memory` cookie value is coerced back to `indexeddb` via `coerceFilesystemBackendCookie` at every selector read site.
+
+### Rule 13e: Standalone provider cache is keyed by `workspaceId`; invalidation has a typed contract
+
+`ProviderRegistry` caches one standalone provider per `(backend, workspaceId)` pair. Webaccess entries MUST NOT be keyed by `handle.name` — two workspaces pointing at folders with the same name would collide. The registry exposes `invalidateStandaloneProvider(backend, workspaceId?)`:
+
+- `invalidateStandaloneProvider('webaccess', workspaceId)` drops exactly one entry; required by `/files` "Change Folder", `forgetWorkspace`, and `bindProjectToWorkspace` (recovery binding) so the next standalone read uses the fresh handle.
+- `invalidateStandaloneProvider('webaccess')` drops every webaccess entry; reserved for the worker boot path.
+- `invalidateStandaloneProvider(non-webaccess)` drops the single backend entry.
+
+Failure to invalidate after a handle swap is a bug — the registry will silently serve reads against the previous handle until the cache entry is replaced by reload.
 
 ## RPC Pattern Rules
 

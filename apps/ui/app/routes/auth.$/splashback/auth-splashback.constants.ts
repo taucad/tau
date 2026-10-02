@@ -25,6 +25,16 @@ export const morphPointCount = 3000;
 /** Default split ratio for assembly morph (60% to gear12, 40% to gear8) */
 export const assemblySplitRatio = 0.6;
 
+/**
+ * World-space radius of the "atoms" scatter cloud used as both the alpha (loading
+ * convergence) and omega (unloading dispersion) point distribution.
+ *
+ * The visualization camera sits at z=40 with fov=45°, giving a visible width of
+ * ~33 units at z=0. A radius of 30 keeps particles "from all around" while
+ * remaining inside the frustum so they read as a sphere rather than streaks.
+ */
+export const loadingScatterRadius = 30;
+
 // ============================================================================
 // Colors
 // ============================================================================

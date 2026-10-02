@@ -11,9 +11,13 @@ describe('createSectionRegistry', () => {
 
   it('should register and resolve dynamic sections into dynamic output', () => {
     const registry = createSectionRegistry();
-    registry.register({ name: 'git_status', compute: () => '<git_status>M file.ts</git_status>', cacheBreak: true });
+    registry.register({
+      name: 'environment',
+      compute: () => '<environment>Model: gpt-test</environment>',
+      cacheBreak: true,
+    });
     const { dynamic } = registry.resolve();
-    expect(dynamic).toContain('<git_status>M file.ts</git_status>');
+    expect(dynamic).toContain('<environment>Model: gpt-test</environment>');
   });
 
   it('should partition sections by cacheBreak flag', () => {

@@ -1,0 +1,18 @@
+---
+description: Auto-curated learned facts and preferences for the `vite` library (libs/vite)
+globs:
+  - "libs/vite/**"
+alwaysApply: false
+---
+
+# Learned: vite
+
+Auto-maintained by the `agents-memory-updater` subagent. New bullets are
+capped at 200 chars and 12 bullets per section. The existing entries below
+were harvested verbatim from `AGENTS.md` during the one-time context
+cleanup; they may exceed the 200-char cap.
+
+## Learned Workspace Facts
+
+- For Vite dev worker HMR crashes, prove the module-graph root cause first; keep workers on worker-safe subpaths. Use `?worker_file` guards only for generic client-only transforms.
+- Vite 8 `vite:oxc` plugin resolves `@oxc-project/runtime` helpers; CJS helpers evaluated in SSR ESM runner cause `module is not defined` — mitigated by `oxcRuntimeEsmPlugin` in `libs/vite` (`@taucad/vite`), with its own tests; `@taucad/vite` MDX/source transformers must skip JSDoc comments — scanning JSDoc-embedded URLs/imports recursively re-traverses co-located `*.plugin.ts` files via the kernel/transcoder graph and hangs the production build silently (loops appear as `nx build ui` stalls with no error); always re-instrument the plugin with per-`id` progress logs to find the culprit when production builds hang while `nx dev` succeeds, and validate every transport/module-graph refactor against `nx serve <app>` + `nx test:e2e <app>` (Playwright e2e exercises the runtime topology end-to-end), not just `nx dev`; custom Vite plugins that scan source for `new URL(import.meta.url, …)` patterns MUST run the cheap URL regex BEFORE calling `stripLiteral`/`js-tokens` — Emscripten `MODULARIZE+SINGLE_FILE` builds (openscad-wasm-prebuilt, replicad-opencascadejs, manifold-3d, draco3dgltf, assimpjs, occt-import-js, rhino3dm) embed multi-MB single-line base64 string literals, and tokenising them blows V8's `irregexp` interpreter recursion budget with `RangeError: Maximum call stack size exceeded` (masquerades as OOM but is a stack-overflow, not a memory issue — `--max-old-space-size` does nothing); for files >256 KiB only tokenise a windowed slice (~4096 lookback aligned to a preceding newline + 256 lookahead) around each match instead of the whole file (`libs/vite/src/ts-module-url.vite-plugin.ts`); the `largeDepRegexFix` plugin embodies the same antipattern's earlier fix for Vite's own asset-import scanner

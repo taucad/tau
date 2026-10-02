@@ -1,9 +1,9 @@
 import { ChevronDown, ChevronRight, RefreshCw } from 'lucide-react';
 import { memo, useCallback, useMemo, useState } from 'react';
-import { Virtuoso } from 'react-virtuoso';
 import { messageRole } from '@taucad/chat/constants';
 import type { MyMessagePart, UsageData } from '@taucad/chat';
 import { useChatActions, useChatSelector } from '#hooks/use-chat.js';
+import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import type { CombinedChatState } from '#hooks/use-chat.js';
 import { serializeMessage } from '#utils/chat.utils.js';
 import { parseInlineReferences } from '#utils/at-reference.utils.js';
@@ -436,7 +436,8 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
 
     return usageDataParts;
   });
-  const { editMessage, retryMessage, startEditingMessage, exitEditMode, stop } = useChatActions();
+  const { startEditingMessage, exitEditMode, stop } = useChatActions();
+  const cadChat = useCadChatClient();
   const chatStatus = useChatSelector((state) => state.status);
   const lastUserMessageId = useChatSelector(selectLastUserMessageId);
   const formattedCancelKeyCombination = formatKeyCombination(cancelChatStreamKeyCombination);
@@ -494,23 +495,20 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
     isCollapsedUserMessage &&
     (collapsedUserRows.length > userMessageCollapseRowThreshold ||
       collapsedUserCharacterCount > userMessageCollapseCharacterThreshold);
-  const shouldVirtualizeCollapsedUserMessage = shouldCollapseUserMessage && fileParts.length === 0;
+  const shouldRenderCollapsedUserRows = shouldCollapseUserMessage && fileParts.length === 0;
 
-  const renderCollapsedUserRow = useCallback(
-    (index: number) => {
-      const row = collapsedUserRows[index];
-      if (typeof row !== 'string') {
-        return null;
-      }
+  const collapsedUserRowsWithStableKeys = useMemo(() => {
+    if (!displayMessage) {
+      return [];
+    }
 
-      return (
-        <p className='text-sm leading-relaxed wrap-break-word whitespace-pre-wrap text-foreground/90'>
-          <TextWithAtReferences text={row} />
-        </p>
-      );
-    },
-    [collapsedUserRows],
-  );
+    let sliceStartOffsetInVirtualText = 0;
+    return collapsedUserRows.map((row) => {
+      const rowKeyPrefix = `${displayMessage.id}:${sliceStartOffsetInVirtualText}`;
+      sliceStartOffsetInVirtualText += row.length + 1;
+      return { keyPrefix: rowKeyPrefix, row };
+    });
+  }, [collapsedUserRows, displayMessage]);
 
   if (!message || !displayMessage) {
     return <div>Message not found</div>;
@@ -538,7 +536,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
         // multi-hundred-px viewport jump on the first wheel-up from the
         // scroll-bottom of a multi-turn chat. Root cause is a layout-
         // reconciliation cascade between sticky stuck/unstuck transitions
-        // and Virtuoso's measurement/anchor path. The
+        // and outer chat-history Virtuoso's measurement/anchor path. The
         // live (last) TurnGroup is still pinned to viewport top via
         // `min-h-(--chat-live-turn-min-h)` on the TG and
         // `scrollToIndex(LAST, align: 'start')` on submit (chat-history.tsx).
@@ -563,7 +561,11 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
             mode='edit'
             className='rounded-sm'
             onSubmit={async (event) => {
-              editMessage(messageId, event.content, event.model, event.metadata, event.imageUrls);
+              // R10/t17: edit-message routes through the cad chat-client so
+              // the wire body's `agent` block is composed from the live
+              // `useCadAgentConfig` snapshot — no model/metadata stamping
+              // on the persisted user row.
+              cadChat.edit(messageId, { text: event.content, imageUrls: event.imageUrls });
               exitEditMode();
               setIsEditing(false);
             }}
@@ -578,11 +580,12 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
           />
         </When>
         <When shouldRender={!isEditing}>
+          {/* Matches focused-edit ChatTextarea natural max (max-h-48 editor + mb-10 toolbar room + 2px border = 14.625rem). Keep in sync so click-to-edit does not jump. */}
           <div
             className={cn(
               'flex flex-col gap-0 min-w-0',
               isUser && 'cursor-pointer rounded-sm border bg-background px-3 py-1 hover:border-primary',
-              shouldCollapseUserMessage && 'max-h-58.5 overflow-hidden',
+              shouldRenderCollapsedUserRows && 'max-h-58.5 overflow-hidden',
               fileParts.length > 0 && 'pt-3',
               showUserBubbleStopShortcut && 'relative',
             )}
@@ -595,17 +598,17 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                 ))}
               </div>
             ) : null}
-            {shouldVirtualizeCollapsedUserMessage ? (
-              <Virtuoso
-                className='h-58.5'
-                totalCount={collapsedUserRows.length}
-                itemContent={renderCollapsedUserRow}
-                components={{
-                  List: (properties) => <div {...properties} className='flex flex-col gap-1 pr-1' />,
-                  Header: () => <div className='h-0.5' />,
-                  Footer: () => <div className='h-0.5' />,
-                }}
-              />
+            {shouldRenderCollapsedUserRows ? (
+              <div className='flex flex-col gap-1 pr-1'>
+                {collapsedUserRowsWithStableKeys.map(({ keyPrefix, row }) => (
+                  <p
+                    key={`${keyPrefix}:${row.slice(0, 120)}`}
+                    className='text-sm leading-relaxed wrap-break-word whitespace-pre-wrap text-foreground/90'
+                  >
+                    <TextWithAtReferences text={row} />
+                  </p>
+                ))}
+              </div>
             ) : (
               <AssistantParts parts={displayMessage.parts} messageId={displayMessage.id} />
             )}
@@ -653,7 +656,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                     popoverProperties={{ side: 'right', align: 'start' }}
                     className='h-fit w-full'
                     onSelect={(modelId) => {
-                      retryMessage(messageId, modelId);
+                      cadChat.retry(messageId, modelId);
                     }}
                   >
                     {({ selectedModel }) => (
@@ -674,7 +677,7 @@ export const ChatMessage = memo(function ({ messageId }: ChatMessageProperties):
                   <DropdownMenuItem
                     className='flex justify-between'
                     onClick={() => {
-                      retryMessage(messageId);
+                      cadChat.retry(messageId);
                     }}
                   >
                     <p>Try again</p>

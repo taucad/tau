@@ -1,98 +1,224 @@
 /**
- * Filesystem settings component.
+ * Filesystem settings pane.
  *
- * Allows the user to:
- * - Select the default storage backend for new projects
- * - Connect/change the workspace directory for File System (webaccess) backend
+ * Surfaces the multi-workspace foundation introduced by the workspaces
+ * audit (R4 + R12 + R13 + R19):
+ *
+ * - Lists every connected workspace; each row owns its own connect /
+ *   grant-access / change / forget controls via `WorkspaceDirectoryPanel`.
+ * - Lets the user toggle the default workspace used by new webaccess
+ *   projects.
+ * - Disables the webaccess option in the default-backend picker when no
+ *   workspace is connected — clicking that option would otherwise leave
+ *   `/projects/new` immediately blocked by a `WorkspaceDirectoryRequiredError`.
+ * - Renames the bottom card to "Origin Storage Usage" so users understand
+ *   IndexedDB + OPFS are the only buckets counted by `navigator.storage`
+ *   (webaccess workspaces sit outside the browser origin).
+ *
+ * Cookie semantics: the `filesystem-backend` cookie controls which
+ * backend the next "New Project" creation defaults to. It does NOT
+ * retroactively change the backend of an existing project — that
+ * binding is owned by `ProjectFileSystemConfig` in `handle-store`.
  */
 
 import { useState, useCallback, useEffect } from 'react';
-import { FolderOpen, HardDrive } from 'lucide-react';
-import type { FileSystemBackend } from '@taucad/types';
+import { HardDrive, Plus } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { Card, CardContent, CardHeader, CardTitle } from '#components/ui/card.js';
-import { BackendSelector } from '#components/filesystem/backend-selector.js';
+import { BackendSelector, coerceFilesystemBackendCookie } from '#components/filesystem/backend-selector.js';
+import type { SelectableFilesystemBackend } from '#components/filesystem/backend-selector.js';
+import { WorkspaceDirectoryPanel } from '#components/filesystem/workspace-directory-panel.js';
 import {
-  storeDirectoryHandle,
-  getStoredDirectoryHandle,
   checkHandlePermission,
+  createWorkspace,
+  forgetWorkspace,
+  getWorkspace,
+  listProjectsForWorkspace,
+  listWorkspaces,
   requestHandlePermission,
+  setDefaultWorkspace,
+  updateWorkspaceHandle,
 } from '#filesystem/handle-store.js';
+import type { Workspace } from '#filesystem/handle-store.js';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 import { isFileSystemAccessSupported } from '#constants/browser.constants.js';
+import type { WorkspaceDirectoryStatus } from '#constants/workspace-directory-copy.constants.js';
+import { Loader } from '#components/ui/loader.js';
+import { toast } from '#components/ui/sonner.js';
+import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 
-/**
- * Filesystem settings pane for the Settings dialog.
- */
+type WorkspaceRow = {
+  workspace: Workspace;
+  status: WorkspaceDirectoryStatus;
+  projectCount: number;
+};
+
 export function FileSystemSettings(): React.JSX.Element {
-  const [backendCookie, setBackendCookie] = useCookie(cookieName.filesystemBackend, 'indexeddb' as FileSystemBackend);
-  const [workspaceDirectoryName, setWorkspaceDirectoryName] = useState<string | undefined>(undefined);
-  const [isWorkspaceConnected, setIsWorkspaceConnected] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
+  const [rawBackendCookie, setRawBackendCookie] = useCookie(cookieName.filesystemBackend, 'indexeddb');
+  const backendCookie: SelectableFilesystemBackend = coerceFilesystemBackendCookie(rawBackendCookie);
+  const [rows, setRows] = useState<WorkspaceRow[]>([]);
+  const [isLoading, setIsLoading] = useState(true);
+  const [busyWorkspaceId, setBusyWorkspaceId] = useState<string | undefined>(undefined);
+  const [isAddingWorkspace, setIsAddingWorkspace] = useState(false);
+  const telemetry = useWorkspaceTelemetry();
 
-  // Check workspace handle status on mount
-  useEffect(() => {
-    const checkWorkspace = async (): Promise<void> => {
-      try {
-        const handle = await getStoredDirectoryHandle();
-        if (handle) {
-          const permission = await checkHandlePermission(handle);
-          setWorkspaceDirectoryName(handle.name);
-          setIsWorkspaceConnected(permission === 'granted');
-        }
-      } catch {
-        // Handle store might not be available
-      }
-    };
-
-    void checkWorkspace();
+  const reloadRows = useCallback(async (): Promise<void> => {
+    try {
+      const workspaces = await listWorkspaces();
+      const built = await Promise.all(
+        workspaces.map(async (workspace): Promise<WorkspaceRow> => {
+          const entry = await getWorkspace(workspace.workspaceId);
+          let status: WorkspaceDirectoryStatus = 'missing';
+          if (entry) {
+            const permission = await checkHandlePermission(entry.handle);
+            status = permission === 'granted' ? 'connected' : 'permission';
+          }
+          const projects = await listProjectsForWorkspace(workspace.workspaceId);
+          return { workspace, status, projectCount: projects.length };
+        }),
+      );
+      setRows(built);
+    } finally {
+      setIsLoading(false);
+    }
   }, []);
 
+  useEffect(() => {
+    void reloadRows();
+  }, [reloadRows]);
+
+  const hasConnectedWorkspace = rows.some((row) => row.status === 'connected');
+
+  // Audit R13: webaccess is disabled as a default when no workspace is
+  // connected. Picking it would immediately fail at `/projects/new` with
+  // `WorkspaceDirectoryRequiredError`. The selector still surfaces the
+  // option so users can read the description, but it stays unselectable
+  // until the user adds a workspace below.
   const handleBackendChange = useCallback(
     (value: string) => {
-      setBackendCookie(value as FileSystemBackend);
+      const next = value as SelectableFilesystemBackend;
+      if (next === 'webaccess' && !hasConnectedWorkspace) {
+        toast.error('Connect a workspace folder first to set File System as the default backend.');
+        return;
+      }
+      setRawBackendCookie(next);
     },
-    [setBackendCookie],
+    [hasConnectedWorkspace, setRawBackendCookie],
   );
 
-  const handleConnectDirectory = useCallback(async () => {
-    setIsConnecting(true);
+  const handleAddWorkspace = useCallback(async () => {
+    if (!isFileSystemAccessSupported) {
+      return;
+    }
+    setIsAddingWorkspace(true);
     try {
       const handle = await globalThis.window.showDirectoryPicker({
         id: 'tau-workspace',
         mode: 'readwrite',
       });
-
-      await storeDirectoryHandle(handle);
-      setWorkspaceDirectoryName(handle.name);
-      setIsWorkspaceConnected(true);
+      const workspace = await createWorkspace(handle, { setDefault: rows.length === 0 });
+      telemetry.workspaceCreated({ workspaceId: workspace.workspaceId, isDefault: rows.length === 0 });
+      await reloadRows();
+      toast.success(`Connected workspace "${handle.name}"`);
     } catch (error) {
-      // User cancelled the directory picker
       if (error instanceof DOMException && error.name === 'AbortError') {
+        telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'aborted' });
         return;
       }
-
+      telemetry.workspaceOpenFailed({ workspaceId: undefined, reason: 'unknown' });
+      toast.error('Failed to connect workspace.');
       throw error;
     } finally {
-      setIsConnecting(false);
+      setIsAddingWorkspace(false);
     }
-  }, []);
+  }, [reloadRows, rows.length, telemetry]);
 
-  const handleReconnectDirectory = useCallback(async () => {
-    setIsConnecting(true);
-    try {
-      const handle = await getStoredDirectoryHandle();
-      if (!handle) {
+  const handleConnectChange = useCallback(
+    async (workspaceId: string) => {
+      if (!isFileSystemAccessSupported) {
         return;
       }
+      setBusyWorkspaceId(workspaceId);
+      try {
+        const handle = await globalThis.window.showDirectoryPicker({
+          id: `tau-workspace-${workspaceId}`,
+          mode: 'readwrite',
+        });
+        await updateWorkspaceHandle(workspaceId, handle);
+        telemetry.workspaceConnected({ workspaceId });
+        await reloadRows();
+        toast.success(`Updated workspace folder to "${handle.name}"`);
+      } catch (error) {
+        if (error instanceof DOMException && error.name === 'AbortError') {
+          telemetry.workspaceOpenFailed({ workspaceId, reason: 'aborted' });
+          return;
+        }
+        telemetry.workspaceOpenFailed({ workspaceId, reason: 'unknown' });
+        toast.error('Failed to change workspace folder.');
+        throw error;
+      } finally {
+        setBusyWorkspaceId(undefined);
+      }
+    },
+    [reloadRows, telemetry],
+  );
 
-      const granted = await requestHandlePermission(handle);
-      setIsWorkspaceConnected(granted);
-    } finally {
-      setIsConnecting(false);
-    }
-  }, []);
+  const handleGrantAccess = useCallback(
+    async (workspaceId: string) => {
+      setBusyWorkspaceId(workspaceId);
+      try {
+        const entry = await getWorkspace(workspaceId);
+        if (!entry) {
+          return;
+        }
+        const granted = await requestHandlePermission(entry.handle);
+        if (granted) {
+          telemetry.workspaceConnected({ workspaceId });
+        } else {
+          telemetry.workspaceOpenFailed({ workspaceId, reason: 'permission' });
+          toast.error('Permission was not granted.');
+        }
+        await reloadRows();
+      } finally {
+        setBusyWorkspaceId(undefined);
+      }
+    },
+    [reloadRows, telemetry],
+  );
+
+  const handleForgetWorkspace = useCallback(
+    async (workspaceId: string) => {
+      setBusyWorkspaceId(workspaceId);
+      try {
+        const projects = await listProjectsForWorkspace(workspaceId);
+        if (projects.length > 0) {
+          toast.error(
+            `Cannot forget workspace — ${projects.length} project${projects.length === 1 ? '' : 's'} still bound to it.`,
+          );
+          return;
+        }
+        await forgetWorkspace(workspaceId);
+        await reloadRows();
+      } finally {
+        setBusyWorkspaceId(undefined);
+      }
+    },
+    [reloadRows],
+  );
+
+  const handleSetDefault = useCallback(
+    async (workspaceId: string) => {
+      setBusyWorkspaceId(workspaceId);
+      try {
+        await setDefaultWorkspace(workspaceId);
+        await reloadRows();
+      } finally {
+        setBusyWorkspaceId(undefined);
+      }
+    },
+    [reloadRows],
+  );
 
   const [storageUsage, setStorageUsage] = useState<{ used: number; quota: number } | undefined>(undefined);
 
@@ -114,7 +240,6 @@ export function FileSystemSettings(): React.JSX.Element {
 
   return (
     <div className='flex flex-col gap-6 pb-6'>
-      {/* Default Backend */}
       <Card>
         <CardHeader>
           <CardTitle>Default Storage</CardTitle>
@@ -124,63 +249,91 @@ export function FileSystemSettings(): React.JSX.Element {
             <div className='flex flex-col gap-1'>
               <span className='font-medium'>Default Backend</span>
               <span className='text-sm text-muted-foreground'>
-                Default storage for new projects. Existing projects keep their current backend.
+                Used for new projects. Existing projects keep the backend they were created with.
               </span>
             </div>
-            <BackendSelector isInternalHidden value={backendCookie} onSelect={handleBackendChange} />
+            <BackendSelector value={backendCookie} onSelect={handleBackendChange} />
           </div>
         </CardContent>
       </Card>
 
-      {/* Workspace Directory (only shown when webaccess is available) */}
       {isFileSystemAccessSupported ? (
         <Card>
-          <CardHeader>
-            <CardTitle>Workspace Directory</CardTitle>
+          <CardHeader className='flex flex-row items-center justify-between gap-2'>
+            <CardTitle>Workspaces</CardTitle>
+            <Button size='sm' variant='outline' disabled={isAddingWorkspace} onClick={handleAddWorkspace}>
+              <Plus className='mr-1 size-3.5' />
+              Add Workspace
+            </Button>
           </CardHeader>
-          <CardContent className='flex flex-col gap-4'>
+          <CardContent className='flex flex-col gap-3'>
             <p className='text-sm text-muted-foreground'>
-              When using the File System backend, projects are stored as subdirectories within a workspace folder on
-              your computer. Pick a workspace directory to get started.
+              A workspace is a folder on your computer. New File System projects go into the default workspace.
             </p>
-
-            {workspaceDirectoryName === undefined ? (
-              <Button variant='outline' className='gap-2' disabled={isConnecting} onClick={handleConnectDirectory}>
-                <FolderOpen className='size-4' />
-                Connect Directory
-              </Button>
+            {isLoading ? (
+              <Loader className='size-4' />
+            ) : rows.length === 0 ? (
+              <p className='text-sm text-muted-foreground'>
+                No workspaces yet. Add one to use the File System backend.
+              </p>
             ) : (
-              <div className='flex items-center justify-between gap-4'>
-                <div className='flex items-center gap-2'>
-                  <FolderOpen className='size-4 shrink-0 text-muted-foreground' />
-                  <div className='flex flex-col gap-0.5'>
-                    <span className='font-medium'>{workspaceDirectoryName}</span>
-                    <span className='text-xs text-muted-foreground'>
-                      {isWorkspaceConnected ? 'Connected' : 'Permission required'}
-                    </span>
-                  </div>
-                </div>
-                <div className='flex items-center gap-2'>
-                  {!isWorkspaceConnected && (
-                    <Button size='sm' variant='outline' disabled={isConnecting} onClick={handleReconnectDirectory}>
-                      Grant Access
-                    </Button>
-                  )}
-                  <Button size='sm' variant='outline' disabled={isConnecting} onClick={handleConnectDirectory}>
-                    Change Directory
-                  </Button>
-                </div>
+              <div className='flex flex-col gap-2'>
+                {rows.map((row) => {
+                  const isBusyRow = busyWorkspaceId === row.workspace.workspaceId;
+                  const projectCountLabel = `${row.projectCount} project${row.projectCount === 1 ? '' : 's'}`;
+                  const meta = (
+                    <div className='flex items-center gap-2 text-xs text-muted-foreground'>
+                      <span>{projectCountLabel}</span>
+                      {row.workspace.isDefault ? (
+                        <span className='rounded-full border border-border bg-muted/60 px-2 py-0.5 font-medium text-foreground'>
+                          Default
+                        </span>
+                      ) : (
+                        <Button
+                          size='sm'
+                          variant='ghost'
+                          className='h-6 px-2 text-xs'
+                          disabled={isBusyRow}
+                          onClick={() => {
+                            void handleSetDefault(row.workspace.workspaceId);
+                          }}
+                        >
+                          Set as default
+                        </Button>
+                      )}
+                    </div>
+                  );
+                  return (
+                    <WorkspaceDirectoryPanel
+                      key={row.workspace.workspaceId}
+                      variant='row'
+                      workspaceId={row.workspace.workspaceId}
+                      workspaceName={row.workspace.name}
+                      status={row.status}
+                      isBusy={isBusyRow}
+                      onConnect={async () => {
+                        await handleConnectChange(row.workspace.workspaceId);
+                      }}
+                      onGrantAccess={async () => {
+                        await handleGrantAccess(row.workspace.workspaceId);
+                      }}
+                      onForget={async () => {
+                        await handleForgetWorkspace(row.workspace.workspaceId);
+                      }}
+                      meta={meta}
+                    />
+                  );
+                })}
               </div>
             )}
           </CardContent>
         </Card>
       ) : undefined}
 
-      {/* Storage Usage */}
       {storageUsage ? (
         <Card>
           <CardHeader>
-            <CardTitle>Storage Usage</CardTitle>
+            <CardTitle>Browser Storage</CardTitle>
           </CardHeader>
           <CardContent className='flex flex-col gap-4'>
             <div className='flex items-center gap-3'>
@@ -200,7 +353,10 @@ export function FileSystemSettings(): React.JSX.Element {
                 </div>
               </div>
             </div>
-            <p className='text-xs text-muted-foreground'>Browser-estimated storage across IndexedDB and OPFS.</p>
+            <p className='text-xs text-muted-foreground'>
+              Browser-managed storage for IndexedDB + OPFS projects. File System workspaces live on your disk and are
+              not counted here.
+            </p>
           </CardContent>
         </Card>
       ) : undefined}

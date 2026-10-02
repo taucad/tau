@@ -3,7 +3,7 @@ import { AtSign, Image, AlertTriangle, AlertCircle, Camera } from 'lucide-react'
 import { useSelector } from '@xstate/react';
 import { createActor } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
-import type { CodeIssue } from '@taucad/types';
+import type { CodeIssue, ScreenshotOverlay } from '@taucad/types';
 import type { KernelIssue } from '@taucad/runtime';
 import { TooltipTrigger, TooltipContent, Tooltip } from '#components/ui/tooltip.js';
 import { Button } from '#components/ui/button.js';
@@ -15,6 +15,7 @@ import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { cn } from '#utils/ui.utils.js';
 import { menuItemLayoutClass } from '#components/ui/menu.variants.js';
 import { useImageQuality } from '#hooks/use-image-quality.js';
+import { buildScreenshotOverlayForPath, resolveScreenshotOverlay } from '#machines/resolve-screenshot-overlay.js';
 
 type ChatContextActionsProperties = {
   readonly addImage: (image: string) => void;
@@ -124,6 +125,7 @@ export function ChatContextActions({
       graphicsRef: ActorRefFrom<typeof graphicsMachine>,
       options: {
         type: 'single' | 'composite';
+        overlay?: ScreenshotOverlay;
         onSuccess: (dataUrls: string[]) => void;
         onError: (error: unknown) => void;
       },
@@ -151,6 +153,7 @@ export function ChatContextActions({
             aspectRatio: 16 / 9,
             maxResolution: 1200,
             zoomLevel: 1.4,
+            overlay: options.overlay,
           },
           onSuccess(dataUrls) {
             cleanup();
@@ -174,6 +177,7 @@ export function ChatContextActions({
             aspectRatio: 1,
             maxResolution: 800,
             zoomLevel: 1.2,
+            overlay: options.overlay,
             composite: {
               enabled: true,
               preferredRatio: { columns: 3, rows: 2 },
@@ -199,14 +203,26 @@ export function ChatContextActions({
     [screenshotQuality],
   );
 
+  /** Resolve the overlay for the main entry — used by the main-view + composite handlers. */
+  const resolveMainOverlay = useCallback((): ScreenshotOverlay | undefined => {
+    return (
+      resolveScreenshotOverlay(cadActor) ?? (mainEntryFile ? buildScreenshotOverlayForPath(mainEntryFile) : undefined)
+    );
+  }, [cadActor, mainEntryFile]);
+
   const handleViewScreenshot = useCallback(
-    (graphicsRef: ActorRefFrom<typeof graphicsMachine>) => {
+    (graphicsRef: ActorRefFrom<typeof graphicsMachine>, viewEntryFile: string | undefined) => {
       if (asPopoverMenu) {
         onClose?.();
       }
 
+      const overlay =
+        resolveScreenshotOverlay(viewEntryFile ? geometryUnits.get(viewEntryFile) : undefined) ??
+        (viewEntryFile ? buildScreenshotOverlayForPath(viewEntryFile) : undefined);
+
       takeScreenshot(graphicsRef, {
         type: 'single',
+        overlay,
         onSuccess(dataUrls) {
           const dataUrl = dataUrls[0];
           if (dataUrl) {
@@ -222,7 +238,7 @@ export function ChatContextActions({
         },
       });
     },
-    [addImage, asPopoverMenu, onClose, takeScreenshot],
+    [addImage, asPopoverMenu, onClose, takeScreenshot, geometryUnits],
   );
 
   const handleAddModelScreenshot = useCallback(() => {
@@ -236,6 +252,7 @@ export function ChatContextActions({
 
     takeScreenshot(mainGraphicsRef, {
       type: 'single',
+      overlay: resolveMainOverlay(),
       onSuccess(dataUrls) {
         const dataUrl = dataUrls[0];
         if (dataUrl) {
@@ -250,7 +267,7 @@ export function ChatContextActions({
         toast.error(`Screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
       },
     });
-  }, [addImage, asPopoverMenu, onClose, takeScreenshot, mainGraphicsRef]);
+  }, [addImage, asPopoverMenu, onClose, takeScreenshot, mainGraphicsRef, resolveMainOverlay]);
 
   const handleAddAllViewsScreenshots = useCallback(() => {
     if (!mainGraphicsRef) {
@@ -263,6 +280,7 @@ export function ChatContextActions({
 
     takeScreenshot(mainGraphicsRef, {
       type: 'composite',
+      overlay: resolveMainOverlay(),
       onSuccess(dataUrls) {
         const compositeDataUrl = dataUrls[0];
         if (compositeDataUrl) {
@@ -277,7 +295,7 @@ export function ChatContextActions({
         toast.error(`All views screenshot failed: ${error instanceof Error ? error.message : String(error)}`);
       },
     });
-  }, [addImage, asPopoverMenu, onClose, takeScreenshot, mainGraphicsRef]);
+  }, [addImage, asPopoverMenu, onClose, takeScreenshot, mainGraphicsRef, resolveMainOverlay]);
 
   const handleAddCodeIssues = useCallback(() => {
     const errors = codeIssues.map(
@@ -359,7 +377,7 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
           group: 'View Screenshots',
           icon: <Image />,
           action() {
-            handleViewScreenshot(graphicsRef);
+            handleViewScreenshot(graphicsRef, settings?.entryFile);
           },
           disabled: !isReady,
         });
@@ -559,7 +577,6 @@ ${error.stack ? `\n\`\`\`\n${error.stack}\n\`\`\`` : ''}`;
         groupedItems={groupedContextItems}
         renderLabel={renderContextItemLabel}
         getValue={getContextItemValue}
-        defaultValue={undefined}
         isDisabled={isContextItemDisabled}
         popoverProperties={{
           align: 'start',

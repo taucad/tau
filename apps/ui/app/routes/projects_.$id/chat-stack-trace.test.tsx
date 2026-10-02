@@ -2,18 +2,26 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import type { KernelIssue } from '@taucad/runtime';
+import { chatTurnRequestSchema } from '@taucad/chat/schemas';
+import type { CadAgentConfigInput, MyUIMessage } from '@taucad/chat';
 
-const { mockCreateChat, mockSendMessage, mockSetFocusedChatId, mockEditorSend, mockReadFile } = vi.hoisted(() => ({
+const { mockCreateChat, mockSubmit, mockSetFocusedChatId, mockEditorSend, mockReadFile } = vi.hoisted(() => ({
   mockCreateChat: vi.fn(),
-  mockSendMessage: vi.fn(),
+  mockSubmit: vi.fn(),
   mockSetFocusedChatId: vi.fn(),
   mockEditorSend: vi.fn(),
   mockReadFile: vi.fn(),
 }));
 
 let mockKernelIssues = new Map<string, KernelIssue[]>();
-let mockSelectedModelId = 'cookie-model';
-let mockKernel: 'openscad' | 'manifold' = 'openscad';
+let mockAgent: CadAgentConfigInput = {
+  profile: 'cad',
+  model: 'cookie-model',
+  kernel: 'openscad',
+  mode: 'agent',
+  toolChoice: 'auto',
+  testingEnabled: true,
+};
 
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({
@@ -30,47 +38,42 @@ vi.mock('#hooks/use-cad.js', () => ({
     selector({ context: { kernelIssues: mockKernelIssues } }),
 }));
 
-vi.mock('#hooks/use-chat.js', () => ({
-  useChatActions: () => ({ sendMessage: mockSendMessage }),
-}));
-
 vi.mock('#hooks/use-chats.js', () => ({
   useChats: () => ({ createChat: mockCreateChat }),
 }));
 
-// Production code now reads from the chat-scoped resolvers — guard the
-// cookie-only hooks with throwing mocks so any regression that re-introduces
-// them is caught immediately.
-vi.mock('#hooks/use-active-chat-model.js', () => ({
-  useActiveChatModel: () => ({
-    modelId: mockSelectedModelId,
-    model: { id: mockSelectedModelId, name: mockSelectedModelId, isResolved: true },
-    setActiveModel: vi.fn(),
+vi.mock('#chat-clients/use-cad-chat-client.js', () => ({
+  useCadChatClient: () => ({
+    submit: mockSubmit,
+    agent: mockAgent,
   }),
 }));
 
-vi.mock('#hooks/use-active-chat-kernel.js', () => ({
-  useActiveChatKernel: () => ({
-    kernelId: mockKernel,
-    kernel: { id: mockKernel, name: mockKernel },
-    setActiveKernel: vi.fn(),
-  }),
+// Production code now reads the entire per-request config via the
+// chat-client — guard the legacy per-field hooks with throwing mocks so any
+// regression that re-introduces them is caught immediately.
+vi.mock('#hooks/use-chat.js', () => ({
+  useChatActions: () => {
+    throw new Error('chat-stack-trace should no longer call useChatActions — switch to useCadChatClient');
+  },
 }));
 
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => {
-    throw new Error('chat-stack-trace should no longer call useModels — switch to useActiveChatModel');
+    throw new Error('chat-stack-trace should no longer call useModels — switch to useCadChatClient');
   },
 }));
 
 vi.mock('#hooks/use-kernel.js', () => ({
   useKernel: () => {
-    throw new Error('chat-stack-trace should no longer call useKernel — switch to useActiveChatKernel');
+    throw new Error('chat-stack-trace should no longer call useKernel — switch to useCadChatClient');
   },
 }));
 
 vi.mock('#hooks/use-chat-snapshot.js', () => ({
-  useChatSnapshot: () => undefined,
+  useChatSnapshot: () => {
+    throw new Error('chat-stack-trace should no longer call useChatSnapshot — switch to useCadChatClient');
+  },
 }));
 
 vi.mock('#hooks/use-keyboard.js', () => ({
@@ -131,17 +134,23 @@ const issue: KernelIssue = {
   stackFrames: [],
 };
 
-describe('ChatStackTrace', () => {
+describe('ChatStackTrace — new-chat (shift held) path', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockReadFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
     mockCreateChat.mockResolvedValue({ id: 'chat_new' });
     mockKernelIssues = new Map([['main.scad', [issue]]]);
-    mockSelectedModelId = 'cookie-model';
-    mockKernel = 'openscad';
+    mockAgent = {
+      profile: 'cad',
+      model: 'cookie-model',
+      kernel: 'openscad',
+      mode: 'agent',
+      toolChoice: 'auto',
+      testingEnabled: true,
+    };
   });
 
-  it('should seed activeModel and activeKernel on the new chat when Fix-with-AI creates a new chat', async () => {
+  it('seeds activeModel and activeKernel on the new chat from the chat-client agent', async () => {
     render(<ChatStackTrace entryFile='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
@@ -154,7 +163,7 @@ describe('ChatStackTrace', () => {
     expect(callArgs.activeKernel).toBe('openscad');
   });
 
-  it('should focus the newly created chat after seeding', async () => {
+  it('focuses the newly created chat after seeding', async () => {
     render(<ChatStackTrace entryFile='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
@@ -163,12 +172,13 @@ describe('ChatStackTrace', () => {
     });
   });
 
-  it('should stamp the chat-scoped model + kernel onto the new chat metadata', async () => {
-    // Diverge the chat-scoped values from the cookie defaults so a
-    // regression that reads from the global hooks would surface as
-    // 'cookie-model' / 'openscad' instead of these chat-local values.
-    mockSelectedModelId = 'chat-local-model';
-    mockKernel = 'manifold';
+  // The pending user message itself should only carry `status: pending` —
+  // the wire body's `agent` payload is composed by the chat-client at
+  // regenerate time, not from this metadata block. This guards against the
+  // legacy "stamp kernel/model into metadata" pattern that the chat-metadata-
+  // first-class-architecture refactor removes.
+  it('seeds the pending user message without per-field metadata stamping', async () => {
+    mockAgent = { ...mockAgent, model: 'chat-local-model', kernel: 'manifold' };
 
     render(<ChatStackTrace entryFile='main.scad' side='top' />);
     fireEvent.click(await screen.findByTestId('fix-with-ai'));
@@ -180,40 +190,80 @@ describe('ChatStackTrace', () => {
     const callArgs = mockCreateChat.mock.calls[0]?.[0] as {
       activeModel?: string;
       activeKernel?: string;
-      messages?: Array<{ metadata?: { model?: string; kernel?: string } }>;
+      messages?: Array<{ metadata?: Record<string, unknown> }>;
     };
     expect(callArgs.activeModel).toBe('chat-local-model');
     expect(callArgs.activeKernel).toBe('manifold');
-    expect(callArgs.messages?.[0]?.metadata?.model).toBe('chat-local-model');
-    expect(callArgs.messages?.[0]?.metadata?.kernel).toBe('manifold');
+    expect(callArgs.messages?.[0]?.metadata?.['status']).toBe('pending');
+  });
+});
+
+describe('ChatStackTrace — in-place (shift not held) path', () => {
+  beforeEach(async () => {
+    vi.clearAllMocks();
+    mockReadFile.mockResolvedValue(new Uint8Array([1, 2, 3]));
+    mockKernelIssues = new Map([['main.scad', [issue]]]);
+    mockAgent = {
+      profile: 'cad',
+      model: 'chat-local-model',
+      kernel: 'manifold',
+      mode: 'plan',
+      toolChoice: 'auto',
+      testingEnabled: false,
+    };
+
+    // Override `useModifiers` for this describe block so the shift-not-held
+    // path is exercised and the in-place chat-client submit fires.
+    const useModifiersMock = (await import('#hooks/use-keyboard.js')) as { useModifiers: () => { shift: boolean } };
+    useModifiersMock.useModifiers = () => ({ shift: false });
   });
 
-  it('should send to the current chat with the chat-scoped model/kernel when shift is not held', async () => {
-    // Override the modifier mock for this single test to bypass the
-    // new-chat branch and exercise the in-place sendMessage path.
-    const useModifiersMock = (await import('#hooks/use-keyboard.js')) as { useModifiers: () => { shift: boolean } };
-    const original = useModifiersMock.useModifiers;
-    useModifiersMock.useModifiers = () => ({ shift: false });
+  it('routes the fix prompt through cadChat.submit (no inline metadata stamping)', async () => {
+    render(<ChatStackTrace entryFile='main.scad' side='top' />);
+    fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
-    mockSelectedModelId = 'chat-local-model';
-    mockKernel = 'manifold';
+    await waitFor(() => {
+      expect(mockSubmit).toHaveBeenCalledOnce();
+    });
 
-    try {
-      render(<ChatStackTrace entryFile='main.scad' side='top' />);
-      fireEvent.click(await screen.findByTestId('fix-with-ai'));
+    const submitArgs = mockSubmit.mock.calls[0]?.[0] as { text: string };
+    expect(typeof submitArgs.text).toBe('string');
+    expect(submitArgs.text).toContain('error');
+    expect(mockCreateChat).not.toHaveBeenCalled();
+  });
 
-      await waitFor(() => {
-        expect(mockSendMessage).toHaveBeenCalledOnce();
-      });
+  // Wire-format invariant — the captured agent identity must produce a body
+  // that satisfies the shared chatTurnRequestSchema. Regression coverage for
+  // the original Fix-with-AI missing-kernel / missing-mode / missing-
+  // testingEnabled bug — all three fields previously needed to be hand-
+  // stamped on the user message metadata and frequently drifted.
+  it('produces a wire body satisfying chatTurnRequestSchema for the Fix-with-AI in-place path', async () => {
+    render(<ChatStackTrace entryFile='main.scad' side='top' />);
+    fireEvent.click(await screen.findByTestId('fix-with-ai'));
 
-      const sentMessage = mockSendMessage.mock.calls[0]?.[0] as {
-        metadata?: { model?: string; kernel?: string };
-      };
-      expect(sentMessage.metadata?.model).toBe('chat-local-model');
-      expect(sentMessage.metadata?.kernel).toBe('manifold');
-      expect(mockCreateChat).not.toHaveBeenCalled();
-    } finally {
-      useModifiersMock.useModifiers = original;
+    await waitFor(() => {
+      expect(mockSubmit).toHaveBeenCalledOnce();
+    });
+
+    const submitArgs = mockSubmit.mock.calls[0]?.[0] as { text: string };
+    const userMessage: MyUIMessage = {
+      id: 'msg_test',
+      role: 'user',
+      parts: [{ type: 'text', text: submitArgs.text }],
+    };
+    const wireBody = {
+      id: 'chat_test',
+      messages: [userMessage],
+      agent: mockAgent,
+    };
+
+    const parsed = chatTurnRequestSchema.parse(wireBody);
+    if (parsed.agent.profile !== 'cad') {
+      throw new Error(`expected cad profile, got ${parsed.agent.profile}`);
     }
+    expect(parsed.agent.kernel).toBe('manifold');
+    expect(parsed.agent.mode).toBe('plan');
+    expect(parsed.agent.toolChoice).toBe('auto');
+    expect(parsed.agent.testingEnabled).toBe(false);
   });
 });

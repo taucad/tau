@@ -14,9 +14,9 @@ To generate and apply the Better Auth schema:
 # Step 1: Generate the schema
 pnpm nx auth-schema-generate api
 
-# Or directly with Better Auth CLI
+# Or directly with Better Auth CLI (requires better-auth >=1.5)
 cd apps/api
-npx @better-auth/cli generate --config app/config/auth.ts --output app/database/auth-schema.ts --yes
+npx auth@latest generate --config app/config/auth.ts --output app/database/auth-schema.ts --yes
 ```
 
 **Step 2: Copy changes to main schema**

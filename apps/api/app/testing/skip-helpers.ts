@@ -1,4 +1,25 @@
 import process from 'node:process';
+import type { AgentConfigInput } from '@taucad/chat/schemas';
+import type { KernelId } from '@taucad/types/constants';
+
+/**
+ * Build the `agent` block for an integration-test `POST /v1/chat` request.
+ * Mirrors the production wire contract enforced by `chatTurnRequestSchema` so
+ * tests parse cleanly through the same schema. See
+ * `docs/policy/chat-request-config-policy.md`.
+ *
+ * @param modelId - Provider-prefixed model identifier.
+ * @param kernel - Kernel target for the CAD agent (default `replicad`).
+ * @returns A `cad`-profile agent config suitable for inlining into the wire body.
+ */
+export const buildCadAgent = (modelId: string, kernel: KernelId = 'replicad'): AgentConfigInput => ({
+  profile: 'cad',
+  model: modelId,
+  kernel,
+  mode: 'agent',
+  toolChoice: 'auto',
+  testingEnabled: false,
+});
 
 /**
  * Predicate for `describe.skipIf(...)` that returns `true` when any of the

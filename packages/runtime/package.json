@@ -1,6 +1,6 @@
 {
   "name": "@taucad/runtime",
-  "version": "0.1.0",
+  "version": "0.1.0-beta.1",
   "description": "Multi-kernel CAD runtime framework for browser and Node.js",
   "type": "module",
   "private": false,
@@ -485,6 +485,7 @@
     "@kittycad/lib": "catalog:",
     "@msgpack/msgpack": "catalog:",
     "@taucad/converter": "workspace:*",
+    "@taucad/events": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/json-schema": "workspace:*",
     "@taucad/kcl-wasm-lib": "catalog:",
@@ -492,6 +493,7 @@
     "@taucad/rpc": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/vm": "workspace:*",
     "cdn-resolve": "catalog:",
     "culori": "catalog:",
     "deepmerge": "catalog:",
@@ -499,9 +501,9 @@
     "esbuild-wasm": "catalog:",
     "json-schema-default": "catalog:",
     "manifold-3d": "catalog:",
-    "opencascade.js": "npm:@taucad/opencascade.js@3.0.0-beta.1",
-    "replicad": "npm:@taucad/replicad@0.21.0-v8.57.1",
-    "replicad-opencascadejs": "npm:@taucad/replicad-opencascadejs@0.21.0-v8.57",
+    "opencascade.js": "npm:@taucad/opencascade.js@3.0.0-beta.3",
+    "replicad": "npm:@taucad/replicad@0.23.3-beta.1",
+    "replicad-opencascadejs": "npm:@taucad/replicad-opencascadejs@0.23.0-beta.0",
     "source-map-js": "catalog:",
     "type-fest": "catalog:",
     "uint8array-extras": "catalog:",
@@ -530,6 +532,6 @@
     "@taucad/tau-examples": "workspace:*",
     "geist": "catalog:",
     "vite": "catalog:",
-    "vitest": "catalog:"
+    "vitest": "4.1.5"
   }
 }

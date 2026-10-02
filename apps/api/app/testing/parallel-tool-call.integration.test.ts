@@ -7,7 +7,7 @@ import type { TestApp } from '#testing/create-test-app.js';
 import { collectFinalMessage, collectStreamChunks } from '#testing/stream-consumer.js';
 import { expectNoErrors, extractToolCallParts } from '#testing/stream-assertions.js';
 import type { RpcTimingEvent } from '#testing/headless-chat-rpc.service.js';
-import { requiresEnv } from '#testing/skip-helpers.js';
+import { buildCadAgent, requiresEnv } from '#testing/skip-helpers.js';
 
 /**
  * Real-LLM integration coverage for parallel tool-call durability and
@@ -81,6 +81,7 @@ describe.skipIf(requiresEnv('ANTHROPIC_API_KEY'))('Parallel tool-call durability
             metadata: { model: modelId, kernel: 'replicad' },
           },
         ],
+        agent: buildCadAgent(modelId, 'replicad'),
       }),
     });
 
@@ -130,6 +131,7 @@ describe.skipIf(requiresEnv('ANTHROPIC_API_KEY'))('Parallel tool-call durability
             metadata: { model: modelId, kernel: 'replicad' },
           },
         ],
+        agent: buildCadAgent(modelId, 'replicad'),
       }),
     });
 
@@ -316,6 +318,7 @@ describe.skipIf(requiresEnv('ANTHROPIC_API_KEY'))('Parallel tool-call durability
             metadata: { model: modelId, kernel: 'replicad' },
           },
         ],
+        agent: buildCadAgent(modelId, 'replicad'),
       }),
     });
 

@@ -152,6 +152,60 @@ afterEach(() => {
 });
 ```
 
+### 4.1 Returning Multiple Disposables From a Test Helper
+
+When a helper produces several owning handles that the caller needs to use
+together (e.g. an explorer iteration that yields a face, an edge, a
+triangulation, and a location), do NOT bundle them with a `cleanup: () => void`
+callback returned alongside the handles. The pattern is fragile: any
+intermediate handle bound by `using` inside the helper is disposed at helper
+return, leaving the outer-scope bindings the caller is expected to use as
+references to disposed objects (use-after-dispose on the consumer side).
+The disposer-idempotency guard from the unified RBV work only covers
+`val::object` envelopes, not raw embind handles.
+
+Use `DisposableStack.move()` to transfer ownership of every accumulated
+handle from the helper's local stack to a caller-owned stack returned to
+the test:
+
+```typescript
+function getFirstTriangulatedEdge(shape: TopoDS_Shape): DisposableStack & {
+  edge: TopoDS_Edge;
+  triangulation: Poly_Triangulation;
+  location: TopLoc_Location;
+} {
+  using outer = new DisposableStack();
+  const explorer = outer.use(new oc.TopExp_Explorer(shape, oc.TopAbs_ShapeEnum.TopAbs_FACE));
+  while (explorer.More()) {
+    using iterStack = new DisposableStack();
+    const face = iterStack.use(oc.TopoDS.Face(explorer.Current()));
+    const triangulation = iterStack.use(BRep_Tool.Triangulation(face, location));
+    if (!triangulation.IsNull()) {
+      // Transfer ownership: iterStack disposers move to a fresh stack the
+      // caller receives. The helper's `using` declarations no longer dispose
+      // the moved handles at scope exit.
+      const moved = iterStack.move();
+      return Object.assign(moved, { edge, triangulation, location });
+    }
+    explorer.Next();
+  }
+  throw new Error('no triangulated edge found');
+}
+
+// Caller drives lifecycle directly via `using`:
+it('does the thing', () => {
+  using bundle = getFirstTriangulatedEdge(shape);
+  expect(bundle.edge).toBeDefined();
+  // ...
+}); // bundle.dispose() runs all the moved disposers in LIFO order
+```
+
+Canonical reference:
+[`tests/smoke/smoke-brep-tool-overloads.test.ts:28-103`](https://github.com/taucad/opencascade.js/blob/main/tests/smoke/smoke-brep-tool-overloads.test.ts).
+Prior art for adopting an RBV container via `stack.use(...)`:
+[`tests/smoke/smoke-output-params-disposal.test.ts`](https://github.com/taucad/opencascade.js/blob/main/tests/smoke/smoke-output-params-disposal.test.ts)
+(around line 122).
+
 ## 5. Type-Safe Mocks with `mock<T>()`
 
 Use `mock<T>()` from `vitest-mock-extended` (already installed) to create typed

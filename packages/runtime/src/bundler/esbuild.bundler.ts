@@ -8,113 +8,118 @@
  * - execute: run bundled JS/TS code via dynamic import (Blob URL or data URL)
  * - registerModule: register/update builtin modules for bundle resolution
  * - resolveDependencies: fast-path dependency resolution via metafile
- *
- * Named exports (EsbuildBundler, createVfsPlugin, initializeEsbuild, etc.)
- * live in `./esbuild-core.ts` to avoid mixed default + named CJS output.
  */
 
-import * as esbuild from 'esbuild-wasm';
-import type { BuildOptions } from 'esbuild-wasm';
-import type { KernelIssue } from '#types/runtime.types.js';
+import type { KernelIssue, KernelIssueCode, KernelIssueType } from '#types/runtime.types.js';
+import type { BundleResult, ExecuteResult } from '#types/runtime-bundler.types.js';
 import { defineBundler } from '#types/runtime-bundler.types.js';
-import type { BuiltinModule } from '#bundler/module-manager.js';
-import {
-  EsbuildBundler,
-  initializeEsbuild,
-  executeCode,
-  createDetectionPlugin,
-  extractExternalImports,
-  extractProjectDependencies,
-} from '#bundler/esbuild-core.js';
+import { createEsbuildModuleVm } from '@taucad/vm';
+import type { BundleResult as VmBundleResult, ModuleVm, VmExecuteResult, VmIssue } from '@taucad/vm';
 
 const autoExportNames = ['main', 'defaultParams', 'getParameterDefinitions'];
 
+const kernelIssueCodes = new Set<KernelIssueCode>([
+  'RENDER_TIMEOUT',
+  'RENDER_ABORTED',
+  'KERNEL_BINDING_FAILED',
+  'KERNEL_CAPABILITY_MISSING',
+  'BUNDLER_FAILED',
+  'MIDDLEWARE_FAILED',
+  'RUNTIME',
+  'UNKNOWN',
+]);
+
+const kernelIssueTypes = new Set<KernelIssueType>(['compilation', 'runtime', 'kernel', 'connection', 'unknown']);
+
+const toKernelIssueCode = (code: string): KernelIssueCode => {
+  if (kernelIssueCodes.has(code as KernelIssueCode)) {
+    return code as KernelIssueCode;
+  }
+
+  return 'UNKNOWN';
+};
+
+const toKernelIssueType = (type: string): KernelIssueType => {
+  if (kernelIssueTypes.has(type as KernelIssueType)) {
+    return type as KernelIssueType;
+  }
+
+  return 'unknown';
+};
+
+const toKernelIssue = (issue: VmIssue): KernelIssue => ({
+  message: issue.message,
+  code: toKernelIssueCode(issue.code),
+  location: issue.location?.fileName
+    ? {
+        fileName: issue.location.fileName,
+        startLineNumber: issue.location.startLineNumber ?? 1,
+        startColumn: issue.location.startColumn ?? 1,
+        endLineNumber: issue.location.endLineNumber,
+        endColumn: issue.location.endColumn,
+      }
+    : undefined,
+  type: toKernelIssueType(issue.type),
+  severity: issue.severity,
+});
+
+const toBundleResult = (result: VmBundleResult): BundleResult => ({
+  ...result,
+  issues: result.issues.map(toKernelIssue),
+});
+
+const toExecuteResult = (result: VmExecuteResult): ExecuteResult => {
+  if (result.success) {
+    return result;
+  }
+
+  return {
+    success: false,
+    issues: result.issues.map(toKernelIssue),
+  };
+};
+
 /** @public */
-export default defineBundler({
+export default defineBundler<{ vm: ModuleVm }>({
   name: 'EsbuildBundler',
   version: '1.0.0',
   extensions: ['ts', 'js', 'tsx', 'jsx'],
 
   async initialize({ filesystem, projectPath }, _options) {
-    const builtinModules = new Map<string, BuiltinModule>();
-    await initializeEsbuild();
-    const bundler = new EsbuildBundler({
+    const vm = await createEsbuildModuleVm({
       filesystem,
       projectPath,
-      builtinModules,
       autoExportNames,
+      cacheExecution: true,
     });
-    await bundler.initialize();
-    return { bundler, builtinModules, filesystem, projectPath };
+    return { vm };
   },
 
   async detectImports({ entryPath }, context) {
-    const buildOptions: BuildOptions = {
-      entryPoints: [entryPath],
-      bundle: true,
-      write: false,
-      metafile: true,
-      format: 'esm',
-      target: 'es2022',
-      platform: 'browser',
-      plugins: [
-        createDetectionPlugin({
-          filesystem: context.filesystem,
-          projectPath: context.projectPath,
-        }),
-      ],
-      external: [],
-      logLevel: 'silent',
-    };
-
-    try {
-      const result = await esbuild.build(buildOptions);
-      return {
-        detectedModules: extractExternalImports(result.metafile),
-        dependencies: extractProjectDependencies(result.metafile, context.projectPath),
-      };
-    } catch (error) {
-      const issues: KernelIssue[] = [];
-      if (error && typeof error === 'object' && 'errors' in error) {
-        const buildErrors = error as { errors: Array<{ text: string }> };
-        for (const errorMessage of buildErrors.errors) {
-          issues.push({
-            message: errorMessage.text,
-            code: 'BUNDLER_FAILED',
-            type: 'compilation',
-            severity: 'error',
-          });
-        }
-      }
-
-      return { detectedModules: [], dependencies: [] };
-    }
+    return context.vm.detectImports(entryPath);
   },
 
   async bundle({ entryPath }, context) {
-    return context.bundler.bundle(entryPath);
+    return toBundleResult(await context.vm.bundle(entryPath));
   },
 
-  async execute(code, _context) {
-    return executeCode(code);
+  async execute(code, context) {
+    return toExecuteResult(await context.vm.execute(code));
   },
 
   registerModule(name, builtinModule, context) {
-    const entry: BuiltinModule = {
+    context.vm.registerModule(name, {
       code: builtinModule.code,
       version: builtinModule.version,
       globalName: builtinModule.globalName,
-    };
-    context.builtinModules.set(name, entry);
-    context.bundler.registerModule(name, entry);
+    });
   },
 
   async resolveDependencies({ entryPath }, context) {
-    const result = await context.bundler.bundle(entryPath);
-    return { resolved: result.dependencies, unresolved: result.unresolvedPaths };
+    return context.vm.resolveDependencies(entryPath);
   },
 
   async cleanup(context) {
-    context.bundler.dispose();
+    context.vm.dispose();
   },
 });

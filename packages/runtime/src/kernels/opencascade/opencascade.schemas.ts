@@ -52,9 +52,17 @@ const occtGltfExportSchema = occtExportTessellationSchema.extend(coordinateSyste
  */
 export const opencascadeOptionsSchema = z.object({
   wasm: z
-    .union([z.literal('full'), z.object({ wasmUrl: z.string(), wasmBindingsUrl: z.string() })])
+    .union([
+      z.literal('auto'),
+      z.literal('full'),
+      z.literal('multi'),
+      z.object({ wasmUrl: z.string(), wasmBindingsUrl: z.string() }),
+    ])
     .optional()
-    .default('full'),
+    .default('full')
+    .describe(
+      'WASM build variant. "full" (default) single-threaded; "multi" pthread build (requires SharedArrayBuffer + cross-origin isolation); "auto" picks multi when supported, else full; or a custom WASM/JS URL pair.',
+    ),
   ocTracing: z
     .enum(['off', 'summary', 'per-call'])
     .optional()

@@ -5,7 +5,8 @@ import { isToolExecutionError } from '@taucad/chat/utils';
 import { AnimatedShinyText } from '#components/magicui/animated-shiny-text.js';
 import { useChatSelector } from '#hooks/use-chat.js';
 import { cn } from '#utils/ui.utils.js';
-import { StructuredToolError } from '#components/chat/chat-tool-error.js';
+import { toolName } from '@taucad/chat/constants';
+import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 
 const snakeToSentenceCase = (string_: string): string =>
@@ -52,6 +53,26 @@ function getAgentLabel(agent: AgentType): string {
 
     default: {
       return snakeToSentenceCase(agent);
+    }
+  }
+}
+
+function getTransferErrorNoun(transferToolName: string): string {
+  switch (transferToolName) {
+    case toolName.transferToCadExpert: {
+      return 'CAD expert handoff';
+    }
+
+    case toolName.transferToResearchExpert: {
+      return 'research handoff';
+    }
+
+    case toolName.transferBackToSupervisor: {
+      return 'supervisor return';
+    }
+
+    default: {
+      return 'agent handoff';
     }
   }
 }
@@ -105,9 +126,14 @@ export function ChatMessageToolTransfer({ part }: { readonly part: ToolUIPart })
     throw new Error(`Unexpected ${toolName} state: ${part.state}`);
   }
 
-  // Check for structured tool errors in output-available state
   if (part.state === 'output-available' && isToolExecutionError(part.output)) {
-    return <StructuredToolError error={part.output} />;
+    return (
+      <ChatToolError
+        errorText={JSON.stringify(part.output)}
+        icon={isTransferBack ? CornerDownLeft : ArrowRight}
+        noun={getTransferErrorNoun(toolName)}
+      />
+    );
   }
 
   // This component has unique agent-specific styling, so we keep it custom

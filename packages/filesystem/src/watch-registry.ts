@@ -6,6 +6,7 @@
  * lifecycle cleanup on disconnect.
  */
 
+import { Topic } from '@taucad/events';
 import type { ChangeEventBus } from '#change-event-bus.js';
 import type { ChangeEvent, WatchRequest, WatchEvent, WatchEventFilter } from '#types.js';
 import { EventCoalescer } from '#event-coalescer.js';
@@ -13,7 +14,8 @@ import { canonicalizePath, parentDirectory } from '@taucad/utils/path';
 
 type WatchSubscription = {
   request: WatchRequest;
-  handlers: Set<(event: WatchEvent) => void>;
+  handlers: Topic<WatchEvent>;
+  handlerUnsubs: Map<(event: WatchEvent) => void, () => void>;
   unsubscribeFromBus: () => void;
   coalescer: EventCoalescer;
 };
@@ -98,13 +100,18 @@ function passesFilter(changeType: ChangeEvent['type'], filter?: WatchEventFilter
   }
   switch (changeType) {
     case 'fileWritten':
+    case 'fileCopied':
+    case 'directoryCreated':
+    case 'directoryCopied':
     case 'directoryChanged': {
       return filter.updated !== false;
     }
-    case 'fileDeleted': {
+    case 'fileDeleted':
+    case 'directoryDeleted': {
       return filter.deleted !== false;
     }
-    case 'fileRenamed': {
+    case 'fileRenamed':
+    case 'directoryRenamed': {
       return filter.renamed !== false;
     }
     case 'backendChanged': {
@@ -118,16 +125,21 @@ function passesFilter(changeType: ChangeEvent['type'], filter?: WatchEventFilter
 
 function changeEventToWatchEvent(event: ChangeEvent, correlationId?: string): WatchEvent | undefined {
   switch (event.type) {
-    case 'fileWritten': {
+    case 'fileWritten':
+    case 'directoryChanged':
+    case 'directoryCreated': {
       return { type: 'change', path: event.path, correlationId };
     }
-    case 'directoryChanged': {
-      return { type: 'change', path: event.path, correlationId };
+    case 'fileCopied':
+    case 'directoryCopied': {
+      return { type: 'change', path: event.targetPath, correlationId };
     }
-    case 'fileDeleted': {
+    case 'fileDeleted':
+    case 'directoryDeleted': {
       return { type: 'delete', path: event.path, correlationId };
     }
-    case 'fileRenamed': {
+    case 'fileRenamed':
+    case 'directoryRenamed': {
       return { type: 'rename', oldPath: event.oldPath, newPath: event.newPath, correlationId };
     }
     case 'backendChanged': {
@@ -143,11 +155,18 @@ function getEventPath(event: ChangeEvent): string | undefined {
   switch (event.type) {
     case 'fileWritten':
     case 'fileDeleted':
+    case 'directoryCreated':
+    case 'directoryDeleted':
     case 'directoryChanged': {
       return event.path;
     }
-    case 'fileRenamed': {
+    case 'fileRenamed':
+    case 'directoryRenamed': {
       return event.oldPath;
+    }
+    case 'fileCopied':
+    case 'directoryCopied': {
+      return event.targetPath;
     }
     default: {
       return undefined;
@@ -239,14 +258,21 @@ export class WatchRegistry {
       });
       subscription = {
         request,
-        handlers: new Set(),
+        handlers: new Topic<WatchEvent>({
+          name: 'WatchRegistry.handlers',
+          onError: (error) => {
+            console.error('[WatchRegistry] Handler error:', error);
+          },
+        }),
+        handlerUnsubs: new Map(),
         unsubscribeFromBus,
         coalescer,
       };
       this._subscriptions.set(hash, subscription);
     }
 
-    subscription.handlers.add(handler);
+    const unsubscribe = subscription.handlers.subscribe(handler);
+    subscription.handlerUnsubs.set(handler, unsubscribe);
 
     if (ownerId) {
       let owned = this._ownerWatches.get(ownerId);
@@ -301,13 +327,7 @@ export class WatchRegistry {
   public emitResetAll(): void {
     for (const subscription of this._subscriptions.values()) {
       const resetEvent: WatchEvent = { type: 'reset', correlationId: subscription.request.correlationId };
-      for (const handler of subscription.handlers) {
-        try {
-          handler(resetEvent);
-        } catch (error) {
-          console.error('[WatchRegistry] Handler error on reset:', error);
-        }
-      }
+      subscription.handlers.emit(resetEvent);
     }
   }
 
@@ -338,7 +358,8 @@ export class WatchRegistry {
     for (const subscription of this._subscriptions.values()) {
       subscription.coalescer.dispose();
       subscription.unsubscribeFromBus();
-      subscription.handlers.clear();
+      subscription.handlers.dispose();
+      subscription.handlerUnsubs.clear();
     }
     this._subscriptions.clear();
     this._ownerWatches.clear();
@@ -364,13 +385,7 @@ export class WatchRegistry {
     if (event.type === 'backendChanged') {
       coalescer.flush();
       const resetEvent: WatchEvent = { type: 'reset', correlationId: request.correlationId };
-      for (const handler of subscription.handlers) {
-        try {
-          handler(resetEvent);
-        } catch (error) {
-          console.error('[WatchRegistry] Handler error:', error);
-        }
-      }
+      subscription.handlers.emit(resetEvent);
       return;
     }
 
@@ -393,7 +408,10 @@ export class WatchRegistry {
       return;
     }
 
-    if (event.type === 'fileRenamed' && matchesExcludes(event.newPath, request.excludes, cs)) {
+    if (
+      (event.type === 'fileRenamed' || event.type === 'directoryRenamed') &&
+      matchesExcludes(event.newPath, request.excludes, cs)
+    ) {
       return;
     }
 
@@ -412,13 +430,7 @@ export class WatchRegistry {
     }
 
     const overflowEvent: WatchEvent = { type: 'overflow', correlationId: subscription.request.correlationId };
-    for (const handler of subscription.handlers) {
-      try {
-        handler(overflowEvent);
-      } catch (error) {
-        console.error('[WatchRegistry] Handler error on overflow:', error);
-      }
-    }
+    subscription.handlers.emit(overflowEvent);
   }
 
   /**
@@ -438,13 +450,7 @@ export class WatchRegistry {
       return;
     }
 
-    for (const handler of subscription.handlers) {
-      try {
-        handler(watchEvent);
-      } catch (error) {
-        console.error('[WatchRegistry] Handler error:', error);
-      }
-    }
+    subscription.handlers.emit(watchEvent);
   }
 
   private _removeHandler(hash: string, handler: (event: WatchEvent) => void, ownerId?: string): void {
@@ -453,7 +459,11 @@ export class WatchRegistry {
       return;
     }
 
-    subscription.handlers.delete(handler);
+    const unsubscribe = subscription.handlerUnsubs.get(handler);
+    if (unsubscribe !== undefined) {
+      unsubscribe();
+      subscription.handlerUnsubs.delete(handler);
+    }
 
     if (subscription.handlers.size === 0) {
       subscription.coalescer.dispose();

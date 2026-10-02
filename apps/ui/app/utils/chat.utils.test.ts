@@ -354,6 +354,8 @@ describe('serializeMessage', () => {
           output: {
             matches: [{ file: 'a.ts', line: 1, content: 'foo' }],
             totalMatches: 1,
+            appliedHeadLimit: 50,
+            appliedOffset: 0,
           },
         },
       ]);
@@ -583,7 +585,7 @@ describe('finalizeInterruptedToolParts', () => {
               input: { targetFile: 'z.scad', content: '//' },
             },
           ],
-          metadata: { model: 'm', createdAt: 2 },
+          metadata: { createdAt: 2 },
         },
       ];
 
@@ -621,7 +623,7 @@ describe('finalizeInterruptedToolParts', () => {
             input: { targetFile: 'z.scad', content: '//' },
           },
         ],
-        metadata: { model: 'm', createdAt: 2 },
+        metadata: { createdAt: 2 },
       },
     ];
 
@@ -651,7 +653,7 @@ describe('finalizeInterruptedToolParts', () => {
             input: { targetFile: 'z.scad', content: '//' },
           },
         ],
-        metadata: { model: 'm', createdAt: 2 },
+        metadata: { createdAt: 2 },
       },
     ];
 
@@ -679,7 +681,7 @@ describe('finalizeInterruptedToolParts', () => {
             input: { targetFile: 'z.scad', content: '//' },
           },
         ],
-        metadata: { model: 'm', createdAt: 2 },
+        metadata: { createdAt: 2 },
       },
     ];
 

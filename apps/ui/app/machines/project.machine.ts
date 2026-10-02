@@ -125,6 +125,13 @@ type ProjectEventInternal =
       settings?: GraphicsViewSettings;
     }
   | { type: 'destroyViewGraphics'; viewId: string }
+  // Filesystem participant intents — fired by the
+  // `file-operation-participants.ts` adapter on rename/delete events.
+  // The participant is the single source of truth; UI components must
+  // not send these intents directly.
+  | { type: 'fileMoved'; oldPath: string; newPath: string }
+  | { type: 'fileDeleted'; path: string }
+  | { type: 'directoryDeleted'; path: string }
   | { type: 'flushNow' };
 
 type ProjectEvent =
@@ -509,6 +516,121 @@ export const projectMachine = setup({
         };
       });
     }),
+    // ─────────────────────────────────────────────────────────────
+    // Filesystem-participant actions
+    //
+    // These actions are invoked by `file-operation-participants.ts`
+    // in response to {@link ContentChangeEvent}s, NOT by UI
+    // components. They re-key every path-indexed map in the project
+    // context so the open viewers + CAD actors + parameter entries +
+    // main entry pointer all survive a rename / delete.
+    // ─────────────────────────────────────────────────────────────
+    applyFileMoved: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'fileMoved');
+      const { oldPath, newPath } = event;
+      const matches = (path: string): boolean => path === oldPath || path.startsWith(`${oldPath}/`);
+      const rewrite = (path: string): string =>
+        path === oldPath ? newPath : path.startsWith(`${oldPath}/`) ? `${newPath}${path.slice(oldPath.length)}` : path;
+
+      enqueue.assign(({ context }) => {
+        // parameterEntries: Map<filePath, entry>
+        const newEntries = new Map(context.parameterEntries);
+        let mutatedEntries = false;
+        for (const [key, value] of context.parameterEntries) {
+          if (matches(key)) {
+            newEntries.delete(key);
+            newEntries.set(rewrite(key), value);
+            mutatedEntries = true;
+          }
+        }
+
+        // geometryUnits: Map<entryFile, ActorRef>
+        const newUnits = new Map(context.geometryUnits);
+        let mutatedUnits = false;
+        for (const [key, value] of context.geometryUnits) {
+          if (matches(key)) {
+            newUnits.delete(key);
+            newUnits.set(rewrite(key), value);
+            mutatedUnits = true;
+          }
+        }
+
+        const next: Partial<ProjectContext> = {};
+        if (mutatedEntries) {
+          next.parameterEntries = newEntries;
+        }
+        if (mutatedUnits) {
+          next.geometryUnits = newUnits;
+        }
+        if (matches(context.mainEntryFile)) {
+          next.mainEntryFile = rewrite(context.mainEntryFile);
+        }
+        return next;
+      });
+
+      // If the mechanical main file was renamed, persist the updated
+      // `assets.mechanical.main` pointer so reload picks the new path.
+      if (matches(context.project?.assets.mechanical?.main ?? '')) {
+        enqueue.assign(({ context }) =>
+          produce(context, (draft) => {
+            if (draft.project?.assets.mechanical) {
+              draft.project.assets.mechanical.main = rewrite(draft.project.assets.mechanical.main);
+              draft.project.updatedAt = Date.now();
+            }
+          }),
+        );
+      }
+    }),
+    applyFileDeleted: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'fileDeleted');
+      const { path } = event;
+      const unit = context.geometryUnits.get(path);
+      if (unit) {
+        enqueue.stopChild(unit);
+      }
+      enqueue.assign(({ context }) => {
+        const newUnits = new Map(context.geometryUnits);
+        newUnits.delete(path);
+        const newEntries = new Map(context.parameterEntries);
+        newEntries.delete(path);
+        return {
+          geometryUnits: newUnits,
+          parameterEntries: newEntries,
+          ...(context.mainEntryFile === path ? { mainEntryFile: '' } : {}),
+        };
+      });
+    }),
+    applyDirectoryDeleted: enqueueActions(({ enqueue, context, event }) => {
+      assertEvent(event, 'directoryDeleted');
+      const { path } = event;
+      const prefix = `${path}/`;
+      const matches = (filePath: string): boolean => filePath === path || filePath.startsWith(prefix);
+
+      for (const [key, unit] of context.geometryUnits) {
+        if (matches(key)) {
+          enqueue.stopChild(unit);
+        }
+      }
+      enqueue.assign(({ context }) => {
+        const newUnits = new Map(context.geometryUnits);
+        const newEntries = new Map(context.parameterEntries);
+        for (const key of context.geometryUnits.keys()) {
+          if (matches(key)) {
+            newUnits.delete(key);
+          }
+        }
+        for (const key of context.parameterEntries.keys()) {
+          if (matches(key)) {
+            newEntries.delete(key);
+          }
+        }
+        return {
+          geometryUnits: newUnits,
+          parameterEntries: newEntries,
+          ...(matches(context.mainEntryFile) ? { mainEntryFile: '' } : {}),
+        };
+      });
+    }),
     createViewGraphics: enqueueActions(({ enqueue, context, event }) => {
       assertEvent(event, 'createViewGraphics');
 
@@ -535,6 +657,7 @@ export const projectMachine = setup({
             upDirection: settings.upDirection,
             environmentPreset: settings.environmentPreset,
             pinnedMeasurements: settings.pinnedMeasurements,
+            graphicsBackendPreference: settings.graphicsBackend ?? 'webgl',
           },
         });
 
@@ -782,6 +905,15 @@ export const projectMachine = setup({
             },
             destroyViewGraphics: {
               actions: 'destroyViewGraphics',
+            },
+            fileMoved: {
+              actions: 'applyFileMoved',
+            },
+            fileDeleted: {
+              actions: 'applyFileDeleted',
+            },
+            directoryDeleted: {
+              actions: 'applyDirectoryDeleted',
             },
           },
         },

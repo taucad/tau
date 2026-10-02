@@ -1,0 +1,33 @@
+import { defineConfig } from 'tsdown';
+import type { Options } from 'tsdown';
+
+const baseConfig: Options = {
+  entry: ['src/index.ts', 'src/internal.ts'],
+  sourcemap: false,
+  clean: true,
+  dts: true,
+  minify: true,
+  copy: (options) => [
+    {
+      from: 'src/wasm',
+      to: `${options.outDir}/wasm`,
+    },
+  ],
+  tsconfig: 'tsconfig.build.json',
+  unbundle: true,
+};
+
+const cjsConfig: Options = {
+  ...baseConfig,
+  format: 'cjs',
+  outDir: 'dist/cjs',
+  dts: false,
+};
+
+const esmConfig: Options = {
+  ...baseConfig,
+  format: 'esm',
+  outDir: 'dist/esm',
+};
+
+export default defineConfig([esmConfig, cjsConfig]);

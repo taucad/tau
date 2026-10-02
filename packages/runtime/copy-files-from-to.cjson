@@ -1,14 +1,15 @@
 {
   "copyFiles": [
-    // esbuild WASM for in-browser bundling
+    // OpenCascade WASM files for Replicad kernel.
+    // - single: pthread-free build, default for COOP/COEP-less environments.
+    // - multi: pthread build, picked by default when SharedArrayBuffer is usable.
     {
-      "from": "./node_modules/esbuild-wasm/esbuild.wasm",
-      "to": "src/bundler/wasm/esbuild.wasm"
-    },
-    // OpenCascade WASM files for Replicad kernel (single = fast/compact, with_exceptions = OC error decoding)
-    {
-      "from": "./node_modules/replicad-opencascadejs/src/replicad_single.wasm",
+      "from": "./node_modules/replicad-opencascadejs/dist/replicad_single.wasm",
       "to": "src/kernels/replicad/wasm/replicad_single.wasm"
+    },
+    {
+      "from": "./node_modules/replicad-opencascadejs/dist/replicad_multi.wasm",
+      "to": "src/kernels/replicad/wasm/replicad_multi.wasm"
     },
     // KCL WASM file for Zoo kernel
     {
@@ -42,6 +43,14 @@
     {
       "from": "./node_modules/opencascade.js/dist/opencascade_full.d.ts",
       "to": "src/kernels/opencascade/wasm/opencascade_full.d.ts"
+    },
+    // Multi-threaded (pthread) OpenCascade WASM. The `opencascade.js/multi`
+    // JS factory is resolved via the package subpath export at runtime; only
+    // the binary is served from the local asset copy (loaded through
+    // `new URL('wasm/opencascade_full_multi.wasm', import.meta.url)`).
+    {
+      "from": "./node_modules/opencascade.js/dist/opencascade_full_multi.wasm",
+      "to": "src/kernels/opencascade/wasm/opencascade_full_multi.wasm"
     }
   ],
   // Always overwrite files

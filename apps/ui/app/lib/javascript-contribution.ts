@@ -1,146 +1,39 @@
 /**
- * JavaScript/TypeScript Language Contribution
+ * JavaScript / JSX language contribution (Monaco `javascript`, `javascriptreact`).
  *
- * Conforms to the LanguageContribution interface for uniform lifecycle management.
- * Handles TypeScript compiler options, the custom JS definition provider
- * for Cmd+Click navigation on imports, and Automatic Type Acquisition (ATA)
- * for IntelliSense on external package imports.
+ * Activation is family-aligned with Monaco's JavaScript worker path.
+ * Shared ATA + kernel typings live in `typescript-family-shared.ts`.
  */
 
 import type * as Monaco from 'monaco-editor';
-import { kernelTypeMaps } from '@taucad/api-extractor';
 import type { LanguageContribution, ActivationContext, ActivationResult } from '#lib/monaco-language-registry.js';
-import { createJsDefinitionProvider } from '#lib/javascript-definition-provider.js';
-import { ModuleResolver } from '#lib/javascript-module-resolver.js';
-import { TypeAcquisitionService } from '#lib/type-acquisition-service.js';
-import { monacoLanguages } from '#lib/monaco.constants.js';
+import { registerMaterializingJsProviders } from '#lib/monaco-typescript-extras/register-materializing-typescript-providers.client.js';
+import { ensureAtaBoot, forwardAtaProjectSessionChange, setJsCompilerOptions } from '#lib/typescript-family-shared.js';
 
-/**
- * Check if a path is in node_modules (and should be read-only).
- */
-function isNodeModulesPath(path: string): boolean {
-  return path.includes('/node_modules/') || path.startsWith('node_modules/');
-}
-
-/** File extensions for JavaScript/TypeScript files */
-const jsExtensions = ['.ts', '.tsx', '.js', '.jsx', '.mts', '.mjs', '.cts', '.cjs'];
-
-/**
- * Check if a path is a JavaScript/TypeScript file.
- */
-function isJsFile(path: string): boolean {
-  return jsExtensions.some((extension) => path.endsWith(extension));
-}
-
-/** Module-level ATA instance for cross-method access */
-let ataInstance: TypeAcquisitionService | undefined;
-
-export const jsTsContribution: LanguageContribution = {
-  languageId: 'typescript', // Primary language ID (covers JS/TS family)
-  /**
-   * Gates JS/TS activation (TypeScript compiler defaults, ATA, definition
-   * provider) behind the first model creation in any of these ids. Until then
-   * `TypeAcquisitionService`, `kernelTypeMaps` virtual files, and module
-   * resolution stay unloaded so the editor opens fast for non-code files.
-   */
-  activationLanguageIds: ['typescript', 'javascript', 'typescriptreact', 'javascriptreact'],
+export const jsContribution: LanguageContribution = {
+  languageId: 'javascript',
+  activationLanguageIds: ['javascript', 'javascriptreact'],
 
   register(_monaco: typeof Monaco): void {
-    // No-op: Monaco's built-in TS/JS support is always available
+    // No-op: Monaco's built-in JS support is always available
   },
 
   activate(context: ActivationContext): ActivationResult {
-    const { monaco } = context;
+    const { monaco, workspaceFs } = context;
     const disposables: Monaco.IDisposable[] = [];
 
-    // Configure TypeScript compiler options
-    monaco.typescript.typescriptDefaults.setCompilerOptions({
-      experimentalDecorators: true,
-      allowSyntheticDefaultImports: true,
-      allowImportingTsExtensions: true,
-      moduleResolution: monaco.typescript.ModuleResolutionKind.NodeJs,
-      target: monaco.typescript.ScriptTarget.ESNext,
-      module: monaco.typescript.ModuleKind.ESNext,
-      noLib: false,
-      allowNonTsExtensions: true,
-      noEmit: true,
-      esModuleInterop: true,
-      baseUrl: '.',
-    });
+    setJsCompilerOptions(monaco);
+    disposables.push(ensureAtaBoot(monaco, context.fileManagerRef));
+    disposables.push(registerMaterializingJsProviders({ monaco, workspaceFs }));
 
-    monaco.typescript.typescriptDefaults.setEagerModelSync(true);
-
-    // Also configure JavaScript defaults
-    monaco.typescript.javascriptDefaults.setCompilerOptions({
-      allowSyntheticDefaultImports: true,
-      moduleResolution: monaco.typescript.ModuleResolutionKind.NodeJs,
-      target: monaco.typescript.ScriptTarget.ESNext,
-      module: monaco.typescript.ModuleKind.ESNext,
-      allowJs: true,
-      checkJs: true,
-      esModuleInterop: true,
-    });
-    monaco.typescript.javascriptDefaults.setEagerModelSync(true);
-
-    // Create module resolver and definition provider
-    const resolver = new ModuleResolver({
-      exists: async (path: string) => context.fileManager.exists(path),
-    });
-    const provider = createJsDefinitionProvider(monaco, { resolver });
-
-    // Register for all JS/TS languages
-    disposables.push(
-      monaco.languages.registerDefinitionProvider(monacoLanguages.typescript, provider),
-      monaco.languages.registerDefinitionProvider(monacoLanguages.javascript, provider),
-      monaco.languages.registerDefinitionProvider(monacoLanguages.typescriptreact, provider),
-      monaco.languages.registerDefinitionProvider(monacoLanguages.javascriptreact, provider),
-    );
-
-    // Initialize Automatic Type Acquisition
-    ataInstance = new TypeAcquisitionService();
-
-    // Register each kernel's type definitions as virtual files in Monaco.
-    // Each map entry becomes a separate addExtraLib registration at
-    // file:///node_modules/<modulePath>/index.d.ts.
-    const staticTypes = kernelTypeMaps.flatMap((typesMap) =>
-      Object.entries(typesMap).map(([packageName, content]) => ({
-        packageName,
-        content,
-        prewrapped: true,
-      })),
-    );
-
-    ataInstance.initialize(monaco, { staticTypes });
-    ataInstance.startWatching();
-
-    disposables.push({
-      dispose(): void {
-        ataInstance?.dispose();
-        ataInstance = undefined;
-      },
-    });
-
-    // Navigation handler for JS/TS files
-    const navigationHandler = {
-      canHandle(path: string): boolean {
-        return isJsFile(path);
-      },
-      isReadOnly(path: string): boolean {
-        return isNodeModulesPath(path);
-      },
-    };
-
-    return {
-      disposables,
-      navigationHandler,
-    };
+    return { disposables };
   },
 
-  onProjectSessionChange(_buildId: string): void {
-    ataInstance?.onProjectSessionChange();
+  onProjectSessionChange(projectId: string): void {
+    forwardAtaProjectSessionChange(projectId);
   },
 
   dispose(): void {
-    // ATA disposal is handled by the disposable in activate()
+    // ATA + provider disposal owned by activate() disposables
   },
 };

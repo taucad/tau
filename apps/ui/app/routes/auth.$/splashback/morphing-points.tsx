@@ -2,6 +2,8 @@ import { useRef, useMemo, useEffect } from 'react';
 import { useFrame } from '@react-three/fiber';
 import * as THREE from 'three';
 import type { Points, Group } from 'three';
+import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
+import { createMorphingPointsNodeMaterial } from '#routes/auth.$/splashback/morphing-points-material.node.js';
 import {
   createMorphingPointsMaterial,
   updateMorphProgress,
@@ -120,6 +122,9 @@ export function MorphingPoints({
   opacity = 1,
   onMorphComplete,
 }: MorphingPointsProperties): React.JSX.Element {
+  const backend = useThreeGraphicsBackend();
+  const nodeHandlesRef = useRef<ReturnType<typeof createMorphingPointsNodeMaterial>['handles'] | undefined>(undefined);
+
   const pointsRef = useRef<Points>(null);
   const rotationGroupRef = useRef<Group>(null);
   const currentRotationYaxisRef = useRef(initialRotationY);
@@ -146,15 +151,27 @@ export function MorphingPoints({
     return geo;
   }, [sourcePoints, targetPoints]);
 
-  // Create the shader material
+  // Create the morphing points material — GLSL ShaderMaterial or TSL PointsNodeMaterial.
   const material = useMemo(() => {
+    if (backend === 'webgpu') {
+      const built = createMorphingPointsNodeMaterial({
+        color: sourceColor,
+        targetColor,
+        pointSize,
+        explosionStrength,
+      });
+      nodeHandlesRef.current = built.handles;
+      return built.material;
+    }
+
+    nodeHandlesRef.current = undefined;
     return createMorphingPointsMaterial({
       color: sourceColor,
       targetColor,
       pointSize,
       explosionStrength,
     });
-  }, [sourceColor, targetColor, pointSize, explosionStrength]);
+  }, [backend, explosionStrength, pointSize, sourceColor, targetColor]);
 
   // Reset hasReachedTarget when target changes
   useEffect(() => {
@@ -211,10 +228,15 @@ export function MorphingPoints({
       },
     });
 
-    // Update shader uniforms
-    updateMorphProgress(material, currentProgress);
-    updateMorphTime(material, state.clock.elapsedTime);
-    updateMorphOpacity(material, opacity);
+    if (nodeHandlesRef.current) {
+      nodeHandlesRef.current.uProgress.value = currentProgress;
+      nodeHandlesRef.current.uTime.value = state.clock.elapsedTime;
+      nodeHandlesRef.current.uOpacity.value = opacity;
+    } else {
+      updateMorphProgress(material as THREE.ShaderMaterial, currentProgress);
+      updateMorphTime(material as THREE.ShaderMaterial, state.clock.elapsedTime);
+      updateMorphOpacity(material as THREE.ShaderMaterial, opacity);
+    }
   });
 
   return (

@@ -3,7 +3,7 @@ title: 'Sharing & Publishing Architecture for Tau'
 description: 'Audit of Tau persistence surfaces and cross-platform research (CodeSandbox, StackBlitz, CodePen, Replit, Gist, Onshape, Shapr3D, Autodesk, Figma, Observable, JupyterLite, RunKit, v0.dev, Lovable, Bolt) producing a phased roadmap for native model sharing.'
 status: draft
 created: '2026-04-23'
-updated: '2026-04-23'
+updated: '2026-05-07'
 category: architecture
 related:
   - docs/architecture/runtime-topology.md
@@ -26,7 +26,7 @@ Three findings dominate the recommendations:
 2. **Cross-origin isolation is a performance optimization, not a hard requirement for embeds.** Per `docs/architecture/runtime-topology.md` § Graceful Degradation, the runtime already falls back from `SharedArrayBuffer`-backed transport to inline `postMessage` delivery when SAB is unavailable, and the file-bridge falls back to RPC. This means **kernels can run inside embeds even on third-party hosts that are not cross-origin isolated** — at reduced throughput (no SAB zero-copy, no WASM threads for OC-based kernels), but functionally complete. Every published model still needs a **pre-rendered GLB derivative** as a **first-paint optimization**: the static viewer renders instantly while the interactive kernel boots in the background, then hands off seamlessly. This matches Tau's existing transport-graceful-degradation pattern rather than the Autodesk/Shapr3D static-only model.
 3. **Avoid the name "snapshot" for the new feature.** Tau already overloads "snapshot" in two places: `messageMetadataSchema.snapshot` (LLM editor-context bundle in `libs/chat`) and the LangGraph `PostgresSaver` checkpoints. Use **`Publication`** (immutable, shareable artifact) and **`Publish`** (the verb) to avoid confusion. This is more than aesthetics — type/name collisions in cross-cutting code (chat metadata vs. publication payloads) cause real bugs.
 
-The recommended target is a **content-addressed publication model**: sha256-keyed file blobs in S3-compatible storage, a Postgres `publication` table holding manifest + visibility + GLB/OG derivatives + lineage, an O(1) "Fork" that copies the manifest pointer (copy-on-write at the blob layer on first divergent edit), 3-tier visibility (Private / Unlisted with unguessable token / Public), a dedicated `embed.tau.new` cross-origin-isolated origin that ships GLB-first (instant paint) with progressive upgrade to the interactive kernel (with or without SAB acceleration depending on host COI), and an opt-in "publish with chat thread" mode that addresses Bolt.new's #1 anti-pattern.
+The recommended target is a **content-addressed publication model**: sha256-keyed file blobs in S3-compatible storage, a Postgres `publication` table holding manifest + visibility + OG derivatives + lineage, an O(1) "Fork" that copies the manifest pointer (copy-on-write at the blob layer on first divergent edit), 2-tier visibility (Private / Public), a dedicated `embed.tau.new` cross-origin-isolated origin that ships GLB-first (instant paint) with progressive upgrade to the interactive kernel (with or without SAB acceleration depending on host COI), and an opt-in "publish with chat thread" mode that addresses Bolt.new's #1 anti-pattern.
 
 For object storage, the recommendation is **Cloudflare R2 in production** (zero egress, $0.015/GB-mo storage, native CDN via `cdn.tau.new`, conditional `If-None-Match: '*'` for atomic content-addressed dedup, 11-nines durability, SOC 2 Type II) and **MinIO in `infra/docker-compose.yml` for local dev** (highest S3 parity in the open-source ecosystem; pinned to a known-good 2025 release; `mc` sidecar bootstraps buckets/IAM/CORS on `pnpm infra:up`). Both speak the same S3 API surface and are exercised through a single `ObjectStorageService` abstraction in the API, so every code path that ships to production runs first against MinIO in `pnpm dev`. Cost projection at Year 3 (10 TB stored, 100 TB egress/mo): R2 ~$190/mo vs AWS S3+CloudFront ~$7,485/mo — **40× cheaper over 3 years** because public model embeds amplify reads-per-write by 100–10,000× and egress dominates the bill.
 
@@ -79,7 +79,7 @@ This document audits the existing persistence surface and surveys 14 comparable 
 | SG13 | **No `projects` Nest module.** API has `chat`, `models`, `kernels`, `tools`, `analysis`, `file-edit`, `code-completion`, `health`, `privacy`, `providers`, `telemetry`, `test-api`, `websocket` — but no `projects`.         | `apps/api/app/api/` listing                                                                                                                               | Greenfield NestJS module for `projects` and `publications` (or one combined `library` module).                                                                                                             |
 | SG14 | **File pool is a 50 MiB SharedArrayBuffer in RAM, never persisted.**                                                                                                                                                         | `apps/ui/app/machines/file-manager.machine.ts:28-29, 149-163`                                                                                             | Not in scope for publication serialization (transient transport). Mention to avoid confusion.                                                                                                              |
 | SG15 | **`module-manager.ts` `node_modules` cache is in the FS provider, shared across projects.**                                                                                                                                  | `apps/ui/app/lib/module-manager.ts:5-12`                                                                                                                  | Publications should NOT include `/node_modules/` paths; it is a derived cache, not project content. Filter at publish time.                                                                                |
-| SG16 | **Cookies hold user-level preferences** (`cadKernel`, `chatModel`, `filesystemBackend`, `viewerEnvironment`, `converterOutputFormats`).                                                                                      | `apps/ui/app/constants/cookie.constants.ts:12-95`                                                                                                         | These are **user**-scoped, not **project**-scoped. Publications should not capture them.                                                                                                                   |
+| SG16 | **Cookies hold user-level preferences** (`cadKernel`, `chatModel`, `filesystemBackend`, `converterOutputFormats`).                                                                                                           | `apps/ui/app/constants/cookie.constants.ts:12-95`                                                                                                         | These are **user**-scoped, not **project**-scoped. Publications should not capture them.                                                                                                                   |
 
 ### Server-Side State Today
 
@@ -103,7 +103,7 @@ This document audits the existing persistence surface and surveys 14 comparable 
 | **IDB `tau-fs-handles.configs`**  | Per-`projectId` filesystem backend selection                                                                       |
 | **OPFS**                          | File bytes (when backend = `opfs`)                                                                                 |
 | **localStorage**                  | `tau:flags` (feature flags), `network-status`                                                                      |
-| **Cookies (`tau-*`)**             | Theme hue/mode, `cadKernel`, `chatModel`, sidebar/layout, viewer environment, converter formats, cookie consent    |
+| **Cookies (`tau-*`)**             | Theme hue/mode, `cadKernel`, `chatModel`, sidebar/layout, converter formats, cookie consent                        |
 | **Cookie `tau-theme` (httpOnly)** | Server-rendered theme                                                                                              |
 
 ## Persistence Surface Mapping
@@ -281,21 +281,20 @@ Same anti-pattern: AI conversation context is lost on share. v0.dev's Duplicate 
 
 ### Theme C: Visibility Tiers
 
-Every platform converged on the same 3–4 tiers:
+Every platform offered 2–4 tiers; Tau ships with two:
 
-| Tier            | Auth | Discoverable | Indexed   | URL form                    |
-| --------------- | ---- | ------------ | --------- | --------------------------- |
-| Private         | yes  | to members   | no        | normal slug, server-checked |
-| Unlisted/Secret | no   | no           | `noindex` | unguessable token in URL    |
-| Public          | no   | yes          | yes       | normal slug                 |
+| Tier    | Auth | Discoverable | Indexed | URL form                    |
+| ------- | ---- | ------------ | ------- | --------------------------- |
+| Private | yes  | to owner     | no      | normal slug, server-checked |
+| Public  | no   | yes          | yes     | normal slug                 |
 
-CodePen adds Password-Protected and Collaborator-Only on top. Figma uniquely supports **org-level password requirement** and **link expiration**. Onshape supports **per-share permission grids** (View/Comment/Copy/Export/Link/Delete as separate flags) — most granular surveyed.
+CodePen adds Password-Protected and Collaborator-Only on top. Figma uniquely supports **org-level password requirement** and **link expiration**. Onshape supports **per-share permission grids** (View/Comment/Copy/Export/Link/Delete as separate flags) — most granular surveyed. Tau's deliberately tight two-tier MVP defers those richer modes until org/team accounts ship.
 
 ### Theme D: URL Schemes
 
-**Pattern**: public IDs are short slugs; private/unlisted IDs are long unguessable tokens. CodePen does this most explicitly — toggling private changes the URL slug to a 32-char hex string. Figma's `file_key` is short base62 (~10 chars) paired with a decorative slug that can change.
+**Pattern**: public IDs are short slugs; private IDs are server-side authorization checks against the signed-in viewer. CodePen does this most explicitly — private pens require sign-in. Figma's `file_key` is short base62 (~10 chars) paired with a decorative slug that can change.
 
-For Tau: public = 8–10-char nanoid slug; unlisted = same slug + 24-char nanoid token in URL path so URL-leak doesn't enable enumeration. Use `generatePrefixedId(idPrefix.publication)` and a new `idPrefix.publicationToken`.
+For Tau: every publication URL is `/v/<publicationId>` where `publicationId` is `generatePrefixedId(idPrefix.publication)` (short, opaque). Private publications return `403` to anyone other than the owner; public publications return `200` to all callers.
 
 ### Theme E: Embed APIs
 
@@ -407,7 +406,7 @@ For Tau: **opt-in "publish with chat thread"**. Two modes: "share with chat" vs 
 | #   | Action                                                                                                                                                                                                           | Priority | Effort | Impact              |
 | --- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------------------- |
 | R1  | **Content-addressed publication storage**: sha256-keyed S3 blobs + Postgres `publication` table with manifest references                                                                                         | P0       | M      | High                |
-| R2  | **3-tier visibility** (Private / Unlisted / Public) with unguessable URL token for Unlisted                                                                                                                      | P0       | S      | High                |
+| R2  | **2-tier visibility** (Private / Public) — Private requires owner session; Public is anyone with the URL                                                                                                         | P0       | S      | High                |
 | R3  | **Drop dormant `project` stub, recreate as text-PK with `owner_id`**                                                                                                                                             | P0       | S      | High (foundational) |
 | R4  | **`embed.tau.new` dedicated cross-origin-isolated origin** with `allow="cross-origin-isolated"` + COEP/COOP headers                                                                                              | P0       | M      | High                |
 | R5  | **Pre-render GLB at publish** for instant first-paint; embed shows GLB immediately, then progressively upgrades to interactive kernel (works on any host, COI or not)                                            | P0       | M      | High                |
@@ -443,10 +442,8 @@ CREATE TABLE publication (
   project_id            TEXT NOT NULL REFERENCES project(id) ON DELETE CASCADE,  -- every publication belongs to a project (Open Question 3)
   owner_id              TEXT NOT NULL REFERENCES "user"(id) ON DELETE CASCADE,   -- cascade-delete on user removal (Open Question 7)
   parent_publication_id TEXT REFERENCES publication(id),   -- fork lineage (Onshape "version-from-version")
-  visibility            TEXT NOT NULL,                     -- 'private' | 'unlisted' | 'public'
-  unlisted_token        TEXT,                              -- nullable; 24-char nanoid for unlisted
+  visibility            TEXT NOT NULL,                     -- 'private' | 'public' (CHECK constraint enforced at DB layer)
   manifest_key          TEXT NOT NULL,                     -- s3://tau-publications/<sha256>.json
-  glb_key               TEXT,                              -- pre-rendered GLB derivative
   og_image_key          TEXT,                              -- 1200x630 PNG
   thumbnail_key         TEXT,                              -- 256x256 WebP
   runtime_pin           TEXT NOT NULL,                     -- '~1.4.0'
@@ -464,7 +461,6 @@ CREATE TABLE publication (
 CREATE INDEX ON publication (project_id, created_at DESC);
 CREATE INDEX ON publication (owner_id, created_at DESC);
 CREATE INDEX ON publication (visibility, created_at DESC) WHERE visibility = 'public' AND unpublished_at IS NULL;
-CREATE INDEX ON publication (unlisted_token) WHERE unlisted_token IS NOT NULL;
 
 CREATE TABLE blob_ref (
   -- refcount table for sha256 blobs; GC blobs with refcount = 0
@@ -550,22 +546,15 @@ User-shipped iframe:
 ></iframe>
 ```
 
-The `allow="cross-origin-isolated"` token is harmless when the host page isn't isolated — the iframe simply doesn't gain COI capability and the runtime falls back to inline transport per `runtime-topology.md` § Graceful Degradation. Embed bootstrap (progressive enhancement, three-stage):
+The `allow="cross-origin-isolated"` token is harmless when the host page isn't isolated — the iframe simply doesn't gain COI capability and the runtime falls back to inline transport per `runtime-topology.md` § Graceful Degradation. Embed bootstrap: the shipped `/v/:id` surface boots `@taucad/runtime` client-side from publication sources (`manifest.files`). Server-side `static.glb` pre-render was intentionally dropped — publishes succeed without geometry, and embeds inherit the same client-render path (poster/thumbnail remain CDN defaults until richer previews ship).
 
 ```typescript
-// Stage 1: instant first-paint with the pre-rendered GLB (works on any host).
-const viewer = await mountModelViewer({ src: publication.glbUrl, poster: publication.thumbnailUrl });
-
-// Stage 2: boot the runtime in the background. Transport selects SAB or
-// postMessage automatically based on self.crossOriginIsolated; no branching needed here.
 const client = await createRuntimeClient({ kernels, sharedMemory: { geometry: { ... } } });
 await client.connect({ port });
 await client.openFile({ file: publication.entryFile, parameters: publication.defaultParameters });
 
-// Stage 3: hand off from static GLB to interactive kernel once the first
-// kernel render lands. UI for parameter sliders becomes live.
 client.on('geometry', (result) => {
-  viewer.replaceGeometry(result);
+  applyViewerGeometry(result);
   enableParameterControls();
 });
 
@@ -576,7 +565,7 @@ if (!self.crossOriginIsolated) {
 }
 ```
 
-This guarantees instant first-paint on every host, kernel-driven interactivity on every host, and SAB-accelerated performance on COI-enabled hosts. The pre-rendered GLB (R5) and OG image (R9) share the same render pass.
+Kernel-driven interactivity works across hosts; SAB-accelerated geometry paths apply where `cross-origin-isolated` holds.
 
 `?mode=static` is preserved as an explicit opt-out for cases where the embedder wants minimum payload (no kernel boot, ~100 KB total) — useful for image-heavy index pages, marketing carousels, or when the publication's interactive surface (no parameters, no animation) gains nothing from kernel-on.
 
@@ -610,7 +599,6 @@ async fork(publicationId: string, owner: User): Promise<Publication> {
       parentPublicationId: original.id,
       visibility: 'private',
       manifestKey: original.manifestKey,        // same manifest, zero S3 work
-      glbKey: original.glbKey,                  // same GLB until edited
       ogImageKey: original.ogImageKey,
       thumbnailKey: original.thumbnailKey,
       runtimePin: original.runtimePin,
@@ -629,13 +617,11 @@ async fork(publicationId: string, owner: User): Promise<Publication> {
 1. Receive publish event from UI: `{ projectId, parameterGroupId, visibility, includeChat, title, description, tags }`.
 2. Resolve current source files from FS worker → upload changed blobs to `s3://tau-blobs/`. Filter out `node_modules/`, `.git/objects/`, `dist/`, `out-tsc/`.
 3. Compute manifest sha256 → upload to `s3://tau-publications/<sha256>.json`.
-4. Spawn headless kernel render via `@taucad/cli` in a worker pool → produces `static.glb`.
-5. Render GLB → 1200×630 PNG via Frame3D self-hosted (Puppeteer + model-viewer) and 256×256 WebP thumbnail.
-6. Upload `static.glb`, `og.png`, `thumb.webp` to S3.
-7. Increment `blob_ref.refcount` for each referenced blob.
-8. `INSERT publication` row → return `publication_id` to UI.
+4. Default OG / thumbnail keys reference seeded CDN assets (server-side `static.glb` is not produced).
+5. Increment `blob_ref.refcount` for each referenced blob.
+6. `INSERT publication` row → return `publication_id` to UI.
 
-Steps 4–6 run in parallel where possible. End-to-end target: ~3–5s for typical models.
+End-to-end target remains dominated by source uploads + manifest write; client viewers render geometry after fetch.
 
 ### R8 Detail — Chat Thread Publication
 
@@ -776,8 +762,10 @@ TAU_S3_BUCKET_DERIVATIVES=tau-derivatives
 TAU_S3_BUCKET_OG_IMAGES=tau-og-images
 
 # Public base URL for direct browser GETs of public derivatives.
-# In dev this is the MinIO endpoint; in prod this is https://cdn.tau.new.
-TAU_S3_PUBLIC_BASE_URL=http://localhost:9000
+# Dev: MinIO uses path-style addressing, so the bucket name must be in the path
+# (http://localhost:9000/<bucket>). Prod: CDN custom domain is host-bound to a
+# single bucket so the bucket name is absent from the path (https://cdn.tau.new).
+TAU_S3_PUBLIC_BASE_URL=http://localhost:9000/tau-content
 
 # MinIO root creds (only used by the mc bootstrap container, never by the API)
 MINIO_ROOT_USER=tauminio
@@ -1025,7 +1013,7 @@ Goal: minimum infrastructure so a logged-in user can publish a single immutable 
 - [ ] Wire `TAU_S3_*` env vars into `apps/api/app/config/environment.config.ts` (Zod schema); add to `apps/api/.env.example`; add Fly secrets for staging + prod.
 - [ ] **R3**: drop dormant `project` stub, create new `project` + `publication` + `blob_ref` tables (Drizzle migration).
 - [ ] **R16**: `owner_id` columns + Better Auth integration in NestJS guards.
-- [ ] `idPrefix.project`, `idPrefix.publication`, `idPrefix.publicationToken` in `@taucad/types/constants`.
+- [ ] `idPrefix.project`, `idPrefix.publication` in `@taucad/types/constants`.
 - [ ] Public `/v/{id}` route in `apps/ui/app/routes/v.$id/route.tsx` — read-only viewer using existing kernel + viewer machinery, hydrating from publication manifest.
 - [ ] Storage integration tests run against MinIO in CI (`pnpm infra:up` in the GH Actions job) — covers presigned URL signing, multipart, conditional writes end-to-end without touching real R2.
 
@@ -1039,7 +1027,7 @@ Goal: end-to-end Publish → Share link → View.
 - [ ] **R5**: GLB pre-render via headless `@taucad/cli` worker pool. Reuse existing `RuntimeClient` + per-kernel `exportGeometry`.
 - [ ] **R9**: OG image render via Frame3D self-hosted (or model-viewer + Puppeteer in-house).
 - [ ] **R15**: thumbnail derivative (256×256 WebP, same render pass).
-- [ ] **R2**: 3-tier visibility, unlisted token route guard.
+- [ ] **R2**: 2-tier visibility (`private` / `public`) with DB `CHECK` constraint and owner-session gate for Private.
 - [ ] Wire **Share Project** dropdown in `nav-projects.tsx` and the header **Share** button to open the publish dialog.
 - [ ] Basic publication list view: `/u/{user}/library` (own publications first, public-others later).
 
@@ -1099,7 +1087,6 @@ To resolve the "snapshot" overload (SG7) and align with established platform voc
 | Concept                                        | Recommended name                                                            | Rejected alternatives                                                                                                                                                        |
 | ---------------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Immutable, shareable, versioned model artifact | **`Publication`** (noun), **`publish`** (verb)                              | `Snapshot` (collides with `messageMetadataSchema.snapshot` and LangGraph checkpoints), `Version` (Onshape term but ambiguous with `runtime_pin`), `Release` (implies semver) |
-| The 24-char URL secret for unlisted            | `publicationToken`                                                          | `secret`, `accessToken` (collision with auth)                                                                                                                                |
 | Forking a publication into a new project       | `fork` (verb), `forkedFrom` (existing field), `parentPublicationId` (DB FK) | `copy`, `duplicate`, `remix` (Lovable term, less standard)                                                                                                                   |
 | The pre-rendered viewer-fallback GLB           | `glbDerivative` or `staticGlb`                                              | `preview` (overloaded with route name), `thumbnail` (taken by 256×256 image)                                                                                                 |
 | "Save the chat with the publication" toggle    | `includeChat: boolean`                                                      | `withConversation`, `shareChat`                                                                                                                                              |
@@ -1113,7 +1100,7 @@ All Phase 0 questions are now resolved. Items marked ⏸️ **DEFERRED** are reo
 1. **Object storage choice.** ✅ **RESOLVED** — production: Cloudflare R2 (decision matrix in [Object Storage: Local-Dev to Production](#object-storage-local-dev-to-production); +22 vs Tigris's +19 in the scoring); local-dev: MinIO via `infra/docker-compose.yml` with `mc` bootstrap sidecar; both behind a single `ObjectStorageService` abstraction so the call-site code is provider-agnostic. Tigris remains the documented migration path if Tau later adds a server-side compute pipeline that benefits from Fly.io co-location.
 2. **Chat persistence: client-only forever, or migrate to server?** ⏸️ **DEFERRED** — revisit alongside cross-device chat sync (post-Phase 4). Phase 1 keeps the original recommendation: chat is treated as an opaque uploaded blob at publish; no server `chat` / `chat_message` tables yet. Decoupling avoids blocking publish on the larger chat-sync architecture.
 3. **Should publications be `project_id`-bound or standalone?** ✅ **RESOLVED — project-bound.** Every publication belongs to a project; there is no "publish a one-off model without saving to a project" path. Schema implication: `publication.project_id` is `NOT NULL` and the `project` row is created (locally → server-synced) before publish. This simplifies fork ergonomics ("Edit your publication" always opens an existing project, never a synthetic one), enables the publication library view to group by source project, and aligns with R8's "always create new publication, update project pointer" decision below.
-4. **Anonymous viewing of unlisted publications** — URL token authorization model. ✅ **RESOLVED — URL token alone authorizes** (matches Gist/CodePen Unlisted). No session cookie required. The publication page sets `<meta name="robots" content="noindex">` and `Referrer-Policy: no-referrer` to minimize URL leakage via crawler indexing or Referer headers.
+4. **Anonymous viewing of public publications.** ✅ **RESOLVED — anyone with the URL can view Public publications.** No session cookie required. Private publications return `403` unless the requester's session matches `publication.owner_id`. Private publications additionally emit `<meta name="robots" content="noindex">` and `Referrer-Policy: no-referrer` as defence-in-depth even though the auth gate alone keeps unauth crawlers out.
 5. **Render timeout / abuse limits** at publish time. ✅ **RESOLVED** — hard cap render at 60s, **max blob size 25 MiB per file** (raised from 5 MiB to accommodate STEP/IGES files and texture-heavy models), max manifest 200 files, max total bytes 50 MiB per publication. Larger projects must self-host or remain client-only. Implication: R2 multipart upload kicks in for individual blobs above 5 MiB (use SDK's `@aws-sdk/lib-storage` `Upload`); the 50 MiB total cap means a single publish never needs streaming concatenation server-side.
 6. **License selection at publish time** (Onshape, CodePen, Replit all surface this). ⏸️ **DEFERRED** to Phase 2/3 alongside discovery. Phase 1 publishes carry no explicit license; copy in the publish dialog can default to a soft "All rights reserved unless you say otherwise" notice. When picked up, the implementation is a `license: TEXT` column on `publication` populated from a publish-dialog dropdown (likely set: `MIT`, `Apache-2.0`, `CC-BY-4.0`, `CC-BY-SA-4.0`, `CC0-1.0`, `All rights reserved`).
 7. **GDPR / data deletion**: deleting a user. ✅ **RESOLVED — cascade-delete.** Deleting a user cascades to owned publications, blob references, and downstream derivatives (GLB, OG, thumbnail). The blob refcount drops; orphan blobs (`refcount = 0`) are GC'd by a scheduled job that issues `DeleteObject` against R2. The account-deletion confirmation modal lists "X published models will be permanently removed" so users understand the blast radius before confirming. Forks of those publications survive: the fork lineage chain breaks cleanly because each fork has its own `manifest_key` (R2 storage is unaffected since fork-time CoW already detached them).
@@ -1127,7 +1114,7 @@ All Phase 0 questions are now resolved. Items marked ⏸️ **DEFERRED** are reo
 
 **In scope** for this research and the Phase 0–4 roadmap:
 
-- Single-user authoring → publish → public/unlisted/private viewing.
+- Single-user authoring → publish → public/private viewing.
 - Embeds with COI auto-fallback.
 - Forking with O(1) at fork time, copy-on-write at edit.
 - Optional chat-thread snapshotting (v0.dev pattern).
@@ -1241,7 +1228,6 @@ sequenceDiagram
   participant UI as Tau UI
   participant API as NestJS API
   participant FS as FS Worker
-  participant Render as Render Worker (taucad CLI)
   participant S3
   participant DB as Postgres
   UI->>API: POST /v1/publications {projectId, paramGroupId, visibility, includeChat}
@@ -1252,18 +1238,9 @@ sequenceDiagram
     API->>DB: increment blob_ref.refcount
   end
   API->>S3: putObject manifest.json (sha256 key)
-  par Render derivatives
-    API->>Render: render(manifestKey) → static.glb
-    Render->>S3: put static.glb
-    Render-->>API: glbKey
-  and
-    API->>Render: render(manifestKey) → og.png + thumb.webp
-    Render->>S3: put og.png, thumb.webp
-    Render-->>API: ogKey, thumbKey
-  end
   API->>DB: INSERT publication {...}
   DB-->>API: publication
-  API-->>UI: {id, urls: {share, embed, og, thumbnail}}
+  API-->>UI: {id, urls: {share, og, thumbnail, manifest}}
 ```
 
 ### Embed Progressive Enhancement Pipeline
@@ -1273,8 +1250,8 @@ sequenceDiagram
                        │
                        ▼
        ┌──────────────────────────────────────┐
-       │ Stage 1: <model-viewer> + GLB         │  ← instant first paint, any host
-       │ (pre-rendered derivative, ~100 KB)    │
+       │ Stage 1: viewer shell + CDN poster   │  ← instant chrome; geometry from kernel
+       │ (no server static.glb in MVP)       │
        └──────────────────────────────────────┘
                        │
                        │  background: createRuntimeClient + connect

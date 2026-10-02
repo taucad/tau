@@ -82,6 +82,52 @@ describe('ChatError', () => {
     expect(screen.getByText('Unable to reach Tau')).toBeInTheDocument();
   });
 
+  /**
+   * Generic-banner button label must mirror the action: a resumable category
+   * (network/server/overloaded) calls `continueChat` and therefore reads
+   * "Resume"; everything else calls `regenerate` and reads "Retry". The
+   * server-category render falls through to the generic banner today (only
+   * `network` and `overloaded` have specialised components), so it is the
+   * sole code path that exercises the "Resume" branch in `chat-error.tsx`.
+   */
+  it('renders a "Resume" button for the server category (resumable -> continueChat)', () => {
+    const serverError: ChatErrorPayload = {
+      category: errorCategory.server,
+      title: 'Server Error',
+      message: 'Upstream failure',
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: serverError,
+      } as unknown as CombinedChatState),
+    );
+    mockRetryAttempt = 0;
+
+    render(<ChatErrorBanner />);
+    expect(screen.getByRole('button', { name: /resume/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
+  });
+
+  it('renders a "Retry" button for the generic category (non-resumable -> regenerate)', () => {
+    const genericError: ChatErrorPayload = {
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Something went wrong',
+    };
+    vi.mocked(useChatSelector).mockImplementation((selector) =>
+      selector({
+        error: undefined,
+        persistedError: genericError,
+      } as unknown as CombinedChatState),
+    );
+    mockRetryAttempt = 0;
+
+    render(<ChatErrorBanner />);
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /resume/i })).not.toBeInTheDocument();
+  });
+
   describe('hook-order stability across retryAttempt transitions', () => {
     /**
      * Regression for React error #300 ("Rendered fewer hooks than expected").

@@ -40,7 +40,7 @@
     "auth-schema-generate": {
       "executor": "nx:run-commands",
       "options": {
-        "command": "npx @better-auth/cli generate --config app/config/auth.ts --output app/database/auth-schema.ts --yes",
+        "command": "npx auth@latest generate --config app/config/auth.ts --output app/database/auth-schema.ts --yes",
         "cwd": "{projectRoot}"
       }
     },

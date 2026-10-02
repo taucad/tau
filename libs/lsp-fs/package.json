@@ -1,0 +1,51 @@
+{
+  "name": "@taucad/lsp-fs",
+  "version": "0.0.1",
+  "description": "LSP workspace filesystem bridge protocol (async JSON-RPC + optional sync SAB channel)",
+  "type": "module",
+  "private": true,
+  "exports": {
+    ".": {
+      "types": "./src/index.ts",
+      "import": "./src/index.ts",
+      "default": "./src/index.ts"
+    },
+    "./protocol": {
+      "types": "./src/protocol.ts",
+      "import": "./src/protocol.ts",
+      "default": "./src/protocol.ts"
+    },
+    "./handle": {
+      "types": "./src/handle.ts",
+      "import": "./src/handle.ts",
+      "default": "./src/handle.ts"
+    },
+    "./client": {
+      "types": "./src/client.ts",
+      "import": "./src/client.ts",
+      "default": "./src/client.ts"
+    },
+    "./sync": {
+      "types": "./src/sync/index.ts",
+      "import": "./src/sync/index.ts",
+      "default": "./src/sync/index.ts"
+    },
+    "./uri": {
+      "types": "./src/uri.ts",
+      "import": "./src/uri.ts",
+      "default": "./src/uri.ts"
+    }
+  },
+  "dependencies": {
+    "@taucad/memory": "workspace:*",
+    "@taucad/utils": "workspace:*",
+    "json-rpc-2.0": "^1.7.1",
+    "uint8array-extras": "catalog:",
+    "vscode-languageserver-protocol": "^3.17.5",
+    "vscode-uri": "catalog:",
+    "zod": "catalog:"
+  },
+  "imports": {
+    "#*": "./src/*"
+  }
+}

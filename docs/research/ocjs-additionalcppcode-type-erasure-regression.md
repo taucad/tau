@@ -1,15 +1,18 @@
 ---
 title: 'OCJS additionalCppCode Type Erasure Regression'
 description: 'Custom C++ classes declared via additionalCppCode lose all OCCT type references in their .d.ts because TypescriptBindings._known_export_names is never seeded for the custom-code generation pass.'
-status: active
+status: superseded
 created: '2026-04-18'
-updated: '2026-04-18'
+updated: '2026-05-16'
 category: investigation
 related:
   - docs/research/ocjs-typescript-codegen-gap-analysis.md
+  - docs/research/ncollection-binding-architecture.md
 ---
 
 # OCJS additionalCppCode Type Erasure Regression
+
+> **STATUS: RESOLVED (2026-05-16)** — Patched in `src/ocjs_bindgen/pipeline/generate.py:474-515` (`generateCustomCodeBindings` now accepts and applies a `known_exports` seed) and `src/ocjs_bindgen/link/yaml_build.py:521-529` (the YAML link path constructs `known_exports = mainBuild.bindings ∪ extraBuilds[].bindings ∪ _auto_symbols` and passes it). The Phase −1 prerequisite for the [NCollection binding architecture migration](./ncollection-binding-architecture.md) is therefore satisfied without further code change. Document retained as the historical investigation that motivated the patch.
 
 A regression introduced during the OCJS v8 codegen rewrite causes every cross-class type reference inside YAML `additionalCppCode` declarations to be emitted as `unknown`, even when the referenced class is bound and exported by the same build. The root cause is `generateCustomCodeBindings()` skipping `TypescriptBindings.prepare_known_exports()`, so the resolver's known-export table is empty and `resolve_type` falls through to its `unknown` fallback. Replicad's consumer surface compensated with `as TopoDS_Shape` / `as Geom2d_Curve` casts that are **not legitimate type narrowings** but workarounds for missing type information that the bindings layer should have emitted directly.
 

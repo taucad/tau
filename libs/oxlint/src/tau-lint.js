@@ -23,13 +23,17 @@ import { noHardcodedColorRule } from './rules/no-hardcoded-color.js';
 import { noTimeUnitSuffixRule } from './rules/no-time-unit-suffix.js';
 import { noBareTimeIdentifierRule } from './rules/no-bare-time-identifier.js';
 import { noAsyncIifeRule } from './rules/no-async-iife.js';
+import { noMonacoCreateModelRule } from './rules/no-monaco-create-model.js';
+import { noHandrolledFanoutRule } from './rules/no-handrolled-fanout.js';
+import { noSceneOverrideMaterialRule } from './rules/no-scene-override-material.js';
 import { staticImportMetaUrlRule } from './rules/static-import-meta-url.js';
+import { requireUsingOnDisposableRule } from './rules/require-using-on-disposable.js';
 
 /** @type {Plugin} */
 const plugin = {
   meta: {
     name: 'tau-lint',
-    version: '1.12.0',
+    version: '1.14.0',
   },
   rules: {
     'no-abusive-eslint-disable': noAbusiveEslintDisableRule,
@@ -48,7 +52,11 @@ const plugin = {
     'no-time-unit-suffix': noTimeUnitSuffixRule,
     'no-bare-time-identifier': noBareTimeIdentifierRule,
     'no-async-iife': noAsyncIifeRule,
+    'no-monaco-create-model': noMonacoCreateModelRule,
+    'no-handrolled-fanout': noHandrolledFanoutRule,
+    'no-scene-override-material': noSceneOverrideMaterialRule,
     'static-import-meta-url': staticImportMetaUrlRule,
+    'require-using-on-disposable': requireUsingOnDisposableRule,
   },
 };
 

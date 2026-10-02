@@ -28,7 +28,6 @@ import { fileURLToPath } from 'node:url';
 import { Worker as NodeWorker } from 'node:worker_threads';
 import { describe, it, expect } from 'vitest';
 import { createRuntimeClient } from '#client/runtime-client.js';
-import { createRuntimeClientOptions } from '#client/runtime-client-options.js';
 import { nodeWorkerTransport } from '#transport/node-worker-transport.js';
 
 const workerEntryUrl = new URL('../worker/node.ts', import.meta.url);
@@ -56,21 +55,19 @@ describe('@taucad/runtime/worker/node bootstrap (Node integration)', () => {
        * Re-enabling this test requires bundling the worker (e.g. via tsdown
        * dist/esm output) or using a pre-compiled JS fixture.
        */
-      const client = createRuntimeClient(
-        createRuntimeClientOptions({
-          kernels: [],
-          transport: nodeWorkerTransport({
-            url: fileURLToPath(workerEntryUrl),
-            workerCtor: class TsxWorker extends NodeWorker {
-              public constructor(url: string | URL) {
-                super(url, {
-                  execArgv: ['--import', 'tsx/esm'],
-                });
-              }
-            },
-          }),
+      const client = createRuntimeClient({
+        kernels: [],
+        transport: nodeWorkerTransport({
+          url: fileURLToPath(workerEntryUrl),
+          workerCtor: class TsxWorker extends NodeWorker {
+            public constructor(url: string | URL) {
+              super(url, {
+                execArgv: ['--import', 'tsx/esm'],
+              });
+            }
+          },
         }),
-      );
+      });
 
       try {
         await client.connect();

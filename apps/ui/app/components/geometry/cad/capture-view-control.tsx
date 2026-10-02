@@ -4,11 +4,13 @@ import { Button } from '#components/ui/button.js';
 import { Tooltip, TooltipContent, TooltipTrigger } from '#components/ui/tooltip.js';
 import { DropdownMenuItem } from '#components/ui/dropdown-menu.js';
 import { useGraphics } from '#hooks/use-graphics.js';
+import { useCad } from '#hooks/use-cad.js';
 import { useChatActions } from '#hooks/use-chat.js';
 import { useImageQuality } from '#hooks/use-image-quality.js';
 import { useTickAnimation } from '#hooks/use-tick-animation.js';
 import { toast } from '#components/ui/sonner.js';
 import { captureViewScreenshot } from '#components/chat/capture-view-screenshot.utils.js';
+import { resolveScreenshotOverlay } from '#machines/resolve-screenshot-overlay.js';
 
 /**
  * Capture-view control button for the viewer toolbar.
@@ -23,6 +25,7 @@ import { captureViewScreenshot } from '#components/chat/capture-view-screenshot.
  */
 export function CaptureViewControl(): React.JSX.Element {
   const graphicsRef = useGraphics();
+  const cadRef = useCad();
   const { addDraftImage } = useChatActions();
   const { quality } = useImageQuality();
   const { ticked, trigger } = useTickAnimation();
@@ -44,12 +47,15 @@ export function CaptureViewControl(): React.JSX.Element {
   qualityRef.current = quality;
   const addDraftImageRef = useRef(addDraftImage);
   addDraftImageRef.current = addDraftImage;
+  const cadRefRef = useRef(cadRef);
+  cadRefRef.current = cadRef;
 
   const handleCapture = useCallback((): void => {
     captureViewScreenshot({
       graphicsRef,
       quality: qualityRef.current,
       activeActors: activeActorsRef.current,
+      overlay: resolveScreenshotOverlay(cadRefRef.current),
       onImage: (dataUrl) => {
         addDraftImageRef.current(dataUrl);
         trigger();
@@ -78,6 +84,7 @@ export function CaptureViewControl(): React.JSX.Element {
  */
 export function CaptureViewOverflowControl(): React.JSX.Element {
   const graphicsRef = useGraphics();
+  const cadRef = useCad();
   const { addDraftImage } = useChatActions();
   const { quality } = useImageQuality();
 
@@ -96,12 +103,15 @@ export function CaptureViewOverflowControl(): React.JSX.Element {
   qualityRef.current = quality;
   const addDraftImageRef = useRef(addDraftImage);
   addDraftImageRef.current = addDraftImage;
+  const cadRefRef = useRef(cadRef);
+  cadRefRef.current = cadRef;
 
   const handleCapture = useCallback((): void => {
     captureViewScreenshot({
       graphicsRef,
       quality: qualityRef.current,
       activeActors: activeActorsRef.current,
+      overlay: resolveScreenshotOverlay(cadRefRef.current),
       onImage: (dataUrl) => {
         addDraftImageRef.current(dataUrl);
         toast.success('Added screenshot to chat');

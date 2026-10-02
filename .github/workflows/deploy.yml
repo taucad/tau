@@ -10,8 +10,9 @@
 #          GitHub-Actions runners (R13 in
 #          docs/research/api-docker-build-optimization.md).
 #        - Nx Cloud build secret (`nx_cloud_token`) so `pnpm nx build api`
-#          can read NX_CLOUD_ACCESS_TOKEN without baking it into a layer
-#          (R8). The Dockerfile reads it via
+#          can read `NX_CLOUD_ACCESS_TOKEN` via the repo-scope read-only Actions
+#          secret (`tau-repo` IaC)—without baking it into a layer (R8). The Dockerfile
+#          reads it via
 #          `--mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN`.
 #   3. Push the resulting image to `registry.fly.io/<app>:<sha>` and deploy
 #      it via `flyctl deploy --image ...` so Fly.io skips its own builder.

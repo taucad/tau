@@ -191,7 +191,7 @@ function GeometryUnitSelector({
         groupedItems={groupedItems}
         renderLabel={renderLabel}
         getValue={getCuValue}
-        defaultValue={defaultValue}
+        value={defaultValue}
         placeholder='Select file'
         searchPlaceHolder='Filter files...'
         title='Select geometry unit'

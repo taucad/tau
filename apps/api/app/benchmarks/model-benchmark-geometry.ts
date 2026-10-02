@@ -1,4 +1,4 @@
-import { createRuntimeClient } from '@taucad/runtime';
+import { createRuntimeClient, createRuntimeClientOptions } from '@taucad/runtime';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import type { HashedGeometryResult } from '@taucad/runtime';
@@ -9,6 +9,14 @@ import { analyzeGlb, evaluateRequirement } from '@taucad/testing/geometry';
 import type { GeometryStats } from '@taucad/testing/geometry';
 import type { GraderCheck } from '#benchmarks/model-benchmark-suite.js';
 import type { ApiRuntimeClient } from '#types/runtime-client.alias.js';
+
+const geometryRendererOptions = createRuntimeClientOptions({
+  transport: inProcessTransport({
+    fileSystem: fromMemoryFs({}),
+  }),
+  kernels: [openscad()],
+  middleware: [gltfCoordinateTransform()],
+});
 
 // =============================================================================
 // Types
@@ -42,13 +50,7 @@ export type GeometryValidationResult = {
 const defaultGeometryTolerance = 1;
 
 export function createGeometryRenderer(): ApiRuntimeClient {
-  return createRuntimeClient({
-    transport: inProcessTransport({
-      fileSystem: fromMemoryFs({}),
-    }),
-    kernels: [openscad()],
-    middleware: [gltfCoordinateTransform()],
-  });
+  return createRuntimeClient(geometryRendererOptions);
 }
 
 /**

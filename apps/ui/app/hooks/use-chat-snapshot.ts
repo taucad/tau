@@ -57,8 +57,9 @@ export function useChatSnapshot(): ChatSnapshot | undefined {
         return { activeFilePath: undefined, openFiles: [] };
       }
 
+      const active = state.context.openFiles.find((f) => f.paneId === state.context.activePaneId);
       return {
-        activeFilePath: state.context.activeFilePath,
+        activeFilePath: active?.path,
         openFiles: state.context.openFiles,
       };
     },

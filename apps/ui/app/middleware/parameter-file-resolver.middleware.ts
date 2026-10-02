@@ -4,7 +4,7 @@ import { defineMiddleware } from '@taucad/runtime/middleware';
 import { parametersDirectory } from '#utils/parameter-config.utils.js';
 
 /** Milliseconds. */
-const parameterWatchDebounce = 200;
+const parameterWatchDebounce = 0;
 
 export const parameterFileResolverMiddleware = defineMiddleware({
   name: 'parameter-file-resolver',

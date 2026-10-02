@@ -1,0 +1,15 @@
+{
+  "blendColor": 0,
+  "blending": 0,
+  "color": 0,
+  "dashSize": 3,
+  "gapSize": 1,
+  "inputNodes": {},
+  "metadata": {
+    "generator": "Material.toJSON",
+    "type": "Material",
+    "version": 4.7
+  },
+  "scale": 1,
+  "type": "Line2NodeMaterial"
+}

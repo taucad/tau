@@ -13,6 +13,8 @@ import { DatabaseService } from '#database/database.service.js';
 import { AuthService } from '#auth/auth.service.js';
 import { BetterAuthService } from '#auth/better-auth.service.js';
 import type { Environment } from '#config/environment.config.js';
+import { EmailModule } from '#email/email.module.js';
+import { EmailService } from '#email/email.service.js';
 
 type AuthInstance = ReturnType<typeof betterAuth>;
 
@@ -32,7 +34,7 @@ export class AuthModule implements NestModule, OnModuleInit {
     return {
       global: true,
       module: AuthModule,
-      imports: [DatabaseModule],
+      imports: [DatabaseModule, EmailModule],
       providers: [
         {
           provide: authInstanceKey,
@@ -40,15 +42,17 @@ export class AuthModule implements NestModule, OnModuleInit {
             databaseService: DatabaseService,
             configService: ConfigService<Environment, true>,
             authService: AuthService,
+            emailService: EmailService,
           ): Promise<AuthInstance> {
             const config = getBetterAuthConfig({
               databaseService,
               configService,
               authService,
+              emailService,
             });
             return betterAuth(config);
           },
-          inject: [DatabaseService, ConfigService, AuthService],
+          inject: [DatabaseService, ConfigService, AuthService, EmailService],
         },
         BetterAuthService,
       ],

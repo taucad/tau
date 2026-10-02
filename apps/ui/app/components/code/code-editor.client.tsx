@@ -4,9 +4,11 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import type { CompletionRegistration } from 'monacopilot';
 import type * as Monaco from 'monaco-editor';
 import { cn } from '#utils/ui.utils.js';
-import { configureMonaco, registerCompletions } from '#lib/monaco.lib.js';
+import { configureMonaco, registerCompletions } from '#lib/monaco.lib.client.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
 import { Theme, useTheme } from '#hooks/use-theme.js';
+import { useCookie } from '#hooks/use-cookie.js';
+import { cookieName } from '#constants/cookie.constants.js';
 
 type CodeEditorProperties = EditorProps & {
   readonly onChange: (value: string) => void;
@@ -107,8 +109,9 @@ const monacoOverlayRestoreStyles = [
 
 await configureMonaco();
 
-export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.JSX.Element {
+export function CodeEditor({ className, options: optionsFromProps, ...rest }: CodeEditorProperties): React.JSX.Element {
   const { theme } = useTheme();
+  const [areInlayHintsEnabled] = useCookie(cookieName.codeInlayHints, false);
   const completionRef = useRef<CompletionRegistration | undefined>(null);
   const isMobile = useIsMobile();
 
@@ -158,7 +161,7 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.
     };
   }, []);
 
-  const options = useMemo(
+  const baseOptions = useMemo(
     () =>
       ({
         fontSize: isMobile ? 16 : 14,
@@ -213,12 +216,17 @@ export function CodeEditor({ className, ...rest }: CodeEditorProperties): React.
           // Controls whether the parameter hints menu cycles or closes when reaching the end of the list.
           cycle: true,
         },
+        inlayHints: {
+          enabled: areInlayHintsEnabled ? 'on' : 'off',
+        },
         automaticLayout: true,
         // Word-based suggestions are redundant for typed languages
         wordBasedSuggestions: 'off',
       }) as const satisfies Monaco.editor.IStandaloneEditorConstructionOptions,
-    [isMobile],
+    [areInlayHintsEnabled, isMobile],
   );
+
+  const options = useMemo(() => ({ ...baseOptions, ...optionsFromProps }), [baseOptions, optionsFromProps]);
 
   const classNames = useMemo(
     () =>

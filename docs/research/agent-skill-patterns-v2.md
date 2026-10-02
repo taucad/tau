@@ -560,6 +560,6 @@ Net: skills are loaded on-demand (not all 13 at once), so typical context cost i
 - Supersedes: `docs/research/agent-skill-patterns.md` (v1, single-conversation analysis)
 - Policy: `docs/policy/context-engineering-policy.md`
 - Policy: `docs/policy/filesystem-context-policy.md`
-- Skill guide: `.cursor/skills-cursor/create-skill/SKILL.md`
-- Subagent guide: `.cursor/skills-cursor/create-subagent/SKILL.md`
+- Skill guide: `.agent/skills-cursor/create-skill/SKILL.md`
+- Subagent guide: `.agent/skills-cursor/create-subagent/SKILL.md`
 - Data source: 159 conversations from `agent-transcripts/` (Jan-Mar 2026)

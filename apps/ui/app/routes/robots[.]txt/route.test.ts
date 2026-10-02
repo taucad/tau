@@ -25,7 +25,6 @@ describe('buildRobotsTxt', () => {
       'Disallow: /convert',
       'Disallow: /import/',
       'Disallow: /i/',
-      'Disallow: /v/*?token=',
       'Disallow: /*?utm_',
     ]) {
       expect(body).toContain(directive);

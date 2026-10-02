@@ -1,0 +1,4 @@
+{
+  "title": "@@CREATE_REPO_npm-name@@",
+  "pages": ["index", "quick-start", "rendering", "options", "errors", "api"]
+}

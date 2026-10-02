@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import { codeLanguages } from '@taucad/types/constants';
+import type { FileTreeService } from '@taucad/fs-client/file-tree-service';
 import type { ActivationContext } from '#lib/monaco-language-registry.js';
-import type { LspFileManager } from '#lib/kcl-language/lsp/kcl-lsp-client.js';
 import type { MonacoTestStub } from '#lib/testing/monaco-language-stub.js';
 import { createMonacoTestStub } from '#lib/testing/monaco-language-stub.js';
 
@@ -15,8 +15,6 @@ const lspConstructorCalls = vi.fn();
 vi.mock('#lib/kcl-language/lsp/kcl-lsp-client.js', () => ({
   KclLspClient: vi.fn(function MockKclLspClient(this: Record<string, unknown>, ...args: unknown[]) {
     lspConstructorCalls(...args);
-    const ctorOptions = (args[0] as { fileManager?: LspFileManager } | undefined) ?? {};
-    const options: { fileManager: LspFileManager | undefined } = { fileManager: ctorOptions.fileManager };
     const state = { ready: false };
     Object.defineProperty(this, 'ready', {
       configurable: true,
@@ -32,11 +30,7 @@ vi.mock('#lib/kcl-language/lsp/kcl-lsp-client.js', () => ({
       waitForReady: vi.fn(async () => {
         state.ready = true;
       }),
-      setFileManager: vi.fn((fm: LspFileManager) => {
-        options.fileManager = fm;
-      }),
-      getFileManager: vi.fn(() => options.fileManager),
-      setCurrentDocumentDir: vi.fn(),
+      setCurrentDocumentUri: vi.fn(),
       /** Escape hatch for tests: `initializeLsp` awaits a real-shaped client; this sets `ready` for `notifyDocumentOpen`. */
       __testSetLspReady: () => {
         state.ready = true;
@@ -44,6 +38,7 @@ vi.mock('#lib/kcl-language/lsp/kcl-lsp-client.js', () => ({
       textDocumentDidOpen: vi.fn(),
       textDocumentDidChange: vi.fn(),
       textDocumentDidClose: vi.fn(),
+      getFileManager: vi.fn(() => ({ readFile: vi.fn(async () => new Uint8Array()) })),
       dispose: vi.fn(),
     });
   }),
@@ -65,6 +60,7 @@ vi.mock('@taucad/runtime/kernels/zoo/engine-connection', () => ({
 /* eslint-enable @typescript-eslint/naming-convention -- end of mock declarations */
 
 function createMockContext(stub: MonacoTestStub): ActivationContext {
+  const readFile = vi.fn(async () => new Uint8Array());
   // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- minimal context exercised by kclContribution.activate
   return {
     monaco: stub.monaco,
@@ -75,12 +71,24 @@ function createMockContext(stub: MonacoTestStub): ActivationContext {
       clearOwnerEverywhere: vi.fn(),
     },
     fileManager: {
-      readFile: vi.fn(async () => new Uint8Array()),
+      readFile,
       exists: vi.fn(async () => false),
       readdir: vi.fn(async () => []),
       getDirectoryStat: vi.fn(),
     },
-    fileManagerRef: undefined,
+    treeService: {
+      stat: vi.fn(),
+      listDirectory: vi.fn(),
+    } as unknown as FileTreeService,
+    fileManagerRef: {
+      getSnapshot: () => ({
+        context: {
+          proxy: { searchFiles: vi.fn().mockReturnValue([]), dispose: vi.fn() },
+          rootDirectory: '/workspace',
+          filePoolBuffer: undefined,
+        },
+      }),
+    },
   } as unknown as ActivationContext;
 }
 
@@ -140,7 +148,7 @@ describe('kclContribution', () => {
 
     // Activate returns synchronously; KclLspClient is queued in a microtask
     expect(result).toBeDefined();
-    expect(result.navigationHandler?.canHandle('foo.kcl')).toBe(true);
+    expect(result.disposables.length).toBeGreaterThan(0);
     expect(lspConstructorCalls).not.toHaveBeenCalled();
   });
 
@@ -157,7 +165,7 @@ describe('kclContribution', () => {
     expect(lspConstructorCalls).toHaveBeenCalledTimes(1);
   });
 
-  it('should pass ActivationContext fileManager into KclLspClient when the activate microtask runs', async () => {
+  it('should pass ActivationContext file bridge into KclLspClient when the activate microtask runs', async () => {
     const { kclContribution, getKclLspClient } = await import('#lib/kcl-language/kcl-register-language.js');
     const context = createMockContext(stub);
 
@@ -165,19 +173,21 @@ describe('kclContribution', () => {
     kclContribution.activate(context);
     await Promise.resolve();
 
-    const ctorArgument = lspConstructorCalls.mock.calls[0]?.[0] as { fileManager?: LspFileManager } | undefined;
-    expect(ctorArgument?.fileManager).toBeDefined();
-    expect(ctorArgument?.fileManager?.readFile).toBeTypeOf('function');
+    const ctorArgument = lspConstructorCalls.mock.calls[0]?.[0] as
+      | { fs?: { fileManager?: { readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>> } } }
+      | undefined;
+    expect(ctorArgument?.fs?.fileManager).toBeDefined();
+    expect(ctorArgument?.fs?.fileManager?.readFile).toBeTypeOf('function');
 
-    await ctorArgument!.fileManager!.readFile('projects/p/child.kcl');
+    await ctorArgument!.fs!.fileManager!.readFile('projects/p/child.kcl');
     expect(context.fileManager.readFile).toHaveBeenCalledWith('projects/p/child.kcl');
 
     const client = getKclLspClient();
     expect(client).toBeDefined();
-    expect(client!.getFileManager()).toBe(ctorArgument?.fileManager);
   });
 
-  it('calls setCurrentDocumentDir with the parent folder before textDocumentDidOpen in notifyDocumentOpen', async () => {
+  it('calls setCurrentDocumentUri before textDocumentDidOpen in notifyDocumentOpen', async () => {
+    // oxlint-disable-next-line @typescript-eslint/no-deprecated -- exercises legacy notifyDocumentOpen helper
     const { kclContribution, getKclLspClient, notifyDocumentOpen } =
       await import('#lib/kcl-language/kcl-register-language.js');
     const context = createMockContext(stub);
@@ -193,7 +203,7 @@ describe('kclContribution', () => {
     const client = rawClient as unknown as {
       readonly ready: boolean;
       __testSetLspReady: () => void;
-      setCurrentDocumentDir: ReturnType<typeof vi.fn>;
+      setCurrentDocumentUri: ReturnType<typeof vi.fn>;
       textDocumentDidOpen: ReturnType<typeof vi.fn>;
     };
     client.__testSetLspReady();
@@ -208,13 +218,14 @@ describe('kclContribution', () => {
     onProjectSessionChange('test-build-id');
 
     const testUri = 'file:///public/kcl-samples/axial-fan/main-current-dir-contract.kcl';
-    client.setCurrentDocumentDir.mockClear();
+    client.setCurrentDocumentUri.mockClear();
     client.textDocumentDidOpen.mockClear();
+    // oxlint-disable-next-line @typescript-eslint/no-deprecated -- legacy helper under test
     notifyDocumentOpen(testUri, 'import "fan-housing.kcl"');
 
-    expect(client.setCurrentDocumentDir).toHaveBeenCalledWith('public/kcl-samples/axial-fan');
+    expect(client.setCurrentDocumentUri).toHaveBeenCalledWith(testUri);
     expect(client.textDocumentDidOpen).toHaveBeenCalledTimes(1);
-    expect(client.setCurrentDocumentDir.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(client.setCurrentDocumentUri.mock.invocationCallOrder[0]).toBeLessThan(
       client.textDocumentDidOpen.mock.invocationCallOrder[0]!,
     );
   });

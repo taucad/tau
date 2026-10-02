@@ -24,7 +24,7 @@ Blueprint for the second layer above the `/node_modules` single source of truth:
 Today the runtime bundler does ad-hoc bare-specifier resolution (`packages/runtime/src/bundler/module-manager.ts`) and Monaco gets type definitions through an in-memory `addExtraLib` registry sourced by `TypeAcquisitionService`. Neither layer reads `package.json#exports` or `tsconfig.json#paths`, so authoring `import x from '#utils/foo.js'` or `import { defaultParams } from './main.scad'` either fails outright or silently picks the wrong file. The fix is to introduce a single **`TauResolver`** that mirrors `nodeNextResolution` (Node.js + TS module resolution) and is consumed by both esbuild (`onResolve`) and Monaco (custom `monaco.languages.typescript.JavaScriptWorker` resolver). Bolted on top of that resolver is a **virtual-types plugin contract** modelled on react-router's `.react-router/types/` and fumadocs' generated `.fumadocs/source.ts`: kernel plugins implement `getVirtualTypes({ files, params })` returning a list of `(virtualPath, contents)` tuples that the resolver materialises into the `/.tau/types/` overlay. This solves three problems at once:
 
 1. KCL/OpenSCAD/JSCAD parameter shapes become real `import { defaultParams } from './cube.scad'` types — closing the typing gap that blocks Pattern 2/3 in `browser-first-parameter-aware-testing.md`.
-2. The test runtime gets `import { render } from '@taucad/test-runtime/render'` typed against the active kernel's actual parameter type without per-kernel manual stubs.
+2. The Tau testing adapter gets `import { renderTauModel } from '@taucad/testing/tau'` typed against the active kernel's actual parameter type without per-kernel manual stubs.
 3. Internal `#`-aliased subpath imports (`#utils/foo.js`) and per-project `tsconfig.paths` resolve identically in the bundler and Monaco — eliminating the workspace's standing "no sibling-relative imports" lint as a configuration surface anyone can adopt.
 
 The resolver is a 600–900 LOC addition; the virtual-types plugin contract is a 4-hook extension to the existing `KernelDefinition` type. Both can land incrementally behind feature flags and reuse the OPFS `/node_modules` cache from [`node-modules-single-source-of-truth.md`](./node-modules-single-source-of-truth.md).
@@ -48,7 +48,7 @@ Three concrete authoring frictions surface today:
 
 1. **Per-project resolution config has nowhere to live.** The bundler hard-codes resolution behaviour in `esbuild-core.ts`. A user dropping a `tsconfig.json` with `paths: { "#utils/*": ["./src/utils/*"] }` into a project sees Monaco respect it (the TS worker reads tsconfig automatically via `compilerOptions`) but esbuild silently fails to resolve the same import at runtime. A user dropping a `package.json` with `"exports": { ".": "./src/index.ts" }` sees the same divergence.
 2. **Non-TS kernels expose parameters to the runtime but not to the editor.** OpenSCAD's per-file customizer schema is rich (groups, ranges, enums, tessellation knobs) and lives in `parse-parameters.ts:108-159`, but a `cube.scad` neighbour file authored as TypeScript cannot `import { defaultParams } from './cube.scad'` because Monaco has no type stub for `.scad` and no mechanism for the OpenSCAD kernel to publish one. The same gap applies to KCL (`zoo.kernel.ts:174-199`'s `convertKclVariablesToJsonSchema` produces a JSON Schema that never reaches the editor).
-3. **The test runtime cannot type its render helper.** `browser-first-parameter-aware-testing.md` Pattern 2 (`describe.each([{ length_x: 8 }])`) only delivers DX if `render(p)` is typed against the active source file's parameter shape. Without virtual types this becomes `render(p: Record<string, unknown>)` — ergonomic suicide for a TDD workflow.
+3. **The Tau testing adapter cannot type its render helper.** `browser-first-parameter-aware-testing.md` Pattern 2 (`describe.each([{ length_x: 8 }])`) only delivers DX if `renderTauModel({ parameters })` is typed against the active source file's parameter shape. Without virtual types this becomes `renderTauModel({ parameters: Record<string, unknown> })` — ergonomic suicide for a TDD workflow.
 
 ## Scope and Non-Goals
 
@@ -294,7 +294,7 @@ The generated tsconfig pins compiler options to match what we already configure 
     "types": ["./.tau/types/*"],
     "paths": {
       "#/*": ["./*"],
-      "@taucad/test-runtime": ["./.tau/types/test-runtime.d.ts"],
+      "@taucad/testing/tau": ["./.tau/types/taucad-testing-tau.d.ts"],
       "*.scad": ["./.tau/types/*.scad.d.ts"],
       "*.kcl": ["./.tau/types/*.kcl.d.ts"]
     }
@@ -356,20 +356,21 @@ For TS kernels the source file is already typed. The virtual `.d.ts` becomes red
 ```typescript
 // User's bracket.test.ts after virtual-types lands
 import { defaultParams } from './bracket.ts';
-import { describe, it, expect, render } from '@taucad/test-runtime';
-//                                                  ^ virtual:
-//                                                  - parameters typed against bracket.ts's defaultParams
-//                                                  - render(p) returns RenderResult with kernel-specific extras
+import { describe, expectGeo, it } from 'geospec';
+import { renderTauModel } from '@taucad/testing/tau';
+//                                      ^ virtual:
+//                                      - parameters typed against bracket.ts's defaultParams
+//                                      - renderTauModel({ parameters }) returns GeometryArtifact
 
 describe.each([defaultParams, { ...defaultParams, length: 100 }])('bracket', (p) => {
   it('is watertight', async () => {
-    const r = await render(p);
-    expect(r).toBeWatertight();
+    const r = await renderTauModel({ parameters: p });
+    await expectGeo(r).toBeWatertight();
   });
 });
 ```
 
-Where the `@taucad/test-runtime` virtual module is generated per-project to bind `render`'s parameter type to `typeof defaultParams` of the file under test. This pattern eliminates the `Record<string, unknown>` escape hatch from `browser-first-parameter-aware-testing.md` Pattern 2/3.
+Where the `@taucad/testing/tau` virtual module is generated per-project to bind `renderTauModel({ parameters })` to `typeof defaultParams` of the file under test. This pattern eliminates the `Record<string, unknown>` escape hatch from `browser-first-parameter-aware-testing.md` Pattern 2/3.
 
 ### Schema → TypeScript translator
 
@@ -377,20 +378,20 @@ Use `json-schema-to-typescript` (npm: `json-schema-to-typescript`, well-maintain
 
 ## Recommendations Roadmap
 
-| #   | Action                                                                                                                                                              | Priority | Effort | Impact                                                                         | Phase |
-| --- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------------------------------------------------------------------------------ | ----- |
-| R1  | Create `@taucad/resolver` package with `TauResolver` implementing `nodeNextResolution`. Pure functional core, FS via injected `ResolverFileSystem` interface.       | **P0**   | L      | Unblocks every other recommendation                                            | 1     |
-| R2  | Wire `TauResolver` into `esbuild-core.ts` `createVfsPlugin` `onResolve`. Replace `parsePackageSpecifier` + `resolveFileExtension` heuristics.                       | **P0**   | M      | Bundler matches Monaco resolution; `#`-imports/`exports` work in user projects | 1     |
-| R3  | Wire `TauResolver` into Monaco via `monaco.languages.typescript.javascriptDefaults.addExtraLib` + custom resolver in the TS worker contribution.                    | **P0**   | M      | Cmd+Click and project-relative imports converge with bundler                   | 1     |
-| R4  | Add `getVirtualTypes` hook to `KernelDefinition` and `KernelMiddlewareOptions`; emit `/.tau/types/*.d.ts` after every `getParameters`/`render` cycle.               | **P0**   | M      | Foundation for non-TS kernel typing                                            | 2     |
-| R5  | Implement OpenSCAD `getVirtualTypes` (translates customizer JSON Schema → `.d.ts` with JSDoc preserving `@group`, `@minimum`, `@maximum`).                          | **P1**   | M      | Closes typing gap for OpenSCAD users                                           | 2     |
-| R6  | Implement KCL `getVirtualTypes` (translates `convertKclVariablesToJsonSchema` output → `.d.ts`).                                                                    | **P1**   | S      | Closes typing gap for KCL users                                                | 2     |
-| R7  | Implement JSCAD/Replicad/Manifold/OpenCASCADE `getVirtualTypes` (mostly pass-through since source is already TS, but emits a `__kernel` brand for `render` typing). | **P1**   | S      | Enables typed `render(p)` in tests                                             | 2     |
-| R8  | Auto-emit `/.tau/tsconfig.generated.json` on project load; user `tsconfig.json` extends from it. If user lacks tsconfig, generated one is the active config.        | **P1**   | S      | Removes per-project boilerplate; resolver always has tsconfig                  | 2     |
-| R9  | Implement `package.json#exports`, `imports`, `typesVersions`, `types` in `TauResolver`. Cite npm-published example fixtures (lodash, three, react-dom) in tests.    | **P1**   | M      | Spec compliance, transitive subpath imports                                    | 2     |
-| R10 | Implement `tsconfig.json#extends`, `references`, `paths`, `baseUrl` in `TauResolver`.                                                                               | **P2**   | M      | Per-project resolution config; `#utils/*` aliases                              | 3     |
-| R11 | Add `@taucad/test-runtime` virtual-types middleware that emits a project-scoped `.d.ts` binding `render(p)` to the active source file's `defaultParams` type.       | **P2**   | M      | Closes Pattern 2/3 typing in `browser-first-parameter-aware-testing`           | 3     |
-| R12 | Document the contract in `docs/policy/library-api-policy.md` §VirtualTypes; flag that public kernel/middleware authors should opt in for non-TS surfaces.           | **P3**   | XS     | Locks in the API surface                                                       | 3     |
+| #   | Action                                                                                                                                                                            | Priority | Effort | Impact                                                                         | Phase |
+| --- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | -------- | ------ | ------------------------------------------------------------------------------ | ----- |
+| R1  | Create `@taucad/resolver` package with `TauResolver` implementing `nodeNextResolution`. Pure functional core, FS via injected `ResolverFileSystem` interface.                     | **P0**   | L      | Unblocks every other recommendation                                            | 1     |
+| R2  | Wire `TauResolver` into `esbuild-core.ts` `createVfsPlugin` `onResolve`. Replace `parsePackageSpecifier` + `resolveFileExtension` heuristics.                                     | **P0**   | M      | Bundler matches Monaco resolution; `#`-imports/`exports` work in user projects | 1     |
+| R3  | Wire `TauResolver` into Monaco via `monaco.languages.typescript.javascriptDefaults.addExtraLib` + custom resolver in the TS worker contribution.                                  | **P0**   | M      | Cmd+Click and project-relative imports converge with bundler                   | 1     |
+| R4  | Add `getVirtualTypes` hook to `KernelDefinition` and `KernelMiddlewareOptions`; emit `/.tau/types/*.d.ts` after every `getParameters`/`render` cycle.                             | **P0**   | M      | Foundation for non-TS kernel typing                                            | 2     |
+| R5  | Implement OpenSCAD `getVirtualTypes` (translates customizer JSON Schema → `.d.ts` with JSDoc preserving `@group`, `@minimum`, `@maximum`).                                        | **P1**   | M      | Closes typing gap for OpenSCAD users                                           | 2     |
+| R6  | Implement KCL `getVirtualTypes` (translates `convertKclVariablesToJsonSchema` output → `.d.ts`).                                                                                  | **P1**   | S      | Closes typing gap for KCL users                                                | 2     |
+| R7  | Implement JSCAD/Replicad/Manifold/OpenCASCADE `getVirtualTypes` (mostly pass-through since source is already TS, but emits a `__kernel` brand for render-helper typing).          | **P1**   | S      | Enables typed `renderTauModel({ parameters })` in tests                        | 2     |
+| R8  | Auto-emit `/.tau/tsconfig.generated.json` on project load; user `tsconfig.json` extends from it. If user lacks tsconfig, generated one is the active config.                      | **P1**   | S      | Removes per-project boilerplate; resolver always has tsconfig                  | 2     |
+| R9  | Implement `package.json#exports`, `imports`, `typesVersions`, `types` in `TauResolver`. Cite npm-published example fixtures (lodash, three, react-dom) in tests.                  | **P1**   | M      | Spec compliance, transitive subpath imports                                    | 2     |
+| R10 | Implement `tsconfig.json#extends`, `references`, `paths`, `baseUrl` in `TauResolver`.                                                                                             | **P2**   | M      | Per-project resolution config; `#utils/*` aliases                              | 3     |
+| R11 | Add `@taucad/testing/tau` virtual-types middleware that emits a project-scoped `.d.ts` binding `renderTauModel({ parameters })` to the active source file's `defaultParams` type. | **P2**   | M      | Closes Pattern 2/3 typing in `browser-first-parameter-aware-testing`           | 3     |
+| R12 | Document the contract in `docs/policy/library-api-policy.md` §VirtualTypes; flag that public kernel/middleware authors should opt in for non-TS surfaces.                         | **P3**   | XS     | Locks in the API surface                                                       | 3     |
 
 Phase 1 (R1–R3) ships parity with Monaco's existing resolution but unifies the pipeline. Phase 2 (R4–R9) adds the new authoring surface. Phase 3 (R10–R12) is polish + spec completeness.
 
@@ -432,7 +433,7 @@ Recommend (1) for simplicity; the FS event coalescer absorbs the noise. Switch t
 
 1. **Should the resolver also handle JSON imports (`import data from './foo.json'`)?** Both esbuild and Monaco support it; spec compliance argues yes. Ship in R1.
 2. **Should `getVirtualTypes` be sync or async?** All kernels can produce types synchronously from already-extracted parameters. Async opens the door to fetching extra metadata (e.g., from a parts registry per [`tau-parts-registry-and-marketplace.md`](./tau-parts-registry-and-marketplace.md)) without blocking. Recommend async.
-3. **Do we need `getVirtualTypes` on `BundlerPlugin` and `TranscoderPlugin` too?** A transcoder could emit virtual types for its supported export formats (`'glb' | 'step' | '3mf'`); a bundler could expose virtual types for its built-in modules. Defer to follow-on; not required by the test-runtime use case.
+3. **Do we need `getVirtualTypes` on `BundlerPlugin` and `TranscoderPlugin` too?** A transcoder could emit virtual types for its supported export formats (`'glb' | 'step' | '3mf'`); a bundler could expose virtual types for its built-in modules. Defer to follow-on; not required by the GeoSpec/Tau testing adapter use case.
 4. **Multi-tsconfig support for monorepo-style user projects?** Probably out of scope until we see real demand; flag in R10 design.
 5. **`.d.ts` validation** — should we typecheck virtual `.d.ts` against the project's tsconfig before writing? Cheap with `tsgo` (Go-based TS compiler already in the workspace) but adds complexity. Defer; rely on Monaco's own diagnostics.
 6. **Tree-shaking the resolver into Monaco's web worker bundle** — if `@taucad/resolver` pulls in any node-only deps it breaks worker builds. Constrain it to a strict no-Node-API surface in R1.
@@ -452,6 +453,6 @@ Internal:
 - Foundation: [`docs/research/node-modules-single-source-of-truth.md`](./node-modules-single-source-of-truth.md) — the OPFS `/node_modules` cache this resolver reads from.
 - Sibling blueprint: [`docs/research/dynamic-runtime-plugins.md`](./dynamic-runtime-plugins.md) — how user-installed plugins emit virtual types via the same hook.
 - Sibling blueprint: [`docs/research/api-npm-and-reproducible-snapshots.md`](./api-npm-and-reproducible-snapshots.md) — how lockfile keeps virtual-types regeneration deterministic.
-- Drives: [`docs/research/browser-first-parameter-aware-testing.md`](./browser-first-parameter-aware-testing.md) — the `render(p)` typing problem this solves.
+- Drives: [`docs/research/browser-first-parameter-aware-testing.md`](./browser-first-parameter-aware-testing.md) — the `renderTauModel({ parameters })` typing problem this solves.
 - Related: [`docs/research/monaco-lsp-lazy-activation-blueprint.md`](./monaco-lsp-lazy-activation-blueprint.md), [`docs/research/typescript-esm-extension-resolution.md`](./typescript-esm-extension-resolution.md), [`docs/research/unresolved-dependency-watch-gap.md`](./unresolved-dependency-watch-gap.md).
 - Policy: [`docs/policy/library-api-policy.md`](../policy/library-api-policy.md), [`docs/policy/filesystem-policy.md`](../policy/filesystem-policy.md).

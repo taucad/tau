@@ -13,7 +13,7 @@ import {
 } from '#testing/stream-assertions.js';
 import { createTestApp } from '#testing/create-test-app.js';
 import type { TestApp } from '#testing/create-test-app.js';
-import { providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
+import { buildCadAgent, providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
 
 type SearchResult = { title: string; url: string; content: string };
 type BrowserResult = { url: string; content: string };
@@ -53,13 +53,13 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               id: 'msg_1',
               role: 'user',
               parts: [{ type: 'text', text }],
-              metadata: {
-                model: modelId,
-                kernel: 'replicad',
-                ...(toolChoice ? { toolChoice } : {}),
-              },
+              metadata: { model: modelId, kernel: 'replicad' },
             },
           ],
+          agent: {
+            ...buildCadAgent(modelId, 'replicad'),
+            ...(toolChoice ? { toolChoice } : {}),
+          },
         }),
       });
 

@@ -1,1 +1,1 @@
-export const defaultChatModel = 'anthropic-claude-opus-4.7';
+export const defaultChatModel = 'anthropic-claude-opus-4.8';

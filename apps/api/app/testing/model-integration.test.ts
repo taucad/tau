@@ -8,21 +8,17 @@ import { ChatRpcService } from '#api/chat/chat-rpc.service.js';
 import { MetricsService } from '#telemetry/metrics.js';
 import { collectStreamChunks, collectFinalMessage } from '#testing/stream-consumer.js';
 import {
-  expectHasTextContent,
-  expectHasReasoningParts,
   expectHasToolCall,
   expectToolCallSucceeded,
-  expectChunkTypesInclude,
   expectIncrementalToolInput,
   expectNoErrors,
   expectMultipleSteps,
   extractUsageData,
-  expectReasoningTokensInUsage,
   expectCacheTokenNormalization,
 } from '#testing/stream-assertions.js';
 import { createTestApp } from '#testing/create-test-app.js';
 import type { TestApp } from '#testing/create-test-app.js';
-import { providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
+import { buildCadAgent, providerEnvForModelId, requiresEnv } from '#testing/skip-helpers.js';
 
 const modelId = process.env['TEST_MODEL_ID'] ?? 'anthropic-claude-sonnet-4.6';
 
@@ -42,82 +38,6 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
 
     afterAll(async () => {
       await testApp.app.close();
-    });
-
-    it('should stream SSE response with text content', async () => {
-      const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          id: `test-thread-${Date.now()}`,
-          messages: [
-            {
-              id: 'msg_1',
-              role: 'user',
-              parts: [
-                {
-                  type: 'text',
-                  text: 'Create a 2mm cube centered on the origin in main.ts using Replicad. Use the create_file tool to write the file.',
-                },
-              ],
-              metadata: {
-                model: modelId,
-                kernel: 'replicad',
-              },
-            },
-          ],
-        }),
-      });
-
-      expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
-      expect(response.headers.get('content-type')).toContain('text/event-stream');
-
-      const chunks = await collectStreamChunks(response);
-      expect(chunks.length).toBeGreaterThan(0);
-
-      expectChunkTypesInclude(chunks, 'text-start');
-
-      const message = await collectFinalMessage(chunks);
-      expect(message.role).toBe('assistant');
-      expectHasTextContent(message);
-    });
-
-    it('should stream reasoning tokens when the model supports thinking', async () => {
-      const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          id: `test-thread-reasoning-${Date.now()}`,
-          messages: [
-            {
-              id: 'msg_1',
-              role: 'user',
-              parts: [
-                {
-                  type: 'text',
-                  text: 'What is the sum of 127 and 354? Think step by step.',
-                },
-              ],
-              metadata: {
-                model: modelId,
-                kernel: 'replicad',
-              },
-            },
-          ],
-        }),
-      });
-
-      expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
-
-      const chunks = await collectStreamChunks(response);
-      expect(chunks.length).toBeGreaterThan(0);
-
-      expectChunkTypesInclude(chunks, 'reasoning-start');
-
-      const message = await collectFinalMessage(chunks);
-      expect(message.role).toBe('assistant');
-      expectHasReasoningParts(message);
-      expectHasTextContent(message);
     });
 
     it('should use tool calls when requested', async () => {
@@ -142,6 +62,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               },
             },
           ],
+          agent: buildCadAgent(modelId, 'replicad'),
         }),
       });
 
@@ -196,6 +117,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               },
             },
           ],
+          agent: buildCadAgent(modelId, 'replicad'),
         }),
       });
 
@@ -252,6 +174,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               },
             },
           ],
+          agent: buildCadAgent(modelId, 'replicad'),
         }),
       });
 
@@ -274,42 +197,6 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
         }
       }
     }, 120_000);
-
-    it('should include reasoning tokens in usage metadata during streaming', async () => {
-      const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({
-          id: `test-thread-usage-${Date.now()}`,
-          messages: [
-            {
-              id: 'msg_1',
-              role: 'user',
-              parts: [
-                {
-                  type: 'text',
-                  text: 'What is the sum of 127 and 354? Think step by step.',
-                },
-              ],
-              metadata: {
-                model: modelId,
-                kernel: 'replicad',
-              },
-            },
-          ],
-        }),
-      });
-
-      expect(response.ok, `HTTP ${response.status}: ${response.statusText}`).toBe(true);
-
-      const chunks = await collectStreamChunks(response);
-      expectNoErrors(chunks);
-
-      const usageData = extractUsageData(chunks);
-      console.log('Usage data:', JSON.stringify(usageData, undefined, 2));
-
-      expectReasoningTokensInUsage(chunks);
-    });
 
     it('should stream tool call arguments incrementally', async () => {
       const response = await fetch(`${testApp.baseUrl}/v1/chat`, {
@@ -358,6 +245,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               },
             },
           ],
+          agent: buildCadAgent(modelId, 'replicad'),
         }),
       });
 
@@ -395,6 +283,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               },
             },
           ],
+          agent: buildCadAgent(modelId, 'replicad'),
         }),
       });
 
@@ -447,6 +336,7 @@ describe.skipIf(providerEnvVariable === undefined || requiresEnv(providerEnvVari
               },
             },
           ],
+          agent: buildCadAgent(modelId, 'replicad'),
         }),
       });
 

@@ -19,8 +19,12 @@ import { ChatInterfaceGraphics } from '#routes/projects_.$id/chat-interface-grap
 import { ChatInterfaceStatus } from '#routes/projects_.$id/chat-interface-status.js';
 import { useIsTopRightPanel } from '#components/panes/use-is-top-right-group.js';
 import { useIsMobile } from '#hooks/use-mobile.js';
+import { useResizeObserver } from '#hooks/use-resize-observer.js';
 import { cn } from '#utils/ui.utils.js';
-import { ChatArButton } from '#routes/projects_.$id/chat-ar-button.js';
+import { ArButton } from '#components/cad/ar-button.js';
+
+/** Horizontal inset sum for bottom controls (`left-2` + `right-2`); pairs with `max-w-[calc(100%-1rem)]` on the overlay. */
+const bottomControlsGutterPx = 16;
 
 type ChatViewerProps = {
   /** Unique Dockview panel ID for this viewer instance */
@@ -288,8 +292,13 @@ const ViewerContent = memo(function ({
   const isTopRight = useIsTopRightPanel(panelApi, containerApi);
   const shiftGizmo = isTopRight && !isMobile;
 
+  const viewerLayoutRef = useRef<HTMLDivElement>(null);
+  const { width: viewerLayoutWidth } = useResizeObserver({ ref: viewerLayoutRef });
+  const toolbarAvailableWidth =
+    viewerLayoutWidth === undefined ? undefined : Math.max(0, viewerLayoutWidth - bottomControlsGutterPx);
+
   return (
-    <div className='group/viewer relative flex h-full flex-col'>
+    <div ref={viewerLayoutRef} className='group/viewer relative flex h-full flex-col'>
       {/* Status overlays */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
         <ChatInterfaceStatus />
@@ -339,13 +348,13 @@ const ViewerContent = memo(function ({
       )}
 
       {/* AR button — mobile iOS only, positioned bottom-right above controls */}
-      <ChatArButton geometries={geometries} kernelClient={kernelClient} className='absolute right-3 bottom-14 z-10' />
+      <ArButton geometries={geometries} kernelClient={kernelClient} className='absolute right-3 bottom-14 z-10' />
 
       {/* Bottom controls */}
-      <div className='absolute right-2 bottom-2 left-2 z-10 flex shrink-0 flex-col gap-2'>
+      <div className='absolute bottom-2 left-2 z-10 flex max-w-[calc(100%-1rem)] shrink-0 flex-col items-start gap-2'>
         <ChatInterfaceGraphics />
         <ChatStackTrace entryFile={entryFile} side='bottom' />
-        <ChatViewerControls />
+        <ChatViewerControls availableWidth={toolbarAvailableWidth} className='self-stretch' />
       </div>
     </div>
   );

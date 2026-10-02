@@ -103,7 +103,7 @@ export function ChatMessageToolGrep({ part }: { readonly part: ToolInvocation<ty
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} fallbackIcon={Search} fallbackTitle='Failed to search files' />;
+      return <ChatToolError errorText={part.errorText} icon={Search} noun='text search' />;
     }
 
     case 'approval-requested':

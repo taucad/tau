@@ -7,6 +7,15 @@
  * so the public `@taucad/runtime/filesystem` surface exposes only the
  * opaque `RuntimeFileSystem` value, never the underlying handle shape.
  *
+ * Spec/instance contract: `_fromMemoryFsHandle(seedFiles)` returns a
+ * plain-data spec whose `create()` factory mints a fresh
+ * {@link RuntimeFileSystemBase} per binding — every `RuntimeClient`
+ * materialised from a single `fromMemoryFs(seed)` value gets its own
+ * private in-memory store seeded from `seed`. Mutations are not shared
+ * across clients. Mirrors the v6 transport callable-plugin lifetime
+ * pattern (see
+ * `docs/research/runtime-filesystem-spec-instance-harmonisation.md`).
+ *
  * @internal
  */
 
@@ -21,17 +30,37 @@ function enoent(message: string): Error {
 
 /**
  * Internal: produce the discriminated `inline`-arm handle backing the
- * public {@link fromMemoryFs} factory.
+ * public {@link fromMemoryFs} factory. Captures `seedFiles` in the spec
+ * closure; each `create()` invocation builds a fresh in-memory store
+ * seeded from the same files.
  *
  * @internal
  * @param files - Initial file contents (path -> content string)
  */
 export function _fromMemoryFsHandle(files?: Record<string, string>): RuntimeFileSystemHandle {
+  /* Defensively snapshot the seed map at spec-construction time so that
+   * callers who happen to mutate the supplied object after wrapping it
+   * cannot retroactively change the seed observed by future `create()`
+   * invocations. The snapshot is reused across every `create()` call. */
+  const seedFiles = files ? { ...files } : undefined;
+  return {
+    kind: 'inline',
+    create: () => buildMemoryFsBase(seedFiles),
+  };
+}
+
+/**
+ * Build a fresh, isolated in-memory `RuntimeFileSystemBase` seeded from
+ * the supplied files. Each invocation owns its own `store` and
+ * `directories` collections so two `RuntimeFileSystemBase` instances
+ * built from the same spec do not share mutable state.
+ */
+function buildMemoryFsBase(seedFiles: Record<string, string> | undefined): RuntimeFileSystemBase {
   const store = new Map<string, Uint8Array<ArrayBuffer> | string>();
   const directories = new Set<string>();
 
-  if (files) {
-    for (const [filePath, content] of Object.entries(files)) {
+  if (seedFiles) {
+    for (const [filePath, content] of Object.entries(seedFiles)) {
       store.set(filePath, content);
       const parts = filePath.split('/');
       for (let i = 1; i < parts.length; i++) {
@@ -63,7 +92,7 @@ export function _fromMemoryFsHandle(files?: Record<string, string>): RuntimeFile
     return typeof content === 'string' ? encoder.encode(content) : new Uint8Array(content);
   }
 
-  const fs: RuntimeFileSystemBase = {
+  return {
     id: 'runtime:memory',
     capabilities: { persistent: false, writable: true, quotaBased: false, caseSensitive: true },
     dispose() {
@@ -154,6 +183,4 @@ export function _fromMemoryFsHandle(files?: Record<string, string>): RuntimeFile
       return store.has(filePath) || directories.has(filePath);
     },
   };
-
-  return { kind: 'inline', fs };
 }

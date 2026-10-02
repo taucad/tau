@@ -1,10 +1,16 @@
-import type { FileEntry, FileStatEntry, FileSystemBackend, FileStat } from '@taucad/types';
+import type { FileEntry, FileStatEntry, FileStat } from '@taucad/types';
 import type { FileTreeNode } from '@taucad/filesystem';
 import { FileSystemObserverBridge } from '@taucad/filesystem';
+import { Topic } from '@taucad/events';
 import type { FileContentService, ContentChangeEvent } from '#file-content-service.js';
 import type { FileSystemClient } from '#file-system-client.js';
-import type { WorkerChangeChannel, WorkerRelativeRenameEvent } from '#worker-change-channel.js';
+import type {
+  WorkerChangeChannel,
+  WorkerRelativeDirectoryRenameEvent,
+  WorkerRelativeRenameEvent,
+} from '#worker-change-channel.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
+import { WorkspacePathEscapeError } from '#workspace-path-resolver.js';
 import type { VisibilityProvider } from '#visibility-provider.js';
 import { PathSubscriberRegistry } from '#path-subscriber-registry.js';
 import { RefreshGenerationGuard } from '#refresh-generation-guard.js';
@@ -14,7 +20,6 @@ import {
   classifyDirectoryListingError,
 } from '#directory-listing.js';
 import type { ListedDirectoryEntry } from '#directory-listing.js';
-import { joinPath } from '@taucad/utils/path';
 
 /** Milliseconds. */
 const defaultRefreshDebounce = 100;
@@ -77,7 +82,7 @@ export class FileTreeService {
   private readonly proxy: FileSystemClient;
   private readonly paths: WorkspacePathResolver;
   private readonly visibility: VisibilityProvider;
-  private readonly treeSubscribers = new Set<() => void>();
+  readonly #treeTopic = new Topic<void>({ name: 'FileTreeService.tree' });
   private refreshTimer: ReturnType<typeof setTimeout> | undefined;
   private pendingRefreshPath = '';
   private pollingTimer: ReturnType<typeof setTimeout> | undefined;
@@ -139,6 +144,21 @@ export class FileTreeService {
         interestedIn: (relativeDirectory) => this.isDirectoryResolvedKey(relativeDirectory),
         handler: (event) => {
           this.handleDirectoryChangedRelative(event.path);
+        },
+      }),
+      init.channel.onDirectoryCreated({
+        handler: (event) => {
+          this.handleDirectoryCreatedRelative(event.path);
+        },
+      }),
+      init.channel.onDirectoryDeleted({
+        handler: (event) => {
+          this.handleDirectoryDeletedRelative(event.path);
+        },
+      }),
+      init.channel.onDirectoryRenamed({
+        handler: (event) => {
+          this.handleDirectoryRenamedRelative(event);
         },
       }),
       init.channel.onBackendChanged(() => {
@@ -337,69 +357,12 @@ export class FileTreeService {
   }
 
   /**
-   * Read shallow directory for files route.
-   * @param path - Directory to read shallowly on the requested backend.
-   * @param backend - Filesystem backend identifier for disambiguation.
-   * @returns Immediate children as {@link FileTreeNode} stubs.
-   */
-  public async readShallowDirectory(path: string, backend: FileSystemBackend): Promise<FileTreeNode[]> {
-    return this.proxy.readShallowDirectory(path, backend);
-  }
-
-  /**
    * Remove a directory via proxy.
    * @param path - Workspace-relative directory to remove (must be empty per worker semantics).
    */
   public async rmdir(path: string): Promise<void> {
     const absolutePath = this.paths.toAbsoluteWorkspacePath(path);
     await this.proxy.rmdir(absolutePath);
-  }
-
-  /**
-   * Recursively delete a directory and all its contents via the worker.
-   * The worker has complete filesystem knowledge; the lazy UI tree does not.
-   * @param path - Directory to delete recursively.
-   */
-  public async deleteDirectory(path: string): Promise<void> {
-    const absolutePath = this.paths.toAbsoluteWorkspacePath(path);
-    const relativeKey = this.relativeDirectoryKeyFromUserPath(path);
-    const entries = await this.proxy.getDirectoryStat(absolutePath);
-
-    const subdirs = new Set<string>();
-    for (const entry of entries) {
-      const entryPath = entry.path.startsWith('/') ? entry.path : joinPath(absolutePath, entry.path);
-      // oxlint-disable-next-line no-await-in-loop -- sequential deletes required
-      await this.proxy.unlink(entryPath);
-
-      // Derive intermediate directories between absolutePath and the file
-      const relativePart = entry.path.startsWith('/') ? entryPath.slice(absolutePath.length + 1) : entry.path;
-      const parts = relativePart.split('/');
-      for (let i = 1; i < parts.length; i++) {
-        subdirs.add(joinPath(absolutePath, parts.slice(0, i).join('/')));
-      }
-    }
-
-    // Rmdir subdirectories deepest-first, then the top-level directory
-    const sortedSubdirs = [...subdirs].sort((a, b) => b.split('/').length - a.split('/').length);
-    for (const directory of sortedSubdirs) {
-      // oxlint-disable-next-line no-await-in-loop -- deepest-first ordering required
-      await this.proxy.rmdir(directory);
-    }
-    await this.proxy.rmdir(absolutePath);
-
-    const prefix = relativeKey === '' ? '' : relativeKey.endsWith('/') ? relativeKey : `${relativeKey}/`;
-    const newTree = new Map(this._tree);
-    newTree.delete(relativeKey);
-    newTree.delete(path);
-    for (const key of newTree.keys()) {
-      if (key.startsWith(prefix)) {
-        newTree.delete(key);
-      }
-    }
-    this._tree = newTree;
-    this.notifyTreeSubscribers();
-    this._listingPathSubscribers.notifyPath(relativeKey, undefined);
-    this._listingPathSubscribers.notifyGlobal(undefined);
   }
 
   // === Refresh Control ===
@@ -568,10 +531,7 @@ export class FileTreeService {
    * @returns Unsubscribe function removing `callback`.
    */
   public subscribeTree(callback: () => void): () => void {
-    this.treeSubscribers.add(callback);
-    return () => {
-      this.treeSubscribers.delete(callback);
-    };
+    return this.#treeTopic.subscribe(callback);
   }
 
   // === Lifecycle ===
@@ -639,7 +599,7 @@ export class FileTreeService {
       clearTimeout(this.refreshTimer);
       this.refreshTimer = undefined;
     }
-    this.treeSubscribers.clear();
+    this.#treeTopic.dispose();
     this._listingPathSubscribers.clear();
   }
 
@@ -695,12 +655,99 @@ export class FileTreeService {
     }
   }
 
+  private handleDirectoryCreatedRelative(relativePath: string): void {
+    const parent = this.paths.parentOf(relativePath);
+    if (!this.isDirectoryResolvedKey(parent)) {
+      return;
+    }
+    const newTree = new Map(this._tree);
+    if (!newTree.has(relativePath)) {
+      const name = relativePath.split('/').pop() ?? relativePath;
+      newTree.set(relativePath, {
+        path: relativePath,
+        name,
+        type: 'dir',
+        size: 0,
+        mtimeMs: Date.now(),
+        isLoaded: false,
+        isDirectoryResolved: true,
+      });
+      this._tree = newTree;
+      this.notifyTreeSubscribers();
+      this._listingPathSubscribers.notifyPath(parent, undefined);
+    }
+  }
+
+  private handleDirectoryDeletedRelative(relativePath: string): void {
+    this.dropSubtree(relativePath);
+  }
+
+  private handleDirectoryRenamedRelative(event: WorkerRelativeDirectoryRenameEvent): void {
+    const { oldPath, newPath } = event;
+    if (oldPath !== undefined && newPath !== undefined) {
+      this.renameSubtree(oldPath, newPath);
+      return;
+    }
+    if (oldPath !== undefined) {
+      this.dropSubtree(oldPath);
+      return;
+    }
+    if (newPath !== undefined) {
+      this.handleDirectoryCreatedRelative(newPath);
+    }
+  }
+
+  private dropSubtree(relativePath: string): void {
+    const prefix = relativePath === '' ? '' : relativePath.endsWith('/') ? relativePath : `${relativePath}/`;
+    const newTree = new Map(this._tree);
+    let changed = newTree.delete(relativePath);
+    // oxlint-disable-next-line unicorn/no-useless-spread -- snapshot keys before mutating newTree to keep iteration deterministic across V8/Bun Map invalidation semantics.
+    for (const key of [...newTree.keys()]) {
+      if (key.startsWith(prefix)) {
+        newTree.delete(key);
+        changed = true;
+      }
+    }
+    if (changed) {
+      this._tree = newTree;
+      this.notifyTreeSubscribers();
+      this._listingPathSubscribers.notifyPath(this.paths.parentOf(relativePath), undefined);
+    }
+  }
+
+  private renameSubtree(oldPath: string, newPath: string): void {
+    const oldPrefix = oldPath === '' ? '' : oldPath.endsWith('/') ? oldPath : `${oldPath}/`;
+    const newPrefix = newPath === '' ? '' : newPath.endsWith('/') ? newPath : `${newPath}/`;
+    const newTree = new Map(this._tree);
+    let changed = false;
+    const ownEntry = newTree.get(oldPath);
+    if (ownEntry) {
+      newTree.delete(oldPath);
+      const name = newPath.split('/').pop() ?? newPath;
+      newTree.set(newPath, { ...ownEntry, path: newPath, name });
+      changed = true;
+    }
+    // oxlint-disable-next-line unicorn/no-useless-spread -- snapshot entries before mutating newTree to keep iteration deterministic across V8/Bun Map invalidation semantics.
+    for (const [key, entry] of [...newTree.entries()]) {
+      if (key.startsWith(oldPrefix)) {
+        const remapped = `${newPrefix}${key.slice(oldPrefix.length)}`;
+        newTree.delete(key);
+        newTree.set(remapped, { ...entry, path: remapped });
+        changed = true;
+      }
+    }
+    if (changed) {
+      this._tree = newTree;
+      this.notifyTreeSubscribers();
+      this._listingPathSubscribers.notifyPath(this.paths.parentOf(oldPath), undefined);
+      this._listingPathSubscribers.notifyPath(this.paths.parentOf(newPath), undefined);
+    }
+  }
+
   private notifyTreeSubscribers(): void {
     this._cachedCompleteTree = undefined;
     this._completeTreeVersion++;
-    for (const callback of this.treeSubscribers) {
-      callback();
-    }
+    this.#treeTopic.emit();
   }
 
   private handleContentChange(event: ContentChangeEvent): void {
@@ -798,6 +845,20 @@ export class FileTreeService {
       this.mergeChildren(relativeDirectory, entries);
     } catch (error) {
       if (error instanceof DOMException && error.name === 'AbortError') {
+        return;
+      }
+      if (error instanceof WorkspacePathEscapeError) {
+        // Defence in depth: the FileContentService contract guarantees that
+        // subscribers receive workspace-relative paths, so this branch is
+        // unreachable in normal operation. Downgrade from `console.error` to
+        // `console.warn` so a future contract regression is still visible
+        // but never spams users — the original bug here was `createProject`
+        // writing `/projects/<id>/...` keys through the root FM's content
+        // service, which produced a refresh on every new chat.
+        console.warn('[FileTreeService] dropped refresh for out-of-workspace path', {
+          path,
+          root: error.root,
+        });
         return;
       }
       console.error('[FileTreeService] refresh failed:', error);

@@ -3,6 +3,7 @@ import { createActor } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { AnyActorRef } from 'xstate';
 import type * as THREE from 'three';
+import type { ViewportCadGl } from '#components/geometry/graphics/three/viewport-cad-renderer.js';
 import { screenshotCapabilityMachine, calculateOptimalGrid } from '#machines/screenshot-capability.machine.js';
 
 // Three/addons -> lottie_canvas.module.js calls HTMLCanvasElement.getContext()
@@ -100,7 +101,7 @@ describe('screenshotCapabilityMachine', () => {
 
       actor.send({
         type: 'registerCapture',
-        gl: {} as THREE.WebGLRenderer,
+        gl: {} as ViewportCadGl,
         scene: {} as THREE.Scene,
         camera: {} as THREE.Camera,
       });
@@ -131,7 +132,7 @@ describe('screenshotCapabilityMachine', () => {
       const actor = createTestActor();
       actor.start();
 
-      const gl = {} as THREE.WebGLRenderer;
+      const gl = {} as ViewportCadGl;
       const scene = {} as THREE.Scene;
       const camera = {} as THREE.Camera;
       actor.send({ type: 'registerCapture', gl, scene, camera });
@@ -151,7 +152,7 @@ describe('screenshotCapabilityMachine', () => {
 
       actor.send({
         type: 'registerCapture',
-        gl: {} as THREE.WebGLRenderer,
+        gl: {} as ViewportCadGl,
         scene: {} as THREE.Scene,
         camera: {} as THREE.Camera,
       });
@@ -228,7 +229,7 @@ describe('screenshotCapabilityMachine', () => {
 
       actor.send({
         type: 'registerCapture',
-        gl: {} as THREE.WebGLRenderer,
+        gl: {} as ViewportCadGl,
         scene: {} as THREE.Scene,
         camera: {} as THREE.Camera,
       });
@@ -290,7 +291,7 @@ describe('screenshotCapabilityMachine', () => {
 
         actor.send({
           type: 'registerCapture',
-          gl: {} as THREE.WebGLRenderer,
+          gl: {} as ViewportCadGl,
           scene: {} as THREE.Scene,
           camera: {} as THREE.Camera,
         });
@@ -329,7 +330,7 @@ describe('screenshotCapabilityMachine', () => {
 
       actor.send({
         type: 'registerCapture',
-        gl: {} as THREE.WebGLRenderer,
+        gl: {} as ViewportCadGl,
         scene: {} as THREE.Scene,
         camera: {} as THREE.Camera,
       });

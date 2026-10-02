@@ -371,9 +371,19 @@ export class RuntimeWorkerClient {
 
   /**
    * Subscribe to autonomous geometry events. Payloads are pre-resolved
-   * (pooled/inline) and de-duplicated by per-shape hash list before the
-   * handler fires so consumers never see wire-level
-   * `HashedGeometryResultTransport` or back-to-back identical results.
+   * (pooled/inline) before the handler fires so consumers never see
+   * wire-level `HashedGeometryResultTransport`.
+   *
+   * Hash de-duplication is intentionally DISABLED here. This handler is
+   * the render-settlement signal — every completed render (including one
+   * that produces byte-identical geometry, e.g. a repeated identical
+   * `export`) must reach the consumer so an awaited render Promise can
+   * settle deterministically. Suppressing back-to-back identical
+   * emissions at this layer would conflate a UI re-render optimisation
+   * with the lifecycle settlement contract and deadlock callers awaiting
+   * the next geometry event. Redundant-emission suppression for UI
+   * subscribers is applied downstream at the `geometry` Topic emission
+   * boundary in `runtime-client`.
    */
   public onGeometry(handler: (result: HashedGeometryResult, rgen: number) => void): Unsubscribe {
     /* Routes pooled-resolution through the transport via a custom
@@ -387,6 +397,7 @@ export class RuntimeWorkerClient {
     return this.deferNotify('geometryComputed', ((): void => undefined) as unknown as GeometrySink, (channel) =>
       subscribeMaterialisedGeometry(channel, handler, {
         resolveGeometry: async (g) => this.transport.resolveGeometry(g),
+        dedupeByHash: false,
       }),
     );
   }

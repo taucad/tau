@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { MyUIMessage } from '@taucad/chat';
+import { fileUnchangedMarker } from '@taucad/chat/constants';
 import type { ActivityGroup, FoldableRun, StandaloneRun } from '#utils/assistant-message-activity.js';
 import {
   classifyActivityPart,
@@ -844,6 +845,41 @@ describe('groupAssistantParts', () => {
 
       const group = expectAggregated(groups[0]!);
       expect(group.summary).toBe('Explored 1 render, 6 screenshots, 4 tests');
+    });
+
+    it('should surface a (M cached) suffix alongside the files segment when M of N reads carry fileUnchangedMarker', async () => {
+      const cachedRead = (): Part =>
+        ({
+          ...readFilePart(),
+          state: 'output-available',
+          output: {
+            content: fileUnchangedMarker.build('tc_prior'),
+            totalLines: 1,
+          },
+        }) as unknown as Part;
+      const freshRead = (): Part =>
+        ({
+          ...readFilePart(),
+          state: 'output-available',
+          output: {
+            content: '   1\thello\n',
+            totalLines: 1,
+          },
+        }) as unknown as Part;
+
+      const parts: Parts = [freshRead(), cachedRead(), cachedRead()];
+      const groups = groupAssistantParts(parts);
+
+      const group = expectAggregated(groups[0]!);
+      expect(group.summaryDetail).toBe('3 files (2 cached)');
+      expect(group.summary).toBe('Explored 3 files (2 cached)');
+    });
+
+    it('should omit the cached suffix when no reads carry fileUnchangedMarker', () => {
+      const groups = groupAssistantParts([readFilePart(), readFilePart()]);
+
+      const group = expectAggregated(groups[0]!);
+      expect(group.summaryDetail).toBe('2 files');
     });
   });
 });

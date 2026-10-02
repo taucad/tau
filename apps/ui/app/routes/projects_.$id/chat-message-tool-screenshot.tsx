@@ -102,9 +102,7 @@ export function ChatMessageToolScreenshot({
     }
 
     case 'output-error': {
-      return (
-        <ChatToolError errorText={part.errorText} fallbackIcon={XCircle} fallbackTitle='Failed to capture screenshot' />
-      );
+      return <ChatToolError errorText={part.errorText} icon={XCircle} noun='screenshot' />;
     }
 
     case 'approval-requested':

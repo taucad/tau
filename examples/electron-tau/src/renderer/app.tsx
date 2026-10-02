@@ -66,6 +66,7 @@ const tauProcessDebug = tauProcessReflect?.env?.['TAU_ELECTRON_DEBUG'] === '1';
 const TAU_DEBUG = tauPreloadDebug || tauProcessDebug;
 
 declare global {
+  // oxlint-disable-next-line typescript/consistent-type-definitions -- Electron PoC example: a small standalone app shell that mixes SCREAMING_SNAKE_CASE constants (glTF magic numbers) with React components, making the workspace's strict naming-convention contract an awkward fit. The example is non-shipping, so we relax the rule mirror-style to `libs/tau-examples`.
   interface Window {
     /**
      * `TAU_ELECTRON_DEBUG=1` forwarded from preload (`process.env` is not

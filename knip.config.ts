@@ -43,7 +43,7 @@ const config: KnipConfig = {
     '.': {
       entry: ['vitest.workspace.ts'],
       project: ['**/*.{ts,tsx,mts}'],
-      ignore: ['tarballs/**'],
+      ignore: ['.agents/skills/create-repo/templates/**', 'tarballs/**'],
       ignoreDependencies: [
         'replicad-opencascadejs',
         'opencascade.js',

@@ -59,7 +59,6 @@ vi.mock('@taucad/runtime/transport-internals', () => ({
   createBridgeProxy: vi.fn(() => ({
     mount: mockMount,
     unmount: mockUnmount,
-    setDirectoryHandle: vi.fn(),
     getDirectoryStat: vi.fn(async () => []),
     readShallowDirectory: vi.fn(async () => []),
     readDirectory: vi.fn(async () => []),
@@ -68,13 +67,33 @@ vi.mock('@taucad/runtime/transport-internals', () => ({
   })),
 }));
 
-const mockGetProjectFileSystemConfig = vi.fn<() => Promise<string | undefined>>();
+const mockGetProjectFileSystemConfig =
+  vi.fn<
+    () => Promise<
+      | { projectId: string; backend: 'indexeddb' | 'opfs' | 'memory' }
+      | { projectId: string; backend: 'webaccess'; workspaceId: string }
+      | undefined
+    >
+  >();
+
+const mockGetWorkspace =
+  vi.fn<
+    (
+      workspaceId: string,
+    ) => Promise<{ workspace: { workspaceId: string; name: string }; handle: FileSystemDirectoryHandle } | undefined>
+  >();
+const mockCheckHandlePermission = vi.fn<() => Promise<string>>();
+const mockSetProjectFileSystemConfig =
+  vi.fn<(config: { projectId: string; backend: 'webaccess'; workspaceId: string }) => Promise<void>>();
 
 vi.mock('#filesystem/handle-store.js', () => ({
-  getStoredDirectoryHandle: vi.fn(async () => undefined),
+  getDefaultWorkspace: vi.fn(async () => undefined),
+  getWorkspace: async (...args: unknown[]) => mockGetWorkspace(...(args as [string])),
   getProjectFileSystemConfig: async () => mockGetProjectFileSystemConfig(),
-  checkHandlePermission: vi.fn(async () => 'granted'),
-  storeDirectoryHandle: vi.fn(),
+  checkHandlePermission: async () => mockCheckHandlePermission(),
+  createWorkspace: vi.fn(),
+  setProjectFileSystemConfig: async (config: { projectId: string; backend: 'webaccess'; workspaceId: string }) =>
+    mockSetProjectFileSystemConfig(config),
   requestHandlePermission: vi.fn(async () => true),
 }));
 
@@ -84,6 +103,9 @@ describe('fileManagerMachine', () => {
     workerTestState.instances.length = 0;
     mockGetProjectFileSystemConfig.mockResolvedValue(undefined);
     mockWaitForWorkerReady.mockResolvedValue(undefined);
+    mockGetWorkspace.mockResolvedValue(undefined);
+    mockCheckHandlePermission.mockResolvedValue('granted');
+    mockSetProjectFileSystemConfig.mockResolvedValue(undefined);
   });
 
   it('should start in initializing state when shouldInitializeOnStart is false', () => {
@@ -351,7 +373,7 @@ describe('fileManagerMachine', () => {
 
   describe('projectId backend resolution', () => {
     it('should call mount with opfs when project config stores opfs', async () => {
-      mockGetProjectFileSystemConfig.mockResolvedValue('opfs');
+      mockGetProjectFileSystemConfig.mockResolvedValue({ projectId: 'test-id', backend: 'opfs' });
 
       const actor = createActor(fileManagerMachine, {
         input: {
@@ -367,7 +389,7 @@ describe('fileManagerMachine', () => {
       });
 
       expect(mockGetProjectFileSystemConfig).toHaveBeenCalled();
-      expect(mockMount).toHaveBeenCalledWith('/projects/test-id', 'opfs', { preservePath: true });
+      expect(mockMount).toHaveBeenCalledWith('/projects/test-id', { backend: 'opfs', preservePath: true });
       actor.stop();
     });
 
@@ -388,7 +410,7 @@ describe('fileManagerMachine', () => {
       });
 
       expect(mockGetProjectFileSystemConfig).toHaveBeenCalled();
-      expect(mockMount).toHaveBeenCalledWith('/projects/test-id', 'indexeddb', { preservePath: true });
+      expect(mockMount).toHaveBeenCalledWith('/projects/test-id', { backend: 'indexeddb', preservePath: true });
       actor.stop();
     });
 
@@ -410,7 +432,7 @@ describe('fileManagerMachine', () => {
     });
 
     it('should call mount with memory when project config stores memory', async () => {
-      mockGetProjectFileSystemConfig.mockResolvedValue('memory');
+      mockGetProjectFileSystemConfig.mockResolvedValue({ projectId: 'mem-id', backend: 'memory' });
 
       const actor = createActor(fileManagerMachine, {
         input: {
@@ -425,7 +447,7 @@ describe('fileManagerMachine', () => {
         expect(actor.getSnapshot().value).toBe('ready');
       });
 
-      expect(mockMount).toHaveBeenCalledWith('/projects/mem-id', 'memory', { preservePath: true });
+      expect(mockMount).toHaveBeenCalledWith('/projects/mem-id', { backend: 'memory', preservePath: true });
       actor.stop();
     });
 
@@ -444,6 +466,351 @@ describe('fileManagerMachine', () => {
       });
 
       expect(mockMount).not.toHaveBeenCalled();
+      actor.stop();
+    });
+  });
+
+  // ── webaccess workspace resolution + recovery (Audit R2, R15, F15) ─────
+
+  describe('webaccess workspace resolution', () => {
+    const makeHandle = (name: string) => ({ kind: 'directory', name }) as unknown as FileSystemDirectoryHandle;
+
+    it('resolves bound workspaceId from project config and mounts webaccess', async () => {
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-1',
+        backend: 'webaccess',
+        workspaceId: 'wsp_bound',
+      });
+      mockGetWorkspace.mockResolvedValue({
+        workspace: { workspaceId: 'wsp_bound', name: 'Bound Workspace' },
+        handle: makeHandle('Bound'),
+      });
+      mockCheckHandlePermission.mockResolvedValue('granted');
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-1',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-1',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      expect(mockGetWorkspace).toHaveBeenCalledWith('wsp_bound');
+      // Audit R2: webaccess mount carries the resolved handle + workspaceId
+      // atomically through a single discriminated MountConfig — no
+      // ambient `setDirectoryHandle` round-trip.
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's `expect.objectContaining` returns `any`; the matcher is typed correctly at runtime.
+      const handleMatcher = expect.objectContaining({ name: 'Bound' }) as FileSystemDirectoryHandle;
+      expect(mockMount).toHaveBeenCalledWith('/projects/proj-1', {
+        backend: 'webaccess',
+        directoryHandle: handleMatcher,
+        workspaceId: 'wsp_bound',
+        preservePath: true,
+      });
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.context.activeWorkspaceId).toBe('wsp_bound');
+      expect(snapshot.context.activeWorkspaceName).toBe('Bound Workspace');
+      expect(snapshot.context.unavailableReason).toBeUndefined();
+      actor.stop();
+    });
+
+    it('ignores the default workspace when project is bound to a different one', async () => {
+      // Audit F15 regression: even if a different workspace was chosen as
+      // the default in Settings, a project bound to wsp_A must still
+      // resolve wsp_A (workspace identity is per-project, immutable).
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-pinned',
+        backend: 'webaccess',
+        workspaceId: 'wsp_pinned',
+      });
+      mockGetWorkspace.mockImplementation(async (id: string) => {
+        if (id === 'wsp_pinned') {
+          return {
+            workspace: { workspaceId: 'wsp_pinned', name: 'Pinned' },
+            handle: makeHandle('Pinned'),
+          };
+        }
+        return undefined;
+      });
+      mockCheckHandlePermission.mockResolvedValue('granted');
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-pinned',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-pinned',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      expect(mockGetWorkspace).toHaveBeenCalledWith('wsp_pinned');
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+      actor.stop();
+    });
+
+    it('transitions to webAccessUnavailable with reason="missing" when legacy config lacks workspaceId', async () => {
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-legacy',
+        backend: 'webaccess',
+      } as { projectId: string; backend: 'webaccess'; workspaceId: string });
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-legacy',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-legacy',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('webAccessUnavailable');
+      });
+
+      expect(actor.getSnapshot().context.unavailableReason).toBe('missing');
+      expect(mockMount).not.toHaveBeenCalled();
+      actor.stop();
+    });
+
+    it('transitions to webAccessUnavailable with reason="missing" when bound workspace is gone', async () => {
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-gone',
+        backend: 'webaccess',
+        workspaceId: 'wsp_gone',
+      });
+      mockGetWorkspace.mockResolvedValue(undefined);
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-gone',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-gone',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('webAccessUnavailable');
+      });
+
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.context.unavailableReason).toBe('missing');
+      expect(snapshot.context.activeWorkspaceId).toBe('wsp_gone');
+      expect(mockMount).not.toHaveBeenCalled();
+      actor.stop();
+    });
+
+    it('transitions to webAccessUnavailable with reason="permission" when handle access is revoked', async () => {
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-revoked',
+        backend: 'webaccess',
+        workspaceId: 'wsp_revoked',
+      });
+      mockGetWorkspace.mockResolvedValue({
+        workspace: { workspaceId: 'wsp_revoked', name: 'Revoked Workspace' },
+        handle: makeHandle('Revoked'),
+      });
+      mockCheckHandlePermission.mockResolvedValue('prompt');
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-revoked',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-revoked',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('webAccessUnavailable');
+      });
+
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.context.unavailableReason).toBe('permission');
+      expect(snapshot.context.activeWorkspaceId).toBe('wsp_revoked');
+      expect(snapshot.context.activeWorkspaceName).toBe('Revoked Workspace');
+      expect(mockMount).not.toHaveBeenCalled();
+      actor.stop();
+    });
+
+    it('should re-resolve the workspace from persistent config when reloadWorkspace is dispatched', async () => {
+      // Boot in `webAccessUnavailable` because the bound workspace is gone,
+      // then simulate the binding transaction: persistent record gains a
+      // valid workspace, `reloadWorkspace` re-runs the actor, machine
+      // reaches `ready`.
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-recover',
+        backend: 'webaccess',
+        workspaceId: 'wsp_initial',
+      });
+      mockGetWorkspace.mockResolvedValue(undefined);
+      mockCheckHandlePermission.mockResolvedValue('granted');
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-recover',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-recover',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('webAccessUnavailable');
+      });
+      expect(actor.getSnapshot().context.unavailableReason).toBe('missing');
+
+      // Simulate the binding-transaction effect: caller updated the
+      // persistent record before dispatching `reloadWorkspace`.
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-recover',
+        backend: 'webaccess',
+        workspaceId: 'wsp_recovered',
+      });
+      mockGetWorkspace.mockResolvedValue({
+        workspace: { workspaceId: 'wsp_recovered', name: 'Recovered Workspace' },
+        handle: makeHandle('Recovered'),
+      });
+
+      actor.send({ type: 'reloadWorkspace' });
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.context.activeWorkspaceId).toBe('wsp_recovered');
+      expect(snapshot.context.activeWorkspaceName).toBe('Recovered Workspace');
+      expect(snapshot.context.unavailableReason).toBeUndefined();
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+      // oxlint-disable-next-line @typescript-eslint/no-unsafe-assignment -- Vitest's `expect.objectContaining` returns `any`; the matcher is typed correctly at runtime.
+      const recoveredHandleMatcher = expect.objectContaining({ name: 'Recovered' }) as FileSystemDirectoryHandle;
+      expect(mockMount).toHaveBeenCalledWith('/projects/proj-recover', {
+        backend: 'webaccess',
+        directoryHandle: recoveredHandleMatcher,
+        workspaceId: 'wsp_recovered',
+        preservePath: true,
+      });
+      actor.stop();
+    });
+
+    it('should never mutate ProjectFileSystemConfig across indexeddb -> webaccess -> indexeddb navigation', async () => {
+      // Repro for the user-reported smoking-gun bug
+      // (`docs/research/fm-workspace-binding-scope.md` Findings 1-3): an
+      // indexeddb project must remain indexeddb after navigating away to a
+      // webaccess project and returning.
+      mockGetProjectFileSystemConfig.mockImplementation(async () => ({
+        projectId: 'proj-A',
+        backend: 'indexeddb',
+      }));
+      mockGetWorkspace.mockImplementation(async (id: string) => {
+        if (id === 'wsp_B') {
+          return {
+            workspace: { workspaceId: 'wsp_B', name: 'B Workspace' },
+            handle: makeHandle('B'),
+          };
+        }
+        return undefined;
+      });
+      mockCheckHandlePermission.mockResolvedValue('granted');
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-A',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-A',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(actor.getSnapshot().context.backendType).toBe('indexeddb');
+
+      // Navigate to project B (webaccess).
+      mockGetProjectFileSystemConfig.mockImplementation(async () => ({
+        projectId: 'proj-B',
+        backend: 'webaccess',
+        workspaceId: 'wsp_B',
+      }));
+      actor.send({ type: 'setRoot', path: '/projects/proj-B', projectId: 'proj-B' });
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(actor.getSnapshot().context.backendType).toBe('webaccess');
+      expect(actor.getSnapshot().context.activeWorkspaceId).toBe('wsp_B');
+
+      // Navigate back to project A (indexeddb).
+      mockGetProjectFileSystemConfig.mockImplementation(async () => ({
+        projectId: 'proj-A',
+        backend: 'indexeddb',
+      }));
+      actor.send({ type: 'setRoot', path: '/projects/proj-A', projectId: 'proj-A' });
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+
+      const snapshot = actor.getSnapshot();
+      expect(snapshot.context.backendType).toBe('indexeddb');
+      expect(snapshot.context.activeWorkspaceId).toBeUndefined();
+      expect(snapshot.context.activeWorkspaceName).toBeUndefined();
+      expect(mockSetProjectFileSystemConfig).not.toHaveBeenCalled();
+      actor.stop();
+    });
+
+    it('should clear activeWorkspace fields immediately when setRoot changes projectId', async () => {
+      // Defence-in-depth check for Finding 3: even before the new actor
+      // run settles for project A, the synchronous `updateRootAndReset`
+      // action must wipe workspace identity so the actor can never read
+      // a stale value (closes the entire bug class by construction).
+      mockGetProjectFileSystemConfig.mockResolvedValue({
+        projectId: 'proj-B',
+        backend: 'webaccess',
+        workspaceId: 'wsp_B',
+      });
+      mockGetWorkspace.mockResolvedValue({
+        workspace: { workspaceId: 'wsp_B', name: 'B Workspace' },
+        handle: makeHandle('B'),
+      });
+      mockCheckHandlePermission.mockResolvedValue('granted');
+
+      const actor = createActor(fileManagerMachine, {
+        input: {
+          rootDirectory: '/projects/proj-B',
+          shouldInitializeOnStart: true,
+          projectId: 'proj-B',
+        },
+      });
+      actor.start();
+
+      await vi.waitFor(() => {
+        expect(actor.getSnapshot().value).toBe('ready');
+      });
+      expect(actor.getSnapshot().context.activeWorkspaceId).toBe('wsp_B');
+      expect(actor.getSnapshot().context.activeWorkspaceName).toBe('B Workspace');
+
+      actor.send({ type: 'setRoot', path: '/projects/proj-A', projectId: 'proj-A' });
+
+      // Inspect context BEFORE the new actor run settles. The reset
+      // must be visible synchronously after `setRoot` is processed.
+      const transitional = actor.getSnapshot();
+      expect(transitional.context.projectId).toBe('proj-A');
+      expect(transitional.context.activeWorkspaceId).toBeUndefined();
+      expect(transitional.context.activeWorkspaceName).toBeUndefined();
+      expect(transitional.context.unavailableReason).toBeUndefined();
+
       actor.stop();
     });
   });

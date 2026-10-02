@@ -190,6 +190,29 @@ export const TauMetrics = {
   }),
 
   /**
+   * Tool-result offloading: emitted once per tool result the
+   * `tool-offloading.middleware.ts` persists to `.tau/tool-results/<chatId>/`.
+   * Tracks how often each tool's output exceeds the per-tool char threshold,
+   * with original vs persisted byte counts so we can quantify the prompt-cache
+   * tokens saved by the offload pass.
+   *
+   * Counter (not histogram) so we can rate-aggregate `sum(rate(...)[5m]) by (tool_name)`
+   * in Grafana without losing per-tool resolution.
+   */
+  chatToolResultOffloaded: defineCounter({
+    name: 'chat.tool_result.offloads',
+    unit: '{offload}',
+    description: 'Tool results persisted to disk by the offloading middleware (by tool and size)',
+    attributes: z.object({
+      'tool.name': z.string().optional(),
+      'tool.result.original_bytes': z.number().optional(),
+      'tool.result.persisted_bytes': z.number().optional(),
+      'tool.result.original_tokens_estimated': z.number().optional(),
+      'tool.result.persisted_tokens_estimated': z.number().optional(),
+    }),
+  }),
+
+  /**
    * Per-section system-prompt byte budget. Recorded by `chat.service.ts`
    * via the `onSectionResolved` callback exposed by
    * [apps/api/app/api/chat/prompts/prompt-section-registry.ts]. One sample

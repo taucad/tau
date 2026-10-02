@@ -1,0 +1,24 @@
+name: Setup repository
+description: Install pinned Node and pnpm dependencies with bounded retries.
+inputs:
+  node-version:
+    description: Exact Node version or supported alias.
+    required: true
+runs:
+  using: composite
+  steps:
+    - uses: pnpm/action-setup@f2b2b233b538f500472c7274c7012f57857d8ce0 # v4.1.0
+      with:
+        run_install: false
+        version: '@@CREATE_REPO_pnpm-major@@'
+    - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+      with:
+        node-version: ${{ inputs.node-version }}
+        cache: pnpm
+    - shell: bash
+      run: |
+        for attempt in 1 2 3; do
+          pnpm install --frozen-lockfile && exit 0
+          test "$attempt" = 3 && exit 1
+          sleep "$((attempt * 5))"
+        done

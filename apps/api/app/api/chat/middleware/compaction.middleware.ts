@@ -3,7 +3,9 @@ import type { AgentMiddleware } from 'langchain';
 import { AIMessage, ToolMessage, HumanMessage } from '@langchain/core/messages';
 import type { BaseMessage } from '@langchain/core/messages';
 import { ContextOverflowError } from '@langchain/core/errors';
+import type { BaseStore } from '@langchain/langgraph';
 import { z } from 'zod';
+import { clearReadDedupForChat } from '#api/chat/clear-recent-reads.js';
 import { idPrefix } from '@taucad/types/constants';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { CompactionService } from '#api/chat/compaction.service.js';
@@ -261,6 +263,7 @@ export const createCompactionMiddleware = (
     async wrapModelCall(request, handler) {
       const { messages } = request;
       const { context, writer } = request.runtime;
+      const { store } = request.runtime as { store?: BaseStore };
       const { chatId, modelId, modelService } = context;
 
       const maxInputTokens = modelService.getContextWindow(modelId) ?? FALLBACK_CONTEXT_WINDOW;
@@ -268,6 +271,11 @@ export const createCompactionMiddleware = (
       const estimatedTokens = Math.ceil(estimateMessageTokens(messages) * tokenEstimationMultiplier);
 
       let processedMessages = messages;
+      // Tracks whether the current model call summarised the message tail.
+      // When true, dedup pointers in the auxiliary store referencing
+      // now-evicted ToolMessages are cleared as a side effect so the next
+      // read_file call cannot route to a stale fileUnchangedMarker.
+      let compactionHappened = false;
 
       if (estimatedTokens > triggerThreshold && messages.length > 2) {
         // Tier 1: Truncate tool args in old messages
@@ -319,6 +327,7 @@ export const createCompactionMiddleware = (
             });
 
             processedMessages = [...addContinuityInstructions(compactedMessages), ...recentMessages];
+            compactionHappened = true;
 
             if (writer) {
               writer({
@@ -339,6 +348,8 @@ export const createCompactionMiddleware = (
           } catch (compactionError) {
             // If Morph API fails, fall back to keeping truncated args
             processedMessages = [...truncateToolArgs(evictedMessages), ...recentMessages];
+            // Truncated args still leave the original ToolMessage tail intact,
+            // so dedup pointers remain valid; do NOT set compactionHappened.
             const errorMessage =
               compactionError instanceof Error ? compactionError.message : 'Unknown compaction error';
             if (writer) {
@@ -361,10 +372,14 @@ export const createCompactionMiddleware = (
       processedMessages = stripExcessMedia(processedMessages);
 
       try {
-        return await handler({
+        const response = await handler({
           ...request,
           messages: processedMessages,
         });
+        if (compactionHappened) {
+          await clearReadDedupForChat(store, chatId);
+        }
+        return response;
       } catch (error) {
         // Tier 3: Emergency re-compaction on ContextOverflowError
         if (error instanceof ContextOverflowError) {
@@ -374,10 +389,14 @@ export const createCompactionMiddleware = (
           const keep = findSafeCutoffPoint(processedMessages, emergencyKeep);
           const emergencyMessages = stripImageBlocks(processedMessages.slice(processedMessages.length - keep));
 
-          return handler({
+          // Emergency re-compaction also evicts ToolMessages, so the same
+          // dedup-pointer reset rule applies.
+          const emergencyResponse = await handler({
             ...request,
             messages: emergencyMessages,
           });
+          await clearReadDedupForChat(store, chatId);
+          return emergencyResponse;
         }
 
         throw error;

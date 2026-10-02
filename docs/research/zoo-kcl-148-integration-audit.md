@@ -6,7 +6,7 @@ created: '2026-05-04'
 updated: '2026-05-04'
 category: audit
 related:
-  - .cursor/skills/rebuild-kcl-wasm-lib/SKILL.md
+  - .agent/skills/rebuild-kcl-wasm-lib/SKILL.md
   - docs/research/kcl-feature-surface-gaps.md
 ---
 
@@ -212,7 +212,7 @@ The screenshot text "Use of sketch blocks is experimental and may change or be r
 | R7  | Add an integration test that connects to a stub WASM `Context` (or a fake engine) and asserts the four-arg contract for both fire and send paths so future upstream churn breaks loudly.                                                        | P1       | Med    | Prevents the next silent contract drift            |
 | R8  | File an upstream issue about the `getAllFiles` JSON contract mismatch (string vs string[]); align Tau when upstream picks a side.                                                                                                               | P2       | Low    | Removes the shared latent bug                      |
 | R9  | Defer `ProjectManager` adoption until Tau wants sketch-block editing / undo. Document the gap in `docs/research/kcl-feature-surface-gaps.md` so it's tracked.                                                                                   | P2       | Low    | Avoids over-scoping this fix                       |
-| R10 | Update `.cursor/skills/rebuild-kcl-wasm-lib/SKILL.md` "Common upstream breaks" matrix to call out the engine-side WASM ABI; future bumps will then re-audit by default.                                                                         | P1       | Low    | Knowledge capture                                  |
+| R10 | Update `.agent/skills/rebuild-kcl-wasm-lib/SKILL.md` "Common upstream breaks" matrix to call out the engine-side WASM ABI; future bumps will then re-audit by default.                                                                          | P1       | Low    | Knowledge capture                                  |
 
 ## Trade-offs
 
@@ -335,7 +335,7 @@ sequenceDiagram
 - WASM API surface: `repos/zoo-modeling-app/rust/kcl-wasm-lib/src/api.rs`
 - Upstream JS reference impl: `repos/zoo-modeling-app/src/network/connectionManager.ts`, `repos/zoo-modeling-app/src/lang/std/fileSystemManager.ts`
 - Tau Zoo kernel: `packages/runtime/src/kernels/zoo/{engine-connection,kcl-utils,filesystem-manager,zoo.kernel}.ts`
-- Rebuild workflow: `.cursor/skills/rebuild-kcl-wasm-lib/SKILL.md`
+- Rebuild workflow: `.agent/skills/rebuild-kcl-wasm-lib/SKILL.md`
 - Triggering upstream commits:
   - `d5fb69e57` Instantiate `RustContext` and `EngineCommandManager` off `KclManager`, remove circular deps (#10173)
   - `ad66c831f` Rename CompilationError to CompilationIssue (#10638)

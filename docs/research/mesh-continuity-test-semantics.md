@@ -1,11 +1,13 @@
 ---
 title: 'Mesh Continuity Test Semantics — Multi-Shape Misalignment'
-description: 'Why connectedComponents regresses when a Replicad Shape3D splits into a multi-color ShapeConfig[]. Consolidates the agent-facing surface to three checks (boundingBox, connectedComponents, watertight) and pivots connectedComponents to pure-geometry AABB-clustering.'
+description: 'Why connectedComponents regresses when a Replicad Shape3D splits into a multi-color ShapeConfig[]. Preserves pure-geometry semantics and aligns the target algorithm with GeoSpec spatial welding.'
 status: draft
 created: '2026-04-21'
-updated: '2026-04-21'
+updated: '2026-06-01'
 category: investigation
 related:
+  - docs/research/geospec-standalone-cad-testing-blueprint.md
+  - docs/research/vitest-style-parameter-geometry-testing-blueprint.md
   - docs/research/multi-file-test-json-migration.md
   - docs/policy/testing-policy.md
 ---
@@ -23,10 +25,19 @@ Compounding the algorithmic mismatch, every author-facing surface — the `test_
 A follow-up audit (see "Addendum: Full Geometry-Test Audit") catalogued every check we ship and showed that **two of the five overlap on "N intentional parts"** (`meshCount`, `connectedComponents`), **three overlap on "is this one fused solid?"** (`meshCount`, `connectedComponents`, `watertight`), and **one is anti-deterministic for an agent surface** (`vertexCount` is driven by tessellation tolerance, not CAD intent). The fix is to consolidate the agent-facing surface to three orthogonal checks, each answering a unique question:
 
 1. **`boundingBox`** — "Is the model the right size / position on the axes I care about?"
-2. **`connectedComponents`** (kept; algorithm rewritten) — "How many spatially-disjoint chunks does the geometry contain?" The current strict triangle-graph algorithm is replaced with **per-primitive AABB overlap clustering** (Union-Find over GLB primitives whose axis-aligned bounding boxes overlap within a tunable `tolerance`). The check stays _purely computational over the GLB_ — no kernel cooperation, no glTF `extras`, no per-kernel metadata — so the GLB remains the single source of truth and any future kernel that emits valid glTF immediately gets correct continuity semantics.
+2. **`connectedComponents`** (kept; algorithm rewritten) — "How many spatially-disjoint chunks does the geometry contain?" The target GeoSpec algorithm spatially welds coincident vertex positions before union-find, mirroring the neighbor-grid technique used by watertight edge classification. It stays _purely computational over mesh geometry_ — no kernel cooperation, no glTF `extras`, no per-kernel metadata — so any future kernel that emits triangles immediately gets provider-agnostic continuity semantics.
 3. **`watertight`** — "Is each compilation unit's surface closed (manifold / 3D-printable)?" When asserted per CU it doubles as the "single fused solid" guardrail without overlap.
 
 `meshCount` and `vertexCount` are removed from the agent-facing schema; `analyzeGlb` keeps computing them for internal diagnostics only. `connectedComponents` is _kept by name_ (the post-fix semantics still match the term — "N spatially-connected chunks") to avoid churn across an unreleased agent API. The prompt, tool descriptions, canonical examples, failure suggestions, benchmark fixtures, and kernel-author docs all migrate to the three-check vocabulary in one atomic PR (no half-vocabulary intermediate state). A glTF-`extras`-based "kernel-supplied part count" was explicitly considered and rejected as the wrong layering — see "Approaches considered and rejected" in Trade-offs.
+
+## 2026-06-01 Target-State Alignment
+
+This investigation remains the source of the pure-mesh and non-overlapping-check vocabulary, but the implementation target is now GeoSpec:
+
+- GeoSpec owns the native connected-components analyzer in `geospec/mesh`.
+- `@taucad/testing` exposes compatibility for existing `test.json` checks and maps Tau prompt/tool output to GeoSpec diagnostics.
+- The target connected-components algorithm is spatial welding plus triangle adjacency, not per-primitive AABB overlap clustering. AABB/gap clustering can exist as a separate assembly-proximity matcher if needed, but it should not be the semantic core of `connectedComponents`.
+- Failure payloads must carry per-component bounding boxes, centers, colors/material hints, and nearest-neighbor gaps so LLM repair loops receive spatial evidence rather than a scalar count.
 
 ## Problem Statement
 

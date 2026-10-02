@@ -1,17 +1,24 @@
-import type { KernelProvider } from '@taucad/runtime';
-import { kernelConfigurations } from '@taucad/types/constants';
+import type { KernelEntry, KernelId } from '@taucad/types/constants';
+import { isKernelId, resolveKernel } from '@taucad/types/constants';
 import { useCookie } from '#hooks/use-cookie.js';
 import { cookieName } from '#constants/cookie.constants.js';
 
-const defaultKernel: KernelProvider = 'openscad';
+const defaultKernel: KernelId = 'openscad';
 
-const kernelById = new Map(kernelConfigurations.map((k) => [k.id, k]));
+type UseKernelResult = {
+  readonly kernel: KernelId;
+  readonly setKernel: (next: KernelId) => void;
+  readonly selectedKernel: KernelEntry;
+};
 
-// oxlint-disable-next-line @typescript-eslint/explicit-module-boundary-types -- intentionally allowing inference
-export const useKernel = () => {
-  const [kernel, setKernel] = useCookie<KernelProvider>(cookieName.cadKernel, defaultKernel);
-
-  const selectedKernel = kernelById.get(kernel);
+export const useKernel = (): UseKernelResult => {
+  const [raw, setKernel] = useCookie<KernelId>(cookieName.cadKernel, defaultKernel);
+  // Heal a stale or tampered cookie at the boundary so downstream
+  // consumers can treat `selectedKernel` as a definite `KernelConfiguration`.
+  // Without this, retiring a kernel from `kernelConfigurations` would
+  // silently surface as the OpenSCAD fallback on every render.
+  const kernel = isKernelId(raw) ? raw : defaultKernel;
+  const selectedKernel = resolveKernel(kernel);
 
   return { kernel, setKernel, selectedKernel };
 };

@@ -1,11 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import * as THREE from 'three';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
 import {
   applyMeshClipping,
-  collectAndClipMeshes,
+  collectClippableTargets,
   enforceMaterialClipping,
-  isClosedManifold,
 } from '#components/geometry/graphics/three/react/section-view.utils.js';
+import { sceneTag, setSceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 
 const testPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
 
@@ -78,7 +79,7 @@ describe('applyMeshClipping', () => {
   });
 });
 
-describe('collectAndClipMeshes', () => {
+describe('collectClippableTargets', () => {
   function createTestSceneGraph(): {
     rootGroup: THREE.Group;
     mesh1: THREE.Mesh;
@@ -102,32 +103,33 @@ describe('collectAndClipMeshes', () => {
     return { rootGroup, mesh1, mesh2, lineSegments };
   }
 
-  it('should collect only THREE.Mesh children', () => {
-    const { rootGroup, mesh1, mesh2 } = createTestSceneGraph();
+  it('should collect meshes and lines separately', () => {
+    const { rootGroup, mesh1, mesh2, lineSegments } = createTestSceneGraph();
 
-    const result = collectAndClipMeshes(rootGroup, {
+    const result = collectClippableTargets(rootGroup, {
       enableSection: true,
       enableLines: true,
       enableMesh: true,
       plane: testPlane,
     });
 
-    expect(result).toHaveLength(2);
-    expect(result).toContain(mesh1);
-    expect(result).toContain(mesh2);
+    expect(result.meshes).toHaveLength(2);
+    expect(result.meshes).toContain(mesh1);
+    expect(result.meshes).toContain(mesh2);
+    expect(result.lines).toEqual([lineSegments]);
   });
 
   it('should apply clippingPlanes to all mesh materials when enableMesh is true', () => {
     const { rootGroup } = createTestSceneGraph();
 
-    const result = collectAndClipMeshes(rootGroup, {
+    const result = collectClippableTargets(rootGroup, {
       enableSection: true,
       enableLines: true,
       enableMesh: true,
       plane: testPlane,
     });
 
-    for (const mesh of result) {
+    for (const mesh of result.meshes) {
       const mat = mesh.material as THREE.Material;
       expect(mat.clippingPlanes).toHaveLength(1);
       expect(mat.clippingPlanes![0]).toBe(testPlane);
@@ -137,15 +139,15 @@ describe('collectAndClipMeshes', () => {
   it('should clear mesh clippingPlanes when enableMesh is false but still return meshes', () => {
     const { rootGroup } = createTestSceneGraph();
 
-    const result = collectAndClipMeshes(rootGroup, {
+    const result = collectClippableTargets(rootGroup, {
       enableSection: true,
       enableLines: true,
       enableMesh: false,
       plane: testPlane,
     });
 
-    expect(result).toHaveLength(2);
-    for (const mesh of result) {
+    expect(result.meshes).toHaveLength(2);
+    for (const mesh of result.meshes) {
       const mat = mesh.material as THREE.Material;
       expect(mat.clippingPlanes).toHaveLength(0);
     }
@@ -154,7 +156,7 @@ describe('collectAndClipMeshes', () => {
   it('should apply clippingPlanes to LineSegments when enableLines is true', () => {
     const { rootGroup, lineSegments } = createTestSceneGraph();
 
-    collectAndClipMeshes(rootGroup, {
+    collectClippableTargets(rootGroup, {
       enableSection: true,
       enableLines: true,
       enableMesh: true,
@@ -168,7 +170,7 @@ describe('collectAndClipMeshes', () => {
   it('should clear LineSegments clippingPlanes when enableLines is false', () => {
     const { rootGroup, lineSegments } = createTestSceneGraph();
 
-    collectAndClipMeshes(rootGroup, {
+    collectClippableTargets(rootGroup, {
       enableSection: true,
       enableLines: false,
       enableMesh: true,
@@ -180,35 +182,38 @@ describe('collectAndClipMeshes', () => {
   });
 
   it('should clear all clipping when enableSection is false', () => {
-    const { rootGroup, mesh1, mesh2 } = createTestSceneGraph();
+    const { rootGroup, mesh1, mesh2, lineSegments } = createTestSceneGraph();
 
-    collectAndClipMeshes(rootGroup, {
+    collectClippableTargets(rootGroup, {
       enableSection: true,
       enableLines: true,
       enableMesh: true,
       plane: testPlane,
     });
 
-    const result = collectAndClipMeshes(rootGroup, {
+    const result = collectClippableTargets(rootGroup, {
       enableSection: false,
       enableLines: true,
       enableMesh: true,
       plane: testPlane,
     });
 
-    expect(result).toHaveLength(0);
+    expect(result.meshes).toHaveLength(0);
+    expect(result.lines).toHaveLength(0);
 
     for (const mesh of [mesh1, mesh2]) {
       const mat = mesh.material as THREE.MeshStandardMaterial;
       expect(mat.clippingPlanes).toHaveLength(0);
       expect(mat.side).toBe(THREE.DoubleSide);
     }
+
+    expect((lineSegments.material as THREE.Material).clippingPlanes).toHaveLength(0);
   });
 
   it('should set matrixAutoUpdate to false on collected meshes', () => {
     const { rootGroup, mesh1, mesh2 } = createTestSceneGraph();
 
-    collectAndClipMeshes(rootGroup, {
+    collectClippableTargets(rootGroup, {
       enableSection: true,
       enableLines: true,
       enableMesh: true,
@@ -218,206 +223,44 @@ describe('collectAndClipMeshes', () => {
     expect(mesh1.matrixAutoUpdate).toBe(false);
     expect(mesh2.matrixAutoUpdate).toBe(false);
   });
-});
 
-// -- Geometry helpers for manifold tests --
+  it('should not mutate or collect meshes tagged as sectionViewHelper', () => {
+    const rootGroup = new THREE.Group();
+    const userMesh = createDoubleSidedMesh();
+    const helperMesh = createDoubleSidedMesh();
+    setSceneTag(helperMesh, sceneTag.sectionViewHelper);
 
-type QuadVertices = readonly [THREE.Vector3, THREE.Vector3, THREE.Vector3, THREE.Vector3];
+    rootGroup.add(userMesh);
+    rootGroup.add(helperMesh);
 
-function createQuadFace(vertices: QuadVertices): THREE.BufferGeometry {
-  const [v0, v1, v2, v3] = vertices;
-  const positions = new Float32Array([
-    v0.x,
-    v0.y,
-    v0.z,
-    v1.x,
-    v1.y,
-    v1.z,
-    v2.x,
-    v2.y,
-    v2.z,
-    v2.x,
-    v2.y,
-    v2.z,
-    v3.x,
-    v3.y,
-    v3.z,
-    v0.x,
-    v0.y,
-    v0.z,
-  ]);
-  const geometry = new THREE.BufferGeometry();
-  geometry.setAttribute('position', new THREE.BufferAttribute(positions, 3));
-  return geometry;
-}
+    const result = collectClippableTargets(rootGroup, {
+      enableSection: true,
+      enableLines: true,
+      enableMesh: true,
+      plane: testPlane,
+    });
 
-function createDecomposedBox(size = 1): THREE.BufferGeometry[] {
-  const h = size / 2;
-
-  const frontLeftBottom = new THREE.Vector3(-h, -h, h);
-  const frontRightBottom = new THREE.Vector3(h, -h, h);
-  const frontRightTop = new THREE.Vector3(h, h, h);
-  const frontLeftTop = new THREE.Vector3(-h, h, h);
-
-  const backLeftBottom = new THREE.Vector3(-h, -h, -h);
-  const backRightBottom = new THREE.Vector3(h, -h, -h);
-  const backRightTop = new THREE.Vector3(h, h, -h);
-  const backLeftTop = new THREE.Vector3(-h, h, -h);
-
-  return [
-    createQuadFace([frontLeftBottom, frontRightBottom, frontRightTop, frontLeftTop]),
-    createQuadFace([backRightBottom, backLeftBottom, backLeftTop, backRightTop]),
-    createQuadFace([frontRightBottom, backRightBottom, backRightTop, frontRightTop]),
-    createQuadFace([backLeftBottom, frontLeftBottom, frontLeftTop, backLeftTop]),
-    createQuadFace([frontLeftTop, frontRightTop, backRightTop, backLeftTop]),
-    createQuadFace([backLeftBottom, backRightBottom, frontRightBottom, frontLeftBottom]),
-  ];
-}
-
-/**
- * Creates a hollow box (square tube) as decomposed quad faces.
- *
- * The inner cavity has the same height as the outer box but reduced x/z extents,
- * forming a tube with 4 outer walls, 4 inner walls (reversed normals), and rim
- * quads connecting outer to inner edges at top and bottom.
- */
-function createHollowBoxFaces(outerSize = 2, innerSize = 1.5): THREE.BufferGeometry[] {
-  const oh = outerSize / 2;
-  const ih = innerSize / 2;
-
-  // Outer vertices
-  const oFlb = new THREE.Vector3(-oh, -oh, oh);
-  const oFrb = new THREE.Vector3(oh, -oh, oh);
-  const oFrt = new THREE.Vector3(oh, oh, oh);
-  const oFlt = new THREE.Vector3(-oh, oh, oh);
-  const oBlb = new THREE.Vector3(-oh, -oh, -oh);
-  const oBrb = new THREE.Vector3(oh, -oh, -oh);
-  const oBrt = new THREE.Vector3(oh, oh, -oh);
-  const oBlt = new THREE.Vector3(-oh, oh, -oh);
-
-  // Inner vertices (same y extents, smaller x/z)
-  const innerFlb = new THREE.Vector3(-ih, -oh, ih);
-  const innerFrb = new THREE.Vector3(ih, -oh, ih);
-  const innerFrt = new THREE.Vector3(ih, oh, ih);
-  const innerFlt = new THREE.Vector3(-ih, oh, ih);
-  const innerBlb = new THREE.Vector3(-ih, -oh, -ih);
-  const innerBrb = new THREE.Vector3(ih, -oh, -ih);
-  const innerBrt = new THREE.Vector3(ih, oh, -ih);
-  const innerBlt = new THREE.Vector3(-ih, oh, -ih);
-
-  const outerWalls = [
-    createQuadFace([oFlb, oFrb, oFrt, oFlt]),
-    createQuadFace([oBrb, oBlb, oBlt, oBrt]),
-    createQuadFace([oFrb, oBrb, oBrt, oFrt]),
-    createQuadFace([oBlb, oFlb, oFlt, oBlt]),
-  ];
-
-  // Reversed winding — normals point inward toward cavity center
-  const innerWalls = [
-    createQuadFace([innerFrb, innerFlb, innerFlt, innerFrt]),
-    createQuadFace([innerBlb, innerBrb, innerBrt, innerBlt]),
-    createQuadFace([innerBrb, innerFrb, innerFrt, innerBrt]),
-    createQuadFace([innerFlb, innerBlb, innerBlt, innerFlt]),
-  ];
-
-  const topRim = [
-    createQuadFace([oFlt, oFrt, innerFrt, innerFlt]),
-    createQuadFace([oBrt, oBlt, innerBlt, innerBrt]),
-    createQuadFace([oFrt, oBrt, innerBrt, innerFrt]),
-    createQuadFace([oBlt, oFlt, innerFlt, innerBlt]),
-  ];
-
-  const bottomRim = [
-    createQuadFace([oFrb, oFlb, innerFlb, innerFrb]),
-    createQuadFace([oBlb, oBrb, innerBrb, innerBlb]),
-    createQuadFace([oBrb, oFrb, innerFrb, innerBrb]),
-    createQuadFace([oFlb, oBlb, innerBlb, innerFlb]),
-  ];
-
-  return [...outerWalls, ...innerWalls, ...topRim, ...bottomRim];
-}
-
-describe('isClosedManifold', () => {
-  it('should identify a single BoxGeometry as closed', () => {
-    const box = new THREE.BoxGeometry(1, 1, 1);
-    const result = isClosedManifold([box]);
-
-    expect(result.closed).toBe(true);
-    expect(result.openEdges).toBe(0);
+    expect(result.meshes).toEqual([userMesh]);
+    expect((helperMesh.material as THREE.MeshStandardMaterial).clippingPlanes).toBeNull();
   });
 
-  it('should identify a single quad face as NOT closed', () => {
-    const face = createQuadFace([
-      new THREE.Vector3(0, 0, 0),
-      new THREE.Vector3(1, 0, 0),
-      new THREE.Vector3(1, 1, 0),
-      new THREE.Vector3(0, 1, 0),
-    ]);
-    const result = isClosedManifold([face]);
+  it('should include LineSegments2 in lines array', () => {
+    const rootGroup = new THREE.Group();
+    const mesh = createDoubleSidedMesh();
+    const fatLine = new LineSegments2();
 
-    expect(result.closed).toBe(false);
-    expect(result.openEdges).toBeGreaterThan(0);
-  });
+    rootGroup.add(mesh);
+    rootGroup.add(fatLine);
 
-  it('should identify six decomposed box faces as closed', () => {
-    const faces = createDecomposedBox(1);
-    const result = isClosedManifold(faces);
+    const result = collectClippableTargets(rootGroup, {
+      enableSection: true,
+      enableLines: true,
+      enableMesh: true,
+      plane: testPlane,
+    });
 
-    expect(result.closed).toBe(true);
-    expect(result.openEdges).toBe(0);
-  });
-
-  it('should identify five faces of a box (missing one) as NOT closed', () => {
-    const faces = createDecomposedBox(1);
-    faces.pop();
-    const result = isClosedManifold(faces);
-
-    expect(result.closed).toBe(false);
-    expect(result.openEdges).toBeGreaterThan(0);
-  });
-
-  it('should identify hollow box shell WITH rim faces as closed', () => {
-    const faces = createHollowBoxFaces(2, 1.5);
-    const result = isClosedManifold(faces);
-
-    expect(result.closed).toBe(true);
-    expect(result.openEdges).toBe(0);
-  });
-
-  it('should identify hollow box shell WITHOUT rim faces as NOT closed', () => {
-    const faces = createHollowBoxFaces(2, 1.5);
-    // Remove all 8 rim faces (last 8 in the array: 4 top + 4 bottom)
-    const openFaces = faces.slice(0, -8);
-    const result = isClosedManifold(openFaces);
-
-    expect(result.closed).toBe(false);
-    expect(result.openEdges).toBeGreaterThan(0);
-  });
-
-  it('should identify hollow box WITHOUT bottom rim as NOT closed', () => {
-    const faces = createHollowBoxFaces(2, 1.5);
-    // Remove only the 4 bottom rim faces (last 4) — top is closed, bottom is open
-    const openBottomFaces = faces.slice(0, -4);
-    const result = isClosedManifold(openBottomFaces);
-
-    expect(result.closed).toBe(false);
-    expect(result.openEdges).toBeGreaterThan(0);
-  });
-
-  it('should handle empty geometry array', () => {
-    const result = isClosedManifold([]);
-
-    expect(result.closed).toBe(true);
-    expect(result.openEdges).toBe(0);
-    expect(result.totalEdges).toBe(0);
-  });
-
-  it('should handle indexed geometry', () => {
-    const box = new THREE.BoxGeometry(1, 1, 1);
-    expect(box.getIndex()).not.toBeNull();
-
-    const result = isClosedManifold([box]);
-    expect(result.closed).toBe(true);
+    expect(result.lines).toContain(fatLine);
+    expect(fatLine.material.clippingPlanes).toHaveLength(1);
   });
 });
 

@@ -44,14 +44,18 @@ export const getItemData = (fileTree: FileItem[], rootId: string, itemId: string
 
 /**
  * Determine whether a path represents a folder. Checks the explicit entry
- * first (via `isDirectory`), falling back to the `allPaths` set for virtual
+ * first (via `isDirectory`), then falls back to the `allPaths` set for virtual
  * folders inferred from nested file paths.
  *
  * @public
  */
 export const isPathFolder = (path: string, fileTree: FileItem[], allPaths: Set<string>): boolean => {
   const entry = fileTree.find((f) => f.path === path);
-  return entry ? (entry.isDirectory ?? false) : allPaths.has(path);
+  if (entry) {
+    return entry.isDirectory ?? false;
+  }
+
+  return allPaths.has(path);
 };
 
 /**

@@ -1,8 +1,25 @@
 // @vitest-environment jsdom
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
 import { renderHook, act } from '@testing-library/react';
-import { tauEditorPanelDragMime, tauFileDragMime, tauViewerPanelDragMime } from '@taucad/types/constants';
+import {
+  resolveKernel,
+  tauEditorPanelDragMime,
+  tauFileDragMime,
+  tauViewerPanelDragMime,
+} from '@taucad/types/constants';
 import type { ResolvedModel } from '#hooks/use-models.js';
+import type { ChatComposerContextValue } from '#hooks/active-chat-provider.js';
+
+// ---------------------------------------------------------------------------
+// Unified composer-context mock — `useChatTextareaLogic` is a single
+// consumer of `useChatComposer()` (which the providers populate). We mock
+// that one hook and feed it a shape mirroring the production contract;
+// `useDraftActions` / `useDraftSelector` proxy to the same actorRef under
+// the hood, so a single mock object backs all surfaces. This collapses
+// the previous five-mock arrangement (use-active-chat-model + use-chat
+// + use-keyboard + sonner + ...) into one composer mock + the keyboard
+// + sonner mocks.
+// ---------------------------------------------------------------------------
 
 const stableModel: ResolvedModel = {
   id: 'chat-scoped-model',
@@ -10,27 +27,6 @@ const stableModel: ResolvedModel = {
 } as unknown as ResolvedModel;
 
 let mockActiveModel: ResolvedModel = stableModel;
-const mockSetActiveModel = vi.fn();
-
-vi.mock('#hooks/use-active-chat-model.js', () => ({
-  useActiveChatModel: () => ({
-    modelId: mockActiveModel.id,
-    model: mockActiveModel,
-    setActiveModel: mockSetActiveModel,
-  }),
-}));
-
-const mockUseChatSelector = vi.fn((selector: (state: unknown) => unknown) =>
-  selector({
-    status: 'idle',
-    draftText: 'hello world',
-    draftImages: [] as string[],
-    draftToolChoice: 'auto',
-    draftMode: 'agent',
-    editDraftText: '',
-    editDraftImages: [] as string[],
-  }),
-);
 
 const chatActionsMock = {
   stop: vi.fn<() => void>(),
@@ -43,9 +39,41 @@ const chatActionsMock = {
   removeEditDraftImage: vi.fn<(index: number) => void>(),
 };
 
+const defaultDraftState = {
+  status: 'idle',
+  draftText: 'hello world',
+  draftImages: [] as string[],
+  draftToolChoice: 'auto',
+  draftMode: 'agent',
+  editDraftText: '',
+  editDraftImages: [] as string[],
+};
+
+const mockUseChatSelector = vi.fn((selector: (state: unknown) => unknown) => selector(defaultDraftState));
+
 vi.mock('#hooks/use-chat.js', () => ({
   useChatActions: () => chatActionsMock,
   useChatSelector: (selector: (state: unknown) => unknown) => mockUseChatSelector(selector),
+  useDraftActions: () => chatActionsMock,
+  useDraftSelector: (selector: (state: unknown) => unknown) => mockUseChatSelector(selector),
+}));
+
+// Single composer mock. Fields the hook actually reads:
+//   - model.model (selectedModel display)
+//   - status / stop (no-op pair for marketing-route tests; the textarea
+//     never reads `model.modelId`, `kernel`, `contextUsage` or `session`
+//     so we leave them at default-shape values).
+vi.mock('#hooks/active-chat-provider.js', () => ({
+  useChatComposer: (): ChatComposerContextValue =>
+    ({
+      draftActorRef: undefined,
+      model: { modelId: mockActiveModel.id, model: mockActiveModel, setActiveModel: vi.fn() },
+      kernel: { kernelId: 'openscad', kernel: resolveKernel('openscad'), setActiveKernel: vi.fn() },
+      status: 'ready',
+      stop: () => undefined,
+      contextUsage: undefined,
+      session: undefined,
+    }) as unknown as ChatComposerContextValue,
 }));
 
 vi.mock('#hooks/use-keyboard.js', () => ({
@@ -60,13 +88,13 @@ vi.mock('#components/ui/sonner.js', () => ({
 
 const { useChatTextareaLogic } = await import('#components/chat/chat-textarea-types.js');
 
-describe('useChatTextareaLogic — chat-scoped model wiring', () => {
+describe('useChatTextareaLogic — onSubmit surface', () => {
   beforeEach(() => {
     vi.clearAllMocks();
     mockActiveModel = stableModel;
   });
 
-  it('should expose the chat-scoped model on selectedModel', () => {
+  it('should expose the chat-scoped model on selectedModel (UI display)', () => {
     const { result } = renderHook(() =>
       useChatTextareaLogic({
         ref: undefined,
@@ -77,8 +105,8 @@ describe('useChatTextareaLogic — chat-scoped model wiring', () => {
     expect(result.current.selectedModel.id).toBe('chat-scoped-model');
   });
 
-  it('should stamp the chat-scoped model id onto onSubmit when handleSubmit fires', async () => {
-    const onSubmit = vi.fn(async () => undefined);
+  it('should invoke onSubmit with ONLY content and imageUrls when handleSubmit fires (no model / no metadata)', async () => {
+    const onSubmit = vi.fn<(payload: { content: string; imageUrls: string[] }) => Promise<void>>(async () => undefined);
     const { result } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
 
     await act(async () => {
@@ -86,16 +114,12 @@ describe('useChatTextareaLogic — chat-scoped model wiring', () => {
     });
 
     expect(onSubmit).toHaveBeenCalledOnce();
-    expect(onSubmit).toHaveBeenCalledWith(
-      expect.objectContaining({
-        content: 'hello world',
-        model: 'chat-scoped-model',
-      }),
-    );
+    const submittedPayload = onSubmit.mock.calls[0]?.[0];
+    expect(submittedPayload).toEqual({ content: 'hello world', imageUrls: [] });
   });
 
-  it('should follow the chat-scoped model when it changes between submits (no cookie bleed)', async () => {
-    const onSubmit = vi.fn(async () => undefined);
+  it('should never thread model or metadata to onSubmit even when the chat-scoped model changes between submits', async () => {
+    const onSubmit = vi.fn<(payload: { content: string; imageUrls: string[] }) => Promise<void>>(async () => undefined);
     const { result, rerender } = renderHook(() => useChatTextareaLogic({ ref: undefined, onSubmit }));
 
     await act(async () => {
@@ -109,7 +133,12 @@ describe('useChatTextareaLogic — chat-scoped model wiring', () => {
       await result.current.handleSubmit();
     });
 
-    expect(onSubmit).toHaveBeenNthCalledWith(2, expect.objectContaining({ model: 'next-chat-scoped-model' }));
+    for (const call of onSubmit.mock.calls) {
+      const submittedPayload = call[0] as Record<string, unknown>;
+      expect(submittedPayload).not.toHaveProperty('model');
+      expect(submittedPayload).not.toHaveProperty('metadata');
+      expect(Object.keys(submittedPayload).sort()).toEqual(['content', 'imageUrls']);
+    }
   });
 });
 

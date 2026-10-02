@@ -1,0 +1,24 @@
+name: Feature request
+description: Propose a concrete public capability.
+title: '[feature]: '
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: Describe the user-visible limitation and affected host.
+    validations:
+      required: true
+  - type: textarea
+    id: contract
+    attributes:
+      label: Proposed public contract
+      description: Show the desired import and smallest complete usage.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Existing alternatives
+      description: Explain why the current API or platform feature does not cover it.

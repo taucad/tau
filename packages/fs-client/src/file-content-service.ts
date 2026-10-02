@@ -1,11 +1,12 @@
 import { BoundedFileCache } from '@taucad/filesystem';
+import { Topic } from '@taucad/events';
 import { PathSubscriberRegistry } from '#path-subscriber-registry.js';
 import type { RefreshGenerationGuard } from '#refresh-generation-guard.js';
 import type { WorkerChangeChannel, WorkerRelativeRenameEvent } from '#worker-change-channel.js';
 import type { WorkspacePathResolver } from '#workspace-path-resolver.js';
 import type { SharedPool } from '@taucad/memory';
-import { joinPath } from '@taucad/utils/path';
-import type { FileSystemClient } from '#file-system-client.js';
+import type { BulkMoveEdit, BulkMoveResult, FileSystemClient } from '#file-system-client.js';
+import type { WorkspaceMutationError } from '@taucad/filesystem';
 import type { FileWriteSource } from '#file-write-source.js';
 import { headSniffByteLength, seemsBinary } from '#seems-binary.js';
 import { BinaryFileError, FileNotFoundError, FileTooLargeError } from '#file-content-errors.js';
@@ -20,7 +21,10 @@ export type ContentChangeEvent =
   | { type: 'read'; path: string; data: Uint8Array<ArrayBuffer> }
   | { type: 'renamed'; oldPath: string; newPath: string }
   | { type: 'deleted'; path: string; source: FileWriteSource }
-  | { type: 'batchWritten'; paths: string[]; source: FileWriteSource };
+  | { type: 'batchWritten'; paths: string[]; source: FileWriteSource }
+  | { type: 'directoryCreated'; path: string }
+  | { type: 'directoryDeleted'; path: string }
+  | { type: 'directoryRenamed'; oldPath: string; newPath: string };
 
 /**
  * Discriminated outcome of a content resolve.
@@ -144,8 +148,8 @@ export class FileContentService {
   private readonly pathNotifyRegistry = new PathSubscriberRegistry();
   private readonly contentChangeRegistry = new PathSubscriberRegistry<ContentChangeEvent>();
   private readonly orphanedPaths = new Set<string>();
-  private readonly orphanSubscribers = new Set<(event: OrphanChangeEvent) => void>();
-  private readonly outcomeSubscribers = new Set<(event: OutcomeChangeEvent) => void>();
+  readonly #orphanTopic = new Topic<OrphanChangeEvent>({ name: 'FileContentService.orphan' });
+  readonly #outcomeTopic = new Topic<OutcomeChangeEvent>({ name: 'FileContentService.outcome' });
   private readonly unsubscribeChannel: Array<() => void>;
 
   public constructor(init: FileContentServiceInit) {
@@ -178,6 +182,29 @@ export class FileContentService {
       init.channel.onDirectoryChanged({
         handler: (event) => {
           this.refreshOpenPathsUnderDirectory(event.path);
+        },
+      }),
+      init.channel.onDirectoryCreated({
+        handler: (event) => {
+          this.notifyGlobalSubscribers({ type: 'directoryCreated', path: event.path });
+        },
+      }),
+      init.channel.onDirectoryDeleted({
+        handler: (event) => {
+          this.onWorkerDirectoryDeleted(event.path);
+          this.notifyGlobalSubscribers({ type: 'directoryDeleted', path: event.path });
+        },
+      }),
+      init.channel.onDirectoryRenamed({
+        handler: (event) => {
+          this.onWorkerDirectoryRenamed(event.oldPath, event.newPath);
+          if (event.oldPath !== undefined && event.newPath !== undefined) {
+            this.notifyGlobalSubscribers({
+              type: 'directoryRenamed',
+              oldPath: event.oldPath,
+              newPath: event.newPath,
+            });
+          }
         },
       }),
       init.channel.onBackendChanged(() => {
@@ -273,25 +300,76 @@ export class FileContentService {
   }
 
   /**
+   * Sync-backfill main-thread cache + `text` outcome after a successful read
+   * from the worker outside the usual resolve path (e.g. Monaco workspace FS
+   * proxy fall-through). Skips async worker round-trip on subsequent resolves.
+   *
+   * @param path - Workspace-relative path.
+   * @param data - File bytes already validated as openable text-sized UTF-8.
+   * @public
+   */
+  public populateText(path: string, data: Uint8Array<ArrayBuffer>): void {
+    this.pendingResolves.delete(path);
+    const limit = this.openSizeBytes;
+    if (seemsBinary(data)) {
+      const head = data.slice(0, headSniffByteLength);
+      const outcome: FileContentResult = { kind: 'binary', size: data.byteLength, head };
+      this.cache.delete(path);
+      this.publishOutcome(path, outcome);
+      return;
+    }
+
+    if (data.byteLength > limit) {
+      const outcome: FileContentResult = { kind: 'too-large', size: data.byteLength, limit };
+      this.cache.delete(path);
+      this.publishOutcome(path, outcome);
+      return;
+    }
+
+    const copy = new Uint8Array(data.byteLength);
+    copy.set(data);
+    this.cache.set(path, copy);
+    const outcome: FileContentResult = { kind: 'text', content: copy };
+    this.publishOutcome(path, outcome);
+    this.setOrphaned(path, false);
+    this.notifyGlobalSubscribers({ type: 'read', path, data: copy });
+  }
+
+  /**
    * Write file content. Clones buffer before transfer to prevent detachment.
+   *
+   * `path` **MUST** be workspace-relative; absolute keys that escape the
+   * workspace root throw {@link WorkspaceScopeViolationError} synchronously.
+   * Use `FileSystemClient.writeFiles` for cross-workspace writes (e.g. the
+   * project bootstrap mount-write-unmount transaction).
+   *
    * @param path - Workspace-relative path.
    * @param data - Bytes to persist (copied before crossing the worker boundary).
    * @param source - Provenance tag for downstream refresh heuristics.
+   * @throws {WorkspaceScopeViolationError} When `path` escapes the workspace root.
    */
   public async write(path: string, data: Uint8Array<ArrayBuffer>, source: FileWriteSource): Promise<void> {
+    const key = this.paths.toWorkspaceRelativeKey('write', path);
     const localCopy = new Uint8Array(data);
-    const absolutePath = joinPath(this.paths.root, path);
+    const absolutePath = this.paths.toAbsolutePath(key);
     await this.proxy.writeFile(absolutePath, data);
-    this.cache.set(path, localCopy);
-    this.setOrphaned(path, false);
-    this.publishOutcome(path, { kind: 'text', content: localCopy });
-    this.notifyGlobalSubscribers({ type: 'written', path, data: localCopy, source });
+    this.cache.set(key, localCopy);
+    this.setOrphaned(key, false);
+    this.publishOutcome(key, { kind: 'text', content: localCopy });
+    this.notifyGlobalSubscribers({ type: 'written', path: key, data: localCopy, source });
   }
 
   /**
    * Write multiple files. Clones each buffer before transfer.
+   *
+   * Map keys **MUST** be workspace-relative; absolute keys that escape the
+   * workspace root throw {@link WorkspaceScopeViolationError} synchronously
+   * before any worker round-trip. Use `FileSystemClient.writeFiles` for
+   * cross-workspace writes.
+   *
    * @param files - Map of relative paths to file payloads.
    * @param source - Provenance tag for downstream refresh heuristics.
+   * @throws {WorkspaceScopeViolationError} When any key escapes the workspace root.
    */
   public async writeFiles(
     files: Record<string, { content: Uint8Array<ArrayBuffer> }>,
@@ -302,17 +380,18 @@ export class FileContentService {
     const paths: string[] = [];
 
     for (const [path, file] of Object.entries(files)) {
+      const key = this.paths.toWorkspaceRelativeKey('writeFiles', path);
       const localCopy = new Uint8Array(file.content);
-      clones.set(path, localCopy);
-      absoluteFiles[joinPath(this.paths.root, path)] = file;
-      paths.push(path);
+      clones.set(key, localCopy);
+      absoluteFiles[this.paths.toAbsolutePath(key)] = file;
+      paths.push(key);
     }
 
     await this.proxy.writeFiles(absoluteFiles);
 
-    for (const [path, localCopy] of clones) {
-      this.cache.set(path, localCopy);
-      this.publishOutcome(path, { kind: 'text', content: localCopy });
+    for (const [key, localCopy] of clones) {
+      this.cache.set(key, localCopy);
+      this.publishOutcome(key, { kind: 'text', content: localCopy });
     }
 
     this.notifyGlobalSubscribers({ type: 'batchWritten', paths, source });
@@ -320,45 +399,242 @@ export class FileContentService {
 
   /**
    * Rename a file. Updates cache and notifies subscribers for both old and new paths.
+   *
+   * Both arguments **MUST** be workspace-relative; absolute keys that escape
+   * the workspace root throw {@link WorkspaceScopeViolationError}
+   * synchronously.
+   *
+   * Preserved for backward compatibility with callers that only deal with
+   * single-file renames. New callers should use {@link move}, which handles
+   * both files and directories and returns the resulting stat.
+   *
    * @param oldPath - Previous workspace-relative path.
    * @param newPath - Target workspace-relative path.
+   * @throws {WorkspaceScopeViolationError} When either key escapes the workspace root.
    */
   public async rename(oldPath: string, newPath: string): Promise<void> {
-    const absoluteOldPath = joinPath(this.paths.root, oldPath);
-    const absoluteNewPath = joinPath(this.paths.root, newPath);
-    await this.proxy.rename(absoluteOldPath, absoluteNewPath);
-    this.cache.rename(oldPath, newPath);
-    const oldOutcome = this.outcomes.get(oldPath);
-    if (oldOutcome) {
-      this.outcomes.delete(oldPath);
-      this.publishOutcome(newPath, oldOutcome);
+    await this.move(oldPath, newPath);
+  }
+
+  /**
+   * Move a file or directory. Updates cache and notifies subscribers for
+   * every affected descendant when the source is a directory.
+   *
+   * Both arguments **MUST** be workspace-relative; absolute keys that escape
+   * the workspace root throw {@link WorkspaceScopeViolationError}
+   * synchronously.
+   *
+   * @param oldPath - Source workspace-relative path.
+   * @param newPath - Target workspace-relative path.
+   * @param options - Optional `{ overwrite }` for collision resolution.
+   * @throws {WorkspaceScopeViolationError} When either key escapes the workspace root.
+   */
+  public async move(oldPath: string, newPath: string, options?: { overwrite?: boolean }): Promise<void> {
+    const oldKey = this.paths.toWorkspaceRelativeKey('move', oldPath);
+    const newKey = this.paths.toWorkspaceRelativeKey('move', newPath);
+    const absoluteOldPath = this.paths.toAbsolutePath(oldKey);
+    const absoluteNewPath = this.paths.toAbsolutePath(newKey);
+    await this.proxy.move(absoluteOldPath, absoluteNewPath, options);
+
+    const subtreeKeys: string[] = [];
+    const oldPrefix = oldKey === '' ? '' : `${oldKey}/`;
+    for (const path of this.outcomes.keys()) {
+      if (path === oldKey || path.startsWith(oldPrefix)) {
+        subtreeKeys.push(path);
+      }
     }
-    this.pathNotifyRegistry.notifyPath(oldPath, undefined);
-    this.notifyGlobalSubscribers({ type: 'renamed', oldPath, newPath });
+    for (const [path] of this.cache.entries()) {
+      if ((path === oldKey || path.startsWith(oldPrefix)) && !subtreeKeys.includes(path)) {
+        subtreeKeys.push(path);
+      }
+    }
+
+    if (subtreeKeys.length === 0) {
+      this.cache.rename(oldKey, newKey);
+      this.pathNotifyRegistry.notifyPath(oldKey, undefined);
+      this.notifyGlobalSubscribers({ type: 'renamed', oldPath: oldKey, newPath: newKey });
+      return;
+    }
+
+    const newPrefix = newKey === '' ? '' : `${newKey}/`;
+    for (const path of subtreeKeys) {
+      const remapped = path === oldKey ? newKey : `${newPrefix}${path.slice(oldPrefix.length)}`;
+      this.cache.rename(path, remapped);
+      const oldOutcome = this.outcomes.get(path);
+      if (oldOutcome) {
+        this.outcomes.delete(path);
+        this.publishOutcome(remapped, oldOutcome);
+      }
+      this.pathNotifyRegistry.notifyPath(path, undefined);
+      this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
+    }
+  }
+
+  /**
+   * Preflight {@link move}. Workspace-relative wrapper that delegates
+   * to the worker's `canMove`; returns `true` when safe to issue or a
+   * structured {@link WorkspaceMutationError} otherwise.
+   *
+   * @param oldPath - Workspace-relative source path.
+   * @param newPath - Workspace-relative target path.
+   * @param options - Optional `{ overwrite }` for collision resolution.
+   */
+  public async canMove(
+    oldPath: string,
+    newPath: string,
+    options?: { overwrite?: boolean },
+  ): Promise<true | WorkspaceMutationError> {
+    const oldKey = this.paths.toWorkspaceRelativeKey('canMove', oldPath);
+    const newKey = this.paths.toWorkspaceRelativeKey('canMove', newPath);
+    return this.proxy.canMove(this.paths.toAbsolutePath(oldKey), this.paths.toAbsolutePath(newKey), options);
+  }
+
+  /**
+   * Preflight rename within a single parent directory. Workspace-relative wrapper.
+   *
+   * @param oldPath - Workspace-relative current path.
+   * @param newName - New basename (no slashes).
+   */
+  public async canRename(oldPath: string, newName: string): Promise<true | WorkspaceMutationError> {
+    const oldKey = this.paths.toWorkspaceRelativeKey('canRename', oldPath);
+    return this.proxy.canRename(this.paths.toAbsolutePath(oldKey), newName);
+  }
+
+  /**
+   * Preflight create. Workspace-relative wrapper for `canCreate`.
+   *
+   * @param path - Workspace-relative path.
+   * @param kind - `'file'` or `'directory'`.
+   */
+  public async canCreate(path: string, kind: 'file' | 'directory'): Promise<true | WorkspaceMutationError> {
+    const key = this.paths.toWorkspaceRelativeKey('canCreate', path);
+    return this.proxy.canCreate(this.paths.toAbsolutePath(key), kind);
+  }
+
+  /**
+   * Preflight delete. Workspace-relative wrapper for `canDelete`.
+   *
+   * @param path - Workspace-relative path.
+   */
+  public async canDelete(path: string): Promise<true | WorkspaceMutationError> {
+    const key = this.paths.toWorkspaceRelativeKey('canDelete', path);
+    return this.proxy.canDelete(this.paths.toAbsolutePath(key));
+  }
+
+  /**
+   * Move many paths atomically. Workspace-relative wrapper that
+   * translates each edit's source/target into absolute paths, calls
+   * the worker {@link FileSystemClient.bulkMove}, and (on success)
+   * migrates the local cache + outcome map for every moved entry via
+   * the same logic as {@link move}.
+   *
+   * On worker-side mid-flight failure the worker already rolled back
+   * the moves; this wrapper makes no local cache changes in that
+   * branch and surfaces the structured error verbatim.
+   *
+   * @param edits - Workspace-relative source/target pairs.
+   * @param options - Optional `{ overwrite }` propagated to every move.
+   */
+  public async bulkMove(edits: readonly BulkMoveEdit[], options?: { overwrite?: boolean }): Promise<BulkMoveResult> {
+    if (edits.length === 0) {
+      return { moved: [], failed: [] };
+    }
+
+    const normalized = edits.map((edit) => {
+      const oldKey = this.paths.toWorkspaceRelativeKey('bulkMove', edit.source);
+      const newKey = this.paths.toWorkspaceRelativeKey('bulkMove', edit.target);
+      return {
+        oldKey,
+        newKey,
+        source: this.paths.toAbsolutePath(oldKey),
+        target: this.paths.toAbsolutePath(newKey),
+      };
+    });
+
+    const result = await this.proxy.bulkMove(
+      normalized.map(({ source, target }) => ({ source, target })),
+      options,
+    );
+
+    if (result.failed.length > 0) {
+      return result;
+    }
+
+    for (const entry of normalized) {
+      const { oldKey, newKey } = entry;
+      const subtreeKeys: string[] = [];
+      const oldPrefix = oldKey === '' ? '' : `${oldKey}/`;
+      for (const path of this.outcomes.keys()) {
+        if (path === oldKey || path.startsWith(oldPrefix)) {
+          subtreeKeys.push(path);
+        }
+      }
+      for (const [path] of this.cache.entries()) {
+        if ((path === oldKey || path.startsWith(oldPrefix)) && !subtreeKeys.includes(path)) {
+          subtreeKeys.push(path);
+        }
+      }
+
+      if (subtreeKeys.length === 0) {
+        this.cache.rename(oldKey, newKey);
+        this.pathNotifyRegistry.notifyPath(oldKey, undefined);
+        this.notifyGlobalSubscribers({ type: 'renamed', oldPath: oldKey, newPath: newKey });
+        continue;
+      }
+
+      const newPrefix = newKey === '' ? '' : `${newKey}/`;
+      for (const path of subtreeKeys) {
+        const remapped = path === oldKey ? newKey : `${newPrefix}${path.slice(oldPrefix.length)}`;
+        this.cache.rename(path, remapped);
+        const oldOutcome = this.outcomes.get(path);
+        if (oldOutcome) {
+          this.outcomes.delete(path);
+          this.publishOutcome(remapped, oldOutcome);
+        }
+        this.pathNotifyRegistry.notifyPath(path, undefined);
+        this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
+      }
+    }
+
+    return result;
   }
 
   /**
    * Delete a file. Removes from cache and notifies subscribers.
+   *
+   * `path` **MUST** be workspace-relative; absolute keys that escape the
+   * workspace root throw {@link WorkspaceScopeViolationError} synchronously.
+   *
    * @param path - Workspace-relative path.
    * @param source - Provenance tag for downstream refresh heuristics.
+   * @throws {WorkspaceScopeViolationError} When `path` escapes the workspace root.
    */
   public async delete(path: string, source: FileWriteSource): Promise<void> {
-    const absolutePath = joinPath(this.paths.root, path);
+    const key = this.paths.toWorkspaceRelativeKey('delete', path);
+    const absolutePath = this.paths.toAbsolutePath(key);
     await this.proxy.unlink(absolutePath);
-    this.cache.delete(path);
-    this.setOrphaned(path, true);
-    this.publishOutcome(path, { kind: 'orphaned' });
-    this.notifyGlobalSubscribers({ type: 'deleted', path, source });
+    this.cache.delete(key);
+    this.setOrphaned(key, true);
+    this.publishOutcome(key, { kind: 'orphaned' });
+    this.notifyGlobalSubscribers({ type: 'deleted', path: key, source });
   }
 
   /**
    * Duplicate a file. Reads source via resolveBytes, writes dest via write.
+   *
+   * Both arguments **MUST** be workspace-relative; absolute keys that escape
+   * the workspace root throw {@link WorkspaceScopeViolationError}
+   * synchronously before any worker round-trip.
+   *
    * @param sourcePath - Existing workspace-relative file path.
    * @param destinationPath - Destination workspace-relative file path.
+   * @throws {WorkspaceScopeViolationError} When either key escapes the workspace root.
    */
   public async duplicate(sourcePath: string, destinationPath: string): Promise<void> {
-    const data = await this.resolveBytes(sourcePath);
-    await this.write(destinationPath, data, 'user');
+    const sourceKey = this.paths.toWorkspaceRelativeKey('duplicate', sourcePath);
+    const destinationKey = this.paths.toWorkspaceRelativeKey('duplicate', destinationPath);
+    const data = await this.resolveBytes(sourceKey);
+    await this.write(destinationKey, data, 'user');
   }
 
   /**
@@ -416,10 +692,7 @@ export class FileContentService {
    * @returns Unsubscribe function removing `handler`.
    */
   public onDidChangeOrphaned(handler: (event: OrphanChangeEvent) => void): () => void {
-    this.orphanSubscribers.add(handler);
-    return () => {
-      this.orphanSubscribers.delete(handler);
-    };
+    return this.#orphanTopic.subscribe(handler);
   }
 
   /**
@@ -430,10 +703,7 @@ export class FileContentService {
    * @returns Unsubscribe function removing `handler`.
    */
   public onDidChangeOutcome(handler: (event: OutcomeChangeEvent) => void): () => void {
-    this.outcomeSubscribers.add(handler);
-    return () => {
-      this.outcomeSubscribers.delete(handler);
-    };
+    return this.#outcomeTopic.subscribe(handler);
   }
 
   /**
@@ -489,9 +759,9 @@ export class FileContentService {
     this.pathNotifyRegistry.clear();
     this.contentChangeRegistry.clear();
     this.orphanedPaths.clear();
-    this.orphanSubscribers.clear();
+    this.#orphanTopic.dispose();
     this.outcomes.clear();
-    this.outcomeSubscribers.clear();
+    this.#outcomeTopic.dispose();
     this.refreshGuard.reset();
   }
 
@@ -531,6 +801,66 @@ export class FileContentService {
         // async-iife: bootstrap
         // oxlint-disable-next-line promise/prefer-await-to-then -- fire-and-forget refresh
         void this.refreshOutcomeInPlace(newPath).catch(() => undefined);
+      }
+    }
+  }
+
+  private onWorkerDirectoryDeleted(relativeDirectory: string): void {
+    const prefix = relativeDirectory === '' ? '' : `${relativeDirectory}/`;
+    const affected = new Set<string>();
+    for (const path of this.outcomes.keys()) {
+      if (path === relativeDirectory || path.startsWith(prefix)) {
+        affected.add(path);
+      }
+    }
+    for (const [path] of this.cache.entries()) {
+      if (path === relativeDirectory || path.startsWith(prefix)) {
+        affected.add(path);
+      }
+    }
+    for (const path of affected) {
+      this.cache.delete(path);
+      this.refreshGuard.reset(path);
+      this.setOrphaned(path, true);
+      this.publishOutcome(path, { kind: 'orphaned' });
+    }
+  }
+
+  private onWorkerDirectoryRenamed(oldDirectory: string | undefined, newDirectory: string | undefined): void {
+    if (oldDirectory === undefined) {
+      return;
+    }
+    const oldPrefix = oldDirectory === '' ? '' : `${oldDirectory}/`;
+    const newPrefix = newDirectory === undefined ? undefined : newDirectory === '' ? '' : `${newDirectory}/`;
+    const affected = new Set<string>();
+    for (const path of this.outcomes.keys()) {
+      if (path === oldDirectory || path.startsWith(oldPrefix)) {
+        affected.add(path);
+      }
+    }
+    for (const [path] of this.cache.entries()) {
+      if (path === oldDirectory || path.startsWith(oldPrefix)) {
+        affected.add(path);
+      }
+    }
+    for (const path of affected) {
+      this.cache.delete(path);
+      this.refreshGuard.reset(path);
+      this.setOrphaned(path, true);
+      this.publishOutcome(path, { kind: 'orphaned' });
+      const remapped =
+        newPrefix === undefined
+          ? undefined
+          : path === oldDirectory
+            ? newDirectory
+            : `${newPrefix}${path.slice(oldPrefix.length)}`;
+      if (remapped !== undefined) {
+        this.notifyGlobalSubscribers({ type: 'renamed', oldPath: path, newPath: remapped });
+        if (this.shouldRefreshWorkerPath(remapped)) {
+          // async-iife: bootstrap
+          // oxlint-disable-next-line promise/prefer-await-to-then -- fire-and-forget refresh
+          void this.refreshOutcomeInPlace(remapped).catch(() => undefined);
+        }
       }
     }
   }
@@ -665,7 +995,7 @@ export class FileContentService {
 
   private async readBytes(path: string): Promise<Uint8Array<ArrayBuffer> | undefined> {
     if (this.filePool) {
-      const absolutePath = joinPath(this.paths.root, path);
+      const absolutePath = this.paths.toAbsolutePath(path);
       const poolData = this.filePool.resolveCopy(absolutePath);
       if (poolData) {
         this.setOrphaned(path, false);
@@ -673,7 +1003,7 @@ export class FileContentService {
       }
     }
 
-    const absolutePath = joinPath(this.paths.root, path);
+    const absolutePath = this.paths.toAbsolutePath(path);
     try {
       const data = await this.proxy.readFile(absolutePath);
       this.setOrphaned(path, false);
@@ -695,9 +1025,7 @@ export class FileContentService {
       return;
     }
     this.outcomes.set(path, result);
-    for (const handler of this.outcomeSubscribers) {
-      handler({ path, result });
-    }
+    this.#outcomeTopic.emit({ path, result });
     this.notifyPathSubscribers(path);
   }
 
@@ -711,9 +1039,7 @@ export class FileContentService {
     } else {
       this.orphanedPaths.delete(path);
     }
-    for (const handler of this.orphanSubscribers) {
-      handler({ path, orphaned });
-    }
+    this.#orphanTopic.emit({ path, orphaned });
   }
 
   private notifyPathSubscribers(path: string): void {

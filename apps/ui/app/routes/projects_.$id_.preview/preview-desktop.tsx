@@ -1,6 +1,6 @@
 import { memo, useCallback, useState } from 'react';
 import { useNavigate, useParams } from 'react-router';
-import { FileCode, Eye, SlidersHorizontal } from 'lucide-react';
+import { Box, FileCode, SlidersHorizontal } from 'lucide-react';
 import { Button } from '#components/ui/button.js';
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '#components/ui/tabs.js';
 import { Avatar, AvatarImage, AvatarFallback } from '#components/ui/avatar.js';
@@ -145,7 +145,7 @@ export const PreviewDesktop = memo(function (): React.JSX.Element {
                 Files
               </TabsTrigger>
               <TabsTrigger value='3d'>
-                <Eye className='mr-2 size-4' />
+                <Box className='mr-2 size-4' />
                 3D View
               </TabsTrigger>
             </TabsList>

@@ -33,8 +33,10 @@ export const rpcClientErrorCodeSchema = zod.enum([
   'IO_ERROR',
   'PARSE_ERROR',
   'RENDER_TIMEOUT',
+  'RESULT_TOO_LARGE',
   'UNKNOWN',
   'UNKNOWN_GEOMETRY_UNIT',
+  'VALIDATION_ERROR',
 ]);
 
 /**
@@ -97,13 +99,14 @@ function defineRpc<Input extends zod.ZodRawShape, Success extends zod.ZodRawShap
 const readFileRpc = defineRpc({
   input: zod.object({
     targetFile: zod.string(),
-    offset: zod.number().optional(),
-    limit: zod.number().optional(),
+    offset: zod.number().int().min(1).optional(),
+    limit: zod.number().int().min(1).max(2000).optional(),
   }),
   success: zod.object({
     content: zod.string(),
     totalLines: zod.number(),
     startLine: zod.number().optional(),
+    truncated: zod.boolean().optional(),
     createdAt: zod.string().optional(),
     modifiedAt: zod.string().optional(),
   }),
@@ -158,11 +161,15 @@ const grepRpc = defineRpc({
     path: zod.string().optional(),
     glob: zod.string().optional(),
     caseSensitive: zod.boolean().optional(),
+    headLimit: zod.number().int().min(1).max(1000).optional(),
+    offset: zod.number().int().min(0).optional(),
   }),
   success: zod.object({
     matches: zod.array(grepMatchSchema),
     totalMatches: zod.number(),
     truncated: zod.boolean().optional(),
+    appliedHeadLimit: zod.number().int().nonnegative(),
+    appliedOffset: zod.number().int().nonnegative(),
   }),
 });
 
@@ -421,8 +428,10 @@ export const rpcClientErrorCode = {
   ioError: 'IO_ERROR',
   parseError: 'PARSE_ERROR',
   renderTimeout: 'RENDER_TIMEOUT',
+  resultTooLarge: 'RESULT_TOO_LARGE',
   unknown: 'UNKNOWN',
   unknownGeometryUnit: 'UNKNOWN_GEOMETRY_UNIT',
+  validationError: 'VALIDATION_ERROR',
 } as const satisfies Record<string, RpcClientErrorCode>;
 
 /** @public */

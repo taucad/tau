@@ -1,10 +1,5 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import type {
-  ActivationContext,
-  LanguageContribution,
-  ActivationResult,
-  NavigationHandler,
-} from '#lib/monaco-language-registry.js';
+import type { ActivationContext, LanguageContribution, ActivationResult } from '#lib/monaco-language-registry.js';
 import type { MonacoTestStub } from '#lib/testing/monaco-language-stub.js';
 import { LanguageContributionRegistry } from '#lib/monaco-language-registry.js';
 import { createMonacoTestStub } from '#lib/testing/monaco-language-stub.js';
@@ -20,16 +15,11 @@ function createMockContribution(
   languageId: string,
   overrides: Partial<LanguageContribution> = {},
 ): LanguageContribution {
-  const handler: NavigationHandler = {
-    canHandle: () => true,
-  };
-
   return {
     languageId,
     register: vi.fn(),
     activate: vi.fn<(context: ActivationContext) => ActivationResult>(() => ({
       disposables: [],
-      navigationHandler: handler,
     })),
     dispose: vi.fn(),
     ...overrides,
@@ -380,7 +370,6 @@ describe('LanguageContributionRegistry', () => {
           }
           return {
             disposables: [],
-            navigationHandler: { canHandle: () => true },
           };
         }),
       });
@@ -394,21 +383,21 @@ describe('LanguageContributionRegistry', () => {
       shouldThrow = false;
       registry.onProjectSessionChange('project-2');
 
-      const handlers = registry.activate(context);
+      registry.activate(context);
       stub.__createModel('inmemory://f/1', 'lang-flaky');
 
       expect(contribFlaky.activate).toHaveBeenCalledTimes(2);
-      expect(handlers).toHaveLength(1);
     });
 
-    it('should return the same handlers reference on repeated activate() calls within the same epoch', () => {
+    it('should early-return when activate() is called twice in the same epoch', () => {
+      const onLanguageSpy = vi.spyOn(stub.monaco.languages, 'onLanguage');
       const contrib = createMockContribution('lang-a', { activationLanguageIds: ['lang-a'] });
       registry.addContribution(contrib);
 
-      const first = registry.activate(context);
-      const second = registry.activate(context);
-
-      expect(second).toBe(first);
+      registry.activate(context);
+      const afterFirst = onLanguageSpy.mock.calls.length;
+      registry.activate(context);
+      expect(onLanguageSpy.mock.calls.length).toBe(afterFirst);
     });
 
     it('should not re-register contributions on subsequent registerAll calls', () => {

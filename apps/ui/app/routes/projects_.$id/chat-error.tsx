@@ -1,6 +1,6 @@
 import { memo, useState } from 'react';
 import type React from 'react';
-import { ChevronRight, RefreshCcw } from 'lucide-react';
+import { ChevronRight, Play, RefreshCcw } from 'lucide-react';
 import { errorCategory } from '@taucad/types/constants';
 import type { ChatError as NormalizedChatError } from '@taucad/types';
 import { Button } from '#components/ui/button.js';
@@ -66,6 +66,10 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
     parsedError.category === errorCategory.server ||
     parsedError.category === errorCategory.overloaded;
   const handleRetry = isResumableCategory ? continueChat : regenerate;
+  // Label mirrors the action: `continueChat` resumes the live stream without
+  // slicing `chat.messages` (partial assistant tail survives), whereas
+  // `regenerate` re-issues the request from scratch.
+  const retryLabel = isResumableCategory ? 'Resume' : 'Retry';
 
   // Render the generic/server error view with collapsible details
   const renderGenericError = (): React.ReactNode => {
@@ -104,8 +108,8 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
                     handleRetry();
                   }}
                 >
-                  <RefreshCcw className='size-3.5' />
-                  Retry
+                  {isResumableCategory ? <Play className='size-3.5' /> : <RefreshCcw className='size-3.5' />}
+                  {retryLabel}
                 </Button>
               </div>
             </div>

@@ -8,6 +8,7 @@ import { AppModule } from '#app.module.js';
 import { DatabaseService } from '#database/database.service.js';
 import { RedisService } from '#redis/redis.service.js';
 import { CheckpointerService } from '#api/chat/checkpointer.service.js';
+import { StoreService } from '#api/chat/store.service.js';
 
 // Mock DatabaseService for tests that don't need database access
 const mockDatabaseService = {
@@ -43,6 +44,17 @@ const mockCheckpointerService = {
   getCheckpointer: () => ({}),
 };
 
+// Mock StoreService for tests that don't need the read-dedup BaseStore
+const mockStoreService = {
+  async onModuleInit() {
+    // No-op
+  },
+  async onModuleDestroy() {
+    // No-op
+  },
+  getStore: () => ({}),
+};
+
 describe('TestApiController (e2e)', () => {
   let app: NestFastifyApplication;
   let moduleRef: TestingModule;
@@ -57,6 +69,8 @@ describe('TestApiController (e2e)', () => {
       .useValue(mockRedisService)
       .overrideProvider(CheckpointerService)
       .useValue(mockCheckpointerService)
+      .overrideProvider(StoreService)
+      .useValue(mockStoreService)
       .compile();
 
     app = moduleRef.createNestApplication<NestFastifyApplication>(new FastifyAdapter());

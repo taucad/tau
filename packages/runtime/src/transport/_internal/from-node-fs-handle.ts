@@ -7,6 +7,14 @@
  * public `@taucad/runtime/filesystem` surface exposes only the opaque
  * `RuntimeFileSystem` value, never the underlying handle shape.
  *
+ * Spec/instance contract: `_fromNodeFsHandle(basePath)` returns a
+ * plain-data spec whose `create()` factory mints a fresh adapter wrapper
+ * around Node `fs.promises` per binding. The underlying disk is shared
+ * by definition (the host filesystem is a global resource), so each
+ * `RuntimeFileSystemBase` observes the same persisted state — but the
+ * adapter object itself is freshly built per `RuntimeClient`,
+ * mirroring the in-memory and fs-like factories for shape uniformity.
+ *
  * @internal
  */
 
@@ -18,19 +26,30 @@ import path from 'node:path';
 
 /**
  * Internal: produce the discriminated `inline`-arm handle backing
- * {@link fromNodeFs}. Kept inside `transport/_internal/` so transports
- * can resolve an opaque {@link RuntimeFileSystem} produced by the public
- * factory back to its underlying `RuntimeFileSystemBase` instance
- * without leaking the discriminated handle shape onto the public
- * filesystem barrel.
+ * {@link fromNodeFs}. Captures `basePath` in the spec closure; each
+ * `create()` invocation builds a fresh `RuntimeFileSystemBase` adapter
+ * targeting the same host directory.
  *
  * @internal
  * @param basePath - Host directory mapped to VFS `/` — kernel paths beginning
  * with `/` resolve under here (POSIX `path.join` would ignore `basePath`
  * otherwise).
- * @returns Discriminated handle whose `inline.fs` proxies `basePath`.
+ * @returns Discriminated handle whose `create()` mints a fresh adapter
+ * each invocation; the underlying disk is intentionally shared.
  */
 export function _fromNodeFsHandle(basePath: string): RuntimeFileSystemHandle {
+  return {
+    kind: 'inline',
+    create: () => buildNodeFsBase(basePath),
+  };
+}
+
+/**
+ * Build a fresh `RuntimeFileSystemBase` adapter wrapping Node
+ * `fs.promises` rooted at `basePath`. The adapter is per-binding; the
+ * underlying disk is shared.
+ */
+function buildNodeFsBase(basePath: string): RuntimeFileSystemBase {
   /* Kernel VFS paths are POSIX-absolute from the project root (e.g.
    * `/main.scad`). Plain `path.join(base, '/x')` ignores `base` on POSIX and
    * resolves to `/x` on the host — map VFS root explicitly under `basePath`. */
@@ -54,7 +73,7 @@ export function _fromNodeFsHandle(basePath: string): RuntimeFileSystemHandle {
     return new Uint8Array(buf);
   }
 
-  const runtimeFs: RuntimeFileSystemBase = {
+  return {
     id: 'runtime:node-fs',
     capabilities: { persistent: true, writable: true, quotaBased: false, caseSensitive: true },
     dispose() {
@@ -96,6 +115,4 @@ export function _fromNodeFsHandle(basePath: string): RuntimeFileSystemHandle {
       }
     },
   };
-
-  return { kind: 'inline', fs: runtimeFs };
 }

@@ -7,7 +7,7 @@ import { Reflector } from '@nestjs/core';
 import type { FastifyReply } from 'fastify';
 import type { StreamTextResult as StreamTextResultType, ToolSet, UIMessage, UIMessageChunk } from 'ai';
 import { toBaseMessages, toUIMessageStream } from '@ai-sdk/langchain';
-import type { ChatUsageTokens, MyUIMessage, ChatSnapshot } from '@taucad/chat';
+import type { ChatUsageTokens, MyUIMessage, ChatSnapshot, AgentConfig } from '@taucad/chat';
 import { ToolMessage } from '@langchain/core/messages';
 import { ChatController } from '#api/chat/chat.controller.js';
 import { ChatService } from '#api/chat/chat.service.js';
@@ -63,15 +63,33 @@ vi.mock('ai', async (importOriginal) => {
  */
 type StreamTextResult = StreamTextResultType<ToolSet, never>;
 
-// Helper to create mock MyUIMessage
-function createMockUserMessage(model: string): MyUIMessage {
+// Helper to create a minimal user message for tests. Per-turn agent config
+// now lives on `body.agent` (see `chatTurnRequestSchema`), so the message
+// itself stays metadata-free.
+function createMockUserMessage(): MyUIMessage {
   return {
     id: 'msg_1',
     role: 'user',
     parts: [{ type: 'text', text: 'Hello' }],
-    metadata: { model, kernel: 'openscad' },
   };
 }
+
+type CadAgent = Extract<AgentConfig, { profile: 'cad' }>;
+
+const cadAgent = (overrides: Partial<CadAgent> = {}): CadAgent => ({
+  profile: 'cad',
+  model: 'test-model',
+  kernel: 'openscad',
+  mode: 'agent',
+  toolChoice: 'auto',
+  testingEnabled: true,
+  snapshot: {},
+  contextPayload: {},
+  ...overrides,
+});
+
+const projectNameAgent: AgentConfig = { profile: 'project_name' };
+const commitNameAgent: AgentConfig = { profile: 'commit_name' };
 
 // Helper to create mock agent with graph property
 function createMockAgent(): {
@@ -228,8 +246,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_123',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -301,13 +320,18 @@ describe('ChatController', () => {
             input: { targetFile: 'z.scad', content: '//' },
           },
         ],
-        metadata: { model: 'test-model', createdAt: 1 },
+        metadata: { createdAt: 1 },
       };
 
+      // Order matches the new chat-request contract: the assistant turn whose
+      // stale tool part the checkpoint splice repairs sits before the trailing
+      // user message that drives the current turn. Per-turn config lives on
+      // `body.agent`, not on the user message itself.
       await controller.createChat(
         {
           id: 'chat_ck_merge_integration',
-          messages: [createMockUserMessage('test-model'), assistantMessage],
+          messages: [createMockUserMessage(), assistantMessage, createMockUserMessage()],
+          agent: cadAgent(),
         } satisfies CreateChatDto,
         createMockResponse(),
       );
@@ -320,7 +344,8 @@ describe('ChatController', () => {
 
       expect(vi.mocked(toBaseMessages)).toHaveBeenCalledTimes(1);
       const passedIntoBase = vi.mocked(toBaseMessages).mock.calls[0]?.[0] as MyUIMessage[];
-      expect(passedIntoBase.at(-1)?.parts[0]).toMatchObject({
+      const splicedAssistant = passedIntoBase.find((message) => message.id === 'm_as');
+      expect(splicedAssistant?.parts[0]).toMatchObject({
         toolCallId: 'cid_ck_merge_controller',
         state: 'output-available',
         output: { merged: true },
@@ -333,15 +358,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_tool_choice',
-        messages: [
-          {
-            id: 'msg_1',
-            role: 'user',
-            parts: [{ type: 'text', text: 'Hello' }],
-            metadata: { model: 'test-model', kernel: 'openscad', toolChoice: 'none' },
-          },
-        ],
-      } as const satisfies CreateChatDto;
+        messages: [createMockUserMessage()],
+        agent: cadAgent({ toolChoice: 'none' }),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -362,14 +381,15 @@ describe('ChatController', () => {
   });
 
   describe('createChat - Name Generator Bypass', () => {
-    it('should use name generator when modelId is name-generator', async () => {
+    it('should use name generator when agent.profile is project_name', async () => {
       // Arrange
       const mockResponse = createMockResponse();
 
       const body = {
         id: 'chat_name_gen',
-        messages: [createMockUserMessage('name-generator')],
-      };
+        messages: [createMockUserMessage()],
+        agent: projectNameAgent,
+      } satisfies CreateChatDto;
 
       const mockStreamResult = createMockStreamResult();
       vi.mocked(chatService.getBuildNameGenerator).mockReturnValue(mockStreamResult);
@@ -383,14 +403,15 @@ describe('ChatController', () => {
       expect(mockResponse.send).toHaveBeenCalled();
     });
 
-    it('should use commit message generator when modelId is commit-name-generator', async () => {
+    it('should use commit message generator when agent.profile is commit_name', async () => {
       // Arrange
       const mockResponse = createMockResponse();
 
       const body = {
         id: 'chat_commit_gen',
-        messages: [createMockUserMessage('commit-name-generator')],
-      };
+        messages: [createMockUserMessage()],
+        agent: commitNameAgent,
+      } satisfies CreateChatDto;
 
       const mockStreamResult = createMockStreamResult();
       vi.mocked(chatService.getCommitMessageGenerator).mockReturnValue(mockStreamResult);
@@ -405,44 +426,11 @@ describe('ChatController', () => {
     });
   });
 
-  describe('createChat - Error Handling', () => {
-    it('should throw error when last message is not a user message', async () => {
-      // Arrange
-      const mockResponse = createMockResponse();
-
-      const assistantMessage: MyUIMessage = {
-        id: 'msg_1',
-        role: 'assistant',
-        parts: [{ type: 'text', text: 'Hello' }],
-      };
-      const body = {
-        id: 'chat_no_user',
-        messages: [assistantMessage],
-      };
-
-      // Act & Assert
-      await expect(controller.createChat(body, mockResponse)).rejects.toThrow('Last message is not a user message');
-    });
-
-    it('should throw error when message model is missing', async () => {
-      // Arrange
-      const mockResponse = createMockResponse();
-
-      const userMessageWithoutModel: MyUIMessage = {
-        id: 'msg_1',
-        role: 'user',
-        parts: [{ type: 'text', text: 'Hello' }],
-        metadata: {}, // No model specified
-      };
-      const body = {
-        id: 'chat_no_model',
-        messages: [userMessageWithoutModel],
-      };
-
-      // Act & Assert
-      await expect(controller.createChat(body, mockResponse)).rejects.toThrow('Message model is required');
-    });
-  });
+  // Validation of the chat request body lives in `chat.dto.ts` as a single
+  // Zod schema (`chatTurnRequestSchema`) enforced at the Fastify body-parse
+  // boundary by `nestjs-zod`'s validation pipe. Cases like "agent is missing"
+  // and "agent.kernel is unknown" are covered by `chat.dto.test.ts`; this
+  // spec exercises only post-validation controller behaviour.
 
   describe('createChat - Response Headers', () => {
     it('should set correct SSE headers for agent execution', async () => {
@@ -451,8 +439,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_headers',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -471,8 +460,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_adapter',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -499,17 +489,17 @@ describe('ChatController', () => {
         openFiles: [{ path: 'src/main.scad', name: 'main.scad' }],
       } as const satisfies ChatSnapshot;
 
-      const messageWithSnapshot = {
+      const messageWithSnapshot: MyUIMessage = {
         id: 'msg_snapshot',
         role: 'user',
         parts: [{ type: 'text', text: 'Create a cube' }],
-        metadata: { model: 'test-model', kernel: 'openscad', snapshot },
-      } as const satisfies MyUIMessage;
+      };
 
       const body = {
         id: 'chat_snapshot',
         messages: [messageWithSnapshot],
-      };
+        agent: cadAgent({ snapshot }),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -546,13 +536,13 @@ describe('ChatController', () => {
         id: 'msg_no_snapshot',
         role: 'user',
         parts: [{ type: 'text', text: 'Create a sphere' }],
-        metadata: { model: 'test-model', kernel: 'openscad' },
       };
 
       const body = {
         id: 'chat_no_snapshot',
         messages: [messageWithoutSnapshot],
-      };
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -583,13 +573,13 @@ describe('ChatController', () => {
         id: 'msg_partial_snapshot',
         role: 'user',
         parts: [{ type: 'text', text: 'Help me' }],
-        metadata: { model: 'test-model', kernel: 'openscad', snapshot: partialSnapshot },
       };
 
       const body = {
         id: 'chat_partial_snapshot',
         messages: [messageWithPartialSnapshot],
-      };
+        agent: cadAgent({ snapshot: partialSnapshot }),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -621,13 +611,13 @@ describe('ChatController', () => {
         id: 'msg_empty_snapshot',
         role: 'user',
         parts: [{ type: 'text', text: 'Test' }],
-        metadata: { model: 'test-model', kernel: 'openscad', snapshot: emptySnapshot },
       };
 
       const body = {
         id: 'chat_empty_snapshot',
         messages: [messageWithEmptySnapshot],
-      };
+        agent: cadAgent({ snapshot: emptySnapshot }),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -701,8 +691,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_error_transform',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -743,8 +734,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_tool_error',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -773,8 +765,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_abort_error',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -806,8 +799,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_text_passthrough',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -830,8 +824,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_multi_chunk',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -927,8 +922,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_static_tool',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -962,8 +958,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_dynamic_tool',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);
@@ -1000,8 +997,9 @@ describe('ChatController', () => {
 
       const body = {
         id: 'chat_mixed_tools',
-        messages: [createMockUserMessage('test-model')],
-      };
+        messages: [createMockUserMessage()],
+        agent: cadAgent(),
+      } satisfies CreateChatDto;
 
       // Act
       await controller.createChat(body, mockResponse);

@@ -1,6 +1,6 @@
 # Tau marketing preview
 
-Standalone, static `apps/www`, with 13 complete pages and an optional Three.js scroll story. Node 22+; Three.js 0.184.0 and esbuild 0.28.2 resolve through the workspace catalog. Existing `apps/ui`, `apps/docs` and the earlier `/vision` implementation are untouched.
+Standalone, static `apps/www`, with 13 complete pages and an optional Three.js scroll story. Node 24+; Three.js 0.184.0 and esbuild 0.28.2 resolve through the workspace catalog. Existing `apps/ui`, `apps/docs` and the earlier `/vision` implementation are untouched.
 
 ## Develop and verify
 
@@ -39,7 +39,11 @@ If root personalization is later wanted, use the existing authenticated server/s
 
 ## Netlify and deferred DNS
 
-`netlify.toml` is for a separate, authorized marketing preview site. It does not change the UI site, Terraform, app routing or DNS. Use a draft deploy, never `--prod`; retain existing Git-only production restrictions. Verify the existing authorized Netlify account/site before upload. No new paid account, credential or site permission is implied.
+`netlify.toml` is for a separate authorized marketing review project. Direct Git builds use repository `taucad/tau`, branch `feature/marketing-www-design-verify-print`, repository root (`.`) as the base, `apps/www` as the UI package directory, `node apps/www/scripts/build.mjs` as the command and `apps/www/dist` as publish directory. The package directory selects this app’s Netlify configuration. Node 24 matches the root engine requirement; pnpm 11.7.0 comes from root `packageManager`. The install flags select this app and its workspace dependency closure with the frozen lock and scripts suppressed. No Nx Cloud token, API secret or app runtime credential is needed.
+
+The operator must complete any explicitly approved Netlify/GitHub authorization before creating the project. Existing app connectivity does not prove the browser session already has that grant. Build settings are prepared for Terraform management in the existing `TauCAD/tau-cloud-staging` workspace, using its existing provider credential and a new, separately verified site UUID. PR previews and other branch deploys are disabled for the review project. It has no custom domain. Netlify calls its selected-branch deploy context "production"; this isolated review project does not replace any existing Tau app or production deployment. Preview noindex and analytics-off remain enabled.
+
+No production app routing or DNS change is part of this setup. If CLI deployment is selected later, it requires an existing authorized session and an explicit review-site UUID; do not use another site or the earlier denied Library artifact.
 
 **Queued DNS task (deferred by user):** after preview acceptance, release owner inventories existing deep links/assets/auth callbacks/settings query routes, implements and tests path ownership and cache isolation, verifies rollback on staging, then requests the previously deferred production/domain action. Do not mutate DNS during this task.
 

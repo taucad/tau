@@ -1,20 +1,17 @@
 # Separate marketing preview site only. Never apply to the UI production site.
 [build]
-base = "apps/www"
-command = "node scripts/build.mjs"
-publish = "dist"
+# Set the Netlify UI package directory to apps/www so this file is selected.
+# Install from the repository root, where the pnpm workspace and lockfile live.
+base = "."
+command = "node apps/www/scripts/build.mjs"
+publish = "apps/www/dist"
 
 [build.environment]
-NODE_VERSION = "22"
+NODE_VERSION = "24"
 WWW_LAUNCH = "false"
+PNPM_FLAGS = "--filter @taucad/www... --frozen-lockfile --ignore-scripts"
 
 # Security, cache and preview noindex headers are emitted in dist/_headers.
 # No app proxy or production domain is enabled in this preview configuration.
 
-# If the selected build image detects the root pnpm workspace, keep dependency
-# installation scoped to this marketing app and suppress workspace hooks.
-[context.deploy-preview.environment]
-PNPM_FLAGS = "--filter @taucad/www --ignore-scripts"
-
-[context.branch-deploy.environment]
-PNPM_FLAGS = "--filter @taucad/www --ignore-scripts"
+# No functions, app build, Nx Cloud token or private runtime environment is used.

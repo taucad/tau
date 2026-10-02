@@ -46,6 +46,7 @@ import type { PeerCertificate } from 'node:tls';
 import { setTimeout as delay } from 'node:timers/promises';
 import { MessageChannel } from 'node:worker_threads';
 
+// eslint-disable-next-line @nx/enforce-module-boundaries -- Repository-only hardware qualification drives the real host launcher; the published package never imports host.
 import { createMachineSecretStore, createMemorySecretVault, createNodeMachineRuntime } from '@taucad/host';
 import { createHostAdmissionAuthority } from '@taucad/runtime/host';
 import { createNodeMachineHost } from '@taucad/runtime/host/node';

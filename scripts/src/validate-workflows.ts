@@ -35,6 +35,7 @@ export const workflowPaths = [
   '.github/workflows/ci.yml',
   '.github/workflows/publish.yml',
   '.github/workflows/formal-nightly.yml',
+  '.github/workflows/desktop-tooling.yml',
 ] as const;
 
 export type WorkflowFile = { readonly path: string; readonly text: string };

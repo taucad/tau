@@ -36,6 +36,7 @@ import {
   requestPrintOutputSchema,
 } from '@taucad/chat';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
+import { parseToolErrorText } from '@taucad/chat/utils';
 import type { RpcGraphicsClient } from '@taucad/chat/rpc';
 import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import { createProviderRpcFileSystem } from '#registry/provider-file-system.js';
@@ -1216,9 +1217,16 @@ describe('machine tool registry', () => {
 
     it('refuses more than 64 keys before reading anything', async () => {
       const bambuStudio = engine();
-      await expect(
-        profilesOf(bambuStudio, { keys: Array.from({ length: 65 }, (_, index) => `key_${String(index)}`) }),
-      ).resolves.toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+      const result = await profilesOf(bambuStudio, {
+        keys: Array.from({ length: 65 }, (_, index) => `key_${String(index)}`),
+      });
+      expect(result).toMatchObject({ isError: true, content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' } });
+      expect(parseToolErrorText(JSON.stringify(result.content))).toMatchObject({
+        errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+        toolName: 'get_print_profiles',
+        toolCallId: expect.any(String) as string,
+        validationErrors: [{ path: 'keys', message: expect.any(String) as string }],
+      });
       expect(bambuStudio.findBambuStudio).not.toHaveBeenCalled();
     });
 

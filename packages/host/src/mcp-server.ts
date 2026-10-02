@@ -468,6 +468,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         return { success: true, ...content };
       }
       return {
+        ...content,
         errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
         message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
       };
@@ -532,6 +533,12 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     };
     return async (call, dispatchOptions) => {
       if ('rpcName' in call) {
+        // Export RPCs carry call identity in args; the tool registry takes it
+        // from invocation metadata and adds it after strict input validation.
+        if (call.rpcName === rpcName.exportModel) {
+          const { toolCallId: _toolCallId, ...input } = call.args;
+          return invokeAllowed(toolName.exportModel, input, dispatchOptions);
+        }
         return invokeAllowed(toolForRpc[call.rpcName], call.args, dispatchOptions);
       }
       const tool = hostMcpAllowedTools.find((name) => name === call.toolName);

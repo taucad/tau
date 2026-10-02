@@ -195,10 +195,10 @@ export type TauMcpAdapter = {
   call(input: TauMcpCall): Promise<CallToolResult>;
 };
 
-const rpcFailure = (result: { errorCode: string; message: string }): CallToolResult => ({
+const rpcFailure = (result: TauMcpRpcFailure): CallToolResult => ({
   isError: true,
   content: [{ type: 'text', text: `${result.errorCode}: ${result.message}` }],
-  structuredContent: { errorCode: result.errorCode, message: result.message },
+  structuredContent: { ...result },
 });
 
 const rpcSuccess = (result: Record<string, unknown>): CallToolResult => ({

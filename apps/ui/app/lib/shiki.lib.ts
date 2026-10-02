@@ -21,7 +21,7 @@ let cachedHighlighter: Promise<HighlighterCore> | undefined;
 export const getHighlighter = async (): Promise<HighlighterCore> => {
   cachedHighlighter ??= (async () => {
     const { createHighlighterCore } = await import('shiki/core');
-    const { createJavaScriptRegexEngine } = await import('shiki/engine/javascript');
+    const { createJavaScriptRawEngine } = await import('shiki/engine/javascript');
 
     return createHighlighterCore({
       themes: [
@@ -32,7 +32,7 @@ export const getHighlighter = async (): Promise<HighlighterCore> => {
       ],
       langs: runtimeShikiLanguageLoaders,
       langAlias: { typescriptreact: 'tsx', javascriptreact: 'jsx' },
-      engine: createJavaScriptRegexEngine(),
+      engine: createJavaScriptRawEngine(),
     });
   })();
   return cachedHighlighter;

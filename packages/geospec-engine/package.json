@@ -24,6 +24,8 @@
   "files": [
     "dist",
     "LICENSE",
+    "NOTICE",
+    "licenses",
     "README.md",
     "provenance.schema.json",
     "provenance.json"

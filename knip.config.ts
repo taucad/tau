@@ -262,6 +262,18 @@ const config: KnipConfig = {
       // (tsconfig `rootDirs`), which a fresh checkout does not have.
       ignoreUnresolved: [/^\.\/\+types\//u],
     },
+    'apps/www': {
+      // The static builder bundles browser entries by path; these CLIs run directly from Node.
+      entry: [
+        'src/client.mjs',
+        'src/site.css',
+        'scripts/{build,serve,browser-check,check-story,render-assets,optimize-assets,capture-metal-hero,export-story-assets}.mjs',
+        'scripts/metal-hero-entry.mjs',
+        'tests/*.test.mjs',
+      ],
+      project: ['src/**/*.{mjs,css}', 'scripts/**/*.{mjs,js}', 'tests/**/*.mjs'],
+      ignore: ['public/**'],
+    },
     'apps/docs': {
       entry: ['app/routes/**/*.{ts,tsx}', 'vite-environment.d.ts'],
       // Content-side modules are referenced from MDX (auto-type-table props,

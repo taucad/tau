@@ -310,6 +310,8 @@ catalog:
   '@streamdown/mermaid': ^1.0.2
   '@napi-rs/cli': 3.8.6
   cheerio: 1.2.0
+  '@axe-core/playwright': 4.13.0
+  sharp: 0.34.5
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

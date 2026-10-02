@@ -1,5 +1,28 @@
 # Marketing preview validation
 
+## Cloud QA and provenance follow-up — 2026-10-02
+
+This selective follow-up starts from published `66b1ccda00c97e84aa8fa2fc6148296e2dceaecd`. It declares the existing QA tools, identifies marketing entry points for Knip, and corrects provenance recipe paths plus the formatted metadata's size/hash. No public asset, runtime source, test, rendering recipe or deployment configuration changed.
+
+Executed in a fresh cloud worktree with Node 24.19.0, pnpm 11.7.0, Playwright 1.62.1 from the existing catalog resolution, `@axe-core/playwright` 4.13.0, Sharp 0.34.5 and system Chromium 151.0.7922.173. Build, tests and browser checks used the declared dependencies without `WWW_RENDER_TOOLS`.
+
+| Check                | Follow-up result                                                                                                                                                                                          |
+| -------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Clean scoped install | Removed the worktree's generated install directories; `--filter @taucad/www... --frozen-lockfile --ignore-scripts` passed and preserved the lockfile bytes                                                |
+| Build and behavior   | 13 pages, noindex and analytics off; all 9 tests passed; all 42 output files byte-identical to the build at `66b1ccda`                                                                                    |
+| Browser routes       | 52 route/viewport/theme audits plus interaction and privacy checks passed; zero reported axe violations                                                                                                   |
+| Live scene           | 16 chapter views plus motion gates, pause/resume, reduced motion, visibility/exit gates, download and context-loss fallback passed                                                                        |
+| Provenance           | All 11 recorded size/hash pairs match; all 4 recipe paths and 3 hero-source paths exist; `planetary.json` is 10,086 bytes with SHA-256 `718ce4658f341546f4afbe28a1c163b80d06475e74a04087e821a2e9f961d3bc` |
+| Sharp                | All 7 recorded images decoded; native PNG encoding passed with install scripts disabled                                                                                                                   |
+| Knip                 | Scoped `apps/www` analysis reports zero issues; the root Knip configuration also passes standalone TypeScript checking                                                                                    |
+| Workspace metadata   | Canonical tag validation passed on 91 tracked project configurations; canonical license validation passed for all 90 workspace packages                                                                   |
+
+Full Nx build/test execution remains blocked by unrelated app/docs configuration imports in the scoped installation; the checked-in Node build/test commands passed. Root-config Oxlint reports the same five pre-existing comment-capitalization findings in `knip.config.ts` before and after this change, with no new findings. ESLint cannot parse that root file through its existing project-service configuration because it is outside the configured TypeScript projects. No lint rule or project-service setting was changed.
+
+Evidence for this follow-up is under `out/research/marketing-www/oct2026-qa-provenance/`, including install/build/test logs, browser and scene reports, `provenance.json`, `sharp.json`, `build-parity.json`, and the scoped Knip output. Lighthouse and offline CAD/hero capture reproduction were not rerun; the original measurements below are retained as historical implementation evidence. Hosted verification still requires the separately authorized Netlify site. No merge, deployment, grant, credential, Terraform, DNS or Fly change was made for this follow-up.
+
+## Original implementation record — historical
+
 Verified locally on 2026-10-02 on `feature/marketing-www-design-verify-print`, preserving the earlier marketing checkpoints and verified GeoSpec base `faecc9ac8f456b7fa5639fc0eb146012e3e499c8`. The tested source is published as draft PR #287 into GeoSpec. No external artifact upload, hosted deployment, production routing change or DNS mutation has occurred in this implementation lane.
 
 | Check                 | Result                                                                                                                                                                                 |

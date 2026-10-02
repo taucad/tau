@@ -781,12 +781,16 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       picogkHelperSource(3).replace('radius * scale', 'MissingPicoGkSymbol * scale'),
       'utf8',
     );
-    const compileFailure = page.getByText("The name 'MissingPicoGkSymbol' does not exist in the current context", {
+    const issues = page.locator('[data-slot="collapsible"]').filter({
+      has: page.getByRole('button', { name: /^Issues/u }),
+    });
+    const compileFailure = issues.getByText("The name 'MissingPicoGkSymbol' does not exist in the current context", {
       exact: true,
     });
     await expectVisible(compileFailure, 120_000);
+    await expectCount(issues, 1);
     await expectCount(compileFailure, 1);
-    await expectCount(page.getByText(/ShapeFactory\.cs:\d+:\d+/u), 1);
+    await expectCount(issues.getByRole('button', { name: /^ShapeFactory\.cs:\d+:\d+$/u }), 1);
     const card = await openFirstProjectCardPreview(page);
     await expectAlertText(card, 'MissingPicoGkSymbol');
     writeFileSync(join(projectRoot, 'ShapeFactory.cs'), picogkHelperSource(3), 'utf8');
@@ -798,8 +802,9 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     await expectVisible(page.getByTestId('cad-viewer-canvas-region').locator('canvas'), 120_000);
 
     writeFileSync(sourcePath, failingPicogkRuntimeSource, 'utf8');
-    const runtimeFailure = page.getByText(picogkRuntimeFailure, { exact: true });
+    const runtimeFailure = issues.getByText(picogkRuntimeFailure, { exact: true });
     await expectVisible(runtimeFailure, 120_000);
+    await expectCount(issues, 1);
     await expectCount(runtimeFailure, 1);
     writeFileSync(sourcePath, picogkSource, 'utf8');
     await expectCount(runtimeFailure, 0, 120_000);

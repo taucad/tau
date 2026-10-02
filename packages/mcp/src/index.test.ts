@@ -40,6 +40,26 @@ describe('@taucad/mcp', () => {
     });
   });
 
+  it('should preserve structured failure details from the dispatch authority', async () => {
+    const failure = {
+      errorCode: 'TOOL_OUTPUT_VALIDATION_FAILED',
+      message: 'Invalid export output',
+      toolName: 'export_model',
+      toolCallId: 'tool-2',
+      validationErrors: [{ path: 'files', message: 'Required' }],
+      rawOutput: { unexpected: true },
+    };
+    const adapter = createTauMcpAdapter({ dispatch: async () => failure });
+    const result = await adapter.call({
+      name: toolName.exportModel,
+      arguments: { targetFile: 'main.tsx', to: 'netlist' },
+      toolCallId: 'tool-2',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual(failure);
+    expect(result.content).toEqual([{ type: 'text', text: 'TOOL_OUTPUT_VALIDATION_FAILED: Invalid export output' }]);
+  });
+
   it('assigns independent MCP requests distinct host tool identities', async () => {
     const ids: string[] = [];
     await Promise.all(
@@ -131,7 +151,7 @@ describe('@taucad/mcp', () => {
     ).resolves.toEqual({
       isError: true,
       content: [{ type: 'text', text: 'RENDER_TIMEOUT: Renderer did not settle.' }],
-      structuredContent: { errorCode: 'RENDER_TIMEOUT', message: 'Renderer did not settle.' },
+      structuredContent: { success: false, errorCode: 'RENDER_TIMEOUT', message: 'Renderer did not settle.' },
     });
   });
 

@@ -7,15 +7,7 @@
 Quantity_Color
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Quantity.Quantity_Color) -> None
-
-2. __init__(self: OCP.OCP.Quantity.Quantity_Color, theName: OCP.OCP.Quantity.Quantity_NameOfColor) -> None
-
-3. __init__(self: OCP.OCP.Quantity.Quantity_Color, theC1: float, theC2: float, theC3: float, theType: OCP.OCP.Quantity.Quantity_TypeOfColor) -> None
-
-4. __init__(self: OCP.OCP.Quantity.Quantity_Color, theRgb: OCP.OCP.gp.gp_Vec3f) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Quantity.Quantity_Color) -> None 2. __init__(self: OCP.OCP.Quantity.Quantity_Color, theName: OCP.OCP.Quantity.Quantity_NameOfColor) -> None 3. __init__(self: OCP.OCP.Quantity.Quantity_Color, theC1: float, theC2: float, theC3: float, theType: OCP.OCP.Quantity.Quantity_TypeOfColor) -> None 4. __init__(self: OCP.OCP.Quantity.Quantity_Color, theRgb: OCP.OCP.gp.gp_Vec3f) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Quantity.Quantity_Color) -> None
   __init__(self: OCP.OCP.Quantity.Quantity_Color, theName: OCP.OCP.Quantity.Quantity_NameOfColor) -> None
@@ -27,15 +19,7 @@ Quantity_Color
   Name(self: OCP.OCP.Quantity.Quantity_Color) -> OCP.OCP.Quantity.Quantity_NameOfColor
 
   // SetValues(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetValues(self: OCP.OCP.Quantity.Quantity_Color, theName: OCP.OCP.Quantity.Quantity_NameOfColor) -> None
-
-Updates the color from specified named color.
-
-2. SetValues(self: OCP.OCP.Quantity.Quantity_Color, theC1: float, theC2: float, theC3: float, theType: OCP.OCP.Quantity.Quantity_TypeOfColor) -> None
-
-Updates a color according to the mode specified by theType. Throws exception if values are out of range.
+  // Remarks: Overloaded function. 1. SetValues(self: OCP.OCP.Quantity.Quantity_Color, theName: OCP.OCP.Quantity.Quantity_NameOfColor) -> None Updates the color from specified named color. 2. SetValues(self: OCP.OCP.Quantity.Quantity_Color, theC1: float, theC2: float, theC3: float, theType: OCP.OCP.Quantity.Quantity_TypeOfColor) -> None Updates a color according to the mode specified by theType. Throws exception if values are out of range.
   SetValues(*args, **kwargs)
   SetValues(self: OCP.OCP.Quantity.Quantity_Color, theName: OCP.OCP.Quantity.Quantity_NameOfColor) -> None
   SetValues(self: OCP.OCP.Quantity.Quantity_Color, theC1: float, theC2: float, theC3: float, theType: OCP.OCP.Quantity.Quantity_TypeOfColor) -> None
@@ -117,15 +101,7 @@ Updates a color according to the mode specified by theType. Throws exception if 
   StringName_s(theColor: OCP.OCP.Quantity.Quantity_NameOfColor) -> str
 
   // ColorFromName_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. ColorFromName_s(theName: str, theColor: OCP.OCP.Quantity.Quantity_NameOfColor) -> bool
-
-Finds color from predefined names. For example, the name of the color which corresponds to "BLACK" is Quantity_NOC_BLACK. Returns FALSE if name is unknown.
-
-2. ColorFromName_s(theColorNameString: str, theColor: OCP.OCP.Quantity.Quantity_Color) -> bool
-
-Finds color from predefined names.
+  // Remarks: Overloaded function. 1. ColorFromName_s(theName: str, theColor: OCP.OCP.Quantity.Quantity_NameOfColor) -> bool Finds color from predefined names. For example, the name of the color which corresponds to "BLACK" is Quantity_NOC_BLACK. Returns FALSE if name is unknown. 2. ColorFromName_s(theColorNameString: str, theColor: OCP.OCP.Quantity.Quantity_Color) -> bool Finds color from predefined names.
   ColorFromName_s(*args, **kwargs)
   ColorFromName_s(theName: str, theColor: OCP.OCP.Quantity.Quantity_NameOfColor) -> bool
   ColorFromName_s(theColorNameString: str, theColor: OCP.OCP.Quantity.Quantity_Color) -> bool
@@ -175,57 +151,25 @@ Finds color from predefined names.
   Argb2color_s(theARGB: int, theColor: OCP.OCP.Quantity.Quantity_Color) -> None
 
   // Convert_LinearRGB_To_sRGB_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Convert_LinearRGB_To_sRGB_s(theLinearValue: float) -> float
-
-Convert linear RGB component into sRGB using OpenGL specs formula (double precision), also known as gamma correction.
-
-2. Convert_LinearRGB_To_sRGB_s(theLinearValue: float) -> float
-
-Convert linear RGB component into sRGB using OpenGL specs formula (single precision), also known as gamma correction.
+  // Remarks: Overloaded function. 1. Convert_LinearRGB_To_sRGB_s(theLinearValue: float) -> float Convert linear RGB component into sRGB using OpenGL specs formula (double precision), also known as gamma correction. 2. Convert_LinearRGB_To_sRGB_s(theLinearValue: float) -> float Convert linear RGB component into sRGB using OpenGL specs formula (single precision), also known as gamma correction.
   Convert_LinearRGB_To_sRGB_s(*args, **kwargs)
   Convert_LinearRGB_To_sRGB_s(theLinearValue: float) -> float
   Convert_LinearRGB_To_sRGB_s(theLinearValue: float) -> float
 
   // Convert_sRGB_To_LinearRGB_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Convert_sRGB_To_LinearRGB_s(thesRGBValue: float) -> float
-
-Convert sRGB component into linear RGB using OpenGL specs formula (double precision), also known as gamma correction.
-
-2. Convert_sRGB_To_LinearRGB_s(thesRGBValue: float) -> float
-
-Convert sRGB component into linear RGB using OpenGL specs formula (single precision), also known as gamma correction.
+  // Remarks: Overloaded function. 1. Convert_sRGB_To_LinearRGB_s(thesRGBValue: float) -> float Convert sRGB component into linear RGB using OpenGL specs formula (double precision), also known as gamma correction. 2. Convert_sRGB_To_LinearRGB_s(thesRGBValue: float) -> float Convert sRGB component into linear RGB using OpenGL specs formula (single precision), also known as gamma correction.
   Convert_sRGB_To_LinearRGB_s(*args, **kwargs)
   Convert_sRGB_To_LinearRGB_s(thesRGBValue: float) -> float
   Convert_sRGB_To_LinearRGB_s(thesRGBValue: float) -> float
 
   // Convert_LinearRGB_To_sRGB_approx22_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Convert_LinearRGB_To_sRGB_approx22_s(theLinearValue: float) -> float
-
-Convert linear RGB component into sRGB using approximated uniform gamma coefficient 2.2.
-
-2. Convert_LinearRGB_To_sRGB_approx22_s(theRGB: OCP.OCP.gp.gp_Vec3f) -> OCP.OCP.gp.gp_Vec3f
-
-Convert linear RGB components into sRGB using approximated uniform gamma coefficient 2.2
+  // Remarks: Overloaded function. 1. Convert_LinearRGB_To_sRGB_approx22_s(theLinearValue: float) -> float Convert linear RGB component into sRGB using approximated uniform gamma coefficient 2.2. 2. Convert_LinearRGB_To_sRGB_approx22_s(theRGB: OCP.OCP.gp.gp_Vec3f) -> OCP.OCP.gp.gp_Vec3f Convert linear RGB components into sRGB using approximated uniform gamma coefficient 2.2
   Convert_LinearRGB_To_sRGB_approx22_s(*args, **kwargs)
   Convert_LinearRGB_To_sRGB_approx22_s(theLinearValue: float) -> float
   Convert_LinearRGB_To_sRGB_approx22_s(theRGB: OCP.OCP.gp.gp_Vec3f) -> OCP.OCP.gp.gp_Vec3f
 
   // Convert_sRGB_To_LinearRGB_approx22_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Convert_sRGB_To_LinearRGB_approx22_s(thesRGBValue: float) -> float
-
-Convert sRGB component into linear RGB using approximated uniform gamma coefficient 2.2
-
-2. Convert_sRGB_To_LinearRGB_approx22_s(theRGB: OCP.OCP.gp.gp_Vec3f) -> OCP.OCP.gp.gp_Vec3f
-
-Convert sRGB components into linear RGB using approximated uniform gamma coefficient 2.2
+  // Remarks: Overloaded function. 1. Convert_sRGB_To_LinearRGB_approx22_s(thesRGBValue: float) -> float Convert sRGB component into linear RGB using approximated uniform gamma coefficient 2.2 2. Convert_sRGB_To_LinearRGB_approx22_s(theRGB: OCP.OCP.gp.gp_Vec3f) -> OCP.OCP.gp.gp_Vec3f Convert sRGB components into linear RGB using approximated uniform gamma coefficient 2.2
   Convert_sRGB_To_LinearRGB_approx22_s(*args, **kwargs)
   Convert_sRGB_To_LinearRGB_approx22_s(thesRGBValue: float) -> float
   Convert_sRGB_To_LinearRGB_approx22_s(theRGB: OCP.OCP.gp.gp_Vec3f) -> OCP.OCP.gp.gp_Vec3f
@@ -259,17 +203,7 @@ Convert sRGB components into linear RGB using approximated uniform gamma coeffic
 Quantity_ColorRGBA
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA) -> None
-
-2. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRgb: OCP.OCP.Quantity.Quantity_Color) -> None
-
-3. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRgb: OCP.OCP.Quantity.Quantity_Color, theAlpha: float) -> None
-
-4. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRgba: OCP.OCP.Graphic3d.Graphic3d_Vec4) -> None
-
-5. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRed: float, theGreen: float, theBlue: float, theAlpha: float) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA) -> None 2. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRgb: OCP.OCP.Quantity.Quantity_Color) -> None 3. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRgb: OCP.OCP.Quantity.Quantity_Color, theAlpha: float) -> None 4. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRgba: OCP.OCP.Graphic3d.Graphic3d_Vec4) -> None 5. __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRed: float, theGreen: float, theBlue: float, theAlpha: float) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA) -> None
   __init__(self: OCP.OCP.Quantity.Quantity_ColorRGBA, theRgb: OCP.OCP.Quantity.Quantity_Color) -> None
@@ -339,17 +273,7 @@ Quantity_ColorRGBA
 
 // Category: Quantity
 // Identifies color definition systems
-// Remarks: Members:
-
-  Quantity_TOC_RGB
-
-  Quantity_TOC_sRGB
-
-  Quantity_TOC_HLS
-
-  Quantity_TOC_CIELab
-
-  Quantity_TOC_CIELch
+// Remarks: Members: Quantity_TOC_RGB Quantity_TOC_sRGB Quantity_TOC_HLS Quantity_TOC_CIELab Quantity_TOC_CIELch
 Quantity_TypeOfColor
 
   // __init__(self

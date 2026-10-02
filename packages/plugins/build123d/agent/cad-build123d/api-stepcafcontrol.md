@@ -27,11 +27,7 @@ STEPCAFControl_Controller
 STEPCAFControl_Reader
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader) -> None
-
-2. __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, WS: OCP.OCP.XSControl.XSControl_WorkSession, scratch: bool = True) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader) -> None 2. __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, WS: OCP.OCP.XSControl.XSControl_WorkSession, scratch: bool = True) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader) -> None
   __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, WS: OCP.OCP.XSControl.XSControl_WorkSession, scratch: bool = True) -> None
@@ -41,15 +37,7 @@ STEPCAFControl_Reader
   Init(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, WS: OCP.OCP.XSControl.XSControl_WorkSession, scratch: bool = True) -> None
 
   // ReadFile(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. ReadFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theFileName: str) -> OCP.OCP.IFSelect.IFSelect_ReturnStatus
-
-Loads a file and returns the read status Provided for use like single-file reader.
-
-2. ReadFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theFileName: str, theParams: DESTEP_Parameters) -> OCP.OCP.IFSelect.IFSelect_ReturnStatus
-
-Loads a file and returns the read status Provided for use like single-file reader.
+  // Remarks: Overloaded function. 1. ReadFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theFileName: str) -> OCP.OCP.IFSelect.IFSelect_ReturnStatus Loads a file and returns the read status Provided for use like single-file reader. 2. ReadFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theFileName: str, theParams: DESTEP_Parameters) -> OCP.OCP.IFSelect.IFSelect_ReturnStatus Loads a file and returns the read status Provided for use like single-file reader.
   ReadFile(*args, **kwargs)
   ReadFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theFileName: str) -> OCP.OCP.IFSelect.IFSelect_ReturnStatus
   ReadFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theFileName: str, theParams: DESTEP_Parameters) -> OCP.OCP.IFSelect.IFSelect_ReturnStatus
@@ -71,19 +59,7 @@ Loads a file and returns the read status Provided for use like single-file reade
   Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, doc: OCP.OCP.TDocStd.TDocStd_Document, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f717df0>) -> bool
 
   // Perform(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: OCP.OCP.TCollection.TCollection_AsciiString, doc: OCP.OCP.TDocStd.TDocStd_Document, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f7cadb0>) -> bool
-
-2. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: OCP.OCP.TCollection.TCollection_AsciiString, doc: OCP.OCP.TDocStd.TDocStd_Document, theParams: DESTEP_Parameters, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f462530>) -> bool
-
-3. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: str, doc: OCP.OCP.TDocStd.TDocStd_Document, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f7c8c70>) -> bool
-
-Translate STEP file given by filename into the document Return True if succeeded, and False in case of fail
-
-4. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: str, doc: OCP.OCP.TDocStd.TDocStd_Document, theParams: DESTEP_Parameters, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f88db30>) -> bool
-
-Translate STEP file given by filename into the document Return True if succeeded, and False in case of fail
+  // Remarks: Overloaded function. 1. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: OCP.OCP.TCollection.TCollection_AsciiString, doc: OCP.OCP.TDocStd.TDocStd_Document, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f7cadb0>) -> bool 2. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: OCP.OCP.TCollection.TCollection_AsciiString, doc: OCP.OCP.TDocStd.TDocStd_Document, theParams: DESTEP_Parameters, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f462530>) -> bool 3. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: str, doc: OCP.OCP.TDocStd.TDocStd_Document, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f7c8c70>) -> bool Translate STEP file given by filename into the document Return True if succeeded, and False in case of fail 4. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: str, doc: OCP.OCP.TDocStd.TDocStd_Document, theParams: DESTEP_Parameters, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f88db30>) -> bool Translate STEP file given by filename into the document Return True if succeeded, and False in case of fail
   Perform(*args, **kwargs)
   Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: OCP.OCP.TCollection.TCollection_AsciiString, doc: OCP.OCP.TDocStd.TDocStd_Document, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f7cadb0>) -> bool
   Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, filename: OCP.OCP.TCollection.TCollection_AsciiString, doc: OCP.OCP.TDocStd.TDocStd_Document, theParams: DESTEP_Parameters, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f462530>) -> bool
@@ -166,15 +142,7 @@ Translate STEP file given by filename into the document Return True if succeeded
   GetViewMode(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader) -> bool
 
   // SetShapeFixParameters(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString) -> None
-
-Sets parameters for shape processing.
-
-2. SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theParameters: OCP.OCP.DE.DE_ShapeFixParameters, theAdditionalParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString = <OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString object at 0x10f5bcdf0>) -> None
-
-Sets parameters for shape processing. Parameters from theParameters are copied to the internal map. Parameters from theAdditionalParameters are copied to the internal map if they are not present in theParameters.
+  // Remarks: Overloaded function. 1. SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString) -> None Sets parameters for shape processing. 2. SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theParameters: OCP.OCP.DE.DE_ShapeFixParameters, theAdditionalParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString = <OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString object at 0x10f5bcdf0>) -> None Sets parameters for shape processing. Parameters from theParameters are copied to the internal map. Parameters from theAdditionalParameters are copied to the internal map if they are not present in theParameters.
   SetShapeFixParameters(*args, **kwargs)
   SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString) -> None
   SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Reader, theParameters: OCP.OCP.DE.DE_ShapeFixParameters, theAdditionalParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString = <OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString object at 0x10f5bcdf0>) -> None

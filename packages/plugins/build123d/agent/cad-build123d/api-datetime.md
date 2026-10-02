@@ -7,8 +7,7 @@
 date
 
   // Create a date from a POSIX timestamp
-  // Remarks: The timestamp is a number, e.g. created via time.time(), that is
-interpreted as local time.
+  // Remarks: The timestamp is a number, e.g. created via time.time(), that is interpreted as local time.
   fromtimestamp(timestamp)
 
   // int -> date corresponding to a proleptic Gregorian ordinal
@@ -55,15 +54,11 @@ interpreted as local time.
 
 // Category: datetime
 // datetime(year, month, day[, hour[, minute[, second[, microsecond[,tzinfo]]]]])
-// Remarks: The year, month and day arguments are required. tzinfo may be None, or an
-instance of a tzinfo subclass. The remaining arguments may be ints.
+// Remarks: The year, month and day arguments are required. tzinfo may be None, or an instance of a tzinfo subclass. The remaining arguments may be ints.
 datetime
 
   // Returns new datetime object representing current time local to tz
-  // Remarks: tz
-    Timezone object.
-
-If no tz is specified, uses local timezone.
+  // Remarks: tz Timezone object. If no tz is specified, uses local timezone.
   now(tz = None)
 
   // Return a new datetime representing UTC day and time
@@ -106,10 +101,7 @@ If no tz is specified, uses local timezone.
   utctimetuple()
 
   // [sep] -> string in ISO 8601 format, YYYY-MM-DDT[HH[:MM[:SS[.mmm[uuu]]]]][+HH:MM]
-  // Remarks: sep is used to separate the year from the time, and defaults to 'T'.
-The optional argument timespec specifies the number of additional terms
-of the time to include. Valid options are 'auto', 'hours', 'minutes',
-'seconds', 'milliseconds' and 'microseconds'.
+  // Remarks: sep is used to separate the year from the time, and defaults to 'T'. The optional argument timespec specifies the number of additional terms of the time to include. Valid options are 'auto', 'hours', 'minutes', 'seconds', 'milliseconds' and 'microseconds'.
   isoformat
 
   // Return self.tzinfo.utcoffset(self)

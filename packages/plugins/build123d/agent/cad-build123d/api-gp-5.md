@@ -7,28 +7,14 @@
 gp_Pnt
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.gp.gp_Pnt) -> None
-
-2. __init__(self: OCP.OCP.gp.gp_Pnt, theCoord: OCP.OCP.gp.gp_XYZ) -> None
-
-3. __init__(self: OCP.OCP.gp.gp_Pnt, theXp: float, theYp: float, theZp: float) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.gp.gp_Pnt) -> None 2. __init__(self: OCP.OCP.gp.gp_Pnt, theCoord: OCP.OCP.gp.gp_XYZ) -> None 3. __init__(self: OCP.OCP.gp.gp_Pnt, theXp: float, theYp: float, theZp: float) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.gp.gp_Pnt) -> None
   __init__(self: OCP.OCP.gp.gp_Pnt, theCoord: OCP.OCP.gp.gp_XYZ) -> None
   __init__(self: OCP.OCP.gp.gp_Pnt, theXp: float, theYp: float, theZp: float) -> None
 
   // SetCoord(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetCoord(self: OCP.OCP.gp.gp_Pnt, theIndex: int, theXi: float) -> None
-
-Changes the coordinate of range theIndex : theIndex = 1 => X is modified theIndex = 2 => Y is modified theIndex = 3 => Z is modified Raised if theIndex != {1, 2, 3}.
-
-2. SetCoord(self: OCP.OCP.gp.gp_Pnt, theXp: float, theYp: float, theZp: float) -> None
-
-For this point, assigns the values theXp, theYp and theZp to its three coordinates.
+  // Remarks: Overloaded function. 1. SetCoord(self: OCP.OCP.gp.gp_Pnt, theIndex: int, theXi: float) -> None Changes the coordinate of range theIndex : theIndex = 1 => X is modified theIndex = 2 => Y is modified theIndex = 3 => Z is modified Raised if theIndex != {1, 2, 3}. 2. SetCoord(self: OCP.OCP.gp.gp_Pnt, theXp: float, theYp: float, theZp: float) -> None For this point, assigns the values theXp, theYp and theZp to its three coordinates.
   SetCoord(*args, **kwargs)
   SetCoord(self: OCP.OCP.gp.gp_Pnt, theIndex: int, theXi: float) -> None
   SetCoord(self: OCP.OCP.gp.gp_Pnt, theXp: float, theYp: float, theZp: float) -> None
@@ -50,19 +36,7 @@ For this point, assigns the values theXp, theYp and theZp to its three coordinat
   SetXYZ(self: OCP.OCP.gp.gp_Pnt, theCoord: OCP.OCP.gp.gp_XYZ) -> None
 
   // Coord(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Coord(self: OCP.OCP.gp.gp_Pnt, theIndex: int) -> float
-
-Returns the coordinate of corresponding to the value of theIndex : theIndex = 1 => X is returned theIndex = 2 => Y is returned theIndex = 3 => Z is returned Raises OutOfRange if theIndex != {1, 2, 3}. Raised if theIndex != {1, 2, 3}.
-
-2. Coord(self: OCP.OCP.gp.gp_Pnt) -> tuple[float, float, float]
-
-For this point gives its three coordinates theXp, theYp and theZp.
-
-3. Coord(self: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_XYZ
-
-For this point, returns its three coordinates as a XYZ object.
+  // Remarks: Overloaded function. 1. Coord(self: OCP.OCP.gp.gp_Pnt, theIndex: int) -> float Returns the coordinate of corresponding to the value of theIndex : theIndex = 1 => X is returned theIndex = 2 => Y is returned theIndex = 3 => Z is returned Raises OutOfRange if theIndex != {1, 2, 3}. Raised if theIndex != {1, 2, 3}. 2. Coord(self: OCP.OCP.gp.gp_Pnt) -> tuple[float, float, float] For this point gives its three coordinates theXp, theYp and theZp. 3. Coord(self: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_XYZ For this point, returns its three coordinates as a XYZ object.
   Coord(*args, **kwargs)
   Coord(self: OCP.OCP.gp.gp_Pnt, theIndex: int) -> float
   Coord(self: OCP.OCP.gp.gp_Pnt) -> tuple[float, float, float]
@@ -89,73 +63,33 @@ For this point, returns its three coordinates as a XYZ object.
   IsEqual(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt, theLinearTolerance: float) -> bool
 
   // Distance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Distance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the distance between two points.
-
-2. Distance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the distance between two points.
+  // Remarks: Overloaded function. 1. Distance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float Computes the distance between two points. 2. Distance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float Computes the distance between two points.
   Distance(*args, **kwargs)
   Distance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float
   Distance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float
 
   // SquareDistance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SquareDistance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the square distance between two points.
-
-2. SquareDistance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the square distance between two points.
+  // Remarks: Overloaded function. 1. SquareDistance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float Computes the square distance between two points. 2. SquareDistance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float Computes the square distance between two points.
   SquareDistance(*args, **kwargs)
   SquareDistance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float
   SquareDistance(self: OCP.OCP.gp.gp_Pnt, theOther: OCP.OCP.gp.gp_Pnt) -> float
 
   // Mirror(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Mirror(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt) -> None
-
-Performs the symmetrical transformation of a point with respect to the point theP which is the center of the symmetry.
-
-2. Mirror(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1) -> None
-
-3. Mirror(self: OCP.OCP.gp.gp_Pnt, theA2: OCP.OCP.gp.gp_Ax2) -> None
+  // Remarks: Overloaded function. 1. Mirror(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt) -> None Performs the symmetrical transformation of a point with respect to the point theP which is the center of the symmetry. 2. Mirror(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1) -> None 3. Mirror(self: OCP.OCP.gp.gp_Pnt, theA2: OCP.OCP.gp.gp_Ax2) -> None
   Mirror(*args, **kwargs)
   Mirror(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt) -> None
   Mirror(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1) -> None
   Mirror(self: OCP.OCP.gp.gp_Pnt, theA2: OCP.OCP.gp.gp_Ax2) -> None
 
   // Mirrored(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Mirrored(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pnt
-
-Performs the symmetrical transformation of a point with respect to an axis placement which is the axis of the symmetry.
-
-2. Mirrored(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Pnt
-
-Performs the symmetrical transformation of a point with respect to a plane. The axis placement theA2 locates the plane of the symmetry : (Location, XDirection, YDirection).
-
-3. Mirrored(self: OCP.OCP.gp.gp_Pnt, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Pnt
-
-Rotates a point. theA1 is the axis of the rotation. theAng is the angular value of the rotation in radians.
+  // Remarks: Overloaded function. 1. Mirrored(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pnt Performs the symmetrical transformation of a point with respect to an axis placement which is the axis of the symmetry. 2. Mirrored(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Pnt Performs the symmetrical transformation of a point with respect to a plane. The axis placement theA2 locates the plane of the symmetry : (Location, XDirection, YDirection). 3. Mirrored(self: OCP.OCP.gp.gp_Pnt, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Pnt Rotates a point. theA1 is the axis of the rotation. theAng is the angular value of the rotation in radians.
   Mirrored(*args, **kwargs)
   Mirrored(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pnt
   Mirrored(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Pnt
   Mirrored(self: OCP.OCP.gp.gp_Pnt, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Pnt
 
   // Rotate(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Rotate(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
-
-2. Rotate(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
+  // Remarks: Overloaded function. 1. Rotate(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None 2. Rotate(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
   Rotate(*args, **kwargs)
   Rotate(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
   Rotate(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
@@ -164,15 +98,7 @@ Rotates a point. theA1 is the axis of the rotation. theAng is the angular value 
   Rotated(self: OCP.OCP.gp.gp_Pnt, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> OCP.OCP.gp.gp_Pnt
 
   // Scale(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Scale(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt, theS: float) -> None
-
-Scales a point. theS is the scaling value.
-
-2. Scale(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt, theS: float) -> None
-
-Scales a point. theS is the scaling value.
+  // Remarks: Overloaded function. 1. Scale(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt, theS: float) -> None Scales a point. theS is the scaling value. 2. Scale(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt, theS: float) -> None Scales a point. theS is the scaling value.
   Scale(*args, **kwargs)
   Scale(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt, theS: float) -> None
   Scale(self: OCP.OCP.gp.gp_Pnt, theP: OCP.OCP.gp.gp_Pnt, theS: float) -> None
@@ -188,32 +114,14 @@ Scales a point. theS is the scaling value.
   Transformed(self: OCP.OCP.gp.gp_Pnt, theT: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.gp.gp_Pnt
 
   // Translate(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Translate(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> None
-
-Translates a point in the direction of the vector theV. The magnitude of the translation is the vector's magnitude.
-
-2. Translate(self: OCP.OCP.gp.gp_Pnt, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
-
-Translates a point from the point theP1 to the point theP2.
-
-3. Translate(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> None
-
-Translates a point in the direction of the vector theV. The magnitude of the translation is the vector's magnitude.
+  // Remarks: Overloaded function. 1. Translate(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> None Translates a point in the direction of the vector theV. The magnitude of the translation is the vector's magnitude. 2. Translate(self: OCP.OCP.gp.gp_Pnt, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None Translates a point from the point theP1 to the point theP2. 3. Translate(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> None Translates a point in the direction of the vector theV. The magnitude of the translation is the vector's magnitude.
   Translate(*args, **kwargs)
   Translate(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> None
   Translate(self: OCP.OCP.gp.gp_Pnt, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
   Translate(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> None
 
   // Translated(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Translated(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Pnt
-
-2. Translated(self: OCP.OCP.gp.gp_Pnt, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pnt
-
-3. Translated(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Pnt
+  // Remarks: Overloaded function. 1. Translated(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Pnt 2. Translated(self: OCP.OCP.gp.gp_Pnt, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pnt 3. Translated(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Pnt
   Translated(*args, **kwargs)
   Translated(self: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Pnt
   Translated(self: OCP.OCP.gp.gp_Pnt, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pnt
@@ -240,19 +148,7 @@ Translates a point in the direction of the vector theV. The magnitude of the tra
 gp_Quaternion
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.gp.gp_Quaternion) -> None
-
-2. __init__(self: OCP.OCP.gp.gp_Quaternion, theX: float, theY: float, theZ: float, theW: float) -> None
-
-3. __init__(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec) -> None
-
-4. __init__(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec, theHelpCrossVec: OCP.OCP.gp.gp_Vec) -> None
-
-5. __init__(self: OCP.OCP.gp.gp_Quaternion, theAxis: OCP.OCP.gp.gp_Vec, theAngle: float) -> None
-
-6. __init__(self: OCP.OCP.gp.gp_Quaternion, theMat: OCP.OCP.gp.gp_Mat) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.gp.gp_Quaternion) -> None 2. __init__(self: OCP.OCP.gp.gp_Quaternion, theX: float, theY: float, theZ: float, theW: float) -> None 3. __init__(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec) -> None 4. __init__(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec, theHelpCrossVec: OCP.OCP.gp.gp_Vec) -> None 5. __init__(self: OCP.OCP.gp.gp_Quaternion, theAxis: OCP.OCP.gp.gp_Vec, theAngle: float) -> None 6. __init__(self: OCP.OCP.gp.gp_Quaternion, theMat: OCP.OCP.gp.gp_Mat) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.gp.gp_Quaternion) -> None
   __init__(self: OCP.OCP.gp.gp_Quaternion, theX: float, theY: float, theZ: float, theW: float) -> None
@@ -266,15 +162,7 @@ gp_Quaternion
   IsEqual(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> bool
 
   // SetRotation(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetRotation(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec) -> None
-
-Sets quaternion to shortest-arc rotation producing vector theVecTo from vector theVecFrom. If vectors theVecFrom and theVecTo are opposite then rotation axis is computed as theVecFrom ^ (1,0,0) or theVecFrom ^ (0,0,1).
-
-2. SetRotation(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec, theHelpCrossVec: OCP.OCP.gp.gp_Vec) -> None
-
-Sets quaternion to shortest-arc rotation producing vector theVecTo from vector theVecFrom. If vectors theVecFrom and theVecTo are opposite then rotation axis is computed as theVecFrom ^ theHelpCrossVec.
+  // Remarks: Overloaded function. 1. SetRotation(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec) -> None Sets quaternion to shortest-arc rotation producing vector theVecTo from vector theVecFrom. If vectors theVecFrom and theVecTo are opposite then rotation axis is computed as theVecFrom ^ (1,0,0) or theVecFrom ^ (0,0,1). 2. SetRotation(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec, theHelpCrossVec: OCP.OCP.gp.gp_Vec) -> None Sets quaternion to shortest-arc rotation producing vector theVecTo from vector theVecFrom. If vectors theVecFrom and theVecTo are opposite then rotation axis is computed as theVecFrom ^ theHelpCrossVec.
   SetRotation(*args, **kwargs)
   SetRotation(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec) -> None
   SetRotation(self: OCP.OCP.gp.gp_Quaternion, theVecFrom: OCP.OCP.gp.gp_Vec, theVecTo: OCP.OCP.gp.gp_Vec, theHelpCrossVec: OCP.OCP.gp.gp_Vec) -> None
@@ -296,15 +184,7 @@ Sets quaternion to shortest-arc rotation producing vector theVecTo from vector t
   SetEulerAngles(self: OCP.OCP.gp.gp_Quaternion, theOrder: OCP.OCP.gp.gp_EulerSequence, theAlpha: float, theBeta: float, theGamma: float) -> None
 
   // Set(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Set(self: OCP.OCP.gp.gp_Quaternion, theX: float, theY: float, theZ: float, theW: float) -> None
-
-2. Set(self: OCP.OCP.gp.gp_Quaternion, theQuaternion: OCP.OCP.gp.gp_Quaternion) -> None
-
-3. Set(self: OCP.OCP.gp.gp_Quaternion, theX: float, theY: float, theZ: float, theW: float) -> None
-
-4. Set(self: OCP.OCP.gp.gp_Quaternion, theQuaternion: OCP.OCP.gp.gp_Quaternion) -> None
+  // Remarks: Overloaded function. 1. Set(self: OCP.OCP.gp.gp_Quaternion, theX: float, theY: float, theZ: float, theW: float) -> None 2. Set(self: OCP.OCP.gp.gp_Quaternion, theQuaternion: OCP.OCP.gp.gp_Quaternion) -> None 3. Set(self: OCP.OCP.gp.gp_Quaternion, theX: float, theY: float, theZ: float, theW: float) -> None 4. Set(self: OCP.OCP.gp.gp_Quaternion, theQuaternion: OCP.OCP.gp.gp_Quaternion) -> None
   Set(*args, **kwargs)
   Set(self: OCP.OCP.gp.gp_Quaternion, theX: float, theY: float, theZ: float, theW: float) -> None
   Set(self: OCP.OCP.gp.gp_Quaternion, theQuaternion: OCP.OCP.gp.gp_Quaternion) -> None
@@ -352,15 +232,7 @@ Sets quaternion to shortest-arc rotation producing vector theVecTo from vector t
   Norm(self: OCP.OCP.gp.gp_Quaternion) -> float
 
   // Scale(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Scale(self: OCP.OCP.gp.gp_Quaternion, theScale: float) -> None
-
-Scale all components by quaternion by theScale; note that rotation is not changed by this operation (except 0-scaling)
-
-2. Scale(self: OCP.OCP.gp.gp_Quaternion, theScale: float) -> None
-
-Scale all components by quaternion by theScale; note that rotation is not changed by this operation (except 0-scaling)
+  // Remarks: Overloaded function. 1. Scale(self: OCP.OCP.gp.gp_Quaternion, theScale: float) -> None Scale all components by quaternion by theScale; note that rotation is not changed by this operation (except 0-scaling) 2. Scale(self: OCP.OCP.gp.gp_Quaternion, theScale: float) -> None Scale all components by quaternion by theScale; note that rotation is not changed by this operation (except 0-scaling)
   Scale(*args, **kwargs)
   Scale(self: OCP.OCP.gp.gp_Quaternion, theScale: float) -> None
   Scale(self: OCP.OCP.gp.gp_Quaternion, theScale: float) -> None
@@ -394,57 +266,25 @@ Scale all components by quaternion by theScale; note that rotation is not change
   Subtracted(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> OCP.OCP.gp.gp_Quaternion
 
   // Multiplied(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Multiplied(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> OCP.OCP.gp.gp_Quaternion
-
-Multiply function - work the same as Matrices multiplying. Result is rotation combination: q' than q (here q=this, q'=theQ). Notices that:
-
-2. Multiplied(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> OCP.OCP.gp.gp_Quaternion
-
-Multiply function - work the same as Matrices multiplying. Result is rotation combination: q' than q (here q=this, q'=theQ). Notices that:
+  // Remarks: Overloaded function. 1. Multiplied(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> OCP.OCP.gp.gp_Quaternion Multiply function - work the same as Matrices multiplying. Result is rotation combination: q' than q (here q=this, q'=theQ). Notices that: 2. Multiplied(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> OCP.OCP.gp.gp_Quaternion Multiply function - work the same as Matrices multiplying. Result is rotation combination: q' than q (here q=this, q'=theQ). Notices that:
   Multiplied(*args, **kwargs)
   Multiplied(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> OCP.OCP.gp.gp_Quaternion
   Multiplied(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> OCP.OCP.gp.gp_Quaternion
 
   // Add(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Add(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None
-
-Adds components of other quaternion; result is "rotations mix"
-
-2. Add(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> None
-
-Adds components of other quaternion; result is "rotations mix"
+  // Remarks: Overloaded function. 1. Add(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None Adds components of other quaternion; result is "rotations mix" 2. Add(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> None Adds components of other quaternion; result is "rotations mix"
   Add(*args, **kwargs)
   Add(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None
   Add(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> None
 
   // Subtract(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Subtract(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None
-
-Subtracts components of other quaternion; result is "rotations mix"
-
-2. Subtract(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> None
-
-Subtracts components of other quaternion; result is "rotations mix"
+  // Remarks: Overloaded function. 1. Subtract(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None Subtracts components of other quaternion; result is "rotations mix" 2. Subtract(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> None Subtracts components of other quaternion; result is "rotations mix"
   Subtract(*args, **kwargs)
   Subtract(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None
   Subtract(self: OCP.OCP.gp.gp_Quaternion, theQ: OCP.OCP.gp.gp_Quaternion) -> None
 
   // Multiply(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Multiply(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None
-
-Adds rotation by multiplication
-
-2. Multiply(self: OCP.OCP.gp.gp_Quaternion, theVec: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Vec
-
-Rotates vector by quaternion as rotation operator
+  // Remarks: Overloaded function. 1. Multiply(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None Adds rotation by multiplication 2. Multiply(self: OCP.OCP.gp.gp_Quaternion, theVec: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Vec Rotates vector by quaternion as rotation operator
   Multiply(*args, **kwargs)
   Multiply(self: OCP.OCP.gp.gp_Quaternion, theOther: OCP.OCP.gp.gp_Quaternion) -> None
   Multiply(self: OCP.OCP.gp.gp_Quaternion, theVec: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Vec

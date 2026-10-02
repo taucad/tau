@@ -44,16 +44,7 @@ CenterOf
 
 // Category: build_enums
 // Continuity level for evaluating geometric connections
-// Remarks: Used to determine how smoothly adjacent geometry joins together,
-such as at shared vertices between edges or shared edges between faces.
-
-Levels:
-
-- C0 (G0): Positional continuity—elements meet at a point but may have sharp angles.
-- C1 (G1): Tangent continuity—elements have the same tangent direction at the junction.
-- C2 (G2): Curvature continuity—elements have matching curvature at the junction.
-
-These levels correspond to common CAD definitions and are compatible with OCCT's GeomAbs_Shape.
+// Remarks: Used to determine how smoothly adjacent geometry joins together, such as at shared vertices between edges or shared edges between faces. Levels: - C0 (G0): Positional continuity—elements meet at a point but may have sharp angles. - C1 (G1): Tangent continuity—elements have the same tangent direction at the junction. - C2 (G2): Curvature continuity—elements have matching curvature at the junction. These levels correspond to common CAD definitions and are compatible with OCCT's GeomAbs_Shape.
 ContinuityLevel
 
   C0
@@ -296,11 +287,7 @@ PositionMode
 
 // Category: build_enums
 // When you export a model to a STEP file, the precision of the geometric data
-// Remarks: (such as the coordinates of points, the definitions of curves and surfaces, etc.)
-can significantly impact the file size and the fidelity of the model when it is
-imported into another CAD system. Higher precision means that the geometric
-data is described with more detail, which can improve the accuracy of the model
-in the target system but can also increase the file size.
+// Remarks: (such as the coordinates of points, the definitions of curves and surfaces, etc.) can significantly impact the file size and the fidelity of the model when it is imported into another CAD system. Higher precision means that the geometric data is described with more detail, which can improve the accuracy of the model in the target system but can also increase the file size.
 PrecisionMode
 
   SESSION

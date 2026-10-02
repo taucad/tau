@@ -10,62 +10,14 @@ BRepTools
   __init__(self: OCP.OCP.BRepTools.BRepTools) -> None
 
   // AddUVBounds_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, B: OCP.OCP.Bnd.Bnd_Box2d) -> None
-
-Adds to the box <B> the bounding values in the parametric space of F.
-
-2. AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire, B: OCP.OCP.Bnd.Bnd_Box2d) -> None
-
-Adds to the box <B> the bounding values of the wire in the parametric space of F.
-
-3. AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, E: OCP.OCP.TopoDS.TopoDS_Edge, B: OCP.OCP.Bnd.Bnd_Box2d) -> None
-
-Adds to the box <B> the bounding values of the edge in the parametric space of F.
+  // Remarks: Overloaded function. 1. AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, B: OCP.OCP.Bnd.Bnd_Box2d) -> None Adds to the box <B> the bounding values in the parametric space of F. 2. AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire, B: OCP.OCP.Bnd.Bnd_Box2d) -> None Adds to the box <B> the bounding values of the wire in the parametric space of F. 3. AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, E: OCP.OCP.TopoDS.TopoDS_Edge, B: OCP.OCP.Bnd.Bnd_Box2d) -> None Adds to the box <B> the bounding values of the edge in the parametric space of F.
   AddUVBounds_s(*args, **kwargs)
   AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, B: OCP.OCP.Bnd.Bnd_Box2d) -> None
   AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire, B: OCP.OCP.Bnd.Bnd_Box2d) -> None
   AddUVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, E: OCP.OCP.TopoDS.TopoDS_Edge, B: OCP.OCP.Bnd.Bnd_Box2d) -> None
 
   // Update_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Update_s(V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None
-
-Update a vertex (nothing is done)
-
-2. Update_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> None
-
-Update an edge, compute 2d bounding boxes.
-
-3. Update_s(W: OCP.OCP.TopoDS.TopoDS_Wire) -> None
-
-Update a wire (nothing is done)
-
-4. Update_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> None
-
-Update a Face, update UV points.
-
-5. Update_s(S: OCP.OCP.TopoDS.TopoDS_Shell) -> None
-
-Update a shell (nothing is done)
-
-6. Update_s(S: OCP.OCP.TopoDS.TopoDS_Solid) -> None
-
-Update a solid (nothing is done)
-
-7. Update_s(C: OCP.OCP.TopoDS.TopoDS_CompSolid) -> None
-
-Update a composite solid (nothing is done)
-
-8. Update_s(C: OCP.OCP.TopoDS.TopoDS_Compound) -> None
-
-Update a compound (nothing is done)
-
-9. Update_s(S: OCP.OCP.TopoDS.TopoDS_Shape) -> None
-
-Update a shape, call the correct update.
+  // Remarks: Overloaded function. 1. Update_s(V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None Update a vertex (nothing is done) 2. Update_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> None Update an edge, compute 2d bounding boxes. 3. Update_s(W: OCP.OCP.TopoDS.TopoDS_Wire) -> None Update a wire (nothing is done) 4. Update_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> None Update a Face, update UV points. 5. Update_s(S: OCP.OCP.TopoDS.TopoDS_Shell) -> None Update a shell (nothing is done) 6. Update_s(S: OCP.OCP.TopoDS.TopoDS_Solid) -> None Update a solid (nothing is done) 7. Update_s(C: OCP.OCP.TopoDS.TopoDS_CompSolid) -> None Update a composite solid (nothing is done) 8. Update_s(C: OCP.OCP.TopoDS.TopoDS_Compound) -> None Update a compound (nothing is done) 9. Update_s(S: OCP.OCP.TopoDS.TopoDS_Shape) -> None Update a shape, call the correct update.
   Update_s(*args, **kwargs)
   Update_s(V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None
   Update_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> None
@@ -118,15 +70,7 @@ Update a shape, call the correct update.
   UnloadAllTriangulations_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
 
   // Compare_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Compare_s(V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex) -> bool
-
-Returns True if the distance between the two vertices is lower than their tolerance.
-
-2. Compare_s(E1: OCP.OCP.TopoDS.TopoDS_Edge, E2: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
-
-Returns True if the distance between the two edges is lower than their tolerance.
+  // Remarks: Overloaded function. 1. Compare_s(V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex) -> bool Returns True if the distance between the two vertices is lower than their tolerance. 2. Compare_s(E1: OCP.OCP.TopoDS.TopoDS_Edge, E2: OCP.OCP.TopoDS.TopoDS_Edge) -> bool Returns True if the distance between the two edges is lower than their tolerance.
   Compare_s(*args, **kwargs)
   Compare_s(V1: OCP.OCP.TopoDS.TopoDS_Vertex, V2: OCP.OCP.TopoDS.TopoDS_Vertex) -> bool
   Compare_s(E1: OCP.OCP.TopoDS.TopoDS_Edge, E2: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
@@ -148,23 +92,7 @@ Returns True if the distance between the two edges is lower than their tolerance
   Dump_s(Sh: OCP.OCP.TopoDS.TopoDS_Shape, S: io.BytesIO) -> None
 
   // Write_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theStream: io.BytesIO, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f1428b0>) -> None
-
-Writes the shape to the stream in an ASCII format TopTools_FormatVersion_VERSION_1. This alias writes shape with triangulation data.
-
-2. Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theStream: io.BytesIO, theWithTriangles: bool, theWithNormals: bool, theVersion: OCP.OCP.TopTools.TopTools_FormatVersion, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f185ff0>) -> None
-
-Writes the shape to the stream in an ASCII format of specified version.
-
-3. Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theFile: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f1570b0>) -> bool
-
-Writes the shape to the file in an ASCII format TopTools_FormatVersion_VERSION_1. This alias writes shape with triangulation data.
-
-4. Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theFile: str, theWithTriangles: bool, theWithNormals: bool, theVersion: OCP.OCP.TopTools.TopTools_FormatVersion, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10ec3dd70>) -> bool
-
-Writes the shape to the file in an ASCII format of specified version.
+  // Remarks: Overloaded function. 1. Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theStream: io.BytesIO, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f1428b0>) -> None Writes the shape to the stream in an ASCII format TopTools_FormatVersion_VERSION_1. This alias writes shape with triangulation data. 2. Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theStream: io.BytesIO, theWithTriangles: bool, theWithNormals: bool, theVersion: OCP.OCP.TopTools.TopTools_FormatVersion, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f185ff0>) -> None Writes the shape to the stream in an ASCII format of specified version. 3. Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theFile: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f1570b0>) -> bool Writes the shape to the file in an ASCII format TopTools_FormatVersion_VERSION_1. This alias writes shape with triangulation data. 4. Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theFile: str, theWithTriangles: bool, theWithNormals: bool, theVersion: OCP.OCP.TopTools.TopTools_FormatVersion, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10ec3dd70>) -> bool Writes the shape to the file in an ASCII format of specified version.
   Write_s(*args, **kwargs)
   Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theStream: io.BytesIO, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f1428b0>) -> None
   Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theStream: io.BytesIO, theWithTriangles: bool, theWithNormals: bool, theVersion: OCP.OCP.TopTools.TopTools_FormatVersion, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f185ff0>) -> None
@@ -172,15 +100,7 @@ Writes the shape to the file in an ASCII format of specified version.
   Write_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theFile: str, theWithTriangles: bool, theWithNormals: bool, theVersion: OCP.OCP.TopTools.TopTools_FormatVersion, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10ec3dd70>) -> bool
 
   // Read_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Read_s(Sh: OCP.OCP.TopoDS.TopoDS_Shape, S: io.BytesIO, B: OCP.OCP.BRep.BRep_Builder, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f0500b0>) -> None
-
-Reads a Shape from <S> in returns it in <Sh>. <B> is used to build the shape.
-
-2. Read_s(Sh: OCP.OCP.TopoDS.TopoDS_Shape, File: str, B: OCP.OCP.BRep.BRep_Builder, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f0218f0>) -> bool
-
-Reads a Shape from <File>, returns it in <Sh>. <B> is used to build the shape.
+  // Remarks: Overloaded function. 1. Read_s(Sh: OCP.OCP.TopoDS.TopoDS_Shape, S: io.BytesIO, B: OCP.OCP.BRep.BRep_Builder, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f0500b0>) -> None Reads a Shape from <S> in returns it in <Sh>. <B> is used to build the shape. 2. Read_s(Sh: OCP.OCP.TopoDS.TopoDS_Shape, File: str, B: OCP.OCP.BRep.BRep_Builder, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f0218f0>) -> bool Reads a Shape from <File>, returns it in <Sh>. <B> is used to build the shape.
   Read_s(*args, **kwargs)
   Read_s(Sh: OCP.OCP.TopoDS.TopoDS_Shape, S: io.BytesIO, B: OCP.OCP.BRep.BRep_Builder, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f0500b0>) -> None
   Read_s(Sh: OCP.OCP.TopoDS.TopoDS_Shape, File: str, B: OCP.OCP.BRep.BRep_Builder, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f0218f0>) -> bool
@@ -202,19 +122,7 @@ Reads a Shape from <File>, returns it in <Sh>. <B> is used to build the shape.
   CheckLocations_s(theS: OCP.OCP.TopoDS.TopoDS_Shape, theProblemShapes: OCP.OCP.TopTools.TopTools_ListOfShape) -> None
 
   // UVBounds_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. UVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> tuple[float, float, float, float]
-
-Returns in UMin, UMax, VMin, VMax the bounding values in the parametric space of F.
-
-2. UVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire) -> tuple[float, float, float, float]
-
-Returns in UMin, UMax, VMin, VMax the bounding values of the wire in the parametric space of F.
-
-3. UVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, E: OCP.OCP.TopoDS.TopoDS_Edge) -> tuple[float, float, float, float]
-
-Returns in UMin, UMax, VMin, VMax the bounding values of the edge in the parametric space of F.
+  // Remarks: Overloaded function. 1. UVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> tuple[float, float, float, float] Returns in UMin, UMax, VMin, VMax the bounding values in the parametric space of F. 2. UVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire) -> tuple[float, float, float, float] Returns in UMin, UMax, VMin, VMax the bounding values of the wire in the parametric space of F. 3. UVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, E: OCP.OCP.TopoDS.TopoDS_Edge) -> tuple[float, float, float, float] Returns in UMin, UMax, VMin, VMax the bounding values of the edge in the parametric space of F.
   UVBounds_s(*args, **kwargs)
   UVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> tuple[float, float, float, float]
   UVBounds_s(F: OCP.OCP.TopoDS.TopoDS_Face, W: OCP.OCP.TopoDS.TopoDS_Wire) -> tuple[float, float, float, float]
@@ -229,32 +137,14 @@ Returns in UMin, UMax, VMin, VMax the bounding values of the edge in the paramet
 BRepTools_WireExplorer
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer) -> None
-
-2. __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None
-
-3. __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer) -> None 2. __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None 3. __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer) -> None
   __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None
   __init__(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
 
   // Init(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Init(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None
-
-Initializes an exploration of the wire <W>.
-
-2. Init(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
-
-Initializes an exploration of the wire <W>. F is used to select the edge connected to the previous in the parametric representation of <F>.
-
-3. Init(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire, F: OCP.OCP.TopoDS.TopoDS_Face, UMin: float, UMax: float, VMin: float, VMax: float) -> None
-
-Initializes an exploration of the wire <W>. F is used to select the edge connected to the previous in the parametric representation of <F>. <UMIn>, <UMax>, <VMin>, <VMax> - the UV bounds of the face <F>.
+  // Remarks: Overloaded function. 1. Init(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None Initializes an exploration of the wire <W>. 2. Init(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire, F: OCP.OCP.TopoDS.TopoDS_Face) -> None Initializes an exploration of the wire <W>. F is used to select the edge connected to the previous in the parametric representation of <F>. 3. Init(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire, F: OCP.OCP.TopoDS.TopoDS_Face, UMin: float, UMax: float, VMin: float, VMax: float) -> None Initializes an exploration of the wire <W>. F is used to select the edge connected to the previous in the parametric representation of <F>. <UMIn>, <UMax>, <VMin>, <VMax> - the UV bounds of the face <F>.
   Init(*args, **kwargs)
   Init(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire) -> None
   Init(self: OCP.OCP.BRepTools.BRepTools_WireExplorer, W: OCP.OCP.TopoDS.TopoDS_Wire, F: OCP.OCP.TopoDS.TopoDS_Face) -> None

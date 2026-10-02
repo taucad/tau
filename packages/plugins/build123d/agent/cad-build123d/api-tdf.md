@@ -10,71 +10,31 @@ TDF_Label
   __init__(self: OCP.OCP.TDF.TDF_Label) -> None
 
   // Nullify(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Nullify(self: OCP.OCP.TDF.TDF_Label) -> None
-
-Nullifies the label.
-
-2. Nullify(self: OCP.OCP.TDF.TDF_Label) -> None
-
-Nullifies the label.
+  // Remarks: Overloaded function. 1. Nullify(self: OCP.OCP.TDF.TDF_Label) -> None Nullifies the label. 2. Nullify(self: OCP.OCP.TDF.TDF_Label) -> None Nullifies the label.
   Nullify(*args, **kwargs)
   Nullify(self: OCP.OCP.TDF.TDF_Label) -> None
   Nullify(self: OCP.OCP.TDF.TDF_Label) -> None
 
   // Data(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Data(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Data
-
-Returns the Data owning <me>.
-
-2. Data(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Data
-
-Returns the Data owning <me>.
+  // Remarks: Overloaded function. 1. Data(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Data Returns the Data owning <me>. 2. Data(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Data Returns the Data owning <me>.
   Data(*args, **kwargs)
   Data(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Data
   Data(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Data
 
   // Tag(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Tag(self: OCP.OCP.TDF.TDF_Label) -> int
-
-Returns the tag of the label. This is the integer assigned randomly to a label in a data framework. This integer is used to identify this label in an entry.
-
-2. Tag(self: OCP.OCP.TDF.TDF_Label) -> int
-
-Returns the tag of the label. This is the integer assigned randomly to a label in a data framework. This integer is used to identify this label in an entry.
+  // Remarks: Overloaded function. 1. Tag(self: OCP.OCP.TDF.TDF_Label) -> int Returns the tag of the label. This is the integer assigned randomly to a label in a data framework. This integer is used to identify this label in an entry. 2. Tag(self: OCP.OCP.TDF.TDF_Label) -> int Returns the tag of the label. This is the integer assigned randomly to a label in a data framework. This integer is used to identify this label in an entry.
   Tag(*args, **kwargs)
   Tag(self: OCP.OCP.TDF.TDF_Label) -> int
   Tag(self: OCP.OCP.TDF.TDF_Label) -> int
 
   // Father(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Father(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
-
-Returns the label father. This label may be null if the label is root.
-
-2. Father(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
-
-Returns the label father. This label may be null if the label is root.
+  // Remarks: Overloaded function. 1. Father(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label Returns the label father. This label may be null if the label is root. 2. Father(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label Returns the label father. This label may be null if the label is root.
   Father(*args, **kwargs)
   Father(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
   Father(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
 
   // IsNull(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsNull(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns True if the <aLabel> is null, i.e. it has not been included in the data framework.
-
-2. IsNull(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns True if the <aLabel> is null, i.e. it has not been included in the data framework.
+  // Remarks: Overloaded function. 1. IsNull(self: OCP.OCP.TDF.TDF_Label) -> bool Returns True if the <aLabel> is null, i.e. it has not been included in the data framework. 2. IsNull(self: OCP.OCP.TDF.TDF_Label) -> bool Returns True if the <aLabel> is null, i.e. it has not been included in the data framework.
   IsNull(*args, **kwargs)
   IsNull(self: OCP.OCP.TDF.TDF_Label) -> bool
   IsNull(self: OCP.OCP.TDF.TDF_Label) -> bool
@@ -84,49 +44,25 @@ Returns True if the <aLabel> is null, i.e. it has not been included in the data 
   Imported(self: OCP.OCP.TDF.TDF_Label, aStatus: bool) -> None
 
   // IsImported(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsImported(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns True if the <aLabel> is imported.
-
-2. IsImported(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns True if the <aLabel> is imported.
+  // Remarks: Overloaded function. 1. IsImported(self: OCP.OCP.TDF.TDF_Label) -> bool Returns True if the <aLabel> is imported. 2. IsImported(self: OCP.OCP.TDF.TDF_Label) -> bool Returns True if the <aLabel> is imported.
   IsImported(*args, **kwargs)
   IsImported(self: OCP.OCP.TDF.TDF_Label) -> bool
   IsImported(self: OCP.OCP.TDF.TDF_Label) -> bool
 
   // IsEqual(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsEqual(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns True if the <aLabel> is equal to me (same LabelNode*).
-
-2. IsEqual(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns True if the <aLabel> is equal to me (same LabelNode*).
+  // Remarks: Overloaded function. 1. IsEqual(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool Returns True if the <aLabel> is equal to me (same LabelNode*). 2. IsEqual(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool Returns True if the <aLabel> is equal to me (same LabelNode*).
   IsEqual(*args, **kwargs)
   IsEqual(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
   IsEqual(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
 
   // IsDifferent(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsDifferent(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
-
-2. IsDifferent(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
+  // Remarks: Overloaded function. 1. IsDifferent(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool 2. IsDifferent(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
   IsDifferent(*args, **kwargs)
   IsDifferent(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
   IsDifferent(self: OCP.OCP.TDF.TDF_Label, aLabel: OCP.OCP.TDF.TDF_Label) -> bool
 
   // IsRoot(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsRoot(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-2. IsRoot(self: OCP.OCP.TDF.TDF_Label) -> bool
+  // Remarks: Overloaded function. 1. IsRoot(self: OCP.OCP.TDF.TDF_Label) -> bool 2. IsRoot(self: OCP.OCP.TDF.TDF_Label) -> bool
   IsRoot(*args, **kwargs)
   IsRoot(self: OCP.OCP.TDF.TDF_Label) -> bool
   IsRoot(self: OCP.OCP.TDF.TDF_Label) -> bool
@@ -140,15 +76,7 @@ Returns True if the <aLabel> is equal to me (same LabelNode*).
   AddAttribute(self: OCP.OCP.TDF.TDF_Label, anAttribute: OCP.OCP.TDF.TDF_Attribute, append: bool = True) -> None
 
   // ForgetAttribute(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. ForgetAttribute(self: OCP.OCP.TDF.TDF_Label, anAttribute: OCP.OCP.TDF.TDF_Attribute) -> None
-
-Forgets an Attribute from the current label, setting its forgotten status true and its valid status false. Raises if the attribute is not in the structure.
-
-2. ForgetAttribute(self: OCP.OCP.TDF.TDF_Label, aguid: OCP.OCP.Standard.Standard_GUID) -> bool
-
-Forgets the Attribute of GUID <aguid> from the current label . If the attribute doesn't exist returns False. Otherwise returns True.
+  // Remarks: Overloaded function. 1. ForgetAttribute(self: OCP.OCP.TDF.TDF_Label, anAttribute: OCP.OCP.TDF.TDF_Attribute) -> None Forgets an Attribute from the current label, setting its forgotten status true and its valid status false. Raises if the attribute is not in the structure. 2. ForgetAttribute(self: OCP.OCP.TDF.TDF_Label, aguid: OCP.OCP.Standard.Standard_GUID) -> bool Forgets the Attribute of GUID <aguid> from the current label . If the attribute doesn't exist returns False. Otherwise returns True.
   ForgetAttribute(*args, **kwargs)
   ForgetAttribute(self: OCP.OCP.TDF.TDF_Label, anAttribute: OCP.OCP.TDF.TDF_Attribute) -> None
   ForgetAttribute(self: OCP.OCP.TDF.TDF_Label, aguid: OCP.OCP.Standard.Standard_GUID) -> bool
@@ -162,29 +90,13 @@ Forgets the Attribute of GUID <aguid> from the current label . If the attribute 
   ResumeAttribute(self: OCP.OCP.TDF.TDF_Label, anAttribute: OCP.OCP.TDF.TDF_Attribute) -> None
 
   // MayBeModified(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. MayBeModified(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns true if <me> or a DESCENDANT of <me> owns attributes not yet available in transaction 0. It means at least one of their attributes is new, modified or deleted.
-
-2. MayBeModified(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns true if <me> or a DESCENDANT of <me> owns attributes not yet available in transaction 0. It means at least one of their attributes is new, modified or deleted.
+  // Remarks: Overloaded function. 1. MayBeModified(self: OCP.OCP.TDF.TDF_Label) -> bool Returns true if <me> or a DESCENDANT of <me> owns attributes not yet available in transaction 0. It means at least one of their attributes is new, modified or deleted. 2. MayBeModified(self: OCP.OCP.TDF.TDF_Label) -> bool Returns true if <me> or a DESCENDANT of <me> owns attributes not yet available in transaction 0. It means at least one of their attributes is new, modified or deleted.
   MayBeModified(*args, **kwargs)
   MayBeModified(self: OCP.OCP.TDF.TDF_Label) -> bool
   MayBeModified(self: OCP.OCP.TDF.TDF_Label) -> bool
 
   // AttributesModified(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. AttributesModified(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns true if <me> owns attributes not yet available in transaction 0. It means at least one attribute is new, modified or deleted.
-
-2. AttributesModified(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns true if <me> owns attributes not yet available in transaction 0. It means at least one attribute is new, modified or deleted.
+  // Remarks: Overloaded function. 1. AttributesModified(self: OCP.OCP.TDF.TDF_Label) -> bool Returns true if <me> owns attributes not yet available in transaction 0. It means at least one attribute is new, modified or deleted. 2. AttributesModified(self: OCP.OCP.TDF.TDF_Label) -> bool Returns true if <me> owns attributes not yet available in transaction 0. It means at least one attribute is new, modified or deleted.
   AttributesModified(*args, **kwargs)
   AttributesModified(self: OCP.OCP.TDF.TDF_Label) -> bool
   AttributesModified(self: OCP.OCP.TDF.TDF_Label) -> bool
@@ -210,15 +122,7 @@ Returns true if <me> owns attributes not yet available in transaction 0. It mean
   Root(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
 
   // HasChild(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. HasChild(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns true if this label has at least one child.
-
-2. HasChild(self: OCP.OCP.TDF.TDF_Label) -> bool
-
-Returns true if this label has at least one child.
+  // Remarks: Overloaded function. 1. HasChild(self: OCP.OCP.TDF.TDF_Label) -> bool Returns true if this label has at least one child. 2. HasChild(self: OCP.OCP.TDF.TDF_Label) -> bool Returns true if this label has at least one child.
   HasChild(*args, **kwargs)
   HasChild(self: OCP.OCP.TDF.TDF_Label) -> bool
   HasChild(self: OCP.OCP.TDF.TDF_Label) -> bool
@@ -232,15 +136,7 @@ Returns true if this label has at least one child.
   FindChild(self: OCP.OCP.TDF.TDF_Label, aTag: int, create: bool = True) -> OCP.OCP.TDF.TDF_Label
 
   // NewChild(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. NewChild(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
-
-Create a new child label of me using autoamtic delivery tags provided by TagSource.
-
-2. NewChild(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
-
-Create a new child label of me using autoamtic delivery tags provided by TagSource.
+  // Remarks: Overloaded function. 1. NewChild(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label Create a new child label of me using autoamtic delivery tags provided by TagSource. 2. NewChild(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label Create a new child label of me using autoamtic delivery tags provided by TagSource.
   NewChild(*args, **kwargs)
   NewChild(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
   NewChild(self: OCP.OCP.TDF.TDF_Label) -> OCP.OCP.TDF.TDF_Label
@@ -278,13 +174,7 @@ Create a new child label of me using autoamtic delivery tags provided by TagSour
 TDF_LabelSequence
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.TDF.TDF_LabelSequence) -> None
-
-2. __init__(self: OCP.OCP.TDF.TDF_LabelSequence, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator) -> None
-
-3. __init__(self: OCP.OCP.TDF.TDF_LabelSequence, theOther: OCP.OCP.TDF.TDF_LabelSequence) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.TDF.TDF_LabelSequence) -> None 2. __init__(self: OCP.OCP.TDF.TDF_LabelSequence, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator) -> None 3. __init__(self: OCP.OCP.TDF.TDF_LabelSequence, theOther: OCP.OCP.TDF.TDF_LabelSequence) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.TDF.TDF_LabelSequence) -> None
   __init__(self: OCP.OCP.TDF.TDF_LabelSequence, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator) -> None
@@ -327,71 +217,31 @@ TDF_LabelSequence
   Assign(self: OCP.OCP.TDF.TDF_LabelSequence, theOther: OCP.OCP.TDF.TDF_LabelSequence) -> OCP.OCP.TDF.TDF_LabelSequence
 
   // Remove(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Remove(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int) -> None
-
-Remove one item
-
-2. Remove(self: OCP.OCP.TDF.TDF_LabelSequence, theFromIndex: int, theToIndex: int) -> None
-
-Remove range of items
+  // Remarks: Overloaded function. 1. Remove(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int) -> None Remove one item 2. Remove(self: OCP.OCP.TDF.TDF_LabelSequence, theFromIndex: int, theToIndex: int) -> None Remove range of items
   Remove(*args, **kwargs)
   Remove(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int) -> None
   Remove(self: OCP.OCP.TDF.TDF_LabelSequence, theFromIndex: int, theToIndex: int) -> None
 
   // Append(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Append(self: OCP.OCP.TDF.TDF_LabelSequence, theItem: OCP.OCP.TDF.TDF_Label) -> None
-
-Append one item
-
-2. Append(self: OCP.OCP.TDF.TDF_LabelSequence, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None
-
-Append another sequence (making it empty)
+  // Remarks: Overloaded function. 1. Append(self: OCP.OCP.TDF.TDF_LabelSequence, theItem: OCP.OCP.TDF.TDF_Label) -> None Append one item 2. Append(self: OCP.OCP.TDF.TDF_LabelSequence, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None Append another sequence (making it empty)
   Append(*args, **kwargs)
   Append(self: OCP.OCP.TDF.TDF_LabelSequence, theItem: OCP.OCP.TDF.TDF_Label) -> None
   Append(self: OCP.OCP.TDF.TDF_LabelSequence, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None
 
   // Prepend(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Prepend(self: OCP.OCP.TDF.TDF_LabelSequence, theItem: OCP.OCP.TDF.TDF_Label) -> None
-
-Prepend one item
-
-2. Prepend(self: OCP.OCP.TDF.TDF_LabelSequence, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None
-
-Prepend another sequence (making it empty)
+  // Remarks: Overloaded function. 1. Prepend(self: OCP.OCP.TDF.TDF_LabelSequence, theItem: OCP.OCP.TDF.TDF_Label) -> None Prepend one item 2. Prepend(self: OCP.OCP.TDF.TDF_LabelSequence, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None Prepend another sequence (making it empty)
   Prepend(*args, **kwargs)
   Prepend(self: OCP.OCP.TDF.TDF_LabelSequence, theItem: OCP.OCP.TDF.TDF_Label) -> None
   Prepend(self: OCP.OCP.TDF.TDF_LabelSequence, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None
 
   // InsertBefore(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. InsertBefore(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theItem: OCP.OCP.TDF.TDF_Label) -> None
-
-InsertBefore theIndex theItem
-
-2. InsertBefore(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None
-
-InsertBefore theIndex another sequence (making it empty)
+  // Remarks: Overloaded function. 1. InsertBefore(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theItem: OCP.OCP.TDF.TDF_Label) -> None InsertBefore theIndex theItem 2. InsertBefore(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None InsertBefore theIndex another sequence (making it empty)
   InsertBefore(*args, **kwargs)
   InsertBefore(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theItem: OCP.OCP.TDF.TDF_Label) -> None
   InsertBefore(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None
 
   // InsertAfter(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. InsertAfter(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None
-
-InsertAfter theIndex another sequence (making it empty)
-
-2. InsertAfter(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theItem: OCP.OCP.TDF.TDF_Label) -> None
-
-InsertAfter theIndex theItem
+  // Remarks: Overloaded function. 1. InsertAfter(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None InsertAfter theIndex another sequence (making it empty) 2. InsertAfter(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theItem: OCP.OCP.TDF.TDF_Label) -> None InsertAfter theIndex theItem
   InsertAfter(*args, **kwargs)
   InsertAfter(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theSeq: OCP.OCP.TDF.TDF_LabelSequence) -> None
   InsertAfter(self: OCP.OCP.TDF.TDF_LabelSequence, theIndex: int, theItem: OCP.OCP.TDF.TDF_Label) -> None

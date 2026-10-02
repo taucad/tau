@@ -23,8 +23,7 @@ helix(
 
 // Category: std
 // Offset a plane by a distance along its normal
-// Remarks: For example, if you offset the `XZ` plane by 10, the new plane will be parallel to the `XZ`
-plane and 10 units away from it.
+// Remarks: For example, if you offset the `XZ` plane by 10, the new plane will be parallel to the `XZ` plane and 10 units away from it.
 offsetPlane(
   @plane: Plane,
   offset: number(Length),
@@ -34,14 +33,7 @@ offsetPlane(
 
 // Category: std
 // Clone a sketch or solid
-// Remarks: This works essentially like a copy-paste operation. It creates a perfect replica
-at that point in time that you can manipulate individually afterwards.
-
-This doesn't really have much utility unless you need the equivalent of a double
-instance pattern with zero transformations.
-
-Really only use this function if YOU ARE SURE you need it. In most cases you
-do not need clone and using a pattern with `instance = 2` is more appropriate.
+// Remarks: This works essentially like a copy-paste operation. It creates a perfect replica at that point in time that you can manipulate individually afterwards. This doesn't really have much utility unless you need the equivalent of a double instance pattern with zero transformations. Really only use this function if YOU ARE SURE you need it. In most cases you do not need clone and using a pattern with `instance = 2` is more appropriate.
 clone(@geometry: Sketch | Solid | ImportedGeometry): Sketch | Solid | ImportedGeometry
 //   @geometry: The sketch, solid, or imported geometry to be cloned
 
@@ -117,9 +109,5 @@ MERGE: string
 
 // Category: std
 // The KCL standard library
-// Remarks: Contains frequently used constants, functions for interacting with the KittyCAD servers to create sketches and geometry, and utility functions. 
-
-The standard library is organised into modules (listed below), but most things are always available in KCL programs. 
-
-You might also want the [KCL language reference](/docs/kcl-lang) or the [KCL guide](https://zoo.dev/docs/kcl-book/intro.html).
+// Remarks: Contains frequently used constants, functions for interacting with the KittyCAD servers to create sketches and geometry, and utility functions. The standard library is organised into modules (listed below), but most things are always available in KCL programs. You might also want the [KCL language reference](/docs/kcl-lang) or the [KCL guide](https://zoo.dev/docs/kcl-book/intro.html).
 std

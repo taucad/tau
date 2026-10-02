@@ -7,11 +7,7 @@
 Geom_BSplineCurve
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Geom.Geom_BSplineCurve, Poles: OCP.OCP.TColgp.TColgp_Array1OfPnt, Knots: OCP.OCP.TColStd.TColStd_Array1OfReal, Multiplicities: OCP.OCP.TColStd.TColStd_Array1OfInteger, Degree: int, Periodic: bool = False) -> None
-
-2. __init__(self: OCP.OCP.Geom.Geom_BSplineCurve, Poles: OCP.OCP.TColgp.TColgp_Array1OfPnt, Weights: OCP.OCP.TColStd.TColStd_Array1OfReal, Knots: OCP.OCP.TColStd.TColStd_Array1OfReal, Multiplicities: OCP.OCP.TColStd.TColStd_Array1OfInteger, Degree: int, Periodic: bool = False, CheckRational: bool = True) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Geom.Geom_BSplineCurve, Poles: OCP.OCP.TColgp.TColgp_Array1OfPnt, Knots: OCP.OCP.TColStd.TColStd_Array1OfReal, Multiplicities: OCP.OCP.TColStd.TColStd_Array1OfInteger, Degree: int, Periodic: bool = False) -> None 2. __init__(self: OCP.OCP.Geom.Geom_BSplineCurve, Poles: OCP.OCP.TColgp.TColgp_Array1OfPnt, Weights: OCP.OCP.TColStd.TColStd_Array1OfReal, Knots: OCP.OCP.TColStd.TColStd_Array1OfReal, Multiplicities: OCP.OCP.TColStd.TColStd_Array1OfInteger, Degree: int, Periodic: bool = False, CheckRational: bool = True) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Geom.Geom_BSplineCurve, Poles: OCP.OCP.TColgp.TColgp_Array1OfPnt, Knots: OCP.OCP.TColStd.TColStd_Array1OfReal, Multiplicities: OCP.OCP.TColStd.TColStd_Array1OfInteger, Degree: int, Periodic: bool = False) -> None
   __init__(self: OCP.OCP.Geom.Geom_BSplineCurve, Poles: OCP.OCP.TColgp.TColgp_Array1OfPnt, Weights: OCP.OCP.TColStd.TColStd_Array1OfReal, Knots: OCP.OCP.TColStd.TColStd_Array1OfReal, Multiplicities: OCP.OCP.TColStd.TColStd_Array1OfInteger, Degree: int, Periodic: bool = False, CheckRational: bool = True) -> None
@@ -21,15 +17,7 @@ Geom_BSplineCurve
   IncreaseDegree(self: OCP.OCP.Geom.Geom_BSplineCurve, Degree: int) -> None
 
   // IncreaseMultiplicity(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IncreaseMultiplicity(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, M: int) -> None
-
-Increases the multiplicity of the knot <Index> to <M>.
-
-2. IncreaseMultiplicity(self: OCP.OCP.Geom.Geom_BSplineCurve, I1: int, I2: int, M: int) -> None
-
-Increases the multiplicities of the knots in [I1,I2] to <M>.
+  // Remarks: Overloaded function. 1. IncreaseMultiplicity(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, M: int) -> None Increases the multiplicity of the knot <Index> to <M>. 2. IncreaseMultiplicity(self: OCP.OCP.Geom.Geom_BSplineCurve, I1: int, I2: int, M: int) -> None Increases the multiplicities of the knots in [I1,I2] to <M>.
   IncreaseMultiplicity(*args, **kwargs)
   IncreaseMultiplicity(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, M: int) -> None
   IncreaseMultiplicity(self: OCP.OCP.Geom.Geom_BSplineCurve, I1: int, I2: int, M: int) -> None
@@ -63,15 +51,7 @@ Increases the multiplicities of the knots in [I1,I2] to <M>.
   Segment(self: OCP.OCP.Geom.Geom_BSplineCurve, U1: float, U2: float, theTolerance: float = 1e-09) -> None
 
   // SetKnot(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetKnot(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, K: float) -> None
-
-Modifies this BSpline curve by assigning the value K to the knot of index Index in the knots table. This is a relatively local modification because K must be such that: Knots(Index - 1) < K < Knots(Index + 1) The second syntax allows you also to increase the multiplicity of the knot to M (but it is not possible to decrease the multiplicity of the knot with this function). Standard_ConstructionError if: - K is not such that: Knots(Index - 1) < K < Knots(Index + 1) - M is greater than the degree of this BSpline curve or lower than the previous multiplicity of knot of index Index in the knots table. Standard_OutOfRange if Index is outside the bounds of the knots table.
-
-2. SetKnot(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, K: float, M: int) -> None
-
-Changes the knot of range Index with its multiplicity. You can increase the multiplicity of a knot but it is not allowed to decrease the multiplicity of an existing knot.
+  // Remarks: Overloaded function. 1. SetKnot(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, K: float) -> None Modifies this BSpline curve by assigning the value K to the knot of index Index in the knots table. This is a relatively local modification because K must be such that: Knots(Index - 1) < K < Knots(Index + 1) The second syntax allows you also to increase the multiplicity of the knot to M (but it is not possible to decrease the multiplicity of the knot with this function). Standard_ConstructionError if: - K is not such that: Knots(Index - 1) < K < Knots(Index + 1) - M is greater than the degree of this BSpline curve or lower than the previous multiplicity of knot of index Index in the knots table. Standard_OutOfRange if Index is outside the bounds of the knots table. 2. SetKnot(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, K: float, M: int) -> None Changes the knot of range Index with its multiplicity. You can increase the multiplicity of a knot but it is not allowed to decrease the multiplicity of an existing knot.
   SetKnot(*args, **kwargs)
   SetKnot(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, K: float) -> None
   SetKnot(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, K: float, M: int) -> None
@@ -85,15 +65,7 @@ Changes the knot of range Index with its multiplicity. You can increase the mult
   SetPeriodic(self: OCP.OCP.Geom.Geom_BSplineCurve) -> None
 
   // SetOrigin(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetOrigin(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int) -> None
-
-Assigns the knot of index Index in the knots table as the origin of this periodic BSpline curve. As a consequence, the knots and poles tables are modified. Exceptions Standard_NoSuchObject if this curve is not periodic. Standard_DomainError if Index is outside the bounds of the knots table.
-
-2. SetOrigin(self: OCP.OCP.Geom.Geom_BSplineCurve, U: float, Tol: float) -> None
-
-Set the origin of a periodic curve at Knot U. If U is not a knot of the BSpline a new knot is inserted. KnotVector and poles are modified. Raised if the curve is not periodic
+  // Remarks: Overloaded function. 1. SetOrigin(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int) -> None Assigns the knot of index Index in the knots table as the origin of this periodic BSpline curve. As a consequence, the knots and poles tables are modified. Exceptions Standard_NoSuchObject if this curve is not periodic. Standard_DomainError if Index is outside the bounds of the knots table. 2. SetOrigin(self: OCP.OCP.Geom.Geom_BSplineCurve, U: float, Tol: float) -> None Set the origin of a periodic curve at Knot U. If U is not a knot of the BSpline a new knot is inserted. KnotVector and poles are modified. Raised if the curve is not periodic
   SetOrigin(*args, **kwargs)
   SetOrigin(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int) -> None
   SetOrigin(self: OCP.OCP.Geom.Geom_BSplineCurve, U: float, Tol: float) -> None
@@ -103,15 +75,7 @@ Set the origin of a periodic curve at Knot U. If U is not a knot of the BSpline 
   SetNotPeriodic(self: OCP.OCP.Geom.Geom_BSplineCurve) -> None
 
   // SetPole(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetPole(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
-
-Modifies this BSpline curve by assigning P to the pole of index Index in the poles table. Exceptions Standard_OutOfRange if Index is outside the bounds of the poles table. Standard_ConstructionError if Weight is negative or null.
-
-2. SetPole(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
-
-Modifies this BSpline curve by assigning P to the pole of index Index in the poles table. This syntax also allows you to modify the weight of the modified pole, which becomes Weight. In this case, if this BSpline curve is non-rational, it can become rational and vice versa. Exceptions Standard_OutOfRange if Index is outside the bounds of the poles table. Standard_ConstructionError if Weight is negative or null.
+  // Remarks: Overloaded function. 1. SetPole(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None Modifies this BSpline curve by assigning P to the pole of index Index in the poles table. Exceptions Standard_OutOfRange if Index is outside the bounds of the poles table. Standard_ConstructionError if Weight is negative or null. 2. SetPole(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None Modifies this BSpline curve by assigning P to the pole of index Index in the poles table. This syntax also allows you to modify the weight of the modified pole, which becomes Weight. In this case, if this BSpline curve is non-rational, it can become rational and vice versa. Exceptions Standard_OutOfRange if Index is outside the bounds of the poles table. Standard_ConstructionError if Weight is negative or null.
   SetPole(*args, **kwargs)
   SetPole(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
   SetPole(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
@@ -209,29 +173,13 @@ Modifies this BSpline curve by assigning P to the pole of index Index in the pol
   Knot(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int) -> float
 
   // Knots(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Knots(self: OCP.OCP.Geom.Geom_BSplineCurve, K: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
-
-returns the knot values of the B-spline curve; Warning A knot with a multiplicity greater than 1 is not repeated in the knot table. The Multiplicity function can be used to obtain the multiplicity of each knot.
-
-2. Knots(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal
-
-returns the knot values of the B-spline curve; Warning A knot with a multiplicity greater than 1 is not repeated in the knot table. The Multiplicity function can be used to obtain the multiplicity of each knot.
+  // Remarks: Overloaded function. 1. Knots(self: OCP.OCP.Geom.Geom_BSplineCurve, K: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None returns the knot values of the B-spline curve; Warning A knot with a multiplicity greater than 1 is not repeated in the knot table. The Multiplicity function can be used to obtain the multiplicity of each knot. 2. Knots(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal returns the knot values of the B-spline curve; Warning A knot with a multiplicity greater than 1 is not repeated in the knot table. The Multiplicity function can be used to obtain the multiplicity of each knot.
   Knots(*args, **kwargs)
   Knots(self: OCP.OCP.Geom.Geom_BSplineCurve, K: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
   Knots(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal
 
   // KnotSequence(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. KnotSequence(self: OCP.OCP.Geom.Geom_BSplineCurve, K: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
-
-Returns K, the knots sequence of this BSpline curve. In this sequence, knots with a multiplicity greater than 1 are repeated. In the case of a non-periodic curve the length of the sequence must be equal to the sum of the NbKnots multiplicities of the knots of the curve (where NbKnots is the number of knots of this BSpline curve). This sum is also equal to : NbPoles + Degree + 1 where NbPoles is the number of poles and Degree the degree of this BSpline curve. In the case of a periodic curve, if there are k periodic knots, the period is Knot(k+1) - Knot(1). The initial sequence is built by writing knots 1 to k+1, which are repeated according to their corresponding multiplicities. If Degree is the degree of the curve, the degree of continuity of the curve at the knot of index 1 (or k+1) is equal to c = Degree + 1 - Mult(1). c knots are then inserted at the beginning and end of the initial sequence: - the c values of knots preceding the first item Knot(k+1) in the initial sequence are inserted at the beginning; the period is subtracted from these c values; - the c values of knots following the last item Knot(1) in the initial sequence are inserted at the end; the period is added to these c values. The length of the sequence must therefore be equal to: NbPoles + 2*Degree - Mult(1) + 2. Example For a non-periodic BSpline curve of degree 2 where: - the array of knots is: { k1 k2 k3 k4 }, - with associated multiplicities: { 3 1 2 3 }, the knot sequence is: K = { k1 k1 k1 k2 k3 k3 k4 k4 k4 } For a periodic BSpline curve of degree 4 , which is "C1" continuous at the first knot, and where : - the periodic knots are: { k1 k2 k3 (k4) } (3 periodic knots: the points of parameter k1 and k4 are identical, the period is p = k4 - k1), - with associated multiplicities: { 3 1 2 (3) }, the degree of continuity at knots k1 and k4 is: Degree + 1 - Mult(i) = 2. 2 supplementary knots are added at the beginning and end of the sequence: - at the beginning: the 2 knots preceding k4 minus the period; in this example, this is k3 - p both times; - at the end: the 2 knots following k1 plus the period; in this example, this is k2 + p and k3 + p. The knot sequence is therefore: K = { k3-p k3-p k1 k1 k1 k2 k3 k3 k4 k4 k4 k2+p k3+p } Exceptions Raised if K.Lower() is less than number of first knot in knot sequence with repetitions or K.Upper() is more than number of last knot in knot sequence with repetitions.
-
-2. KnotSequence(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal
-
-returns the knots of the B-spline curve. Knots with multiplicit greater than 1 are repeated
+  // Remarks: Overloaded function. 1. KnotSequence(self: OCP.OCP.Geom.Geom_BSplineCurve, K: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None Returns K, the knots sequence of this BSpline curve. In this sequence, knots with a multiplicity greater than 1 are repeated. In the case of a non-periodic curve the length of the sequence must be equal to the sum of the NbKnots multiplicities of the knots of the curve (where NbKnots is the number of knots of this BSpline curve). This sum is also equal to : NbPoles + Degree + 1 where NbPoles is the number of poles and Degree the degree of this BSpline curve. In the case of a periodic curve, if there are k periodic knots, the period is Knot(k+1) - Knot(1). The initial sequence is built by writing knots 1 to k+1, which are repeated according to their corresponding multiplicities. If Degree is the degree of the curve, the degree of continuity of the curve at the knot of index 1 (or k+1) is equal to c = Degree + 1 - Mult(1). c knots are then inserted at the beginning and end of the initial sequence: - the c values of knots preceding the first item Knot(k+1) in the initial sequence are inserted at the beginning; the period is subtracted from these c values; - the c values of knots following the last item Knot(1) in the initial sequence are inserted at the end; the period is added to these c values. The length of the sequence must therefore be equal to: NbPoles + 2*Degree - Mult(1) + 2. Example For a non-periodic BSpline curve of degree 2 where: - the array of knots is: { k1 k2 k3 k4 }, - with associated multiplicities: { 3 1 2 3 }, the knot sequence is: K = { k1 k1 k1 k2 k3 k3 k4 k4 k4 } For a periodic BSpline curve of degree 4 , which is "C1" continuous at the first knot, and where : - the periodic knots are: { k1 k2 k3 (k4) } (3 periodic knots: the points of parameter k1 and k4 are identical, the period is p = k4 - k1), - with associated multiplicities: { 3 1 2 (3) }, the degree of continuity at knots k1 and k4 is: Degree + 1 - Mult(i) = 2. 2 supplementary knots are added at the beginning and end of the sequence: - at the beginning: the 2 knots preceding k4 minus the period; in this example, this is k3 - p both times; - at the end: the 2 knots following k1 plus the period; in this example, this is k2 + p and k3 + p. The knot sequence is therefore: K = { k3-p k3-p k1 k1 k1 k2 k3 k3 k4 k4 k4 k2+p k3+p } Exceptions Raised if K.Lower() is less than number of first knot in knot sequence with repetitions or K.Upper() is more than number of last knot in knot sequence with repetitions. 2. KnotSequence(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal returns the knots of the B-spline curve. Knots with multiplicit greater than 1 are repeated
   KnotSequence(*args, **kwargs)
   KnotSequence(self: OCP.OCP.Geom.Geom_BSplineCurve, K: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
   KnotSequence(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal
@@ -253,15 +201,7 @@ returns the knots of the B-spline curve. Knots with multiplicit greater than 1 a
   Multiplicity(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int) -> int
 
   // Multiplicities(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Multiplicities(self: OCP.OCP.Geom.Geom_BSplineCurve, M: OCP.OCP.TColStd.TColStd_Array1OfInteger) -> None
-
-Returns the multiplicity of the knots of the curve.
-
-2. Multiplicities(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfInteger
-
-returns the multiplicity of the knots of the curve.
+  // Remarks: Overloaded function. 1. Multiplicities(self: OCP.OCP.Geom.Geom_BSplineCurve, M: OCP.OCP.TColStd.TColStd_Array1OfInteger) -> None Returns the multiplicity of the knots of the curve. 2. Multiplicities(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfInteger returns the multiplicity of the knots of the curve.
   Multiplicities(*args, **kwargs)
   Multiplicities(self: OCP.OCP.Geom.Geom_BSplineCurve, M: OCP.OCP.TColStd.TColStd_Array1OfInteger) -> None
   Multiplicities(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfInteger
@@ -279,15 +219,7 @@ returns the multiplicity of the knots of the curve.
   Pole(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int) -> OCP.OCP.gp.gp_Pnt
 
   // Poles(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Poles(self: OCP.OCP.Geom.Geom_BSplineCurve, P: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
-
-Returns the poles of the B-spline curve;
-
-2. Poles(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColgp.TColgp_Array1OfPnt
-
-Returns the poles of the B-spline curve;
+  // Remarks: Overloaded function. 1. Poles(self: OCP.OCP.Geom.Geom_BSplineCurve, P: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None Returns the poles of the B-spline curve; 2. Poles(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColgp.TColgp_Array1OfPnt Returns the poles of the B-spline curve;
   Poles(*args, **kwargs)
   Poles(self: OCP.OCP.Geom.Geom_BSplineCurve, P: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
   Poles(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColgp.TColgp_Array1OfPnt
@@ -301,15 +233,7 @@ Returns the poles of the B-spline curve;
   Weight(self: OCP.OCP.Geom.Geom_BSplineCurve, Index: int) -> float
 
   // Weights(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Weights(self: OCP.OCP.Geom.Geom_BSplineCurve, W: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
-
-Returns the weights of the B-spline curve;
-
-2. Weights(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal
-
-Returns the weights of the B-spline curve;
+  // Remarks: Overloaded function. 1. Weights(self: OCP.OCP.Geom.Geom_BSplineCurve, W: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None Returns the weights of the B-spline curve; 2. Weights(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal Returns the weights of the B-spline curve;
   Weights(*args, **kwargs)
   Weights(self: OCP.OCP.Geom.Geom_BSplineCurve, W: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
   Weights(self: OCP.OCP.Geom.Geom_BSplineCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal

@@ -14,8 +14,7 @@ GeoSpecSubject: {
 }
 
 // Geometry units accepted at GeoSpec evidence-loading boundaries
-// Remarks: Loaded subjects normalize coordinates into canonical millimetres; this type
-describes source and provenance units, not a project-wide configuration.
+// Remarks: Loaded subjects normalize coordinates into canonical millimetres; this type describes source and provenance units, not a project-wide configuration.
 GeoSpecUnit: 'mm' | 'cm' | 'm' | 'in' | 'ft' | (string & {})
 
 // Geometry assertion collected from a GeoSpec test module
@@ -112,12 +111,7 @@ GeoSpecComponentInterferenceAllowance: {
 }
 
 // Component-interference expectation accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
-// Remarks: GeoSpec checks for positive solid intersection volume between assembly
-components. Tangent contact and correctly meshed gears are allowed.
-`pairs` narrows the check to specific component-label pairs while preserving
-exact positive-volume evidence for every selected pair. `allowances`
-documents explicitly intentional positive-volume interference such as gasket
-compression, press fits, or simplified thread engagement.
+// Remarks: GeoSpec checks for positive solid intersection volume between assembly components. Tangent contact and correctly meshed gears are allowed. `pairs` narrows the check to specific component-label pairs while preserving exact positive-volume evidence for every selected pair. `allowances` documents explicitly intentional positive-volume interference such as gasket compression, press fits, or simplified thread engagement.
 GeoSpecComponentInterferenceExpectation: {
     tolerance?: number;
     pairs?: GeoSpecComponentInterferencePairExpectation[];
@@ -359,12 +353,7 @@ GeoSpecProductStructureExpectation: {
 }
 
 // One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
-// Remarks: Verdicts are decided by exact BRep evidence only (D3): extrema for
-`contact`/`clearance`, analytic fact comparison for
-`coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`,
-exact solid classification for `containment`/`insertion`, and exact
-boolean common volume for `interference` (positive volume outside the
-`minVolume`/`maxVolume` allowance band fails).
+// Remarks: Verdicts are decided by exact BRep evidence only (D3): extrema for `contact`/`clearance`, analytic fact comparison for `coaxial`/`concentric`/`coplanar`/`parallel`/`perpendicular`/`angle`, exact solid classification for `containment`/`insertion`, and exact boolean common volume for `interference` (positive volume outside the `minVolume`/`maxVolume` allowance band fails).
 GeoSpecSpatialRelationshipExpectation: {
     id?: string;
     kind: 'contact' | 'clearance' | 'coaxial' | 'concentric' | 'coplanar' | 'parallel' | 'perpendicular' | 'angle' | 'containment' | 'insertion' | 'interference';
@@ -424,12 +413,7 @@ GeoSpecValidBrepExpectation: {
 }
 
 // Void-continuity expectation accepted by `expectGeo(...).toHaveVoidContinuity(...)`
-// Remarks: A whole-assembly negative-space claim: the ordered `path` waypoints must all
-lie in ONE connected open-void component (void = outside every `material`
-solid), that component must not reach any `isolatedFrom` point, and its
-tightest sampled cross-section must meet `minCrossSection`. Connectivity and
-isolation are proven from Boolean shell topology, generalized winding-number
-body identity, and deterministic cross-sections.
+// Remarks: A whole-assembly negative-space claim: the ordered `path` waypoints must all lie in ONE connected open-void component (void = outside every `material` solid), that component must not reach any `isolatedFrom` point, and its tightest sampled cross-section must meet `minCrossSection`. Connectivity and isolation are proven from Boolean shell topology, generalized winding-number body identity, and deterministic cross-sections.
 GeoSpecVoidContinuityExpectation: {
     /** Ordered waypoints (>= 1) known to lie in the void being proven. */
     path: GeoSpecVoidWaypoint[];
@@ -626,8 +610,7 @@ GeometrySource: {
 }
 
 // Canonical P0 object under test for GeoSpec
-// Remarks: This is intentionally a GeoSpec-loaded subject rather than a Tau runtime
-contract. Runtime integrations pass GLB/glTF bytes or files into loaders.
+// Remarks: This is intentionally a GeoSpec-loaded subject rather than a Tau runtime contract. Runtime integrations pass GLB/glTF bytes or files into loaders.
 GeometrySubject: {
     kind: 'geometry-subject';
     /** Opaque engine-owned identifier used by every protocol claim. */
@@ -785,11 +768,7 @@ GeoSpecMatcherDescriptor: {
 }
 
 // How the substrate derives an assertion's recorded `expected` value from the arguments the spec author passed
-// Remarks: - `first` — the first argument verbatim.
-- `first-or-empty` — the first argument, defaulting to `{}`.
-- `bounds` — `(min, max)` pairs collapse to `{ min, max }`; a lone object
-  argument passes through.
-- `true` — nullary matchers record the literal `true`.
+// Remarks: - `first` — the first argument verbatim. - `first-or-empty` — the first argument, defaulting to `{}`. - `bounds` — `(min, max)` pairs collapse to `{ min, max }`; a lone object argument passes through. - `true` — nullary matchers record the literal `true`.
 GeoSpecMatcherExpectedShape: 'first' | 'first-or-empty' | 'bounds' | 'true'
 
 // Whether a matcher settles synchronously (throwing its `GeoSpecAssertionError` inside the `it()` body) or asynchronously (settled before the test completes)
@@ -835,8 +814,7 @@ GeoSpecClaimResult: {
 GeoSpecDeterminismClass: 'reference-wasm' | 'bit-parity-verified' | 'defers-to-reference'
 
 // First TypeScript binding of Contract B
-// Remarks: The methods are transport operations; every data type they exchange is a
-protocol DTO above. `Uint8Array` is the one ratified bulk lane.
+// Remarks: The methods are transport operations; every data type they exchange is a protocol DTO above. `Uint8Array` is the one ratified bulk lane.
 GeoSpecEngineProtocol: {
     initialize(request: GeoSpecInitializeRequest): GeoSpecInitializeResult;
     ingestSubject(request: GeoSpecIngestSubjectRequest, bytes: Uint8Array<ArrayBuffer>): Promise<GeoSpecIngestSubjectResult>;
@@ -1216,10 +1194,7 @@ GeometryEvidenceDiagnostic: Omit<GeometryDiagnostic, 'details'> & {
 }
 
 // Statistics about a parsed GLB geometry
-// Remarks: `vertexCount` and `meshCount` are kept on the type for internal diagnostic
-use (and for the kernel-author Vitest harness in
-`kernel-geometry-testing.utils.ts`); they are no longer exposed via the
-agent-facing requirement schema.
+// Remarks: `vertexCount` and `meshCount` are kept on the type for internal diagnostic use (and for the kernel-author Vitest harness in `kernel-geometry-testing.utils.ts`); they are no longer exposed via the agent-facing requirement schema.
 GeometryStats: {
     vertexCount: number;
     meshCount: number;
@@ -1376,10 +1351,7 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
 }
 
 // Runtime client surface consumed by `geospec/model`
-// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but
-only needs connection lifecycle and request-scoped documents. Keep this shape
-small so typed runtime clients do not have to widen their full generic
-method surface to GeoSpec's testing DSL.
+// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL.
 GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
     open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {
@@ -1520,10 +1492,7 @@ RelationshipFinalEvidence: {
 }
 
 // One geometric witness backing a relationship verdict
-// Remarks: `value` layout by kind: `point` is `[x, y, z]`; `axis` is
-`[ox, oy, oz, dx, dy, dz]`; `plane` is `[nx, ny, nz, offset]`.
-`topologyRef` is the snapshot topology-ref string (`'#o1.2.f7'`) —
-diagnostics and pinning only, never a durable reference.
+// Remarks: `value` layout by kind: `point` is `[x, y, z]`; `axis` is `[ox, oy, oz, dx, dy, dz]`; `plane` is `[nx, ny, nz, offset]`. `topologyRef` is the snapshot topology-ref string (`'#o1.2.f7'`) — diagnostics and pinning only, never a durable reference.
 RelationshipWitness: {
     kind: 'point' | 'axis' | 'plane';
     value: number[];
@@ -1563,11 +1532,7 @@ GeoSpecCollectorOptions: {
 GeoSpecTestNamePattern: RegExp
 
 // Options for recursive GeoSpec test discovery
-// Remarks: `files` accepts either exact `*.geospec.ts` / `*.geospec.js` files or
-directory roots. When omitted, discovery starts at `projectPath`.
-
-`include` and `exclude` are Vitest-style file globs applied to
-project-relative GeoSpec paths after `files` roots have been expanded.
+// Remarks: `files` accepts either exact `*.geospec.ts` / `*.geospec.js` files or directory roots. When omitted, discovery starts at `projectPath`. `include` and `exclude` are Vitest-style file globs applied to project-relative GeoSpec paths after `files` roots have been expanded.
 DiscoverGeoSpecFilesOptions: {
     filesystem: GeoSpecDiscoveryFileSystem;
     projectPath: string;
@@ -1586,27 +1551,21 @@ GeoSpecDiscoveryFileStat: {
 }
 
 // Minimal filesystem contract used by GeoSpec test discovery
-// Remarks: Browser workers, Node CLI hosts, and embedded runners adapt their native
-filesystem APIs to this shape so discovery has one shared behavior.
+// Remarks: Browser workers, Node CLI hosts, and embedded runners adapt their native filesystem APIs to this shape so discovery has one shared behavior.
 GeoSpecDiscoveryFileSystem: {
     readdir(path: string): Promise<readonly string[]>;
     stat(path: string): Promise<GeoSpecDiscoveryFileStat>;
 }
 
 // Result returned by recursive GeoSpec test discovery
-// Remarks: `files` are project-relative, sorted, and de-duplicated. `unmatchedRoots`
-contains requested file or directory roots that did not select any GeoSpec
-files.
+// Remarks: `files` are project-relative, sorted, and de-duplicated. `unmatchedRoots` contains requested file or directory roots that did not select any GeoSpec files.
 GeoSpecDiscoveryResult: {
     files: string[];
     unmatchedRoots: string[];
 }
 
 // Worker-local cache for successful GeoSpec bundles
-// Remarks: The cache is internal runner infrastructure. Each invocation still creates a
-fresh collector, run token and host binding, so runs that reuse one entry
-stay isolated. An entry is reused only while every read its bundle was built
-from still returns the answer the bundler got.
+// Remarks: The cache is internal runner infrastructure. Each invocation still creates a fresh collector, run token and host binding, so runs that reuse one entry stay isolated. An entry is reused only while every read its bundle was built from still returns the answer the bundler got.
 GeoSpecModuleBundleCache: Map<string, {
     builtinIdentity: string;
     /** The run token embedded in `bundle.code`; a reuse executes a copy under its own run's token. */
@@ -1762,12 +1721,7 @@ GeoSpecNativeModelEngine: GeoSpecNativeEngine & {
 }
 
 // Model loader injected into native VM runs
-// Remarks: The freshness unit is one load: every call reads its source again (the
-source reader or a Runtime export) and the engine digests those exact bytes.
-Nothing is deduplicated per run or per scope; bytes equal to an admitted
-subject's reuse that subject by digest, length and descriptor, and edited
-bytes admit a new subject. Only concurrent identical inline-code Runtime
-loads share one in-flight export.
+// Remarks: The freshness unit is one load: every call reads its source again (the source reader or a Runtime export) and the engine digests those exact bytes. Nothing is deduplicated per run or per scope; bytes equal to an admitted subject's reuse that subject by digest, length and descriptor, and edited bytes admit a new subject. Only concurrent identical inline-code Runtime loads share one in-flight export.
 GeoSpecNativeModelLoader: <Code extends Record<string, string> = Record<string, string>>(options: GeoSpecNativeLoadModelOptions<Code>) => Promise<GeoSpecNativeModelSubject>
 
 // Subject identity returned by native STEP/GLB admission
@@ -1784,9 +1738,7 @@ GeoSpecNativeModelResource: {
 }
 
 // Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
-// Remarks: The loader takes ownership of the returned bytes and admits them without a
-copy, so a reader must return bytes that nothing mutates afterwards (a fresh
-read, not a view of a shared or reused buffer).
+// Remarks: The loader takes ownership of the returned bytes and admits them without a copy, so a reader must return bytes that nothing mutates afterwards (a fresh read, not a view of a shared or reused buffer).
 GeoSpecNativeSourceReader: (source: LoadModelSourceOptions['source']) => Promise<Uint8Array<ArrayBuffer>>
 
 // Reusable native model loader whose admitted subjects can be released as one run
@@ -2513,13 +2465,7 @@ SelectorDiagnosticOptions: {
 GeoSpecStepLoader: (options: LoadStepOptions) => Promise<GeometrySubject>
 
 // The five lazily materialized BRep evidence facets
-// Remarks: Facet → evidence-field ownership:
-- `summary` → `topologyCounts`, `boundingBox`
-- `massProperties` → `massProperties`
-- `validity` → `validity`
-- `faceFeatures` → `planarFaces`, `cylindricalFaces`, `circularHoles`,
-  `circularHolePatterns`, `chamferFeatures`, `filletFeatures`
-- `wallThickness` → `minimumWallThickness`
+// Remarks: Facet → evidence-field ownership: - `summary` → `topologyCounts`, `boundingBox` - `massProperties` → `massProperties` - `validity` → `validity` - `faceFeatures` → `planarFaces`, `cylindricalFaces`, `circularHoles`, `circularHolePatterns`, `chamferFeatures`, `filletFeatures` - `wallThickness` → `minimumWallThickness`
 BrepFacetName: 'summary' | 'massProperties' | 'validity' | 'faceFeatures' | 'wallThickness'
 
 // Defaults accepted by {@link import ('./load-step.js').createStepLoader}
@@ -2554,9 +2500,7 @@ StepSource: string | URL | Uint8Array<ArrayBuffer> | ArrayBuffer | Blob | File |
 StepStreamingMode: 'auto' | 'native-stream' | 'filesystem'
 
 // One native AP242 datum placement row (a coordinate *frame* from the supplemental-geometry channel), expanded per occurrence like subshape names and expressed in subject-frame coordinates
-// Remarks: Distinct from {@link XdeSemanticDatum}: this is supplemental geometry
-(`AXIS2_PLACEMENT_3D` items in a CONSTRUCTIVE_GEOMETRY_REPRESENTATION), not
-the GD&T `DATUM` family.
+// Remarks: Distinct from {@link XdeSemanticDatum}: this is supplemental geometry (`AXIS2_PLACEMENT_3D` items in a CONSTRUCTIVE_GEOMETRY_REPRESENTATION), not the GD&T `DATUM` family.
 XdeDatumPlacement: {
     occurrencePath: string;
     name: string;
@@ -2574,9 +2518,7 @@ XdeDatumSystem: {
 }
 
 // One placed occurrence recovered from an AP242 STEP structure read
-// Remarks: `path` is dot-joined instance-name segments from the root (root omitted) per
-the GeoSpec AP242 profile; repeated names under one parent are disambiguated
-`name[k]` in the parent's stored component order.
+// Remarks: `path` is dot-joined instance-name segments from the root (root omitted) per the GeoSpec AP242 profile; repeated names under one parent are disambiguated `name[k]` in the parent's stored component order.
 XdeOccurrence: {
     path: string;
     productName: string;
@@ -2673,8 +2615,7 @@ GeoSpecMatcherMethods: {
 }
 
 // One positive-only ancillary query
-// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return
-full reports, including failed/refused reports, without assertion errors.
+// Remarks: An explicit claimId leaves the automatic sequence unchanged. Queries return full reports, including failed/refused reports, without assertion errors.
 GeoSpecQueryOptions: {
     readonly capability: GeoSpecQueryCapability;
     readonly claimId?: string;

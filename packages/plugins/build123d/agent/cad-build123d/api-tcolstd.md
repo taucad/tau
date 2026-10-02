@@ -7,13 +7,7 @@
 TColStd_IndexedDataMapOfStringString
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString) -> None
-
-2. __init__(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theNbBuckets: int, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator = None) -> None
-
-3. __init__(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theOther: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString) -> None 2. __init__(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theNbBuckets: int, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator = None) -> None 3. __init__(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theOther: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString) -> None
   __init__(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theNbBuckets: int, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator = None) -> None
@@ -76,15 +70,7 @@ TColStd_IndexedDataMapOfStringString
   FindIndex(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theKey1: OCP.OCP.TCollection.TCollection_AsciiString) -> int
 
   // FindFromKey(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. FindFromKey(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theKey1: OCP.OCP.TCollection.TCollection_AsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-FindFromKey
-
-2. FindFromKey(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theKey1: OCP.OCP.TCollection.TCollection_AsciiString, theValue: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
-
-Find value for key with copying.
+  // Remarks: Overloaded function. 1. FindFromKey(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theKey1: OCP.OCP.TCollection.TCollection_AsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString FindFromKey 2. FindFromKey(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theKey1: OCP.OCP.TCollection.TCollection_AsciiString, theValue: OCP.OCP.TCollection.TCollection_AsciiString) -> bool Find value for key with copying.
   FindFromKey(*args, **kwargs)
   FindFromKey(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theKey1: OCP.OCP.TCollection.TCollection_AsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString
   FindFromKey(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theKey1: OCP.OCP.TCollection.TCollection_AsciiString, theValue: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
@@ -102,15 +88,7 @@ Find value for key with copying.
   ChangeSeek(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theKey1: OCP.OCP.TCollection.TCollection_AsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString
 
   // Clear(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Clear(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, doReleaseMemory: bool = False) -> None
-
-Clear data. If doReleaseMemory is false then the table of buckets is not released and will be reused.
-
-2. Clear(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator) -> None
-
-Clear data and reset allocator
+  // Remarks: Overloaded function. 1. Clear(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, doReleaseMemory: bool = False) -> None Clear data. If doReleaseMemory is false then the table of buckets is not released and will be reused. 2. Clear(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator) -> None Clear data and reset allocator
   Clear(*args, **kwargs)
   Clear(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, doReleaseMemory: bool = False) -> None
   Clear(self: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theAllocator: OCP.OCP.NCollection.NCollection_BaseAllocator) -> None

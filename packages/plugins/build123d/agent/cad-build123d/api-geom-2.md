@@ -7,11 +7,7 @@
 Geom_BezierCurve
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
-
-2. __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt, PoleWeights: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None 2. __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt, PoleWeights: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
   __init__(self: OCP.OCP.Geom.Geom_BezierCurve, CurvePoles: OCP.OCP.TColgp.TColgp_Array1OfPnt, PoleWeights: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
@@ -21,29 +17,13 @@ Geom_BezierCurve
   Increase(self: OCP.OCP.Geom.Geom_BezierCurve, Degree: int) -> None
 
   // InsertPoleAfter(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
-
-Inserts a pole P after the pole of range Index. If the curve <me> is rational the weight value for the new pole of range Index is 1.0. raised if Index is not in the range [1, NbPoles]
-
-2. InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
-
-Inserts a pole with its weight in the set of poles after the pole of range Index. If the curve was non rational it can become rational if all the weights are not identical. Raised if Index is not in the range [1, NbPoles]
+  // Remarks: Overloaded function. 1. InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None Inserts a pole P after the pole of range Index. If the curve <me> is rational the weight value for the new pole of range Index is 1.0. raised if Index is not in the range [1, NbPoles] 2. InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None Inserts a pole with its weight in the set of poles after the pole of range Index. If the curve was non rational it can become rational if all the weights are not identical. Raised if Index is not in the range [1, NbPoles]
   InsertPoleAfter(*args, **kwargs)
   InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
   InsertPoleAfter(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
 
   // InsertPoleBefore(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
-
-Inserts a pole P before the pole of range Index. If the curve <me> is rational the weight value for the new pole of range Index is 1.0. Raised if Index is not in the range [1, NbPoles]
-
-2. InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
-
-Inserts a pole with its weight in the set of poles after the pole of range Index. If the curve was non rational it can become rational if all the weights are not identical. Raised if Index is not in the range [1, NbPoles]
+  // Remarks: Overloaded function. 1. InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None Inserts a pole P before the pole of range Index. If the curve <me> is rational the weight value for the new pole of range Index is 1.0. Raised if Index is not in the range [1, NbPoles] 2. InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None Inserts a pole with its weight in the set of poles after the pole of range Index. If the curve was non rational it can become rational if all the weights are not identical. Raised if Index is not in the range [1, NbPoles]
   InsertPoleBefore(*args, **kwargs)
   InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
   InsertPoleBefore(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
@@ -65,15 +45,7 @@ Inserts a pole with its weight in the set of poles after the pole of range Index
   Segment(self: OCP.OCP.Geom.Geom_BezierCurve, U1: float, U2: float) -> None
 
   // SetPole(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
-
-Substitutes the pole of range index with P. If the curve <me> is rational the weight of range Index is not modified. raiseD if Index is not in the range [1, NbPoles]
-
-2. SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
-
-Substitutes the pole and the weights of range Index. If the curve <me> is not rational it can become rational if all the weights are not identical. If the curve was rational it can become non rational if all the weights are identical. Raised if Index is not in the range [1, NbPoles] Raised if Weight <= Resolution from package gp
+  // Remarks: Overloaded function. 1. SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None Substitutes the pole of range index with P. If the curve <me> is rational the weight of range Index is not modified. raiseD if Index is not in the range [1, NbPoles] 2. SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None Substitutes the pole and the weights of range Index. If the curve <me> is not rational it can become rational if all the weights are not identical. If the curve was rational it can become non rational if all the weights are identical. Raised if Index is not in the range [1, NbPoles] Raised if Weight <= Resolution from package gp
   SetPole(*args, **kwargs)
   SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt) -> None
   SetPole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int, P: OCP.OCP.gp.gp_Pnt, Weight: float) -> None
@@ -148,15 +120,7 @@ Substitutes the pole and the weights of range Index. If the curve <me> is not ra
   Pole(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int) -> OCP.OCP.gp.gp_Pnt
 
   // Poles(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Poles(self: OCP.OCP.Geom.Geom_BezierCurve, P: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
-
-Returns all the poles of the curve.
-
-2. Poles(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColgp.TColgp_Array1OfPnt
-
-Returns all the poles of the curve.
+  // Remarks: Overloaded function. 1. Poles(self: OCP.OCP.Geom.Geom_BezierCurve, P: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None Returns all the poles of the curve. 2. Poles(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColgp.TColgp_Array1OfPnt Returns all the poles of the curve.
   Poles(*args, **kwargs)
   Poles(self: OCP.OCP.Geom.Geom_BezierCurve, P: OCP.OCP.TColgp.TColgp_Array1OfPnt) -> None
   Poles(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColgp.TColgp_Array1OfPnt
@@ -166,15 +130,7 @@ Returns all the poles of the curve.
   Weight(self: OCP.OCP.Geom.Geom_BezierCurve, Index: int) -> float
 
   // Weights(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Weights(self: OCP.OCP.Geom.Geom_BezierCurve, W: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
-
-Returns all the weights of the curve.
-
-2. Weights(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal
-
-Returns all the weights of the curve.
+  // Remarks: Overloaded function. 1. Weights(self: OCP.OCP.Geom.Geom_BezierCurve, W: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None Returns all the weights of the curve. 2. Weights(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal Returns all the weights of the curve.
   Weights(*args, **kwargs)
   Weights(self: OCP.OCP.Geom.Geom_BezierCurve, W: OCP.OCP.TColStd.TColStd_Array1OfReal) -> None
   Weights(self: OCP.OCP.Geom.Geom_BezierCurve) -> OCP.OCP.TColStd.TColStd_Array1OfReal

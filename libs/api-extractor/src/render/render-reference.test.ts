@@ -156,6 +156,7 @@ describe('renderShard', () => {
         name: 'make',
         kind: 'function',
         signatures: [{ parameters: [], text: 'make(\r\n  size: number, \r\n): Shape; ' }],
+        docs: { remarks: 'First line. \r\n  Second line. ', throws: ['Invalid \r\n  size. '] },
       },
     ]);
     const [shard] = planShards(multiline, { groupBy: () => 'Functions' });
@@ -165,6 +166,7 @@ describe('renderShard', () => {
 
     const rendered = renderShard(shard, multiline);
     expect(rendered).toContain('make(\n  size: number,\n): Shape;');
+    expect(rendered).toContain('// Remarks: First line. Second line.\n// Throws: Invalid size.');
     expect(rendered).not.toMatch(/\r| +$/mu);
   });
 

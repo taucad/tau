@@ -7,11 +7,7 @@
 GProp_GProps
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.GProp.GProp_GProps) -> None
-
-2. __init__(self: OCP.OCP.GProp.GProp_GProps, SystemLocation: OCP.OCP.gp.gp_Pnt) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.GProp.GProp_GProps) -> None 2. __init__(self: OCP.OCP.GProp.GProp_GProps, SystemLocation: OCP.OCP.gp.gp_Pnt) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.GProp.GProp_GProps) -> None
   __init__(self: OCP.OCP.GProp.GProp_GProps, SystemLocation: OCP.OCP.gp.gp_Pnt) -> None

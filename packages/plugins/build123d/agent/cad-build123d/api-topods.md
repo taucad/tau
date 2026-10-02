@@ -39,15 +39,7 @@ TopoDS_Shape
   Nullify(self: OCP.OCP.TopoDS.TopoDS_Shape) -> None
 
   // Location(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Location(self: OCP.OCP.TopoDS.TopoDS_Shape, theLoc: OCP.OCP.TopLoc.TopLoc_Location, theRaiseExc: bool = False) -> None
-
-Sets the shape local coordinate system.
-
-2. Location(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopLoc.TopLoc_Location
-
-Returns the shape local coordinate system.
+  // Remarks: Overloaded function. 1. Location(self: OCP.OCP.TopoDS.TopoDS_Shape, theLoc: OCP.OCP.TopLoc.TopLoc_Location, theRaiseExc: bool = False) -> None Sets the shape local coordinate system. 2. Location(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopLoc.TopLoc_Location Returns the shape local coordinate system.
   Location(*args, **kwargs)
   Location(self: OCP.OCP.TopoDS.TopoDS_Shape, theLoc: OCP.OCP.TopLoc.TopLoc_Location, theRaiseExc: bool = False) -> None
   Location(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopLoc.TopLoc_Location
@@ -57,15 +49,7 @@ Returns the shape local coordinate system.
   Located(self: OCP.OCP.TopoDS.TopoDS_Shape, theLoc: OCP.OCP.TopLoc.TopLoc_Location, theRaiseExc: bool = False) -> OCP.OCP.TopoDS.TopoDS_Shape
 
   // Orientation(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Orientation(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopAbs.TopAbs_Orientation
-
-Returns the shape orientation.
-
-2. Orientation(self: OCP.OCP.TopoDS.TopoDS_Shape, theOrient: OCP.OCP.TopAbs.TopAbs_Orientation) -> None
-
-Sets the shape orientation.
+  // Remarks: Overloaded function. 1. Orientation(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopAbs.TopAbs_Orientation Returns the shape orientation. 2. Orientation(self: OCP.OCP.TopoDS.TopoDS_Shape, theOrient: OCP.OCP.TopAbs.TopAbs_Orientation) -> None Sets the shape orientation.
   Orientation(*args, **kwargs)
   Orientation(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopAbs.TopAbs_Orientation
   Orientation(self: OCP.OCP.TopoDS.TopoDS_Shape, theOrient: OCP.OCP.TopAbs.TopAbs_Orientation) -> None
@@ -79,113 +63,49 @@ Sets the shape orientation.
   ShapeType(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopAbs.TopAbs_ShapeEnum
 
   // Free(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Free(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Returns the free flag.
-
-2. Free(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsFree: bool) -> None
-
-Sets the free flag.
+  // Remarks: Overloaded function. 1. Free(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Returns the free flag. 2. Free(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsFree: bool) -> None Sets the free flag.
   Free(*args, **kwargs)
   Free(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   Free(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsFree: bool) -> None
 
   // Locked(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Locked(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Returns the locked flag.
-
-2. Locked(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsLocked: bool) -> None
-
-Sets the locked flag.
+  // Remarks: Overloaded function. 1. Locked(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Returns the locked flag. 2. Locked(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsLocked: bool) -> None Sets the locked flag.
   Locked(*args, **kwargs)
   Locked(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   Locked(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsLocked: bool) -> None
 
   // Modified(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Modified(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Returns the modification flag.
-
-2. Modified(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsModified: bool) -> None
-
-Sets the modification flag.
+  // Remarks: Overloaded function. 1. Modified(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Returns the modification flag. 2. Modified(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsModified: bool) -> None Sets the modification flag.
   Modified(*args, **kwargs)
   Modified(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   Modified(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsModified: bool) -> None
 
   // Checked(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Checked(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Returns the checked flag.
-
-2. Checked(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsChecked: bool) -> None
-
-Sets the checked flag.
+  // Remarks: Overloaded function. 1. Checked(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Returns the checked flag. 2. Checked(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsChecked: bool) -> None Sets the checked flag.
   Checked(*args, **kwargs)
   Checked(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   Checked(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsChecked: bool) -> None
 
   // Orientable(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Orientable(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Returns the orientability flag.
-
-2. Orientable(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsOrientable: bool) -> None
-
-Sets the orientability flag.
+  // Remarks: Overloaded function. 1. Orientable(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Returns the orientability flag. 2. Orientable(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsOrientable: bool) -> None Sets the orientability flag.
   Orientable(*args, **kwargs)
   Orientable(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   Orientable(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsOrientable: bool) -> None
 
   // Closed(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Closed(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Returns the closedness flag.
-
-2. Closed(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsClosed: bool) -> None
-
-Sets the closedness flag.
+  // Remarks: Overloaded function. 1. Closed(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Returns the closedness flag. 2. Closed(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsClosed: bool) -> None Sets the closedness flag.
   Closed(*args, **kwargs)
   Closed(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   Closed(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsClosed: bool) -> None
 
   // Infinite(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Infinite(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Returns the infinity flag.
-
-2. Infinite(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsInfinite: bool) -> None
-
-Sets the infinity flag.
+  // Remarks: Overloaded function. 1. Infinite(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Returns the infinity flag. 2. Infinite(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsInfinite: bool) -> None Sets the infinity flag.
   Infinite(*args, **kwargs)
   Infinite(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   Infinite(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsInfinite: bool) -> None
 
   // Convex(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Convex(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-
-Returns the convexness flag.
-
-2. Convex(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsConvex: bool) -> None
-
-Sets the convexness flag.
+  // Remarks: Overloaded function. 1. Convex(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool Returns the convexness flag. 2. Convex(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsConvex: bool) -> None Sets the convexness flag.
   Convex(*args, **kwargs)
   Convex(self: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
   Convex(self: OCP.OCP.TopoDS.TopoDS_Shape, theIsConvex: bool) -> None
@@ -251,13 +171,7 @@ Sets the convexness flag.
   EmptyCopied(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopoDS.TopoDS_Shape
 
   // TShape(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. TShape(self: OCP.OCP.TopoDS.TopoDS_Shape, theTShape: OCP.OCP.TopoDS.TopoDS_TShape) -> None
-
-2. TShape(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopoDS.TopoDS_TShape
-
-Returns a handle to the actual shape implementation.
+  // Remarks: Overloaded function. 1. TShape(self: OCP.OCP.TopoDS.TopoDS_Shape, theTShape: OCP.OCP.TopoDS.TopoDS_TShape) -> None 2. TShape(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopoDS.TopoDS_TShape Returns a handle to the actual shape implementation.
   TShape(*args, **kwargs)
   TShape(self: OCP.OCP.TopoDS.TopoDS_Shape, theTShape: OCP.OCP.TopoDS.TopoDS_TShape) -> None
   TShape(self: OCP.OCP.TopoDS.TopoDS_Shape) -> OCP.OCP.TopoDS.TopoDS_TShape

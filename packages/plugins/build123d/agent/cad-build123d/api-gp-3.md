@@ -7,15 +7,7 @@
 gp_Dir
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.gp.gp_Dir) -> None
-
-2. __init__(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Vec) -> None
-
-3. __init__(self: OCP.OCP.gp.gp_Dir, theCoord: OCP.OCP.gp.gp_XYZ) -> None
-
-4. __init__(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.gp.gp_Dir) -> None 2. __init__(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Vec) -> None 3. __init__(self: OCP.OCP.gp.gp_Dir, theCoord: OCP.OCP.gp.gp_XYZ) -> None 4. __init__(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.gp.gp_Dir) -> None
   __init__(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Vec) -> None
@@ -23,23 +15,7 @@ gp_Dir
   __init__(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None
 
   // SetCoord(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetCoord(self: OCP.OCP.gp.gp_Dir, theIndex: int, theXi: float) -> None
-
-For this unit vector, assigns the value Xi to: - the X coordinate if theIndex is 1, or - the Y coordinate if theIndex is 2, or - the Z coordinate if theIndex is 3, and then normalizes it. Warning Remember that all the coordinates of a unit vector are implicitly modified when any single one is changed directly. Exceptions Standard_OutOfRange if theIndex is not 1, 2, or 3. Standard_ConstructionError if either of the following is less than or equal to gp::Resolution(): - Sqrt(Xv*Xv + Yv*Yv + Zv*Zv), or - the modulus of the number triple formed by the new value theXi and the two other coordinates of this vector that were not directly modified.
-
-2. SetCoord(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None
-
-For this unit vector, assigns the values theXv, theYv and theZv to its three coordinates. Remember that all the coordinates of a unit vector are implicitly modified when any single one is changed directly.
-
-3. SetCoord(self: OCP.OCP.gp.gp_Dir, theIndex: int, theXi: float) -> None
-
-For this unit vector, assigns the value Xi to: - the X coordinate if theIndex is 1, or - the Y coordinate if theIndex is 2, or - the Z coordinate if theIndex is 3, and then normalizes it. Warning Remember that all the coordinates of a unit vector are implicitly modified when any single one is changed directly. Exceptions Standard_OutOfRange if theIndex is not 1, 2, or 3. Standard_ConstructionError if either of the following is less than or equal to gp::Resolution(): - Sqrt(Xv*Xv + Yv*Yv + Zv*Zv), or - the modulus of the number triple formed by the new value theXi and the two other coordinates of this vector that were not directly modified.
-
-4. SetCoord(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None
-
-For this unit vector, assigns the values theXv, theYv and theZv to its three coordinates. Remember that all the coordinates of a unit vector are implicitly modified when any single one is changed directly.
+  // Remarks: Overloaded function. 1. SetCoord(self: OCP.OCP.gp.gp_Dir, theIndex: int, theXi: float) -> None For this unit vector, assigns the value Xi to: - the X coordinate if theIndex is 1, or - the Y coordinate if theIndex is 2, or - the Z coordinate if theIndex is 3, and then normalizes it. Warning Remember that all the coordinates of a unit vector are implicitly modified when any single one is changed directly. Exceptions Standard_OutOfRange if theIndex is not 1, 2, or 3. Standard_ConstructionError if either of the following is less than or equal to gp::Resolution(): - Sqrt(Xv*Xv + Yv*Yv + Zv*Zv), or - the modulus of the number triple formed by the new value theXi and the two other coordinates of this vector that were not directly modified. 2. SetCoord(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None For this unit vector, assigns the values theXv, theYv and theZv to its three coordinates. Remember that all the coordinates of a unit vector are implicitly modified when any single one is changed directly. 3. SetCoord(self: OCP.OCP.gp.gp_Dir, theIndex: int, theXi: float) -> None For this unit vector, assigns the value Xi to: - the X coordinate if theIndex is 1, or - the Y coordinate if theIndex is 2, or - the Z coordinate if theIndex is 3, and then normalizes it. Warning Remember that all the coordinates of a unit vector are implicitly modified when any single one is changed directly. Exceptions Standard_OutOfRange if theIndex is not 1, 2, or 3. Standard_ConstructionError if either of the following is less than or equal to gp::Resolution(): - Sqrt(Xv*Xv + Yv*Yv + Zv*Zv), or - the modulus of the number triple formed by the new value theXi and the two other coordinates of this vector that were not directly modified. 4. SetCoord(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None For this unit vector, assigns the values theXv, theYv and theZv to its three coordinates. Remember that all the coordinates of a unit vector are implicitly modified when any single one is changed directly.
   SetCoord(*args, **kwargs)
   SetCoord(self: OCP.OCP.gp.gp_Dir, theIndex: int, theXi: float) -> None
   SetCoord(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None
@@ -47,71 +23,31 @@ For this unit vector, assigns the values theXv, theYv and theZv to its three coo
   SetCoord(self: OCP.OCP.gp.gp_Dir, theXv: float, theYv: float, theZv: float) -> None
 
   // SetX(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetX(self: OCP.OCP.gp.gp_Dir, theX: float) -> None
-
-Assigns the given value to the X coordinate of this unit vector.
-
-2. SetX(self: OCP.OCP.gp.gp_Dir, theX: float) -> None
-
-Assigns the given value to the X coordinate of this unit vector.
+  // Remarks: Overloaded function. 1. SetX(self: OCP.OCP.gp.gp_Dir, theX: float) -> None Assigns the given value to the X coordinate of this unit vector. 2. SetX(self: OCP.OCP.gp.gp_Dir, theX: float) -> None Assigns the given value to the X coordinate of this unit vector.
   SetX(*args, **kwargs)
   SetX(self: OCP.OCP.gp.gp_Dir, theX: float) -> None
   SetX(self: OCP.OCP.gp.gp_Dir, theX: float) -> None
 
   // SetY(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetY(self: OCP.OCP.gp.gp_Dir, theY: float) -> None
-
-Assigns the given value to the Y coordinate of this unit vector.
-
-2. SetY(self: OCP.OCP.gp.gp_Dir, theY: float) -> None
-
-Assigns the given value to the Y coordinate of this unit vector.
+  // Remarks: Overloaded function. 1. SetY(self: OCP.OCP.gp.gp_Dir, theY: float) -> None Assigns the given value to the Y coordinate of this unit vector. 2. SetY(self: OCP.OCP.gp.gp_Dir, theY: float) -> None Assigns the given value to the Y coordinate of this unit vector.
   SetY(*args, **kwargs)
   SetY(self: OCP.OCP.gp.gp_Dir, theY: float) -> None
   SetY(self: OCP.OCP.gp.gp_Dir, theY: float) -> None
 
   // SetZ(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetZ(self: OCP.OCP.gp.gp_Dir, theZ: float) -> None
-
-Assigns the given value to the Z coordinate of this unit vector.
-
-2. SetZ(self: OCP.OCP.gp.gp_Dir, theZ: float) -> None
-
-Assigns the given value to the Z coordinate of this unit vector.
+  // Remarks: Overloaded function. 1. SetZ(self: OCP.OCP.gp.gp_Dir, theZ: float) -> None Assigns the given value to the Z coordinate of this unit vector. 2. SetZ(self: OCP.OCP.gp.gp_Dir, theZ: float) -> None Assigns the given value to the Z coordinate of this unit vector.
   SetZ(*args, **kwargs)
   SetZ(self: OCP.OCP.gp.gp_Dir, theZ: float) -> None
   SetZ(self: OCP.OCP.gp.gp_Dir, theZ: float) -> None
 
   // SetXYZ(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetXYZ(self: OCP.OCP.gp.gp_Dir, theCoord: OCP.OCP.gp.gp_XYZ) -> None
-
-Assigns the three coordinates of theCoord to this unit vector.
-
-2. SetXYZ(self: OCP.OCP.gp.gp_Dir, theXYZ: OCP.OCP.gp.gp_XYZ) -> None
-
-Assigns the three coordinates of theCoord to this unit vector.
+  // Remarks: Overloaded function. 1. SetXYZ(self: OCP.OCP.gp.gp_Dir, theCoord: OCP.OCP.gp.gp_XYZ) -> None Assigns the three coordinates of theCoord to this unit vector. 2. SetXYZ(self: OCP.OCP.gp.gp_Dir, theXYZ: OCP.OCP.gp.gp_XYZ) -> None Assigns the three coordinates of theCoord to this unit vector.
   SetXYZ(*args, **kwargs)
   SetXYZ(self: OCP.OCP.gp.gp_Dir, theCoord: OCP.OCP.gp.gp_XYZ) -> None
   SetXYZ(self: OCP.OCP.gp.gp_Dir, theXYZ: OCP.OCP.gp.gp_XYZ) -> None
 
   // Coord(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Coord(self: OCP.OCP.gp.gp_Dir, theIndex: int) -> float
-
-Returns the coordinate of range theIndex : theIndex = 1 => X is returned Ithendex = 2 => Y is returned theIndex = 3 => Z is returned Exceptions Standard_OutOfRange if theIndex is not 1, 2, or 3.
-
-2. Coord(self: OCP.OCP.gp.gp_Dir) -> tuple[float, float, float]
-
-Returns for the unit vector its three coordinates theXv, theYv, and theZv.
+  // Remarks: Overloaded function. 1. Coord(self: OCP.OCP.gp.gp_Dir, theIndex: int) -> float Returns the coordinate of range theIndex : theIndex = 1 => X is returned Ithendex = 2 => Y is returned theIndex = 3 => Z is returned Exceptions Standard_OutOfRange if theIndex is not 1, 2, or 3. 2. Coord(self: OCP.OCP.gp.gp_Dir) -> tuple[float, float, float] Returns for the unit vector its three coordinates theXv, theYv, and theZv.
   Coord(*args, **kwargs)
   Coord(self: OCP.OCP.gp.gp_Dir, theIndex: int) -> float
   Coord(self: OCP.OCP.gp.gp_Dir) -> tuple[float, float, float]
@@ -153,53 +89,25 @@ Returns for the unit vector its three coordinates theXv, theYv, and theZv.
   AngleWithRef(self: OCP.OCP.gp.gp_Dir, theOther: OCP.OCP.gp.gp_Dir, theVRef: OCP.OCP.gp.gp_Dir) -> float
 
   // Cross(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Cross(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> None
-
-Computes the cross product between two directions Raises the exception ConstructionError if the two directions are parallel because the computed vector cannot be normalized to create a direction.
-
-2. Cross(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> None
-
-Computes the cross product between two directions Raises the exception ConstructionError if the two directions are parallel because the computed vector cannot be normalized to create a direction.
+  // Remarks: Overloaded function. 1. Cross(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> None Computes the cross product between two directions Raises the exception ConstructionError if the two directions are parallel because the computed vector cannot be normalized to create a direction. 2. Cross(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> None Computes the cross product between two directions Raises the exception ConstructionError if the two directions are parallel because the computed vector cannot be normalized to create a direction.
   Cross(*args, **kwargs)
   Cross(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> None
   Cross(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> None
 
   // Crossed(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Crossed(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
-
-Computes the triple vector product. <me> ^ (V1 ^ V2) Raises the exception ConstructionError if V1 and V2 are parallel or <me> and (V1^V2) are parallel because the computed vector can't be normalized to create a direction.
-
-2. Crossed(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
-
-Computes the triple vector product. <me> ^ (V1 ^ V2) Raises the exception ConstructionError if V1 and V2 are parallel or <me> and (V1^V2) are parallel because the computed vector can't be normalized to create a direction.
+  // Remarks: Overloaded function. 1. Crossed(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir Computes the triple vector product. <me> ^ (V1 ^ V2) Raises the exception ConstructionError if V1 and V2 are parallel or <me> and (V1^V2) are parallel because the computed vector can't be normalized to create a direction. 2. Crossed(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir Computes the triple vector product. <me> ^ (V1 ^ V2) Raises the exception ConstructionError if V1 and V2 are parallel or <me> and (V1^V2) are parallel because the computed vector can't be normalized to create a direction.
   Crossed(*args, **kwargs)
   Crossed(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
   Crossed(self: OCP.OCP.gp.gp_Dir, theRight: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
 
   // CrossCross(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. CrossCross(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> None
-
-2. CrossCross(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> None
+  // Remarks: Overloaded function. 1. CrossCross(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> None 2. CrossCross(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> None
   CrossCross(*args, **kwargs)
   CrossCross(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> None
   CrossCross(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> None
 
   // CrossCrossed(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. CrossCrossed(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
-
-Computes the double vector product this ^ (theV1 ^ theV2). - CrossCrossed creates a new unit vector. Exceptions Standard_ConstructionError if: - theV1 and theV2 are parallel, or - this unit vector and (theV1 ^ theV2) are parallel. This is because, in these conditions, the computed vector is null and cannot be normalized.
-
-2. CrossCrossed(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
-
-Computes the double vector product this ^ (theV1 ^ theV2). - CrossCrossed creates a new unit vector. Exceptions Standard_ConstructionError if: - theV1 and theV2 are parallel, or - this unit vector and (theV1 ^ theV2) are parallel. This is because, in these conditions, the computed vector is null and cannot be normalized.
+  // Remarks: Overloaded function. 1. CrossCrossed(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir Computes the double vector product this ^ (theV1 ^ theV2). - CrossCrossed creates a new unit vector. Exceptions Standard_ConstructionError if: - theV1 and theV2 are parallel, or - this unit vector and (theV1 ^ theV2) are parallel. This is because, in these conditions, the computed vector is null and cannot be normalized. 2. CrossCrossed(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir Computes the double vector product this ^ (theV1 ^ theV2). - CrossCrossed creates a new unit vector. Exceptions Standard_ConstructionError if: - theV1 and theV2 are parallel, or - this unit vector and (theV1 ^ theV2) are parallel. This is because, in these conditions, the computed vector is null and cannot be normalized.
   CrossCrossed(*args, **kwargs)
   CrossCrossed(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
   CrossCrossed(self: OCP.OCP.gp.gp_Dir, theV1: OCP.OCP.gp.gp_Dir, theV2: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
@@ -220,43 +128,21 @@ Computes the double vector product this ^ (theV1 ^ theV2). - CrossCrossed create
   Reversed(self: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
 
   // Mirror(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Mirror(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Dir) -> None
-
-2. Mirror(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1) -> None
-
-3. Mirror(self: OCP.OCP.gp.gp_Dir, theA2: OCP.OCP.gp.gp_Ax2) -> None
+  // Remarks: Overloaded function. 1. Mirror(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Dir) -> None 2. Mirror(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1) -> None 3. Mirror(self: OCP.OCP.gp.gp_Dir, theA2: OCP.OCP.gp.gp_Ax2) -> None
   Mirror(*args, **kwargs)
   Mirror(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Dir) -> None
   Mirror(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1) -> None
   Mirror(self: OCP.OCP.gp.gp_Dir, theA2: OCP.OCP.gp.gp_Ax2) -> None
 
   // Mirrored(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Mirrored(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
-
-Performs the symmetrical transformation of a direction with respect to the direction theV which is the center of the symmetry.
-
-2. Mirrored(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Dir
-
-Performs the symmetrical transformation of a direction with respect to an axis placement which is the axis of the symmetry.
-
-3. Mirrored(self: OCP.OCP.gp.gp_Dir, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Dir
-
-Performs the symmetrical transformation of a direction with respect to a plane. The axis placement theA2 locates the plane of the symmetry : (Location, XDirection, YDirection).
+  // Remarks: Overloaded function. 1. Mirrored(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir Performs the symmetrical transformation of a direction with respect to the direction theV which is the center of the symmetry. 2. Mirrored(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Dir Performs the symmetrical transformation of a direction with respect to an axis placement which is the axis of the symmetry. 3. Mirrored(self: OCP.OCP.gp.gp_Dir, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Dir Performs the symmetrical transformation of a direction with respect to a plane. The axis placement theA2 locates the plane of the symmetry : (Location, XDirection, YDirection).
   Mirrored(*args, **kwargs)
   Mirrored(self: OCP.OCP.gp.gp_Dir, theV: OCP.OCP.gp.gp_Dir) -> OCP.OCP.gp.gp_Dir
   Mirrored(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Dir
   Mirrored(self: OCP.OCP.gp.gp_Dir, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Dir
 
   // Rotate(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Rotate(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
-
-2. Rotate(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
+  // Remarks: Overloaded function. 1. Rotate(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None 2. Rotate(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
   Rotate(*args, **kwargs)
   Rotate(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
   Rotate(self: OCP.OCP.gp.gp_Dir, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
@@ -286,59 +172,7 @@ Performs the symmetrical transformation of a direction with respect to a plane. 
 
 // Category: gp
 // Enumerates all 24 possible variants of generalized Euler angles, defining general 3d rotation by three rotations around main axes of coordinate system, in different possible orders
-// Remarks: Members:
-
-  gp_EulerAngles
-
-  gp_YawPitchRoll
-
-  gp_Extrinsic_XYZ
-
-  gp_Extrinsic_XZY
-
-  gp_Extrinsic_YZX
-
-  gp_Extrinsic_YXZ
-
-  gp_Extrinsic_ZXY
-
-  gp_Extrinsic_ZYX
-
-  gp_Intrinsic_XYZ
-
-  gp_Intrinsic_XZY
-
-  gp_Intrinsic_YZX
-
-  gp_Intrinsic_YXZ
-
-  gp_Intrinsic_ZXY
-
-  gp_Intrinsic_ZYX
-
-  gp_Extrinsic_XYX
-
-  gp_Extrinsic_XZX
-
-  gp_Extrinsic_YZY
-
-  gp_Extrinsic_YXY
-
-  gp_Extrinsic_ZYZ
-
-  gp_Extrinsic_ZXZ
-
-  gp_Intrinsic_XYX
-
-  gp_Intrinsic_XZX
-
-  gp_Intrinsic_YZY
-
-  gp_Intrinsic_YXY
-
-  gp_Intrinsic_ZXZ
-
-  gp_Intrinsic_ZYZ
+// Remarks: Members: gp_EulerAngles gp_YawPitchRoll gp_Extrinsic_XYZ gp_Extrinsic_XZY gp_Extrinsic_YZX gp_Extrinsic_YXZ gp_Extrinsic_ZXY gp_Extrinsic_ZYX gp_Intrinsic_XYZ gp_Intrinsic_XZY gp_Intrinsic_YZX gp_Intrinsic_YXZ gp_Intrinsic_ZXY gp_Intrinsic_ZYX gp_Extrinsic_XYX gp_Extrinsic_XZX gp_Extrinsic_YZY gp_Extrinsic_YXY gp_Extrinsic_ZYZ gp_Extrinsic_ZXZ gp_Intrinsic_XYX gp_Intrinsic_XZX gp_Intrinsic_YZY gp_Intrinsic_YXY gp_Intrinsic_ZXZ gp_Intrinsic_ZYZ
 gp_EulerSequence
 
   // __init__(self
@@ -354,36 +188,14 @@ gp_EulerSequence
 gp_GTrsf
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.gp.gp_GTrsf) -> None
-
-2. __init__(self: OCP.OCP.gp.gp_GTrsf, theT: OCP.OCP.gp.gp_Trsf) -> None
-
-3. __init__(self: OCP.OCP.gp.gp_GTrsf, theM: OCP.OCP.gp.gp_Mat, theV: OCP.OCP.gp.gp_XYZ) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.gp.gp_GTrsf) -> None 2. __init__(self: OCP.OCP.gp.gp_GTrsf, theT: OCP.OCP.gp.gp_Trsf) -> None 3. __init__(self: OCP.OCP.gp.gp_GTrsf, theM: OCP.OCP.gp.gp_Mat, theV: OCP.OCP.gp.gp_XYZ) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.gp.gp_GTrsf) -> None
   __init__(self: OCP.OCP.gp.gp_GTrsf, theT: OCP.OCP.gp.gp_Trsf) -> None
   __init__(self: OCP.OCP.gp.gp_GTrsf, theM: OCP.OCP.gp.gp_Mat, theV: OCP.OCP.gp.gp_XYZ) -> None
 
   // SetAffinity(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA1: OCP.OCP.gp.gp_Ax1, theRatio: float) -> None
-
-Changes this transformation into an affinity of ratio theRatio with respect to the axis theA1. Note: an affinity is a point-by-point transformation that transforms any point P into a point P' such that if H is the orthogonal projection of P on the axis theA1 or the plane A2, the vectors HP and HP' satisfy: HP' = theRatio * HP.
-
-2. SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA2: OCP.OCP.gp.gp_Ax2, theRatio: float) -> None
-
-Changes this transformation into an affinity of ratio theRatio with respect to the plane defined by the origin, the "X Direction" and the "Y Direction" of coordinate system theA2. Note: an affinity is a point-by-point transformation that transforms any point P into a point P' such that if H is the orthogonal projection of P on the axis A1 or the plane theA2, the vectors HP and HP' satisfy: HP' = theRatio * HP.
-
-3. SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA1: OCP.OCP.gp.gp_Ax1, theRatio: float) -> None
-
-Changes this transformation into an affinity of ratio theRatio with respect to the axis theA1. Note: an affinity is a point-by-point transformation that transforms any point P into a point P' such that if H is the orthogonal projection of P on the axis theA1 or the plane A2, the vectors HP and HP' satisfy: HP' = theRatio * HP.
-
-4. SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA2: OCP.OCP.gp.gp_Ax2, theRatio: float) -> None
-
-Changes this transformation into an affinity of ratio theRatio with respect to the plane defined by the origin, the "X Direction" and the "Y Direction" of coordinate system theA2. Note: an affinity is a point-by-point transformation that transforms any point P into a point P' such that if H is the orthogonal projection of P on the axis A1 or the plane theA2, the vectors HP and HP' satisfy: HP' = theRatio * HP.
+  // Remarks: Overloaded function. 1. SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA1: OCP.OCP.gp.gp_Ax1, theRatio: float) -> None Changes this transformation into an affinity of ratio theRatio with respect to the axis theA1. Note: an affinity is a point-by-point transformation that transforms any point P into a point P' such that if H is the orthogonal projection of P on the axis theA1 or the plane A2, the vectors HP and HP' satisfy: HP' = theRatio * HP. 2. SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA2: OCP.OCP.gp.gp_Ax2, theRatio: float) -> None Changes this transformation into an affinity of ratio theRatio with respect to the plane defined by the origin, the "X Direction" and the "Y Direction" of coordinate system theA2. Note: an affinity is a point-by-point transformation that transforms any point P into a point P' such that if H is the orthogonal projection of P on the axis A1 or the plane theA2, the vectors HP and HP' satisfy: HP' = theRatio * HP. 3. SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA1: OCP.OCP.gp.gp_Ax1, theRatio: float) -> None Changes this transformation into an affinity of ratio theRatio with respect to the axis theA1. Note: an affinity is a point-by-point transformation that transforms any point P into a point P' such that if H is the orthogonal projection of P on the axis theA1 or the plane A2, the vectors HP and HP' satisfy: HP' = theRatio * HP. 4. SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA2: OCP.OCP.gp.gp_Ax2, theRatio: float) -> None Changes this transformation into an affinity of ratio theRatio with respect to the plane defined by the origin, the "X Direction" and the "Y Direction" of coordinate system theA2. Note: an affinity is a point-by-point transformation that transforms any point P into a point P' such that if H is the orthogonal projection of P on the axis A1 or the plane theA2, the vectors HP and HP' satisfy: HP' = theRatio * HP.
   SetAffinity(*args, **kwargs)
   SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA1: OCP.OCP.gp.gp_Ax1, theRatio: float) -> None
   SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA2: OCP.OCP.gp.gp_Ax2, theRatio: float) -> None
@@ -391,15 +203,7 @@ Changes this transformation into an affinity of ratio theRatio with respect to t
   SetAffinity(self: OCP.OCP.gp.gp_GTrsf, theA2: OCP.OCP.gp.gp_Ax2, theRatio: float) -> None
 
   // SetValue(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetValue(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int, theValue: float) -> None
-
-Replaces the coefficient (theRow, theCol) of the matrix representing this transformation by theValue. Raises OutOfRange if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
-
-2. SetValue(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int, theValue: float) -> None
-
-Replaces the coefficient (theRow, theCol) of the matrix representing this transformation by theValue. Raises OutOfRange if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
+  // Remarks: Overloaded function. 1. SetValue(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int, theValue: float) -> None Replaces the coefficient (theRow, theCol) of the matrix representing this transformation by theValue. Raises OutOfRange if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4 2. SetValue(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int, theValue: float) -> None Replaces the coefficient (theRow, theCol) of the matrix representing this transformation by theValue. Raises OutOfRange if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
   SetValue(*args, **kwargs)
   SetValue(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int, theValue: float) -> None
   SetValue(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int, theValue: float) -> None
@@ -433,15 +237,7 @@ Replaces the coefficient (theRow, theCol) of the matrix representing this transf
   SetForm(self: OCP.OCP.gp.gp_GTrsf) -> None
 
   // Value(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Value(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int) -> float
-
-Returns the coefficients of the global matrix of transformation. Raises OutOfRange if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
-
-2. Value(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int) -> float
-
-Returns the coefficients of the global matrix of transformation. Raises OutOfRange if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
+  // Remarks: Overloaded function. 1. Value(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int) -> float Returns the coefficients of the global matrix of transformation. Raises OutOfRange if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4 2. Value(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int) -> float Returns the coefficients of the global matrix of transformation. Raises OutOfRange if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
   Value(*args, **kwargs)
   Value(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int) -> float
   Value(self: OCP.OCP.gp.gp_GTrsf, theRow: int, theCol: int) -> float
@@ -473,19 +269,7 @@ Returns the coefficients of the global matrix of transformation. Raises OutOfRan
   Powered(self: OCP.OCP.gp.gp_GTrsf, theN: int) -> OCP.OCP.gp.gp_GTrsf
 
   // Transforms(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Transforms(self: OCP.OCP.gp.gp_GTrsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None
-
-2. Transforms(self: OCP.OCP.gp.gp_GTrsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None
-
-3. Transforms(self: OCP.OCP.gp.gp_GTrsf) -> tuple[float, float, float]
-
-Transforms a triplet XYZ with a GTrsf.
-
-4. Transforms(self: OCP.OCP.gp.gp_GTrsf) -> tuple[float, float, float]
-
-Transforms a triplet XYZ with a GTrsf.
+  // Remarks: Overloaded function. 1. Transforms(self: OCP.OCP.gp.gp_GTrsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None 2. Transforms(self: OCP.OCP.gp.gp_GTrsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None 3. Transforms(self: OCP.OCP.gp.gp_GTrsf) -> tuple[float, float, float] Transforms a triplet XYZ with a GTrsf. 4. Transforms(self: OCP.OCP.gp.gp_GTrsf) -> tuple[float, float, float] Transforms a triplet XYZ with a GTrsf.
   Transforms(*args, **kwargs)
   Transforms(self: OCP.OCP.gp.gp_GTrsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None
   Transforms(self: OCP.OCP.gp.gp_GTrsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None
@@ -493,11 +277,7 @@ Transforms a triplet XYZ with a GTrsf.
   Transforms(self: OCP.OCP.gp.gp_GTrsf) -> tuple[float, float, float]
 
   // Trsf(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Trsf(self: OCP.OCP.gp.gp_GTrsf) -> OCP.OCP.gp.gp_Trsf
-
-2. Trsf(self: OCP.OCP.gp.gp_GTrsf) -> OCP.OCP.gp.gp_Trsf
+  // Remarks: Overloaded function. 1. Trsf(self: OCP.OCP.gp.gp_GTrsf) -> OCP.OCP.gp.gp_Trsf 2. Trsf(self: OCP.OCP.gp.gp_GTrsf) -> OCP.OCP.gp.gp_Trsf
   Trsf(*args, **kwargs)
   Trsf(self: OCP.OCP.gp.gp_GTrsf) -> OCP.OCP.gp.gp_Trsf
   Trsf(self: OCP.OCP.gp.gp_GTrsf) -> OCP.OCP.gp.gp_Trsf

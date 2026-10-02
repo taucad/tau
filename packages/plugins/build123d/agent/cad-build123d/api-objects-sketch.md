@@ -38,11 +38,7 @@ Ellipse
 
 // Category: objects_sketch
 // Sketch Object
-// Remarks: Create a polygon defined by given sequence of points.
-
-Note: the order of the points defines the resulting normal of the Face in Algebra
-mode, where counter-clockwise order creates an upward normal while clockwise order
-a downward normal. In Builder mode, the Face is added with an upward normal.
+// Remarks: Create a polygon defined by given sequence of points. Note: the order of the points defines the resulting normal of the Face in Algebra mode, where counter-clockwise order creates an upward normal while clockwise order a downward normal. In Builder mode, the Face is added with an upward normal.
 Polygon
 
   Polygon(*pts: VectorLike | Iterable[VectorLike], rotation: float = 0, align: Align | tuple[Align, Align] | None = (Align.NONE, Align.NONE), mode: Mode = Mode.ADD)
@@ -78,8 +74,7 @@ RectangleRounded
 
 // Category: objects_sketch
 // Sketch Object
-// Remarks: Create a regular polygon defined by radius and side count. Use major_radius to define whether
-the polygon circumscribes (along the vertices) or inscribes (along the sides) the radius circle.
+// Remarks: Create a regular polygon defined by radius and side count. Use major_radius to define whether the polygon circumscribes (along the vertices) or inscribes (along the sides) the radius circle.
 RegularPolygon
 
   RegularPolygon(radius: float, side_count: int, major_radius: bool = True, rotation: float = 0, align: tuple[Align, Align] = (Align.CENTER, Align.CENTER), mode: Mode = Mode.ADD)
@@ -103,8 +98,7 @@ SlotArc
 
 // Category: objects_sketch
 // Sketch Object
-// Remarks: Create a slot defined by the center of the slot and the center of one end arc.
-The slot will be symmetric about the center point.
+// Remarks: Create a slot defined by the center of the slot and the center of one end arc. The slot will be symmetric about the center point.
 SlotCenterPoint
 
   SlotCenterPoint(center: VectorLike, point: VectorLike, height: float, rotation: float = 0, mode: Mode = Mode.ADD)
@@ -139,24 +133,7 @@ SlotOverall
 
 // Category: objects_sketch
 // Sketch Object
-// Remarks: Create text defined by text string and font size.
-
-Fonts installed to the system can be specified by name and FontStyle. Fonts with
-subfamilies not in FontStyle should be specified with the subfamily name, e.g.
-"Arial Black". Alternatively, a specific font file can be specified with font_path.
-
-Use `available_fonts()` to list available font names for `font` and FontStyles.
-Note: on Windows, fonts must be installed with "Install for all users" to be found
-by name.
-
-Not all fonts have every FontStyle available, however ITALIC and BOLDITALIC will
-still italicize the font if the respective font file is not available.
-
-text_align specifies alignment of text inside the bounding box, while align the
-aligns the bounding box itself.
-
-Optionally, the Text can be positioned on a non-linear edge or wire with a path and
-position_on_path.
+// Remarks: Create text defined by text string and font size. Fonts installed to the system can be specified by name and FontStyle. Fonts with subfamilies not in FontStyle should be specified with the subfamily name, e.g. "Arial Black". Alternatively, a specific font file can be specified with font_path. Use `available_fonts()` to list available font names for `font` and FontStyles. Note: on Windows, fonts must be installed with "Install for all users" to be found by name. Not all fonts have every FontStyle available, however ITALIC and BOLDITALIC will still italicize the font if the respective font file is not available. text_align specifies alignment of text inside the bounding box, while align the aligns the bounding box itself. Optionally, the Text can be positioned on a non-linear edge or wire with a path and position_on_path.
 Text
 
   Text(txt: str, font_size: float, font: str = 'Arial', font_path: PathLike[str] | str | None = None, font_style: FontStyle = FontStyle.REGULAR, text_align: tuple[TextAlign, TextAlign] = (TextAlign.CENTER, TextAlign.CENTER), align: Align | tuple[Align, Align] | None = None, path: Edge | Wire | None = None, position_on_path: float = 0.0, single_line_width: float | None = None, rotation: float = 0.0, mode: Mode = Mode.ADD)
@@ -190,10 +167,7 @@ Trapezoid
 
 // Category: objects_sketch
 // Sketch Object
-// Remarks: Create a triangle defined by one side length and any of two other side lengths or interior
-angles. The interior angles are opposite the side with the same designation
-(i.e. side 'a' is opposite angle 'A'). Side 'a' is the bottom side, followed by 'b'
-on the right, going counter-clockwise.
+// Remarks: Create a triangle defined by one side length and any of two other side lengths or interior angles. The interior angles are opposite the side with the same designation (i.e. side 'a' is opposite angle 'A'). Side 'a' is the bottom side, followed by 'b' on the right, going counter-clockwise.
 // Throws: ValueError: One length and two other values were not provided
 Triangle
 

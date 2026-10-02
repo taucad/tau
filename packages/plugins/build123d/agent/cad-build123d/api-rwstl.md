@@ -18,23 +18,7 @@ RWStl
   WriteAscii_s(theMesh: OCP.OCP.Poly.Poly_Triangulation, thePath: OCP.OCP.OSD.OSD_Path, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10e6a9270>) -> bool
 
   // ReadFile_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. ReadFile_s(theFile: OCP.OCP.OSD.OSD_Path, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10eb83bf0>) -> OCP.OCP.Poly.Poly_Triangulation
-
-Read specified STL file and returns its content as triangulation. In case of error, returns Null handle.
-
-2. ReadFile_s(theFile: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10e9b1170>) -> OCP.OCP.Poly.Poly_Triangulation
-
-Read specified STL file and returns its content as triangulation. In case of error, returns Null handle.
-
-3. ReadFile_s(theFile: str, theMergeAngle: float, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10eab7570>) -> OCP.OCP.Poly.Poly_Triangulation
-
-Read specified STL file and returns its content as triangulation.
-
-4. ReadFile_s(theFile: str, theMergeAngle: float, theTriangList: NCollection_Sequence<opencascade::handle<Poly_Triangulation>>, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10e8e04b0>) -> None
-
-Read specified STL file and fills triangulation list for multi-domain case.
+  // Remarks: Overloaded function. 1. ReadFile_s(theFile: OCP.OCP.OSD.OSD_Path, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10eb83bf0>) -> OCP.OCP.Poly.Poly_Triangulation Read specified STL file and returns its content as triangulation. In case of error, returns Null handle. 2. ReadFile_s(theFile: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10e9b1170>) -> OCP.OCP.Poly.Poly_Triangulation Read specified STL file and returns its content as triangulation. In case of error, returns Null handle. 3. ReadFile_s(theFile: str, theMergeAngle: float, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10eab7570>) -> OCP.OCP.Poly.Poly_Triangulation Read specified STL file and returns its content as triangulation. 4. ReadFile_s(theFile: str, theMergeAngle: float, theTriangList: NCollection_Sequence<opencascade::handle<Poly_Triangulation>>, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10e8e04b0>) -> None Read specified STL file and fills triangulation list for multi-domain case.
   ReadFile_s(*args, **kwargs)
   ReadFile_s(theFile: OCP.OCP.OSD.OSD_Path, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10eb83bf0>) -> OCP.OCP.Poly.Poly_Triangulation
   ReadFile_s(theFile: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10e9b1170>) -> OCP.OCP.Poly.Poly_Triangulation

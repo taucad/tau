@@ -102,11 +102,7 @@ GeoSpecTauProjectArtifact: {
 GeoSpecTauProjectRuntime: RuntimeClientWithRoutes & Pick<RuntimeClient, 'shutdown' | 'snapshotSource'>
 
 // Trusted project configuration using existing discovery and runner options
-// Remarks: Omitted values keep their existing owner's defaults. Defined overrides
-replace whole fields, including empty arrays, false and the subjects map.
-Existing discovery currently treats an absent or empty include array as its
-default pattern. Preserving [] here does not change that consumer behavior.
-This is configuration data, not a canonical engine plan or a geometry result.
+// Remarks: Omitted values keep their existing owner's defaults. Defined overrides replace whole fields, including empty arrays, false and the subjects map. Existing discovery currently treats an absent or empty include array as its default pattern. Preserving [] here does not change that consumer behavior. This is configuration data, not a canonical engine plan or a geometry result.
 GeoSpecConfig: {
     include?: readonly string[];
     exclude?: readonly string[];
@@ -124,8 +120,7 @@ GeoSpecConfig: {
 }
 
 // Imported Tau project data for later host resolution
-// Remarks: This descriptor does not validate the original manifest bytes or its schema,
-admit an asset, export geometry, or establish finalized-artifact provenance.
+// Remarks: This descriptor does not validate the original manifest bytes or its schema, admit an asset, export geometry, or establish finalized-artifact provenance.
 GeoSpecTauProjectDescriptor: {
     readonly kind: 'tau-project';
     /** Normalized project-relative POSIX path identifying the imported manifest. */

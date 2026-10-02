@@ -7,13 +7,7 @@
 gp_Lin
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.gp.gp_Lin) -> None
-
-2. __init__(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> None
-
-3. __init__(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Dir) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.gp.gp_Lin) -> None 2. __init__(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> None 3. __init__(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Dir) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.gp.gp_Lin) -> None
   __init__(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> None
@@ -47,84 +41,34 @@ gp_Lin
   Contains(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt, theLinearTolerance: float) -> bool
 
   // Distance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Distance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the distance between <me> and the point theP.
-
-2. Distance(self: OCP.OCP.gp.gp_Lin, theOther: OCP.OCP.gp.gp_Lin) -> float
-
-Computes the distance between two lines.
-
-3. Distance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the distance between <me> and the point theP.
+  // Remarks: Overloaded function. 1. Distance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float Computes the distance between <me> and the point theP. 2. Distance(self: OCP.OCP.gp.gp_Lin, theOther: OCP.OCP.gp.gp_Lin) -> float Computes the distance between two lines. 3. Distance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float Computes the distance between <me> and the point theP.
   Distance(*args, **kwargs)
   Distance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float
   Distance(self: OCP.OCP.gp.gp_Lin, theOther: OCP.OCP.gp.gp_Lin) -> float
   Distance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float
 
   // SquareDistance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SquareDistance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the square distance between <me> and the point theP.
-
-2. SquareDistance(self: OCP.OCP.gp.gp_Lin, theOther: OCP.OCP.gp.gp_Lin) -> float
-
-Computes the square distance between two lines.
-
-3. SquareDistance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the square distance between <me> and the point theP.
+  // Remarks: Overloaded function. 1. SquareDistance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float Computes the square distance between <me> and the point theP. 2. SquareDistance(self: OCP.OCP.gp.gp_Lin, theOther: OCP.OCP.gp.gp_Lin) -> float Computes the square distance between two lines. 3. SquareDistance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float Computes the square distance between <me> and the point theP.
   SquareDistance(*args, **kwargs)
   SquareDistance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float
   SquareDistance(self: OCP.OCP.gp.gp_Lin, theOther: OCP.OCP.gp.gp_Lin) -> float
   SquareDistance(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> float
 
   // Normal(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Normal(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin
-
-Computes the line normal to the direction of <me>, passing through the point theP. Raises ConstructionError if the distance between <me> and the point theP is lower or equal to Resolution from gp because there is an infinity of solutions in 3D space.
-
-2. Normal(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin
-
-Computes the line normal to the direction of <me>, passing through the point theP. Raises ConstructionError if the distance between <me> and the point theP is lower or equal to Resolution from gp because there is an infinity of solutions in 3D space.
+  // Remarks: Overloaded function. 1. Normal(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin Computes the line normal to the direction of <me>, passing through the point theP. Raises ConstructionError if the distance between <me> and the point theP is lower or equal to Resolution from gp because there is an infinity of solutions in 3D space. 2. Normal(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin Computes the line normal to the direction of <me>, passing through the point theP. Raises ConstructionError if the distance between <me> and the point theP is lower or equal to Resolution from gp because there is an infinity of solutions in 3D space.
   Normal(*args, **kwargs)
   Normal(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin
   Normal(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin
 
   // Mirror(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Mirror(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> None
-
-2. Mirror(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> None
-
-3. Mirror(self: OCP.OCP.gp.gp_Lin, theA2: OCP.OCP.gp.gp_Ax2) -> None
+  // Remarks: Overloaded function. 1. Mirror(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> None 2. Mirror(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> None 3. Mirror(self: OCP.OCP.gp.gp_Lin, theA2: OCP.OCP.gp.gp_Ax2) -> None
   Mirror(*args, **kwargs)
   Mirror(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> None
   Mirror(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> None
   Mirror(self: OCP.OCP.gp.gp_Lin, theA2: OCP.OCP.gp.gp_Ax2) -> None
 
   // Mirrored(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Mirrored(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin
-
-Performs the symmetrical transformation of a line with respect to the point theP which is the center of the symmetry.
-
-2. Mirrored(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Lin
-
-Performs the symmetrical transformation of a line with respect to an axis placement which is the axis of the symmetry.
-
-3. Mirrored(self: OCP.OCP.gp.gp_Lin, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Lin
-
-Performs the symmetrical transformation of a line with respect to a plane. The axis placement <theA2> locates the plane of the symmetry : (Location, XDirection, YDirection).
+  // Remarks: Overloaded function. 1. Mirrored(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin Performs the symmetrical transformation of a line with respect to the point theP which is the center of the symmetry. 2. Mirrored(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Lin Performs the symmetrical transformation of a line with respect to an axis placement which is the axis of the symmetry. 3. Mirrored(self: OCP.OCP.gp.gp_Lin, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Lin Performs the symmetrical transformation of a line with respect to a plane. The axis placement <theA2> locates the plane of the symmetry : (Location, XDirection, YDirection).
   Mirrored(*args, **kwargs)
   Mirrored(self: OCP.OCP.gp.gp_Lin, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin
   Mirrored(self: OCP.OCP.gp.gp_Lin, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Lin
@@ -152,25 +96,13 @@ Performs the symmetrical transformation of a line with respect to a plane. The a
   Transformed(self: OCP.OCP.gp.gp_Lin, theT: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.gp.gp_Lin
 
   // Translate(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Translate(self: OCP.OCP.gp.gp_Lin, theV: OCP.OCP.gp.gp_Vec) -> None
-
-2. Translate(self: OCP.OCP.gp.gp_Lin, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
+  // Remarks: Overloaded function. 1. Translate(self: OCP.OCP.gp.gp_Lin, theV: OCP.OCP.gp.gp_Vec) -> None 2. Translate(self: OCP.OCP.gp.gp_Lin, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
   Translate(*args, **kwargs)
   Translate(self: OCP.OCP.gp.gp_Lin, theV: OCP.OCP.gp.gp_Vec) -> None
   Translate(self: OCP.OCP.gp.gp_Lin, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
 
   // Translated(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Translated(self: OCP.OCP.gp.gp_Lin, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Lin
-
-Translates a line in the direction of the vector theV. The magnitude of the translation is the vector's magnitude.
-
-2. Translated(self: OCP.OCP.gp.gp_Lin, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin
-
-Translates a line from the point theP1 to the point theP2.
+  // Remarks: Overloaded function. 1. Translated(self: OCP.OCP.gp.gp_Lin, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Lin Translates a line in the direction of the vector theV. The magnitude of the translation is the vector's magnitude. 2. Translated(self: OCP.OCP.gp.gp_Lin, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin Translates a line from the point theP1 to the point theP2.
   Translated(*args, **kwargs)
   Translated(self: OCP.OCP.gp.gp_Lin, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Lin
   Translated(self: OCP.OCP.gp.gp_Lin, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Lin
@@ -192,15 +124,7 @@ Translates a line from the point theP1 to the point theP2.
 gp_Pln
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.gp.gp_Pln) -> None
-
-2. __init__(self: OCP.OCP.gp.gp_Pln, theA3: OCP.OCP.gp.gp_Ax3) -> None
-
-3. __init__(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Dir) -> None
-
-4. __init__(self: OCP.OCP.gp.gp_Pln, theA: float, theB: float, theC: float, theD: float) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.gp.gp_Pln) -> None 2. __init__(self: OCP.OCP.gp.gp_Pln, theA3: OCP.OCP.gp.gp_Ax3) -> None 3. __init__(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt, theV: OCP.OCP.gp.gp_Dir) -> None 4. __init__(self: OCP.OCP.gp.gp_Pln, theA: float, theB: float, theC: float, theD: float) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.gp.gp_Pln) -> None
   __init__(self: OCP.OCP.gp.gp_Pln, theA3: OCP.OCP.gp.gp_Ax3) -> None
@@ -232,31 +156,7 @@ gp_Pln
   Direct(self: OCP.OCP.gp.gp_Pln) -> bool
 
   // Distance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Distance(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the distance between <me> and the point <theP>.
-
-2. Distance(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin) -> float
-
-Computes the distance between <me> and the line <theL>.
-
-3. Distance(self: OCP.OCP.gp.gp_Pln, theOther: OCP.OCP.gp.gp_Pln) -> float
-
-Computes the distance between two planes.
-
-4. Distance(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the distance between <me> and the point <theP>.
-
-5. Distance(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin) -> float
-
-Computes the distance between <me> and the line <theL>.
-
-6. Distance(self: OCP.OCP.gp.gp_Pln, theOther: OCP.OCP.gp.gp_Pln) -> float
-
-Computes the distance between two planes.
+  // Remarks: Overloaded function. 1. Distance(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> float Computes the distance between <me> and the point <theP>. 2. Distance(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin) -> float Computes the distance between <me> and the line <theL>. 3. Distance(self: OCP.OCP.gp.gp_Pln, theOther: OCP.OCP.gp.gp_Pln) -> float Computes the distance between two planes. 4. Distance(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> float Computes the distance between <me> and the point <theP>. 5. Distance(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin) -> float Computes the distance between <me> and the line <theL>. 6. Distance(self: OCP.OCP.gp.gp_Pln, theOther: OCP.OCP.gp.gp_Pln) -> float Computes the distance between two planes.
   Distance(*args, **kwargs)
   Distance(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> float
   Distance(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin) -> float
@@ -266,19 +166,7 @@ Computes the distance between two planes.
   Distance(self: OCP.OCP.gp.gp_Pln, theOther: OCP.OCP.gp.gp_Pln) -> float
 
   // SquareDistance(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SquareDistance(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> float
-
-Computes the square distance between <me> and the point <theP>.
-
-2. SquareDistance(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin) -> float
-
-Computes the square distance between <me> and the line <theL>.
-
-3. SquareDistance(self: OCP.OCP.gp.gp_Pln, theOther: OCP.OCP.gp.gp_Pln) -> float
-
-Computes the square distance between two planes.
+  // Remarks: Overloaded function. 1. SquareDistance(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> float Computes the square distance between <me> and the point <theP>. 2. SquareDistance(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin) -> float Computes the square distance between <me> and the line <theL>. 3. SquareDistance(self: OCP.OCP.gp.gp_Pln, theOther: OCP.OCP.gp.gp_Pln) -> float Computes the square distance between two planes.
   SquareDistance(*args, **kwargs)
   SquareDistance(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> float
   SquareDistance(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin) -> float
@@ -293,46 +181,20 @@ Computes the square distance between two planes.
   YAxis(self: OCP.OCP.gp.gp_Pln) -> OCP.OCP.gp.gp_Ax1
 
   // Contains(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Contains(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt, theLinearTolerance: float) -> bool
-
-Returns true if this plane contains the point theP. This means that - the distance between point theP and this plane is less than or equal to theLinearTolerance, or - line L is normal to the "main Axis" of the local coordinate system of this plane, within the tolerance AngularTolerance, and the distance between the origin of line L and this plane is less than or equal to theLinearTolerance.
-
-2. Contains(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin, theLinearTolerance: float, theAngularTolerance: float) -> bool
-
-Returns true if this plane contains the line theL. This means that - the distance between point P and this plane is less than or equal to LinearTolerance, or - line theL is normal to the "main Axis" of the local coordinate system of this plane, within the tolerance theAngularTolerance, and the distance between the origin of line theL and this plane is less than or equal to theLinearTolerance.
+  // Remarks: Overloaded function. 1. Contains(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt, theLinearTolerance: float) -> bool Returns true if this plane contains the point theP. This means that - the distance between point theP and this plane is less than or equal to theLinearTolerance, or - line L is normal to the "main Axis" of the local coordinate system of this plane, within the tolerance AngularTolerance, and the distance between the origin of line L and this plane is less than or equal to theLinearTolerance. 2. Contains(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin, theLinearTolerance: float, theAngularTolerance: float) -> bool Returns true if this plane contains the line theL. This means that - the distance between point P and this plane is less than or equal to LinearTolerance, or - line theL is normal to the "main Axis" of the local coordinate system of this plane, within the tolerance theAngularTolerance, and the distance between the origin of line theL and this plane is less than or equal to theLinearTolerance.
   Contains(*args, **kwargs)
   Contains(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt, theLinearTolerance: float) -> bool
   Contains(self: OCP.OCP.gp.gp_Pln, theL: OCP.OCP.gp.gp_Lin, theLinearTolerance: float, theAngularTolerance: float) -> bool
 
   // Mirror(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Mirror(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> None
-
-2. Mirror(self: OCP.OCP.gp.gp_Pln, theA1: OCP.OCP.gp.gp_Ax1) -> None
-
-3. Mirror(self: OCP.OCP.gp.gp_Pln, theA2: OCP.OCP.gp.gp_Ax2) -> None
+  // Remarks: Overloaded function. 1. Mirror(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> None 2. Mirror(self: OCP.OCP.gp.gp_Pln, theA1: OCP.OCP.gp.gp_Ax1) -> None 3. Mirror(self: OCP.OCP.gp.gp_Pln, theA2: OCP.OCP.gp.gp_Ax2) -> None
   Mirror(*args, **kwargs)
   Mirror(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> None
   Mirror(self: OCP.OCP.gp.gp_Pln, theA1: OCP.OCP.gp.gp_Ax1) -> None
   Mirror(self: OCP.OCP.gp.gp_Pln, theA2: OCP.OCP.gp.gp_Ax2) -> None
 
   // Mirrored(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Mirrored(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pln
-
-Performs the symmetrical transformation of a plane with respect to the point <theP> which is the center of the symmetry Warnings : The normal direction to the plane is not changed. The "XAxis" and the "YAxis" are reversed.
-
-2. Mirrored(self: OCP.OCP.gp.gp_Pln, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Pln
-
-Performs the symmetrical transformation of a plane with respect to an axis placement which is the axis of the symmetry. The transformation is performed on the "Location" point, on the "XAxis" and the "YAxis". The resulting normal direction is the cross product between the "XDirection" and the "YDirection" after transformation if the initial plane was right handed, else it is the opposite.
-
-3. Mirrored(self: OCP.OCP.gp.gp_Pln, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Pln
-
-Performs the symmetrical transformation of a plane with respect to an axis placement. The axis placement <A2> locates the plane of the symmetry. The transformation is performed on the "Location" point, on the "XAxis" and the "YAxis". The resulting normal direction is the cross product between the "XDirection" and the "YDirection" after transformation if the initial plane was right handed, else it is the opposite.
+  // Remarks: Overloaded function. 1. Mirrored(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pln Performs the symmetrical transformation of a plane with respect to the point <theP> which is the center of the symmetry Warnings : The normal direction to the plane is not changed. The "XAxis" and the "YAxis" are reversed. 2. Mirrored(self: OCP.OCP.gp.gp_Pln, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Pln Performs the symmetrical transformation of a plane with respect to an axis placement which is the axis of the symmetry. The transformation is performed on the "Location" point, on the "XAxis" and the "YAxis". The resulting normal direction is the cross product between the "XDirection" and the "YDirection" after transformation if the initial plane was right handed, else it is the opposite. 3. Mirrored(self: OCP.OCP.gp.gp_Pln, theA2: OCP.OCP.gp.gp_Ax2) -> OCP.OCP.gp.gp_Pln Performs the symmetrical transformation of a plane with respect to an axis placement. The axis placement <A2> locates the plane of the symmetry. The transformation is performed on the "Location" point, on the "XAxis" and the "YAxis". The resulting normal direction is the cross product between the "XDirection" and the "YDirection" after transformation if the initial plane was right handed, else it is the opposite.
   Mirrored(*args, **kwargs)
   Mirrored(self: OCP.OCP.gp.gp_Pln, theP: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pln
   Mirrored(self: OCP.OCP.gp.gp_Pln, theA1: OCP.OCP.gp.gp_Ax1) -> OCP.OCP.gp.gp_Pln
@@ -360,25 +222,13 @@ Performs the symmetrical transformation of a plane with respect to an axis place
   Transformed(self: OCP.OCP.gp.gp_Pln, theT: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.gp.gp_Pln
 
   // Translate(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Translate(self: OCP.OCP.gp.gp_Pln, theV: OCP.OCP.gp.gp_Vec) -> None
-
-2. Translate(self: OCP.OCP.gp.gp_Pln, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
+  // Remarks: Overloaded function. 1. Translate(self: OCP.OCP.gp.gp_Pln, theV: OCP.OCP.gp.gp_Vec) -> None 2. Translate(self: OCP.OCP.gp.gp_Pln, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
   Translate(*args, **kwargs)
   Translate(self: OCP.OCP.gp.gp_Pln, theV: OCP.OCP.gp.gp_Vec) -> None
   Translate(self: OCP.OCP.gp.gp_Pln, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
 
   // Translated(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Translated(self: OCP.OCP.gp.gp_Pln, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Pln
-
-Translates a plane in the direction of the vector theV. The magnitude of the translation is the vector's magnitude.
-
-2. Translated(self: OCP.OCP.gp.gp_Pln, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pln
-
-Translates a plane from the point theP1 to the point theP2.
+  // Remarks: Overloaded function. 1. Translated(self: OCP.OCP.gp.gp_Pln, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Pln Translates a plane in the direction of the vector theV. The magnitude of the translation is the vector's magnitude. 2. Translated(self: OCP.OCP.gp.gp_Pln, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pln Translates a plane from the point theP1 to the point theP2.
   Translated(*args, **kwargs)
   Translated(self: OCP.OCP.gp.gp_Pln, theV: OCP.OCP.gp.gp_Vec) -> OCP.OCP.gp.gp_Pln
   Translated(self: OCP.OCP.gp.gp_Pln, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> OCP.OCP.gp.gp_Pln
@@ -388,15 +238,7 @@ Translates a plane from the point theP1 to the point theP2.
   DumpJson(self: OCP.OCP.gp.gp_Pln, theOStream: io.BytesIO, theDepth: int = -1) -> None
 
   // Coefficients(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Coefficients(self: OCP.OCP.gp.gp_Pln) -> tuple[float, float, float, float]
-
-Returns the coefficients of the plane's cartesian equation :
-
-2. Coefficients(self: OCP.OCP.gp.gp_Pln) -> tuple[float, float, float, float]
-
-Returns the coefficients of the plane's cartesian equation :
+  // Remarks: Overloaded function. 1. Coefficients(self: OCP.OCP.gp.gp_Pln) -> tuple[float, float, float, float] Returns the coefficients of the plane's cartesian equation : 2. Coefficients(self: OCP.OCP.gp.gp_Pln) -> tuple[float, float, float, float] Returns the coefficients of the plane's cartesian equation :
   Coefficients(*args, **kwargs)
   Coefficients(self: OCP.OCP.gp.gp_Pln) -> tuple[float, float, float, float]
   Coefficients(self: OCP.OCP.gp.gp_Pln) -> tuple[float, float, float, float]

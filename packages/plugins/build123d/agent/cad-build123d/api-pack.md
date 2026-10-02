@@ -4,8 +4,7 @@
 
 // Category: pack
 // Pack objects in a squarish area in Plane.XY
-// Remarks: Returns:
-    Collection[Shape]: rearranged objects
+// Remarks: Returns: Collection[Shape]: rearranged objects
 pack(objects: Collection[Shape], padding: float, align_z: bool = False) -> Collection[Shape]
 //   objects: objects to arrange
 //   padding: space between objects

@@ -26,15 +26,7 @@ ArrowHead
 
 // Category: drafting
 // Sketch Object
-// Remarks: Create a dimension line typically for internal measurements.
-Typically used for (but not restricted to) inside dimensions, a dimension line often
-as arrows on either side of a dimension or label.
-
-There are three options depending on the size of the text and length
-of the dimension line:
-Type 1) The label and arrows fit within the length of the path
-Type 2) The text fit within the path and the arrows go outside
-Type 3) Neither the text nor the arrows fit within the path
+// Remarks: Create a dimension line typically for internal measurements. Typically used for (but not restricted to) inside dimensions, a dimension line often as arrows on either side of a dimension or label. There are three options depending on the size of the text and length of the dimension line: Type 1) The label and arrows fit within the length of the path Type 2) The text fit within the path and the arrows go outside Type 3) Neither the text nor the arrows fit within the path
 // Throws: ValueError: Only 2 points allowed for dimension lines
 // Throws: ValueError: No output - no arrows selected
 DimensionLine
@@ -74,9 +66,7 @@ Draft
 
 // Category: drafting
 // Sketch Object
-// Remarks: Create a dimension line with two lines extending outward from the part to dimension.
-Typically used for (but not restricted to) outside dimensions, with a pair of lines
-extending from the edge of a part to a dimension line.
+// Remarks: Create a dimension line with two lines extending outward from the part to dimension. Typically used for (but not restricted to) outside dimensions, with a pair of lines extending from the edge of a part to a dimension line.
 ExtensionLine
 
   ExtensionLine(border: PathDescriptor, offset: float, draft: Draft, sketch: Sketch | None = None, label: str | None = None, arrows: tuple[bool, bool] = (True, True), tolerance: float | tuple[float, float] | None = None, label_angle: bool = False, measurement_direction: VectorLike | None = None, mode: Mode = Mode.ADD)

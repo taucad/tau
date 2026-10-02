@@ -7,33 +7,13 @@
 gp_Trsf
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.gp.gp_Trsf) -> None
-
-2. __init__(self: OCP.OCP.gp.gp_Trsf, theT: OCP.OCP.gp.gp_Trsf2d) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.gp.gp_Trsf) -> None 2. __init__(self: OCP.OCP.gp.gp_Trsf, theT: OCP.OCP.gp.gp_Trsf2d) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.gp.gp_Trsf) -> None
   __init__(self: OCP.OCP.gp.gp_Trsf, theT: OCP.OCP.gp.gp_Trsf2d) -> None
 
   // SetMirror(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetMirror(self: OCP.OCP.gp.gp_Trsf, theP: OCP.OCP.gp.gp_Pnt) -> None
-
-Makes the transformation into a symmetrical transformation. theP is the center of the symmetry.
-
-2. SetMirror(self: OCP.OCP.gp.gp_Trsf, theA1: OCP.OCP.gp.gp_Ax1) -> None
-
-Makes the transformation into a symmetrical transformation. theA1 is the center of the axial symmetry.
-
-3. SetMirror(self: OCP.OCP.gp.gp_Trsf, theA2: OCP.OCP.gp.gp_Ax2) -> None
-
-Makes the transformation into a symmetrical transformation. theA2 is the center of the planar symmetry and defines the plane of symmetry by its origin, "X Direction" and "Y Direction".
-
-4. SetMirror(self: OCP.OCP.gp.gp_Trsf, theP: OCP.OCP.gp.gp_Pnt) -> None
-
-Makes the transformation into a symmetrical transformation. theP is the center of the symmetry.
+  // Remarks: Overloaded function. 1. SetMirror(self: OCP.OCP.gp.gp_Trsf, theP: OCP.OCP.gp.gp_Pnt) -> None Makes the transformation into a symmetrical transformation. theP is the center of the symmetry. 2. SetMirror(self: OCP.OCP.gp.gp_Trsf, theA1: OCP.OCP.gp.gp_Ax1) -> None Makes the transformation into a symmetrical transformation. theA1 is the center of the axial symmetry. 3. SetMirror(self: OCP.OCP.gp.gp_Trsf, theA2: OCP.OCP.gp.gp_Ax2) -> None Makes the transformation into a symmetrical transformation. theA2 is the center of the planar symmetry and defines the plane of symmetry by its origin, "X Direction" and "Y Direction". 4. SetMirror(self: OCP.OCP.gp.gp_Trsf, theP: OCP.OCP.gp.gp_Pnt) -> None Makes the transformation into a symmetrical transformation. theP is the center of the symmetry.
   SetMirror(*args, **kwargs)
   SetMirror(self: OCP.OCP.gp.gp_Trsf, theP: OCP.OCP.gp.gp_Pnt) -> None
   SetMirror(self: OCP.OCP.gp.gp_Trsf, theA1: OCP.OCP.gp.gp_Ax1) -> None
@@ -41,15 +21,7 @@ Makes the transformation into a symmetrical transformation. theP is the center o
   SetMirror(self: OCP.OCP.gp.gp_Trsf, theP: OCP.OCP.gp.gp_Pnt) -> None
 
   // SetRotation(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetRotation(self: OCP.OCP.gp.gp_Trsf, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
-
-Changes the transformation into a rotation. theA1 is the rotation axis and theAng is the angular value of the rotation in radians.
-
-2. SetRotation(self: OCP.OCP.gp.gp_Trsf, theR: OCP.OCP.gp.gp_Quaternion) -> None
-
-Changes the transformation into a rotation defined by quaternion. Note that rotation is performed around origin, i.e. no translation is involved.
+  // Remarks: Overloaded function. 1. SetRotation(self: OCP.OCP.gp.gp_Trsf, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None Changes the transformation into a rotation. theA1 is the rotation axis and theAng is the angular value of the rotation in radians. 2. SetRotation(self: OCP.OCP.gp.gp_Trsf, theR: OCP.OCP.gp.gp_Quaternion) -> None Changes the transformation into a rotation defined by quaternion. Note that rotation is performed around origin, i.e. no translation is involved.
   SetRotation(*args, **kwargs)
   SetRotation(self: OCP.OCP.gp.gp_Trsf, theA1: OCP.OCP.gp.gp_Ax1, theAng: float) -> None
   SetRotation(self: OCP.OCP.gp.gp_Trsf, theR: OCP.OCP.gp.gp_Quaternion) -> None
@@ -67,42 +39,14 @@ Changes the transformation into a rotation defined by quaternion. Note that rota
   SetDisplacement(self: OCP.OCP.gp.gp_Trsf, theFromSystem1: OCP.OCP.gp.gp_Ax3, theToSystem2: OCP.OCP.gp.gp_Ax3) -> None
 
   // SetTransformation(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetTransformation(self: OCP.OCP.gp.gp_Trsf, theFromSystem1: OCP.OCP.gp.gp_Ax3, theToSystem2: OCP.OCP.gp.gp_Ax3) -> None
-
-Modifies this transformation so that it transforms the coordinates of any point, (x, y, z), relative to a source coordinate system into the coordinates (x', y', z') which are relative to a target coordinate system, but which represent the same point The transformation is from the coordinate system "theFromSystem1" to the coordinate system "theToSystem2". Example :
-
-2. SetTransformation(self: OCP.OCP.gp.gp_Trsf, theToSystem: OCP.OCP.gp.gp_Ax3) -> None
-
-Modifies this transformation so that it transforms the coordinates of any point, (x, y, z), relative to a source coordinate system into the coordinates (x', y', z') which are relative to a target coordinate system, but which represent the same point The transformation is from the default coordinate system to the local coordinate system defined with the Ax3 theToSystem. Use in the same way as the previous method. FromSystem1 is defaulted to the absolute coordinate system.
-
-3. SetTransformation(self: OCP.OCP.gp.gp_Trsf, R: OCP.OCP.gp.gp_Quaternion, theT: OCP.OCP.gp.gp_Vec) -> None
-
-Sets transformation by directly specified rotation and translation.
+  // Remarks: Overloaded function. 1. SetTransformation(self: OCP.OCP.gp.gp_Trsf, theFromSystem1: OCP.OCP.gp.gp_Ax3, theToSystem2: OCP.OCP.gp.gp_Ax3) -> None Modifies this transformation so that it transforms the coordinates of any point, (x, y, z), relative to a source coordinate system into the coordinates (x', y', z') which are relative to a target coordinate system, but which represent the same point The transformation is from the coordinate system "theFromSystem1" to the coordinate system "theToSystem2". Example : 2. SetTransformation(self: OCP.OCP.gp.gp_Trsf, theToSystem: OCP.OCP.gp.gp_Ax3) -> None Modifies this transformation so that it transforms the coordinates of any point, (x, y, z), relative to a source coordinate system into the coordinates (x', y', z') which are relative to a target coordinate system, but which represent the same point The transformation is from the default coordinate system to the local coordinate system defined with the Ax3 theToSystem. Use in the same way as the previous method. FromSystem1 is defaulted to the absolute coordinate system. 3. SetTransformation(self: OCP.OCP.gp.gp_Trsf, R: OCP.OCP.gp.gp_Quaternion, theT: OCP.OCP.gp.gp_Vec) -> None Sets transformation by directly specified rotation and translation.
   SetTransformation(*args, **kwargs)
   SetTransformation(self: OCP.OCP.gp.gp_Trsf, theFromSystem1: OCP.OCP.gp.gp_Ax3, theToSystem2: OCP.OCP.gp.gp_Ax3) -> None
   SetTransformation(self: OCP.OCP.gp.gp_Trsf, theToSystem: OCP.OCP.gp.gp_Ax3) -> None
   SetTransformation(self: OCP.OCP.gp.gp_Trsf, R: OCP.OCP.gp.gp_Quaternion, theT: OCP.OCP.gp.gp_Vec) -> None
 
   // SetTranslation(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetTranslation(self: OCP.OCP.gp.gp_Trsf, theV: OCP.OCP.gp.gp_Vec) -> None
-
-Changes the transformation into a translation. theV is the vector of the translation.
-
-2. SetTranslation(self: OCP.OCP.gp.gp_Trsf, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
-
-Makes the transformation into a translation where the translation vector is the vector (theP1, theP2) defined from point theP1 to point theP2.
-
-3. SetTranslation(self: OCP.OCP.gp.gp_Trsf, theV: OCP.OCP.gp.gp_Vec) -> None
-
-Changes the transformation into a translation. theV is the vector of the translation.
-
-4. SetTranslation(self: OCP.OCP.gp.gp_Trsf, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
-
-Makes the transformation into a translation where the translation vector is the vector (theP1, theP2) defined from point theP1 to point theP2.
+  // Remarks: Overloaded function. 1. SetTranslation(self: OCP.OCP.gp.gp_Trsf, theV: OCP.OCP.gp.gp_Vec) -> None Changes the transformation into a translation. theV is the vector of the translation. 2. SetTranslation(self: OCP.OCP.gp.gp_Trsf, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None Makes the transformation into a translation where the translation vector is the vector (theP1, theP2) defined from point theP1 to point theP2. 3. SetTranslation(self: OCP.OCP.gp.gp_Trsf, theV: OCP.OCP.gp.gp_Vec) -> None Changes the transformation into a translation. theV is the vector of the translation. 4. SetTranslation(self: OCP.OCP.gp.gp_Trsf, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None Makes the transformation into a translation where the translation vector is the vector (theP1, theP2) defined from point theP1 to point theP2.
   SetTranslation(*args, **kwargs)
   SetTranslation(self: OCP.OCP.gp.gp_Trsf, theV: OCP.OCP.gp.gp_Vec) -> None
   SetTranslation(self: OCP.OCP.gp.gp_Trsf, theP1: OCP.OCP.gp.gp_Pnt, theP2: OCP.OCP.gp.gp_Pnt) -> None
@@ -137,15 +81,7 @@ Makes the transformation into a translation where the translation vector is the 
   ScaleFactor(self: OCP.OCP.gp.gp_Trsf) -> float
 
   // GetRotation(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. GetRotation(self: OCP.OCP.gp.gp_Trsf, theAxis: OCP.OCP.gp.gp_XYZ, theAngle: float) -> bool
-
-Returns the boolean True if there is non-zero rotation. In the presence of rotation, the output parameters store the axis and the angle of rotation. The method always returns positive value "theAngle", i.e., 0. < theAngle <= PI. Note that this rotation is defined only by the vectorial part of the transformation; generally you would need to check also the translational part to obtain the axis (gp_Ax1) of rotation.
-
-2. GetRotation(self: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.gp.gp_Quaternion
-
-Returns quaternion representing rotational part of the transformation.
+  // Remarks: Overloaded function. 1. GetRotation(self: OCP.OCP.gp.gp_Trsf, theAxis: OCP.OCP.gp.gp_XYZ, theAngle: float) -> bool Returns the boolean True if there is non-zero rotation. In the presence of rotation, the output parameters store the axis and the angle of rotation. The method always returns positive value "theAngle", i.e., 0. < theAngle <= PI. Note that this rotation is defined only by the vectorial part of the transformation; generally you would need to check also the translational part to obtain the axis (gp_Ax1) of rotation. 2. GetRotation(self: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.gp.gp_Quaternion Returns quaternion representing rotational part of the transformation.
   GetRotation(*args, **kwargs)
   GetRotation(self: OCP.OCP.gp.gp_Trsf, theAxis: OCP.OCP.gp.gp_XYZ, theAngle: float) -> bool
   GetRotation(self: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.gp.gp_Quaternion
@@ -155,15 +91,7 @@ Returns quaternion representing rotational part of the transformation.
   VectorialPart(self: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.gp.gp_Mat
 
   // Value(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Value(self: OCP.OCP.gp.gp_Trsf, theRow: int, theCol: int) -> float
-
-Returns the coefficients of the transformation's matrix. It is a 3 rows * 4 columns matrix. This coefficient includes the scale factor. Raises OutOfRanged if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
-
-2. Value(self: OCP.OCP.gp.gp_Trsf, theRow: int, theCol: int) -> float
-
-Returns the coefficients of the transformation's matrix. It is a 3 rows * 4 columns matrix. This coefficient includes the scale factor. Raises OutOfRanged if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
+  // Remarks: Overloaded function. 1. Value(self: OCP.OCP.gp.gp_Trsf, theRow: int, theCol: int) -> float Returns the coefficients of the transformation's matrix. It is a 3 rows * 4 columns matrix. This coefficient includes the scale factor. Raises OutOfRanged if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4 2. Value(self: OCP.OCP.gp.gp_Trsf, theRow: int, theCol: int) -> float Returns the coefficients of the transformation's matrix. It is a 3 rows * 4 columns matrix. This coefficient includes the scale factor. Raises OutOfRanged if theRow < 1 or theRow > 3 or theCol < 1 or theCol > 4
   Value(*args, **kwargs)
   Value(self: OCP.OCP.gp.gp_Trsf, theRow: int, theCol: int) -> float
   Value(self: OCP.OCP.gp.gp_Trsf, theRow: int, theCol: int) -> float
@@ -194,19 +122,7 @@ Returns the coefficients of the transformation's matrix. It is a 3 rows * 4 colu
   Powered(self: OCP.OCP.gp.gp_Trsf, theN: int) -> OCP.OCP.gp.gp_Trsf
 
   // Transforms(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Transforms(self: OCP.OCP.gp.gp_Trsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None
-
-Transformation of a triplet XYZ with a Trsf
-
-2. Transforms(self: OCP.OCP.gp.gp_Trsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None
-
-Transformation of a triplet XYZ with a Trsf
-
-3. Transforms(self: OCP.OCP.gp.gp_Trsf) -> tuple[float, float, float]
-
-4. Transforms(self: OCP.OCP.gp.gp_Trsf) -> tuple[float, float, float]
+  // Remarks: Overloaded function. 1. Transforms(self: OCP.OCP.gp.gp_Trsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None Transformation of a triplet XYZ with a Trsf 2. Transforms(self: OCP.OCP.gp.gp_Trsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None Transformation of a triplet XYZ with a Trsf 3. Transforms(self: OCP.OCP.gp.gp_Trsf) -> tuple[float, float, float] 4. Transforms(self: OCP.OCP.gp.gp_Trsf) -> tuple[float, float, float]
   Transforms(*args, **kwargs)
   Transforms(self: OCP.OCP.gp.gp_Trsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None
   Transforms(self: OCP.OCP.gp.gp_Trsf, theCoord: OCP.OCP.gp.gp_XYZ) -> None

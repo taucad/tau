@@ -4,11 +4,7 @@
 
 // Category: _local
 // PurePath subclass that can make system calls
-// Remarks: Path represents a filesystem path but unlike PurePath, also offers
-methods to do system calls on path objects. Depending on your system,
-instantiating a Path will return either a PosixPath or a WindowsPath
-object. You can also instantiate a PosixPath or WindowsPath directly,
-but cannot instantiate a WindowsPath on a POSIX system or vice versa.
+// Remarks: Path represents a filesystem path but unlike PurePath, also offers methods to do system calls on path objects. Depending on your system, instantiating a Path will return either a PosixPath or a WindowsPath object. You can also instantiate a PosixPath or WindowsPath directly, but cannot instantiate a WindowsPath on a POSIX system or vice versa.
 Path
 
   // Return the path as a URI
@@ -37,8 +33,7 @@ Path
   write_text(data, encoding = None, errors = None, newline = None)
 
   // Yield path objects of the directory contents
-  // Remarks: The children are yielded in arbitrary order, and the
-special entries '.' and '..' are not included.
+  // Remarks: The children are yielded in arbitrary order, and the special entries '.' and '..' are not included.
   iterdir()
 
   // Iterate over this subtree and yield all existing files (of any
@@ -46,17 +41,14 @@ special entries '.' and '..' are not included.
   glob(pattern, case_sensitive = None, recurse_symlinks = False)
 
   // Recursively yield all existing files (of any kind, including
-  // Remarks: directories) matching the given relative pattern, anywhere in
-this subtree.
+  // Remarks: directories) matching the given relative pattern, anywhere in this subtree.
   rglob(pattern, case_sensitive = None, recurse_symlinks = False)
 
   // Walk the directory tree from this directory, similar to os.walk()
   walk(top_down = True, on_error = None, follow_symlinks = False)
 
   // Return an absolute version of this path
-  // Remarks: No normalization or symlink resolution is performed.
-
-Use resolve() to resolve symlinks and remove '..' segments.
+  // Remarks: No normalization or symlink resolution is performed. Use resolve() to resolve symlinks and remove '..' segments.
   absolute()
 
   // Make the path absolute, resolving all symlinks on the way and also
@@ -89,19 +81,11 @@ Use resolve() to resolve symlinks and remove '..' segments.
   rmdir()
 
   // Rename this path to the target path
-  // Remarks: The target path may be absolute or relative. Relative paths are
-interpreted relative to the current working directory, *not* the
-directory of the Path object.
-
-Returns the new Path instance pointing to the target path.
+  // Remarks: The target path may be absolute or relative. Relative paths are interpreted relative to the current working directory, *not* the directory of the Path object. Returns the new Path instance pointing to the target path.
   rename(target)
 
   // Rename this path to the target path, overwriting if that path exists
-  // Remarks: The target path may be absolute or relative. Relative paths are
-interpreted relative to the current working directory, *not* the
-directory of the Path object.
-
-Returns the new Path instance pointing to the target path.
+  // Remarks: The target path may be absolute or relative. Relative paths are interpreted relative to the current working directory, *not* the directory of the Path object. Returns the new Path instance pointing to the target path.
   replace(target)
 
   // Make this path a symlink pointing to the target path

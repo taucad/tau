@@ -7,11 +7,7 @@
 STEPCAFControl_Writer
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer) -> None
-
-2. __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theWS: OCP.OCP.XSControl.XSControl_WorkSession, theScratch: bool = True) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer) -> None 2. __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theWS: OCP.OCP.XSControl.XSControl_WorkSession, theScratch: bool = True) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer) -> None
   __init__(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theWS: OCP.OCP.XSControl.XSControl_WorkSession, theScratch: bool = True) -> None
@@ -29,31 +25,7 @@ STEPCAFControl_Writer
   WriteStream(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theStream: io.BytesIO) -> OCP.OCP.IFSelect.IFSelect_ReturnStatus
 
   // Transfer(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f49a0f0>) -> bool
-
-Transfers a document (or single label) to a STEP model The mode of translation of shape is AsIs If multi is not null pointer, it switches to multifile mode (with external refs), and string pointed by <multi> gives prefix for names of extern files (can be empty string) Returns True if translation is OK
-
-2. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theParams: DESTEP_Parameters, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f88e130>) -> bool
-
-Transfers a document (or single label) to a STEP model This method uses if need to set parameters avoiding initialization from Interface_Static
-
-3. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabel: OCP.OCP.TDF.TDF_Label, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f4c7a30>) -> bool
-
-Method to transfer part of the document specified by label
-
-4. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabel: OCP.OCP.TDF.TDF_Label, theParams: DESTEP_Parameters, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f49bd70>) -> bool
-
-Method to transfer part of the document specified by label This method uses if need to set parameters avoiding initialization from Interface_Static
-
-5. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabelSeq: OCP.OCP.TDF.TDF_LabelSequence, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f79f670>) -> bool
-
-Method to writing sequence of root assemblies or part of the file specified by use by one label
-
-6. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabelSeq: OCP.OCP.TDF.TDF_LabelSequence, theParams: DESTEP_Parameters, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f88c130>) -> bool
-
-Method to writing sequence of root assemblies or part of the file specified by use by one label. This method is utilized if there's a need to set parameters avoiding initialization from Interface_Static
+  // Remarks: Overloaded function. 1. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f49a0f0>) -> bool Transfers a document (or single label) to a STEP model The mode of translation of shape is AsIs If multi is not null pointer, it switches to multifile mode (with external refs), and string pointed by <multi> gives prefix for names of extern files (can be empty string) Returns True if translation is OK 2. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theParams: DESTEP_Parameters, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f88e130>) -> bool Transfers a document (or single label) to a STEP model This method uses if need to set parameters avoiding initialization from Interface_Static 3. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabel: OCP.OCP.TDF.TDF_Label, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f4c7a30>) -> bool Method to transfer part of the document specified by label 4. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabel: OCP.OCP.TDF.TDF_Label, theParams: DESTEP_Parameters, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f49bd70>) -> bool Method to transfer part of the document specified by label This method uses if need to set parameters avoiding initialization from Interface_Static 5. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabelSeq: OCP.OCP.TDF.TDF_LabelSequence, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f79f670>) -> bool Method to writing sequence of root assemblies or part of the file specified by use by one label 6. Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabelSeq: OCP.OCP.TDF.TDF_LabelSequence, theParams: DESTEP_Parameters, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f88c130>) -> bool Method to writing sequence of root assemblies or part of the file specified by use by one label. This method is utilized if there's a need to set parameters avoiding initialization from Interface_Static
   Transfer(*args, **kwargs)
   Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f49a0f0>) -> bool
   Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theParams: DESTEP_Parameters, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f88e130>) -> bool
@@ -63,32 +35,14 @@ Method to writing sequence of root assemblies or part of the file specified by u
   Transfer(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabelSeq: OCP.OCP.TDF.TDF_LabelSequence, theParams: DESTEP_Parameters, theMode: OCP.OCP.STEPControl.STEPControl_StepModelType = <STEPControl_StepModelType.STEPControl_AsIs: 0>, theIsMulti: str = None, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f88c130>) -> bool
 
   // Perform(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: OCP.OCP.TCollection.TCollection_AsciiString, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f678fb0>) -> bool
-
-2. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f6069f0>) -> bool
-
-Transfers a document and writes it to a STEP file Returns True if translation is OK
-
-3. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: str, theParams: DESTEP_Parameters, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f2ec530>) -> bool
-
-Transfers a document and writes it to a STEP file This method is utilized if there's a need to set parameters avoiding initialization from Interface_Static Returns True if translation is OK
+  // Remarks: Overloaded function. 1. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: OCP.OCP.TCollection.TCollection_AsciiString, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f678fb0>) -> bool 2. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f6069f0>) -> bool Transfers a document and writes it to a STEP file Returns True if translation is OK 3. Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: str, theParams: DESTEP_Parameters, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f2ec530>) -> bool Transfers a document and writes it to a STEP file This method is utilized if there's a need to set parameters avoiding initialization from Interface_Static Returns True if translation is OK
   Perform(*args, **kwargs)
   Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: OCP.OCP.TCollection.TCollection_AsciiString, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f678fb0>) -> bool
   Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: str, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f6069f0>) -> bool
   Perform(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theDoc: OCP.OCP.TDocStd.TDocStd_Document, theFileName: str, theParams: DESTEP_Parameters, theProgress: OCP.OCP.Message.Message_ProgressRange = <OCP.OCP.Message.Message_ProgressRange object at 0x10f2ec530>) -> bool
 
   // ExternFile(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. ExternFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabel: OCP.OCP.TDF.TDF_Label, theExtFile: OCP.OCP.STEPCAFControl.STEPCAFControl_ExternFile) -> bool
-
-Returns data on external file by its original label Returns False if no external file with given name is read
-
-2. ExternFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theName: str, theExtFile: OCP.OCP.STEPCAFControl.STEPCAFControl_ExternFile) -> bool
-
-Returns data on external file by its name Returns False if no external file with given name is read
+  // Remarks: Overloaded function. 1. ExternFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabel: OCP.OCP.TDF.TDF_Label, theExtFile: OCP.OCP.STEPCAFControl.STEPCAFControl_ExternFile) -> bool Returns data on external file by its original label Returns False if no external file with given name is read 2. ExternFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theName: str, theExtFile: OCP.OCP.STEPCAFControl.STEPCAFControl_ExternFile) -> bool Returns data on external file by its name Returns False if no external file with given name is read
   ExternFile(*args, **kwargs)
   ExternFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theLabel: OCP.OCP.TDF.TDF_Label, theExtFile: OCP.OCP.STEPCAFControl.STEPCAFControl_ExternFile) -> bool
   ExternFile(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theName: str, theExtFile: OCP.OCP.STEPCAFControl.STEPCAFControl_ExternFile) -> bool
@@ -143,15 +97,7 @@ Returns data on external file by its name Returns False if no external file with
   GetMaterialMode(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer) -> bool
 
   // SetShapeFixParameters(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString) -> None
-
-Sets parameters for shape processing.
-
-2. SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theParameters: OCP.OCP.DE.DE_ShapeFixParameters, theAdditionalParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString = <OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString object at 0x10f79f2f0>) -> None
-
-Sets parameters for shape processing. Parameters from theParameters are copied to the internal map. Parameters from theAdditionalParameters are copied to the internal map if they are not present in theParameters.
+  // Remarks: Overloaded function. 1. SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString) -> None Sets parameters for shape processing. 2. SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theParameters: OCP.OCP.DE.DE_ShapeFixParameters, theAdditionalParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString = <OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString object at 0x10f79f2f0>) -> None Sets parameters for shape processing. Parameters from theParameters are copied to the internal map. Parameters from theAdditionalParameters are copied to the internal map if they are not present in theParameters.
   SetShapeFixParameters(*args, **kwargs)
   SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString) -> None
   SetShapeFixParameters(self: OCP.OCP.STEPCAFControl.STEPCAFControl_Writer, theParameters: OCP.OCP.DE.DE_ShapeFixParameters, theAdditionalParameters: OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString = <OCP.OCP.Resource.Resource_DataMapOfAsciiStringAsciiString object at 0x10f79f2f0>) -> None

@@ -106,9 +106,7 @@ pow(
 
 // Category: std.math
 // Compute the logarithm of the number with respect to an arbitrary base
-// Remarks: The result might not be correctly rounded owing to implementation
-details; `log2` can produce more accurate results for base 2,
-and `log10` can produce more accurate results for base 10.
+// Remarks: The result might not be correctly rounded owing to implementation details; `log2` can produce more accurate results for base 2, and `log10` can produce more accurate results for base 10.
 log(
   @input: number,
   base: number(_),
@@ -160,13 +158,7 @@ legAngY(
 
 // Category: std.math
 // The value of `pi`, Archimedes’ constant (π)
-// Remarks: `PI` is a number and is technically a ratio, so you might expect it to have type `number(_)`.
-However, `PI` is nearly always used for converting between different units - usually degrees to or
-from radians. Therefore, `PI` is treated a bit specially by KCL and always has unknown units. This
-means that if you use `PI`, you will need to give KCL some extra information about the units of numbers.
-Usually you should use type ascription on the result of calculations, e.g., `(2 * PI): rad`.
-It is better to use `units::toRadians` or `units::toDegrees` to convert between angles with
-different units where possible.
+// Remarks: `PI` is a number and is technically a ratio, so you might expect it to have type `number(_)`. However, `PI` is nearly always used for converting between different units - usually degrees to or from radians. Therefore, `PI` is treated a bit specially by KCL and always has unknown units. This means that if you use `PI`, you will need to give KCL some extra information about the units of numbers. Usually you should use type ascription on the result of calculations, e.g., `(2 * PI): rad`. It is better to use `units::toRadians` or `units::toDegrees` to convert between angles with different units where possible.
 PI: number(_?)
 
 // Category: std.math

@@ -14,41 +14,19 @@ BRepGProp
   LinearProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, LProps: OCP.OCP.GProp.GProp_GProps, SkipShared: bool = False, UseTriangulation: bool = False) -> None
 
   // SurfaceProperties_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SurfaceProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, SProps: OCP.OCP.GProp.GProp_GProps, SkipShared: bool = False, UseTriangulation: bool = False) -> None
-
-Computes the surface global properties of the shape S, i.e. the global properties induced by each face of the shape S, and brings them together with the global properties still retained by the framework SProps. If the current system of SProps was empty, its global properties become equal to the surface global properties of S. For this computation, no surface density is attached to the faces. Consequently, the added mass corresponds to the sum of the areas of the faces of S. The density of the component systems, i.e. that of each component of the current system of SProps, and that of S which is considered to be equal to 1, must be coherent. Note that this coherence cannot be checked. You are advised to use a framework for each different value of density, and then to bring these frameworks together into a global one. The point relative to which the inertia of the system is computed is the reference point of the framework SProps. Note : if your programming ensures that the framework SProps retains only surface global properties, brought together, for example, by the function SurfaceProperties, for objects the density of which is equal to 1 (or is not defined), the function Mass will return the total area of faces of the system analysed by SProps. Warning No check is performed to verify that the shape S retains truly surface properties. If S is simply a vertex, an edge or a wire, it is not considered to present any additional global properties. SkipShared is a special flag, which allows taking in calculation shared topological entities or not. For ex., if SkipShared = True, faces, shared by two or more shells, are taken into calculation only once. UseTriangulation is a special flag, which defines preferable source of geometry data. If UseTriangulation = Standard_False, exact geometry objects (surfaces) are used, otherwise face triangulations are used first.
-
-2. SurfaceProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, SProps: OCP.OCP.GProp.GProp_GProps, Eps: float, SkipShared: bool = False) -> float
-
-Updates <SProps> with the shape <S>, that contains its principal properties. The surface properties of all the faces in <S> are computed. Adaptive 2D Gauss integration is used. Parameter Eps sets maximal relative error of computed mass (area) for each face. Error is calculated as Abs((M(i+1)-M(i))/M(i+1)), M(i+1) and M(i) are values for two successive steps of adaptive integration. Method returns estimation of relative error reached for whole shape. WARNING: if Eps > 0.001 algorithm performs non-adaptive integration. SkipShared is a special flag, which allows taking in calculation shared topological entities or not For ex., if SkipShared = True, faces, shared by two or more shells, are taken into calculation only once.
+  // Remarks: Overloaded function. 1. SurfaceProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, SProps: OCP.OCP.GProp.GProp_GProps, SkipShared: bool = False, UseTriangulation: bool = False) -> None Computes the surface global properties of the shape S, i.e. the global properties induced by each face of the shape S, and brings them together with the global properties still retained by the framework SProps. If the current system of SProps was empty, its global properties become equal to the surface global properties of S. For this computation, no surface density is attached to the faces. Consequently, the added mass corresponds to the sum of the areas of the faces of S. The density of the component systems, i.e. that of each component of the current system of SProps, and that of S which is considered to be equal to 1, must be coherent. Note that this coherence cannot be checked. You are advised to use a framework for each different value of density, and then to bring these frameworks together into a global one. The point relative to which the inertia of the system is computed is the reference point of the framework SProps. Note : if your programming ensures that the framework SProps retains only surface global properties, brought together, for example, by the function SurfaceProperties, for objects the density of which is equal to 1 (or is not defined), the function Mass will return the total area of faces of the system analysed by SProps. Warning No check is performed to verify that the shape S retains truly surface properties. If S is simply a vertex, an edge or a wire, it is not considered to present any additional global properties. SkipShared is a special flag, which allows taking in calculation shared topological entities or not. For ex., if SkipShared = True, faces, shared by two or more shells, are taken into calculation only once. UseTriangulation is a special flag, which defines preferable source of geometry data. If UseTriangulation = Standard_False, exact geometry objects (surfaces) are used, otherwise face triangulations are used first. 2. SurfaceProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, SProps: OCP.OCP.GProp.GProp_GProps, Eps: float, SkipShared: bool = False) -> float Updates <SProps> with the shape <S>, that contains its principal properties. The surface properties of all the faces in <S> are computed. Adaptive 2D Gauss integration is used. Parameter Eps sets maximal relative error of computed mass (area) for each face. Error is calculated as Abs((M(i+1)-M(i))/M(i+1)), M(i+1) and M(i) are values for two successive steps of adaptive integration. Method returns estimation of relative error reached for whole shape. WARNING: if Eps > 0.001 algorithm performs non-adaptive integration. SkipShared is a special flag, which allows taking in calculation shared topological entities or not For ex., if SkipShared = True, faces, shared by two or more shells, are taken into calculation only once.
   SurfaceProperties_s(*args, **kwargs)
   SurfaceProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, SProps: OCP.OCP.GProp.GProp_GProps, SkipShared: bool = False, UseTriangulation: bool = False) -> None
   SurfaceProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, SProps: OCP.OCP.GProp.GProp_GProps, Eps: float, SkipShared: bool = False) -> float
 
   // VolumeProperties_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. VolumeProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, OnlyClosed: bool = False, SkipShared: bool = False, UseTriangulation: bool = False) -> None
-
-Computes the global volume properties of the solid S, and brings them together with the global properties still retained by the framework VProps. If the current system of VProps was empty, its global properties become equal to the global properties of S for volume. For this computation, no volume density is attached to the solid. Consequently, the added mass corresponds to the volume of S. The density of the component systems, i.e. that of each component of the current system of VProps, and that of S which is considered to be equal to 1, must be coherent to each other. Note that this coherence cannot be checked. You are advised to use a separate framework for each density, and then to bring these frameworks together into a global one. The point relative to which the inertia of the system is computed is the reference point of the framework VProps. Note: if your programming ensures that the framework VProps retains only global properties of volume (brought together for example, by the function VolumeProperties) for objects the density of which is equal to 1 (or is not defined), the function Mass will return the total volume of the solids of the system analysed by VProps. Warning The shape S must represent an object whose global volume properties can be computed. It may be a finite solid, or a series of finite solids all oriented in a coherent way. Nonetheless, S must be exempt of any free boundary. Note that these conditions of coherence are not checked by this algorithm, and results will be false if they are not respected. SkipShared a is special flag, which allows taking in calculation shared topological entities or not. For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once. UseTriangulation is a special flag, which defines preferable source of geometry data. If UseTriangulation = Standard_False, exact geometry objects (surfaces) are used, otherwise face triangulations are used first.
-
-2. VolumeProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, Eps: float, OnlyClosed: bool = False, SkipShared: bool = False) -> float
-
-Updates <VProps> with the shape <S>, that contains its principal properties. The volume properties of all the FORWARD and REVERSED faces in <S> are computed. If OnlyClosed is True then computed faces must belong to closed Shells. Adaptive 2D Gauss integration is used. Parameter Eps sets maximal relative error of computed mass (volume) for each face. Error is calculated as Abs((M(i+1)-M(i))/M(i+1)), M(i+1) and M(i) are values for two successive steps of adaptive integration. Method returns estimation of relative error reached for whole shape. WARNING: if Eps > 0.001 algorithm performs non-adaptive integration. SkipShared is a special flag, which allows taking in calculation shared topological entities or not. For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once.
+  // Remarks: Overloaded function. 1. VolumeProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, OnlyClosed: bool = False, SkipShared: bool = False, UseTriangulation: bool = False) -> None Computes the global volume properties of the solid S, and brings them together with the global properties still retained by the framework VProps. If the current system of VProps was empty, its global properties become equal to the global properties of S for volume. For this computation, no volume density is attached to the solid. Consequently, the added mass corresponds to the volume of S. The density of the component systems, i.e. that of each component of the current system of VProps, and that of S which is considered to be equal to 1, must be coherent to each other. Note that this coherence cannot be checked. You are advised to use a separate framework for each density, and then to bring these frameworks together into a global one. The point relative to which the inertia of the system is computed is the reference point of the framework VProps. Note: if your programming ensures that the framework VProps retains only global properties of volume (brought together for example, by the function VolumeProperties) for objects the density of which is equal to 1 (or is not defined), the function Mass will return the total volume of the solids of the system analysed by VProps. Warning The shape S must represent an object whose global volume properties can be computed. It may be a finite solid, or a series of finite solids all oriented in a coherent way. Nonetheless, S must be exempt of any free boundary. Note that these conditions of coherence are not checked by this algorithm, and results will be false if they are not respected. SkipShared a is special flag, which allows taking in calculation shared topological entities or not. For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once. UseTriangulation is a special flag, which defines preferable source of geometry data. If UseTriangulation = Standard_False, exact geometry objects (surfaces) are used, otherwise face triangulations are used first. 2. VolumeProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, Eps: float, OnlyClosed: bool = False, SkipShared: bool = False) -> float Updates <VProps> with the shape <S>, that contains its principal properties. The volume properties of all the FORWARD and REVERSED faces in <S> are computed. If OnlyClosed is True then computed faces must belong to closed Shells. Adaptive 2D Gauss integration is used. Parameter Eps sets maximal relative error of computed mass (volume) for each face. Error is calculated as Abs((M(i+1)-M(i))/M(i+1)), M(i+1) and M(i) are values for two successive steps of adaptive integration. Method returns estimation of relative error reached for whole shape. WARNING: if Eps > 0.001 algorithm performs non-adaptive integration. SkipShared is a special flag, which allows taking in calculation shared topological entities or not. For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once.
   VolumeProperties_s(*args, **kwargs)
   VolumeProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, OnlyClosed: bool = False, SkipShared: bool = False, UseTriangulation: bool = False) -> None
   VolumeProperties_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, Eps: float, OnlyClosed: bool = False, SkipShared: bool = False) -> float
 
   // VolumePropertiesGK_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. VolumePropertiesGK_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, Eps: float = 0.001, OnlyClosed: bool = False, IsUseSpan: bool = False, CGFlag: bool = False, IFlag: bool = False, SkipShared: bool = False) -> float
-
-Updates <VProps> with the shape <S>, that contains its principal properties. The volume properties of all the FORWARD and REVERSED faces in <S> are computed. If OnlyClosed is True then computed faces must belong to closed Shells. Adaptive 2D Gauss integration is used. Parameter IsUseSpan says if it is necessary to define spans on a face. This option has an effect only for BSpline faces. Parameter Eps sets maximal relative error of computed property for each face. Error is delivered by the adaptive Gauss-Kronrod method of integral computation that is used for properties computation. Method returns estimation of relative error reached for whole shape. Returns negative value if the computation is failed. SkipShared is a special flag, which allows taking in calculation shared topological entities or not. For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once.
-
-2. VolumePropertiesGK_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, thePln: OCP.OCP.gp.gp_Pln, Eps: float = 0.001, OnlyClosed: bool = False, IsUseSpan: bool = False, CGFlag: bool = False, IFlag: bool = False, SkipShared: bool = False) -> float
+  // Remarks: Overloaded function. 1. VolumePropertiesGK_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, Eps: float = 0.001, OnlyClosed: bool = False, IsUseSpan: bool = False, CGFlag: bool = False, IFlag: bool = False, SkipShared: bool = False) -> float Updates <VProps> with the shape <S>, that contains its principal properties. The volume properties of all the FORWARD and REVERSED faces in <S> are computed. If OnlyClosed is True then computed faces must belong to closed Shells. Adaptive 2D Gauss integration is used. Parameter IsUseSpan says if it is necessary to define spans on a face. This option has an effect only for BSpline faces. Parameter Eps sets maximal relative error of computed property for each face. Error is delivered by the adaptive Gauss-Kronrod method of integral computation that is used for properties computation. Method returns estimation of relative error reached for whole shape. Returns negative value if the computation is failed. SkipShared is a special flag, which allows taking in calculation shared topological entities or not. For ex., if SkipShared = True, the volumes formed by the equal (the same TShape, location and orientation) faces are taken into calculation only once. 2. VolumePropertiesGK_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, thePln: OCP.OCP.gp.gp_Pln, Eps: float = 0.001, OnlyClosed: bool = False, IsUseSpan: bool = False, CGFlag: bool = False, IFlag: bool = False, SkipShared: bool = False) -> float
   VolumePropertiesGK_s(*args, **kwargs)
   VolumePropertiesGK_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, Eps: float = 0.001, OnlyClosed: bool = False, IsUseSpan: bool = False, CGFlag: bool = False, IFlag: bool = False, SkipShared: bool = False) -> float
   VolumePropertiesGK_s(S: OCP.OCP.TopoDS.TopoDS_Shape, VProps: OCP.OCP.GProp.GProp_GProps, thePln: OCP.OCP.gp.gp_Pln, Eps: float = 0.001, OnlyClosed: bool = False, IsUseSpan: bool = False, CGFlag: bool = False, IFlag: bool = False, SkipShared: bool = False) -> float
@@ -57,27 +35,13 @@ Updates <VProps> with the shape <S>, that contains its principal properties. The
 BRepGProp_Face
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.BRepGProp.BRepGProp_Face, IsUseSpan: bool = False) -> None
-
-2. __init__(self: OCP.OCP.BRepGProp.BRepGProp_Face, F: OCP.OCP.TopoDS.TopoDS_Face, IsUseSpan: bool = False) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.BRepGProp.BRepGProp_Face, IsUseSpan: bool = False) -> None 2. __init__(self: OCP.OCP.BRepGProp.BRepGProp_Face, F: OCP.OCP.TopoDS.TopoDS_Face, IsUseSpan: bool = False) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.BRepGProp.BRepGProp_Face, IsUseSpan: bool = False) -> None
   __init__(self: OCP.OCP.BRepGProp.BRepGProp_Face, F: OCP.OCP.TopoDS.TopoDS_Face, IsUseSpan: bool = False) -> None
 
   // Load(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Load(self: OCP.OCP.BRepGProp.BRepGProp_Face, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
-
-2. Load(self: OCP.OCP.BRepGProp.BRepGProp_Face, E: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
-
-Loading the boundary arc. Returns FALSE if edge has no P-Curve.
-
-3. Load(self: OCP.OCP.BRepGProp.BRepGProp_Face, IsFirstParam: bool, theIsoType: OCP.OCP.GeomAbs.GeomAbs_IsoType) -> None
-
-Loading the boundary arc. This arc is either a top, bottom, left or right bound of a UV rectangle in which the parameters of surface are defined. If IsFirstParam is equal to Standard_True, the face is initialized by either left of bottom bound. Otherwise it is initialized by the top or right one. If theIsoType is equal to GeomAbs_IsoU, the face is initialized with either left or right bound. Otherwise - with either top or bottom one.
+  // Remarks: Overloaded function. 1. Load(self: OCP.OCP.BRepGProp.BRepGProp_Face, F: OCP.OCP.TopoDS.TopoDS_Face) -> None 2. Load(self: OCP.OCP.BRepGProp.BRepGProp_Face, E: OCP.OCP.TopoDS.TopoDS_Edge) -> bool Loading the boundary arc. Returns FALSE if edge has no P-Curve. 3. Load(self: OCP.OCP.BRepGProp.BRepGProp_Face, IsFirstParam: bool, theIsoType: OCP.OCP.GeomAbs.GeomAbs_IsoType) -> None Loading the boundary arc. This arc is either a top, bottom, left or right bound of a UV rectangle in which the parameters of surface are defined. If IsFirstParam is equal to Standard_True, the face is initialized by either left of bottom bound. Otherwise it is initialized by the top or right one. If theIsoType is equal to GeomAbs_IsoU, the face is initialized with either left or right bound. Otherwise - with either top or bottom one.
   Load(*args, **kwargs)
   Load(self: OCP.OCP.BRepGProp.BRepGProp_Face, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
   Load(self: OCP.OCP.BRepGProp.BRepGProp_Face, E: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
@@ -87,29 +51,13 @@ Loading the boundary arc. This arc is either a top, bottom, left or right bound 
   VIntegrationOrder(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> int
 
   // NaturalRestriction(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. NaturalRestriction(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> bool
-
-Returns Standard_True if the face is not trimmed.
-
-2. NaturalRestriction(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> bool
-
-Returns Standard_True if the face is not trimmed.
+  // Remarks: Overloaded function. 1. NaturalRestriction(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> bool Returns Standard_True if the face is not trimmed. 2. NaturalRestriction(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> bool Returns Standard_True if the face is not trimmed.
   NaturalRestriction(*args, **kwargs)
   NaturalRestriction(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> bool
   NaturalRestriction(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> bool
 
   // Value2d(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Value2d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float) -> OCP.OCP.gp.gp_Pnt2d
-
-Returns the value of the boundary curve of the face.
-
-2. Value2d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float) -> OCP.OCP.gp.gp_Pnt2d
-
-Returns the value of the boundary curve of the face.
+  // Remarks: Overloaded function. 1. Value2d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float) -> OCP.OCP.gp.gp_Pnt2d Returns the value of the boundary curve of the face. 2. Value2d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float) -> OCP.OCP.gp.gp_Pnt2d Returns the value of the boundary curve of the face.
   Value2d(*args, **kwargs)
   Value2d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float) -> OCP.OCP.gp.gp_Pnt2d
   Value2d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float) -> OCP.OCP.gp.gp_Pnt2d
@@ -147,29 +95,13 @@ Returns the value of the boundary curve of the face.
   Normal(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float, V: float, P: OCP.OCP.gp.gp_Pnt, VNor: OCP.OCP.gp.gp_Vec) -> None
 
   // FirstParameter(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. FirstParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float
-
-Returns the parametric value of the start point of the current arc of curve.
-
-2. FirstParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float
-
-Returns the parametric value of the start point of the current arc of curve.
+  // Remarks: Overloaded function. 1. FirstParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float Returns the parametric value of the start point of the current arc of curve. 2. FirstParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float Returns the parametric value of the start point of the current arc of curve.
   FirstParameter(*args, **kwargs)
   FirstParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float
   FirstParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float
 
   // LastParameter(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. LastParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float
-
-Returns the parametric value of the end point of the current arc of curve.
-
-2. LastParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float
-
-Returns the parametric value of the end point of the current arc of curve.
+  // Remarks: Overloaded function. 1. LastParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float Returns the parametric value of the end point of the current arc of curve. 2. LastParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float Returns the parametric value of the end point of the current arc of curve.
   LastParameter(*args, **kwargs)
   LastParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float
   LastParameter(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> float
@@ -179,15 +111,7 @@ Returns the parametric value of the end point of the current arc of curve.
   IntegrationOrder(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> int
 
   // D12d(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. D12d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float, P: OCP.OCP.gp.gp_Pnt2d, V1: OCP.OCP.gp.gp_Vec2d) -> None
-
-Returns the point of parameter U and the first derivative at this point of a boundary curve.
-
-2. D12d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float, P: OCP.OCP.gp.gp_Pnt2d, V1: OCP.OCP.gp.gp_Vec2d) -> None
-
-Returns the point of parameter U and the first derivative at this point of a boundary curve.
+  // Remarks: Overloaded function. 1. D12d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float, P: OCP.OCP.gp.gp_Pnt2d, V1: OCP.OCP.gp.gp_Vec2d) -> None Returns the point of parameter U and the first derivative at this point of a boundary curve. 2. D12d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float, P: OCP.OCP.gp.gp_Pnt2d, V1: OCP.OCP.gp.gp_Vec2d) -> None Returns the point of parameter U and the first derivative at this point of a boundary curve.
   D12d(*args, **kwargs)
   D12d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float, P: OCP.OCP.gp.gp_Pnt2d, V1: OCP.OCP.gp.gp_Vec2d) -> None
   D12d(self: OCP.OCP.BRepGProp.BRepGProp_Face, U: float, P: OCP.OCP.gp.gp_Pnt2d, V1: OCP.OCP.gp.gp_Vec2d) -> None
@@ -205,15 +129,7 @@ Returns the point of parameter U and the first derivative at this point of a bou
   GetTKnots(self: OCP.OCP.BRepGProp.BRepGProp_Face, theTMin: float, theTMax: float, theTKnots: OCP.OCP.TColStd.TColStd_HArray1OfReal) -> tuple[()]
 
   // GetFace(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. GetFace(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> OCP.OCP.TopoDS.TopoDS_Face
-
-Returns the TopoDS face.
-
-2. GetFace(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> OCP.OCP.TopoDS.TopoDS_Face
-
-Returns the TopoDS face.
+  // Remarks: Overloaded function. 1. GetFace(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> OCP.OCP.TopoDS.TopoDS_Face Returns the TopoDS face. 2. GetFace(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> OCP.OCP.TopoDS.TopoDS_Face Returns the TopoDS face.
   GetFace(*args, **kwargs)
   GetFace(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> OCP.OCP.TopoDS.TopoDS_Face
   GetFace(self: OCP.OCP.BRepGProp.BRepGProp_Face) -> OCP.OCP.TopoDS.TopoDS_Face

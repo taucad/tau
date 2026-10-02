@@ -7,11 +7,7 @@
 Bnd_Box
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Bnd.Bnd_Box) -> None
-
-2. __init__(self: OCP.OCP.Bnd.Bnd_Box, theMin: OCP.OCP.gp.gp_Pnt, theMax: OCP.OCP.gp.gp_Pnt) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Bnd.Bnd_Box) -> None 2. __init__(self: OCP.OCP.Bnd.Bnd_Box, theMin: OCP.OCP.gp.gp_Pnt, theMax: OCP.OCP.gp.gp_Pnt) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Bnd.Bnd_Box) -> None
   __init__(self: OCP.OCP.Bnd.Bnd_Box, theMin: OCP.OCP.gp.gp_Pnt, theMax: OCP.OCP.gp.gp_Pnt) -> None
@@ -25,29 +21,13 @@ Bnd_Box
   SetVoid(self: OCP.OCP.Bnd.Bnd_Box) -> None
 
   // Set(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Set(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> None
-
-Sets this bounding box so that it bounds - the point P. This involves first setting this bounding box to be void and then adding the point P.
-
-2. Set(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt, D: OCP.OCP.gp.gp_Dir) -> None
-
-Sets this bounding box so that it bounds the half-line defined by point P and direction D, i.e. all points M defined by M=P+u*D, where u is greater than or equal to 0, are inside the bounding volume. This involves first setting this box to be void and then adding the half-line.
+  // Remarks: Overloaded function. 1. Set(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> None Sets this bounding box so that it bounds - the point P. This involves first setting this bounding box to be void and then adding the point P. 2. Set(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt, D: OCP.OCP.gp.gp_Dir) -> None Sets this bounding box so that it bounds the half-line defined by point P and direction D, i.e. all points M defined by M=P+u*D, where u is greater than or equal to 0, are inside the bounding volume. This involves first setting this box to be void and then adding the half-line.
   Set(*args, **kwargs)
   Set(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> None
   Set(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt, D: OCP.OCP.gp.gp_Dir) -> None
 
   // Update(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Update(self: OCP.OCP.Bnd.Bnd_Box, aXmin: float, aYmin: float, aZmin: float, aXmax: float, aYmax: float, aZmax: float) -> None
-
-Enlarges this bounding box, if required, so that it contains at least: - interval [ aXmin,aXmax ] in the "X Direction", - interval [ aYmin,aYmax ] in the "Y Direction", - interval [ aZmin,aZmax ] in the "Z Direction";
-
-2. Update(self: OCP.OCP.Bnd.Bnd_Box, X: float, Y: float, Z: float) -> None
-
-Adds a point of coordinates (X,Y,Z) to this bounding box.
+  // Remarks: Overloaded function. 1. Update(self: OCP.OCP.Bnd.Bnd_Box, aXmin: float, aYmin: float, aZmin: float, aXmax: float, aYmax: float, aZmax: float) -> None Enlarges this bounding box, if required, so that it contains at least: - interval [ aXmin,aXmax ] in the "X Direction", - interval [ aYmin,aYmax ] in the "Y Direction", - interval [ aZmin,aZmax ] in the "Z Direction"; 2. Update(self: OCP.OCP.Bnd.Bnd_Box, X: float, Y: float, Z: float) -> None Adds a point of coordinates (X,Y,Z) to this bounding box.
   Update(*args, **kwargs)
   Update(self: OCP.OCP.Bnd.Bnd_Box, aXmin: float, aYmin: float, aZmin: float, aXmax: float, aYmax: float, aZmax: float) -> None
   Update(self: OCP.OCP.Bnd.Bnd_Box, X: float, Y: float, Z: float) -> None
@@ -153,23 +133,7 @@ Adds a point of coordinates (X,Y,Z) to this bounding box.
   Transformed(self: OCP.OCP.Bnd.Bnd_Box, T: OCP.OCP.gp.gp_Trsf) -> OCP.OCP.Bnd.Bnd_Box
 
   // Add(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Add(self: OCP.OCP.Bnd.Bnd_Box, Other: OCP.OCP.Bnd.Bnd_Box) -> None
-
-Adds the box <Other> to <me>.
-
-2. Add(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> None
-
-Adds a Pnt to the box.
-
-3. Add(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt, D: OCP.OCP.gp.gp_Dir) -> None
-
-Extends <me> from the Pnt <P> in the direction <D>.
-
-4. Add(self: OCP.OCP.Bnd.Bnd_Box, D: OCP.OCP.gp.gp_Dir) -> None
-
-Extends the Box in the given Direction, i.e. adds an half-line. The box may become infinite in 1,2 or 3 directions.
+  // Remarks: Overloaded function. 1. Add(self: OCP.OCP.Bnd.Bnd_Box, Other: OCP.OCP.Bnd.Bnd_Box) -> None Adds the box <Other> to <me>. 2. Add(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> None Adds a Pnt to the box. 3. Add(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt, D: OCP.OCP.gp.gp_Dir) -> None Extends <me> from the Pnt <P> in the direction <D>. 4. Add(self: OCP.OCP.Bnd.Bnd_Box, D: OCP.OCP.gp.gp_Dir) -> None Extends the Box in the given Direction, i.e. adds an half-line. The box may become infinite in 1,2 or 3 directions.
   Add(*args, **kwargs)
   Add(self: OCP.OCP.Bnd.Bnd_Box, Other: OCP.OCP.Bnd.Bnd_Box) -> None
   Add(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> None
@@ -177,35 +141,7 @@ Extends the Box in the given Direction, i.e. adds an half-line. The box may beco
   Add(self: OCP.OCP.Bnd.Bnd_Box, D: OCP.OCP.gp.gp_Dir) -> None
 
   // IsOut(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsOut(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> bool
-
-Returns True if the Pnt is out the box.
-
-2. IsOut(self: OCP.OCP.Bnd.Bnd_Box, L: OCP.OCP.gp.gp_Lin) -> bool
-
-Returns False if the line intersects the box.
-
-3. IsOut(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pln) -> bool
-
-Returns False if the plane intersects the box.
-
-4. IsOut(self: OCP.OCP.Bnd.Bnd_Box, Other: OCP.OCP.Bnd.Bnd_Box) -> bool
-
-Returns False if the <Box> intersects or is inside <me>.
-
-5. IsOut(self: OCP.OCP.Bnd.Bnd_Box, Other: OCP.OCP.Bnd.Bnd_Box, T: OCP.OCP.gp.gp_Trsf) -> bool
-
-Returns False if the transformed <Box> intersects or is inside <me>.
-
-6. IsOut(self: OCP.OCP.Bnd.Bnd_Box, T1: OCP.OCP.gp.gp_Trsf, Other: OCP.OCP.Bnd.Bnd_Box, T2: OCP.OCP.gp.gp_Trsf) -> bool
-
-Returns False if the transformed <Box> intersects or is inside the transformed box <me>.
-
-7. IsOut(self: OCP.OCP.Bnd.Bnd_Box, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt, D: OCP.OCP.gp.gp_Dir) -> bool
-
-Returns False if the flat band lying between two parallel lines represented by their reference points <P1>, <P2> and direction <D> intersects the box.
+  // Remarks: Overloaded function. 1. IsOut(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> bool Returns True if the Pnt is out the box. 2. IsOut(self: OCP.OCP.Bnd.Bnd_Box, L: OCP.OCP.gp.gp_Lin) -> bool Returns False if the line intersects the box. 3. IsOut(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pln) -> bool Returns False if the plane intersects the box. 4. IsOut(self: OCP.OCP.Bnd.Bnd_Box, Other: OCP.OCP.Bnd.Bnd_Box) -> bool Returns False if the <Box> intersects or is inside <me>. 5. IsOut(self: OCP.OCP.Bnd.Bnd_Box, Other: OCP.OCP.Bnd.Bnd_Box, T: OCP.OCP.gp.gp_Trsf) -> bool Returns False if the transformed <Box> intersects or is inside <me>. 6. IsOut(self: OCP.OCP.Bnd.Bnd_Box, T1: OCP.OCP.gp.gp_Trsf, Other: OCP.OCP.Bnd.Bnd_Box, T2: OCP.OCP.gp.gp_Trsf) -> bool Returns False if the transformed <Box> intersects or is inside the transformed box <me>. 7. IsOut(self: OCP.OCP.Bnd.Bnd_Box, P1: OCP.OCP.gp.gp_Pnt, P2: OCP.OCP.gp.gp_Pnt, D: OCP.OCP.gp.gp_Dir) -> bool Returns False if the flat band lying between two parallel lines represented by their reference points <P1>, <P2> and direction <D> intersects the box.
   IsOut(*args, **kwargs)
   IsOut(self: OCP.OCP.Bnd.Bnd_Box, P: OCP.OCP.gp.gp_Pnt) -> bool
   IsOut(self: OCP.OCP.Bnd.Bnd_Box, L: OCP.OCP.gp.gp_Lin) -> bool
@@ -251,13 +187,7 @@ Returns False if the flat band lying between two parallel lines represented by t
 Bnd_OBB
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.Bnd.Bnd_OBB) -> None
-
-2. __init__(self: OCP.OCP.Bnd.Bnd_OBB, theCenter: OCP.OCP.gp.gp_Pnt, theXDirection: OCP.OCP.gp.gp_Dir, theYDirection: OCP.OCP.gp.gp_Dir, theZDirection: OCP.OCP.gp.gp_Dir, theHXSize: float, theHYSize: float, theHZSize: float) -> None
-
-3. __init__(self: OCP.OCP.Bnd.Bnd_OBB, theBox: OCP.OCP.Bnd.Bnd_Box) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.Bnd.Bnd_OBB) -> None 2. __init__(self: OCP.OCP.Bnd.Bnd_OBB, theCenter: OCP.OCP.gp.gp_Pnt, theXDirection: OCP.OCP.gp.gp_Dir, theYDirection: OCP.OCP.gp.gp_Dir, theZDirection: OCP.OCP.gp.gp_Dir, theHXSize: float, theHYSize: float, theHZSize: float) -> None 3. __init__(self: OCP.OCP.Bnd.Bnd_OBB, theBox: OCP.OCP.Bnd.Bnd_Box) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.Bnd.Bnd_OBB) -> None
   __init__(self: OCP.OCP.Bnd.Bnd_OBB, theCenter: OCP.OCP.gp.gp_Pnt, theXDirection: OCP.OCP.gp.gp_Dir, theYDirection: OCP.OCP.gp.gp_Dir, theZDirection: OCP.OCP.gp.gp_Dir, theHXSize: float, theHYSize: float, theHZSize: float) -> None
@@ -328,15 +258,7 @@ Bnd_OBB
   SquareExtent(self: OCP.OCP.Bnd.Bnd_OBB) -> float
 
   // IsOut(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsOut(self: OCP.OCP.Bnd.Bnd_OBB, theOther: OCP.OCP.Bnd.Bnd_OBB) -> bool
-
-Check if the box do not interfere the other box.
-
-2. IsOut(self: OCP.OCP.Bnd.Bnd_OBB, theP: OCP.OCP.gp.gp_Pnt) -> bool
-
-Check if the point is inside of <this>.
+  // Remarks: Overloaded function. 1. IsOut(self: OCP.OCP.Bnd.Bnd_OBB, theOther: OCP.OCP.Bnd.Bnd_OBB) -> bool Check if the box do not interfere the other box. 2. IsOut(self: OCP.OCP.Bnd.Bnd_OBB, theP: OCP.OCP.gp.gp_Pnt) -> bool Check if the point is inside of <this>.
   IsOut(*args, **kwargs)
   IsOut(self: OCP.OCP.Bnd.Bnd_OBB, theOther: OCP.OCP.Bnd.Bnd_OBB) -> bool
   IsOut(self: OCP.OCP.Bnd.Bnd_OBB, theP: OCP.OCP.gp.gp_Pnt) -> bool
@@ -346,15 +268,7 @@ Check if the point is inside of <this>.
   IsCompletelyInside(self: OCP.OCP.Bnd.Bnd_OBB, theOther: OCP.OCP.Bnd.Bnd_OBB) -> bool
 
   // Add(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Add(self: OCP.OCP.Bnd.Bnd_OBB, theOther: OCP.OCP.Bnd.Bnd_OBB) -> None
-
-Rebuilds this in order to include all previous objects (which it was created from) and theOther.
-
-2. Add(self: OCP.OCP.Bnd.Bnd_OBB, theP: OCP.OCP.gp.gp_Pnt) -> None
-
-Rebuilds this in order to include all previous objects (which it was created from) and theP.
+  // Remarks: Overloaded function. 1. Add(self: OCP.OCP.Bnd.Bnd_OBB, theOther: OCP.OCP.Bnd.Bnd_OBB) -> None Rebuilds this in order to include all previous objects (which it was created from) and theOther. 2. Add(self: OCP.OCP.Bnd.Bnd_OBB, theP: OCP.OCP.gp.gp_Pnt) -> None Rebuilds this in order to include all previous objects (which it was created from) and theP.
   Add(*args, **kwargs)
   Add(self: OCP.OCP.Bnd.Bnd_OBB, theOther: OCP.OCP.Bnd.Bnd_OBB) -> None
   Add(self: OCP.OCP.Bnd.Bnd_OBB, theP: OCP.OCP.gp.gp_Pnt) -> None

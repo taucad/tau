@@ -90,15 +90,7 @@ RWGltf_CafWriter
   SetCompressionParameters(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDracoParameters: OCP.OCP.RWGltf.RWGltf_DracoParameters) -> None
 
   // Perform(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theRootLabels: OCP.OCP.TDF.TDF_LabelSequence, theLabelFilter: OCP.OCP.TColStd.TColStd_MapOfAsciiString, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool
-
-Write glTF file and associated binary file. Triangulation data should be precomputed within shapes!
-
-2. Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool
-
-Write glTF file and associated binary file. Triangulation data should be precomputed within shapes!
+  // Remarks: Overloaded function. 1. Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theRootLabels: OCP.OCP.TDF.TDF_LabelSequence, theLabelFilter: OCP.OCP.TColStd.TColStd_MapOfAsciiString, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool Write glTF file and associated binary file. Triangulation data should be precomputed within shapes! 2. Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool Write glTF file and associated binary file. Triangulation data should be precomputed within shapes!
   Perform(*args, **kwargs)
   Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theRootLabels: OCP.OCP.TDF.TDF_LabelSequence, theLabelFilter: OCP.OCP.TColStd.TColStd_MapOfAsciiString, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool
   Perform(self: OCP.OCP.RWGltf.RWGltf_CafWriter, theDocument: OCP.OCP.TDocStd.TDocStd_Document, theFileInfo: OCP.OCP.TColStd.TColStd_IndexedDataMapOfStringString, theProgress: OCP.OCP.Message.Message_ProgressRange) -> bool

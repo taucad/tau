@@ -35,12 +35,7 @@ defaultGeoSpecInclude: readonly ["**/*.geospec.{ts,js}"]
 storedNamePattern: RegExp
 
 // Default selector tolerances
-// Remarks: Rationale:
-- `linearMm: 0.02` — the V8 manufacturability audit's fixture contact
-  tolerance; tight enough to reject real fit errors, loose enough to absorb
-  STEP round-trip noise.
-- `angularToleranceDegrees: 0.5` — separates deliberate drafts/tilts from
-  numeric noise in exported analytic directions.
+// Remarks: Rationale: - `linearMm: 0.02` — the V8 manufacturability audit's fixture contact tolerance; tight enough to reject real fit errors, loose enough to absorb STEP round-trip noise. - `angularToleranceDegrees: 0.5` — separates deliberate drafts/tilts from numeric noise in exported analytic directions.
 defaultSelectorTolerances: SelectorTolerances
 
 // Diagnostic codes emitted by selector resolution

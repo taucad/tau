@@ -4,12 +4,7 @@
 
 // Category: operations_sketch
 // Sketch Operation
-// Remarks: Given an edge from a Face/Sketch, modify the face by replacing the given edge with the
-arc of the Voronoi largest empty circle that will fit within the Face.  This
-"rounds off" the end of the object.
-
-Returns:
-    Sketch: the modified shape
+// Remarks: Given an edge from a Face/Sketch, modify the face by replacing the given edge with the arc of the Voronoi largest empty circle that will fit within the Face. This "rounds off" the end of the object. Returns: Sketch: the modified shape
 // Throws: ValueError: Invalid geometry
 full_round(edge: Edge, invert: bool = False, voronoi_point_count: int = 100, mode: Mode = Mode.REPLACE) -> tuple[Sketch, Vector, float]
 //   edge: target Edge to remove
@@ -33,10 +28,7 @@ make_hull(edges: Edge | Iterable[Edge] | None = None, mode: Mode = Mode.ADD) -> 
 
 // Category: operations_sketch
 // Sketch Operation
-// Remarks: Convert edges, wires or pending edges into faces by sweeping a perpendicular line along them.
-
-Returns:
-    Sketch: Traced lines
+// Remarks: Convert edges, wires or pending edges into faces by sweeping a perpendicular line along them. Returns: Sketch: Traced lines
 // Throws: ValueError: No objects to trace
 trace(lines: Curve | Edge | Wire | Iterable[Curve | Edge | Wire] | None = None, line_width: float = 1, mode: Mode = Mode.ADD) -> Sketch
 //   lines: lines to trace

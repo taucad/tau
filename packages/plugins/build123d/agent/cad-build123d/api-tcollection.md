@@ -7,35 +7,7 @@
 TCollection_AsciiString
 
   // __init__(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString) -> None
-
-2. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, message: str) -> None
-
-3. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, message: str, aLen: int) -> None
-
-4. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, aChar: str) -> None
-
-5. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, length: int, filler: str) -> None
-
-6. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, value: int) -> None
-
-7. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, value: float) -> None
-
-8. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_AsciiString) -> None
-
-9. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_AsciiString, message: str) -> None
-
-10. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_AsciiString, message: str) -> None
-
-11. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_AsciiString, message: OCP.OCP.TCollection.TCollection_AsciiString) -> None
-
-12. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_ExtendedString, replaceNonAscii: str = '\x00') -> None
-
-13. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, theStringUtf: str) -> None
-
-14. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, arg0: str) -> None
+  // Remarks: Overloaded function. 1. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString) -> None 2. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, message: str) -> None 3. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, message: str, aLen: int) -> None 4. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, aChar: str) -> None 5. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, length: int, filler: str) -> None 6. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, value: int) -> None 7. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, value: float) -> None 8. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_AsciiString) -> None 9. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_AsciiString, message: str) -> None 10. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_AsciiString, message: str) -> None 11. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_AsciiString, message: OCP.OCP.TCollection.TCollection_AsciiString) -> None 12. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, astring: OCP.OCP.TCollection.TCollection_ExtendedString, replaceNonAscii: str = '\x00') -> None 13. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, theStringUtf: str) -> None 14. __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, arg0: str) -> None
   __init__(*args, **kwargs)
   __init__(self: OCP.OCP.TCollection.TCollection_AsciiString) -> None
   __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, message: str) -> None
@@ -53,27 +25,7 @@ TCollection_AsciiString
   __init__(self: OCP.OCP.TCollection.TCollection_AsciiString, arg0: str) -> None
 
   // AssignCat(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> None
-
-Appends <other> to me. This is an unary operator.
-
-2. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: int) -> None
-
-Appends <other> to me. This is an unary operator.
-
-3. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: float) -> None
-
-Appends <other> to me. This is an unary operator.
-
-4. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> None
-
-Appends <other> to me. This is an unary operator. ex: aString += "Dummy" To catenate more than one CString, you must put a AsciiString before. Example: aString += "Hello " + "Dolly" IS NOT VALID ! But astring += anotherString + "Hello " + "Dolly" is valid.
-
-5. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> None
-
-Appends <other> to me. This is an unary operator. Example: aString += anotherString
+  // Remarks: Overloaded function. 1. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> None Appends <other> to me. This is an unary operator. 2. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: int) -> None Appends <other> to me. This is an unary operator. 3. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: float) -> None Appends <other> to me. This is an unary operator. 4. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> None Appends <other> to me. This is an unary operator. ex: aString += "Dummy" To catenate more than one CString, you must put a AsciiString before. Example: aString += "Hello " + "Dolly" IS NOT VALID ! But astring += anotherString + "Hello " + "Dolly" is valid. 5. AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> None Appends <other> to me. This is an unary operator. Example: aString += anotherString
   AssignCat(*args, **kwargs)
   AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> None
   AssignCat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: int) -> None
@@ -86,47 +38,7 @@ Appends <other> to me. This is an unary operator. Example: aString += anotherStr
   Capitalize(self: OCP.OCP.TCollection.TCollection_AsciiString) -> None
 
   // Cat(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Syntax: aString = aString + "Dummy" Example: aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
-
-2. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: int) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Syntax: aString = aString + 15; Example: aString contains "I say " gives "I say 15" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
-
-3. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: float) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Syntax: aString = aString + 15.15; Example: aString contains "I say " gives "I say 15.15" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
-
-4. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Syntax: aString = aString + "Dummy" Example: aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
-
-5. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Example: aString = aString + anotherString
-
-6. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Example: aString = aString + anotherString
-
-7. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Syntax: aString = aString + "Dummy" Example: aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
-
-8. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Syntax: aString = aString + "Dummy" Example: aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
-
-9. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: int) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Syntax: aString = aString + 15; Example: aString contains "I say " gives "I say 15" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
-
-10. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: float) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Appends <other> to me. Syntax: aString = aString + 15.15; Example: aString contains "I say " gives "I say 15.15" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
+  // Remarks: Overloaded function. 1. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Syntax: aString = aString + "Dummy" Example: aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too. 2. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: int) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Syntax: aString = aString + 15; Example: aString contains "I say " gives "I say 15" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too. 3. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: float) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Syntax: aString = aString + 15.15; Example: aString contains "I say " gives "I say 15.15" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too. 4. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Syntax: aString = aString + "Dummy" Example: aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too. 5. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Example: aString = aString + anotherString 6. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Example: aString = aString + anotherString 7. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Syntax: aString = aString + "Dummy" Example: aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too. 8. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Syntax: aString = aString + "Dummy" Example: aString contains "I say " aString = aString + "Hello " + "Dolly" gives "I say Hello Dolly" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too. 9. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: int) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Syntax: aString = aString + 15; Example: aString contains "I say " gives "I say 15" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too. 10. Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: float) -> OCP.OCP.TCollection.TCollection_AsciiString Appends <other> to me. Syntax: aString = aString + 15.15; Example: aString contains "I say " gives "I say 15.15" To catenate more than one CString, you must put a String before. So the following example is WRONG ! aString = "Hello " + "Dolly" THIS IS NOT ALLOWED This rule is applicable to AssignCat (operator +=) too.
   Cat(*args, **kwargs)
   Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> OCP.OCP.TCollection.TCollection_AsciiString
   Cat(self: OCP.OCP.TCollection.TCollection_AsciiString, other: int) -> OCP.OCP.TCollection.TCollection_AsciiString
@@ -152,15 +64,7 @@ Appends <other> to me. Syntax: aString = aString + 15.15; Example: aString conta
   Clear(self: OCP.OCP.TCollection.TCollection_AsciiString) -> None
 
   // Copy(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Copy(self: OCP.OCP.TCollection.TCollection_AsciiString, fromwhere: str) -> None
-
-Copy <fromwhere> to <me>. Used as operator = Example: aString = anotherCString;
-
-2. Copy(self: OCP.OCP.TCollection.TCollection_AsciiString, fromwhere: OCP.OCP.TCollection.TCollection_AsciiString) -> None
-
-Copy <fromwhere> to <me>. Used as operator = Example: aString = anotherString;
+  // Remarks: Overloaded function. 1. Copy(self: OCP.OCP.TCollection.TCollection_AsciiString, fromwhere: str) -> None Copy <fromwhere> to <me>. Used as operator = Example: aString = anotherCString; 2. Copy(self: OCP.OCP.TCollection.TCollection_AsciiString, fromwhere: OCP.OCP.TCollection.TCollection_AsciiString) -> None Copy <fromwhere> to <me>. Used as operator = Example: aString = anotherString;
   Copy(*args, **kwargs)
   Copy(self: OCP.OCP.TCollection.TCollection_AsciiString, fromwhere: str) -> None
   Copy(self: OCP.OCP.TCollection.TCollection_AsciiString, fromwhere: OCP.OCP.TCollection.TCollection_AsciiString) -> None
@@ -178,19 +82,7 @@ Copy <fromwhere> to <me>. Used as operator = Example: aString = anotherString;
   FirstLocationNotInSet(self: OCP.OCP.TCollection.TCollection_AsciiString, Set: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> int
 
   // Insert(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Insert(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None
-
-Inserts a Character at position <where>. Example: aString contains "hy not ?" aString.Insert(1,'W'); gives "Why not ?" aString contains "Wh" aString.Insert(3,'y'); gives "Why" aString contains "Way" aString.Insert(2,'h'); gives "Why"
-
-2. Insert(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None
-
-Inserts a CString at position <where>. Example: aString contains "O more" aString.Insert(2,"nce"); gives "Once more"
-
-3. Insert(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: OCP.OCP.TCollection.TCollection_AsciiString) -> None
-
-Inserts a AsciiString at position <where>.
+  // Remarks: Overloaded function. 1. Insert(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None Inserts a Character at position <where>. Example: aString contains "hy not ?" aString.Insert(1,'W'); gives "Why not ?" aString contains "Wh" aString.Insert(3,'y'); gives "Why" aString contains "Way" aString.Insert(2,'h'); gives "Why" 2. Insert(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None Inserts a CString at position <where>. Example: aString contains "O more" aString.Insert(2,"nce"); gives "Once more" 3. Insert(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: OCP.OCP.TCollection.TCollection_AsciiString) -> None Inserts a AsciiString at position <where>.
   Insert(*args, **kwargs)
   Insert(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None
   Insert(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None
@@ -209,57 +101,25 @@ Inserts a AsciiString at position <where>.
   IsEmpty(self: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
 
   // IsEqual(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsEqual(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool
-
-Returns true if the characters in this ASCII string are identical to the characters in ASCII string other. Note that this method is an alias of operator ==.
-
-2. IsEqual(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
-
-Returns true if the characters in this ASCII string are identical to the characters in ASCII string other. Note that this method is an alias of operator ==.
+  // Remarks: Overloaded function. 1. IsEqual(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool Returns true if the characters in this ASCII string are identical to the characters in ASCII string other. Note that this method is an alias of operator ==. 2. IsEqual(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool Returns true if the characters in this ASCII string are identical to the characters in ASCII string other. Note that this method is an alias of operator ==.
   IsEqual(*args, **kwargs)
   IsEqual(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool
   IsEqual(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
 
   // IsDifferent(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsDifferent(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool
-
-Returns true if there are differences between the characters in this ASCII string and ASCII string other. Note that this method is an alias of operator !=
-
-2. IsDifferent(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
-
-Returns true if there are differences between the characters in this ASCII string and ASCII string other. Note that this method is an alias of operator !=
+  // Remarks: Overloaded function. 1. IsDifferent(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool Returns true if there are differences between the characters in this ASCII string and ASCII string other. Note that this method is an alias of operator != 2. IsDifferent(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool Returns true if there are differences between the characters in this ASCII string and ASCII string other. Note that this method is an alias of operator !=
   IsDifferent(*args, **kwargs)
   IsDifferent(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool
   IsDifferent(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
 
   // IsLess(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsLess(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool
-
-Returns TRUE if <me> is 'ASCII' less than <other>.
-
-2. IsLess(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
-
-Returns TRUE if <me> is 'ASCII' less than <other>.
+  // Remarks: Overloaded function. 1. IsLess(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool Returns TRUE if <me> is 'ASCII' less than <other>. 2. IsLess(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool Returns TRUE if <me> is 'ASCII' less than <other>.
   IsLess(*args, **kwargs)
   IsLess(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool
   IsLess(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
 
   // IsGreater(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsGreater(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool
-
-Returns TRUE if <me> is 'ASCII' greater than <other>.
-
-2. IsGreater(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
-
-Returns TRUE if <me> is 'ASCII' greater than <other>.
+  // Remarks: Overloaded function. 1. IsGreater(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool Returns TRUE if <me> is 'ASCII' greater than <other>. 2. IsGreater(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool Returns TRUE if <me> is 'ASCII' greater than <other>.
   IsGreater(*args, **kwargs)
   IsGreater(self: OCP.OCP.TCollection.TCollection_AsciiString, other: str) -> bool
   IsGreater(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
@@ -297,29 +157,13 @@ Returns TRUE if <me> is 'ASCII' greater than <other>.
   LeftJustify(self: OCP.OCP.TCollection.TCollection_AsciiString, Width: int, Filler: str) -> None
 
   // Length(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Length(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int
-
-Returns number of characters in <me>. This is the same functionality as 'strlen' in C. Example TCollection_AsciiString myAlphabet("abcdef"); assert ( myAlphabet.Length() == 6 ); - 1 is the position of the first character in this string. - The length of this string gives the position of its last character. - Positions less than or equal to zero, or greater than the length of this string are invalid in functions which identify a character of this string by its position.
-
-2. Length(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int
-
-Returns number of characters in <me>. This is the same functionality as 'strlen' in C. Example TCollection_AsciiString myAlphabet("abcdef"); assert ( myAlphabet.Length() == 6 ); - 1 is the position of the first character in this string. - The length of this string gives the position of its last character. - Positions less than or equal to zero, or greater than the length of this string are invalid in functions which identify a character of this string by its position.
+  // Remarks: Overloaded function. 1. Length(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int Returns number of characters in <me>. This is the same functionality as 'strlen' in C. Example TCollection_AsciiString myAlphabet("abcdef"); assert ( myAlphabet.Length() == 6 ); - 1 is the position of the first character in this string. - The length of this string gives the position of its last character. - Positions less than or equal to zero, or greater than the length of this string are invalid in functions which identify a character of this string by its position. 2. Length(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int Returns number of characters in <me>. This is the same functionality as 'strlen' in C. Example TCollection_AsciiString myAlphabet("abcdef"); assert ( myAlphabet.Length() == 6 ); - 1 is the position of the first character in this string. - The length of this string gives the position of its last character. - Positions less than or equal to zero, or greater than the length of this string are invalid in functions which identify a character of this string by its position.
   Length(*args, **kwargs)
   Length(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int
   Length(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int
 
   // Location(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Location(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> int
-
-Returns an index in the string <me> of the first occurrence of the string S in the string <me> from the starting index FromIndex to the ending index ToIndex returns zero if failure Raises an exception if FromIndex or ToIndex is out of range. Example: before me = "aabAaAa", S = "Aa", FromIndex = 1, ToIndex = 7 after me = "aabAaAa" returns 4
-
-2. Location(self: OCP.OCP.TCollection.TCollection_AsciiString, N: int, C: str, FromIndex: int, ToIndex: int) -> int
-
-Returns the index of the nth occurrence of the character C in the string <me> from the starting index FromIndex to the ending index ToIndex. Returns zero if failure. Raises an exception if FromIndex or ToIndex is out of range. Example: before me = "aabAa", N = 3, C = 'a', FromIndex = 1, ToIndex = 5 after me = "aabAa" returns 5
+  // Remarks: Overloaded function. 1. Location(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> int Returns an index in the string <me> of the first occurrence of the string S in the string <me> from the starting index FromIndex to the ending index ToIndex returns zero if failure Raises an exception if FromIndex or ToIndex is out of range. Example: before me = "aabAaAa", S = "Aa", FromIndex = 1, ToIndex = 7 after me = "aabAaAa" returns 4 2. Location(self: OCP.OCP.TCollection.TCollection_AsciiString, N: int, C: str, FromIndex: int, ToIndex: int) -> int Returns the index of the nth occurrence of the character C in the string <me> from the starting index FromIndex to the ending index ToIndex. Returns zero if failure. Raises an exception if FromIndex or ToIndex is out of range. Example: before me = "aabAa", N = 3, C = 'a', FromIndex = 1, ToIndex = 5 after me = "aabAa" returns 5
   Location(*args, **kwargs)
   Location(self: OCP.OCP.TCollection.TCollection_AsciiString, other: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> int
   Location(self: OCP.OCP.TCollection.TCollection_AsciiString, N: int, C: str, FromIndex: int, ToIndex: int) -> int
@@ -345,15 +189,7 @@ Returns the index of the nth occurrence of the character C in the string <me> fr
   RealValue(self: OCP.OCP.TCollection.TCollection_AsciiString) -> float
 
   // RemoveAll(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. RemoveAll(self: OCP.OCP.TCollection.TCollection_AsciiString, C: str, CaseSensitive: bool) -> None
-
-Remove all the occurrences of the character C in the string. Example: before me = "HellLLo", C = 'L' , CaseSensitive = True after me = "Hello"
-
-2. RemoveAll(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> None
-
-Removes every <what> characters from <me>.
+  // Remarks: Overloaded function. 1. RemoveAll(self: OCP.OCP.TCollection.TCollection_AsciiString, C: str, CaseSensitive: bool) -> None Remove all the occurrences of the character C in the string. Example: before me = "HellLLo", C = 'L' , CaseSensitive = True after me = "Hello" 2. RemoveAll(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> None Removes every <what> characters from <me>.
   RemoveAll(*args, **kwargs)
   RemoveAll(self: OCP.OCP.TCollection.TCollection_AsciiString, C: str, CaseSensitive: bool) -> None
   RemoveAll(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> None
@@ -371,47 +207,19 @@ Removes every <what> characters from <me>.
   RightJustify(self: OCP.OCP.TCollection.TCollection_AsciiString, Width: int, Filler: str) -> None
 
   // Search(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. Search(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> int
-
-Searches a CString in <me> from the beginning and returns position of first item <what> matching. it returns -1 if not found. Example: aString contains "Sample single test" aString.Search("le") returns 5
-
-2. Search(self: OCP.OCP.TCollection.TCollection_AsciiString, what: OCP.OCP.TCollection.TCollection_AsciiString) -> int
-
-Searches an AsciiString in <me> from the beginning and returns position of first item <what> matching. It returns -1 if not found.
+  // Remarks: Overloaded function. 1. Search(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> int Searches a CString in <me> from the beginning and returns position of first item <what> matching. it returns -1 if not found. Example: aString contains "Sample single test" aString.Search("le") returns 5 2. Search(self: OCP.OCP.TCollection.TCollection_AsciiString, what: OCP.OCP.TCollection.TCollection_AsciiString) -> int Searches an AsciiString in <me> from the beginning and returns position of first item <what> matching. It returns -1 if not found.
   Search(*args, **kwargs)
   Search(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> int
   Search(self: OCP.OCP.TCollection.TCollection_AsciiString, what: OCP.OCP.TCollection.TCollection_AsciiString) -> int
 
   // SearchFromEnd(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SearchFromEnd(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> int
-
-Searches a CString in a AsciiString from the end and returns position of first item <what> matching. It returns -1 if not found. Example: aString contains "Sample single test" aString.SearchFromEnd("le") returns 12
-
-2. SearchFromEnd(self: OCP.OCP.TCollection.TCollection_AsciiString, what: OCP.OCP.TCollection.TCollection_AsciiString) -> int
-
-Searches a AsciiString in another AsciiString from the end and returns position of first item <what> matching. It returns -1 if not found.
+  // Remarks: Overloaded function. 1. SearchFromEnd(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> int Searches a CString in a AsciiString from the end and returns position of first item <what> matching. It returns -1 if not found. Example: aString contains "Sample single test" aString.SearchFromEnd("le") returns 12 2. SearchFromEnd(self: OCP.OCP.TCollection.TCollection_AsciiString, what: OCP.OCP.TCollection.TCollection_AsciiString) -> int Searches a AsciiString in another AsciiString from the end and returns position of first item <what> matching. It returns -1 if not found.
   SearchFromEnd(*args, **kwargs)
   SearchFromEnd(self: OCP.OCP.TCollection.TCollection_AsciiString, what: str) -> int
   SearchFromEnd(self: OCP.OCP.TCollection.TCollection_AsciiString, what: OCP.OCP.TCollection.TCollection_AsciiString) -> int
 
   // SetValue(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SetValue(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None
-
-Replaces one character in the AsciiString at position <where>. If <where> is less than zero or greater than the length of <me> an exception is raised. Example: aString contains "Garbake" astring.Replace(6,'g') gives <me> = "Garbage"
-
-2. SetValue(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None
-
-Replaces a part of <me> by a CString. If <where> is less than zero or greater than the length of <me> an exception is raised. Example: aString contains "abcde" aString.SetValue(4,"1234567") gives <me> = "abc1234567"
-
-3. SetValue(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: OCP.OCP.TCollection.TCollection_AsciiString) -> None
-
-Replaces a part of <me> by another AsciiString.
+  // Remarks: Overloaded function. 1. SetValue(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None Replaces one character in the AsciiString at position <where>. If <where> is less than zero or greater than the length of <me> an exception is raised. Example: aString contains "Garbake" astring.Replace(6,'g') gives <me> = "Garbage" 2. SetValue(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None Replaces a part of <me> by a CString. If <where> is less than zero or greater than the length of <me> an exception is raised. Example: aString contains "abcde" aString.SetValue(4,"1234567") gives <me> = "abc1234567" 3. SetValue(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: OCP.OCP.TCollection.TCollection_AsciiString) -> None Replaces a part of <me> by another AsciiString.
   SetValue(*args, **kwargs)
   SetValue(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None
   SetValue(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int, what: str) -> None
@@ -422,29 +230,13 @@ Replaces a part of <me> by another AsciiString.
   Split(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int) -> OCP.OCP.TCollection.TCollection_AsciiString
 
   // SubString(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. SubString(self: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Creation of a sub-string of the string <me>. The sub-string starts to the index Fromindex and ends to the index ToIndex. Raises an exception if ToIndex or FromIndex is out of bounds Example: before me = "abcdefg", ToIndex=3, FromIndex=6 after me = "abcdefg" returns "cdef"
-
-2. SubString(self: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> OCP.OCP.TCollection.TCollection_AsciiString
-
-Creation of a sub-string of the string <me>. The sub-string starts to the index Fromindex and ends to the index ToIndex. Raises an exception if ToIndex or FromIndex is out of bounds Example: before me = "abcdefg", ToIndex=3, FromIndex=6 after me = "abcdefg" returns "cdef"
+  // Remarks: Overloaded function. 1. SubString(self: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> OCP.OCP.TCollection.TCollection_AsciiString Creation of a sub-string of the string <me>. The sub-string starts to the index Fromindex and ends to the index ToIndex. Raises an exception if ToIndex or FromIndex is out of bounds Example: before me = "abcdefg", ToIndex=3, FromIndex=6 after me = "abcdefg" returns "cdef" 2. SubString(self: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> OCP.OCP.TCollection.TCollection_AsciiString Creation of a sub-string of the string <me>. The sub-string starts to the index Fromindex and ends to the index ToIndex. Raises an exception if ToIndex or FromIndex is out of bounds Example: before me = "abcdefg", ToIndex=3, FromIndex=6 after me = "abcdefg" returns "cdef"
   SubString(*args, **kwargs)
   SubString(self: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> OCP.OCP.TCollection.TCollection_AsciiString
   SubString(self: OCP.OCP.TCollection.TCollection_AsciiString, FromIndex: int, ToIndex: int) -> OCP.OCP.TCollection.TCollection_AsciiString
 
   // ToCString(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. ToCString(self: OCP.OCP.TCollection.TCollection_AsciiString) -> str
-
-Returns pointer to AsciiString (char *). This is useful for some casual manipulations. Warning: Because this "char *" is 'const', you can't modify its contents.
-
-2. ToCString(self: OCP.OCP.TCollection.TCollection_AsciiString) -> str
-
-Returns pointer to AsciiString (char *). This is useful for some casual manipulations. Warning: Because this "char *" is 'const', you can't modify its contents.
+  // Remarks: Overloaded function. 1. ToCString(self: OCP.OCP.TCollection.TCollection_AsciiString) -> str Returns pointer to AsciiString (char *). This is useful for some casual manipulations. Warning: Because this "char *" is 'const', you can't modify its contents. 2. ToCString(self: OCP.OCP.TCollection.TCollection_AsciiString) -> str Returns pointer to AsciiString (char *). This is useful for some casual manipulations. Warning: Because this "char *" is 'const', you can't modify its contents.
   ToCString(*args, **kwargs)
   ToCString(self: OCP.OCP.TCollection.TCollection_AsciiString) -> str
   ToCString(self: OCP.OCP.TCollection.TCollection_AsciiString) -> str
@@ -470,29 +262,13 @@ Returns pointer to AsciiString (char *). This is useful for some casual manipula
   Value(self: OCP.OCP.TCollection.TCollection_AsciiString, where: int) -> str
 
   // HashCode(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. HashCode(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int
-
-Computes a hash code for the given ASCII string Returns the same integer value as the hash function for TCollection_ExtendedString
-
-2. HashCode(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int
-
-Computes a hash code for the given ASCII string Returns the same integer value as the hash function for TCollection_ExtendedString
+  // Remarks: Overloaded function. 1. HashCode(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int Computes a hash code for the given ASCII string Returns the same integer value as the hash function for TCollection_ExtendedString 2. HashCode(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int Computes a hash code for the given ASCII string Returns the same integer value as the hash function for TCollection_ExtendedString
   HashCode(*args, **kwargs)
   HashCode(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int
   HashCode(self: OCP.OCP.TCollection.TCollection_AsciiString) -> int
 
   // IsEqual_s(*args, **kwargs)
-  // Remarks: Overloaded function.
-
-1. IsEqual_s(string1: OCP.OCP.TCollection.TCollection_AsciiString, string2: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
-
-Returns True when the two strings are the same. (Just for HashCode for AsciiString)
-
-2. IsEqual_s(string1: OCP.OCP.TCollection.TCollection_AsciiString, string2: str) -> bool
-
-Returns True when the two strings are the same. (Just for HashCode for AsciiString)
+  // Remarks: Overloaded function. 1. IsEqual_s(string1: OCP.OCP.TCollection.TCollection_AsciiString, string2: OCP.OCP.TCollection.TCollection_AsciiString) -> bool Returns True when the two strings are the same. (Just for HashCode for AsciiString) 2. IsEqual_s(string1: OCP.OCP.TCollection.TCollection_AsciiString, string2: str) -> bool Returns True when the two strings are the same. (Just for HashCode for AsciiString)
   IsEqual_s(*args, **kwargs)
   IsEqual_s(string1: OCP.OCP.TCollection.TCollection_AsciiString, string2: OCP.OCP.TCollection.TCollection_AsciiString) -> bool
   IsEqual_s(string1: OCP.OCP.TCollection.TCollection_AsciiString, string2: str) -> bool

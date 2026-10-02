@@ -1,13 +1,13 @@
 import type { MockInstance } from 'vitest';
 import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 'vitest';
 import { act, render, screen, fireEvent } from '@testing-library/react';
-import { useSyncExternalStore } from 'react';
+import { Profiler, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
 import type { DockviewPanelApi } from 'dockview-react';
 import type { GeometryComponentManifest } from '@taucad/types';
-import type { Artifact, Evaluation, KernelIssue, Rendering } from '@taucad/runtime';
+import type { Artifact, Evaluation, KernelIssue, Rendering, ViewUpdateOutcome } from '@taucad/runtime';
 import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { MockRuntimeDocumentFixture } from '@taucad/runtime-testing';
 import { workbenchRecords } from '@taucad/workbench';
@@ -44,6 +44,19 @@ vi.mock('@xstate/react', () => ({
 const mockProjectSend = vi.fn();
 const mockEditorSend = vi.fn();
 const mockGraphicsSend = vi.fn();
+let mockGraphicsProjection: Readonly<{ artifact: Artifact | undefined; artifactKey: string | undefined }> = {
+  artifact: undefined,
+  artifactKey: undefined,
+};
+const mockGraphicsListeners = new Set<() => void>();
+const subscribeGraphics = (listener: () => void): (() => void) => {
+  mockGraphicsListeners.add(listener);
+  return () => {
+    mockGraphicsListeners.delete(listener);
+  };
+};
+const mockGltfPresentation = { presentedKey: undefined };
+let mockCaptureRendering: (() => Promise<Rendering>) | undefined;
 let mockGeometryUnits = new Map<string, ActorRefFrom<typeof cadMachine>>();
 let mockViewSettings: Record<
   string,
@@ -189,6 +202,9 @@ type MockCadActorOptions = {
 function createMockCadActor(options: MockCadActorOptions = {}): ActorRefFrom<typeof cadMachine> {
   const rendering = 'rendering' in options ? options.rendering : mockRendering;
   const runtime = options.runtime ?? createMockRuntimeDocument();
+  if (!options.runtime && rendering) {
+    vi.mocked(runtime.view.rendering).mockResolvedValue({ superseded: false, rendering });
+  }
   const tags = new Set(options.tags);
 
   return {
@@ -412,7 +428,10 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-status.js', () => ({
 }));
 
 vi.mock('#routes/w.$workspace.$project/chat-viewer-controls.js', () => ({
-  ChatViewerControls: () => <div role='group' aria-label='Viewer controls' />,
+  ChatViewerControls: ({ captureRendering }: { captureRendering: () => Promise<Rendering> }) => {
+    mockCaptureRendering = captureRendering;
+    return <div role='group' aria-label='Viewer controls' />;
+  },
 }));
 
 vi.mock('#components/cad/ar-button.js', () => ({
@@ -428,21 +447,27 @@ vi.mock('#hooks/use-graphics.js', () => ({
     return <div>{children}</div>;
   },
   useGraphics: () => mockGraphicsActor,
-  useGraphicsSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) =>
-    selector({
-      context: {
-        enableSurfaces: true,
-        enableLines: true,
-        enableGizmo: true,
-        enableGrid: true,
-        enableAxes: true,
-        enableMatcap: false,
-        upDirection: 'z',
-        isSectionViewActive: mockAreToolsRunning,
-        isMeasureActive: mockAreToolsRunning,
-        measurements: [],
-      },
-    }),
+  useGraphicsSelector: (selector: (state: { context: Record<string, unknown> }) => unknown) => {
+    const selectSnapshot = () =>
+      selector({
+        context: {
+          enableSurfaces: true,
+          enableLines: true,
+          enableGizmo: true,
+          enableGrid: true,
+          enableAxes: true,
+          enableMatcap: false,
+          upDirection: 'z',
+          isSectionViewActive: mockAreToolsRunning,
+          isMeasureActive: mockAreToolsRunning,
+          measurements: [],
+          artifact: mockGraphicsProjection.artifact,
+          artifactKey: mockGraphicsProjection.artifactKey,
+          gltfPresentation: mockGltfPresentation,
+        },
+      });
+    return useSyncExternalStore(subscribeGraphics, selectSnapshot, selectSnapshot);
+  },
   useModelInteractionSelector: (selector: (state: { context: ModelInteractionContext }) => unknown) =>
     selector({ context: createModelInteractionContext() }),
   useKinematicsSelector: (
@@ -464,6 +489,27 @@ describe('ChatViewer reopen-renderer overlay', () => {
     mockProjectSend.mockClear();
     mockEditorSend.mockClear();
     mockGraphicsSend.mockClear();
+    mockGraphicsProjection = { artifact: mockRendering.artifact, artifactKey: mockRendering.hash };
+    mockGraphicsSend.mockImplementation((event: { type: string; artifact?: Artifact; hash?: string }) => {
+      if (event.type !== 'updateArtifact' && event.type !== 'clearArtifact') {
+        return;
+      }
+      const next =
+        event.type === 'clearArtifact'
+          ? { artifact: undefined, artifactKey: undefined }
+          : { artifact: event.artifact, artifactKey: event.hash };
+      if (
+        next.artifact === mockGraphicsProjection.artifact &&
+        next.artifactKey === mockGraphicsProjection.artifactKey
+      ) {
+        return;
+      }
+      mockGraphicsProjection = next;
+      for (const listener of mockGraphicsListeners) {
+        listener();
+      }
+    });
+    mockCaptureRendering = undefined;
     mockViewActions.edit.mockClear();
     mockViewActions.remove.mockClear();
     mockGeometryUnits = new Map();
@@ -498,8 +544,17 @@ describe('ChatViewer reopen-renderer overlay', () => {
     getBoundingClientRectSpy = undefined;
   });
 
-  it('opens and closes the saved named projection without changing the CAD document', () => {
+  it('opens, captures and closes the saved named projection without changing the CAD document', async () => {
     const runtime = createMockRuntimeDocument();
+    const drawing: Rendering = {
+      ...runtime.rendering,
+      success: true,
+      view: 'drawing',
+      instance: 'sheet-1',
+      artifact: { mimeType: 'image/svg+xml', content: '<svg/>' },
+      hash: 'drawing',
+    };
+    vi.mocked(runtime.view.rendering).mockResolvedValue({ superseded: false, rendering: drawing });
     const evaluation: Evaluation = {
       ...successfulEvaluation(runtime.evaluation),
       success: true,
@@ -526,8 +581,16 @@ describe('ChatViewer reopen-renderer overlay', () => {
     });
     expect(runtime.document.update).not.toHaveBeenCalled();
     expect(runtime.document.close).not.toHaveBeenCalled();
+    await expect(mockCaptureRendering?.()).resolves.toBe(drawing);
+    const pending = Promise.withResolvers<ViewUpdateOutcome>();
+    vi.mocked(runtime.view.rendering).mockReturnValueOnce(pending.promise);
+    const capture = mockCaptureRendering?.();
+    mockViewSettings['view-1'] = { ...mockViewSettings['view-1']!, selectedKernelView: 'model' };
+    viewer.rerender(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    pending.resolve({ superseded: false, rendering: drawing });
+    await expect(capture).rejects.toThrow('The selected view changed during capture.');
     viewer.unmount();
-    expect(runtime.view.close).toHaveBeenCalledTimes(1);
+    expect(runtime.view.close).toHaveBeenCalledTimes(2);
     expect(runtime.document.close).not.toHaveBeenCalled();
   });
 
@@ -1109,20 +1172,25 @@ describe('ChatViewer reopen-renderer overlay', () => {
   it('should place the hover badge on later pointer moves without re-rendering the viewer', () => {
     mockHoveredComponentId = rightRimComponentId;
     const cadActor = createMockCadActor();
+    const onRender = vi.fn();
     mockGeometryUnits.set(helperEntryPath, cadActor);
 
-    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    render(
+      <Profiler id='viewer' onRender={onRender}>
+        <ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />
+      </Profiler>,
+    );
 
     const canvasRegion = screen.getByTestId('cad-viewer-canvas-region');
     fireCanvasPointerMove(canvasRegion, { clientX: 74, clientY: 92 });
 
-    // Each render of the viewer reads every cad subscription's snapshot, so a
-    // flat read count across pointer moves means no React commit happened.
-    const readsAfterFirstMove = vi.mocked(cadActor.getSnapshot).mock.calls.length;
+    // React can retry a render while bailing out a repeated state update.
+    // The profiler counts committed renders, which pointer movement must avoid.
+    const commitsAfterFirstMove = onRender.mock.calls.length;
     fireCanvasPointerMove(canvasRegion, { clientX: 120, clientY: 140 });
     fireCanvasPointerMove(canvasRegion, { clientX: 160, clientY: 180 });
 
-    expect(vi.mocked(cadActor.getSnapshot).mock.calls.length).toBe(readsAfterFirstMove);
+    expect(onRender.mock.calls.length).toBe(commitsAfterFirstMove);
     expect(screen.getByTestId('chat-viewer-layout')).toHaveStyle({
       '--viewer-hover-label-x': '150px',
       '--viewer-hover-label-y': '160px',

@@ -1,8 +1,10 @@
 /* oxlint-disable jsx-a11y/no-noninteractive-tabindex -- The CAD canvas needs focus for scoped viewer shortcuts; a button role would misrepresent a drawing surface. */
+import { interactiveViewContent } from '#lib/interactive-view-content.js';
+import type { AppCapabilitiesManifest } from '#types/runtime-client.alias.js';
 import { memo, useEffect, useCallback, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import type { FileEntry } from '@taucad/types';
 import { asKnownArtifact } from '@taucad/runtime';
-import type { Evaluation, Rendering, RuntimeDocument } from '@taucad/runtime';
+import type { Evaluation, Rendering, RuntimeDocument, ViewSubscription } from '@taucad/runtime';
 import { canonicalJson } from '@taucad/utils/hash';
 import type { IDockviewPanelHeaderProps } from 'dockview-react';
 import { FileX, FolderOpen, PlayCircle } from 'lucide-react';
@@ -44,6 +46,8 @@ import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#mac
 import { describeKinematicsHover, getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import {
   selectCadEvaluation,
+  selectCadCapabilities,
+  selectCadActiveKernelId,
   selectCadRendering,
   selectCadDocument,
   selectCadFailureIssues,
@@ -73,6 +77,8 @@ const componentNameBadgeBottomThresholdPx = 56;
 function usePaneRuntimeView({
   document,
   evaluation,
+  capabilities,
+  kernelId,
   selectedId,
   options,
   instance,
@@ -80,14 +86,28 @@ function usePaneRuntimeView({
 }: Readonly<{
   document: RuntimeDocument | undefined;
   evaluation: Evaluation | undefined;
+  capabilities: AppCapabilitiesManifest | undefined;
+  kernelId: string | undefined;
   selectedId: string | undefined;
   options: Record<string, unknown> | undefined;
   instance: string | undefined;
   blocked?: string;
-}>): Readonly<{ rendering: Rendering | undefined; unavailable: string | undefined }> {
+}>): Readonly<{
+  rendering: Rendering | undefined;
+  unavailable: string | undefined;
+  captureRendering: () => Promise<Rendering>;
+}> {
   const [lastSuccess, setLastSuccess] = useState<{ key: string; rendering: Rendering } | undefined>();
   const [viewError, setViewError] = useState<{ key: string; message: string } | undefined>();
-  const offered = evaluation?.success ? evaluation.views.find((view) => view.id === selectedId) : undefined;
+  const offered = evaluation?.success
+    ? selectedId
+      ? evaluation.views.find((view) => view.id === selectedId)
+      : evaluation.views[0]
+    : undefined;
+  const requestedId = selectedId ?? offered?.id;
+  const content = interactiveViewContent(offered?.mimeType, kernelId, capabilities);
+  const includeEdges = content?.includeEdges === true;
+  const activeView = useRef<{ key: string; view: ViewSubscription; closed: boolean } | undefined>(undefined);
   const unavailable =
     blocked ??
     (selectedId && evaluation?.success && !offered
@@ -103,7 +123,7 @@ function usePaneRuntimeView({
   // The presented picture belongs to this document until a replacement succeeds,
   // including while the person switches views or a new view fails.
   const pictureKey = document?.id ?? '';
-  const subscriptionKey = `${document?.id ?? ''}:${selectedId ?? ''}:${optionsKey}:${instance ?? ''}`;
+  const subscriptionKey = `${document?.id ?? ''}:${requestedId ?? ''}:${optionsKey}:${instance ?? ''}:${includeEdges}`;
 
   useEffect(() => {
     if (!document || Boolean(unavailable) || isEmpty) {
@@ -115,8 +135,9 @@ function usePaneRuntimeView({
       const request = {
         options: JSON.parse(optionsKey) as Record<string, unknown>,
         ...(instance ? { instance } : {}),
+        ...(includeEdges ? { content: { includeEdges: true } } : {}),
       };
-      view = selectedId ? document.view(selectedId, request) : document.view();
+      view = requestedId ? document.view(requestedId, request) : document.view();
     } catch (error) {
       queueMicrotask(() => {
         if (!closed) {
@@ -130,6 +151,8 @@ function usePaneRuntimeView({
         closed = true;
       };
     }
+    const active = { key: subscriptionKey, view, closed: false };
+    activeView.current = active;
     const onRendering = (next: Rendering): void => {
       if (closed) {
         return;
@@ -175,13 +198,43 @@ function usePaneRuntimeView({
     void readInitial();
     return () => {
       closed = true;
+      active.closed = true;
+      if (activeView.current === active) {
+        activeView.current = undefined;
+      }
       unrendered();
       unstatus();
       view.close();
     };
-  }, [document, isEmpty, selectedId, optionsKey, instance, unavailable, pictureKey, subscriptionKey]);
+  }, [document, isEmpty, requestedId, includeEdges, optionsKey, instance, unavailable, pictureKey, subscriptionKey]);
+
+  const captureRendering = useCallback(async (): Promise<Rendering> => {
+    const active = activeView.current;
+    if (!active || active.key !== subscriptionKey || Boolean(unavailable) || isEmpty) {
+      throw new Error('The selected view is unavailable for capture.');
+    }
+    const assertActive = (): void => {
+      if (active.closed || activeView.current !== active) {
+        throw new Error('The selected view changed during capture.');
+      }
+    };
+    for (;;) {
+      assertActive();
+      // oxlint-disable-next-line no-await-in-loop -- Superseded evaluations must settle on the same pane subscription.
+      const outcome = await active.view.rendering();
+      assertActive();
+      if (outcome.superseded) {
+        continue;
+      }
+      if (!outcome.rendering.success || outcome.rendering.transient) {
+        throw new Error('The selected view has no committed successful rendering for capture.');
+      }
+      return outcome.rendering;
+    }
+  }, [subscriptionKey, unavailable, isEmpty]);
 
   return {
+    captureRendering,
     rendering:
       evaluation?.success && evaluation.views.length === 0
         ? undefined
@@ -509,6 +562,8 @@ const ViewerContent = memo(function ({
   const evaluation = useCadSelector(selectCadEvaluation, undefined);
   const defaultRendering = useCadSelector(selectCadRendering, undefined);
   const runtimeDocument = useCadSelector(selectCadDocument, undefined);
+  const capabilities = useCadSelector(selectCadCapabilities, undefined);
+  const kernelId = useCadSelector(selectCadActiveKernelId, undefined);
   const savedView = viewRecords.get(viewId);
   const selectedKernelView = savedView?.selectedKernelView;
   const offeredViewId = selectedKernelView ?? (evaluation?.success ? evaluation.views[0]?.id : undefined);
@@ -519,9 +574,15 @@ const ViewerContent = memo(function ({
     localForView && localForView.evaluationId !== evaluation?.id
       ? `Instance “${localForView.instanceId}” belonged to a previous evaluation. Choose a current instance.`
       : undefined;
-  const { rendering: paneRendering, unavailable } = usePaneRuntimeView({
+  const {
+    rendering: paneRendering,
+    unavailable,
+    captureRendering,
+  } = usePaneRuntimeView({
     document: runtimeDocument,
     evaluation,
+    capabilities,
+    kernelId,
     selectedId:
       selectedKernelView ??
       (Boolean(localForView) || Boolean(selectedState?.authoredInstance) || Boolean(selectedState?.options)
@@ -543,7 +604,6 @@ const ViewerContent = memo(function ({
     [evaluation, knownArtifact],
   );
   const artifact = rendering?.success && !emptyModel ? rendering.artifact : undefined;
-  const artifactHash = artifact && rendering?.success ? rendering.hash : undefined;
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
   const failureMessage =
     failureIssues?.find((issue) => issue.severity === 'error')?.message ?? failureIssues?.[0]?.message;
@@ -632,6 +692,7 @@ const ViewerContent = memo(function ({
   const previews = useSyncExternalStore(subscribePreviews, getPreviewSnapshot, getPreviewSnapshot);
   const presentedArtifact = useGraphicsSelector((state) => state.context.artifact);
   const presentedArtifactKey = useGraphicsSelector((state) => state.context.artifactKey);
+  const presentedSourceFile = useGraphicsSelector((state) => state.context.artifactSourceFile);
   const presentedKey = useGraphicsSelector((state) => state.context.gltfPresentation.presentedKey);
   const componentNameForPointer = useModelInteractionSelector((state) => {
     const unit = getModelInteractionUnitState(state.context, modelInteractionUnitId);
@@ -778,31 +839,36 @@ const ViewerContent = memo(function ({
   // The hover badge is placed from custom properties written straight to the
   // layout element so a move never re-renders this subtree; only pointer
   // entry/exit is React state.
-  const updateViewerPointerPosition = useCallback((event: React.PointerEvent<HTMLDivElement>): void => {
-    const layout = viewerLayoutRef.current;
-    const viewerBounds = layout?.getBoundingClientRect();
-    if (!layout || !viewerBounds) {
-      setIsPointerOverViewer(false);
-      return;
-    }
+  const updateViewerPointerPosition = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      const layout = viewerLayoutRef.current;
+      const viewerBounds = layout?.getBoundingClientRect();
+      if (!layout || !viewerBounds) {
+        setIsPointerOverViewer(false);
+        return;
+      }
 
-    const x = Math.max(0, Math.min(event.clientX - viewerBounds.left, viewerBounds.width));
-    const y = Math.max(0, Math.min(event.clientY - viewerBounds.top, viewerBounds.height));
-    // Read at each move rather than kept: the bar grows and shrinks as tools start and stop.
-    const controlsTop =
-      (bottomControlsRef.current?.getBoundingClientRect().top ?? viewerBounds.bottom) - viewerBounds.top;
-    layout.style.setProperty('--viewer-hover-label-x', `${x}px`);
-    layout.style.setProperty('--viewer-hover-label-y', `${y}px`);
-    layout.style.setProperty(
-      '--viewer-hover-label-translate-x',
-      x > viewerBounds.width - componentNameBadgeRightEdgeThresholdPx ? 'calc(-100% - 8px)' : '8px',
-    );
-    layout.style.setProperty(
-      '--viewer-hover-label-translate-y',
-      y > controlsTop - componentNameBadgeBottomThresholdPx ? 'calc(-100% - 10px)' : '10px',
-    );
-    setIsPointerOverViewer(true);
-  }, []);
+      const x = Math.max(0, Math.min(event.clientX - viewerBounds.left, viewerBounds.width));
+      const y = Math.max(0, Math.min(event.clientY - viewerBounds.top, viewerBounds.height));
+      // Read at each move rather than kept: the bar grows and shrinks as tools start and stop.
+      const controlsTop =
+        (bottomControlsRef.current?.getBoundingClientRect().top ?? viewerBounds.bottom) - viewerBounds.top;
+      layout.style.setProperty('--viewer-hover-label-x', `${x}px`);
+      layout.style.setProperty('--viewer-hover-label-y', `${y}px`);
+      layout.style.setProperty(
+        '--viewer-hover-label-translate-x',
+        x > viewerBounds.width - componentNameBadgeRightEdgeThresholdPx ? 'calc(-100% - 8px)' : '8px',
+      );
+      layout.style.setProperty(
+        '--viewer-hover-label-translate-y',
+        y > controlsTop - componentNameBadgeBottomThresholdPx ? 'calc(-100% - 10px)' : '10px',
+      );
+      if (!isPointerOverViewer) {
+        setIsPointerOverViewer(true);
+      }
+    },
+    [isPointerOverViewer],
+  );
 
   const clearViewerPointerPosition = useCallback((): void => {
     setIsPointerOverViewer(false);
@@ -972,7 +1038,7 @@ const ViewerContent = memo(function ({
         onPointerMove={updateViewerPointerPosition}
         onPointerLeave={clearViewerPointerPosition}
       >
-        {artifact ? (
+        {artifact && presentedArtifact ? (
           <CadViewer
             enableZoom
             enablePan
@@ -984,9 +1050,9 @@ const ViewerContent = memo(function ({
             enableLines={enableLines}
             enableMatcap={enableMatcap}
             upDirection={upDirection}
-            artifact={artifact}
-            artifactHash={artifactHash}
-            sourceFile={entryPath}
+            artifact={presentedArtifact}
+            artifactHash={presentedArtifactKey}
+            sourceFile={presentedSourceFile}
             // Keep R3F on default offsetX/Y compute; eventPrefix='client'
             // is window-relative and mis-rays docked panels.
             eventSource={canvasEventSource}
@@ -1046,7 +1112,7 @@ const ViewerContent = memo(function ({
           {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
           <ArButton artifact={artifact} runtimeDocument={runtimeDocument} className='ml-auto shrink-0' />
         </div>
-        <ChatViewerControls shouldEnableCapture={profile === 'editor'} />
+        <ChatViewerControls shouldEnableCapture={profile === 'editor'} captureRendering={captureRendering} />
       </div>
     </div>
   );

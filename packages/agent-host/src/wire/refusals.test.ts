@@ -37,6 +37,11 @@ const notYetProduced = [
 const resumableCodes = Object.keys(refusals).filter((code) => isResumable(code));
 
 describe('the refusal registry (D11, I17)', () => {
+  it('should keep an over-budget revision fetch terminal and owned by revisions', () => {
+    expect(refusalOf('FETCH_LIMIT_EXCEEDED')).toEqual({ owner: 'revisions', retry: 'never' });
+    expect(isResumable('FETCH_LIMIT_EXCEEDED')).toBe(false);
+  });
+
   it('should keep isResumable equal to the thirteen-code set plus codes nothing produces yet', () => {
     expect(resumableCodes.toSorted()).toEqual([...todaysResumable, ...notYetProduced].toSorted());
   });

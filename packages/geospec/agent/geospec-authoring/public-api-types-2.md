@@ -1,6 +1,175 @@
 # geospec — Types (2)
 
-75 top-level symbols. Signatures are verbatim typescript.
+76 top-level symbols. Signatures are verbatim typescript.
+
+// Structured payload when `boundingBox` fails
+BoundingBoxFailure: {
+    axisFailures: BoundingBoxAxisFailure[];
+}
+
+  axisFailures: BoundingBoxAxisFailure[]
+
+// Scene bounding box with per-primitive contributors in the subject's unit and frame
+BoundingBoxStats: {
+    size: [number, number, number];
+    center: [number, number, number];
+    primitives: PrimitiveRecord[];
+}
+
+  size: [number, number, number]
+
+  center: [number, number, number]
+
+  primitives: PrimitiveRecord[]
+
+// Result of evaluating a single test requirement against geometry stats
+CheckResult: {
+    passed: true;
+} | {
+    passed: false;
+    check: 'boundingBox';
+    reason: string;
+    suggestion: string;
+    failure: BoundingBoxFailure;
+} | {
+    passed: false;
+    check: 'connectedComponents';
+    reason: string;
+    suggestion: string;
+    failure: ConnectedComponentsFailure;
+} | {
+    passed: false;
+    check: 'watertight';
+    reason: string;
+    suggestion: string;
+    failure: WatertightFailure;
+} | {
+    passed: false;
+    check: 'invalid';
+    reason: string;
+    suggestion: string;
+}
+
+  passed: true
+
+// Smallest clearance between two clusters along the dominant separation axis
+ClusterGap: {
+    fromLabel: string;
+    toLabel: string;
+    axis: 'x' | 'y' | 'z';
+    /** Millimetres — clearance between the two named primitives' AABBs. */
+    gapMm: number;
+    fromPrimitive: string;
+    toPrimitive: string;
+}
+
+  fromLabel: string
+
+  toLabel: string
+
+  axis: 'x' | 'y' | 'z'
+
+  // Millimetres — clearance between the two named primitives' AABBs
+  gapMm: number
+
+  fromPrimitive: string
+
+  toPrimitive: string
+
+// One spatial cluster from AABB overlap grouping
+ClusterReport: {
+    label: string;
+    primitives: PrimitiveRecord[];
+    aabb: AabbMeters;
+    centroid: [number, number, number];
+    totalVertices: number;
+}
+
+  label: string
+
+  primitives: PrimitiveRecord[]
+
+  aabb: AabbMeters
+
+  centroid: [number, number, number]
+
+  totalVertices: number
+
+// Structured payload when `connectedComponents` fails
+ConnectedComponentsFailure: {
+    expected: number;
+    got: number;
+    toleranceMm: number;
+    clusters: ClusterReport[];
+    gaps: ClusterGap[];
+}
+
+  expected: number
+
+  got: number
+
+  toleranceMm: number
+
+  clusters: ClusterReport[]
+
+  gaps: ClusterGap[]
+
+// Full connected-components analysis at one tolerance
+ConnectedComponentsResult: {
+    count: number;
+    clusters: ClusterReport[];
+    gaps: ClusterGap[];
+}
+
+  count: number
+
+  clusters: ClusterReport[]
+
+  gaps: ClusterGap[]
+
+// Diagnostic form permitted inside a wire-safe subject snapshot
+GeometryEvidenceDiagnostic: Omit<GeometryDiagnostic, 'details'> & {
+    details?: JSONValue;
+}
+
+  code: KernelIssueCode | (string & {})
+
+  severity: 'error' | 'warning' | 'info'
+
+  message: string
+
+  suggestion: string
+
+  spatial: {
+          min?: Vec3;
+          max?: Vec3;
+          center?: Vec3;
+      }
+
+  details: JSONValue
+
+// Statistics about a parsed GLB geometry
+// Remarks: `vertexCount` and `meshCount` are kept on the type for internal diagnostic use (and for the kernel-author Vitest harness in `kernel-geometry-testing.utils.ts`); they are no longer exposed via the agent-facing requirement schema.
+GeometryStats: {
+    vertexCount: number;
+    meshCount: number;
+    triangleCount: number;
+    meshQuality: MeshQualityStats;
+    watertight: boolean;
+    boundingBox?: BoundingBoxStats;
+}
+
+  vertexCount: number
+
+  meshCount: number
+
+  triangleCount: number
+
+  meshQuality: MeshQualityStats
+
+  watertight: boolean
+
+  boundingBox: BoundingBoxStats
 
 // One TRIANGLES primitive with identity for spatial-test feedback
 PrimitiveRecord: {
@@ -289,6 +458,7 @@ ManagedGeoSpecModelLoader: GeoSpecModelLoader & {
   dispose(): Promise<void>;
 
 // Runtime client surface consumed by `geospec/model`
+// Remarks: GeoSpec accepts concrete Tau runtime clients from multiple call sites but only needs connection lifecycle and request-scoped documents. Keep this shape small so typed runtime clients do not have to widen their full generic method surface to GeoSpec's testing DSL.
 GeoSpecRuntimeClient: Pick<RuntimeClient, 'connect' | 'terminate'> & {
     open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
     on?(event: 'telemetry', handler: (batch: {
@@ -597,6 +767,7 @@ RelationshipFinalEvidence: {
   witnesses: RelationshipWitness[]
 
 // One geometric witness backing a relationship verdict
+// Remarks: `value` layout by kind: `point` is `[x, y, z]`; `axis` is `[ox, oy, oz, dx, dy, dz]`; `plane` is `[nx, ny, nz, offset]`. `topologyRef` is the snapshot topology-ref string (`'#o1.2.f7'`) — diagnostics and pinning only, never a durable reference.
 RelationshipWitness: {
     kind: 'point' | 'axis' | 'plane';
     value: number[];
@@ -691,6 +862,7 @@ GeoSpecCollectorOptions: {
 GeoSpecTestNamePattern: RegExp
 
 // Options for recursive GeoSpec test discovery
+// Remarks: `files` accepts either exact `*.geospec.ts` / `*.geospec.js` files or directory roots. When omitted, discovery starts at `projectPath`. `include` and `exclude` are Vitest-style file globs applied to project-relative GeoSpec paths after `files` roots have been expanded.
 DiscoverGeoSpecFilesOptions: {
     filesystem: GeoSpecDiscoveryFileSystem;
     projectPath: string;
@@ -723,6 +895,7 @@ GeoSpecDiscoveryFileStat: {
   kind: GeoSpecDiscoveryFileKind
 
 // Minimal filesystem contract used by GeoSpec test discovery
+// Remarks: Browser workers, Node CLI hosts, and embedded runners adapt their native filesystem APIs to this shape so discovery has one shared behavior.
 GeoSpecDiscoveryFileSystem: {
     readdir(path: string): Promise<readonly string[]>;
     stat(path: string): Promise<GeoSpecDiscoveryFileStat>;
@@ -735,6 +908,7 @@ GeoSpecDiscoveryFileSystem: {
   stat(path: string): Promise<GeoSpecDiscoveryFileStat>;
 
 // Result returned by recursive GeoSpec test discovery
+// Remarks: `files` are project-relative, sorted, and de-duplicated. `unmatchedRoots` contains requested file or directory roots that did not select any GeoSpec files.
 GeoSpecDiscoveryResult: {
     files: string[];
     unmatchedRoots: string[];
@@ -745,6 +919,7 @@ GeoSpecDiscoveryResult: {
   unmatchedRoots: string[]
 
 // Worker-local cache for successful GeoSpec bundles
+// Remarks: The cache is internal runner infrastructure. Each invocation still creates a fresh collector, run token and host binding, so runs that reuse one entry stay isolated. An entry is reused only while every read its bundle was built from still returns the answer the bundler got.
 GeoSpecModuleBundleCache: Map<string, {
     builtinIdentity: string;
     /** The run token embedded in `bundle.code`; a reuse executes a copy under its own run's token. */
@@ -1085,6 +1260,7 @@ GeoSpecNativeModelEngine: GeoSpecNativeEngine & {
   releaseSubject(request: Uint8Array<ArrayBuffer>): Uint8Array<ArrayBuffer>;
 
 // Model loader injected into native VM runs
+// Remarks: The freshness unit is one load: every call reads its source again (the source reader or a Runtime export) and the engine digests those exact bytes. Nothing is deduplicated per run or per scope; bytes equal to an admitted subject's reuse that subject by digest, length and descriptor, and edited bytes admit a new subject. Only concurrent identical inline-code Runtime loads share one in-flight export.
 GeoSpecNativeModelLoader: <Code extends Record<string, string> = Record<string, string>>(options: GeoSpecNativeLoadModelOptions<Code>) => Promise<GeoSpecNativeModelSubject>
 
 // Subject identity returned by native STEP/GLB admission
@@ -1112,6 +1288,7 @@ GeoSpecNativeModelResource: {
   source: LoadModelSourceOptions['source']
 
 // Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
+// Remarks: The loader takes ownership of the returned bytes and admits them without a copy, so a reader must return bytes that nothing mutates afterwards (a fresh read, not a view of a shared or reused buffer).
 GeoSpecNativeSourceReader: (source: LoadModelSourceOptions['source']) => Promise<Uint8Array<ArrayBuffer>>
 
 // Reusable native model loader whose admitted subjects can be released as one run
@@ -1132,6 +1309,7 @@ ManagedGeoSpecNativeModelLoader: GeoSpecNativeModelLoader & {
 }
 
   // Drain registered admissions, including additions while drainage awaits, then release this scope's subjects (with a carrier
+  // Remarks: Await the intended complete load chain before final release, and await this method before closing the caller-owned engine. Calls after it returns start a new scope requiring another release; future detached loads are not part of the completed scope.
   // ManagedGeoSpecNativeModelLoader.releaseAll (method)
   releaseAll(): Promise<void>;
 
@@ -1539,261 +1717,3 @@ GeoSpecRunnerFileResult: {
 
   // Executing worker's isolate-resident memory at file completion, in bytes (R15 memory-class telemetry)
   workerMemoryBytes: number
-
-// Shared options for Node and browser GeoSpec runner factories
-GeoSpecRunnerOptions: {
-    /** Filesystem containing the project and test modules. */
-    filesystem: VmFileSystem;
-    /** Model loader exposed to authored tests through `geospec/model`. */
-    modelLoader?: RunGeoSpecModuleOptions['modelLoader'];
-    /** Protocol-3 assertion client used by explicitly native runners. */
-    nativeAssertions?: RunGeoSpecModuleOptions['nativeAssertions'];
-    /** Managed native model loader released after each settled run. */
-    nativeModelLoader?: ManagedGeoSpecNativeModelLoader;
-    /** STEP loader exposed to authored tests through `geospec/step`. */
-    stepLoader?: RunGeoSpecModuleOptions['stepLoader'];
-    /** Additional in-memory modules made available to the VM. */
-    builtinModules?: RunGeoSpecModuleOptions['builtinModules'];
-    /** Internal profile counters used by opt-in benchmark tooling. */
-    internalProfile?: GeoSpecRunProfile;
-}
-
-  // Filesystem containing the project and test modules
-  filesystem: VmFileSystem
-
-  // Model loader exposed to authored tests through `geospec/model`
-  modelLoader: RunGeoSpecModuleOptions['modelLoader']
-
-  // Protocol-3 assertion client used by explicitly native runners
-  nativeAssertions: RunGeoSpecModuleOptions['nativeAssertions']
-
-  // Managed native model loader released after each settled run
-  nativeModelLoader: ManagedGeoSpecNativeModelLoader
-
-  // STEP loader exposed to authored tests through `geospec/step`
-  stepLoader: RunGeoSpecModuleOptions['stepLoader']
-
-  // Additional in-memory modules made available to the VM
-  builtinModules: RunGeoSpecModuleOptions['builtinModules']
-
-  // Internal profile counters used by opt-in benchmark tooling
-  internalProfile: GeoSpecRunProfile
-
-// Aggregate result returned by GeoSpec worker-style runners
-GeoSpecRunnerResult: {
-    /** True when no files or tests failed and at least one test was selected. */
-    success: boolean;
-    /** Number of non-skipped tests that passed. */
-    passed: number;
-    /** Number of file-level or test-level failures. */
-    failed: number;
-    /** Number of collected tests after filters were applied. */
-    selectedTests: number;
-    /** Per-file module execution results. */
-    files: GeoSpecRunnerFileResult[];
-    /** Run-level issues such as aborts or empty filter selections. */
-    issues?: VmIssue[];
-    /** Wall-clock cost of the whole run, in milliseconds (R1). */
-    durationMs?: number;
-    /** Complete requested-file accounting; discovery may remain unknown in unstarted or broken modules. */
-    accounting?: GeoSpecRunnerAccounting;
-    /** Coherence of the consumed source graphs, not a geometry verdict. */
-    lineageStatus?: 'complete' | 'unavailable' | 'mixed';
-}
-
-  // True when no files or tests failed and at least one test was selected
-  success: boolean
-
-  // Number of non-skipped tests that passed
-  passed: number
-
-  // Number of file-level or test-level failures
-  failed: number
-
-  // Number of collected tests after filters were applied
-  selectedTests: number
-
-  // Per-file module execution results
-  files: GeoSpecRunnerFileResult[]
-
-  // Run-level issues such as aborts or empty filter selections
-  issues: VmIssue[]
-
-  // Wall-clock cost of the whole run, in milliseconds (R1)
-  durationMs: number
-
-  // Complete requested-file accounting
-  accounting: GeoSpecRunnerAccounting
-
-  // Coherence of the consumed source graphs, not a geometry verdict
-  lineageStatus: 'complete' | 'unavailable' | 'mixed'
-
-// Options accepted by a GeoSpec worker-style runner run
-GeoSpecRunnerRunOptions: {
-    /** GeoSpec test files to execute. Files run serially by default. */
-    files: readonly string[];
-    /** JavaScript regular expression matched against full `suite > test` names. */
-    testNamePattern?: string | RegExp;
-    /** Timeout for each async test callback, in milliseconds. */
-    testTimeout?: number;
-    /** Non-verdict matcher wall backstop. Milliseconds. */
-    matcherWallBackstop?: number;
-    /** Emit structured forensic measurements for this run. */
-    forensic?: boolean;
-    /**
-     * Stop after the first failing file (R1). Interactive fail-fast only —
-     * never the default for reward runs, which want the complete red set.
-     */
-    bail?: boolean;
-}
-
-  // GeoSpec test files to execute
-  files: readonly string[]
-
-  // JavaScript regular expression matched against full `suite > test` names
-  testNamePattern: string | RegExp
-
-  // Timeout for each async test callback, in milliseconds
-  testTimeout: number
-
-  // Non-verdict matcher wall backstop
-  matcherWallBackstop: number
-
-  // Emit structured forensic measurements for this run
-  forensic: boolean
-
-  // Stop after the first failing file (R1)
-  bail: boolean
-
-// One parsed segment of a selector path (`name`, `name[3]`, or selector-side `name[*]`)
-SelectorPathSegment: {
-    /** Bare segment name without index. */
-    name: string;
-    /** 1-based member index when the segment is `name[n]`. */
-    index?: number;
-    /** True when the segment is the selector-side wildcard `name[*]`. */
-    wildcard?: boolean;
-}
-
-  // Bare segment name without index
-  name: string
-
-  // 1-based member index when the segment is `name[n]`
-  index: number
-
-  // True when the segment is the selector-side wildcard `name[*]`
-  wildcard: boolean
-
-// Tolerance vocabulary consumed by selector predicates
-SelectorTolerances: {
-    /** Linear/contact tolerance in millimetres (offset bands, `near`, radii). */
-    linearMm: number;
-    /** Angular tolerance in degrees for normal/axis/parallelism predicates. */
-    angularToleranceDegrees: number;
-}
-
-  // Linear/contact tolerance in millimetres (offset bands, `near`, radii)
-  linearMm: number
-
-  // Angular tolerance in degrees for normal/axis/parallelism predicates
-  angularToleranceDegrees: number
-
-// Axis query predicates over cylindrical/conical face facts
-AxisQuery: {
-    /** Axis direction parallelism. */
-    axis?: DirectionPredicate;
-    radius?: NumericRange;
-    near?: Partial<Vec3Record> & {
-        tolerance?: number;
-    };
-    containsPoint?: Vec3;
-    nearestTo?: Vec3;
-    within?: GeometrySelector;
-    orderBy?: 'radius' | 'offsetAlong';
-    along?: Vec3;
-    pick?: 'first' | 'last' | number;
-    allOf?: AxisQuery[];
-    anyOf?: AxisQuery[];
-    not?: AxisQuery;
-}
-
-  // Axis direction parallelism
-  axis: DirectionPredicate
-
-  radius: NumericRange
-
-  near: Partial<Vec3Record> & {
-          tolerance?: number;
-      }
-
-  containsPoint: Vec3
-
-  nearestTo: Vec3
-
-  within: GeometrySelector
-
-  orderBy: 'radius' | 'offsetAlong'
-
-  along: Vec3
-
-  pick: 'first' | 'last' | number
-
-  allOf: AxisQuery[]
-
-  anyOf: AxisQuery[]
-
-  not: AxisQuery
-
-// Axis selector resolved from cylindrical/conical face facts
-AxisSelector: {
-    kind: 'axis';
-    of?: string | RegExp;
-    query?: AxisQuery;
-    expect?: Cardinality;
-}
-
-  kind: 'axis'
-
-  of: string | RegExp
-
-  query: AxisQuery
-
-  expect: Cardinality
-
-// Body query predicates over available source facts
-BodyQuery: {
-    area?: NumericRange;
-    near?: Partial<Vec3Record> & {
-        tolerance?: number;
-    };
-    nearestTo?: Vec3;
-    within?: GeometrySelector;
-    orderBy?: 'area' | 'offsetAlong';
-    along?: Vec3;
-    pick?: 'first' | 'last' | number;
-    allOf?: BodyQuery[];
-    anyOf?: BodyQuery[];
-    not?: BodyQuery;
-}
-
-  area: NumericRange
-
-  near: Partial<Vec3Record> & {
-          tolerance?: number;
-      }
-
-  nearestTo: Vec3
-
-  within: GeometrySelector
-
-  orderBy: 'area' | 'offsetAlong'
-
-  along: Vec3
-
-  pick: 'first' | 'last' | number
-
-  allOf: BodyQuery[]
-
-  anyOf: BodyQuery[]
-
-  not: BodyQuery

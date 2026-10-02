@@ -73,11 +73,11 @@ public sealed partial class WorkerTests
         var members = shape.GetProperty("members");
         Assert.Equal(
             [
-                "this[]", "Count", "Limit", "Seed", "Density", "Inner", "Shape", "Grow", "Pick", "Tag", "Mark", "op_Addition", "op_Implicit",
+                "this[int index]", "Count", "Limit", "Seed", "Density", "Changed", "Inner", "Shape", "Grow", "Pick", "Tag", "Mark", "op_Addition", "op_Implicit",
                 "Expand", "Shrink", "Old", "Described", "Guarded", "Shared",
             ],
             members.EnumerateArray().Select(member => member.GetProperty("name").GetString()));
-        Assert.Equal("property", Named(members, "this[]").GetProperty("kind").GetString());
+        Assert.Equal("property", Named(members, "this[int index]").GetProperty("kind").GetString());
         Assert.True(Named(members, "Count").GetProperty("static").GetBoolean());
         Assert.Equal("constant", Named(members, "Limit").GetProperty("kind").GetString());
         Assert.Equal("field", Named(members, "Seed").GetProperty("kind").GetString());
@@ -90,11 +90,11 @@ public sealed partial class WorkerTests
         Assert.False(Named(members, "Described").TryGetProperty("deprecated", out _));
         Assert.Equal("protected", Named(members, "Guarded").GetProperty("visibility").GetString());
         Assert.Equal("protected", Named(members, "Shared").GetProperty("visibility").GetString());
-        Assert.Equal("public static implicit operator float(Shape shape)", Signatures(members, "op_Implicit")[0].GetProperty("text").GetString());
+        Assert.Equal("public static implicit operator float (Shape shape)", Signatures(members, "op_Implicit")[0].GetProperty("text").GetString());
 
         var constructors = Signatures(members, "Shape");
         Assert.Equal("constructor", Named(members, "Shape").GetProperty("kind").GetString());
-        Assert.Equal(["public Shape(float size, float scale = 1)", "public Shape()"], constructors.Select(signature => signature.GetProperty("text").GetString()));
+        Assert.Equal(["public Shape(float size, float scale = 1f)", "public Shape()"], constructors.Select(signature => signature.GetProperty("text").GetString()));
         Assert.False(constructors[0].TryGetProperty("returnType", out _));
         Assert.Equal("Make a shape of size .", constructors[0].GetProperty("description").GetString());
         var constructorParameters = constructors[0].GetProperty("parameters");
@@ -126,12 +126,63 @@ public sealed partial class WorkerTests
         // A DateTime constant has no literal form, so it is written as the keyword.
         Assert.Equal("default", Named(Signatures(members, "Mark")[0].GetProperty("parameters"), "at").GetProperty("defaultValue").GetString());
 
+        Assert.Equal("public abstract class Array", Named(entries, "Array").GetProperty("signatures")[0].GetProperty("text").GetString());
+        Assert.Equal("public sealed class String", Named(entries, "String").GetProperty("signatures")[0].GetProperty("text").GetString());
         // BCL entries come from metadata: no declaration site, and an enum default is its underlying constant.
         var text = Named(entries, "String");
         Assert.False(text.TryGetProperty("source", out _));
         var split = Signatures(text.GetProperty("members"), "Split")
             .First(signature => signature.GetProperty("text").GetString() == "public string[] Split(char separator, StringSplitOptions options = None)");
         Assert.Equal("0", Named(split.GetProperty("parameters"), "options").GetProperty("defaultValue").GetString());
+    }
+
+    [Fact]
+    public void EmitApiRetainsConstructionAccessorsConstraintsDefaultsAndNestedDeclarations()
+    {
+        Write("declarations/Types.cs", """
+        namespace PicoGK;
+        public class RequiredBase { public required string BaseName { get; init; } }
+        public sealed record Image {
+            public required byte[] Data { get; init; }
+            public string? Name { get; init; }
+            public float Scale { get; init; } = 1f;
+        }
+        public class Holder<T> : RequiredBase where T : class, new() {
+            public T? Value { get; private set; }
+            public int ReadOnly => 3;
+            public int this[int index] => index;
+            public string this[string key] => key;
+            public U Echo<U>(U value, float scale = 1f) where U : struct => value;
+            public class Nested { public enum Mode : long { First = 1L, Alias = First } }
+        }
+        public readonly record struct Stamp(int Value);
+        """);
+        var output = Path.Combine(root, "declarations.json");
+        Assert.Equal(0, InvokeMain(["--emit-api", output, Path.Combine(root, "declarations")]).ExitCode);
+        var payload = JsonDocument.Parse(File.ReadAllText(output)).RootElement;
+        Assert.Equal(0, payload.GetProperty("diagnosticErrors").GetInt32());
+        var entries = payload.GetProperty("entries");
+        string Declaration(JsonElement entry) => entry.GetProperty("signatures")[0].GetProperty("text").GetString()!;
+        Assert.Equal("public sealed record Image", Declaration(Named(entries, "Image")));
+        var image = Named(entries, "Image").GetProperty("members");
+        Assert.Equal("public required byte[] Data { get; init; }", Declaration(Named(image, "Data")));
+        Assert.Equal("public string? Name { get; init; }", Declaration(Named(image, "Name")));
+        Assert.Equal("public float Scale { get; init; } = 1f;", Declaration(Named(image, "Scale")));
+        Assert.Equal("public Image()", Declaration(Named(image, "Image")));
+        Assert.Equal("public readonly record struct Stamp(int Value)", Declaration(Named(entries, "Stamp")));
+        var holder = Named(entries, "Holder");
+        Assert.Equal("public class Holder<T> : RequiredBase where T : class, new()", Declaration(holder));
+        var members = holder.GetProperty("members");
+        Assert.Equal("public T? Value { get; private set; }", Declaration(Named(members, "Value")));
+        Assert.Equal("public int ReadOnly { get; }", Declaration(Named(members, "ReadOnly")));
+        Assert.Equal("public int this[int index] { get; }", Declaration(Named(members, "this[int index]")));
+        Assert.Equal("public string this[string key] { get; }", Declaration(Named(members, "this[string key]")));
+        Assert.Equal("public U Echo<U>(U value, float scale = 1f)\r\n    where U : struct", Declaration(Named(members, "Echo")));
+        var mode = Named(Named(members, "Nested").GetProperty("members"), "Mode");
+        Assert.Equal("PicoGK.Holder.Nested", mode.GetProperty("path").GetString());
+        Assert.Equal("public enum Mode : long", Declaration(mode));
+        Assert.Equal("Alias = First", Declaration(Named(mode.GetProperty("members"), "Alias")));
+        Assert.Equal("public required string BaseName { get; init; }", Declaration(Named(Named(entries, "RequiredBase").GetProperty("members"), "BaseName")));
     }
 
     [Fact]
@@ -237,7 +288,7 @@ public sealed partial class WorkerTests
 
             public static Shape operator +(Shape left, Shape right) => left;
 
-            public static implicit operator float(Shape shape) => 0f;
+            public static implicit operator float (Shape shape) => 0f;
 
             public float this[int index] => index;
 

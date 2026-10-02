@@ -1,353 +1,13 @@
-# PicoGK — System
+# PicoGK — Selected BCL reference — System (2)
 
 3 top-level symbols. Signatures are verbatim csharp.
 
-Array
-
-  Length: int
-
-  LongLength: long
-
-  Rank: int
-
-  SyncRoot: object
-
-  IsReadOnly: bool
-
-  IsFixedSize: bool
-
-  IsSynchronized: bool
-
-  MaxLength: int
-
-  // System.Array.Initialize (method)
-  public void Initialize()
-
-  // System.Array.AsReadOnly (method)
-  public static ReadOnlyCollection<T> AsReadOnly<T>(T[] array)
-
-  // System.Array.Resize (method)
-  public static void Resize<T>(ref T[]? array, int newSize)
-
-  // System.Array.CreateInstance (method)
-  public static Array CreateInstance(Type elementType, int length)
-  public static Array CreateInstance(Type elementType, int length1, int length2)
-  public static Array CreateInstance(Type elementType, int length1, int length2, int length3)
-  public static Array CreateInstance(Type elementType, params int[] lengths)
-  public static Array CreateInstance(Type elementType, int[] lengths, int[] lowerBounds)
-  public static Array CreateInstance(Type elementType, params long[] lengths)
-
-  // System.Array.CreateInstanceFromArrayType (method)
-  public static Array CreateInstanceFromArrayType(Type arrayType, int length)
-  public static Array CreateInstanceFromArrayType(Type arrayType, params int[] lengths)
-  public static Array CreateInstanceFromArrayType(Type arrayType, int[] lengths, int[] lowerBounds)
-
-  // System.Array.Copy (method)
-  public static void Copy(Array sourceArray, Array destinationArray, long length)
-  public static void Copy(Array sourceArray, long sourceIndex, Array destinationArray, long destinationIndex, long length)
-  public static void Copy(Array sourceArray, Array destinationArray, int length)
-  public static void Copy(Array sourceArray, int sourceIndex, Array destinationArray, int destinationIndex, int length)
-
-  // System.Array.ConstrainedCopy (method)
-  public static void ConstrainedCopy(Array sourceArray, int sourceIndex, Array destinationArray, int destinationIndex, int length)
-
-  // System.Array.Clear (method)
-  public static void Clear(Array array)
-  public static void Clear(Array array, int index, int length)
-
-  // System.Array.GetLength (method)
-  public int GetLength(int dimension)
-
-  // System.Array.GetUpperBound (method)
-  public int GetUpperBound(int dimension)
-
-  // System.Array.GetLowerBound (method)
-  public int GetLowerBound(int dimension)
-
-  // System.Array.GetValue (method)
-  public object? GetValue(params int[] indices)
-  public object? GetValue(int index)
-  public object? GetValue(int index1, int index2)
-  public object? GetValue(int index1, int index2, int index3)
-  public object? GetValue(long index)
-  public object? GetValue(long index1, long index2)
-  public object? GetValue(long index1, long index2, long index3)
-  public object? GetValue(params long[] indices)
-
-  // System.Array.SetValue (method)
-  public void SetValue(object? value, int index)
-  public void SetValue(object? value, int index1, int index2)
-  public void SetValue(object? value, int index1, int index2, int index3)
-  public void SetValue(object? value, params int[] indices)
-  public void SetValue(object? value, long index)
-  public void SetValue(object? value, long index1, long index2)
-  public void SetValue(object? value, long index1, long index2, long index3)
-  public void SetValue(object? value, params long[] indices)
-
-  // System.Array.GetLongLength (method)
-  public long GetLongLength(int dimension)
-
-  // System.Array.Clone (method)
-  public object Clone()
-
-  // System.Array.BinarySearch (method)
-  public static int BinarySearch(Array array, object? value)
-  public static int BinarySearch(Array array, int index, int length, object? value)
-  public static int BinarySearch(Array array, object? value, IComparer? comparer)
-  public static int BinarySearch(Array array, int index, int length, object? value, IComparer? comparer)
-  public static int BinarySearch<T>(T[] array, T value)
-  public static int BinarySearch<T>(T[] array, T value, IComparer<T>? comparer)
-  public static int BinarySearch<T>(T[] array, int index, int length, T value)
-  public static int BinarySearch<T>(T[] array, int index, int length, T value, IComparer<T>? comparer)
-
-  // System.Array.ConvertAll (method)
-  public static TOutput[] ConvertAll<TInput, TOutput>(TInput[] array, Converter<TInput, TOutput> converter)
-
-  // System.Array.CopyTo (method)
-  public void CopyTo(Array array, int index)
-  public void CopyTo(Array array, long index)
-
-  // System.Array.Empty (method)
-  public static T[] Empty<T>()
-
-  // System.Array.Exists (method)
-  public static bool Exists<T>(T[] array, Predicate<T> match)
-
-  // System.Array.Fill (method)
-  public static void Fill<T>(T[] array, T value)
-  public static void Fill<T>(T[] array, T value, int startIndex, int count)
-
-  // System.Array.Find (method)
-  public static T? Find<T>(T[] array, Predicate<T> match)
-
-  // System.Array.FindAll (method)
-  public static T[] FindAll<T>(T[] array, Predicate<T> match)
-
-  // System.Array.FindIndex (method)
-  public static int FindIndex<T>(T[] array, Predicate<T> match)
-  public static int FindIndex<T>(T[] array, int startIndex, Predicate<T> match)
-  public static int FindIndex<T>(T[] array, int startIndex, int count, Predicate<T> match)
-
-  // System.Array.FindLast (method)
-  public static T? FindLast<T>(T[] array, Predicate<T> match)
-
-  // System.Array.FindLastIndex (method)
-  public static int FindLastIndex<T>(T[] array, Predicate<T> match)
-  public static int FindLastIndex<T>(T[] array, int startIndex, Predicate<T> match)
-  public static int FindLastIndex<T>(T[] array, int startIndex, int count, Predicate<T> match)
-
-  // System.Array.ForEach (method)
-  public static void ForEach<T>(T[] array, Action<T> action)
-
-  // System.Array.IndexOf (method)
-  public static int IndexOf(Array array, object? value)
-  public static int IndexOf(Array array, object? value, int startIndex)
-  public static int IndexOf(Array array, object? value, int startIndex, int count)
-  public static int IndexOf<T>(T[] array, T value)
-  public static int IndexOf<T>(T[] array, T value, int startIndex)
-  public static int IndexOf<T>(T[] array, T value, int startIndex, int count)
-
-  // System.Array.LastIndexOf (method)
-  public static int LastIndexOf(Array array, object? value)
-  public static int LastIndexOf(Array array, object? value, int startIndex)
-  public static int LastIndexOf(Array array, object? value, int startIndex, int count)
-  public static int LastIndexOf<T>(T[] array, T value)
-  public static int LastIndexOf<T>(T[] array, T value, int startIndex)
-  public static int LastIndexOf<T>(T[] array, T value, int startIndex, int count)
-
-  // System.Array.Reverse (method)
-  public static void Reverse(Array array)
-  public static void Reverse(Array array, int index, int length)
-  public static void Reverse<T>(T[] array)
-  public static void Reverse<T>(T[] array, int index, int length)
-
-  // System.Array.Sort (method)
-  public static void Sort(Array array)
-  public static void Sort(Array keys, Array? items)
-  public static void Sort(Array array, int index, int length)
-  public static void Sort(Array keys, Array? items, int index, int length)
-  public static void Sort(Array array, IComparer? comparer)
-  public static void Sort(Array keys, Array? items, IComparer? comparer)
-  public static void Sort(Array array, int index, int length, IComparer? comparer)
-  public static void Sort(Array keys, Array? items, int index, int length, IComparer? comparer)
-  public static void Sort<T>(T[] array)
-  public static void Sort<TKey, TValue>(TKey[] keys, TValue[]? items)
-  public static void Sort<T>(T[] array, int index, int length)
-  public static void Sort<TKey, TValue>(TKey[] keys, TValue[]? items, int index, int length)
-  public static void Sort<T>(T[] array, IComparer<T>? comparer)
-  public static void Sort<TKey, TValue>(TKey[] keys, TValue[]? items, IComparer<TKey>? comparer)
-  public static void Sort<T>(T[] array, int index, int length, IComparer<T>? comparer)
-  public static void Sort<TKey, TValue>(TKey[] keys, TValue[]? items, int index, int length, IComparer<TKey>? comparer)
-  public static void Sort<T>(T[] array, Comparison<T> comparison)
-
-  // System.Array.TrueForAll (method)
-  public static bool TrueForAll<T>(T[] array, Predicate<T> match)
-
-  // System.Array.GetEnumerator (method)
-  public IEnumerator GetEnumerator()
-
-Console
-
-  In: TextReader
-
-  InputEncoding: Encoding
-
-  OutputEncoding: Encoding
-
-  KeyAvailable: bool
-
-  Out: TextWriter
-
-  Error: TextWriter
-
-  IsInputRedirected: bool
-
-  IsOutputRedirected: bool
-
-  IsErrorRedirected: bool
-
-  CursorSize: int
-
-  NumberLock: bool
-
-  CapsLock: bool
-
-  BackgroundColor: ConsoleColor
-
-  ForegroundColor: ConsoleColor
-
-  BufferWidth: int
-
-  BufferHeight: int
-
-  WindowLeft: int
-
-  WindowTop: int
-
-  WindowWidth: int
-
-  WindowHeight: int
-
-  LargestWindowWidth: int
-
-  LargestWindowHeight: int
-
-  CursorVisible: bool
-
-  CursorLeft: int
-
-  CursorTop: int
-
-  Title: string
-
-  TreatControlCAsInput: bool
-
-  // System.Console.ReadKey (method)
-  public static ConsoleKeyInfo ReadKey()
-  public static ConsoleKeyInfo ReadKey(bool intercept)
-
-  // System.Console.ResetColor (method)
-  public static void ResetColor()
-
-  // System.Console.SetBufferSize (method)
-  public static void SetBufferSize(int width, int height)
-
-  // System.Console.SetWindowPosition (method)
-  public static void SetWindowPosition(int left, int top)
-
-  // System.Console.SetWindowSize (method)
-  public static void SetWindowSize(int width, int height)
-
-  // System.Console.GetCursorPosition (method)
-  public static (int Left, int Top) GetCursorPosition()
-
-  // System.Console.Beep (method)
-  public static void Beep()
-  public static void Beep(int frequency, int duration)
-
-  // System.Console.MoveBufferArea (method)
-  public static void MoveBufferArea(int sourceLeft, int sourceTop, int sourceWidth, int sourceHeight, int targetLeft, int targetTop)
-  public static void MoveBufferArea(int sourceLeft, int sourceTop, int sourceWidth, int sourceHeight, int targetLeft, int targetTop, char sourceChar, ConsoleColor sourceForeColor, ConsoleColor sourceBackColor)
-
-  // System.Console.Clear (method)
-  public static void Clear()
-
-  // System.Console.SetCursorPosition (method)
-  public static void SetCursorPosition(int left, int top)
-
-  // System.Console.OpenStandardInput (method)
-  public static Stream OpenStandardInput()
-  public static Stream OpenStandardInput(int bufferSize)
-
-  // System.Console.OpenStandardOutput (method)
-  public static Stream OpenStandardOutput()
-  public static Stream OpenStandardOutput(int bufferSize)
-
-  // System.Console.OpenStandardError (method)
-  public static Stream OpenStandardError()
-  public static Stream OpenStandardError(int bufferSize)
-
-  // System.Console.SetIn (method)
-  public static void SetIn(TextReader newIn)
-
-  // System.Console.SetOut (method)
-  public static void SetOut(TextWriter newOut)
-
-  // System.Console.SetError (method)
-  public static void SetError(TextWriter newError)
-
-  // System.Console.Read (method)
-  public static int Read()
-
-  // System.Console.ReadLine (method)
-  public static string? ReadLine()
-
-  // System.Console.WriteLine (method)
-  public static void WriteLine()
-  public static void WriteLine(bool value)
-  public static void WriteLine(char value)
-  public static void WriteLine(char[]? buffer)
-  public static void WriteLine(char[] buffer, int index, int count)
-  public static void WriteLine(decimal value)
-  public static void WriteLine(double value)
-  public static void WriteLine(float value)
-  public static void WriteLine(int value)
-  public static void WriteLine(uint value)
-  public static void WriteLine(long value)
-  public static void WriteLine(ulong value)
-  public static void WriteLine(object? value)
-  public static void WriteLine(string? value)
-  public static void WriteLine(ReadOnlySpan<char> value)
-  public static void WriteLine(string format, object? arg0)
-  public static void WriteLine(string format, object? arg0, object? arg1)
-  public static void WriteLine(string format, object? arg0, object? arg1, object? arg2)
-  public static void WriteLine(string format, params object?[]? arg)
-  public static void WriteLine(string format, params ReadOnlySpan<object?> arg)
-
-  // System.Console.Write (method)
-  public static void Write(string format, object? arg0)
-  public static void Write(string format, object? arg0, object? arg1)
-  public static void Write(string format, object? arg0, object? arg1, object? arg2)
-  public static void Write(string format, params object?[]? arg)
-  public static void Write(string format, params ReadOnlySpan<object?> arg)
-  public static void Write(bool value)
-  public static void Write(char value)
-  public static void Write(char[]? buffer)
-  public static void Write(char[] buffer, int index, int count)
-  public static void Write(double value)
-  public static void Write(decimal value)
-  public static void Write(float value)
-  public static void Write(int value)
-  public static void Write(uint value)
-  public static void Write(long value)
-  public static void Write(ulong value)
-  public static void Write(object? value)
-  public static void Write(string? value)
-  public static void Write(ReadOnlySpan<char> value)
-
-Convert
-
-  DBNull: object
+// Category: Selected BCL reference
+// System.Convert (class)
+public static class Convert
+
+  // System.Convert.DBNull (field)
+  public static readonly object DBNull
 
   // System.Convert.GetTypeCode (method)
   public static TypeCode GetTypeCode(object? value)
@@ -738,3 +398,359 @@ Convert
   // System.Convert.TryToHexStringLower (method)
   public static bool TryToHexStringLower(ReadOnlySpan<byte> source, Span<char> destination, out int charsWritten)
   public static bool TryToHexStringLower(ReadOnlySpan<byte> source, Span<byte> utf8Destination, out int bytesWritten)
+
+// Category: Selected BCL reference
+// System.Math (class)
+public static class Math
+
+  // System.Math.E (constant)
+  public const double E = 2.718281828459045
+
+  // System.Math.PI (constant)
+  public const double PI = 3.141592653589793
+
+  // System.Math.Tau (constant)
+  public const double Tau = 6.283185307179586
+
+  // System.Math.Acos (method)
+  public static double Acos(double d)
+
+  // System.Math.Acosh (method)
+  public static double Acosh(double d)
+
+  // System.Math.Asin (method)
+  public static double Asin(double d)
+
+  // System.Math.Asinh (method)
+  public static double Asinh(double d)
+
+  // System.Math.Atan (method)
+  public static double Atan(double d)
+
+  // System.Math.Atanh (method)
+  public static double Atanh(double d)
+
+  // System.Math.Atan2 (method)
+  public static double Atan2(double y, double x)
+
+  // System.Math.Cbrt (method)
+  public static double Cbrt(double d)
+
+  // System.Math.Ceiling (method)
+  public static double Ceiling(double a)
+  public static decimal Ceiling(decimal d)
+
+  // System.Math.Cos (method)
+  public static double Cos(double d)
+
+  // System.Math.Cosh (method)
+  public static double Cosh(double value)
+
+  // System.Math.Exp (method)
+  public static double Exp(double d)
+
+  // System.Math.Floor (method)
+  public static double Floor(double d)
+  public static decimal Floor(decimal d)
+
+  // System.Math.FusedMultiplyAdd (method)
+  public static double FusedMultiplyAdd(double x, double y, double z)
+
+  // System.Math.Log (method)
+  public static double Log(double d)
+  public static double Log(double a, double newBase)
+
+  // System.Math.Log2 (method)
+  public static double Log2(double x)
+
+  // System.Math.Log10 (method)
+  public static double Log10(double d)
+
+  // System.Math.Pow (method)
+  public static double Pow(double x, double y)
+
+  // System.Math.Sin (method)
+  public static double Sin(double a)
+
+  // System.Math.SinCos (method)
+  public static (double Sin, double Cos) SinCos(double x)
+
+  // System.Math.Sinh (method)
+  public static double Sinh(double value)
+
+  // System.Math.Sqrt (method)
+  public static double Sqrt(double d)
+
+  // System.Math.Tan (method)
+  public static double Tan(double a)
+
+  // System.Math.Tanh (method)
+  public static double Tanh(double value)
+
+  // System.Math.Abs (method)
+  public static short Abs(short value)
+  public static int Abs(int value)
+  public static long Abs(long value)
+  public static nint Abs(nint value)
+  public static sbyte Abs(sbyte value)
+  public static decimal Abs(decimal value)
+  public static double Abs(double value)
+  public static float Abs(float value)
+
+  // System.Math.BigMul (method)
+  public static ulong BigMul(uint a, uint b)
+  public static long BigMul(int a, int b)
+  public static ulong BigMul(ulong a, ulong b, out ulong low)
+  public static long BigMul(long a, long b, out long low)
+  public static UInt128 BigMul(ulong a, ulong b)
+  public static Int128 BigMul(long a, long b)
+
+  // System.Math.BitDecrement (method)
+  public static double BitDecrement(double x)
+
+  // System.Math.BitIncrement (method)
+  public static double BitIncrement(double x)
+
+  // System.Math.CopySign (method)
+  public static double CopySign(double x, double y)
+
+  // System.Math.DivRem (method)
+  public static int DivRem(int a, int b, out int result)
+  public static long DivRem(long a, long b, out long result)
+  public static (sbyte Quotient, sbyte Remainder) DivRem(sbyte left, sbyte right)
+  public static (byte Quotient, byte Remainder) DivRem(byte left, byte right)
+  public static (short Quotient, short Remainder) DivRem(short left, short right)
+  public static (ushort Quotient, ushort Remainder) DivRem(ushort left, ushort right)
+  public static (int Quotient, int Remainder) DivRem(int left, int right)
+  public static (uint Quotient, uint Remainder) DivRem(uint left, uint right)
+  public static (long Quotient, long Remainder) DivRem(long left, long right)
+  public static (ulong Quotient, ulong Remainder) DivRem(ulong left, ulong right)
+  public static (nint Quotient, nint Remainder) DivRem(nint left, nint right)
+  public static (nuint Quotient, nuint Remainder) DivRem(nuint left, nuint right)
+
+  // System.Math.Clamp (method)
+  public static byte Clamp(byte value, byte min, byte max)
+  public static decimal Clamp(decimal value, decimal min, decimal max)
+  public static double Clamp(double value, double min, double max)
+  public static short Clamp(short value, short min, short max)
+  public static int Clamp(int value, int min, int max)
+  public static long Clamp(long value, long min, long max)
+  public static nint Clamp(nint value, nint min, nint max)
+  public static sbyte Clamp(sbyte value, sbyte min, sbyte max)
+  public static float Clamp(float value, float min, float max)
+  public static ushort Clamp(ushort value, ushort min, ushort max)
+  public static uint Clamp(uint value, uint min, uint max)
+  public static ulong Clamp(ulong value, ulong min, ulong max)
+  public static nuint Clamp(nuint value, nuint min, nuint max)
+
+  // System.Math.IEEERemainder (method)
+  public static double IEEERemainder(double x, double y)
+
+  // System.Math.ILogB (method)
+  public static int ILogB(double x)
+
+  // System.Math.Max (method)
+  public static byte Max(byte val1, byte val2)
+  public static decimal Max(decimal val1, decimal val2)
+  public static double Max(double val1, double val2)
+  public static short Max(short val1, short val2)
+  public static int Max(int val1, int val2)
+  public static long Max(long val1, long val2)
+  public static nint Max(nint val1, nint val2)
+  public static sbyte Max(sbyte val1, sbyte val2)
+  public static float Max(float val1, float val2)
+  public static ushort Max(ushort val1, ushort val2)
+  public static uint Max(uint val1, uint val2)
+  public static ulong Max(ulong val1, ulong val2)
+  public static nuint Max(nuint val1, nuint val2)
+
+  // System.Math.MaxMagnitude (method)
+  public static double MaxMagnitude(double x, double y)
+
+  // System.Math.Min (method)
+  public static byte Min(byte val1, byte val2)
+  public static decimal Min(decimal val1, decimal val2)
+  public static double Min(double val1, double val2)
+  public static short Min(short val1, short val2)
+  public static int Min(int val1, int val2)
+  public static long Min(long val1, long val2)
+  public static nint Min(nint val1, nint val2)
+  public static sbyte Min(sbyte val1, sbyte val2)
+  public static float Min(float val1, float val2)
+  public static ushort Min(ushort val1, ushort val2)
+  public static uint Min(uint val1, uint val2)
+  public static ulong Min(ulong val1, ulong val2)
+  public static nuint Min(nuint val1, nuint val2)
+
+  // System.Math.MinMagnitude (method)
+  public static double MinMagnitude(double x, double y)
+
+  // System.Math.ReciprocalEstimate (method)
+  public static double ReciprocalEstimate(double d)
+
+  // System.Math.ReciprocalSqrtEstimate (method)
+  public static double ReciprocalSqrtEstimate(double d)
+
+  // System.Math.Round (method)
+  public static decimal Round(decimal d)
+  public static decimal Round(decimal d, int decimals)
+  public static decimal Round(decimal d, MidpointRounding mode)
+  public static decimal Round(decimal d, int decimals, MidpointRounding mode)
+  public static double Round(double a)
+  public static double Round(double value, int digits)
+  public static double Round(double value, MidpointRounding mode)
+  public static double Round(double value, int digits, MidpointRounding mode)
+
+  // System.Math.Sign (method)
+  public static int Sign(decimal value)
+  public static int Sign(double value)
+  public static int Sign(short value)
+  public static int Sign(int value)
+  public static int Sign(long value)
+  public static int Sign(nint value)
+  public static int Sign(sbyte value)
+  public static int Sign(float value)
+
+  // System.Math.Truncate (method)
+  public static decimal Truncate(decimal d)
+  public static double Truncate(double d)
+
+  // System.Math.ScaleB (method)
+  public static double ScaleB(double x, int n)
+
+// Category: Selected BCL reference
+// System.MathF (class)
+public static class MathF
+
+  // System.MathF.E (constant)
+  public const float E = 2.7182817
+
+  // System.MathF.PI (constant)
+  public const float PI = 3.1415927
+
+  // System.MathF.Tau (constant)
+  public const float Tau = 6.2831855
+
+  // System.MathF.Acos (method)
+  public static float Acos(float x)
+
+  // System.MathF.Acosh (method)
+  public static float Acosh(float x)
+
+  // System.MathF.Asin (method)
+  public static float Asin(float x)
+
+  // System.MathF.Asinh (method)
+  public static float Asinh(float x)
+
+  // System.MathF.Atan (method)
+  public static float Atan(float x)
+
+  // System.MathF.Atanh (method)
+  public static float Atanh(float x)
+
+  // System.MathF.Atan2 (method)
+  public static float Atan2(float y, float x)
+
+  // System.MathF.Cbrt (method)
+  public static float Cbrt(float x)
+
+  // System.MathF.Ceiling (method)
+  public static float Ceiling(float x)
+
+  // System.MathF.Cos (method)
+  public static float Cos(float x)
+
+  // System.MathF.Cosh (method)
+  public static float Cosh(float x)
+
+  // System.MathF.Exp (method)
+  public static float Exp(float x)
+
+  // System.MathF.Floor (method)
+  public static float Floor(float x)
+
+  // System.MathF.FusedMultiplyAdd (method)
+  public static float FusedMultiplyAdd(float x, float y, float z)
+
+  // System.MathF.Log (method)
+  public static float Log(float x)
+  public static float Log(float x, float y)
+
+  // System.MathF.Log2 (method)
+  public static float Log2(float x)
+
+  // System.MathF.Log10 (method)
+  public static float Log10(float x)
+
+  // System.MathF.Pow (method)
+  public static float Pow(float x, float y)
+
+  // System.MathF.Sin (method)
+  public static float Sin(float x)
+
+  // System.MathF.SinCos (method)
+  public static (float Sin, float Cos) SinCos(float x)
+
+  // System.MathF.Sinh (method)
+  public static float Sinh(float x)
+
+  // System.MathF.Sqrt (method)
+  public static float Sqrt(float x)
+
+  // System.MathF.Tan (method)
+  public static float Tan(float x)
+
+  // System.MathF.Tanh (method)
+  public static float Tanh(float x)
+
+  // System.MathF.Abs (method)
+  public static float Abs(float x)
+
+  // System.MathF.BitDecrement (method)
+  public static float BitDecrement(float x)
+
+  // System.MathF.BitIncrement (method)
+  public static float BitIncrement(float x)
+
+  // System.MathF.CopySign (method)
+  public static float CopySign(float x, float y)
+
+  // System.MathF.IEEERemainder (method)
+  public static float IEEERemainder(float x, float y)
+
+  // System.MathF.ILogB (method)
+  public static int ILogB(float x)
+
+  // System.MathF.Max (method)
+  public static float Max(float x, float y)
+
+  // System.MathF.MaxMagnitude (method)
+  public static float MaxMagnitude(float x, float y)
+
+  // System.MathF.Min (method)
+  public static float Min(float x, float y)
+
+  // System.MathF.MinMagnitude (method)
+  public static float MinMagnitude(float x, float y)
+
+  // System.MathF.ReciprocalEstimate (method)
+  public static float ReciprocalEstimate(float x)
+
+  // System.MathF.ReciprocalSqrtEstimate (method)
+  public static float ReciprocalSqrtEstimate(float x)
+
+  // System.MathF.Round (method)
+  public static float Round(float x)
+  public static float Round(float x, int digits)
+  public static float Round(float x, MidpointRounding mode)
+  public static float Round(float x, int digits, MidpointRounding mode)
+
+  // System.MathF.Sign (method)
+  public static int Sign(float x)
+
+  // System.MathF.Truncate (method)
+  public static float Truncate(float x)
+
+  // System.MathF.ScaleB (method)
+  public static float ScaleB(float x, int n)

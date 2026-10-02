@@ -77,6 +77,7 @@ DrawingInterface: export declare interface DrawingInterface
   sketchOnPlane(inputPlane?: PlaneName | Plane, origin?: Point | number): SketchInterface | Sketches;
 
   // Returns the sketched version of the drawing, on a face
+  // Remarks: The scale mode corresponds to the way the coordinates of the drawing are interpreted match with the face: - `original` uses global coordinates (1mm in the drawing is 1mm on the face). This is the default, but currently supported only for planar and circular faces - `bounds` normalises the UV parameters on the face to [0,1] intervals. - `native` uses the default UV parameters of opencascade
   // DrawingInterface.sketchOnFace (method)
   sketchOnFace(face: Face, scaleMode: ScaleMode): SketchInterface | Sketches;
 
@@ -198,22 +199,27 @@ GenericSketcher: export declare interface GenericSketcher<ReturnType>
   tangentArc(xDist: number, yDist: number): this;
 
   // Draws an arc of ellipse by defining its end point and an ellipse
+  // Remarks: The shape of the ellipse is defined by both its radiuses, its angle relative to the current coordinat system, as well as the long and sweep flags (as defined for SVG paths)
   // GenericSketcher.ellipseTo (method)
   ellipseTo(end: Point2D, horizontalRadius: number, verticalRadius: number, rotation: number, longAxis: boolean, sweep: boolean): this;
 
   // Draws an arc of ellipse by defining its end point and an ellipse
+  // Remarks: The shape of the ellipse is defined by both its radiuses, its angle relative to the current coordinat system, as well as the long and sweep flags (as defined for SVG paths)
   // GenericSketcher.ellipse (method)
   ellipse(xDist: number, yDist: number, horizontalRadius: number, verticalRadius: number, rotation: number, longAxis: boolean, sweep: boolean): this;
 
   // Draws an arc as half an ellipse, defined by the sagitta of the ellipse (which corresponds to the radius in the axe orthogonal to the straight line)
+  // Remarks: The sweep flag is to be understood as defined for SVG paths.
   // GenericSketcher.halfEllipseTo (method)
   halfEllipseTo(end: Point2D, radius: number, sweep: boolean): this;
 
   // Draws an arc as half an ellipse, defined by the sagitta of the ellipse (which corresponds to the radius in the axe orthogonal to the straight line).The end point is defined by distances from he start point
+  // Remarks: The sweep flag is to be understood as defined for SVG paths.
   // GenericSketcher.halfEllipse (method)
   halfEllipse(xDist: number, yDist: number, radius: number, sweep: boolean): this;
 
   // Draws a generic bezier curve to the end point, going using a set of control points
+  // Remarks: This is the generic definition of a bézier curve, you might want to use either the quadratic or cubic (most common) version, unless you know exactly what you are aiming at.
   // GenericSketcher.bezierCurveTo (method)
   bezierCurveTo(end: Point2D, controlPoints: Point2D | Point2D[]): this;
 
@@ -222,14 +228,17 @@ GenericSketcher: export declare interface GenericSketcher<ReturnType>
   quadraticBezierCurveTo(end: Point2D, controlPoint: Point2D): this;
 
   // Draws a cubic bezier curve to the end point, using the start and end control point to define its shape
+  // Remarks: If you are struggling setting your control points, the smoothSpline might be better for your needs.
   // GenericSketcher.cubicBezierCurveTo (method)
   cubicBezierCurveTo(end: Point2D, startControlPoint: Point2D, endControlPoint: Point2D): this;
 
   // Draws a cubic bezier curve to the end point, attempting to make the line smooth with the previous segment
+  // Remarks: It will base its first control point so that its tangent is the same than the previous segment. The control point relative to the end is by default set to be in the direction of the straight line between start and end. You can specifiy the `endSkew` either as an angle (in degrees) to this direction, or as an absolute direction in the coordinate system (a Point). The start- and end- factors decide on how far the control point is from the start and end point. At a factor of 1, the distance corresponds to a quarter of the straight line distance.
   // GenericSketcher.smoothSplineTo (method)
   smoothSplineTo(end: Point2D, config?: SplineConfig): this;
 
   // Draws a cubic bezier curve to the end point, attempting to make the line smooth with the previous segment
+  // Remarks: It will base its first control point so that its tangent is the same than the previous segment. You can force another tangent by defining `startTangent`. You can configure the tangent of the end point by configuring the `endTangent`, either as "symmetric" to reproduce the start angle, as an angle from the X axis (in the coordinate system) or a 2d direction (still in the coordinate system. The start- and end- factors decide on how far the control point is from the start and end point. At a factor of 1, the distance corresponds to a quarter of the straight line distance.
   // GenericSketcher.smoothSpline (method)
   smoothSpline(xDist: number, yDist: number, splineConfig: SplineConfig): this;
 
@@ -347,6 +356,7 @@ SketchInterface: export declare interface SketchInterface
       }): Shape3D;
 
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
+  // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).
   // SketchInterface.extrude (method)
   extrude(extrusionDistance: number, extrusionConfig?: {
           extrusionDirection?: Point;
@@ -356,5 +366,6 @@ SketchInterface: export declare interface SketchInterface
       }): Shape3D;
 
   // Loft between this sketch and another sketch (or an array of them)
+  // Remarks: You can also define a `startPoint` for the loft (that will be placed before this sketch) and an `endPoint` after the last one. You can also define if you want the loft to result in a ruled surface. Note that all sketches will be deleted by this operation
   // SketchInterface.loftWith (method)
   loftWith(otherSketches: this | this[], loftConfig: LoftConfig, returnShell?: boolean): Shape3D;

@@ -31,7 +31,15 @@ export const picogkRuntimeManifestSchema = z
     sourceFilesSha256: sha256,
     workerPath: relativeResourcePath,
     workerSha256: sha256,
-    resourceFiles: z.array(z.object({ path: relativeResourcePath, sha256, label: z.string().min(1) })).min(1),
+    resourceFiles: z
+      .array(
+        z.object({
+          path: relativeResourcePath,
+          sha256,
+          label: z.string().min(1),
+        }),
+      )
+      .min(1),
   })
   .strict();
 

@@ -2,6 +2,7 @@
 
 6 top-level symbols. Signatures are verbatim python.
 
+// Category: drafting
 // Sketch Object
 Arrow
 
@@ -14,6 +15,7 @@ Arrow
   //   head_type: arrow head shape
   //   mode: _description_
 
+// Category: drafting
 // Sketch Object
 ArrowHead
 
@@ -24,7 +26,11 @@ ArrowHead
   //   rotation: rotation in degrees
   //   mode: combination mode
 
+// Category: drafting
 // Sketch Object
+// Remarks: Create a dimension line typically for internal measurements. Typically used for (but not restricted to) inside dimensions, a dimension line often as arrows on either side of a dimension or label. There are three options depending on the size of the text and length of the dimension line: Type 1) The label and arrows fit within the length of the path Type 2) The text fit within the path and the arrows go outside Type 3) Neither the text nor the arrows fit within the path
+// Throws: ValueError: Only 2 points allowed for dimension lines
+// Throws: ValueError: No output - no arrows selected
 DimensionLine
 
   // build123d.drafting.DimensionLine.__init__ (constructor)
@@ -38,7 +44,9 @@ DimensionLine
   //   label_angle: a flag indicating that instead of an extracted length value, the size of the circular arc extracted from the path should be displayed in degrees
   //   mode: combination mode
 
+// Category: drafting
 // Draft
+// Remarks: Documenting build123d designs with dimension and extension lines as well as callouts.
 Draft
 
   // Are metric units being used
@@ -60,7 +68,9 @@ Draft
   //   fractional_precision: maximum fraction denominator - must be a factor of 2
   //   extension_gap: gap between the point and start of extension line in extension_line
 
+// Category: drafting
 // Sketch Object
+// Remarks: Create a dimension line with two lines extending outward from the part to dimension. Typically used for (but not restricted to) outside dimensions, with a pair of lines extending from the edge of a part to a dimension line.
 ExtensionLine
 
   // build123d.drafting.ExtensionLine.__init__ (constructor)
@@ -75,7 +85,9 @@ ExtensionLine
   //   measurement_direction: Vector line which to project the dimension against
   //   mode: combination mode
 
+// Category: drafting
 // Sketch Object
+// Remarks: The border of a technical drawing with external frame and text box.
 TechnicalDrawing
 
   // build123d.drafting.TechnicalDrawing.__init__ (constructor)

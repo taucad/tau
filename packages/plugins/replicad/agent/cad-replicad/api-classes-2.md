@@ -1,6 +1,175 @@
 # replicad — Classes (2)
 
-14 top-level symbols. Signatures are verbatim typescript.
+17 top-level symbols. Signatures are verbatim typescript.
+
+MeshShape: export declare class MeshShape extends WrappingObj<ManifoldInstance> implements Shape3DLike<MeshShape, MeshShapeMesh, MeshShape, number>
+
+  // MeshShape.constructor (constructor)
+  constructor(manifoldShape: ManifoldInstance);
+
+  // MeshShape.clone (method)
+  clone(): MeshShape;
+
+  // MeshShape.fuse (method)
+  fuse(other: MeshShape, _options?: any): MeshShape;
+
+  // MeshShape.cut (method)
+  cut(other: MeshShape, _options?: any): MeshShape;
+
+  // MeshShape.intersect (method)
+  intersect(other: MeshShape): MeshShape;
+
+  // MeshShape.translate (method)
+  translate(xDist: number, yDist: number, zDist: number): MeshShape;
+  translate(vector: Point): MeshShape;
+
+  // MeshShape.translateX (method)
+  translateX(distance: number): MeshShape;
+
+  // MeshShape.translateY (method)
+  translateY(distance: number): MeshShape;
+
+  // MeshShape.translateZ (method)
+  translateZ(distance: number): MeshShape;
+
+  // MeshShape.rotate (method)
+  rotate(angle: number, position?: Point, direction?: Point): MeshShape;
+  rotate(vector: Point): MeshShape;
+
+  // MeshShape.scale (method)
+  scale(scale: number, center?: Point): MeshShape;
+
+  // MeshShape.mirror (method)
+  mirror(inputPlane?: Plane | PlaneName | Point, origin?: Point): MeshShape;
+
+  // MeshShape.simplify (method)
+  simplify(tolerance?: number): MeshShape;
+
+  // MeshShape.refine (method)
+  refine(n: number): MeshShape;
+
+  // MeshShape.refineToLength (method)
+  refineToLength(length: number): MeshShape;
+
+  // MeshShape.refineToTolerance (method)
+  refineToTolerance(tolerance: number): MeshShape;
+
+  // MeshShape.hull (method)
+  hull(): MeshShape;
+
+  // MeshShape.asOriginal (method)
+  asOriginal(): MeshShape;
+
+  // MeshShape.mesh (method)
+  mesh(): MeshShapeMesh;
+
+  boundingBox
+
+  // MeshShape.volume (method)
+  volume(): number;
+
+  // MeshShape.surfaceArea (method)
+  surfaceArea(): number;
+
+  // MeshShape.numTri (method)
+  numTri(): number;
+
+  // MeshShape.numVert (method)
+  numVert(): number;
+
+  // MeshShape.numEdge (method)
+  numEdge(): number;
+
+  isEmpty
+
+  // Exports the mesh shape as an STL file Blob
+  // Remarks: Since MeshShape is already a triangle mesh, no tessellation parameters are needed (tolerance/angularTolerance are accepted but ignored for API compatibility).
+  // MeshShape.blobSTL (method)
+  blobSTL({ binary }?: {
+          binary?: boolean | undefined;
+      }): Blob;
+
+Plane: export declare class Plane
+
+  oc: OpenCascadeInstance
+
+  xDir: Vector
+
+  yDir: Vector
+
+  zDir: Vector
+
+  // Plane.constructor (constructor)
+  constructor(origin: Point, xDirection?: Point | null, normal?: Point);
+
+  // Plane.delete (method)
+  delete(): void;
+
+  // Plane.clone (method)
+  clone(): Plane;
+
+  origin
+
+  // Plane.translateTo (method)
+  translateTo(point: Point): Plane;
+
+  // Plane.translate (method)
+  translate(xDist: number, yDist: number, zDist: number): Plane;
+  translate(vector: Point): Plane;
+
+  // Plane.translateX (method)
+  translateX(xDist: number): Plane;
+
+  // Plane.translateY (method)
+  translateY(yDist: number): Plane;
+
+  // Plane.translateZ (method)
+  translateZ(zDist: number): Plane;
+
+  // Plane.pivot (method)
+  pivot(angle: number, direction?: Direction): Plane;
+
+  // Plane.rotate2DAxes (method)
+  rotate2DAxes(angle: number): Plane;
+
+  // Plane.setOrigin2d (method)
+  setOrigin2d(x: number, y: number): void;
+
+  // Plane.toLocalCoords (method)
+  toLocalCoords(vec: Vector): Vector;
+
+  // Plane.toWorldCoords (method)
+  toWorldCoords(v: Point): Vector;
+
+ProjectionCamera: export declare class ProjectionCamera extends WrappingObj<gp_Ax2>
+
+  // ProjectionCamera.constructor (constructor)
+  constructor(position?: Point, direction?: Point, xAxis?: Point);
+
+  position
+
+  direction
+
+  xAxis
+
+  yAxis
+
+  // ProjectionCamera.autoAxes (method)
+  autoAxes(): void;
+
+  // ProjectionCamera.setPosition (method)
+  setPosition(position: Point): this;
+
+  // ProjectionCamera.setXAxis (method)
+  setXAxis(xAxis: Point): this;
+
+  // ProjectionCamera.setYAxis (method)
+  setYAxis(yAxis: Point): this;
+
+  // ProjectionCamera.lookAt (method)
+  lookAt(shape: {
+          boundingBox: BoundingBox;
+      } | Point): this;
 
 Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj<Type>
 
@@ -24,6 +193,7 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
   isEqual(other: AnyShape): boolean;
 
   // Asserts that this shape is a 3D shape (Shell, Solid, CompSolid, or Compound) and returns it typed as Shape3D
+  // Remarks: Useful for chaining after operations that return a generic shape type.
   // Shape.asShape3D (method)
   asShape3D(): Shape3D;
 
@@ -94,6 +264,7 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
   blobSTEP(): Blob;
 
   // Exports the current shape as a STL file as a Blob
+  // Remarks: In order to create a STL file, the shape needs to be meshed. The tolerances correspond to the values used to mesh the shape.
   // Shape.blobSTL (method)
   blobSTL({ tolerance, angularTolerance, binary, }?: {
           tolerance?: number | undefined;
@@ -104,6 +275,7 @@ Shape: export declare class Shape<Type extends TopoDS_Shape> extends WrappingObj
 Shell: export declare class Shell extends _3DShape<TopoDS_Shell>
 
 // A line drawing to be acted upon
+// Remarks: Note that all operations will delete the sketch
 Sketch: export declare class Sketch implements SketchInterface
 
   wire: Wire
@@ -144,6 +316,7 @@ Sketch: export declare class Sketch implements SketchInterface
       }): Shape3D;
 
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
+  // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).
   // Sketch.extrude (method)
   extrude(extrusionDistance: number, { extrusionDirection, extrusionProfile, twistAngle, origin, }?: {
           extrusionDirection?: Point;
@@ -153,10 +326,12 @@ Sketch: export declare class Sketch implements SketchInterface
       }): Shape3D;
 
   // Sweep along this sketch another sketch defined in the function `sketchOnPlane`
+  // Remarks: TODO: clean the interface of the sweep config to make it more understandable.
   // Sketch.sweepSketch (method)
   sweepSketch(sketchOnPlane: (plane: Plane, origin: Point) => this, sweepConfig?: GenericSweepConfig): Shape3D;
 
   // Loft between this sketch and another sketch (or an array of them)
+  // Remarks: You can also define a `startPoint` for the loft (that will be placed before this sketch) and an `endPoint` after the last one. You can also define if you want the loft to result in a ruled surface. Note that all sketches will be deleted by this operation
   // Sketch.loftWith (method)
   loftWith(otherSketches: this | this[], loftConfig?: LoftConfig, returnShell?: boolean): Shape3D;
 
@@ -267,22 +442,27 @@ Sketcher: export declare class Sketcher implements GenericSketcher<Sketch>
   hBulgeArc(distance: number, bulge: number): this;
 
   // Draws an arc of ellipse by defining its end point and an ellipse
+  // Remarks: The shape of the ellipse is defined by both its radiuses, its angle relative to the current coordinat system, as well as the long and sweep flags (as defined for SVG paths)
   // Sketcher.ellipseTo (method)
   ellipseTo(end: Point2D, horizontalRadius: number, verticalRadius: number, rotation?: number, longAxis?: boolean, sweep?: boolean): this;
 
   // Draws an arc of ellipse by defining its end point and an ellipse
+  // Remarks: The shape of the ellipse is defined by both its radiuses, its angle relative to the current coordinat system, as well as the long and sweep flags (as defined for SVG paths)
   // Sketcher.ellipse (method)
   ellipse(xDist: number, yDist: number, horizontalRadius: number, verticalRadius: number, rotation?: number, longAxis?: boolean, sweep?: boolean): this;
 
   // Draws an arc as half an ellipse, defined by the sagitta of the ellipse (which corresponds to the radius in the axe orthogonal to the straight line)
+  // Remarks: The sweep flag is to be understood as defined for SVG paths.
   // Sketcher.halfEllipseTo (method)
   halfEllipseTo(end: Point2D, verticalRadius: number, sweep?: boolean): this;
 
   // Draws an arc as half an ellipse, defined by the sagitta of the ellipse (which corresponds to the radius in the axe orthogonal to the straight line).The end point is defined by distances from he start point
+  // Remarks: The sweep flag is to be understood as defined for SVG paths.
   // Sketcher.halfEllipse (method)
   halfEllipse(xDist: number, yDist: number, verticalRadius: number, sweep?: boolean): this;
 
   // Draws a generic bezier curve to the end point, going using a set of control points
+  // Remarks: This is the generic definition of a bézier curve, you might want to use either the quadratic or cubic (most common) version, unless you know exactly what you are aiming at.
   // Sketcher.bezierCurveTo (method)
   bezierCurveTo(end: Point2D, controlPoints: Point2D | Point2D[]): this;
 
@@ -291,14 +471,17 @@ Sketcher: export declare class Sketcher implements GenericSketcher<Sketch>
   quadraticBezierCurveTo(end: Point2D, controlPoint: Point2D): this;
 
   // Draws a cubic bezier curve to the end point, using the start and end control point to define its shape
+  // Remarks: If you are struggling setting your control points, the smoothSpline might be better for your needs.
   // Sketcher.cubicBezierCurveTo (method)
   cubicBezierCurveTo(end: Point2D, startControlPoint: Point2D, endControlPoint: Point2D): this;
 
   // Draws a cubic bezier curve to the end point, attempting to make the line smooth with the previous segment
+  // Remarks: It will base its first control point so that its tangent is the same than the previous segment. The control point relative to the end is by default set to be in the direction of the straight line between start and end. You can specifiy the `endSkew` either as an angle (in degrees) to this direction, or as an absolute direction in the coordinate system (a Point). The start- and end- factors decide on how far the control point is from the start and end point. At a factor of 1, the distance corresponds to a quarter of the straight line distance.
   // Sketcher.smoothSplineTo (method)
   smoothSplineTo(end: Point2D, config?: SplineConfig): this;
 
   // Draws a cubic bezier curve to the end point, attempting to make the line smooth with the previous segment
+  // Remarks: It will base its first control point so that its tangent is the same than the previous segment. You can force another tangent by defining `startTangent`. You can configure the tangent of the end point by configuring the `endTangent`, either as "symmetric" to reproduce the start angle, as an angle from the X axis (in the coordinate system) or a 2d direction (still in the coordinate system. The start- and end- factors decide on how far the control point is from the start and end point. At a factor of 1, the distance corresponds to a quarter of the straight line distance.
   // Sketcher.smoothSpline (method)
   smoothSpline(xDist: number, yDist: number, splineConfig?: SplineConfig): this;
 
@@ -331,6 +514,7 @@ Sketches: export declare class Sketches
   faces(): AnyShape;
 
   // Extrudes the sketch to a certain distance.(along the default direction and origin of the sketch)
+  // Remarks: You can define another extrusion direction or origin, It is also possible to twist extrude with an angle (in degrees), or to give a profile to the extrusion (the endFactor will scale the face, and the profile will define how the scale is applied (either linarly or with a s-shape).
   // Sketches.extrude (method)
   extrude(extrusionDistance: number, extrusionConfig?: {
           extrusionDirection?: Point;

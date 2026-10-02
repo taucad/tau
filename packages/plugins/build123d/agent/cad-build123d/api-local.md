@@ -2,7 +2,9 @@
 
 1 top-level symbols. Signatures are verbatim python.
 
+// Category: _local
 // PurePath subclass that can make system calls
+// Remarks: Path represents a filesystem path but unlike PurePath, also offers methods to do system calls on path objects. Depending on your system, instantiating a Path will return either a PosixPath or a WindowsPath object. You can also instantiate a PosixPath or WindowsPath directly, but cannot instantiate a WindowsPath on a POSIX system or vice versa.
 Path
 
   // Return the path as a URI
@@ -13,6 +15,7 @@ Path
   Path(*args, **kwargs)
 
   // Return the result of the stat() system call on this path, like
+  // Remarks: os.stat() does.
   // pathlib._local.Path.stat (method)
   stat(follow_symlinks = True)
 
@@ -25,6 +28,7 @@ Path
   is_junction()
 
   // Open the file pointed to by this path and return a file object, as
+  // Remarks: the built-in open() function does.
   // pathlib._local.Path.open (method)
   open(mode = 'r', buffering = -1, encoding = None, errors = None, newline = None)
 
@@ -37,14 +41,17 @@ Path
   write_text(data, encoding = None, errors = None, newline = None)
 
   // Yield path objects of the directory contents
+  // Remarks: The children are yielded in arbitrary order, and the special entries '.' and '..' are not included.
   // pathlib._local.Path.iterdir (method)
   iterdir()
 
   // Iterate over this subtree and yield all existing files (of any
+  // Remarks: kind, including directories) matching the given relative pattern.
   // pathlib._local.Path.glob (method)
   glob(pattern, case_sensitive = None, recurse_symlinks = False)
 
   // Recursively yield all existing files (of any kind, including
+  // Remarks: directories) matching the given relative pattern, anywhere in this subtree.
   // pathlib._local.Path.rglob (method)
   rglob(pattern, case_sensitive = None, recurse_symlinks = False)
 
@@ -53,10 +60,12 @@ Path
   walk(top_down = True, on_error = None, follow_symlinks = False)
 
   // Return an absolute version of this path
+  // Remarks: No normalization or symlink resolution is performed. Use resolve() to resolve symlinks and remove '..' segments.
   // pathlib._local.Path.absolute (method)
   absolute()
 
   // Make the path absolute, resolving all symlinks on the way and also
+  // Remarks: normalizing it.
   // pathlib._local.Path.resolve (method)
   resolve(strict = False)
 
@@ -85,6 +94,7 @@ Path
   chmod(mode, follow_symlinks = True)
 
   // Remove this file or link
+  // Remarks: If the path is a directory, use rmdir() instead.
   // pathlib._local.Path.unlink (method)
   unlink(missing_ok = False)
 
@@ -93,22 +103,27 @@ Path
   rmdir()
 
   // Rename this path to the target path
+  // Remarks: The target path may be absolute or relative. Relative paths are interpreted relative to the current working directory, *not* the directory of the Path object. Returns the new Path instance pointing to the target path.
   // pathlib._local.Path.rename (method)
   rename(target)
 
   // Rename this path to the target path, overwriting if that path exists
+  // Remarks: The target path may be absolute or relative. Relative paths are interpreted relative to the current working directory, *not* the directory of the Path object. Returns the new Path instance pointing to the target path.
   // pathlib._local.Path.replace (method)
   replace(target)
 
   // Make this path a symlink pointing to the target path
+  // Remarks: Note the order of arguments (link, target) is the reverse of os.symlink.
   // pathlib._local.Path.symlink_to (method)
   symlink_to(target, target_is_directory = False)
 
   // Make this path a hard link pointing to the same file as *target*
+  // Remarks: Note the order of arguments (self, target) is the reverse of os.link's.
   // pathlib._local.Path.hardlink_to (method)
   hardlink_to(target)
 
   // Return a new path with expanded ~ and ~user constructs
+  // Remarks: (as returned by os.path.expanduser)
   // pathlib._local.Path.expanduser (method)
   expanduser()
 

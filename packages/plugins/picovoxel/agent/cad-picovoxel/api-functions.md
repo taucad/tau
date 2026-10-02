@@ -19,6 +19,7 @@ declare function emptyBounds(): Bounds;
 declare function isEmptyBounds(bounds: Bounds): boolean;
 
 // Serialises indexed geometry to binary STL bytes (deindexed, as the format is)
+// Remarks: This free function has no session, so no lane is declared for it — it keeps the `'open'`-session semantics. Passing `lane: 'fast'` refuses with `PICO_LANE_EXPORT` unless `options.acceptLane` is `'fast'`; an acknowledged export stamps `LANE=fast` into the 80-byte header (read back by `meshFromStl`). `'exact'` or omitted writes the historical header, byte for byte. The stamp is a best-effort audit, not a security boundary: third-party tools rewrite STL headers. The bytes own a fresh, non-shared `ArrayBuffer`, so a caller can hand them to a `Blob`, a transfer list or a file write without copying first.
 // meshToStlBytes (function)
 declare function meshToStlBytes(vertices: Float32Array, triangles: Uint32Array, options?: ToStlOptions, lane?: 'exact' | 'fast'): Uint8Array<ArrayBuffer>;
 

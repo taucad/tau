@@ -141,9 +141,30 @@ const collectDocs = (symbol: ts.Symbol, checker: ts.TypeChecker): ApiDocs | unde
   );
 
   const examples = tags.filter((tag) => tag.name === 'example').map((tag) => parseExample(tagText(tag)));
-  const throws = tags
-    .filter((tag) => tag.name === 'throws')
-    .map((tag) => tagText(tag))
+  const throws = (symbol.getDeclarations() ?? [])
+    .flatMap((declaration) => {
+      const declarationTags = ts.getJSDocTags(declaration);
+      return declarationTags.flatMap((tag, index) => {
+        if (!ts.isJSDocThrowsTag(tag)) {
+          return [];
+        }
+        const source = tag.getSourceFile();
+        let { end } = tag;
+        // TypeScript can parse a link inside throws braces as a separate inline tag.
+        for (const following of declarationTags.slice(index + 1)) {
+          if (source.text[following.pos - 1] !== '{') {
+            break;
+          }
+          end = following.end;
+        }
+        return [
+          source.text
+            .slice(tag.tagName.end, end)
+            .replaceAll(/\r?\n[\t ]*\*[\t ]?/gu, '\n')
+            .trim(),
+        ];
+      });
+    })
     .filter((part) => part !== '');
   const seeAlso = tags
     .filter((tag) => tag.name === 'see')

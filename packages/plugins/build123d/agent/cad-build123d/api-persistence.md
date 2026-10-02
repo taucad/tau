@@ -2,6 +2,7 @@
 
 1 top-level symbols. Signatures are verbatim python.
 
+// Category: persistence
 // Modify the copyreg so that pickle knows what to look for when it tries to pickle an OCP Shape
 // build123d.persistence.modify_copyreg (function)
 modify_copyreg()

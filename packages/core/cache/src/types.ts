@@ -16,6 +16,12 @@ export type ActionDigest = `sha256:${string}` & { readonly [actionDigestBrand]: 
 /** A validated lowercase SHA-256 identity for a canonical scene value. @public */
 export type SceneDigest = `sha256:${string}` & { readonly [sceneDigestBrand]: true };
 
+/** Metadata bytes and immutable content leaves for one reusable result. @public */
+export type EncodedContent = {
+  readonly bytes: Uint8Array<ArrayBuffer>;
+  readonly content: ReadonlyArray<Uint8Array<ArrayBuffer>>;
+};
+
 /** Versioned serializer for one reusable compute result type. @public */
 export type CacheCodec<T> = {
   readonly id: string;
@@ -31,8 +37,13 @@ export type CacheCodec<T> = {
   readonly encode: (input: {
     readonly value: T;
     readonly signal: AbortSignal;
-  }) => Promise<Uint8Array<ArrayBuffer>> | Uint8Array<ArrayBuffer>;
-  readonly decode: (input: { readonly bytes: Uint8Array<ArrayBuffer>; readonly signal: AbortSignal }) => Promise<T> | T;
+  }) => Promise<Uint8Array<ArrayBuffer> | EncodedContent> | Uint8Array<ArrayBuffer> | EncodedContent;
+  readonly decode: (input: {
+    readonly bytes: Uint8Array<ArrayBuffer>;
+    readonly signal: AbortSignal;
+    /** Resolve only content declared by this result's published record. */
+    readonly readContent?: (input: { readonly digest: ContentDigest }) => Promise<Uint8Array<ArrayBuffer> | undefined>;
+  }) => Promise<T> | T;
 };
 
 /** Stable identity inputs for a cacheable unit of kernel or solver work. @public */

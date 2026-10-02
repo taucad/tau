@@ -198,6 +198,10 @@ describe('extractTypescriptApi over a source module', () => {
  * @param size - Edge length.
  * @param mode - How to combine it.
  * @deprecated Use makeSolidBox instead.
+ * @throws {@link Failure} when geometry cannot be exported or
+ * parsed, or when no engine is registered.
+ * @throws {RangeError} when size is negative.
+ * @throws When the input cannot be read.
  * @example <caption>A unit box</caption>
  * \`\`\`typescript
  * makeBox(1);
@@ -278,6 +282,15 @@ export declare namespace cyclic {
     expect(makeBox?.docs?.examples).toStrictEqual([{ caption: 'A unit box', code: 'makeBox(1);' }]);
     expect(makeBox?.deprecated).toBe('Use makeSolidBox instead.');
     expect(makeBox?.category).toBe('operations');
+  });
+
+  it('should preserve throws links, types and multiline conditions', () => {
+    const makeBox = corpus.entries.find((entry) => entry.name === 'makeBox');
+    expect(makeBox?.docs?.throws).toEqual([
+      '{@link Failure} when geometry cannot be exported or\nparsed, or when no engine is registered.',
+      '{RangeError} when size is negative.',
+      'When the input cannot be read.',
+    ]);
   });
 
   it('captures member visibility, static and hidden members', () => {

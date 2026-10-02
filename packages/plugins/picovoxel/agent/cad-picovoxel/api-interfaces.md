@@ -1,6 +1,6 @@
 # picovoxel — Interfaces
 
-51 top-level symbols. Signatures are verbatim typescript.
+43 top-level symbols. Signatures are verbatim typescript.
 
 AddBeamOptions: interface AddBeamOptions
 
@@ -53,6 +53,7 @@ CreatePicoSessionOptions: interface CreatePicoSessionOptions
   fastRenorm: boolean
 
   // Routes lattice rendering down the serial C#-identical `Voxels::RenderLattice` loop instead of the parallel tube-complex lane
+  // Remarks: Choose `true` for tiny lattices: the tube lane's fixed setup cost (spatial bucketing, the deterministic split tree) is negligible at 10^5 beams and dominant at ~14 — the 14-beam HeatX print web takes 2.9 ms serial and 7.3 ms on the tube lane. The catch: the serial arm mis-renders beams whose end spheres nest (an upstream defect that loses 90.7% of the volume), which the tube lane renders correctly.
   serialLattice: boolean
 
   registry: HandleRegistry
@@ -134,6 +135,7 @@ Mesh: interface Mesh
   bounds(): Bounds;
 
   // Enclosed volume (mm³) and surface area (mm²) from the triangles
+  // Remarks: No voxels are involved, so `voxels.toMesh().measure()` cross-checks `Voxels.properties()`, whose round trip fills sealed cavities and cavities behind passages about two voxels wide or narrower (see https://github.com/taucad/picovoxel/blob/main/docs/memory-and-limits.md#known-limits). The volume assumes a closed mesh and is negative when the triangles face inwards. Coincident duplicate faces count twice in the area. An empty mesh measures 0 and 0.
   // Mesh.measure (method)
   measure(): {
       volume: number;
@@ -166,6 +168,7 @@ Mesh: interface Mesh
     }): Voxels;
 
   // Binary STL bytes with the UNITS= header convention
+  // Remarks: Export is keyed by the session's lane claim (see docs/lanes.md). Exact provenance always exports with the standard header. Non-exact provenance is stamped into the 80-byte header (`LANE=fast`, read back by `meshFromStl`) and - in a `lane: 'fast'` session (explicit, or resolved from `'auto'`) exports without asking when every member is `fast`; - otherwise — a session that declared no lane (`'open'`), or any member other than `fast` (`gpu-l1`, `unknown`, …) — refuses with `PICO_LANE_EXPORT` unless acknowledged with `{ acceptLane: 'fast' }`. A `lane: 'exact'` session never holds non-exact geometry. The stamp is a best-effort audit, not security: third-party tools rewrite STL headers.
   // Mesh.toStl (method)
   toStl(options?: ToStlOptions): Uint8Array;
 
@@ -557,6 +560,7 @@ Voxels: interface Voxels
   isEmpty: boolean
 
   // Pure surface offset
+  // Remarks: `fastRenorm` (opt-in) runs the renormalization upstream performs after every half-voxel CFL step with a first-order upwind gradient instead of 5th-order HJ-WENO — 3.5–3.9x on the offset family, since renormalization is 94–97% of the offset wall. It CHANGES THE OUTPUT (measured at ≤2.2% volume, ≤0.36 mm peak narrow-band displacement, level set still clean; the measurements are recorded in the repository's bench/results/webgpu-v2/sk-0.8-ab.json), so it is never the library default — a session may default it on (see `CreatePicoOptions.fastRenorm`), and an explicit per-op value always wins.
   // Voxels.offset (method)
   offset(options: {
       distance: number;
@@ -627,6 +631,7 @@ Voxels: interface Voxels
   volume: number
 
   // Volume (mm³), surface area (mm²) and bounds free of boolean residue, from one native traversal of the mesh → fresh-voxels round-trip (src/pico-props.cpp)
+  // Remarks: As in C# `CalculateProperties`, the round trip fills a sealed cavity, or one whose openings are about two voxels wide or narrower, and drops its surface. Cross-check parts with internal voids with `toMesh().measure()`; see https://github.com/taucad/picovoxel/blob/main/docs/memory-and-limits.md#known-limits.
   // Voxels.properties (method)
   properties(): {
       volume: number;
@@ -901,87 +906,3 @@ TangentOptions: interface TangentOptions
   relativeStartStrength: boolean
 
   relativeEndStrength: boolean
-
-FromCliResult: interface FromCliResult extends SliceStack
-
-  unitsHeader: number
-
-  date: string
-
-  headerLayerCount: number
-
-  warnings: string[]
-
-SdfImage: interface SdfImage
-
-  width: number
-
-  height: number
-
-  // Row-major samples, negative inside
-  data: ArrayLike<number>
-
-Slice: interface Slice
-
-  // Layer height position in mm (first layer at one layerHeight, as CLI wants)
-  z: number
-
-  contours: SliceContour[]
-
-  // Value provenance of the sliced voxels (`'exact'` or absent = exact
-  lane: 'exact' | 'fast'
-
-SliceContour: interface SliceContour
-
-  // Flat [x0, y0, x1, y1, …] loop in mm
-  points: Float64Array
-
-  // Solid boundaries are CCW, holes CW (upstream contract)
-  winding: ContourWinding
-
-SliceStack: interface SliceStack
-
-  slices: Slice[]
-
-  // XY bounds over every contour + Z from first/last layer
-  bounds: {
-      min: readonly [number, number, number];
-      max: readonly [number, number, number];
-    }
-
-  // Value provenance (`'exact'` or absent = exact)
-  lane: 'exact' | 'fast'
-
-SliceVoxelsOptions: interface SliceVoxelsOptions
-
-  // Layer height in mm
-  layerHeight: number
-
-  // Keep absolute XY coordinates instead of the bbox-relative default
-  useAbsoluteXY: boolean
-
-  // Monotonic 0→1
-  onProgress: (fraction: number) => void
-
-ToCliOptions: interface ToCliOptions
-
-  // Units in mm per CLI unit (1 = mm, upstream default)
-  units: number
-
-  // Emit an intentionally-empty first layer so readers can infer layer height
-  emptyFirstLayer: boolean
-
-  // Header date string
-  date: string
-
-  onProgress: (fraction: number) => void
-
-ToSvgOptions: interface ToSvgOptions
-
-  // Filled single-path rendering (holes via winding) instead of stroked outlines
-  solid: boolean
-
-  strokeWidth: number
-
-  // Override the viewBox [minX, minY, width, height]
-  viewBox: readonly [number, number, number, number]

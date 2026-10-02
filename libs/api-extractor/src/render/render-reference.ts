@@ -35,15 +35,21 @@ const indexSummary = (entry: ApiEntry): string => {
 const memberCount = (entry: ApiEntry): number => (entry.members ?? []).length;
 
 /** One entry's index lines: the symbol, then each of its members indented. */
-const indexLines = (entry: ApiEntry, parentPath?: string): readonly string[] => {
+const indexLines = (
+  entry: ApiEntry,
+  context: { readonly parent?: string; readonly depth?: number; readonly parentCategory?: string } = {},
+): readonly string[] => {
+  const { parent = '', depth = 0, parentCategory } = context;
   const summary = indexSummary(entry);
   const members = memberCount(entry);
-  const suffix = members === 0 ? '' : ` [${members} members]`;
-  const path = entry.path ?? parentPath;
+  const suffix = `${members === 0 ? '' : ` [${members} members]`}${entry.category === undefined || entry.category === parentCategory ? '' : ` [category: ${entry.category}]`}`;
+  const path = entry.path ?? (parent === '' ? undefined : parent);
   const name = path === undefined ? entry.name : `${path}.${entry.name}`;
-  const lines = [`${name} (${entry.kind})${suffix}${summary === '' ? '' : ` — ${summary}`}`];
+  const lines = [
+    `${'  '.repeat(depth)}${name} (${entry.kind})${suffix}${summary === '' ? '' : ` — ${summary}`} [id: ${entry.id}]`,
+  ];
   for (const member of entry.members ?? []) {
-    lines.push(...indexLines(member, name).map((line) => `  ${line}`));
+    lines.push(...indexLines(member, { parent: name, depth: depth + 1, parentCategory: entry.category }));
   }
   return lines;
 };
@@ -89,11 +95,20 @@ export const renderIndex = (
 };
 
 /** The `//` comment block above a signature: summary, then the status flags. */
-const annotationLines = (entry: ApiEntry, indent: string): readonly string[] => {
+const annotationLines = (entry: ApiEntry, indent: string, parentCategory?: string): readonly string[] => {
   const lines: string[] = [];
+  if (entry.category !== undefined && entry.category !== parentCategory) {
+    lines.push(`${indent}// Category: ${entry.category}`);
+  }
   const summary = entry.docs?.summary;
   if (summary !== undefined && summary !== '') {
     lines.push(`${indent}// ${firstSentence(summary)}`);
+  }
+  if (entry.docs?.remarks !== undefined) {
+    lines.push(`${indent}// Remarks: ${entry.docs.remarks.replaceAll(/\s+/gu, ' ').trim()}`);
+  }
+  for (const exception of entry.docs?.throws ?? []) {
+    lines.push(`${indent}// Throws: ${exception.replaceAll(/\s+/gu, ' ').trim()}`);
   }
   if (entry.deprecated !== undefined) {
     lines.push(`${indent}// DEPRECATED${entry.deprecated === true ? '' : `: ${entry.deprecated}`}`);
@@ -117,9 +132,9 @@ const sourceLines = (text: string, indent: string): readonly string[] =>
     .split('\n')
     .map((line) => `${indent}${line.trimEnd()}`);
 
-const renderEntryBody = (entry: ApiEntry, depth: number): readonly string[] => {
+const renderEntryBody = (entry: ApiEntry, depth: number, parentCategory?: string): readonly string[] => {
   const indent = '  '.repeat(depth);
-  const lines: string[] = [...annotationLines(entry, indent)];
+  const lines: string[] = [...annotationLines(entry, indent, parentCategory)];
 
   if (entry.signatures === undefined || entry.signatures.length === 0) {
     const rendered = `${entry.name}${entry.type === undefined ? '' : `: ${entry.type.text}`}`;
@@ -136,7 +151,7 @@ const renderEntryBody = (entry: ApiEntry, depth: number): readonly string[] => {
 
   for (const member of entry.members ?? []) {
     lines.push('');
-    lines.push(...renderEntryBody(member, depth + 1));
+    lines.push(...renderEntryBody(member, depth + 1, entry.category));
   }
 
   return lines;

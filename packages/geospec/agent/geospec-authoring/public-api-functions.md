@@ -3,6 +3,7 @@
 70 top-level symbols. Signatures are verbatim typescript.
 
 // Create a GeoSpec instance
+// Remarks: The root factory stays lazy: mesh parsing code is loaded only when a mesh method is called.
 // createGeoSpec (function)
 export declare function createGeoSpec(): GeoSpec;
 
@@ -88,11 +89,13 @@ export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
 () => GeoSpecEngineProtocol | undefined
 
 // Register the engine that executes GeoSpec claims
+// Throws: GeoSpecEngineUnavailableError when the engine speaks a different protocol version — an unusable engine must never register silently.
 // registerGeoSpecEngine (function)
 (implementation: GeoSpecEngineImplementation) => void
 //   implementation: The engine's protocol implementation
 
 // Look up one engine export or fail with the engine-unavailable error
+// Throws: GeoSpecEngineUnavailableError when no engine provides it.
 // requireGeoSpecEngineHostBinding (function)
 <Name extends keyof GeoSpecEngineHostBindings>(capability: Name) => GeoSpecEngineHostBindings[Name]
 //   capability: Export name
@@ -123,6 +126,8 @@ export declare function expectGeo(subject: GeoSpecSubject): GeoSpecMatcher;
 //   defaults: Model loading defaults
 
 // Load a CAD model into GeoSpec evidence
+// Remarks: Direct geometry sources are parsed immediately. Code and project files are exported through the required `@taucad/runtime` integration on this subpath.
+// Throws: {@link GeoSpecModelLoadError} when the model cannot be exported or parsed, or when no GeoSpec engine is registered.
 // loadModel (function)
 export declare function loadModel<Code extends Record<string, string> = Record<string, string>>(options: LoadModelOptions<Code>): Promise<GeoSpecSubject>;
 //   options: Source, code, or file model load options
@@ -157,6 +162,7 @@ export declare function createCollector(options?: GeoSpecCollectorOptions): GeoS
 () => void
 
 // Compile a Vitest-style test-name pattern once for a GeoSpec run
+// Remarks: String inputs are JavaScript regular expression sources matched against the full `suite > test` name. `RegExp` inputs are used as-is.
 // compileGeoSpecTestNamePattern (function)
 (testNamePattern: string | RegExp | undefined) => {
     success: true;
@@ -180,6 +186,7 @@ export declare function createCollector(options?: GeoSpecCollectorOptions): GeoS
 //   testNamePattern: optional compiled regex
 
 // Discover GeoSpec test files from exact files or directory roots
+// Remarks: The returned `files` are project-relative paths suitable for `runGeoSpecModule` and runner factory APIs.
 // discoverGeoSpecFiles (function)
 (options: DiscoverGeoSpecFilesOptions) => Promise<GeoSpecDiscoveryResult>
 //   options: Discovery options containing a filesystem adapter and project roots
@@ -229,6 +236,7 @@ export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Prom
 //   root: Absolute project root path
 
 // Create a GeoSpec runner for browser environments
+// Remarks: The public surface intentionally hides worker and MessagePort primitives. Applications provide filesystem and loader capabilities, and the runner returns compact results suitable for UI and agent RPC consumption.
 // createGeoSpecWebRunner (function)
 (options: GeoSpecWebRunnerOptions) => GeoSpecRunner
 //   options: Filesystem, project root, loaders, and lifecycle event hook
@@ -284,6 +292,7 @@ export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Prom
 //   options: XDE structure plus subject-frame face facts per occurrence
 
 // Resolve a geometry selector against a per-subject selector index
+// Remarks: Pure and deterministic (D1): identical selector and index produce a deeply equal {@link GeometrySelection}; no fallback across evidence classes.
 // resolve (function)
 (selector: GeometrySelector, index: SelectorIndex) => GeometrySelection
 //   selector: Typed selector or string shorthand (authored path or `#o…` snapshot topology ref)
@@ -334,6 +343,7 @@ export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Prom
 //   options: Subject, polarity and host invocation function
 
 // Submit an ancillary query with positive polarity through the native core
+// Remarks: Queries return full reports even when failed or refused. Protocol errors propagate unchanged. Rust owns defaults, validation and canonical encoding.
 // evaluateGeoSpecNativeQuery (function)
 (options: GeoSpecNativeQueryOptions) => GeoSpecCanonicalClaimReport
 //   options: Query identity, subject and authored payload
@@ -354,11 +364,13 @@ export declare function runGeoSpecModule(options: RunGeoSpecModuleOptions): Prom
 //   options: Flat native assertion-client options
 
 // Export one Tau project from Runtime's coherent source snapshot
+// Remarks: This helper preserves finalized bytes and provenance metadata. It does not certify mathematical geometry or grant the runtime trusted-evaluator authority.
 // exportTauProjectArtifact (function)
 (options: ExportTauProjectArtifactOptions) => Promise<KernelResult<GeoSpecTauProjectArtifact>>
 //   options: Descriptor, fresh-runtime factory, and optional cancellation signal
 
 // Load one trusted project config using Node's native module loader
+// Remarks: Explicit selection or exactly one geospec.config.js/.mjs/.ts/.mts is allowed. TypeScript must use erasable syntax; JSON imports use standard attributes. Executable config/imports are trusted developer code, not sandboxed code. Node's same-process module cache is unchanged: load once per run and use a fresh process when fresh executable imports are required. No reload guarantee or transitive-source identity is supplied here.
 // loadGeoSpecConfig (function)
 (options: LoadGeoSpecConfigOptions) => Promise<LoadedGeoSpecConfig>
 //   options: Project, optional explicit config and defined option overrides

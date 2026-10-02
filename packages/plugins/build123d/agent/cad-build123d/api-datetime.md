@@ -2,10 +2,12 @@
 
 2 top-level symbols. Signatures are verbatim python.
 
+// Category: datetime
 // date(year, month, day) --> date object
 date
 
   // Create a date from a POSIX timestamp
+  // Remarks: The timestamp is a number, e.g. created via time.time(), that is interpreted as local time.
   // datetime.date.fromtimestamp (method)
   fromtimestamp(timestamp)
 
@@ -17,6 +19,7 @@ date
   fromisoformat(object)
 
   // int, int, int -> Construct a date from the ISO year, week number and weekday
+  // Remarks: This is the inverse of the date.isocalendar() function
   fromisocalendar
 
   // Current date or datetime
@@ -43,6 +46,7 @@ date
   isoformat()
 
   // Return the day of the week represented by the date
+  // Remarks: Monday == 1 ... Sunday == 7
   // datetime.date.isoweekday (method)
   isoweekday()
 
@@ -51,16 +55,20 @@ date
   toordinal()
 
   // Return the day of the week represented by the date
+  // Remarks: Monday == 0 ... Sunday == 6
   // datetime.date.weekday (method)
   weekday()
 
   // Return date with new specified fields
   replace
 
+// Category: datetime
 // datetime(year, month, day[, hour[, minute[, second[, microsecond[,tzinfo]]]]])
+// Remarks: The year, month and day arguments are required. tzinfo may be None, or an instance of a tzinfo subclass. The remaining arguments may be ints.
 datetime
 
   // Returns new datetime object representing current time local to tz
+  // Remarks: tz Timezone object. If no tz is specified, uses local timezone.
   // datetime.datetime.now (method)
   now(tz = None)
 
@@ -113,6 +121,7 @@ datetime
   utctimetuple()
 
   // [sep] -> string in ISO 8601 format, YYYY-MM-DDT[HH[:MM[:SS[.mmm[uuu]]]]][+HH:MM]
+  // Remarks: sep is used to separate the year from the time, and defaults to 'T'. The optional argument timespec specifies the number of additional terms of the time to include. Valid options are 'auto', 'hours', 'minutes', 'seconds', 'milliseconds' and 'microseconds'.
   isoformat
 
   // Return self.tzinfo.utcoffset(self)

@@ -27,6 +27,7 @@ import type { TauSkillsManifest } from '#bundle/bundle.types.js';
 import { doctrineFile, skillsManifestFile } from '#bundle/bundle.types.js';
 import type { WrittenBundle } from '#bundle/write-bundle.js';
 import { readDoctrine, writeCorpusBundle, writeDoctrineBundle } from '#bundle/write-bundle.js';
+import { csharpReferenceCorpus } from '#languages/csharp/reference.js';
 import { loadKclCorpus } from '#languages/kcl/extract.js';
 import { loadOpenscadCorpus } from '#languages/openscad/extract.js';
 import { extractTypescriptApi } from '#languages/typescript/extract.js';
@@ -334,10 +335,14 @@ export const bundleOwners: readonly BundleOwner[] = [
       'Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK modeling, appearance or moving-part requests in Tau Desktop.',
     whenToUse:
       'Use for PicoGK C# models, physical materials, textures, named parts and moving mechanisms in Tau Desktop.',
-    corpus: committedCorpus('picogk/picogk.corpus.json'),
-    // C# namespaces: `PicoGK`, `PicoGK.Shapes`, `System.Numerics`.
-    groupBy: (entry) => entry.path ?? 'other',
-    authoredReferences: ['kinematics-reference.md', 'materials-reference.md'],
+    corpus: () => csharpReferenceCorpus(committedCorpus('picogk/picogk.corpus.json')(), 'modeling'),
+    groupBy: (entry) => `${entry.category ?? 'CAD authoring'} — ${entry.path ?? 'other'}`,
+    supplementalApi: {
+      corpus: () => csharpReferenceCorpus(committedCorpus('picogk/picogk.corpus.json')(), 'embedding'),
+      prefix: 'embedding',
+      groupBy: (entry) => `${entry.category ?? 'Advanced embedding'} — ${entry.path ?? 'other'}`,
+    },
+    authoredReferences: ['kinematics-reference.md', 'materials-reference.md', 'runtime-reference.md'],
   },
   {
     slug: 'cad-picovoxel',

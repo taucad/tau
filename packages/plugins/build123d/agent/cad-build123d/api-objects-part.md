@@ -2,7 +2,9 @@
 
 11 top-level symbols. Signatures are verbatim python.
 
+// Category: objects_part
 // BasePartObject
+// Remarks: Base class for all BuildPart objects & operations
 BasePartObject
 
   // build123d.objects_part.BasePartObject.__init__ (constructor)
@@ -11,7 +13,9 @@ BasePartObject
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combination mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a box defined by length, width, and height.
 Box
 
   // build123d.objects_part.Box.__init__ (constructor)
@@ -23,7 +27,9 @@ Box
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a cone defined by bottom radius, top radius, and height.
 Cone
 
   // build123d.objects_part.Cone.__init__ (constructor)
@@ -36,7 +42,9 @@ Cone
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a convex solid from the convex hull of the provided points.
 ConvexPolyhedron
 
   // build123d.objects_part.ConvexPolyhedron.__init__ (constructor)
@@ -46,7 +54,9 @@ ConvexPolyhedron
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Operation
+// Remarks: Create a counter bore hole defined by radius, counter bore radius, counter bore and depth.
 CounterBoreHole
 
   // build123d.objects_part.CounterBoreHole.__init__ (constructor)
@@ -57,7 +67,9 @@ CounterBoreHole
   //   depth: hole depth, through part if None
   //   mode: combination mode
 
+// Category: objects_part
 // Part Operation
+// Remarks: Create a countersink hole defined by radius, countersink radius, countersink angle, and depth.
 CounterSinkHole
 
   // build123d.objects_part.CounterSinkHole.__init__ (constructor)
@@ -68,7 +80,9 @@ CounterSinkHole
   //   counter_sink_angle: cone angle
   //   mode: combination mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a cylinder defined by radius and height.
 Cylinder
 
   // build123d.objects_part.Cylinder.__init__ (constructor)
@@ -80,7 +94,9 @@ Cylinder
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Operation
+// Remarks: Create a hole defined by radius and depth.
 Hole
 
   // build123d.objects_part.Hole.__init__ (constructor)
@@ -89,7 +105,9 @@ Hole
   //   depth: hole depth, through part if None
   //   mode: combination mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a sphere defined by a radius.
 Sphere
 
   // build123d.objects_part.Sphere.__init__ (constructor)
@@ -102,7 +120,9 @@ Sphere
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a torus defined by major and minor radii.
 Torus
 
   // build123d.objects_part.Torus.__init__ (constructor)
@@ -116,7 +136,9 @@ Torus
   //   align: align MIN, CENTER, or MAX of object
   //   mode: combine mode
 
+// Category: objects_part
 // Part Object
+// Remarks: Create a wedge with a near face defined by xsize and z size, a far face defined by xmin to xmax and zmin to zmax, and a depth of ysize.
 Wedge
 
   // build123d.objects_part.Wedge.__init__ (constructor)

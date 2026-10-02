@@ -45,7 +45,6 @@ import {
 import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
-import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -57,7 +56,7 @@ import { assertRootedPath } from '@taucad/utils/path';
  * and re-exports the same declaration by name, so the emitted `.d.mts` keeps it
  * as an external import. */
 import type { ExportFile, RuntimeFileSystemBase } from '@taucad/runtime/types';
-import type { RuntimeClient } from '@taucad/runtime/client';
+import type { RuntimeClient, WideViewRequest } from '@taucad/runtime/client';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';
@@ -98,8 +97,17 @@ export type HostExportFile = ExportFile;
  *
  * @public
  */
-export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | 'connect' | 'capabilities'> &
-  Pick<RuntimeAgentClient, 'open'>;
+export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | 'connect' | 'capabilities'> & {
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'signal'>) => Pick<
+    ReturnType<RuntimeClient['open']>,
+    'evaluation' | 'export' | 'close'
+  > & {
+    view: (
+      id?: string,
+      request?: Pick<WideViewRequest, 'instance' | 'options'>,
+    ) => Pick<ReturnType<ReturnType<RuntimeClient['open']>['view']>, 'rendering' | 'close'>;
+  };
+};
 
 /** Filesystem capability the host tool registry consumes. @public */
 export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;

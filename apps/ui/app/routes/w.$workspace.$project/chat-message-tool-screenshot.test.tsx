@@ -110,10 +110,13 @@ afterEach(() => {
 describe('ChatMessageToolScreenshot — file-aware titles', () => {
   it('should render "Captured 1 screenshot of <filename>" with a muted (untoned) leading icon', () => {
     const part = buildOutputPart('lib/skids.ts', 'single', {
-      images: [{ view: 'isometric', dataUrl: 'data:image/png;base64,abc' }],
+      images: [{ view: 'model', angle: 'isometric', dataUrl: 'data:image/png;base64,abc' }],
     });
 
     render(<ChatMessageToolScreenshot part={part} />);
+
+    expect(screen.getByRole('img', { name: 'isometric view' })).toBeInTheDocument();
+    expect(screen.getByText('isometric')).toBeInTheDocument();
 
     const title = screen.getByTestId('chat-tool-card-title');
     expect(title.textContent).toContain('Captured');
@@ -137,7 +140,7 @@ describe('ChatMessageToolScreenshot — file-aware titles', () => {
   it('should render all six canonical views in order with responsive containment', () => {
     const views = ['front', 'back', 'right', 'left', 'top', 'bottom'] as const;
     const part = buildOutputPart('main.ts', 'multi_angle', {
-      images: views.map((view) => ({ view, dataUrl: `data:image/png;base64,${view}` })),
+      images: views.map((angle) => ({ view: 'model', angle, dataUrl: `data:image/png;base64,${angle}` })),
     });
 
     const { container } = render(<ChatMessageToolScreenshot part={part} />);
@@ -155,6 +158,41 @@ describe('ChatMessageToolScreenshot — file-aware titles', () => {
       expect(image.className).toContain('object-contain');
     }
     expect(views.map((view) => screen.getByText(view).textContent)).toEqual([...views]);
+  });
+
+  it('should use the captured drawing view when no camera angle is provided', () => {
+    const part = buildOutputPart('drawing.ts', 'single', {
+      images: [{ view: 'drawing', instance: 'Shape 1', dataUrl: 'data:image/png;base64,abc' }],
+    });
+
+    render(<ChatMessageToolScreenshot part={part} />);
+
+    expect(screen.getByRole('img', { name: 'drawing view' })).toBeInTheDocument();
+    expect(screen.getByText('drawing')).toBeInTheDocument();
+  });
+
+  it('should retain distinct view, instance and angle identities when captures reorder', () => {
+    const images: ScreenshotOutputAvailable['output']['images'] = [
+      { view: 'model', instance: 'Assembly', angle: 'front', dataUrl: 'data:image/png;base64,AQ==' },
+      { view: 'model', instance: 'Detail', angle: 'front', dataUrl: 'data:image/png;base64,Ag==' },
+      { view: 'model', instance: 'Detail', angle: 'back', dataUrl: 'data:image/png;base64,Aw==' },
+      { view: 'alternate', instance: 'Detail', angle: 'back', dataUrl: 'data:image/png;base64,BA==' },
+    ];
+    const consoleError = vi.spyOn(console, 'error');
+    try {
+      const { rerender } = render(
+        <ChatMessageToolScreenshot part={buildOutputPart('main.ts', 'multi_angle', { images })} />,
+      );
+      const reordered = images.toReversed();
+      rerender(<ChatMessageToolScreenshot part={buildOutputPart('main.ts', 'multi_angle', { images: reordered })} />);
+
+      expect(screen.getAllByRole('img').map((image) => image.getAttribute('src'))).toEqual(
+        reordered.map((image) => ('dataUrl' in image ? image.dataUrl : image.path)),
+      );
+      expect(consoleError).not.toHaveBeenCalled();
+    } finally {
+      consoleError.mockRestore();
+    }
   });
 
   it('should render "Capturing orthographic views of <filename>..." while loading multi-angle', () => {

@@ -21,7 +21,7 @@
       "executor": "nx:run-commands",
       "dependsOn": ["^build"],
       "options": {
-        "command": "tsdown",
+        "command": "tsdown --config-loader=tsx",
         "cwd": "{projectRoot}"
       }
     },

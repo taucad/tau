@@ -7,7 +7,7 @@ import { afterEach, expect, test } from 'vitest';
 import type { Locator, Page } from 'playwright';
 import { getBoundingBoxFromInspect, getInspectReport, validateGlbData } from '@taucad/runtime-testing';
 
-import { authenticatePackagedDesktop, launchDesktopApp } from '#support/desktop-app.js';
+import { authenticatePackagedDesktop, desktopDescendants, launchDesktopApp } from '#support/desktop-app.js';
 import type { DesktopSession } from '#support/desktop-app.js';
 import { desktopE2ECompletedArtifact } from '#support/config.js';
 import {
@@ -261,29 +261,10 @@ const capturePicoGkFiles = (root: string, destination: string, artifacts: boolea
 };
 
 const ownedPicoGkWorkers = (electronPid: number): readonly NativeWorker[] => {
-  const result = spawnSync('ps', ['-axo', 'pid=,ppid='], { encoding: 'utf8' });
+  const result = spawnSync('ps', ['-axww', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
-  const parents = new Map(
-    result.stdout
-      .trim()
-      .split('\n')
-      .map((line) => {
-        const [pid, parent] = line.trim().split(/\s+/u).map(Number);
-        return [pid, parent] as const;
-      }),
-  );
-  return picogkWorkers().filter(({ pid }) => {
-    const visited = new Set<number>();
-    let current: number | undefined = pid;
-    while (current && !visited.has(current)) {
-      if (current === electronPid) {
-        return true;
-      }
-      visited.add(current);
-      current = parents.get(current);
-    }
-    return false;
-  });
+  const owned = new Set(desktopDescendants(electronPid, result.stdout).map(({ pid }) => pid));
+  return picogkWorkers().filter(({ pid }) => owned.has(pid));
 };
 
 const exportToProject = async (page: Page, projectRoot: string, extension: 'glb' | 'stl'): Promise<string> => {
@@ -839,7 +820,13 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
       })
       .toBe(true);
     expect(session.application.windows()).toHaveLength(1);
-    expect(spawnSync('ps', ['-axo', 'command='], { encoding: 'utf8' }).stdout).not.toMatch(/PicoGK.*Viewer/u);
+    const processes = spawnSync('ps', ['-axww', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' });
+    expect(processes.status, processes.stderr).toBe(0);
+    expect(
+      desktopDescendants(session.application.process().pid, processes.stdout)
+        .map(({ command }) => command)
+        .join('\n'),
+    ).not.toMatch(/PicoGK.*Viewer/u);
     expect(rendererErrors.some((message) => message.includes('unsafe-eval'))).toBe(false);
 
     await session.capture('picogk-packaged-success');

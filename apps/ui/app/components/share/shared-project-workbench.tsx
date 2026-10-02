@@ -46,7 +46,7 @@ const rememberSessionRunConsent = (consentKey: string): void => {
  * Shared models are code that runs on this origin's runtime worker, so a viewer opts in before any kernel starts.
  * Interim control until model code runs on a separate sandbox origin.
  */
-export const SharedRunConsent = ({
+const SharedRunConsent = ({
   title,
   onRun,
 }: {

@@ -35,7 +35,10 @@
   },
   "exports": {
     ".": "./src/index.ts",
-    "./agent": "./agent/skills.json",
+    "./agent": {
+      "types": "./agent/skills.d.cts",
+      "default": "./agent/skills.json"
+    },
     "./agent/*": "./agent/*",
     "./package.json": "./package.json"
   },
@@ -47,7 +50,10 @@
         "import": "./dist/index.mjs",
         "default": "./dist/index.mjs"
       },
-      "./agent": "./agent/skills.json",
+      "./agent": {
+        "types": "./agent/skills.d.cts",
+        "default": "./agent/skills.json"
+      },
       "./agent/*": "./agent/*",
       "./package.json": "./package.json"
     },

@@ -155,6 +155,7 @@
         "{workspaceRoot}/packages/workbench/agent/resources.js",
         "{workspaceRoot}/packages/workbench/agent/resources.d.ts",
         "{workspaceRoot}/packages/workbench/agent/skills.json",
+        "{workspaceRoot}/packages/workbench/agent/skills.d.cts",
         "{workspaceRoot}/packages/plugins/*/agent/resources.js",
         "{workspaceRoot}/packages/plugins/*/agent/resources.d.ts",
         "{workspaceRoot}/packages/plugins/*/agent/skills.json",

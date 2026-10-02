@@ -1,6 +1,6 @@
 ---
 name: cad-picovoxel
-description: Guides PicoVoxel voxel, SDF and lattice CAD, PBR materials and mechanisms. Use for TypeScript geometry, textures or moving-part authoring.
+description: Guides PicoVoxel voxel, SDF and lattice CAD, named parts, PBR materials and mechanisms. For TypeScript geometry, appearance, textures or moving-part authoring.
 ---
 
 # PicoVoxel authoring

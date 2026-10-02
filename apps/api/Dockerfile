@@ -4,7 +4,7 @@
 #
 # Stages: base -> deps -> build -> pruned -> runtime
 #   base    : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
-#   deps    : workspace skeleton only (lockfile + every workspace package.json
+#   deps    : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
 #             + patches); cache key independent of source edits.
 #   build   : full source + `pnpm nx build api`; reuses deps layer cache.
 #   pruned  : `pnpm deploy --prod` to materialise a self-contained app dir.
@@ -26,7 +26,7 @@
 #     is required; the cold-cache cost is ~70s (network-bound, same as filtered).
 
 ARG NODE_VERSION=24.19.0
-ARG PNPM_VERSION=10.30.3
+ARG PNPM_VERSION=11.7.0
 
 # ── Base ──────────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-slim AS base
@@ -39,7 +39,7 @@ WORKDIR /app
 
 # ── Deps: workspace skeleton only (cache key = lockfile + package.jsons) ──
 FROM base AS deps
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .pnpmfile.cjs ./
 COPY patches/ ./patches/
 # `--parents` (BuildKit syntax 1.20+) preserves directory tree so each
 # workspace package.json lands at its real path. Matches pnpm-workspace.yaml

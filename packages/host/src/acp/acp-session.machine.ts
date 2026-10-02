@@ -1030,7 +1030,7 @@ const machineDefinition = setup({
  *
  * @internal
  */
-export const acpSessionMachine = machineDefinition.createMachine({
+const acpSessionMachineDefinition = machineDefinition.createMachine({
   id: 'acpSession',
   version: '2',
   context: ({ input }) => ({
@@ -1664,6 +1664,19 @@ export const acpSessionMachine = machineDefinition.createMachine({
     },
   },
 });
+
+type AcpSessionMachineDefinition = typeof acpSessionMachineDefinition;
+
+/**
+ * The type of {@link acpSessionMachine}, named so declarations reference it rather than inline it.
+ *
+ * @internal
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference an interface by name and would expand an alias (K-17)
+export interface AcpSessionMachine extends AcpSessionMachineDefinition {}
+
+/** The ACP session machine with its full inferred contract named for declaration emit. @internal */
+export const acpSessionMachine: AcpSessionMachine = acpSessionMachineDefinition;
 
 /* The adapter died under a lent turn: it fails, drains, and the child closes. */
 function exitBusy(context: AcpBusyContext, enq: Enqueue, stderr: string) {

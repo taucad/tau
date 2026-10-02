@@ -2,8 +2,8 @@ import { describe, expectGeo, it } from 'geospec';
 import { loadModel } from 'geospec/model';
 
 // Dimensions are millimetres. x: front to handles, y: axle, z: ground up.
-const cache = new Map();
-function model(
+const cache = new Map<string, ReturnType<typeof loadModel>>();
+async function model(
   part = 'assembly',
   format: 'glb' | 'step' = 'glb',
   parameters: Record<string, number> = {},
@@ -19,7 +19,7 @@ function model(
   if (!cache.has(key)) {
     cache.set(key, loadModel(options));
   }
-  return cache.get(key);
+  return cache.get(key)!;
 }
 
 const parts = [

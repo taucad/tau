@@ -729,6 +729,14 @@
       "token": "server.dispose(reason.message)",
       "class": "Debounce",
       "owner": "machines"
+    },
+    {
+      "id": "N3",
+      "bound": "Not a timer: the RevisionClock host-clock interface declares setTimeout without scheduling it",
+      "site": "packages/revisions/src/revision-effects.types.ts",
+      "token": "setTimeout(callback:",
+      "class": "None",
+      "owner": "revisions host clock"
     }
   ]
 }

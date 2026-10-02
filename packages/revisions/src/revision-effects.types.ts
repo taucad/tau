@@ -1,10 +1,8 @@
 import type { PathPolicy, RootedFileSystem } from '@taucad/filesystem';
-import type { ActorOptions, AnyActorLogic } from 'xstate';
 import type { ParameterRecordCodec } from '#algorithms/index.js';
-import type { CheckoutCutTrigger } from '#checkout.machine.js';
 import type { PublishPublicationActorInput, PublishPublicationActorOutput } from '#publish.types.js';
 import type { RemoteStorageSupplier } from '#remote.types.js';
-import type { RevisionActor } from '#revision-authority.js';
+import type { RevisionActor, RevisionTrigger } from '#revision-authority.js';
 import type { Checkout, RevisionPort } from '#revision-port.js';
 import type { RevisionStreamHandlers } from '#revision-stream.js';
 
@@ -37,6 +35,13 @@ export type UseCheckoutFileSystem = <Result>(
   checkout: Checkout,
   operation: (filesystem: RevisionFileSystem) => Promise<Result>,
 ) => Promise<Result>;
+
+/** Host clock supplied to the revision actors without coupling this contract to XState. */
+type RevisionClock = Readonly<{
+  now?: () => number;
+  setTimeout(callback: (...args: unknown[]) => void, delay: number): unknown;
+  clearTimeout(id: unknown): void;
+}>;
 
 /**
  * Where one turn was placed, that its lease is now held, or why it could not be
@@ -81,7 +86,7 @@ export type RevisionActorsOptions = Readonly<{
    * its `now()` (milliseconds since the Unix epoch) stamps what this host mints,
    * falling back to `Date.now`. Each root takes its own clock.
    */
-  clock?: ActorOptions<AnyActorLogic>['clock'];
+  clock?: RevisionClock;
   /** Actor recorded on every revision this host mints. */
   actorId?: string;
   /**
@@ -96,7 +101,7 @@ export type RevisionActorsOptions = Readonly<{
    * An agent turn is resolved by `runId`, which is how the model behind a turn
    * reaches the revision at all.
    */
-  actor?: (input: Readonly<{ runId: string | undefined; trigger: CheckoutCutTrigger }>) => RevisionActor | undefined;
+  actor?: (input: Readonly<{ runId: string | undefined; trigger: RevisionTrigger }>) => RevisionActor | undefined;
   /**
    * The classifier this project's layout answers with (EQ6, D6).
    *

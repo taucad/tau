@@ -241,7 +241,9 @@ function usePaneRuntimeView({
         : lastSuccess?.key === pictureKey
           ? lastSuccess.rendering
           : undefined,
-    unavailable: unavailable ?? (viewError?.key === subscriptionKey ? viewError.message : undefined),
+    // A failed evaluation fails every open view with the build's issues; the Issues card owns those.
+    unavailable:
+      unavailable ?? (evaluation?.success && viewError?.key === subscriptionKey ? viewError.message : undefined),
   };
 }
 

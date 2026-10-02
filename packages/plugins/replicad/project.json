@@ -9,7 +9,7 @@
       "executor": "nx:run-commands",
       "dependsOn": ["copy-assets", "^copy-assets", "^build"],
       "options": {
-        "command": "tsdown --config-loader=tsx",
+        "command": "tsdown",
         "cwd": "{projectRoot}"
       }
     },

@@ -161,7 +161,7 @@ export const publishable = (workspaceValue: Workspace): WorkspaceProject[] =>
 /**
  * Every project carries exactly one `type:` and one `scope:` from the
  * vocabulary. Application libraries additionally carry exactly one `layer:`;
- * other projects may carry one. Host tags are optional but must be unique and valid.
+ * other projects may carry one. Host and release tags are optional but must be unique and valid.
  * The returned strings are the violations.
  *
  * @public
@@ -172,7 +172,8 @@ export const validateTags = (workspaceValue: Workspace): string[] =>
       const allowed: readonly string[] = values;
       const present = tags.filter((tag) => tag.startsWith(`${dimension}:`));
       const [tag, ...extra] = present;
-      const required = dimension !== 'host' && (dimension !== 'layer' || tags.includes('type:app-lib'));
+      const required =
+        dimension !== 'host' && dimension !== 'release' && (dimension !== 'layer' || tags.includes('type:app-lib'));
       if ((required && tag === undefined) || extra.length > 0) {
         return [`expected exactly one ${dimension}: tag, found ${present.join(', ') || 'none'}`];
       }

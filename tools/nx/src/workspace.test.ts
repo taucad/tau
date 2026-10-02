@@ -5,7 +5,7 @@ import type * as ResolverModule from '#resolver.js';
 const readCachedProjectGraph = vi.fn<() => ProjectGraph>();
 const createProjectGraphAsync = vi.fn<() => Promise<ProjectGraph>>();
 
-vi.mock('@nx/devkit', () => ({
+vi.mock('#devkit.js', () => ({
   readCachedProjectGraph,
   createProjectGraphAsync,
   // A root with no project on disk, so manifest and project.json reads miss.

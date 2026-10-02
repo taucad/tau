@@ -54,6 +54,10 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 # ── Build ─────────────────────────────────────────────────────────────────
 FROM deps AS build
 COPY . .
+# The deps stage installed from the frozen lockfile moments ago. pnpm's
+# pre-run dependency check would otherwise re-run a full install here and
+# exhaust the builder's 2 GB Node heap, so it only warns, as CI does.
+ENV pnpm_config_verify_deps_before_run=warn
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \

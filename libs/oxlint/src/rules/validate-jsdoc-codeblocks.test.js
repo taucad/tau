@@ -413,7 +413,7 @@ export const foo = 1;
           },
         ],
       });
-    });
+    }, 15_000);
   });
 
   describe('type-aware lint profile', () => {

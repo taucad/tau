@@ -192,5 +192,25 @@ export const createProjectFiles = (root = '/projects/project-1'): ProjectFiles =
   };
 };
 
-/** The one project the Print pane fixture and the print intent tests share. */
-export const projectFiles = createProjectFiles();
+/** The current project shared by the Print pane fixture and print intent tests. */
+let current = createProjectFiles();
+export const projectFiles: ProjectFiles = {
+  root: current.root,
+  get fileManager() {
+    return current.fileManager;
+  },
+  get writes() {
+    return current.writes;
+  },
+  read: (path) => current.read(path),
+  write: (path, content) => {
+    current.write(path, content);
+  },
+  race: (...texts) => {
+    current.race(...texts);
+  },
+  clear: () => {
+    current.clear();
+    current = createProjectFiles();
+  },
+};

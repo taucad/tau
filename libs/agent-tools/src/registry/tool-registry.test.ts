@@ -13,6 +13,7 @@ import type {
 import type { JsonValue } from '@taucad/agent-host';
 import { toolDescriptions } from '@taucad/chat/constants';
 import { testModelOutputSchema } from '@taucad/chat';
+import { parseToolErrorText } from '@taucad/chat/utils';
 import { ResourceQueue } from '@taucad/filesystem';
 import { MemoryProvider } from '@taucad/filesystem/backend';
 import { composeView } from '@taucad/filesystem/composed-view';
@@ -513,6 +514,30 @@ describe('createChatToolRegistry invocation', () => {
       content: { errorCode: 'TOOL_INPUT_VALIDATION_FAILED' },
     });
     expect(result.content).not.toHaveProperty('success');
+    expect(parseToolErrorText(JSON.stringify(result.content))).toMatchObject({
+      errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+      toolName: 'read_file',
+      toolCallId: 'call-1',
+      validationErrors: expect.arrayContaining([
+        { path: 'targetFile', message: expect.any(String) as string },
+      ]) as Array<{ path: string; message: string }>,
+    });
+  });
+
+  it('should preserve the amplifier export refusal as a complete validation error', async () => {
+    const exportModel = vi.fn();
+    const result = await invoke(build({ graphics: { exportModel } }), 'export_model', {
+      input: { targetFile: 'main.tsx', to: 'glb', toolCallId: 'untrusted-call-id' },
+    });
+    expect(result.isError).toBe(true);
+    expect(parseToolErrorText(JSON.stringify(result.content))).toEqual({
+      errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+      message: '✖ Unrecognized key: "toolCallId"',
+      toolName: 'export_model',
+      toolCallId: 'call-1',
+      validationErrors: [{ path: '', message: 'Unrecognized key: "toolCallId"' }],
+    });
+    expect(exportModel).not.toHaveBeenCalled();
   });
 
   it('dispatches a validated call to the RPC handler', async () => {

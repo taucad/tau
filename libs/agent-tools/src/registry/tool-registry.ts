@@ -13,7 +13,7 @@
  */
 
 import { rpcClientErrorCode, testModelOutputSchema } from '@taucad/chat';
-import type { RpcCall, RpcName } from '@taucad/chat';
+import type { RpcCall, RpcName, ToolInputValidationError } from '@taucad/chat';
 import { mutatingRpcNames, rpcName, toolDescriptions, toolMode, toolName } from '@taucad/chat/constants';
 import { createRpcDispatcher, writeArtifactSet } from '@taucad/chat/rpc';
 import type {
@@ -368,11 +368,22 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
     if (!parsed.success) {
       const arrange = invocation.toolName === toolName.arrangeWorkbench;
       return {
-        content: {
-          ...(arrange ? { success: false } : {}),
-          errorCode: arrange ? 'VALIDATION_ERROR' : 'TOOL_INPUT_VALIDATION_FAILED',
-          message: arrange ? arrangeValidationMessage(parsed.error, invocation.input) : z.prettifyError(parsed.error),
-        },
+        content: arrange
+          ? {
+              success: false,
+              errorCode: rpcClientErrorCode.validationError,
+              message: arrangeValidationMessage(parsed.error, invocation.input),
+            }
+          : ({
+              errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+              message: z.prettifyError(parsed.error),
+              toolName: invocation.toolName,
+              toolCallId: invocation.toolCallId,
+              validationErrors: parsed.error.issues.map((issue) => ({
+                path: issue.path.join('.'),
+                message: issue.message,
+              })),
+            } satisfies ToolInputValidationError),
         isError: true,
       };
     }

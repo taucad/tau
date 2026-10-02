@@ -129,6 +129,18 @@ describe('ChatToolError parsed errors', () => {
 });
 
 describe('ChatToolError unparseable fallback', () => {
+  it('should display the persisted amplifier refusal without losing the chat', async () => {
+    const errorText = JSON.stringify({
+      errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+      message: '✖ Unrecognized key: "toolCallId"',
+    });
+    render(<ChatToolError errorText={errorText} icon={TriangleAlert} noun='model export' />);
+    expect(screen.getByText('tool input validation failed')).toBeInTheDocument();
+    expect(screen.getByText('model export')).toBeInTheDocument();
+    await userEvent.click(screen.getByRole('button'));
+    expect(screen.getByText(errorText)).toBeInTheDocument();
+  });
+
   it.each([
     ['UNKNOWN', 'unknown'],
     ['AUTHENTICATION_ERROR', 'authentication error'],

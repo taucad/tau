@@ -14,8 +14,8 @@ describe('normalizeProjectPathToolInputAliases', () => {
     [toolName.editFile, 'targetFile'],
     [toolName.createFile, 'targetFile'],
     [toolName.deleteFile, 'targetFile'],
-    [toolName.getKernelResult, 'targetFile'],
-    [toolName.exportGeometry, 'targetFile'],
+    [toolName.evaluateModel, 'targetFile'],
+    [toolName.exportModel, 'targetFile'],
     [toolName.screenshot, 'targetFile'],
     [toolName.listDirectory, 'path'],
     [toolName.grep, 'path'],
@@ -80,7 +80,7 @@ describe('normalizeProjectPathToolInputAliases', () => {
     });
 
     expect(
-      normalizeProjectPathToolOutputAliases(toolName.getKernelResult, {
+      normalizeProjectPathToolOutputAliases(toolName.evaluateModel, {
         status: 'error',
         kernelIssues: [{ message: 'broken', location: { fileName: '/main.ts', startLineNumber: 1 } }],
       }).input,

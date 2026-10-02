@@ -1,6 +1,6 @@
 ---
 title: Transport API
-description: Consumer topology helpers and author-facing transport contracts for preview admission, timeout recovery, and typed closure.
+description: Consumer topology helpers and author-facing transport contracts for document delivery, timeout recovery, and typed closure.
 docType: reference
 icon: lucide:waypoints
 ---
@@ -109,112 +109,51 @@ await host.ready;
 
 ## Author Subpath
 
-`@taucad/runtime/transport` exports the factories `defineRuntimeTransport` and `definePassthroughTransport`, the `runtimeProtocolSchemas` wire validators, and the shared contracts:
+`@taucad/runtime/transport` exports `defineRuntimeTransport`, `definePassthroughTransport`, and `runtimeDocumentProtocolSchemas`. Use the shared validators at both channel boundaries. Known message fields are validated; additive unknown payload fields are ignored. The client verifies the hello `protocolVersion` before initialization.
 
-| Role               | Types                                                                                                                                                                                                                                                                                 |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Client contract    | `TransportPlugin`, `RuntimeTransportClient`, `RuntimeTransportCloseResult`, `RuntimeTransportPreviewReservation`, `RuntimeTransportRenderTarget`, `RuntimeTransportTimeoutRecovery`, `TransportDescriptor`                                                                            |
-| Host contract      | `RuntimeTransportHost`, `TransportClientReady`, `TransportHostReady`, `TransportHelloPayload`, `RuntimeInitializePayload`, `RuntimeInitializeMemoryHandle`, `HostInitializeBindings`, `HostInitializeBindingsCore`, `HostGeometryDeliveryBinding`, `EncodedBinary`, `EncodedGeometry` |
-| Wire re-exports    | `ChannelServerHandle`, `Port`, `RpcProtocol`, `WithTransferables`                                                                                                                                                                                                                     |
-| Projection helpers | `TransportPluginId`, `TransportId`, `TransportProtocol`, `TransportBindingsExtra`, `TransportClientOptions`, `TransportHostOptions`, `RuntimeFromTransport`                                                                                                                           |
+| Role        | Types                                                                                                                                                                                                                                                            |
+| ----------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Client      | `TransportPlugin`, `RuntimeTransportClient`, `RuntimeTransportCloseResult`, `RuntimeTransportTimeoutRecovery`, `RuntimeTransportFacet`, `TransportDescriptor`                                                                                                    |
+| Host        | `RuntimeTransportHost`, `TransportClientReady`, `TransportHostReady`, `TransportHelloPayload`, `RuntimeInitializePayload`, `RuntimeInitializeMemoryHandle`, `HostInitializeBindings`, `HostInitializeBindingsCore`, `HostBinaryDeliveryBinding`, `EncodedBinary` |
+| Channel     | `Channel`, `ChannelServerHandle`, `Port`, `RpcProtocol`, `WithTransferables`                                                                                                                                                                                     |
+| Projections | `TransportPluginId`, `TransportId`, `TransportProtocol`, `TransportBindingsExtra`, `TransportClientOptions`, `TransportHostOptions`, `RuntimeFromTransport`                                                                                                      |
 
-Use `runtimeProtocolSchemas` at both channel boundaries. It rejects malformed timeout reasons, missing target identities, and invalid generations before they reach `KernelWorker`.
+<auto-type-table path='./props/transport.ts' name='RuntimeTransportClient' />
 
-## Preview Admission
+<auto-type-table path='./props/transport.ts' name='RuntimeTransportHost' />
 
-`RuntimeTransportClient.reservePreview()` runs synchronously before source staging or other asynchronous admission work. A SAB-backed transport advances its internal abort generation and returns the exact captured value; a wire-only transport returns an empty reservation.
+## Binary Delivery
 
-The reservation is opaque. Do not derive render ordering from it, reuse it for another preview, or allocate a second generation when the command is sent.
+`resolveBinary` materializes document view artifacts and export files into owned bytes before delivering them to consumers. Host bindings expose `binaryDelivery.publishBytes(key, bytes)` and `acknowledge(key)`. Pooled delivery must copy before acknowledging ownership. Inline delivery must also preserve consumer ownership. Terminal notifications settle only after materialization and preceding operation logs and telemetry.
+
+`initialize` assembles transport-private memory and filesystem bindings. A concurrent or successful second initialization rejects with `RuntimeAlreadyInitializedError`; a failed first attempt may be retried. Keep native abort-slot layouts and transferable lists inside the transport implementation.
 
 ## Timeout Recovery
 
-An isolated transport reports `kind: 'terminable'`. `abortRender` must target exactly the supplied render; `terminate` must terminate only this client's host and settle `closed` with the timeout cause. A same-isolate transport reports `{ kind: 'unsupported' }`.
+`operationTimeoutRecovery` is the current transport capability name. Its `kind: 'terminable'` branch terminates exactly this client's isolated host and settles closure with the timeout cause. Same-isolate transports report `{ kind: 'unsupported' }` because synchronous work can block their deadline timer.
 
-`renderId` and `abortGeneration` are opaque correlation values. Forward them unchanged. A delayed timeout for one ID must never cancel its successor.
+<auto-type-table path='./props/transport.ts' name='RuntimeTransportTimeoutRecovery' />
 
-Do not advertise a terminable timeout based on a diagnostic descriptor or the presence of `SharedArrayBuffer`. The capability is behavioral: the transport must be able to stop an unresponsive host from another event loop or process.
+The runtime owns document operation correlation and cancellation. Do not infer termination capability from a diagnostic descriptor or the presence of `SharedArrayBuffer`.
 
 ## Typed Closure
 
-`RuntimeTransportClient.closed` resolves once with the first terminal cause and never rejects:
+`closed` resolves once with the first terminal cause and never rejects. `close()` is idempotent and releases exactly the host owned by that materialized client. `createRuntimeClient` observes closure from construction onward, including failures before or during `open()`.
 
-| Cause            | When to use                                                         |
-| ---------------- | ------------------------------------------------------------------- |
-| `requested`      | Consumer called normal close/terminate                              |
-| `render-timeout` | Bounded timeout recovery terminated this client's isolated host     |
-| `host-exit`      | Worker or process exited independently; include `exitCode` if known |
-| `wire-failure`   | Native channel failed; include the original `Error`                 |
+<auto-type-table path='./props/transport.ts' name='RuntimeTransportCloseResult' />
 
-First-cause ownership matters. A later requested close must not overwrite an already observed host exit, wire failure, or timeout termination.
+| Cause               | Meaning                                                           |
+| ------------------- | ----------------------------------------------------------------- |
+| `requested`         | Consumer closed or terminated the client.                         |
+| `operation-timeout` | Deadline recovery terminated this isolated host.                  |
+| `host-exit`         | Host exited independently; phase distinguishes boot from session. |
+| `wire-failure`      | Channel failed; the result retains the original error.            |
 
-## Complete Client Contract
-
-A materialized `RuntimeTransportClient` combines the cancellation members with the normal lifecycle and delivery methods:
-
-```typescript
-import type {
-  RuntimeTransportClient,
-  RuntimeTransportCloseResult,
-  RuntimeTransportPreviewReservation,
-  RuntimeTransportTimeoutRecovery,
-} from '@taucad/runtime/transport';
-
-let generation = 0;
-const reservePreview = (): RuntimeTransportPreviewReservation => ({ abortGeneration: ++generation });
-
-let resolveClosed: (result: RuntimeTransportCloseResult) => void = () => {};
-const closed = new Promise<RuntimeTransportCloseResult>((resolve) => {
-  resolveClosed = resolve;
-});
-let closedResult: RuntimeTransportCloseResult | undefined;
-const settleClosed = (result: RuntimeTransportCloseResult): void => {
-  if (closedResult) return;
-  closedResult = result;
-  resolveClosed(result);
-};
-
-const timeoutRecovery: RuntimeTransportTimeoutRecovery = {
-  kind: 'terminable',
-  abortRender(target) {
-    console.log('send the targeted timeout to the host', target);
-  },
-  async terminate() {
-    // ...terminate exactly this client's host, then:
-    settleClosed({ cause: 'render-timeout' });
-  },
-};
-
-const transportClient: RuntimeTransportClient = {
-  id: 'my-isolated-host',
-  closed,
-  reservePreview,
-  renderTimeoutRecovery: timeoutRecovery,
-  describe: () => ({
-    id: 'my-isolated-host',
-    wire: 'web-worker',
-    memory: { geometryDelivery: 'transfer', abortSignal: 'wire-notify' },
-    fileSystem: 'unbound',
-  }),
-  async open() {
-    throw new Error('Open the transport wire here.');
-  },
-  async initialize() {
-    throw new Error('Send the runtime initialization call here.');
-  },
-  async resolveGeometry() {
-    throw new Error('Decode the transported geometry here.');
-  },
-  async close() {
-    settleClosed({ cause: 'requested' });
-  },
-};
-```
-
-`close()` must be idempotent and must terminate the exact host owned by this materialized client. `createRuntimeClient` observes `closed` from construction onward, so a failure before or during `open()` still settles admitted work.
+A later requested close cannot overwrite a previously observed exit, wire failure, or timeout.
 
 ## Related
 
-- [Configure Render Timeouts](../guides/render-timeouts)
+- [Configure Operation Timeouts](../guides/render-timeouts)
 - [Framework Integrations API](./frameworks)
 - [Embedding in a Host](../guides/embedding-in-a-host)
 - [Worker Model](../concepts/worker-model)

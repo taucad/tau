@@ -1,9 +1,10 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import { z } from 'zod';
-import type { ExportFile, GeometryResponse } from '@taucad/runtime/types';
+import { createExportFile } from '@taucad/runtime/types';
+import type { ExportFile } from '@taucad/runtime/types';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { createKernelParameterDeclaration, defineKernel } from '@taucad/runtime/kernel';
+import { createKernelParameterDeclaration, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
 import type { imageEdgeSchemas } from '#image-export-options.js';
@@ -12,14 +13,18 @@ import { imageTranscoder } from '#image.transcoder.js';
 type WebpInput = z.input<typeof imageEdgeSchemas.webp>;
 type WebpOutput = z.output<typeof imageEdgeSchemas.webp>;
 
-const geometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
+const geometry = new Uint8Array([1]);
 const kernel = defineKernel({
   id: 'imageTypeKernel',
   extensions: ['ts'],
   name: 'Image type kernel',
   version: '1.0.0',
-  exportFormats: {
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+  exports: {
     glb: {
+      title: 'glTF binary',
+      mimeType: 'model/gltf-binary',
+      extension: 'glb',
       optionsSchema: z.object({
         coordinateSystem: z.enum(['y-up', 'z-up']).default('y-up'),
         unit: z.object({ length: z.enum(['meter', 'millimeter']).default('meter') }).default({ length: 'meter' }),
@@ -30,13 +35,12 @@ const kernel = defineKernel({
   async initialize() {
     return {};
   },
-  async getDependencies() {
+  async resolve() {
     return { resolved: [], unresolved: [] };
   },
-  async getParameters() {
-    return {
-      success: true,
-      data: createKernelParameterDeclaration(
+  async describe() {
+    return createKernelSuccess({
+      parameters: createKernelParameterDeclaration(
         {},
         { type: 'object', properties: {} },
         {
@@ -44,14 +48,16 @@ const kernel = defineKernel({
           name: 'ImageTypeKernelParameters',
         },
       ),
-      issues: [],
-    };
+    });
   },
-  async createGeometry() {
-    return { geometry, nativeHandle: {} };
+  async evaluate() {
+    return { handle: geometry };
   },
-  async exportGeometry() {
-    return { success: true, data: [], issues: [] };
+  async render({ handle }) {
+    return { content: handle };
+  },
+  async export({ handle }) {
+    return { files: [createExportFile('glb', 'model.glb', handle)] };
   },
 });
 const runtime = defineRuntime({ kernels: [kernel()], transcoders: [imageTranscoder()] });
@@ -94,10 +100,10 @@ describe('image export option types', () => {
   });
 
   it('should infer exact public client options and plural results', async () => {
-    const result = await client.export('webp', {
-      source,
-      content: { includeEdges: true },
-      exportOptions: {
+    const document = client.open({ source });
+    void document.export('glb', { content: { includeEdges: true } });
+    const result = await document.export('webp', {
+      options: {
         mode: 'batch',
         quality: 1,
         axes: true,
@@ -120,21 +126,19 @@ describe('image export option types', () => {
       },
     });
     if (result.success) {
-      expectTypeOf(result.data).toEqualTypeOf<ExportFile[]>();
+      expectTypeOf(result.files).toExtend<readonly [ExportFile, ...ExportFile[]]>();
     }
 
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [{ id: 'front', camera: frontCamera }],
         // @ts-expect-error a shared camera would make per-view precedence ambiguous.
         camera: frontCamera,
       },
     });
-    void client.export('png', {
-      source,
-      exportOptions: {
+    void document.export('png', {
+      options: {
         mode: 'single',
         // @ts-expect-error views belong to the batch branch.
         views: [{ id: 'front', camera: frontCamera }],
@@ -142,10 +146,9 @@ describe('image export option types', () => {
     });
     // A label's presence is its own switch — optional at both altitudes, with no
     // separate enable flag to keep in sync.
-    void client.export('webp', { source, exportOptions: { mode: 'single', label: 'Front' } });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', { options: { mode: 'single', label: 'Front' } });
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [
           { id: 'front', label: 'Front', camera: frontCamera },
@@ -153,17 +156,15 @@ describe('image export option types', () => {
         ],
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'single',
         // @ts-expect-error the deleted enable flag is no longer part of the surface.
         includeLabel: true,
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [
           {
@@ -175,16 +176,14 @@ describe('image export option types', () => {
         ],
       },
     });
-    void client.export('png', {
-      source,
-      exportOptions: {
+    void document.export('png', {
+      options: {
         // @ts-expect-error quality is not a PNG option.
         quality: 0.8,
       },
     });
-    void client.export('png', {
-      source,
-      exportOptions: {
+    void document.export('png', {
+      options: {
         mode: 'batch',
         views: [
           {
@@ -196,9 +195,8 @@ describe('image export option types', () => {
         ],
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [
           {
@@ -210,17 +208,15 @@ describe('image export option types', () => {
         ],
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'single',
         // @ts-expect-error misspelled image settings are rejected.
         widht: 800,
       },
     });
-    void client.export('webp', {
-      source,
-      exportOptions: {
+    void document.export('webp', {
+      options: {
         mode: 'batch',
         views: [{ id: 'front', camera: frontCamera }],
         // @ts-expect-error unrelated export settings are rejected.

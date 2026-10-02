@@ -6,11 +6,12 @@
  * across the shared color matrix. See docs/policy/color-space-policy.md.
  */
 import { describe, expect, it } from 'vitest';
+import { asKnownArtifact } from '@taucad/runtime';
 import { cadMaterialDefaults } from '@taucad/runtime/types';
 import { replicadKernel } from '#replicad.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
 import {
-  assertSuccess,
+  assertRenderingSuccess,
   colorParityCases,
   createTestGeometry,
   expectLinearBaseColor,
@@ -20,7 +21,7 @@ import {
 } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
-import type { HashedGeometryResult } from '@taucad/runtime/types';
+import type { Rendering } from '@taucad/runtime/client';
 
 const runtime = defineRuntime({ kernels: [replicadKernel()], bundlers: [esbuildBundler()] });
 
@@ -30,15 +31,14 @@ export default function main() {
   return { shape: makeCylinder(5, 20), color: '${hex}', opacity: ${opacity} };
 }`;
 
-async function renderColored(hex: string, opacity: number): Promise<HashedGeometryResult> {
+async function renderColored(hex: string, opacity: number): Promise<Rendering> {
   const file = 'colored.ts';
   const result = await createTestGeometry({
     runtime,
     files: { [file]: buildSourceFor(hex, opacity) },
-    mainFile: file,
-    parameters: {},
+    open: { source: { path: file } },
   });
-  assertSuccess(result, `replicad createGeometry (${hex}, alpha=${opacity})`);
+  assertRenderingSuccess(result, `replicad createGeometry (${hex}, alpha=${opacity})`);
   return result;
 }
 
@@ -70,10 +70,9 @@ export default function main() {
   ];
 }`,
       },
-      mainFile: file,
-      parameters: {},
+      open: { source: { path: file } },
     });
-    assertSuccess(result, 'replicad multi-color createGeometry');
+    assertRenderingSuccess(result, 'replicad multi-color createGeometry');
 
     const baseColors = await getAllMaterialBaseColors(result);
     expect(baseColors.length).toBeGreaterThanOrEqual(3);
@@ -93,10 +92,9 @@ export default function main() {
   return makeCylinder(5, 20);
 }`,
       },
-      mainFile: file,
-      parameters: {},
+      open: { source: { path: file } },
     });
-    assertSuccess(result, 'replicad uncoloured createGeometry');
+    assertRenderingSuccess(result, 'replicad uncoloured createGeometry');
 
     const baseColor = await getMaterialBaseColor(result);
     const expected = cadMaterialDefaults.baseColorFactor;
@@ -118,19 +116,19 @@ export default function main() {
   return draw().hLine(50).vLine(30).hLine(-50).close();
 }`,
       },
-      mainFile: file,
-      parameters: {},
+      open: { source: { path: file } },
     });
-    assertSuccess(result, 'replicad SVG createGeometry');
+    assertRenderingSuccess(result, 'replicad SVG createGeometry');
 
-    expect(result.data).toMatchObject({
-      format: 'svg',
+    const artifact = asKnownArtifact(result.artifact);
+    expect(artifact).toMatchObject({
+      mimeType: 'image/svg+xml',
       units: { length: 'mm' },
     });
-    if (result.data.format !== 'svg') {
-      throw new TypeError(`Expected SVG geometry, received ${result.data.format}`);
+    if (artifact?.mimeType !== 'image/svg+xml') {
+      throw new TypeError('Expected SVG drawing artifact.');
     }
-    expect(result.data.content).toContain('viewBox="-1.000001 -31.000001 52.000001999999995 32.000002"');
-    expect(result.data.content).toContain('d="M 0 0 L 50 0 L 50 -30 L 0 -30 L 0 0 Z"');
+    expect(artifact.content).toContain('viewBox="-1.000001 -31.000001 52.000001999999995 32.000002"');
+    expect(artifact.content).toContain('d="M 0 0 L 50 0 L 50 -30 L 0 -30 L 0 0 Z"');
   });
 });

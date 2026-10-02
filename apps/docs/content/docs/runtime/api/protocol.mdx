@@ -1,17 +1,38 @@
 ---
 title: Runtime Protocol API
-description: Typed runtime calls, event names, telemetry, and client closure data for custom transports.
+description: Schema-derived document calls, commands, notifications, and binary delivery for custom transports.
 docType: reference
 wordBudgetOverride: 400
 ---
 
 # Runtime Protocol API
 
-Custom transports use `runtimeProtocolSchemas` from `@taucad/runtime/transport` to validate messages at both channel boundaries. Import `runtimeProtocolListenNames`, `RuntimeEvaluateModelArgs`, and `RuntimeResolveParametersArgs` from `@taucad/runtime/types`; they describe the empty core listen-name tuple and two typed calls. Ordinary consumers use the higher-level [client](./client).
+Custom transports use `runtimeDocumentProtocolSchemas` from `@taucad/runtime/transport` to validate messages at both boundaries. `RuntimeDocumentProtocol` from `@taucad/runtime/types` is derived from that schema authority. Ordinary consumers use the [client](./client).
 
-The `/types` exports `TelemetryOrigin`, `TelemetrySpanRecord`, and `TelemetryBatch` identify a source, correlate a span, and transfer bounded observations. Import `RuntimeEvaluateInput` and `RuntimeTerminatedDetail` from `@taucad/runtime/client` for evaluation source/options and the reason an isolated host closed. Preserve that cause in diagnostics rather than recasting a host exit as a requested close.
+## Calls and Notifications
+
+`documentProtocolCallNames` names six acknowledged calls: `initialize`, `describe`, `export`, `snapshotSource`, `transcode`, `dispose`.
+
+`documentProtocolClientNotifyNames` names document/view commands: `open`, `update`, `close`, `openView`, `updateView`, `closeView`, `abort`, `binaryMaterialised`.
+
+`documentProtocolWorkerNotifyNames` names host notifications: `described`, `evaluating`, `evaluated`, `rendering`, `rendered`, `progress`, `errorEvent`, `stateChanged`, `log`, `logBatch`, `telemetry`, `capabilitiesUpdated`. `documentProtocolNotifyNames` combines both directions. Import these names from `@taucad/runtime/types`.
+
+Document, evaluation, view, request, and operation identities correlate work to its owner. Preserve them through admission, supersession, error reporting, and binary materialization. A stale notification must not replace a newer evaluation or projection.
+
+## Binary Delivery
+
+`WireArtifact`, `WireRendering`, `WireExportFile`, and `WireExportResult` retain transport-owned binary delivery handles. Public `Rendering` artifacts and `ExportResult.files` contain materialized owned bytes. A successful wire export preserves the nonempty tuple invariant. Custom transports resolve delivery before publishing a consumer result and acknowledge `binaryMaterialised` so retained storage can be released.
+
+Text SVG content remains text. Unknown MIME types remain opaque artifacts; consumers choose a renderer separately from transport delivery.
+
+## Telemetry and Closure
+
+`TelemetryOrigin`, `TelemetrySpanRecord`, and `TelemetryBatch` identify sources and correlate bounded observations. Log and telemetry delivery precedes the associated terminal notification.
+
+Transport loss rejects pending work with `RuntimeTerminatedError`. Explicit document/view closure and normal supersession retain their own outcome semantics. An operation-scoped `errorEvent` must settle only its correlated operation; a connection-scoped failure belongs to the client.
 
 ## Related
 
 - [Transport API](./transport)
+- [Client API](./client)
 - [Runtime architecture](../concepts/architecture)

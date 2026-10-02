@@ -307,6 +307,7 @@
     "@taucad/runtime-testing": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/utils": "workspace:*",
+    "@taucad/workbench": "workspace:*",
     "@testing-library/jest-dom": "catalog:",
     "@testing-library/react": "catalog:",
     "@testing-library/user-event": "^14.6.1",

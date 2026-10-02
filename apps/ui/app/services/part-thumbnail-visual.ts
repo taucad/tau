@@ -66,7 +66,7 @@ function admitPreviewGeometry(json: ReturnType<typeof parseGltfBytes>['json']): 
     }
   };
   for (const rawMesh of meshes) {
-    const primitives = object(rawMesh)['primitives'];
+    const { primitives } = object(rawMesh);
     if (!Array.isArray(primitives)) {
       continue;
     }

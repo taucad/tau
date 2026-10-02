@@ -88,6 +88,12 @@ if (shipsGit && !existsSync(gitSourceRoot)) {
   throw new Error(`The git payload ships with its source; ${gitSourceRoot} is missing. Run prepare-git again.`);
 }
 const { release, unsigned, zip } = parseMacosPackageMode(process.argv.slice(2));
+// Local non-ZIP packages remain development-only; every distribution archive is held.
+if (zip) {
+  execFileSync(process.execPath, [resolve(workspaceRoot, 'packages/plugins/tscircuit/check-vendored-licenses.mjs')], {
+    stdio: 'inherit',
+  });
+}
 const extensions = ['TauQuickLookPreview.appex', 'TauQuickLookThumbnail.appex'] as const;
 const adhocAppEntitlements = [
   'com.apple.security.cs.allow-jit',

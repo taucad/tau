@@ -7,7 +7,7 @@
  * in a sibling. This test pins:
  *
  * - `webWorkerHost(opts)` produces a {@link RuntimeTransportHost}
- *   typed against `RuntimeProtocol` and the same literal id as the
+ *   typed against `RuntimeDocumentProtocol` and the same literal id as the
  *   composed `webWorkerTransport` plugin (host side exported separately).
  * - The options shape exposes the canonical `worker: KernelWorker`
  *   field (the host's only required option).
@@ -17,7 +17,7 @@
 
 import { assertType, describe, it } from 'vitest';
 import type { RuntimeTransportHost } from '#transport/runtime-transport.types.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import { webWorkerHost } from '#transport/web-worker-host.js';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 
@@ -26,7 +26,7 @@ describe('webWorkerHost — type conformance (R1)', () => {
     const stubWorker = {} as unknown as KernelWorker;
     const direct = webWorkerHost({ worker: stubWorker });
     const second = webWorkerHost({ worker: stubWorker });
-    assertType<RuntimeTransportHost<RuntimeProtocol, Readonly<Record<never, never>>, 'web-worker'>>(direct);
+    assertType<RuntimeTransportHost<RuntimeDocumentProtocol, Readonly<Record<never, never>>, 'web-worker'>>(direct);
     assertType<typeof direct>(second);
   });
 

@@ -1,0 +1,59 @@
+---
+title: tscircuit
+description: Author electronics boards in TSX and render them as 3D, schematic, or PCB.
+docType: reference
+icon: lucide:cpu
+wordBudgetOverride: 450
+---
+
+`@taucad/tscircuit` evaluates `.tsx` and `.jsx` boards in browser workers and Node hosts, retaining settled circuit JSON for views and exports.
+
+## Authoring contract
+
+Each entry file default-exports one board component. `React` is provided as a global by the worker, so the import is optional. Give each part a unique `name`; footprints are footprinter strings such as `0402`, `0603`, `soic8`, or `dip8`; positions are millimetres.
+
+```tsx
+export default () => (
+  <board width='20mm' height='20mm'>
+    <resistor name='R1' resistance='1k' footprint='0402' pcbX={-4} pcbY={0} />
+    <led name='LED1' color='red' footprint='0603' pcbX={4} pcbY={0} />
+    <trace from='.R1 > .pin2' to='.LED1 > .anode' />
+  </board>
+);
+```
+
+Traces use tscircuit selectors (`.R1 > .pin1`, `net.GND`). Optional `defaultParameters` exports become editable parameters that Tau passes to the component as props.
+
+## Views and exports
+
+One evaluation retains the settled circuit JSON. It offers these separately declared views from that handle:
+
+| View ID     | Artifact                                               |
+| ----------- | ------------------------------------------------------ |
+| `board`     | Textured GLB board with feature-edge lines             |
+| `schematic` | Schematic SVG, with one instance per authored sheet    |
+| `pcb`       | Fitted PCB layout SVG; `pinNumbers` is its view option |
+
+The kernel declares export IDs `board` (GLB), `bom` (CSV), `netlist` (text), and `circuit` (JSON). Each has its own title, MIME type, extension, and optional options schema. A schematic-only result may offer only the schematic view; the ordered offers are returned by `evaluate`.
+
+Each sheet is rendered through its converter ID. A uniquely named authored sheet keeps a stable selection across reorder; unnamed or duplicate-name sheets have evaluation-local IDs and titles marked “current evaluation,” and expire after reevaluation. With no authored sheets, the schematic renders the whole circuit. Parts outside all sheets produce a warning naming those parts. The SVG dimensions are fitted pixels, with no physical-unit claim.
+
+The document client opens synchronously with `client.open({ source })`, selects PCB with `document.view('pcb', { options: { pinNumbers: true } })`, and waits for the result with `await pcb.rendering()`.
+
+## Offline behaviour
+
+The circuit uses the local autorouter and no parts engine. The kernel blocks `fetch` during evaluation and GLB conversion, so `http(s)://` footprint and `cadModel` URLs are never requested; each attempt becomes a `warning` naming the URL. Library references (`kicad:`, `jlcpcb:`) produce a `warning` and an unplaced part. The render completes with local bodies and bounding boxes.
+
+## Install
+
+Install `@taucad/tscircuit` with its runtime and Zod peers. The package includes its upstream engine, so consumers need no pnpm hook or bundler alias.
+
+```bash
+npm install @taucad/tscircuit @taucad/runtime zod
+```
+
+## Related
+
+- [Choose a Kernel](../guides/choosing-a-kernel)
+- [Kernel Plugins](../api/kernels)
+- [Kernel Selection](../concepts/kernel-selection)

@@ -12,7 +12,7 @@ import { definePassthroughTransport } from '#transport/define-runtime-transport.
 import { inProcessClient } from '#transport/in-process-client.js';
 import type { InProcessClientOptions, inProcessId } from '#transport/in-process-client.js';
 import { inProcessClientOptionsSchema } from '#transport/in-process-transport.schemas.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 import type { TransportPlugin } from '#transport/runtime-transport.types.js';
 import type { AnyRuntimeDefinition } from '#worker/runtime-definition.js';
 
@@ -59,9 +59,9 @@ const makeInProcessTransport = definePassthroughTransport({
  */
 export const inProcessTransport = <const Runtime extends AnyRuntimeDefinition>(
   options: InProcessClientOptions<Runtime>,
-): TransportPlugin<RuntimeProtocol, Readonly<Record<never, never>>, typeof inProcessId, Runtime> =>
+): TransportPlugin<RuntimeDocumentProtocol, Readonly<Record<never, never>>, typeof inProcessId, Runtime> =>
   makeInProcessTransport(options) as unknown as TransportPlugin<
-    RuntimeProtocol,
+    RuntimeDocumentProtocol,
     Readonly<Record<never, never>>,
     typeof inProcessId,
     Runtime

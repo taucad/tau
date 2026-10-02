@@ -3,7 +3,7 @@ title: 'Context Engineering Policy'
 description: 'Comprehensive guide to optimizing system prompts, tool definitions, and context pipelines for LLM agents. Covers foundational principles, placement framework, cache economics, compaction safety, subagent criteria, untrusted content, and eval discipline.'
 status: active
 created: '2026-03-09'
-updated: '2026-09-20'
+updated: '2026-09-30'
 related:
   - docs/policy/filesystem-context-policy.md
   - docs/research/transcript-search-architecture.md
@@ -213,7 +213,7 @@ Use XML tags or Markdown headers for distinct sections:
 ```
 ## Workflow
 1. Read existing files before editing
-2. Verify with get_kernel_result after changes
+2. Verify with evaluate_model after changes
 ```
 
 The tool descriptions already explain HOW; the prompt only needs WHEN.

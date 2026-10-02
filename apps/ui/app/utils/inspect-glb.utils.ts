@@ -69,6 +69,16 @@ export function inspectGlb(glb: ArrayBuffer | Uint8Array<ArrayBuffer>): GltfInsp
   return inspectGltfJson(json);
 }
 
+/** A valid model with no mesh has no picture to present or thumbnail to store. */
+export function isEmptyGlb(glb: Uint8Array<ArrayBuffer>): boolean {
+  try {
+    return inspectGlb(glb).counts.meshes === 0;
+  } catch {
+    // Malformed output remains an error for the rendering owner to report.
+    return false;
+  }
+}
+
 export function inspectGltfJson(json: GltfJson): GltfInspection {
   const asset = {
     version: json.asset.version,

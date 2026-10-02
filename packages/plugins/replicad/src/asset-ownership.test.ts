@@ -60,7 +60,7 @@ describe('Replicad asset ownership', () => {
           }
         `,
       },
-      mainFile: 'box.ts',
+      open: { source: { path: 'box.ts' } },
     });
 
     expect(geometry.success).toBe(true);

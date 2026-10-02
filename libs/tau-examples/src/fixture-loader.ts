@@ -21,7 +21,7 @@ export type Fixture = {
   mainFile: string;
 };
 
-const candidateMainFiles = ['main.ts', 'main.py', 'main.scad', 'main.cpp'] as const;
+const candidateMainFiles = ['main.ts', 'main.tsx', 'main.py', 'main.scad', 'main.cpp'] as const;
 const excludedDirectories = new Set(['.tau', '__pycache__']);
 const excludedFiles = new Set(['thumbnail.webp']);
 

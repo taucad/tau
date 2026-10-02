@@ -7,6 +7,7 @@ import { toast } from 'sonner';
 import type { ToolInvocation } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import type { FileExtension } from '@taucad/types';
+import { fileExtensions } from '@taucad/types/constants';
 import { randomUuid } from '@taucad/utils/id';
 
 import {
@@ -32,8 +33,6 @@ import { deriveAvailableFormats } from '#utils/export-formats.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { awaitFreshRender } from '#machines/await-fresh-render.js';
-import { selectCadFailureIssues } from '#machines/cad.machine.js';
 
 /** Matches {@link chat-tool-file-operation.tsx} action buttons — label hidden until `@xs/code`. */
 const exportActionLabelClassName = '**:data-[slot=label]:hidden @xs/code:**:data-[slot=label]:flex';
@@ -58,6 +57,16 @@ function filenameBaseFromTargetFile(targetFile: string): string {
   return basename.slice(0, extensionIndex);
 }
 
+function exportedFormatFor(to: string, primaryName: string | undefined): FileExtension | undefined {
+  const requested = fileExtensions.find((format) => format === to);
+  if (requested !== undefined) {
+    return requested;
+  }
+  return fileExtensions
+    .filter((format) => primaryName?.endsWith(`.${format}`))
+    .sort((first, second) => second.length - first.length)[0];
+}
+
 function ExportTargetLink({ targetFile }: { readonly targetFile: string }): React.JSX.Element {
   const basename = getBasename(targetFile);
 
@@ -80,7 +89,7 @@ function ExportGeometryDownloadSplitButton({
     readonly byteLength: number;
   }>;
   readonly targetFile: string;
-  readonly exportedFormat: FileExtension;
+  readonly exportedFormat: FileExtension | undefined;
 }): React.JSX.Element {
   const fileManager = useFileManager();
   const { geometryUnits, projectRef } = useProject();
@@ -89,7 +98,7 @@ function ExportGeometryDownloadSplitButton({
   const { exportToDisk, isExporting } = useExportToDisk(filenameBase);
   const [isArtifactDownloadBusy, setIsArtifactDownloadBusy] = useState(false);
   const [exportMenuOpen, setExportMenuOpen] = useState(false);
-  const [selectedFormat, setSelectedFormat] = useState<FileExtension>(exportedFormat);
+  const [selectedFormat, setSelectedFormat] = useState<FileExtension | undefined>(exportedFormat);
   const isDownloadBusy = isArtifactDownloadBusy || isExporting;
 
   useEffect(() => {
@@ -116,7 +125,7 @@ function ExportGeometryDownloadSplitButton({
   }, [openPanel]);
 
   const onDownload = useCallback(async () => {
-    if (selectedFormat !== exportedFormat) {
+    if (selectedFormat !== undefined && selectedFormat !== exportedFormat) {
       const claimId = randomUuid();
       projectRef.send({ type: 'claimGeometryUnit', claimId, entryPath: targetFile });
       try {
@@ -132,16 +141,7 @@ function ExportGeometryDownloadSplitButton({
           toast.error('Export failed');
           return;
         }
-        const settled = await awaitFreshRender(claimedActor);
-        const failedIssues = selectCadFailureIssues(settled);
-        if (failedIssues) {
-          toast.error(failedIssues.map((issue) => issue.message).join('; ') || 'Export failed');
-          return;
-        }
-        if (settled.context.latestGeometryOutcome !== 'success') {
-          toast.error(`No current successful geometry is available for ${targetFile}`);
-          return;
-        }
+        // The document export pins its own evaluation; a view may be absent or fail independently.
         await exportToDisk(claimedActor, selectedFormat);
       } catch {
         toast.error('Export failed');
@@ -159,7 +159,7 @@ function ExportGeometryDownloadSplitButton({
       );
       await downloadExportArtifactSet(artifacts, {
         singleFileName: files[0]!.name,
-        archiveName: `${filenameBase}-${exportedFormat}.zip`,
+        archiveName: `${filenameBase}-${exportedFormat ?? 'export'}.zip`,
       });
     } catch {
       toast.error('Failed to read exported file');
@@ -172,7 +172,7 @@ function ExportGeometryDownloadSplitButton({
     setSelectedFormat(formatValue as FileExtension);
   }, []);
 
-  const formatLabel = selectedFormat.toUpperCase();
+  const formatLabel = selectedFormat?.toUpperCase() ?? 'files';
 
   const downloadTooltip = useMemo(() => {
     if (selectedFormat === exportedFormat) {
@@ -205,7 +205,7 @@ function ExportGeometryDownloadSplitButton({
           >
             <Download className='size-3.5 shrink-0' />
             <span data-slot='label'>Download </span>
-            <span className='uppercase'>{selectedFormat}</span>
+            <span className='uppercase'>{selectedFormat ?? 'files'}</span>
           </button>
         </TooltipTrigger>
         <TooltipContent side='top'>{downloadTooltip}</TooltipContent>
@@ -266,7 +266,7 @@ function ExportGeometryDownloadSplitButton({
 export function ChatMessageToolExportGeometry({
   part,
 }: {
-  readonly part: ToolInvocation<typeof toolName.exportGeometry>;
+  readonly part: ToolInvocation<typeof toolName.exportModel>;
 }): React.JSX.Element {
   switch (part.state) {
     case 'input-streaming':
@@ -311,7 +311,7 @@ export function ChatMessageToolExportGeometry({
               </ChatToolLabel>
             </ChatToolCardTitle>
             <ExportGeometryDownloadSplitButton
-              exportedFormat={output.format}
+              exportedFormat={exportedFormatFor(output.to, output.files[0]?.name)}
               files={output.files}
               targetFile={input.targetFile}
             />
@@ -327,7 +327,7 @@ export function ChatMessageToolExportGeometry({
     case 'approval-requested':
     case 'approval-responded':
     case 'output-denied': {
-      throw new Error(`Unexpected ${toolName.exportGeometry} state: ${part.state}`);
+      throw new Error(`Unexpected ${toolName.exportModel} state: ${part.state}`);
     }
   }
 }

@@ -1,4 +1,6 @@
 import { createRuntimeClient } from '@taucad/runtime/client';
+import { createExportFile } from '@taucad/runtime/types';
+import type { ExportFile } from '@taucad/runtime/types';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { converterRuntime } from '@taucad/converter/runtime';
@@ -156,33 +158,44 @@ const convert = async (request: NativeRequest): Promise<void> => {
   try {
     await client.connect();
     const source = { files, entry: request.entry };
-    const outcome =
-      request.target === 'png'
-        ? await (async () => {
-            const glb = await client.export('glb', { source });
-            const model = glb.success && glb.data.length === 1 ? glb.data[0] : undefined;
-            if (!glb.success || !model?.name.endsWith('.glb')) {
-              throw new Error(glb.success ? 'Converter returned an invalid GLB result' : glb.issues[0]?.message);
-            }
-            const thumbnail = await toStaticThumbnailGlb(model.bytes);
-            return client.export('png', {
-              source: { entry: 'thumbnail.glb', files: { 'thumbnail.glb': thumbnail } },
-              exportOptions: { width: request.width!, height: request.height! },
-            });
-          })()
-        : await client.export('usdz', { source });
-    const output = outcome.success && outcome.data.length === 1 ? outcome.data[0] : undefined;
-    if (!outcome.success || !output?.name.endsWith(`.${request.target}`)) {
-      throw new Error(
-        outcome.success
-          ? `Converter returned an invalid ${request.target.toUpperCase()} result`
-          : (outcome.issues[0]?.message ?? `${request.target.toUpperCase()} export failed`),
-      );
+    const document = client.open({ source, watch: false });
+    try {
+      let output: ExportFile;
+      if (request.target === 'png') {
+        const glb = await document.export('glb');
+        const model = glb.success && glb.files.length === 1 ? glb.files[0] : undefined;
+        if (!glb.success || !model?.name.endsWith('.glb')) {
+          throw new Error(glb.success ? 'Converter returned an invalid GLB result' : glb.issues[0]?.message);
+        }
+        const thumbnail = await toStaticThumbnailGlb(model.bytes);
+        const converted = await client.transcode({
+          from: 'glb',
+          to: 'png',
+          files: [createExportFile('glb', 'thumbnail.glb', thumbnail)],
+          options: { width: request.width!, height: request.height! },
+        });
+        const image = converted.success && converted.data.length === 1 ? converted.data[0] : undefined;
+        if (!converted.success || !image?.name.endsWith('.png')) {
+          throw new Error(
+            converted.success ? 'Converter returned an invalid PNG result' : converted.issues[0]?.message,
+          );
+        }
+        output = image;
+      } else {
+        const exported = await document.export('usdz');
+        const file = exported.success && exported.files.length === 1 ? exported.files[0] : undefined;
+        if (!exported.success || !file?.name.endsWith('.usdz')) {
+          throw new Error(exported.success ? 'Converter returned an invalid USDZ result' : exported.issues[0]?.message);
+        }
+        output = file;
+      }
+      if (output.bytes.byteLength === 0 || output.bytes.byteLength > manifest.limits.maxOutputBytes) {
+        throw new Error('Quick Look output-size limit exceeded');
+      }
+      post({ id: request.id, success: true, name: output.name, base64: uint8ArrayToBase64(output.bytes) });
+    } finally {
+      document.close();
     }
-    if (output.bytes.byteLength === 0 || output.bytes.byteLength > manifest.limits.maxOutputBytes) {
-      throw new Error('Quick Look output-size limit exceeded');
-    }
-    post({ id: request.id, success: true, name: output.name, base64: uint8ArrayToBase64(output.bytes) });
   } catch (error) {
     post({
       id: request.id,
@@ -191,7 +204,7 @@ const convert = async (request: NativeRequest): Promise<void> => {
     });
   } finally {
     active.delete(request.id);
-    client.terminate();
+    await client.shutdown();
   }
 };
 

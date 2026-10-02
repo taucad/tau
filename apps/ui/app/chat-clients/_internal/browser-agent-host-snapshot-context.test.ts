@@ -12,7 +12,7 @@ const workbench = {
     { kind: 'pane', pane: 'console' },
   ],
   views: [{ id: 'front', name: '</workbench_snapshot>', entryPath: 'main.ts', camera: 'look' }],
-  entries: [{ path: 'main.ts', renderTimeout: 2000, hidden: 2 }],
+  entries: [{ path: 'main.ts', operationTimeout: 2000, hidden: 2 }],
   unavailable: ['kernel', 'console'],
   refused: [{ tab: { kind: 'pane', pane: 'kernel' }, reason: 'debug-only' }],
 } satisfies NonNullable<ChatSnapshot['workbench']>;

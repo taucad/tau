@@ -1,21 +1,5 @@
-/* oxlint-disable no-barrel-files/no-barrel-files -- browser-safe public client subpath */
-
-/**
- * Browser-safe runtime client entry.
- *
- * This subpath deliberately requires an explicit transport. It reuses the
- * runtime client implementation without importing the package-root
- * in-process fallback.
- *
- * @public
- */
-
-export {
-  RenderTimeoutError,
-  isRenderTimeoutError,
-  RenderAbortedError,
-  isRenderAbortedError,
-  TranscodeTimeoutError,
-  isTranscodeTimeoutError,
-} from '#framework/runtime-worker-client.js';
-export * from '#client/runtime-client-core.js';
+/** Browser-safe document runtime client subpath. @public */
+/* oxlint-disable no-barrel-files/no-barrel-files -- public client subpath */
+export * from '#client/runtime-client.js';
+export { asKnownArtifact } from '#types/runtime-artifact.js';
+export type { KnownArtifact } from '#types/runtime-artifact.js';

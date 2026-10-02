@@ -106,7 +106,7 @@ const toolFor = (shape: StepShape): string =>
     : shape === 'edit'
       ? 'edit_file'
       : shape === 'kernel'
-        ? 'get_kernel_result'
+        ? 'evaluate_model'
         : shape === 'screenshot'
           ? 'screenshot'
           : 'read_file';
@@ -231,7 +231,7 @@ const toolsFor = (options: {
   readonly step: number;
 }): ToolRegistry => ({
   list: () =>
-    ['read_file', 'create_file', 'edit_file', 'get_kernel_result', 'screenshot'].map((name) => ({
+    ['read_file', 'create_file', 'edit_file', 'evaluate_model', 'screenshot'].map((name) => ({
       name,
       description: `Run ${name}.`,
       inputSchema: { type: 'object' },

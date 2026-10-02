@@ -1,4 +1,4 @@
-import type { MimeType } from '#types/mime-types.types.js';
+import type { MediaType } from '#types/mime-types.types.js';
 
 /**
  * File content classification used by model-visible filesystem metadata.
@@ -166,5 +166,5 @@ export type FileInput = {
 export type ExportFile = {
   name: string;
   bytes: Uint8Array<ArrayBuffer>;
-  mimeType: MimeType;
+  mimeType: MediaType;
 };

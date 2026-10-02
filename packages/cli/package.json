@@ -89,6 +89,7 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "citty": "catalog:",
     "consola": "catalog:",
     "ink": "catalog:",

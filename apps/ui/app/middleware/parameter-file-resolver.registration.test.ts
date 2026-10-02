@@ -21,7 +21,7 @@ describe('parameterFileResolver plugin registration', () => {
     expect(registration).not.toHaveProperty('createModule');
   });
 
-  it('should register geometry hooks in the worker-owned UI runtime', async () => {
+  it('should register dependency resolution and evaluation hooks in the worker-owned UI runtime', async () => {
     const resolvedRuntime = await resolveRuntimeDefinition(runtime, {
       tauApiUrl: 'http://localhost:4000',
       tauWebSocketUrl: 'ws://localhost:4001',
@@ -30,7 +30,7 @@ describe('parameterFileResolver plugin registration', () => {
     expect(resolvedRuntime.middleware.map((middleware) => middleware.id)).toContain('parameterFileResolver');
     const parameterFileResolverMiddleware = await resolveRuntimePluginDefinition('middleware', parameterFileResolver());
     expect(parameterFileResolverMiddleware.name).toBe('ParameterFileResolver');
-    expect(parameterFileResolverMiddleware.getDependencies).toEqual(expect.any(Function));
-    expect(parameterFileResolverMiddleware.wrapCreateGeometry).toEqual(expect.any(Function));
+    expect(parameterFileResolverMiddleware.resolve).toEqual(expect.any(Function));
+    expect(parameterFileResolverMiddleware.wrapEvaluate).toEqual(expect.any(Function));
   });
 });

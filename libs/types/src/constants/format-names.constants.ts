@@ -55,6 +55,11 @@ export const formatConfigurations = {
     name: 'Caligari Object (COB)',
     description: 'Developed by Caligari Corporation for use in truSpace, a 3D modeling and animation format.',
   },
+  csv: {
+    name: 'Comma-Separated Values (CSV)',
+    description:
+      'Plain-text tabular format with one record per line; produced by EDA kernels for bill-of-materials exports.',
+  },
   dae: {
     name: 'COLLADA (DAE)',
     description:
@@ -119,6 +124,11 @@ export const formatConfigurations = {
   jpg: {
     name: 'JPEG Image (JPG)',
     description: 'Conventional file-extension alias for JPEG raster images produced by the runtime image transcoder.',
+  },
+  json: {
+    name: 'JavaScript Object Notation (JSON)',
+    description:
+      'Structured text interchange format; produced by EDA kernels for the settled circuit JSON that backs every other export.',
   },
   ifc: {
     name: 'Industry Foundation Classes (IFC)',
@@ -215,6 +225,10 @@ export const formatConfigurations = {
     name: 'STEP (STP)',
     description:
       'Developed by ISO for use in representing product manufacturing information, facilitating interoperability between different CAD systems.',
+  },
+  txt: {
+    name: 'Plain Text (TXT)',
+    description: 'Unstructured plain-text format; produced by EDA kernels for human-readable netlist exports.',
   },
   usda: {
     name: 'Universal Scene Description ASCII (USDA)',

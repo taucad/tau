@@ -119,7 +119,7 @@ export type BundlerDefinition<Context = unknown, Options extends Record<string, 
   clearExecutionCache?(code: string | undefined, context: Context): void;
 
   /** Clean up bundler resources (e.g., esbuild.stop()). */
-  cleanup?(context: Context): Promise<void>;
+  onDispose?(context: Context): Promise<void>;
 };
 
 type BundlerExtensions<Options> = string[] | ((options: Options | undefined) => string[]);
@@ -150,7 +150,7 @@ type BundlerDefinitionConfig<
   /** Invalidate cached execution results after source changes. */
   clearExecutionCache?(code: string | undefined, context: Context): void;
   /** Clean up bundler resources (e.g., esbuild.stop()). */
-  cleanup?(context: Context): Promise<void>;
+  onDispose?(context: Context): Promise<void>;
 };
 
 /* oxlint-disable typescript/prefer-function-type, typescript/consistent-type-definitions, typescript/no-restricted-types -- Named callable type keeps private unique-symbol carriers nameable in emitted declarations; [] is the exact no-options tuple. */

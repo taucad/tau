@@ -4,7 +4,7 @@ import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import type { ComputeGeneration, ComputeReuseScope, ComputeStoreEntry } from '@taucad/runtime/kernel';
 import { describe, expect, it, vi } from 'vitest';
 
-import { createReplicadComputeReuse } from '#replicad-compute-reuse.js';
+import { createReplicadComputeReuse, replicadModuleFacade } from '#replicad-compute-reuse.js';
 
 type FakeBooleanOptions = { readonly [key: string]: unknown; readonly optimisation?: string };
 
@@ -204,6 +204,26 @@ const createFixture = (
 };
 
 describe('Replicad semantic compute reuse', () => {
+  it('should wrap a frozen module export without violating Proxy property invariants', async () => {
+    const source = Object.freeze({
+      makeBox: (first: readonly number[], second: readonly number[]) =>
+        new FakeShape(`box(${first.join(',')};${second.join(',')})`),
+      deserializeShape: (serialized: string) => new FakeShape(serialized),
+    });
+    const facade = replicadModuleFacade(source);
+    const adapter = createReplicadComputeReuse({
+      library: facade,
+      enabled: true,
+      producer: producer(),
+      environment: { variant: 'single' },
+    });
+    const scope = createScope(adapter, new Map());
+    const result = await adapter.run(scope.scope, async () => adapter.library.makeBox([0, 0, 0], [2, 3, 4]));
+    expect(result.serialize()).toBe('box(0,0,0;2,3,4)');
+    expect(Object.getOwnPropertyDescriptor(facade, 'makeBox')?.configurable).toBe(true);
+    expect(Object.getOwnPropertyDescriptor(source, 'makeBox')?.configurable).toBe(false);
+  });
+
   it('warms a fresh adapter from published actions before running user code', async () => {
     const cache = new Map<ActionDigest, CacheEntry>();
     const seed = createFixture();

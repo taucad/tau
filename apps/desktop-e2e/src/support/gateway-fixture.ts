@@ -80,7 +80,7 @@ export type GatewayFixtureScript = {
    * chat can write *different* bytes. Replaying the same arguments is not
    * neutral: a byte-identical rewrite settles as `turn.finalized` with no
    * changed paths (nothing to save, so no revision marker), and two turns of
-   * identical `create_file`/`get_kernel_result` pairs are exactly the four-event
+   * identical `create_file`/`evaluate_model` pairs are exactly the four-event
    * alternation the host's `ping_pong` safeguard nudges on
    * (`packages/agent-host/src/harness/safeguards.ts:397-416`).
    */
@@ -419,7 +419,7 @@ type WireToolResult = {
  * Every failed `tool_result` in the given forwarded requests, bounded so the
  * failure message stays readable.
  *
- * The agent's runtime tools (`get_kernel_result`, `screenshot`, `test_model`)
+ * The agent's runtime tools (`evaluate_model`, `screenshot`, `test_model`)
  * run in the services utility, and a request main refuses answers the agent
  * with an *error result* rather than a failed run — so every other assertion in
  * a row still passes while the tool never touched the kernel. This is the seam
@@ -475,7 +475,7 @@ const toolResultText = (content: unknown): string => {
 
 /** One `tool_result`, paired with the call it answered. */
 export type GatewayToolResult = {
-  /** The tool the agent called, e.g. `get_kernel_result`. */
+  /** The tool the agent called, e.g. `evaluate_model`. */
   readonly name: string;
   /** The provider's `is_error` flag. */
   readonly isError: boolean;

@@ -31,12 +31,11 @@ import { msgpackCodec } from '@taucad/rpc/codec/msgpack';
 import type { KernelWorker } from '#framework/kernel-worker.js';
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import type { RuntimeFileSystemBase } from '#types/runtime-kernel.types.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
-import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
+import { createDocumentWorkerDispatcher } from '#transport/_internal/runtime-document-dispatcher.js';
 import { createWorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import { extractInlineFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
-import { encodeGeometryAsOwnedCopy } from '#transport/_internal/owned-transfer-bytes.js';
 import { installWorkerCrashTrap } from '#transport/_internal/worker-crash-trap.js';
 import {
   createSessionPairing,
@@ -185,7 +184,7 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
 
   /** Live sockets and their heartbeat liveness flag. */
   const liveness = new Map<WebSocket, { alive: boolean }>();
-  const dispatchers = new Set<ChannelServerHandle<RuntimeProtocol>>();
+  const dispatchers = new Set<ChannelServerHandle<RuntimeDocumentProtocol>>();
   /** In-flight per-connection teardowns, so `close()` can await them. */
   const teardowns = new Set<Promise<void>>();
 
@@ -405,10 +404,9 @@ export const webSocketHost = (options: WebSocketHostOptions): WebSocketHostHandl
       }
 
       const worker = options.worker();
-      const dispatcher = createWorkerDispatcher(worker, port, {
+      const dispatcher = createDocumentWorkerDispatcher(worker, port, {
         inlineFileSystem,
         ...(computeStorePort ? { computeStorePort } : {}),
-        encodeGeometry: encodeGeometryAsOwnedCopy,
       });
       dispatchers.add(dispatcher);
 

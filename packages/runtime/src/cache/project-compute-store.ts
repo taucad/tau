@@ -671,12 +671,22 @@ const createProjectComputeLifecycle = (filesystem: KernelFileSystem): ProjectCom
       for (const digest of leases.content) {
         references.content.add(digest);
       }
+      const cutoff = now - gracePeriod;
+      const actionFiles = await listTreeFiles(filesystem, actionRoot);
+      // A young action is retained by the grace period even without a ref. Its
+      // output and dependencies must remain readable for that same interval.
+      for (const file of actionFiles) {
+        if (file.mtimeMs > cutoff) {
+          const value = digestFromPath({ path: file.path, root: actionRoot, suffix: '.json' });
+          if (value !== undefined) {
+            references.actions.add(actionDigest({ value }));
+          }
+        }
+      }
       await markActionClosure({ filesystem, reachable: references });
       signal?.throwIfAborted();
       await writeGcState(filesystem, { schemaVersion: 1, phase: 'sweeping', runId, startedAt: now });
 
-      const cutoff = now - gracePeriod;
-      const actionFiles = await listTreeFiles(filesystem, actionRoot);
       const contentFiles = await listTreeFiles(filesystem, contentRoot);
       let removedActions = 0;
       let removedContent = 0;

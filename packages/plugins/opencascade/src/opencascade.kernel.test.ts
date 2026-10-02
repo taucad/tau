@@ -4,24 +4,25 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- vitest asymmetric matchers return any */
 import { describe, it, expect, beforeAll, afterAll, afterEach, vi } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
-import type { FileExtension, GeometryResponse, GetParametersResult, HashedGeometryResult } from '@taucad/runtime/types';
-import type { ExportResult } from '@taucad/runtime';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { Description, ExportResult, Rendering } from '@taucad/runtime/client';
 import { opencascadeKernel } from '#opencascade.kernel.js';
 import { getModuleRegistry } from '@taucad/runtime/kernel';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import type { OpenCascadeInstance } from 'libcascade/init';
 import {
-  assertFailure,
-  assertSuccess,
+  assertRenderingSuccess,
   createMockKernelRuntime,
   createGeometryFile,
   createGeometryTestHelpers,
   createTestRuntimeClient,
+  expectKernelProjectionOrder,
   mapZupMillimetersToYupMeters,
   readCoordinateEvidence,
 } from '@taucad/runtime-testing';
 import { esbuildBundler } from '@taucad/esbuild';
 import { defineRuntime } from '@taucad/runtime/worker';
+import { opencascadeExportSchemas, opencascadeRenderSchema } from '#opencascade.schemas.js';
 
 // =============================================================================
 // Test Utilities
@@ -108,11 +109,28 @@ async function readGltfMaterialNames(glbBytes: Uint8Array<ArrayBuffer>): Promise
     .map((material) => material.getName());
 }
 
-function extractGltfBytes(result: { data: GeometryResponse }): Uint8Array<ArrayBuffer> {
-  if (result.data.format !== 'gltf') {
-    throw new Error(`Expected GLTF geometry, received ${result.data.format}`);
+function extractGltfBytes(result: Rendering): Uint8Array<ArrayBuffer> {
+  assertRenderingSuccess(result);
+  const artifact = asKnownArtifact(result.artifact);
+  if (artifact?.mimeType !== 'model/gltf-binary') {
+    throw new Error(`Expected GLB rendering, received ${result.artifact.mimeType}`);
   }
-  return result.data.content;
+  return artifact.content;
+}
+
+function assertDocumentSuccess<T extends Description | ExportResult>(
+  result: T,
+  context: string,
+): asserts result is Extract<T, { success: true }> {
+  if (!result.success) {
+    throw new Error(`${context}: ${result.issues.map((issue) => issue.message).join('; ')}`);
+  }
+  expect(result.success).toBe(true);
+}
+
+function assertDocumentFailure(result: Description | ExportResult | Rendering, context: string): void {
+  expect(result.success, `${context}: expected failure`).toBe(false);
+  expect(result.issues.length, `${context}: expected a reported issue`).toBeGreaterThan(0);
 }
 
 function assertStepRoundTripVolumeMm3(stepBytes: Uint8Array<ArrayBuffer>, expectedMm3: number): void {
@@ -151,6 +169,7 @@ const runtime = defineRuntime({
   kernels: [opencascadeKernel({ wasm: 'full', ocTracing: 'off' })],
   bundlers: [esbuildBundler()],
 });
+const makeTestClient = (files: Record<string, string>) => createTestRuntimeClient({ runtime, files });
 
 type GeometryFile = ReturnType<typeof createGeometryFile>;
 
@@ -162,7 +181,8 @@ const sourcePath = (file: GeometryFile): string => (file.path === '' ? file.file
 // =============================================================================
 
 describe('OpenCascade Kernel', { timeout: 30_000 }, () => {
-  let client: ReturnType<typeof createTestRuntimeClient>;
+  let client: ReturnType<typeof makeTestClient>;
+  let document: ReturnType<ReturnType<typeof makeTestClient>['open']> | undefined;
 
   const renderGeometry = async ({
     file,
@@ -170,67 +190,71 @@ describe('OpenCascade Kernel', { timeout: 30_000 }, () => {
   }: {
     file: GeometryFile;
     parameters: Record<string, unknown>;
-  }): Promise<HashedGeometryResult> => {
-    const outcome = await client.render({ source: { path: sourcePath(file) }, parameters });
+  }): Promise<Rendering> => {
+    document?.close();
+    const opened = client.open({ source: { path: sourcePath(file) }, parameters });
+    document = opened;
+    const outcome = await opened.view('model').rendering();
     expect(outcome.superseded).toBe(false);
     if (outcome.superseded) {
       throw new Error('OpenCascade test render was superseded');
     }
-    return outcome.geometry;
+    return outcome.rendering;
   };
 
-  const readParameters = async (file: GeometryFile): Promise<GetParametersResult> => {
-    const result = Promise.withResolvers<GetParametersResult>();
-    const unsubscribe = client.on('parametersResolved', result.resolve);
-    try {
-      await client.render({ source: { path: sourcePath(file) } });
-      return await result.promise;
-    } finally {
-      unsubscribe();
-    }
-  };
+  const readParameters = async (file: GeometryFile): Promise<Description> =>
+    client.describe({ source: { path: sourcePath(file) } });
 
   const exportLastRender = async (
-    format: FileExtension,
+    format: Extract<keyof ReturnType<typeof opencascadeKernel>['exports'], string>,
     exportOptions?: Record<string, unknown>,
-  ): Promise<ExportResult> => client.export(format, exportOptions === undefined ? undefined : { exportOptions });
+  ): Promise<ExportResult> => {
+    if (!document) {
+      throw new Error('Expected a committed document before export');
+    }
+    return document.export(format, exportOptions === undefined ? undefined : { options: exportOptions });
+  };
 
   it('should expose libcascade as its only authored-code module coordinate', () => {
     const plugin = opencascadeKernel();
 
     expect(plugin.builtinModuleNames).toEqual(['libcascade']);
-    expect(plugin.detectImport?.test("import init from 'libcascade';")).toBe(true);
-    expect(plugin.detectImport?.test("import init from 'opencascade';")).toBe(false);
-    expect(plugin.detectImport?.test("import init from 'opencascade.js';")).toBe(false);
+    const { detectImport } = plugin;
+    expect(detectImport).toBeDefined();
+    if (!detectImport) {
+      throw new Error('OpenCascade kernel has no import detector metadata.');
+    }
+    const pattern = new RegExp(detectImport.source, detectImport.flags);
+    expect(pattern.test("import init from 'libcascade';")).toBe(true);
+    expect(pattern.test("import init from 'opencascade';")).toBe(false);
+    expect(pattern.test("import init from 'opencascade.js';")).toBe(false);
   });
 
   beforeAll(async () => {
-    client = createTestRuntimeClient({
-      runtime,
-      files: {
-        'box-import.ts': `import oc, { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { if (oc.BRepPrimAPI_MakeBox !== BRepPrimAPI_MakeBox) throw new Error('libcascade default and named exports diverged'); return new oc.BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
-        'box-import-js.ts': `import { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
-        'no-import.ts': `export default function main() { return { x: 1 }; }`,
-        'model.scad': `cube([10, 10, 10]);`,
-        'box-require.js': `const { BRepPrimAPI_MakeBox } = require('libcascade');\nmodule.exports = function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
-        'params.ts': `
+    client = makeTestClient({
+      'box-import.ts': `import oc, { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { if (oc.BRepPrimAPI_MakeBox !== BRepPrimAPI_MakeBox) throw new Error('libcascade default and named exports diverged'); return new oc.BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'box-import-js.ts': `import { BRepPrimAPI_MakeBox } from 'libcascade';\nexport default function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'no-import.ts': `export default function main() { return { x: 1 }; }`,
+      'model.scad': `cube([10, 10, 10]);`,
+      'box-require.js': `const { BRepPrimAPI_MakeBox } = require('libcascade');\nmodule.exports = function main() { return new BRepPrimAPI_MakeBox(10, 10, 10).Shape(); }`,
+      'params.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export const defaultParams = { width: 10, height: 20, depth: 30 };
 export default function main(params = defaultParams) {
   return new BRepPrimAPI_MakeBox(params.width, params.height, params.depth).Shape();
 }`,
-        'no-params.ts': `
+      'no-params.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
 }`,
-        'box.ts': `
+      'box.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 20, 30);
   return box.Shape();
 }`,
-        'coordinate.ts': `
+      'coordinate.ts': `
 import { BRepPrimAPI_MakeBox, gp_Pnt } from 'libcascade';
 export default function main() {
   const origin = new gp_Pnt(7, 11, 13);
@@ -240,32 +264,32 @@ export default function main() {
   box.delete();
   return [{ shape, name: 'Asymmetric Box', color: '#ff0000' }];
 }`,
-        'multi.ts': `
+      'multi.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10);
   const box2 = new BRepPrimAPI_MakeBox(20, 20, 20);
   return [box1.Shape(), box2.Shape()];
 }`,
-        'named.ts': `
+      'named.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10);
   return [{ shape: box.Shape(), name: 'MyBox', color: '#ff0000' }];
 }`,
-        'named-pbr.ts': `
+      'named-pbr.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10);
   return [{ shape: box.Shape(), name: 'PbrBox', color: '#ff0000', metalness: 0.2, roughness: 0.7, density: 1.25 }];
 }`,
-        'parameterized.ts': `
+      'parameterized.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export const defaultParams = { size: 10 };
 export default function main(params = defaultParams) {
   return new BRepPrimAPI_MakeBox(params.size, params.size, params.size).Shape();
 }`,
-        'assembly.ts': `
+      'assembly.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10);
@@ -275,7 +299,7 @@ export default function main() {
     { shape: box2.Shape(), name: 'LargeBox' },
   ];
 }`,
-        'fuse.ts': `
+      'fuse.ts': `
 import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Fuse } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -287,7 +311,7 @@ export default function main() {
   fused.delete();
   return result;
 }`,
-        'common.ts': `
+      'common.ts': `
 import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Common } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
@@ -299,7 +323,7 @@ export default function main() {
   common.delete();
   return result;
 }`,
-        'cut.ts': `
+      'cut.ts': `
 import { BRepPrimAPI_MakeBox, Message_ProgressRange, BRepAlgoAPI_Cut } from 'libcascade';
 export default function main() {
   const box1 = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
@@ -311,7 +335,7 @@ export default function main() {
   cut.delete();
   return result;
 }`,
-        'fillet.ts': `
+      'fillet.ts': `
 import { BRepPrimAPI_MakeBox, BRepFilletAPI_MakeFillet, ChFi3d_FilletShape, TopExp_Explorer, TopAbs_ShapeEnum, TopoDS } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(20, 20, 20).Shape();
@@ -326,7 +350,7 @@ export default function main() {
   fillet.delete();
   return result;
 }`,
-        'transform.ts': `
+      'transform.ts': `
 import { BRepPrimAPI_MakeBox, gp_Trsf, gp_Vec, BRepBuilderAPI_Transform } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -340,7 +364,7 @@ export default function main() {
   transformed.delete();
   return result;
 }`,
-        'compound.ts': `
+      'compound.ts': `
 import { TopoDS_Builder, TopoDS_Compound, BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   const builder = new TopoDS_Builder();
@@ -352,13 +376,13 @@ export default function main() {
   builder.Add(compound, box2);
   return compound;
 }`,
-        'empty.ts': `
+      'empty.ts': `
 import init from 'libcascade';
 export default function main() {}`,
-        'default-not-function.ts': `
+      'default-not-function.ts': `
 import 'libcascade';
 export default 42;`,
-        'bad-call.ts': `
+      'bad-call.ts': `
 import { BRepPrimAPI_MakeBox, BRepFilletAPI_MakeFillet, ChFi3d_FilletShape, TopExp_Explorer, TopAbs_ShapeEnum, TopoDS } from 'libcascade';
 export default function main() {
   const box = new BRepPrimAPI_MakeBox(10, 10, 10).Shape();
@@ -370,7 +394,7 @@ export default function main() {
   }
   return fillet.Shape();
 }`,
-        'throw-in-params.ts': `
+      'throw-in-params.ts': `
 import 'libcascade';
 const trap = {};
 Object.defineProperty(trap, 'badKey', {
@@ -382,17 +406,19 @@ Object.defineProperty(trap, 'badKey', {
 export const defaultParams = trap;
 export default function main() {}
 `,
-        'bad-wedge-arity.ts': `
+      'bad-wedge-arity.ts': `
 import { BRepPrimAPI_MakeWedge, gp_Pnt, gp_Dir, gp_Ax2 } from 'libcascade';
 export default function main() {
   const ax = new gp_Ax2(new gp_Pnt(0, 0, 0), new gp_Dir(0, 0, 1));
   return new BRepPrimAPI_MakeWedge(ax, 1, 1, 1, 0, 1, 0, 0, 0, 1).Shape();
 }`,
-      },
     });
   });
 
-  afterAll(async () => client.shutdown());
+  afterAll(async () => {
+    document?.close();
+    await client.shutdown();
+  });
 
   // =============================================================================
   // getParameters
@@ -402,16 +428,16 @@ export default function main() {
     it('should extract defaultParams', async () => {
       const geometryFile = createGeometryFile('params.ts');
       const result = await readParameters(geometryFile);
-      assertSuccess(result, 'getParameters');
-      expect(result.data.defaults).toEqual({ width: 10, height: 20, depth: 30 });
-      expect(result.data.schema).toBeDefined();
+      assertDocumentSuccess(result, 'getParameters');
+      expect(result.parameters.defaults).toEqual({ width: 10, height: 20, depth: 30 });
+      expect(result.parameters.schema).toBeDefined();
     });
 
     it('should return empty params when none defined', async () => {
       const geometryFile = createGeometryFile('no-params.ts');
       const result = await readParameters(geometryFile);
-      assertSuccess(result, 'getParameters empty');
-      expect(result.data.defaults).toEqual({});
+      assertDocumentSuccess(result, 'getParameters empty');
+      expect(result.parameters.defaults).toEqual({});
     });
   });
 
@@ -425,9 +451,8 @@ export default function main() {
     it('should create a box shape and return GLTF', async () => {
       const geometryFile = createGeometryFile('box.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'box createGeometry');
-      expect(result.data).toBeDefined();
-      expect(result.data.format).toBe('gltf');
+      assertRenderingSuccess(result, 'box createGeometry');
+      expect(asKnownArtifact(result.artifact)?.mimeType).toBe('model/gltf-binary');
       await geometryHelpers.expectValidGltf(result);
       const { nodeNames, meshNames } = await readGltfNodeMeshNames(extractGltfBytes(result));
       expect(nodeNames).toEqual(['Shape 1']);
@@ -437,13 +462,13 @@ export default function main() {
     it('should handle parameterized geometry', async () => {
       const geometryFile = createGeometryFile('parameterized.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: { size: 25 } });
-      assertSuccess(result, 'parameterized createGeometry');
+      assertRenderingSuccess(result, 'parameterized createGeometry');
     });
 
     it('should handle array of shapes', async () => {
       const geometryFile = createGeometryFile('multi.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'multi-shape createGeometry');
+      assertRenderingSuccess(result, 'multi-shape createGeometry');
       const { nodeNames, meshNames } = await readGltfNodeMeshNames(extractGltfBytes(result));
       expect(nodeNames).toEqual(['Shape 1', 'Shape 2']);
       expect(meshNames).toEqual(['Shape 1', 'Shape 2']);
@@ -452,13 +477,13 @@ export default function main() {
     it('should handle named shape entries', async () => {
       const geometryFile = createGeometryFile('named.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'named shapes createGeometry');
+      assertRenderingSuccess(result, 'named shapes createGeometry');
     });
 
     it('should keep shape labels out of generated GLB material names', async () => {
       const geometryFile = createGeometryFile('named-pbr.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'named PBR shape createGeometry');
+      assertRenderingSuccess(result, 'named PBR shape createGeometry');
 
       const gltfBytes = extractGltfBytes(result);
       const { nodeNames, meshNames } = await readGltfNodeMeshNames(gltfBytes);
@@ -470,7 +495,7 @@ export default function main() {
     it('should serialize native handles as versioned geometry-only BRep snapshots', async () => {
       const geometryFile = createGeometryFile('named-pbr.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'named PBR shape createGeometry for native-handle snapshot');
+      assertRenderingSuccess(result, 'named PBR shape createGeometry for native-handle snapshot');
       expect(result).not.toHaveProperty('serializedNativeHandle');
 
       const oc = getModuleRegistry().get('libcascade') as unknown as OpenCascadeInstance | undefined;
@@ -501,7 +526,7 @@ export default function main() {
           },
         ];
         const snapshot = expectOpenCascadeSnapshot(
-          definition.serializeNativeHandle!({ nativeHandle }, kernelRuntime, context),
+          definition.serializeHandle!({ handle: nativeHandle }, kernelRuntime, context),
         );
         expect(snapshot.entries).toHaveLength(1);
         expect(snapshot.entries[0]!.metadata).toEqual(
@@ -522,14 +547,96 @@ export default function main() {
           expect.any(Object),
         );
 
-        const restored = definition.deserializeNativeHandle!(
-          { serializedNativeHandle: structuredClone(snapshot) },
+        const restored = definition.deserializeHandle!(
+          { serialized: structuredClone(snapshot) },
           kernelRuntime,
           context,
         );
         try {
           expect(restored).toHaveLength(1);
           expect(restored[0]!.name).toBe('PbrBox');
+          const fine = opencascadeRenderSchema.parse({
+            tessellation: { linearTolerance: 0.001, angularTolerance: 5 },
+          });
+          const coarse = opencascadeRenderSchema.parse({
+            tessellation: { linearTolerance: 1, angularTolerance: 60 },
+          });
+          const render = async (handle: typeof restored, options: typeof fine) => {
+            const projected = await definition.render!({ handle, view: 'model', options }, kernelRuntime, context);
+            if (!(projected.content instanceof Uint8Array)) {
+              throw new Error('Expected GLB bytes from OpenCascade render');
+            }
+            return projected.content;
+          };
+          const cylinder = new cascade.BRepPrimAPI_MakeCylinder(5, 20);
+          const cylinderShape = cylinder.Shape();
+          const curvedHandle = [{ ...nativeHandle[0]!, shape: cylinderShape }];
+          const freshCylinder = new cascade.BRepPrimAPI_MakeCylinder(5, 20);
+          const freshCylinderShape = freshCylinder.Shape();
+          const curvedFresh = [{ ...nativeHandle[0]!, shape: freshCylinderShape }];
+          try {
+            expect(await render(curvedHandle, coarse)).toEqual(await render(curvedFresh, coarse));
+            const curvedSnapshot = expectOpenCascadeSnapshot(
+              definition.serializeHandle!({ handle: curvedHandle }, kernelRuntime, context),
+            );
+            const curvedRestored = definition.deserializeHandle!(
+              { serialized: structuredClone(curvedSnapshot) },
+              kernelRuntime,
+              context,
+            );
+            const curvedProperties = new cascade.GProp_GProps();
+            try {
+              const restoredGlb = await render(curvedRestored, fine);
+              const freshGlb = await render(curvedFresh, fine);
+              const restoredDocument = await new NodeIO().readBinary(restoredGlb);
+              const freshDocument = await new NodeIO().readBinary(freshGlb);
+              expect(await readGltfSize(restoredGlb)).toEqual(await readGltfSize(freshGlb));
+              expect(
+                restoredDocument
+                  .getRoot()
+                  .listMeshes()
+                  .map((mesh) =>
+                    mesh.listPrimitives().map((primitive) => primitive.getAttribute('POSITION')?.getCount()),
+                  ),
+              ).toEqual(
+                freshDocument
+                  .getRoot()
+                  .listMeshes()
+                  .map((mesh) =>
+                    mesh.listPrimitives().map((primitive) => primitive.getAttribute('POSITION')?.getCount()),
+                  ),
+              );
+              cascade.BRepGProp.VolumeProperties(curvedRestored[0]!.shape, curvedProperties, true, false, false);
+              expect(curvedProperties.Mass()).toBeCloseTo(Math.PI * 5 * 5 * 20, 0);
+            } finally {
+              curvedProperties.delete();
+              definition.releaseHandle!({ handle: curvedRestored }, kernelRuntime, context);
+            }
+            const ordered = await expectKernelProjectionOrder({
+              renderA: async () => render(curvedHandle, fine),
+              renderB: async () => render(curvedHandle, coarse),
+              freshB: async () => render(curvedFresh, coarse),
+              export: async () => {
+                const projected = await definition.export!(
+                  { exportId: 'step', handle: curvedHandle, options: opencascadeExportSchemas.step.parse({}) },
+                  kernelRuntime,
+                  context,
+                );
+                const step = projected.files[0].bytes;
+                if (!(step instanceof Uint8Array)) {
+                  throw new Error('Expected STEP bytes');
+                }
+                assertStepRoundTripVolumeMm3(step, Math.PI * 5 * 5 * 20);
+                return step.byteLength;
+              },
+            });
+            expect(ordered.first).not.toEqual(ordered.intervening);
+          } finally {
+            freshCylinderShape.delete();
+            freshCylinder.delete();
+            cylinderShape.delete();
+            cylinder.delete();
+          }
           const properties = new cascade.GProp_GProps();
           try {
             cascade.BRepGProp.VolumeProperties(restored[0]!.shape, properties, true, false, false);
@@ -538,7 +645,7 @@ export default function main() {
             properties.delete();
           }
         } finally {
-          definition.disposeNativeHandle!({ nativeHandle: restored }, kernelRuntime, context);
+          definition.releaseHandle!({ handle: restored }, kernelRuntime, context);
         }
       } finally {
         shape.delete();
@@ -549,7 +656,7 @@ export default function main() {
     it('should render an empty GLB when main returns undefined (empty body)', async () => {
       const geometryFile = createGeometryFile('empty.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'empty createGeometry');
+      assertRenderingSuccess(result, 'empty createGeometry');
       await geometryHelpers.expectValidGltf(result);
       await geometryHelpers.expectMeshCount(result, 0);
     });
@@ -557,34 +664,37 @@ export default function main() {
     it('should render an empty GLB when default export is not a function', async () => {
       const geometryFile = createGeometryFile('default-not-function.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'default-not-function createGeometry');
+      assertRenderingSuccess(result, 'default-not-function createGeometry');
       await geometryHelpers.expectValidGltf(result);
       await geometryHelpers.expectMeshCount(result, 0);
     });
 
     // -- exportGeometry --
 
-    it('should fail export with no geometry', async () => {
-      const freshClient = createTestRuntimeClient({ runtime });
+    it('should evaluate a source for an export without first rendering a view', async () => {
+      const exportOnly = client.open({ source: { path: 'box.ts' } });
       try {
-        await expect(freshClient.export('step')).rejects.toMatchObject({ code: 'RUNTIME_NO_RENDER_OUTCOME' });
+        const result = await exportOnly.export('step');
+        assertDocumentSuccess(result, 'export-only STEP');
+        expect(result.files[0].bytes).toBeInstanceOf(Uint8Array);
+        expect(result.files[0].bytes.byteLength).toBeGreaterThan(0);
       } finally {
-        await freshClient.shutdown();
+        exportOnly.close();
       }
     });
 
     it('should export to STEP format', async () => {
       const geometryFile = createGeometryFile('box.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for STEP export');
+      assertRenderingSuccess(createResult, 'createGeometry for STEP export');
 
       const exportResult = await exportLastRender('step');
-      assertSuccess(exportResult, 'STEP export');
-      expect(exportResult.data.length).toBeGreaterThan(0);
-      expect(exportResult.data[0]?.bytes).toBeInstanceOf(Uint8Array);
-      expect(exportResult.data[0]?.mimeType).toBe('application/step');
+      assertDocumentSuccess(exportResult, 'STEP export');
+      expect(exportResult.files.length).toBeGreaterThan(0);
+      expect(exportResult.files[0].bytes).toBeInstanceOf(Uint8Array);
+      expect(exportResult.files[0].mimeType).toBe('application/step');
 
-      const stepContent = new TextDecoder().decode(exportResult.data[0]!.bytes);
+      const stepContent = new TextDecoder().decode(exportResult.files[0].bytes);
       expect(stepContent).toContain('CLOSED_SHELL');
       expect(stepContent).toContain('ADVANCED_BREP_SHAPE_REPRESENTATION');
       expect(stepContent).toContain('MANIFOLD_SOLID_BREP');
@@ -595,60 +705,60 @@ export default function main() {
     it('should export to STL format', async () => {
       const geometryFile = createGeometryFile('box.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for STL export');
+      assertRenderingSuccess(createResult, 'createGeometry for STL export');
 
       const exportResult = await exportLastRender('stl');
-      assertSuccess(exportResult, 'STL export');
-      expect(exportResult.data.length).toBeGreaterThan(0);
-      expect(exportResult.data[0]?.name).toBe('Shape 1');
-      expect(exportResult.data[0]?.bytes).toBeInstanceOf(Uint8Array);
+      assertDocumentSuccess(exportResult, 'STL export');
+      expect(exportResult.files.length).toBeGreaterThan(0);
+      expect(exportResult.files[0].name).toBe('Shape 1');
+      expect(exportResult.files[0].bytes).toBeInstanceOf(Uint8Array);
     });
 
     it('should export to binary STL format', async () => {
       const geometryFile = createGeometryFile('box.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for STL-binary export');
+      assertRenderingSuccess(createResult, 'createGeometry for STL-binary export');
 
       const exportResult = await exportLastRender('stl', { binary: true });
-      assertSuccess(exportResult, 'STL-binary export');
-      expect(exportResult.data.length).toBeGreaterThan(0);
+      assertDocumentSuccess(exportResult, 'STL-binary export');
+      expect(exportResult.files.length).toBeGreaterThan(0);
     });
 
     it('should export to GLB format', async () => {
       const geometryFile = createGeometryFile('box.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for GLB export');
+      assertRenderingSuccess(createResult, 'createGeometry for GLB export');
 
       const exportResult = await exportLastRender('glb');
-      assertSuccess(exportResult, 'GLB export');
-      expect(exportResult.data[0]?.name).toContain('glb');
+      assertDocumentSuccess(exportResult, 'GLB export');
+      expect(exportResult.files[0].name).toContain('glb');
     });
 
     it('should export an empty GLB after an empty render but keep STEP and STL unavailable', async () => {
       const geometryFile = createGeometryFile('empty.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'empty createGeometry for export');
+      assertRenderingSuccess(createResult, 'empty createGeometry for export');
 
       const glbResult = await exportLastRender('glb');
-      assertSuccess(glbResult, 'empty GLB export');
-      const document = await new NodeIO().readBinary(glbResult.data[0]!.bytes);
+      assertDocumentSuccess(glbResult, 'empty GLB export');
+      const document = await new NodeIO().readBinary(glbResult.files[0].bytes);
       expect(document.getRoot().listMeshes()).toHaveLength(0);
 
-      assertFailure(await exportLastRender('step'), 'empty STEP export');
-      assertFailure(await exportLastRender('stl'), 'empty STL export');
+      assertDocumentFailure(await exportLastRender('step'), 'empty STEP export');
+      assertDocumentFailure(await exportLastRender('stl'), 'empty STL export');
     });
 
     it('should export STEP assembly with multiple named shapes', async () => {
       const geometryFile = createGeometryFile('assembly.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for assembly export');
+      assertRenderingSuccess(createResult, 'createGeometry for assembly export');
 
       const exportResult = await exportLastRender('step');
-      assertSuccess(exportResult, 'STEP export');
-      expect(exportResult.data.length).toBe(1);
-      expect(exportResult.data[0]?.name).toBe('assembly');
+      assertDocumentSuccess(exportResult, 'STEP export');
+      expect(exportResult.files.length).toBe(1);
+      expect(exportResult.files[0].name).toBe('assembly');
 
-      const stepContent = new TextDecoder().decode(exportResult.data[0]!.bytes);
+      const stepContent = new TextDecoder().decode(exportResult.files[0].bytes);
       expect(stepContent).toContain('CLOSED_SHELL');
       expect(stepContent).toContain('ADVANCED_BREP_SHAPE_REPRESENTATION');
       expect(stepContent).toContain('MANIFOLD_SOLID_BREP');
@@ -666,12 +776,12 @@ export default function main() {
     it('should export STEP with non-shape material labels', async () => {
       const geometryFile = createGeometryFile('named-pbr.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for PBR STEP export');
+      assertRenderingSuccess(createResult, 'createGeometry for PBR STEP export');
 
       const exportResult = await exportLastRender('step');
-      assertSuccess(exportResult, 'PBR STEP export');
+      assertDocumentSuccess(exportResult, 'PBR STEP export');
 
-      const stepContent = new TextDecoder().decode(exportResult.data[0]!.bytes);
+      const stepContent = new TextDecoder().decode(exportResult.files[0].bytes);
       expect(stepContent).toContain('PbrBox');
       expect(stepContent).toContain('tau-material');
     });
@@ -679,28 +789,28 @@ export default function main() {
     it('should round-trip STEP export/import preserving box volume', async () => {
       const geometryFile = createGeometryFile('box.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for STEP round-trip');
+      assertRenderingSuccess(createResult, 'createGeometry for STEP round-trip');
 
       const exportResult = await exportLastRender('step');
-      assertSuccess(exportResult, 'STEP export');
-      assertStepRoundTripVolumeMm3(exportResult.data[0]!.bytes, 6000);
+      assertDocumentSuccess(exportResult, 'STEP export');
+      assertStepRoundTripVolumeMm3(exportResult.files[0].bytes, 6000);
     });
 
     it('should round-trip STEP export/import preserving assembly volume', async () => {
       const geometryFile = createGeometryFile('assembly.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for assembly STEP round-trip');
+      assertRenderingSuccess(createResult, 'createGeometry for assembly STEP round-trip');
 
       const exportResult = await exportLastRender('step');
-      assertSuccess(exportResult, 'STEP assembly export');
+      assertDocumentSuccess(exportResult, 'STEP assembly export');
       // SmallBox 10³ + LargeBox 20³
-      assertStepRoundTripVolumeMm3(exportResult.data[0]!.bytes, 9000);
+      assertStepRoundTripVolumeMm3(exportResult.files[0].bytes, 9000);
     });
 
     it('should return error for unsupported export format', async () => {
       const geometryFile = createGeometryFile('box.ts');
       const createResult = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(createResult, 'createGeometry for unsupported format test');
+      assertRenderingSuccess(createResult, 'createGeometry for unsupported format test');
 
       // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- intentionally invalid format for error-path testing
       const exportResult = await exportLastRender('obj' as unknown as 'step');
@@ -716,15 +826,15 @@ export default function main() {
       const coarseExport = await exportLastRender('glb', {
         tessellation: { linearTolerance: 1, angularTolerance: 60 },
       });
-      assertSuccess(coarseExport, 'coarse GLB export');
+      assertDocumentSuccess(coarseExport, 'coarse GLB export');
 
       const fineExport = await exportLastRender('glb', {
         tessellation: { linearTolerance: 0.001, angularTolerance: 5 },
       });
-      assertSuccess(fineExport, 'fine GLB export');
+      assertDocumentSuccess(fineExport, 'fine GLB export');
 
-      const coarseSize = coarseExport.data[0]!.bytes.byteLength;
-      const fineSize = fineExport.data[0]!.bytes.byteLength;
+      const coarseSize = coarseExport.files[0].bytes.byteLength;
+      const fineSize = fineExport.files[0].bytes.byteLength;
 
       // Finer tessellation must produce a larger GLB (more triangles on curved fillet surfaces)
       expect(fineSize).toBeGreaterThan(coarseSize);
@@ -737,15 +847,15 @@ export default function main() {
       const coarseExport = await exportLastRender('stl', {
         tessellation: { linearTolerance: 1, angularTolerance: 60 },
       });
-      assertSuccess(coarseExport, 'coarse STL export');
+      assertDocumentSuccess(coarseExport, 'coarse STL export');
 
       const fineExport = await exportLastRender('stl', {
         tessellation: { linearTolerance: 0.001, angularTolerance: 5 },
       });
-      assertSuccess(fineExport, 'fine STL export');
+      assertDocumentSuccess(fineExport, 'fine STL export');
 
-      const coarseSize = coarseExport.data[0]!.bytes.byteLength;
-      const fineSize = fineExport.data[0]!.bytes.byteLength;
+      const coarseSize = coarseExport.files[0].bytes.byteLength;
+      const fineSize = fineExport.files[0].bytes.byteLength;
 
       expect(fineSize).toBeGreaterThan(coarseSize);
     });
@@ -765,11 +875,11 @@ export default function main() {
         unit: { length: 'millimeter' },
       });
 
-      assertSuccess(yUpExport, 'y-up GLB export');
-      assertSuccess(zUpExport, 'z-up GLB export');
+      assertDocumentSuccess(yUpExport, 'y-up GLB export');
+      assertDocumentSuccess(zUpExport, 'z-up GLB export');
 
-      const yUpEvidence = await readCoordinateEvidence({ bytes: yUpExport.data[0]!.bytes });
-      const zUpEvidence = await readCoordinateEvidence({ bytes: zUpExport.data[0]!.bytes });
+      const yUpEvidence = await readCoordinateEvidence({ bytes: yUpExport.files[0].bytes });
+      const zUpEvidence = await readCoordinateEvidence({ bytes: zUpExport.files[0].bytes });
       expect(yUpEvidence).toEqual(mapZupMillimetersToYupMeters(zUpEvidence));
     });
 
@@ -782,8 +892,8 @@ export default function main() {
         unit: { length: 'millimeter' },
       });
 
-      assertSuccess(exportResult, 'z-up millimeter GLB export');
-      const size = await readGltfSize(exportResult.data[0]!.bytes);
+      assertDocumentSuccess(exportResult, 'z-up millimeter GLB export');
+      const size = await readGltfSize(exportResult.files[0].bytes);
       expect(size[0]).toBeCloseTo(10, 4);
       expect(size[1]).toBeCloseTo(20, 4);
       expect(size[2]).toBeCloseTo(30, 4);
@@ -794,21 +904,21 @@ export default function main() {
     it('should perform boolean union (fuse)', async () => {
       const geometryFile = createGeometryFile('fuse.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'Boolean fuse');
+      assertRenderingSuccess(result, 'Boolean fuse');
       await geometryHelpers.expectValidGltf(result);
     });
 
     it('should perform boolean intersection (common)', async () => {
       const geometryFile = createGeometryFile('common.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'Boolean common');
+      assertRenderingSuccess(result, 'Boolean common');
       await geometryHelpers.expectValidGltf(result);
     });
 
     it('should perform boolean difference (cut)', async () => {
       const geometryFile = createGeometryFile('cut.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'Boolean cut');
+      assertRenderingSuccess(result, 'Boolean cut');
       await geometryHelpers.expectValidGltf(result);
     });
 
@@ -817,14 +927,14 @@ export default function main() {
     it('should apply fillet to a box edge', async () => {
       const geometryFile = createGeometryFile('fillet.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'Fillet operation');
+      assertRenderingSuccess(result, 'Fillet operation');
       await geometryHelpers.expectValidGltf(result);
     });
 
     it('should apply a translation transform', async () => {
       const geometryFile = createGeometryFile('transform.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'Transform operation');
+      assertRenderingSuccess(result, 'Transform operation');
       await geometryHelpers.expectValidGltf(result);
       // OpenCASCADE Z-up mm -> GLTF Y-up m: x'=x/1000, y'=z/1000, z'=-y/1000
       // OpenCASCADE center (55,55,55)mm -> GLTF (0.055, 0.055, -0.055)m
@@ -834,7 +944,7 @@ export default function main() {
     it('should build a compound from multiple shapes', async () => {
       const geometryFile = createGeometryFile('compound.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
-      assertSuccess(result, 'Compound shape');
+      assertRenderingSuccess(result, 'Compound shape');
       await geometryHelpers.expectValidGltf(result);
     });
   });
@@ -848,7 +958,7 @@ export default function main() {
       const geometryFile = createGeometryFile('bad-call.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
 
-      assertFailure(result, 'bad-call createGeometry');
+      assertDocumentFailure(result, 'bad-call createGeometry');
       const issue = result.issues[0]!;
       expect(issue).toEqual(
         expect.objectContaining({
@@ -865,7 +975,7 @@ export default function main() {
     it('should resolve user source path for getParameters errors via inline source map', async () => {
       const geometryFile = createGeometryFile('throw-in-params.ts');
       const result = await readParameters(geometryFile);
-      assertFailure(result, 'throw-in-params getParameters');
+      assertDocumentFailure(result, 'throw-in-params getParameters');
       const issue = result.issues[0]!;
       expect(issue.stackFrames?.length ?? 0).toBeGreaterThan(0);
       const userFrame = issue.stackFrames!.find((f) => f.context === 'user');
@@ -878,7 +988,7 @@ export default function main() {
       const geometryFile = createGeometryFile('bad-wedge-arity.ts');
       const result = await renderGeometry({ file: geometryFile, parameters: {} });
 
-      assertFailure(result, 'bad-wedge-arity createGeometry');
+      assertDocumentFailure(result, 'bad-wedge-arity createGeometry');
       const issue = result.issues[0]!;
       expect(issue.message).toMatch(/BRepPrimAPI_MakeWedge/);
       expect(issue.message).toMatch(/invalid number of parameters \(10\)/);

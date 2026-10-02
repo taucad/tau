@@ -119,6 +119,8 @@ export type ExportDependency = {
   route?: {
     kind: 'direct' | 'transcoded';
     kernelId?: string;
+    /** Exact source product when several exports share an extension. */
+    exportId?: string;
     sourceFormat?: string;
     targetFormat: string;
     transcoderId?: string;

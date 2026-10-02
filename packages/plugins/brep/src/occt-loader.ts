@@ -1,6 +1,6 @@
 /* oxlint-disable new-cap -- External library uses PascalCase method names */
 /* eslint-disable @typescript-eslint/naming-convention -- OCCT's WASM API uses PascalCase methods. */
-import { Document, NodeIO } from '@gltf-transform/core';
+import { Document, WebIO } from '@gltf-transform/core';
 import { cadMaterialDefaults } from '@taucad/runtime/types';
 import { createReverseCoordinateTransform, ImportLoader } from '@taucad/geometry-core';
 import type { ImportFile } from '@taucad/geometry-core';
@@ -34,7 +34,7 @@ export type OcctImportJs = {
 // oxlint-disable-next-line typescript/no-unnecessary-type-arguments -- ensuring future API changes are picked up automatically
 export class OcctLoader extends ImportLoader<OcctImportResult, OcctOptions> {
   private readonly occt: OcctImportJs;
-  private readonly io = new NodeIO();
+  private readonly io = new WebIO();
 
   public constructor(occt: OcctImportJs) {
     super();

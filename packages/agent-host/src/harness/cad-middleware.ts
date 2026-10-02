@@ -439,7 +439,7 @@ const trimStructuredResult = (toolName: string, value: unknown): unknown => {
       ...provenance,
     };
   }
-  if (toolName === 'get_kernel_result' && typeof value['status'] === 'string') {
+  if (toolName === 'evaluate_model' && typeof value['status'] === 'string') {
     const kernelIssues: unknown[] | undefined = Array.isArray(value['kernelIssues'])
       ? value['kernelIssues']
       : undefined;

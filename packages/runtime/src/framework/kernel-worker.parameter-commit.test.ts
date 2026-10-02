@@ -3,17 +3,16 @@
  * keeps dependency discovery, parameter extraction, admission and kernel selection.
  */
 
-import { randomUUID } from 'node:crypto';
 import { describe, it, expect, vi } from 'vitest';
 import type * as ParametersModule from '@taucad/parameters';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
-import type { RuntimeStateChangedArgs } from '#types/runtime-protocol.types.js';
+import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
+import { defineKernelV2 as defineKernel } from '#types/runtime-kernel-v2.types.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph. */
 import {
   createGeometryFile,
+  getTestFileSystem,
   initializeWorkerForTesting,
   seedTestFileSystem,
 } from '../../test/support/kernel-worker.fixture.js';
@@ -58,37 +57,38 @@ const createCommitWorker = async () => {
     detectImport: /from 'commit-kernel'/,
     name: 'Commit kernel',
     version: '1.0.0',
-    exportFormats: {},
+    views: { display: { title: 'Display', mimeType: 'image/svg+xml' } },
+    exports: {},
     async initialize() {
       return {};
     },
-    async getDependencies(input, runtime) {
+    async resolve(input, runtime) {
       operationIds.push(['dependencies', runtime.operationId]);
       counts.dependencies++;
       return { resolved: [input.entryPath], unresolved: [] };
     },
-    async getParameters(_input, runtime) {
+    async describe(_input, runtime) {
       operationIds.push(['parameters', runtime.operationId]);
       counts.parameters++;
-      return { success: true, data: declaration, issues: [] };
+      return { success: true, data: { parameters: declaration }, issues: [] };
     },
-    async createGeometry(input, runtime) {
+    async evaluate(input, runtime) {
       operationIds.push(['geometry', runtime.operationId]);
       geometryParameters.push(input.parameters);
-      return { geometry: { format: 'gltf', content: new Uint8Array([1]) }, nativeHandle: {} };
+      return { handle: { width: input.parameters['width'] } };
     },
-    async exportGeometry() {
-      return { success: true, data: [], issues: [] };
+    async render({ handle }) {
+      return { content: `<svg xmlns="http://www.w3.org/2000/svg"><text>${String(handle.width)}</text></svg>` };
     },
   })();
   // Stands in for the parameter-file resolver: the record feeds geometry, never parameters.
   const recordResolver = defineMiddleware({
     id: 'record-resolver',
     name: 'RecordResolver',
-    getDependencies() {
-      return [{ path: record, affects: ['createGeometry'] }];
+    resolve() {
+      return [{ path: record, affects: ['evaluate'] }];
     },
-    async wrapCreateGeometry(input, handler, runtime) {
+    async wrapEvaluate(input, handler, runtime) {
       const stored = JSON.parse(await runtime.filesystem.readFile(record, 'utf8')) as Record<string, unknown>;
       return handler({ ...input, parameters: { ...stored, ...input.parameters } });
     },
@@ -104,29 +104,44 @@ const createCommitWorker = async () => {
     }),
   });
   await initializeWorkerForTesting(worker);
-  // @ts-expect-error - white-box access to the worker's filesystem to count reads and writes.
-  const filesystem = worker._filesystem as { readFile: (...args: unknown[]) => unknown };
-  const readFile = vi.spyOn(filesystem, 'readFile');
+  const readFile = vi.spyOn(getTestFileSystem(), 'readFile');
   const selectionReads = (): number =>
-    readFile.mock.calls.filter(([path, encoding]) => path === entry && encoding === 'utf8').length;
+    readFile.mock.calls.filter((args) => args[0] === entry && args.includes('utf8')).length;
 
-  const stageAndRender = async (stage: Record<string, string>): Promise<void> => {
-    await worker.handleStageAndOpenFile({
-      renderId: randomUUID(),
-      stage: Object.fromEntries(Object.entries(stage).map(([path, text]) => [path, encoder.encode(text)])),
-      file: createGeometryFile(entry),
-      parameters: {},
+  const evaluated: Array<Parameters<NonNullable<KernelRuntimeWorker['onEvaluated']>>[0]> = [];
+  worker.onEvaluated = (event) => {
+    evaluated.push(event);
+  };
+  let intent = 0;
+  const stageAndEvaluate = async (stage: Record<string, string>): Promise<void> => {
+    const mark = evaluated.length;
+    const encoded = Object.fromEntries(Object.entries(stage).map(([path, text]) => [path, encoder.encode(text)]));
+    if (intent === 0) {
+      worker.handleOpenDocument({
+        documentId: 'doc',
+        intent: intent++,
+        stage: encoded,
+        file: createGeometryFile(entry),
+        parameters: {},
+        watch: true,
+      });
+    } else {
+      worker.handleUpdateDocument({ documentId: 'doc', intent: intent++, stage: encoded });
+    }
+    await vi.waitFor(() => {
+      expect(evaluated).toHaveLength(mark + 1);
     });
+    expect(evaluated.at(-1)).toMatchObject({ success: true, transient: false });
   };
 
-  return { worker, counts, operationIds, geometryParameters, selectionReads, stageAndRender };
+  return { worker, counts, operationIds, geometryParameters, selectionReads, stageAndEvaluate };
 };
 
 describe('KernelWorker committed parameter edits', () => {
   it('should reuse discovery, extraction, admission and selection across record-only commits', async () => {
-    const { worker, counts, geometryParameters, selectionReads, stageAndRender } = await createCommitWorker();
+    const { worker, counts, geometryParameters, selectionReads, stageAndEvaluate } = await createCommitWorker();
     try {
-      await stageAndRender({});
+      await stageAndEvaluate({});
       const baseline = {
         dependencies: counts.dependencies,
         parameters: counts.parameters,
@@ -135,9 +150,9 @@ describe('KernelWorker committed parameter edits', () => {
         geometries: geometryParameters.length,
       };
 
-      await stageAndRender({ [record]: JSON.stringify({ width: 3 }) });
-      await stageAndRender({ [record]: JSON.stringify({ width: 4 }) });
-      await stageAndRender({ [record]: JSON.stringify({ width: 5 }) });
+      await stageAndEvaluate({ [record]: JSON.stringify({ width: 3 }) });
+      await stageAndEvaluate({ [record]: JSON.stringify({ width: 4 }) });
+      await stageAndEvaluate({ [record]: JSON.stringify({ width: 5 }) });
 
       expect({
         dependencies: counts.dependencies - baseline.dependencies,
@@ -147,7 +162,7 @@ describe('KernelWorker committed parameter edits', () => {
         widths: geometryParameters.slice(baseline.geometries).map(({ width }) => width),
       }).toEqual({ dependencies: 0, parameters: 0, admissions: 0, selections: 0, widths: [3, 4, 5] });
 
-      await stageAndRender({ [entry]: "import { box } from 'commit-kernel'; // edited" });
+      await stageAndEvaluate({ [entry]: "import { box } from 'commit-kernel'; // edited" });
 
       expect(counts.dependencies - baseline.dependencies).toBe(1);
       expect(counts.parameters - baseline.parameters).toBe(1);
@@ -157,12 +172,12 @@ describe('KernelWorker committed parameter edits', () => {
     }
   });
 
-  it('should give every kernel call in one render the same operation identity and the next render another', async () => {
-    const { worker, operationIds, stageAndRender } = await createCommitWorker();
+  it('should give every kernel call in one evaluation the same operation identity and the next evaluation another', async () => {
+    const { worker, operationIds, stageAndEvaluate } = await createCommitWorker();
     try {
-      await stageAndRender({});
+      await stageAndEvaluate({});
       const first = operationIds.splice(0);
-      await stageAndRender({ [record]: JSON.stringify({ width: 3 }) });
+      await stageAndEvaluate({ [record]: JSON.stringify({ width: 3 }) });
       const second = operationIds.splice(0);
 
       expect(first.map(([call]) => call)).toEqual(['dependencies', 'parameters', 'geometry']);
@@ -176,35 +191,38 @@ describe('KernelWorker committed parameter edits', () => {
   });
 
   it('should publish the committed values when a watched change follows a transient render', async () => {
-    const { worker, geometryParameters, stageAndRender } = await createCommitWorker();
+    const { worker, geometryParameters, stageAndEvaluate } = await createCommitWorker();
     try {
-      await stageAndRender({});
-      const settled = async (): Promise<RuntimeStateChangedArgs> =>
-        new Promise((resolve) => {
-          worker.onStateChanged = (event) => {
-            if (event.state === 'idle' || event.state === 'error') {
-              resolve(event);
-            }
-          };
-        });
-
-      const transientSettled = settled();
-      worker.handleOpenFile({
-        renderId: randomUUID(),
-        file: createGeometryFile(entry),
-        parameters: { width: 9 },
-        transient: true,
+      await stageAndEvaluate({});
+      const rendered: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+      worker.onRendered = (event) => {
+        rendered.push(event);
+      };
+      worker.handleOpenView({ documentId: 'doc', subscriptionId: 'view', requestId: 'initial', view: 'display' });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(1);
       });
-      await transientSettled;
+
+      worker.handleUpdateDocument({ documentId: 'doc', intent: 1, parameters: { width: 9 }, transient: true });
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(2);
+      });
       expect(geometryParameters.at(-1)).toMatchObject({ width: 9 });
+      expect(rendered[1]).toMatchObject({ success: true, transient: true });
 
-      const watchedSettled = settled();
       await worker.notifyFileChanged([entry]);
-      await watchedSettled;
-
+      await vi.waitFor(() => {
+        expect(rendered).toHaveLength(3);
+      });
       expect(geometryParameters.at(-1)).toMatchObject({ width: 2 });
-      // @ts-expect-error - white-box: only a non-transient render publishes the artifact.
-      expect(worker.currentPublishedRender).toBeDefined();
+      expect(rendered[2]).toMatchObject({
+        success: true,
+        transient: false,
+        artifact: {
+          mimeType: 'image/svg+xml',
+          content: '<svg xmlns="http://www.w3.org/2000/svg"><text>2</text></svg>',
+        },
+      });
     } finally {
       await worker.cleanup();
     }

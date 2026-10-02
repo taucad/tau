@@ -19,7 +19,7 @@ import * as url from 'node:url';
 import { describe, it } from 'vitest';
 import { replicadKernel } from '#replicad.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
-import { assertSuccess, createGeometryTestHelpers, createTestGeometry } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createGeometryTestHelpers, createTestGeometry } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 // ---------------------------------------------------------------------------
@@ -80,11 +80,10 @@ describe('Replicad — STEP raw-import bundler round-trip', { timeout: 120_000 }
       const result = await createTestGeometry({
         runtime,
         files: { 'main.ts': source, 'lib/cube.step': cubeStepContent },
-        mainFile: 'main.ts',
-        parameters: {},
+        open: { source: { path: 'main.ts' } },
       });
 
-      assertSuccess(result, `replicad createGeometry — ${label}`);
+      assertRenderingSuccess(result, `replicad createGeometry — ${label}`);
 
       await geometryHelpers.expectValidGltf(result);
       await geometryHelpers.expectMeshCount(result, 1);
@@ -119,12 +118,11 @@ describe('Replicad — STEP raw-import bundler round-trip', { timeout: 120_000 }
     const result = await createTestGeometry({
       runtime,
       files: { 'main.ts': guardedSource, 'lib/cube.step': cubeStepContent },
-      mainFile: 'main.ts',
-      parameters: {},
+      open: { source: { path: 'main.ts' } },
     });
 
-    // `assertSuccess` fails loudly with the thrown error message if the loader contract breaks.
-    assertSuccess(result, 'replicad createGeometry — ?raw text-loader contract');
+    // The rendering assertion surfaces the loader's thrown error when the contract breaks.
+    assertRenderingSuccess(result, 'replicad createGeometry — ?raw text-loader contract');
     await geometryHelpers.expectValidGltf(result);
   });
 });

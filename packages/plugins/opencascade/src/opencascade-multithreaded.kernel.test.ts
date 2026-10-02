@@ -4,7 +4,7 @@ import { afterAll, describe, it, expect, beforeAll } from 'vitest';
 import { opencascadeKernel } from '#opencascade.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
 import { getModuleRegistry } from '@taucad/runtime/kernel';
-import { assertSuccess, createGeometryTestHelpers, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createGeometryTestHelpers, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 // =============================================================================
@@ -53,32 +53,37 @@ describe('OpenCascade Kernel (multi-threaded)', { timeout: 60_000 }, () => {
     kernels: [opencascadeKernel({ wasm: 'multi', ocTracing: 'off' })],
     bundlers: [esbuildBundler()],
   });
-  let client: ReturnType<typeof createTestRuntimeClient>;
+  const makeTestClient = (files: Record<string, string>) => createTestRuntimeClient({ runtime, files });
+  let client: ReturnType<typeof makeTestClient>;
 
   beforeAll(async () => {
-    client = createTestRuntimeClient({
-      runtime,
-      files: {
-        'box.ts': `
+    client = makeTestClient({
+      'box.ts': `
 import { BRepPrimAPI_MakeBox } from 'libcascade';
 export default function main() {
   return new BRepPrimAPI_MakeBox(10, 20, 30).Shape();
 }`,
-      },
     });
   });
 
   afterAll(async () => client.shutdown());
 
   it('initialises the pthread build and renders valid GLTF', async () => {
-    const outcome = await client.render({ source: { path: 'box.ts' }, parameters: {} });
-    expect(outcome.superseded).toBe(false);
-    if (outcome.superseded) {
-      return;
+    const document = client.open({ source: { path: 'box.ts' }, parameters: {}, watch: false });
+    const view = document.view('model');
+    try {
+      const outcome = await view.rendering();
+      expect(outcome.superseded).toBe(false);
+      if (outcome.superseded) {
+        throw new Error('Multi-threaded OpenCascade render was superseded.');
+      }
+      const result = outcome.rendering;
+      assertRenderingSuccess(result, 'multi-threaded box createGeometry');
+      await geometryHelpers.expectValidGltf(result);
+    } finally {
+      view.close();
+      document.close();
     }
-    const result = outcome.geometry;
-    assertSuccess(result, 'multi-threaded box createGeometry');
-    await geometryHelpers.expectValidGltf(result);
   });
 
   it('activates OCCT global parallel mode after init', () => {

@@ -1,5 +1,6 @@
 import { useMemo } from 'react';
 import { useSelector } from '@xstate/react';
+import { asKnownArtifact } from '@taucad/runtime';
 import type { ActorRefFrom } from 'xstate';
 import { Separator } from '@taucad/ui/components/separator';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -19,18 +20,20 @@ const fmt = (n: number): string => (Number.isInteger(n) ? n.toFixed(0) : n.toFix
 const vec = (v: readonly [number, number, number]): string => `[${fmt(v[0])}, ${fmt(v[1])}, ${fmt(v[2])}]`;
 
 export function PreviewDebugPanel({ cadRef }: Props): React.JSX.Element {
-  const geometry = useSelector(cadRef, (s) => s.context.geometry);
+  const rendering = useSelector(cadRef, (s) => s.context.rendering);
+  const artifact = rendering?.success ? rendering.artifact : undefined;
 
   const inspection = useMemo<GltfInspection | undefined>(() => {
-    if (geometry?.format !== 'gltf') {
+    const known = artifact === undefined ? undefined : asKnownArtifact(artifact);
+    if (known?.mimeType !== 'model/gltf-binary') {
       return undefined;
     }
     try {
-      return inspectGlb(geometry.content);
+      return inspectGlb(known.content);
     } catch {
       return undefined;
     }
-  }, [geometry]);
+  }, [artifact]);
 
   return (
     <>

@@ -1,10 +1,10 @@
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import type { TranscoderRuntime } from '@taucad/runtime/transcoder';
+import type { TranscoderServices } from '@taucad/runtime/transcoder';
 import type { ExportFile } from '@taucad/runtime/types';
 import { gltfTranscoder } from '@taucad/gltf';
 
 const noop = () => undefined;
-const runtime: TranscoderRuntime = {
+const runtime: TranscoderServices = {
   logger: { log: noop, debug: noop, trace: noop, warn: noop, error: noop, custom: noop },
   tracer: { startSpan: () => ({ end: noop, setAttribute: noop, addEvent: noop }) },
   signal: new AbortController().signal,

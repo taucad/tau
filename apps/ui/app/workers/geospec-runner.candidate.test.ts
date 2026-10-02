@@ -4,7 +4,7 @@ import { createGeoSpecAssertionClient } from 'geospec/assertion-client';
 import { exactClusterSelector, withCandidate } from '#workers/geospec-runner.impl.js';
 
 describe('exact cluster candidate selector', () => {
-  it('should skip private candidate work for an authored mesh contentHash claim', async () => {
+  it('should skip private candidate work for an authored mesh contentHash claim', () => {
     const contentHash = 'a'.repeat(64);
     let request: Uint8Array<ArrayBuffer> | undefined;
     const engine = {
@@ -15,9 +15,9 @@ describe('exact cluster candidate selector', () => {
       },
     };
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 8_000_000 });
-    await expect(
-      client.expectGeo({ contentHash }).toHaveConnectedComponents({ count: 1, toleranceMm: 0.01 }),
-    ).rejects.toThrow('captured');
+    expect(() => client.expectGeo({ contentHash }).toHaveConnectedComponents({ count: 1, toleranceMm: 0.01 })).toThrow(
+      'captured',
+    );
     expect(request).toBeDefined();
     expect(exactClusterSelector(request!)).toBeUndefined();
     expect(engine.processRequest).not.toHaveBeenCalled();
@@ -36,7 +36,7 @@ describe('exact cluster candidate selector', () => {
     expect(canonicalize).not.toHaveBeenCalled();
   });
 
-  it('should export one candidate after a local authored STEP subjectHash claim', async () => {
+  it('should export one candidate after a local authored STEP subjectHash claim', () => {
     const subjectHash = 'a'.repeat(64);
     let request: Uint8Array<ArrayBuffer> | undefined;
     const engine = {
@@ -47,9 +47,9 @@ describe('exact cluster candidate selector', () => {
       },
     };
     const client = createGeoSpecAssertionClient({ engine, workUnitLimit: 8_000_000 });
-    await expect(
-      client.expectGeo({ subjectHash }).toHaveConnectedComponents({ count: 1, toleranceMm: 0.01 }),
-    ).rejects.toThrow('captured');
+    expect(() => client.expectGeo({ subjectHash }).toHaveConnectedComponents({ count: 1, toleranceMm: 0.01 })).toThrow(
+      'captured',
+    );
     expect(request).toBeDefined();
     expect(exactClusterSelector(request!)).toEqual({ subjectHash, toleranceMm: 0.01 });
     const candidate = { address: { actionSha256: 'b'.repeat(64) } };

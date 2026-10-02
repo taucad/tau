@@ -524,9 +524,9 @@ function LiveComponentTree({
     [currentSelection],
   );
   const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
-  const geometry = useSelector(graphicsRef, (state) => state.context.geometry);
-  // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Legacy embedded test actors omit presentation state.
-  const presentedKey = useSelector(graphicsRef, (state) => state.context.gltfPresentation?.presentedKey);
+  const artifact = useSelector(graphicsRef, (state) => state.context.artifact);
+  const artifactKey = useSelector(graphicsRef, (state) => state.context.artifactKey);
+  const presentedKey = useSelector(graphicsRef, (state) => state.context.gltfPresentation.presentedKey);
 
   useEffect(() => {
     if (!imageService || sharedThumbnails) {
@@ -621,7 +621,7 @@ function LiveComponentTree({
       return;
     }
     thumbnails.announcePresentedSource(presentedKey);
-    if (geometry?.format !== 'gltf' || geometry.hash !== presentedKey || !manifest) {
+    if (artifact?.mimeType !== 'model/gltf-binary' || artifactKey !== presentedKey || !manifest) {
       thumbnails.releaseOwner('explorer');
       return;
     }
@@ -632,11 +632,11 @@ function LiveComponentTree({
       return node?.kind === 'part' && node.primitiveRefs?.length ? [{ id, primitives: node.primitiveRefs }] : [];
     });
     let active = true;
-    const { content } = geometry;
+    const { content } = artifact;
     const requestedParts = parts.slice(0, 128);
     const manualPartId = manualPreviewRetry.current;
     manualPreviewRetry.current = undefined;
-    if (content.buffer.byteLength > 64 * 1024 * 1024) {
+    if (content.byteLength > 64 * 1024 * 1024) {
       thumbnails.failPreparationForOwner(
         'explorer',
         requestedParts,
@@ -683,7 +683,8 @@ function LiveComponentTree({
       active = false;
     };
   }, [
-    geometry,
+    artifact,
+    artifactKey,
     manifest,
     params.entryPath,
     presentedKey,

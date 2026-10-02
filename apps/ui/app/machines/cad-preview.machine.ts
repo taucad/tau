@@ -108,13 +108,9 @@ export const cadPreviewMachine = setup({
     },
     active: {
       on: {
-        /* A preview has no parameter record, so its values go straight to the kernel. This machine is
-         * the only owner of them; the CAD machine keeps no second copy to fall out of step. */
+        /* Preview values are committed on the watched document and become its export baseline. */
         setParameters: ({ context, event }, enq) => {
-          const { kernelClient } = context.cadRef.getSnapshot().context;
-          enq(() => {
-            void kernelClient?.updateParameters(event.parameters);
-          });
+          enq.sendTo(context.cadRef, { type: 'setPreviewParameters', parameters: event.parameters });
           return { context: { parameters: event.parameters } };
         },
       },

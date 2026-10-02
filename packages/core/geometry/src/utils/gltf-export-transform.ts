@@ -1,5 +1,5 @@
-import { NodeIO } from '@gltf-transform/core';
-import type { JSONDocument } from '@gltf-transform/core';
+import { WebIO } from '@gltf-transform/core';
+import type { Document, JSONDocument } from '@gltf-transform/core';
 
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
 import { admitMechanism, transformMechanism } from '@taucad/kinematics';
@@ -18,10 +18,7 @@ type GltfExportTransformOptions = GeometryOutputTransformOptions & {
   preserveMeshTopology?: boolean;
 };
 
-const preserveTransformedMeshTopology = (
-  document: Awaited<ReturnType<NodeIO['readBinary']>>,
-  options: GltfExportTransformOptions,
-): boolean => {
+const preserveTransformedMeshTopology = (document: Document, options: GltfExportTransformOptions): boolean => {
   const root = document.getRoot();
   const topology = root.getExtension<TauCadTopologyRoot>(tauCadTopologyExtension);
   if (!topology) {
@@ -62,7 +59,7 @@ const preserveTransformedMeshTopology = (
   return true;
 };
 
-const stripTopologyMetadataForTransformedExport = (document: Awaited<ReturnType<NodeIO['readBinary']>>): void => {
+const stripTopologyMetadataForTransformedExport = (document: Document): void => {
   const root = document.getRoot();
   root.setExtension(kittyCadBoundaryRepresentationExtension, null);
   root.setExtension(tauCadTopologyExtension, null);
@@ -115,7 +112,7 @@ export async function transformGltfExportBytes(
     return bytes;
   }
 
-  const io = registerTauGltfExtensions(new NodeIO()).registerExtensions([KHRMaterialsUnlit]);
+  const io = registerTauGltfExtensions(new WebIO()).registerExtensions([KHRMaterialsUnlit]);
   const document =
     options.format === 'glb'
       ? await io.readBinary(bytes)

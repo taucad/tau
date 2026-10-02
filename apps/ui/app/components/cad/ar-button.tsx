@@ -1,10 +1,9 @@
 import { memo } from 'react';
 import { Loader2 } from 'lucide-react';
-import type { Geometry } from '@taucad/types';
+import type { Artifact, RuntimeDocument } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { useAr } from '#components/cad/use-ar.js';
-import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
@@ -34,16 +33,16 @@ function ArIcon({ className }: { readonly className?: string }): React.JSX.Eleme
 }
 
 export const ArButton = memo(function ({
-  geometry,
-  kernelClient,
+  artifact,
+  runtimeDocument,
   className,
 }: {
-  readonly geometry: Geometry | undefined;
-  readonly kernelClient?: AppRuntimeClient;
+  readonly artifact: Artifact | undefined;
+  readonly runtimeDocument?: RuntimeDocument;
   readonly className?: string;
 }): React.ReactNode {
   const isMobile = useIsMobile();
-  const { canActivateAr, isConverting, activateAr } = useAr(geometry, kernelClient);
+  const { canActivateAr, isConverting, activateAr } = useAr(artifact, runtimeDocument);
 
   if (!isMobile || !canActivateAr) {
     return undefined;

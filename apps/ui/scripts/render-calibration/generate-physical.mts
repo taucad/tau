@@ -16,6 +16,7 @@ import { readGltfSceneBounds } from '@taucad/geometry-core';
 import { replicadKernel } from '@taucad/replicad';
 import { esbuildBundler } from '@taucad/esbuild';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import { asKnownArtifact } from '@taucad/runtime';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
@@ -82,12 +83,15 @@ export default function main(): Model {
     const client = createRuntimeClient({
       transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs({ 'main.ts': variant.source }) }),
     });
+    const document = client.open({ source: { path: 'main.ts' }, watch: false });
+    const view = document.view('model', { content: { includeEdges: true } });
     try {
-      const result = await client.render({ source: { path: 'main.ts' }, content: { includeEdges: true } });
+      const result = await view.rendering();
       assert.ok(!result.superseded, 'Render was superseded');
-      assert.ok(result.geometry.success, JSON.stringify(result.geometry.issues));
-      assert.equal(result.geometry.data.format, 'gltf');
-      const bytes = result.geometry.data.content;
+      assert.ok(result.rendering.success, JSON.stringify(result.rendering.issues));
+      const artifact = asKnownArtifact(result.rendering.artifact);
+      assert.equal(artifact?.mimeType, 'model/gltf-binary');
+      const bytes = artifact.content;
       const { json } = await new NodeIO().binaryToJSON(bytes);
       const primitives = json.meshes?.flatMap((mesh) => mesh.primitives) ?? [];
       const count = (mode: number): number =>
@@ -139,6 +143,8 @@ export default function main(): Model {
       await writeFile(catalogPath, `${JSON.stringify(catalog, null, 2)}\n`);
       console.log(JSON.stringify({ file: fixture.file, sha256: fixture.sha256, stats: fixture.stats }));
     } finally {
+      view.close();
+      document.close();
       await client.shutdown();
     }
   };

@@ -15,10 +15,12 @@
 #
 # Nothing here publishes an npm package or deploys anything.
 #
-# The macOS job reads its signing material from the `desktop-release`
-# environment, which only `desktop@*` tags may use: MACOS_CERTIFICATE_P12_BASE64,
+# The macOS job reads its signing material from the `desktop` environment,
+# which only `desktop@*` tags may use and a release manager approves per run.
+# It records a deployment so each desktop release shows under `desktop` in the
+# repository's Deployments sidebar. Secrets: MACOS_CERTIFICATE_P12_BASE64,
 # MACOS_CERTIFICATE_PASSWORD, APPLE_API_KEY_P8_BASE64, APPLE_API_KEY_ID and
-# APPLE_API_ISSUER_ID secrets, and the APPLE_TEAM_ID variable.
+# APPLE_API_ISSUER_ID, and the APPLE_TEAM_ID variable.
 name: Release build
 run-name: ${{ github.event.release.tag_name || inputs.tag }}
 
@@ -134,8 +136,7 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 240
     environment:
-      name: desktop-release
-      deployment: false
+      name: desktop
     env:
       GEOSPEC_WORKERS: 1
       TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos
@@ -222,7 +223,7 @@ jobs:
           for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_API_KEY_P8_BASE64 \
             APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_TEAM_ID; do
             if [ -z "${!name}" ]; then
-              echo "::error::$name is not set on the desktop-release environment"
+              echo "::error::$name is not set on the desktop environment"
               exit 1
             fi
           done

@@ -377,6 +377,17 @@ function renderAssistantPart(
     }
 
     case 'source-url': {
+      // Model-emitted, so only web URLs become links (same guard as the plan link).
+      if (!['http:', 'https:'].includes(URL.parse(part.url)?.protocol ?? '')) {
+        return (
+          <span
+            key={`${messageId}-message-part-${index}`}
+            className='block max-w-full truncate text-xs text-muted-foreground'
+          >
+            {part.title ?? part.url}
+          </span>
+        );
+      }
       return (
         <a
           key={`${messageId}-message-part-${index}`}

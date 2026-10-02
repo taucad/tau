@@ -65,8 +65,14 @@ vi.mock('#hooks/use-file-manager.js', () => ({
   }),
 }));
 
+// Stands in for the provider that creates the kernel and its runtime worker.
+const projectProvider = vi.hoisted(() => vi.fn());
+
 vi.mock('#hooks/use-project.js', () => ({
-  ProjectProvider: ({ children }: { readonly children: React.JSX.Element }): React.JSX.Element => children,
+  ProjectProvider: (props: { readonly children: React.JSX.Element; readonly profile: string }): React.JSX.Element => {
+    projectProvider(props);
+    return props.children;
+  },
   useProject: vi.fn(),
   useParameterSetActor: () => undefined,
 }));
@@ -176,19 +182,73 @@ describe('SharedProjectHydrator', () => {
   });
 });
 
+const renderWorkbench = (viewedPublication: ParsedPublication = publication): ReturnType<typeof render> =>
+  render(
+    <TooltipProvider>
+      <MemoryRouter>
+        <SharedProjectWorkbench projectId='shared-test' publication={viewedPublication} hydratedFiles={sharedFiles} />
+      </MemoryRouter>
+    </TooltipProvider>,
+  );
+
 describe('SharedProjectWorkbench', () => {
   beforeEach(() => {
     fileManager.reset();
+    projectProvider.mockReset();
+    globalThis.sessionStorage.clear();
+  });
+
+  it('should not start a kernel for a shared model until the viewer chooses to run it', async () => {
+    renderWorkbench();
+
+    expect(screen.getByRole('main', { name: publication.title })).toBeInTheDocument();
+    expect(screen.getByText(/executes that code in this browser/)).toBeInTheDocument();
+    expect(projectProvider).not.toHaveBeenCalled();
+    expect(fileManager.mount).not.toHaveBeenCalled();
+
+    await userEvent.click(screen.getByRole('button', { name: 'Run this model' }));
+    await act(async () => {
+      fileManager.releaseRootListing();
+    });
+
+    await waitFor(() => {
+      expect(projectProvider).toHaveBeenCalledWith(expect.objectContaining({ profile: 'shared' }));
+    });
+  });
+
+  it('should run the same shared model again in this session without asking', async () => {
+    const first = renderWorkbench();
+    await userEvent.click(screen.getByRole('button', { name: 'Run this model' }));
+    first.unmount();
+    projectProvider.mockReset();
+    fileManager.reset();
+
+    renderWorkbench();
+    await act(async () => {
+      fileManager.releaseRootListing();
+    });
+
+    expect(screen.queryByRole('button', { name: 'Run this model' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(projectProvider).toHaveBeenCalled();
+    });
+  });
+
+  it('should run a publication for its owner without asking', async () => {
+    renderWorkbench({ ...publication, viewerRole: 'owner' });
+    await act(async () => {
+      fileManager.releaseRootListing();
+    });
+
+    expect(screen.queryByRole('button', { name: 'Run this model' })).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(projectProvider).toHaveBeenCalled();
+    });
   });
 
   it('should open the workbench drawer from a trigger in the top bar on phones', async () => {
-    render(
-      <TooltipProvider>
-        <MemoryRouter>
-          <SharedProjectWorkbench projectId='shared-test' publication={publication} hydratedFiles={sharedFiles} />
-        </MemoryRouter>
-      </TooltipProvider>,
-    );
+    renderWorkbench();
+    await userEvent.click(screen.getByRole('button', { name: 'Run this model' }));
     await act(async () => {
       fileManager.releaseRootListing();
     });

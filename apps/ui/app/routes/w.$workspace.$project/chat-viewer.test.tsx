@@ -716,6 +716,28 @@ describe('ChatViewer reopen-renderer overlay', () => {
     pane.unmount();
   });
 
+  it('leaves a failed evaluation to the Issues card instead of a view alert', () => {
+    const runtime = createMockRuntimeDocument();
+    const issue = { message: 'Compile failed', code: 'RUNTIME', type: 'runtime', severity: 'error' } as const;
+    const evaluation: Evaluation = { id: 'failed-evaluation', success: false, transient: false, issues: [issue] };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, evaluation, rendering: undefined }));
+    render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+
+    act(() => {
+      runtime.emitRendered({
+        success: false,
+        requestId: 'default-failed',
+        evaluationId: evaluation.id,
+        transient: false,
+        issues: [issue],
+      });
+      runtime.emitViewStatus('error');
+    });
+
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Use default view' })).not.toBeInTheDocument();
+  });
+
   it('preserves an unavailable saved projection until the user explicitly recovers', () => {
     const runtime = createMockRuntimeDocument();
     mockViewSettings = {

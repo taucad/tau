@@ -293,36 +293,38 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
   const version = useSyncExternalStore(subscribe, snapshot, () => '');
   return useMemo(
     () =>
-      store.observedChatIdsOf(projectId).flatMap((chatId): FinalizedRevision[] => {
-        const projection = store.getProjection(chatId);
-        if (projection === undefined) {
-          return [];
-        }
-        return Object.values(projection.ledger.runs).flatMap((run) =>
-          run.settlements.flatMap(({ event }): FinalizedRevision[] =>
-            event.type === 'turn.finalized' && event.revisionId !== undefined
-              ? [
-                  {
-                    branch: event.branch,
-                    card: {
-                      revisionId: event.revisionId,
-                      n: undefined,
-                      createdAt: 0,
-                      summary: '',
-                      actor: '',
-                      turnId: event.turnId,
-                      conflicted: false,
-                      tags: [],
-                      trigger: 'turn',
-                      changedPaths: event.changedPaths,
-                      ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
-                    },
-                  },
-                ]
-              : [],
-          ),
-        );
-      }),
+      version === ''
+        ? []
+        : store.observedChatIdsOf(projectId).flatMap((chatId): FinalizedRevision[] => {
+            const projection = store.getProjection(chatId);
+            if (projection === undefined) {
+              return [];
+            }
+            return Object.values(projection.ledger.runs).flatMap((run) =>
+              run.settlements.flatMap(({ event }): FinalizedRevision[] =>
+                event.type === 'turn.finalized' && event.revisionId !== undefined
+                  ? [
+                      {
+                        branch: event.branch,
+                        card: {
+                          revisionId: event.revisionId,
+                          n: undefined,
+                          createdAt: 0,
+                          summary: '',
+                          actor: '',
+                          turnId: event.turnId,
+                          conflicted: false,
+                          tags: [],
+                          trigger: 'turn',
+                          changedPaths: event.changedPaths,
+                          ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
+                        },
+                      },
+                    ]
+                  : [],
+              ),
+            );
+          }),
     [projectId, store, version],
   );
 };

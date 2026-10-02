@@ -2785,7 +2785,7 @@ importers:
         version: link:../../libs/utils
       three:
         specifier: 'catalog:'
-        version: 0.184.0
+        version: 0.184.0(patch_hash=ff8a98e8756c08bdc9d3d6e64114451606fe42bf86270b8880f583709bdf95a9)
     devDependencies:
       esbuild:
         specifier: 'catalog:'

@@ -31,13 +31,18 @@ await it('should declare full backend and approved minimum capability while pres
     changed += 1;
     assert.notEqual(row.expectedUtf8, undefined);
     assert.notEqual(baseline.expectedUtf8, undefined);
-    const expected = /** @type {{ result: { capabilities: Array<{implementation: string, name: string, profile?: string, qualification: string, registryVersion: number, scope: string}>, configuration: { backends: { brep: boolean, csg: boolean } } } }} */ (
-      JSON.parse(row.expectedUtf8)
-    );
+    const expected =
+      /** @type {{ result: { capabilities: Array<{implementation: string, name: string, profile?: string, qualification: string, registryVersion: number, scope: string}>, configuration: { backends: { brep: boolean, csg: boolean } } } }} */ (
+        JSON.parse(row.expectedUtf8)
+      );
     assert.deepEqual(expected.result.configuration.backends, { brep: true, csg: true });
     assert.deepEqual(expected.result.capabilities.at(-1), {
-      implementation: 'implemented', name: 'minimumDistance', profile: 'geospec-minimum-distance-v1',
-      qualification: 'unqualified', registryVersion: 5, scope: 'declared-subject-profile',
+      implementation: 'implemented',
+      name: 'minimumDistance',
+      profile: 'geospec-minimum-distance-v1',
+      qualification: 'unqualified',
+      registryVersion: 5,
+      scope: 'declared-subject-profile',
     });
     assert.equal(expected.result.capabilities.filter(({ name }) => name === 'minimumDistance').length, 1);
     expected.result.capabilities.pop();

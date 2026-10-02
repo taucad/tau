@@ -4,7 +4,7 @@
 #
 # Stages: base -> deps -> build -> pruned -> runtime
 #   base    : node:24-slim with pnpm pinned via `npm i -g` (no Corepack).
-#   deps    : workspace skeleton only (lockfile + every workspace package.json
+#   deps    : workspace skeleton only (lockfile, pnpmfile + every workspace package.json
 #             + patches); cache key independent of source edits.
 #   build   : full source + `pnpm nx build api`; reuses deps layer cache.
 #   pruned  : `pnpm deploy --prod` to materialise a self-contained app dir.
@@ -25,7 +25,7 @@
 #     missing-module error before `nx build api` can even start. Full install
 #     is required; the cold-cache cost is ~70s (network-bound, same as filtered).
 
-ARG NODE_VERSION=24.3.0
+ARG NODE_VERSION=24.19.0
 ARG PNPM_VERSION=10.30.3
 
 # ── Base ──────────────────────────────────────────────────────────────────
@@ -39,27 +39,39 @@ WORKDIR /app
 
 # ── Deps: workspace skeleton only (cache key = lockfile + package.jsons) ──
 FROM base AS deps
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .pnpmfile.cjs ./
 COPY patches/ ./patches/
 # `--parents` (BuildKit syntax 1.20+) preserves directory tree so each
 # workspace package.json lands at its real path. Matches pnpm-workspace.yaml
 # globs apps/*, libs/*, packages/*, packages/plugins/*, packages/core/*, and
 # tools/*. Nested workspace placements need explicit patterns because
-# `*/*/package.json` is only two levels deep. (`scripts/` is one level deep
-# and intentionally dockerignored — pnpm tolerates it.)
-COPY --parents */*/package.json apps/libs/*/package.json apps/react-e2e/apps/*/package.json packages/plugins/*/package.json packages/core/*/package.json ./
+# `*/*/package.json` is only two levels deep, and `scripts/` is one level deep.
+COPY --parents scripts/package.json */*/package.json apps/libs/*/package.json apps/react-e2e/apps/*/package.json packages/plugins/*/package.json packages/core/*/package.json ./
+# `canvas` is a root devDependency that only jsdom loads, optionally, in tests.
+# In this workspace pnpm does not put its `prebuild-install` dependency on the
+# install script's PATH, so the script falls through to a node-gyp build that
+# needs Python and the cairo/pango headers, which node:slim lacks. The API never
+# loads canvas, so the image skips that build instead of carrying a C toolchain.
+# The build stage's `COPY . .` restores the committed setting; pnpm's pre-run
+# dependency check only warns about the difference (see the build stage).
+RUN sed -i 's/^  canvas: true$/  canvas: false/' pnpm-workspace.yaml && \
+    grep -q '^  canvas: false$' pnpm-workspace.yaml
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     pnpm install --frozen-lockfile --prefer-offline
 
 # ── Build ─────────────────────────────────────────────────────────────────
 FROM deps AS build
 COPY . .
+# The deps stage installed from the frozen lockfile moments ago. pnpm's
+# pre-run dependency check would otherwise re-run a full install here and
+# exhaust the builder's 2 GB Node heap, so it only warns, as CI does.
+ENV pnpm_config_verify_deps_before_run=warn
+# The script builds the API without the GeoSpec native engine's Darwin-only artifact gate;
+# its header says why the runtime image does not need it.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \
-    pnpm nx build api && \
-    pnpm nx run api:build:billing-command && \
-    pnpm nx run api:build:maintenance-command
+    node apps/api/scripts/build-image.mts
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned

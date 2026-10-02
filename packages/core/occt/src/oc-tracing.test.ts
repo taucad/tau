@@ -2,9 +2,23 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { wrapOcForExceptions, wrapOcWithTracing } from '#oc-tracing.js';
 import type { OcExceptionInstance } from '#oc-exceptions.js';
-import { RenderAbortedError, isRenderAbortedError } from '@taucad/runtime';
 import type * as RuntimeKernelModule from '@taucad/runtime/kernel';
 import type { RuntimeSpanTracer, SpanHandle } from '@taucad/runtime/types';
+
+// The runtime's cooperative-abort error is internal; `checkAbort` is mocked, so the test
+// supplies a stand-in with the same name/code shape the runtime recognises across realms.
+class RenderAbortedError extends Error {
+  public constructor() {
+    super('Render aborted by a superseding document operation');
+    this.name = 'RenderAbortedError';
+  }
+
+  public get code(): 'RUNTIME_RENDER_ABORTED' {
+    return 'RUNTIME_RENDER_ABORTED';
+  }
+}
+
+const isRenderAbortedError = (error: unknown): error is RenderAbortedError => error instanceof RenderAbortedError;
 
 const { checkAbortMock } = vi.hoisted(() => ({ checkAbortMock: vi.fn() }));
 

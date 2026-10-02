@@ -368,7 +368,7 @@ function ViewerEmptyState({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath,
-          operationTimeout: entriesRecord?.entries[entryPath]?.operationTimeout,
+          operationTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
         });
       };
 
@@ -1144,19 +1144,21 @@ export const ViewerDockview = memo(function ({
         return;
       }
       const panelViewId = panel.id;
-      if (!panel.api.isVisible) {
+      const visible = panel.api.isVisible;
+      // Editor tabs need their record owner even when graphics rendering is hidden.
+      if (profile === 'editor' || visible) {
+        const settings = viewRecords.get(panelViewId);
+        const validatedSettings = settings ? graphicsSettingsForView(settings) : defaultGraphicsSettings;
+        if (!admittedGraphics.current.has(panelViewId)) {
+          admittedGraphics.current.add(panelViewId);
+          projectRef.send({ type: 'createViewGraphics', viewId: panelViewId, settings: validatedSettings });
+        }
+      }
+      if (!visible) {
         if (visibleGeometryDemand.current.delete(panelViewId)) {
           projectRef.send({ type: 'setViewerGeometryDemand', viewId: panelViewId });
         }
         return;
-      }
-      const settings = viewRecords.get(panelViewId);
-
-      const validatedSettings = settings ? graphicsSettingsForView(settings) : defaultGraphicsSettings;
-
-      if (!admittedGraphics.current.has(panelViewId)) {
-        admittedGraphics.current.add(panelViewId);
-        projectRef.send({ type: 'createViewGraphics', viewId: panelViewId, settings: validatedSettings });
       }
 
       let panelEntryPath = (panel.params as ViewerPanelParameters | undefined)?.entryPath;
@@ -1183,7 +1185,7 @@ export const ViewerDockview = memo(function ({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: panelEntryPath,
-          operationTimeout: entriesRecord?.entries[panelEntryPath]?.operationTimeout,
+          operationTimeout: entriesRecord?.entries[panelEntryPath]?.renderTimeout,
         });
       }
       if (panelEntryPath && visibleGeometryDemand.current.get(panelViewId) !== panelEntryPath) {
@@ -1330,7 +1332,7 @@ export const ViewerDockview = memo(function ({
           projectRef.send({
             type: 'createGeometryUnit',
             entryPath,
-            operationTimeout: entriesRecord?.entries[entryPath]?.operationTimeout,
+            operationTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
           });
         },
       });
@@ -1362,7 +1364,7 @@ export const ViewerDockview = memo(function ({
       projectRef.send({
         type: 'createGeometryUnit',
         entryPath: path,
-        operationTimeout: entriesRecord?.entries[path]?.operationTimeout,
+        operationTimeout: entriesRecord?.entries[path]?.renderTimeout,
       });
     },
     [entriesRecord, getInheritedSettings, profile, projectRef, viewCommands],

@@ -39,7 +39,7 @@ WORKDIR /app
 
 # ── Deps: workspace skeleton only (cache key = lockfile + package.jsons) ──
 FROM base AS deps
-COPY pnpm-lock.yaml pnpm-workspace.yaml package.json ./
+COPY pnpm-lock.yaml pnpm-workspace.yaml package.json .pnpmfile.cjs ./
 COPY patches/ ./patches/
 # `--parents` (BuildKit syntax 1.20+) preserves directory tree so each
 # workspace package.json lands at its real path. Matches pnpm-workspace.yaml

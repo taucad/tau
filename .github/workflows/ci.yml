@@ -494,6 +494,7 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (needs.plan.outputs.e2e == 'true')
     steps:
       - name: Checkout
@@ -564,6 +565,7 @@ jobs:
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.geospec-producer.result == 'success') &&
+      (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
       (github.event_name == 'pull_request' && vars.TAU_BENCHMARK_RUNNER_ENABLED == 'true')
     runs-on: [self-hosted, tau-benchmark]
     steps:

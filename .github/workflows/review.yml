@@ -10,8 +10,8 @@ on:
     branches-ignore:
       - production
 
+# FLY_API_TOKEN is set only on the Fly deploy step, not workflow-wide.
 env:
-  FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
   # Match the region with production apps
   FLY_REGION: syd
   FLY_ORG: personal
@@ -63,6 +63,8 @@ jobs:
         id: deploy
         continue-on-error: true
         uses: superfly/fly-pr-review-apps@5d9f067254bebd0aaa77d908d6337b63f4d4f019 # v1.6.0
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         with:
           name: ${{ env.API_APP_NAME }}
           region: syd

@@ -29,18 +29,17 @@ const getPanelTitle = (panel: IDockviewPanel): string => panel.api.title ?? pane
 const renderPanelLabel = (
   panel: IDockviewPanel,
   activePanel: IDockviewPanel | undefined,
-  iconOptions: Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'>,
+  iconOptions: Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'> & { readonly pathHint?: string },
 ): React.JSX.Element => {
   const title = getPanelTitle(panel);
-  const path = getPanelPath(panel);
 
   return (
     <span className='flex min-w-0 flex-1 items-center gap-2'>
       <DockviewTabIcon title={title} leadingIcon={iconOptions.leadingIcon} icon={iconOptions.getIcon?.(panel)} />
-      <span className='flex min-w-0 flex-1 flex-col'>
-        <span className='truncate'>{title}</span>
-        {path && path !== title ? <span className='truncate text-xs text-muted-foreground'>{path}</span> : null}
-      </span>
+      <span className='min-w-0 flex-1 truncate'>{title}</span>
+      {iconOptions.pathHint ? (
+        <span className='max-w-1/2 truncate text-xs text-muted-foreground'>{iconOptions.pathHint}</span>
+      ) : null}
       {activePanel?.id === panel.id ? <Check aria-label='Active tab' className='size-3.5 shrink-0' /> : null}
     </span>
   );
@@ -78,6 +77,12 @@ export function DockviewTabOverflowPicker(
 
   if (panels.length === 0) {
     return undefined;
+  }
+
+  const titleCounts = new Map<string, number>();
+  for (const panel of panels) {
+    const title = getPanelTitle(panel);
+    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
   }
 
   return (
@@ -167,15 +172,23 @@ export function DockviewTabOverflowPicker(
                 value={panel.id}
                 keywords={[getPanelTitle(panel), getPanelPath(panel) ?? '']}
                 title={getPanelPath(panel) ?? getPanelTitle(panel)}
+                aria-description={getPanelPath(panel)}
                 aria-current={activePanel?.id === panel.id ? 'page' : undefined}
-                className='min-h-9 shrink-0 py-2 aria-current:bg-menu-highlight'
+                className='min-h-7 shrink-0 aria-current:bg-menu-highlight'
                 onSelect={() => {
                   panel.api.setActive();
                   cancelClose();
                   setIsOpen(false);
                 }}
               >
-                {renderPanelLabel(panel, activePanel, { getIcon, leadingIcon })}
+                {renderPanelLabel(panel, activePanel, {
+                  getIcon,
+                  leadingIcon,
+                  pathHint:
+                    (titleCounts.get(getPanelTitle(panel)) ?? 0) > 1
+                      ? getPanelPath(panel)?.split('/').slice(0, -1).join('/')
+                      : undefined,
+                })}
               </CommandItem>
             ))}
           </CommandList>

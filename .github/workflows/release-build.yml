@@ -296,9 +296,29 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # prepare-build123d-python resolves its wheels with uv on both hosts;
+      # prepare-git builds git on Linux against libcurl and zlib.
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          pipx install uv
+          uv --version
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq libcurl4-openssl-dev zlib1g-dev
+          fi
+
+      # On Windows the archive and the Python payload use the inbox bsdtar,
+      # which must come before Git Bash's GNU tar on PATH.
       - name: Package
         shell: bash
-        run: pnpm nx run "desktop:${{ matrix.target }}" --parallel=1
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Windows ]; then
+            export PATH="/c/Windows/System32:$PATH"
+          fi
+          pnpm nx run "desktop:${{ matrix.target }}" --parallel=1
 
       - name: Upload the archive
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2

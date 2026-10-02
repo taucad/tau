@@ -12,7 +12,7 @@ import { join } from 'node:path';
 import { NodeFsAuthorityHost, serveNodeFsProvider, NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { WorkspaceFileService, ProviderRegistry, MountTable, ResourceQueue, ChangeEventBus } from '@taucad/filesystem';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
-import type { CheckedFileWrite, RootedFileSystem } from '@taucad/filesystem';
+import type { CheckedFileWrite } from '@taucad/filesystem';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { waitFor } from 'xstate';
 
@@ -39,7 +39,7 @@ afterEach(async () => {
 const key: TurnAttemptKey = { chatId: 'chat-1', turnId: 'turn-1', runId: 'run-1', attempt: 1 };
 
 type Project = Readonly<{
-  filesystem: RootedFileSystem;
+  filesystem: RevisionFileSystem;
   port: RevisionPort;
   /** Start a root over the same store, as a host (re)start does, and one placement session over it. */
   open: () => Readonly<{ revisions: ProjectRevisions; placement: TurnPlacementAdapter<RevisionFileSystem> }>;
@@ -48,7 +48,7 @@ type Project = Readonly<{
 const createProject = async (withAuthority = false): Promise<Project> => {
   const root = await mkdtemp(join(tmpdir(), 'tau-turn-placement-'));
   roots.push(root);
-  let filesystem: RootedFileSystem = new NodeFsProvider(root);
+  let filesystem: RevisionFileSystem = new NodeFsProvider(root);
   if (withAuthority) {
     const authorityRoot = await mkdtemp(join(tmpdir(), 'tau-placement-authority-'));
     roots.push(authorityRoot);

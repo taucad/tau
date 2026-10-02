@@ -6,10 +6,14 @@
 # dashboard via Terraform (`repos/tau-cloud/stacks/cloud/{staging,prod-us}`).
 # Pattern follows novuhq/novu: one `netlify.toml` shape, sites differ by dashboard env.
 #
-# Triggers:
-#   - staging: pushes to `main` (production context) + PR previews (`taucad` site).
+# Triggers: Netlify no longer builds from Git (`deploy_mode = "ci"` in tau-cloud).
+# GitHub Actions runs this build with `netlify deploy --prod --context production`
+# (`.github/workflows/deploy-ui.yml`), after bringing in the GeoSpec engine
+# products that only CI's macOS producer can make:
+#   - staging: pushes to `main` that affect the UI (`ci.yml` deploy-ui-staging).
 #   - prod: pushes to Git branch `production`, made only by dispatching
 #     `.github/workflows/deploy-production.yml` with a release tag.
+# There are no PR deploy previews.
 #
 # SOURCE MAPS (`pnpm nx run ui:sourcemaps`): run inside the Netlify build for
 # **production context** only (`[build]` + `[context.production]` include them);

@@ -11,11 +11,14 @@
     "dev": "node scripts/serve.mjs"
   },
   "dependencies": {
-    "three": "catalog:",
-    "@taucad/utils": "workspace:*"
+    "@taucad/utils": "workspace:*",
+    "three": "catalog:"
   },
   "devDependencies": {
-    "esbuild": "catalog:"
+    "@axe-core/playwright": "catalog:",
+    "esbuild": "catalog:",
+    "playwright": "catalog:",
+    "sharp": "catalog:"
   },
   "imports": {
     "#www/*.js": "./src/*.mjs",

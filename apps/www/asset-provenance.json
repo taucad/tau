@@ -35,8 +35,8 @@
       "sha256": "4fb9835165e389f5720cf05e3c62a1bfbf512a1cfb4c3c2cb412bccca401478f"
     }
   ],
-  "renderRecipe": "scripts/render-assets.cjs",
-  "responsiveAndSocialRecipe": "scripts/optimize-assets.cjs",
+  "renderRecipe": "scripts/render-assets.mjs",
+  "responsiveAndSocialRecipe": "scripts/optimize-assets.mjs",
   "firstPartySourceLicense": "Apache-2.0",
   "notes": "Static chrome hero captures existing Tau geometry, TSL material and studio. Below-fold Three.js geometry is a compressed tessellation of the 34-part authored Replicad model; rigid kinematics are prescribed, not physics. No fresh GeoSpec result or live print is represented. Static images and all text remain usable without a GPU.",
   "refreshedAssets": [
@@ -57,8 +57,8 @@
     },
     {
       "path": "apps/www/public/planetary.json",
-      "bytes": 7300,
-      "sha256": "793af432bf219809fa2561fd86d5dc0de11f35ab6053d145086f863e16c7840d"
+      "bytes": 10086,
+      "sha256": "718ce4658f341546f4afbe28a1c163b80d06475e74a04087e821a2e9f961d3bc"
     },
     {
       "path": "apps/www/public/social.png",
@@ -72,12 +72,12 @@
       "apps/ui/app/components/geometry/loader/metal-morph-material.node.ts",
       "apps/ui/app/components/geometry/loader/metal-morph-environment.ts"
     ],
-    "recipe": "scripts/capture-metal-hero.cjs",
+    "recipe": "scripts/capture-metal-hero.mjs",
     "shape": "escher-star",
     "detail": 6,
     "capturePixelRatio": 2,
     "static": true
   },
-  "storyRecipe": "scripts/export-story-assets.cjs",
+  "storyRecipe": "scripts/export-story-assets.mjs",
   "modelUnchangedThrough": "df1966a64f28dac856d514cb4030ef26a707151a"
 }

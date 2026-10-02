@@ -17,6 +17,8 @@ export { revisionMetadataSchema } from '#algorithms/revision-metadata.js';
 export { revisionId } from '@taucad/project-core/revision-id';
 export type { RevisionId } from '@taucad/project-core/revision-id';
 export { ImmutableRevisionTree } from '#algorithms/revision-tree.js';
+export { compareRevisionFile, diffRevisionTrees } from '#algorithms/revision-comparison.js';
+export type { RevisionFileComparison, RevisionComparisonNotice } from '#algorithms/revision-comparison.js';
 export type { RevisionTreeEntry, RevisionTreeInput } from '#algorithms/revision-tree.js';
 export { mergeFilePreferring, mergeRevisionTrees, renderConflictMarkers } from '#algorithms/revision-merge.js';
 export type {

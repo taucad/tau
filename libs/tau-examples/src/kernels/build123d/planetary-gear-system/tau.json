@@ -1,0 +1,8 @@
+{
+  "$schema": "https://tau.new/schemas/tau-schema-v1.json",
+  "id": "proj_IoThw7tZ0iqFVthfzFX5u",
+  "name": "Planetary Gear System — build123d",
+  "description": "A native build123d port of Tau's 34-part Replicad planetary stage, with a nested carrier and three reusable planet subassemblies. A reference for comparing authored structure, STEP and Tau's Model pane. The input angle rebuilds a static pose; live mechanism transport is not implemented for build123d.",
+  "tags": ["assembly", "gears", "parametric", "build123d", "reference"],
+  "assets": { "main": { "entryPath": "main.py" } }
+}

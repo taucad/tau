@@ -7,6 +7,7 @@
  * cancelled or failing stream leaves behind.
  */
 
+import { ImmutableRevisionTree } from '@taucad/revisions/algorithms';
 import { describe, expect, it, vi } from 'vitest';
 import { captureRevisionTree, createCaptureMemo } from '#algorithms/revision-capture.js';
 import type { RevisionCaptureFileSystem } from '#algorithms/revision-capture.js';
@@ -76,6 +77,34 @@ const vanishingFileSystem = (
 };
 
 describe('captureRevisionTree', () => {
+  it('should exclude only reserved Tau staging and backup siblings from capture', async () => {
+    const staged = '.main.ts.tau-staged.00000000-0000-0000-0000-000000000001.tmp';
+    const backup = '.main.ts.tau-backup.00000000-0000-0000-0000-000000000001.tmp';
+    const authored = '.main.ts.tau-staged.0.tmp';
+    const filesystem = vanishingFileSystem(
+      {
+        '': ['main.ts', staged, backup, authored],
+        'main.ts': 'kept',
+        [staged]: 'staged',
+        [backup]: 'backup',
+        [authored]: 'authored',
+      },
+      new Set(),
+    );
+    const captured = await captureRevisionTree(filesystem);
+    expect(captured.entries().map(({ path }) => path)).toEqual([authored, 'main.ts']);
+    const incremental = await captureRevisionTree(filesystem, {
+      changedSince: { tree: captured, paths: [staged, backup] },
+    });
+    expect(incremental.entries().map(({ path }) => path)).toEqual([authored, 'main.ts']);
+    const older = new ImmutableRevisionTree([
+      ['main.ts', 'old'],
+      [staged, 'old staging'],
+    ]);
+    const cleaned = await captureRevisionTree(filesystem, { changedSince: { tree: older, paths: ['main.ts'] } });
+    expect(cleaned.entries().map(({ path }) => path)).toEqual(['main.ts']);
+  });
+
   it('skips entries that vanish between the listing and the read instead of failing the capture', async () => {
     /* eslint-disable @typescript-eslint/naming-convention -- Path-keyed object: keys are workspace paths and run ids, not identifiers */
     const filesystem = vanishingFileSystem(

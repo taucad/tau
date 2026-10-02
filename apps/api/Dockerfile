@@ -25,7 +25,10 @@
 #     missing-module error before `nx build api` can even start. Full install
 #     is required; the cold-cache cost is ~70s (network-bound, same as filtered).
 
-ARG NODE_VERSION=24.3.0
+# 24.21.0: tsdown's config loader trips a Node bug fixed in 24.11.1 ("Failed to
+# load the config file due to a known Node.js bug"), which broke every library
+# build in the build stage on 24.3.0. CI runs Node 24.10.0 or the latest 24.
+ARG NODE_VERSION=24.21.0
 ARG PNPM_VERSION=10.30.3
 
 # ── Base ──────────────────────────────────────────────────────────────────

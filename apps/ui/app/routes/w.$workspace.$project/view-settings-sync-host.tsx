@@ -1,5 +1,5 @@
 import { useSelector } from '@xstate/react';
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -66,29 +66,24 @@ function ViewSettingsSyncEntry({
   } = useProject();
   const { parameterFiles, subscribeWorkbenchRecord } = useFileManager();
   const root = `/projects/${projectId}`;
-  const [notice, setNotice] = useState<{
-    code: 'INVALID_RECORD' | 'NEWER_RECORD';
-    message: string;
-  }>();
+  const [notice, setNotice] = useState<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string }>();
   const [ioError, setIoError] = useState<string>();
   const [, recordTick] = useState(0);
-  const recordGenerationRef = useRef(0);
   const [localRecordReceipt, setLocalRecordReceipt] = useState<{
     record: WorkbenchView;
     patch: ViewRecordPatch;
   }>();
   const recordPath = workbenchPaths.view(viewId);
-  // oxlint-disable-next-line react/refs -- The store invokes these callbacks after render.
-  const store = useMemo(
-    () =>
-      // oxlint-disable-next-line react/refs -- Store callbacks read generation after render, not during construction.
-      createWorkbenchViewStore({
+  const { store, advanceGeneration, currentGeneration } = useMemo(() => {
+    let generation = 0;
+    return {
+      store: createWorkbenchViewStore({
         root,
         viewId,
         files: parameterFiles,
         editDebounce: 500,
         onChange: (state, _source, locallyAuthored) => {
-          recordGenerationRef.current++;
+          generation++;
           setLocalRecordReceipt(
             state.record && locallyAuthored ? { record: state.record, patch: locallyAuthored } : undefined,
           );
@@ -106,13 +101,18 @@ function ViewSettingsSyncEntry({
           }
         },
         onError: (error) => {
-          recordGenerationRef.current++;
+          generation++;
+          setLocalRecordReceipt(undefined);
           setAppliedWorkbenchRevision(recordPath, undefined);
           setIoError(error instanceof Error ? error.message : 'View record unavailable.');
         },
       }),
-    [parameterFiles, recordPath, root, setAppliedWorkbenchRevision, setViewEntryPath, setViewRecord, viewId],
-  );
+      advanceGeneration: () => {
+        generation++;
+      },
+      currentGeneration: () => generation,
+    };
+  }, [parameterFiles, recordPath, root, setAppliedWorkbenchRevision, setViewEntryPath, setViewRecord, viewId]);
   useEffect(() => {
     const unsubscribe = subscribeWorkbenchRecord(workbenchPaths.view(viewId), () => {
       void store.read();
@@ -120,10 +120,10 @@ function ViewSettingsSyncEntry({
     void store.read(true);
     return () => {
       unsubscribe();
-      recordGenerationRef.current++;
+      advanceGeneration();
       setAppliedWorkbenchRevision(recordPath, undefined);
     };
-  }, [recordPath, setAppliedWorkbenchRevision, store, subscribeWorkbenchRecord, viewId]);
+  }, [advanceGeneration, recordPath, setAppliedWorkbenchRevision, store, subscribeWorkbenchRecord, viewId]);
   useEffect(() => {
     storeMounts.set(store, (storeMounts.get(store) ?? 0) + 1);
     return () => {
@@ -152,13 +152,13 @@ function ViewSettingsSyncEntry({
       if (state.record !== applied || !state.bytes || state.refusal) {
         return;
       }
-      const generation = recordGenerationRef.current;
+      const generation = currentGeneration();
       const { bytes } = state;
       async function acknowledgeAppliedBytes(): Promise<void> {
         const digest = await digestBytes(bytes);
         const current = store.snapshot();
         if (
-          generation === recordGenerationRef.current &&
+          generation === currentGeneration() &&
           current.record === applied &&
           current.bytes === bytes &&
           !current.refusal
@@ -168,7 +168,7 @@ function ViewSettingsSyncEntry({
       }
       void acknowledgeAppliedBytes();
     },
-    [recordPath, setAppliedWorkbenchRevision, store],
+    [currentGeneration, recordPath, setAppliedWorkbenchRevision, store],
   );
   const entryPath = record?.entryPath ?? viewEntryPaths.get(viewId);
   const cadRef = useSelector(projectRef, (state) =>
@@ -198,11 +198,7 @@ function ViewSettingsSyncEntry({
               type='button'
               onClick={() => {
                 const replacement =
-                  record ??
-                  workbenchRecords.view.schema.parse({
-                    version: 1,
-                    entryPath: entryPath ?? null,
-                  });
+                  record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath: entryPath ?? null });
                 void store.reset(replacement);
               }}
             >

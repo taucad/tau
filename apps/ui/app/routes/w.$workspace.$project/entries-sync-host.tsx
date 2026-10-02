@@ -37,8 +37,6 @@ export function EntriesSyncHost(): React.JSX.Element {
   const root = `/projects/${projectId}`;
   const [notice, setNotice] = useState<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string }>();
   const [ioError, setIoError] = useState<string>();
-  const generationRef = useRef(0);
-  const acknowledgedRef = useRef(new Set<string>());
   const [published, setPublished] = useState<{
     record: WorkbenchEntries | undefined;
     patch: EntryRecordPatch | undefined;
@@ -48,22 +46,22 @@ export function EntriesSyncHost(): React.JSX.Element {
     digest: `sha256:${string}`;
     generation: number;
   }>();
-  const clearApplied = useCallback((): void => {
-    for (const path of acknowledgedRef.current) {
-      setAppliedEntryRevision(path, undefined);
-    }
-    acknowledgedRef.current.clear();
-  }, [setAppliedEntryRevision]);
-  // oxlint-disable-next-line react/refs -- Store callbacks run after render.
-  const store = useMemo(
-    () =>
-      // oxlint-disable-next-line react/refs -- Store callbacks read generation after render, not during construction.
-      createWorkbenchEntriesStore({
+  const { store, clearApplied, advanceGeneration, currentGeneration, acknowledge } = useMemo(() => {
+    let generation = 0;
+    const acknowledged = new Set<string>();
+    const clearApplied = (): void => {
+      for (const path of acknowledged) {
+        setAppliedEntryRevision(path, undefined);
+      }
+      acknowledged.clear();
+    };
+    return {
+      store: createWorkbenchEntriesStore({
         root,
         files: parameterFiles,
         editDebounce: 500,
         onChange: (state, _source, locallyAuthored) => {
-          const generation = ++generationRef.current;
+          const currentGeneration = ++generation;
           setPublished({ record: state.record, patch: locallyAuthored });
           setIoError(undefined);
           clearApplied();
@@ -76,23 +74,31 @@ export function EntriesSyncHost(): React.JSX.Element {
             const { bytes } = state;
             const captureAppliedBytes = async (): Promise<void> => {
               const digest = await digestBytes(bytes);
-              if (generation === generationRef.current) {
-                setEntriesDigest({ bytes, digest, generation });
+              if (currentGeneration === generation) {
+                setEntriesDigest({ bytes, digest, generation: currentGeneration });
               }
             };
             void captureAppliedBytes();
           }
         },
         onError: (error) => {
-          generationRef.current++;
+          generation++;
           setPublished(undefined);
           clearApplied();
           setEntriesDigest(undefined);
           setIoError(error instanceof Error ? error.message : 'Entry settings unavailable.');
         },
       }),
-    [clearApplied, parameterFiles, root, setEntriesRecord],
-  );
+      clearApplied,
+      advanceGeneration: () => {
+        generation++;
+      },
+      currentGeneration: () => generation,
+      acknowledge: (path: string) => {
+        acknowledged.add(path);
+      },
+    };
+  }, [parameterFiles, root, setAppliedEntryRevision, setEntriesRecord]);
   useEffect(() => {
     const unsubscribe = subscribeWorkbenchRecord(workbenchPaths.entries, () => {
       void store.read();
@@ -100,11 +106,11 @@ export function EntriesSyncHost(): React.JSX.Element {
     void store.read(true);
     return () => {
       unsubscribe();
-      generationRef.current++;
+      advanceGeneration();
       clearApplied();
       setEntriesDigest(undefined);
     };
-  }, [clearApplied, store, subscribeWorkbenchRecord]);
+  }, [advanceGeneration, clearApplied, store, subscribeWorkbenchRecord]);
   useEffect(() => {
     storeMounts.set(store, (storeMounts.get(store) ?? 0) + 1);
     return () => {
@@ -133,17 +139,17 @@ export function EntriesSyncHost(): React.JSX.Element {
       const state = store.snapshot();
       if (
         !entriesDigest ||
-        entriesDigest.generation !== generationRef.current ||
+        entriesDigest.generation !== currentGeneration() ||
         entriesDigest.digest !== digest ||
         state.bytes !== entriesDigest.bytes ||
         state.refusal
       ) {
         return;
       }
-      acknowledgedRef.current.add(path);
+      acknowledge(path);
       setAppliedEntryRevision(path, digest);
     },
-    [entriesDigest, setAppliedEntryRevision, store],
+    [acknowledge, currentGeneration, entriesDigest, setAppliedEntryRevision, store],
   );
   return (
     <>
@@ -234,11 +240,10 @@ export function EntryOwner({
     const previous = appliedEntryRef.current?.entry;
     const first = appliedEntryRef.current === undefined;
     appliedEntryRef.current = { entry };
-    const targetTimeout = entry?.operationTimeout ?? defaultOperationTimeout;
+    const targetTimeout = entry?.renderTimeout ?? defaultOperationTimeout;
     if (
       (first ||
-        (!Object.hasOwn(localPatch ?? {}, 'operationTimeout') &&
-          previous?.operationTimeout !== entry?.operationTimeout)) &&
+        (!Object.hasOwn(localPatch ?? {}, 'renderTimeout') && previous?.renderTimeout !== entry?.renderTimeout)) &&
       cadRef.getSnapshot().context.operationTimeout !== targetTimeout
     ) {
       cadRef.send({ type: 'setOperationTimeout', operationTimeout: targetTimeout });
@@ -306,14 +311,14 @@ export function EntryOwner({
     }
     const changedTimeout =
       previous.operationTimeout !== operationTimeout &&
-      operationTimeout !== (entry?.operationTimeout ?? defaultOperationTimeout);
+      operationTimeout !== (entry?.renderTimeout ?? defaultOperationTimeout);
     const changedComponents =
       !same(previous.components, components) &&
       !same(components, entry?.components ?? { hidden: [], isolated: [], opacity: [] });
     if (!changedTimeout && !changedComponents) {
       return;
     }
-    void write(path, { ...entry, operationTimeout, components });
+    void write(path, { ...entry, renderTimeout: operationTimeout, components });
   }, [components, entry, observed, path, ready, operationTimeout, write]);
   return null;
 }

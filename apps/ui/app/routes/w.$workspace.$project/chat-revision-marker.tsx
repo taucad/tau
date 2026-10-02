@@ -15,7 +15,7 @@ import type { TurnRevisionBase, TurnRevisionState } from '#routes/w.$workspace.$
 import { requestRevisionReveal } from '#routes/w.$workspace.$project/revision-reveal.js';
 import { selectVisibleChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
-import { useRevisionCards, useRevisionChanges, useRevisions, useTurnRevision } from '#hooks/use-revisions.js';
+import { useRevisionCards, useRevisionChanges, useRevisions } from '#hooks/use-revisions.js';
 import type { RevisionCard } from '#hooks/use-revisions.js';
 import { useRevisionStatus } from '#hooks/use-revision-status.js';
 import { useChatActions, useChatContext, useChatSelector } from '#hooks/use-chat.js';
@@ -27,26 +27,6 @@ import type { TurnRevisionLog } from '#machines/chat-projection.logic.js';
 
 /** Tucked under the user bubble, like a status strip attached to a composer (R11, R12). */
 const cardClassName = 'mx-2 -mt-3 rounded-b-lg border border-t-0 bg-muted/40 pt-3';
-
-const stateKey = (state: TurnRevisionState | undefined): string =>
-  state === undefined
-    ? ''
-    : `${state.kind}:${state.kind === 'saved' ? state.revision.revisionId : ''}:${turnRevisionLabel(state, 0)}`;
-
-/**
- * The revision a turn recorded, never the base mint that opened it.
- *
- * A turn that starts dirty mints the pre-turn tree under its *own* turn id
- * (`turn.machine` D17) — on a new project, the scaffold — so the graph names a
- * card for a turn that has saved nothing yet. The turn's lease says which
- * revision that base is, and a starting point is not a result.
- *
- * @param card - The card the graph attached to this turn.
- * @param baseRevisionId - The revision this turn started from.
- * @returns The card, unless it is this turn's own base.
- */
-const turnSave = (card: RevisionCard | undefined, baseRevisionId: string | undefined): RevisionCard | undefined =>
-  card?.revisionId === baseRevisionId ? undefined : card;
 
 /**
  * One revision's card: from the loaded page when it is on it, looked up otherwise.
@@ -95,14 +75,11 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
   const settled = useRevisionCard(log?.settlement?.revisionId);
   const placement = log?.placement;
   const baseRevisionId = placement?.baseRevisionId;
-  const status = useRevisionStatus();
   /* The base only names a working or unconfirmed turn, which only the latest turn can be. */
   const baseCard = useRevisionCard(isLatestTurn && log?.settlement === undefined ? baseRevisionId : undefined);
-  const recorded = turnSave(useTurnRevision(userMessageId), baseRevisionId);
+  const previousResult = useRevisionCard(log?.previousRevisionId);
   const run = useChatSidebarStatus(projectId, activeChatId);
   const hasError = useChatSelector((state) => selectVisibleChatError(state) !== undefined);
-  /* The last visible state, so a reconnect holds what the summary said. */
-  const [held, setHeld] = useState<TurnRevisionState>();
 
   const base: TurnRevisionBase | undefined =
     placement === undefined
@@ -111,25 +88,16 @@ function useTurnRevisionState(userMessageId: string, isLatestTurn: boolean): Tur
         ? { kind: 'first' }
         : { kind: 'revision', n: baseCard?.n };
 
-  const state = deriveTurnRevisionState({
+  return deriveTurnRevisionState({
     log,
     settled,
-    recorded,
+    recorded: previousResult,
     base,
-    hasChanges:
-      isLatestTurn &&
-      status?.dirty === true &&
-      status.checkoutId !== undefined &&
-      status.checkoutId === placement?.checkoutId &&
-      status.headRevisionId === baseRevisionId,
+    hasChanges: log?.hasChanges === true,
     isUnreachable: isLatestTurn && hasError,
     isReconnecting: isLatestTurn && run?.state === 'reconnecting',
-    previous: held,
+    previous: undefined,
   });
-  if (stateKey(state) !== stateKey(held)) {
-    setHeld(state);
-  }
-  return state;
 }
 
 function StatusIcon({ state }: { readonly state: TurnRevisionState }): React.JSX.Element {

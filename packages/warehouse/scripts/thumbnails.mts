@@ -44,14 +44,11 @@ for (const { part } of definitions) {
     continue;
   }
   const client = await createNodeClient({ runtime, projectPath: root });
+  const document = client.open({ source: { path: 'main.ts' }, watch: false });
   try {
-    const rendered = await client.render({ source: { path: 'main.ts' }, content: { includeEdges: true } });
-    if (rendered.superseded || !rendered.geometry.success) {
-      throw new Error(`Render failed: ${part.id}: ${JSON.stringify(rendered)}`);
-    }
-    const result = await client.export('webp', {
+    const result = await document.export('webp', {
       content: { includeEdges: true },
-      exportOptions: {
+      options: {
         mode: 'single',
         width: 768,
         height: 576,
@@ -69,15 +66,16 @@ for (const { part } of definitions) {
         ao: {},
       },
     });
-    if (!result.success || result.data.length !== 1 || !result.data[0]) {
-      throw new Error(`Thumbnail failed: ${part.id}: ${JSON.stringify(result)}`);
+    if (!result.success || result.files.length !== 1 || !result.files[0]) {
+      throw new Error(`Thumbnail failed: ${part.id}: ${JSON.stringify(result.issues)}`);
     }
-    await writeFile(join(root, 'thumbnail.webp'), result.data[0].bytes);
+    await writeFile(join(root, 'thumbnail.webp'), result.files[0].bytes);
     sourceDigests[part.id] = digest;
     await writeFile(sourceDigestsPath, JSON.stringify(sourceDigests, undefined, 2) + '\n');
     console.log(`Rendered ${part.id}`);
   } finally {
-    await client.shutdown({ drain: true });
+    document.close();
+    await client.shutdown();
   }
 }
 

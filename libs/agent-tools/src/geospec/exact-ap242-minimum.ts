@@ -27,8 +27,12 @@ const request = (method: string, requestId: string, extra: Record<string, unknow
 const supportsMinimum = (engine: GeoSpecNativeModelEngine): boolean => {
   const envelope = decode(engine.processRequest(request('initialize', 'configuration')));
   const result = record(envelope['result']);
-  if (envelope['requestId'] !== 'configuration' || result['canonicalProfile'] !== header.canonicalProfile ||
-    result['protocolVersion'] !== header.protocolVersion || result['registryVersion'] !== header.registryVersion) {
+  if (
+    envelope['requestId'] !== 'configuration' ||
+    result['canonicalProfile'] !== header.canonicalProfile ||
+    result['protocolVersion'] !== header.protocolVersion ||
+    result['registryVersion'] !== header.registryVersion
+  ) {
     return false;
   }
   const advertised = result['capabilities'];
@@ -36,11 +40,17 @@ const supportsMinimum = (engine: GeoSpecNativeModelEngine): boolean => {
     return false;
   }
   const entries = advertised.filter((entry) => record(entry)['name'] === 'minimumDistance');
-  return entries.length === 1 && entries.every((entry) => {
-    const capability = record(entry);
-    return capability['profile'] === 'geospec-minimum-distance-v1' &&
-      capability['implementation'] === 'implemented' && capability['registryVersion'] === 5;
-  });
+  return (
+    entries.length === 1 &&
+    entries.every((entry) => {
+      const capability = record(entry);
+      return (
+        capability['profile'] === 'geospec-minimum-distance-v1' &&
+        capability['implementation'] === 'implemented' &&
+        capability['registryVersion'] === 5
+      );
+    })
+  );
 };
 
 const namedPath = (rows: unknown[], name: string): string | undefined => {
@@ -48,8 +58,7 @@ const namedPath = (rows: unknown[], name: string): string | undefined => {
   for (const value of rows) {
     const row = record(value);
     const { occurrencePath: path, instanceName } = row;
-    if (typeof path !== 'string' || path.length === 0 ||
-      !(typeof instanceName === 'string' || instanceName === null)) {
+    if (typeof path !== 'string' || path.length === 0 || !(typeof instanceName === 'string' || instanceName === null)) {
       throw new TypeError('Native AP242 occurrence metadata is malformed.');
     }
     if (instanceName === name) {
@@ -63,9 +72,15 @@ const namedPath = (rows: unknown[], name: string): string | undefined => {
 };
 
 const releaseSubject = (engine: GeoSpecNativeModelEngine, handle: Record<string, unknown>): void => {
-  const release = record(decode(engine.releaseSubject(request('releaseSubject', 'ap242-minimum-release', {
-    subjectHandle: handle,
-  })))['result']);
+  const release = record(
+    decode(
+      engine.releaseSubject(
+        request('releaseSubject', 'ap242-minimum-release', {
+          subjectHandle: handle,
+        }),
+      ),
+    )['result'],
+  );
   if (release['released'] !== true) {
     throw new TypeError('Native AP242 subject release was not confirmed.');
   }
@@ -87,21 +102,40 @@ export const queryDirectAp242MinimumDistance = async (options: {
 }): Promise<MinimumDistanceResult> => {
   const { engine, ap242Bytes, nameA, nameB } = options;
   if (!nameA || !nameB || nameA === nameB) {
-    return { status: 'refused', code: 'invalid-selection', message: 'Select two distinct displayed AP242 occurrence names.' };
+    return {
+      status: 'refused',
+      code: 'invalid-selection',
+      message: 'Select two distinct displayed AP242 occurrence names.',
+    };
   }
   if (ap242Bytes.byteLength === 0 || ap242Bytes.byteLength > maxBytes) {
-    return { status: 'refused', code: 'unsupported-evidence', message: 'The AP242 source exceeds the native input limit.' };
+    return {
+      status: 'refused',
+      code: 'unsupported-evidence',
+      message: 'The AP242 source exceeds the native input limit.',
+    };
   }
   let admitted = false;
   let released = false;
   try {
     if (!supportsMinimum(engine)) {
-      return { status: 'refused', code: 'unsupported-evidence', message: 'This native engine lacks complete AP242 minimum/witness support.' };
+      return {
+        status: 'refused',
+        code: 'unsupported-evidence',
+        message: 'This native engine lacks complete AP242 minimum/witness support.',
+      };
     }
-    const admissionBytes = engine.ingestSubject(request('ingestSubject', 'ap242-minimum-admit', {
-      format: 'step', frame: { coordinateSystem: 'y-up', sourceUnit: 'auto', outputUnit: 'mm' },
-      ingestOptions: {}, primaryByteLength: ap242Bytes.byteLength, resources: [],
-    }), ap242Bytes, []);
+    const admissionBytes = engine.ingestSubject(
+      request('ingestSubject', 'ap242-minimum-admit', {
+        format: 'step',
+        frame: { coordinateSystem: 'y-up', sourceUnit: 'auto', outputUnit: 'mm' },
+        ingestOptions: {},
+        primaryByteLength: ap242Bytes.byteLength,
+        resources: [],
+      }),
+      ap242Bytes,
+      [],
+    );
     admitted = true;
     if (admissionBytes.byteLength > maxMetadataBytes) {
       throw new TypeError('AP242 occurrence metadata exceeds one MiB.');
@@ -113,21 +147,42 @@ export const queryDirectAp242MinimumDistance = async (options: {
     }
     const descriptor = record(subject['descriptor']);
     const frame = record(descriptor['frame']);
-    if (frame['coordinateSystem'] !== 'y-up' || frame['outputCoordinateSystem'] !== 'z-up' ||
-      frame['outputUnit'] !== 'mm' || frame['uniformScale'] !== 1) {
-      return { status: 'refused', code: 'unsupported-evidence', message: 'Native AP242 source units or frame are not verified.' };
+    if (
+      frame['coordinateSystem'] !== 'y-up' ||
+      frame['outputCoordinateSystem'] !== 'z-up' ||
+      frame['outputUnit'] !== 'mm' ||
+      frame['uniformScale'] !== 1
+    ) {
+      return {
+        status: 'refused',
+        code: 'unsupported-evidence',
+        message: 'Native AP242 source units or frame are not verified.',
+      };
     }
-    const handle = record(record(decode(engine.subjectHandle(request('subjectHandle', 'ap242-minimum-handle', {
-      subjectHash,
-    })))['result'])['subjectHandle']);
+    const handle = record(
+      record(
+        decode(
+          engine.subjectHandle(
+            request('subjectHandle', 'ap242-minimum-handle', {
+              subjectHash,
+            }),
+          ),
+        )['result'],
+      )['subjectHandle'],
+    );
     try {
       const pathA = namedPath(rows, nameA);
       const pathB = namedPath(rows, nameB);
       if (pathA === undefined || pathB === undefined || pathA === pathB) {
-        return { status: 'refused', code: 'invalid-selection', message: 'Displayed names do not identify two unique AP242 occurrences.' };
+        return {
+          status: 'refused',
+          code: 'invalid-selection',
+          message: 'Displayed names do not identify two unique AP242 occurrences.',
+        };
       }
       return await createGeoSpecAssertionClient({ engine }).query({
-        capability: 'minimumDistance', subject: { subjectHash },
+        capability: 'minimumDistance',
+        subject: { subjectHash },
         payload: { pair: [{ occurrencePath: pathA }, { occurrencePath: pathB }] },
       });
     } finally {
@@ -135,7 +190,11 @@ export const queryDirectAp242MinimumDistance = async (options: {
       released = true;
     }
   } catch (error) {
-    return { status: 'interrupted', code: 'engine-error', message: error instanceof Error ? error.message : 'AP242 minimum query failed.' };
+    return {
+      status: 'interrupted',
+      code: 'engine-error',
+      message: error instanceof Error ? error.message : 'AP242 minimum query failed.',
+    };
   } finally {
     if (admitted && !released) {
       engine.close();

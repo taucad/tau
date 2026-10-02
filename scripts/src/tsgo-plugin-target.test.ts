@@ -47,15 +47,15 @@ describe('tsgo plugin typecheck target', () => {
   it('should run the spec config even when the app config fails', async () => {
     const { command, parallel } = await typecheckOptionsFor('apps/api/tsconfig.json', 'apps/api');
 
-    expect(command).toContain('tsgo -p tsconfig.app.json');
-    expect(command).toContain('tsgo -p tsconfig.spec.json');
+    expect(command).toContain('tsconfig.app.json');
+    expect(command).toContain('tsconfig.spec.json');
     // Neither short-circuiting shape: no `&&` between the checks, and no
     // reliance on nx's parallel mode, which kills siblings on first failure.
     expect(command).not.toContain('&&');
     expect(parallel).toBeUndefined();
-    // The app check's failure is recorded and deferred, not propagated early.
-    expect(command).toMatch(/tsgo -p tsconfig\.app\.json[^;]*\|\| status=1;/u);
-    expect(command).toMatch(/exit \$\{status:-0\}$/u);
+    expect(command).toContain('node "../../scripts/src/typecheck-projects.ts"');
+    expect(command).not.toContain('||');
+    expect(command).not.toContain('${status');
   });
 
   it('should short-circuit for no project in the workspace', async () => {

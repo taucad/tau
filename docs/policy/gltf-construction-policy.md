@@ -3,7 +3,7 @@ title: 'glTF Construction Policy'
 description: 'Rules for constructing glTF/GLB binaries in the runtime, governing the direct writer, buffer layout, material encoding, and kernel integration patterns'
 status: active
 created: '2026-03-24'
-updated: '2026-09-30'
+updated: '2026-10-02'
 related:
   - docs/policy/geometry-naming-policy.md
   - docs/policy/rendering-pipeline-policy.md
@@ -26,7 +26,7 @@ This policy codifies the decision to use a direct GLB binary writer on the rende
 
 ## 1. Use the Direct Writer on the Render Hot Path
 
-Use `writeGlb()` and `writeGltfJson()` from `packages/runtime/src/utils/glb-writer.ts` for all render-path GLB construction. Do not use `@gltf-transform/core` `Document` + `NodeIO` on the render hot path.
+Use `writeGlb()` and `writeGltfJson()` from `packages/core/geometry/src/utils/glb-writer.ts` for all render-path GLB construction. Do not use `@gltf-transform/core` `Document` + `NodeIO` on the render hot path.
 
 **Why**: The direct writer is synchronous, allocates no intermediate document model, and produces spec-compliant GLB in a single pass. Profiling shows this eliminates the `Document` construction and `NodeIO.writeBinary()` overhead that dominated short renders.
 
@@ -84,6 +84,16 @@ const glb = await new NodeIO().writeBinary(document);
 
 Do not add new `@gltf-transform/core` `Document` + `NodeIO().writeBinary()` calls to kernel render paths. If a new kernel produces mesh data (positions, normals, indices), map it to `GlbInput` and call `writeGlb()`.
 
+### 1.2 Shared Assets and Named Occurrences
+
+Keep the existing inline node input. Reuse an immutable primitive-array and topology identity for occurrences of one mesh asset; the writer numbers assets on first encounter. Each node retains its own name, extras, component identity and placement. Equal values alone do not establish asset identity. Share compatible accessor and buffer-view identities across material variants without merging authored material metadata or incompatible vertex layouts.
+
+Serialize local placement through the existing column-major `SpatialMatrix` type. Validate finite affine TRS, excluding shear and zero scale, before serialization. Preserve the supplied matrix exactly. Apply coordinate and unit conversion once at the mapping/export boundary. When a producer cannot preserve its actual float geometry through placement, bake that geometry instead. Do not silently decompose or approximate a placement.
+
+### 1.3 Lossless Index Width
+
+Preserve supplied Uint16 or Uint32 indices. Uint16 is valid only when every referenced index is at most **65,534**; 65,535 is the forbidden primitive-restart value. Use Uint32 for larger indices. Validate the numeric elements that will be serialized, including their vertex range, rather than an overridable iterator. Omit indices only for genuinely sequential triangle or line soup; never deindex a shared mesh or split it merely to force Uint16.
+
 ## 2. Non-Interleaved Buffer Layout
 
 The direct writer uses **non-interleaved** (Structure of Arrays) buffer layout: each vertex attribute (POSITION, NORMAL) gets its own `bufferView`. Do not implement interleaved (Array of Structures) layout with `byteStride`.
@@ -124,18 +134,18 @@ All GLB output must comply with the glTF 2.0 specification. The direct writer mu
 
 ### 3.2 Required JSON Properties
 
-| Property                           | Requirement                                                                        |
-| ---------------------------------- | ---------------------------------------------------------------------------------- |
-| `asset.version`                    | Must be `"2.0"`                                                                    |
-| `asset.generator`                  | Must be `"tau-runtime"`                                                            |
-| `scene`                            | Must be `0` (index of default scene)                                               |
-| `scenes[0].nodes`                  | Array of root node indices                                                         |
-| `bufferViews[].target`             | `34962` (ARRAY_BUFFER) for vertex data, `34963` (ELEMENT_ARRAY_BUFFER) for indices |
-| `accessors[].min/max`              | Required on POSITION accessors (bounding box). Omit on NORMAL and index accessors. |
-| `accessors[].componentType`        | `5126` (FLOAT) for positions/normals, `5125` (UNSIGNED_INT) for indices            |
-| `accessors[].type`                 | `"VEC3"` for positions/normals, `"SCALAR"` for indices                             |
-| `materials[].pbrMetallicRoughness` | Always present with `baseColorFactor`, `metallicFactor`, `roughnessFactor`         |
-| `materials[].doubleSided`          | Always `true` for CAD geometry                                                     |
+| Property                           | Requirement                                                                                                  |
+| ---------------------------------- | ------------------------------------------------------------------------------------------------------------ |
+| `asset.version`                    | Must be `"2.0"`                                                                                              |
+| `asset.generator`                  | Must be `"tau-runtime"`                                                                                      |
+| `scene`                            | Must be `0` (index of default scene)                                                                         |
+| `scenes[0].nodes`                  | Array of root node indices                                                                                   |
+| `bufferViews[].target`             | `34962` (ARRAY_BUFFER) for vertex data, `34963` (ELEMENT_ARRAY_BUFFER) for indices                           |
+| `accessors[].min/max`              | Required on POSITION accessors (bounding box). Omit on NORMAL and index accessors.                           |
+| `accessors[].componentType`        | `5126` (FLOAT) for positions/normals; `5123` (UNSIGNED_SHORT) or `5125` (UNSIGNED_INT) for validated indices |
+| `accessors[].type`                 | `"VEC3"` for positions/normals, `"SCALAR"` for indices                                                       |
+| `materials[].pbrMetallicRoughness` | Always present with `baseColorFactor`, `metallicFactor`, `roughnessFactor`                                   |
+| `materials[].doubleSided`          | Always `true` for CAD geometry                                                                               |
 
 ### 3.3 Material Encoding
 
@@ -313,6 +323,8 @@ Do not assert only byte length, byte inequality, or `instanceof Uint8Array` — 
 - [ ] Headless scene consumption preserves core node transforms and repeated mesh references for both surfaces and lines
 - [ ] `asset.generator` is `"tau-runtime"`
 - [ ] POSITION accessors have `min`/`max`
+- [ ] Shared assets retain independent named nodes and validated local placement
+- [ ] Uint16 indices never exceed 65534; larger indices remain Uint32
 - [ ] `bufferView.target` is set (34962 for vertex, 34963 for index)
 - [ ] Materials use `cadMaterialDefaults` from `@taucad/types/constants`
 - [ ] Tau-generated auxiliary edges use `cadEdgeOverlayMaterialDefaults` and `KHR_materials_unlit`

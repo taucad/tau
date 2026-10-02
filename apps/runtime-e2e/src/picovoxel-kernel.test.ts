@@ -154,25 +154,28 @@ describe('PicoVoxel packaged runtime', () => {
           }),
         });
         try {
-          const preview = await client.render({ source: { path: 'main.ts' } });
-          if (preview.superseded || !preview.geometry.success || preview.geometry.data.format !== 'gltf') {
+          const document = client.open({ source: { path: 'main.ts' } });
+          const preview = await document.view('model').rendering();
+          const artifact =
+            !preview.superseded && preview.rendering.success ? asKnownArtifact(preview.rendering.artifact) : undefined;
+          if (artifact?.mimeType !== 'model/gltf-binary') {
             throw new Error('Preview failed');
           }
-          const glb = extractGltfFromExportResult(await client.export('glb'));
+          const glb = extractGltfFromExportResult(await document.export('glb'));
           if (!glb) {
             throw new Error('Exact GLB export failed');
           }
-          const stl = await client.export('stl');
+          const stl = await document.export('stl');
           if (!stl.success) {
             throw new Error('STL export failed');
           }
-          await client.shutdown({ drain: true });
+          await client.shutdown();
           const control = await engine.control({ workspace: projectPath });
           const { entries } = await control.inspect({});
-          return { preview: preview.geometry.data.content, glb, stl: stl.data, entries };
+          return { preview: artifact.content, glb, stl: stl.files, entries };
         } finally {
           try {
-            await client.shutdown({ drain: true });
+            await client.shutdown();
           } finally {
             await engine.dispose();
           }

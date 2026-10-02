@@ -514,6 +514,83 @@ describe('Print pane orientation', () => {
 });
 
 describe('Print pane prepare and send', () => {
+  it('should abort only the old slice when options change while its export is pending', async () => {
+    const oldExport = Promise.withResolvers<void>();
+    const currentExport = Promise.withResolvers<void>();
+    const sliceResult: Awaited<ReturnType<typeof mockExport>> = {
+      success: true,
+      exportId: 'gcode.3mf',
+      evaluationId: 'mock-evaluation',
+      files: [
+        {
+          name: 'main.gcode.3mf',
+          bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
+          mimeType: 'application/vnd.bambulab.gcode-3mf',
+        },
+      ],
+      issues: [],
+    };
+    mockExport
+      .mockImplementationOnce(async () => {
+        await oldExport.promise;
+        return sliceResult;
+      })
+      .mockImplementationOnce(async () => {
+        await currentExport.promise;
+        return sliceResult;
+      });
+    const signalAt = (index: number): AbortSignal => {
+      const args: readonly unknown[] | undefined = mockExport.mock.calls[index];
+      const options = args?.[1];
+      if (
+        !options ||
+        typeof options !== 'object' ||
+        !('signal' in options) ||
+        !(options.signal instanceof AbortSignal)
+      ) {
+        throw new Error('Expected a slice export with an AbortSignal.');
+      }
+      return options.signal;
+    };
+    const user = userEvent.setup();
+    try {
+      renderPane(createFixture().client);
+      await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+      await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+      await waitFor(() => {
+        expect(mockExport).toHaveBeenCalledOnce();
+      });
+      const oldSignal = signalAt(0);
+      await chooseOption(user, within(prepareRegion()).getByRole('combobox', { name: 'Plate' }), 'Cool plate');
+      expect(oldSignal.aborted).toBe(true);
+      await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+      await waitFor(() => {
+        expect(mockExport).toHaveBeenCalledTimes(2);
+      });
+      const currentSignal = signalAt(1);
+      expect(currentSignal.aborted).toBe(false);
+      await act(async () => {
+        oldExport.resolve();
+      });
+      expect(mockWriteFiles).not.toHaveBeenCalled();
+      expect(within(prepareRegion()).queryByLabelText('Slice result')).not.toBeInTheDocument();
+      expect(currentSignal.aborted).toBe(false);
+      await act(async () => {
+        currentExport.resolve();
+      });
+      expect(await within(prepareRegion()).findByLabelText('Slice result')).toBeInTheDocument();
+      expect(currentSignal.aborted).toBe(false);
+      await waitFor(() => {
+        expect(mockWriteFiles).toHaveBeenCalledOnce();
+      });
+    } finally {
+      await act(async () => {
+        oldExport.resolve();
+        currentExport.resolve();
+      });
+    }
+  });
+
   it('should cancel slicing immediately and discard a late successful export before writing or publishing it', async () => {
     let finish!: () => void;
     mockExport.mockImplementationOnce(async () => {

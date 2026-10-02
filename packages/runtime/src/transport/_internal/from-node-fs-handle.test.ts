@@ -1,11 +1,12 @@
 import { describe, it, expect, afterAll, afterEach, vi } from 'vitest';
-import { EventEmitter } from 'node:events';
 import * as fs from 'node:fs/promises';
 import * as nodeFs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { _fromNodeFsHandle as fromNodeFS } from '#transport/_internal/from-node-fs-handle.js';
 import type { RuntimeFileSystemBase, RuntimeWatchEvent } from '#types/runtime-kernel.types.js';
+import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
+import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 
 const { realpathMock } = vi.hoisted(() => ({ realpathMock: vi.fn<typeof fs.realpath>() }));
 const { watchMock } = vi.hoisted(() => ({ watchMock: vi.fn<typeof nodeFs.watch>() }));
@@ -264,13 +265,6 @@ describe('fromNodeFS watch', () => {
   const watchDeliveryBudget = { timeout: 10_000 } as const;
 
   const roots: string[] = [];
-  const passthroughWatch = watchMock.getMockImplementation();
-
-  /** Drain the macOS FSEvents replay window that can surface writes made just before arming. */
-  const settleFsEvents = async (): Promise<void> =>
-    new Promise((resolve) => {
-      setTimeout(resolve, 150);
-    });
 
   const createRoot = async (): Promise<string> => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), 'kernels-node-fs-watch-'));
@@ -278,40 +272,32 @@ describe('fromNodeFS watch', () => {
     return root;
   };
 
-  /** Collect every event a subscription delivers; the caller owns the returned unsubscribe. */
-  const subscribe = (
+  /** Await the adapter's private native admission before the one external mutation. */
+  const subscribe = async (
     fileSystem: RuntimeFileSystemBase,
     request: Parameters<NonNullable<RuntimeFileSystemBase['watch']>>[0],
-  ): { readonly events: RuntimeWatchEvent[]; readonly unsubscribe: () => void } => {
+  ): Promise<{ readonly events: RuntimeWatchEvent[]; readonly unsubscribe: () => void }> => {
     const events: RuntimeWatchEvent[] = [];
-    if (!fileSystem.watch) {
-      throw new Error('The Node filesystem adapter must expose watch().');
+    const { watchReady } = fileSystem as RuntimeFileSystemBase & WorkerFileSystemProxy;
+    if (!watchReady) {
+      throw new Error('The Node filesystem adapter must expose watchReady().');
     }
-    return { events, unsubscribe: fileSystem.watch(request, (event) => events.push(event)) };
+    const registration = watchReady(request, (event) => events.push(event));
+    await registration.ready;
+    return { events, unsubscribe: registration.unsubscribe };
   };
 
   afterEach(async () => {
-    if (!passthroughWatch) {
-      throw new Error('Expected the node:fs watch mock to delegate to the native implementation.');
-    }
-    watchMock.mockImplementation(passthroughWatch);
     await Promise.all(roots.splice(0).map(async (root) => fs.rm(root, { recursive: true, force: true })));
   });
 
   it('should deliver a change for an externally written path and nothing for its peers', async () => {
     const root = await createRoot();
-    await fs.writeFile(path.join(root, 'main.ts'), 'first');
-    await fs.writeFile(path.join(root, 'peer.ts'), 'peer');
     const fileSystem = unwrap(root);
-    const { events, unsubscribe } = subscribe(fileSystem, { paths: ['main.ts', 'peer.ts'], recursive: false });
+    const { events, unsubscribe } = await subscribe(fileSystem, { paths: ['main.ts', 'peer.ts'], recursive: false });
 
     try {
-      // FSEvents on macOS can replay writes that happened just before the watcher
-      // armed; drain that window so the assertion below judges only this write.
-      // (The kernel is immune to the replay anyway — it content-hash-dedupes.)
-      await settleFsEvents();
-      events.length = 0;
-      await fs.writeFile(path.join(root, 'main.ts'), 'second');
+      await fs.writeFile(path.join(root, 'main.ts'), 'first');
       await vi.waitFor(() => {
         expect(events).toContainEqual({ type: 'change', path: 'main.ts' });
       }, watchDeliveryBudget);
@@ -326,7 +312,7 @@ describe('fromNodeFS watch', () => {
     const root = await createRoot();
     await fs.writeFile(path.join(root, 'main.ts'), 'first');
     const fileSystem = unwrap(root);
-    const { events, unsubscribe } = subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
+    const { events, unsubscribe } = await subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
 
     try {
       const temporaryPath = path.join(root, '.main.ts.editor.tmp');
@@ -351,7 +337,7 @@ describe('fromNodeFS watch', () => {
   it('should accept paths that do not exist and report their later creation', async () => {
     const root = await createRoot();
     const fileSystem = unwrap(root);
-    const { events, unsubscribe } = subscribe(fileSystem, {
+    const { events, unsubscribe } = await subscribe(fileSystem, {
       paths: ['missing.ts', 'absent-dir/nested/deep.ts'],
       recursive: false,
     });
@@ -380,7 +366,7 @@ describe('fromNodeFS watch', () => {
     await fs.mkdir(path.join(root, '.tau', 'cache', 'geometry'), { recursive: true });
     await fs.writeFile(path.join(root, 'main.ts'), 'first');
     const fileSystem = unwrap(root);
-    const { events, unsubscribe } = subscribe(fileSystem, {
+    const { events, unsubscribe } = await subscribe(fileSystem, {
       paths: ['.tau/cache/geometry/warm.bin', 'main.ts'],
       recursive: false,
       excludes: ['.tau/cache/**'],
@@ -405,19 +391,19 @@ describe('fromNodeFS watch', () => {
     const root = await createRoot();
     const fileSystem = unwrap(root);
 
-    expect(() => subscribe(fileSystem, { paths: ['../outside.txt'], recursive: false })).toThrow(
-      expect.objectContaining({ code: 'PATH_OUTSIDE_ROOT' }),
-    );
+    await expect(subscribe(fileSystem, { paths: ['../outside.txt'], recursive: false })).rejects.toMatchObject({
+      code: 'PATH_OUTSIDE_ROOT',
+    });
   });
 
-  it('should arm its watchers before returning', async () => {
+  it('should deliver the immediate write after native admission', async () => {
     const root = await createRoot();
     await fs.writeFile(path.join(root, 'main.ts'), 'first');
     const fileSystem = unwrap(root);
-    const { events, unsubscribe } = subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
+    const { events, unsubscribe } = await subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
 
     try {
-      // No await between arming and writing: an asynchronously armed watcher would miss this.
+      // No delay between the actual native-ready handoff and this external write.
       nodeFs.writeFileSync(path.join(root, 'main.ts'), 'second');
       await vi.waitFor(() => {
         expect(events).toContainEqual({ type: 'change', path: 'main.ts' });
@@ -427,69 +413,44 @@ describe('fromNodeFS watch', () => {
     }
   });
 
-  it('should close every watcher once on unsubscribe and on dispose', async () => {
+  it('should logically detach on unsubscribe and on dispose', async () => {
     const root = await createRoot();
-    await fs.writeFile(path.join(root, 'main.ts'), 'first');
-    if (!passthroughWatch) {
-      throw new Error('Expected the node:fs watch mock to delegate to the native implementation.');
+    const nativeStop = vi.fn();
+    const watch = vi.spyOn(NodeFsProvider.prototype, 'watch').mockResolvedValue(nativeStop);
+    try {
+      const fileSystem = unwrap(root);
+      const first = await subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
+      first.unsubscribe();
+      first.unsubscribe();
+      expect(nativeStop).toHaveBeenCalledTimes(1);
+      const second = await subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
+      fileSystem.dispose();
+      expect(nativeStop).toHaveBeenCalledTimes(2);
+      second.unsubscribe();
+      expect(nativeStop).toHaveBeenCalledTimes(2);
+      expect(watch).toHaveBeenCalledTimes(2);
+    } finally {
+      watch.mockRestore();
     }
-    const opened: nodeFs.FSWatcher[] = [];
-    watchMock.mockImplementation(((...parameters: Parameters<typeof nodeFs.watch>) => {
-      const watcher = passthroughWatch(...parameters);
-      vi.spyOn(watcher, 'close');
-      opened.push(watcher);
-      return watcher;
-    }) as typeof nodeFs.watch);
-    const fileSystem = unwrap(root);
-
-    const first = subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
-    expect(opened).toHaveLength(1);
-    first.unsubscribe();
-    first.unsubscribe();
-    expect(opened[0]!.close).toHaveBeenCalledTimes(1);
-
-    const second = subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
-    expect(opened).toHaveLength(2);
-    fileSystem.dispose();
-    expect(opened[1]!.close).toHaveBeenCalledTimes(1);
-    second.unsubscribe();
-    expect(opened[1]!.close).toHaveBeenCalledTimes(1);
   });
 
-  it('should emit exactly one reset per watcher loss and none for its own unsubscribe', async () => {
+  it('should forward a native loss reset but stay quiet after unsubscribe', async () => {
     const root = await createRoot();
-    await fs.writeFile(path.join(root, 'main.ts'), 'first');
-    const fakes: Array<EventEmitter & { readonly close: () => void }> = [];
-    watchMock.mockImplementation((() => {
-      // oxlint-disable-next-line unicorn/prefer-event-target -- fs.watch returns an EventEmitter; the fake must match its shape
-      const fake: EventEmitter & { close: () => void } = Object.assign(new EventEmitter(), {
-        close: vi.fn(() => {
-          fake.emit('close');
-        }),
-      });
-      fakes.push(fake);
-      return fake;
-    }) as unknown as typeof nodeFs.watch);
-    const fileSystem = unwrap(root);
-
-    const lossy = subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
+    let nativeHandler: Parameters<NodeFsProvider['watch']>[1] | undefined;
+    const watch = vi.spyOn(NodeFsProvider.prototype, 'watch').mockImplementation(async (_request, handler) => {
+      nativeHandler = handler;
+      return () => undefined;
+    });
     try {
-      expect(fakes).toHaveLength(1);
-
-      fakes[0]!.emit('change', 'rename', null);
-      expect(lossy.events).toEqual([{ type: 'reset' }]);
-
-      fakes[0]!.emit('error', new Error('watcher failed'));
-      // The error closes the watcher; the resulting close must not double-report the loss.
-      expect(lossy.events).toEqual([{ type: 'reset' }, { type: 'reset' }]);
-      fakes[0]!.emit('close');
-      expect(lossy.events).toHaveLength(2);
+      const fileSystem = unwrap(root);
+      const live = await subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
+      nativeHandler?.({ type: 'reset' });
+      expect(live.events).toEqual([{ type: 'reset' }]);
+      live.unsubscribe();
+      nativeHandler?.({ type: 'reset' });
+      expect(live.events).toEqual([{ type: 'reset' }]);
     } finally {
-      lossy.unsubscribe();
+      watch.mockRestore();
     }
-
-    const quiet = subscribe(fileSystem, { paths: ['main.ts'], recursive: false });
-    quiet.unsubscribe();
-    expect(quiet.events).toEqual([]);
   });
 });

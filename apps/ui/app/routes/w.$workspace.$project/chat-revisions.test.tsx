@@ -946,14 +946,14 @@ describe('History over a long line (B2)', () => {
       </QueryClientProvider>,
     );
   };
-  const rowButtons = (): HTMLElement[] => screen.getAllByRole('button', { name: /^Rev \d+ · /u });
-
   it('reads one page, shows its rows, then reads the next page when Show more reaches the end', async () => {
     const user = userEvent.setup();
     onLongLine();
     renderStablePane();
 
     expect(await screen.findByRole('button', { name: 'Show 38 more' })).toBeInTheDocument();
+    const history = screen.getByRole('list', { name: 'Revision history' });
+    const rowButtons = (): HTMLElement[] => within(history).getAllByRole('button', { name: /^Rev \d+ · /u });
     expect(revisionStatusHarness.logRequests).toEqual(['main']);
     await user.click(screen.getByRole('button', { name: 'Show 38 more' }));
     expect(rowButtons()).toHaveLength(50);

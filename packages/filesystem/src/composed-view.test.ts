@@ -855,7 +855,7 @@ describe('composeView watch mask', () => {
     const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
     const received: WatchEvent[] = [];
 
-    view.watch!({ paths: [''], recursive: true }, (event) => {
+    void view.watch!({ paths: [''], recursive: true }, (event) => {
       received.push(event);
     });
     for (const path of [
@@ -881,12 +881,12 @@ describe('composeView watch mask', () => {
     const { base, subscriptions } = watchable();
     const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
 
-    expect(() => view.watch!({ paths: ['.git'] }, () => undefined)).toThrow(
-      expect.objectContaining({ code: 'EPERM', reason: maskedPathCode }),
-    );
-    expect(() => view.watch!({ paths: ['src', 'vendor/x/.git'] }, () => undefined)).toThrow(
-      expect.objectContaining({ code: 'EPERM' }),
-    );
+    expect(() => {
+      void view.watch!({ paths: ['.git'] }, () => undefined);
+    }).toThrow(expect.objectContaining({ code: 'EPERM', reason: maskedPathCode }));
+    expect(() => {
+      void view.watch!({ paths: ['src', 'vendor/x/.git'] }, () => undefined);
+    }).toThrow(expect.objectContaining({ code: 'EPERM' }));
     expect(subscriptions).toStrictEqual([]);
   });
 
@@ -914,6 +914,30 @@ describe('composeView watch mask', () => {
     /* The base's own disposer is what the caller gets back, so a `watch` that
      * answers a promise of one — `NodeFsProviderClient` — still works. */
     expect(unsubscribe).toBe(stop);
+  });
+
+  it('preserves an asynchronous base admission and its disposer through the mask', async () => {
+    const admission = Promise.withResolvers<() => void>();
+    const stop = vi.fn();
+    let deliver: ((event: WatchEvent) => void) | undefined;
+    const base = Object.assign(new MemoryProvider(), {
+      // oxlint-disable-next-line typescript/promise-function-async -- This test verifies exact promise identity through the composed view.
+      watch: (_request: WatchRequest, handler: (event: WatchEvent) => void): Promise<() => void> => {
+        deliver = handler;
+        return admission.promise;
+      },
+    });
+    const view = composeView({ filesystem: base }, { consumer: 'agent', policy: tauPathPolicy });
+    const received: WatchEvent[] = [];
+    const result = view.watch!({ paths: [''], recursive: true }, (event) => received.push(event));
+    expect(result).toBe(admission.promise);
+    admission.resolve(stop);
+    const unsubscribe = await result;
+    deliver?.({ type: 'change', path: '.git/HEAD' });
+    deliver?.({ type: 'change', path: 'src/main.ts' });
+    expect(received).toEqual([{ type: 'change', path: 'src/main.ts' }]);
+    unsubscribe();
+    expect(stop).toHaveBeenCalledOnce();
   });
 });
 

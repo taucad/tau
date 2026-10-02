@@ -4,6 +4,7 @@
 import { cloneBoundedJson } from '@taucad/parameters/json';
 import { Topic } from '@taucad/events';
 import type { RootedFileSystem } from '@taucad/filesystem';
+import type { ComposedView } from '@taucad/filesystem/composed-view';
 import type { CacheValue } from '@taucad/cache-core';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
 import {
@@ -17,8 +18,7 @@ import type { MachineSettingsRecord, MachineTypeId, SettingsDefinition, Settings
 
 import type { MachineSettingsSnapshot, MachineSettingsEdit, MachineSettingsSave } from '@taucad/types';
 
-type SettingsFileSystem = Pick<RootedFileSystem, 'readFileStream' | 'writeFileChecked'> &
-  Partial<Pick<RootedFileSystem, 'watch'>>;
+type SettingsFileSystem = Pick<RootedFileSystem, 'readFileStream' | 'writeFileChecked'> & Pick<ComposedView, 'watch'>;
 
 type Entry = {
   typeId: MachineTypeId;
@@ -28,6 +28,7 @@ type Entry = {
   epoch: number;
   reading?: Promise<MachineSettingsSnapshot>;
   watchReady: Promise<void>;
+  watchFailure?: Error;
   unwatch: () => void;
   topic: Topic<MachineSettingsSnapshot>;
   observers: number;
@@ -324,7 +325,10 @@ export class MachineSettingsOwner {
     };
     this.#entries.set(typeId, entry);
     if (this.#filesystem.watch) {
-      entry.unwatch = this.#filesystem.watch({ paths: [machineSettingsPath({ typeId })] }, () => {
+      const watch = this.#filesystem.watch({ paths: [machineSettingsPath({ typeId })] }, () => {
+        if (this.#closed || this.#entries.get(typeId) !== entry) {
+          return;
+        }
         entry.dirty = true;
         entry.epoch += 1;
         if (entry.observers > 0 && entry.pending === 0) {
@@ -337,6 +341,22 @@ export class MachineSettingsOwner {
           );
         }
       });
+      if (typeof watch === 'function') {
+        entry.unwatch = watch;
+      } else {
+        entry.watchReady = watch.then(
+          (release) => {
+            if (this.#closed || this.#entries.get(typeId) !== entry) {
+              release();
+            } else {
+              entry.unwatch = release;
+            }
+          },
+          (error: unknown) => {
+            entry.watchFailure = error instanceof Error ? error : new Error(errorMessage(error));
+          },
+        );
+      }
     }
     return entry;
   }
@@ -409,6 +429,12 @@ export class MachineSettingsOwner {
 
   async #acquire(entry: Entry): Promise<MachineSettingsSnapshot> {
     await entry.watchReady;
+    if (entry.watchFailure) {
+      throw entry.watchFailure;
+    }
+    if (this.#entries.get(entry.typeId) !== entry) {
+      throw new Error('Machine settings authority is closed.');
+    }
     for (;;) {
       const { epoch } = entry;
       let bytes: Uint8Array<ArrayBuffer> | null;

@@ -1234,7 +1234,7 @@ export function GltfMesh({
   const retiredPresentationsRef = useRef<PreparedGltfPresentation[]>([]);
   const frameProbeRef = useRef<{ revision: number; modelEmptyFrames: number } | undefined>(undefined);
   const [topologyScheduler] = useState(createSectionTopologyScheduler);
-  const { size, invalidate, gl, scene: rootScene } = useThree();
+  const { size, invalidate, scene: rootScene } = useThree();
   const { theme } = useTheme();
   const activeEdgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
   const matcapTint = theme === Theme.DARK ? darkModeIntensityScale : 1;
@@ -1389,7 +1389,7 @@ export function GltfMesh({
         },
       });
     },
-    [gltfFile.byteLength, graphicsActor, graphicsBackendThree, topologyScheduler],
+    [graphicsActor, graphicsBackendThree, topologyScheduler],
   );
 
   const ensureSectionAnalysis = useCallback(
@@ -1862,13 +1862,10 @@ export function GltfMesh({
     gltfFile,
     graphicsBackendThree,
     invalidate,
-    gl,
     graphicsActor,
     sourceFile,
     geometryHash,
     requestedUnitId,
-    rootScene,
-    cameraRig,
     presentationRevision,
     ensureSectionAnalysis,
     emitTelemetry,
@@ -2017,41 +2014,26 @@ export function GltfMesh({
   );
   useRenderFrameRetarget(retargetMaterialDistances);
 
-  // Material-mode changes mutate only the committed bundle and never reparse the GLB.
+  // Material-mode and visual-state changes commit through one presentation owner.
   useLayoutEffect(() => {
-    if (!presentation) {
+    if (!presentation || !scene || !componentManifest) {
       return;
     }
     const materialSignature = `${enableMatcap}:${matcapTint}:${graphicsBackendThree}`;
-    if (materialSignaturesRef.current.get(presentation) === materialSignature) {
-      return;
+    if (materialSignaturesRef.current.get(presentation) !== materialSignature) {
+      if (enableMatcap) {
+        void applyMatcap({ scene: presentation.scene }, matcapTint, graphicsBackendThree);
+      } else {
+        restoreOriginalMaterials(presentation.scene, presentation.originalMaterials);
+      }
+      retargetMaterialDistances(renderFrame);
+      applyGltfSurfaceDepthBiasToScene(presentation.scene, graphicsBackendThree);
+      seedSceneMaterialAppearances(presentation.scene);
+      invalidateSceneTransparency(presentation.scene);
+      appliedAppearance.delete(presentation.scene);
+      materialSignaturesRef.current.set(presentation, materialSignature);
     }
-    if (enableMatcap) {
-      void applyMatcap({ scene: presentation.scene }, matcapTint, graphicsBackendThree);
-    } else {
-      restoreOriginalMaterials(presentation.scene, presentation.originalMaterials);
-    }
-    retargetMaterialDistances(renderFrame);
-    applyGltfSurfaceDepthBiasToScene(presentation.scene, graphicsBackendThree);
-    seedSceneMaterialAppearances(presentation.scene);
-    invalidateSceneTransparency(presentation.scene);
-    appliedAppearance.delete(presentation.scene);
-    materialSignaturesRef.current.set(presentation, materialSignature);
-    invalidate();
-  }, [
-    enableMatcap,
-    graphicsBackendThree,
-    invalidate,
-    matcapTint,
-    presentation,
-    renderFrame,
-    retargetMaterialDistances,
-  ]);
 
-  useLayoutEffect(() => {
-    if (!scene || !componentManifest) {
-      return;
-    }
     if (enableLines && !expandedEdgeScenes.has(scene)) {
       const bundle = committedPresentationRef.current;
       applyFatLineSegments(
@@ -2101,28 +2083,32 @@ export function GltfMesh({
     setModelEmphasisSet(rootScene, emphasised);
     invalidate();
   }, [
-    scene,
-    componentManifest,
-    modelVisualState,
-    enableSurfaces,
-    enableLines,
-    presentation,
     activeEdgeColor,
-    sectionClip,
+    componentManifest,
+    enableLines,
     enableMatcap,
-    matcapTint,
+    enableSurfaces,
     graphicsBackendThree,
     invalidate,
+    matcapTint,
+    modelVisualState,
+    presentation,
+    renderFrame,
+    retargetMaterialDistances,
     rootScene,
+    scene,
+    sectionClip,
   ]);
 
-  useEffect(
-    () => () => {
+  useLayoutEffect(() => {
+    if (!scene) {
+      return undefined;
+    }
+    return () => {
       setModelEmphasisSet(rootScene, emptyModelEmphasisSet);
       invalidateSceneTransparency(rootScene);
-    },
-    [rootScene, scene],
-  );
+    };
+  }, [rootScene, scene]);
 
   useEffect(() => {
     lastHoveredComponentIdRef.current = modelVisualState.isViewerHoverSuppressed

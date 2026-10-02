@@ -196,8 +196,8 @@ describe('ChatMessageToolArrangeWorkbench', () => {
       input: {
         views: [{ id: 'iso', name: 'Review' }],
         entries: [
-          { path: 'model/main.ts', operationTimeout: 15_000 },
-          { path: 'model/other.ts', operationTimeout: 30_000 },
+          { path: 'model/main.ts', renderTimeout: 15_000 },
+          { path: 'model/other.ts', renderTimeout: 30_000 },
         ],
       },
       output: {

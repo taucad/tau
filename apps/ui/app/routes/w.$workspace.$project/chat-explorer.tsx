@@ -473,7 +473,11 @@ function LiveComponentTree({
   readonly graphicsRef: GraphicsActorRef;
   readonly modelRef: ModelInteractionRef;
 }): React.JSX.Element {
-  const contentRef = useRef<HTMLDivElement>(null);
+  const [scroller, setScroller] = useState<HTMLDivElement>();
+  // oxlint-disable-next-line typescript/no-restricted-types -- React passes null when a callback ref detaches.
+  const attachScroller = useCallback((element: HTMLDivElement | null) => {
+    setScroller(element ?? undefined);
+  }, []);
   const unitId = deriveModelInteractionUnitId({ sourceFile: params.entryPath });
   const unitState = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
   const {
@@ -492,6 +496,7 @@ function LiveComponentTree({
     () => (manifest ? getVisibleModelComponents(manifest, normalizedQuery) : []),
     [manifest, normalizedQuery],
   );
+  const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
   const leafPartIds = useMemo(
     () =>
       manifest?.nodeOrder.filter((id) => {
@@ -514,19 +519,21 @@ function LiveComponentTree({
   const getPreviewSnapshot = useCallback(() => thumbnails?.snapshot() ?? emptyPreviewSnapshot, [thumbnails]);
   const previews = useSyncExternalStore(subscribePreviews, getPreviewSnapshot, getPreviewSnapshot);
   const selectedPreview = currentSelection ? previews.get(currentSelection) : undefined;
-  const [previewRetryRevision, setPreviewRetryRevision] = useState(0);
-  const manualPreviewRetry = useRef<string | undefined>(undefined);
-  const retryPreview = useCallback(
-    (id?: string) => {
-      manualPreviewRetry.current = id ?? currentSelection;
-      setPreviewRetryRevision((value) => value + 1);
-    },
-    [currentSelection],
-  );
-  const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
   const artifact = useSelector(graphicsRef, (state) => state.context.artifact);
   const artifactKey = useSelector(graphicsRef, (state) => state.context.artifactKey);
   const presentedKey = useSelector(graphicsRef, (state) => state.context.gltfPresentation.presentedKey);
+  const [previewRetry, setPreviewRetry] = useState<{ partId: string; requestId: number; sourceKey: string }>();
+  const submittedRetryId = useRef(0);
+  const retryPreview = useCallback(
+    (id?: string) => {
+      const partId = id ?? currentSelection;
+      if (!partId || !presentedKey) {
+        return;
+      }
+      setPreviewRetry((current) => ({ partId, requestId: (current?.requestId ?? 0) + 1, sourceKey: presentedKey }));
+    },
+    [currentSelection, presentedKey],
+  );
 
   useEffect(() => {
     if (!imageService || sharedThumbnails) {
@@ -544,13 +551,17 @@ function LiveComponentTree({
   useEffect(() => () => thumbnails?.releaseOwner('explorer'), [thumbnails]);
 
   useEffect(() => {
-    const scroller = contentRef.current;
     if (!scroller) {
       return undefined;
     }
+    const visibleIds = new Set(visibleNodes.map((node) => node.id));
     const mounted = new Set<HTMLElement>();
     const inView = new Set<string>();
+    let active = true;
     const publishVisible = (): void => {
+      if (!active) {
+        return;
+      }
       const next = [...inView].slice(0, 127);
       setVisiblePreviewIds((current) =>
         current.length === next.length && current.every((id, index) => id === next[index]) ? current : next,
@@ -561,10 +572,13 @@ function LiveComponentTree({
         ? undefined
         : new IntersectionObserver(
             (entries) => {
+              if (!active) {
+                return;
+              }
               for (const entry of entries) {
                 const row = entry.target as HTMLElement;
                 const id = row.dataset['modelComponentId'];
-                if (!id || !mounted.has(row)) {
+                if (!id || !visibleIds.has(id) || !mounted.has(row)) {
                   continue;
                 }
                 if (entry.isIntersecting) {
@@ -578,7 +592,14 @@ function LiveComponentTree({
             { root: scroller, rootMargin: '56px 0px' },
           );
     const syncMountedRows = (): void => {
-      const rows = new Set(scroller.querySelectorAll<HTMLElement>('[data-model-component-row]'));
+      if (!active) {
+        return;
+      }
+      const rows = new Set(
+        [...scroller.querySelectorAll<HTMLElement>('[data-model-component-row]')].filter((row) =>
+          visibleIds.has(row.dataset['modelComponentId'] ?? ''),
+        ),
+      );
       for (const row of mounted) {
         if (!rows.has(row)) {
           observer?.unobserve(row);
@@ -611,12 +632,17 @@ function LiveComponentTree({
     mountedRows.observe(scroller, { childList: true, subtree: true });
     syncMountedRows();
     return () => {
+      active = false;
       mountedRows.disconnect();
       observer?.disconnect();
     };
-  }, [manifest, normalizedQuery]);
+  }, [scroller, visibleNodes]);
 
   useEffect(() => {
+    if (previewRetry && previewRetry.sourceKey !== presentedKey) {
+      // Retire an unsubmitted retry when its presented-source lifetime ends.
+      submittedRetryId.current = previewRetry.requestId;
+    }
     if (!thumbnails) {
       return;
     }
@@ -634,9 +660,11 @@ function LiveComponentTree({
     let active = true;
     const { content } = artifact;
     const requestedParts = parts.slice(0, 128);
-    const manualPartId = manualPreviewRetry.current;
-    manualPreviewRetry.current = undefined;
-    if (content.byteLength > 64 * 1024 * 1024) {
+    const pendingRetry =
+      previewRetry?.sourceKey === presentedKey && previewRetry.requestId !== submittedRetryId.current
+        ? previewRetry
+        : undefined;
+    if (content.buffer.byteLength > 64 * 1024 * 1024) {
       thumbnails.failPreparationForOwner(
         'explorer',
         requestedParts,
@@ -666,8 +694,11 @@ function LiveComponentTree({
               ...part,
               visualKey: prepared.previews[index]?.key ?? prepared.visualKey,
             })),
-            manualPartId ? { manualPartId } : undefined,
+            pendingRetry ? { manualPartId: pendingRetry.partId } : undefined,
           );
+          if (pendingRetry) {
+            submittedRetryId.current = pendingRetry.requestId;
+          }
         }
       } catch (error) {
         if (active) {
@@ -688,7 +719,7 @@ function LiveComponentTree({
     manifest,
     params.entryPath,
     presentedKey,
-    previewRetryRevision,
+    previewRetry,
     selectedComponentIds,
     thumbnails,
     visiblePreviewIds,
@@ -705,7 +736,9 @@ function LiveComponentTree({
         unitId,
         componentId: currentSelection,
         preview: selectedPreview,
-        retry: retryPreview,
+        retry: () => {
+          retryPreview();
+        },
         decodeError: () => {
           if (selectedPreview?.bytes) {
             thumbnails?.failDecode(currentSelection, selectedPreview.bytes);
@@ -726,7 +759,7 @@ function LiveComponentTree({
 
   return (
     <ModelPaneviewPanelSurface
-      contentRef={contentRef}
+      contentRef={attachScroller}
       footer={
         <Collapsible>
           <div className='flex min-w-0 items-center justify-between gap-2 border-t px-2 py-1 text-xs text-muted-foreground'>

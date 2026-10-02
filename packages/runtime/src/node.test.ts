@@ -1,7 +1,8 @@
-import { mkdtemp, writeFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it, vi } from 'vitest';
+import parcelWatcher from '@parcel/watcher';
 import { createNodeClient } from '#node.js';
 import { defineKernelV2 as defineKernel } from '#types/runtime-kernel-v2.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
@@ -71,20 +72,41 @@ describe('createNodeClient', () => {
     client.terminate();
   });
 
-  it('releases fs.watch handles on terminate for a path-backed client', async () => {
+  it('releases the admitted native subscription on termination for a path-backed client', async () => {
     const projectDirectory = await mkdtemp(join(tmpdir(), 'taucad-node-client-'));
     await writeFile(join(projectDirectory, 'main.mock'), 'fixture');
-    const client = await createClient(projectDirectory);
-
-    const document = client.open({ source: { path: 'main.mock' }, watch: true });
-    const outcome = await document.evaluation();
-    expect(outcome.superseded).toBe(false);
-    expect(process.getActiveResourcesInfo()).toContain('FSEventWrap');
-
-    document.close();
-    client.terminate();
-    await vi.waitFor(() => {
-      expect(process.getActiveResourcesInfo()).not.toContain('FSEventWrap');
+    const nativeSubscribe = parcelWatcher.subscribe.bind(parcelWatcher);
+    const active = new Set<Awaited<ReturnType<typeof parcelWatcher.subscribe>>>();
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (...args) => {
+      const subscription = await nativeSubscribe(...args);
+      active.add(subscription);
+      const nativeUnsubscribe = subscription.unsubscribe.bind(subscription);
+      vi.spyOn(subscription, 'unsubscribe').mockImplementation(async () => {
+        await nativeUnsubscribe();
+        active.delete(subscription);
+      });
+      return subscription;
     });
+    let client: Awaited<ReturnType<typeof createClient>> | undefined;
+    let document: ReturnType<Awaited<ReturnType<typeof createClient>>['open']> | undefined;
+    try {
+      client = await createClient(projectDirectory);
+      document = client.open({ source: { path: 'main.mock' }, watch: true });
+      const outcome = await document.evaluation();
+      expect(outcome.superseded).toBe(false);
+      expect(subscribe).toHaveBeenCalled();
+      expect(active.size).toBeGreaterThan(0);
+
+      document.close();
+      client.terminate();
+      await vi.waitFor(() => {
+        expect(active.size).toBe(0);
+      });
+    } finally {
+      document?.close();
+      client?.terminate();
+      subscribe.mockRestore();
+      await rm(projectDirectory, { recursive: true, force: true });
+    }
   });
 });

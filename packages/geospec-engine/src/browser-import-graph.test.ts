@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import { dirname, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { createDefaultRuntimeClient as createBrowserDefaultRuntimeClient } from '#model/default-runtime-client.browser.js';
 
 /**
  * The bundling contract for the host-neutral entry.
@@ -44,16 +45,18 @@ const importSpecifiers = (source: string): string[] => [
 /**
  * Resolve one specifier to a file on disk, mirroring the package's `imports`
  * map under the `browser` condition. Returns undefined for bare packages —
- * their own graphs are their own contract.
+ * their own graphs are their own contract, except for known Node-only entries.
  */
 const resolveLocal = (specifier: string, fromPath: string): string | undefined => {
   const candidate = specifier.startsWith('#cache/node-evidence-store.js')
     ? fileURLToPath(new URL('src/cache/browser-evidence-store.ts', packageRoot))
-    : specifier.startsWith('#')
-      ? fileURLToPath(new URL(`src/${specifier.slice(1).replace(/\.js$/, '.ts')}`, packageRoot))
-      : specifier.startsWith('.')
-        ? resolve(dirname(fromPath), specifier.replace(/\.js$/, '.ts'))
-        : undefined;
+    : specifier === '#model/default-runtime-client.js'
+      ? fileURLToPath(new URL('src/model/default-runtime-client.browser.ts', packageRoot))
+      : specifier.startsWith('#')
+        ? fileURLToPath(new URL(`src/${specifier.slice(1).replace(/\.js$/, '.ts')}`, packageRoot))
+        : specifier.startsWith('.')
+          ? resolve(dirname(fromPath), specifier.replace(/\.js$/, '.ts'))
+          : undefined;
 
   if (candidate === undefined) {
     return undefined;
@@ -68,11 +71,13 @@ const resolveLocal = (specifier: string, fromPath: string): string | undefined =
     }
   }
 
+  if (specifier === '#model/default-runtime-client.js') {
+    throw new Error(`Browser import target missing: ${candidate}`);
+  }
   return undefined;
 };
 
-const walkNeutralGraph = (): Map<string, string[]> => {
-  const entry = fileURLToPath(new URL('register.ts', sourceRoot));
+const walkNeutralGraph = (entry = fileURLToPath(new URL('register.ts', sourceRoot))): Map<string, string[]> => {
   const seen = new Set<string>();
   const offenders = new Map<string, string[]>();
   const queue = [entry];
@@ -85,11 +90,13 @@ const walkNeutralGraph = (): Map<string, string[]> => {
     seen.add(path);
 
     const specifiers = importSpecifiers(readFileSync(path, 'utf8'));
-    const builtins = specifiers.filter(
-      (specifier) => (specifier.startsWith('node:') || specifier === 'fs') && !shimmedBuiltins.has(specifier),
+    const nodeOnlyImports = specifiers.filter(
+      (specifier) =>
+        specifier === '@taucad/runtime/node' ||
+        ((specifier.startsWith('node:') || specifier === 'fs') && !shimmedBuiltins.has(specifier)),
     );
-    if (builtins.length > 0) {
-      offenders.set(relative(fileURLToPath(packageRoot), path), [...new Set(builtins)].sort());
+    if (nodeOnlyImports.length > 0) {
+      offenders.set(relative(fileURLToPath(packageRoot), path), [...new Set(nodeOnlyImports)].sort());
     }
 
     for (const specifier of specifiers) {
@@ -104,8 +111,22 @@ const walkNeutralGraph = (): Map<string, string[]> => {
 };
 
 describe('browser import graph', () => {
-  it('reaches no unshimmed Node builtin from the host-neutral register', () => {
+  it('refuses a default runtime when a browser caller has not injected one', async () => {
+    await expect(createBrowserDefaultRuntimeClient(undefined)).rejects.toThrow(
+      'GeoSpec cannot create a default runtime in a browser. Provide a runtime or source adapter.',
+    );
+  });
+
+  it('reaches no Node-only import from the host-neutral register', () => {
     expect(Object.fromEntries(walkNeutralGraph())).toEqual({});
+  });
+
+  it('reaches no Node-only import from the injected model loader', () => {
+    const entry = fileURLToPath(new URL('model/load-model.ts', sourceRoot));
+    expect(Object.fromEntries(walkNeutralGraph(entry))).toEqual({});
+    expect(resolveLocal('#model/default-runtime-client.js', entry)).toBe(
+      fileURLToPath(new URL('model/default-runtime-client.browser.ts', sourceRoot)),
+    );
   });
 
   it('walks a graph large enough to be meaningful', () => {
@@ -129,5 +150,6 @@ describe('browser import graph', () => {
     }
 
     expect(reached.size).toBeGreaterThanOrEqual(50);
+    expect(reached.has(fileURLToPath(new URL('runner/pool/pool.ts', sourceRoot)))).toBe(true);
   });
 });

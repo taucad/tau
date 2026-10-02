@@ -24,6 +24,7 @@ import { fileURLToPath } from 'node:url';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import type { AgentLogEvent } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
+import type { CommandAnswer } from '@taucad/agent-host/wire';
 import { afterAll, afterEach, beforeAll, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import { WebSocket, WebSocketServer } from 'ws';
@@ -576,9 +577,8 @@ describe('tau tui', () => {
     await submit(terminal, 'slow noask again');
     /* The transcript row, not the log file: the run is only "live" to this view
      * once the page carrying its admission has been folded. */
-    await until(() =>
-      /user slow noask again/u.test(terminal.output().slice(secondTurnOutputStart)) ? true : undefined,
-    );
+    await untilPainted(terminal, /user slow noask again/u);
+    expect(terminal.output().slice(secondTurnOutputStart)).not.toContain('start failed:');
     await until(() =>
       /enter keeps draft until this external run settles/u.test(terminal.output().slice(secondTurnOutputStart))
         ? true
@@ -598,6 +598,162 @@ describe('tau tui', () => {
     terminal.stdin.write('q');
     await expect(finished).resolves.toBeUndefined();
   }, 120_000);
+
+  it('should stop a settling start on cancel and restore its draft', async () => {
+    const client = mock<AgentChannelClient>();
+    client.execute.mockImplementation(async (command) =>
+      command.type === 'attach'
+        ? {
+            commandId: command.commandId,
+            generation: 1,
+            status: 'applied',
+            effect: 'not-applied',
+            details: { endCursor: 0 },
+          }
+        : {
+            commandId: command.commandId,
+            generation: 1,
+            status: 'refused',
+            effect: 'not-applied',
+            code: 'CHAT_RUN_LIVE',
+            message: 'The previous run is settling.',
+            details: { state: 'settling' },
+          },
+    );
+    const opened = vi.spyOn(agentClient, 'openAgentChannel').mockResolvedValue({
+      client,
+      url: new URL('http://127.0.0.1:1'),
+    });
+    const replay = vi.spyOn(agentClient, 'readNext').mockImplementation(async ({ ledger, signal }) => {
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { ledger, events: [], endCursor: 0, reset: false };
+    });
+    try {
+      const terminal = createTerminal();
+      const finished = runTui({
+        host: 'http://127.0.0.1:1',
+        chatId: 'chat-tui-settling-cancel',
+        from: 0,
+        stdin: terminal.stdin,
+        stdout: terminal.stdout,
+      });
+      mounted.push({ terminal, finished });
+      await submit(terminal, 'make a plate');
+      await until(() => (client.execute.mock.calls.some(([command]) => command.type === 'start') ? true : undefined));
+      const beforeCancel = terminal.output().length;
+      terminal.stdin.write('c');
+      await until(() => (terminal.output().slice(beforeCancel).includes('> make a plate') ? true : undefined));
+      const starts = client.execute.mock.calls.filter(([command]) => command.type === 'start');
+      expect(starts).toHaveLength(1);
+      expect(client.execute.mock.calls.filter(([command]) => command.type === 'cancel')).toHaveLength(0);
+      terminal.stdin.write('\u001B');
+      await settle();
+      terminal.stdin.write('q');
+      await expect(finished).resolves.toBeUndefined();
+    } finally {
+      replay.mockRestore();
+      opened.mockRestore();
+    }
+  });
+
+  it('should cancel the newly admitted run when cancel was pressed before its start answer', async () => {
+    const client = mock<AgentChannelClient>();
+    const startAnswer = Promise.withResolvers<CommandAnswer>();
+    client.execute.mockImplementation(async (command) => {
+      if (command.type === 'attach') {
+        return {
+          commandId: command.commandId,
+          generation: 1,
+          status: 'applied',
+          effect: 'not-applied',
+          details: { endCursor: 0 },
+        };
+      }
+      if (command.type === 'start') {
+        return startAnswer.promise;
+      }
+      return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 2 };
+    });
+    const opened = vi.spyOn(agentClient, 'openAgentChannel').mockResolvedValue({
+      client,
+      url: new URL('http://127.0.0.1:1'),
+    });
+    const oldRun: AgentLogEvent = {
+      version: 1,
+      leaderEpoch: 'epoch-1',
+      sequence: 0,
+      recordedAt: new Date(0).toISOString(),
+      runId: 'old-run',
+      type: 'run.lifecycle',
+      state: 'completed',
+    };
+    const replay = vi.spyOn(agentClient, 'readNext').mockImplementation(async ({ ledger, signal }) => {
+      if (ledger.position.cursor === 0) {
+        return { ledger: { ...ledger, position: { cursor: 1 } }, events: [oldRun], endCursor: 1, reset: false };
+      }
+      await new Promise<void>((resolve) => {
+        signal?.addEventListener(
+          'abort',
+          () => {
+            resolve();
+          },
+          { once: true },
+        );
+      });
+      return { ledger, events: [], endCursor: 1, reset: false };
+    });
+    try {
+      const terminal = createTerminal();
+      const finished = runTui({
+        host: 'http://127.0.0.1:1',
+        chatId: 'chat-tui-cancel-unanswered',
+        from: 0,
+        stdin: terminal.stdin,
+        stdout: terminal.stdout,
+      });
+      mounted.push({ terminal, finished });
+      await untilPainted(terminal, /run completed/u);
+      await submit(terminal, 'make the next plate');
+      const start = await until(() => client.execute.mock.calls.find(([command]) => command.type === 'start')?.[0]);
+      if (start.type !== 'start') {
+        throw new TypeError('Expected a start command.');
+      }
+      terminal.stdin.write('c');
+      await settle();
+      expect(client.execute.mock.calls.filter(([command]) => command.type === 'cancel')).toHaveLength(0);
+
+      startAnswer.resolve({
+        commandId: start.commandId,
+        generation: 1,
+        status: 'applied',
+        effect: 'durable',
+        cursor: 1,
+      });
+      const cancelled = await until(
+        () => client.execute.mock.calls.find(([command]) => command.type === 'cancel')?.[0],
+      );
+      if (cancelled.type !== 'cancel') {
+        throw new TypeError('Expected a cancel command.');
+      }
+      expect(cancelled.payload.runId).toBe(start.payload.runId);
+      expect(cancelled.payload.runId).not.toBe('old-run');
+      expect(client.execute.mock.calls.filter(([command]) => command.type === 'cancel')).toHaveLength(1);
+      await untilPainted(terminal, /cancel: applied at 2/u);
+      terminal.stdin.write('q');
+      await expect(finished).resolves.toBeUndefined();
+    } finally {
+      replay.mockRestore();
+      opened.mockRestore();
+    }
+  });
 
   it('keeps the current external run selected when an older turn settles late', async () => {
     const client = mock<AgentChannelClient>();

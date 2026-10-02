@@ -6,6 +6,8 @@ import type { OnModuleDestroy } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { WebSocketServer, WebSocket } from 'ws';
 import type { Environment } from '#config/environment.config.js';
+import { httpBodyLimit } from '#constants/http-body.constant.js';
+import { absorbSocketErrors } from '#api/websocket/socket-error.js';
 
 export type WebSocketConnectionHandler = (socket: WebSocket, request: IncomingMessage) => void | Promise<void>;
 
@@ -158,7 +160,8 @@ export class DevWebSocketService implements OnModuleDestroy {
     });
 
     // Create raw WebSocket server with noServer mode
-    this.wss = new WebSocketServer({ noServer: true });
+    // Bounded like the production upgrade routes; `ws` otherwise accepts 100 MiB per message.
+    this.wss = new WebSocketServer({ noServer: true, maxPayload: httpBodyLimit });
 
     // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Buffer required by ws library
     this.httpServer.on('upgrade', (request: IncomingMessage, socket: Duplex, head: Buffer) => {
@@ -172,6 +175,7 @@ export class DevWebSocketService implements OnModuleDestroy {
           .find(([prefix]) => pathname.startsWith(prefix))?.[1];
       if (handler) {
         this.wss!.handleUpgrade(request, socket, head, (ws) => {
+          absorbSocketErrors(ws);
           this.wss!.emit('connection', ws, request);
           void this.handleConnection(ws, request, handler);
         });

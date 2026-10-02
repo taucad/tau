@@ -151,7 +151,7 @@ describe('ChatSessionStoreProvider', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    expect(harness.projectManager.getChat).toHaveBeenCalledWith('chat_a');
+    expect(harness.projectManager.getChat).toHaveBeenCalledWith('chat_a', 'proj_a');
     // The chat's composer record is read through the file manager's client.
     await vi.waitFor(() => {
       expect(harness.client.readFile).toHaveBeenCalledWith('/.tau/composers/chats/proj_a/chat_a.json');

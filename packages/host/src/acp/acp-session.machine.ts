@@ -69,7 +69,7 @@ import {
   childEventSchemas as eventSchemas,
   reportSchemas,
 } from '#acp/acp-machine-schemas.js';
-import type { AcpBusyContext, AcpSessionContext } from '#acp/acp-machine-schemas.js';
+import type { AcpBusyContext, AcpSessionContext, AcpSessionEvent } from '#acp/acp-machine-schemas.js';
 
 /** E16: milliseconds the adapter has to spawn, initialize and restore before it is closed. */
 export const acpStartTimeout = 30_000;
@@ -288,6 +288,18 @@ type Enqueue = {
     options: { readonly id: string } & Readonly<Record<'delay', number>> /* E17: acpKillGrace */,
   ): void;
 };
+
+/*
+ * The machine's handlers name their parameters: an inline handler's are expanded from the whole
+ * setup, once per handler, which overflows declaration emit (TS7056; xstate-policy K-17).
+ */
+type On<K extends AcpSessionEvent['type'], C = AcpSessionContext> = Readonly<{
+  context: C;
+  event: Extract<AcpSessionEvent, Readonly<{ type: K }>>;
+}>;
+type Held<C = AcpSessionContext> = Readonly<{ context: C }>;
+type Faulted<C = AcpSessionContext> = Readonly<{ context: C; event: Readonly<{ error: unknown }> }>;
+type ClosingContext = AcpSessionContext & { readonly deferred?: Report | undefined };
 
 /**
  * Events a state takes on purpose without a transition (MC-R17).
@@ -1025,15 +1037,10 @@ const machineDefinition = setup({
   },
 });
 
-/**
- * One vendor ACP session: restore, the lent turn, cancel, and the close ladder (W10 EA-S5).
- *
- * @internal
- */
-export const acpSessionMachine = machineDefinition.createMachine({
+const acpSessionMachineDefinition = machineDefinition.createMachine({
   id: 'acpSession',
   version: '2',
-  context: ({ input }) => ({
+  context: ({ input }: Readonly<{ input: AcpSessionInput }>) => ({
     key: input.key,
     parentRef: input.parentRef,
     adapter: input.opening.adapter,
@@ -1065,13 +1072,13 @@ export const acpSessionMachine = machineDefinition.createMachine({
   invoke: {
     id: 'connection',
     src: 'adapterConnection',
-    input: ({ context }) => ({ adapter: context.adapter, cwd: context.cwd }),
+    input: ({ context }: Held) => ({ adapter: context.adapter, cwd: context.cwd }),
   },
   /*
    * A fault (MC-R12): a transition threw. The turn in hand is answered with it, and the child
    * closes through the ladder, whose connection cleanup kills the group.
    */
-  onError: refines('Unmodelled', ({ context, event }, enq) => {
+  onError: refines('Unmodelled', ({ context, event }: Faulted, enq: Enqueue) => {
     const failure = failureOfError(event.error, context.adapter);
     /* Root context is any state's: only `busy` holds a lent turn (MC-R26). */
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- read, not narrowed, across per-state context.
@@ -1083,7 +1090,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
   }),
   /* Anything a state does not take for itself. */
   on: {
-    probeModel: refines('Stutter', ({ event }, enq) => {
+    probeModel: refines('Stutter', ({ event }: On<'probeModel'>, enq: Enqueue) => {
       enq.emit({
         type: 'modelProbed',
         requestId: event.requestId,
@@ -1095,14 +1102,14 @@ export const acpSessionMachine = machineDefinition.createMachine({
     /* An answer nobody waits on: the state that asked has moved on (MC-R18). */
     callSettled: refines('Stutter', () => ({})),
     /* E17 after a cancel bound: SIGKILL the group, whatever state the child is in by now. */
-    killDue: refines('Stutter', (_args, enq) => {
+    killDue: refines('Stutter', (_args: unknown, enq: Enqueue) => {
       enq.sendTo('connection', { type: 'kill' });
       return {};
     }),
-    sessionUpdate: refines('Stutter', ({ context, event }) =>
+    sessionUpdate: refines('Stutter', ({ context, event }: On<'sessionUpdate'>) =>
       ownUpdate(context, event.sessionId) ? { context: folded(context, event.update) } : {},
     ),
-    vendorRequest: refines('Stutter', ({ event }, enq) => {
+    vendorRequest: refines('Stutter', ({ event }: On<'vendorRequest'>, enq: Enqueue) => {
       refuseVendor(enq, event.id, event.request);
       return {};
     }),
@@ -1113,7 +1120,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
     lentFailed: refines('Stutter', () => ({})),
     flushed: refines('Stutter', () => ({})),
     recorded: refines('Stutter', () => ({})),
-    lend: refines('Stutter', ({ context, event }, enq) => {
+    lend: refines('Stutter', ({ context, event }: On<'lend'>, enq: Enqueue) => {
       /* Unreachable while the parent is correct: it lends only a resting child. */
       tell(context, enq, {
         type: 'turnEnded',
@@ -1131,9 +1138,9 @@ export const acpSessionMachine = machineDefinition.createMachine({
     opening: {
       id: 'opening',
       on: {
-        cancel: refines('Cancel', ({ context }, enq) => abandonOpen(context, enq, cancelled)),
-        close: refines('Cancel', ({ context }, enq) => abandonOpen(context, enq, cancelled)),
-        adapterExited: refines('AdapterExited', ({ context, event }, enq) =>
+        cancel: refines('Cancel', ({ context }: On<'cancel'>, enq: Enqueue) => abandonOpen(context, enq, cancelled)),
+        close: refines('Cancel', ({ context }: On<'close'>, enq: Enqueue) => abandonOpen(context, enq, cancelled)),
+        adapterExited: refines('AdapterExited', ({ context, event }: On<'adapterExited'>, enq: Enqueue) =>
           abandonOpen({ ...context, stderr: event.stderr, exited: true }, enq, exitFailure(context, event.stderr)),
         ),
       },
@@ -1142,7 +1149,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
         starting: {
           /* E16: acpStartTimeout bounds spawn, initialize and the skill publication. */
           timeout: acpStartTimeout,
-          onTimeout: refines('Cancel', ({ context }, enq) =>
+          onTimeout: refines('Cancel', ({ context }: Held, enq: Enqueue) =>
             abandonOpen(context, enq, {
               code: 'EXTERNAL_AGENT_FAILED',
               message: `${context.adapter.displayName} did not start within ${String(acpStartTimeout / 1000)} seconds.`,
@@ -1154,14 +1161,14 @@ export const acpSessionMachine = machineDefinition.createMachine({
               invoke: {
                 src: 'publishSkills',
                 onDone: refines('Stutter', skillsPublished),
-                onError: refines('Unmodelled', ({ context, event }, enq) =>
+                onError: refines('Unmodelled', ({ context, event }: Faulted, enq: Enqueue) =>
                   abandonOpen(context, enq, failureOfError(event.error, context.adapter)),
                 ),
               },
             },
             initializing: {
               on: {
-                callSettled: refines('Stutter', ({ context, event }, enq) => {
+                callSettled: refines('Stutter', ({ context, event }: On<'callSettled'>, enq: Enqueue) => {
                   if (!answers(context, event.id)) {
                     return {};
                   }
@@ -1193,7 +1200,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
         /* The restore ladder (EA-S5): a recoverable loss moves to the next rung; success opens. */
         resuming: {
           on: {
-            callSettled: refines('Opened', ({ context, event }, enq) => {
+            callSettled: refines('Opened', ({ context, event }: On<'callSettled'>, enq: Enqueue) => {
               if (!answers(context, event.id)) {
                 return {};
               }
@@ -1210,7 +1217,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
         },
         loading: {
           on: {
-            callSettled: refines('Opened', ({ context, event }, enq) => {
+            callSettled: refines('Opened', ({ context, event }: On<'callSettled'>, enq: Enqueue) => {
               if (!answers(context, event.id)) {
                 return {};
               }
@@ -1227,7 +1234,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
         },
         creating: {
           on: {
-            callSettled: refines('Opened', ({ context, event }, enq) => {
+            callSettled: refines('Opened', ({ context, event }: On<'callSettled'>, enq: Enqueue) => {
               if (!answers(context, event.id)) {
                 return {};
               }
@@ -1249,7 +1256,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
       invoke: {
         id: 'lentTurn',
         src: 'lentTurn',
-        input: ({ context }) => ({
+        input: ({ context }: Held<AcpBusyContext>) => ({
           requestId: context.lent.requestId,
           key: context.key,
           adapter: context.adapter,
@@ -1266,14 +1273,14 @@ export const acpSessionMachine = machineDefinition.createMachine({
         }),
       },
       on: {
-        sessionUpdate: refines('Stutter', ({ context, event }, enq) => {
+        sessionUpdate: refines('Stutter', ({ context, event }: On<'sessionUpdate', AcpBusyContext>, enq: Enqueue) => {
           if (!ownUpdate(context, event.sessionId)) {
             return {};
           }
           enq.sendTo('lentTurn', { type: 'update', update: event.update });
           return { context: folded(context, event.update) };
         }),
-        vendorAnswered: refines('Stutter', ({ context, event }, enq) => {
+        vendorAnswered: refines('Stutter', ({ context, event }: On<'vendorAnswered', AcpBusyContext>, enq: Enqueue) => {
           if (event.permission && !context.permissions.includes(event.id)) {
             /* Already answered `cancelled` (MC-R18). */
             return {};
@@ -1281,10 +1288,13 @@ export const acpSessionMachine = machineDefinition.createMachine({
           respond(enq, event.id, event.answer);
           return { context: { permissions: context.permissions.filter((id) => id !== event.id) } };
         }),
-        elicitationComplete: refines('Stutter', ({ event }, enq) => {
-          enq.sendTo('lentTurn', { type: 'loginComplete', elicitationId: event.elicitationId });
-          return {};
-        }),
+        elicitationComplete: refines(
+          'Stutter',
+          ({ event }: On<'elicitationComplete', AcpBusyContext>, enq: Enqueue) => {
+            enq.sendTo('lentTurn', { type: 'loginComplete', elicitationId: event.elicitationId });
+            return {};
+          },
+        ),
       },
       initial: 'binding',
       states: {
@@ -1292,30 +1302,41 @@ export const acpSessionMachine = machineDefinition.createMachine({
         binding: {
           on: {
             /* Bound: the binding is live, so the prompt goes out and a cancel from here is `session/cancel`. */
-            lentReady: refines('Bound', ({ context }, enq) => configureOrPrompt(context, enq, { fresh: false })),
-            lentFailed: refines('Unmodelled', ({ context, event }, enq) =>
+            lentReady: refines('Bound', ({ context }: On<'lentReady', AcpBusyContext>, enq: Enqueue) =>
+              configureOrPrompt(context, enq, { fresh: false }),
+            ),
+            lentFailed: refines('Unmodelled', ({ context, event }: On<'lentFailed', AcpBusyContext>, enq: Enqueue) =>
               flush(context, enq, { outcome: failed(event.failure) }),
             ),
-            adapterExited: refines('Unmodelled', ({ context, event }, enq) => exitBusy(context, enq, event.stderr)),
-            close: refines('Cancel', ({ context }, enq) => {
+            adapterExited: refines(
+              'Unmodelled',
+              ({ context, event }: On<'adapterExited', AcpBusyContext>, enq: Enqueue) =>
+                exitBusy(context, enq, event.stderr),
+            ),
+            close: refines('Cancel', ({ context }: On<'close', AcpBusyContext>, enq: Enqueue) => {
               ladder(enq);
               return flush(context, enq, { outcome: failed(cancelled), closeAfter: true });
             }),
             /* Before any prompt: no `session/cancel`, the turn ends resting (W10-F1). */
-            cancel: refines('CancelBinding', ({ context }, enq) => flush(context, enq, { outcome: failed(cancelled) })),
-            vendorRequest: refines('Stutter', ({ context, event }, enq) => {
-              if (event.request.method.startsWith('fs/') && sessionOf(event.request) === context.acpSessionId) {
-                enq.sendTo('lentTurn', { type: 'serve', id: event.id, ...event.request });
-              } else {
-                refuseVendor(enq, event.id, event.request);
-              }
-              return {};
-            }),
+            cancel: refines('CancelBinding', ({ context }: On<'cancel', AcpBusyContext>, enq: Enqueue) =>
+              flush(context, enq, { outcome: failed(cancelled) }),
+            ),
+            vendorRequest: refines(
+              'Stutter',
+              ({ context, event }: On<'vendorRequest', AcpBusyContext>, enq: Enqueue) => {
+                if (event.request.method.startsWith('fs/') && sessionOf(event.request) === context.acpSessionId) {
+                  enq.sendTo('lentTurn', { type: 'serve', id: event.id, ...event.request });
+                } else {
+                  refuseVendor(enq, event.id, event.request);
+                }
+                return {};
+              },
+            ),
           },
         },
         configuring: {
           on: {
-            callSettled: refines('Stutter', ({ context, event }, enq) => {
+            callSettled: refines('Stutter', ({ context, event }: On<'callSettled', AcpBusyContext>, enq: Enqueue) => {
               if (!answers(context, event.id)) {
                 return {};
               }
@@ -1333,49 +1354,68 @@ export const acpSessionMachine = machineDefinition.createMachine({
               enq.sendTo('lentTurn', { type: 'sessionState', presentation });
               return configureOrPrompt(context, enq, { configOptions, presentation, pending: undefined });
             }),
-            cancel: refines('Cancel', ({ context }, enq) => cancelTurn(context, enq, false)),
-            close: refines('Cancel', ({ context }, enq) => {
+            cancel: refines('Cancel', ({ context }: On<'cancel', AcpBusyContext>, enq: Enqueue) =>
+              cancelTurn(context, enq, false),
+            ),
+            close: refines('Cancel', ({ context }: On<'close', AcpBusyContext>, enq: Enqueue) => {
               ladder(enq);
               return cancelTurn(context, enq, true);
             }),
-            adapterExited: refines('Unmodelled', ({ context, event }, enq) => exitBusy(context, enq, event.stderr)),
-            vendorRequest: refines('Stutter', ({ context, event }, enq) => serve(context, enq, event)),
+            adapterExited: refines(
+              'Unmodelled',
+              ({ context, event }: On<'adapterExited', AcpBusyContext>, enq: Enqueue) =>
+                exitBusy(context, enq, event.stderr),
+            ),
+            vendorRequest: refines('Stutter', ({ context, event }: On<'vendorRequest', AcpBusyContext>, enq: Enqueue) =>
+              serve(context, enq, event),
+            ),
           },
         },
         prompting: {
           on: {
-            callSettled: refines('PromptAnswered', ({ context, event }, enq) => {
-              if (!answers(context, event.id)) {
-                return {};
-              }
-              if ('error' in event.answer) {
-                return flush(context, enq, { outcome: failed(failureOfCall(context, event.answer.error)) });
-              }
-              if (event.answer.method !== 'session/prompt') {
-                return {};
-              }
-              const answered = event.answer.result;
-              /* Read back, not echoed: the model the agent actually finished on (V6). */
-              const model = modelChoice(context.configOptions)?.currentValue ?? context.lent.model;
-              const report = { usage: answered.usage ?? undefined, model };
-              /* A typed failure ends the turn `end_turn`: the stop reason alone would
-               * record a usage limit as a completed turn. */
-              const stop = airSessionFailureOf(answered._meta);
-              const ended = stop ? stopped(context, stop, { meta: answered._meta, at: event.at }) : undefined;
-              return flush(context, enq, {
-                report,
-                answered: answered.usage ?? undefined,
-                outcome: ended ? failed(ended.failure) : { ok: true, stopReason: answered.stopReason },
-                ...(ended ? { limit: ended.limit } : {}),
-              });
-            }),
-            cancel: refines('Cancel', ({ context }, enq) => cancelTurn(context, enq, false)),
-            close: refines('Cancel', ({ context }, enq) => {
+            callSettled: refines(
+              'PromptAnswered',
+              ({ context, event }: On<'callSettled', AcpBusyContext>, enq: Enqueue) => {
+                if (!answers(context, event.id)) {
+                  return {};
+                }
+                if ('error' in event.answer) {
+                  return flush(context, enq, { outcome: failed(failureOfCall(context, event.answer.error)) });
+                }
+                if (event.answer.method !== 'session/prompt') {
+                  return {};
+                }
+                const answered = event.answer.result;
+                /* Read back, not echoed: the model the agent actually finished on (V6). */
+                const model = modelChoice(context.configOptions)?.currentValue ?? context.lent.model;
+                const report = { usage: answered.usage ?? undefined, model };
+                /* A typed failure ends the turn `end_turn`: the stop reason alone would
+                 * record a usage limit as a completed turn. */
+                const stop = airSessionFailureOf(answered._meta);
+                const ended = stop ? stopped(context, stop, { meta: answered._meta, at: event.at }) : undefined;
+                return flush(context, enq, {
+                  report,
+                  answered: answered.usage ?? undefined,
+                  outcome: ended ? failed(ended.failure) : { ok: true, stopReason: answered.stopReason },
+                  ...(ended ? { limit: ended.limit } : {}),
+                });
+              },
+            ),
+            cancel: refines('Cancel', ({ context }: On<'cancel', AcpBusyContext>, enq: Enqueue) =>
+              cancelTurn(context, enq, false),
+            ),
+            close: refines('Cancel', ({ context }: On<'close', AcpBusyContext>, enq: Enqueue) => {
               ladder(enq);
               return cancelTurn(context, enq, true);
             }),
-            adapterExited: refines('Unmodelled', ({ context, event }, enq) => exitBusy(context, enq, event.stderr)),
-            vendorRequest: refines('Stutter', ({ context, event }, enq) => serve(context, enq, event)),
+            adapterExited: refines(
+              'Unmodelled',
+              ({ context, event }: On<'adapterExited', AcpBusyContext>, enq: Enqueue) =>
+                exitBusy(context, enq, event.stderr),
+            ),
+            vendorRequest: refines('Stutter', ({ context, event }: On<'vendorRequest', AcpBusyContext>, enq: Enqueue) =>
+              serve(context, enq, event),
+            ),
           },
         },
         /* E22: the vendor has acpCancelSettleTimeout to settle its outstanding call. */
@@ -1383,7 +1423,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
           timeout: acpCancelSettleTimeout,
           /* The vendor ignored `session/cancel`: the ladder starts now, while the turn drains (EA-R8).
            * SIGTERM to the group, and SIGKILL after acpKillGrace; the turn is answered from `closed`. */
-          onTimeout: refines('CancelTimedOut', ({ context }, enq) => {
+          onTimeout: refines('CancelTimedOut', ({ context }: Held<AcpBusyContext>, enq: Enqueue) => {
             ladder(enq);
             return flush(context, enq, {
               outcome: context.outcome ?? failed(cancelled),
@@ -1392,19 +1432,27 @@ export const acpSessionMachine = machineDefinition.createMachine({
             });
           }),
           on: {
-            close: refines('Stutter', (_args, enq) => {
+            close: refines('Stutter', (_args: unknown, enq: Enqueue) => {
               ladder(enq);
               return { context: { closeAfter: true } };
             }),
-            adapterExited: refines('Unmodelled', ({ context, event }, enq) => exitBusy(context, enq, event.stderr)),
-            callSettled: refines('CancelSettled', ({ context, event }, enq) =>
-              answers(context, event.id) ? flush(context, enq, { outcome: context.outcome ?? failed(cancelled) }) : {},
+            adapterExited: refines(
+              'Unmodelled',
+              ({ context, event }: On<'adapterExited', AcpBusyContext>, enq: Enqueue) =>
+                exitBusy(context, enq, event.stderr),
+            ),
+            callSettled: refines(
+              'CancelSettled',
+              ({ context, event }: On<'callSettled', AcpBusyContext>, enq: Enqueue) =>
+                answers(context, event.id)
+                  ? flush(context, enq, { outcome: context.outcome ?? failed(cancelled) })
+                  : {},
             ),
           },
         },
         flushing: {
           on: {
-            flushed: refines('Stutter', ({ context, event }, enq) => {
+            flushed: refines('Stutter', ({ context, event }: On<'flushed', AcpBusyContext>, enq: Enqueue) => {
               const outcome: AcpTurnResult =
                 context.outcome?.ok === true
                   ? event.failure === undefined
@@ -1423,31 +1471,31 @@ export const acpSessionMachine = machineDefinition.createMachine({
               });
               return { target: 'recording', context: { outcome, priorUsage } };
             }),
-            vendorAnswered: refines('Stutter', ({ event }, enq) => {
+            vendorAnswered: refines('Stutter', ({ event }: On<'vendorAnswered', AcpBusyContext>, enq: Enqueue) => {
               if (!event.permission) {
                 respond(enq, event.id, event.answer);
               }
               return {};
             }),
-            close: refines('Stutter', (_args, enq) => {
+            close: refines('Stutter', (_args: unknown, enq: Enqueue) => {
               ladder(enq);
               return { context: { closeAfter: true } };
             }),
-            adapterExited: refines('Unmodelled', ({ event }) => ({
+            adapterExited: refines('Unmodelled', ({ event }: On<'adapterExited', AcpBusyContext>) => ({
               context: { exited: true, stderr: event.stderr, closeAfter: true },
             })),
           },
         },
         recording: {
           on: {
-            close: refines('Stutter', (_args, enq) => {
+            close: refines('Stutter', (_args: unknown, enq: Enqueue) => {
               ladder(enq);
               return { context: { closeAfter: true } };
             }),
-            adapterExited: refines('Unmodelled', ({ event }) => ({
+            adapterExited: refines('Unmodelled', ({ event }: On<'adapterExited', AcpBusyContext>) => ({
               context: { exited: true, stderr: event.stderr, closeAfter: true },
             })),
-            recorded: refines('TurnEnded', ({ context, event }, enq) =>
+            recorded: refines('TurnEnded', ({ context, event }: On<'recorded', AcpBusyContext>, enq: Enqueue) =>
               endTurn(
                 context,
                 enq,
@@ -1465,13 +1513,13 @@ export const acpSessionMachine = machineDefinition.createMachine({
       id: 'idle',
       tags: ['resting'],
       on: {
-        close: refines('CloseChat', ({ context }, enq) => close(context, enq, {})),
-        adapterExited: refines('AdapterExited', ({ event }) => ({
+        close: refines('CloseChat', ({ context }: On<'close'>, enq: Enqueue) => close(context, enq, {})),
+        adapterExited: refines('AdapterExited', ({ event }: On<'adapterExited'>) => ({
           target: 'closed',
           context: { exited: true, stderr: event.stderr },
         })),
         /* A lend waiting on a presentation write is cancelled before it prompts; otherwise the turn already ended. */
-        cancel: refines('Cancel', ({ context }, enq) =>
+        cancel: refines('Cancel', ({ context }: On<'cancel'>, enq: Enqueue) =>
           dropQueued(context, enq) ? { context: { queued: undefined } } : {},
         ),
       },
@@ -1479,7 +1527,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
       states: {
         resting: {
           on: {
-            probeModel: refines('Stutter', ({ context, event }, enq) => {
+            probeModel: refines('Stutter', ({ context, event }: On<'probeModel'>, enq: Enqueue) => {
               const choice = modelChoice(context.configOptions);
               if (!choice?.values.includes(event.model) || choice.currentValue === event.model) {
                 enq.emit({
@@ -1502,10 +1550,10 @@ export const acpSessionMachine = machineDefinition.createMachine({
               };
             }),
             /* A failed presentation write is retried first (`persisting` serves or refuses the lend). */
-            lend: refines('Acquire', ({ context, event }) =>
+            lend: refines('Acquire', ({ context, event }: On<'lend'>) =>
               context.stale ? { target: 'persisting', context: { queued: event.lend } } : lend(event.lend),
             ),
-            sessionUpdate: refines('Stutter', ({ context, event }) =>
+            sessionUpdate: refines('Stutter', ({ context, event }: On<'sessionUpdate'>) =>
               ownUpdate(context, event.sessionId)
                 ? { target: 'persisting', context: folded(context, event.update) }
                 : {},
@@ -1514,7 +1562,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
         },
         probing: {
           on: {
-            lend: refines('Acquire', ({ context, event }, enq) => {
+            lend: refines('Acquire', ({ context, event }: On<'lend'>, enq: Enqueue) => {
               if (context.queued !== undefined) {
                 tell(context, enq, {
                   type: 'turnEnded',
@@ -1527,7 +1575,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
               }
               return { context: { queued: event.lend } };
             }),
-            callSettled: refines('Stutter', ({ context, event }, enq) => {
+            callSettled: refines('Stutter', ({ context, event }: On<'callSettled'>, enq: Enqueue) => {
               if (!answers(context, event.id)) {
                 return {};
               }
@@ -1573,7 +1621,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
         persisting: {
           invoke: {
             src: 'persistPresentation',
-            input: ({ context }) => ({
+            input: ({ context }: Held) => ({
               key: context.key,
               agentId: context.adapter.id,
               sessionMessageId: context.sessionMessageId,
@@ -1581,7 +1629,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
               presentation: context.presentation,
             }),
             onDone: refines('Dequeued', presentationPersisted),
-            onError: refines('Stutter', ({ context, event }, enq) => {
+            onError: refines('Stutter', ({ context, event }: Faulted, enq: Enqueue) => {
               if (context.queued !== undefined) {
                 /* The owed write failed again: the lend is refused with its cause, and the child rests. */
                 tell(context, enq, {
@@ -1596,8 +1644,8 @@ export const acpSessionMachine = machineDefinition.createMachine({
             }),
           },
           on: {
-            lend: refines('Acquire', ({ event }) => ({ context: { queued: event.lend } })),
-            sessionUpdate: refines('Stutter', ({ context, event }) =>
+            lend: refines('Acquire', ({ event }: On<'lend'>) => ({ context: { queued: event.lend } })),
+            sessionUpdate: refines('Stutter', ({ context, event }: On<'sessionUpdate'>) =>
               ownUpdate(context, event.sessionId) ? { context: { ...folded(context, event.update), dirty: true } } : {},
             ),
           },
@@ -1608,7 +1656,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
     closing: {
       id: 'closing',
       on: {
-        adapterExited: refines('AdapterExited', ({ event }) => ({
+        adapterExited: refines('AdapterExited', ({ event }: On<'adapterExited'>) => ({
           target: 'closed',
           context: { exited: true, stderr: event.stderr },
         })),
@@ -1620,7 +1668,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
           timeout: sessionCloseTimeout,
           onTimeout: refines('Stutter', () => ({ target: 'terminating', context: { pending: undefined } })),
           on: {
-            callSettled: refines('Stutter', ({ context, event }) =>
+            callSettled: refines('Stutter', ({ context, event }: On<'callSettled'>) =>
               answers(context, event.id) ? { target: 'terminating', context: { pending: undefined } } : {},
             ),
           },
@@ -1628,7 +1676,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
         /* E18: acpTerminateBackstop; its handler kills the group again before the state ends. */
         terminating: {
           timeout: acpTerminateBackstop,
-          onTimeout: refines('AdapterExited', (_args, enq) => {
+          onTimeout: refines('AdapterExited', (_args: unknown, enq: Enqueue) => {
             enq.sendTo('connection', { type: 'kill' });
             return { target: '#closed' };
           }),
@@ -1636,14 +1684,14 @@ export const acpSessionMachine = machineDefinition.createMachine({
           states: {
             /* E17: SIGTERM to the group, then acpKillGrace before SIGKILL. */
             signalled: {
-              entry: (_args, enq) => {
+              entry: (_args: unknown, enq: Enqueue) => {
                 enq.sendTo('connection', { type: 'terminate' });
               },
               timeout: acpKillGrace,
               onTimeout: refines('Stutter', () => ({ target: 'killed' })),
             },
             killed: {
-              entry: (_args, enq) => {
+              entry: (_args: unknown, enq: Enqueue) => {
                 enq.sendTo('connection', { type: 'kill' });
               },
             },
@@ -1655,7 +1703,7 @@ export const acpSessionMachine = machineDefinition.createMachine({
     closed: {
       id: 'closed',
       type: 'final',
-      entry: ({ context }, enq) => {
+      entry: ({ context }: Held<ClosingContext>, enq: Enqueue) => {
         if (context.deferred !== undefined) {
           tell(context, enq, context.deferred);
         }
@@ -1664,6 +1712,23 @@ export const acpSessionMachine = machineDefinition.createMachine({
     },
   },
 });
+
+type AcpSessionMachineDefinition = typeof acpSessionMachineDefinition;
+
+/**
+ * The type of {@link acpSessionMachine}, named so declarations reference it rather than inline it.
+ *
+ * @internal
+ */
+// oxlint-disable-next-line typescript/no-empty-interface, typescript/no-empty-object-type, typescript/consistent-type-definitions -- an interface, not a type alias: declarations reference it by name, where an alias is expanded into every transition of this machine and of any machine that holds it (K-17, TS7056)
+export interface AcpSessionMachine extends AcpSessionMachineDefinition {}
+
+/**
+ * One vendor ACP session: restore, the lent turn, cancel, and the close ladder (W10 EA-S5).
+ *
+ * @internal
+ */
+export const acpSessionMachine: AcpSessionMachine = acpSessionMachineDefinition;
 
 /* The adapter died under a lent turn: it fails, drains, and the child closes. */
 function exitBusy(context: AcpBusyContext, enq: Enqueue, stderr: string) {

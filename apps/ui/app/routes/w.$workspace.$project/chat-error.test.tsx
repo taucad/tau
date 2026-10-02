@@ -90,6 +90,42 @@ const persisted = (error: ChatErrorPayload): void => {
   );
 };
 
+const projectedCreditFailure = (error: ChatErrorPayload): CombinedChatState => {
+  const projection = createActor(chatProjectionLogic).start();
+  projection.send({
+    type: 'batch',
+    answer: {
+      status: 'batch',
+      cursor: 0,
+      nextCursor: 3,
+      endCursor: 3,
+      events: [
+        lifecycleRow(0, 'admitted'),
+        lifecycleRow(1, 'running'),
+        logRow(2, {
+          type: 'run.lifecycle',
+          state: 'failed',
+          attempt: 1,
+          detail: {
+            code: error.code,
+            message: error.message,
+            ...(error.httpStatus === undefined ? {} : { status: error.httpStatus }),
+            ...(error.details === undefined ? {} : { details: error.details }),
+          },
+        }),
+      ],
+    },
+  });
+  const state = {
+    error: undefined,
+    persistedError: error,
+    projection: projection.getSnapshot().context,
+    attachmentStatus: 'attached',
+  };
+  projection.stop();
+  return state as CombinedChatState;
+};
+
 describe('ChatError', () => {
   beforeEach(() => {
     debug.enabled = false;
@@ -831,24 +867,50 @@ describe('ChatError', () => {
     expect(screen.queryByRole('button', { name: /^retry$/i })).not.toBeInTheDocument();
   });
 
-  /* W2 carries `details` from the 402 all the way to the persisted ChatError;
-   * the banner has to hand it to the card or the shortfall is lost again. */
-  it('should pass the denial shortfall through to the credits card', () => {
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: undefined,
-        persistedError: {
-          category: errorCategory.credits,
-          title: 'Credit Limit Reached',
-          message: 'Insufficient Tau credit for this model request.',
-          details: {
-            requiredCreditAtoms: '3084332',
-            availableCreditAtoms: '2960000',
-            routeId: 'openai-gpt-6-astra',
-          },
-        } satisfies ChatErrorPayload,
-      } as unknown as CombinedChatState),
-    );
+  it('should show the paused shortfall from a projected credit failure', () => {
+    const error: ChatErrorPayload = {
+      category: errorCategory.credits,
+      title: 'Credit Limit Reached',
+      message: 'Insufficient Tau credit for this model request.',
+      code: 'INSUFFICIENT_CREDIT',
+      httpStatus: 402,
+      details: {
+        requiredCreditAtoms: '3084332',
+        availableCreditAtoms: '2960000',
+        routeId: 'openai-gpt-6-astra',
+      },
+    };
+    const state = projectedCreditFailure(error);
+    vi.mocked(useChatSelector).mockImplementation((selector) => selector(state));
+
+    const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    render(<ChatErrorBanner />, {
+      wrapper: ({ children }: { readonly children: ReactNode }) => (
+        <MemoryRouter>
+          <QueryClientProvider client={client}>{children}</QueryClientProvider>
+        </MemoryRouter>
+      ),
+    });
+
+    expect(
+      screen.getByText('Tau paused this turn: 13 more credits needed for openai-gpt-6-astra.'),
+    ).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Resume' })).toBeInTheDocument();
+  });
+
+  /* W2 carries `details` from the 402 through the persisted ChatError even
+   * before a host projection catches up. */
+  it('should show the denial shortfall from a persisted credit error', () => {
+    persisted({
+      category: errorCategory.credits,
+      title: 'Credit Limit Reached',
+      message: 'Insufficient Tau credit for this model request.',
+      details: {
+        requiredCreditAtoms: '3084332',
+        availableCreditAtoms: '2960000',
+        routeId: 'openai-gpt-6-astra',
+      },
+    });
 
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
     render(<ChatErrorBanner />, {
@@ -860,7 +922,8 @@ describe('ChatError', () => {
     });
 
     expect(screen.getByText('13 more credits needed for openai-gpt-6-astra.')).toBeInTheDocument();
-    expect(screen.getByText('Add credits, then send your message.')).toBeInTheDocument();
+    expect(screen.queryByText(/Tau paused this turn/iu)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Resume' })).not.toBeInTheDocument();
   });
 
   /* The useSyncExternalStore contract requires a cached snapshot. Parsing inside the selector
@@ -910,12 +973,7 @@ describe('ChatError', () => {
       title: 'Credit Limit Reached',
       message: creditMessage,
     };
-    vi.mocked(useChatSelector).mockImplementation((selector) =>
-      selector({
-        error: undefined,
-        persistedError: creditError,
-      } as unknown as CombinedChatState),
-    );
+    persisted(creditError);
 
     /* `ChatErrorCredits` reads live entitlements to choose its top-up route. */
     const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });

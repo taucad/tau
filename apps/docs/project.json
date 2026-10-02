@@ -27,7 +27,43 @@
     "lint": {
       "dependsOn": ["generate-fumadocs"],
       "options": {
-        "files": "app *.test.ts vite.config.ts vitest.config.ts react-router.config.ts vite-environment.d.ts"
+        "files": "app *.test.ts vite.config.ts vitest.config.ts react-router.config.ts vite-environment.d.ts scripts/*.mts"
+      }
+    },
+    "verify-deploy": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": ["build"],
+      "options": {
+        "command": "node apps/docs/scripts/verify-deploy.mts"
+      }
+    },
+    "verify-browser": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "options": {
+        "command": "node apps/docs/scripts/verify-browser.mts"
+      }
+    },
+    "deploy-check": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "dependsOn": [
+        "test",
+        "lint",
+        "typecheck",
+        {
+          "target": "validate-prose",
+          "projects": ["scripts"]
+        }
+      ],
+      "options": {
+        "commands": [
+          "pnpm nx run docs:verify-deploy",
+          "if [ -z \"$CHROMIUM_EXECUTABLE_PATH\" ]; then pnpm exec playwright install chromium; fi",
+          "node apps/docs/scripts/verify-browser.mts"
+        ],
+        "parallel": false
       }
     }
   }

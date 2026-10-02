@@ -1,0 +1,58 @@
+name: 'Retain GeoSpec engine preparation'
+description: 'After geospec-producer succeeds: drop build trees and save the OCCT, toolchain and Cargo preparation for later runs'
+
+# Callers run this only outside pull requests, so the entries live on `main` and the
+# integration branch, where every pull request into them can restore them.
+
+inputs:
+  generation:
+    description: 'geospec-producer output `generation`'
+    required: true
+  preparation-hit:
+    description: 'geospec-producer output `preparation-hit`'
+    required: true
+  cargo-hit:
+    description: 'geospec-producer output `cargo-hit`'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    # Prefix reuse verifies each installed prefix, its receipt and build/CMakeCache.txt
+    # (prepare-delivery.py PREFIX_CACHE_OUTPUTS); the object trees and Rust targets are rebuilt
+    # on demand, so they stay out of the cache.
+    - name: Drop rebuildable build trees from the preparation
+      if: inputs.preparation-hit != 'true'
+      shell: bash
+      run: |
+        root=node_modules/.cache/geospec-engine-native/delivery-wasm-eh/generations
+        for generation in "$root"/*/; do
+          for prefix in "${generation}occt-native" "${generation}occt-mixed-simd128"; do
+            if [ -f "$prefix/build/CMakeCache.txt" ]; then
+              mv "$prefix/build/CMakeCache.txt" "$RUNNER_TEMP/geospec-CMakeCache.txt"
+              rm -rf "$prefix/build"
+              mkdir "$prefix/build"
+              mv "$RUNNER_TEMP/geospec-CMakeCache.txt" "$prefix/build/CMakeCache.txt"
+            fi
+          done
+          rm -rf "${generation}mixed-build-simd128/target" "${generation}tmp" "$generation".occt-*-attempt "$generation"ci-node-target-*
+        done
+        du -sh "$root"/*/* 2>/dev/null | sort -h | tail -20 || true
+
+    - name: Save the OCCT and toolchain preparation
+      if: inputs.preparation-hit != 'true'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        key: geospec-preparation-v1-${{ inputs.generation }}
+        path: node_modules/.cache/geospec-engine-native/delivery-wasm-eh/generations
+
+    - name: Save the Cargo registry
+      if: inputs.cargo-hit != 'true'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        key: geospec-cargo-v1-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('packages/geospec-engine-native/rust/Cargo.lock', 'packages/geospec-engine-native/bindings/*/Cargo.lock', 'packages/geospec-engine-native/native/**/Cargo.lock') }}
+        path: |
+          ~/.cargo/registry/index
+          ~/.cargo/registry/cache
+          ~/.cargo/registry/src
+          ~/.cargo/git/db

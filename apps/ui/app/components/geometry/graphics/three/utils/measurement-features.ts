@@ -753,9 +753,10 @@ export function getLineMeasurementFeatures(line: GeometryObject): MeshFeatureGra
     | THREE.BufferAttribute
     | THREE.InterleavedBufferAttribute
     | undefined;
+  const indices = start ? undefined : geometry.getIndex();
   const attributeVersion = (attribute: THREE.BufferAttribute | THREE.InterleavedBufferAttribute | undefined): number =>
     attribute instanceof THREE.InterleavedBufferAttribute ? attribute.data.version : (attribute?.version ?? -1);
-  const signature = `${association ? objectId(association) : -1}:${start ? objectId(start) : -1}:${attributeVersion(start)}:${end ? objectId(end) : -1}:${attributeVersion(end)}:${position ? objectId(position) : -1}:${attributeVersion(position)}`;
+  const signature = `${association ? objectId(association) : -1}:${start ? objectId(start) : -1}:${attributeVersion(start)}:${end ? objectId(end) : -1}:${attributeVersion(end)}:${position ? objectId(position) : -1}:${attributeVersion(position)}:${indices ? objectId(indices) : -1}:${attributeVersion(indices ?? undefined)}`;
   const cached = lineGraphs.get(line);
   if (cached?.signature === signature) {
     return cached.graph;
@@ -769,10 +770,15 @@ export function getLineMeasurementFeatures(line: GeometryObject): MeshFeatureGra
           new THREE.Vector3(end.getX(segment), end.getY(segment), end.getZ(segment)),
         ];
       }
-      if (position && segment * 2 + 1 < position.count) {
+      if (position && segment * 2 + 1 < (indices?.count ?? position.count)) {
+        const first = indices?.getX(segment * 2) ?? segment * 2;
+        const second = indices?.getX(segment * 2 + 1) ?? segment * 2 + 1;
+        if (![first, second].every((index) => Number.isInteger(index) && index >= 0 && index < position.count)) {
+          return undefined;
+        }
         return [
-          new THREE.Vector3().fromBufferAttribute(position, segment * 2),
-          new THREE.Vector3().fromBufferAttribute(position, segment * 2 + 1),
+          new THREE.Vector3().fromBufferAttribute(position, first),
+          new THREE.Vector3().fromBufferAttribute(position, second),
         ];
       }
       return undefined;

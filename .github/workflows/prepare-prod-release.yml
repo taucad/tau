@@ -32,9 +32,6 @@ jobs:
   prepare:
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # RELEASE_BOT_* secrets live only on this environment (tau-cloud
-    # stacks/repo/tau), fenced to the `main` branch.
-    environment: release-pr
     steps:
       - name: Mint tau-release-bot token
         id: release-bot-token
@@ -115,46 +112,34 @@ jobs:
         shell: bash
         env:
           GH_TOKEN: ${{ steps.release-bot-token.outputs.token }}
-          # Step outputs carry commit subjects (PR titles), so they reach the
-          # script only as env values and are never expanded as shell code.
-          MAIN_SHA: ${{ steps.meta.outputs.main_sha }}
-          PROD_SHA: ${{ steps.meta.outputs.prod_sha }}
-          COMMIT_COUNT: ${{ steps.meta.outputs.commit_count }}
-          COMMIT_LOG: ${{ steps.meta.outputs.commit_log }}
-          TS_UTC: ${{ steps.meta.outputs.ts_utc }}
         run: |
           set -euo pipefail
           if ! git rev-parse --verify refs/remotes/origin/production >/dev/null 2>&1; then
             echo "::notice::origin/production absent — skipping PR upsert. Bootstrap with: git push origin main:production"
             exit 0
           fi
-          BODY=$(cat <<'EOF'
-          Promotes `main` (`__MAIN_SHA__`) →
-          `production` (currently at `__PROD_SHA__`).
+          BODY=$(cat <<EOF
+          Promotes \`main\` (\`${{ steps.meta.outputs.main_sha }}\`) →
+          \`production\` (currently at \`${{ steps.meta.outputs.prod_sha }}\`).
 
-          **__COMMIT_COUNT__** commits since the last production release:
+          **${{ steps.meta.outputs.commit_count }}** commits since the last production release:
 
-          __COMMIT_LOG__
+          ${{ steps.meta.outputs.commit_log }}
 
           ---
 
-          - This PR is **bot-managed** — force-updated on every push to `main`. Do not push to `release/main-to-production` manually.
-          - **No required PR checks.** Verify staging (`https://taucad.dev`, `https://api.taucad.dev/health/live`) before merging.
-          - Merge triggers Netlify prod UI build (`taucad-prod-us`) + `.github/workflows/prod-deploy-on-merge.yml` (Fly API `tau-api`).
+          - This PR is **bot-managed** — force-updated on every push to \`main\`. Do not push to \`release/main-to-production\` manually.
+          - **No required PR checks.** Verify staging (\`https://taucad.dev\`, \`https://api.taucad.dev/health/live\`) before merging.
+          - Merge triggers Netlify prod UI build (\`taucad-prod-us\`) + \`.github/workflows/prod-deploy-on-merge.yml\` (Fly API \`tau-api\`).
           EOF
           )
-          # Quoted replacements are inserted literally (no `&` pattern expansion).
-          BODY="${BODY//__MAIN_SHA__/"$MAIN_SHA"}"
-          BODY="${BODY//__PROD_SHA__/"$PROD_SHA"}"
-          BODY="${BODY//__COMMIT_COUNT__/"$COMMIT_COUNT"}"
-          BODY="${BODY//__COMMIT_LOG__/"$COMMIT_LOG"}"
           PR_NUMBER=$(gh pr list \
             --base production \
             --head release/main-to-production \
             --state open \
             --json number --jq '.[0].number // empty')
 
-          TITLE="Promote main → production (${TS_UTC})"
+          TITLE="Promote main → production (${{ steps.meta.outputs.ts_utc }})"
           if [ -z "$PR_NUMBER" ]; then
             gh pr create \
               --base production \

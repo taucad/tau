@@ -17,13 +17,12 @@ runs:
         distribution: 'temurin'
         java-version: '25'
 
-    # actions/cache rejects keys containing commas, so the tool list is joined with dashes.
-    - name: Derive cache key segment
-      id: key
+    - name: Normalize tool selection for cache key
+      id: cache-key
       shell: bash
       env:
-        TOOLS: ${{ inputs.tools }}
-      run: echo "tools=${TOOLS//,/-}" >> "$GITHUB_OUTPUT"
+        FORMAL_TOOLS: ${{ inputs.tools }}
+      run: printf 'tools=%s\n' "${FORMAL_TOOLS//,/-}" >> "$GITHUB_OUTPUT"
 
     # Toolchains live under node_modules/.cache/formal, never in `pnpm install`.
     # The key changes when the lock does, so a re-pin re-downloads and re-verifies.
@@ -31,9 +30,11 @@ runs:
       uses: actions/cache@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
       with:
         path: node_modules/.cache/formal
-        key: formal-${{ runner.os }}-${{ runner.arch }}-${{ steps.key.outputs.tools }}-${{ hashFiles('tools/formal/toolchain.lock') }}
+        key: formal-${{ runner.os }}-${{ runner.arch }}-${{ steps.cache-key.outputs.tools }}-${{ hashFiles('tools/formal/toolchain.lock') }}
 
     # Downloads what the cache lacks and refuses any bytes whose sha256 differs from the lock.
     - name: Provision and verify toolchains
       shell: bash
-      run: pnpm nx run formal:setup --tools=${{ inputs.tools }}
+      env:
+        FORMAL_TOOLS: ${{ inputs.tools }}
+      run: pnpm nx run formal:setup --tools="$FORMAL_TOOLS"

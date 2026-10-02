@@ -2,7 +2,7 @@
   "java": { "ci": "25", "minimum": 21 },
   "tlc": {
     "build": "2026.10.02.152454-dfd4f7f",
-    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
+    "url": "https://raw.githubusercontent.com/taucad/tau/8182371f4fda870df7e08c9de20ce2853723662a/tools/formal/vendor/tla2tools.jar",
     "sha256": "400ae7f0291bef9459c07840e0da1507196ee707a7102b04186a5f1b820470d7"
   },
   "community": {

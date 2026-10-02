@@ -7,7 +7,7 @@ icon: lucide:cpu
 
 A runtime host owns executable kernel code, caches, native handles, and dependency watches. Running that host in a Web Worker, Node worker, or Electron utility process keeps expensive model computation away from application input and display work. An in-process host shares the application's event loop and has different isolation limits.
 
-Deployment values reach executable composition through a Zod `configSchema` and allowlisted [boot config](../api/client#boot-config). The filesystem remains a separate workspace resource supplied by the transport.
+Deployment values reach executable composition through a Zod `configSchema` and allowlisted [boot config](../api/client#boot-configuration). The filesystem remains a separate workspace resource supplied by the transport.
 
 ## How It Works
 

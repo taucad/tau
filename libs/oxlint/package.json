@@ -9,7 +9,9 @@
     "typescript": "catalog:"
   },
   "devDependencies": {
-    "@taucad/nx": "workspace:*"
+    "@taucad/nx": "workspace:*",
+    "@types/estree": "^1.0.9",
+    "@typescript-eslint/types": "^8.61.1"
   },
   "exports": {
     "./tau-lint": {

@@ -314,6 +314,15 @@ export type TurnFinalizedLogEvent = LogEventBase & {
   readonly runIds: readonly string[];
 };
 
+/** Host-confirmed first versioned file change through an admitted attempt's tools. @public */
+export type TurnChangedLogEvent = LogEventBase & {
+  readonly type: 'turn.changed';
+  readonly turnId: string;
+  readonly chatId: string;
+  readonly attempt: number;
+  readonly checkoutId: string;
+};
+
 /** A turn whose writes could not be merged into the checkout it ran on. @public */
 export type TurnConflictedLogEvent = LogEventBase & {
   readonly type: 'turn.conflicted';
@@ -495,6 +504,7 @@ export type AgentLogEvent =
   | SnapshotContextRefreshedEvent
   | SafeguardRecordedEvent
   | InterruptRecordedEvent
+  | TurnChangedLogEvent
   | TurnFinalizedLogEvent
   | TurnConflictedLogEvent
   | TurnFailedLogEvent

@@ -313,7 +313,15 @@ export const createComputeCapabilityHost = (input: {
   let sessionPromise: Promise<ComputeStoreSession> | undefined;
   const openSession = async (): Promise<ComputeStoreSession> => {
     sessionPromise ??= engine.open({ workspace });
-    return sessionPromise;
+    const pending = sessionPromise;
+    try {
+      return await pending;
+    } catch (error) {
+      if (sessionPromise === pending) {
+        sessionPromise = undefined;
+      }
+      throw error;
+    }
   };
 
   /** Bounded by actions in flight: each entry remains until its last caller settles. */
@@ -337,7 +345,15 @@ export const createComputeCapabilityHost = (input: {
         },
       });
     })();
-    return servicePromise;
+    const pending = servicePromise;
+    try {
+      return await pending;
+    } catch (error) {
+      if (servicePromise === pending) {
+        servicePromise = undefined;
+      }
+      throw error;
+    }
   };
 
   let currentGeneration = 1 as ComputeGeneration;
@@ -702,12 +718,12 @@ export const createComputeCapabilityHost = (input: {
             }
           }
         },
-        openScope: (open) =>
-          openScope(open, {
-            signal,
-            operationId,
-            generationPromise: captureGeneration(),
-          }),
+        openScope: (open) => {
+          const generationPromise = captureGeneration();
+          /* A scope may not warm immediately; keep the original rejection for its later consumer. */
+          void Promise.allSettled([generationPromise]);
+          return openScope(open, { signal, operationId, generationPromise });
+        },
       };
     },
     permitPublication,

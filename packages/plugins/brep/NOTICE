@@ -1,0 +1,15 @@
+@taucad/brep is licensed under the Apache License 2.0 (LICENSE).
+
+dist/wasm/occt-import-js.wasm is copied unmodified from occt-import-js 0.0.23
+(https://github.com/kovacsv/occt-import-js), a WebAssembly build of Open
+CASCADE Technology (OCCT). This package uses facilities provided by the Open
+CASCADE Technology software.
+
+occt-import-js is licensed under the GNU Lesser General Public License 2.1, and
+OCCT under the same licence with the Open CASCADE exception. Their unmodified
+texts accompany this package as licenses/occt-import-js-LGPL-2.1.md and
+licenses/OCCT-LGPL-exception.txt. The corresponding source is available from
+the occt-import-js repository at the release above; a rebuilt module can replace
+dist/wasm/occt-import-js.wasm.
+
+These technical materials are not legal certification.

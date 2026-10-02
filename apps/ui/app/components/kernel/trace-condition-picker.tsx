@@ -235,12 +235,7 @@ export function TraceConditionPicker({
         <div className='flex items-center gap-1'>
           {conditions.length > 0 && (
             <>
-              <CopyButton
-                size='icon-xs'
-                tooltip='Copy filters'
-                aria-label='Copy filters'
-                getText={getConditionsText}
-              />
+              <CopyButton size='icon-xs' tooltip='Copy filters' aria-label='Copy filters' getText={getConditionsText} />
               <Button variant='ghost' size='xs' aria-label='Clear filters' onClick={handleClear}>
                 <Trash2 className='size-3' />
               </Button>

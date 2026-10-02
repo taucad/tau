@@ -192,7 +192,10 @@ describe('isContextWindowRefusal', () => {
   });
 
   it.each([
-    ['a credit-balance refusal', { error: { type: 'invalid_request_error', message: 'Your credit balance is too low.' } }],
+    [
+      'a credit-balance refusal',
+      { error: { type: 'invalid_request_error', message: 'Your credit balance is too low.' } },
+    ],
     ['a schema refusal', { error: { type: 'invalid_request_error', message: 'tools.0.name: String should match' } }],
     ['an absent body', undefined],
     ['a non-object body', 'prompt is too long'],

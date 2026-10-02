@@ -17,6 +17,13 @@ export const shaderRiskCapabilities = {
 
 export const shaderSites = [
   {
+    id: 'gltf-edge-occurrences',
+    modules: ['#components/geometry/graphics/three/utils/gltf-edge-batches.ts'],
+    authoring: ['on-before-compile', 'tsl'],
+    backends: ['webgl', 'webgpu'],
+    risks: ['custom-position', 'depth', 'clipping', 'lifecycle', 'hot-path', 'upstream-drift'],
+  },
+  {
     id: 'filament-beads',
     modules: [
       '#components/printer/printer-filament-material.ts',
@@ -154,6 +161,37 @@ const evidence = (unit: string, semantic: string, generatedSource = `${unit}::${
 
 /** Evidence names are checked against real test source by shader-policy.test.ts. */
 export const shaderEvidence = {
+  'gltf-edge-occurrences': {
+    'backend-differential': [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should preserve pixels and release actual occurrence buffers through material changes',
+    ],
+    reference: [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.test.ts::should reject malformed prototypes and out-of-capacity placements',
+    ],
+    'generated-source': [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.test.ts::should retain the stripped occurrence endpoint graph',
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should preserve pixels and release actual occurrence buffers through material changes',
+    ],
+    'real-compile': [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should preserve pixels and release actual occurrence buffers through material changes',
+    ],
+    pixels: [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should preserve pixels and release actual occurrence buffers through material changes',
+    ],
+    'depth-clipping': [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should preserve pixels and release actual occurrence buffers through material changes',
+    ],
+    lifecycle: [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should retain canonical identity and finite line cohorts across appearance and pose events',
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should preserve pixels and release actual occurrence buffers through material changes',
+    ],
+    'structural-perf': [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should preserve pixels and release actual occurrence buffers through material changes',
+    ],
+    'gpu-whole-frame': [
+      'apps/ui/app/components/geometry/graphics/three/utils/gltf-edge-batches.browser.test.ts::should preserve pixels and release actual occurrence buffers through material changes',
+    ],
+  },
   'filament-beads': {
     reference: [
       'apps/ui/app/components/printer/printer-filament-material.test.ts::should retain exact bead extents and bounded joins',

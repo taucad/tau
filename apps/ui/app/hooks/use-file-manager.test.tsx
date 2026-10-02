@@ -68,6 +68,11 @@ const mockProxyContents =
   vi.fn<(path: string, filter?: { versionedOnly?: boolean }) => Promise<Record<string, Uint8Array<ArrayBuffer>>>>();
 const mockProxyExists = vi.fn<(path: string) => Promise<boolean>>();
 const mockProxyReadFile = vi.fn<(path: string) => Promise<Uint8Array<ArrayBuffer>>>();
+const mockReadMachineSettings = vi.fn(
+  async (_bridge: { worker?: unknown }, _typeId: string): Promise<{ status: 'absent' }> => ({
+    status: 'absent',
+  }),
+);
 const mockProxyDispose = vi.fn();
 const bridgeProxyDisposals = new Map<unknown, () => void>();
 const disposedBridges = new Map<unknown, boolean>();
@@ -148,6 +153,7 @@ vi.mock('@taucad/fs-bridge', () => ({
       }
       return bytes;
     },
+    readMachineSettings: async (typeId: string) => mockReadMachineSettings(bridge, typeId),
     /* The rooted half of the same proxy: the file services read the project
        through its composed view, and a mutation asks it who owns the path. */
     provenance: vi.fn(async (path: string) =>
@@ -757,6 +763,37 @@ describe('FileManagerProvider — client + workspace facades', () => {
     );
     expect(opens).toHaveLength(2);
     expect(mockProxyExists).toHaveBeenCalledTimes(2);
+  });
+
+  it('should keep a delayed machine-settings read on its original worker after root rotation', async () => {
+    const { result } = renderProvider();
+    await vi.waitFor(() => {
+      expect(result.current.contentService).toBeDefined();
+    });
+    const firstWorker = workerTestState.instances[0];
+    const oldSettings = result.current.machineSettings;
+    let oldRead!: Promise<void>;
+    act(() => {
+      result.current.fileManagerRef.send({ type: 'setRoot', path: '/checkouts/next', projectId: 'p' });
+      oldRead = oldSettings.refresh('bambu.x1c');
+    });
+    await vi.waitFor(() => {
+      expect(result.current.machineSettings).not.toBe(oldSettings);
+      expect(workerTestState.instances).toHaveLength(2);
+    });
+    const currentSettings = result.current.machineSettings;
+    await oldRead;
+    await currentSettings.refresh('bambu.x1c');
+
+    const settingsWorkers = mockReadMachineSettings.mock.calls.map(([bridge]) => bridge.worker);
+    expect(settingsWorkers).toHaveLength(2);
+    expect(settingsWorkers[0]).toBe(firstWorker);
+    expect(settingsWorkers[1]).toBe(workerTestState.instances[1]);
+    const oldBridge = mockReadMachineSettings.mock.calls[0]?.[0];
+    await vi.waitFor(() => {
+      expect(bridgeProxyDisposals.get(oldBridge)).toHaveBeenCalledOnce();
+    });
+    expect(currentSettings.get('bambu.x1c').file.status).toBe('absent');
   });
 
   it('reads replacement-worker bytes from a child effect before the provider effects run', async () => {

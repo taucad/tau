@@ -221,6 +221,9 @@ const startWorker = async (): Promise<{ app: NestFastifyApplication; origin: str
   );
   app.enableVersioning({ type: VersioningType.URI });
   await app.init();
+  /* S2 exercises cross-worker store and manifest races, not the production 2.5 GiB disk reservation.
+   * Keep a nonzero admission bound without depending on the test runner's transient free space. */
+  app.get(GitRepositoryService).leaseDiskBytesPerLease = 1024 ** 2;
   await app.getHttpAdapter().getInstance().ready();
   await app.listen(String(port), '127.0.0.1');
 

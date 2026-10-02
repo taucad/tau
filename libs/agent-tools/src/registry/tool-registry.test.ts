@@ -370,8 +370,8 @@ describe('arrange_workbench routing', () => {
       label: 'duplicate entry',
       input: {
         entries: [
-          { path: 'main.ts', operationTimeout: 100 },
-          { path: 'main.ts', operationTimeout: 200 },
+          { path: 'main.ts', renderTimeout: 100 },
+          { path: 'main.ts', renderTimeout: 200 },
         ],
       },
       field: 'entries[1].path',

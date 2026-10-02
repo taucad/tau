@@ -1,6 +1,6 @@
 import { MessageChannel } from 'node:worker_threads';
 import { describe, expect, it } from 'vitest';
-import { contentDigest, digestAction } from '@taucad/cache-core';
+import { contentDigest, digestAction, digestContent } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import {
@@ -222,5 +222,454 @@ describe('compute store channel', () => {
     client2.dispose();
     authority1.dispose();
     authority2.dispose();
+  });
+
+  it('reopens one logical session on a new channel without carrying its old physical id', async () => {
+    const firstStore = createMemoryComputeEngine();
+    const secondStore = createMemoryComputeEngine();
+    const first = new MessageChannel();
+    const second = new MessageChannel();
+    let firstOpens = 0;
+    let secondOpens = 0;
+    const firstServer = exposeComputeStoreChannel({
+      port: first.port1,
+      engine: {
+        open: async (input) => {
+          firstOpens += 1;
+          return firstStore.engine.open(input);
+        },
+      },
+      workspace: 'trusted',
+      control: firstStore.control({ workspace: 'trusted' }),
+    });
+    const secondControl = secondStore.control({ workspace: 'trusted' });
+    const secondServer = exposeComputeStoreChannel({
+      port: second.port1,
+      engine: {
+        open: async (input) => {
+          secondOpens += 1;
+          return secondStore.engine.open(input);
+        },
+      },
+      workspace: 'trusted',
+      control: secondControl,
+    });
+    const client = createComputeStoreChannelClient(first.port2);
+    try {
+      const ignored = await client.engine.open({ workspace: 'forged' });
+      const session = await client.engine.open({ workspace: 'also-forged' });
+      const registeredStore = client.store;
+      const initialGeneration = session.generation;
+      expect(firstOpens).toBe(2);
+      const cleared = await secondControl.clear({});
+      expect(cleared.generation).toBeGreaterThan(initialGeneration);
+
+      client.rebind(second.port2);
+      expect(client.store).toBe(registeredStore);
+      const inspected = await client.control.inspect({});
+      const nextGeneration = inspected.generation;
+      await expect(
+        session.get({ digests: [], maxEntries: 1, maxBytes: 128, generation: nextGeneration }),
+      ).resolves.toMatchObject({ status: 'ok', entries: [], omitted: [] });
+      expect(session.generation).toBe(initialGeneration);
+      expect(firstOpens).toBe(2);
+      expect(secondOpens).toBe(1);
+
+      await ignored.close();
+      await session.close();
+      await expect(
+        session.get({ digests: [], maxEntries: 1, maxBytes: 128, generation: nextGeneration }),
+      ).rejects.toMatchObject({ code: 'CHANNEL_CLOSED' });
+      expect(secondOpens).toBe(1);
+    } finally {
+      client.dispose();
+      firstServer.dispose();
+      secondServer.dispose();
+    }
+  });
+
+  it('reads new authority bytes and clears shared residency after a generation change', async () => {
+    const firstStore = createMemoryComputeEngine();
+    const secondStore = createMemoryComputeEngine();
+    const digest = await digestAction({ action });
+    const seed = async (engine: ReturnType<typeof createMemoryComputeEngine>, value: string): Promise<void> => {
+      const session = await engine.engine.open({ workspace: 'trusted' });
+      const bytes = new TextEncoder().encode(value);
+      await expect(
+        session.put({
+          entries: [
+            {
+              action,
+              actionDigest: digest,
+              contentDigest: await digestContent({ bytes }),
+              mediaType: 'application/octet-stream',
+              bytes,
+              determinism: 'byte-exact',
+            },
+          ],
+          generation: session.generation,
+          durability: 'disposable',
+        }),
+      ).resolves.toMatchObject({ status: 'committed', published: [digest] });
+      await session.close();
+    };
+    await seed(firstStore, 'old-bytes');
+    const secondControl = secondStore.control({ workspace: 'trusted' });
+    const cleared = await secondControl.clear({});
+    expect(cleared.generation).toBeGreaterThan(1);
+    await seed(secondStore, 'new-bytes');
+
+    const first = new MessageChannel();
+    const second = new MessageChannel();
+    const firstServer = exposeComputeStoreChannel({
+      port: first.port1,
+      engine: firstStore.engine,
+      workspace: 'trusted',
+      control: firstStore.control({ workspace: 'trusted' }),
+    });
+    const secondServer = exposeComputeStoreChannel({
+      port: second.port1,
+      engine: secondStore.engine,
+      workspace: 'trusted',
+      control: secondControl,
+    });
+    const client = createComputeStoreChannelClient(first.port2);
+    const host = createComputeCapabilityHost({
+      binding: { mode: 'durable', store: client.store },
+      workspace: 'forged',
+    });
+    const capability = host.capability(new AbortController().signal);
+    if (capability.status !== 'on') {
+      throw new Error('durable compute capability was off');
+    }
+    const baseResident = resident();
+    const imported: string[] = [];
+    let clears = 0;
+    const sharedResident: ResidentCacheBinding = {
+      ...baseResident,
+      importEntries: async (input) => {
+        imported.push(...input.entries.map((entry) => new TextDecoder().decode(entry.bytes)));
+        return baseResident.importEntries(input);
+      },
+      clear: (input) => {
+        clears += 1;
+        baseResident.clear(input);
+      },
+    };
+    const evaluation = {
+      action,
+      codec: {
+        id: action.codec.id,
+        version: action.codec.version,
+        mediaType: 'application/octet-stream',
+        encode: ({ value }: { readonly value: string }) => new TextEncoder().encode(value),
+        decode: ({ bytes }: { readonly bytes: Uint8Array<ArrayBuffer> }) => new TextDecoder().decode(bytes),
+      },
+      compute: async () => {
+        throw new Error('seeded action must not recompute');
+      },
+      policy: 'best-effort',
+    } as const;
+    const warm = async () => {
+      const scope = capability.openScope({
+        namespace: 'channel.lifecycle',
+        producer: action.producer,
+        environment: {},
+        resident: sharedResident,
+      });
+      const result = await scope.warm({ digests: [digest] });
+      scope.close({ outcome: 'cancelled' });
+      return result;
+    };
+    try {
+      await expect(capability.evaluate(evaluation)).resolves.toMatchObject({ source: 'cache', value: 'old-bytes' });
+      await expect(warm()).resolves.toMatchObject({ status: 'imported', imported: [digest] });
+      expect(imported).toEqual(['old-bytes']);
+      expect(clears).toBe(0);
+
+      client.rebind(second.port2);
+      await expect(capability.evaluate(evaluation)).resolves.toMatchObject({ source: 'cache', value: 'new-bytes' });
+      await expect(warm()).resolves.toMatchObject({ status: 'imported', imported: [digest] });
+      expect(imported).toEqual(['old-bytes', 'new-bytes']);
+      expect(clears).toBe(1);
+      expect(baseResident.contains({ digest })).toBe(true);
+    } finally {
+      await host.dispose();
+      client.dispose();
+      firstServer.dispose();
+      secondServer.dispose();
+    }
+  });
+
+  it('settles an old in-flight get without replaying it on the replacement channel', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const firstStore = createMemoryComputeEngine();
+    const secondStore = createMemoryComputeEngine();
+    const first = new MessageChannel();
+    const second = new MessageChannel();
+    const firstServer = exposeComputeStoreChannel({
+      port: first.port1,
+      engine: {
+        open: async (input) => {
+          const session = await firstStore.engine.open(input);
+          return {
+            ...session,
+            get: async (request) => {
+              entered.resolve();
+              await release.promise;
+              return session.get(request);
+            },
+          };
+        },
+      },
+      workspace: 'trusted',
+      control: firstStore.control({ workspace: 'trusted' }),
+    });
+    let secondGets = 0;
+    const secondServer = exposeComputeStoreChannel({
+      port: second.port1,
+      engine: {
+        open: async (input) => {
+          const session = await secondStore.engine.open(input);
+          return {
+            ...session,
+            get: async (request) => {
+              secondGets += 1;
+              return session.get(request);
+            },
+          };
+        },
+      },
+      workspace: 'trusted',
+      control: secondStore.control({ workspace: 'trusted' }),
+    });
+    const client = createComputeStoreChannelClient(first.port2);
+    try {
+      const session = await client.engine.open({ workspace: 'forged' });
+      const request = { digests: [], maxEntries: 1, maxBytes: 128, generation: session.generation };
+      const oldCall = session.get(request);
+      await entered.promise;
+      client.rebind(second.port2);
+      await expect(oldCall).rejects.toMatchObject({ code: 'CHANNEL_CLOSED' });
+      expect(secondGets).toBe(0);
+      release.resolve();
+      const inspected = await client.control.inspect({});
+      const nextGeneration = inspected.generation;
+      await expect(session.get({ ...request, generation: nextGeneration })).resolves.toMatchObject({ status: 'ok' });
+      expect(secondGets).toBe(1);
+    } finally {
+      release.resolve();
+      client.dispose();
+      firstServer.dispose();
+      secondServer.dispose();
+    }
+  });
+
+  it('closes a physical session whose open completes after its channel closed', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const first = new MessageChannel();
+    const authority = createMemoryComputeEngine();
+    let closes = 0;
+    let openSignal: AbortSignal | undefined;
+    const server = exposeComputeStoreChannel({
+      port: first.port1,
+      engine: {
+        open: async (input) => {
+          openSignal = input.signal;
+          entered.resolve();
+          await release.promise;
+          const session = await authority.engine.open({ workspace: input.workspace });
+          return {
+            ...session,
+            close: async () => {
+              closes += 1;
+              await session.close();
+            },
+          };
+        },
+      },
+      workspace: 'trusted',
+      control: authority.control({ workspace: 'trusted' }),
+    });
+    const peerClosed = Promise.withResolvers<void>();
+    server.onClose(() => {
+      peerClosed.resolve();
+    });
+    const client = createComputeStoreChannelClient(first.port2);
+    try {
+      const opening = client.engine.open({ workspace: 'forged' });
+      await entered.promise;
+      client.dispose();
+      await expect(opening).rejects.toMatchObject({ code: 'CHANNEL_CLOSED' });
+      await peerClosed.promise;
+      expect(openSignal?.aborted).toBe(true);
+      release.resolve();
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      expect(closes).toBe(1);
+    } finally {
+      release.resolve();
+      client.dispose();
+      server.dispose();
+    }
+  });
+
+  it('recovers a later host use after an initial physical open is closed during rebind', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const firstStore = createMemoryComputeEngine();
+    const secondStore = createMemoryComputeEngine();
+    const first = new MessageChannel();
+    const second = new MessageChannel();
+    let firstOpens = 0;
+    let secondOpens = 0;
+    const firstServer = exposeComputeStoreChannel({
+      port: first.port1,
+      engine: {
+        open: async (input) => {
+          firstOpens += 1;
+          if (firstOpens === 2) {
+            entered.resolve();
+          }
+          await release.promise;
+          return firstStore.engine.open(input);
+        },
+      },
+      workspace: 'trusted',
+      control: firstStore.control({ workspace: 'trusted' }),
+    });
+    const secondServer = exposeComputeStoreChannel({
+      port: second.port1,
+      engine: {
+        open: async (input) => {
+          secondOpens += 1;
+          return secondStore.engine.open(input);
+        },
+      },
+      workspace: 'trusted',
+      control: secondStore.control({ workspace: 'trusted' }),
+    });
+    const client = createComputeStoreChannelClient(first.port2);
+    const oldOpen = client.engine.open({ workspace: 'forged' });
+    const host = createComputeCapabilityHost({
+      binding: { mode: 'durable', store: client.store },
+      workspace: 'forged',
+    });
+    const capability = host.capability(new AbortController().signal);
+    expect(capability.status).toBe('on');
+    if (capability.status !== 'on') {
+      throw new Error('durable compute capability was off');
+    }
+    const evaluation = {
+      action,
+      codec: {
+        id: action.codec.id,
+        version: action.codec.version,
+        mediaType: 'application/octet-stream',
+        encode: ({ value }: { readonly value: string }) => new TextEncoder().encode(value),
+        decode: ({ bytes }: { readonly bytes: Uint8Array<ArrayBuffer> }) => new TextDecoder().decode(bytes),
+      },
+      compute: async () => 'shape',
+      policy: 'best-effort',
+    } as const;
+    const oldEvaluation = capability.evaluate(evaluation);
+    try {
+      await entered.promise;
+      client.rebind(second.port2);
+      await expect(oldOpen).rejects.toMatchObject({ code: 'CHANNEL_CLOSED' });
+      await expect(oldEvaluation).rejects.toMatchObject({ code: 'CHANNEL_CLOSED' });
+      release.resolve();
+      await expect(capability.evaluate(evaluation)).resolves.toMatchObject({ source: 'computed', value: 'shape' });
+      expect(secondOpens).toBe(1);
+    } finally {
+      release.resolve();
+      await host.dispose().catch(() => undefined);
+      client.dispose();
+      firstServer.dispose();
+      secondServer.dispose();
+    }
+  });
+
+  it('observes an eager scope generation failure until warm consumes it', async () => {
+    const entered = Promise.withResolvers<void>();
+    const release = Promise.withResolvers<void>();
+    const first = new MessageChannel();
+    const authority = createMemoryComputeEngine();
+    const server = exposeComputeStoreChannel({
+      port: first.port1,
+      engine: {
+        open: async (input) => {
+          entered.resolve();
+          await release.promise;
+          return authority.engine.open(input);
+        },
+      },
+      workspace: 'trusted',
+      control: authority.control({ workspace: 'trusted' }),
+    });
+    const client = createComputeStoreChannelClient(first.port2);
+    const host = createComputeCapabilityHost({
+      binding: { mode: 'durable', store: client.store },
+      workspace: 'trusted',
+    });
+    const capability = host.capability(new AbortController().signal);
+    if (capability.status !== 'on') {
+      throw new Error('durable compute capability was off');
+    }
+    const scope = capability.openScope({
+      namespace: 'channel.lifecycle',
+      producer: action.producer,
+      environment: {},
+      resident: resident(),
+    });
+    try {
+      await entered.promise;
+      client.dispose();
+      release.resolve();
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      await expect(scope.warm({ digests: [] })).resolves.toMatchObject({
+        status: 'unavailable',
+        reason: 'Channel closed',
+      });
+      scope.close({ outcome: 'cancelled' });
+    } finally {
+      release.resolve();
+      await host.dispose().catch(() => undefined);
+      client.dispose();
+      server.dispose();
+    }
+  });
+
+  it('never reconnects a finally disposed connection or a closed logical session', async () => {
+    const first = new MessageChannel();
+    const replacement = new MessageChannel();
+    const authority = createMemoryComputeEngine();
+    const firstServer = exposeComputeStoreChannel({
+      port: first.port1,
+      engine: authority.engine,
+      workspace: 'trusted',
+      control: authority.control({ workspace: 'trusted' }),
+    });
+    const replacementServer = exposeComputeStoreChannel({
+      port: replacement.port1,
+      engine: authority.engine,
+      workspace: 'trusted',
+      control: authority.control({ workspace: 'trusted' }),
+    });
+    const connection = connectComputeStoreChannel(first.port2);
+    const registeredStore = connection.store;
+    connection.dispose();
+    expect(() => {
+      connection.rebind(replacement.port2);
+    }).toThrow(/Channel closed/u);
+    expect(connection.store).toBe(registeredStore);
+    connection.dispose();
+    firstServer.dispose();
+    replacementServer.dispose();
   });
 });

@@ -801,7 +801,8 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
     await request('fs/write_text_file', { sessionId, path: 'main.scad', content: 'cube(10);\n' });
     await callTauMcp(sessionId, session.mcpServers, 'screenshot', { targetFile: 'main.scad', mode: 'single' }, 'mcp-2');
   }
-  if (text.includes('mcp-arrange-conflict')) {
+  if (text.includes('mcp-arrange-conflict') || text.includes('mcp-arrange-workbench')) {
+    await request('fs/write_text_file', { sessionId, path: 'main.scad', content: 'cube(10);\n' });
     await callTauMcp(
       sessionId,
       session.mcpServers,
@@ -811,16 +812,18 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
       },
       'mcp-arrange-1',
     );
-    await callTauMcp(
-      sessionId,
-      session.mcpServers,
-      'arrange_workbench',
-      {
-        basedOn: 'missing',
-        open: [{ kind: 'pane', pane: 'parameters' }],
-      },
-      'mcp-arrange-conflict-2',
-    );
+    if (text.includes('mcp-arrange-conflict')) {
+      await callTauMcp(
+        sessionId,
+        session.mcpServers,
+        'arrange_workbench',
+        {
+          basedOn: 'missing',
+          open: [{ kind: 'pane', pane: 'parameters' }],
+        },
+        'mcp-arrange-conflict-2',
+      );
+    }
     return cancelled.has(sessionId) ? 'cancelled' : 'end_turn';
   }
   if (text.includes('mcp')) {

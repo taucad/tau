@@ -18,6 +18,7 @@
 
 import type { RuntimeFileSystem } from '#filesystem/runtime-filesystem.js';
 import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
+import type { WorkerFileSystemProxy } from '#transport/_internal/worker-filesystem-proxy.js';
 import { createFileSystemBridgePort } from '@taucad/fs-bridge';
 import type { FileSystemBridgePort } from '@taucad/fs-bridge';
 
@@ -44,11 +45,43 @@ export const buildFileSystemBridge = (fs: RuntimeFileSystem | undefined): Resolv
      * filesystem instance — no shared mutable state across clients
      * built from the same `inProcessTransport({ runtime, fileSystem })` plugin. */
     const fileSystem = handle.create();
-    const bridge = createFileSystemBridgePort(fileSystem);
+    const { watchReady } = fileSystem as Partial<WorkerFileSystemProxy>;
+    // eslint-disable-next-line tau-lint/no-handrolled-fanout -- Tracks disposal of pending watch admissions, not event subscribers.
+    const pendingWatches = new Set<() => void>();
+    let disposed = false;
+    const bridge = createFileSystemBridgePort(
+      watchReady === undefined || fileSystem.watch === undefined
+        ? fileSystem
+        : {
+            ...fileSystem,
+            watch: async (request, handler) => {
+              const registration = watchReady.call(fileSystem, request, handler);
+              const unsubscribe = (): void => {
+                pendingWatches.delete(unsubscribe);
+                registration.unsubscribe();
+              };
+              pendingWatches.add(unsubscribe);
+              try {
+                await registration.ready;
+                if (disposed) {
+                  throw new Error('Filesystem bridge closed before watch admission.');
+                }
+                return unsubscribe;
+              } catch (error) {
+                unsubscribe();
+                throw error;
+              }
+            },
+          },
+    );
     return {
       port: bridge.port,
       kind: 'inline',
       dispose: () => {
+        disposed = true;
+        for (const unsubscribe of pendingWatches) {
+          unsubscribe();
+        }
         bridge.dispose();
       },
     };

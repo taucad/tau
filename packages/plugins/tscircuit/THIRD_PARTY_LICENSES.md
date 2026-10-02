@@ -365,7 +365,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## @tscircuit/math-utils@0.0.38 — REVIEW PENDING (no SPDX field)
+## @tscircuit/math-utils@0.0.9 — REVIEW PENDING (no SPDX field)
 
 MIT License
 
@@ -389,7 +389,7 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## @tscircuit/math-utils@0.0.9 — REVIEW PENDING (no SPDX field)
+## @tscircuit/math-utils@0.0.38 — REVIEW PENDING (no SPDX field)
 
 MIT License
 
@@ -1245,13 +1245,13 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 
-## graphics-debug@0.0.100 — HELD (no SPDX field)
+## graphics-debug@0.0.99 — HELD (no SPDX field)
 
 Hold reason: upstream package ships no LICENSE text.
 
 Package did not ship a LICENSE text.
 
-## graphics-debug@0.0.99 — HELD (no SPDX field)
+## graphics-debug@0.0.100 — HELD (no SPDX field)
 
 Hold reason: upstream package ships no LICENSE text.
 

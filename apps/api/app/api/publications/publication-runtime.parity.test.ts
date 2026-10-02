@@ -23,7 +23,7 @@ const loadEngineKernelExtensions = async (): Promise<Readonly<Record<string, rea
 };
 
 /** Kernels the hosted publication runtime serves that the engine's default plugin set omits. */
-const publicationOnlyKernelIds = ['openrscad', 'zoo'];
+const publicationOnlyKernelIds = ['zoo'];
 
 describe('publicationKernelExtensions parity', () => {
   it('matches the engine default runtime for every shared kernel', { timeout: 30_000 }, async () => {

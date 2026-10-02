@@ -15,7 +15,7 @@ export const OmniScroller = ({
 }: OmniScrollerProperties): React.JSX.Element => {
   const rootRef = useRef<HTMLDivElement>(null);
 
-  useImperativeHandle(ref, () => rootRef.current!);
+  useImperativeHandle(ref, () => rootRef.current!, []);
 
   useEffect(() => {
     const root = rootRef.current;

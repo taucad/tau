@@ -11,9 +11,6 @@
       "path": "./apps/api"
     },
     {
-      "path": "./libs/tau-examples"
-    },
-    {
       "path": "./apps/api-e2e"
     },
     {
@@ -50,9 +47,6 @@
       "path": "./tools/workspace-plugin"
     },
     {
-      "path": "./examples/react-router"
-    },
-    {
       "path": "./packages/filesystem"
     },
     {
@@ -74,9 +68,6 @@
       "path": "./libs/events"
     },
     {
-      "path": "./examples/nextjs"
-    },
-    {
       "path": "./libs/memory"
     },
     {
@@ -93,9 +84,6 @@
     },
     {
       "path": "./apps/libs/lsp-fs"
-    },
-    {
-      "path": "./libs/oxlint"
     },
     {
       "path": "./apps/libs/lsp"

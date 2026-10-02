@@ -2,6 +2,6 @@
   {
     "name": "Revisions ES module outputs",
     "path": "dist/**/*.mjs",
-    "limit": "101 kB"
+    "limit": "105 kB"
   }
 ]

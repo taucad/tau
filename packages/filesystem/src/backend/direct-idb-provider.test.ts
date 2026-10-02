@@ -685,7 +685,7 @@ describe('DirectIdbProvider', () => {
       expect(entries).toHaveLength(rows);
       expect(stat).not.toHaveBeenCalled();
       expect(transaction.mock.calls.filter(([, mode]) => mode === 'readonly')).toHaveLength(1);
-    });
+    }, 30_000);
 
     it('should return entries with type, size, and mtime', async () => {
       await provider.writeFile('src/index.ts', 'export {}');

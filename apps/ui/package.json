@@ -64,6 +64,7 @@
     "@taucad/tau-examples": "workspace:*",
     "@taucad/telemetry": "workspace:*",
     "@taucad/three": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "@taucad/types": "workspace:*",
     "@taucad/ui": "workspace:*",
     "@taucad/units": "workspace:*",

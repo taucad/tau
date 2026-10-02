@@ -1,40 +1,27 @@
-/**
- * Conformance test C17 (v6 Appendix B).
- *
- * Kernel plugin metadata does not carry a `worker` field: executable runtime
- * ownership belongs to the worker/host runtime definition, not to client-side
- * plugin metadata or per-kernel workers.
- */
-
+/** Kernel registration metadata keeps implementation and transport details private. */
 import { assertType, describe, it } from 'vitest';
-import type { GeometryResponse } from '@taucad/types';
 import type { KernelPlugin } from '#plugins/plugin-types.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
-// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
-import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
-
-const testGeometry = { format: 'gltf', content: new Uint8Array([1]) } satisfies GeometryResponse;
+import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
+import type { DescribeResult } from '#types/runtime-kernel-v2.types.js';
 
 const baseKernelDefinition = {
   id: 'x',
   extensions: ['x'],
   name: 'Kernel',
   version: '1.0.0',
-  exportFormats: {},
+  views: {},
+  exports: {},
   async initialize() {
     return {};
   },
-  async getDependencies() {
+  async resolve() {
     return { resolved: [], unresolved: [] };
   },
-  async getParameters() {
-    return createParameterDeclaration();
+  async describe() {
+    return { success: false, issues: [] } satisfies DescribeResult;
   },
-  async createGeometry() {
-    return { geometry: testGeometry, nativeHandle: {} };
-  },
-  async exportGeometry() {
-    return { success: true, data: [], issues: [] };
+  async evaluate() {
+    return { handle: {} };
   },
 };
 
@@ -44,25 +31,23 @@ describe('KernelPlugin API correctness (C17)', () => {
     assertType<HasWorker>(false);
   });
 
-  it('defineKernel rejects extra unknown config keys at compile time', () => {
-    const okFactory = defineKernel(baseKernelDefinition);
+  it('defineKernelV2 rejects runtime and transport config keys', () => {
+    const okFactory = defineKernelV2(baseKernelDefinition);
     assertType<KernelPlugin>(okFactory());
 
-    defineKernel({
+    defineKernelV2({
       ...baseKernelDefinition,
-      // @ts-expect-error -- `worker` is not a valid defineKernel config key.
+      // @ts-expect-error -- `worker` is not a kernel authoring key.
       worker: () => undefined,
     });
-
-    defineKernel({
+    defineKernelV2({
       ...baseKernelDefinition,
-      // @ts-expect-error -- `transport` belongs on createRuntimeClient, not on a kernel.
+      // @ts-expect-error -- `transport` belongs on createRuntimeClient.
       transport: undefined,
     });
-
-    defineKernel({
+    defineKernelV2({
       ...baseKernelDefinition,
-      // @ts-expect-error -- implementation loading details are hidden on the returned plugin factory.
+      // @ts-expect-error -- implementation loading details are hidden on plugin registrations.
       implementationHref: 'taucad:test',
     });
   });

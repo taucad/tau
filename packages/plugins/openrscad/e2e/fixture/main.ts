@@ -57,17 +57,17 @@ const run = async (): Promise<OpenrscadBrowserReport> => {
   const client = createRuntimeClient(
     createWebWorkerClientOptions({
       createWorker: () => new Worker(new URL('runtime.worker.ts', import.meta.url), { type: 'module' }),
-      renderTimeout: 120_000,
+      operationTimeout: 120_000,
     }),
   );
   const tracker = trackEngineBackend(client);
 
   try {
-    const result = await client.export('usdz', { source: { files: { 'main.scad': source } } });
+    const result = await client.open({ source: { files: { 'main.scad': source } } }).export('usdz');
     if (!result.success) {
       throw new Error(`usdz export failed: ${result.issues.map((issue) => issue.message).join('; ')}`);
     }
-    const bytes = new Uint8Array(result.data[0]!.bytes);
+    const bytes = new Uint8Array(result.files[0].bytes);
     return {
       backend: await tracker.backend(),
       logs: tracker.logs,

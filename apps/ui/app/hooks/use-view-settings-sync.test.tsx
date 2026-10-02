@@ -13,7 +13,7 @@ import type { ViewRecordPatch } from '#workbench-records/view-store.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { cadMachine } from '#machines/cad.machine.js';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
-import { createMockRuntimeClient } from '@taucad/runtime-testing';
+import { createMockRuntimeClient, createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type { KernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { getViewCameraSession } from '#services/graphics-camera-registry.js';
@@ -71,8 +71,11 @@ const graphics = () =>
     { input: {} },
   ).start();
 
-const cad = () =>
-  createActor(
+const cadFixtures = new WeakMap<ActorRefFrom<typeof cadMachine>, ReturnType<typeof createMockRuntimeDocument>>();
+
+const cad = () => {
+  const fixture = createMockRuntimeDocument();
+  const actor = createActor(
     cadMachine.provide({
       actors: {
         connectKernelActor: fromSafeAsync(
@@ -80,11 +83,11 @@ const cad = () =>
             type: 'kernelConnected';
             client: ReturnType<typeof createMockRuntimeClient>;
             cleanups: Array<() => void>;
-          }> => ({
-            type: 'kernelConnected',
-            client: createMockRuntimeClient(),
-            cleanups: [],
-          }),
+          }> => {
+            const client = createMockRuntimeClient();
+            vi.mocked(client.open).mockReturnValue(fixture.document);
+            return { type: 'kernelConnected', client, cleanups: [] };
+          },
         ),
       },
     }),
@@ -96,6 +99,9 @@ const cad = () =>
       },
     },
   ).start();
+  cadFixtures.set(actor, fixture);
+  return actor;
+};
 
 const editor = () =>
   mock<ActorRefFrom<typeof editorMachine>>({
@@ -189,18 +195,17 @@ describe('view record owner synchronization', () => {
       });
       act(() => {
         cadRef.send({ type: 'setEntryPath', entryPath: 'src/main.ts' });
-        cadRef.send({
-          type: 'geometryComputed',
-          geometry: {
-            format: 'gltf',
-            content: new Uint8Array(0),
-            hash: 'test',
-          },
-          issues: [],
-        });
       });
       await waitFor(() => {
-        expect(cadRef.getSnapshot().context.geometry?.format).toBe('gltf');
+        expect(cadRef.getSnapshot().context.defaultView).toBeDefined();
+      });
+      const fixture = cadFixtures.get(cadRef)!;
+      act(() => {
+        fixture.emitRendered(fixture.rendering);
+      });
+      await waitFor(() => {
+        const { rendering } = cadRef.getSnapshot().context;
+        expect(rendering?.success ? rendering.artifact.mimeType : undefined).toBe('model/gltf-binary');
       });
       view.rerender(draw(4));
       expect(session.framing.initialized).toBe(true);
@@ -685,6 +690,55 @@ describe('view record owner synchronization', () => {
     await waitFor(() => expect(graphicsRef.getSnapshot().context.displayUnits.length.symbol).toBe('in'));
     await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]), { timeout: 1000 });
     unmount();
+    graphicsRef.stop();
+  });
+
+  it('adopts and persists a named projection camera without replacing the default camera', async () => {
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writeRecord = vi.fn(async (_next: WorkbenchView) => true);
+    const base = workbenchRecords.view.schema.parse({
+      ...initial(),
+      camera: { kind: 'preset', preset: 'front' },
+      kernelViews: [{ id: 'drawing', camera: { kind: 'preset', preset: 'right' } }],
+    });
+    const draw = (record: WorkbenchView) => (
+      <GraphicsProvider graphicsRef={graphicsRef}>
+        <Harness graphicsRef={graphicsRef} editorRef={editorRef} record={record} writeRecord={writeRecord} />
+      </GraphicsProvider>
+    );
+    const pane = render(draw(base));
+    const session = getViewCameraSession(graphicsRef)!;
+    const rig = session.rig.actorRef;
+    await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([0, -1, 0]));
+
+    pane.rerender(draw({ ...base, selectedKernelView: 'drawing' }));
+    await waitFor(() => expect(rig.getSnapshot().context.view.direction).toEqual([1, 0, 0]));
+    session.framing.initialized = true;
+    writeRecord.mockClear();
+    act(() =>
+      rig.send({
+        type: 'setView',
+        target: [1, 2, 3],
+        direction: [0, 1, 0],
+        up: [0, 0, 1],
+        verticalSpan: 5,
+      }),
+    );
+    await waitFor(() =>
+      expect(
+        writeRecord.mock.calls.some(
+          ([next]) => next.kernelViews?.find((view) => view.id === 'drawing')?.camera?.kind === 'pose',
+        ),
+      ).toBe(true),
+    );
+    const saved = writeRecord.mock.calls.at(-1)?.[0];
+    expect(saved?.camera).toEqual(base.camera);
+    expect(saved?.kernelViews?.find((view) => view.id === 'drawing')?.camera).toMatchObject({
+      kind: 'pose',
+      target: [1, 2, 3],
+    });
+    pane.unmount();
     graphicsRef.stop();
   });
 });

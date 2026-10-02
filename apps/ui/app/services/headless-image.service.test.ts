@@ -70,9 +70,9 @@ describe('HeadlessImageService', () => {
   it('defers only cold automatic part batches and lets one explicit retry warm the shared worker', async () => {
     const { imageClient, service } = createFixture();
     vi.mocked(imageClient.transcode).mockRejectedValueOnce(new Error('Invalid GLB'));
-    const partBatch = {
+    const partBatch: WebpGlbJob = {
       ...thumbnailJob('cold-part'),
-      exportOptions: { mode: 'batch' as const, width: 256, height: 256, views: [] },
+      exportOptions: { mode: 'batch', width: 256, height: 256, views: [] },
     };
     await expect(service.export(partBatch)).rejects.toMatchObject({ code: 'cold-start-deferred' });
     expect(imageClient.connect).not.toHaveBeenCalled();
@@ -443,7 +443,13 @@ describe('HeadlessImageService', () => {
       }),
     );
     await service.export(
-      captureJob('visibility', { exportOptions: { width: 16, height: 16, visiblePrimitives: [0] } }),
+      captureJob('visibility', {
+        exportOptions: {
+          width: 16,
+          height: 16,
+          visiblePrimitives: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+        },
+      }),
     );
 
     expect(imageClient.transcode).toHaveBeenCalledTimes(5);
@@ -587,7 +593,7 @@ describe('HeadlessImageService', () => {
       files: [{ name: 'render.svg', bytes: new TextEncoder().encode(svg), mimeType: 'image/svg+xml' }],
       options,
     });
-    expect(imageClient.render).not.toHaveBeenCalled();
+    expect(imageClient.open).not.toHaveBeenCalled();
   });
 
   it('does not probe renderer GPU when the selected execution host does not require it', async () => {
@@ -629,7 +635,7 @@ describe('HeadlessImageService', () => {
   it('does not enqueue an automatic preview when disposal wins during adapter admission', async () => {
     const probe = Promise.withResolvers<boolean>();
     const createImageClient = vi.fn();
-    const service = new HeadlessImageService({ createImageClient, isAutomaticGpuAvailable: () => probe.promise });
+    const service = new HeadlessImageService({ createImageClient, isAutomaticGpuAvailable: async () => probe.promise });
     const pending = service.export(captureJob('late-adapter', { kind: 'automatic-thumbnail' }));
     service.dispose();
     probe.resolve(true);

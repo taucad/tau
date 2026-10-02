@@ -3,7 +3,7 @@ import { useSelector } from '@xstate/react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { ActorRefFrom } from 'xstate';
-import { defaultRenderTimeout } from '#constants/editor.constants.js';
+import { defaultOperationTimeout } from '#constants/editor.constants.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { useProject } from '#hooks/use-project.js';
@@ -211,7 +211,7 @@ export function EntryOwner({
   onApplied?: (path: string, digest: `sha256:${string}`) => void;
   // oxlint-disable-next-line typescript/no-restricted-types -- This React owner renders no DOM.
 }>): React.JSX.Element | null {
-  const renderTimeout = useSelector(cadRef, (state) => state.context.renderTimeout);
+  const operationTimeout = useSelector(cadRef, (state) => state.context.operationTimeout);
   const unitId = createSourceModelInteractionUnitId(path);
   const componentUnit = useSelector(modelInteractionRef, (state) => state.context.unitsById[unitId]);
   const components = useMemo(
@@ -225,7 +225,7 @@ export function EntryOwner({
     }),
     [componentUnit],
   );
-  const [observed, setObserved] = useState<{ renderTimeout: number; components: Entry['components'] }>();
+  const [observed, setObserved] = useState<{ operationTimeout: number; components: Entry['components'] }>();
   const appliedEntryRef = useRef<{ entry: Entry | undefined } | undefined>(undefined);
   useEffect(() => {
     if (!recordPresent) {
@@ -234,13 +234,14 @@ export function EntryOwner({
     const previous = appliedEntryRef.current?.entry;
     const first = appliedEntryRef.current === undefined;
     appliedEntryRef.current = { entry };
-    const targetTimeout = entry?.renderTimeout ?? defaultRenderTimeout;
+    const targetTimeout = entry?.operationTimeout ?? defaultOperationTimeout;
     if (
       (first ||
-        (!Object.hasOwn(localPatch ?? {}, 'renderTimeout') && previous?.renderTimeout !== entry?.renderTimeout)) &&
-      cadRef.getSnapshot().context.renderTimeout !== targetTimeout
+        (!Object.hasOwn(localPatch ?? {}, 'operationTimeout') &&
+          previous?.operationTimeout !== entry?.operationTimeout)) &&
+      cadRef.getSnapshot().context.operationTimeout !== targetTimeout
     ) {
-      cadRef.send({ type: 'setRenderTimeout', renderTimeout: targetTimeout });
+      cadRef.send({ type: 'setOperationTimeout', operationTimeout: targetTimeout });
     }
     const defaults = { hidden: [], isolated: [], opacity: [] };
     const target = entry?.components ?? defaults;
@@ -294,7 +295,7 @@ export function EntryOwner({
       return;
     }
     const previous = observed;
-    const next = { renderTimeout, components };
+    const next = { operationTimeout, components };
     if (same(previous, next)) {
       return;
     }
@@ -304,14 +305,15 @@ export function EntryOwner({
       return;
     }
     const changedTimeout =
-      previous.renderTimeout !== renderTimeout && renderTimeout !== (entry?.renderTimeout ?? defaultRenderTimeout);
+      previous.operationTimeout !== operationTimeout &&
+      operationTimeout !== (entry?.operationTimeout ?? defaultOperationTimeout);
     const changedComponents =
       !same(previous.components, components) &&
       !same(components, entry?.components ?? { hidden: [], isolated: [], opacity: [] });
     if (!changedTimeout && !changedComponents) {
       return;
     }
-    void write(path, { ...entry, renderTimeout, components });
-  }, [components, entry, observed, path, ready, renderTimeout, write]);
+    void write(path, { ...entry, operationTimeout, components });
+  }, [components, entry, observed, path, ready, operationTimeout, write]);
   return null;
 }

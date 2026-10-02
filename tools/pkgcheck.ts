@@ -22,7 +22,7 @@ import {
   writeFileSync,
 } from 'node:fs';
 import { createRequire } from 'node:module';
-import { basename, dirname, join, relative, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { tmpdir } from 'node:os';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
@@ -817,6 +817,46 @@ function linkInstalledPackage(from: string, nodeModules: string, dependency: str
   return true;
 }
 
+/** Stage the files npm would publish, without running package lifecycle scripts. */
+function copyPackedFiles(source: string, destination: string): void {
+  const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
+    cwd: source,
+    encoding: 'utf8',
+    stdio: ['pipe', 'pipe', 'pipe'],
+  });
+  const packs: unknown = JSON.parse(output);
+  if (!Array.isArray(packs) || packs.length !== 1 || !isRecord(packs[0]) || !Array.isArray(packs[0].files)) {
+    throw new Error(`npm pack returned an invalid file list for ${source}`);
+  }
+
+  const sourceRoot = realpathSync(source);
+  for (const file of packs[0].files) {
+    if (!isRecord(file) || typeof file.path !== 'string') {
+      throw new Error(`npm pack returned an invalid file path for ${source}`);
+    }
+    const { path } = file;
+    if (path === 'package.json') {
+      // The staged manifest must retain publishConfig overrides and omit scripts.
+      continue;
+    }
+    if (
+      path.startsWith('/') ||
+      path.includes('\\') ||
+      path.split('/').some((segment) => segment === '' || segment === '.' || segment === '..')
+    ) {
+      throw new Error(`npm pack returned an unsafe file path: ${path}`);
+    }
+    const fileSource = realpathSync(join(source, path));
+    const relativeSource = relative(sourceRoot, fileSource);
+    if (isAbsolute(relativeSource) || relativeSource.split(sep)[0] === '..') {
+      throw new Error(`npm pack returned a file outside the package: ${path}`);
+    }
+    const fileDestination = join(destination, path);
+    mkdirSync(dirname(fileDestination), { recursive: true });
+    cpSync(fileSource, fileDestination);
+  }
+}
+
 /**
  * Install one workspace package into a throwaway consumer the way npm would:
  * its `publishConfig`-applied manifest plus its built `dist`, never its source
@@ -844,7 +884,7 @@ function stagePublishedPackage(projectDirectory: string, nodeModules: string, st
     // hide exactly the defect `tau-no-vendored-node-modules` exists to catch.
     failures.push(`${name}: dist/node_modules exists; declare the vendored dependencies instead of shipping a copy`);
   } else if (existsSync(distribution)) {
-    cpSync(distribution, join(destination, 'dist'), { recursive: true });
+    copyPackedFiles(projectDirectory, destination);
   } else {
     failures.push(`${name}: dist/ is missing; build it before running pkgcheck`);
   }
@@ -920,7 +960,13 @@ void [
  * check every shipped `.d.mts` under both resolution modes.
  */
 function consumerProbeSource(specifiers: readonly string[]): string {
-  const imports = specifiers.map((specifier, index) => `import * as probe${String(index)} from '${specifier}';`);
+  const { exports } = applyPublishConfig(packageJson);
+  const imports = specifiers.map((specifier, index) => {
+    const subpath = `.${specifier.slice(packageName.length)}`;
+    const target = isRecord(exports) ? exports[subpath] : undefined;
+    const attribute = typeof target === 'string' && target.endsWith('.json') ? ' with { type: "json" }' : '';
+    return `import * as probe${String(index)} from '${specifier}'${attribute};`;
+  });
   const bindings = specifiers.map((_, index) => `probe${String(index)}`);
   const prologue = packageName === '@taucad/runtime' ? runtimeConsumerProbe : '';
   return `${prologue}${imports.join('\n')}\nvoid [${bindings.join(', ')}];\n`;
@@ -1011,15 +1057,7 @@ async function runAttw(): Promise<CheckResult> {
     delete publishPackage.scripts;
     writeFileSync(join(stagingDirectory, 'package.json'), JSON.stringify(publishPackage, undefined, 2));
 
-    const distributionSource = join(absoluteRoot, 'dist');
-    if (existsSync(distributionSource)) {
-      cpSync(distributionSource, join(stagingDirectory, 'dist'), { recursive: true });
-    }
-
-    const readmeSource = join(absoluteRoot, 'README.md');
-    if (existsSync(readmeSource)) {
-      cpSync(readmeSource, join(stagingDirectory, 'README.md'));
-    }
+    copyPackedFiles(absoluteRoot, stagingDirectory);
 
     const attwConfigSource = join(absoluteRoot, '.attw.json');
     if (existsSync(attwConfigSource)) {

@@ -18,7 +18,7 @@
 
 import { isNode } from '#framework/environment.js';
 import { toOtlpJson } from '#framework/telemetry-otlp.js';
-import type { TelemetryBatch, TelemetrySpanRecord } from '#types/runtime-protocol.types.js';
+import type { TelemetryBatch, TelemetrySpanRecord } from '#types/runtime-wire.types.js';
 
 /** A sink that accepts batches without blocking the emitting thread. */
 export type TelemetryExporter = {

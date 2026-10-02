@@ -14,7 +14,7 @@ import { equalBytes } from '#object-hash.js';
 import { assertMaterializableRevisionTree } from '#portable-tree.js';
 import { RevisionPortError } from '#revision-port.js';
 import type { Checkout } from '#revision-port.js';
-import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem } from '#revision-effects.js';
+import type { RevisionActorsOptions, RevisionFileSystem, UseCheckoutFileSystem } from '#revision-effects.types.js';
 
 /** Cancellation, the caller's own capture, and the brackets around one write. */
 type MaterializeTreeOptions<Result> = Readonly<{

@@ -5,7 +5,7 @@ import { createServicesBroker } from '#main/services-broker.js';
 import type { ServicesBrokerOptions } from '#main/services-broker.js';
 import type * as Impl from '#tau/services-host.impl.js';
 
-type Lease = { readonly port: { close: () => void }; release(reason: 'requested' | 'render-timeout'): void };
+type Lease = { readonly port: { close: () => void }; release(reason: 'requested' | 'operation-timeout'): void };
 const captured = vi.hoisted(() => ({
   requestRuntimePort: undefined as undefined | ((workspaceRoot: string) => Promise<Lease>),
 }));

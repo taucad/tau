@@ -268,7 +268,7 @@ export const createGeometryBroker = (options: GeometryBrokerOptions): GeometryBr
   let cancelWatchdog: ReturnType<typeof setTimeout> | undefined;
   let idleWatchdog: ReturnType<typeof setTimeout> | undefined;
   let residentWatchdog: ReturnType<typeof setInterval> | undefined;
-  // A completed native suite can retain subjects even after a later legacy suite.
+  // A completed suite can retain native subjects until this slot exits.
   // Conservatively retain all suite grants until exit; rotate at this fixed ceiling.
   const residentSuiteGrants = new Set<() => boolean>();
   const log = options.log ?? ((): void => undefined);

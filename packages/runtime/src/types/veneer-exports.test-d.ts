@@ -4,8 +4,8 @@ import type {
   ChatError,
   // @ts-expect-error project records are not runtime contracts
   File,
+  Artifact,
   FileExtension,
-  Geometry,
   JSONSchema7,
   JSONValue,
   // @ts-expect-error publication records are not runtime contracts
@@ -16,7 +16,7 @@ import type {
 
 test('runtime owns the explicit veneer type contract', () => {
   void expectTypeOf<FileExtension>().toBeString;
-  void expectTypeOf<Geometry>().toBeObject;
+  void expectTypeOf<Artifact>().toBeObject;
   void expectTypeOf<JSONSchema7>().toBeObject;
   void expectTypeOf<JSONValue>().not.toBeNever;
   void expectTypeOf<[ChatError, File, PublicationRecord, WorkspaceMarker]>().toBeArray;

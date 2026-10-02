@@ -1,22 +1,20 @@
-import type { Geometry } from '@taucad/types';
 import type { Dependency } from '#types/runtime-dependency.types.js';
-import type { KernelResult } from '#types/runtime.types.js';
+import type { KernelIssue, KernelResult } from '#types/runtime.types.js';
+import type { KernelOffers } from '#types/runtime-kernel-v2.types.js';
 import type { RuntimeContentInput } from '#types/runtime-content.types.js';
 import type { RuntimeFileLocator } from '#types/runtime-file.types.js';
+import { nativeBuildInputSymbol as nativeBuildInputIdentity } from '#types/runtime-kernel.types.js';
+import type {
+  NativeBuildInput as KernelNativeBuildInput,
+  NativeBuildInputCarrier as KernelNativeBuildInputCarrier,
+} from '#types/runtime-kernel.types.js';
 
 /** Exact content-free input passed to the terminal kernel create hook. @public */
-export type NativeBuildInput = {
-  readonly entryPath: string;
-  readonly parameters: Record<string, unknown>;
-} & ({ readonly options: Record<string, unknown> } | { readonly options?: never });
-
-/** Private result carrier used to preserve exact replay input through middleware and caches. @public */
-export const nativeBuildInputSymbol: unique symbol = Symbol('nativeBuildInput');
-
-/** @public */
-export type NativeBuildInputCarrier = {
-  readonly [nativeBuildInputSymbol]?: NativeBuildInput;
-};
+export type NativeBuildInput = KernelNativeBuildInput;
+/** Replay identity shared with middleware cache implementations. @public */
+export const nativeBuildInputSymbol: typeof nativeBuildInputIdentity = nativeBuildInputIdentity;
+/** The replay carrier; its symbol property is runtime-owned. @public */
+export type NativeBuildInputCarrier = KernelNativeBuildInputCarrier;
 
 /**
  * Stable identity for one render request and its dependency graph.
@@ -53,7 +51,7 @@ export type KernelBinding<KernelHandle = unknown> = {
  * @public
  */
 export type OperationOwner<KernelHandle = unknown> = {
-  kind: 'render-artifact' | 'request';
+  kind: 'request';
   file: RuntimeFileLocator;
   binding?: KernelBinding<KernelHandle>;
 };
@@ -63,6 +61,8 @@ export type OperationOwner<KernelHandle = unknown> = {
  * @public
  */
 export type NativeHandleSlot = {
+  /** Stable evaluation identity; the handle payload itself need not be unique or defined. */
+  evaluationId: number;
   identityKey: string;
   kernelId: string | undefined;
   kernelVersion: string | undefined;
@@ -74,32 +74,47 @@ export type NativeHandleSlot = {
  * @public
  */
 export type SerializedNativeHandleSlot = {
+  evaluationId: number;
   identityKey: string;
   kernelId: string | undefined;
   kernelVersion: string | undefined;
   serializedNativeHandle: unknown;
 };
 
-/**
- * Render result held by a materialized render artifact.
- *
- * `data` is `undefined` only for export-scoped materializations (`publish: false`)
- * of kernels that defer their display artifact to the `meshGeometry` phase — the
- * export path consumes the native-handle slots, never the display geometry.
- * Published (display) artifacts always carry `data`; the orchestrator enforces
- * the display-path invariant before publishing.
- * @public
- */
-export type MaterializedRenderResult = KernelResult<Geometry | undefined>;
+/** One admitted evaluation, independent of any projection rendered from it. @public */
+export type EvaluationSlot = {
+  readonly id: number;
+  readonly identityKey: string;
+  readonly owner: OperationOwner;
+  /** The exact terminal input after evaluate middleware, for safe replay and reuse. */
+  nativeBuildInput?: NativeBuildInput;
+  offers?: KernelOffers;
+  issues?: KernelIssue[];
+  /** Terminal kernel output retained before response middleware transforms it. */
+  terminalOffers?: KernelOffers;
+  terminalIssues?: KernelIssue[];
+  hasHandle: boolean;
+  handle: unknown;
+  liveNativeHandleSlot?: NativeHandleSlot;
+  serializedNativeHandleSlot?: SerializedNativeHandleSlot;
+};
 
 /**
- * Materialized render output plus any native export artifacts available for the same identity.
+ * Evaluation result held beside native-handle slots. View artifacts are
+ * produced separately by the selected view render operation.
+ * @public
+ */
+export type MaterializedRenderResult = KernelResult<undefined>;
+
+/**
+ * Materialized evaluation plus native handles available for views and exports.
  * @public
  */
 export type MaterializedRender = {
   identity: RenderIdentity;
   owner: OperationOwner;
   result: MaterializedRenderResult;
+  evaluationSlot?: EvaluationSlot;
   liveNativeHandleSlot?: NativeHandleSlot;
   serializedNativeHandleSlot?: SerializedNativeHandleSlot;
 };
@@ -155,12 +170,14 @@ export function createRenderIdentityKey(identity: RenderIdentity): string {
  * @returns Stable key for live and serialized native-handle slots.
  * @public
  */
-export function createNativeHandleIdentityKey(identity: RenderIdentity): string {
-  return [
+export function createNativeHandleIdentityKey(
+  identity: Pick<RenderIdentity, 'file' | 'selectedKernelId' | 'selectedKernelVersion' | 'nativeHandleKey'>,
+): string {
+  return JSON.stringify([
     identity.file.path,
     identity.file.filename,
     identity.selectedKernelId ?? '<no-kernel>',
     identity.selectedKernelVersion ?? '<no-version>',
     identity.nativeHandleKey,
-  ].join('|');
+  ]);
 }

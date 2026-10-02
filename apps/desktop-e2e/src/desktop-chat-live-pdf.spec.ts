@@ -45,7 +45,7 @@ import {
  * and credits only, and a refused workspace root answers the model with error
  * *results* rather than failing the run.
  */
-const runtimeToolNames = new Set(['get_kernel_result', 'screenshot', 'test_model']);
+const runtimeToolNames = new Set(['evaluate_model', 'screenshot', 'test_model']);
 
 const live = process.env['TAU_E2E_LIVE_LLM'] === 'true';
 const modelName = process.env['TAU_E2E_LIVE_MODEL'] ?? 'GPT-6 Luna';

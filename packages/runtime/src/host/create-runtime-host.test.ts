@@ -41,9 +41,6 @@ function createRecordingHost(id = 'recording'): RecordingHost {
     adoptInitialize: vi.fn(() => {
       throw new Error('adoptInitialize not used by createRuntimeHost contract');
     }),
-    encodeGeometry: vi.fn(() => {
-      throw new Error('encodeGeometry not used by createRuntimeHost contract');
-    }),
     close: vi.fn(async () => {
       counters.closed += 1;
       closedResolve?.();

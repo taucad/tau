@@ -31,6 +31,7 @@ export const skillOwners: readonly string[] = [
   '@taucad/picogk',
   '@taucad/picovoxel',
   '@taucad/replicad',
+  '@taucad/tscircuit',
   '@taucad/workbench',
   '@taucad/zoo',
   'geospec',

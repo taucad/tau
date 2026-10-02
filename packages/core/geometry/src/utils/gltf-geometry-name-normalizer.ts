@@ -1,4 +1,4 @@
-import { BufferUtils, NodeIO, Primitive } from '@gltf-transform/core';
+import { BufferUtils, WebIO, Primitive } from '@gltf-transform/core';
 import type { Document, JSONDocument, Mesh, Node, PlatformIO } from '@gltf-transform/core';
 
 import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
@@ -219,7 +219,7 @@ export async function normalizeGltfGeometryNames(
       sceneNamePolicy,
     });
   }
-  const io = configuredIo ?? registerTauGltfExtensions(new NodeIO()).registerExtensions([KHRMaterialsUnlit]);
+  const io = configuredIo ?? registerTauGltfExtensions(new WebIO()).registerExtensions([KHRMaterialsUnlit]);
   const document = await io.readJSON({
     json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'],
     resources: {},

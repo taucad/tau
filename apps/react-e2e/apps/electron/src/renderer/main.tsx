@@ -1,15 +1,15 @@
 import { useEffect, useRef, useState } from 'react';
 import type { ReactElement } from 'react';
 import { createRoot } from 'react-dom/client';
-import { createRuntimeClient, isRenderTimeoutError, isRuntimeTerminatedError } from '@taucad/runtime/client';
+import { createRuntimeClient, isOperationTimeoutError, isRuntimeTerminatedError } from '@taucad/runtime/client';
 import { createElectronClientOptions } from '@taucad/runtime/electron/renderer';
 import type { runtime } from '../main/runtime-definition.js';
 import { RuntimeFixture } from '../../../../support/runtime-fixture';
 import type { RuntimeFixtureOptions } from '../../../../support/runtime-fixture';
 import { mainFile } from '../../../../support/replicad-cylinder';
 
-const clientOptions = createElectronClientOptions<typeof runtime>({ renderTimeout: 60_000 });
-const timeoutClientOptions = createElectronClientOptions<typeof runtime>({ renderTimeout: 5000 });
+const clientOptions = createElectronClientOptions<typeof runtime>({ operationTimeout: 60_000 });
+const timeoutClientOptions = createElectronClientOptions<typeof runtime>({ operationTimeout: 60_000 });
 const runtimeOptions = {
   clientOptions,
   initialParameters: { radius: 10, height: 24 },
@@ -39,21 +39,36 @@ const TimeoutRuntimeHarness = (): ReactElement => {
       const client = createRuntimeClient(await timeoutClientOptions());
       activeClient.current = client;
       try {
+        const description = await client.describe({ source: { path: 'blocking.block' } });
+        if (!description.success) {
+          throw new Error(description.issues.map(({ message }) => message).join('; '));
+        }
+        client.setOperationTimeout(5000);
         try {
-          await client.render({ source: { path: 'blocking.block' } });
+          const document = client.open({ source: { path: 'blocking.block' }, watch: false });
+          try {
+            await document.evaluation();
+          } finally {
+            document.close();
+          }
           throw new Error('The blocking render unexpectedly settled.');
         } catch (error) {
-          if (!isRenderTimeoutError(error)) {
+          if (!isOperationTimeoutError(error)) {
             throw error;
           }
         }
 
         setPhase('render timed out');
         try {
-          await client.render({ source: { path: 'main.ts' } });
+          const document = client.open({ source: { path: 'main.ts' }, watch: false });
+          try {
+            await document.view().rendering();
+          } finally {
+            document.close();
+          }
           throw new Error('The timed-out runtime unexpectedly accepted another render.');
         } catch (error) {
-          if (!isRuntimeTerminatedError(error) || error.causeKind !== 'render-timeout') {
+          if (!isRuntimeTerminatedError(error) || error.causeKind !== 'operation-timeout') {
             throw error;
           }
         }

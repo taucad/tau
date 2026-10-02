@@ -76,16 +76,16 @@ describe('entry owner reconciliation', () => {
     hostFiles.writeFileChecked.mockClear();
     hostFiles.set(
       new TextEncoder().encode(
-        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 30_000 } } }),
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 30_000 } } }),
       ),
     );
     const setEntriesRecord = vi.fn();
-    let renderTimeout = 30_000;
+    let operationTimeout = 30_000;
     const cad = {
-      getSnapshot: () => ({ context: { renderTimeout } }),
-      send: (event: { type: string; renderTimeout: number }) => {
-        if (event.type === 'setRenderTimeout') {
-          renderTimeout = event.renderTimeout;
+      getSnapshot: () => ({ context: { operationTimeout } }),
+      send: (event: { type: string; operationTimeout: number }) => {
+        if (event.type === 'setOperationTimeout') {
+          operationTimeout = event.operationTimeout;
         }
       },
     };
@@ -109,7 +109,7 @@ describe('entry owner reconciliation', () => {
     setEntriesRecord.mockClear();
     hostFiles.set(
       new TextEncoder().encode(
-        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 45_000 } } }),
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 45_000 } } }),
       ),
     );
     await act(async () => {
@@ -118,11 +118,11 @@ describe('entry owner reconciliation', () => {
     await waitFor(() => {
       expect(setEntriesRecord).toHaveBeenCalledWith(
         expect.objectContaining({
-          entries: { 'a.ts': expect.objectContaining({ renderTimeout: 45_000 }) },
+          entries: { 'a.ts': expect.objectContaining({ operationTimeout: 45_000 }) },
         }),
       );
     });
-    renderTimeout = 60_000;
+    operationTimeout = 60_000;
     view.rerender(<EntriesSyncHost />);
     await waitFor(
       () => {
@@ -141,13 +141,13 @@ describe('entry owner reconciliation', () => {
   it('persists an entry owner edit after first service readiness and StrictMode replay', async () => {
     hostFiles.set(
       new TextEncoder().encode(
-        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 30_000 } } }),
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 30_000 } } }),
       ),
     );
     hostFiles.writeFileChecked.mockClear();
     hostContentService = undefined;
-    let renderTimeout = 30_000;
-    const cad = { getSnapshot: () => ({ context: { renderTimeout } }), send: vi.fn() };
+    let operationTimeout = 30_000;
+    const cad = { getSnapshot: () => ({ context: { operationTimeout } }), send: vi.fn() };
     const model = { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() };
     const acknowledged = new Map<string, string>();
     hostProject = {
@@ -181,7 +181,7 @@ describe('entry owner reconciliation', () => {
         <EntriesSyncHost />
       </StrictMode>,
     );
-    renderTimeout = 45_000;
+    operationTimeout = 45_000;
     view.rerender(
       <StrictMode>
         <EntriesSyncHost />
@@ -191,7 +191,7 @@ describe('entry owner reconciliation', () => {
       () => {
         expect(workbenchRecords.entries.read(hostFiles.get()!)).toMatchObject({
           status: 'current',
-          record: { entries: { 'a.ts': { renderTimeout: 45_000 } } },
+          record: { entries: { 'a.ts': { operationTimeout: 45_000 } } },
         });
       },
       { timeout: 1500 },
@@ -203,7 +203,7 @@ describe('entry owner reconciliation', () => {
   it('does not reacknowledge stale entry bytes after a read failure and a new owner mount', async () => {
     hostFiles.set(
       new TextEncoder().encode(
-        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 30_000 } } }),
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 30_000 } } }),
       ),
     );
     hostContentService = { subscribe: () => () => undefined };
@@ -215,7 +215,7 @@ describe('entry owner reconciliation', () => {
         acknowledged.delete(path);
       }
     });
-    const cad = { getSnapshot: () => ({ context: { renderTimeout: 30_000 } }), send: vi.fn() };
+    const cad = { getSnapshot: () => ({ context: { operationTimeout: 30_000 } }), send: vi.fn() };
     const model = { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() };
     const geometryUnits = new Map([['a.ts', cad]]);
     hostProject = {
@@ -253,15 +253,15 @@ describe('entry owner reconciliation', () => {
     view.unmount();
   });
   it('persists a human hide without reverting it and adopts a foreign isolation independently', async () => {
-    let renderTimeout = 180_000;
+    let operationTimeout = 180_000;
     let hidden: string[] = [];
     let isolated: string[] = [];
     let opacity: Record<string, number> = {};
     const cad = {
-      getSnapshot: () => ({ context: { renderTimeout } }),
-      send: vi.fn((event: { type: string; renderTimeout: number }) => {
-        if (event.type === 'setRenderTimeout') {
-          renderTimeout = event.renderTimeout;
+      getSnapshot: () => ({ context: { operationTimeout } }),
+      send: vi.fn((event: { type: string; operationTimeout: number }) => {
+        if (event.type === 'setOperationTimeout') {
+          operationTimeout = event.operationTimeout;
         }
       }),
     } as unknown as ActorRefFrom<typeof cadMachine>;
@@ -301,7 +301,7 @@ describe('entry owner reconciliation', () => {
       ),
     } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
     type Entry = WorkbenchEntries['entries'][string];
-    const empty: Entry = { renderTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
+    const empty: Entry = { operationTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
     const write = vi.fn(async (_path: string, _next: Entry) => true);
     const draw = (entry: Entry) => (
       <EntryOwner
@@ -337,14 +337,14 @@ describe('entry owner reconciliation', () => {
   });
 
   it('keeps newer local entry settings when an older checked write is received with a foreign sibling field', async () => {
-    let renderTimeout = 180_000;
+    let operationTimeout = 180_000;
     let hidden: string[] = [];
     let isolated: string[] = [];
     const cad = {
-      getSnapshot: () => ({ context: { renderTimeout } }),
-      send: vi.fn((event: { type: string; renderTimeout: number }) => {
-        if (event.type === 'setRenderTimeout') {
-          renderTimeout = event.renderTimeout;
+      getSnapshot: () => ({ context: { operationTimeout } }),
+      send: vi.fn((event: { type: string; operationTimeout: number }) => {
+        if (event.type === 'setOperationTimeout') {
+          operationTimeout = event.operationTimeout;
         }
       }),
     } as unknown as ActorRefFrom<typeof cadMachine>;
@@ -381,9 +381,9 @@ describe('entry owner reconciliation', () => {
       ),
     } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
     type Entry = WorkbenchEntries['entries'][string];
-    const initial: Entry = { renderTimeout, components: { hidden: [], isolated: [], opacity: [] } };
+    const initial: Entry = { operationTimeout, components: { hidden: [], isolated: [], opacity: [] } };
     const write = vi.fn(async (_path: string, _next: Entry) => true);
-    const draw = (entry: Entry, localPatch?: { renderTimeout?: number; components?: { hidden?: string[] } }) => (
+    const draw = (entry: Entry, localPatch?: { operationTimeout?: number; components?: { hidden?: string[] } }) => (
       <EntryOwner
         path='a.ts'
         cadRef={cad}
@@ -400,26 +400,26 @@ describe('entry owner reconciliation', () => {
       await Promise.resolve();
     });
     hidden = ['part-a'];
-    renderTimeout = 200_000;
+    operationTimeout = 200_000;
     view.rerender(draw(initial));
     await waitFor(() => {
       expect(write).toHaveBeenCalled();
     });
     const olderLocal = write.mock.lastCall![1];
     hidden = ['part-a', 'part-b'];
-    renderTimeout = 300_000;
+    operationTimeout = 300_000;
     view.rerender(draw(initial));
     view.rerender(
       draw(
         { ...olderLocal, components: { ...olderLocal.components!, isolated: ['part-c'] } },
-        { renderTimeout: olderLocal.renderTimeout, components: { hidden: olderLocal.components!.hidden } },
+        { operationTimeout: olderLocal.operationTimeout, components: { hidden: olderLocal.components!.hidden } },
       ),
     );
     await waitFor(() => {
       expect(isolated).toEqual(['part-c']);
     });
     expect(hidden).toEqual(['part-a', 'part-b']);
-    expect(renderTimeout).toBe(300_000);
+    expect(operationTimeout).toBe(300_000);
     view.unmount();
   });
 });

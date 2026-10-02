@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { createTelemetryOrigin, WorkerTelemetryCollector, toAbsoluteTime } from '#framework/worker-telemetry.js';
-import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
+import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 
 const entry = (name: string): TelemetryEntry => ({
   name,

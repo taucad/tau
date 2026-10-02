@@ -46,25 +46,43 @@ const createClient = () =>
   });
 
 type Client = ReturnType<typeof createClient>;
+const documents = new WeakMap<Client, ReturnType<Client['open']>>();
+const lanes = new WeakMap<Client, 'fast' | 'exact'>();
+const documentFor = (client: Client) => {
+  let document = documents.get(client);
+  if (!document) {
+    document = client.open({ source: { path: 'main.ts' }, watch: false });
+    documents.set(client, document);
+    lanes.set(client, 'fast');
+  }
+  return document;
+};
 
 const render = async (client: Client, lane?: 'fast' | 'exact') => {
-  const outcome = await client.render({
-    source: { path: 'main.ts' },
-    content: { includeEdges: true },
-    ...(lane ? { renderOptions: { lane } } : {}),
-  });
-  if (outcome.superseded || !outcome.geometry.success) {
+  const document = documentFor(client);
+  const requestedLane = lane ?? 'fast';
+  if (lanes.get(client) !== requestedLane) {
+    const updated = await document.update({ evaluateOptions: { lane: requestedLane } });
+    if (updated.superseded || !updated.evaluation.success) {
+      throw new Error('PicoVoxel evaluation failed');
+    }
+    lanes.set(client, requestedLane);
+  }
+  const view = document.view('model', { content: { includeEdges: true } });
+  const outcome = await view.rendering();
+  view.close();
+  if (outcome.superseded || !outcome.rendering.success) {
     throw new Error('PicoVoxel render failed');
   }
-  return outcome.geometry;
+  return outcome.rendering;
 };
 
 const exportStl = async (client: Client, exportOptions?: { lane: 'fast' | 'exact' }) => {
-  const result = await client.export('stl', exportOptions ? { exportOptions } : undefined);
+  const result = await documentFor(client).export('stl', exportOptions ? { options: exportOptions } : {});
   if (!result.success) {
     throw new Error(result.issues.map(({ message }) => message).join('; '));
   }
-  return result.data[0]!.bytes;
+  return result.files[0].bytes;
 };
 
 beforeEach(() => {
@@ -107,34 +125,47 @@ describe('PicoVoxel dual path through the runtime', () => {
             })),
           );
       };
+      const opened = [] as Array<ReturnType<typeof client.open>>;
       const build = async (named: boolean) => {
-        const result = await client.render({
+        const document = client.open({
           source: { files: { 'main.ts': source(named) } },
-          renderOptions: { lane },
+          evaluateOptions: { lane },
+          watch: false,
         });
-        if (result.superseded || !result.geometry.success || result.geometry.data.format !== 'gltf') {
+        opened.push(document);
+        const view = document.view('model');
+        const outcome = await view.rendering();
+        view.close();
+        if (
+          outcome.superseded ||
+          !outcome.rendering.success ||
+          typeof outcome.rendering.artifact.content === 'string'
+        ) {
           throw new Error('Named render failed');
         }
-        return result.geometry.data.content;
+        return { bytes: outcome.rendering.artifact.content, document };
       };
       try {
         const raw = await build(false);
         const named = await build(true);
         const again = await build(true);
         expect(sessions.lanes).toEqual([lane, lane]);
-        expect(again).toEqual(named);
-        expect(await attributes(named)).toEqual(await attributes(raw));
-        const summary = await readGltfNamingSummary(again);
+        expect(again.bytes).toEqual(named.bytes);
+        expect(await attributes(named.bytes)).toEqual(await attributes(raw.bytes));
+        const summary = await readGltfNamingSummary(again.bytes);
         expect(summary.nodeNames).toEqual(['蓋 / Mesh', '蓋 / Mesh']);
         expect(summary.meshNames).toEqual(summary.nodeNames);
-        const exported = await client.export('glb');
+        const exported = await again.document.export('glb');
         expect(exported.success).toBe(true);
         if (!exported.success) {
           throw new Error('Exact export failed');
         }
-        const exportedNames = await readGltfNamingSummary(exported.data[0]!.bytes);
+        const exportedNames = await readGltfNamingSummary(exported.files[0].bytes);
         expect(exportedNames.nodeNames).toEqual(summary.nodeNames);
       } finally {
+        for (const document of opened) {
+          document.close();
+        }
         await client.shutdown();
       }
     },
@@ -148,9 +179,8 @@ describe('PicoVoxel dual path through the runtime', () => {
       const exact = await exportStl(client);
       const again = await exportStl(client);
 
-      // DP4 in a bare runtime: the export's exact replay is request-local (never published), and
-      // with no geometry cache nothing retains it, so a second export replays again. Same bytes.
-      expect(sessions.lanes).toEqual(['fast', 'exact', 'exact']);
+      // The worker retains the exact evaluation for matching later exports.
+      expect(sessions.lanes).toEqual(['fast', 'exact']);
       expect(header(exact)).toBe('PicoGK UNITS=mm');
       expect(again).toEqual(exact);
     } finally {
@@ -199,7 +229,7 @@ describe('PicoVoxel dual path through the runtime', () => {
       const exact = await render(client, 'exact');
 
       expect(sessions.lanes).toEqual(['fast', 'exact']);
-      expect(fast.data).not.toEqual(exact.data);
+      expect(fast.artifact).not.toEqual(exact.artifact);
     } finally {
       await client.shutdown();
     }
@@ -220,7 +250,7 @@ describe('PicoVoxel dual path through the runtime', () => {
       const exactAgain = await render(client, 'exact');
 
       expect(sessions.lanes).toEqual(['fast', 'exact']);
-      expect([fastAgain.data, exactAgain.data]).toEqual([fast.data, exact.data]);
+      expect([fastAgain.artifact, exactAgain.artifact]).toEqual([fast.artifact, exact.artifact]);
     } finally {
       await client.shutdown();
     }
@@ -239,14 +269,16 @@ describe('PicoVoxel dual path through the runtime', () => {
     }
   }, 120_000);
 
-  it('should build a request-scoped export once, in the exact lane', async () => {
+  it('should build an export-only document once, in the exact lane', async () => {
     const client = createClient();
+    const document = client.open({ source: { path: 'main.ts' }, evaluateOptions: { lane: 'exact' }, watch: false });
     try {
-      const result = await client.export('glb', { source: { path: 'main.ts' } });
+      const result = await document.export('glb');
 
       expect(result.success).toBe(true);
       expect(sessions.lanes).toEqual(['exact']);
     } finally {
+      document.close();
       await client.shutdown();
     }
   }, 120_000);

@@ -109,7 +109,7 @@
     "#*": "./src/*"
   },
   "dependencies": {
-    "@gltf-transform/core": "^4.4.0",
+    "@gltf-transform/core": "catalog:",
     "@taucad/assimp": "workspace:*",
     "@taucad/brep": "workspace:*",
     "@taucad/esbuild": "workspace:*",
@@ -127,13 +127,14 @@
     "@taucad/replicad": "workspace:*",
     "@taucad/rhino": "workspace:*",
     "@taucad/runtime": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "geospec": "workspace:*",
     "manifold-3d": "catalog:",
     "zod": "catalog:"
   },
   "devDependencies": {
     "@libcascade/toolchain": "catalog:",
-    "@taucad/picogk": "workspace:^",
+    "@taucad/picogk": "workspace:*",
     "@taucad/tau-examples": "workspace:*",
     "@vitest/browser-playwright": "catalog:",
     "vitest": "catalog:"
@@ -142,7 +143,7 @@
     "prepack": "node scripts/generate-provenance.mjs"
   },
   "peerDependencies": {
-    "@taucad/picogk": "workspace:^"
+    "@taucad/picogk": "^0.1.0-beta.0"
   },
   "peerDependenciesMeta": {
     "@taucad/picogk": {

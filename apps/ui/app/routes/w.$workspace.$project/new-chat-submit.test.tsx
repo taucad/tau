@@ -15,12 +15,15 @@ vi.mock('@ai-sdk/react', () => ({
     public regenerate = vi.fn(async () => undefined);
     public stop = vi.fn(async () => undefined);
 
-    constructor({ id }: { readonly id: string }) {
+    public constructor({ id }: { readonly id: string }) {
       this.id = id;
     }
 
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the SDK's callback hook exactly.
     public '~registerMessagesCallback' = (): (() => void) => () => undefined;
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the SDK's callback hook exactly.
     public '~registerStatusCallback' = (): (() => void) => () => undefined;
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Match the SDK's callback hook exactly.
     public '~registerErrorCallback' = (): (() => void) => () => undefined;
   },
 }));
@@ -65,7 +68,7 @@ it('keeps a newly focused chat’s error write on its own chatId', async () => {
   expect(newSession.chat).not.toBe(oldSession.chat);
   expect(newSession.chat.id).toBe('chat_new');
   await vi.waitFor(() => {
-    expect(getChat).toHaveBeenCalledWith('chat_new');
+    expect(getChat).toHaveBeenCalledWith('chat_new', 'project_test');
     expect(newSession.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
   });
 

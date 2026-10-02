@@ -150,9 +150,9 @@ type ProjectEventInternal =
   | { type: 'updateTags'; tags: string[] }
   | { type: 'loadModel' }
   | { type: 'setMainFile'; path: string }
-  | { type: 'createGeometryUnit'; entryPath: string; renderTimeout?: number }
+  | { type: 'createGeometryUnit'; entryPath: string; operationTimeout?: number }
   | { type: 'setViewerGeometryDemand'; viewId: string; entryPath?: string }
-  | { type: 'claimGeometryUnit'; claimId: string; entryPath: string; renderTimeout?: number }
+  | { type: 'claimGeometryUnit'; claimId: string; entryPath: string; operationTimeout?: number }
   | { type: 'releaseGeometryUnit'; claimId: string }
   /* R4: a unit reporting whether its kernel was refused, and why. */
   | { type: 'geometryUnit.kernelRefused'; actorId: string; reason: string | undefined }
@@ -167,6 +167,7 @@ type ProjectEventInternal =
       settings?: GraphicsViewSettings;
     }
   | { type: 'destroyViewGraphics'; viewId: string }
+  | { type: 'reconcileViewManifest'; unitId: string }
   // Filesystem participant intents — fired by the
   // `file-operation-participants.ts` adapter on rename/delete events.
   // The participant is the single source of truth; UI components must
@@ -234,7 +235,7 @@ const spawnGeometryUnit = (
   unit: Readonly<{
     self: AnyActorRef;
     entryPath: string;
-    options: Readonly<{ shouldInitializeKernelOnStart: boolean; renderTimeout?: number }>;
+    options: Readonly<{ shouldInitializeKernelOnStart: boolean; operationTimeout?: number }>;
   }>,
 ): CadUnitRef => {
   const { self, entryPath, options } = unit;
@@ -247,7 +248,7 @@ const spawnGeometryUnit = (
       fileManagerRef: context.fileManagerRef,
       kernelOptionsFactory: context.kernelOptionsFactory,
       fileSystemRoot: context.fileSystemRoot,
-      ...(options.renderTimeout === undefined ? {} : { renderTimeout: options.renderTimeout }),
+      ...(options.operationTimeout === undefined ? {} : { operationTimeout: options.operationTimeout }),
     },
   });
   enq.sendTo(cadUnit, { type: 'initializeModel', entryPath, ...(context.stage ? { stage: context.stage } : {}) });
@@ -321,12 +322,36 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
   return { context: { viewGraphics } };
 };
 
+/** The project owns the shared manifest until its last presented GLB pane leaves. */
+const reconcileViewManifest = (
+  context: ProjectContext,
+  enq: ProjectEnqueue,
+  { unitId, excludedViewId }: Readonly<{ unitId: string; excludedViewId?: string }>,
+): void => {
+  for (const [viewId, graphics] of context.viewGraphics) {
+    if (viewId === excludedViewId) {
+      continue;
+    }
+    const view = graphics.getSnapshot().context;
+    if (view.artifact?.mimeType === 'model/gltf-binary' && view.modelInteractionUnitId === unitId) {
+      return;
+    }
+  }
+  enq.sendTo(context.modelInteractionRef, { type: 'clearManifest', unitId, source: 'viewer' });
+  enq.sendTo(context.modelInteractionRef, { type: 'clearSelection', unitId, source: 'viewer' });
+  enq.sendTo(context.modelInteractionRef, { type: 'clearFocus', unitId, source: 'viewer' });
+};
+
 const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphics'>, enq: ProjectEnqueue) => {
   const gfx = context.viewGraphics.get(event.viewId);
   if (!gfx) {
     return {};
   }
   enq.stop(gfx);
+  const unitId = gfx.getSnapshot().context.modelInteractionUnitId;
+  if (unitId) {
+    reconcileViewManifest(context, enq, { unitId, excludedViewId: event.viewId });
+  }
   const viewGraphics = new Map(context.viewGraphics);
   viewGraphics.delete(event.viewId);
   return { context: { viewGraphics } };
@@ -511,6 +536,10 @@ export const projectMachine = setup({
         // are not silently dropped if a useEffect fires before loading starts.
         createViewGraphics,
         destroyViewGraphics,
+        reconcileViewManifest: ({ context, event }, enq) => {
+          reconcileViewManifest(context, enq, { unitId: event.unitId });
+          return {};
+        },
       },
     },
     loading: {
@@ -522,6 +551,10 @@ export const projectMachine = setup({
         // zero dependency on context.project or any loaded data.
         createViewGraphics,
         destroyViewGraphics,
+        reconcileViewManifest: ({ context, event }, enq) => {
+          reconcileViewManifest(context, enq, { unitId: event.unitId });
+          return {};
+        },
         projectRetrieved: {
           context: ({ event }) => ({ project: event.project, manifestIssue: event.issue, isLoading: false }),
         },
@@ -603,7 +636,7 @@ export const projectMachine = setup({
                 entryPath: event.entryPath,
                 options: {
                   shouldInitializeKernelOnStart: true,
-                  ...(event.renderTimeout === undefined ? {} : { renderTimeout: event.renderTimeout }),
+                  ...(event.operationTimeout === undefined ? {} : { operationTimeout: event.operationTimeout }),
                 },
               });
               geometryUnits.set(event.entryPath, unit);
@@ -651,7 +684,7 @@ export const projectMachine = setup({
                 enq.raise({
                   type: 'createGeometryUnit',
                   entryPath: event.entryPath,
-                  renderTimeout: event.renderTimeout,
+                  operationTimeout: event.operationTimeout,
                 });
               }
               return { context: { operationGeometryDemand } };
@@ -694,6 +727,10 @@ export const projectMachine = setup({
             },
             createViewGraphics,
             destroyViewGraphics,
+            reconcileViewManifest: ({ context, event }, enq) => {
+              reconcileViewManifest(context, enq, { unitId: event.unitId });
+              return {};
+            },
             // ─────────────────────────────────────────────────────────────
             // Filesystem-participant transitions
             //

@@ -10,6 +10,44 @@
 
 import { buildCaptureExportOptions, captureFilesToDataUrls } from '@taucad/agent-tools/capture';
 import { HeadlessImageService } from '#services/headless-image.service.js';
+import type { HeadlessImageJob } from '#services/headless-image.service.js';
+
+type GlbWebpOptions = Extract<HeadlessImageJob, { sourceFormat: 'glb'; format: 'webp' }>['exportOptions'];
+type BatchGlbView = NonNullable<Extract<GlbWebpOptions, { mode: 'batch' }>['views']>[number];
+const copyVector = (vector: readonly [number, number, number]): [number, number, number] => [
+  vector[0],
+  vector[1],
+  vector[2],
+];
+
+/** Materialize the shared immutable recipe as the runtime image job's mutable tuple input. */
+const captureOptions = (recipe: { readonly mode: 'single' | 'multi_angle'; readonly size: number }): GlbWebpOptions => {
+  const options = buildCaptureExportOptions(recipe);
+  return options.mode === 'batch'
+    ? {
+        ...options,
+        views: options.views.map(
+          (view): BatchGlbView => ({
+            ...view,
+            camera: {
+              framing: 'bounds',
+              direction: copyVector(view.camera.direction),
+              up: copyVector(view.camera.up),
+              margin: view.camera.margin,
+              projection: { kind: 'orthographic' },
+            },
+          }),
+        ),
+      }
+    : {
+        ...options,
+        camera: {
+          ...options.camera,
+          direction: copyVector(options.camera.direction),
+          up: copyVector(options.camera.up),
+        },
+      };
+};
 
 export type HeadlessCaptureProbeOutcome =
   | { readonly ok: true; readonly mimeTypes: readonly string[] }
@@ -33,7 +71,7 @@ export const runHeadlessCaptureProbe = async (
       geometryHash: 'probe',
       content,
       format: 'webp',
-      exportOptions: buildCaptureExportOptions(recipe),
+      exportOptions: captureOptions(recipe),
     });
     return { ok: true, mimeTypes: (files ?? []).map((file) => file.mimeType) };
   } catch (error) {

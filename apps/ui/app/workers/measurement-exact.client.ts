@@ -1,7 +1,8 @@
 import type { ActorRefFrom } from 'xstate';
 import type { GeometryComponentManifest } from '@taucad/types';
+import type { Rendering, RuntimeDocument, SourceRevision } from '@taucad/runtime';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { bestRouteForActiveKernel, exportWithRuntimeValidatedInput } from '#utils/export-formats.utils.js';
+import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
 import { runExactRequest } from '#workers/measurement-exact.transport.js';
 import type { ExactRequest, ExactResponse } from './measurement-exact.worker.js';
 
@@ -34,22 +35,34 @@ function isCancelled(signal: AbortSignal | undefined): boolean {
   return signal?.aborted ?? false;
 }
 
-function presentedRevisionMatches(
-  input: ExactOccurrenceDistanceInput,
-  baseline?: { requestId: number; entryPath: string | undefined; client: unknown },
-): boolean {
+type PresentedBaseline = { rendering: Rendering; document: RuntimeDocument; entryPath: string | undefined };
+
+const sameSourceRevision = (left: SourceRevision | undefined, right: SourceRevision | undefined): boolean => {
+  if (!left || !right || left.entry !== right.entry) {
+    return false;
+  }
+  const paths = Object.keys(left.files);
+  return (
+    paths.length === Object.keys(right.files).length && paths.every((path) => left.files[path] === right.files[path])
+  );
+};
+
+function presentedRevisionMatches(input: ExactOccurrenceDistanceInput, baseline?: PresentedBaseline): boolean {
   const { context } = input.cadRef.getSnapshot();
+  const { rendering } = context;
   return (
     context.activeKernelId === 'replicad' &&
-    context.latestGeometryOutcome === 'success' &&
-    context.lastRequestedRenderId === context.lastSettledRenderId &&
-    context.geometry?.hash === input.presentedGeometryHash &&
+    context.latestRenderingOutcome === 'success' &&
+    rendering?.success === true &&
+    !rendering.transient &&
+    rendering.hash === input.presentedGeometryHash &&
+    rendering.sourceRevision !== undefined &&
     input.manifest.geometryHash === input.presentedGeometryHash &&
     context.entryPath === input.manifest.sourceFile &&
     (baseline === undefined ||
-      (context.lastRequestedRenderId === baseline.requestId &&
+      (rendering === baseline.rendering &&
         context.entryPath === baseline.entryPath &&
-        context.kernelClient === baseline.client))
+        context.document === baseline.document))
   );
 }
 
@@ -79,33 +92,44 @@ export async function measureExactOccurrenceDistance(
     return unavailable('The displayed components have no unique authored occurrence names.');
   }
   const { context } = input.cadRef.getSnapshot();
-  const baseline = {
-    requestId: context.lastRequestedRenderId,
+  const { rendering: currentRendering, document } = context;
+  if (!currentRendering?.success || !document) {
+    return unavailable('The displayed model is not the settled Replicad source.');
+  }
+  const baseline: PresentedBaseline = {
+    rendering: currentRendering,
     entryPath: context.entryPath,
-    client: context.kernelClient,
+    document,
   };
   if (!presentedRevisionMatches(input, baseline)) {
     return unavailable('The displayed model changed before AP242 export.');
   }
   const client = context.kernelClient;
   const route = client && bestRouteForActiveKernel(client, 'step', context.activeKernelId);
-  if (!client || !route || route.transcoderId !== undefined || route.kernelId !== 'replicad') {
+  if (!route || route.transcoderId !== undefined || route.kernelId !== 'replicad') {
     return unavailable('This render has no direct Replicad AP242 export route.');
   }
   try {
-    const exported = await exportWithRuntimeValidatedInput(client, route, {
-      exportOptions: { coordinateSystem: 'y-up' },
+    const exported = await exportDocumentWithValidatedInput(document, route, {
+      options: { coordinateSystem: 'y-up' },
+      signal: input.signal,
     });
     if (isCancelled(input.signal) || !presentedRevisionMatches(input, baseline)) {
       return unavailable('The displayed model changed during AP242 export.');
     }
-    if (!exported.success || exported.data.length !== 1) {
+    if (!exported.success || exported.files.length !== 1) {
       return unavailable('AP242 export failed.');
+    }
+    if (
+      exported.evaluationId !== baseline.rendering.evaluationId ||
+      !sameSourceRevision(exported.sourceRevision, baseline.rendering.sourceRevision)
+    ) {
+      return unavailable('The displayed model changed during AP242 export.');
     }
     const id = ++nextRequestId;
     const request: ExactRequest = {
       id,
-      source: { format: 'ap242', bytes: exported.data[0]!.bytes, coordinateSystem: 'y-up' },
+      source: { format: 'ap242', bytes: exported.files[0].bytes, coordinateSystem: 'y-up' },
       occurrences: [{ name: nameA }, { name: nameB }],
     };
     const result: ExactResponse = await runExactRequest(request, input.signal);

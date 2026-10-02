@@ -1028,22 +1028,24 @@ const createOpenCascadeKernelContext = async (variant: string): Promise<BenchCon
 
 const opencascadeKernelExportGlb = async (context: BenchContext): Promise<number> => {
   const client = context['client'] as ReturnType<typeof createRuntimeClient>;
-  const result = await client.export('glb', {
-    source: { path: context['file'] as string },
-    parameters: {},
-  });
-  if (!result.success) {
-    const messages = result.issues.map((issue) => issue.message).join('; ');
-    throw new Error(`OpenCascade kernel export failed: ${messages}`);
+  const document = client.open({ source: { path: context['file'] as string }, parameters: {} });
+  try {
+    const result = await document.export('glb');
+    if (!result.success) {
+      const messages = result.issues.map((issue) => issue.message).join('; ');
+      throw new Error(`OpenCascade kernel export failed: ${messages}`);
+    }
+    if (result.files.length !== 1) {
+      throw new Error(`OpenCascade kernel GLB export returned ${result.files.length} artifacts`);
+    }
+    const glb = result.files[0];
+    if (!glb.name.toLowerCase().endsWith('.glb') || glb.mimeType !== 'model/gltf-binary') {
+      throw new Error(`OpenCascade kernel GLB export returned ${glb.name} (${glb.mimeType})`);
+    }
+    return glb.bytes.byteLength;
+  } finally {
+    document.close();
   }
-  if (result.data.length !== 1) {
-    throw new Error(`OpenCascade kernel GLB export returned ${result.data.length} artifacts`);
-  }
-  const glb = result.data[0]!;
-  if (!glb.name.toLowerCase().endsWith('.glb') || glb.mimeType !== 'model/gltf-binary') {
-    throw new Error(`OpenCascade kernel GLB export returned ${glb.name} (${glb.mimeType})`);
-  }
-  return glb.bytes.byteLength;
 };
 
 const makeDistanceTargets = (oc: Oc): any[] => {

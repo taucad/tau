@@ -241,7 +241,7 @@ describe('handleArrangeWorkbench', () => {
   it('replaces component lists while preserving other entry settings and writes entries before layout', async () => {
     const oldEntries = workbenchRecords.entries.serialize({
       version: 1,
-      entries: { 'main.ts': { renderTimeout: 5000, components: { hidden: ['a'], isolated: ['b'], opacity: [] } } },
+      entries: { 'main.ts': { operationTimeout: 5000, components: { hidden: ['a'], isolated: ['b'], opacity: [] } } },
     });
     const state = harness({ 'main.ts': 'model', [workbenchPaths.entries]: oldEntries });
     const result = await handleArrangeWorkbench(
@@ -255,7 +255,7 @@ describe('handleArrangeWorkbench', () => {
     ]);
     expect(workbenchRecords.entries.read(bytes(state.files.get(workbenchPaths.entries)!))).toMatchObject({
       status: 'current',
-      record: { entries: { 'main.ts': { renderTimeout: 5000, components: { hidden: ['c'], isolated: ['b'] } } } },
+      record: { entries: { 'main.ts': { operationTimeout: 5000, components: { hidden: ['c'], isolated: ['b'] } } } },
     });
   });
 
@@ -390,7 +390,11 @@ describe('handleArrangeWorkbench', () => {
   it('preflights missing files, non-model entry paths and unknown views with no writes', async () => {
     const state = harness({ 'notes.md': 'notes' });
     expect(
-      await handleArrangeWorkbench({ entries: [{ path: 'absent.ts', renderTimeout: 20 }] }, state.fs, state.workbench),
+      await handleArrangeWorkbench(
+        { entries: [{ path: 'absent.ts', operationTimeout: 20 }] },
+        state.fs,
+        state.workbench,
+      ),
     ).toMatchObject({ success: false, errorCode: 'FILE_NOT_FOUND', message: '`absent.ts` does not exist.' });
     expect(
       await handleArrangeWorkbench({ views: [{ id: 'lost', entryPath: 'absent.ts' }] }, state.fs, state.workbench),
@@ -426,7 +430,7 @@ describe('handleArrangeWorkbench', () => {
         'views[0].entryPath: `main.ts` is a directory; choose an existing model file accepted by the current runtime. Nothing was written.',
     });
     expect(state.workbench.isModelFile).not.toHaveBeenCalled();
-    expect(await handleArrangeWorkbench({ entries: [{ path: 'main.ts', renderTimeout: 1000 }] }, state.fs)).toEqual({
+    expect(await handleArrangeWorkbench({ entries: [{ path: 'main.ts', operationTimeout: 1000 }] }, state.fs)).toEqual({
       success: false,
       errorCode: 'VALIDATION_ERROR',
       message: 'entries[0].path: `main.ts` is a directory; choose an existing file. Nothing was written.',

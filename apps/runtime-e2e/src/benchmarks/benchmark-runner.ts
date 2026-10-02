@@ -12,7 +12,7 @@
 import type { TelemetryEntry } from '@taucad/runtime/types';
 import { createHash } from 'node:crypto';
 import { cpus, loadavg } from 'node:os';
-import { createRuntimeClient } from '@taucad/runtime/client';
+import { asKnownArtifact, createRuntimeClient } from '@taucad/runtime/client';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
 import { replicadKernel } from '@taucad/replicad';
@@ -418,48 +418,56 @@ export async function runBenchmarks(
       const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
       const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
       let failureMessage: string | undefined;
-      if (caseOperation === 'render') {
-        const renderResult = await client.render({
-          source: { path: benchCase.mainFile },
-          parameters,
-          content: { includeEdges },
-          renderOptions,
-          ...(committed === undefined
-            ? {}
-            : {
-                stage: {
-                  [sidecarPath]: serializeParameterRecord(
-                    fileParameterEntrySchema.parse({
-                      activeGroup: 'default',
-                      groups: { default: { values: committed } },
-                    }),
-                  ),
-                },
-              }),
-        });
-        if (renderResult.superseded) {
-          failureMessage = 'render was unexpectedly superseded';
-        } else if (renderResult.geometry.success) {
-          geometryHash = renderResult.geometry.data.hash;
-          if (renderResult.geometry.data.format === 'gltf') {
-            outputBytes = renderResult.geometry.data.content;
+      const document = client.open({
+        source: { path: benchCase.mainFile },
+        parameters,
+        ...(caseOperation !== 'render' || committed === undefined
+          ? {}
+          : {
+              stage: {
+                [sidecarPath]: serializeParameterRecord(
+                  fileParameterEntrySchema.parse({
+                    activeGroup: 'default',
+                    groups: { default: { values: committed } },
+                  }),
+                ),
+              },
+            }),
+      });
+      try {
+        if (caseOperation === 'render') {
+          const view = document.view('model', {
+            content: { includeEdges },
+            ...(renderOptions === undefined ? {} : { options: renderOptions }),
+          });
+          const outcome = await view.rendering().finally(() => {
+            view.close();
+          });
+          if (outcome.superseded) {
+            failureMessage = 'render was unexpectedly superseded';
+          } else if (outcome.rendering.success) {
+            geometryHash = outcome.rendering.hash;
+            const artifact = asKnownArtifact(outcome.rendering.artifact);
+            if (artifact?.mimeType === 'model/gltf-binary') {
+              outputBytes = artifact.content;
+            }
+          } else {
+            failureMessage = outcome.rendering.issues.map((issue) => issue.message).join('; ');
           }
         } else {
-          failureMessage = renderResult.geometry.issues.map((issue) => issue.message).join('; ');
+          const exportResult = await document.export('glb', {
+            content: { includeEdges },
+            ...(renderOptions === undefined ? {} : { options: renderOptions }),
+          });
+          if (exportResult.success) {
+            outputBytes =
+              exportResult.files.find(({ name }) => name.endsWith('.glb'))?.bytes ?? exportResult.files[0].bytes;
+          } else {
+            failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
+          }
         }
-      } else {
-        const exportResult = await client.export('glb', {
-          source: { path: benchCase.mainFile },
-          parameters,
-          content: { includeEdges },
-          ...(renderOptions === undefined ? {} : { exportOptions: renderOptions }),
-        });
-        if (exportResult.success) {
-          outputBytes =
-            exportResult.data.find(({ name }) => name.endsWith('.glb'))?.bytes ?? exportResult.data[0]?.bytes;
-        } else {
-          failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
-        }
+      } finally {
+        document.close();
       }
       const elapsed = performance.now() - start;
       onIterationProgress?.({
@@ -498,7 +506,7 @@ export async function runBenchmarks(
       profileAnalysis = analyzeProfile(cpuProfileResult, allTelemetry);
     }
 
-    client.terminate();
+    await client.shutdown();
     globalThis.gc?.();
 
     const stats = computeStats(timings);

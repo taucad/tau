@@ -1,21 +1,17 @@
 ---
 title: Core Types
-description: KernelResult, KernelIssue, WorkerState, and other fundamental type definitions.
+description: Operation results, artifacts, kernel authoring contracts, issues, and capability types.
 docType: reference
 icon: lucide:file-type
 ---
 
-The shared contract between client and worker runtime: operation results, issues, geometry output, and worker state.
+# Core Types
+
+Operation results and plugin-author contracts share issues and artifacts.
 
 ## Result Types
 
-All kernel operations return a discriminated union — check the `success` field to narrow the result:
-
-```typescript
-import type { KernelSuccessResult, KernelErrorResult } from '@taucad/runtime';
-
-export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;
-```
+`KernelResult<T>` discriminates plugin success and failure with `success`.
 
 <auto-type-table path='./props/types.ts' name='KernelSuccessResult' />
 
@@ -31,15 +27,27 @@ export type KernelResult<T> = KernelSuccessResult<T> | KernelErrorResult;
 
 `KernelIssueType` (`'compilation' | 'runtime' | 'kernel' | 'connection' | 'unknown'`) and `IssueSeverity` (`'error' | 'warning' | 'info'`) classify each issue. `kernelIssueCodeValues` enumerates the stable codes; `isKernelIssueCode` guards one.
 
-## Worker State and Render Phase
+## Document Results
 
-`WorkerState` is the worker's current lifecycle state: `'idle'`, `'rendering'`, or `'error'`. Subscribe via `client.on('state', handler)`.
+<auto-type-table path='./props/types.ts' name='Description' />
 
-`RenderPhase` identifies the current render phase: `'resolvingDeps'`, `'bundling'`, `'extractingParams'`, `'computingGeometry'`, `'postProcessing'` — subscribe via `client.on('progress', handler)`. `AbortReason` (`'superseded' | 'timeout'`) names why a phase was abandoned.
+<auto-type-table path='./props/types.ts' name='Evaluation' />
+
+<auto-type-table path='./props/types.ts' name='Rendering' />
+
+<auto-type-table path='./props/types.ts' name='ExportResult' />
+
+<auto-type-table path='./props/types.ts' name='ViewOffer' />
+
+<auto-type-table path='./props/types.ts' name='ExportOffer' />
+
+Document results always carry `issues`. Successful evaluations offer ordered view and export IDs, including an empty view list. A rendering correlates `requestId` and `evaluationId`; its `artifact` carries MIME type, content, and optional units. `hash` identifies its projected artifact. Successful exports carry a nonempty file tuple. Optional `sourceRevision` records evaluated source provenance.
+
+`DocumentStatus` and `ViewStatus` describe separate owners. Their events and supersession outcomes are documented in [Client API](./client).
 
 ## Dependency Types
 
-The `Dependency` union records what a kernel's geometry depends on, for cache key computation, middleware, and change detection:
+`Dependency` records inputs to cache identity and change detection:
 
 <auto-type-table path='./props/types.ts' name='FileDependency' />
 
@@ -53,9 +61,7 @@ The `Dependency` union records what a kernel's geometry depends on, for cache ke
 
 <auto-type-table path='./props/types.ts' name='AssetDependency' />
 
-`Dependency` is the union: `FileDependency | MiddlewareDependency | FrameworkDependency | OptionDependency | ParameterDependency | AssetDependency`.
-
-`FileDependency.path` is a canonical root-relative [runtime path](../concepts/path-namespaces) such as `src/main.ts` — the same spelling used for filesystem calls, cache keys, render identity, change events, and watch ownership. Authority paths and host paths never enter dependency identity.
+`FileDependency.path` is a canonical root-relative [runtime path](../concepts/path-namespaces), shared by filesystem and cache identity.
 
 ## Filesystem Types
 
@@ -67,9 +73,37 @@ The `Dependency` union records what a kernel's geometry depends on, for cache ke
 
 ## Kernel Types
 
+<auto-type-table path='./props/types.ts' name='DescribeInput' />
+
+<auto-type-table path='./props/types.ts' name='DescribeResult' />
+
+<auto-type-table path='./props/types.ts' name='ResolveInput' />
+
+<auto-type-table path='./props/types.ts' name='ResolveOutput' />
+
 <auto-type-table path='./props/types.ts' name='KernelDefinition' />
 
-<auto-type-table path='./props/types.ts' name='KernelRuntime' />
+<auto-type-table path='./props/types.ts' name='KernelServices' />
+
+<auto-type-table path='./props/types.ts' name='ViewDeclaration' />
+
+<auto-type-table path='./props/types.ts' name='ExportDeclaration' />
+
+<auto-type-table path='./props/types.ts' name='ViewInstance' />
+
+`evaluate` returns an opaque handle plus the ordered view and export IDs this result offers. The first offered view is the default. Views can expose named instances; `render` selects one view and optional instance without evaluating again.
+
+<auto-type-table path='./props/types.ts' name='EvaluateInput' />
+
+<auto-type-table path='./props/types.ts' name='EvaluateOutput' />
+
+<auto-type-table path='./props/types.ts' name='RenderInput' />
+
+<auto-type-table path='./props/types.ts' name='RenderOutput' />
+
+<auto-type-table path='./props/types.ts' name='ExportInput' />
+
+<auto-type-table path='./props/types.ts' name='ExportOutput' />
 
 ## Bundler Types
 
@@ -83,25 +117,37 @@ The `Dependency` union records what a kernel's geometry depends on, for cache ke
 
 ## Tracer Types
 
+<auto-type-table path='./props/types.ts' name='TelemetryEntry' />
+
 <auto-type-table path='./props/types.ts' name='SpanHandle' />
 
 <auto-type-table path='./props/types.ts' name='RuntimeSpanTracer' />
 
-## Geometry and Export Types
+## Artifacts and Plugin Results
 
-<auto-type-table path='./props/types.ts' name='CreateGeometryResult' />
+<auto-type-table path='./props/types.ts' name='Artifact' />
 
-<auto-type-table path='./props/types.ts' name='HashedGeometryResult' />
+<auto-type-table path='./props/types.ts' name='EvaluateResult' />
 
-<auto-type-table path='./props/types.ts' name='GetParametersResult' />
+<auto-type-table path='./props/types.ts' name='RenderResult' />
 
-<auto-type-table path='./props/types.ts' name='ExportGeometryResult' />
+<auto-type-table path='./props/types.ts' name='KernelExportResult' />
 
-Successful exports resolve to an ordered `ExportFile` array (`name` plus owned `bytes`). Kernel handlers receive `GetParametersInput` / `ExportGeometryInput`; `GetParametersResult` carries a `JSONSchema7` parameter schema.
+<auto-type-table path='./props/types.ts' name='KnownArtifact' />
+
+`Artifact` accepts open MIME types with text or bytes. `asKnownArtifact` narrows GLB and SVG; other MIME types remain valid. `ExportOutput` carries a nonempty ordered `ExportFile` tuple; `RenderOutput` carries one artifact whose MIME type matches the selected declaration.
+
+## Conversion Types
+
+<auto-type-table path='./props/types.ts' name='TranscodeInput' />
+
+<auto-type-table path='./props/types.ts' name='TranscodeResult' />
+
+`TranscoderServices` supplies the logger, tracer, and cancellation signal. `MediaType` names artifact MIME types; `JSONSchema7` carries serializable option metadata.
 
 ## Content and Capability Types
 
-Framework-owned content requirements stay separate from plugin-owned option schemas. A concrete route advertises only the content properties it can fulfill, plus an `ExportFidelity` (`'brep' | 'mesh'`) used by route ranking.
+Framework-owned content requirements stay separate from plugin-owned option schemas. A route advertises supported content and an `ExportFidelity` (`'brep' | 'mesh'`) used by route ranking.
 
 <auto-type-table path='./props/types.ts' name='RuntimeContentInput' />
 
@@ -113,35 +159,9 @@ Framework-owned content requirements stay separate from plugin-owned option sche
 
 <auto-type-table path='./props/types.ts' name='CapabilitiesManifest' />
 
-## Usage
-
-The same `KernelResult` shape arrives from `client.export(format, input)` and from `client.on('geometry', handler)`:
-
-```typescript
-import { createRuntimeClient } from '@taucad/runtime';
-import { defineRuntime } from '@taucad/runtime/worker';
-import { replicad } from '@taucad/replicad';
-import { fromMemoryFs } from '@taucad/runtime/filesystem';
-import { inProcessTransport } from '@taucad/runtime/transport/in-process';
-
-const runtime = defineRuntime({ plugins: [replicad()] });
-const client = createRuntimeClient({
-  transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
-});
-const result = await client.export('glb', {
-  source: { files: { 'main.ts': 'export default () => null' } },
-});
-
-if (result.success) {
-  for (const file of result.data) console.log(file.name, file.bytes.byteLength);
-} else {
-  console.error(result.issues);
-}
-```
-
 ## Related
 
 - [Handle Errors](../guides/error-handling)
-- [Live Rendering](../guides/live-rendering) -- subscribe to the same `KernelResult` shape over the `geometry` event
+- [Live Rendering](../guides/live-rendering)
 - [API: Client](./client)
 - [API: Filesystem](./filesystem)

@@ -36,4 +36,15 @@ describe('shiki.lib', () => {
       ]),
     );
   });
+
+  it.each(['"""', "'''"])('should end Python docstrings delimited by %s', async (delimiter) => {
+    const highlighter = await getHighlighter();
+    const source = `${delimiter}\nA Python module.\n${delimiter}\ndef polar(radius):\n    return 2.0 # scale`;
+
+    for (const theme of highlighter.getLoadedThemes()) {
+      const { tokens } = highlighter.codeToTokens(source, { lang: 'python', theme });
+      expect(tokens[3]?.[0]?.content).toBe('def');
+      expect(new Set(tokens[4]?.map(({ color }) => color)).size).toBeGreaterThan(2);
+    }
+  });
 });

@@ -130,6 +130,56 @@ it.each(['base-normal', 'cross-delta-role', 'position-normal'] as const)(
   },
 );
 
+it.each(['color', 'animation'] as const)(
+  'should reject an untransformed shared accessor owner %s before mutation',
+  async (owner) => {
+    const fixture = createFixture();
+    if (owner === 'color') {
+      fixture.position.setArray(new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]));
+      fixture.primitive.setAttribute('COLOR_0', fixture.position);
+    } else {
+      const time = fixture.document
+        .createAccessor()
+        .setBuffer(fixture.document.getRoot().listBuffers()[0]!)
+        .setType('SCALAR')
+        .setArray(new Float32Array([0, 1, 2]));
+      const sampler = fixture.document.createAnimationSampler().setInput(time).setOutput(fixture.position);
+      const channel = fixture.document
+        .createAnimationChannel()
+        .setSampler(sampler)
+        .setTargetPath('translation')
+        .setTargetNode(fixture.document.getRoot().listNodes()[0]!);
+      fixture.document.createAnimation().addSampler(sampler).addChannel(channel);
+    }
+    const before = new Float32Array(fixture.position.getArray()!);
+    await expect(fixture.document.transform(createScalingTransform())).rejects.toThrow(/incompatible.*role/i);
+    expect(fixture.position.getArray()).toEqual(before);
+    expect(fixture.document.getRoot().listNodes()[1]!.getTranslation()).toEqual([1, 2, 3]);
+  },
+);
+
+it('should preserve compatible sharing between untransformed attributes', async () => {
+  const fixture = createFixture();
+  const colors = fixture.document
+    .createAccessor()
+    .setBuffer(fixture.document.getRoot().listBuffers()[0]!)
+    .setType('VEC3')
+    .setArray(new Float32Array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]));
+  fixture.primitive.setAttribute('COLOR_0', colors).setAttribute('_AUTHOR_COLOR', colors);
+  const before = new Float32Array(colors.getArray()!);
+  await fixture.document.transform(createCoordinateTransform(), createScalingTransform());
+  expect(colors.getArray()).toEqual(before);
+  expect(fixture.primitive.getAttribute('COLOR_0')).toBe(fixture.primitive.getAttribute('_AUTHOR_COLOR'));
+});
+
+it('should reject index storage also referenced as transformed geometry before mutation', async () => {
+  const fixture = createFixture();
+  fixture.primitive.setIndices(fixture.position);
+  const before = new Float32Array(fixture.position.getArray()!);
+  await expect(fixture.document.transform(createScalingTransform())).rejects.toThrow(/incompatible.*roles.*indices/i);
+  expect(fixture.position.getArray()).toEqual(before);
+});
+
 it.each(['base', 'target'] as const)('should reject invalid %s tangent layout before mutation', async (owner) => {
   const fixture = createFixture();
   if (owner === 'base') {

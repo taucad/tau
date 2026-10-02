@@ -1,5 +1,5 @@
 import { transformPrimitive } from '@gltf-transform/functions';
-import type { Accessor, mat4, vec4, Document, Primitive, PrimitiveTarget } from '@gltf-transform/core';
+import type { Accessor, mat4, vec4, Document, Primitive, PrimitiveTarget, Property } from '@gltf-transform/core';
 import { resolveCoordinateTransform } from '@taucad/spatial';
 import type { Volume } from '@gltf-transform/extensions';
 
@@ -124,28 +124,46 @@ const transformDocumentMeshes = (document: Document, matrix: mat4, directionRota
       .flatMap((mesh) => mesh.listPrimitives()),
   );
   const roles = new Map<Accessor, string>();
+  const transformOwners = new Set<Property>([document.getRoot()]);
   // Preflight all roles before writing shared storage or node placement.
   for (const primitive of primitives) {
     for (const owner of [primitive, ...primitive.listTargets()]) {
       const isTarget = owner !== primitive;
-      for (const semantic of ['POSITION', 'NORMAL', 'TANGENT']) {
+      transformOwners.add(owner);
+      for (const semantic of owner.listSemantics()) {
         const accessor = owner.getAttribute(semantic);
         if (!accessor) {
           continue;
         }
+        const transformedRole = semantic === 'POSITION' || semantic === 'NORMAL' || semantic === 'TANGENT';
         const expectedType = semantic === 'TANGENT' && !isTarget ? 'VEC4' : 'VEC3';
-        if (accessor.getType() !== expectedType) {
+        if (transformedRole && accessor.getType() !== expectedType) {
           throw new Error(
             `${semantic} requires ${expectedType} for ${isTarget ? 'morph targets' : 'base attributes'}.`,
           );
         }
-        const role = isTarget && semantic !== 'POSITION' ? `morph-${semantic}` : semantic;
+        const role = transformedRole
+          ? isTarget && semantic !== 'POSITION'
+            ? `morph-${semantic}`
+            : semantic
+          : 'untouched';
         const previousRole = roles.get(accessor);
         if (previousRole !== undefined && previousRole !== role) {
           throw new Error(`Shared accessor has incompatible transform roles: ${previousRole} and ${role}.`);
         }
         roles.set(accessor, role);
       }
+    }
+  }
+  for (const primitive of primitives) {
+    const indices = primitive.getIndices();
+    if (indices && roles.has(indices) && roles.get(indices) !== 'untouched') {
+      throw new Error('Shared accessor has incompatible transform roles: geometry and indices.');
+    }
+  }
+  for (const [accessor, role] of roles) {
+    if (role !== 'untouched' && accessor.listParents().some((parent) => !transformOwners.has(parent))) {
+      throw new Error('Shared accessor has incompatible transform roles: geometry and an untransformed owner.');
     }
   }
   const transformed = new Set<Accessor>();

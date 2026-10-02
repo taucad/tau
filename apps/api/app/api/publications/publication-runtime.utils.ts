@@ -52,6 +52,7 @@ export const publicationKernelExtensions = [
       'xgl',
     ],
   },
+  { id: 'tscircuit', extensions: ['tsx', 'jsx'] },
 ] as const;
 
 export const runtimePinFromPackageVersion = (version: string): string => {

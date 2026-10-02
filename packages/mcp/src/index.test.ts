@@ -2,8 +2,8 @@ import { describe, expect, it, vi } from 'vitest';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { InMemoryTransport } from '@modelcontextprotocol/sdk/inMemory.js';
 import {
-  exportGeometryInputSchema,
-  getKernelResultInputSchema,
+  exportModelInputSchema,
+  evaluateModelInputSchema,
   screenshotInputSchema,
   testModelInputSchema,
 } from '@taucad/chat';
@@ -14,18 +14,18 @@ import type { TauMcpDispatch } from '#tau-mcp.js';
 describe('@taucad/mcp', () => {
   it('exports only the four CAD tools with canonical schemas', () => {
     expect(tauMcpToolNames).toEqual([
-      toolName.getKernelResult,
+      toolName.evaluateModel,
       toolName.testModel,
       toolName.screenshot,
-      toolName.exportGeometry,
+      toolName.exportModel,
     ]);
     expect(tauMcpToolNames).not.toContain('create_file');
     expect(tauMcpToolNames).not.toContain('edit_file');
     expect(tauMcpToolNames).not.toContain('delete_file');
-    expect(tauMcpToolDefinitions[toolName.getKernelResult].inputSchema).toBe(getKernelResultInputSchema);
+    expect(tauMcpToolDefinitions[toolName.evaluateModel].inputSchema).toBe(evaluateModelInputSchema);
     expect(tauMcpToolDefinitions[toolName.testModel].inputSchema).toBe(testModelInputSchema);
     expect(tauMcpToolDefinitions[toolName.screenshot].inputSchema).toBe(screenshotInputSchema);
-    expect(tauMcpToolDefinitions[toolName.exportGeometry].inputSchema).toBe(exportGeometryInputSchema);
+    expect(tauMcpToolDefinitions[toolName.exportModel].inputSchema).toBe(exportModelInputSchema);
   });
 
   it('runs through the transport-neutral dispatch port', async () => {
@@ -34,10 +34,30 @@ describe('@taucad/mcp', () => {
     });
 
     await expect(
-      adapter.call({ name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' }, toolCallId: 'tool-1' }),
+      adapter.call({ name: toolName.evaluateModel, arguments: { targetFile: 'main.ts' }, toolCallId: 'tool-1' }),
     ).resolves.toMatchObject({
       structuredContent: { status: 'ready' },
     });
+  });
+
+  it('should preserve structured failure details from the dispatch authority', async () => {
+    const failure = {
+      errorCode: 'TOOL_OUTPUT_VALIDATION_FAILED',
+      message: 'Invalid export output',
+      toolName: 'export_model',
+      toolCallId: 'tool-2',
+      validationErrors: [{ path: 'files', message: 'Required' }],
+      rawOutput: { unexpected: true },
+    };
+    const adapter = createTauMcpAdapter({ dispatch: async () => failure });
+    const result = await adapter.call({
+      name: toolName.exportModel,
+      arguments: { targetFile: 'main.tsx', to: 'netlist' },
+      toolCallId: 'tool-2',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.structuredContent).toEqual(failure);
+    expect(result.content).toEqual([{ type: 'text', text: 'TOOL_OUTPUT_VALIDATION_FAILED: Invalid export output' }]);
   });
 
   it('assigns independent MCP requests distinct host tool identities', async () => {
@@ -54,7 +74,7 @@ describe('@taucad/mcp', () => {
         const [clientTransport, serverTransport] = InMemoryTransport.createLinkedPair();
         try {
           await Promise.all([server.connect(serverTransport), client.connect(clientTransport)]);
-          await client.callTool({ name: toolName.getKernelResult, arguments: { targetFile: 'main.ts' } });
+          await client.callTool({ name: toolName.evaluateModel, arguments: { targetFile: 'main.ts' } });
         } finally {
           await client.close();
           await server.close();
@@ -69,12 +89,13 @@ describe('@taucad/mcp', () => {
     const dispatchMock = vi.fn();
     const dispatch: TauMcpDispatch = async (call, options) => {
       dispatchMock(call, options);
-      if (!('rpcName' in call) || call.rpcName !== rpcName.exportGeometry) {
+      if (!('rpcName' in call) || call.rpcName !== rpcName.exportModel) {
         throw new Error(`Unexpected call ${JSON.stringify(call)}`);
       }
       return {
         success: true,
-        format: 'glb',
+        to: 'glb',
+        exportId: 'board',
         files: [
           {
             name: 'model.glb',
@@ -89,16 +110,16 @@ describe('@taucad/mcp', () => {
     const adapter = createTauMcpAdapter({ dispatch });
 
     await adapter.call({
-      name: toolName.exportGeometry,
-      arguments: { targetFile: 'main.ts', format: 'glb' },
+      name: toolName.exportModel,
+      arguments: { targetFile: 'main.ts', to: 'glb' },
       toolCallId: 'tool-2',
       signal,
     });
 
     expect(dispatchMock).toHaveBeenCalledWith(
       {
-        rpcName: rpcName.exportGeometry,
-        args: { targetFile: 'main.ts', format: 'glb', toolCallId: 'tool-2' },
+        rpcName: rpcName.exportModel,
+        args: { targetFile: 'main.ts', to: 'glb', toolCallId: 'tool-2' },
       },
       { toolCallId: 'tool-2', signal },
     );
@@ -130,7 +151,7 @@ describe('@taucad/mcp', () => {
     ).resolves.toEqual({
       isError: true,
       content: [{ type: 'text', text: 'RENDER_TIMEOUT: Renderer did not settle.' }],
-      structuredContent: { errorCode: 'RENDER_TIMEOUT', message: 'Renderer did not settle.' },
+      structuredContent: { success: false, errorCode: 'RENDER_TIMEOUT', message: 'Renderer did not settle.' },
     });
   });
 

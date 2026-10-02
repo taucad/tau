@@ -8,7 +8,7 @@ import type { CheckedFileWriteResult } from '@taucad/types';
 import { createWorkbenchEntriesStore } from '#workbench-records/entries-store.js';
 
 const encoder = new TextEncoder();
-const seed = (): WorkbenchEntries => ({ version: 1, entries: { 'a.ts': { renderTimeout: 180_000 } } });
+const seed = (): WorkbenchEntries => ({ version: 1, entries: { 'a.ts': { operationTimeout: 180_000 } } });
 function memory() {
   let bytes: Uint8Array<ArrayBuffer> | null = encoder.encode(workbenchRecords.entries.serialize(seed()));
   let release: (() => void) | undefined;
@@ -101,7 +101,7 @@ describe('workbench entries checked store', () => {
     try {
       const hydration = entries.read();
       await entered.promise;
-      const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+      const edited = entries.edit('a.ts', { operationTimeout: 240_000 });
       let settled = false;
       const drained = (async () => {
         const saved = await entries.flush();
@@ -118,7 +118,7 @@ describe('workbench entries checked store', () => {
       expect(await drained).toBe(true);
       expect(workbenchRecords.entries.read(data.get()!)).toMatchObject({
         status: 'current',
-        record: { entries: { 'a.ts': { renderTimeout: 240_000 } } },
+        record: { entries: { 'a.ts': { operationTimeout: 240_000 } } },
       });
     } finally {
       release.resolve();
@@ -134,7 +134,7 @@ describe('workbench entries checked store', () => {
       try {
         await entries.read();
         const release = data.delay();
-        const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+        const edited = entries.edit('a.ts', { operationTimeout: 240_000 });
         await vi.waitFor(() => {
           expect(data.writes).toHaveBeenCalledOnce();
         });
@@ -149,7 +149,7 @@ describe('workbench entries checked store', () => {
         expect(await entries.flush()).toBe(true);
         expect(workbenchRecords.entries.read(data.get()!)).toMatchObject({
           status: 'current',
-          record: { entries: { 'a.ts': { renderTimeout: 240_000 } } },
+          record: { entries: { 'a.ts': { operationTimeout: 240_000 } } },
         });
       } finally {
         entries.dispose();
@@ -179,7 +179,7 @@ describe('workbench entries checked store', () => {
       await entries.read();
       data.setBytes(encoder.encode('{broken'));
       await entries.read();
-      expect(await entries.edit('a.ts', { renderTimeout: 240_000 })).toBe(false);
+      expect(await entries.edit('a.ts', { operationTimeout: 240_000 })).toBe(false);
       expect(await entries.flush()).toBe(false);
       expect(await entries.reset(seed())).toBe(true);
       expect(await entries.flush()).toBe(true);
@@ -207,14 +207,14 @@ describe('workbench entries checked store', () => {
     });
     try {
       await entries.read();
-      const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+      const edited = entries.edit('a.ts', { operationTimeout: 240_000 });
       await entered.promise;
       entries.dispose();
       release.resolve();
       expect(await edited).toBe(false);
       await vi.runOnlyPendingTimersAsync();
       expect(writeFileChecked).toHaveBeenCalledOnce();
-      expect(await entries.edit('a.ts', { renderTimeout: 300_000 })).toBe(false);
+      expect(await entries.edit('a.ts', { operationTimeout: 300_000 })).toBe(false);
       expect(writeFileChecked).toHaveBeenCalledOnce();
     } finally {
       release.resolve();
@@ -244,17 +244,17 @@ describe('workbench entries checked store', () => {
       },
     });
     await entries.read();
-    const edited = entries.edit('a.ts', { renderTimeout: 240_000 });
+    const edited = entries.edit('a.ts', { operationTimeout: 240_000 });
     await committed.promise;
     await entries.read();
     expect(onChange.mock.lastCall?.[1]).toBe('write');
-    expect(onChange.mock.lastCall?.[2]).toEqual({ path: 'a.ts', fields: { renderTimeout: 240_000 } });
+    expect(onChange.mock.lastCall?.[2]).toEqual({ path: 'a.ts', fields: { operationTimeout: 240_000 } });
     data.setBytes(
       encoder.encode(
         workbenchRecords.entries.serialize({
           version: 1,
           entries: {
-            'a.ts': { renderTimeout: 240_000, components: { hidden: [], isolated: ['foreign'], opacity: [] } },
+            'a.ts': { operationTimeout: 240_000, components: { hidden: [], isolated: ['foreign'], opacity: [] } },
           },
         }),
       ),
@@ -350,14 +350,14 @@ describe('workbench entries checked store', () => {
       });
       await store.read();
       const releaseWrite = newerForeign ? undefined : data.delay();
-      const saving = store.edit('a.ts', { renderTimeout: 15_000 });
+      const saving = store.edit('a.ts', { operationTimeout: 15_000 });
       await vi.waitFor(() => {
         expect(data.writes).toHaveBeenCalledOnce();
       });
       if (newerForeign) {
         data.setBytes(
           encoder.encode(
-            workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 30_000 } } }),
+            workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 30_000 } } }),
           ),
         );
       }
@@ -369,7 +369,7 @@ describe('workbench entries checked store', () => {
       expect(await saving).toBe(true);
       watchGate.resolve();
       await watching;
-      expect(store.snapshot().record?.entries['a.ts']?.renderTimeout).toBe(newerForeign ? 30_000 : 15_000);
+      expect(store.snapshot().record?.entries['a.ts']?.operationTimeout).toBe(newerForeign ? 30_000 : 15_000);
       expect(data.writes).toHaveBeenCalledOnce();
     }
   });
@@ -383,12 +383,18 @@ describe('workbench entries checked store', () => {
       const result = Promise.all(
         i % 2 === 0
           ? [
-              a.edit('a.ts', { renderTimeout: 15_000 }),
-              b.edit('a.ts', { renderTimeout: 180_000, components: { hidden: ['part'], isolated: [], opacity: [] } }),
+              a.edit('a.ts', { operationTimeout: 15_000 }),
+              b.edit('a.ts', {
+                operationTimeout: 180_000,
+                components: { hidden: ['part'], isolated: [], opacity: [] },
+              }),
             ]
           : [
-              b.edit('a.ts', { renderTimeout: 180_000, components: { hidden: ['part'], isolated: [], opacity: [] } }),
-              a.edit('a.ts', { renderTimeout: 15_000 }),
+              b.edit('a.ts', {
+                operationTimeout: 180_000,
+                components: { hidden: ['part'], isolated: [], opacity: [] },
+              }),
+              a.edit('a.ts', { operationTimeout: 15_000 }),
             ],
       );
       await Promise.resolve();
@@ -398,7 +404,7 @@ describe('workbench entries checked store', () => {
         status: 'current',
         record: {
           entries: {
-            'a.ts': { renderTimeout: 15_000, components: { hidden: ['part'] } },
+            'a.ts': { operationTimeout: 15_000, components: { hidden: ['part'] } },
           },
         },
       });
@@ -417,10 +423,10 @@ describe('workbench entries checked store', () => {
         await Promise.all([a.read(), b.read()]);
         const changed = field === 'opacity' ? [{ id: 'part', opacity: 0.5 }] : ['part'];
         const person = {
-          renderTimeout: 180_000,
+          operationTimeout: 180_000,
           components: { hidden: [], isolated: [], opacity: [], [field]: changed },
         };
-        const foreign = { renderTimeout: 15_000 };
+        const foreign = { operationTimeout: 15_000 };
         const release = m.delay();
         const writes = Promise.all(
           i % 2 === 0
@@ -433,7 +439,7 @@ describe('workbench entries checked store', () => {
         const read = workbenchRecords.entries.read(m.get()!);
         expect(read.status).toBe('current');
         if (read.status === 'current') {
-          expect(read.record.entries['a.ts']?.renderTimeout).toBe(15_000);
+          expect(read.record.entries['a.ts']?.operationTimeout).toBe(15_000);
           expect(read.record.entries['a.ts']?.components?.[field]).toEqual(changed);
         }
       }
@@ -442,25 +448,28 @@ describe('workbench entries checked store', () => {
 
   it('lets the delayed checked writer win competing timeout and component values', async () => {
     type Entry = WorkbenchEntries['entries'][string];
-    const variants: ReadonlyArray<{ field: 'renderTimeout' | 'hidden' | 'isolated' | 'opacity'; a: Entry; b: Entry }> =
-      [
-        { field: 'renderTimeout', a: { renderTimeout: 15_000 }, b: { renderTimeout: 30_000 } },
-        {
-          field: 'hidden',
-          a: { components: { hidden: ['a'], isolated: [], opacity: [] } },
-          b: { components: { hidden: ['b'], isolated: [], opacity: [] } },
-        },
-        {
-          field: 'isolated',
-          a: { components: { hidden: [], isolated: ['a'], opacity: [] } },
-          b: { components: { hidden: [], isolated: ['b'], opacity: [] } },
-        },
-        {
-          field: 'opacity',
-          a: { components: { hidden: [], isolated: [], opacity: [{ id: 'a', opacity: 0.5 }] } },
-          b: { components: { hidden: [], isolated: [], opacity: [{ id: 'b', opacity: 0.25 }] } },
-        },
-      ];
+    const variants: ReadonlyArray<{
+      field: 'operationTimeout' | 'hidden' | 'isolated' | 'opacity';
+      a: Entry;
+      b: Entry;
+    }> = [
+      { field: 'operationTimeout', a: { operationTimeout: 15_000 }, b: { operationTimeout: 30_000 } },
+      {
+        field: 'hidden',
+        a: { components: { hidden: ['a'], isolated: [], opacity: [] } },
+        b: { components: { hidden: ['b'], isolated: [], opacity: [] } },
+      },
+      {
+        field: 'isolated',
+        a: { components: { hidden: [], isolated: ['a'], opacity: [] } },
+        b: { components: { hidden: [], isolated: ['b'], opacity: [] } },
+      },
+      {
+        field: 'opacity',
+        a: { components: { hidden: [], isolated: [], opacity: [{ id: 'a', opacity: 0.5 }] } },
+        b: { components: { hidden: [], isolated: [], opacity: [{ id: 'b', opacity: 0.25 }] } },
+      },
+    ];
     for (const variant of variants) {
       for (let i = 0; i < 100; i++) {
         const m = memory();
@@ -477,8 +486,8 @@ describe('workbench entries checked store', () => {
         expect(read.status).toBe('current');
         if (read.status === 'current') {
           const expected = i % 2 === 0 ? variant.a : variant.b;
-          if (variant.field === 'renderTimeout') {
-            expect(read.record.entries['a.ts']?.renderTimeout).toEqual(expected.renderTimeout);
+          if (variant.field === 'operationTimeout') {
+            expect(read.record.entries['a.ts']?.operationTimeout).toEqual(expected.operationTimeout);
           } else {
             expect(read.record.entries['a.ts']?.components?.[variant.field]).toEqual(
               expected.components?.[variant.field],
@@ -495,15 +504,15 @@ describe('workbench entries checked store', () => {
     const b = store(m);
     await Promise.all([a.read(), b.read()]);
     m.setBytes(
-      encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 0 } } })),
+      encoder.encode(workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { operationTimeout: 0 } } })),
     );
     await Promise.all([a.read(), b.read()]);
-    expect(a.snapshot().record?.entries['a.ts']?.renderTimeout).toBe(0);
+    expect(a.snapshot().record?.entries['a.ts']?.operationTimeout).toBe(0);
     expect(m.writes).not.toHaveBeenCalled();
     m.setBytes(encoder.encode('{bad'));
     await a.read();
     expect(a.snapshot().refusal?.code).toBe('INVALID_RECORD');
-    expect(await a.edit('a.ts', { renderTimeout: 30_000 })).toBe(false);
+    expect(await a.edit('a.ts', { operationTimeout: 30_000 })).toBe(false);
     m.setBytes(encoder.encode('{"version":2}'));
     await a.read();
     expect(a.snapshot().refusal?.code).toBe('NEWER_RECORD');
@@ -545,15 +554,15 @@ describe('workbench entries checked store', () => {
         onError: errors,
       });
       await entries.read();
-      expect(await entries.edit('a.ts', { renderTimeout: 15_000 })).toBe(false);
-      expect(await entries.edit('b.ts', { renderTimeout: 30_000 })).toBe(false);
+      expect(await entries.edit('a.ts', { operationTimeout: 15_000 })).toBe(false);
+      expect(await entries.edit('b.ts', { operationTimeout: 30_000 })).toBe(false);
       expect(await entries.flush()).toBe(true);
       expect(workbenchRecords.entries.read(m.get()!)).toMatchObject({
         status: 'current',
         record: {
           entries: {
-            'a.ts': { renderTimeout: 15_000 },
-            'b.ts': { renderTimeout: 30_000 },
+            'a.ts': { operationTimeout: 15_000 },
+            'b.ts': { operationTimeout: 30_000 },
           },
         },
       });
@@ -580,9 +589,9 @@ describe('workbench entries checked store', () => {
         },
       });
       await entries.read();
-      const first = entries.edit('a.ts', { renderTimeout: 15_000 });
+      const first = entries.edit('a.ts', { operationTimeout: 15_000 });
       const second = entries.edit('a.ts', {
-        renderTimeout: 15_000,
+        operationTimeout: 15_000,
         components: { hidden: ['part'], isolated: [], opacity: [] },
       });
       expect(m.writes).not.toHaveBeenCalled();
@@ -593,7 +602,7 @@ describe('workbench entries checked store', () => {
         status: 'current',
         record: {
           entries: {
-            'a.ts': { renderTimeout: 15_000, components: { hidden: ['part'] } },
+            'a.ts': { operationTimeout: 15_000, components: { hidden: ['part'] } },
           },
         },
       });
@@ -622,14 +631,14 @@ describe('workbench entries checked store', () => {
       onError: () => undefined,
     });
     await entries.read();
-    expect(await entries.edit('a.ts', { renderTimeout: 15_000 })).toBe(false);
+    expect(await entries.edit('a.ts', { operationTimeout: 15_000 })).toBe(false);
     m.setBytes(
       encoder.encode(
         workbenchRecords.entries.serialize({
           version: 1,
           entries: {
-            'a.ts': { renderTimeout: 180_000, components: { hidden: ['foreign'], isolated: [], opacity: [] } },
-            'a.ts-extra': { renderTimeout: 22_000 },
+            'a.ts': { operationTimeout: 180_000, components: { hidden: ['foreign'], isolated: [], opacity: [] } },
+            'a.ts-extra': { operationTimeout: 22_000 },
           },
         }),
       ),
@@ -641,8 +650,8 @@ describe('workbench entries checked store', () => {
       status: 'current',
       record: {
         entries: {
-          'b.ts': { renderTimeout: 15_000, components: { hidden: ['foreign'] } },
-          'a.ts-extra': { renderTimeout: 22_000 },
+          'b.ts': { operationTimeout: 15_000, components: { hidden: ['foreign'] } },
+          'a.ts-extra': { operationTimeout: 22_000 },
         },
       },
     });
@@ -672,7 +681,7 @@ describe('workbench entries checked store', () => {
     });
     await entries.read();
     expect(await entries.changePaths({ type: 'rename', oldPath: 'a.ts', newPath: 'b.ts' })).toBe(false);
-    expect(await entries.edit('b.ts', { renderTimeout: 7000 })).toBe(false);
+    expect(await entries.edit('b.ts', { operationTimeout: 7000 })).toBe(false);
     expect(await entries.changePaths({ type: 'delete', path: 'b.ts' })).toBe(false);
     expect(await entries.flush()).toBe(true);
     const read = workbenchRecords.entries.read(m.get()!);

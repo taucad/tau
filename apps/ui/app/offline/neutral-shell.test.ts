@@ -37,8 +37,8 @@ const callLoader = async (cookie: string): ReturnType<typeof loader> => {
     request: new Request(url, { headers: { cookie } }),
     params: {},
     context: emptyContext,
-    unstable_url: url,
-    unstable_pattern: '/usage',
+    url,
+    pattern: '/usage',
   };
   return loader(loaderArguments);
 };
@@ -48,7 +48,7 @@ const metaArguments: Parameters<typeof meta>[0] = {
   data: undefined,
   loaderData: undefined,
   params: {},
-  location: { pathname: '/usage', search: '', hash: '', state: undefined, key: 'test', unstable_mask: undefined },
+  location: { pathname: '/usage', search: '', hash: '', state: undefined, key: 'test', mask: undefined },
   matches: [],
 };
 

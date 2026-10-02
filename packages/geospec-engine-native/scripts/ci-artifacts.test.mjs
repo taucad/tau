@@ -159,7 +159,7 @@ void test('cached preparation target uses verified ensure-delivery on source cha
   /** @type {unknown} */
   const rawProject = JSON.parse(readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8'));
   const project =
-    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], options?: {command?: string}} >}} */ (
+    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], outputs?: string[], options?: {command?: string}} >}} */ (
       rawProject
     );
   const target = project.targets['prepare-geospec-ci-artifacts'];
@@ -167,6 +167,12 @@ void test('cached preparation target uses verified ensure-delivery on source cha
   assert.equal(target.cache, true);
   assert.deepEqual(target.inputs, [
     { runtime: 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs cache-key' },
+  ]);
+  assert.deepEqual(target.outputs, [
+    '{projectRoot}/bindings/node/generated',
+    '{projectRoot}/bindings/emscripten/generated',
+    '{projectRoot}/dist',
+    '{workspaceRoot}/out/artifacts/geospec-native-engine/ci',
   ]);
   assert.equal(target.options?.command, 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs ensure-delivery');
 });

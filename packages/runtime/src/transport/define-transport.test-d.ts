@@ -24,7 +24,7 @@ import type {
   TransportHostOptions,
   TransportPluginId,
 } from '#transport/transport-projections.js';
-import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import type { RuntimeDocumentProtocol } from '#types/runtime-document-protocol.types.js';
 
 const stubDescribe =
   <Id extends string>(id: Id) =>
@@ -40,13 +40,13 @@ const stubDescribe =
 
 const stubClient = <Id extends string>(
   id: Id,
-): RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, Id> =>
-  ({ id }) as unknown as RuntimeTransportClient<RuntimeProtocol, Readonly<Record<never, never>>, Id>;
+): RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, Id> =>
+  ({ id }) as unknown as RuntimeTransportClient<RuntimeDocumentProtocol, Readonly<Record<never, never>>, Id>;
 
 const stubHost = <Id extends string>(
   id: Id,
-): RuntimeTransportHost<RuntimeProtocol, Readonly<Record<never, never>>, Id> =>
-  ({ id }) as unknown as RuntimeTransportHost<RuntimeProtocol, Readonly<Record<never, never>>, Id>;
+): RuntimeTransportHost<RuntimeDocumentProtocol, Readonly<Record<never, never>>, Id> =>
+  ({ id }) as unknown as RuntimeTransportHost<RuntimeDocumentProtocol, Readonly<Record<never, never>>, Id>;
 
 const schemaHost = z.object({ port: z.number().default(0) });
 

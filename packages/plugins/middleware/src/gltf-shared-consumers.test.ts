@@ -13,7 +13,7 @@ import {
 import { gltfEdgeDetection } from '#gltf-edge-detection.middleware.js';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { createMockRuntime } from '@taucad/runtime-testing';
-import type { ExportGeometryResult, ExportFile } from '@taucad/runtime/types';
+import type { KernelExportResult, ExportFile } from '@taucad/runtime/types';
 
 const fixture = () => {
   const document = new Document();
@@ -144,10 +144,10 @@ it('generates JSON glTF edges with external buffers and keeps JSON output and ow
         ([name, bytes]): ExportFile => ({ name, mimeType: 'application/octet-stream', bytes }),
       ),
     ],
-  } satisfies ExportGeometryResult;
+  } satisfies KernelExportResult;
   const definition = await resolveRuntimePluginDefinition('middleware', gltfEdgeDetection());
-  const result = await definition.wrapExportGeometry!(
-    { format: 'gltf', options: {}, content: { includeEdges: true } },
+  const result = await definition.wrapExport!(
+    { exportId: 'gltf', extension: 'gltf', mimeType: 'model/gltf+json', options: {}, content: { includeEdges: true } },
     async () => input,
     createMockRuntime<Record<string, never>, { thresholdDegrees: number }>({ options: { thresholdDegrees: 30 } }),
   );
@@ -155,7 +155,7 @@ it('generates JSON glTF edges with external buffers and keeps JSON output and ow
   if (!result.success) {
     return;
   }
-  const json = JSON.parse(new TextDecoder().decode(result.data[0]!.bytes)) as JSONDocument['json'];
+  const json = JSON.parse(new TextDecoder().decode(result.data[0].bytes)) as JSONDocument['json'];
   const restored = await io.readJSON({
     json,
     resources: Object.fromEntries(result.data.slice(1).map((file) => [file.name, file.bytes])),
@@ -193,10 +193,10 @@ it('embeds rewritten texture bytes and authored metadata through JSON naming and
     success: true,
     issues: [],
     data: [{ name: 'textured.gltf', mimeType: 'model/gltf+json', bytes: normalized }],
-  } satisfies ExportGeometryResult;
+  } satisfies KernelExportResult;
   const definition = await resolveRuntimePluginDefinition('middleware', gltfEdgeDetection());
-  const result = await definition.wrapExportGeometry!(
-    { format: 'gltf', options: {}, content: { includeEdges: true } },
+  const result = await definition.wrapExport!(
+    { exportId: 'gltf', extension: 'gltf', mimeType: 'model/gltf+json', options: {}, content: { includeEdges: true } },
     async () => input,
     createMockRuntime<Record<string, never>, { thresholdDegrees: number }>({ options: { thresholdDegrees: 30 } }),
   );
@@ -204,7 +204,7 @@ it('embeds rewritten texture bytes and authored metadata through JSON naming and
   if (!result.success) {
     return;
   }
-  const json = JSON.parse(new TextDecoder().decode(result.data[0]!.bytes)) as JSONDocument['json'];
+  const json = JSON.parse(new TextDecoder().decode(result.data[0].bytes)) as JSONDocument['json'];
   expect(json.images![0]!.uri).toMatch(/^data:image\/png;base64,/);
   const restored = await io.readJSON({ json, resources: {} });
   expect([...restored.getRoot().listTextures()[0]!.getImage()!]).toEqual([...image]);
@@ -255,10 +255,10 @@ it('retains one manifold surface and shared owner-local edges for both placement
         ([name, bytes]): ExportFile => ({ name, mimeType: 'application/octet-stream', bytes }),
       ),
     ],
-  } satisfies ExportGeometryResult;
+  } satisfies KernelExportResult;
   const definition = await resolveRuntimePluginDefinition('middleware', gltfEdgeDetection());
-  const result = await definition.wrapExportGeometry!(
-    { format: 'gltf', options: {}, content: { includeEdges: true } },
+  const result = await definition.wrapExport!(
+    { exportId: 'gltf', extension: 'gltf', mimeType: 'model/gltf+json', options: {}, content: { includeEdges: true } },
     async () => input,
     createMockRuntime<Record<string, never>, { thresholdDegrees: number }>({ options: { thresholdDegrees: 30 } }),
   );
@@ -267,7 +267,7 @@ it('retains one manifold surface and shared owner-local edges for both placement
     return;
   }
   const restored = await io.readJSON({
-    json: JSON.parse(new TextDecoder().decode(result.data[0]!.bytes)) as JSONDocument['json'],
+    json: JSON.parse(new TextDecoder().decode(result.data[0].bytes)) as JSONDocument['json'],
     resources: {},
   });
   const root = restored.getRoot();
@@ -345,11 +345,17 @@ it('rejects unsupported required compact EXT before losing per-instance placemen
     success: true,
     issues: [],
     data: [{ name: 'compact.glb', mimeType: 'model/gltf-binary', bytes: await io.writeBinary(document) }],
-  } satisfies ExportGeometryResult;
+  } satisfies KernelExportResult;
   const definition = await resolveRuntimePluginDefinition('middleware', gltfEdgeDetection());
   await expect(
-    definition.wrapExportGeometry!(
-      { format: 'glb', options: {}, content: { includeEdges: true } },
+    definition.wrapExport!(
+      {
+        exportId: 'glb',
+        extension: 'glb',
+        mimeType: 'model/gltf-binary',
+        options: {},
+        content: { includeEdges: true },
+      },
       async () => input,
       createMockRuntime<Record<string, never>, { thresholdDegrees: number }>({ options: { thresholdDegrees: 30 } }),
     ),

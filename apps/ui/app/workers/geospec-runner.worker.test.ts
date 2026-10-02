@@ -24,8 +24,12 @@ const workerMocks = vi.hoisted(() => {
     exists: vi.fn(),
     dispose: vi.fn(),
   };
+  const document = {
+    export: vi.fn<(format: string, input: { options: Record<string, unknown> }) => Promise<{ success: boolean }>>(),
+    close: vi.fn(),
+  };
   const runtimeClient = {
-    export: vi.fn(),
+    open: vi.fn<(input: { source: { path: string }; parameters?: Record<string, unknown> }) => typeof document>(),
     terminate: vi.fn(),
   };
   const runner = {
@@ -47,6 +51,7 @@ const workerMocks = vi.hoisted(() => {
   return {
     fsProxy,
     runtimeClient,
+    document,
     runner,
     geoSpecModelLoadErrorClass: MockGeoSpecModelLoadError,
     createGeoSpecModelLoadError: (diagnostics: ReadonlyArray<{ code: string; message: string }>) =>
@@ -209,13 +214,16 @@ const initializeWorkerSession = async (options: {
     },
   } as MessageEvent<GeoSpecRunnerWorkerRequest>);
 
-  await vi.waitFor(() => {
-    expect(options.postMessage).toHaveBeenCalledWith({
-      type: 'initialized',
-      requestId,
-      sessionId,
-    } satisfies GeoSpecRunnerWorkerResponse);
-  });
+  await vi.waitFor(
+    () => {
+      expect(options.postMessage).toHaveBeenCalledWith({
+        type: 'initialized',
+        requestId,
+        sessionId,
+      } satisfies GeoSpecRunnerWorkerResponse);
+    },
+    { timeout: 5000 },
+  );
   options.postMessage.mockClear();
   return sessionId;
 };
@@ -250,7 +258,9 @@ describe('geospec-runner.worker', () => {
     workerMocks.fsProxy.rename.mockReset();
     workerMocks.fsProxy.exists.mockReset();
     workerMocks.fsProxy.dispose.mockReset();
-    workerMocks.runtimeClient.export.mockReset();
+    workerMocks.runtimeClient.open.mockReset().mockReturnValue(workerMocks.document);
+    workerMocks.document.export.mockReset();
+    workerMocks.document.close.mockReset();
     workerMocks.runtimeClient.terminate.mockReset();
     workerMocks.runner.run.mockReset();
     workerMocks.runner.close.mockReset();
@@ -295,13 +305,15 @@ describe('geospec-runner.worker', () => {
     workerMocks.createDefaultKernelOptions.mockImplementation((options: unknown) => ({ options }));
     workerMocks.createRuntimeClient.mockReturnValue(workerMocks.runtimeClient);
     mockProjectTree('', ['main.geospec.ts']);
-    workerMocks.runtimeClient.export.mockResolvedValue({ success: true });
+    workerMocks.document.export.mockResolvedValue({ success: true });
     workerMocks.runner.run.mockImplementation(async () => {
       const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
         model: { runtime: typeof workerMocks.runtimeClient };
       };
       expect(runnerOptions.model.runtime).toBe(workerMocks.runtimeClient);
-      await runnerOptions.model.runtime.export({ entryPath: 'main.ts', parameters: { height: 42 } });
+      const document = runnerOptions.model.runtime.open({ source: { path: 'main.ts' }, parameters: { height: 42 } });
+      await document.export('glb', { options: {} });
+      document.close();
       return successfulRunnerResult();
     });
     workerMocks.runner.close.mockResolvedValue(undefined);
@@ -365,10 +377,12 @@ describe('geospec-runner.worker', () => {
       testNamePattern: undefined,
       testTimeout: undefined,
     });
-    expect(workerMocks.runtimeClient.export).toHaveBeenCalledWith({
-      entryPath: 'main.ts',
+    expect(workerMocks.runtimeClient.open).toHaveBeenCalledWith({
+      source: { path: 'main.ts' },
       parameters: { height: 42 },
     });
+    expect(workerMocks.document.export).toHaveBeenCalledWith('glb', { options: {} });
+    expect(workerMocks.document.close).toHaveBeenCalledOnce();
     expect(workerMocks.runtimeClient.terminate).not.toHaveBeenCalled();
     expect(workerMocks.fsProxy.dispose).not.toHaveBeenCalled();
   }, 15_000);
@@ -795,13 +809,17 @@ describe('geospec-runner.worker', () => {
     const fatalError = workerMocks.createGeoSpecModelLoadError([
       { code: 'RUNTIME_UNAVAILABLE', message: 'runtime boot failed' },
     ]);
-    workerMocks.runtimeClient.export.mockRejectedValue(fatalError);
+    workerMocks.document.export.mockRejectedValue(fatalError);
     workerMocks.runner.run.mockImplementation(async () => {
       const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
         model: { runtime: typeof workerMocks.runtimeClient };
       };
-      await expect(runnerOptions.model.runtime.export({ entryPath: 'main.scad' })).rejects.toBe(fatalError);
-      await expect(runnerOptions.model.runtime.export({ entryPath: 'main.scad' })).rejects.toBe(fatalError);
+      await expect(
+        runnerOptions.model.runtime.open({ source: { path: 'main.scad' } }).export('glb', { options: {} }),
+      ).rejects.toBe(fatalError);
+      await expect(
+        runnerOptions.model.runtime.open({ source: { path: 'main.scad' } }).export('glb', { options: {} }),
+      ).rejects.toBe(fatalError);
       return successfulRunnerResult();
     });
     workerMocks.runner.close.mockResolvedValue(undefined);
@@ -823,7 +841,7 @@ describe('geospec-runner.worker', () => {
     await vi.waitFor(() => {
       expect(workerMocks.runner.run).toHaveBeenCalledTimes(1);
     });
-    expect(workerMocks.runtimeClient.export).toHaveBeenCalledTimes(2);
+    expect(workerMocks.document.export).toHaveBeenCalledTimes(2);
   });
 
   it('should reject run requests before initialization with a structured diagnostic', async () => {
@@ -1019,20 +1037,24 @@ describe('geospec-runner.worker', () => {
     const fatalError = workerMocks.createGeoSpecModelLoadError([
       { code: 'RUNTIME_UNAVAILABLE', message: 'runtime boot failed' },
     ]);
-    workerMocks.runtimeClient.export.mockRejectedValueOnce(fatalError).mockResolvedValueOnce({ success: true });
+    workerMocks.document.export.mockRejectedValueOnce(fatalError).mockResolvedValueOnce({ success: true });
     workerMocks.runner.run
       .mockImplementationOnce(async () => {
         const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
           model: { runtime: typeof workerMocks.runtimeClient };
         };
-        await expect(runnerOptions.model.runtime.export({ entryPath: 'main.scad' })).rejects.toBe(fatalError);
+        await expect(
+          runnerOptions.model.runtime.open({ source: { path: 'main.scad' } }).export('glb', { options: {} }),
+        ).rejects.toBe(fatalError);
         return successfulRunnerResult();
       })
       .mockImplementationOnce(async () => {
         const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
           model: { runtime: typeof workerMocks.runtimeClient };
         };
-        await expect(runnerOptions.model.runtime.export({ entryPath: 'main.scad' })).resolves.toEqual({
+        await expect(
+          runnerOptions.model.runtime.open({ source: { path: 'main.scad' } }).export('glb', { options: {} }),
+        ).resolves.toEqual({
           success: true,
         });
         return successfulRunnerResult();
@@ -1063,7 +1085,7 @@ describe('geospec-runner.worker', () => {
     await vi.waitFor(() => {
       expect(workerMocks.runner.run).toHaveBeenCalledTimes(2);
     });
-    expect(workerMocks.runtimeClient.export).toHaveBeenCalledTimes(2);
+    expect(workerMocks.document.export).toHaveBeenCalledTimes(2);
   });
 
   it('should select compiled WASM with bounded evidence without an engine choice', async () => {

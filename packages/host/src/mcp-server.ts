@@ -77,10 +77,10 @@ export const hostMcpCapabilityPrefix = 'tau-mcp-host-v1';
  * @public
  */
 export const hostMcpAllowedTools = [
-  toolName.getKernelResult,
+  toolName.evaluateModel,
   toolName.testModel,
   toolName.screenshot,
-  toolName.exportGeometry,
+  toolName.exportModel,
   toolName.arrangeWorkbench,
   toolName.getPrintProfiles,
   toolName.requestPrint,
@@ -160,10 +160,10 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
  * (`apps/api/app/api/mcp/mcp-authority.service.ts`).
  */
 const toolForRpc: Readonly<Record<TauMcpRpcName, HostMcpAllowedTool>> = {
-  [rpcName.getKernelResult]: toolName.getKernelResult,
+  [rpcName.evaluateModel]: toolName.evaluateModel,
   [rpcName.runGeoSpecTests]: toolName.testModel,
   [rpcName.captureImages]: toolName.screenshot,
-  [rpcName.exportGeometry]: toolName.exportGeometry,
+  [rpcName.exportModel]: toolName.exportModel,
 };
 
 const capabilityClaimsSchema = z
@@ -468,6 +468,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
         return { success: true, ...content };
       }
       return {
+        ...content,
         errorCode: typeof content['errorCode'] === 'string' ? content['errorCode'] : 'TOOL_ERROR',
         message: typeof content['message'] === 'string' ? content['message'] : `${tool} failed.`,
       };
@@ -532,6 +533,12 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
     };
     return async (call, dispatchOptions) => {
       if ('rpcName' in call) {
+        // Export RPCs carry call identity in args; the tool registry takes it
+        // from invocation metadata and adds it after strict input validation.
+        if (call.rpcName === rpcName.exportModel) {
+          const { toolCallId: _toolCallId, ...input } = call.args;
+          return invokeAllowed(toolName.exportModel, input, dispatchOptions);
+        }
         return invokeAllowed(toolForRpc[call.rpcName], call.args, dispatchOptions);
       }
       const tool = hostMcpAllowedTools.find((name) => name === call.toolName);

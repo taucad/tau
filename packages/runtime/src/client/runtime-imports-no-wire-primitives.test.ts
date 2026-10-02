@@ -5,11 +5,9 @@
  * not surface wire primitives (`MessagePort`, `SharedArrayBuffer`,
  * `Worker`) in its production type signatures. The wire is owned by
  * the `transport/` plugins and the `framework/` dispatcher; everything
- * else (`client/**`, `host/**`, the `runtime-worker-client.ts`
- * orchestrator) stays wire-agnostic.
+ * else (`client/**`, `host/**`) stays wire-agnostic.
  *
- * - C4 polices the public surface across `client/**`, `host/**`, and
- *   the orchestrator (`framework/runtime-worker-client.ts`).
+ * - C4 polices the public surface across `client/**` and `host/**`.
  * - C5 polices the v6 transport-public surface explicitly so the
  *   transport contract types do not leak wire primitives into the
  *   consumer-callable boundary.
@@ -31,7 +29,7 @@ const transportPublicSurfaceFiles = [
 ];
 
 // `Transferable[]` is intentional on the host-binding contract
-// (`HostGeometryDeliveryBinding.encode -> { transferables }`) — that
+// (`HostBinaryDeliveryBinding.publishBytes -> { transferables }`) — that
 // is the transport <-> dispatcher protocol, not the consumer-facing
 // client surface. The sentinel polices the consumer wire primitives
 // only: raw `MessagePort` (bridge port), `SharedArrayBuffer` (caller
@@ -102,7 +100,6 @@ describe('C4 — runtime consumer-facing surface (client/host/orchestrator) is w
   const consumerSurfaceFiles = [
     ...findFiles(join(runtimeSource, 'client'), () => true),
     ...findFiles(join(runtimeSource, 'host'), () => true),
-    join(runtimeSource, 'framework', 'runtime-worker-client.ts'),
   ];
 
   for (const path of consumerSurfaceFiles) {

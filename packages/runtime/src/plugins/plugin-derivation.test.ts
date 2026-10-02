@@ -1,33 +1,31 @@
-import { z } from 'zod';
 import { describe, expect, it } from 'vitest';
 
 import { deriveExportTargets, deriveImportExtensions } from '#plugins/plugin-derivation.js';
-import { defineKernel } from '#types/runtime-kernel.types.js';
+import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
-// oxlint-disable-next-line no-restricted-imports -- Runtime-private fixture stays outside the package build graph.
-import { createParameterDeclaration } from '../../test/support/kernel-worker.fixture.js';
 
-const kernel = defineKernel({
+const kernel = defineKernelV2({
   id: 'fixture',
   extensions: ['step', '*', 'stp'],
   name: 'Fixture',
   version: '1.0.0',
-  exportFormats: { glb: { optionsSchema: z.object({}) } },
+  views: {},
+  exports: { native: { title: 'Native', mimeType: 'model/gltf-binary', extension: 'glb' } },
   async initialize() {
     return {};
   },
-  async getDependencies() {
-    return { resolved: [], unresolved: [] };
+  async resolve({ entryPath }) {
+    return { resolved: [entryPath], unresolved: [] };
   },
-  async getParameters() {
-    return createParameterDeclaration();
+  async describe() {
+    return { success: false, issues: [] };
   },
-  async createGeometry() {
-    return { nativeHandle: undefined };
+  async evaluate() {
+    return { handle: {}, views: [] as const, exports: ['native'] as const };
   },
-  async exportGeometry() {
-    return { success: true, data: [], issues: [] };
+  async export() {
+    return { files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: new Uint8Array([1]) }] as const };
   },
 });
 
@@ -59,5 +57,35 @@ describe('runtime capability derivation', () => {
     expect(Object.fromEntries(runtime.kernels.map((entry) => [entry.id, entry.extensions]))).toEqual({
       fixture: ['step', '*', 'stp'],
     });
+  });
+
+  it('reads serialisable V2 export declarations from a real registration', () => {
+    const modern = defineKernelV2({
+      id: 'modern',
+      name: 'Modern',
+      version: '1.0.0',
+      extensions: ['modern'],
+      views: {},
+      exports: { native: { title: 'Native', mimeType: 'application/x-modern', extension: 'x-modern' } },
+      async initialize() {
+        return {};
+      },
+      async resolve() {
+        return { resolved: [], unresolved: [] };
+      },
+      async describe() {
+        return { success: false, issues: [] };
+      },
+      async evaluate() {
+        return { handle: {}, views: [] as const, exports: ['native'] as const };
+      },
+      async export() {
+        return {
+          files: [{ name: 'model.x-modern', mimeType: 'application/x-modern', bytes: new Uint8Array([1]) }] as const,
+        };
+      },
+    })();
+    const runtime = defineRuntime({ kernels: [modern] });
+    expect(deriveExportTargets(runtime)).toEqual(['x-modern']);
   });
 });

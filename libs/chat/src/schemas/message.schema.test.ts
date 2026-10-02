@@ -252,7 +252,7 @@ describe('safeValidateUiMessages Tau wire extensions', () => {
         role: 'assistant',
         parts: [
           {
-            type: 'tool-get_kernel_result',
+            type: 'tool-evaluate_model',
             toolCallId: 'call-path',
             state: 'output-available',
             input: { targetFile: '/main.ts' },
@@ -262,7 +262,7 @@ describe('safeValidateUiMessages Tau wire extensions', () => {
       },
     ]);
 
-    expect(findPart(messages, 'tool-get_kernel_result')).toMatchObject({ input: { targetFile: 'main.ts' } });
+    expect(findPart(messages, 'tool-evaluate_model')).toMatchObject({ input: { targetFile: 'main.ts' } });
   });
 
   it('keeps common reasoning metadata assignable to MyMessagePart', () => {

@@ -7,13 +7,15 @@ import { electronUtilityHost } from '#electron/electron-utility-host.js';
 import { serveElectronFileSystemBridgePort } from '#electron/filesystem-bridge-port.js';
 import type { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import type { MessagePortMainLike } from '@taucad/rpc';
-import type * as DispatcherModule from '#transport/_internal/runtime-worker-dispatcher.js';
+import type * as DispatcherModule from '#transport/_internal/runtime-document-dispatcher.js';
 
-const dispatcherCalls = vi.hoisted(() => [] as Array<Parameters<typeof DispatcherModule.createWorkerDispatcher>>);
+const dispatcherCalls = vi.hoisted(
+  () => [] as Array<Parameters<typeof DispatcherModule.createDocumentWorkerDispatcher>>,
+);
 const disposeDispatcher = vi.hoisted(() => vi.fn());
 
-vi.mock('#transport/_internal/runtime-worker-dispatcher.js', () => ({
-  createWorkerDispatcher: (...args: Parameters<typeof DispatcherModule.createWorkerDispatcher>) => {
+vi.mock('#transport/_internal/runtime-document-dispatcher.js', () => ({
+  createDocumentWorkerDispatcher: (...args: Parameters<typeof DispatcherModule.createDocumentWorkerDispatcher>) => {
     dispatcherCalls.push(args);
     return { dispose: disposeDispatcher };
   },

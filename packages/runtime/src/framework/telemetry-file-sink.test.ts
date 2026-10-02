@@ -4,7 +4,7 @@ import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { openTelemetryFileSink, telemetryDirectory, telemetryFormat } from '#framework/telemetry-file-sink.js';
-import type { TelemetryBatch } from '#types/runtime-protocol.types.js';
+import type { TelemetryBatch } from '#types/runtime-wire.types.js';
 
 const batch = (name: string, size = 1): TelemetryBatch => ({
   origin: { label: 'utility', instance: 'instance-a' },

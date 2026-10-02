@@ -40,7 +40,7 @@ describe('handleCaptureImages', () => {
     const images = mock<RpcImageClient>();
     const failure: CaptureImagesRpcResult = {
       success: false,
-      errorCode: 'RENDER_TIMEOUT',
+      errorCode: 'OPERATION_TIMEOUT',
       message: 'Image render timed out',
     };
     images.captureImages.mockResolvedValue(failure);

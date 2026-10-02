@@ -1,11 +1,18 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
+import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { projectManifestSchema } from '@taucad/types';
 import { describe, expect, it } from 'vitest';
 import sharp from 'sharp';
-import { createExampleRuntimeClient, exampleKernelIds, exampleRuntime } from '#scripts/runtime.js';
+import {
+  createExampleGeoSpecRuntimeClient,
+  createExampleRuntimeClient,
+  exampleKernelIds,
+  exampleRuntime,
+} from '#scripts/runtime.js';
 
 type ManifestEntry = {
   readonly kind: 'model' | 'test-fixture' | 'spec-fixture' | 'reference';
@@ -132,20 +139,71 @@ describe('generated example artifacts', () => {
   it('exports a shell+fillet fixture byte-identically on fresh kernel instances', { timeout: 120_000 }, async () => {
     const exportOnFreshClient = async (): Promise<string> => {
       const client = await createExampleRuntimeClient(join(sourceDirectory, 'kernels'));
+      const document = client.open({
+        source: { path: 'replicad/vase/main.ts' },
+        watch: false,
+      });
       try {
-        const result = await client.export('glb', {
-          source: { path: 'replicad/vase/main.ts' },
+        const result = await document.export('glb', {
           content: { includeEdges: true },
         });
         if (!result.success) {
           throw new Error(result.issues.map((issue) => issue.message).join('; '));
         }
-        return createHash('sha256').update(result.data[0]!.bytes).digest('hex');
+        return createHash('sha256').update(result.files[0].bytes).digest('hex');
       } finally {
-        client.terminate();
+        document.close();
+        await client.shutdown();
       }
     };
 
     expect(await exportOnFreshClient()).toBe(await exportOnFreshClient());
+  });
+
+  it('pins GeoSpec exports to one document and rejects a closed lazy document', { timeout: 120_000 }, async () => {
+    const root = await mkdtemp(join(tmpdir(), 'tau-example-geospec-'));
+    const sourceRoot = join(root, 'src', 'model');
+    const sourcePath = join(sourceRoot, 'main.ts');
+    await mkdir(sourceRoot, { recursive: true });
+    await writeFile(
+      sourcePath,
+      "import { makeBaseBox } from 'replicad'; export default () => makeBaseBox(10, 10, 10);",
+      'utf8',
+    );
+    const runtime = await createExampleGeoSpecRuntimeClient(root);
+    const document = runtime.open({ source: { path: 'model/main.ts' } });
+    try {
+      const first = await document.export('glb');
+      expect(first.success).toBe(true);
+      if (!first.success) {
+        throw new Error('Expected the first GeoSpec model export');
+      }
+      await writeFile(
+        sourcePath,
+        "import { makeBaseBox } from 'replicad'; export default () => makeBaseBox(20, 20, 20);",
+        'utf8',
+      );
+      const second = await document.export('glb');
+      expect(second.success).toBe(true);
+      if (!second.success) {
+        throw new Error('Expected the pinned GeoSpec model export');
+      }
+      expect(createHash('sha256').update(second.files[0].bytes).digest('hex')).toBe(
+        createHash('sha256').update(first.files[0].bytes).digest('hex'),
+      );
+      document.close();
+      await expect(document.export('glb')).rejects.toThrow('closed');
+
+      const lazyRuntime = await createExampleGeoSpecRuntimeClient(root);
+      const lazyDocument = lazyRuntime.open({ source: { path: 'model/main.ts' } });
+      const pending = lazyDocument.export('glb');
+      lazyDocument.close();
+      await expect(pending).rejects.toThrow('closed');
+      lazyRuntime.terminate();
+    } finally {
+      document.close();
+      runtime.terminate();
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

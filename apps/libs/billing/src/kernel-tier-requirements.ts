@@ -16,6 +16,7 @@ export const kernelTierRequirements = {
   manifold: 'free',
   jscad: 'free',
   opencascadejs: 'free',
+  tscircuit: 'free',
   zoo: 'pro',
 } as const satisfies Record<KernelId, BillingTier>;
 

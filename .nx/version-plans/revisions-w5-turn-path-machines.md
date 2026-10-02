@@ -1,6 +1,6 @@
 ---
 revisions: minor
-host: patch
+host: minor
 ---
 
 Answer every revision request by its own id, key turns by attempt, and hold a turn's lease until its settlement is acknowledged. **Breaking**:

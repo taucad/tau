@@ -12,7 +12,7 @@
  * Type-only imports (`import type { Channel } from '@taucad/rpc'`) are
  * permitted because they have no runtime cost and only carry generic
  * shape information across the seam (used e.g. by
- * `framework/runtime-worker-client.ts` to type a transport-supplied
+ * `client/runtime-document-session.ts` to type a transport-supplied
  * channel reference).
  *
  * Companion tests:

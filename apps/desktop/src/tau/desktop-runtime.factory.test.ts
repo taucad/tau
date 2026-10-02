@@ -27,10 +27,12 @@ describe('desktop runtime kernels', () => {
     const { kernels } = await resolveDesktopRuntime();
     const picovoxelKernel = kernels.find((kernel) => kernel.id === 'picovoxel')!;
     const { detectImport } = picovoxelKernel;
+    expect(detectImport).toBeDefined();
+    const importMatcher = new RegExp(detectImport!.source, detectImport!.flags);
 
     expect(picovoxelKernel.extensions).toEqual(['ts', 'js']);
-    expect(detectImport?.test("import type { Pico } from 'picovoxel';")).toBe(true);
-    expect(detectImport?.test("import { makeBox } from 'replicad';")).toBe(false);
+    expect(importMatcher.test("import type { Pico } from 'picovoxel';")).toBe(true);
+    expect(importMatcher.test("import { makeBox } from 'replicad';")).toBe(false);
     // Native PicoGK is composed on Apple Silicon only and claims C# alone.
     const picogkKernel = kernels.find((kernel) => kernel.id === 'picogk');
     if (process.platform === 'darwin' && process.arch === 'arm64') {

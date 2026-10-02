@@ -45,17 +45,20 @@ describe('PicoVoxel authored mechanisms', () => {
     try {
       for (const carriagePosition of [defaultParams.carriagePosition, 20]) {
         // oxlint-disable-next-line eslint/no-await-in-loop -- Parameter variants share one client serially.
-        const result = await client.export('glb', {
-          source: { path: 'main.ts' },
-          parameters: { carriagePosition },
-          content: { includeTopology: true },
-        });
+        const result = await (async () => {
+          const document = client.open({ source: { path: 'main.ts' }, parameters: { carriagePosition } });
+          try {
+            return await document.export('glb', { content: { includeTopology: true } });
+          } finally {
+            document.close();
+          }
+        })();
         if (!result.success) {
           throw new Error(JSON.stringify(result.issues));
         }
         expect(result.issues).toEqual([]);
         // oxlint-disable-next-line eslint/no-await-in-loop -- Decode this parameter variant before changing it.
-        const document = await io.readBinary(result.data[0]!.bytes);
+        const document = await io.readBinary(result.files[0].bytes);
         const root = document.getRoot();
         const payload: unknown = root.getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
         const topology = payload as TauCadTopologyPayload;
@@ -85,11 +88,18 @@ describe('PicoVoxel authored mechanisms', () => {
           root.listMeshes().every((mesh) => mesh.listPrimitives().every((primitive) => primitive.getMaterial())),
         ).toBe(true);
       }
-      const plain = await client.export('glb', { source: { path: 'main.ts' } });
+      const plain = await (async () => {
+        const document = client.open({ source: { path: 'main.ts' } });
+        try {
+          return await document.export('glb');
+        } finally {
+          document.close();
+        }
+      })();
       if (!plain.success) {
         throw new Error(JSON.stringify(plain.issues));
       }
-      const document = await io.readBinary(plain.data[0]!.bytes);
+      const document = await io.readBinary(plain.files[0].bytes);
       expect(document.getRoot().getExtension('TAU_cad_topology')).toBeNull();
       expect(
         document
@@ -115,15 +125,19 @@ describe('PicoVoxel authored mechanisms', () => {
     const client = await createExampleRuntimeClient(directory);
     const io = await createNodeIo();
     try {
-      const result = await client.export('glb', {
-        source: { files: { 'main.ts': source }, entry: 'main.ts' },
-        content: { includeTopology: true },
-      });
+      const result = await (async () => {
+        const document = client.open({ source: { files: { 'main.ts': source }, entry: 'main.ts' } });
+        try {
+          return await document.export('glb', { content: { includeTopology: true } });
+        } finally {
+          document.close();
+        }
+      })();
       if (!result.success) {
         throw new Error(JSON.stringify(result.issues));
       }
       expect(result.issues).toEqual([]);
-      const document = await io.readBinary(result.data[0]!.bytes);
+      const document = await io.readBinary(result.files[0].bytes);
       const payload: unknown = document.getRoot().getExtension<TauCadTopologyRoot>('TAU_cad_topology')?.getPayload();
       const topology = payload as TauCadTopologyPayload;
       const mechanism = admit(topology.mechanism);

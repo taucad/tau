@@ -13,9 +13,8 @@ const createGraphicsActor = () =>
     { input: {} },
   );
 
-const geometry = (hash: string): { format: 'gltf'; hash: string; content: Uint8Array<ArrayBuffer> } => ({
-  format: 'gltf',
-  hash,
+const artifact = (): { mimeType: 'model/gltf-binary'; content: Uint8Array<ArrayBuffer> } => ({
+  mimeType: 'model/gltf-binary',
   content: new TextEncoder().encode('{}'),
 });
 
@@ -82,9 +81,9 @@ describe('graphics GLTF presentation projection', () => {
     actor.start();
     try {
       actor.send({
-        type: 'updateGeometry',
-        geometry: geometry('a'),
-        units: { length: 'mm' },
+        type: 'updateArtifact',
+        artifact: artifact(),
+        hash: 'a',
       });
       actor.send({
         type: 'gltfPresentationCommitted',
@@ -94,9 +93,9 @@ describe('graphics GLTF presentation projection', () => {
         manifest,
       });
       actor.send({
-        type: 'updateGeometry',
-        geometry: geometry('b'),
-        units: { length: 'mm' },
+        type: 'updateArtifact',
+        artifact: artifact(),
+        hash: 'b',
       });
 
       expect(actor.getSnapshot().context.gltfPresentation).toMatchObject({
@@ -138,6 +137,28 @@ describe('graphics GLTF presentation projection', () => {
         phase: 'presented',
       });
       expect(actor.getSnapshot().context.modelInteractionUnitId).toBe('unit:b');
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('keeps artifact source identity atomic through replacement and clearing', () => {
+    const actor = createGraphicsActor();
+    actor.start();
+    try {
+      const first = artifact();
+      const second = artifact();
+      actor.send({ type: 'updateArtifact', artifact: first, hash: 'first', sourceFile: 'first.scad' });
+      actor.send({ type: 'updateArtifact', artifact: second, hash: 'second', sourceFile: 'second.scad' });
+      expect(actor.getSnapshot().context).toMatchObject({
+        artifact: second,
+        artifactKey: 'second',
+        artifactSourceFile: 'second.scad',
+        gltfPresentation: { requestedRevision: 2, requestedKey: 'second' },
+      });
+      actor.send({ type: 'clearArtifact' });
+      expect(actor.getSnapshot().context.artifactSourceFile).toBeUndefined();
+      expect(actor.getSnapshot().context.artifact).toBeUndefined();
     } finally {
       actor.stop();
     }

@@ -12,7 +12,7 @@ describe('browser compatibility', () => {
     const root = await import('#index.js');
     const client = await import('#client/index.js');
     const filesystem = await import('#filesystem/index.js');
-    const middleware = await import('#middleware/runtime-middleware.js');
+    const middleware = await import('#plugins/middleware-entry.js');
 
     expect(root.fromFsLike).toBeTypeOf('function');
     expect(client.createRuntimeClient).toBeTypeOf('function');

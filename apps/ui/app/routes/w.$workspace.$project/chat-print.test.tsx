@@ -297,7 +297,7 @@ describe('Print pane orientation', () => {
     );
     await waitFor(() => {
       expect(mockProjectSend).toHaveBeenCalledWith(
-        expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'main.ts', renderTimeout: undefined }),
+        expect.objectContaining({ type: 'claimGeometryUnit', entryPath: 'main.ts', operationTimeout: undefined }),
       );
     });
     const claim = mockProjectSend.mock.calls.find(([event]) => event.type === 'claimGeometryUnit')?.[0] as unknown as {
@@ -522,7 +522,9 @@ describe('Print pane prepare and send', () => {
       });
       return {
         success: true,
-        data: [
+        exportId: 'gcode.3mf',
+        evaluationId: 'mock-evaluation',
+        files: [
           {
             name: 'main.gcode.3mf',
             bytes: new Uint8Array([0x50, 0x4b, 0x03, 0x04]),
@@ -583,7 +585,7 @@ describe('Print pane prepare and send', () => {
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
-        exportOptions: { ...machineSliceOptions, preset: 'fine' },
+        options: { ...machineSliceOptions, preset: 'fine' },
       });
     });
     expect(mockWriteFiles).toHaveBeenCalledExactlyOnceWith({
@@ -712,7 +714,7 @@ describe('Print pane prepare and send', () => {
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
-        exportOptions: { ...machineSliceOptions, plate: 'cool' },
+        options: { ...machineSliceOptions, plate: 'cool' },
       });
     });
   });
@@ -749,7 +751,7 @@ describe('Print pane prepare and send', () => {
     await waitFor(() => {
       expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
         signal: signalMatcher,
-        exportOptions: { ...machineSliceOptions, layerHeight: 0.16 },
+        options: { ...machineSliceOptions, layerHeight: 0.16 },
       });
     });
     expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
@@ -778,9 +780,8 @@ describe('Print pane prepare and send', () => {
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
     mockExport.mockResolvedValueOnce({
       success: false,
-      data: [],
-      issues: [{ message: 'The GLB carries no triangle primitives.' }],
-    } as unknown as Awaited<ReturnType<typeof mockExport>>);
+      issues: [{ code: 'GEOMETRY_INVALID', severity: 'error', message: 'The GLB carries no triangle primitives.' }],
+    });
 
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
     expect(await within(prepareRegion()).findByText('The GLB carries no triangle primitives.')).toBeInTheDocument();
@@ -1490,7 +1491,7 @@ describe('Print pane Bambu Studio mode', () => {
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
-        exportOptions: {
+        options: {
           engine: 'bambu-studio',
           bambuStudio: { printer: x1c, process: standard, filaments: [plaMatte], plate: 'textured-pei' },
         },
@@ -1591,7 +1592,7 @@ describe('Print pane Bambu Studio mode', () => {
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
-        exportOptions: {
+        options: {
           engine: 'bambu-studio',
           bambuStudio: {
             printer: x1c,
@@ -1754,7 +1755,7 @@ describe('Print pane Bambu Studio mode', () => {
       await waitFor(() => {
         expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
           signal: signalMatcher,
-          exportOptions: {
+          options: {
             engine: 'bambu-studio',
             // In filament order: filament 1 from A3, filament 2 from A1.
             bambuStudio: { printer: x1c, process: standard, filaments: [petg, plaMatte], plate: 'textured-pei' },
@@ -1811,7 +1812,9 @@ describe('Print pane Bambu Studio mode', () => {
     const merged = `The printer loads at most 4 filaments, so the model's 5 colours print as one, in ${red}.`;
     mockExport.mockResolvedValueOnce({
       success: true,
-      data: [{ name: 'main.gcode.3mf', bytes: new Uint8Array([1]), mimeType: 'application/vnd.bambulab.gcode-3mf' }],
+      exportId: 'gcode.3mf',
+      evaluationId: 'mock-evaluation',
+      files: [{ name: 'main.gcode.3mf', bytes: new Uint8Array([1]), mimeType: 'application/vnd.bambulab.gcode-3mf' }],
       issues: [{ message: merged, code: 'REPRESENTATION_UNSUPPORTED', severity: 'warning' }],
     });
     await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
@@ -1939,7 +1942,7 @@ describe('Print pane Bambu Studio mode', () => {
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
-        exportOptions: machineSliceOptions,
+        options: machineSliceOptions,
       });
     });
     const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
@@ -2089,7 +2092,7 @@ describe('Print pane print settings file', () => {
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
-        exportOptions: {
+        options: {
           engine: 'bambu-studio',
           bambuStudio: {
             printer: x1c,
@@ -2196,7 +2199,7 @@ describe('Print pane print settings file', () => {
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
-        exportOptions: { ...machineSliceOptions, nozzleDiameter: 0.6, layerHeight: 0.16 },
+        options: { ...machineSliceOptions, nozzleDiameter: 0.6, layerHeight: 0.16 },
       });
     });
 
@@ -2208,6 +2211,7 @@ describe('Print pane print settings file', () => {
   it('should preserve malformed and future records, blocking preparation and management', async () => {
     const unreadable = '{"version":2,"typeId":"bambu.x1c"}';
     projectFiles.write(settingsPath, unreadable);
+
     renderPane(createFixture().client);
     await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
 

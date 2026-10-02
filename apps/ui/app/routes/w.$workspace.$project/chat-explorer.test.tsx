@@ -279,7 +279,8 @@ function createGraphicsRefForUnit(
   return createStaticActor({
     context: {
       modelInteractionRef: modelRef,
-      geometry: previewGeometry && { format: 'gltf', ...previewGeometry },
+      artifact: previewGeometry && { mimeType: 'model/gltf-binary', content: previewGeometry.content },
+      artifactKey: previewGeometry?.hash,
       gltfPresentation: { presentedKey: previewGeometry?.hash },
     },
   }) as unknown as ActorRefFrom<typeof graphicsMachine>;

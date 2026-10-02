@@ -12,7 +12,11 @@ import * as transport from '#transport/index.js';
 
 describe('transport public surface (C1)', () => {
   it('exposes only the cross-environment author API', () => {
-    const expected = new Set(['defineRuntimeTransport', 'definePassthroughTransport', 'runtimeProtocolSchemas']);
+    const expected = new Set([
+      'defineRuntimeTransport',
+      'definePassthroughTransport',
+      'runtimeDocumentProtocolSchemas',
+    ]);
     const actual = new Set(
       Object.keys(transport).filter((k) => (transport as Record<string, unknown>)[k] !== undefined),
     );

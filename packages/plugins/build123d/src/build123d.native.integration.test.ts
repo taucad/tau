@@ -1,5 +1,6 @@
 // @vitest-environment node
 /* oxlint-disable typescript/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any. */
+import { strict as assert } from 'node:assert';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
@@ -7,7 +8,6 @@ import { createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
 import { validateTauCadTopology } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
 import {
-  assertSuccess,
   createTestRuntimeClient,
   extractGltfFromResult,
   getBoundingBoxFromInspect,
@@ -20,9 +20,9 @@ import { readParameterRecord } from '@taucad/parameters';
 import { loadParameterSnapshot, commitParameterChange } from '@taucad/parameters/authority';
 import type { ParameterAuthority } from '@taucad/parameters/authority';
 import { createActor, createAsyncLogic, waitFor } from 'xstate';
-import type { ParameterManifest } from '@taucad/parameters';
 import { parameterSetMachine } from '@taucad/parameters/set-machine';
 import { defineRuntime } from '@taucad/runtime/worker';
+import { asKnownArtifact } from '@taucad/runtime';
 import { describe, expect, it } from 'vitest';
 
 import { build123d } from '#index.js';
@@ -159,37 +159,34 @@ describe('Build123d native kernel', () => {
     // Only the system directories the sandbox wrapper resolves `which` from: no user or tool PATH.
     process.env['PATH'] = '/usr/bin:/bin';
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': source } });
-    const nextManifest = async (): Promise<ParameterManifest> =>
-      new Promise((resolve) => {
-        client.on('parametersResolved', (result) => {
-          if (result.success) {
-            resolve(result.data);
-          }
-        });
-      });
     try {
-      const baselineParameters = nextManifest();
-      const baseline = await client.render({
-        source: { path: 'main.py' },
-        parameters: { width: 50, angle: 15 },
-      });
-      const baselineManifest = await baselineParameters;
+      const baselineDescription = await client.describe({ source: { path: 'main.py' } });
+      assert.ok(baselineDescription.success);
+      const baselineManifest = baselineDescription.parameters;
+      const baselineDocument = client.open({ source: { path: 'main.py' }, parameters: { width: 50, angle: 15 } });
+      const baselineOutcome = await baselineDocument.view('model').rendering();
+      expect(baselineOutcome.superseded).toBe(false);
+      if (baselineOutcome.superseded) {
+        throw new Error('Native Build123d baseline render was unexpectedly superseded.');
+      }
+      const baseline = baselineOutcome.rendering;
       expect(baselineManifest.defaults).toEqual({ width: 40, depth: 30, height: 20, angle: 30 });
       expect(Object.keys(baselineManifest.bindings).sort()).toEqual(['/angle', '/depth', '/height', '/width']);
       for (const binding of Object.values(baselineManifest.bindings)) {
         expect(binding).not.toHaveProperty('unit');
       }
 
-      const declaredParameters = nextManifest();
-      const rendered = await client.render({
-        source: { files: { 'main.py': declaredSource }, entry: 'main.py' },
-        parameters: { width: 50, angle: 15 },
-      });
-      const declared = await declaredParameters;
-      expect(rendered.superseded).toBe(false);
-      if (rendered.superseded) {
+      const declaredSourceInput = { files: { 'main.py': declaredSource } };
+      const declaredDescription = await client.describe({ source: declaredSourceInput });
+      assert.ok(declaredDescription.success);
+      const declared = declaredDescription.parameters;
+      const declaredDocument = client.open({ source: declaredSourceInput, parameters: { width: 50, angle: 15 } });
+      const renderedOutcome = await declaredDocument.view('model').rendering();
+      expect(renderedOutcome.superseded).toBe(false);
+      if (renderedOutcome.superseded) {
         throw new Error('Native Build123d render was unexpectedly superseded.');
       }
+      const rendered = renderedOutcome.rendering;
       expect(declared.defaults).toEqual({ width: 40, depth: 30, height: 20, angle: 30 });
       expect(declared.source).toMatchObject({ id: 'build123d', capability: 'json-structure' });
       expect(declared.bindings).toMatchObject({
@@ -229,18 +226,15 @@ describe('Build123d native kernel', () => {
         ]),
       );
 
-      expect(baseline.superseded).toBe(false);
-      if (baseline.superseded) {
-        throw new Error('Native Build123d baseline render was unexpectedly superseded.');
-      }
-      assertSuccess(baseline.geometry);
-      assertSuccess(rendered.geometry);
-      expect(rendered.geometry.data.format).toBe('gltf');
-      if (baseline.geometry.data.format !== 'gltf' || rendered.geometry.data.format !== 'gltf') {
+      assert.ok(baseline.success);
+      assert.ok(rendered.success);
+      const baselineArtifact = asKnownArtifact(baseline.artifact);
+      const renderedArtifact = asKnownArtifact(rendered.artifact);
+      if (baselineArtifact?.mimeType !== 'model/gltf-binary' || renderedArtifact?.mimeType !== 'model/gltf-binary') {
         throw new Error('Expected GLB geometry');
       }
-      const glb = rendered.geometry.data.content;
-      expect(glb).toEqual(baseline.geometry.data.content);
+      const glb = renderedArtifact.content;
+      expect(glb).toEqual(baselineArtifact.content);
       validateGlbData(glb);
       expect(await getSignedVolumeFromGlb(glb)).toBeCloseTo(30e-6, 10);
       const { json, payload } = readTopology(glb);
@@ -266,9 +260,11 @@ describe('Build123d native kernel', () => {
         }),
       ).toEqual([]);
 
-      const step = await client.export('step');
-      assertSuccess(step);
-      expect(Buffer.from(step.data[0]!.bytes).subarray(0, 13).toString()).toBe('ISO-10303-21;');
+      const step = await declaredDocument.export('step');
+      assert.ok(step.success);
+      expect(Buffer.from(step.files[0].bytes).subarray(0, 13).toString()).toBe('ISO-10303-21;');
+      baselineDocument.close();
+      declaredDocument.close();
     } finally {
       process.env['PATH'] = previousPath;
       await client.shutdown();
@@ -277,21 +273,17 @@ describe('Build123d native kernel', () => {
 
   it('preserves real geometry through an admitted source-unit record', async () => {
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': declaredSource } });
-    const nextManifest = async (): Promise<ParameterManifest> =>
-      new Promise((resolve) => {
-        client.on('parametersResolved', (result) => {
-          if (result.success) {
-            resolve(result.data);
-          }
-        });
-      });
     try {
-      const baselineParameters = nextManifest();
-      const baseline = await client.render({
-        source: { path: 'main.py' },
-        parameters: { width: 50, angle: 15 },
-      });
-      const admitted = await baselineParameters;
+      const baselineDescription = await client.describe({ source: { path: 'main.py' } });
+      assert.ok(baselineDescription.success);
+      const admitted = baselineDescription.parameters;
+      const baselineDocument = client.open({ source: { path: 'main.py' }, parameters: { width: 50, angle: 15 } });
+      const baselineOutcome = await baselineDocument.view('model').rendering();
+      expect(baselineOutcome.superseded).toBe(false);
+      if (baselineOutcome.superseded) {
+        throw new Error('Build123d baseline render was unexpectedly superseded');
+      }
+      const baseline = baselineOutcome.rendering;
       const width = admitted.bindings['/width'];
       expect(width?.sourceUnitCapability).toBe('change-source-unit:preserve-size:v1');
       if (!width) {
@@ -441,7 +433,7 @@ describe('Build123d native kernel', () => {
         units: { '/width': 'cm' },
         sourceUnits: { '/width': 'cm' },
       });
-      const converted = await client.render({
+      const convertedDocument = client.open({
         source: {
           files: {
             'main.py': declaredSource,
@@ -452,18 +444,23 @@ describe('Build123d native kernel', () => {
         // A caller's number is in the producer's declared unit; a value in another unit is unit-bearing text.
         parameters: { width: '5 cm', angle: 15 },
       });
-      expect(baseline.superseded).toBe(false);
-      expect(converted.superseded).toBe(false);
-      if (baseline.superseded || converted.superseded) {
+      const convertedOutcome = await convertedDocument.view('model').rendering();
+      expect(convertedOutcome.superseded).toBe(false);
+      if (convertedOutcome.superseded) {
         throw new Error('Build123d source-unit render was unexpectedly superseded');
       }
-      assertSuccess(baseline.geometry);
-      assertSuccess(converted.geometry);
-      if (baseline.geometry.data.format !== 'gltf' || converted.geometry.data.format !== 'gltf') {
+      const converted = convertedOutcome.rendering;
+      assert.ok(baseline.success);
+      assert.ok(converted.success);
+      const baselineArtifact = asKnownArtifact(baseline.artifact);
+      const convertedArtifact = asKnownArtifact(converted.artifact);
+      if (baselineArtifact?.mimeType !== 'model/gltf-binary' || convertedArtifact?.mimeType !== 'model/gltf-binary') {
         throw new Error('Expected GLB geometry');
       }
-      expect(converted.geometry.data.content).toEqual(baseline.geometry.data.content);
-      expect(await getSignedVolumeFromGlb(converted.geometry.data.content)).toBeCloseTo(30e-6, 10);
+      expect(convertedArtifact.content).toEqual(baselineArtifact.content);
+      expect(await getSignedVolumeFromGlb(convertedArtifact.content)).toBeCloseTo(30e-6, 10);
+      baselineDocument.close();
+      convertedDocument.close();
       actor.send({ type: 'close' });
       await waitFor(actor, (snapshot) => snapshot.status === 'done');
     } finally {
@@ -479,17 +476,23 @@ describe('Build123d native kernel', () => {
     };
     const client = createTestRuntimeClient({ runtime, files });
     const render = async (nextFiles: typeof files): Promise<Uint8Array<ArrayBuffer>> => {
-      const rendered = await client.render({ source: { files: nextFiles, entry: 'main.py' } });
-      expect(rendered.superseded).toBe(false);
-      if (rendered.superseded) {
-        throw new Error('Native Build123d render was unexpectedly superseded.');
+      const document = client.open({ source: { files: nextFiles, entry: 'main.py' } });
+      try {
+        const outcome = await document.view('model').rendering();
+        expect(outcome.superseded).toBe(false);
+        if (outcome.superseded) {
+          throw new Error('Native Build123d render was unexpectedly superseded.');
+        }
+        const rendered = outcome.rendering;
+        assert.ok(rendered.success);
+        const glb = extractGltfFromResult(rendered);
+        if (!glb) {
+          throw new Error('Expected GLB geometry');
+        }
+        return glb;
+      } finally {
+        document.close();
       }
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
-      if (!glb) {
-        throw new Error('Expected GLB geometry');
-      }
-      return glb;
     };
 
     try {
@@ -549,15 +552,16 @@ describe('Build123d native kernel', () => {
       });
       expect(await getSignedVolumeFromGlb(dataEdit)).toBeCloseTo(42e-9, 14);
 
-      const failed = await client.render({
+      const failedDocument = client.open({
         source: {
           files: { ...files, 'dimensions.py': dimensionsSource("(_ for _ in ()).throw(RuntimeError('broken'))") },
           entry: 'main.py',
         },
       });
-      expect(failed.superseded).toBe(false);
-      if (!failed.superseded) {
-        expect(failed.geometry).toEqual(
+      const failedOutcome = await failedDocument.view('model').rendering();
+      expect(failedOutcome.superseded).toBe(false);
+      if (!failedOutcome.superseded) {
+        expect(failedOutcome.rendering).toEqual(
           expect.objectContaining({
             success: false,
             issues: [
@@ -569,6 +573,7 @@ describe('Build123d native kernel', () => {
           }),
         );
       }
+      failedDocument.close();
 
       const recovered = await render({ ...files, 'width.txt': '3' });
       expect(await getSignedVolumeFromGlb(recovered)).toBeCloseTo(24e-9, 14);
@@ -583,16 +588,19 @@ describe('Build123d native kernel', () => {
     process.env['PATH'] = '/usr/bin:/bin';
     const client = createTestRuntimeClient({ runtime, files: { 'main.py': v8Source } });
     try {
-      const rendered = await client.render({
-        source: { path: 'main.py' },
-        renderOptions: { tessellation: { linearTolerance: 0.25, angularTolerance: 0.2 } },
-      });
-      expect(rendered.superseded).toBe(false);
-      if (rendered.superseded) {
+      const document = client.open({ source: { path: 'main.py' } });
+      const outcome = await document
+        .view('model', {
+          options: { tessellation: { linearTolerance: 0.25, angularTolerance: 0.2 } },
+        })
+        .rendering();
+      expect(outcome.superseded).toBe(false);
+      if (outcome.superseded) {
         throw new Error('Native Build123d V8 render was unexpectedly superseded.');
       }
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
+      const rendered = outcome.rendering;
+      assert.ok(rendered.success);
+      const glb = extractGltfFromResult(rendered);
       if (!glb) {
         throw new Error('Expected GLB geometry');
       }
@@ -607,6 +615,7 @@ describe('Build123d native kernel', () => {
         center: [expect.closeTo(0.253, 10), expect.closeTo(83.805e-3, 10), 0],
       });
       expect(await getSignedVolumeFromGlb(glb)).toBeCloseTo(47.51e-3, 5);
+      document.close();
     } finally {
       process.env['PATH'] = previousPath;
       await client.shutdown();

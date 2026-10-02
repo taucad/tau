@@ -25,7 +25,18 @@ import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
-import { createMachineToolRegistry } from '@taucad/agent-tools/registry';
+import {
+  createChatToolRegistry,
+  createMachineToolRegistry,
+  createProviderRpcFileSystem,
+} from '@taucad/agent-tools/registry';
+import { MemoryProvider } from '@taucad/filesystem/backend';
+import { ResourceQueue } from '@taucad/filesystem';
+import { composeView } from '@taucad/filesystem/composed-view';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
+import type { RpcGraphicsClient } from '@taucad/chat/rpc';
+import { exportModelOutputSchema } from '@taucad/chat/schemas/tools/export-model';
+import { parseToolErrorText } from '@taucad/chat/utils';
 import type { BambuStudioEngine, MachinePrintPlanner } from '@taucad/agent-tools/registry';
 import type { MachineArtifactReference, MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
 
@@ -166,10 +177,10 @@ afterEach(async () => {
 
 describe('createHostMcpEndpoint capability', () => {
   it.each([
-    { name: 'get_kernel_result', input: { targetFile: 'main.scad' } },
+    { name: 'evaluate_model', input: { targetFile: 'main.scad' } },
     { name: 'test_model', input: {} },
     { name: 'screenshot', input: { targetFile: 'main.scad', mode: 'single' } },
-    { name: 'export_geometry', input: { targetFile: 'main.scad', format: 'glb' } },
+    { name: 'export_model', input: { targetFile: 'main.scad', to: 'glb' } },
   ])('does not release admitted $name work until it settles', async ({ name, input }) => {
     const entered = Promise.withResolvers<void>();
     const unblock = Promise.withResolvers<void>();
@@ -235,10 +246,10 @@ describe('createHostMcpEndpoint capability', () => {
     expect(claims).toMatchObject({ v: 1, runId: 'run-1', chatId: 'chat-1' });
     expect(claims.sessionKey).toMatch(/^[\w-]+$/u);
     expect(claims.allowedTools).toEqual([
-      'get_kernel_result',
+      'evaluate_model',
       'test_model',
       'screenshot',
-      'export_geometry',
+      'export_model',
       'arrange_workbench',
       'get_print_profiles',
       'request_print',
@@ -296,6 +307,103 @@ describe('createHostMcpEndpoint capability', () => {
 });
 
 describe('the mounted /mcp route', () => {
+  it('should export through the real registry without mixing RPC metadata into tool input', async () => {
+    const provider = new MemoryProvider();
+    const fileSystem = createProviderRpcFileSystem({
+      provider: composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy }),
+      mutations: new ResourceQueue(),
+    });
+    const exportModel = vi.fn<RpcGraphicsClient['exportModel']>(async () => ({
+      success: true,
+      exportId: 'netlist',
+      files: [{ name: 'netlist.json', mimeType: 'application/json', bytes: new TextEncoder().encode('{}') }],
+    }));
+    const realRegistry = createChatToolRegistry({
+      fileSystemFor: () => fileSystem,
+      graphics: { exportModel },
+      testingEnabled: false,
+    });
+    endpoint = createHostMcpEndpoint({
+      secret,
+      workspaceRoot,
+      registry: {
+        list: () => realRegistry.list(),
+        invoke: async (invocation) => {
+          invocations.push(invocation);
+          return realRegistry.invoke(invocation);
+        },
+      },
+    });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-1', chatId: 'chat-1' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-1',
+      chatId: 'chat-1',
+      signal: new AbortController().signal,
+    });
+    try {
+      const client = await connectMcpOverFetch({
+        url: new URL('mcp', server.url()).href,
+        headers: { authorization: `Bearer ${capability.token}` },
+      });
+      const input = { targetFile: 'main.tsx', to: 'netlist' };
+      const result = await client.callTool('export_model', input);
+      expect(result.isError, JSON.stringify(result)).not.toBe(true);
+      const output = exportModelOutputSchema.parse(result.structuredContent);
+      expect(invocations).toHaveLength(1);
+      const invocation = invocations[0]!;
+      expect(invocation.input).toEqual(input);
+      expect(invocation.toolCallId).not.toBe('');
+      expect(exportModel).toHaveBeenCalledExactlyOnceWith(input, { signal: invocation.signal });
+      expect(output.files[0]?.artifactPath).toBe(
+        `.tau/artifacts/${invocation.toolCallId}__main.tsx-netlist/netlist.json`,
+      );
+      expect(await fileSystem.readFile(output.files[0]!.artifactPath)).toBe('{}');
+    } finally {
+      await release();
+    }
+  });
+
+  it('should preserve registry validation details through MCP error presentation', async () => {
+    const error = {
+      errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+      message: 'Invalid profile selection',
+      toolName: 'get_print_profiles',
+      toolCallId: 'call-profile',
+      validationErrors: [{ path: 'keys', message: 'Too many keys' }],
+    };
+    endpoint = createHostMcpEndpoint({
+      secret,
+      workspaceRoot,
+      registry: {
+        list: () => [{ name: 'get_print_profiles', description: 'Profiles', inputSchema: { type: 'object' } }],
+        invoke: async () => ({ content: error, isError: true }),
+      },
+    });
+    server = startAgentServer({ launcher: stubLauncher(), token, workspaceRoot, mcp: endpoint });
+    await server.ready;
+    const capability = endpoint.mint({ runId: 'run-1', chatId: 'chat-1' });
+    const release = endpoint.activate({
+      token: capability.token,
+      runId: 'run-1',
+      chatId: 'chat-1',
+      signal: new AbortController().signal,
+    });
+    try {
+      const client = await connectMcpOverFetch({
+        url: new URL('mcp', server.url()).href,
+        headers: { authorization: `Bearer ${capability.token}` },
+      });
+      const result = await client.callTool('get_print_profiles', {});
+      expect(result.isError).toBe(true);
+      expect(parseToolErrorText(JSON.stringify(result.structuredContent))).toEqual(error);
+    } finally {
+      await release();
+    }
+  });
+
   it('never attributes a request admitted under one run to the next run', async () => {
     const runIds: string[] = [];
     endpoint = createHostMcpEndpoint({
@@ -366,7 +474,7 @@ describe('the mounted /mcp route', () => {
           jsonrpc: '2.0',
           id: 1,
           method: 'tools/call',
-          params: { name: 'get_kernel_result', arguments: { targetFile: 'main.ts' } },
+          params: { name: 'evaluate_model', arguments: { targetFile: 'main.ts' } },
         }),
       );
       const reply = await response;
@@ -623,7 +731,9 @@ describe('the mounted /mcp route', () => {
         entries: [machine],
       }),
       requestPrint,
-      listProviders: async () => [{ id: 'bambu', vendor: 'Bambu Lab' }],
+      listProviders: async () => [
+        { id: 'bambu', vendor: 'Bambu Lab', manifest: { identity: { typeId: 'bambu.x1c' } } },
+      ],
     } as unknown as MachineClient;
     const planPrint = vi.fn<MachinePrintPlanner>(async () => ({
       artifact: {
@@ -636,6 +746,7 @@ describe('the mounted /mcp route', () => {
     /* A host without Bambu Studio: the profiles tool names the reference engine and why. */
     const machineRegistry = createMachineToolRegistry(client, {
       planPrint,
+      machineSettings: { readMachineSettings: async () => ({ status: 'absent' }) },
       bambuStudio: { ...unusedBambuStudio, findBambuStudio: async () => undefined },
     });
     endpoint = createHostMcpEndpoint({
@@ -688,10 +799,10 @@ describe('the mounted /mcp route', () => {
     const { tools } = toolsListSchema.parse(listed.result);
     /* The grant, in order; the registry's other machine tools are never registered. */
     expect(tools.map(({ name }) => name)).toEqual([
-      'get_kernel_result',
+      'evaluate_model',
       'test_model',
       'screenshot',
-      'export_geometry',
+      'export_model',
       'get_print_profiles',
       'request_print',
       'get_print_request',
@@ -707,7 +818,7 @@ describe('the mounted /mcp route', () => {
     });
     expect(
       tools
-        .filter(({ name }) => ['get_kernel_result', 'test_model', 'screenshot'].includes(name))
+        .filter(({ name }) => ['evaluate_model', 'test_model', 'screenshot'].includes(name))
         .map(({ annotations }) => annotations),
     ).toEqual(
       Array.from({ length: 3 }, () => ({
@@ -717,7 +828,7 @@ describe('the mounted /mcp route', () => {
         openWorldHint: false,
       })),
     );
-    expect(tools.find(({ name }) => name === 'export_geometry')?.annotations).toEqual({
+    expect(tools.find(({ name }) => name === 'export_model')?.annotations).toEqual({
       readOnlyHint: false,
       destructiveHint: false,
       idempotentHint: false,
@@ -761,7 +872,7 @@ describe('the mounted /mcp route', () => {
     const options = { layerHeight: 0.2, supports: { enabled: true, angles: [45, 60] } };
     const requested = await call('request_print', { targetFile: 'main.ts', options });
 
-    expect(requested.isError).not.toBe(true);
+    expect(requested.isError, JSON.stringify(requested)).not.toBe(true);
     expect(invocations).toHaveLength(1);
     expect(invocations[0]).toMatchObject({ toolName: 'request_print', runId: 'run-1' });
     /* An MCP caller has no interrupt port: the registry sees no `approve` and

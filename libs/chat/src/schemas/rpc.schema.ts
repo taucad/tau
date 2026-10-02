@@ -26,12 +26,9 @@ import {
   globSearchInputSchema,
   globSearchOutputSchema,
 } from '#schemas/tools/glob-search.tool.schema.js';
-import {
-  getKernelResultInputSchema,
-  getKernelResultOutputSchema,
-} from '#schemas/tools/get-kernel-result.tool.schema.js';
+import { evaluateModelInputSchema, evaluateModelOutputSchema } from '#schemas/tools/evaluate-model.tool.schema.js';
 import { geoSpecRunFilterInputSchema, testModelOutputSchema } from '#schemas/tools/test-model.tool.schema.js';
-import { exportGeometryInputSchema, exportGeometryOutputSchema } from '#schemas/tools/export-geometry.tool.schema.js';
+import { exportModelInputSchema, exportModelOutputSchema } from '#schemas/tools/export-model.tool.schema.js';
 import { screenshotInputSchema, screenshotOutputSchema } from '#schemas/tools/screenshot.tool.schema.js';
 import {
   arrangeWorkbenchInputSchema,
@@ -84,7 +81,7 @@ export const rpcClientErrorCodeSchema = zod.enum([
   'IO_ERROR',
   'PARSE_ERROR',
   'AUTHENTICATION_ERROR',
-  'RENDER_TIMEOUT',
+  'OPERATION_TIMEOUT',
   'RESULT_TOO_LARGE',
   'SKILL_NOT_FOUND',
   'UNKNOWN',
@@ -217,9 +214,9 @@ const globSearchRpc = defineRpc({
   }),
 });
 
-const getKernelResultRpc = defineRpc({
-  input: getKernelResultInputSchema,
-  success: getKernelResultOutputSchema,
+const evaluateModelRpc = defineRpc({
+  input: evaluateModelInputSchema,
+  success: evaluateModelOutputSchema,
 });
 
 const runGeoSpecTestsRpc = defineRpc({
@@ -227,18 +224,11 @@ const runGeoSpecTestsRpc = defineRpc({
   success: testModelOutputSchema,
 });
 
-const exportGeometryRpc = defineRpc({
-  input: exportGeometryInputSchema.extend({
+const exportModelRpc = defineRpc({
+  input: exportModelInputSchema.extend({
     toolCallId: zod.string(),
-    /**
-     * Transcoder options the host chose, such as the slicer settings of a
-     * print request; the runtime validates them against the export route's
-     * schema. The model-facing tool schema has no such field, so model input
-     * never reaches this one.
-     */
-    exportOptions: zod.record(zod.string(), zod.unknown()).optional(),
   }),
-  success: exportGeometryOutputSchema,
+  success: exportModelOutputSchema,
 });
 
 const captureImagesRpc = defineRpc({
@@ -320,10 +310,10 @@ export type RpcSchemasRegistry = {
   [rpcName.listDirectory]: RpcSchemaEntry<ListDirectoryRpcInput, ListDirectoryRpcResult>;
   [rpcName.grep]: RpcSchemaEntry<GrepRpcInput, GrepRpcResult>;
   [rpcName.globSearch]: RpcSchemaEntry<GlobSearchRpcInput, GlobSearchRpcResult>;
-  [rpcName.getKernelResult]: RpcSchemaEntry<GetKernelResultRpcInput, GetKernelResultRpcResult>;
+  [rpcName.evaluateModel]: RpcSchemaEntry<EvaluateModelRpcInput, EvaluateModelRpcResult>;
   [rpcName.captureImages]: RpcSchemaEntry<CaptureImagesRpcInput, CaptureImagesRpcResult>;
   [rpcName.runGeoSpecTests]: RpcSchemaEntry<RunGeoSpecTestsRpcInput, RunGeoSpecTestsRpcResult>;
-  [rpcName.exportGeometry]: RpcSchemaEntry<ExportGeometryRpcInput, ExportGeometryRpcResult>;
+  [rpcName.exportModel]: RpcSchemaEntry<ExportModelRpcInput, ExportModelRpcResult>;
   [rpcName.appendFile]: RpcSchemaEntry<AppendFileRpcInput, AppendFileRpcResult>;
   [rpcName.editFile]: RpcSchemaEntry<EditFileRpcInput, EditFileRpcResult>;
   [rpcName.resolveSkill]: RpcSchemaEntry<ResolveSkillRpcInput, ResolveSkillRpcResult>;
@@ -364,9 +354,9 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
     inputSchema: globSearchRpc.inputSchema,
     resultSchema: globSearchRpc.resultSchema,
   },
-  [rpcName.getKernelResult]: {
-    inputSchema: getKernelResultRpc.inputSchema,
-    resultSchema: getKernelResultRpc.resultSchema,
+  [rpcName.evaluateModel]: {
+    inputSchema: evaluateModelRpc.inputSchema,
+    resultSchema: evaluateModelRpc.resultSchema,
   },
   [rpcName.captureImages]: {
     inputSchema: captureImagesRpc.inputSchema,
@@ -376,9 +366,9 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
     inputSchema: runGeoSpecTestsRpc.inputSchema,
     resultSchema: runGeoSpecTestsRpc.resultSchema,
   },
-  [rpcName.exportGeometry]: {
-    inputSchema: exportGeometryRpc.inputSchema,
-    resultSchema: exportGeometryRpc.resultSchema,
+  [rpcName.exportModel]: {
+    inputSchema: exportModelRpc.inputSchema,
+    resultSchema: exportModelRpc.resultSchema,
   },
   [rpcName.appendFile]: {
     inputSchema: appendFileRpc.inputSchema,
@@ -474,7 +464,7 @@ export const rpcClientErrorCode = {
   ioError: 'IO_ERROR',
   parseError: 'PARSE_ERROR',
   authenticationError: 'AUTHENTICATION_ERROR',
-  renderTimeout: 'RENDER_TIMEOUT',
+  operationTimeout: 'OPERATION_TIMEOUT',
   resultTooLarge: 'RESULT_TOO_LARGE',
   skillNotFound: 'SKILL_NOT_FOUND',
   unknown: 'UNKNOWN',
@@ -540,11 +530,11 @@ export type GlobSearchRpcSuccess = z.infer<typeof globSearchRpc.successSchema>;
 export type GlobSearchRpcResult = z.infer<typeof globSearchRpc.resultSchema>;
 
 /** @public */
-export type GetKernelResultRpcInput = z.infer<typeof getKernelResultRpc.inputSchema>;
+export type EvaluateModelRpcInput = z.infer<typeof evaluateModelRpc.inputSchema>;
 /** @public */
-export type GetKernelResultRpcSuccess = z.infer<typeof getKernelResultRpc.successSchema>;
+export type EvaluateModelRpcSuccess = z.infer<typeof evaluateModelRpc.successSchema>;
 /** @public */
-export type GetKernelResultRpcResult = z.infer<typeof getKernelResultRpc.resultSchema>;
+export type EvaluateModelRpcResult = z.infer<typeof evaluateModelRpc.resultSchema>;
 
 /** @public */
 export type CaptureImagesRpcInput = z.infer<typeof captureImagesRpc.inputSchema>;
@@ -561,11 +551,11 @@ export type RunGeoSpecTestsRpcSuccess = z.infer<typeof runGeoSpecTestsRpc.succes
 export type RunGeoSpecTestsRpcResult = z.infer<typeof runGeoSpecTestsRpc.resultSchema>;
 
 /** @public */
-export type ExportGeometryRpcInput = z.infer<typeof exportGeometryRpc.inputSchema>;
+export type ExportModelRpcInput = z.infer<typeof exportModelRpc.inputSchema>;
 /** @public */
-export type ExportGeometryRpcSuccess = z.infer<typeof exportGeometryRpc.successSchema>;
+export type ExportModelRpcSuccess = z.infer<typeof exportModelRpc.successSchema>;
 /** @public */
-export type ExportGeometryRpcResult = z.infer<typeof exportGeometryRpc.resultSchema>;
+export type ExportModelRpcResult = z.infer<typeof exportModelRpc.resultSchema>;
 
 /** @public */
 export type AppendFileRpcInput = z.infer<typeof appendFileRpc.inputSchema>;

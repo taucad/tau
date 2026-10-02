@@ -1,11 +1,9 @@
 import type { RhinoModule } from 'rhino3dm';
 import {
   coordinateSystemSchema,
-  createKernelError,
   createKernelParameterDeclaration,
   createKernelSuccess,
   defineKernel,
-  finalizeRenderOutput,
   unitSchema,
   withoutEmscriptenProcessListeners,
 } from '@taucad/runtime/kernel';
@@ -41,13 +39,16 @@ export const rhinoKernel = defineKernel({
   extensions: ['3dm'],
   name: 'RhinoKernel',
   version: '0.1.0',
-  exportFormats: { glb: { optionsSchema: glbOptionsSchema } },
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+  exports: {
+    glb: { title: 'glTF binary', mimeType: 'model/gltf-binary', extension: 'glb', optionsSchema: glbOptionsSchema },
+  },
 
   async initialize() {
     return { rhino: await loadBackend() };
   },
 
-  async getDependencies({ entryPath }, { filesystem }) {
+  async resolve({ entryPath }, { filesystem }) {
     const inventory = await createImportFileInventory(filesystem, entryPath);
     return {
       resolved: [...inventory.resolved],
@@ -55,9 +56,9 @@ export const rhinoKernel = defineKernel({
     };
   },
 
-  async getParameters() {
-    return createKernelSuccess(
-      createKernelParameterDeclaration(
+  async describe() {
+    return createKernelSuccess({
+      parameters: createKernelParameterDeclaration(
         {},
         { type: 'object', properties: {}, additionalProperties: false },
         {
@@ -65,10 +66,10 @@ export const rhinoKernel = defineKernel({
           name: 'RhinoParameters',
         },
       ),
-    );
+    });
   },
 
-  async createGeometry({ entryPath }, { filesystem }, context: { rhino: RhinoModule }) {
+  async evaluate({ entryPath }, { filesystem }, context: { rhino: RhinoModule }) {
     const inventory = await createImportFileInventory(filesystem, entryPath);
     const glb = await new ThreeDmLoader(context.rhino)
       .initialize({ format: '3dm' })
@@ -81,31 +82,25 @@ export const rhinoKernel = defineKernel({
       sceneNamePolicy: 'clear-generated',
       sceneNameSource: 'external-generated',
     });
-    return finalizeRenderOutput({
-      artifacts: [{ format: 'gltf', content: normalized }],
-      nativeHandle: normalized,
-    });
+    return { handle: normalized };
   },
 
-  async exportGeometry(input) {
-    if (input.nativeHandle.length === 0) {
-      return createKernelError([
-        {
-          message: 'No geometry available for export.',
-          code: 'RUNTIME',
-          type: 'runtime',
-          severity: 'error',
-        },
-      ]);
+  async render({ handle }) {
+    return { content: handle };
+  },
+
+  async export(input) {
+    if (input.handle.length === 0) {
+      throw new Error('No geometry available for export.');
     }
-    const bytes = await transformGltfExportBytes(input.nativeHandle, {
+    const bytes = await transformGltfExportBytes(input.handle, {
       format: 'glb',
       coordinateSystem: input.options.coordinateSystem,
       unit: input.options.unit,
     });
-    return createKernelSuccess([createExportFile('glb', 'model.glb', bytes)]);
+    return { files: [createExportFile('glb', 'model.glb', bytes)] };
   },
 
-  serializeNativeHandle: ({ nativeHandle }) => new Uint8Array(nativeHandle),
-  deserializeNativeHandle: ({ serializedNativeHandle }) => new Uint8Array(serializedNativeHandle),
+  serializeHandle: ({ handle }) => new Uint8Array(handle),
+  deserializeHandle: ({ serialized }) => new Uint8Array(serialized),
 });

@@ -469,7 +469,7 @@ export const svgTranscoder = defineTranscoder({
   async initialize() {
     return {};
   },
-  async transcode(input, runtime) {
+  async transcode(input, services) {
     if (input.files.length !== 1) {
       return {
         success: false,
@@ -484,7 +484,7 @@ export const svgTranscoder = defineTranscoder({
       };
     }
     try {
-      runtime.logger.log(`Rendering SVG → ${input.to}`);
+      services.logger.log(`Rendering SVG → ${input.to}`);
       const svg = textDecoder.decode(input.files[0]!.bytes);
       const rendered =
         input.to === 'webp' ? await renderSvgWebp(svg, input.options) : await renderSvgPng(svg, input.options);

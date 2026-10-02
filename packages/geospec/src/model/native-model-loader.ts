@@ -14,7 +14,7 @@ import type {
   LoadModelSourceOptions,
 } from '#model/types.js';
 import type { GeometryDiagnostic } from '#mesh/types.js';
-import type { KernelIssue, SourceRevision } from '@taucad/runtime/types';
+import type { ExportFile, KernelIssue, SourceRevision } from '@taucad/runtime/types';
 import { sha256Bytes } from '@taucad/runtime/kernel';
 
 const protocolHeader = {
@@ -210,14 +210,6 @@ export type ManagedGeoSpecNativeModelLoader = GeoSpecNativeModelLoader & {
 };
 
 type RuntimeOptions = Exclude<LoadModelOptions, { source: unknown }>;
-type RuntimeExport = (
-  format: string,
-  options: {
-    source: { files: Record<string, string>; entry: string } | { path: string };
-    parameters?: Record<string, unknown>;
-    exportOptions: Record<string, unknown>;
-  },
-) => ReturnType<GeoSpecRuntimeClient['export']>;
 
 const failure = (diagnostics: GeometryDiagnostic[]): GeoSpecModelLoadError => new GeoSpecModelLoadError(diagnostics);
 
@@ -736,15 +728,22 @@ export const createGeoSpecNativeModelLoader = (
       throw failure(requested.diagnostics);
     }
     const exportOptions = structuredClone(requested.options);
-    const exported = await (runtime.export as unknown as RuntimeExport)(format, {
+    const document = runtime.open({
       source: runtimeSource(options),
       ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
-      exportOptions: structuredClone(exportOptions),
     });
+    const exported = await (async () => {
+      try {
+        return await document.export(format, { options: structuredClone(exportOptions) });
+      } finally {
+        document.close();
+      }
+    })();
     if (!exported.success) {
       throw failure(exported.issues.map(runtimeIssueDiagnostic));
     }
-    const [primary, ...resources] = exported.data;
+    const files: ExportFile[] = [...exported.files];
+    const [primary, ...resources] = files;
     if (primary === undefined) {
       throw failure([
         diagnostic({
@@ -761,7 +760,7 @@ export const createGeoSpecNativeModelLoader = (
     }
     // The export is consumed synchronously by admission, so its bytes need no copy.
     const artifacts = await Promise.all(
-      exported.data.map(async ({ name, bytes }) => ({
+      files.map(async ({ name, bytes }) => ({
         name,
         sha256: await sha256Bytes(bytes),
         byteLength: bytes.byteLength,

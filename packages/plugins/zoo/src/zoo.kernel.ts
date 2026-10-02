@@ -11,7 +11,7 @@
  */
 
 import { createExportFile } from '@taucad/runtime/types';
-import type { GeometryGltf, KernelErrorResult, KernelIssue, RuntimeSpanTracer } from '@taucad/runtime/types';
+import type { KernelErrorResult, KernelIssue, RuntimeSpanTracer } from '@taucad/runtime/types';
 import type { CompilationIssue as CompilationError } from '@taucad/kcl-wasm-lib/bindings/CompilationIssue';
 import type { System } from '@taucad/kcl-wasm-lib/bindings/ModelingCmd';
 import {
@@ -21,8 +21,6 @@ import {
   createKernelError,
   createKernelSuccess,
   createKernelParameterDeclaration,
-  RenderArtifactFinalizationError,
-  finalizeRenderOutput,
 } from '@taucad/runtime/kernel';
 import type { KernelFileSystem, RuntimeLogger } from '@taucad/runtime/kernel';
 
@@ -39,7 +37,6 @@ import {
   normalizeGltfGeometryNames,
   createEmptyGlb,
   createEmptyGltf,
-  createEmptyGltfGeometry,
 } from '@taucad/geometry-core';
 import { enrichZooGltfTopology } from '#zoo-gltf-topology.utils.js';
 
@@ -53,33 +50,47 @@ type ZooContext = {
   token: string | undefined;
   kclUtils: KclUtilities | undefined;
   fileSystemManager: FileSystemManager | undefined;
+  /** Changes whenever this kernel replaces the engine's current program. */
+  generation?: number;
 };
 
 type ZooNativeHandle = {
   kind: 'zoo-live-engine-session';
   hasGeometry: boolean;
+  generation: number;
 };
 
 type ZooExportFormat = keyof typeof zooExportSchemas;
 
-const createZooNativeHandle = (hasGeometry: boolean): ZooNativeHandle => ({
+const createZooNativeHandle = (hasGeometry: boolean, generation: number): ZooNativeHandle => ({
   kind: 'zoo-live-engine-session',
   hasGeometry,
+  generation,
 });
+
+const isCurrentZooHandle = (handle: ZooNativeHandle, context: ZooContext): boolean =>
+  handle.generation === (context.generation ?? 0) &&
+  (!handle.hasGeometry || context.kclUtils?.canExportFromMemory === true);
+
+const assertCurrentZooHandle = (handle: ZooNativeHandle, context: ZooContext): void => {
+  if (handle.generation !== (context.generation ?? 0)) {
+    throw new Error('Zoo evaluation is no longer the current engine program; re-evaluate the captured source.');
+  }
+};
 
 const createNoGeometryZooExportResult = (format: ZooExportFormat) => {
   switch (format) {
     case 'glb': {
-      return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))]);
+      return { files: [createExportFile('glb', 'model.glb', asBuffer(createEmptyGlb()))] as const };
     }
 
     case 'gltf': {
-      return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(createEmptyGltf()))]);
+      return { files: [createExportFile('gltf', 'model.gltf', asBuffer(createEmptyGltf()))] as const };
     }
 
     case 'step':
     case 'stl': {
-      return createKernelError([
+      throw new KclBuildError([
         {
           message: 'No geometry available for export.',
           code: 'RUNTIME',
@@ -90,7 +101,7 @@ const createNoGeometryZooExportResult = (format: ZooExportFormat) => {
 
     default: {
       const _exhaustive: never = format;
-      return createKernelError([
+      throw new KclBuildError([
         {
           message: `Unsupported export format: ${String(_exhaustive)}`,
           code: 'KERNEL_CAPABILITY_MISSING',
@@ -220,12 +231,21 @@ export const zooKernel = defineKernel({
   name: 'ZooKernel',
   version: '1.2.0',
   optionsSchema: zooOptionsSchema,
-  render: { content: ['includeTopology'] },
-  exportFormats: {
-    stl: { optionsSchema: zooExportSchemas.stl },
-    step: { optionsSchema: zooExportSchemas.step },
-    glb: { optionsSchema: zooExportSchemas.glb, content: ['includeTopology'] },
+  views: { model: { title: 'Model', mimeType: 'model/gltf-binary', content: ['includeTopology'] } },
+  exports: {
+    stl: { title: 'STL', mimeType: 'model/stl', extension: 'stl', optionsSchema: zooExportSchemas.stl },
+    step: { title: 'STEP', mimeType: 'application/step', extension: 'step', optionsSchema: zooExportSchemas.step },
+    glb: {
+      title: 'glTF binary',
+      mimeType: 'model/gltf-binary',
+      extension: 'glb',
+      optionsSchema: zooExportSchemas.glb,
+      content: ['includeTopology'],
+    },
     gltf: {
+      title: 'glTF JSON',
+      mimeType: 'model/gltf+json',
+      extension: 'gltf',
       optionsSchema: zooExportSchemas.gltf,
       content: ['includeTopology'],
     },
@@ -242,7 +262,7 @@ export const zooKernel = defineKernel({
     return context;
   },
 
-  async getDependencies({ entryPath }, { filesystem }, context) {
+  async resolve({ entryPath }, { filesystem }, context) {
     ensureFileSystemManager(context, filesystem);
     const utilities = await getKclUtils(context);
     return discoverKclDependencies(
@@ -252,7 +272,7 @@ export const zooKernel = defineKernel({
     );
   },
 
-  async getParameters({ entryPath }, { filesystem, logger }, context) {
+  async describe({ entryPath }, { filesystem, logger }, context) {
     ensureFileSystemManager(context, filesystem);
     const relativeFilePath = toKclEnginePath(entryPath);
     const code = await filesystem.readFile(entryPath, 'utf8');
@@ -277,12 +297,12 @@ export const zooKernel = defineKernel({
       }
 
       const { defaultParameters, jsonSchema } = KclUtilities.convertKclVariablesToJsonSchema(executionResult.variables);
-      return createKernelSuccess(
-        createKernelParameterDeclaration(defaultParameters, jsonSchema, {
+      return createKernelSuccess({
+        parameters: createKernelParameterDeclaration(defaultParameters, jsonSchema, {
           id: 'urn:taucad:zoo:parameters',
           name: 'ZooParameters',
         }),
-      );
+      });
     } catch (error) {
       const kclErrorResult = handleError(error, code, relativeFilePath);
       logKernelIssues(kclErrorResult.issues, logger);
@@ -290,17 +310,16 @@ export const zooKernel = defineKernel({
     }
   },
 
-  async createGeometry({ entryPath, parameters }, { filesystem, logger, signal }, context) {
+  async evaluate({ entryPath, parameters }, { filesystem, logger, signal }, context) {
     ensureFileSystemManager(context, filesystem);
+    const generation = (context.generation ?? 0) + 1;
+    context.generation = generation;
     const relativeFilePath = toKclEnginePath(entryPath);
     const code = await filesystem.readFile(entryPath, 'utf8');
     try {
       const trimmedCode = code.trim();
       if (trimmedCode === '') {
-        return finalizeRenderOutput({
-          artifacts: [createEmptyGltfGeometry()],
-          nativeHandle: createZooNativeHandle(false),
-        });
+        return { handle: createZooNativeHandle(false, generation) };
       }
 
       const utilities = await getKclUtilitiesWithEngine(context);
@@ -322,12 +341,12 @@ export const zooKernel = defineKernel({
         );
       }
 
-      // Display GLTF fetch is deferred to meshGeometry so a BRep-only export
+      // Display GLTF fetch is deferred to render so a BRep-only export
       // skips the engine round-trip. An executed-but-empty scene is discovered
-      // at fetch/export time; exportGeometry's per-format empty guards cover it.
-      return { nativeHandle: createZooNativeHandle(true) };
+      // at fetch/export time; export's per-format empty guards cover it.
+      return { handle: createZooNativeHandle(true, generation) };
     } catch (error) {
-      if (error instanceof KclBuildError || error instanceof RenderArtifactFinalizationError) {
+      if (error instanceof KclBuildError) {
         throw error;
       }
 
@@ -337,9 +356,10 @@ export const zooKernel = defineKernel({
     }
   },
 
-  async meshGeometry({ nativeHandle, content }, { logger, signal }, context) {
-    if (!nativeHandle.hasGeometry) {
-      return { geometry: createEmptyGltfGeometry() };
+  async render({ handle, content }, { logger, signal }, context) {
+    assertCurrentZooHandle(handle, context);
+    if (!handle.hasGeometry) {
+      return { content: asBuffer(createEmptyGlb()) };
     }
 
     try {
@@ -353,7 +373,7 @@ export const zooKernel = defineKernel({
       );
       const gltf = exportResult[0];
       if (!gltf) {
-        return { geometry: createEmptyGltfGeometry() };
+        return { content: asBuffer(createEmptyGlb()) };
       }
 
       const normalizedGltf = await normalizeGltfGeometryNames(gltf.contents, {
@@ -367,8 +387,7 @@ export const zooKernel = defineKernel({
       const outputGltf = content?.includeTopology
         ? await enrichZooGltfTopology(normalizedGltf, { format: 'glb' })
         : normalizedGltf;
-      const geometry: GeometryGltf = { format: 'gltf', content: outputGltf };
-      return { geometry };
+      return { content: asBuffer(outputGltf) };
     } catch (error) {
       const kclErrorResult = handleError(error);
       logKernelIssues(kclErrorResult.issues, logger);
@@ -377,17 +396,18 @@ export const zooKernel = defineKernel({
   },
 
   // oxlint-disable-next-line complexity -- self-contained, refactor later.
-  async exportGeometry(input, { logger, signal }, context) {
-    const { format, nativeHandle } = input;
+  async export(input, { logger, signal }, context) {
+    const { exportId, handle } = input;
+    assertCurrentZooHandle(handle, context);
 
-    if (!nativeHandle.hasGeometry) {
-      return createNoGeometryZooExportResult(format);
+    if (!handle.hasGeometry) {
+      return createNoGeometryZooExportResult(exportId);
     }
 
     try {
       const utilities = await getKclUtilitiesWithEngine(context);
 
-      switch (format) {
+      switch (exportId) {
         case 'stl': {
           const { options } = input;
           const { binary, coordinateSystem, unit } = options;
@@ -401,7 +421,7 @@ export const zooKernel = defineKernel({
             { signal },
           );
           if (stlResult.length === 0 || !stlResult[0]) {
-            return createKernelError([
+            throw new KclBuildError([
               {
                 message: 'No STL data received from KCL export',
                 code: 'RUNTIME',
@@ -409,7 +429,7 @@ export const zooKernel = defineKernel({
               },
             ]);
           }
-          return createKernelSuccess([createExportFile('stl', 'model.stl', asBuffer(stlResult[0].contents))]);
+          return { files: [createExportFile('stl', 'model.stl', asBuffer(stlResult[0].contents))] };
         }
 
         case 'step': {
@@ -423,7 +443,7 @@ export const zooKernel = defineKernel({
             { signal },
           );
           if (stepResult.length === 0 || !stepResult[0]) {
-            return createKernelError([
+            throw new KclBuildError([
               {
                 message: 'No STEP data received from KCL export',
                 code: 'RUNTIME',
@@ -431,7 +451,7 @@ export const zooKernel = defineKernel({
               },
             ]);
           }
-          return createKernelSuccess([createExportFile('step', 'model.step', asBuffer(stepResult[0].contents))]);
+          return { files: [createExportFile('step', 'model.step', asBuffer(stepResult[0].contents))] };
         }
 
         case 'glb': {
@@ -439,7 +459,7 @@ export const zooKernel = defineKernel({
           const { coordinateSystem, unit } = options;
           const glbResult = await utilities.exportFromMemory({ type: 'gltf', storage: 'binary' }, { signal });
           if (glbResult.length === 0 || !glbResult[0]) {
-            return createKernelError([
+            throw new KclBuildError([
               {
                 message: 'No GLB data received from KCL export',
                 code: 'RUNTIME',
@@ -461,7 +481,7 @@ export const zooKernel = defineKernel({
             sceneNameSource: 'external-generated',
           });
           const output = content?.includeTopology ? await enrichZooGltfTopology(glb, { format: 'glb' }) : glb;
-          return createKernelSuccess([createExportFile('glb', 'model.glb', asBuffer(output))]);
+          return { files: [createExportFile('glb', 'model.glb', asBuffer(output))] };
         }
 
         case 'gltf': {
@@ -476,7 +496,7 @@ export const zooKernel = defineKernel({
             { signal },
           );
           if (gltfResult.length === 0 || !gltfResult[0]) {
-            return createKernelError([
+            throw new KclBuildError([
               {
                 message: 'No GLTF data received from KCL export',
                 code: 'RUNTIME',
@@ -498,12 +518,12 @@ export const zooKernel = defineKernel({
             sceneNameSource: 'external-generated',
           });
           const output = content?.includeTopology ? await enrichZooGltfTopology(gltf, { format: 'gltf' }) : gltf;
-          return createKernelSuccess([createExportFile('gltf', 'model.gltf', asBuffer(output))]);
+          return { files: [createExportFile('gltf', 'model.gltf', asBuffer(output))] };
         }
 
         default: {
-          const _exhaustive: never = format;
-          return createKernelError([
+          const _exhaustive: never = exportId;
+          throw new KclBuildError([
             {
               message: `Unsupported export format: ${String(_exhaustive)}`,
               code: 'KERNEL_CAPABILITY_MISSING',
@@ -513,21 +533,20 @@ export const zooKernel = defineKernel({
         }
       }
     } catch (error) {
+      if (error instanceof KclBuildError) {
+        throw error;
+      }
       const kclErrorResult = handleError(error);
       logKernelIssues(kclErrorResult.issues, logger);
-      return kclErrorResult;
+      throw new KclBuildError(kclErrorResult.issues);
     }
   },
 
-  isNativeHandleValid({ nativeHandle }, _runtime, context) {
-    if (!nativeHandle.hasGeometry) {
-      return true;
-    }
-
-    return context.kclUtils?.canExportFromMemory === true;
+  isHandleValid({ handle }, _runtime, context) {
+    return isCurrentZooHandle(handle, context);
   },
 
-  async cleanup(context) {
+  async onDispose(context) {
     await context.kclUtils?.cleanup();
     context.kclUtils = undefined;
   },

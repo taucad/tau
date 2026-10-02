@@ -22,12 +22,13 @@ const exportFixture = async (
   const client = createRuntimeClient({
     transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs(fixture.files) }),
   });
+  const document = client.open({ source: { path: fixture.mainFile }, watch: false });
   try {
-    const result = await client.export('glb', { source: { path: fixture.mainFile } });
+    const result = await document.export('glb');
     if (!result.success) {
       throw new Error(result.issues.map(({ message }) => message).join('; '));
     }
-    const output = result.data.find(({ name }) => name.endsWith('.glb'))?.bytes;
+    const output = result.files.find(({ name }) => name.endsWith('.glb'))?.bytes;
     if (output === undefined) {
       throw new Error('Runtime returned no GLB output.');
     }
@@ -36,7 +37,8 @@ const exportFixture = async (
       sha256: createHash('sha256').update(output).digest('hex'),
     };
   } finally {
-    client.terminate();
+    document.close();
+    await client.shutdown();
   }
 };
 

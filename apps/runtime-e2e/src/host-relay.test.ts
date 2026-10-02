@@ -94,11 +94,13 @@ describe('Tau Host production-surface relay', { concurrent: false }, () => {
     const local = createRuntimeClient({
       transport: inProcessTransport({ runtime: webSocketRuntime, fileSystem }),
     });
+    const remoteDocument = remote.open({ source: { path: 'main.ts' }, watch: false });
+    const localDocument = local.open({ source: { path: 'main.ts' }, watch: false });
 
     try {
       const [remoteExport, localExport] = await Promise.all([
-        remote.export('glb', { source: { path: 'main.ts' } }),
-        local.export('glb', { source: { path: 'main.ts' } }),
+        remoteDocument.export('glb'),
+        localDocument.export('glb'),
       ]);
       const remoteBytes = extractGltfFromExportResult(remoteExport);
       const localBytes = extractGltfFromExportResult(localExport);
@@ -106,6 +108,8 @@ describe('Tau Host production-surface relay', { concurrent: false }, () => {
       expect(remoteBytes).toBeDefined();
       expect(Buffer.from(remoteBytes!).equals(Buffer.from(localBytes!))).toBe(true);
     } finally {
+      remoteDocument.close();
+      localDocument.close();
       remote.terminate();
       local.terminate();
     }

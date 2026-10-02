@@ -11,7 +11,7 @@ export const parameterUnits = defineMiddleware({
     angleDefault: z.enum(['deg', 'rad']).default('deg'),
   }),
 
-  async wrapGetParameters(input, handler, { options }) {
+  async wrapDescribe(input, handler, { options }) {
     const result = await handler(input);
     if (!result.success || input.resolution?.mode === 'declared-only') {
       return result;
@@ -22,7 +22,13 @@ export const parameterUnits = defineMiddleware({
     }
     return {
       ...result,
-      data: await inferParameterManifest(result.data, { angleDefault: options.angleDefault, language }),
+      data: {
+        ...result.data,
+        parameters: await inferParameterManifest(result.data.parameters, {
+          angleDefault: options.angleDefault,
+          language,
+        }),
+      },
     };
   },
 });

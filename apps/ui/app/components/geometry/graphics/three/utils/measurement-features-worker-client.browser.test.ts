@@ -80,6 +80,7 @@ describe('cold mesh measurement graph worker', () => {
       );
       sliceDurations.push(performance.now() - scanStart);
       // Match the catalog's timer boundary between feature batches.
+      // oxlint-disable-next-line no-await-in-loop -- each batch needs its own event-loop turn to measure blocking.
       await new Promise<void>((resolve) => {
         setTimeout(resolve, 0);
       });

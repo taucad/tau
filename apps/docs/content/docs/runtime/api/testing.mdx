@@ -17,12 +17,12 @@ npm install -D @taucad/runtime-testing vitest
 
 ## Runtime Harnesses
 
-| Function                     | Description                                                                                  |
-| ---------------------------- | -------------------------------------------------------------------------------------------- |
-| `createTestRuntimeClient`    | Create a real client over `inProcessTransport` with an isolated in-memory filesystem         |
-| `createTestGeometry`         | Render one fixture through a temporary client and shut the client down before returning      |
-| `getTestParameters`          | Resolve one fixture's parameter schema through a temporary client and shut it down afterward |
-| `describeBundlerConformance` | Run the shared bundler conformance suite against a custom bundler definition                 |
+| Function                     | Description                                                                                                                    |
+| ---------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| `createTestRuntimeClient`    | Create a real client over `inProcessTransport` with an isolated in-memory filesystem                                           |
+| `createTestGeometry`         | Render one fixture with the runtime's typed `open` request and optional named-view callback; close the client before returning |
+| `getTestParameters`          | Resolve one fixture's parameter schema through a temporary client and shut it down afterward                                   |
+| `describeBundlerConformance` | Run the shared bundler conformance suite against a custom bundler definition                                                   |
 
 Callers own clients returned by `createTestRuntimeClient` and must call `shutdown()`. The two convenience helpers own and close the clients they create.
 
@@ -38,10 +38,9 @@ Callers own clients returned by `createTestRuntimeClient` and must call `shutdow
 | `createMockDependencies`          | Create standard dependency records                                |
 | `createMockCreateGeometryHandler` | Create a middleware geometry handler                              |
 | `createMockGetParametersHandler`  | Create a middleware parameter handler                             |
-| `createSuccessResult`             | Create a successful geometry result                               |
-| `createGltfSuccessResult`         | Create a successful glTF result                                   |
 | `createErrorResult`               | Create a failed geometry result                                   |
-| `assertSuccess` / `assertFailure` | Assert and narrow a runtime result                                |
+| `assertSuccess` / `assertFailure` | Assert and narrow a kernel result                                 |
+| `assertRenderingSuccess`          | Assert and narrow a public document rendering                     |
 | `createMockInput`                 | Create a middleware geometry request                              |
 | `createGeometryFile`              | Create a normalized file locator for direct definition unit tests |
 
@@ -55,7 +54,7 @@ Callers own clients returned by `createTestRuntimeClient` and must call `shutdow
 import { afterEach, describe, expect, it } from 'vitest';
 import { esbuild } from '@taucad/esbuild';
 import { replicad } from '@taucad/replicad';
-import { assertSuccess, createGeometryTestHelpers, createTestRuntimeClient } from '@taucad/runtime-testing';
+import { assertRenderingSuccess, createGeometryTestHelpers, createTestRuntimeClient } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
 const runtime = defineRuntime({
@@ -82,12 +81,16 @@ describe('kernel test', () => {
     });
     clients.add(client);
 
-    const outcome = await client.render({ source: { path: 'main.ts' } });
+    const document = client.open({ source: { path: 'main.ts' } });
+    const view = document.view('model');
+    const outcome = await view.rendering();
     expect(outcome.superseded).toBe(false);
     if (outcome.superseded) return;
 
-    assertSuccess(outcome.geometry);
-    await createGeometryTestHelpers().expectValidGltf(outcome.geometry);
+    assertRenderingSuccess(outcome.rendering);
+    await createGeometryTestHelpers().expectValidGltf(outcome.rendering);
+    view.close();
+    document.close();
   });
 });
 ```

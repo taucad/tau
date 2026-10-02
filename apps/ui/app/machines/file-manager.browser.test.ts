@@ -30,33 +30,33 @@ const verifyPublicReuse = async (
     name: 'File manager compute fixture',
     version: '1.0.0',
     extensions: ['compute'],
-    exportFormats: {},
+    views: { model: { title: 'Model', mimeType: 'model/gltf-binary' } },
+    exports: {},
     async initialize() {
       return {};
     },
-    async getDependencies(input) {
+    async resolve(input) {
       return { resolved: [input.entryPath], unresolved: [] };
     },
-    async getParameters() {
+    async describe() {
       return {
         success: true,
         data: {
-          defaults: {},
-          schema: {
-            $schema: 'https://json-structure.org/meta/extended/v0/#',
-            $id: 'urn:taucad:test:file-manager-compute-parameters',
-            $uses: ['JSONSchemaUnits'],
-            name: 'FileManagerComputeParameters',
-            type: 'object',
+          parameters: {
+            defaults: {},
+            schema: {
+              $schema: 'https://json-structure.org/meta/extended/v0/#',
+              $id: 'urn:taucad:test:file-manager-compute-parameters',
+              $uses: ['JSONSchemaUnits'],
+              name: 'FileManagerComputeParameters',
+              type: 'object',
+            },
           },
         },
         issues: [],
       };
     },
-    async exportGeometry() {
-      return { success: false, issues: [] };
-    },
-    async createGeometry(_input, runtime) {
+    async evaluate(_input, runtime) {
       if (runtime.compute.status !== 'on') {
         throw new Error('compute capability was off');
       }
@@ -89,11 +89,10 @@ const verifyPublicReuse = async (
         },
       });
       publication = 'publication' in result ? result.publication : undefined;
-      return {
-        geometry: { format: 'gltf', content: new Uint8Array([1]) },
-        nativeHandle: {},
-        issues: [],
-      };
+      return { handle: {}, views: ['model'] as const, exports: [] as const };
+    },
+    async render() {
+      return { content: new Uint8Array([1]) };
     },
   })();
   const createClient = (store = existingStore) => {
@@ -108,32 +107,40 @@ const verifyPublicReuse = async (
     return { client, connection };
   };
   const producer = createClient();
-  const rendered = await producer.client.render({
-    source: { files: { 'main.compute': 'producer' } },
-  });
+  const producerDocument = producer.client.open({ source: { files: { 'main.compute': 'producer' } } });
+  const evaluated = await producerDocument.evaluation();
+  const rendered = await producerDocument.view('model').rendering();
   if (!expectRevoked) {
-    expect(rendered).toMatchObject({ superseded: false, geometry: { success: true, issues: [] } });
+    expect(evaluated).toMatchObject({ superseded: false, evaluation: { success: true, issues: [] } });
+    expect(rendered).toMatchObject({ superseded: false, rendering: { success: true, issues: [] } });
   }
   if (expectRevoked) {
-    expect(rendered.superseded || !rendered.geometry.success).toBe(true);
+    expect(evaluated.superseded || !evaluated.evaluation.success).toBe(true);
     expect(publication).toBeUndefined();
   } else if (expectedSolves === 1) {
     expect(publication).toMatchObject({ status: 'stored' });
   } else {
     expect(publication).toBeUndefined();
   }
-  await producer.client.shutdown();
+  producerDocument.close();
+  producer.client.terminate();
   producer.connection?.dispose();
   if (existingStore) {
     return;
   }
   const consumer = createClient();
-  const consumed = await consumer.client.render({
-    source: { files: { 'main.compute': 'consumer' } },
+  const consumerDocument = consumer.client.open({ source: { files: { 'main.compute': 'consumer' } } });
+  await expect(consumerDocument.evaluation()).resolves.toMatchObject({
+    superseded: false,
+    evaluation: { success: true },
   });
-  expect(consumed).toMatchObject({ superseded: false, geometry: { success: true, issues: [] } });
+  await expect(consumerDocument.view('model').rendering()).resolves.toMatchObject({
+    superseded: false,
+    rendering: { success: true, issues: [] },
+  });
   expect(solves).toBe(expectedSolves);
-  await consumer.client.shutdown();
+  consumerDocument.close();
+  consumer.client.terminate();
   consumer.connection?.dispose();
 };
 

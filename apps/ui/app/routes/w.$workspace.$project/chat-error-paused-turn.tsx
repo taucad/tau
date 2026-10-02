@@ -98,7 +98,13 @@ export const ChatErrorPausedTurn = memo(function ({
             {resumable ? 'Resume' : 'Try again'}
           </Button>
           {resumable && canTryAgain ? (
-            <Button variant='outline' size='xs' onClick={() => { regenerate(); }}>
+            <Button
+              variant='outline'
+              size='xs'
+              onClick={() => {
+                regenerate();
+              }}
+            >
               <RefreshCcw className='size-3.5' />
               Try again
             </Button>

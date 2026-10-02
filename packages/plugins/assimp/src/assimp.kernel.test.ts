@@ -1,8 +1,6 @@
-/* oxlint-disable @typescript-eslint/no-unsafe-assignment -- defineKernel intentionally erases private backend context */
 import { readFileSync } from 'node:fs';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
-import { createMockKernelRuntime, validateGlbData } from '@taucad/runtime-testing';
-import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
+import { createMockKernelRuntime, expectKernelProjectionOrder, validateGlbData } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { defaultPostProcess } from 'libassimp';
 import type { AssimpFile, ConvertOptions, ConvertResult } from 'libassimp';
@@ -11,7 +9,7 @@ import { assimpKernel } from '#assimp.kernel.js';
 
 type ConvertHandler = (files: readonly AssimpFile[], options: ConvertOptions<'glb'>) => Promise<ConvertResult>;
 
-const definition = await resolveRuntimePluginDefinition<AnyKernelDefinition>('kernel', assimpKernel());
+const definition = await resolveRuntimePluginDefinition('kernel', assimpKernel());
 const runtime = createMockKernelRuntime();
 let context!: Awaited<ReturnType<typeof definition.initialize>>;
 
@@ -29,7 +27,11 @@ const createGlb = (): Uint8Array<ArrayBuffer> => {
   return bytes;
 };
 const convertedGlb = createGlb();
-const createContext = (handler: ConvertHandler) => ({ assimp: { convert: vi.fn(handler) } });
+// This focused fixture supplies only the Assimp method exercised by these hook tests.
+const createContext = (handler: ConvertHandler) =>
+  ({ assimp: { convert: vi.fn(handler) } }) as unknown as Parameters<typeof definition.evaluate>[2] & {
+    assimp: { convert: ReturnType<typeof vi.fn<ConvertHandler>> };
+  };
 const createCachedRuntime = (cache: ReadonlyMap<string, Uint8Array<ArrayBuffer> | string>, signal?: AbortSignal) => ({
   ...createMockKernelRuntime({ signal }),
   fileContentCache: cache,
@@ -40,7 +42,7 @@ beforeAll(async () => {
 });
 
 afterAll(async () => {
-  await definition.cleanup?.(context);
+  await definition.onDispose?.(context);
 });
 
 describe('assimpKernel', () => {
@@ -50,20 +52,20 @@ describe('assimpKernel', () => {
     localRuntime.filesystem.mocks.stat.mockResolvedValue({ type: 'file', size: 4, mtimeMs: 0 });
     localRuntime.filesystem.mocks.readFile.mockResolvedValue(encode('fixture'));
 
-    await expect(definition.getDependencies({ entryPath: 'models/main.obj' }, localRuntime, context)).resolves.toEqual({
+    await expect(definition.resolve({ entryPath: 'models/main.obj' }, localRuntime, context)).resolves.toEqual({
       resolved: ['models/main.obj', 'models/texture.png'],
       unresolved: [],
     });
-    await expect(
-      definition.getParameters({ entryPath: 'models/main.obj' }, localRuntime, context),
-    ).resolves.toMatchObject({
+    await expect(definition.describe({ entryPath: 'models/main.obj' }, localRuntime, context)).resolves.toMatchObject({
       success: true,
       data: {
-        defaults: {},
-        schema: {
-          $id: 'urn:taucad:assimp:parameters',
-          name: 'AssimpParameters',
-          type: 'object',
+        parameters: {
+          defaults: {},
+          schema: {
+            $id: 'urn:taucad:assimp:parameters',
+            name: 'AssimpParameters',
+            type: 'object',
+          },
         },
       },
       issues: [],
@@ -87,8 +89,8 @@ describe('assimpKernel', () => {
       return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
-    const result = await definition.createGeometry(
-      { entryPath: 'models/main.obj', parameters: {} },
+    const result = await definition.evaluate(
+      { entryPath: 'models/main.obj', parameters: {}, options: {} },
       localRuntime,
       localContext,
     );
@@ -98,8 +100,37 @@ describe('assimpKernel', () => {
     expect(localRuntime.filesystem.mocks.exists).not.toHaveBeenCalled();
     expect(localRuntime.filesystem.mocks.readdir).not.toHaveBeenCalled();
     expect(localRuntime.filesystem.mocks.stat).not.toHaveBeenCalled();
-    expect(result.geometry).toEqual({ format: 'gltf', content: convertedGlb });
-    expect(result.nativeHandle).toEqual(convertedGlb);
+    expect(result.handle).toEqual(convertedGlb);
+    expect(
+      await definition.render!({ handle: result.handle, view: 'model', options: {} }, localRuntime, localContext),
+    ).toEqual({ content: convertedGlb });
+    const freshSnapshot = definition.serializeHandle!({ handle: result.handle }, localRuntime, localContext);
+    const render = async (handle: typeof result.handle) => {
+      const projected = await definition.render!({ handle, view: 'model', options: {} }, localRuntime, localContext);
+      return projected.content;
+    };
+    const exportModel = async (
+      handle: typeof result.handle,
+      coordinateSystem: 'y-up' | 'z-up',
+      length: 'meter' | 'millimeter',
+    ) => {
+      const projected = await definition.export!(
+        { exportId: 'glb', handle, options: { coordinateSystem, unit: { length } } },
+        localRuntime,
+        localContext,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(result.handle),
+      renderB: async () => exportModel(result.handle, 'y-up', 'meter'),
+      export: async () => exportModel(result.handle, 'z-up', 'millimeter'),
+      freshB: async () => {
+        const fresh = definition.deserializeHandle!({ serialized: freshSnapshot }, localRuntime, localContext);
+        return exportModel(fresh, 'y-up', 'meter');
+      },
+    });
+    expect(ordered.first).toEqual(convertedGlb);
   });
 
   it('reads an uncached entry exactly once without inventory probes', async () => {
@@ -111,7 +142,11 @@ describe('assimpKernel', () => {
       return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
-    await definition.createGeometry({ entryPath: 'models/main.obj', parameters: {} }, localRuntime, localContext);
+    await definition.evaluate(
+      { entryPath: 'models/main.obj', parameters: {}, options: {} },
+      localRuntime,
+      localContext,
+    );
 
     expect(localRuntime.filesystem.mocks.readFile).toHaveBeenCalledExactlyOnceWith('models/main.obj', undefined);
     expect(localRuntime.filesystem.mocks.exists).not.toHaveBeenCalled();
@@ -131,7 +166,11 @@ describe('assimpKernel', () => {
       return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
-    await definition.createGeometry({ entryPath: 'models/main.obj', parameters: {} }, localRuntime, localContext);
+    await definition.evaluate(
+      { entryPath: 'models/main.obj', parameters: {}, options: {} },
+      localRuntime,
+      localContext,
+    );
 
     expect(localRuntime.filesystem.mocks.readFile).toHaveBeenCalledExactlyOnceWith('shared/main.mtl', undefined);
     expect(localRuntime.filesystem.mocks.exists).not.toHaveBeenCalled();
@@ -146,7 +185,7 @@ describe('assimpKernel', () => {
       return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
-    await definition.createGeometry({ entryPath: 'main.obj', parameters: {} }, localRuntime, localContext);
+    await definition.evaluate({ entryPath: 'main.obj', parameters: {}, options: {} }, localRuntime, localContext);
 
     expect(localRuntime.filesystem.mocks.readFile).toHaveBeenCalledExactlyOnceWith('missing.mtl', undefined);
   });
@@ -166,7 +205,7 @@ describe('assimpKernel', () => {
     });
 
     await expect(
-      definition.createGeometry({ entryPath: 'main.obj', parameters: {} }, localRuntime, localContext),
+      definition.evaluate({ entryPath: 'main.obj', parameters: {}, options: {} }, localRuntime, localContext),
     ).rejects.toBe(failure);
     expect(localContext.assimp.convert).toHaveBeenCalledOnce();
     expect(localRuntime.filesystem.mocks.readFile).toHaveBeenCalledExactlyOnceWith('material.mtl', undefined);
@@ -190,7 +229,11 @@ describe('assimpKernel', () => {
       return { files: [{ name: 'converted.glb', bytes: convertedGlb }] };
     });
 
-    await definition.createGeometry({ entryPath: 'models/main.obj', parameters: {} }, localRuntime, localContext);
+    await definition.evaluate(
+      { entryPath: 'models/main.obj', parameters: {}, options: {} },
+      localRuntime,
+      localContext,
+    );
 
     expect(localRuntime.filesystem.mocks.readFile).toHaveBeenCalledExactlyOnceWith('shared/main.mtl', undefined);
   });
@@ -207,7 +250,7 @@ describe('assimpKernel', () => {
     });
 
     await expect(
-      definition.createGeometry({ entryPath: 'main.obj', parameters: {} }, localRuntime, localContext),
+      definition.evaluate({ entryPath: 'main.obj', parameters: {}, options: {} }, localRuntime, localContext),
     ).rejects.toBe(reason);
   });
 
@@ -219,7 +262,7 @@ describe('assimpKernel', () => {
     const localContext = createContext(async () => ({ files: [{ name: 'converted.glb', bytes: convertedGlb }] }));
 
     await expect(
-      definition.createGeometry({ entryPath: 'main.obj', parameters: {} }, localRuntime, localContext),
+      definition.evaluate({ entryPath: 'main.obj', parameters: {}, options: {} }, localRuntime, localContext),
     ).rejects.toBe(reason);
     expect(localRuntime.filesystem.mocks.readFile).not.toHaveBeenCalled();
     expect(localContext.assimp.convert).not.toHaveBeenCalled();
@@ -232,52 +275,45 @@ describe('assimpKernel', () => {
     }));
 
     await expect(
-      definition.createGeometry({ entryPath: 'main.obj', parameters: {} }, localRuntime, localContext),
+      definition.evaluate({ entryPath: 'main.obj', parameters: {}, options: {} }, localRuntime, localContext),
     ).rejects.toThrow('Failed to import obj file: libassimp returned no GLB output');
   });
 
   it('should export GLB bytes and reject an empty native handle', async () => {
     await expect(
-      definition.exportGeometry(
+      definition.export!(
         {
-          format: 'glb',
-          nativeHandle: convertedGlb,
+          exportId: 'glb',
+          handle: convertedGlb,
           options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
         },
         runtime,
         context,
       ),
-    ).resolves.toEqual({
-      success: true,
-      data: [{ name: 'model.glb', bytes: convertedGlb, mimeType: 'model/gltf-binary' }],
-      issues: [],
-    });
+    ).resolves.toEqual({ files: [{ name: 'model.glb', bytes: convertedGlb, mimeType: 'model/gltf-binary' }] });
     await expect(
-      definition.exportGeometry(
+      definition.export!(
         {
-          format: 'glb',
-          nativeHandle: new Uint8Array(),
+          exportId: 'glb',
+          handle: new Uint8Array(),
           options: { coordinateSystem: 'y-up', unit: { length: 'meter' } },
         },
         runtime,
         context,
       ),
-    ).resolves.toEqual({
-      success: false,
-      issues: [{ message: 'No geometry available for export.', code: 'RUNTIME', type: 'runtime', severity: 'error' }],
-    });
+    ).rejects.toThrow('No geometry available for export.');
   });
 
   it('should copy native-handle bytes across serialization boundaries', () => {
-    const { serializeNativeHandle, deserializeNativeHandle } = definition;
-    expect(serializeNativeHandle).toBeDefined();
-    expect(deserializeNativeHandle).toBeDefined();
-    if (!serializeNativeHandle) {
+    const { serializeHandle, deserializeHandle } = definition;
+    expect(serializeHandle).toBeDefined();
+    expect(deserializeHandle).toBeDefined();
+    if (!serializeHandle) {
       return;
     }
 
-    const serialized = serializeNativeHandle({ nativeHandle: convertedGlb }, runtime, context);
-    const restored = deserializeNativeHandle({ serializedNativeHandle: serialized }, runtime, context);
+    const serialized = serializeHandle({ handle: convertedGlb }, runtime, context);
+    const restored = deserializeHandle({ serialized }, runtime, context);
 
     expect(serialized).toEqual(convertedGlb);
     expect(serialized).not.toBe(convertedGlb);
@@ -293,11 +329,13 @@ describe('assimpKernel', () => {
       runtime.filesystem.mocks.stat.mockResolvedValueOnce({ type: 'file', size: bytes.length, mtimeMs: 0 });
       runtime.filesystem.mocks.readFile.mockResolvedValue(bytes);
 
-      const result = await definition.createGeometry({ entryPath: name, parameters: {} }, runtime, context);
-      expect(result.geometry?.format).toBe('gltf');
-      if (result.geometry?.format === 'gltf') {
-        validateGlbData(result.geometry.content);
-      }
+      const result = await definition.evaluate({ entryPath: name, parameters: {}, options: {} }, runtime, context);
+      const artifact = await definition.render!(
+        { handle: result.handle, view: 'model', options: {} },
+        runtime,
+        context,
+      );
+      validateGlbData(artifact.content as Uint8Array<ArrayBuffer>);
     },
   );
 });

@@ -14,21 +14,26 @@ afterEach(async () => {
   }
 });
 
-it('should render file source in Geist Mono with distinct syntax colors', async () => {
+it.each([
+  ['main.tsx', 'export default () => (<box name="example" />);'],
+  ['main.py', '"""A Python module."""\ndef polar(radius):\n    return 2.0 # scale'],
+])('should render %s in Geist Mono with distinct syntax colors', async (path, source) => {
   await page.viewport(1000, 600);
   const { container } = render(
     <div style={{ position: 'fixed', top: 0, left: 0, width: 800, height: 300 }}>
       <CodeEditor
         className='h-full bg-background'
-        path='file:///main.tsx'
-        defaultLanguage={getMonacoLanguage('main.tsx')}
-        defaultValue='export default () => (<box name="example" />);'
+        path={`file:///${path}`}
+        defaultLanguage={getMonacoLanguage(path)}
+        defaultValue={source}
         onChange={() => undefined}
       />
     </div>,
   );
 
-  await expect.poll(() => container.querySelector('.view-line')?.textContent, { timeout: 10_000 }).toContain('export');
+  await expect
+    .poll(() => container.querySelector('.view-line')?.textContent.replaceAll('\u00A0', ' '), { timeout: 10_000 })
+    .toContain(source.split('\n')[0]);
   await expect.poll(() => container.querySelector('.overflow-guard')?.getBoundingClientRect().height).toBe(300);
   const line = container.querySelector('.view-line')!;
   expect(line.getBoundingClientRect().top).toBeGreaterThanOrEqual(0);
@@ -36,7 +41,7 @@ it('should render file source in Geist Mono with distinct syntax colors', async 
   expect(getComputedStyle(line).getPropertyValue('--font-mono')).toContain('Geist Mono');
   expect(getComputedStyle(line).fontFamily).toContain('Geist Mono');
   const monaco = (await configureMonaco())!;
-  expect(monaco.editor.getModel(monaco.Uri.file('/main.tsx'))?.getLanguageId()).toBe('typescriptreact');
+  expect(monaco.editor.getModel(monaco.Uri.file(`/${path}`))?.getLanguageId()).toBe(getMonacoLanguage(path));
   await expect
     .poll(
       () =>

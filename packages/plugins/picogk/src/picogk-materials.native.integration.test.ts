@@ -7,18 +7,14 @@ import { tmpdir } from 'node:os';
 import { geometryCache } from '@taucad/middleware';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { defineKernel } from '@taucad/runtime/kernel';
 import { createSqliteComputeEngine, fromSqlite } from '@taucad/runtime/node';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { createNodeIo, srgbToLinear } from '@taucad/geometry-core';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { mock } from 'vitest-mock-extended';
 import { defineRuntime } from '@taucad/runtime/worker';
-import {
-  assertSuccess,
-  createMockKernelRuntime,
-  createTestRuntimeClient,
-  extractGltfFromResult,
-} from '@taucad/runtime-testing';
+import { createMockKernelRuntime, createTestRuntimeClient, extractGltfFromResult } from '@taucad/runtime-testing';
 import { describe, expect, it, vi } from 'vitest';
 import { loadPicogkKernelOptions, picogkKernel } from '#index.js';
 import { PicogkSession } from '#picogk-session.js';
@@ -64,6 +60,13 @@ const parse = async (bytes: Uint8Array<ArrayBuffer>) => {
   const io = await createNodeIo();
   return { ...(await io.binaryToJSON(bytes)), document: await io.readBinary(bytes) };
 };
+function assertSuccess<
+  Result extends { readonly success: boolean; readonly issues: ReadonlyArray<{ message: string }> },
+>(result: Result): asserts result is Extract<Result, { success: true }> {
+  if (!result.success) {
+    throw new Error(result.issues.map(({ message }) => message).join('; '));
+  }
+}
 
 describe('typed PicoGK materials through the production worker', () => {
   it('should receive full material metadata above 1 MiB through the production session', async () => {
@@ -120,12 +123,13 @@ Library.Go(1f, () => {
   it('preserves all factors, maps, shared resources, UV frames, exports and restored handles', async () => {
     const client = createTestRuntimeClient({ runtime, files: { 'main.cs': fullMaterialSource } });
     try {
-      const rendered = await client.render({ source: { path: 'main.cs' } });
+      const opened = client.open({ source: { path: 'main.cs' } });
+      const rendered = await opened.view('model').rendering();
       if (rendered.superseded) {
         throw new Error('Unexpected superseded material render');
       }
-      assertSuccess(rendered.geometry);
-      const bytes = extractGltfFromResult(rendered.geometry)!;
+      assertSuccess(rendered.rendering);
+      const bytes = extractGltfFromResult(rendered.rendering)!;
       const { json, document } = await parse(bytes);
       const material = json.materials?.find((entry) => entry.name === 'Full physical material');
       expect(material?.alphaMode).toBe('MASK');
@@ -249,34 +253,34 @@ Library.Go(1f, () => {
         expect(t[0]! * n[0]! + t[1]! * n[1]! + t[2]! * n[2]!).toBeCloseTo(0, 5);
         expect(Math.abs(t[3]!)).toBe(1);
       }
-      const exported = await client.export('glb', {
-        exportOptions: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
+      const exported = await opened.export('glb', {
+        options: { coordinateSystem: 'z-up', unit: { length: 'millimeter' } },
       });
       assertSuccess(exported);
-      const { json: millimeters } = await parse(exported.data[0]!.bytes);
+      const { json: millimeters } = await parse(exported.files[0].bytes);
       const volume = millimeters.materials?.find((entry) => entry.name === material?.name)?.extensions?.[
         'KHR_materials_volume'
       ];
       expect(volume).toMatchObject({ thicknessFactor: expect.closeTo(2), attenuationDistance: 250 });
-      const gltf = await client.export('gltf');
+      const gltf = await opened.export('gltf');
       assertSuccess(gltf);
-      const jsonExport: unknown = JSON.parse(new TextDecoder().decode(gltf.data[0]!.bytes));
+      const jsonExport: unknown = JSON.parse(new TextDecoder().decode(gltf.files[0].bytes));
       expect(jsonExport).toMatchObject({ images: expect.any(Array), textures: [{ source: 0, sampler: 0 }] });
       const io = await createNodeIo();
       const resolved = await io.readJSON({
-        json: JSON.parse(new TextDecoder().decode(gltf.data[0]!.bytes)) as Awaited<
+        json: JSON.parse(new TextDecoder().decode(gltf.files[0].bytes)) as Awaited<
           ReturnType<typeof io.writeJSON>
         >['json'],
-        resources: Object.fromEntries(gltf.data.slice(1).map(({ name, bytes: resource }) => [name, resource])),
+        resources: Object.fromEntries(gltf.files.slice(1).map(({ name, bytes: resource }) => [name, resource])),
       });
       expect(resolved.getRoot().listMeshes()).toHaveLength(2);
       expect(resolved.getRoot().listTextures()[0]?.getImage()).toEqual(new Uint8Array(Buffer.from(png, 'base64')));
       const definition = await resolveRuntimePluginDefinition('kernel', picogkKernel(options));
-      const serialize = definition.serializeNativeHandle!;
-      const serialized = serialize({ nativeHandle: { glb: bytes } }, createMockKernelRuntime(), mock());
+      const serialize = definition.serializeHandle!;
+      const serialized = serialize({ handle: { glb: bytes } }, createMockKernelRuntime(), mock());
       const freshDefinition = await resolveRuntimePluginDefinition('kernel', picogkKernel(options));
-      const restored = freshDefinition.deserializeNativeHandle!(
-        { serializedNativeHandle: structuredClone(serialized) },
+      const restored = freshDefinition.deserializeHandle!(
+        { serialized: structuredClone(serialized) },
         createMockKernelRuntime(),
         mock(),
       );
@@ -303,10 +307,17 @@ Library.Go(1f, () => {
 
   it('restores native materials in a fresh host from SQLite and invalidates changed image assets', async () => {
     const directory = await mkdtemp(join(tmpdir(), 'tau-picogk-pbr-cache-'));
-    const plugin = picogkKernel(options);
-    const definition = await resolveRuntimePluginDefinition('kernel', plugin);
-    const build = vi.spyOn(definition, 'createGeometry');
-    const restore = vi.spyOn(definition, 'deserializeNativeHandle');
+    const definition = await resolveRuntimePluginDefinition('kernel', picogkKernel(options));
+    const build = vi.fn(definition.evaluate);
+    const restore = vi.fn(definition.deserializeHandle);
+    const plugin = defineKernel({
+      ...definition,
+      id: 'picogk',
+      extensions: ['cs'],
+      evaluate: build,
+      serializeHandle: definition.serializeHandle!,
+      deserializeHandle: restore,
+    })(options);
     const cachedRuntime = defineRuntime({ kernels: [plugin], middleware: [geometryCache()] });
     const source = fullMaterialSource.replace(
       `Convert.FromBase64String("${png}")`,
@@ -322,24 +333,25 @@ Library.Go(1f, () => {
         }),
       });
       try {
-        const result = await client.render({
+        const opened = client.open({
           source: { entry: 'main.cs', files: { 'main.cs': source, 'map.png': image } },
         });
+        const result = await opened.view('model').rendering();
         if (result.superseded) {
           throw new Error('Unexpected superseded cached render');
         }
-        assertSuccess(result.geometry);
-        const exported = await client.export(format);
+        assertSuccess(result.rendering);
+        const exported = await opened.export(format);
         assertSuccess(exported);
         if (format === 'glb') {
-          return exported.data[0]!.bytes;
+          return exported.files[0].bytes;
         }
         const io = await createNodeIo();
         const document = await io.readJSON({
-          json: JSON.parse(new TextDecoder().decode(exported.data[0]!.bytes)) as Awaited<
+          json: JSON.parse(new TextDecoder().decode(exported.files[0].bytes)) as Awaited<
             ReturnType<typeof io.writeJSON>
           >['json'],
-          resources: Object.fromEntries(exported.data.slice(1).map(({ name, bytes }) => [name, bytes])),
+          resources: Object.fromEntries(exported.files.slice(1).map(({ name, bytes }) => [name, bytes])),
         });
         return await io.writeBinary(document);
       } finally {
@@ -378,8 +390,6 @@ Library.Go(1f, () => {
       expect(modified.document.getRoot().listTextures()[0]?.getImage()).toEqual(changed);
       expect(modified.json.materials).toEqual(baseline.json.materials);
     } finally {
-      build.mockRestore();
-      restore.mockRestore();
       await rm(directory, { recursive: true, force: true });
     }
   }, 120_000);
@@ -399,12 +409,13 @@ Library.Go(1f, () => { var viewer = Library.oViewer();
 });`;
     const client = createTestRuntimeClient({ runtime, files: { 'main.cs': source } });
     try {
-      const result = await client.render({ source: { path: 'main.cs' } });
+      const opened = client.open({ source: { path: 'main.cs' } });
+      const result = await opened.view('model').rendering();
       if (result.superseded) {
         throw new Error('Unexpected superseded phase fixture');
       }
-      assertSuccess(result.geometry);
-      const { json, document } = await parse(extractGltfFromResult(result.geometry)!);
+      assertSuccess(result.rendering);
+      const { json, document } = await parse(extractGltfFromResult(result.rendering)!);
       expect(json.extensionsUsed).toContain('EXT_texture_webp');
       expect(json.images?.map(({ mimeType }) => mimeType)).toEqual(['image/jpeg', 'image/webp']);
       expect(
@@ -463,14 +474,14 @@ Library.Go(1f, () => { var viewer = Library.oViewer();
         const bitangent = transformDirection(cross(sourceN, sourceT).map((value) => value * sourceT[3]!));
         expect(targetT[3]).toBe(dot(cross(targetN, targetT), bitangent) < 0 ? -1 : 1);
       }
-      const exported = await client.export('gltf');
+      const exported = await opened.export('gltf');
       assertSuccess(exported);
       const io = await createNodeIo();
       const resolved = await io.readJSON({
-        json: JSON.parse(new TextDecoder().decode(exported.data[0]!.bytes)) as Awaited<
+        json: JSON.parse(new TextDecoder().decode(exported.files[0].bytes)) as Awaited<
           ReturnType<typeof io.writeJSON>
         >['json'],
-        resources: Object.fromEntries(exported.data.slice(1).map(({ name, bytes }) => [name, bytes])),
+        resources: Object.fromEntries(exported.files.slice(1).map(({ name, bytes }) => [name, bytes])),
       });
       expect(
         resolved
@@ -497,12 +508,13 @@ Library.Go(.5f, () => {
 });`;
     const client = createTestRuntimeClient({ runtime, files: { 'main.cs': source } });
     try {
-      const rendered = await client.render({ source: { path: 'main.cs' } });
+      const opened = client.open({ source: { path: 'main.cs' } });
+      const rendered = await opened.view('model').rendering();
       if (rendered.superseded) {
         throw new Error('Unexpected superseded witness render');
       }
-      assertSuccess(rendered.geometry);
-      const bytes = extractGltfFromResult(rendered.geometry)!;
+      assertSuccess(rendered.rendering);
+      const bytes = extractGltfFromResult(rendered.rendering)!;
       const { json } = await parse(bytes);
       expect(json.materials?.map((material) => material.name)).toEqual([
         'Textured clearcoat',
@@ -534,13 +546,14 @@ Library.Go(.5f, () => {
         },
       });
       try {
-        const rendered = await client.render({ source: { path: 'main.cs' } });
+        const opened = client.open({ source: { path: 'main.cs' } });
+        const rendered = await opened.view('model').rendering();
         if (rendered.superseded) {
           throw new Error('Unexpected superseded invalid material render');
         }
-        expect(rendered.geometry.success).toBe(false);
-        expect(JSON.stringify(rendered.geometry.issues)).toContain(expected);
-        expect(JSON.stringify(rendered.geometry.issues)).toContain('Correct this property and retry');
+        expect(rendered.rendering.success).toBe(false);
+        expect(JSON.stringify(rendered.rendering.issues)).toContain(expected);
+        expect(JSON.stringify(rendered.rendering.issues)).toContain('Correct this property and retry');
       } finally {
         await client.shutdown();
       }

@@ -50,9 +50,9 @@ catalog:
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
   '@fastify/otel': ^0.17.1
-  '@gltf-transform/core': ^4.4.0
-  '@gltf-transform/extensions': ^4.4.0
-  '@gltf-transform/functions': ^4.4.0
+  '@gltf-transform/core': ^4.4.1
+  '@gltf-transform/extensions': ^4.4.1
+  '@gltf-transform/functions': ^4.4.1
   '@inkjs/ui': ^2.0.0
   '@jscad/modeling': ^2.13.0
   '@kittycad/lib': ^2.0.48
@@ -109,6 +109,48 @@ catalog:
   '@size-limit/file': ^12.1.0
   '@tanstack/react-pacer': ^0.22.1
   '@tanstack/react-query': ^5.101.0
+  # tscircuit EDA kernel (@taucad/tscircuit): exact pins by charter D1 — every package is
+  # 0.0.x with no semver guarantee. The @tscircuit/core peers are the modules its published
+  # dist imports at runtime, so the plugin must own them. Never add tscircuit or @tscircuit/eval.
+  '@tscircuit/core': 0.0.1844
+  '@tscircuit/alphabet': 0.0.26
+  '@tscircuit/capacity-autorouter': 0.0.879
+  '@tscircuit/checks': 0.0.183
+  '@tscircuit/circuit-json-util': 0.0.111
+  '@tscircuit/copper-pour-solver': 0.0.52
+  '@tscircuit/create-fdm-enclosure': 0.0.7
+  '@tscircuit/footprinter': 0.0.426
+  '@tscircuit/image-utils': 0.0.10
+  '@tscircuit/infer-cable-insertion-point': 0.0.4
+  '@tscircuit/infgrid-ijump-astar': 0.0.35
+  '@tscircuit/matchpack': 0.0.91
+  '@tscircuit/math-utils': 0.0.38
+  '@tscircuit/manifold-2d': 0.0.6
+  '@tscircuit/miniflex': 0.0.4
+  '@tscircuit/props': 0.0.646
+  '@tscircuit/schematic-match-adapt': 0.0.22
+  '@tscircuit/schematic-trace-solver': 0.0.184
+  '@tscircuit/solver-utils': 0.0.21
+  # Undeclared runtime import of @tscircuit/infgrid-ijump-astar's dist; owning it here hoists it.
+  '@tscircuit/soup-util': 0.0.41
+  bpc-graph: 0.0.67
+  calculate-elbow: 0.0.13
+  circuit-json: 0.0.485
+  circuit-json-to-bpc: 0.0.14
+  circuit-json-to-connectivity-map: 0.0.30
+  # Undeclared runtime import of @tscircuit/schematic-trace-solver's dist; owning it here hoists it.
+  connectivity-map: 1.0.0
+  circuit-json-to-gltf: 0.0.123
+  circuit-json-to-bom-csv: 0.0.17
+  circuit-json-to-readable-netlist: 0.0.17
+  circuit-json-to-spice: 0.0.46
+  circuit-to-svg: 0.0.413
+  format-si-unit: 0.0.14
+  graphics-debug: 0.0.100
+  minicssgrid: 0.0.9
+  schematic-symbols: 0.0.244
+  spicets: 0.0.5
+  spicey: 0.0.14
   '@taucad/kcl-wasm-lib': 0.1.184
   '@testing-library/dom': ^10.4.1
   '@testing-library/jest-dom': 6.6.3

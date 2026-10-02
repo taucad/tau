@@ -201,7 +201,7 @@ export const exportCommand = defineCommand({
     let profileArtifacts: Array<{ name: string; path: string; bytes: number }> = [];
     /*
      * Without these handlers the default signal disposition kills the process before
-     * the worker is drained, so an interrupted export leaks its in-process runtime.
+     * the document closes and the runtime transport shuts down.
      */
     const stopped = Promise.withResolvers<NodeJS.Signals>();
     const onSignal = (signal: NodeJS.Signals): void => {
@@ -209,16 +209,20 @@ export const exportCommand = defineCommand({
     };
     process.once('SIGINT', onSignal);
     process.once('SIGTERM', onSignal);
+    let document: ReturnType<typeof client.open> | undefined;
     try {
+      const opened = client.open({
+        source: { path: inputFilename },
+        parameters: suppliedParameters,
+      });
+      document = opened;
       const exportOutcome = async (): Promise<{
         readonly type: 'result';
         readonly value: ExportResult;
       }> => ({
         type: 'result',
-        value: await client.export(format, {
-          source: { path: inputFilename },
-          parameters: suppliedParameters,
-          ...(exportOptions === undefined ? {} : { exportOptions }),
+        value: await opened.export(format, {
+          ...(exportOptions === undefined ? {} : { options: exportOptions }),
           ...(content === undefined ? {} : { content }),
         }),
       });
@@ -262,10 +266,10 @@ export const exportCommand = defineCommand({
         }
       }
 
-      if (streamToStdout && result.data.length !== 1) {
+      if (streamToStdout && result.files.length !== 1) {
         throw cliError(
           'OUTPUT_STREAM_AMBIGUOUS',
-          `--output - streams one artifact, but this export produced ${result.data.length}. Pass a file path instead.`,
+          `--output - streams one artifact, but this export produced ${result.files.length}. Pass a file path instead.`,
           exitCodes.usage,
         );
       }
@@ -273,7 +277,7 @@ export const exportCommand = defineCommand({
       const outputDirectory = dirname(outputPath);
       const targetPaths = streamToStdout
         ? ['-']
-        : result.data.map((file, index) => {
+        : result.files.map((file, index) => {
             if (!isSafeRelativePath(file.name)) {
               throw new Error(`Export returned an unsafe relative artifact path: ${file.name}`);
             }
@@ -287,7 +291,7 @@ export const exportCommand = defineCommand({
           throw new Error(`Telemetry output path collides with an export artifact: ${telemetryPath}`);
         }
       }
-      profileArtifacts = result.data.map((file, index) => ({
+      profileArtifacts = result.files.map((file, index) => ({
         name: file.name,
         path: targetPaths[index]!,
         bytes: file.bytes.byteLength,
@@ -295,11 +299,11 @@ export const exportCommand = defineCommand({
       profileLedger?.checkpoint('cli.validate-artifacts');
 
       if (streamToStdout) {
-        const [file] = result.data;
-        await writeStdout(file!.bytes);
-        output.success(`Wrote ${file!.bytes.byteLength} bytes → stdout`);
+        const [file] = result.files;
+        await writeStdout(file.bytes);
+        output.success(`Wrote ${file.bytes.byteLength} bytes → stdout`);
       } else {
-        for (const [index, file] of result.data.entries()) {
+        for (const [index, file] of result.files.entries()) {
           const targetPath = targetPaths[index]!;
           // oxlint-disable-next-line no-await-in-loop -- Preflight completes before ordered filesystem writes begin.
           await mkdir(dirname(targetPath), { recursive: true });
@@ -316,7 +320,7 @@ export const exportCommand = defineCommand({
           ok: true,
           input: inputPath,
           format,
-          artifacts: result.data.map((file, index) => ({
+          artifacts: result.files.map((file, index) => ({
             name: file.name,
             path: targetPaths[index]!,
             bytes: file.bytes.byteLength,
@@ -328,7 +332,11 @@ export const exportCommand = defineCommand({
     } finally {
       process.off('SIGINT', onSignal);
       process.off('SIGTERM', onSignal);
-      await client.shutdown({ drain: true });
+      try {
+        document?.close();
+      } finally {
+        await client.shutdown();
+      }
       profileLedger?.checkpoint('runtime.shutdown');
     }
 

@@ -1,4 +1,4 @@
-type ElectronRuntimeHostReleaseReason = 'requested' | 'render-timeout';
+type ElectronRuntimeHostReleaseReason = 'requested' | 'operation-timeout';
 
 type ElectronRuntimeHostRelease = (reason: ElectronRuntimeHostReleaseReason) => void;
 

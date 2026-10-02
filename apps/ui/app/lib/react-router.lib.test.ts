@@ -36,6 +36,23 @@ describe('netlify.toml homepage cache policy', () => {
   });
 });
 
+describe('Netlify vendored licence hold', () => {
+  it.each(['build', 'context.production', 'context.deploy-preview', 'context.branch-deploy'])(
+    'should check licences before building artifacts in %s',
+    (context) => {
+      const toml = readFileSync(resolve(import.meta.dirname, '../../netlify.toml'), 'utf8');
+      const section = toml.split(`\n[${context}]\n`)[1]?.split('\n[')[0];
+      expect(section).toContain('pnpm nx run tscircuit:check-vendored-licenses && pnpm nx build ui');
+    },
+  );
+  it('should retain ordinary local development without a distribution check', () => {
+    const toml = readFileSync(resolve(import.meta.dirname, '../../netlify.toml'), 'utf8');
+    const section = toml.split('\n[dev]\n')[1]?.split('\n[')[0];
+    expect(section).toContain('command = "pnpm nx dev ui"');
+    expect(section).not.toContain('check-vendored-licenses');
+  });
+});
+
 describe('redirectIfSubdomain', () => {
   it('should throw a redirect when subdomain matches', () => {
     const request = new Request('https://www.tau.new/some/path?query=1');

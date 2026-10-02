@@ -46,7 +46,7 @@ export function CloseProjectDialog({
   row,
   name,
   closePlan,
-  beforeDelete = false,
+  isBeforeDelete = false,
   isOpen,
   onOpenChange,
   onConfirm,
@@ -55,7 +55,7 @@ export function CloseProjectDialog({
   readonly name: string;
   readonly closePlan?: ClosePlan;
   /** This question only closes work; deletion needs a later, verified gesture. */
-  readonly beforeDelete?: boolean;
+  readonly isBeforeDelete?: boolean;
   readonly isOpen: boolean;
   readonly onOpenChange: (next: boolean) => void;
   readonly onConfirm?: () => void;
@@ -68,8 +68,8 @@ export function CloseProjectDialog({
         <AlertDialogHeader>
           <AlertDialogTitle>
             {stopsRuns
-              ? `Stop ${pluralize(closePlan.stoppableRunCount, 'run')} and close ${name}${beforeDelete ? ' before deleting' : ''}?`
-              : `Close ${name}${beforeDelete ? ' before deleting' : ''}?`}
+              ? `Stop ${pluralize(closePlan.stoppableRunCount, 'run')} and close ${name}${isBeforeDelete ? ' before deleting' : ''}?`
+              : `Close ${name}${isBeforeDelete ? ' before deleting' : ''}?`}
           </AlertDialogTitle>
           <AlertDialogDescription asChild>
             <div>
@@ -103,7 +103,7 @@ export function CloseProjectDialog({
                 Work already saved as revisions stays on this device. If backup is unavailable, those revisions stay
                 queued for the next connection. You can reopen the project any time.
               </p>
-              {beforeDelete && <p>This does not delete the project. Choose Delete again after its work has ended.</p>}
+              {isBeforeDelete && <p>This does not delete the project. Choose Delete again after its work has ended.</p>}
             </div>
           </AlertDialogDescription>
         </AlertDialogHeader>

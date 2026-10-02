@@ -48,19 +48,23 @@ it.each(examples)('should export complete, playable Community kinematics for %s'
   try {
     await runtime.connect();
     for (const parameters of [{}, ...(posedParameters[name] ? [posedParameters[name]] : [])]) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- Each pose uses the same isolated kernel client serially.
-      const result = await runtime.export('glb', {
-        source: { path: 'main.ts' },
-        parameters,
-        exportOptions: { unit: { length: 'meter' } },
-        content: { includeTopology: true },
-      });
+      const document = runtime.open({ source: { path: 'main.ts' }, parameters });
+      let result;
+      try {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Each pose uses the same isolated kernel client serially.
+        result = await document.export('glb', {
+          options: { unit: { length: 'meter' } },
+          content: { includeTopology: true },
+        });
+      } finally {
+        document.close();
+      }
       if (!result.success) {
         throw new Error(JSON.stringify(result.issues));
       }
-      const bytes = result.data[0]?.bytes;
-      expect(bytes).toBeDefined();
-      const topology = readTopology(bytes!);
+      const { bytes } = result.files[0];
+      expect(bytes.byteLength).toBeGreaterThan(0);
+      const topology = readTopology(bytes);
       const admitted = admitMechanism(topology.mechanism);
       if (admitted.status !== 'admitted') {
         throw new Error(JSON.stringify(admitted.issues));

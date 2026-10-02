@@ -4,6 +4,7 @@
  */
 import { expect, vi } from 'vitest';
 import { OPFSProvider } from '@taucad/filesystem/backend';
+import { Topic } from '@taucad/events';
 import type { FileSystemProvider } from '@taucad/filesystem';
 import type { createFileSystemBridgePort as createBridgePort } from '@taucad/fs-bridge';
 import { connectAgentWorkerChannel, serveTurnPlacementChannel } from '@taucad/agent-host/channel-client';
@@ -40,7 +41,7 @@ export const livePlacementPort = (
   createFileSystemBridgePort: typeof createBridgePort,
 ): MessagePort => {
   const facts: TurnPlacementFact[] = [];
-  const wakes = new Set<() => void>();
+  const wakes = new Topic<void>({ name: 'resident-placement.settlements' });
   const { port1, port2 } = new MessageChannel();
   serveTurnPlacementChannel({
     port: port2,
@@ -72,10 +73,7 @@ export const livePlacementPort = (
             runIds: [key.runId],
           },
         });
-        for (const wake of wakes) {
-          wake();
-        }
-        wakes.clear();
+        wakes.emit();
         return { requestId, status: 'applied' };
       },
       abandon: async ({ requestId }) => ({ requestId, status: 'applied' }),
@@ -89,10 +87,16 @@ export const livePlacementPort = (
           }
           // oxlint-disable-next-line no-await-in-loop -- a listen waits for its next fact.
           await new Promise<void>((resolve) => {
-            wakes.add(resolve);
-            signal.addEventListener('abort', () => {
+            const abort = (): void => {
+              unsubscribe();
+              resolve();
+            };
+            const unsubscribe = wakes.subscribe(() => {
+              signal.removeEventListener('abort', abort);
+              unsubscribe();
               resolve();
             });
+            signal.addEventListener('abort', abort, { once: true });
           });
         }
       },

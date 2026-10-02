@@ -3,6 +3,7 @@ import { homedir, tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { RuntimeDocument } from '@taucad/runtime/client';
 import type { SourceRevision } from '@taucad/runtime/types';
 import type { GeoSpecNativeRunnerOptions } from 'geospec/runner/native';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -134,10 +135,23 @@ describe('native host GeoSpec composition', () => {
       throw new Error('Expected the borrowed project runtime.');
     }
     const sourceRevision: SourceRevision = { entry: 'widget.ts', files: { 'widget.ts': 'missing' } };
-    runtime.export.mockResolvedValue({ success: true, data: [], issues: [], sourceRevision });
-    const exported = await trackedRuntime.export('glb', { source: { path: 'widget.ts' } });
+    const document = mock<RuntimeDocument>();
+    document.export.mockResolvedValue({
+      success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation',
+      files: [{ name: 'widget.glb', mimeType: 'model/gltf-binary', bytes: new Uint8Array([1]) }],
+      issues: [],
+      sourceRevision,
+    });
+    runtime.open.mockReturnValue(document);
+    const trackedDocument = trackedRuntime.open({ source: { path: 'widget.ts' } });
+    const exported = await trackedDocument.export('glb');
     expect(exported.sourceRevision).toEqual(sourceRevision);
-    expect(runtime.export).toHaveBeenCalledExactlyOnceWith('glb', { source: { path: 'widget.ts' } });
+    expect(runtime.open).toHaveBeenCalledExactlyOnceWith({ source: { path: 'widget.ts' } });
+    expect(document.export).toHaveBeenCalledExactlyOnceWith('glb');
+    trackedDocument.close();
+    expect(document.close).toHaveBeenCalledOnce();
     expect(trackedRuntime).toBe(runtime);
     expect(runner).not.toHaveProperty('sourceRevisions');
     expect(options?.model?.projectPath).toBe(root);

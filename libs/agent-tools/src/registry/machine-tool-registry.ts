@@ -2,6 +2,7 @@
 import type {
   HostToolApprovalAnswer,
   HostToolInvocation,
+  HostToolResult,
   InterruptResolution,
   JsonObject,
   JsonValue,
@@ -30,6 +31,7 @@ import {
   requestPrintOptionKeys,
 } from '@taucad/chat';
 import { toolDescriptions, toolName } from '@taucad/chat/constants';
+import type { ToolInputValidationError } from '@taucad/chat';
 import type { MachineSettingsService } from '@taucad/types';
 import { toProviderToolJsonSchema } from '@taucad/chat/schemas';
 import type { SlicerOptionsInput } from '@taucad/slicer';
@@ -179,7 +181,7 @@ const asJson = (value: unknown): JsonValue => {
  * What `request_print` needs from its host beyond the machine client.
  *
  * Slices the named source through the runtime export route to `gcode.3mf` —
- * the same route `export_geometry` takes, so the artifact is recorded in the
+ * the same route `export_model` takes, so the artifact is recorded in the
  * project and named by the project, its path and its digest — composes the
  * provider's submission configuration for the resolved machine (expected setup
  * from what the machine observes, since an agent cannot know a provider's
@@ -768,7 +770,7 @@ export const createMachineToolRegistry = (
       )
       .map((name) => definitionFor(name)),
   answerApproval: async (answer) => answerPrintApproval(client, answer),
-  async invoke(invocation) {
+  async invoke(invocation): Promise<HostToolResult> {
     if (!toolNames.has(invocation.toolName)) {
       return {
         content: {
@@ -794,15 +796,22 @@ export const createMachineToolRegistry = (
           : new DOMException('The operation was aborted.', 'AbortError');
       }
       return {
-        content: {
-          errorCode: error instanceof z.ZodError ? 'TOOL_INPUT_VALIDATION_FAILED' : 'MACHINE_TOOL_ERROR',
-          message:
-            error instanceof z.ZodError
-              ? z.prettifyError(error)
-              : error instanceof Error
-                ? error.message
-                : String(error),
-        },
+        content:
+          error instanceof z.ZodError
+            ? ({
+                errorCode: 'TOOL_INPUT_VALIDATION_FAILED',
+                message: z.prettifyError(error),
+                toolName: invocation.toolName,
+                toolCallId: invocation.toolCallId,
+                validationErrors: error.issues.map((issue) => ({
+                  path: issue.path.join('.'),
+                  message: issue.message,
+                })),
+              } satisfies ToolInputValidationError)
+            : {
+                errorCode: 'MACHINE_TOOL_ERROR',
+                message: error instanceof Error ? error.message : String(error),
+              },
         isError: true,
       };
     }

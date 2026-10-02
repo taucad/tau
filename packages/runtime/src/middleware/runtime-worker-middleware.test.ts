@@ -11,27 +11,67 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { z } from 'zod';
-import type { GeometryGltf, OnWorkerLog } from '@taucad/types';
-import type { CreateGeometryResult } from '#types/runtime.types.js';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import type { OnWorkerLog } from '@taucad/types';
+import type { EvaluateResult } from '#types/runtime-kernel-v2.types.js';
+import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
-import { MockKernelWorker } from '../../test/support/kernel-worker.fixture.js';
+import { createGeometryFile, MockKernelWorker } from '../../test/support/kernel-worker.fixture.js';
+
+let documentSequence = 0;
+const evaluateDocument = async (worker: MockKernelWorker) => {
+  const documentId = `middleware-${++documentSequence}`;
+  const evaluated: Array<Parameters<NonNullable<MockKernelWorker['onEvaluated']>>[0]> = [];
+  worker.onEvaluated = (event) => {
+    if (event.documentId === documentId) {
+      evaluated.push(event);
+    }
+  };
+  worker.handleOpenDocument({
+    documentId,
+    intent: 1,
+    file: createGeometryFile('main.ts'),
+    parameters: {},
+    watch: false,
+  });
+  await vi.waitFor(() => {
+    expect(evaluated).toHaveLength(1);
+  });
+  return { documentId, result: evaluated[0]! };
+};
+
+const renderDocument = async (worker: MockKernelWorker, documentId: string) => {
+  const subscriptionId = `view-${++documentSequence}`;
+  const rendered: Array<Parameters<NonNullable<MockKernelWorker['onRendered']>>[0]> = [];
+  worker.onRendered = (event) => {
+    if (event.subscriptionId === subscriptionId) {
+      rendered.push(event);
+    }
+  };
+  worker.handleOpenView({ documentId, subscriptionId, requestId: subscriptionId, view: 'model' });
+  await vi.waitFor(() => {
+    expect(rendered).toHaveLength(1);
+  });
+  return rendered[0]!;
+};
 
 describe('runtime-worker middleware onion chain', () => {
-  function spyOnCreateGeometry(worker: MockKernelWorker) {
-    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- keyof MockKernelWorker not assignable to vi.spyOn; use as unknown as to spy on protected method
-    return vi.spyOn(
-      worker as unknown as { onCreateGeometry: (...args: unknown[]) => Promise<unknown> },
-      'onCreateGeometry',
-    );
+  class CachedEvaluationWorker extends MockKernelWorker {
+    public cachedEvaluation(content: Uint8Array<ArrayBuffer>): EvaluateResult {
+      return this.completeFixtureEvaluation(content);
+    }
   }
 
-  const mockGltfContent = new Uint8Array([1, 2, 3, 4]);
-  const successResult: CreateGeometryResult = {
-    success: true,
-    data: { format: 'gltf', content: mockGltfContent },
-    issues: [],
-  };
+  function spyOnEvaluateForOwner(worker: MockKernelWorker, executionOrder?: string[]) {
+    // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- Spy on the protected v2 kernel boundary in this white-box fixture.
+    const target = worker as unknown as {
+      onEvaluateForOwner: (...args: unknown[]) => Promise<unknown>;
+    };
+    const original = target.onEvaluateForOwner.bind(worker);
+    return vi.spyOn(target, 'onEvaluateForOwner').mockImplementation(async (...args) => {
+      executionOrder?.push('main');
+      return original(...args);
+    });
+  }
 
   let onLog: ReturnType<typeof vi.fn>;
 
@@ -39,14 +79,40 @@ describe('runtime-worker middleware onion chain', () => {
     onLog = vi.fn();
   });
 
+  it('passes v2 describe and selected-view render requests through their hooks', async () => {
+    const phases: string[] = [];
+    const middleware = defineMiddlewareV2({
+      id: 'DescribeRenderMiddleware',
+      name: 'DescribeRenderMiddleware',
+      async wrapDescribe(input, next) {
+        phases.push(`describe:${input.entryPath}`);
+        return next(input);
+      },
+      async wrapRender(input, next) {
+        phases.push(`render:${input.view}:${input.mimeType}`);
+        return next(input);
+      },
+    });
+    const worker = new MockKernelWorker({ middleware: [middleware], onLog: onLog as OnWorkerLog });
+
+    const { documentId, result } = await evaluateDocument(worker);
+    const rendered = await renderDocument(worker, documentId);
+
+    expect(result.success).toBe(true);
+    expect(rendered.success).toBe(true);
+    expect(phases).toContain('describe:main.ts');
+    expect(phases).toContain('render:model:model/gltf-binary');
+    expect(phases.indexOf('describe:main.ts')).toBeLessThan(phases.indexOf('render:model:model/gltf-binary'));
+  });
+
   /**
    * Helper to create a tracking middleware that records execution order.
    */
   function createTrackingMiddleware(name: string, executionOrder: string[]) {
-    return defineMiddleware({
+    return defineMiddlewareV2({
       id: name,
       name,
-      async wrapCreateGeometry(request, handler) {
+      async wrapEvaluate(request, handler) {
         executionOrder.push(`${name}-before`);
         const result = await handler(request);
         executionOrder.push(`${name}-after`);
@@ -66,17 +132,13 @@ describe('runtime-worker middleware onion chain', () => {
       // Create worker with tracking middleware
       const worker = new MockKernelWorker({
         middleware: [middleware1, middleware2, middleware3],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
       // Spy on the internal createGeometry to track when main is called
-      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
-        executionOrder.push('main');
-        return successResult;
-      });
+      const createGeometrySpy = spyOnEvaluateForOwner(worker, executionOrder);
 
-      await worker.runCreateGeometry();
+      await evaluateDocument(worker);
 
       // Onion model: M1 wraps M2 wraps M3 wraps main
       // Before: outside-in (M1 -> M2 -> M3 -> main)
@@ -100,7 +162,7 @@ describe('runtime-worker middleware onion chain', () => {
       const middleware1 = createTrackingMiddleware('M1', executionOrder);
 
       // Middleware without wrap hook
-      const middleware2 = defineMiddleware({
+      const middleware2 = defineMiddlewareV2({
         id: 'NoHookMiddleware',
         name: 'NoHookMiddleware',
       });
@@ -109,16 +171,12 @@ describe('runtime-worker middleware onion chain', () => {
 
       const worker = new MockKernelWorker({
         middleware: [middleware1, middleware2, middleware3],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
-        executionOrder.push('main');
-        return successResult;
-      });
+      const createGeometrySpy = spyOnEvaluateForOwner(worker, executionOrder);
 
-      await worker.runCreateGeometry();
+      await evaluateDocument(worker);
 
       // NoHookMiddleware is skipped
       expect(executionOrder).toEqual(['M1-before', 'M3-before', 'main', 'M3-after', 'M1-after']);
@@ -129,81 +187,65 @@ describe('runtime-worker middleware onion chain', () => {
 
   describe('short-circuiting', () => {
     it('should allow middleware to short-circuit by not calling handler', async () => {
-      const cachedResult: CreateGeometryResult = {
-        success: true,
-        data: { format: 'gltf', content: new Uint8Array([9, 9, 9]) },
-        issues: [],
-      };
+      const cachedContent = new Uint8Array([9, 9, 9]);
 
       const executionOrder: string[] = [];
 
       // Cache middleware that short-circuits
-      const cacheMiddleware = defineMiddleware({
+      const cacheMiddleware = defineMiddlewareV2({
         id: 'CacheMiddleware',
         name: 'CacheMiddleware',
-        async wrapCreateGeometry(_request, _handler) {
+        async wrapEvaluate(_request, _handler) {
           executionOrder.push('cache-check');
-          // Short-circuit - don't call handler
-          return cachedResult;
+          return worker.cachedEvaluation(cachedContent);
         },
       });
 
-      const worker = new MockKernelWorker({
+      const worker = new CachedEvaluationWorker({
         middleware: [cacheMiddleware],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
-        executionOrder.push('main');
-        return successResult;
-      });
+      const createGeometrySpy = spyOnEvaluateForOwner(worker, executionOrder);
 
-      const result = await worker.runCreateGeometry();
+      const { documentId, result } = await evaluateDocument(worker);
+      const rendered = await renderDocument(worker, documentId);
 
       expect(executionOrder).toEqual(['cache-check']);
       expect(createGeometrySpy).not.toHaveBeenCalled();
-      // Result contains geometry with hash added by kernel-worker
       expect(result.success).toBe(true);
-      if (result.success) {
-        const geometry = result.data;
-        const cachedGeometry = cachedResult.data;
-
-        if (geometry.format === 'gltf' && cachedGeometry?.format === 'gltf') {
-          expect(geometry.content).toEqual(cachedGeometry.content);
-        }
-      }
+      expect(rendered).toMatchObject({
+        success: true,
+        artifact: { content: cachedContent },
+      });
 
       createGeometrySpy.mockRestore();
     });
 
     it('should allow upstream middleware to process short-circuited results', async () => {
-      const cachedResult: CreateGeometryResult = {
-        success: true,
-        data: { format: 'gltf', content: new Uint8Array([5, 6, 7]) },
-        issues: [],
-      };
-
-      const transformedContent = new Uint8Array([100, 100, 100]);
+      const cachedContent = new Uint8Array([5, 6, 7]);
       const executionOrder: string[] = [];
 
       // Outer middleware (transform) - wraps everything
-      const transformMiddleware = defineMiddleware({
+      const transformMiddleware = defineMiddlewareV2({
         id: 'TransformMiddleware',
         name: 'TransformMiddleware',
-        async wrapCreateGeometry(request, handler) {
+        async wrapEvaluate(request, handler) {
           executionOrder.push('transform-before');
           const result = await handler(request);
           executionOrder.push('transform-after');
 
-          // Transform the result regardless of source
           if (result.success) {
             return {
               ...result,
-              data: {
-                format: 'gltf',
-                content: transformedContent,
-              } satisfies GeometryGltf,
+              issues: [
+                ...result.issues,
+                {
+                  message: 'processed cached evaluation',
+                  code: 'RUNTIME',
+                  severity: 'info',
+                },
+              ],
             };
           }
 
@@ -212,45 +254,37 @@ describe('runtime-worker middleware onion chain', () => {
       });
 
       // Inner middleware (cache) - short-circuits
-      const cacheMiddleware = defineMiddleware({
+      const cacheMiddleware = defineMiddlewareV2({
         id: 'CacheMiddleware',
         name: 'CacheMiddleware',
-        async wrapCreateGeometry(_request, _handler) {
+        async wrapEvaluate(_request, _handler) {
           executionOrder.push('cache-hit');
-          // Short-circuit with cached result
-          return cachedResult;
+          return worker.cachedEvaluation(cachedContent);
         },
       });
 
       // Order: [transform, cache] - transform is outermost
-      const worker = new MockKernelWorker({
+      const worker = new CachedEvaluationWorker({
         middleware: [transformMiddleware, cacheMiddleware],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
-        executionOrder.push('main');
-        return successResult;
-      });
+      const createGeometrySpy = spyOnEvaluateForOwner(worker, executionOrder);
 
-      const result = await worker.runCreateGeometry();
+      const { documentId, result } = await evaluateDocument(worker);
+      const rendered = await renderDocument(worker, documentId);
 
       // Cache short-circuits, but transform still runs on return journey
       expect(executionOrder).toEqual(['transform-before', 'cache-hit', 'transform-after']);
       expect(createGeometrySpy).not.toHaveBeenCalled();
 
-      // Result should be transformed
       expect(result.success).toBe(true);
-
       if (result.success) {
-        const geometry = result.data;
-
-        expect(geometry.format).toBe('gltf');
-
-        if (geometry.format === 'gltf') {
-          expect(geometry.content).toBe(transformedContent);
-        }
+        expect(result.issues.map((issue) => issue.message)).toContain('processed cached evaluation');
+        expect(rendered).toMatchObject({
+          success: true,
+          artifact: { content: cachedContent },
+        });
       }
 
       createGeometrySpy.mockRestore();
@@ -268,11 +302,11 @@ describe('runtime-worker middleware onion chain', () => {
 
       let capturedState: Partial<TestState> = {};
 
-      const statefulMiddleware = defineMiddleware({
+      const statefulMiddleware = defineMiddlewareV2({
         id: 'StatefulMiddleware',
         name: 'StatefulMiddleware',
         stateSchema,
-        async wrapCreateGeometry(input, handler, { state }) {
+        async wrapEvaluate(input, handler, { state }) {
           // Update state before handler
           state.update({ beforeValue: 'set-before' });
 
@@ -293,11 +327,10 @@ describe('runtime-worker middleware onion chain', () => {
 
       const worker = new MockKernelWorker({
         middleware: [statefulMiddleware],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      await worker.runCreateGeometry();
+      await evaluateDocument(worker);
 
       expect(capturedState.beforeValue).toBe('set-before');
       expect(capturedState.afterValue).toBe('set-after');
@@ -310,11 +343,11 @@ describe('runtime-worker middleware onion chain', () => {
 
       const capturedStates: Record<string, string | undefined> = {};
 
-      const middleware1 = defineMiddleware({
+      const middleware1 = defineMiddlewareV2({
         id: 'Middleware1',
         name: 'Middleware1',
         stateSchema,
-        async wrapCreateGeometry(input, handler, { state }) {
+        async wrapEvaluate(input, handler, { state }) {
           state.update({ value: 'M1-value' });
           const result = await handler(input);
           capturedStates['m1'] = state.value.value;
@@ -322,11 +355,11 @@ describe('runtime-worker middleware onion chain', () => {
         },
       });
 
-      const middleware2 = defineMiddleware({
+      const middleware2 = defineMiddlewareV2({
         id: 'Middleware2',
         name: 'Middleware2',
         stateSchema,
-        async wrapCreateGeometry(input, handler, { state }) {
+        async wrapEvaluate(input, handler, { state }) {
           state.update({ value: 'M2-value' });
           const result = await handler(input);
           capturedStates['m2'] = state.value.value;
@@ -336,11 +369,10 @@ describe('runtime-worker middleware onion chain', () => {
 
       const worker = new MockKernelWorker({
         middleware: [middleware1, middleware2],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      await worker.runCreateGeometry();
+      await evaluateDocument(worker);
 
       // Each middleware has its own state
       expect(capturedStates['m1']).toBe('M1-value');
@@ -350,10 +382,10 @@ describe('runtime-worker middleware onion chain', () => {
 
   describe('result transformation', () => {
     it('should allow multiple middleware to transform results', async () => {
-      const middleware1 = defineMiddleware({
+      const middleware1 = defineMiddlewareV2({
         id: 'AddSuffix1',
         name: 'AddSuffix1',
-        async wrapCreateGeometry(request, handler) {
+        async wrapEvaluate(request, handler) {
           const result = await handler(request);
 
           if (result.success) {
@@ -368,10 +400,10 @@ describe('runtime-worker middleware onion chain', () => {
         },
       });
 
-      const middleware2 = defineMiddleware({
+      const middleware2 = defineMiddlewareV2({
         id: 'AddSuffix2',
         name: 'AddSuffix2',
-        async wrapCreateGeometry(request, handler) {
+        async wrapEvaluate(request, handler) {
           const result = await handler(request);
 
           if (result.success) {
@@ -385,19 +417,17 @@ describe('runtime-worker middleware onion chain', () => {
         },
       });
 
-      const mainResult: CreateGeometryResult = {
-        success: true,
-        data: { format: 'gltf', content: new Uint8Array([1]) },
-        issues: [{ message: 'main-issue', code: 'RUNTIME', severity: 'warning' }],
-      };
-
       const worker = new MockKernelWorker({
         middleware: [middleware1, middleware2],
-        computeResult: mainResult,
+        evaluationResult: {
+          success: true,
+          data: { views: ['model'] },
+          issues: [{ message: 'main-issue', code: 'RUNTIME', severity: 'warning' }],
+        },
         onLog: onLog as OnWorkerLog,
       });
 
-      const result = await worker.runCreateGeometry();
+      const { result } = await evaluateDocument(worker);
 
       expect(result.success).toBe(true);
 
@@ -421,16 +451,12 @@ describe('runtime-worker middleware onion chain', () => {
       const worker = new MockKernelWorker({
         middleware: [middleware1, middleware2, middleware3],
         middlewareEnabled: [true, false, true],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
-        executionOrder.push('main');
-        return successResult;
-      });
+      const createGeometrySpy = spyOnEvaluateForOwner(worker, executionOrder);
 
-      await worker.runCreateGeometry();
+      await evaluateDocument(worker);
 
       expect(executionOrder).toEqual([
         //
@@ -447,11 +473,11 @@ describe('runtime-worker middleware onion chain', () => {
     it('should respect middleware-level enabled=false default', async () => {
       const executionOrder: string[] = [];
 
-      const disabledMiddleware = defineMiddleware({
+      const disabledMiddleware = defineMiddlewareV2({
         id: 'DisabledByDefault',
         name: 'DisabledByDefault',
         enabled: false,
-        async wrapCreateGeometry(request, handler) {
+        async wrapEvaluate(request, handler) {
           executionOrder.push('disabled-before');
           const result = await handler(request);
           executionOrder.push('disabled-after');
@@ -461,16 +487,12 @@ describe('runtime-worker middleware onion chain', () => {
 
       const worker = new MockKernelWorker({
         middleware: [disabledMiddleware],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
-        executionOrder.push('main');
-        return successResult;
-      });
+      const createGeometrySpy = spyOnEvaluateForOwner(worker, executionOrder);
 
-      await worker.runCreateGeometry();
+      await evaluateDocument(worker);
 
       expect(executionOrder).toEqual(['main']);
 
@@ -480,11 +502,11 @@ describe('runtime-worker middleware onion chain', () => {
     it('should allow entry-level enabled to override middleware default', async () => {
       const executionOrder: string[] = [];
 
-      const disabledMiddleware = defineMiddleware({
+      const disabledMiddleware = defineMiddlewareV2({
         id: 'DisabledByDefault',
         name: 'DisabledByDefault',
         enabled: false,
-        async wrapCreateGeometry(request, handler) {
+        async wrapEvaluate(request, handler) {
           executionOrder.push('overridden-before');
           const result = await handler(request);
           executionOrder.push('overridden-after');
@@ -495,16 +517,12 @@ describe('runtime-worker middleware onion chain', () => {
       const worker = new MockKernelWorker({
         middleware: [disabledMiddleware],
         middlewareEnabled: [true],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      const createGeometrySpy = spyOnCreateGeometry(worker).mockImplementation(async () => {
-        executionOrder.push('main');
-        return successResult;
-      });
+      const createGeometrySpy = spyOnEvaluateForOwner(worker, executionOrder);
 
-      await worker.runCreateGeometry();
+      await evaluateDocument(worker);
 
       expect(executionOrder).toEqual(['overridden-before', 'main', 'overridden-after']);
 
@@ -514,51 +532,49 @@ describe('runtime-worker middleware onion chain', () => {
 
   describe('error handling', () => {
     it('should propagate errors from main operation', async () => {
-      const middleware = defineMiddleware({
+      const middleware = defineMiddlewareV2({
         id: 'PassthroughMiddleware',
         name: 'PassthroughMiddleware',
-        async wrapCreateGeometry(request, handler) {
+        async wrapEvaluate(request, handler) {
           return handler(request);
         },
       });
 
       const worker = new MockKernelWorker({
         middleware: [middleware],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      spyOnCreateGeometry(worker).mockRejectedValue(new Error('Main operation failed'));
+      spyOnEvaluateForOwner(worker).mockRejectedValue(new Error('Main operation failed'));
 
-      const result = await worker.runCreateGeometry();
+      const { result } = await evaluateDocument(worker);
       expect(result.success).toBe(false);
       if (!result.success && result.issues[0]) {
         expect(result.issues[0].message).toContain('Main operation failed');
-        expect(result.issues[0].type).toBe('kernel');
+        expect(result.issues[0]['type']).toBe('kernel');
       }
     });
 
     it('should catch errors from middleware and return error result', async () => {
-      const middleware = defineMiddleware({
+      const middleware = defineMiddlewareV2({
         id: 'ErrorMiddleware',
         name: 'ErrorMiddleware',
-        async wrapCreateGeometry(_request, _handler) {
+        async wrapEvaluate(_request, _handler) {
           throw new Error('Middleware error');
         },
       });
 
       const worker = new MockKernelWorker({
         middleware: [middleware],
-        computeResult: successResult,
         onLog: onLog as OnWorkerLog,
       });
 
-      const result = await worker.runCreateGeometry();
+      const { result } = await evaluateDocument(worker);
       expect(result.success).toBe(false);
       if (!result.success && result.issues[0]) {
         expect(result.issues[0].message).toContain('Middleware error in ErrorMiddleware');
         expect(result.issues[0].message).toContain('Middleware error');
-        expect(result.issues[0].type).toBe('kernel');
+        expect(result.issues[0]['type']).toBe('kernel');
       }
     });
   });

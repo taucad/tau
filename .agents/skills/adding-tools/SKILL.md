@@ -9,6 +9,8 @@ First trace the tool's actual callers and owners. Reuse an existing tool or RPC 
 
 The host-neutral route is `libs/chat` contract → `libs/agent-tools` registry → `packages/agent-host` log → host composition → `apps/ui` presentation. The API is not the CAD tool executor. File and record changes use the owning filesystem and RPC authority. Choose only the entries that the tool actually needs; keep the numbered inventory so a cross-surface tool cannot silently omit a grant or presentation step.
 
+For a tool that exposes CAD computation, use domain-neutral evaluation vocabulary and the current runtime's declared view/export IDs. Kernel authors implement `resolve`/`describe`/`evaluate`/`render`/`write`; the tool schema should name the user-visible result and route, not obsolete `createGeometry`/`meshGeometry` phases or a global `renderOptions.output` selector. Until W3 ships the document-view client, the existing client can display only the first offered view; do not promise explicit view selection from that bridge.
+
 ## Registration inventory
 
 1. Add the permanent name to [`toolName`](../../../libs/chat/src/constants/tool.constants.ts); `toolNames` also feeds tool-choice validation.

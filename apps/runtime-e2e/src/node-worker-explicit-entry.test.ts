@@ -58,16 +58,20 @@ describe('explicit Node worker entry', () => {
 
   it('renders a trivial replicad model over nodeWorkerTransport', async () => {
     const client = createClient(await createProject());
+    const document = client.open({ source: { path: 'box.ts' }, parameters: {}, watch: false });
+    const view = document.view('model');
     try {
-      const outcome = await client.render({ source: { path: 'box.ts' }, parameters: {} });
+      const outcome = await view.rendering();
 
       expect(outcome.superseded).toBe(false);
       if (outcome.superseded) {
         throw new Error('The only render in this test must not be superseded.');
       }
-      expect(outcome.geometry.success).toBe(true);
+      expect(outcome.rendering.success).toBe(true);
     } finally {
-      client.terminate();
+      view.close();
+      document.close();
+      await client.shutdown();
     }
   });
 
@@ -81,7 +85,7 @@ describe('explicit Node worker entry', () => {
         .map(({ id }) => String(id));
       expect(hosted).toEqual(['replicad']);
     } finally {
-      client.terminate();
+      await client.shutdown();
     }
   });
 });

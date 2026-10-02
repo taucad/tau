@@ -323,7 +323,7 @@ describe('runtime plugin ABI', () => {
 
   it('reports an incompatible instance ABI separately in defineRuntime', () => {
     expect(() => defineUncheckedRuntime({ plugins: [fakeInstance(1)] })).toThrow(
-      'Tau plugin ABI mismatch: received 1, but this runtime requires 4. Align @taucad/runtime versions.',
+      `Tau plugin ABI mismatch: received 1, but this runtime requires ${runtimePluginAbiVersion}. Align @taucad/runtime versions.`,
     );
   });
 });

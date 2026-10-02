@@ -51,7 +51,7 @@ runs:
     # compiles against cairo and pango. Ubuntu images ship them; macOS images do not.
     - name: Install canvas build libraries
       if: runner.os == 'macOS'
-      run: brew install pkg-config cairo pango libpng jpeg giflib librsvg
+      run: brew install pkg-config cairo pango libpng jpeg giflib librsvg pixman
       shell: bash
 
     - name: Install dependencies

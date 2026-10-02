@@ -20,6 +20,8 @@ const types = {
   '.html': 'text/html; charset=utf-8',
   '.css': 'text/css',
   '.mjs': 'text/javascript',
+  '.json': 'application/json',
+  '.gz': 'application/gzip',
   '.webp': 'image/webp',
   '.png': 'image/png',
   '.svg': 'image/svg+xml',
@@ -57,7 +59,7 @@ createServer(async (req, res) => {
     if (target.includes(sep + 'assets' + sep)) res.setHeader('Cache-Control', 'public, max-age=3600, must-revalidate');
     if (
       /\b gzip\b|^gzip\b/u.test(String(req.headers['accept-encoding'])) &&
-      ['.html', '.css', '.mjs', '.xml', '.svg', '.txt'].includes(extname(target))
+      ['.html', '.css', '.mjs', '.xml', '.svg', '.txt', '.json'].includes(extname(target))
     ) {
       bytes = gzipSync(bytes);
       res.setHeader('Content-Encoding', 'gzip');

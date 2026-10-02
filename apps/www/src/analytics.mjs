@@ -7,6 +7,7 @@ export const allowedPages = new Set([
   '/download/',
   '/blog/',
   '/privacy/',
+  '/contact/',
   '/use-cases/',
   '/use-cases/prototyping/',
   '/use-cases/engineering/',

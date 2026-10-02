@@ -6,6 +6,7 @@ export const navigation = [
   ['Vision', '/vision/'],
   ['Pricing', '/pricing/'],
   ['Journal', '/blog/'],
+  ['Contact', '/contact/'],
 ];
 export const useCases = [
   {

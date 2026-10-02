@@ -150,3 +150,27 @@ document.addEventListener('click', (event) => {
   clicks.add(key);
   send({ name, placement });
 });
+
+// Leave the hero and the full reading path static; load 3D only at the story.
+const storyStage = document.querySelector('[data-story-stage]');
+const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+if (storyStage && 'DecompressionStream' in window && !motionPreference.matches && !navigator.connection?.saveData) {
+  let loading = false;
+  const observer = new IntersectionObserver(
+    async ([entry]) => {
+      if (!entry.isIntersecting || loading || document.hidden || motionPreference.matches) return;
+      loading = true;
+      observer.disconnect();
+      try {
+        const { mountStory } = await import('./story-scene.mjs');
+        await mountStory(storyStage);
+      } catch {
+        // The image, chapters and source link remain the complete fallback.
+        storyStage.dataset.fallback = 'true';
+      }
+    },
+    { threshold: 0.05 },
+  );
+  observer.observe(storyStage);
+  window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+}

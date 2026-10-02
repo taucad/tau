@@ -5200,15 +5200,34 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const depsSpan = this.tracer.startSpan('kernel.resolve-deps', {
       phase: 'resolvingDeps',
     });
-    const dependencies = await this.computeDependencies({
-      operations: ['evaluate', 'export'],
-      parameters: options.renderIdentity.parameters,
-      renderOptions: options.renderIdentity.renderOptions,
-      content: options.plan.route.content,
-      exportDependency: options.plan.dependency,
-      resolvedMiddleware: this.getExportExecutionList(options.plan),
-      owner: options.plan.owner,
-    });
+    // The document owns its evaluated source. Only the export leg observes
+    // current files; otherwise old handles would be cached under new source hashes.
+    let dependencies: Dependency[];
+    if (options.pinnedSourceRevision && options.renderArtifact) {
+      const exportDependencies = await this.computeMiddlewareDependencies(
+        options.plan.owner,
+        this.getExportExecutionList(options.plan),
+        ['export'],
+      );
+      dependencies = [
+        ...options.renderArtifact.identity.dependencies.filter(
+          ({ type }) => type !== 'content' && type !== 'export' && type !== 'middleware',
+        ),
+        ...exportDependencies.dependencies,
+        { type: 'content', content: options.plan.route.content as Record<string, boolean> },
+        options.plan.dependency,
+      ];
+    } else {
+      dependencies = await this.computeDependencies({
+        operations: ['evaluate', 'export'],
+        parameters: options.renderIdentity.parameters,
+        renderOptions: options.renderIdentity.renderOptions,
+        content: options.plan.route.content,
+        exportDependency: options.plan.dependency,
+        resolvedMiddleware: this.getExportExecutionList(options.plan),
+        owner: options.plan.owner,
+      });
+    }
     const dependencyHash = await this.computeDependencyHash(dependencies);
     depsSpan.end();
 
@@ -5369,6 +5388,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       renderOptions: renderArtifact.identity.renderOptions,
       exportOptions: exportMaterialization.options,
       content: plan.route.content,
+      ...(pinnedSourceRevision ? { pinnedIdentity: renderArtifact.identity } : {}),
     });
     if (!desiredNativeHandleKey.success) {
       return createKernelError(desiredNativeHandleKey.issues);
@@ -7237,17 +7257,28 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     renderOptions: Record<string, unknown>;
     exportOptions?: Record<string, unknown>;
     content: RuntimeContentInput;
+    pinnedIdentity?: RenderIdentity;
   }): Promise<{ success: true; key: string } | { success: false; issues: KernelIssue[] }> {
     const createOptions = this.resolveCreateOptions(input.renderOptions, input.exportOptions, input.owner);
     if (!createOptions.success) {
       return createOptions;
     }
-    const dependencies = await this.computeDependencies({
-      operations: ['evaluate'],
-      parameters: input.parameters,
-      resolvedMiddleware: this.getCreateExecutionList(input.owner, input.content, input.exportOptions !== undefined),
-      owner: input.owner,
-    });
+    // Retain the admitted evaluation closure, but still compare parsed
+    // construction options before attempting live/serialized handle reuse.
+    const dependencies = input.pinnedIdentity
+      ? input.pinnedIdentity.dependencies.filter(
+          ({ type }) => type !== 'render-options' && type !== 'content' && type !== 'export',
+        )
+      : await this.computeDependencies({
+          operations: ['evaluate'],
+          parameters: input.parameters,
+          resolvedMiddleware: this.getCreateExecutionList(
+            input.owner,
+            input.content,
+            input.exportOptions !== undefined,
+          ),
+          owner: input.owner,
+        });
     if ('options' in createOptions.input) {
       dependencies.push({
         type: 'option',

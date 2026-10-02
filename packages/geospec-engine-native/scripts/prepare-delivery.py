@@ -222,7 +222,9 @@ def host_tool_paths():
     for name in ['node', 'python3', 'cmake', 'ninja', 'xcrun', 'bash', 'git', 'rustup']:
         found = shutil.which(os.environ.get('GEOSPEC_GIT', 'git') if name == 'git' else name)
         require(found is not None, f'Missing prerequisite: {name}')
-        paths[name] = Path(found).resolve()
+        # rustup is a multicall binary that dispatches on argv[0]; Homebrew links `rustup` to
+        # `rustup-init`, so resolving the link would run the installer.
+        paths[name] = Path(found).absolute() if name == 'rustup' else Path(found).resolve()
     return paths
 
 

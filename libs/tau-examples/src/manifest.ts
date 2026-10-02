@@ -7,7 +7,7 @@ export type ExampleKind = 'model' | 'test-fixture' | 'spec-fixture' | 'reference
 
 /** Map of kernel names to their available example fixture names. */
 export type ExampleManifest = {
-  build123d: 'v8-engine-brep';
+  build123d: 'planetary-gear-system' | 'v8-engine-brep';
   jscad: 'cube' | 'cube-cylinder-section-fixture' | 'cylinder' | 'edge-occlusion-fixture' | 'gear' | 'non-manifold-section-fixture' | 'planetary-gear-system' | 'section-cap-fixture' | 'section-overlap-fixture' | 'section-overlap-heavy-planetary-fixture' | 'section-overlap-heavy-v8-fixture' | 'section-picking-fixture';
   manifold: 'manifold-logo';
   occt: 'v8-engine-brep';

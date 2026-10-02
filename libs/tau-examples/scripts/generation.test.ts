@@ -88,7 +88,7 @@ describe('generated example artifacts', () => {
     // PicoVoxel adds three test fixtures, the helix-heat-x heavy reference and six implicit references (D36).
     expect(manifest.filter((entry) => entry.kind === 'test-fixture')).toHaveLength(12);
     expect(manifest.filter((entry) => entry.kind === 'spec-fixture')).toHaveLength(1);
-    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(9);
+    expect(manifest.filter((entry) => entry.kind === 'reference')).toHaveLength(10);
 
     for (const entry of manifest) {
       expect(entry.files.some((path) => path === 'thumbnail.webp' || path === 'thumbnail-featured.webp')).toBe(false);

@@ -3,6 +3,18 @@
     "kind": "reference",
     "geometry": "3d",
     "kernel": "build123d",
+    "name": "planetary-gear-system",
+    "mainFile": "main.py",
+    "files": [
+      "README.md",
+      "main.py",
+      "tau.json"
+    ]
+  },
+  {
+    "kind": "reference",
+    "geometry": "3d",
+    "kernel": "build123d",
     "name": "v8-engine-brep",
     "mainFile": "main.py",
     "files": [

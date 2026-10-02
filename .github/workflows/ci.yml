@@ -742,7 +742,7 @@ jobs:
         run: cp apps/api/.env.example apps/api/.env
 
       - name: Start Postgres + Redis + MinIO
-        run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+        run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
       - name: MinIO smoke (seed + RW)
         run: bash infra/docker-compose.test.sh
@@ -857,7 +857,7 @@ jobs:
         run: cp apps/api/.env.example apps/api/.env
 
       - name: Start Postgres + Redis + MinIO
-        run: docker-compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
+        run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
       # `api:db-migrate` is the release migration job: DDL, the billing protections and
       # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in

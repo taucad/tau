@@ -66,8 +66,12 @@ RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned
+# Peer auto-install is off because the legacy deploy resolves every workspace
+# package's peers from the registry, and `@taucad/camera` (a type-only peer of
+# `@taucad/workbench`) is not published; the API's runtime dependencies are all
+# declared directly.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
-    pnpm --filter=@taucad/api --prod deploy /pruned --legacy
+    pnpm --config.auto-install-peers=false --filter=@taucad/api --prod deploy /pruned --legacy
 
 # ── Runtime ───────────────────────────────────────────────────────────────
 FROM node:${NODE_VERSION}-slim AS runtime

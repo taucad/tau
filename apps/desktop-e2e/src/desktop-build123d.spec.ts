@@ -260,7 +260,7 @@ const capturePicoGkFiles = (root: string, destination: string, artifacts: boolea
   });
 };
 
-const ownedPicoGkWorkers = (electronPid: number): readonly NativeWorker[] => {
+const ownedPicoGkWorkers = (electronPid: number | undefined): readonly NativeWorker[] => {
   const result = spawnSync('ps', ['-axww', '-o', 'pid=,ppid=,command='], { encoding: 'utf8' });
   expect(result.status, result.stderr).toBe(0);
   const owned = new Set(desktopDescendants(electronPid, result.stdout).map(({ pid }) => pid));
@@ -584,7 +584,6 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
   if (process.platform !== 'darwin' || process.arch !== 'arm64') {
     return;
   }
-  const existingWorkerPids = new Set(picogkWorkers().map(({ pid }) => pid));
   let observedProjectRoot: string | undefined;
   const account = tauTestAccount('picogk');
   seededEmail = account.email;
@@ -802,7 +801,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     const stlPath = await exportToProject(page, projectRoot, 'stl');
     expect(readFileSync(stlPath).byteLength).toBeGreaterThan(84);
 
-    const workersBeforeReload = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
+    const workersBeforeReload = ownedPicoGkWorkers(session.application.process().pid);
     expect(workersBeforeReload).not.toHaveLength(0);
     const renderingStatus = page.getByText('rendering...', { exact: true });
     await expectCount(renderingStatus, 0, 120_000);
@@ -830,7 +829,7 @@ test('[completed-artifact] runs packaged PicoGK C# through filesystem, topology,
     expect(rendererErrors.some((message) => message.includes('unsafe-eval'))).toBe(false);
 
     await session.capture('picogk-packaged-success');
-    const workers = picogkWorkers().filter(({ pid }) => !existingWorkerPids.has(pid));
+    const workers = ownedPicoGkWorkers(session.application.process().pid);
     await session.close();
     session = undefined;
     await expect

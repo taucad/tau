@@ -623,7 +623,9 @@ describe('the mounted /mcp route', () => {
         entries: [machine],
       }),
       requestPrint,
-      listProviders: async () => [{ id: 'bambu', vendor: 'Bambu Lab' }],
+      listProviders: async () => [
+        { id: 'bambu', vendor: 'Bambu Lab', manifest: { identity: { typeId: 'bambu.x1c' } } },
+      ],
     } as unknown as MachineClient;
     const planPrint = vi.fn<MachinePrintPlanner>(async () => ({
       artifact: {
@@ -636,6 +638,7 @@ describe('the mounted /mcp route', () => {
     /* A host without Bambu Studio: the profiles tool names the reference engine and why. */
     const machineRegistry = createMachineToolRegistry(client, {
       planPrint,
+      machineSettings: { readMachineSettings: async () => ({ status: 'absent' }) },
       bambuStudio: { ...unusedBambuStudio, findBambuStudio: async () => undefined },
     });
     endpoint = createHostMcpEndpoint({
@@ -761,7 +764,7 @@ describe('the mounted /mcp route', () => {
     const options = { layerHeight: 0.2, supports: { enabled: true, angles: [45, 60] } };
     const requested = await call('request_print', { targetFile: 'main.ts', options });
 
-    expect(requested.isError).not.toBe(true);
+    expect(requested.isError, JSON.stringify(requested)).not.toBe(true);
     expect(invocations).toHaveLength(1);
     expect(invocations[0]).toMatchObject({ toolName: 'request_print', runId: 'run-1' });
     /* An MCP caller has no interrupt port: the registry sees no `approve` and

@@ -15,6 +15,13 @@ import {
 } from '#electron/renderer.js';
 import { protocolVersion } from '#types/protocol-header.types.js';
 import type { RuntimeProtocol } from '#types/runtime-protocol.types.js';
+import { createRuntimeWorker, defineRuntime } from '#worker/index.js';
+import { createWorkerDispatcher } from '#transport/_internal/runtime-worker-dispatcher.js';
+import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
+import { createRuntimeClient } from '#client/runtime-client-core.js';
+import { registerElectronRuntimeHostRelease } from '#electron/_internal/runtime-host-lease.js';
+import { fromMemoryFs } from '#filesystem/runtime-filesystem.js';
+import { resolveRuntimeFileSystem } from '#transport/_internal/runtime-filesystem-handle.js';
 
 const runtimeRelayTag = 'tau-runtime-port';
 const hostExitRelayTag = 'tau-runtime-host-exit';
@@ -71,6 +78,210 @@ const setupRendererHarness = (hostId: string) => {
 };
 
 describe('Electron renderer runtime helpers', () => {
+  it.each(['default', 'drain', 'terminate'] as const)(
+    'disposes the real worker once on %s client shutdown',
+    async (mode) => {
+      const { port1, port2 } = new MessageChannel();
+      const gate = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      const disposed = vi.fn();
+      class OwnedWorker extends KernelRuntimeWorker {
+        protected override async onCleanup(): Promise<void> {
+          disposed();
+          entered.resolve();
+          await gate.promise;
+          await super.onCleanup();
+        }
+      }
+      const worker = new OwnedWorker({ runtime: defineRuntime({}) });
+      const filesystem = resolveRuntimeFileSystem(fromMemoryFs());
+      if (filesystem.kind !== 'inline') {
+        throw new Error('Expected inline owned filesystem');
+      }
+      const server = createWorkerDispatcher(worker, wrapMessagePort(port2), { inlineFileSystem: filesystem.create() });
+      const release = vi.fn();
+      registerElectronRuntimeHostRelease(port1, release);
+      const client = createRuntimeClient({ transport: electronUtilityTransport({ port: port1 }) });
+      try {
+        await client.connect();
+        if (mode === 'terminate') {
+          client.terminate();
+        }
+        const closing = client.shutdown({ drain: mode === 'drain' });
+        await entered.promise;
+        expect(disposed).toHaveBeenCalledOnce();
+        expect(release).not.toHaveBeenCalled();
+        gate.resolve();
+        await closing;
+        await vi.waitFor(() => {
+          expect(release).toHaveBeenCalledExactlyOnceWith('requested');
+        });
+        expect(disposed).toHaveBeenCalledOnce();
+      } finally {
+        gate.resolve();
+        await client.shutdown();
+        server.dispose();
+        port2.close();
+        await worker.cleanup();
+      }
+    },
+  );
+
+  it.each(['error', 'host-exit', 'render-timeout'] as const)(
+    'releases its own utility when cleanup encounters %s',
+    async (mode) => {
+      const { port1, port2 } = new MessageChannel();
+      const gate = Promise.withResolvers<void>();
+      const entered = Promise.withResolvers<void>();
+      const cleanup = vi.fn(async () => {
+        entered.resolve();
+        if (mode === 'error') {
+          throw new Error('Owned cleanup refused');
+        }
+        await gate.promise;
+        return undefined;
+      });
+      const server = createChannelServer<RuntimeProtocol>({
+        port: wrapMessagePort(port2),
+        sessionKey: 'tau.runtime/v1',
+        hello: { server: 'kernel-runtime-worker', runtimeVersion: 'test', protocolVersion },
+        impl: {
+          async call(_context, name) {
+            if (name !== 'cleanup') {
+              throw new Error('Only cleanup is served');
+            }
+            await cleanup();
+            throw new Error('Cleanup response unavailable after hard termination');
+          },
+          notify: () => undefined,
+          listen: () => {
+            throw new Error('No listeners');
+          },
+        },
+      });
+      const release = vi.fn();
+      registerElectronRuntimeHostRelease(port1, release);
+      const transport = electronUtilityTransport({ port: port1 }).materialize();
+      try {
+        await transport.open();
+        const closing = transport.close();
+        await entered.promise;
+        if (mode === 'host-exit') {
+          server.dispose();
+          port2.close();
+          await expect(transport.closed).resolves.toMatchObject({ cause: 'host-exit', phase: 'session' });
+        } else if (mode === 'render-timeout') {
+          if (transport.renderTimeoutRecovery.kind !== 'terminable') {
+            throw new Error('Expected hard timeout recovery');
+          }
+          await transport.renderTimeoutRecovery.terminate();
+          await expect(transport.closed).resolves.toEqual({ cause: 'render-timeout' });
+        }
+        await closing;
+        expect(release).toHaveBeenCalledExactlyOnceWith(mode === 'render-timeout' ? 'render-timeout' : 'requested');
+        expect(cleanup).toHaveBeenCalledOnce();
+      } finally {
+        gate.resolve();
+        await transport.close();
+        server.dispose();
+        port2.close();
+      }
+    },
+  );
+
+  it('acknowledges owned worker cleanup before releasing repeated close callers', async () => {
+    const { port1, port2 } = new MessageChannel();
+    const siblingPorts = new MessageChannel();
+    const siblingWorker = createRuntimeWorker({ runtime: defineRuntime({}) });
+    const siblingCleanup = vi.spyOn(siblingWorker, 'cleanup');
+    const siblingServer = createWorkerDispatcher(siblingWorker, wrapMessagePort(siblingPorts.port2));
+    const siblingRelease = vi.fn();
+    registerElectronRuntimeHostRelease(siblingPorts.port1, siblingRelease);
+    const sibling = electronUtilityTransport({ port: siblingPorts.port1 }).materialize();
+    const worker = createRuntimeWorker({ runtime: defineRuntime({}) });
+    const cleanupGate = Promise.withResolvers<void>();
+    const cleanupEntered = Promise.withResolvers<void>();
+    const originalCleanup = worker.cleanup.bind(worker);
+    const cleanup = vi.spyOn(worker, 'cleanup').mockImplementation(async () => {
+      cleanupEntered.resolve();
+      await cleanupGate.promise;
+      await originalCleanup();
+    });
+    const server = createWorkerDispatcher(worker, wrapMessagePort(port2));
+    let receive: ((event: MessageEvent) => void) | undefined;
+    const bridge = {
+      requestRuntimePort: vi.fn((requestId: string) => {
+        receive?.(relayEvent({ taucadRelay: runtimeRelayTag, hostId: 'cleanup-owned', requestId }, [port1]));
+      }),
+      releaseRuntimeHost: vi.fn(),
+      relayTag: { hostExit: hostExitRelayTag, runtime: runtimeRelayTag },
+    };
+    const target = {
+      addEventListener: (_name: string, listener: (event: MessageEvent) => void) => {
+        receive = listener;
+      },
+      removeEventListener: vi.fn(),
+    } as unknown as Window;
+    const options = await createElectronClientOptions({ bridge, target })();
+    const transport = options.transport.materialize();
+    let settled = 0;
+    try {
+      await transport.open();
+      await sibling.open();
+      const trackClose = async (): Promise<void> => {
+        await transport.close();
+        settled += 1;
+      };
+      const first = trackClose();
+      const second = trackClose();
+      await vi.waitFor(() => {
+        expect(cleanup).toHaveBeenCalledOnce();
+      });
+      await cleanupEntered.promise;
+      expect(settled).toBe(0);
+      expect(bridge.releaseRuntimeHost).not.toHaveBeenCalled();
+      cleanupGate.resolve();
+      await Promise.all([first, second]);
+      expect(settled).toBe(2);
+      expect(bridge.releaseRuntimeHost).toHaveBeenCalledExactlyOnceWith('cleanup-owned', 'requested');
+      expect(siblingCleanup).not.toHaveBeenCalled();
+      expect(siblingRelease).not.toHaveBeenCalled();
+    } finally {
+      cleanupGate.resolve();
+      await transport.close();
+      server.dispose();
+      port2.close();
+      await originalCleanup();
+      await sibling.close();
+      siblingServer.dispose();
+      siblingPorts.port2.close();
+    }
+  });
+
+  it.each(['cold', 'opening', 'failed-open'] as const)(
+    'releases %s clients without waiting for unavailable cleanup',
+    async (mode) => {
+      const { port1, port2 } = new MessageChannel();
+      const release = vi.fn();
+      registerElectronRuntimeHostRelease(port1, release);
+      const transport = electronUtilityTransport({ port: port1 }).materialize();
+      try {
+        const opening = mode === 'cold' ? undefined : expect(transport.open()).rejects.toThrow();
+        if (mode === 'failed-open') {
+          port2.close();
+          await opening;
+        }
+        await Promise.all([transport.close(), transport.close()]);
+        await opening;
+        await expect(transport.open()).rejects.toThrow();
+        expect(release).toHaveBeenCalledExactlyOnceWith('requested');
+      } finally {
+        await transport.close();
+        port2.close();
+      }
+    },
+  );
+
   afterEach(() => {
     Reflect.deleteProperty(globalThis as unknown as Record<string, unknown>, 'taucad');
   });

@@ -3759,7 +3759,7 @@ importers:
         specifier: 'catalog:'
         version: 3.0.2
       '@taucad/picogk':
-        specifier: workspace:^
+        specifier: workspace:*
         version: link:../plugins/picogk
       '@taucad/tau-examples':
         specifier: workspace:*

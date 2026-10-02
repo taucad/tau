@@ -598,6 +598,10 @@ export const selectPosition = (projection: ChatProjection): ChatLedger['position
 /** What a turn's newest attempt says about its revision (§5.8): the log facts the revision card reads. @public */
 export type TurnRevisionLog = Readonly<{
   attempt: number;
+  /** Host-confirmed change for this attempt, independent of selected checkout status. */
+  hasChanges?: boolean;
+  /** Earlier verified result for this user turn; never progress for the current attempt. */
+  previousRevisionId?: string;
   /** The attempt's terminal lifecycle, once its terminal row is folded. */
   terminal?: 'completed' | 'failed' | 'cancelled';
   /** The attempt waits on the person: it paused, or an interrupt it opened is still open. */
@@ -621,7 +625,8 @@ const isTerminal = (lifecycle: string): lifecycle is 'completed' | 'failed' | 'c
  * @public
  */
 export const selectTurnRevision = (projection: ChatProjection, turnId: string): TurnRevisionLog | undefined => {
-  const run = Object.values(projection.ledger.runs).findLast((entry) => entry.turnId === turnId);
+  const runs = Object.values(projection.ledger.runs).filter((entry) => entry.turnId === turnId);
+  const run = runs.at(-1);
   if (run === undefined) {
     return undefined;
   }
@@ -630,8 +635,22 @@ export const selectTurnRevision = (projection: ChatProjection, turnId: string): 
   /* A `turn.failed` names the base its placement minted (TS-S9); the log's row type does not declare it yet. */
   const revisionId =
     event !== undefined && 'revisionId' in event && typeof event.revisionId === 'string' ? event.revisionId : undefined;
+  const prior = runs
+    .flatMap((entry) =>
+      entry.settlements.filter(
+        (settlement) =>
+          (entry !== run || settlement.attempt < run.attempt) &&
+          entry.changes?.[settlement.attempt] !== undefined &&
+          settlement.event.type === 'turn.finalized' &&
+          settlement.event.revisionId !== undefined &&
+          settlement.event.revisionId !== entry.placement?.baseRevisionId,
+      ),
+    )
+    .at(-1);
   return {
     attempt: run.attempt,
+    hasChanges: run.changes?.[run.attempt] !== undefined,
+    ...(prior?.event.type === 'turn.finalized' ? { previousRevisionId: prior.event.revisionId } : {}),
     ...(isTerminal(lifecycle) ? { terminal: lifecycle } : {}),
     isWaiting: lifecycle === 'paused' || Object.keys(run.pendingInterrupts).length > 0,
     ...(run.placement === undefined ? {} : { placement: run.placement }),

@@ -166,7 +166,36 @@ export const createChatRunEffects = (
   const listening = new AbortController();
   const listen = async (placement: TurnPlacementPort): Promise<void> => {
     for await (const fact of placement.settlements({ signal: listening.signal })) {
-      if (fact.kind === 'settled' && fact.key.chatId === input.chatId) {
+      if (fact.key.chatId !== input.chatId) {
+        continue;
+      }
+      if (fact.kind === 'changed') {
+        try {
+          const { ledger, messageIds } = await services.append({
+            chatId: input.chatId,
+            leaderEpoch: input.leaderEpoch,
+            rows: [
+              {
+                runId: fact.key.runId,
+                body: {
+                  type: 'turn.changed',
+                  turnId: fact.key.turnId,
+                  chatId: fact.key.chatId,
+                  attempt: fact.key.attempt,
+                  checkoutId: fact.checkoutId,
+                },
+              },
+            ],
+          });
+          deliver({ type: 'rowsCommitted', ledger, messageIds });
+        } catch (error) {
+          console.warn(
+            '[agent-host] Turn change proof could not be recorded; the marker remains unconfirmed.',
+            codedFailureDetail(error),
+          );
+        }
+      }
+      if (fact.kind === 'settled') {
         deliver({ type: 'settlementPublished', key: fact.key, row: fact.row });
       }
     }

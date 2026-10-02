@@ -1,1 +1,314 @@
-{"source":"libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts","sha256":"464caa7c826d12ace762c36cef7e61d279203d446827387192e52181a76b9f64","parts":34,"teeth":{"sun":24,"planet":24,"ring":72},"meshes":[{"name":"Internal Ring Gear","color":"#718293","metalness":0.8,"roughness":0.29,"position":{"offset":0,"length":60564},"normal":{"offset":242256,"length":60564},"index":{"offset":484512,"length":60012}},{"name":"Sun Gear And Input Shaft","color":"#D0D6DD","metalness":0.85,"roughness":0.24,"position":{"offset":724560,"length":25350},"normal":{"offset":825960,"length":25350},"index":{"offset":927360,"length":23964}},{"name":"Carrier Rear","color":"#285E88","metalness":0.65,"roughness":0.32,"position":{"offset":1023216,"length":12660},"normal":{"offset":1073856,"length":12660},"index":{"offset":1124496,"length":12132}},{"name":"Carrier Front And Output Hub","color":"#285E88","metalness":0.65,"roughness":0.32,"position":{"offset":1173024,"length":16572},"normal":{"offset":1239312,"length":16572},"index":{"offset":1305600,"length":17808}},{"name":"Planet Gear 1","color":"#B7C1CA","metalness":0.85,"roughness":0.27,"position":{"offset":1376832,"length":21210},"normal":{"offset":1461672,"length":21210},"index":{"offset":1546512,"length":19908}},{"name":"Planet Pin 1","color":"#8C9AA7","metalness":0.85,"roughness":0.24,"position":{"offset":1626144,"length":8082},"normal":{"offset":1658472,"length":8082},"index":{"offset":1690800,"length":11616}},{"name":"Flanged Bushing 1","color":"#BE974E","metalness":0.75,"roughness":0.3,"position":{"offset":1737264,"length":3102},"normal":{"offset":1749672,"length":3102},"index":{"offset":1762080,"length":3060}},{"name":"Thrust Washer 1","color":"#BE974E","metalness":0.75,"roughness":0.3,"position":{"offset":1774320,"length":3216},"normal":{"offset":1787184,"length":3216},"index":{"offset":1800048,"length":3048}},{"name":"Front Thrust Spacer 1","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":1812240,"length":2568},"normal":{"offset":1822512,"length":2568},"index":{"offset":1832784,"length":2496}},{"name":"Rear Thrust Spacer 1","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":1842768,"length":2568},"normal":{"offset":1853040,"length":2568},"index":{"offset":1863312,"length":2496}},{"name":"Front Screw Washer 1","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":1873296,"length":2568},"normal":{"offset":1883568,"length":2568},"index":{"offset":1893840,"length":2496}},{"name":"Rear Screw Washer 1","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":1903824,"length":2568},"normal":{"offset":1914096,"length":2568},"index":{"offset":1924368,"length":2496}},{"name":"Front Socket Screw 1","color":"#313B46","metalness":0.7,"roughness":0.28,"position":{"offset":1934352,"length":4152},"normal":{"offset":1950960,"length":4152},"index":{"offset":1967568,"length":5874}},{"name":"Rear Socket Screw 1","color":"#313B46","metalness":0.7,"roughness":0.28,"position":{"offset":1991064,"length":4152},"normal":{"offset":2007672,"length":4152},"index":{"offset":2024280,"length":5874}},{"name":"Planet Gear 2","color":"#B7C1CA","metalness":0.85,"roughness":0.27,"position":{"offset":2047776,"length":21210},"normal":{"offset":2132616,"length":21210},"index":{"offset":2217456,"length":19908}},{"name":"Planet Pin 2","color":"#8C9AA7","metalness":0.85,"roughness":0.24,"position":{"offset":2297088,"length":8082},"normal":{"offset":2329416,"length":8082},"index":{"offset":2361744,"length":11616}},{"name":"Flanged Bushing 2","color":"#BE974E","metalness":0.75,"roughness":0.3,"position":{"offset":2408208,"length":3102},"normal":{"offset":2420616,"length":3102},"index":{"offset":2433024,"length":3060}},{"name":"Thrust Washer 2","color":"#BE974E","metalness":0.75,"roughness":0.3,"position":{"offset":2445264,"length":3216},"normal":{"offset":2458128,"length":3216},"index":{"offset":2470992,"length":3048}},{"name":"Front Thrust Spacer 2","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":2483184,"length":2568},"normal":{"offset":2493456,"length":2568},"index":{"offset":2503728,"length":2496}},{"name":"Rear Thrust Spacer 2","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":2513712,"length":2568},"normal":{"offset":2523984,"length":2568},"index":{"offset":2534256,"length":2496}},{"name":"Front Screw Washer 2","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":2544240,"length":2568},"normal":{"offset":2554512,"length":2568},"index":{"offset":2564784,"length":2496}},{"name":"Rear Screw Washer 2","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":2574768,"length":2568},"normal":{"offset":2585040,"length":2568},"index":{"offset":2595312,"length":2496}},{"name":"Front Socket Screw 2","color":"#313B46","metalness":0.7,"roughness":0.28,"position":{"offset":2605296,"length":4152},"normal":{"offset":2621904,"length":4152},"index":{"offset":2638512,"length":5874}},{"name":"Rear Socket Screw 2","color":"#313B46","metalness":0.7,"roughness":0.28,"position":{"offset":2662008,"length":4152},"normal":{"offset":2678616,"length":4152},"index":{"offset":2695224,"length":5874}},{"name":"Planet Gear 3","color":"#B7C1CA","metalness":0.85,"roughness":0.27,"position":{"offset":2718720,"length":21210},"normal":{"offset":2803560,"length":21210},"index":{"offset":2888400,"length":19908}},{"name":"Planet Pin 3","color":"#8C9AA7","metalness":0.85,"roughness":0.24,"position":{"offset":2968032,"length":8082},"normal":{"offset":3000360,"length":8082},"index":{"offset":3032688,"length":11616}},{"name":"Flanged Bushing 3","color":"#BE974E","metalness":0.75,"roughness":0.3,"position":{"offset":3079152,"length":3102},"normal":{"offset":3091560,"length":3102},"index":{"offset":3103968,"length":3060}},{"name":"Thrust Washer 3","color":"#BE974E","metalness":0.75,"roughness":0.3,"position":{"offset":3116208,"length":3216},"normal":{"offset":3129072,"length":3216},"index":{"offset":3141936,"length":3048}},{"name":"Front Thrust Spacer 3","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":3154128,"length":2568},"normal":{"offset":3164400,"length":2568},"index":{"offset":3174672,"length":2496}},{"name":"Rear Thrust Spacer 3","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":3184656,"length":2568},"normal":{"offset":3194928,"length":2568},"index":{"offset":3205200,"length":2496}},{"name":"Front Screw Washer 3","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":3215184,"length":2568},"normal":{"offset":3225456,"length":2568},"index":{"offset":3235728,"length":2496}},{"name":"Rear Screw Washer 3","color":"#8C9AA7","metalness":0.8,"roughness":0.3,"position":{"offset":3245712,"length":2568},"normal":{"offset":3255984,"length":2568},"index":{"offset":3266256,"length":2496}},{"name":"Front Socket Screw 3","color":"#313B46","metalness":0.7,"roughness":0.28,"position":{"offset":3276240,"length":4152},"normal":{"offset":3292848,"length":4152},"index":{"offset":3309456,"length":5874}},{"name":"Rear Socket Screw 3","color":"#313B46","metalness":0.7,"roughness":0.28,"position":{"offset":3332952,"length":4152},"normal":{"offset":3349560,"length":4152},"index":{"offset":3366168,"length":5874}}]}
+{
+  "source": "libs/tau-examples/src/kernels/replicad/planetary-gear-system/main.ts",
+  "sha256": "464caa7c826d12ace762c36cef7e61d279203d446827387192e52181a76b9f64",
+  "parts": 34,
+  "teeth": { "sun": 24, "planet": 24, "ring": 72 },
+  "meshes": [
+    {
+      "name": "Internal Ring Gear",
+      "color": "#718293",
+      "metalness": 0.8,
+      "roughness": 0.29,
+      "position": { "offset": 0, "length": 60564 },
+      "normal": { "offset": 242256, "length": 60564 },
+      "index": { "offset": 484512, "length": 60012 }
+    },
+    {
+      "name": "Sun Gear And Input Shaft",
+      "color": "#D0D6DD",
+      "metalness": 0.85,
+      "roughness": 0.24,
+      "position": { "offset": 724560, "length": 25350 },
+      "normal": { "offset": 825960, "length": 25350 },
+      "index": { "offset": 927360, "length": 23964 }
+    },
+    {
+      "name": "Carrier Rear",
+      "color": "#285E88",
+      "metalness": 0.65,
+      "roughness": 0.32,
+      "position": { "offset": 1023216, "length": 12660 },
+      "normal": { "offset": 1073856, "length": 12660 },
+      "index": { "offset": 1124496, "length": 12132 }
+    },
+    {
+      "name": "Carrier Front And Output Hub",
+      "color": "#285E88",
+      "metalness": 0.65,
+      "roughness": 0.32,
+      "position": { "offset": 1173024, "length": 16572 },
+      "normal": { "offset": 1239312, "length": 16572 },
+      "index": { "offset": 1305600, "length": 17808 }
+    },
+    {
+      "name": "Planet Gear 1",
+      "color": "#B7C1CA",
+      "metalness": 0.85,
+      "roughness": 0.27,
+      "position": { "offset": 1376832, "length": 21210 },
+      "normal": { "offset": 1461672, "length": 21210 },
+      "index": { "offset": 1546512, "length": 19908 }
+    },
+    {
+      "name": "Planet Pin 1",
+      "color": "#8C9AA7",
+      "metalness": 0.85,
+      "roughness": 0.24,
+      "position": { "offset": 1626144, "length": 8082 },
+      "normal": { "offset": 1658472, "length": 8082 },
+      "index": { "offset": 1690800, "length": 11616 }
+    },
+    {
+      "name": "Flanged Bushing 1",
+      "color": "#BE974E",
+      "metalness": 0.75,
+      "roughness": 0.3,
+      "position": { "offset": 1737264, "length": 3102 },
+      "normal": { "offset": 1749672, "length": 3102 },
+      "index": { "offset": 1762080, "length": 3060 }
+    },
+    {
+      "name": "Thrust Washer 1",
+      "color": "#BE974E",
+      "metalness": 0.75,
+      "roughness": 0.3,
+      "position": { "offset": 1774320, "length": 3216 },
+      "normal": { "offset": 1787184, "length": 3216 },
+      "index": { "offset": 1800048, "length": 3048 }
+    },
+    {
+      "name": "Front Thrust Spacer 1",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 1812240, "length": 2568 },
+      "normal": { "offset": 1822512, "length": 2568 },
+      "index": { "offset": 1832784, "length": 2496 }
+    },
+    {
+      "name": "Rear Thrust Spacer 1",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 1842768, "length": 2568 },
+      "normal": { "offset": 1853040, "length": 2568 },
+      "index": { "offset": 1863312, "length": 2496 }
+    },
+    {
+      "name": "Front Screw Washer 1",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 1873296, "length": 2568 },
+      "normal": { "offset": 1883568, "length": 2568 },
+      "index": { "offset": 1893840, "length": 2496 }
+    },
+    {
+      "name": "Rear Screw Washer 1",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 1903824, "length": 2568 },
+      "normal": { "offset": 1914096, "length": 2568 },
+      "index": { "offset": 1924368, "length": 2496 }
+    },
+    {
+      "name": "Front Socket Screw 1",
+      "color": "#313B46",
+      "metalness": 0.7,
+      "roughness": 0.28,
+      "position": { "offset": 1934352, "length": 4152 },
+      "normal": { "offset": 1950960, "length": 4152 },
+      "index": { "offset": 1967568, "length": 5874 }
+    },
+    {
+      "name": "Rear Socket Screw 1",
+      "color": "#313B46",
+      "metalness": 0.7,
+      "roughness": 0.28,
+      "position": { "offset": 1991064, "length": 4152 },
+      "normal": { "offset": 2007672, "length": 4152 },
+      "index": { "offset": 2024280, "length": 5874 }
+    },
+    {
+      "name": "Planet Gear 2",
+      "color": "#B7C1CA",
+      "metalness": 0.85,
+      "roughness": 0.27,
+      "position": { "offset": 2047776, "length": 21210 },
+      "normal": { "offset": 2132616, "length": 21210 },
+      "index": { "offset": 2217456, "length": 19908 }
+    },
+    {
+      "name": "Planet Pin 2",
+      "color": "#8C9AA7",
+      "metalness": 0.85,
+      "roughness": 0.24,
+      "position": { "offset": 2297088, "length": 8082 },
+      "normal": { "offset": 2329416, "length": 8082 },
+      "index": { "offset": 2361744, "length": 11616 }
+    },
+    {
+      "name": "Flanged Bushing 2",
+      "color": "#BE974E",
+      "metalness": 0.75,
+      "roughness": 0.3,
+      "position": { "offset": 2408208, "length": 3102 },
+      "normal": { "offset": 2420616, "length": 3102 },
+      "index": { "offset": 2433024, "length": 3060 }
+    },
+    {
+      "name": "Thrust Washer 2",
+      "color": "#BE974E",
+      "metalness": 0.75,
+      "roughness": 0.3,
+      "position": { "offset": 2445264, "length": 3216 },
+      "normal": { "offset": 2458128, "length": 3216 },
+      "index": { "offset": 2470992, "length": 3048 }
+    },
+    {
+      "name": "Front Thrust Spacer 2",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 2483184, "length": 2568 },
+      "normal": { "offset": 2493456, "length": 2568 },
+      "index": { "offset": 2503728, "length": 2496 }
+    },
+    {
+      "name": "Rear Thrust Spacer 2",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 2513712, "length": 2568 },
+      "normal": { "offset": 2523984, "length": 2568 },
+      "index": { "offset": 2534256, "length": 2496 }
+    },
+    {
+      "name": "Front Screw Washer 2",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 2544240, "length": 2568 },
+      "normal": { "offset": 2554512, "length": 2568 },
+      "index": { "offset": 2564784, "length": 2496 }
+    },
+    {
+      "name": "Rear Screw Washer 2",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 2574768, "length": 2568 },
+      "normal": { "offset": 2585040, "length": 2568 },
+      "index": { "offset": 2595312, "length": 2496 }
+    },
+    {
+      "name": "Front Socket Screw 2",
+      "color": "#313B46",
+      "metalness": 0.7,
+      "roughness": 0.28,
+      "position": { "offset": 2605296, "length": 4152 },
+      "normal": { "offset": 2621904, "length": 4152 },
+      "index": { "offset": 2638512, "length": 5874 }
+    },
+    {
+      "name": "Rear Socket Screw 2",
+      "color": "#313B46",
+      "metalness": 0.7,
+      "roughness": 0.28,
+      "position": { "offset": 2662008, "length": 4152 },
+      "normal": { "offset": 2678616, "length": 4152 },
+      "index": { "offset": 2695224, "length": 5874 }
+    },
+    {
+      "name": "Planet Gear 3",
+      "color": "#B7C1CA",
+      "metalness": 0.85,
+      "roughness": 0.27,
+      "position": { "offset": 2718720, "length": 21210 },
+      "normal": { "offset": 2803560, "length": 21210 },
+      "index": { "offset": 2888400, "length": 19908 }
+    },
+    {
+      "name": "Planet Pin 3",
+      "color": "#8C9AA7",
+      "metalness": 0.85,
+      "roughness": 0.24,
+      "position": { "offset": 2968032, "length": 8082 },
+      "normal": { "offset": 3000360, "length": 8082 },
+      "index": { "offset": 3032688, "length": 11616 }
+    },
+    {
+      "name": "Flanged Bushing 3",
+      "color": "#BE974E",
+      "metalness": 0.75,
+      "roughness": 0.3,
+      "position": { "offset": 3079152, "length": 3102 },
+      "normal": { "offset": 3091560, "length": 3102 },
+      "index": { "offset": 3103968, "length": 3060 }
+    },
+    {
+      "name": "Thrust Washer 3",
+      "color": "#BE974E",
+      "metalness": 0.75,
+      "roughness": 0.3,
+      "position": { "offset": 3116208, "length": 3216 },
+      "normal": { "offset": 3129072, "length": 3216 },
+      "index": { "offset": 3141936, "length": 3048 }
+    },
+    {
+      "name": "Front Thrust Spacer 3",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 3154128, "length": 2568 },
+      "normal": { "offset": 3164400, "length": 2568 },
+      "index": { "offset": 3174672, "length": 2496 }
+    },
+    {
+      "name": "Rear Thrust Spacer 3",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 3184656, "length": 2568 },
+      "normal": { "offset": 3194928, "length": 2568 },
+      "index": { "offset": 3205200, "length": 2496 }
+    },
+    {
+      "name": "Front Screw Washer 3",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 3215184, "length": 2568 },
+      "normal": { "offset": 3225456, "length": 2568 },
+      "index": { "offset": 3235728, "length": 2496 }
+    },
+    {
+      "name": "Rear Screw Washer 3",
+      "color": "#8C9AA7",
+      "metalness": 0.8,
+      "roughness": 0.3,
+      "position": { "offset": 3245712, "length": 2568 },
+      "normal": { "offset": 3255984, "length": 2568 },
+      "index": { "offset": 3266256, "length": 2496 }
+    },
+    {
+      "name": "Front Socket Screw 3",
+      "color": "#313B46",
+      "metalness": 0.7,
+      "roughness": 0.28,
+      "position": { "offset": 3276240, "length": 4152 },
+      "normal": { "offset": 3292848, "length": 4152 },
+      "index": { "offset": 3309456, "length": 5874 }
+    },
+    {
+      "name": "Rear Socket Screw 3",
+      "color": "#313B46",
+      "metalness": 0.7,
+      "roughness": 0.28,
+      "position": { "offset": 3332952, "length": 4152 },
+      "normal": { "offset": 3349560, "length": 4152 },
+      "index": { "offset": 3366168, "length": 5874 }
+    }
+  ]
+}

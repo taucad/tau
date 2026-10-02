@@ -1,7 +1,7 @@
 import { existsSync } from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
 import { dirname, join, relative, resolve, sep } from 'node:path';
-import { workspaceRoot } from '@nx/devkit';
+import { workspaceRoot } from '#devkit.js';
 import ts from 'typescript';
 import { bundledLibraryProjects, workspace } from '#resolver.js';
 import type { Workspace, WorkspaceProject } from '#resolver.js';

@@ -65,6 +65,7 @@
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
     "@taucad/agent-host": "workspace:*",
+    "@taucad/bambu": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",

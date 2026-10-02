@@ -1,6 +1,7 @@
 import type { Vector2, Object3D, BufferGeometry, Material } from 'three';
 import {
   Float32BufferAttribute,
+  BufferAttribute,
   InstancedBufferAttribute,
   DynamicDrawUsage,
   InstancedBufferGeometry,
@@ -43,7 +44,10 @@ export function createEdgePrototypeGeometry(positions: Float32Array, capacity: n
     }
     geometry.setAttribute(name, new Float32BufferAttribute(values, source.itemSize));
   }
-  const indices = new Uint32Array(quad.index!.count * segments);
+  const indices =
+    segments * 8 - 1 <= 65_534
+      ? new Uint16Array(quad.index!.count * segments)
+      : new Uint32Array(quad.index!.count * segments);
   const starts = new Float32Array(segments * 8 * 3);
   const ends = new Float32Array(starts.length);
   for (let segment = 0; segment < segments; segment++) {
@@ -55,7 +59,7 @@ export function createEdgePrototypeGeometry(positions: Float32Array, capacity: n
       ends.set(positions.subarray(segment * 6 + 3, segment * 6 + 6), (segment * 8 + vertex) * 3);
     }
   }
-  geometry.setIndex([...indices]);
+  geometry.setIndex(new BufferAttribute(indices, 1));
   geometry.setAttribute('instanceStart', new Float32BufferAttribute(starts, 3));
   geometry.setAttribute('instanceEnd', new Float32BufferAttribute(ends, 3));
   for (let column = 0; column < 4; column++) {

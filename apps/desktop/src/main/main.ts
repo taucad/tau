@@ -824,7 +824,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   ipcMain.handle(externalAgentsChannel, async (event) => (trusted(event.senderFrame) ? externalAgents : []));
   /* Blueprint D12: the Print pane's Bambu Studio presets and settings. The
    * service parses every input; this guard keeps other senders out. */
-  const bambuStudio = createBambuStudioService({ env: environment });
+  const bambuStudio = createBambuStudioService({ env: environment, pathOverride: !environmentLocked });
   for (const [channel, call] of [
     [slicersChannels.bambuStudio.status, bambuStudio.status],
     [slicersChannels.bambuStudio.catalog, bambuStudio.catalog],

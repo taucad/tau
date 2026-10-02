@@ -1,0 +1,76 @@
+# Destroys per-PR Fly review apps (`tau-api-pr-<number>`).
+#
+# Review apps are being retired: testing happens on staging, which `main`
+# deploys to. This manual workflow lists every Fly app the review token can
+# see and destroys only names matching `^tau-api-pr-[0-9]+$`, so it can never
+# touch `tau-api-staging` or `tau-api`. It defaults to a dry run; destroying
+# needs `dry_run: false` and the confirmation phrase.
+
+name: Tear Down Fly Review Apps
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: 'List the review apps without destroying them'
+        type: boolean
+        default: true
+      confirm:
+        description: 'Type destroy-review-apps to destroy (ignored on a dry run)'
+        type: string
+        default: ''
+
+permissions:
+  contents: read
+
+concurrency:
+  group: fly-preview-teardown
+  cancel-in-progress: false
+
+jobs:
+  teardown:
+    name: Tear down tau-api-pr-* apps
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    environment:
+      name: review-api
+      deployment: false
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+    steps:
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master
+
+      - name: List review apps
+        id: list
+        run: |
+          apps=$(flyctl apps list --json | jq -r '.[] | (.Name // .name)' | grep -E '^tau-api-pr-[0-9]+$' | sort -V || true)
+          echo "Review apps found:"
+          echo "${apps:-  (none)}"
+          {
+            echo 'apps<<EOF'
+            echo "$apps"
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Destroy review apps
+        if: ${{ !inputs.dry_run && steps.list.outputs.apps != '' }}
+        env:
+          CONFIRM: ${{ inputs.confirm }}
+          APPS: ${{ steps.list.outputs.apps }}
+        run: |
+          if [ "$CONFIRM" != "destroy-review-apps" ]; then
+            echo "::error::Confirmation phrase missing; nothing destroyed"
+            exit 1
+          fi
+          status=0
+          while read -r app; do
+            [ -z "$app" ] && continue
+            case "$app" in
+              tau-api-pr-[0-9]*) ;;
+              *) echo "::error::Refusing to destroy ${app}"; exit 1 ;;
+            esac
+            echo "Destroying ${app}"
+            flyctl apps destroy "$app" --yes || status=1
+          done <<< "$APPS"
+          exit "$status"

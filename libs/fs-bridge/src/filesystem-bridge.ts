@@ -562,7 +562,7 @@ const serializeBulkMoveResult = (result: BulkMoveResult): BulkMoveResult => ({
  *
  * Generic over `T extends StringKeyedObject` (not the mutating subset)
  * so partial handler shapes — e.g. `{ readFile: vi.fn() }` from tests
- * or {@link import('#types/runtime-kernel.types.js').RuntimeFileSystemBase}
+ * or `@taucad/runtime`'s `RuntimeFileSystemBase`
  * from kernel bridges — remain compatible. The proxy only intercepts a
  * mutating method name when that method actually exists on `target`.
  *

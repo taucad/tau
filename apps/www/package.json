@@ -11,7 +11,8 @@
     "dev": "node scripts/serve.mjs"
   },
   "dependencies": {
-    "three": "catalog:"
+    "three": "catalog:",
+    "@taucad/utils": "workspace:*"
   },
   "devDependencies": {
     "esbuild": "catalog:"

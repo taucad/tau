@@ -34,8 +34,8 @@ test('every page has one main, one heading, noindex and escaped metadata', () =>
       asset: { css: '/a.css', js: '/a.js' },
       analyticsEndpoint: '',
     });
-    assert.equal((html.match(/<main /gu) || []).length, 1);
-    assert.equal((html.match(/<h1[ >]/gu) || []).length, 1);
+    assert.equal((html.match(/<main /gu) ?? []).length, 1);
+    assert.equal((html.match(/<h1[ >]/gu) ?? []).length, 1);
     assert.ok(html.includes('content="noindex,nofollow"'));
     assert.ok(html.includes('<link rel="canonical"'));
   }
@@ -48,6 +48,9 @@ test('preview build has empty sitemap and excludes editorial drafts', async () =
   assert.equal(result.status, 0, result.stderr);
   assert.equal((await readFile(join(root, 'dist/sitemap.xml'), 'utf8')).includes('<loc>'), false);
   assert.equal((await readdir(join(root, 'dist'))).includes('content'), false);
+  assert.equal((await readdir(join(root, 'dist'))).includes('assets'), false);
+  assert.ok((await readdir(join(root, 'dist/_www/assets'))).includes('planetary.bin.gz'));
+  assert.equal((await readFile(join(root, 'dist/index.html'), 'utf8')).includes('="/assets/'), false);
   assert.ok((await readFile(join(root, 'dist/_headers'), 'utf8')).includes('X-Robots-Tag: noindex'));
 });
 test('build rejects credential-bearing origins and off-origin analytics sinks', () => {
@@ -87,8 +90,9 @@ test('publication rejects unreviewed prose, unsafe slugs, invalid dates and dupl
     { date: '2026-02-31' },
     { date: '2027-01-01' },
     { paragraphs: [] },
-  ])
+  ]) {
     assert.throws(() => validateArticles([{ ...article, ...change }], now));
+  }
   assert.throws(() => validateArticles([article, article], now));
 });
 
@@ -99,8 +103,9 @@ test('a reviewed article builds an escaped detail page and journal entry without
   try {
     const fixture = join(scratch, 'apps/www');
     await mkdir(fixture, { recursive: true });
-    for (const folder of ['src', 'scripts', 'public'])
+    for (const folder of ['src', 'scripts', 'public']) {
       await cp(join(root, folder), join(fixture, folder), { recursive: true });
+    }
     await mkdir(join(scratch, 'packages/ui/src/styles'), { recursive: true });
     await cp(join(root, '../../packages/ui/src/styles/tokens.css'), join(scratch, 'packages/ui/src/styles/tokens.css'));
     await mkdir(join(fixture, 'content'));

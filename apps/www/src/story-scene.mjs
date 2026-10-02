@@ -47,14 +47,18 @@ export async function mountStory(stage) {
     return resource;
   };
   const cleanup = () => {
-    if (disposed) return;
+    if (disposed) {
+      return;
+    }
     disposed = true;
     cancelAnimationFrame(frame);
     controller.abort();
     observer?.disconnect();
     resizeObserver?.disconnect();
     environment?.dispose();
-    for (const resource of resources) resource.dispose();
+    for (const resource of resources) {
+      resource.dispose();
+    }
     renderer?.dispose();
     renderer?.forceContextLoss();
     renderer?.domElement.remove();
@@ -63,12 +67,16 @@ export async function mountStory(stage) {
   };
   try {
     const responses = await Promise.all([
-      fetch('/assets/planetary.json', { signal: controller.signal }),
-      fetch('/assets/planetary.bin.gz', { signal: controller.signal }),
+      fetch('/_www/assets/planetary.json', { signal: controller.signal }),
+      fetch('/_www/assets/planetary.bin.gz', { signal: controller.signal }),
     ]);
-    if (responses.some((response) => !response.ok)) throw new Error('Geometry unavailable');
+    if (responses.some((response) => !response.ok)) {
+      throw new Error('Geometry unavailable');
+    }
     const [manifest, binary] = await Promise.all([responses[0].json(), decodeGeometry(responses[1])]);
-    if (manifest.parts !== 34 || manifest.meshes.length !== 34) throw new Error('Unexpected assembly');
+    if (manifest.parts !== 34 || manifest.meshes.length !== 34) {
+      throw new Error('Unexpected assembly');
+    }
     if (reduced.matches || document.hidden) {
       cleanup();
       return;
@@ -94,8 +102,8 @@ export async function mountStory(stage) {
     root.rotation.x = -Math.PI / 2;
     root.rotation.z = -0.25;
     scene.add(root);
-    scene.add(new THREE.HemisphereLight(0xffffff, 0x68747b, 0.8));
-    const key = new THREE.DirectionalLight(0xffffff, 2);
+    scene.add(new THREE.HemisphereLight(0xff_ff_ff, 0x68_74_7b, 0.8));
+    const key = new THREE.DirectionalLight(0xff_ff_ff, 2);
     key.position.set(-160, 220, 140);
     scene.add(key);
     const objects = manifest.meshes.map((part, index) => {
@@ -111,7 +119,9 @@ export async function mountStory(stage) {
       geometry.setIndex(new THREE.BufferAttribute(new Uint32Array(binary, part.index.offset, part.index.length), 1));
       const planet = /^(?:Planet Gear|Flanged Bushing) (\d)$/u.exec(part.name);
       const angle = planet ? ((Number(planet[1]) - 1) * Math.PI * 2) / 3 : 0;
-      if (planet) geometry.translate(-48 * Math.cos(angle), -48 * Math.sin(angle), 0);
+      if (planet) {
+        geometry.translate(-48 * Math.cos(angle), -48 * Math.sin(angle), 0);
+      }
       const material = own(
         new THREE.MeshStandardMaterial({
           color: part.color,
@@ -127,7 +137,9 @@ export async function mountStory(stage) {
       root.add(group);
       const positions = geometry.attributes.position.array;
       const samples = [];
-      for (let i = 0; i < positions.length; i += 24) samples.push(positions[i], positions[i + 1], positions[i + 2]);
+      for (let i = 0; i < positions.length; i += 24) {
+        samples.push(positions[i], positions[i + 1], positions[i + 2]);
+      }
       const dotsGeometry = own(new THREE.BufferGeometry());
       dotsGeometry.setAttribute('position', new THREE.Float32BufferAttribute(samples, 3));
       const dotsMaterial = own(
@@ -136,40 +148,51 @@ export async function mountStory(stage) {
       const dots = new THREE.Points(dotsGeometry, dotsMaterial);
       group.add(dots);
       let lift = 0;
-      if (part.name.includes('Front Socket')) lift = 100;
-      else if (part.name.includes('Front Screw')) lift = 85;
-      else if (part.name.includes('Carrier Front')) lift = 70;
-      else if (part.name.includes('Front Thrust')) lift = 48;
-      else if (part.name.includes('Thrust Washer')) lift = 36;
-      else if (part.name.startsWith('Planet Gear')) lift = 23;
-      else if (part.name.includes('Flanged Bushing')) lift = 16;
-      else if (part.name.startsWith('Sun')) lift = 19;
-      else if (part.name.includes('Carrier Rear')) lift = -25;
-      else if (part.name.includes('Rear')) lift = -44;
+      if (part.name.includes('Front Socket')) {
+        lift = 100;
+      } else if (part.name.includes('Front Screw')) {
+        lift = 85;
+      } else if (part.name.includes('Carrier Front')) {
+        lift = 70;
+      } else if (part.name.includes('Front Thrust')) {
+        lift = 48;
+      } else if (part.name.includes('Thrust Washer')) {
+        lift = 36;
+      } else if (part.name.startsWith('Planet Gear')) {
+        lift = 23;
+      } else if (part.name.includes('Flanged Bushing')) {
+        lift = 16;
+      } else if (part.name.startsWith('Sun')) {
+        lift = 19;
+      } else if (part.name.includes('Carrier Rear')) {
+        lift = -25;
+      } else if (part.name.includes('Rear')) {
+        lift = -44;
+      }
       return { group, mesh, dots, part, planet, angle, lift, index };
     });
     const printer = new THREE.Group();
     scene.add(printer);
-    const frameMaterial = own(new THREE.MeshStandardMaterial({ color: 0x69737a, metalness: 0.65, roughness: 0.4 }));
-    const beam = (x, y, z, sx, sy, sz) => {
-      const geometry = own(new THREE.BoxGeometry(sx, sy, sz));
+    const frameMaterial = own(new THREE.MeshStandardMaterial({ color: 0x69_73_7a, metalness: 0.65, roughness: 0.4 }));
+    const beam = ([x, y, z], [width, height, depth]) => {
+      const geometry = own(new THREE.BoxGeometry(width, height, depth));
       const mesh = new THREE.Mesh(geometry, frameMaterial);
       mesh.position.set(x, y, z);
       printer.add(mesh);
       return mesh;
     };
-    beam(0, -68, 0, 220, 9, 190);
-    beam(-105, 45, 0, 7, 230, 7);
-    beam(105, 45, 0, 7, 230, 7);
-    beam(0, 157, 0, 217, 7, 7);
-    const gantry = beam(0, 40, 0, 210, 6, 6);
-    const nozzle = beam(0, 31, 0, 14, 16, 14);
+    beam([0, -68, 0], [220, 9, 190]);
+    beam([-105, 45, 0], [7, 230, 7]);
+    beam([105, 45, 0], [7, 230, 7]);
+    beam([0, 157, 0], [217, 7, 7]);
+    const gantry = beam([0, 40, 0], [210, 6, 6]);
+    const nozzle = beam([0, 31, 0], [14, 16, 14]);
     const bounds = own(new THREE.EdgesGeometry(new THREE.BoxGeometry(182, 76, 182)));
     const outline = new THREE.LineSegments(
       bounds,
       own(
         new THREE.LineBasicMaterial({
-          color: 0x168478,
+          color: 0x16_84_78,
           transparent: true,
           opacity: 0.7,
           depthTest: true,
@@ -180,7 +203,9 @@ export async function mountStory(stage) {
     scene.add(outline);
     const fit = () => {
       const { width, height } = surface.getBoundingClientRect();
-      if (!width || !height) return;
+      if (!width || !height) {
+        return;
+      }
       renderer.setSize(width, height, false);
       camera.aspect = width / height;
       camera.updateProjectionMatrix();
@@ -191,15 +216,25 @@ export async function mountStory(stage) {
       const anchor = innerHeight * (innerWidth <= 760 ? 0.76 : 0.52);
       const tops = chapters.map((chapter) => chapter.getBoundingClientRect().top);
       let index = 0;
-      for (let i = 1; i < tops.length; i++) if (tops[i] <= anchor) index = i;
-      if (index === 7) return 7;
+      for (let i = 1; i < tops.length; i++) {
+        if (tops[i] <= anchor) {
+          index = i;
+        }
+      }
+      if (index === 7) {
+        return 7;
+      }
       return clamp(index + (anchor - tops[index]) / (tops[index + 1] - tops[index]), 0, 7);
     };
     const draw = () => {
       frame = 0;
-      if (disposed || paused || document.hidden || !active || reduced.matches) return;
+      if (disposed || paused || document.hidden || !active || reduced.matches) {
+        return;
+      }
       const p = progress();
-      if (Math.abs(p - lastProgress) < 0.001) return;
+      if (Math.abs(p - lastProgress) < 0.001) {
+        return;
+      }
       lastProgress = p;
       const chapter = Math.min(7, Math.floor(p + 0.15));
       stage.dataset.chapter = String(chapter);
@@ -217,7 +252,7 @@ export async function mountStory(stage) {
         const pose = partPose(part.name, sun);
         group.position.set(pose.x, pose.y, lift * explode);
         group.rotation.set(0, 0, pose.rotation);
-        const lane = part.name.startsWith('Internal') ? -1 : part.name.startsWith('Sun') || planet ? 0 : 1;
+        const lane = part.name.startsWith('Internal') ? -1 : part.name.startsWith('Sun') || planet !== null ? 0 : 1;
         group.position.x += lane * 115 * (1 - formed);
         group.position.z += ((index % 4) - 1.5) * 18 * (1 - formed);
         const growth = blend(0.75, 1, formed);
@@ -247,10 +282,11 @@ export async function mountStory(stage) {
       stage.dataset.frames = String(rendered);
       stage.classList.add('is-live');
     };
-    function request() {
-      if (!frame && !disposed && !paused && active && !document.hidden && !reduced.matches)
+    const request = () => {
+      if (!frame && !disposed && !paused && active && !document.hidden && !reduced.matches) {
         frame = requestAnimationFrame(draw);
-    }
+      }
+    };
     observer = new IntersectionObserver(
       ([entry]) => {
         active = entry.isIntersecting;
@@ -284,7 +320,9 @@ export async function mountStory(stage) {
     reduced.addEventListener(
       'change',
       () => {
-        if (reduced.matches) cleanup();
+        if (reduced.matches) {
+          cleanup();
+        }
       },
       { signal: controller.signal },
     );

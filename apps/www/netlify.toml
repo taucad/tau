@@ -12,7 +12,7 @@ WWW_LAUNCH = "false"
 # No app proxy or production domain is enabled in this preview configuration.
 
 # If the selected build image detects the root pnpm workspace, keep dependency
-# installation scoped to this dependency-free app and suppress workspace hooks.
+# installation scoped to this marketing app and suppress workspace hooks.
 [context.deploy-preview.environment]
 PNPM_FLAGS = "--filter @taucad/www --ignore-scripts"
 

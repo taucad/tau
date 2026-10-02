@@ -1,0 +1,13 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "allowJs": true,
+    "checkJs": false,
+    "composite": false,
+    "declaration": false,
+    "declarationMap": false,
+    "noEmit": true
+  },
+  "include": ["src/*.mjs", "scripts/*.mjs", "scripts/*.cjs", "tests/*.mjs"],
+  "exclude": ["dist", "public"]
+}

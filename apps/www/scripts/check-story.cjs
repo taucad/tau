@@ -70,7 +70,9 @@ const output = resolve(process.env.WWW_REPORT_DIR || 'out/research/marketing-www
       await page.getByRole('button', { name: 'Resume motion' }).click();
       await page.waitForTimeout(200);
       assert.notEqual(await stage.getAttribute('data-frames'), paused);
-      await page.evaluate(() => scrollTo({ top: document.body.scrollHeight, behavior: 'instant' }));
+      await page.evaluate(() => {
+        scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+      });
       await page.waitForTimeout(200);
       const offscreen = await stage.getAttribute('data-frames');
       await page.waitForTimeout(400);

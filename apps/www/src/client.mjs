@@ -1,3 +1,4 @@
+import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from './analytics.mjs';
 
 const mobileMenu = document.querySelector('.mobile-menu');
@@ -17,25 +18,30 @@ if (controls && modelImage) {
   let requestedView = 'exploded';
   controls.addEventListener('click', async (event) => {
     const button = event.target.closest('button[data-view]');
-    if (!button || !['assembly', 'exploded'].includes(button.dataset.view)) return;
+    if (!button || !['assembly', 'exploded'].includes(button.dataset.view)) {
+      return;
+    }
     requestedView = button.dataset.view;
     const view = requestedView;
     const next = new Image();
-    next.src = `/assets/${view}.webp`;
+    next.src = `/_www/assets/${view}.webp`;
     try {
       await next.decode();
     } catch {
       return;
     }
-    if (view !== requestedView) return;
+    if (view !== requestedView) {
+      return;
+    }
     modelImage.removeAttribute('srcset');
     modelImage.src = next.src;
     modelImage.alt =
       view === 'exploded'
         ? 'Exploded view of the authored planetary assembly showing the ring, carrier plates, gears and bearing hardware'
         : 'Assembled view of the authored planetary stage with three planet gears and a blue carrier';
-    for (const control of controls.querySelectorAll('button'))
+    for (const control of controls.querySelectorAll('button')) {
       control.setAttribute('aria-pressed', String(control === button));
+    }
   });
 }
 
@@ -76,16 +82,20 @@ const campaign = new URLSearchParams(location.search).get('utm_campaign');
 const safeCampaign = campaignCodes.has(campaign) ? campaign : undefined;
 const returning = safeRead(visitKey) === 'yes';
 const send = ({ name, placement }) => {
-  if (!permittedEndpoint || consent !== 'accepted' || privacySignal) return;
+  if (!permittedEndpoint || consent !== 'accepted' || privacySignal) {
+    return;
+  }
   const payload = sanitizeEvent({
     name,
     page: document.body.dataset.page,
     placement,
     campaign: safeCampaign,
     returning,
-    eventId: crypto.randomUUID(),
+    eventId: randomUuid(),
   });
-  if (!payload) return;
+  if (!payload) {
+    return;
+  }
   const controller = new AbortController();
   controllerSet.add(controller);
   fetch(permittedEndpoint, {
@@ -97,11 +107,15 @@ const send = ({ name, placement }) => {
     keepalive: true,
     signal: controller.signal,
   })
-    .catch(() => {})
+    .catch(() => {
+      // Optional analytics transport failures must not interrupt navigation.
+    })
     .finally(() => controllerSet.delete(controller));
 };
 const pageView = () => {
-  if (pageSent || consent !== 'accepted' || privacySignal || !permittedEndpoint) return;
+  if (pageSent || consent !== 'accepted' || privacySignal || !permittedEndpoint) {
+    return;
+  }
   pageSent = true;
   send({ name: 'marketing_page_view' });
   safeWrite(visitKey, 'yes');
@@ -115,38 +129,57 @@ preferenceButton.addEventListener('click', () => {
   panel.hidden = false;
   panel.querySelector('button').focus();
 });
-for (const button of document.querySelectorAll('[data-consent]'))
-  button.addEventListener('click', () => {
-    consent = button.dataset.consent;
-    safeWrite(consentKey, consent);
-    if (consent === 'denied') {
-      for (const controller of controllerSet) controller.abort();
-      safeRemove(visitKey);
+panel.addEventListener('click', (event) => {
+  const button = event.target.closest('button[data-consent]');
+  if (!button || !panel.contains(button)) {
+    return;
+  }
+  consent = button.dataset.consent;
+  safeWrite(consentKey, consent);
+  if (consent === 'denied') {
+    for (const controller of controllerSet) {
+      controller.abort();
     }
-    panel.hidden = true;
-    pageView();
-  });
+    safeRemove(visitKey);
+  }
+  panel.hidden = true;
+  pageView();
+});
 privacyReset?.addEventListener('click', () => {
   consent = null;
-  for (const controller of controllerSet) controller.abort();
+  for (const controller of controllerSet) {
+    controller.abort();
+  }
   safeRemove(consentKey);
   safeRemove(visitKey);
   document.querySelector('#privacy-status').textContent =
     'Your analytics preference and local visit marker have been cleared. Analytics is off.';
-  if (permittedEndpoint && !privacySignal) panel.hidden = false;
+  if (permittedEndpoint && !privacySignal) {
+    panel.hidden = false;
+  }
 });
 window.addEventListener('storage', (event) => {
-  if (event.key !== consentKey) return;
+  if (event.key !== consentKey) {
+    return;
+  }
   consent = event.newValue;
-  if (consent !== 'accepted') for (const controller of controllerSet) controller.abort();
+  if (consent !== 'accepted') {
+    for (const controller of controllerSet) {
+      controller.abort();
+    }
+  }
 });
 document.addEventListener('click', (event) => {
   const target = event.target.closest('a[data-event]');
-  if (!target || consent !== 'accepted') return;
-  const placement = target.dataset.placement;
+  if (!target || consent !== 'accepted') {
+    return;
+  }
+  const { placement } = target.dataset;
   const name = target.dataset.event === 'download' ? 'marketing_download_click' : 'marketing_cta_click';
   const key = `${name}:${placement}`;
-  if (clicks.has(key)) return;
+  if (clicks.has(key)) {
+    return;
+  }
   clicks.add(key);
   send({ name, placement });
 });
@@ -158,7 +191,9 @@ if (storyStage && 'DecompressionStream' in window && !motionPreference.matches &
   let loading = false;
   const observer = new IntersectionObserver(
     async ([entry]) => {
-      if (!entry.isIntersecting || loading || document.hidden || motionPreference.matches) return;
+      if (!entry.isIntersecting || loading || document.hidden || motionPreference.matches) {
+        return;
+      }
       loading = true;
       observer.disconnect();
       try {
@@ -172,5 +207,11 @@ if (storyStage && 'DecompressionStream' in window && !motionPreference.matches &
     { threshold: 0.05 },
   );
   observer.observe(storyStage);
-  window.addEventListener('pagehide', () => observer.disconnect(), { once: true });
+  window.addEventListener(
+    'pagehide',
+    () => {
+      observer.disconnect();
+    },
+    { once: true },
+  );
 }

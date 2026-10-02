@@ -320,9 +320,13 @@ jobs:
       # PostgreSQL and real MinIO and refuse rather than skip when they are absent. The
       # whole of `test` for that tag runs in the `api` lane below, which has both; this
       # lane stays hermetic. The selector is a tag, never a project name.
+      #
+      # `--parallel=2`: at Nx's default of three, ui:lint, ui:typecheck and ui:build
+      # ran together and exhausted the hosted runner, which then lost its VM
+      # ("The runner has received a shutdown signal") a few minutes in.
       - name: Run affected tasks
         run: |
-          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart
+          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=2
           pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64
 
       - name: Select affected Python checks

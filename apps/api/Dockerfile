@@ -66,12 +66,12 @@ COPY . .
 # pre-run dependency check would otherwise re-run a full install here and
 # exhaust the builder's 2 GB Node heap, so it only warns, as CI does.
 ENV pnpm_config_verify_deps_before_run=warn
+# The script builds the API without the GeoSpec native engine's Darwin-only artifact gate;
+# its header says why the runtime image does not need it.
 RUN --mount=type=cache,id=pnpm,target=/pnpm/store \
     --mount=type=cache,id=nx,target=/app/.nx/cache \
     --mount=type=secret,id=nx_cloud_token,env=NX_CLOUD_ACCESS_TOKEN \
-    pnpm nx build api && \
-    pnpm nx run api:build:billing-command && \
-    pnpm nx run api:build:maintenance-command
+    node apps/api/scripts/build-image.mts
 
 # ── Prune to production deploy tree ───────────────────────────────────────
 FROM build AS pruned

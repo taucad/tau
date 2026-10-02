@@ -1,5 +1,5 @@
 import { useCallback } from 'react';
-import { ChevronDown, Clock, Copy, Tag, Circle, Plus, X, Trash2 } from 'lucide-react';
+import { ChevronDown, Clock, Tag, Circle, Plus, X, Trash2 } from 'lucide-react';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -7,6 +7,7 @@ import {
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Button } from '@taucad/ui/components/button';
+import { CopyButton } from '#components/copy-button.js';
 import { Input } from '@taucad/ui/components/input';
 import { cn } from '@taucad/ui/utils/cn';
 
@@ -216,15 +217,16 @@ export function TraceConditionPicker({
     onChange([]);
   }, [onChange]);
 
-  const handleCopy = useCallback(() => {
-    const text = conditions
-      .map((c) => {
-        const config = fieldConfigs[c.field];
-        return `${config.label} ${c.operator} ${c.value}${config.unit ?? ''}`;
-      })
-      .join(' AND ');
-    void navigator.clipboard.writeText(text);
-  }, [conditions]);
+  const getConditionsText = useCallback(
+    () =>
+      conditions
+        .map((c) => {
+          const config = fieldConfigs[c.field];
+          return `${config.label} ${c.operator} ${c.value}${config.unit ?? ''}`;
+        })
+        .join(' AND '),
+    [conditions],
+  );
 
   return (
     <div className='flex flex-col gap-2'>
@@ -233,9 +235,12 @@ export function TraceConditionPicker({
         <div className='flex items-center gap-1'>
           {conditions.length > 0 && (
             <>
-              <Button variant='ghost' size='xs' aria-label='Copy filters' onClick={handleCopy}>
-                <Copy className='size-3' />
-              </Button>
+              <CopyButton
+                size='icon-xs'
+                tooltip='Copy filters'
+                aria-label='Copy filters'
+                getText={getConditionsText}
+              />
               <Button variant='ghost' size='xs' aria-label='Clear filters' onClick={handleClear}>
                 <Trash2 className='size-3' />
               </Button>

@@ -51,8 +51,22 @@ const runnerOptions = (files: Readonly<Record<string, string>>): GeoSpecRunnerOp
   filesystem: memoryFileSystem(files),
 });
 
+const initializeResponse = (): Uint8Array<ArrayBuffer> =>
+  new TextEncoder().encode(
+    JSON.stringify({
+      requestId: 'configuration',
+      result: {
+        canonicalProfile: 'geospec-jcs-v1',
+        protocolVersion: 3,
+        registryVersion: 5,
+        configuration: { binaryAdmissionLimits: { maxSubjectBytes: 1024, maxTotalBinaryBytes: 1024 } },
+      },
+    }),
+  );
+
 const canonicalLoaderFixture = () => {
   const engine = mock<GeoSpecNativeModelEngine>();
+  engine.processRequest.mockReturnValue(initializeResponse());
   const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
   const subjectHash = 'a'.repeat(64);
   engine.ingestSubject.mockReturnValue(encode({ result: { subject: { subjectHash } } }));
@@ -105,6 +119,7 @@ describe('accumulateFileResult', () => {
 describe('createSerialRunContext', () => {
   it('should retain canonical opaque subject ownership without reference-engine projection', async () => {
     const engine = mock<GeoSpecNativeModelEngine>();
+    engine.processRequest.mockReturnValue(initializeResponse());
     const encode = (value: unknown) => new TextEncoder().encode(JSON.stringify(value));
     const subjectHash = 'a'.repeat(64);
     engine.ingestSubject.mockReturnValue(encode({ result: { subject: { subjectHash } } }));

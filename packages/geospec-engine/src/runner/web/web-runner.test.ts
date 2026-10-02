@@ -55,7 +55,25 @@ const stubWebWorker = (): { worker: WebWorkerLike; posted: unknown[]; terminated
               result: {
                 success: true,
                 passed: true,
-                tests: [{ suite: [], name: 't', assertions: [], status: 'passed', diagnostics: [] }],
+                tests: [{ suite: [], name: 't', ordinal: 0, assertions: [], status: 'passed', diagnostics: [] }],
+                accounting: {
+                  discovered: 1,
+                  selected: 1,
+                  completed: 1,
+                  passed: 1,
+                  failed: 0,
+                  unsupported: 0,
+                  inconclusive: 0,
+                  skipped: 0,
+                  notRun: 0,
+                },
+                lineage: {
+                  status: 'complete',
+                  modules: [
+                    { entryPath: file, bundleSha256: 'stub', files: { [file]: 'sha256:stub' }, consistent: true },
+                  ],
+                  loads: [],
+                },
                 bundle: { code: '', issues: [], success: true, dependencies: [], unresolvedPaths: [] },
               },
             },

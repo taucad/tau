@@ -328,14 +328,14 @@ function renderAssistantPart(
               />
             );
           }
-          case 'get_kernel_result': {
+          case 'evaluate_model': {
             return (
               <ChatMessageToolGetKernelResult
                 key={part.toolCallId}
                 part={
-                  { ...part, type: 'tool-get_kernel_result', state } as Extract<
+                  { ...part, type: 'tool-evaluate_model', state } as Extract<
                     MyMessagePart,
-                    { type: 'tool-get_kernel_result' }
+                    { type: 'tool-evaluate_model' }
                   >
                 }
               />
@@ -361,15 +361,12 @@ function renderAssistantPart(
               />
             );
           }
-          case 'export_geometry': {
+          case 'export_model': {
             return (
               <ChatMessageToolExportGeometry
                 key={part.toolCallId}
                 part={
-                  { ...part, type: 'tool-export_geometry', state } as Extract<
-                    MyMessagePart,
-                    { type: 'tool-export_geometry' }
-                  >
+                  { ...part, type: 'tool-export_model', state } as Extract<MyMessagePart, { type: 'tool-export_model' }>
                 }
               />
             );
@@ -445,7 +442,7 @@ function renderAssistantPart(
       return <ChatMessageToolGlobSearch key={part.toolCallId} part={part} />;
     }
 
-    case 'tool-get_kernel_result': {
+    case 'tool-evaluate_model': {
       return <ChatMessageToolGetKernelResult key={part.toolCallId} part={part} />;
     }
 
@@ -457,7 +454,7 @@ function renderAssistantPart(
       return <ChatMessageToolRevisions key={part.toolCallId} part={part} />;
     }
 
-    case 'tool-export_geometry': {
+    case 'tool-export_model': {
       return <ChatMessageToolExportGeometry key={part.toolCallId} part={part} />;
     }
 
@@ -913,7 +910,7 @@ export const ChatMessage = memo(function ({ messageId, footer }: ChatMessageProp
               className={cn(
                 'flex flex-col gap-0 min-w-0',
                 isUser &&
-                  'relative z-10 cursor-action rounded-lg border bg-background px-3 py-1 outline-none hover:border-primary focus-visible:focus-outline',
+                  'relative z-10 cursor-action rounded-lg border bg-background px-3 py-1 outline-none hover:border-foreground/20 focus-visible:focus-outline',
                 shouldRenderCollapsedUserRows && 'max-h-60.5 overflow-hidden',
                 fileParts.length > 0 && 'pt-3',
               )}

@@ -43,7 +43,7 @@ describe('deriveCadPreviewStatus', () => {
       deriveCadPreviewStatus({
         initError: undefined,
         cadState: 'idle',
-        geometryFailed: true,
+        renderingFailed: true,
       }),
     ).toBe('error');
   });
@@ -53,7 +53,7 @@ describe('deriveCadPreviewStatus', () => {
       deriveCadPreviewStatus({
         initError: undefined,
         cadState: 'rendering',
-        geometryFailed: true,
+        renderingFailed: true,
       }),
     ).toBe('loading');
   });
@@ -63,7 +63,7 @@ describe('deriveCadPreviewStatus', () => {
       deriveCadPreviewStatus({
         initError: undefined,
         cadState: 'idle',
-        geometryFailed: false,
+        renderingFailed: false,
       }),
     ).toBe('ready');
   });

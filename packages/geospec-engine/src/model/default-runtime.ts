@@ -12,6 +12,7 @@ import { openrscad } from '@taucad/openrscad';
 import { picovoxel } from '@taucad/picovoxel';
 import { replicad } from '@taucad/replicad';
 import { rhino } from '@taucad/rhino';
+import { tscircuit } from '@taucad/tscircuit';
 
 export const defaultRuntime = defineRuntime({
   plugins: [
@@ -30,5 +31,6 @@ export const defaultRuntime = defineRuntime({
     rhino(),
     image(),
     assimp({ preset: 'all' }),
+    tscircuit(),
   ],
 });

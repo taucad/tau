@@ -517,11 +517,15 @@ const CalibrationCanvas = memo(function CalibrationCanvas({
     [lighting, post, edges, matcap, overlay, backend],
   );
   useEffect(() => {
-    graphicsRef.send({
-      type: 'updateGeometry',
-      geometry,
-      units: { length: 'm' },
-    });
+    if (geometry.format === 'gltf') {
+      graphicsRef.send({
+        type: 'updateArtifact',
+        artifact: { mimeType: 'model/gltf-binary', content: geometry.content },
+        hash: geometry.hash,
+      });
+    } else {
+      graphicsRef.send({ type: 'clearArtifact' });
+    }
   }, [geometry, graphicsRef]);
   return (
     <GraphicsProvider graphicsRef={graphicsRef} initialVerticalFieldOfView={0}>

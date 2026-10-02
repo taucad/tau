@@ -3,7 +3,7 @@ import { beforeAll, describe, it, expect, vi } from 'vitest';
 import { parametersDirectory } from '@taucad/types';
 import { parameterFileResolver } from '#parameter-file-resolver.middleware.js';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
-import { createMockCreateGeometryHandler, createMockInput, createMockRuntime } from '@taucad/runtime-testing';
+import { createMockEvaluateHandler, createMockInput, createMockRuntime } from '@taucad/runtime-testing';
 import { requireParameterRecord } from '@taucad/parameters';
 import type * as ParametersModule from '@taucad/parameters';
 
@@ -39,7 +39,7 @@ function createTestContext(options?: {
       parameters: {},
       ...options?.input,
     }),
-    handler: createMockCreateGeometryHandler(),
+    handler: createMockEvaluateHandler(),
   };
 }
 
@@ -69,7 +69,7 @@ describe('parameterFileResolverMiddleware', () => {
       }),
     });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
 
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -86,7 +86,7 @@ describe('parameterFileResolverMiddleware', () => {
       readFileError: notFound,
     });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
 
     expect(handler).toHaveBeenCalledWith(input);
   });
@@ -97,7 +97,7 @@ describe('parameterFileResolverMiddleware', () => {
       readFileError: permissionError,
     });
 
-    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toThrow(
+    await expect(parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime)).rejects.toThrow(
       permissionError,
     );
     expect(permissionError.name).toBe('Error');
@@ -110,7 +110,7 @@ describe('parameterFileResolverMiddleware', () => {
       readFileResult: '{invalid json',
     });
 
-    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toMatchObject({
+    await expect(parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime)).rejects.toMatchObject({
       issues: [{ code: 'INVALID_RECORD' }],
     });
     expect(handler).not.toHaveBeenCalled();
@@ -121,7 +121,7 @@ describe('parameterFileResolverMiddleware', () => {
       readFileResult: JSON.stringify({ groups: {} }),
     });
 
-    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toMatchObject({
+    await expect(parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime)).rejects.toMatchObject({
       issues: [{ code: 'INVALID_RECORD' }],
     });
     expect(handler).not.toHaveBeenCalled();
@@ -132,7 +132,7 @@ describe('parameterFileResolverMiddleware', () => {
       readFileResult: JSON.stringify({ activeGroup: 'default' }),
     });
 
-    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toMatchObject({
+    await expect(parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime)).rejects.toMatchObject({
       issues: [{ code: 'INVALID_RECORD' }],
     });
     expect(handler).not.toHaveBeenCalled();
@@ -161,7 +161,7 @@ describe('parameterFileResolverMiddleware', () => {
       readFileResult: JSON.stringify(entry),
     });
 
-    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toMatchObject({
+    await expect(parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime)).rejects.toMatchObject({
       issues: [{ code: 'INVALID_RECORD' }],
     });
     expect(handler).not.toHaveBeenCalled();
@@ -171,7 +171,7 @@ describe('parameterFileResolverMiddleware', () => {
     const current = createTestContext({
       readFileResult: JSON.stringify({ activeGroup: 'default', groups: { default: { values: { width: 42 } } } }),
     });
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(current.input, current.handler, current.runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(current.input, current.handler, current.runtime);
     expect(current.handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { width: 42 } }));
 
     const retired = createTestContext({
@@ -183,7 +183,7 @@ describe('parameterFileResolverMiddleware', () => {
       }),
     });
     await expect(
-      parameterFileResolverMiddleware.wrapCreateGeometry!(retired.input, retired.handler, retired.runtime),
+      parameterFileResolverMiddleware.wrapEvaluate!(retired.input, retired.handler, retired.runtime),
     ).rejects.toMatchObject({ issues: [{ code: 'INVALID_RECORD' }] });
     expect(retired.handler).not.toHaveBeenCalled();
   });
@@ -197,7 +197,7 @@ describe('parameterFileResolverMiddleware', () => {
       input: { parameters: { width: 10, depth: 5 } },
     });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
 
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -215,7 +215,7 @@ describe('parameterFileResolverMiddleware', () => {
       input: { parameters: { width: 10, height: 20 } },
     });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
 
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -233,7 +233,7 @@ describe('parameterFileResolverMiddleware', () => {
       input: { parameters: { height: 20 } },
     });
 
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
 
     expect(handler).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -255,7 +255,7 @@ describe('parameterFileResolverMiddleware', () => {
         },
       }),
     });
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(stored.input, stored.handler, stored.runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(stored.input, stored.handler, stored.runtime);
     expect(stored.handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { width: '20 in' } }));
 
     const overridden = createTestContext({
@@ -271,7 +271,7 @@ describe('parameterFileResolverMiddleware', () => {
       }),
       input: { parameters: { width: 508 } },
     });
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(overridden.input, overridden.handler, overridden.runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(overridden.input, overridden.handler, overridden.runtime);
     expect(overridden.handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { width: 508 } }));
   });
 
@@ -290,7 +290,7 @@ describe('parameterFileResolverMiddleware', () => {
         },
       });
 
-      await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+      await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
 
       const calledParams = (
         vi.mocked(handler).mock.calls[0]![0] as {
@@ -325,7 +325,7 @@ describe('parameterFileResolverMiddleware', () => {
         },
       });
 
-      await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+      await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
 
       const calledParams = (
         vi.mocked(handler).mock.calls[0]![0] as {
@@ -356,7 +356,7 @@ describe('parameterFileResolverMiddleware', () => {
         input: { parameters: originalParameters },
       });
 
-      await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+      await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
 
       const calledParams = (
         vi.mocked(handler).mock.calls[0]![0] as {
@@ -377,7 +377,7 @@ describe('parameterFileResolverMiddleware', () => {
       makeEntry({ activeGroup: 'default', groups: { default: { values: { size: { width } } } } });
     const render = async (content: string) => {
       const { input, handler, runtime } = createTestContext({ readFileResult: content });
-      await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+      await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
       const { parameters } = vi.mocked(handler).mock.calls[0]![0] as { parameters: Record<string, unknown> };
       // A handler that mutates its input must not reach the next render's values.
       (parameters['size'] as { width: number }).width = -1;
@@ -390,7 +390,7 @@ describe('parameterFileResolverMiddleware', () => {
     expect(await render(record(31))).toEqual({ size: { width: -1 } });
     expect(decode).toHaveBeenCalledOnce();
     const { input, handler, runtime } = createTestContext({ readFileResult: record(31) });
-    await parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime);
+    await parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime);
     expect(handler).toHaveBeenCalledWith(expect.objectContaining({ parameters: { size: { width: 31 } } }));
 
     await render(record(32));
@@ -407,17 +407,15 @@ describe('parameterFileResolverMiddleware', () => {
     });
     vi.mocked(handler).mockRejectedValueOnce(handlerError);
 
-    await expect(parameterFileResolverMiddleware.wrapCreateGeometry!(input, handler, runtime)).rejects.toThrow(
-      handlerError,
-    );
+    await expect(parameterFileResolverMiddleware.wrapEvaluate!(input, handler, runtime)).rejects.toThrow(handlerError);
     expect(handlerError.name).toBe('SyntaxError');
     expect(handlerError.message).toBe('handler failed');
     expect(handler).toHaveBeenCalledOnce();
   });
 
-  describe('getDependencies', () => {
+  describe('resolve', () => {
     it('should return the per-geometry-unit parameter file path', () => {
-      const result = parameterFileResolverMiddleware.getDependencies!(
+      const result = parameterFileResolverMiddleware.resolve!(
         { entryPath: 'main.ts' },
         createDependencyRuntime({
           watchDebounce: 200,
@@ -425,12 +423,12 @@ describe('parameterFileResolverMiddleware', () => {
       );
 
       expect(result).toEqual([
-        { path: `${parametersDirectory}/main.ts.json`, affects: ['createGeometry'], watchDebounce: 200 },
+        { path: `${parametersDirectory}/main.ts.json`, affects: ['evaluate'], watchDebounce: 200 },
       ]);
     });
 
     it('should return synchronously (not a promise)', () => {
-      const result = parameterFileResolverMiddleware.getDependencies!(
+      const result = parameterFileResolverMiddleware.resolve!(
         { entryPath: 'main.ts' },
         createDependencyRuntime({
           watchDebounce: 200,

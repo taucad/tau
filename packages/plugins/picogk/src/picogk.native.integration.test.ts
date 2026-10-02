@@ -1,5 +1,6 @@
 // @vitest-environment node
 /* oxlint-disable typescript/no-unsafe-assignment -- Vitest asymmetric matchers are typed as any. */
+import { strict as assert } from 'node:assert';
 import { mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -8,7 +9,6 @@ import { validateTauCadTopology } from '@taucad/geometry-core';
 import type { TauCadTopologyPayload } from '@taucad/geometry-core';
 import { assimp } from '@taucad/assimp';
 import {
-  assertSuccess,
   createTestRuntimeClient,
   extractGltfFromResult,
   getBoundingBoxFromInspect,
@@ -17,8 +17,6 @@ import {
   validateGlbData,
 } from '@taucad/runtime-testing';
 import { createNodeClient } from '@taucad/runtime/node';
-import type { ParameterManifest } from '@taucad/parameters';
-import type { WorkerState } from '@taucad/runtime/types';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { describe, expect, it, vi } from 'vitest';
 
@@ -260,20 +258,17 @@ describe('PicoGK native C# kernel', () => {
       runtime,
       files: { 'main.cs': parameterizedSphereSource },
     });
-    const parameters = new Promise<ParameterManifest>((resolve) => {
-      client.on('parametersResolved', (result) => {
-        if (result.success) {
-          resolve(result.data);
-        }
-      });
-    });
     try {
-      const initial = await client.render({ source: { path: 'main.cs' } });
+      const description = await client.describe({ source: { path: 'main.cs' } });
+      assert.ok(description.success);
+      const manifest = description.parameters;
+      const document = client.open({ source: { path: 'main.cs' } });
+      const initial = await document.view('model').rendering();
       expect(initial.superseded).toBe(false);
       if (initial.superseded) {
         throw new Error('Initial PicoGK render was unexpectedly superseded.');
       }
-      const manifest = await parameters;
+      assert.ok(initial.rendering.success);
       expect(manifest.defaults).toEqual({
         [voxelSizeParameter]: 1,
         [radiusParameter]: 15,
@@ -309,22 +304,31 @@ describe('PicoGK native C# kernel', () => {
           additionalProperties: false,
         },
       });
-      const rendered = await client.updateParameters({
-        [voxelSizeParameter]: 0.5,
-        [radiusParameter]: 24,
-        [colorParameter]: 'ff0000',
+      const updated = await document.update({
+        parameters: {
+          [voxelSizeParameter]: 0.5,
+          [radiusParameter]: 24,
+          [colorParameter]: 'ff0000',
+        },
       });
+      expect(updated.superseded).toBe(false);
+      if (updated.superseded) {
+        throw new Error('Parameterized PicoGK update was unexpectedly superseded.');
+      }
+      const rendered = await document.view('model').rendering();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Parameterized PicoGK render was unexpectedly superseded.');
       }
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
+      const { rendering } = rendered;
+      assert.ok(rendering.success);
+      const glb = extractGltfFromResult(rendering);
       if (!glb) {
         throw new Error('Expected parameterized PicoGK GLB geometry.');
       }
       const bounds = getBoundingBoxFromInspect(await getInspectReport(glb));
       expect(bounds?.size).toEqual([expect.closeTo(0.048, 2), expect.closeTo(0.048, 2), expect.closeTo(0.048, 2)]);
+      document.close();
     } finally {
       await client.shutdown();
     }
@@ -338,27 +342,24 @@ describe('PicoGK native C# kernel', () => {
       runtime,
       files: { 'main.cs': sphereSource() },
     });
-    const parameters = new Promise<ParameterManifest>((resolve) => {
-      client.on('parametersResolved', (result) => {
-        if (result.success) {
-          resolve(result.data);
-        }
-      });
-    });
     try {
-      const rendered = await client.render({ source: { path: 'main.cs' } });
+      const description = await client.describe({ source: { path: 'main.cs' } });
+      assert.ok(description.success);
+      const analyzed = description.parameters;
+      const document = client.open({ source: { path: 'main.cs' } });
+      const rendered = await document.view('model').rendering();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Native PicoGK render was unexpectedly superseded.');
       }
-      const analyzed = await parameters;
       expect(analyzed.defaults).toEqual({});
       expect(analyzed.legacyProjection).toMatchObject({
         status: 'usable',
         schema: { type: 'object', additionalProperties: false },
       });
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
+      const { rendering } = rendered;
+      assert.ok(rendering.success);
+      const glb = extractGltfFromResult(rendering);
       if (!glb) {
         throw new Error('Expected PicoGK GLB geometry.');
       }
@@ -388,29 +389,28 @@ describe('PicoGK native C# kernel', () => {
       const bounds = getBoundingBoxFromInspect(await getInspectReport(glb));
       expect(bounds?.size).toEqual([expect.closeTo(0.03, 2), expect.closeTo(0.03, 2), expect.closeTo(0.03, 2)]);
 
-      const exported = await client.export('glb');
-      assertSuccess(exported);
-      expect(exported.data).toHaveLength(1);
-      expect(exported.data[0]?.name).toBe('model.glb');
-      validateGlbData(exported.data[0]!.bytes);
+      const exported = await document.export('glb');
+      assert.ok(exported.success);
+      expect(exported.files).toHaveLength(1);
+      expect(exported.files[0].name).toBe('model.glb');
+      validateGlbData(exported.files[0].bytes);
 
-      const stl = await client.export('stl');
-      assertSuccess(stl);
-      expect(stl.data).toHaveLength(1);
+      const stl = await document.export('stl');
+      assert.ok(stl.success);
+      expect(stl.files).toHaveLength(1);
       const roundTrip = createTestRuntimeClient({
         runtime,
-        files: { 'roundtrip.stl': stl.data[0]!.bytes },
+        files: { 'roundtrip.stl': stl.files[0].bytes },
       });
       try {
-        const imported = await roundTrip.render({
-          source: { path: 'roundtrip.stl' },
-        });
+        const importedDocument = roundTrip.open({ source: { path: 'roundtrip.stl' } });
+        const imported = await importedDocument.view('model').rendering();
         expect(imported.superseded).toBe(false);
         if (imported.superseded) {
           throw new Error('PicoGK STL round trip was unexpectedly superseded.');
         }
-        assertSuccess(imported.geometry);
-        const roundTripGlb = extractGltfFromResult(imported.geometry);
+        assert.ok(imported.rendering.success);
+        const roundTripGlb = extractGltfFromResult(imported.rendering);
         if (!roundTripGlb) {
           throw new Error('Expected Assimp to reimport the PicoGK STL as GLB.');
         }
@@ -421,9 +421,11 @@ describe('PicoGK native C# kernel', () => {
           expect.closeTo(0.03, 2),
           expect.closeTo(0.03, 2),
         ]);
+        importedDocument.close();
       } finally {
         await roundTrip.shutdown();
       }
+      document.close();
     } finally {
       process.env['PATH'] = previousPath;
       await client.shutdown();
@@ -440,21 +442,27 @@ describe('PicoGK native C# kernel', () => {
       runtime,
       projectPath: projectRoot,
     });
-    const states: WorkerState[] = [];
-    const geometries: unknown[] = [];
-    const stopState = client.on('state', (state) => states.push(state));
-    const stopGeometry = client.on('geometry', (geometry) => geometries.push(geometry));
+    const document = client.open({ source: { path: 'main.cs' }, watch: true });
+    const view = document.view('model');
+    const evaluations: unknown[] = [];
+    const renderings: unknown[] = [];
+    const statuses: string[] = [];
+    const stopEvaluation = document.on('evaluated', (evaluation) => evaluations.push(evaluation));
+    const stopRendering = view.on('rendered', (rendering) => renderings.push(rendering));
+    const stopStatus = document.on('status', (status) => statuses.push(status));
     try {
-      const initial = await client.render({ source: { path: 'main.cs' } });
+      const initial = await view.rendering();
       expect(initial.superseded).toBe(false);
-      states.length = 0;
-      geometries.length = 0;
+      evaluations.length = 0;
+      renderings.length = 0;
+      statuses.length = 0;
 
       writeFileSync(join(projectRoot, 'scale.txt'), '2', 'utf8');
       await vi.waitFor(
         () => {
-          expect(geometries).toHaveLength(1);
-          expect(states.at(-1)).toBe('idle');
+          expect(evaluations).toHaveLength(1);
+          expect(renderings).toHaveLength(1);
+          expect(statuses.at(-1)).toBe('ready');
         },
         { timeout: 120_000, interval: 50 },
       );
@@ -463,14 +471,15 @@ describe('PicoGK native C# kernel', () => {
         setTimeout(resolve, 3000);
       });
 
-      expect(states.filter((state) => state === 'buffering')).toEqual(['buffering']);
-      expect(states.filter((state) => state === 'rendering')).toEqual(['rendering']);
-      expect(geometries).toHaveLength(1);
+      expect(evaluations).toHaveLength(1);
+      expect(renderings).toHaveLength(1);
     } finally {
-      stopState();
-      stopGeometry();
-      await client.shutdown({ drain: true });
-      client.terminate();
+      stopEvaluation();
+      stopRendering();
+      stopStatus();
+      view.close();
+      document.close();
+      await client.shutdown();
       rmSync(projectRoot, { recursive: true, force: true });
     }
   }, 180_000);
@@ -483,19 +492,22 @@ describe('PicoGK native C# kernel', () => {
     };
     const client = createTestRuntimeClient({ runtime, files });
     const render = async (next: typeof files): Promise<Uint8Array<ArrayBuffer>> => {
-      const rendered = await client.render({
-        source: { files: next, entry: 'main.cs' },
-      });
-      expect(rendered.superseded).toBe(false);
-      if (rendered.superseded) {
-        throw new Error('Native PicoGK render was unexpectedly superseded.');
+      const document = client.open({ source: { files: next, entry: 'main.cs' } });
+      try {
+        const rendered = await document.view('model').rendering();
+        expect(rendered.superseded).toBe(false);
+        if (rendered.superseded) {
+          throw new Error('Native PicoGK render was unexpectedly superseded.');
+        }
+        assert.ok(rendered.rendering.success);
+        const glb = extractGltfFromResult(rendered.rendering);
+        if (!glb) {
+          throw new Error('Expected PicoGK GLB geometry.');
+        }
+        return glb;
+      } finally {
+        document.close();
       }
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
-      if (!glb) {
-        throw new Error('Expected PicoGK GLB geometry.');
-      }
-      return glb;
     };
     try {
       const sizeX = async (sourceFiles: typeof files): Promise<number> => {
@@ -518,15 +530,16 @@ describe('PicoGK native C# kernel', () => {
       expect(helperEdit).toBeGreaterThan(initial * 1.8);
       expect(assetEdit).toBeGreaterThan(helperEdit * 1.4);
 
-      const failed = await client.render({
+      const failedDocument = client.open({
         source: {
           files: { ...files, 'ShapeFactory.cs': 'public static class {' },
           entry: 'main.cs',
         },
       });
+      const failed = await failedDocument.view('model').rendering();
       expect(failed.superseded).toBe(false);
       if (!failed.superseded) {
-        expect(failed.geometry).toMatchObject({
+        expect(failed.rendering).toMatchObject({
           success: false,
           issues: expect.arrayContaining([
             expect.objectContaining({
@@ -538,6 +551,7 @@ describe('PicoGK native C# kernel', () => {
           ]),
         });
       }
+      failedDocument.close();
       await expect(render(files)).resolves.toBeInstanceOf(Uint8Array);
     } finally {
       await client.shutdown();
@@ -550,13 +564,14 @@ describe('PicoGK native C# kernel', () => {
       files: helixHeatExchangerFiles(),
     });
     try {
-      const rendered = await client.render({ source: { path: 'Program.cs' } });
+      const document = client.open({ source: { path: 'Program.cs' } });
+      const rendered = await document.view('model').rendering();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('Native HeatX render was unexpectedly superseded.');
       }
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
+      assert.ok(rendered.rendering.success);
+      const glb = extractGltfFromResult(rendered.rendering);
       if (!glb) {
         throw new Error('Expected HeatX GLB geometry.');
       }
@@ -567,6 +582,7 @@ describe('PicoGK native C# kernel', () => {
       expect(bounds?.size.every((size) => size > 0.05)).toBe(true);
       expect(getGeometryStatsFromInspect(report).meshCount).toBe(1);
       expect(readTopology(glb).payload.components).toHaveLength(1);
+      document.close();
     } finally {
       await client.shutdown();
     }
@@ -584,15 +600,14 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       },
     });
     try {
-      const rendered = await wireframeClient.render({
-        source: { path: 'Program.cs' },
-      });
+      const document = wireframeClient.open({ source: { path: 'Program.cs' } });
+      const rendered = await document.view('model').rendering();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('ShapeKernel wireframe render was unexpectedly superseded.');
       }
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
+      assert.ok(rendered.rendering.success);
+      const glb = extractGltfFromResult(rendered.rendering);
       if (!glb) {
         throw new Error('Expected ShapeKernel wireframe GLB geometry.');
       }
@@ -602,6 +617,7 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
         .map(({ mode }) => mode);
       expect(lineModes).toHaveLength(6);
       expect(lineModes.every((mode) => mode === 1)).toBe(true);
+      document.close();
     } finally {
       await wireframeClient.shutdown();
     }
@@ -611,15 +627,14 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       files: roverFiles(),
     });
     try {
-      const rendered = await roverClient.render({
-        source: { path: 'Program.cs' },
-      });
+      const document = roverClient.open({ source: { path: 'Program.cs' } });
+      const rendered = await document.view('model').rendering();
       expect(rendered.superseded).toBe(false);
       if (rendered.superseded) {
         throw new Error('RoverWheel render was unexpectedly superseded.');
       }
-      assertSuccess(rendered.geometry);
-      const glb = extractGltfFromResult(rendered.geometry);
+      assert.ok(rendered.rendering.success);
+      const glb = extractGltfFromResult(rendered.rendering);
       if (!glb) {
         throw new Error('Expected RoverWheel GLB geometry.');
       }
@@ -627,6 +642,7 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
       const report = await getInspectReport(glb);
       expect(getGeometryStatsFromInspect(report).meshCount).toBe(1);
       expect(getBoundingBoxFromInspect(report)?.size.every((size) => size > 0.05)).toBe(true);
+      document.close();
     } finally {
       await roverClient.shutdown();
     }
@@ -637,26 +653,40 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
 
     it('evaluates each entry alone, with its own parameters and exactly the sources it compiled', async () => {
       const client = createTestRuntimeClient({ runtime, files: files() });
-      const evaluate = async (
+      const open = (
         entry: string,
         options: { readonly parameters?: Record<string, unknown>; readonly files?: Record<string, string> } = {},
       ) =>
-        client.evaluate({
+        client.open({
           source: { files: options.files ?? files(), entry },
           ...(options.parameters === undefined ? {} : { parameters: options.parameters }),
         });
-      const widthMm = async (...args: Parameters<typeof evaluate>): Promise<number> => {
-        const result = await evaluate(...args);
-        assertSuccess(result);
-        const glb = extractGltfFromResult(result);
-        if (!glb) {
-          throw new Error('Expected PicoGK GLB geometry.');
+      const evaluate = async (...args: Parameters<typeof open>) => {
+        const document = open(...args);
+        try {
+          return await document.evaluation();
+        } finally {
+          document.close();
         }
-        const bounds = getBoundingBoxFromInspect(await getInspectReport(glb));
-        if (!bounds) {
-          throw new Error('Expected a PicoGK bounding box.');
+      };
+      const widthMm = async (...args: Parameters<typeof open>): Promise<number> => {
+        const document = open(...args);
+        try {
+          const outcome = await document.view('model').rendering();
+          assert.ok(!outcome.superseded);
+          assert.ok(outcome.rendering.success);
+          const glb = extractGltfFromResult(outcome.rendering);
+          if (!glb) {
+            throw new Error('Expected PicoGK GLB geometry.');
+          }
+          const bounds = getBoundingBoxFromInspect(await getInspectReport(glb));
+          if (!bounds) {
+            throw new Error('Expected a PicoGK bounding box.');
+          }
+          return bounds.size[0] * 1000;
+        } finally {
+          document.close();
         }
-        return bounds.size[0] * 1000;
       };
       try {
         // Switching back and forth keeps each model's geometry, and an override stays with its entry.
@@ -669,7 +699,10 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
 
         // Provenance names what was compiled: this program and the helper, never the other program.
         const evaluated = await evaluate(first.path);
-        expect(Object.keys(evaluated.sourceRevision?.files ?? {}).toSorted()).toEqual([helper, first.path].toSorted());
+        assert.ok(!evaluated.superseded);
+        expect(Object.keys(evaluated.evaluation.sourceRevision?.files ?? {}).toSorted()).toEqual(
+          [helper, first.path].toSorted(),
+        );
 
         // The shared helper is a source of both programs, so an edit to it reaches both.
         await expect(widthMm(first.path, { files: files(2) })).resolves.toBeCloseTo(first.defaultSizeMm * 2, 1);
@@ -678,7 +711,9 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
         // A syntax error in the other program leaves this one running, and is reported where it is.
         const broken = { ...files(), [second.path]: `${files()[second.path]!}\nLibrary.Go(1f, () => {` };
         await expect(widthMm(first.path, { files: broken })).resolves.toBeCloseTo(first.defaultSizeMm, 1);
-        await expect(evaluate(second.path, { files: broken })).resolves.toMatchObject({
+        const brokenEvaluation = await evaluate(second.path, { files: broken });
+        assert.ok(!brokenEvaluation.superseded);
+        expect(brokenEvaluation.evaluation).toMatchObject({
           success: false,
           issues: expect.arrayContaining([
             expect.objectContaining({ location: expect.objectContaining({ fileName: second.path }) }),
@@ -686,7 +721,9 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
         });
 
         // A helper names no model of its own when two programs could claim it.
-        await expect(evaluate(helper)).resolves.toMatchObject({
+        const helperEvaluation = await evaluate(helper);
+        assert.ok(!helperEvaluation.superseded);
+        expect(helperEvaluation.evaluation).toMatchObject({
           success: false,
           issues: [expect.objectContaining({ details: expect.objectContaining({ workerCode: 'CS_TAU_ENTRY' }) })],
         });
@@ -705,30 +742,33 @@ Library.Go(1f, () => Sh.PreviewBoxWireframe(new BaseBox(new LocalFrame(), 10f, 2
         write(path, content);
       }
       const client = await createNodeClient({ runtime, projectPath: projectRoot });
-      const geometries: unknown[] = [];
-      const stopGeometry = client.on('geometry', (geometry) => geometries.push(geometry));
+      const document = client.open({ source: { path: first.path }, watch: true });
+      const view = document.view('model');
+      const renderings: unknown[] = [];
+      const stopRendering = view.on('rendered', (rendering) => renderings.push(rendering));
       try {
-        const initial = await client.render({ source: { path: first.path } });
+        const initial = await view.rendering();
         expect(initial.superseded).toBe(false);
-        geometries.length = 0;
+        renderings.length = 0;
 
         write(second.path, `${files()[second.path]!}\n// edited\n`);
         await new Promise((resolve) => {
           setTimeout(resolve, 3000);
         });
-        expect(geometries).toHaveLength(0);
+        expect(renderings).toHaveLength(0);
 
         write(helper, files(2)[helper]!);
         await vi.waitFor(
           () => {
-            expect(geometries).toHaveLength(1);
+            expect(renderings).toHaveLength(1);
           },
           { timeout: 120_000, interval: 50 },
         );
       } finally {
-        stopGeometry();
-        await client.shutdown({ drain: true });
-        client.terminate();
+        stopRendering();
+        view.close();
+        document.close();
+        await client.shutdown();
         rmSync(projectRoot, { recursive: true, force: true });
       }
     }, 300_000);

@@ -67,7 +67,7 @@ The default-exported `main` function is the entry point the kernel calls. The ke
 
 ## Step 3: Render with Parameter Overrides
 
-Hand the model code and a `parameters` override to `client.export('glb', input)`. The call renders the model and returns binary glTF in one step:
+Open the model with parameter overrides, then export the document's committed evaluation:
 
 ```typescript
 import { createRuntimeClient } from '@taucad/runtime';
@@ -89,13 +89,14 @@ const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
-const result = await client.export('glb', {
+const document = client.open({
   source: { files: { 'main.ts': modelCode } },
   parameters: { width: 50, depth: 15 },
 });
+const result = await document.export('glb');
 
 if (result.success) {
-  for (const file of result.data) {
+  for (const file of result.files) {
     console.log(`Rendered ${file.name}: ${file.bytes.byteLength} bytes (${file.mimeType})`);
   }
 } else {
@@ -103,9 +104,11 @@ if (result.success) {
     console.error(`[${issue.severity}] ${issue.message}`);
   }
 }
+document.close();
+await client.shutdown();
 ```
 
-The `parameters` object overrides the model's defaults for this render — here the box widens to 50 and deepens to 15 while `height` and `fillet` keep their defaults. The result is a discriminated union: `result.success` narrows to `data` (an ordered, non-empty file array) on success, or to `issues` (structured errors with messages, locations, and severities) on failure.
+The `parameters` object overrides the model's defaults for this render — here the box widens to 50 and deepens to 15 while `height` and `fillet` keep their defaults. The result is a discriminated union: `result.success` narrows to `files` (an ordered, non-empty file array) on success, or to `issues` (structured errors with messages, locations, and severities) on failure.
 
 **Verify:** You should see output like `Rendered model.glb: 5824 bytes (model/gltf-binary)`. On errors, check that the model imports from `replicad` and default-exports `main`.
 
@@ -133,31 +136,33 @@ const runtime = defineRuntime({ plugins: [replicad(), esbuild()] });
 const client = createRuntimeClient({
   transport: inProcessTransport({ runtime, fileSystem: fromMemoryFs() }),
 });
-const stepResult = await client.export('step', {
+const document = client.open({
   source: { files: { 'main.ts': modelCode } },
   parameters: { width: 50, depth: 15 },
 });
+const stepResult = await document.export('step');
 
 if (stepResult.success) {
-  for (const { name, bytes, mimeType } of stepResult.data) {
+  for (const { name, bytes, mimeType } of stepResult.files) {
     console.log(`Exported ${name}: ${bytes.byteLength} bytes (${mimeType})`);
   }
 } else {
   console.error('Export failed:', stepResult.issues);
 }
 
-client.terminate();
+document.close();
+await client.shutdown();
 ```
 
 The runtime picks the export route from the active kernel's capabilities. STEP export is available on the Replicad and OpenCASCADE kernels; other kernels support different formats — see [Choose a Kernel](../guides/choosing-a-kernel).
 
-**Verify:** You should see a `.step` file logged, and the process should exit cleanly. If it hangs, `terminate()` was not called or a listener is keeping the event loop alive.
+**Verify:** You should see a `.step` file logged, and the process should exit cleanly. If it hangs, `shutdown()` was not awaited or a listener is keeping the event loop alive.
 
 ## Recap
 
 1. Created a [`RuntimeClient`](../api/client) with an explicit transport and filesystem
 2. Wrote a parametric model with a default-exported `main` function
-3. Rendered to glTF with parameter overrides via `client.export('glb', input)`
+3. Rendered to glTF with parameter overrides via `document.export('glb')`
 4. Re-exported to STEP by swapping the format argument, then terminated the client
 
 ## Next Steps

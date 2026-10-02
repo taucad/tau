@@ -1,5 +1,5 @@
 import type { SpanHandle, RuntimeSpanTracer } from '#types/runtime-tracer.types.js';
-import type { TelemetryEntry } from '#types/runtime-protocol.types.js';
+import type { TelemetryEntry } from '#types/runtime-wire.types.js';
 
 type SpanAttributes = Record<string, string | number | boolean>;
 

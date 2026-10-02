@@ -64,7 +64,7 @@ export const useViewerShortcuts = (
     return {
       resolveCutToRemove,
       always: { ignoreInputs: true, enabled: isTarget },
-      in3d: { ignoreInputs: true, enabled: () => isTarget() && context().geometry?.format !== 'svg' },
+      in3d: { ignoreInputs: true, enabled: () => isTarget() && context().artifact?.mimeType !== 'image/svg+xml' },
       escape: {
         ignoreInputs: true,
         enabled: () => isTarget() && (context().isMeasureActive || context().isSectionViewActive),

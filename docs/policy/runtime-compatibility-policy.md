@@ -3,7 +3,7 @@ title: 'Runtime Compatibility Policy'
 description: 'Wire-version, tolerant-reader, peer-support, notification, and compatibility-gate rules for @taucad/runtime and @taucad/rpc.'
 status: active
 created: '2026-08-15'
-updated: '2026-08-16'
+updated: '2026-09-30'
 related:
   - docs/policy/rpc-policy.md
   - docs/policy/version-policy.md
@@ -53,7 +53,7 @@ An additive wire change is a new optional field that a version-equal receiver ca
 
 Runtime wire schemas must therefore be tolerant readers: unknown fields are preserved or ignored, while known-field type checks and mode invariants remain enforced. A change is not additive merely because its TypeScript property is optional.
 
-Every additive change must include a compatibility test proving that the previous reader shape accepts the new payload. `packages/runtime/src/types/runtime-protocol-payload-shape.test.ts` is the canonical location for these pins.
+Every additive change must include a compatibility test proving that the previous reader shape accepts the new payload. `packages/runtime/src/types/runtime-document-protocol-payload-shape.test.ts` is the canonical location for these pins.
 
 ## Notifications
 
@@ -75,10 +75,10 @@ Cached workers, Electron renderer/utility skew, and remote hosts are still subje
 
 The following tests are release gates for runtime wire changes:
 
-- `packages/runtime/src/types/runtime-protocol-schema-coverage.test.ts` — every call and notify has a registered validator, and the protocol inventory is pinned;
-- `packages/runtime/src/types/runtime-protocol-payload-shape.test.ts` — payload invariants and additive-reader compatibility;
+- `packages/runtime/src/types/runtime-document-protocol-schema-coverage.test.ts` — every call and notify has a registered validator, and the protocol inventory is pinned;
+- `packages/runtime/src/types/runtime-document-protocol-payload-shape.test.ts` — payload invariants and additive-reader compatibility;
 - `packages/runtime/src/types/protocol-header.runtime.test.ts` — protocol-header validation and typed mismatch errors;
-- `packages/runtime/src/framework/runtime-worker-client.initialize.test.ts` — hello ordering and connect-time mismatch rejection;
+- `packages/runtime/src/client/runtime-document-client.initialize.test.ts` — hello ordering and connect-time mismatch rejection;
 - `packages/rpc/src/wire.test.ts` and `packages/rpc/src/channel-lifecycle.test.ts` — frame-version rejection and diagnostic behavior;
 - `packages/rpc/src/wire-protocol-validation.test.ts` — schema-bound notification drop behavior.
 

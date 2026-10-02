@@ -1202,11 +1202,12 @@ export const chatRunMachine = setup({
                 key: next.key,
                 rows: [
                   ...cancelPending(context.ledger, runId),
-                  lifecycle('cancelled', {
-                    ...(context.ledger.runs[runId]?.committed
+                  lifecycle(
+                    'cancelled',
+                    context.ledger.runs[runId]?.committed
                       ? { detail: { code: 'USER_STOPPED', message: 'You stopped this turn. Resume to continue it.' } }
-                      : {}),
-                  }),
+                      : {},
+                  ),
                 ].map((body) => ({
                   runId,
                   body,

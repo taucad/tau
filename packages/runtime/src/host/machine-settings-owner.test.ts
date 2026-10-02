@@ -151,7 +151,8 @@ describe('root-owned machine settings', () => {
     });
     try {
       for (let index = 0; index < 100; index += 1) {
-        expect((await owner.read({ typeId: `fixture.type${index}` })).status).toBe('current');
+        const record = await owner.read({ typeId: `fixture.type${index}` });
+        expect(record.status).toBe('current');
       }
       expect(reads).toHaveBeenCalledTimes(100);
       expect(unwatch).toHaveBeenCalledTimes(68);

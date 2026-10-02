@@ -1,16 +1,15 @@
 /* oxlint-disable @typescript-eslint/no-unsafe-assignment -- defineKernel intentionally erases private backend context */
 import { readFileSync } from 'node:fs';
 import { NodeIO } from '@gltf-transform/core';
-import { beforeAll, describe, expect, it } from 'vitest';
-import { createMockKernelRuntime, validateGlbData } from '@taucad/runtime-testing';
-import type { AnyKernelDefinition } from '@taucad/runtime/kernel';
+import { beforeAll, describe, expect, expectTypeOf, it } from 'vitest';
+import { createMockKernelRuntime, expectKernelProjectionOrder, validateGlbData } from '@taucad/runtime-testing';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 
 import { gltfKernel } from '#gltf.kernel.js';
 
 import { dracoExtensionName } from '#draco-backend.js';
 
-const definition = await resolveRuntimePluginDefinition<AnyKernelDefinition>('kernel', gltfKernel());
+const definition = await resolveRuntimePluginDefinition('kernel', gltfKernel());
 const runtime = createMockKernelRuntime();
 let context!: Awaited<ReturnType<typeof definition.initialize>>;
 
@@ -29,16 +28,51 @@ const stage = (files: Readonly<Record<string, Uint8Array<ArrayBuffer>>>) => {
 };
 
 describe('gltfKernel', () => {
+  it('retains the GLB view and export declarations', () => {
+    const registration = gltfKernel();
+    expectTypeOf<keyof typeof registration.views>().toEqualTypeOf<'model'>();
+    expectTypeOf<keyof typeof registration.exports>().toEqualTypeOf<'glb'>();
+    expect(registration).toMatchObject({
+      views: { model: { mimeType: 'model/gltf-binary' } },
+      exports: { glb: { extension: 'glb', mimeType: 'model/gltf-binary' } },
+    });
+  });
+
   it.each(['cube.glb', 'cube-draco.glb'])('imports %s', async (name) => {
     const bytes = new Uint8Array(readFileSync(new URL(`fixtures/${name}`, import.meta.url)));
     stage({ [name]: bytes });
-    const result = await definition.createGeometry({ entryPath: name, parameters: {} }, runtime, context);
-    expect(result.geometry?.format).toBe('gltf');
-    if (result.geometry?.format === 'gltf') {
-      validateGlbData(result.geometry.content);
-      const { json } = await new NodeIO().binaryToJSON(result.geometry.content);
-      expect(json.extensionsUsed?.includes(dracoExtensionName)).not.toBe(true);
-    }
+    const result = await definition.evaluate({ entryPath: name, parameters: {}, options: {} }, runtime, context);
+    const artifact = await definition.render!({ handle: result.handle, view: 'model', options: {} }, runtime, context);
+    validateGlbData(artifact.content as Uint8Array<ArrayBuffer>);
+    const freshSnapshot = definition.serializeHandle!({ handle: result.handle }, runtime, context);
+    const render = async (handle: typeof result.handle) => {
+      const projected = await definition.render!({ handle, view: 'model', options: {} }, runtime, context);
+      return projected.content;
+    };
+    const exportModel = async (
+      handle: typeof result.handle,
+      coordinateSystem: 'y-up' | 'z-up',
+      length: 'meter' | 'millimeter',
+    ) => {
+      const projected = await definition.export!(
+        { exportId: 'glb', handle, options: { coordinateSystem, unit: { length } } },
+        runtime,
+        context,
+      );
+      return projected.files[0].bytes;
+    };
+    const ordered = await expectKernelProjectionOrder({
+      renderA: async () => render(result.handle),
+      renderB: async () => exportModel(result.handle, 'y-up', 'meter'),
+      export: async () => exportModel(result.handle, 'z-up', 'millimeter'),
+      freshB: async () => {
+        const fresh = definition.deserializeHandle!({ serialized: freshSnapshot }, runtime, context);
+        return exportModel(fresh, 'y-up', 'meter');
+      },
+    });
+    expect(ordered.first).toEqual(artifact.content);
+    const { json } = await new NodeIO().binaryToJSON(artifact.content as Uint8Array<ArrayBuffer>);
+    expect(json.extensionsUsed?.includes(dracoExtensionName)).not.toBe(true);
   });
 
   it.each([
@@ -52,12 +86,10 @@ describe('gltfKernel', () => {
       ]),
     );
     stage(files);
-    const result = await definition.createGeometry({ entryPath: name, parameters: {} }, runtime, context);
-    expect(result.geometry?.format).toBe('gltf');
-    if (result.geometry?.format === 'gltf') {
-      validateGlbData(result.geometry.content);
-      const { json } = await new NodeIO().binaryToJSON(result.geometry.content);
-      expect(json.extensionsUsed?.includes(dracoExtensionName)).not.toBe(true);
-    }
+    const result = await definition.evaluate({ entryPath: name, parameters: {}, options: {} }, runtime, context);
+    const artifact = await definition.render!({ handle: result.handle, view: 'model', options: {} }, runtime, context);
+    validateGlbData(artifact.content as Uint8Array<ArrayBuffer>);
+    const { json } = await new NodeIO().binaryToJSON(artifact.content as Uint8Array<ArrayBuffer>);
+    expect(json.extensionsUsed?.includes(dracoExtensionName)).not.toBe(true);
   });
 });

@@ -1,6 +1,7 @@
 import { memo } from 'react';
 import type { CanvasProps } from '@react-three/fiber';
-import type { Geometry } from '@taucad/types';
+import { asKnownArtifact } from '@taucad/runtime';
+import type { Artifact } from '@taucad/runtime';
 import { GltfMesh } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { ThreeProvider } from '#components/geometry/graphics/three/three-context.js';
@@ -16,7 +17,8 @@ type CadViewerCanvasEventProperties = Pick<CanvasProps, 'eventSource' | 'eventPr
 
 type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> &
   CadViewerCanvasEventProperties & {
-    readonly geometry?: Geometry;
+    readonly artifact?: Artifact;
+    readonly artifactHash?: string;
     readonly sourceFile?: string;
     readonly enableSurfaces?: boolean;
     readonly enableLines?: boolean;
@@ -28,7 +30,8 @@ type CadViewerProperties = Omit<ThreeViewerProperties, 'graphicsBackend'> &
 
 export const CadViewer = memo(
   ({
-    geometry,
+    artifact,
+    artifactHash,
     sourceFile,
     enableSurfaces = true,
     enableLines = true,
@@ -42,17 +45,18 @@ export const CadViewer = memo(
 
     const graphicsBackendEffective = resolveViewerGraphicsBackend(webGpuEnabled, gpuAvailable);
 
-    if (geometry?.format === 'svg') {
-      return <SvgViewer enableGrid={properties.enableGrid} enableAxes={properties.enableAxes} geometry={geometry} />;
+    const known = artifact === undefined ? undefined : asKnownArtifact(artifact);
+    if (known?.mimeType === 'image/svg+xml') {
+      return <SvgViewer enableGrid={properties.enableGrid} enableAxes={properties.enableAxes} artifact={known} />;
     }
 
     let scene: React.ReactNode;
-    if (geometry?.format === 'gltf') {
+    if (known?.mimeType === 'model/gltf-binary') {
       scene = (
         <GltfMesh
-          gltfFile={geometry.content}
+          gltfFile={known.content}
           sourceFile={sourceFile}
-          geometryHash={geometry.hash}
+          geometryHash={artifactHash}
           presentationRevision={requestedGltfRevision}
           enableMatcap={enableMatcap}
           enableSurfaces={enableSurfaces}
@@ -60,8 +64,15 @@ export const CadViewer = memo(
           onModelComponentSecondaryPointerCandidate={onModelComponentSecondaryPointerCandidate}
         />
       );
-    } else if (geometry?.format === 'webrtc') {
-      throw new Error('WebRTC geometries are not supported');
+    } else if (artifact !== undefined) {
+      return (
+        <div
+          role='status'
+          className='flex size-full items-center justify-center bg-background text-sm text-muted-foreground'
+        >
+          No viewer is available for {artifact.mimeType}.
+        </div>
+      );
     }
 
     return (

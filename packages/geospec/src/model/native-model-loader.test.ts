@@ -1,4 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { RuntimeDocument } from '@taucad/runtime/client';
+import type { SourceRevision } from '@taucad/runtime/types';
 import { createGeoSpecNativeModelLoader } from '#model/native-model-loader.js';
 import type { GeoSpecNativeModelEngine } from '#model/native-model-loader.js';
 import type { GeoSpecRuntimeClient } from '#model/types.js';
@@ -7,6 +10,10 @@ import { createGeoSpecAssertionClient } from '#assertion-client/client.js';
 import type { GeoSpecNativeSubject } from '#engine/client.js';
 
 const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
+
+// SAFETY: the fixture constructs an exact 64-hex SHA-256 digest for source revision identity.
+const digest = (fill: string): Exclude<SourceRevision['files'][string], 'missing'> =>
+  `sha256:${fill.repeat(64)}` as Exclude<SourceRevision['files'][string], 'missing'>;
 
 const testEngine = () => {
   const ingestSubject = vi.fn(
@@ -44,12 +51,18 @@ const testEngine = () => {
 describe('native model loader ownership', () => {
   it('should honor no eager STEP mesh without forwarding an unsupported ingest flag', async () => {
     const { engine, ingestSubject } = testEngine();
+    const document = mock<RuntimeDocument>();
+    document.export.mockResolvedValue({
+      success: true,
+      exportId: 'step',
+      evaluationId: 'evaluation-1',
+      issues: [],
+      files: [{ name: 'part.step', mimeType: 'application/step', bytes: Uint8Array.of(1) }],
+    });
     const runtime: GeoSpecRuntimeClient = {
       connect: async () => undefined,
       terminate: () => undefined,
-      export: vi
-        .fn()
-        .mockResolvedValue({ success: true, issues: [], data: [{ name: 'part.step', bytes: Uint8Array.of(1) }] }),
+      open: vi.fn(() => document),
     };
     const loader = createGeoSpecNativeModelLoader({ engine, format: 'stp', runtime });
     try {
@@ -118,21 +131,25 @@ describe('native model loader ownership', () => {
 
   it('should admit successful Runtime issues into the compiled subject', async () => {
     const { engine, ingestSubject } = testEngine();
+    const document = mock<RuntimeDocument>();
+    document.export.mockResolvedValue({
+      success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
+      issues: [{ code: 'RUNTIME', severity: 'warning', message: 'Model warning' }],
+      files: [{ name: 'part.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.of(1) }],
+    });
     const runtime: GeoSpecRuntimeClient = {
       connect: async () => undefined,
       terminate: () => undefined,
-      export: vi.fn().mockResolvedValue({
-        success: true,
-        issues: [{ code: 'MODEL_WARNING', severity: 'warning', message: 'Model warning' }],
-        data: [{ name: 'part.glb', bytes: Uint8Array.of(1) }],
-      }),
+      open: vi.fn(() => document),
     };
     const loader = createGeoSpecNativeModelLoader({ engine, runtime });
     try {
       await loader({ file: 'main.ts' });
       const request: unknown = JSON.parse(new TextDecoder().decode(ingestSubject.mock.calls[0]![0]));
       expect(request).toMatchObject({
-        diagnostics: [{ code: 'MODEL_WARNING', severity: 'warning', message: 'Model warning' }],
+        diagnostics: [{ code: 'RUNTIME', severity: 'warning', message: 'Model warning' }],
       });
     } finally {
       await loader.releaseAll();
@@ -142,21 +159,25 @@ describe('native model loader ownership', () => {
   it('should retain each Runtime load graph and actual export bytes despite equal admitted geometry', async () => {
     const { engine } = testEngine();
     const parameters = { width: 2 };
-    const files = { 'main.ts': `sha256:${'a'.repeat(64)}`, 'cache.json': `sha256:${'b'.repeat(64)}` };
+    const files = { 'main.ts': digest('a'), 'cache.json': digest('b') };
+    const document = mock<RuntimeDocument>();
+    document.export.mockImplementation(async () => ({
+      success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
+      issues: [],
+      sourceRevision: { entry: 'main.ts', files: { ...files } },
+      files: [{ name: 'part.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.of(parameters.width) }],
+    }));
     const runtime: GeoSpecRuntimeClient = {
       connect: async () => undefined,
       terminate: () => undefined,
-      export: vi.fn().mockImplementation(async () => ({
-        success: true,
-        issues: [],
-        sourceRevision: { entry: 'main.ts', files: { ...files } },
-        data: [{ name: 'part.glb', bytes: Uint8Array.of(parameters.width) }],
-      })),
+      open: vi.fn(() => document),
     };
     const loader = createGeoSpecNativeModelLoader({ engine, runtime });
     const first = await loader({ file: 'main.ts', parameters });
     parameters.width = 3;
-    files['cache.json'] = `sha256:${'c'.repeat(64)}`;
+    files['cache.json'] = digest('c');
     const second = await loader({ file: 'main.ts', parameters });
     expect(first).toMatchObject({
       load: {
@@ -190,16 +211,20 @@ describe('native model loader ownership', () => {
     const read = Uint8Array.of(1);
     const exported = Uint8Array.of(2);
     const resource = Uint8Array.of(3);
+    const document = mock<RuntimeDocument>();
+    document.export.mockResolvedValue({
+      success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
+      files: [
+        { name: 'model.glb', mimeType: 'model/gltf-binary', bytes: exported },
+        { name: 'model.bin', mimeType: 'application/octet-stream', bytes: resource },
+      ],
+      issues: [],
+    });
     const runtime: GeoSpecRuntimeClient = {
       connect: vi.fn(async () => undefined),
-      export: vi.fn().mockResolvedValue({
-        success: true,
-        issues: [],
-        data: [
-          { name: 'model.glb', bytes: exported },
-          { name: 'model.bin', bytes: resource },
-        ],
-      }),
+      open: vi.fn(() => document),
       terminate: vi.fn(),
     };
     const loader = createGeoSpecNativeModelLoader({ engine, runtime, readSource: async () => read });
@@ -220,19 +245,22 @@ describe('native model loader ownership', () => {
 
   it('coalesces inline Runtime exports, drains release, and retries after failure', async () => {
     const { engine, ingestSubject, releaseSubject } = testEngine();
-    const firstExport = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();
+    const firstExport = Promise.withResolvers<Awaited<ReturnType<RuntimeDocument['export']>>>();
     const exportModel = vi
       .fn()
       .mockImplementationOnce(async () => firstExport.promise)
       .mockResolvedValue({
         success: true,
+        exportId: 'glb',
+        evaluationId: 'evaluation-1',
+        files: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: Uint8Array.of(8) }],
         issues: [],
-        data: [{ name: 'model.glb', bytes: Uint8Array.of(8) }],
       });
     const terminate = vi.fn();
+    const document = mock<RuntimeDocument>({ export: exportModel });
     const runtime: GeoSpecRuntimeClient = {
       connect: vi.fn(async () => undefined),
-      export: exportModel,
+      open: vi.fn(() => document),
       terminate,
     };
     const loader = createGeoSpecNativeModelLoader({ engine, runtime });
@@ -256,7 +284,7 @@ describe('native model loader ownership', () => {
     code['main.ts'] = 'model B';
     await loader(options);
     expect(exportModel).toHaveBeenCalledTimes(3);
-    expect(exportModel.mock.calls[2]?.[1]).toMatchObject({
+    expect(vi.mocked(runtime.open).mock.calls[2]?.[0]).toMatchObject({
       source: { files: { 'main.ts': 'model B' } },
     });
     await loader.releaseAll();
@@ -265,11 +293,13 @@ describe('native model loader ownership', () => {
 
   it('keeps a shared Runtime admission alive until releaseAll drains it', async () => {
     const { engine, ingestSubject, releaseSubject } = testEngine();
-    const exported = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();
+    const exported = Promise.withResolvers<Awaited<ReturnType<RuntimeDocument['export']>>>();
     const terminate = vi.fn();
+    const exportModel = vi.fn(async () => exported.promise);
+    const document = mock<RuntimeDocument>({ export: exportModel });
     const runtime: GeoSpecRuntimeClient = {
       connect: vi.fn(async () => undefined),
-      export: vi.fn(async () => exported.promise),
+      open: vi.fn(() => document),
       terminate,
     };
     const loader = createGeoSpecNativeModelLoader({
@@ -285,14 +315,16 @@ describe('native model loader ownership', () => {
     const duplicate = loader(options);
     const cleanup = loader.releaseAll();
     await vi.waitFor(() => {
-      expect(runtime.export).toHaveBeenCalledTimes(1);
+      expect(exportModel).toHaveBeenCalledTimes(1);
     });
     expect(releaseSubject).not.toHaveBeenCalled();
     expect(terminate).not.toHaveBeenCalled();
     exported.resolve({
       success: true,
+      exportId: 'glb',
+      evaluationId: 'evaluation-1',
       issues: [],
-      data: [
+      files: [
         {
           name: 'model.glb',
           mimeType: 'model/gltf-binary',
@@ -615,15 +647,17 @@ describe('native model loader carried scopes', () => {
 
   it('should reserve each coalesced pending admission before its owner can dispose', async () => {
     const { engine, released } = contentEngine();
-    const exported = Promise.withResolvers<Awaited<ReturnType<GeoSpecRuntimeClient['export']>>>();
+    const exported = Promise.withResolvers<Awaited<ReturnType<RuntimeDocument['export']>>>();
     const started = Promise.withResolvers<void>();
+    const document = mock<RuntimeDocument>();
+    document.export.mockImplementation(async () => {
+      started.resolve();
+      return exported.promise;
+    });
     const runtime: GeoSpecRuntimeClient = {
       connect: async () => undefined,
       terminate: () => undefined,
-      export: vi.fn(async () => {
-        started.resolve();
-        return exported.promise;
-      }),
+      open: vi.fn(() => document),
     };
     const loader = createGeoSpecNativeModelLoader({ engine, runtime });
     try {
@@ -633,14 +667,16 @@ describe('native model loader carried scopes', () => {
       await started.promise;
       exported.resolve({
         success: true,
+        exportId: 'step',
+        evaluationId: 'evaluation-1',
         issues: [],
-        data: [{ name: 'model.step', mimeType: 'application/step', bytes: Uint8Array.of(1) }],
+        files: [{ name: 'model.step', mimeType: 'application/step', bytes: Uint8Array.of(1) }],
       });
       const firstSubject = await first;
       leaseFor(firstSubject, engine).dispose();
       const secondSubject = await second;
       rawSubjectResidency(secondSubject)!();
-      expect(runtime.export).toHaveBeenCalledOnce();
+      expect(document.export).toHaveBeenCalledOnce();
       expect(released).toEqual([]);
       leaseFor(secondSubject, engine).dispose();
       expect(released).toEqual(['1']);

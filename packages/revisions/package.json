@@ -147,17 +147,18 @@
     "@taucad/project-core": "workspace:*",
     "buffer": "catalog:",
     "isomorphic-git": "catalog:",
-    "nanoid": "catalog:",
-    "zod": "catalog:"
+    "nanoid": "catalog:"
   },
   "peerDependencies": {
-    "xstate": "^6.0.0-alpha.59"
+    "xstate": "^6.0.0-alpha.59",
+    "zod": "^4.0.0"
   },
   "devDependencies": {
     "@taucad/formal": "workspace:*",
     "@taucad/utils": "workspace:*",
     "@taucad/xstate-testing": "workspace:*",
-    "xstate": "catalog:"
+    "xstate": "catalog:",
+    "zod": "catalog:"
   },
   "peerDependenciesMeta": {
     "xstate": {

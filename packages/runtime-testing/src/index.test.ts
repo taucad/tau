@@ -3,11 +3,12 @@ import { readFileSync, readdirSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { contentDigest, digestAction } from '@taucad/cache-core';
 import type { ActionDigest, ComputeAction } from '@taucad/cache-core';
 import type { ResidentCacheBinding, ResidentExportEntry } from '@taucad/runtime/kernel';
+import type { RenderResult, KernelExportResult } from '@taucad/runtime/types';
 
 import * as entry from '#index.js';
 
@@ -23,6 +24,46 @@ describe('@taucad/runtime-testing', () => {
     });
 
     await client.shutdown();
+  });
+
+  it('provides a document mock with public evaluation, rendering, and event contracts', async () => {
+    const client = entry.createMockRuntimeClient();
+    const fixture = entry.createMockRuntimeDocument();
+    vi.mocked(client.open).mockReturnValue(fixture.document);
+    const document = client.open({ source: { path: 'main.ts' } });
+    const view = document.view('model');
+    const evaluated = vi.fn();
+    const rendered = vi.fn();
+    document.on('evaluated', evaluated);
+    view.on('rendered', rendered);
+
+    await expect(document.evaluation()).resolves.toEqual({ superseded: false, evaluation: fixture.evaluation });
+    await expect(view.rendering()).resolves.toEqual({ superseded: false, rendering: fixture.rendering });
+    fixture.emitEvaluated(fixture.evaluation);
+    fixture.emitRendered(fixture.rendering);
+    expect(evaluated).toHaveBeenCalledExactlyOnceWith(fixture.evaluation);
+    expect(rendered).toHaveBeenCalledExactlyOnceWith(fixture.rendering);
+    expect(fixture.viewSpy).toHaveBeenCalledWith('model', undefined);
+  });
+
+  it('reads actual v2 render and export artifacts through the known-media boundary', () => {
+    const glb = new Uint8Array([1, 2, 3]);
+    const rendered: RenderResult = {
+      success: true,
+      data: { mimeType: 'model/gltf-binary', content: glb },
+      issues: [],
+    };
+    expect(entry.extractGltfFromResult(rendered)).toBe(glb);
+    expect(() =>
+      entry.extractGltfFromResult({ ...rendered, data: { mimeType: 'model/gltf-binary', content: new Uint8Array() } }),
+    ).toThrow(TypeError);
+
+    const written: KernelExportResult = {
+      success: true,
+      data: [{ name: 'model.glb', mimeType: 'model/gltf-binary', bytes: glb }],
+      issues: [],
+    };
+    expect(entry.extractGltfFromExportResult(written)).toEqual(glb);
   });
 
   it('preserves the kernel filesystem text and byte read overloads', async () => {

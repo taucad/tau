@@ -4,14 +4,7 @@ import type { GeoSpecSubject } from '#model/subject.js';
 import type { GeoSpecNativeModelEngine, GeoSpecNativeSourceReader } from '#model/native-model-loader.js';
 import type { MeshSource } from '#mesh/load-mesh.js';
 import type { StepSource, StepStreamingMode } from '#step/types.js';
-import type {
-  ExportFormatsFor,
-  ExportResult,
-  KernelPlugin,
-  RuntimeSource,
-  RuntimeSourceFiles,
-  TranscoderPlugin,
-} from '@taucad/runtime';
+import type { RuntimeClient } from '@taucad/runtime';
 
 /**
  * Geometry formats accepted by {@link import('./load-model.js').loadModel}.
@@ -24,36 +17,22 @@ export type GeoSpecModelFormat = MeshFileFormat | 'step' | 'stp';
  * Runtime client surface consumed by `geospec/model`.
  *
  * GeoSpec accepts concrete Tau runtime clients from multiple call sites but
- * only needs connection lifecycle and request-scoped export. Keep this shape
+ * only needs connection lifecycle and request-scoped documents. Keep this shape
  * small so typed runtime clients do not have to widen their full generic
  * method surface to GeoSpec's testing DSL.
  *
  * @public
  */
-type GeoSpecRuntimeExportFormat = ExportFormatsFor<readonly KernelPlugin[], readonly TranscoderPlugin[]>;
-
-/**
- *
- *
- * @public
- */
-export type GeoSpecRuntimeClient = {
-  connect(): Promise<void>;
-  terminate(): void;
+export type GeoSpecRuntimeClient = Pick<RuntimeClient, 'connect' | 'terminate'> & {
+  open: (
+    input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'parameters' | 'stage' | 'watch' | 'signal'>,
+  ) => Pick<ReturnType<RuntimeClient['open']>, 'export' | 'close'>;
   on?(
     event: 'telemetry',
     handler: (batch: {
       readonly entries: ReadonlyArray<{ name: string; duration: number; startTime: number; workerTimeOrigin: number }>;
     }) => void,
   ): () => void;
-  export<const Format extends GeoSpecRuntimeExportFormat, const Files extends RuntimeSourceFiles = RuntimeSourceFiles>(
-    format: Format,
-    options?: {
-      readonly source?: RuntimeSource<Files>;
-      readonly parameters?: Record<string, unknown>;
-      readonly exportOptions?: Record<string, unknown>;
-    },
-  ): Promise<ExportResult>;
 };
 
 /**

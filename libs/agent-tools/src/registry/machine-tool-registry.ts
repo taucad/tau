@@ -179,7 +179,7 @@ const asJson = (value: unknown): JsonValue => {
  * What `request_print` needs from its host beyond the machine client.
  *
  * Slices the named source through the runtime export route to `gcode.3mf` —
- * the same route `export_geometry` takes, so the artifact is recorded in the
+ * the same route `export_model` takes, so the artifact is recorded in the
  * project and named by the project, its path and its digest — composes the
  * provider's submission configuration for the resolved machine (expected setup
  * from what the machine observes, since an agent cannot know a provider's

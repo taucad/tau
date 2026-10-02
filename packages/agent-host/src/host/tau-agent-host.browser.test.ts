@@ -36,9 +36,9 @@ it('boots the complete host in a worker and persists a tool turn to OPFS', async
   });
   worker.terminate();
   if (result.log !== undefined) {
-    /* Resolved against this file: out/test-results/chat-logs/<project>/<spec>/<chatId>.jsonl. */
+    /* Vitest's browser command resolves from the project root; retain the repository output convention. */
     await commands.writeFile(
-      '../../../../out/test-results/chat-logs/agent-host/tau-agent-host.browser.test.ts/host-worker-smoke.jsonl',
+      '../../out/test-results/chat-logs/agent-host/tau-agent-host.browser.test.ts/host-worker-smoke.jsonl',
       result.log,
     );
   }

@@ -18,7 +18,7 @@ import { createHash } from 'node:crypto';
 import { models } from './models.mts';
 import { repoRoot } from './repo-root.mts';
 import { rejectSupersededTimingResult } from './retry-policy.mjs';
-import { createRuntimeClient } from '../../../../../packages/runtime/src/client/index.ts';
+import { asKnownArtifact, createRuntimeClient } from '../../../../../packages/runtime/src/client/index.ts';
 import { inProcessTransport } from '../../../../../packages/runtime/src/transport/in-process.ts';
 import { fromNodeFs } from '../../../../../packages/runtime/src/filesystem/from-node-fs.ts';
 import { fromMemoryFs } from '../../../../../packages/runtime/src/filesystem/index.ts';
@@ -506,27 +506,37 @@ const main = async () => {
       brepDigests = [];
       const load = loadavg();
       const start = performance.now();
-      const request: any = { source: { path: model.mainFile }, parameters, ...(content ? { content } : {}) };
-      let result = await client.render(request);
+      const renderRequest = async () => {
+        const document = client.open({ source: { path: model.mainFile }, parameters, watch: values.watch !== 'off' });
+        const view = document.view('model', content ? { content } : {});
+        try {
+          return await view.rendering();
+        } finally {
+          view.close();
+          document.close();
+        }
+      };
+      let result = await renderRequest();
       let wallMs = performance.now() - start;
       let retried = false;
       if (values.failOnRetry) rejectSupersededTimingResult(result);
       if (result.superseded) {
-        // a watcher event for our own source rewrite can supersede the in-flight render; re-issue once
+        // A watcher event for our own source rewrite can supersede the in-flight render; re-issue once.
         retried = true;
         probe.reset();
         telemetry = [];
         logs.length = 0;
         brepDigests = [];
         const retryStart = performance.now();
-        result = await client.render(request);
+        result = await renderRequest();
         wallMs = performance.now() - retryStart;
       }
       if (result.superseded) throw new Error('render superseded twice');
-      if (!result.geometry.success)
-        throw new Error(`render failed: ${JSON.stringify(result.geometry.issues).slice(0, 2000)}`);
-      if (result.geometry.data.format !== 'gltf') throw new Error('expected glb');
-      const bytes: Uint8Array = result.geometry.data.content;
+      if (!result.rendering.success)
+        throw new Error(`render failed: ${JSON.stringify(result.rendering.issues).slice(0, 2000)}`);
+      const artifact = asKnownArtifact(result.rendering.artifact);
+      if (artifact?.mimeType !== 'model/gltf-binary') throw new Error('expected glb');
+      const bytes = artifact.content;
       const spans: Record<string, { count: number; ms: number }> = {};
       let librarySummary: Record<string, { calls: number; ms: number; errors: number }> | undefined;
       for (const entry of telemetry) {

@@ -1,21 +1,16 @@
 /**
- * Phase 4 / R8 — `RuntimeCommand`, `RuntimeResponse`,
- * `ConfigureMemoryRequest` deletion contract.
+ * Legacy runtime protocol deletion contract.
  *
- * The pre-channel runtime modelled the wire as discriminated unions
- * (`RuntimeCommand` C→W, `RuntimeResponse` W→C, `ConfigureMemoryRequest`
- * memory bootstrap). v6 collapses these into the typed
- * {@link RuntimeProtocol} with `calls` / `notifies` / `listens` tables
- * and the `InitializeMemoryHandle` envelope. The legacy unions are
- * pure documentation of the ghost protocol and must not survive.
+ * The document protocol is the current worker wire contract. The older
+ * preview protocol types and their predecessor command unions must not
+ * regain a public or source-level foothold.
  *
  * Asserts that:
  *
  *   1. `RuntimeCommand`, `RuntimeResponse`, `ConfigureMemoryRequest`
  *      are NOT named exports of `@taucad/runtime` (`#index.js`) or
  *      `@taucad/runtime/types`.
- *   2. The dedicated `runtime-protocol.test-d.ts` no longer exists
- *      (its only purpose is the legacy inventory).
+ *   2. The old preview protocol module and its type test do not exist.
  */
 
 import { existsSync } from 'node:fs';
@@ -39,8 +34,7 @@ describe('legacy RuntimeCommand/RuntimeResponse/ConfigureMemoryRequest removal (
     });
   }
 
-  it('the legacy `runtime-protocol.test-d.ts` no longer exists', () => {
-    const legacyPath = resolve(packageRoot, 'types/runtime-protocol.test-d.ts');
-    expect(existsSync(legacyPath)).toBe(false);
+  it.each(['runtime-protocol.types.ts', 'runtime-protocol.test-d.ts'])('the legacy `%s` no longer exists', (name) => {
+    expect(existsSync(resolve(packageRoot, 'types', name))).toBe(false);
   });
 });

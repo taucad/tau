@@ -6,7 +6,7 @@
 
 import { describe, it, expectTypeOf } from 'vitest';
 import type {
-  HostGeometryDeliveryBinding,
+  HostBinaryDeliveryBinding,
   HostInitializeBindingsCore,
   HostInitializeBindings,
 } from '#transport/runtime-transport.types.js';
@@ -16,9 +16,9 @@ describe('HostInitializeBindingsCore excludes fileSystem slot (Finding 1, R1)', 
     expectTypeOf<HostInitializeBindingsCore>().not.toHaveProperty('fileSystem');
   });
 
-  it('retains the geometry-delivery binding', () => {
-    expectTypeOf<HostInitializeBindingsCore>().toHaveProperty('geometryDelivery');
-    expectTypeOf<HostInitializeBindingsCore['geometryDelivery']>().toMatchTypeOf<HostGeometryDeliveryBinding>();
+  it('retains the binary-delivery binding', () => {
+    expectTypeOf<HostInitializeBindingsCore>().toHaveProperty('binaryDelivery');
+    expectTypeOf<HostInitializeBindingsCore['binaryDelivery']>().toMatchTypeOf<HostBinaryDeliveryBinding>();
   });
 
   it('HostInitializeBindings default still extends HostInitializeBindingsCore without fileSystem', () => {

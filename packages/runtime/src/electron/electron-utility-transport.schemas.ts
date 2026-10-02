@@ -57,7 +57,7 @@ export const electronUtilityMainClientOptionsSchema = z.object({
     { message: 'port must be an emitter-shaped MessagePortMain' },
   ),
   release: z
-    .custom<(reason: 'requested' | 'render-timeout') => void>((value) => typeof value === 'function', {
+    .custom<(reason: 'requested' | 'operation-timeout') => void>((value) => typeof value === 'function', {
       message: 'release must be a function',
     })
     .optional(),

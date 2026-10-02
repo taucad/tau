@@ -13,6 +13,7 @@ import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import sharp from 'sharp';
+import { asKnownArtifact } from '@taucad/runtime';
 import { createExampleRuntimeClient, exampleKernelIds } from '#scripts/runtime.js';
 
 // Nx sets FORCE_COLOR while some shells set NO_COLOR; runtime workers would
@@ -102,10 +103,18 @@ const isWebp = (bytes: Uint8Array<ArrayBuffer>): boolean =>
 
 const decodeWebp = async (
   bytes: Uint8Array<ArrayBuffer>,
-): Promise<{ readonly width: number; readonly height: number; readonly pixels: Uint8Array<ArrayBuffer> }> => {
+): Promise<{
+  readonly width: number;
+  readonly height: number;
+  readonly pixels: Uint8Array<ArrayBuffer>;
+}> => {
   const input = Buffer.from(bytes.buffer, bytes.byteOffset, bytes.byteLength);
   const { data, info } = await sharp(input).ensureAlpha().raw().toBuffer({ resolveWithObject: true });
-  return { width: info.width, height: info.height, pixels: new Uint8Array(data) };
+  return {
+    width: info.width,
+    height: info.height,
+    pixels: new Uint8Array(data),
+  };
 };
 
 const imagesEquivalent = async (
@@ -214,61 +223,91 @@ for (const entry of isolated ? renderable : []) {
   });
   try {
     const sourcePath = picogkRoot ? entry.mainFile : `${entry.kernel}/${entry.name}/${entry.mainFile}`;
-    console.log(`Rendering ${entry.kernel}/${entry.name}`);
-    // oxlint-disable-next-line eslint/no-await-in-loop -- One shared runtime/GPU queue renders fixtures serially.
-    const outcome = await client.render({
+    const document = client.open({
       source: { path: sourcePath },
-      content: { includeEdges: true },
-      // Pinned bytes come from PicoVoxel's exact lane, never the fast viewer preview.
-      ...(entry.kernel === 'picovoxel' && { renderOptions: { lane: 'exact' } }),
+      watch: false,
+      ...(entry.kernel === 'picovoxel' ? { evaluateOptions: { lane: 'exact' } } : {}),
     });
-    if (outcome.superseded) {
-      throw new Error(`Thumbnail render failed for ${entry.kernel}/${entry.name}: render was superseded`);
-    }
-    for (const { file, lineWidth } of entry.featured ? variants : variants.slice(0, 1)) {
-      const path = join(kernelsDirectory, entry.kernel, entry.name, file);
-      if (outcome.geometry.success && outcome.geometry.data.format === 'svg') {
-        // oxlint-disable-next-line eslint/no-await-in-loop -- Preserve manifest order and the shared render queue.
-        const bytes = await renderSvgThumbnail(outcome.geometry.data.content);
-        thumbnails.push({ entry, bytes, path });
-        continue;
+    let closeView: (() => void) | undefined;
+    try {
+      // oxlint-disable-next-line no-await-in-loop -- Each fixture is evaluated on its isolated client.
+      const evaluated = await document.evaluation();
+      if (evaluated.superseded) {
+        throw new Error(`Thumbnail evaluation was superseded for ${entry.kernel}/${entry.name}`);
       }
-      // oxlint-disable-next-line eslint/no-await-in-loop -- Re-export the settled 3D render through the image transcoder.
-      const result = await client.export('webp', {
-        ...(!outcome.geometry.success && { source: { path: sourcePath } }),
-        content: { includeEdges: true },
-        exportOptions: {
-          mode: 'single',
-          ...thumbnailOptions,
-          lineWidth,
-          camera: {
-            framing: 'bounds',
-            direction: [0.6123724357, -0.6123724357, 0.5],
-            up: [0, 0, 1],
-            margin: thumbnailMargin,
-            projection: { kind: 'perspective', verticalFieldOfView: 45 },
+      const view =
+        evaluated.evaluation.success && evaluated.evaluation.views.some(({ id }) => id === 'model')
+          ? document.view('model', { content: { includeEdges: true } })
+          : document.view();
+      closeView = () => {
+        view.close();
+      };
+      console.log(`Rendering ${entry.kernel}/${entry.name}`);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- One shared runtime/GPU queue renders fixtures serially.
+      const outcome = await view.rendering();
+      if (outcome.superseded) {
+        throw new Error(`Thumbnail render failed for ${entry.kernel}/${entry.name}: render was superseded`);
+      }
+      for (const { file, lineWidth } of entry.featured ? variants : variants.slice(0, 1)) {
+        const path = join(kernelsDirectory, entry.kernel, entry.name, file);
+        const artifact = outcome.rendering.success ? asKnownArtifact(outcome.rendering.artifact) : undefined;
+        if (artifact?.mimeType === 'image/svg+xml') {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- Preserve manifest order and the shared render queue.
+          const bytes = await renderSvgThumbnail(artifact.content);
+          thumbnails.push({ entry, bytes, path });
+          continue;
+        }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Re-export the settled 3D render through the image transcoder.
+        const exported = await document.export('glb', {
+          content: { includeEdges: true },
+        });
+        if (!exported.success) {
+          throw new Error(
+            `Thumbnail model export failed for ${entry.kernel}/${entry.name}: ${exported.issues.map((issue) => issue.message).join('; ')}`,
+          );
+        }
+        // oxlint-disable-next-line no-await-in-loop -- Each featured variant has a distinct camera line width.
+        const result = await client.transcode({
+          from: 'glb',
+          to: 'webp',
+          files: [...exported.files],
+          options: {
+            mode: 'single',
+            ...thumbnailOptions,
+            lineWidth,
+            camera: {
+              framing: 'bounds',
+              direction: [0.6123724357, -0.6123724357, 0.5],
+              up: [0, 0, 1],
+              margin: thumbnailMargin,
+              projection: { kind: 'perspective', verticalFieldOfView: 45 },
+            },
+            quality: 0.9,
+            ao: {},
           },
-          quality: 0.9,
-          ao: {},
-        },
-      });
-      if (!result.success) {
-        throw new Error(
-          `Thumbnail export failed for ${entry.kernel}/${entry.name}: ${result.issues
-            .map((issue) => issue.message)
-            .join('; ')}`,
-        );
+        });
+        if (!result.success) {
+          throw new Error(
+            `Thumbnail export failed for ${entry.kernel}/${entry.name}: ${result.issues
+              .map((issue) => issue.message)
+              .join('; ')}`,
+          );
+        }
+        const thumbnail = result.data[0];
+        if (result.data.length !== 1 || thumbnail?.mimeType !== 'image/webp' || !isWebp(thumbnail.bytes)) {
+          throw new Error(
+            `Thumbnail export expected exactly one valid image/webp artifact, received: ${result.data.map((file) => `${file.mimeType} (${file.bytes.length} bytes)`).join(', ')}`,
+          );
+        }
+        thumbnails.push({ entry, bytes: thumbnail.bytes, path });
       }
-      const thumbnail = result.data[0];
-      if (result.data.length !== 1 || thumbnail?.mimeType !== 'image/webp' || !isWebp(thumbnail.bytes)) {
-        throw new Error(
-          `Thumbnail export expected exactly one valid image/webp artifact, received: ${result.data.map((file) => `${file.mimeType} (${file.bytes.length} bytes)`).join(', ')}`,
-        );
-      }
-      thumbnails.push({ entry, bytes: thumbnail.bytes, path });
+    } finally {
+      closeView?.();
+      document.close();
     }
   } finally {
-    client.terminate();
+    // oxlint-disable-next-line no-await-in-loop -- Each fixture owns one fresh kernel instance.
+    await client.shutdown();
   }
 }
 

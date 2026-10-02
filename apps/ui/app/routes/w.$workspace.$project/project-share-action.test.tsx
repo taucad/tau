@@ -63,7 +63,7 @@ vi.mock('#hooks/use-project.js', () => ({
     projectId: project.id,
     projectRef,
     editorRef,
-    entriesRecord: { version: 1, entries: { 'main.ts': { renderTimeout: 30_000 } } },
+    entriesRecord: { version: 1, entries: { 'main.ts': { operationTimeout: 30_000 } } },
   }),
 }));
 
@@ -159,9 +159,9 @@ beforeEach(() => {
 });
 
 describe('ProjectShareWorkbenchPanel', () => {
-  /* E1: the entry's CAD actor owns its render timeout, so a unit this panel has to spawn for the
+  /* E1: the entry's CAD actor owns its operation timeout, so a unit this panel has to spawn for the
    * thumbnail is seeded from the durable per-entry record instead of starting on the default. */
-  it('seeds a unit it spawns with the durable render timeout', async () => {
+  it('seeds a unit it spawns with the durable operation timeout', async () => {
     const existing = geometryUnits.get('main.ts')!;
     geometryUnits.delete('main.ts');
     projectSend.mockClear();
@@ -177,13 +177,13 @@ describe('ProjectShareWorkbenchPanel', () => {
         type: string;
         claimId: string;
         entryPath: string;
-        renderTimeout?: number;
+        operationTimeout?: number;
       };
       expect(claim).toEqual({
         type: 'claimGeometryUnit',
         claimId: claim.claimId,
         entryPath: 'main.ts',
-        renderTimeout: 30_000,
+        operationTimeout: 30_000,
       });
       expect(typeof claim.claimId).toBe('string');
       expect(projectSend).toHaveBeenCalledWith({

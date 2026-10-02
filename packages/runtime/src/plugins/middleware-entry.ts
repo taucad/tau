@@ -1,26 +1,23 @@
 /* oxlint-disable no-barrel-files/no-barrel-files -- package subpath entry point */
-export { defineMiddleware } from '#middleware/runtime-middleware.js';
+export { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 export type {
-  KernelMiddleware,
-  MiddlewarePluginFactory,
-  MiddlewarePluginRegistration,
-} from '#middleware/runtime-middleware.js';
+  KernelMiddlewareV2 as KernelMiddleware,
+  KernelMiddlewareServices,
+  MiddlewareContent,
+  MiddlewareDependency,
+  MiddlewareDependencyServices,
+  MiddlewareResolveHook,
+  MiddlewareState,
+  EvaluateRequest,
+  RenderRequest,
+  ExportRequest,
+  WrapDescribeHook,
+  WrapEvaluateHook,
+  WrapRenderHook,
+  WrapExportHook,
+} from '#types/runtime-middleware-v2.types.js';
+export type { MiddlewarePluginFactoryV2 as MiddlewarePluginFactory } from '#middleware/runtime-middleware-v2.js';
 export { nativeBuildInputSymbol } from '#framework/render-artifact.js';
 export type { NativeBuildInput, NativeBuildInputCarrier } from '#framework/render-artifact.js';
-export { getParametersResultSchema } from '#types/runtime-protocol.schemas.js';
+export { describeResultSchema } from '#middleware/middleware-describe-result.schemas.js';
 export { LruMap } from '@taucad/utils/cache';
-export type {
-  CreateGeometryHandler,
-  ExportGeometryHandler,
-  GetMiddlewareDependenciesHook,
-  KernelMiddlewareRuntime,
-  MeshGeometryHandler,
-  MiddlewareCreateGeometryRequest,
-  MiddlewareDependencyDeclaration,
-  MiddlewareDependencyRuntime,
-  MiddlewareState,
-  WrapCreateGeometryHook,
-  WrapExportGeometryHook,
-  WrapGetParametersHook,
-  WrapMeshGeometryHook,
-} from '#types/runtime-middleware.types.js';

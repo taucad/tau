@@ -46,6 +46,7 @@
     "@taucad/runtime": "workspace:*",
     "@taucad/skills": "workspace:*",
     "@taucad/slicer": "workspace:*",
+    "@taucad/tscircuit": "workspace:*",
     "@taucad/zoo": "workspace:*",
     "@taulabs/openrscad-engine": "catalog:",
     "esbuild": "catalog:",

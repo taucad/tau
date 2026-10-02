@@ -3,7 +3,7 @@ title: 'Runtime API Policy'
 description: 'Naming and ownership rules for runtime consumer, plugin-author, transport, filesystem, and artifact APIs.'
 status: active
 created: '2026-07-20'
-updated: '2026-09-06'
+updated: '2026-09-30'
 related:
   - docs/policy/library-api-policy.md
   - docs/policy/runtime-architecture-policy.md
@@ -138,9 +138,9 @@ Name the normalized runtime path of the model entry `entryPath` in every kernel,
 
 This applies to:
 
-- `GetParametersInput`;
-- `CreateGeometryInput`;
-- `GetDependenciesInput`;
+- `DescribeInput`;
+- `EvaluateInput`;
+- `ResolveInput`;
 - `BundleInput`;
 - `KernelBundler.bundle(entryPath)`;
 - `KernelBundler.resolveDependencies(entryPath)`; and
@@ -153,14 +153,33 @@ The value is a canonical root-relative path within the supplied runtime filesyst
 CORRECT:
 
 ```typescript
-export default defineKernel({
-  async getDependencies({ entryPath }, runtime) {
-    return runtime.bundler.resolveDependencies(entryPath);
-  },
+import { createKernelParameterDeclaration, createKernelSuccess, defineKernel } from '@taucad/runtime/kernel';
 
-  async createGeometry({ entryPath }, runtime) {
-    const source = await runtime.filesystem.readFile(entryPath, 'utf8');
-    return evaluate(source);
+const emptyParameters = createKernelParameterDeclaration(
+  {},
+  { type: 'object', properties: {}, additionalProperties: false },
+  { id: 'urn:taucad:example:parameters', name: 'ExampleParameters' },
+);
+
+const kernel = defineKernel({
+  id: 'example',
+  name: 'Example',
+  version: '1.0.0',
+  extensions: ['example'],
+  views: {},
+  exports: {},
+  async initialize() {
+    return {};
+  },
+  async resolve({ entryPath }, services) {
+    return services.bundler.resolveDependencies(entryPath);
+  },
+  async describe() {
+    return createKernelSuccess({ parameters: emptyParameters });
+  },
+  async evaluate({ entryPath }, services) {
+    const source = await services.filesystem.readFile(entryPath, 'utf8');
+    return { handle: source };
   },
 });
 ```
@@ -306,7 +325,7 @@ CORRECT:
 
 ```typescript
 const kernel = defineKernel({
-  async createGeometry({ entryPath }) {
+  async evaluate({ entryPath }) {
     expectTypeOf(entryPath).toEqualTypeOf<string>();
     return createResult();
   },

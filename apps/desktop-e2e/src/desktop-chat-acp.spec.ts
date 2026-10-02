@@ -3,7 +3,7 @@ import { existsSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join } from 'node:path';
 import {
-  getKernelResultOutputSchema,
+  evaluateModelOutputSchema,
   rpcSchemasRegistry,
   screenshotOutputSchema,
   testModelOutputSchema,
@@ -186,14 +186,14 @@ test.skipIf(!codexAvailable)('uses native Tau skills and tools through the Codex
     const runId = latestCompletedRun(events);
     expect(events).toMatch(/cad-openscad\/SKILL\.md/u);
     const messages = durableMessages(events);
-    for (const toolName of ['get_kernel_result', 'screenshot']) {
+    for (const toolName of ['evaluate_model', 'screenshot']) {
       expect(
         messages.findLast((message) => message.role === 'tool-input' && message.toolName === toolName)?.content,
       ).toMatchObject({ targetFile: 'main.scad' });
     }
     expect(
-      getKernelResultOutputSchema.parse(
-        toolResult(events, { runId, toolName: 'get_kernel_result', targetFile: 'main.scad' }),
+      evaluateModelOutputSchema.parse(
+        toolResult(events, { runId, toolName: 'evaluate_model', targetFile: 'main.scad' }),
       ),
     ).toMatchObject({
       status: 'ready',
@@ -269,7 +269,7 @@ it('conformance other volume and envelope', async () => {
       // oxlint-disable-next-line no-await-in-loop -- each turn measures the source version just written.
       await sendPrompt(
         page,
-        `Do not edit any file. Use Tau get_kernel_result and one isometric screenshot for EACH of main.scad and other.scad, then run test_model with files ["conformance.geospec.ts"]. Report the observed results. End with this plain paragraph exactly once: ${completionLine}`,
+        `Do not edit any file. Use Tau evaluate_model and one isometric screenshot for EACH of main.scad and other.scad, then run test_model with files ["conformance.geospec.ts"]. Report the observed results. End with this plain paragraph exactly once: ${completionLine}`,
       );
       // oxlint-disable-next-line no-await-in-loop -- await this exact subsequent run, not an older completed run.
       await expect
@@ -290,8 +290,8 @@ it('conformance other volume and envelope', async () => {
       await expectCount(page.getByRole('article').last().getByText(completionLine, { exact: true }), 1);
       const captures = ['main.scad', 'other.scad'].map((targetFile) => {
         expect(
-          getKernelResultOutputSchema.parse(
-            toolResult(current, { runId: currentRun, toolName: 'get_kernel_result', targetFile }),
+          evaluateModelOutputSchema.parse(
+            toolResult(current, { runId: currentRun, toolName: 'evaluate_model', targetFile }),
           ),
         ).toMatchObject({ status: 'ready', kernelIssues: [] });
         const tests = testModelOutputSchema.parse(
@@ -404,8 +404,8 @@ test.skipIf(!codexAvailable || turbojetSourcePath === undefined)(
         readFileSync(sourcePath, 'utf8').replaceAll(/\s/gu, ''),
       );
       expect(
-        getKernelResultOutputSchema.parse(
-          toolResult(events, { runId, toolName: 'get_kernel_result', targetFile: 'main.py' }),
+        evaluateModelOutputSchema.parse(
+          toolResult(events, { runId, toolName: 'evaluate_model', targetFile: 'main.py' }),
         ),
       ).toMatchObject({
         status: 'ready',
@@ -676,7 +676,7 @@ test.skipIf(!codexAvailable)(
 
 /** The candidate turn's instruction: one deterministic, cheap edit to the seeded model. */
 const candidatePrompt =
-  "Add the exact line `// candidate` as the very first line of main.scad. Change nothing else in the file and edit no other file. Then use Tau's get_kernel_result, test_model, and screenshot tools against this checkout and briefly report their results.";
+  "Add the exact line `// candidate` as the very first line of main.scad. Change nothing else in the file and edit no other file. Then use Tau's evaluate_model, test_model, and screenshot tools against this checkout and briefly report their results.";
 
 /** The one line the candidate turn is asked to prepend. */
 const candidateMarker = '// candidate';
@@ -900,7 +900,7 @@ test.skipIf(!codexAvailable)(
         .map((event) => event.replacement?.metadata?.tauInternal)
         .find((marker) => marker !== undefined);
       expect(envelope).toMatchObject({ kind: 'external-agent', agentId: 'codex', mode: 'candidate' });
-      for (const toolName of ['get_kernel_result', 'test_model', 'screenshot']) {
+      for (const toolName of ['evaluate_model', 'test_model', 'screenshot']) {
         expect(candidateEvents).toMatch(new RegExp(`"role":"tool-output"[^\\n]*"toolName":"${toolName}"`, 'u'));
       }
       expect(candidateEvents).not.toMatch(/Main refused the desktop runtime-port request/u);

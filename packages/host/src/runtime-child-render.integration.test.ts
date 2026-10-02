@@ -3,9 +3,9 @@
  *
  * `tau serve` forks `packages/cli/src/host-runtime-child.ts` under the tsx
  * loader, dials it over loopback with `fromNodeFs(workspaceRoot)` bridged back,
- * and answers `get_kernel_result` from it. Every layer of that was covered by a
+ * and answers `evaluate_model` from it. Every layer of that was covered by a
  * unit test with a fake runtime client and none of it was covered *together*:
- * the G4 live proof (2026-09-03 07:14) answered all 20 `get_kernel_result` and
+ * the G4 live proof (2026-09-03 07:14) answered all 20 `evaluate_model` and
  * both `screenshot` calls with `This Tau Host could not render main.scad:
  * Runtime render failed` on a valid OpenSCAD file, and no vertical caught it.
  *
@@ -89,7 +89,7 @@ const probeSequence = async (
 };
 
 describe('runtime child render (from source)', () => {
-  it('answers get_kernel_result for a valid model on the supervised child', { timeout: 120_000 }, async () => {
+  it('answers evaluate_model for a valid model on the supervised child', { timeout: 120_000 }, async () => {
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-render-'));
     roots.push(workspaceRoot);
     await writeFile(join(workspaceRoot, 'main.scad'), hexNut, 'utf8');
@@ -117,8 +117,8 @@ describe('runtime child render (from source)', () => {
 
   it('answers the repaired source, not the failure it already reported', { timeout: 120_000 }, async () => {
     /* The reported desktop sequence, on the daemon's own vertical: one
-     * `get_kernel_result` on a broken model, an edit that fixes it, and a
-     * second `get_kernel_result` on the same registry and runtime client. */
+     * `evaluate_model` on a broken model, an edit that fixes it, and a
+     * second `evaluate_model` on the same registry and runtime client. */
     const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-host-render-'));
     roots.push(workspaceRoot);
     await writeFile(join(workspaceRoot, 'main.ts'), brokenModel, 'utf8');

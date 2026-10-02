@@ -8,10 +8,10 @@ import { handleDeleteFile } from '#rpc/handlers/handle-delete-file.js';
 import { handleListDirectory } from '#rpc/handlers/handle-list-directory.js';
 import { handleGrep } from '#rpc/handlers/handle-grep.js';
 import { handleGlobSearch } from '#rpc/handlers/handle-glob-search.js';
-import { handleGetKernelResult } from '#rpc/handlers/handle-get-kernel-result.js';
+import { handleEvaluateModel } from '#rpc/handlers/handle-evaluate-model.js';
 import { handleCaptureImages } from '#rpc/handlers/handle-capture-images.js';
 import { handleRunGeoSpecTests } from '#rpc/handlers/handle-run-geospec-tests.js';
-import { handleExportGeometry } from '#rpc/handlers/handle-export-geometry.js';
+import { handleExportModel } from '#rpc/handlers/handle-export-model.js';
 import { handleAppendFile } from '#rpc/handlers/handle-append-file.js';
 import { handleEditFile } from '#rpc/handlers/handle-edit-file.js';
 import { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
@@ -48,11 +48,11 @@ export function createRpcDispatcher(deps: RpcDependencies): RpcDispatcher {
     [rpcName.listDirectory]: async (args) => handleListDirectory(args, deps.fileSystem),
     [rpcName.grep]: async (args) => handleGrep(args, deps.fileSystem),
     [rpcName.globSearch]: async (args) => handleGlobSearch(args, deps.fileSystem),
-    [rpcName.getKernelResult]: async (args, context) => handleGetKernelResult(args, deps.kernelClient, context),
+    [rpcName.evaluateModel]: async (args, context) => handleEvaluateModel(args, deps.kernelClient, context),
     [rpcName.captureImages]: async (args, context) => handleCaptureImages(args, deps.images, context),
     [rpcName.runGeoSpecTests]: async (args, context) => handleRunGeoSpecTests(args, deps.geospec, context),
-    [rpcName.exportGeometry]: async (args, context) =>
-      handleExportGeometry(args, { graphics: deps.graphics, fileSystem: deps.fileSystem }, context),
+    [rpcName.exportModel]: async (args, context) =>
+      handleExportModel(args, { graphics: deps.graphics, fileSystem: deps.fileSystem }, context),
     [rpcName.appendFile]: async (args) => handleAppendFile(args, deps.fileSystem),
     [rpcName.editFile]: async (args) => handleEditFile(args, deps.fileSystem),
     [rpcName.resolveSkill]: async (args) => handleResolveSkill(args, deps.skillResolver),

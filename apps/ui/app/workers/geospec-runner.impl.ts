@@ -18,6 +18,7 @@
 
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import { createRuntimeClient } from '@taucad/runtime/client';
+import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { fromFsLike } from '@taucad/runtime/filesystem';
 import type { FsLike } from '@taucad/runtime/filesystem';
 import type { FileStat } from '@taucad/types';
@@ -28,6 +29,7 @@ import type { GeoSpecRunner, GeoSpecRunnerOptions } from 'geospec/runner/worker'
 import { z } from 'zod';
 import { createDefaultKernelOptions } from '#constants/kernel-worker.constants.js';
 import { uiRuntimeConfigSchema } from '#runtime/ui-runtime.schema.js';
+import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
 import type {
   GeoSpecRunnerWorkerInitializeRequest,
   GeoSpecRunnerWorkerRequest,
@@ -312,7 +314,7 @@ const formatRuntimeConfigError = (error: unknown): string => {
 type WorkerSession = {
   sessionId: string;
   fileSystem: ProjectFileSystemBridge;
-  runtimeClient: ReturnType<typeof createRuntimeClient>;
+  runtimeClient: AppRuntimeClient;
   runner: GeoSpecRunner;
   closeEngine?: (() => void) | undefined;
 };
@@ -367,7 +369,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
   }
 
   let fileSystem: ProjectFileSystemBridge | undefined;
-  let runtimeClient: ReturnType<typeof createRuntimeClient> | undefined;
+  let runtimeClient: AppRuntimeClient | undefined;
   let runner: GeoSpecRunner | undefined;
   let closeEngine: (() => void) | undefined;
   try {
@@ -378,7 +380,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
 
     fileSystem = await createProjectFileSystemProxy(request.fileSystemPort);
     const runtimeFileSystem = fromFsLike(createRuntimeFsLike(fileSystem));
-    runtimeClient = createRuntimeClient(
+    runtimeClient = createRuntimeClient<AnyRuntimeDefinition>(
       createDefaultKernelOptions({
         fileSystem: runtimeFileSystem,
         runtimeConfig: runtimeConfigResult.data,
@@ -416,6 +418,7 @@ const initializeGeoSpecWorker = async (request: GeoSpecRunnerWorkerInitializeReq
           }),
       };
       const projectFiles = fileSystem;
+
       runner = createNativeGeoSpecRunner({
         filesystem: createBridgeVmFileSystem(fileSystem),
         // PERF-OUTPUT-01: the product selects the bounded success evidence (ruling 13).

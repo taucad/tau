@@ -4,7 +4,8 @@ import { CadPreviewViewer } from '#components/cad-preview.js';
 import type { CadPreviewStatus } from '#hooks/use-cad-preview.js';
 
 const cadPreviewMocks = vi.hoisted(() => ({
-  geometry: undefined as { format: 'gltf'; content: Uint8Array<ArrayBuffer>; hash: string } | undefined,
+  artifact: undefined as { mimeType: 'model/gltf-binary'; content: Uint8Array<ArrayBuffer> } | undefined,
+  artifactHash: undefined as string | undefined,
   status: 'idle' as CadPreviewStatus,
   error: undefined as Error | undefined,
   graphicsRef: {
@@ -25,7 +26,8 @@ const cadPreviewMocks = vi.hoisted(() => ({
 
 vi.mock('#hooks/use-cad-preview.js', () => ({
   useCadPreview: () => ({
-    geometry: cadPreviewMocks.geometry,
+    artifact: cadPreviewMocks.artifact,
+    artifactHash: cadPreviewMocks.artifactHash,
     graphicsRef: cadPreviewMocks.graphicsRef,
     status: cadPreviewMocks.status,
     error: cadPreviewMocks.error,
@@ -50,13 +52,14 @@ vi.mock('#components/ui/loader.js', () => ({
 
 describe('CadPreviewViewer', () => {
   beforeEach(() => {
-    cadPreviewMocks.geometry = undefined;
+    cadPreviewMocks.artifact = undefined;
+    cadPreviewMocks.artifactHash = undefined;
     cadPreviewMocks.status = 'idle';
     cadPreviewMocks.error = undefined;
   });
 
-  it('should show loading while render has not settled and no geometry yet', () => {
-    cadPreviewMocks.geometry = undefined;
+  it('should show loading while render has not settled and no artifact yet', () => {
+    cadPreviewMocks.artifact = undefined;
     cadPreviewMocks.status = 'loading';
 
     render(<CadPreviewViewer className='size-full' />);
@@ -66,7 +69,8 @@ describe('CadPreviewViewer', () => {
   });
 
   it('should keep the last model visible while a re-render is in progress', () => {
-    cadPreviewMocks.geometry = { format: 'gltf', content: new Uint8Array([1, 2, 3]), hash: 'stale' };
+    cadPreviewMocks.artifact = { mimeType: 'model/gltf-binary', content: new Uint8Array([1, 2, 3]) };
+    cadPreviewMocks.artifactHash = 'stale';
     cadPreviewMocks.status = 'loading';
 
     render(<CadPreviewViewer className='size-full' />);
@@ -76,7 +80,8 @@ describe('CadPreviewViewer', () => {
   });
 
   it('should keep the last model visible with the exact failed-rerender message', () => {
-    cadPreviewMocks.geometry = { format: 'gltf', content: new Uint8Array([1, 2, 3]), hash: 'stale' };
+    cadPreviewMocks.artifact = { mimeType: 'model/gltf-binary', content: new Uint8Array([1, 2, 3]) };
+    cadPreviewMocks.artifactHash = 'stale';
     cadPreviewMocks.status = 'ready';
     cadPreviewMocks.error = new Error('preview rerender sentinel');
 

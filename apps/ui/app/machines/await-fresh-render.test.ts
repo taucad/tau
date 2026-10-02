@@ -1,219 +1,212 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createActor, setup, types } from 'xstate';
+import type { ActorRefFrom } from 'xstate';
+import type { Rendering, RuntimeDocument, ViewSubscription } from '@taucad/runtime';
+import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import { eventSchemas } from '#lib/xstate.lib.js';
+import { defaultOperationTimeout } from '#constants/editor.constants.js';
+import { awaitFreshRender, AwaitFreshOperationTimeoutError } from '#machines/await-fresh-render.js';
+import type { cadMachine } from '#machines/cad.machine.js';
 
-import { defaultRenderTimeout } from '#constants/editor.constants.js';
-import { awaitFreshRender, AwaitFreshRenderTimeoutError } from '#machines/await-fresh-render.js';
+type Context = {
+  document: RuntimeDocument | undefined;
+  defaultView: ViewSubscription | undefined;
+  lastProjection: Rendering | undefined;
+  latestRenderingOutcome: 'success' | 'failure' | undefined;
+};
+type Event =
+  | { type: 'open'; document: RuntimeDocument; view?: ViewSubscription }
+  | { type: 'projection'; rendering: Rendering }
+  | { type: 'fail' };
 
-/**
- * Minimal stand-in for `cadMachine` that exposes the same public-context shape
- * relied on by `awaitFreshRender` (`lastRequestedRenderId`,
- * `lastSettledRenderId`, plus the `idle | rendering | error` state values).
- *
- * Keeps the helper test isolated from the full cadMachine wiring. The helper
- * only depends on the structural contract, not the concrete machine.
- */
 const fakeCadMachine = setup({
-  schemas: {
-    context: types<{ lastRequestedRenderId: number; lastSettledRenderId: number }>(),
-    events: eventSchemas<
-      { type: 'request' } | { type: 'settle' } | { type: 'startRender' } | { type: 'finishRender' } | { type: 'fail' }
-    >(),
-  },
+  schemas: { context: types<Context>(), events: eventSchemas<Event>() },
 }).createMachine({
   id: 'fakeCad',
   initial: 'idle',
-  context: { lastRequestedRenderId: 0, lastSettledRenderId: 0 },
+  context: {
+    document: undefined,
+    defaultView: undefined,
+    lastProjection: undefined,
+    latestRenderingOutcome: undefined,
+  },
   states: {
     idle: {
       on: {
-        request: {
-          context: ({ context }) => ({ lastRequestedRenderId: context.lastRequestedRenderId + 1 }),
-        },
-        startRender: { target: 'rendering' },
-        settle: {
-          context: ({ context }) => ({ lastSettledRenderId: context.lastRequestedRenderId }),
-        },
+        open: ({ event }) => ({
+          context: { document: event.document, defaultView: event.view, lastProjection: undefined },
+        }),
+        projection: ({ event }) => ({
+          context: {
+            lastProjection: event.rendering,
+            latestRenderingOutcome: event.rendering.success ? 'success' : 'failure',
+          },
+        }),
         fail: { target: 'error' },
       },
     },
-    rendering: {
-      on: {
-        /* The real machine re-enters `rendering.submitting` on a new render
-         * intent and bumps the requested id there, so a render can be
-         * overtaken before its own outcome arrives. */
-        request: {
-          context: ({ context }) => ({ lastRequestedRenderId: context.lastRequestedRenderId + 1 }),
-        },
-        finishRender: {
-          target: 'idle',
-          context: ({ context }) => ({ lastSettledRenderId: context.lastRequestedRenderId }),
-        },
-        fail: { target: 'error' },
-      },
-    },
-    error: {
-      on: {
-        request: {
-          context: ({ context }) => ({ lastRequestedRenderId: context.lastRequestedRenderId + 1 }),
-        },
-      },
-    },
+    error: {},
   },
 });
 
-describe('awaitFreshRender', () => {
-  it('should resolve immediately when current render result is already at-or-above baseline', async () => {
-    const actor = createActor(fakeCadMachine).start();
-    actor.send({ type: 'request' });
-    actor.send({ type: 'settle' });
-
-    // Re-arm a baseline equal to the current render result. The helper should
-    // resolve immediately because the machine already satisfies the predicate.
-    const snapshot = await awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0], {
-      awaitTimeout: 100,
-    });
-    expect(snapshot.context.lastSettledRenderId).toBeGreaterThanOrEqual(snapshot.context.lastRequestedRenderId);
-    actor.stop();
+const actorFixture = () => {
+  const actor = createActor(fakeCadMachine).start();
+  const asCadActor = actor as unknown as ActorRefFrom<typeof cadMachine>;
+  const runtime = createMockRuntimeDocument();
+  vi.mocked(runtime.view.rendering).mockImplementation(async () => {
+    actor.send({ type: 'projection', rendering: runtime.rendering });
+    return { superseded: false, rendering: runtime.rendering };
   });
+  return { actor, asCadActor, runtime };
+};
 
-  it('should wait for next settled geometry that satisfies the baseline', async () => {
-    const actor = createActor(fakeCadMachine).start();
-    actor.send({ type: 'request' });
-    actor.send({ type: 'startRender' });
-
-    const promise = awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0], {
-      awaitTimeout: 1000,
-    });
-
-    setTimeout(() => {
-      actor.send({ type: 'finishRender' });
-    }, 10);
-
-    const snapshot = await promise;
-    expect(snapshot.value).toBe('idle');
-    expect(snapshot.context.lastSettledRenderId).toBe(1);
-    actor.stop();
-  });
-
-  it('should ignore stale settlements that do not satisfy the baseline', async () => {
-    const actor = createActor(fakeCadMachine).start();
-    actor.send({ type: 'request' });
-    actor.send({ type: 'request' });
-
-    const promise = awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0], {
-      awaitTimeout: 1000,
-    });
-
-    actor.send({ type: 'startRender' });
-    actor.send({ type: 'finishRender' });
-
-    const snapshot = await promise;
-    expect(snapshot.context.lastSettledRenderId).toBe(2);
-    expect(snapshot.context.lastSettledRenderId).toBeGreaterThanOrEqual(2);
-    actor.stop();
-  });
-
-  it('should resolve when the machine reaches error state', async () => {
-    const actor = createActor(fakeCadMachine).start();
-    actor.send({ type: 'request' });
-    actor.send({ type: 'startRender' });
-
-    const promise = awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0], {
-      awaitTimeout: 1000,
-    });
-
-    actor.send({ type: 'fail' });
-
-    const snapshot = await promise;
-    expect(snapshot.value).toBe('error');
-    actor.stop();
-  });
-
-  /* The sibling of the stale-kernel class: an error raised for render N while
-   * render N+1 is already in flight is the *previous* render's verdict, and
-   * handing it back as this wait's answer is exactly the staleness the
-   * baseline exists to exclude. */
-  it('should not settle on an error that a newer render request has overtaken', async () => {
-    const actor = createActor(fakeCadMachine).start();
-    actor.send({ type: 'request' });
-    actor.send({ type: 'startRender' });
-
-    const promise = awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0], {
-      awaitTimeout: 50,
-    });
-    actor.send({ type: 'request' });
-    actor.send({ type: 'fail' });
-
-    await expect(promise).rejects.toBeInstanceOf(AwaitFreshRenderTimeoutError);
-    expect(actor.getSnapshot().value).toBe('error');
-    actor.stop();
-  });
-
-  it('should reject with AwaitFreshRenderTimeoutError when no fresh result arrives in time', async () => {
-    const actor = createActor(fakeCadMachine).start();
-    actor.send({ type: 'request' });
-    actor.send({ type: 'startRender' });
-
-    await expect(
-      awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0], {
-        awaitTimeout: 25,
+describe('awaitFreshRender document settlement', () => {
+  it('waits for a pending document evaluation and its default view', async () => {
+    const { actor, asCadActor, runtime } = actorFixture();
+    let resolveEvaluation: ((value: { superseded: false; evaluation: typeof runtime.evaluation }) => void) | undefined;
+    vi.mocked(runtime.document.evaluation).mockReturnValue(
+      new Promise((resolve) => {
+        resolveEvaluation = resolve;
       }),
-    ).rejects.toBeInstanceOf(AwaitFreshRenderTimeoutError);
+    );
+    actor.send({ type: 'open', document: runtime.document, view: runtime.view });
+
+    const pending = awaitFreshRender(asCadActor, { awaitTimeout: 1000 });
+    await vi.waitFor(() => {
+      expect(runtime.document.evaluation).toHaveBeenCalledOnce();
+    });
+    expect(runtime.view.rendering).not.toHaveBeenCalled();
+    resolveEvaluation?.({ superseded: false, evaluation: runtime.evaluation });
+    const settled = await pending;
+
+    expect(runtime.view.rendering).toHaveBeenCalledOnce();
+    expect(settled.context.document).toBe(runtime.document);
     actor.stop();
   });
 
-  it('should default to the shared render timeout when awaitTimeout is omitted', async () => {
+  it('settles a successful empty evaluation without pulling a view', async () => {
+    const { actor, asCadActor, runtime } = actorFixture();
+    const empty = { ...runtime.evaluation, views: [] };
+    vi.mocked(runtime.document.evaluation).mockResolvedValue({ superseded: false, evaluation: empty });
+    actor.send({ type: 'open', document: runtime.document });
+
+    await expect(awaitFreshRender(asCadActor, { awaitTimeout: 100 })).resolves.toMatchObject({
+      context: { document: runtime.document },
+    });
+    expect(runtime.view.rendering).not.toHaveBeenCalled();
+    actor.stop();
+  });
+
+  it('returns a failed evaluation without waiting for a projection', async () => {
+    const { actor, asCadActor, runtime } = actorFixture();
+    vi.mocked(runtime.document.evaluation).mockResolvedValue({
+      superseded: false,
+      evaluation: { success: false, id: runtime.evaluation.id, transient: false, issues: [] },
+    });
+    actor.send({ type: 'open', document: runtime.document, view: runtime.view });
+
+    await awaitFreshRender(asCadActor, { awaitTimeout: 100 });
+    expect(runtime.view.rendering).not.toHaveBeenCalled();
+    actor.stop();
+  });
+
+  it('settles a failed view and preserves the actor failure outcome', async () => {
+    const { actor, asCadActor, runtime } = actorFixture();
+    vi.mocked(runtime.view.rendering).mockImplementation(async () => {
+      const outcome = {
+        superseded: false,
+        rendering: {
+          success: false,
+          requestId: 'failed',
+          evaluationId: runtime.evaluation.id,
+          transient: false,
+          issues: [],
+        },
+      } as const;
+      actor.send({ type: 'projection', rendering: outcome.rendering });
+      return outcome;
+    });
+    actor.send({ type: 'open', document: runtime.document, view: runtime.view });
+
+    const settled = await awaitFreshRender(asCadActor, { awaitTimeout: 100 });
+    expect(settled.context.latestRenderingOutcome).toBe('failure');
+    actor.stop();
+  });
+
+  it('returns the exact presented rendering source revision', async () => {
+    const { actor, asCadActor, runtime } = actorFixture();
+    const rendering: Rendering = {
+      ...runtime.rendering,
+      sourceRevision: { entry: 'main.ts', files: { 'main.ts': 'missing' } },
+    };
+    vi.mocked(runtime.view.rendering).mockImplementation(async () => {
+      actor.send({ type: 'projection', rendering });
+      return { superseded: false, rendering };
+    });
+    actor.send({ type: 'open', document: runtime.document, view: runtime.view });
+
+    const settled = await awaitFreshRender(asCadActor, { awaitTimeout: 100 });
+    expect(settled.context.lastProjection?.sourceRevision).toEqual(rendering.sourceRevision);
+    actor.stop();
+  });
+
+  it('retries when the source document is replaced during evaluation', async () => {
+    const { actor, asCadActor, runtime: first } = actorFixture();
+    const second = createMockRuntimeDocument();
+    vi.mocked(second.view.rendering).mockImplementation(async () => {
+      actor.send({ type: 'projection', rendering: second.rendering });
+      return { superseded: false, rendering: second.rendering };
+    });
+    let resolveFirst: ((value: { superseded: false; evaluation: typeof first.evaluation }) => void) | undefined;
+    vi.mocked(first.document.evaluation).mockReturnValue(
+      new Promise((resolve) => {
+        resolveFirst = resolve;
+      }),
+    );
+    actor.send({ type: 'open', document: first.document, view: first.view });
+
+    const pending = awaitFreshRender(asCadActor, { awaitTimeout: 1000 });
+    await vi.waitFor(() => {
+      expect(first.document.evaluation).toHaveBeenCalledOnce();
+    });
+    actor.send({ type: 'open', document: second.document, view: second.view });
+    resolveFirst?.({ superseded: false, evaluation: first.evaluation });
+    const settled = await pending;
+
+    expect(first.view.rendering).not.toHaveBeenCalled();
+    expect(second.view.rendering).toHaveBeenCalledOnce();
+    expect(settled.context.document).toBe(second.document);
+    actor.stop();
+  });
+
+  it('rejects a closed document instead of presenting an old result', async () => {
+    const { actor, asCadActor, runtime } = actorFixture();
+    vi.mocked(runtime.document.evaluation).mockRejectedValue(new Error('document closed'));
+    actor.send({ type: 'open', document: runtime.document, view: runtime.view });
+    await expect(awaitFreshRender(asCadActor, { awaitTimeout: 100 })).rejects.toThrow('document closed');
+    actor.stop();
+  });
+
+  it('classifies a missing document deadline with the operation timeout code', async () => {
+    const { actor, asCadActor } = actorFixture();
+    await expect(awaitFreshRender(asCadActor, { awaitTimeout: 10 })).rejects.toMatchObject({
+      name: 'AwaitFreshOperationTimeoutError',
+      code: 'OPERATION_TIMEOUT',
+    });
+    actor.stop();
+  });
+
+  it('uses the shared operation deadline by default', async () => {
     vi.useFakeTimers();
-    const actor = createActor(fakeCadMachine).start();
-    actor.send({ type: 'request' });
-    actor.send({ type: 'startRender' });
-
-    let settledError: unknown;
-    let settled = false;
-    const promise = (async () => {
-      try {
-        await awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0]);
-      } catch (error) {
-        settled = true;
-        settledError = error;
-      }
-    })();
-
+    const { actor, asCadActor } = actorFixture();
     try {
-      await vi.advanceTimersByTimeAsync(defaultRenderTimeout - 1);
-      await Promise.resolve();
-      expect(settled).toBe(false);
-
-      await vi.advanceTimersByTimeAsync(1);
-      await promise;
-
-      expect(settled).toBe(true);
-      expect(settledError).toBeInstanceOf(AwaitFreshRenderTimeoutError);
+      const pending = awaitFreshRender(asCadActor);
+      const assertion = expect(pending).rejects.toBeInstanceOf(AwaitFreshOperationTimeoutError);
+      await vi.advanceTimersByTimeAsync(defaultOperationTimeout);
+      await assertion;
     } finally {
       actor.stop();
       vi.useRealTimers();
-    }
-  });
-
-  it('should expose code === "RENDER_TIMEOUT" on AwaitFreshRenderTimeoutError (never depends on XState message)', async () => {
-    const actor = createActor(fakeCadMachine).start();
-    actor.send({ type: 'request' });
-    actor.send({ type: 'startRender' });
-
-    try {
-      await awaitFreshRender(actor as unknown as Parameters<typeof awaitFreshRender>[0], {
-        awaitTimeout: 10,
-      });
-      throw new Error('Expected awaitFreshRender to reject');
-    } catch (error) {
-      expect(error).toBeInstanceOf(AwaitFreshRenderTimeoutError);
-      // Discriminator must come from our owned timeout race, not from any
-      // substring scan of the inner XState error wording. Future XState
-      // releases that change the timeout message must not break this contract.
-      expect((error as AwaitFreshRenderTimeoutError).code).toBe('RENDER_TIMEOUT');
-    } finally {
-      actor.stop();
     }
   });
 });

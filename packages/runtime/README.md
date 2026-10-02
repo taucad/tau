@@ -22,17 +22,22 @@ import { replicad } from '@taucad/replicad';
 
 const runtime = defineRuntime({ plugins: [esbuild(), replicad()] });
 const client = await createNodeClient({ runtime });
-const result = await client.export('glb', {
+const document = client.open({
   source: {
-    files: {
-      'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);',
-    },
+    files: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);' },
   },
 });
 
-if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
-console.log(`Exported ${result.data[0].name}: ${result.data[0].bytes.byteLength} bytes`);
-client.terminate();
+try {
+  const result = await document.export('glb');
+  if (!result.success) throw new Error(`Export failed: ${result.issues[0]?.message}`);
+  const file = result.files[0];
+  if (file.bytes.byteLength === 0) throw new Error('Exported an empty GLB.');
+  console.log(`Exported ${file.name}: ${file.bytes.byteLength} bytes`);
+} finally {
+  document.close();
+  await client.shutdown();
+}
 ```
 
 ## Browser worker

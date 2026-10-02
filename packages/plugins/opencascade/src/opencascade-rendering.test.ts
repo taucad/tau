@@ -17,7 +17,7 @@ import { describe, expect, it } from 'vitest';
 import { opencascadeKernel } from '#opencascade.kernel.js';
 import { esbuildBundler } from '@taucad/esbuild';
 import {
-  assertSuccess,
+  assertRenderingSuccess,
   colorParityCases,
   createTestGeometry,
   expectLinearBaseColor,
@@ -26,7 +26,7 @@ import {
 } from '@taucad/runtime-testing';
 import { defineRuntime } from '@taucad/runtime/worker';
 
-import type { HashedGeometryResult } from '@taucad/runtime/types';
+import type { Rendering } from '@taucad/runtime/client';
 
 const runtime = defineRuntime({ kernels: [opencascadeKernel()], bundlers: [esbuildBundler()] });
 
@@ -55,15 +55,14 @@ type RenderCase = {
   readonly variant: string;
 };
 
-async function renderColored({ source, hex, opacity, variant }: RenderCase): Promise<HashedGeometryResult> {
+async function renderColored({ source, hex, opacity, variant }: RenderCase): Promise<Rendering> {
   const file = 'colored.ts';
   const result = await createTestGeometry({
     runtime,
     files: { [file]: source },
-    mainFile: file,
-    parameters: {},
+    open: { source: { path: file } },
   });
-  assertSuccess(result, `opencascade ${variant} (${hex}, alpha=${opacity})`);
+  assertRenderingSuccess(result, `opencascade ${variant} (${hex}, alpha=${opacity})`);
   return result;
 }
 
@@ -120,10 +119,9 @@ export default function main() {
   };
 }`,
         },
-        mainFile: file,
-        parameters: {},
+        open: { source: { path: file } },
       });
-      assertSuccess(result, 'occt PBR createGeometry');
+      assertRenderingSuccess(result, 'occt PBR createGeometry');
 
       const baseColor = await getMaterialBaseColor(result);
       expectLinearBaseColor(baseColor, '#1565C0');
@@ -146,12 +144,11 @@ export default function main() {
   return new BRepPrimAPI_MakeCylinder(5, 20).Shape();
 }`,
       },
-      mainFile: file,
-      parameters: {},
+      open: { source: { path: file } },
     });
-    assertSuccess(result, 'occt uncoloured createGeometry');
+    assertRenderingSuccess(result, 'occt uncoloured createGeometry');
 
-    expect(result.data.format).toBe('gltf');
+    expect(result.artifact.mimeType).toBe('model/gltf-binary');
 
     try {
       const baseColor = await getMaterialBaseColor(result);

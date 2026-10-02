@@ -8,7 +8,7 @@
  */
 
 import type { KernelIssue } from '#types/runtime.types.js';
-import type { KernelRuntime } from '#types/runtime-kernel.types.js';
+import type { KernelServices } from '#types/runtime-kernel-v2.types.js';
 import { isKernelIssueCode } from '#types/kernel-issue-codes.js';
 import { isNode, resolveFileUrl } from '#framework/environment.js';
 import { asBuffer } from '@taucad/utils/file';
@@ -100,7 +100,10 @@ export function createKernelModuleRegistryExpression(name: string): string {
 }
 
 /** Registers a registry-backed built-in module with the runtime bundler. @public */
-export function registerKernelModule(runtime: KernelRuntime, options: RegisterKernelModuleOptions): void {
+export function registerKernelModule(
+  runtime: Pick<KernelServices, 'bundler'>,
+  options: RegisterKernelModuleOptions,
+): void {
   const registry = getModuleRegistry();
   registry.set(options.name, options.exports);
 

@@ -40,7 +40,7 @@ import {
  *
  * So this row is written against that log as much as against the DOM. It opens
  * nine projects in one window, runs a scripted turn in the ninth whose
- * `get_kernel_result` makes the *agent's* services host ask main for a runtime
+ * `evaluate_model` makes the *agent's* services host ask main for a runtime
  * port of its own, and then reads the shell's ledger: no `refusing to exceed`,
  * no `services.runtime-port-failed`, and — after the app has quit — one
  * released `kernel.exit` for every `kernel.fork`. A warm spare is forked
@@ -51,7 +51,7 @@ import {
  * `test_model`, and `test_model` over a project with no `*.geospec.ts` never
  * reaches a runner at all (`libs/agent-tools/src/geospec/run-tests.ts:79-86`),
  * so it would prove the MCP path and not the utility fork this gate is about.
- * The gateway script names `get_kernel_result` — the blueprint's own acceptance
+ * The gateway script names `evaluate_model` — the blueprint's own acceptance
  * tool — the way `desktop-chat-in-project.spec.ts` does.
  *
  * The last third covers R3 (park hidden idle kernels): leaving the ninth
@@ -175,7 +175,7 @@ test('serves the ninth live project a kernel tool, and parks a hidden one', asyn
       { name: 'create_file', input: { targetFile: 'main.scad', content: gatewayFixtureScadSource } },
       /* The one scripted call that makes the services utility ask main for a
        * runtime port of its own — the request the cap refused. */
-      { name: 'get_kernel_result', input: { targetFile: 'main.scad' } },
+      { name: 'evaluate_model', input: { targetFile: 'main.scad' } },
     ],
   });
   session = await launchDesktopApp({ token });
@@ -235,7 +235,7 @@ test('serves the ninth live project a kernel tool, and parks a hidden one', asyn
      * funded turn is asked for. */
     expect(kernelLedger(session.logPath).refusals).toEqual([]);
 
-    /* 4. The turn itself: `create_file`, `get_kernel_result`, then the round
+    /* 4. The turn itself: `create_file`, `evaluate_model`, then the round
      * that finds no third call and closes the turn. */
     await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 180_000 }).toBeGreaterThanOrEqual(3);
     const sourcePath = await waitForProjectOnDisk(session.homeRoot, slug, { extension: '.scad', page });

@@ -11,7 +11,8 @@
     "types": ["node", "vitest"],
     "paths": {
       "#support/*.js": ["./src/support/*.ts"],
-      "@taucad/runtime-testing": ["../../packages/runtime-testing/src/index.ts"]
+      "@taucad/runtime-testing": ["../../packages/runtime-testing/src/index.ts"],
+      "@taucad/workbench": ["../../packages/workbench/src/index.ts"]
     }
   },
   "include": [

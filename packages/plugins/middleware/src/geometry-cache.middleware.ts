@@ -5,32 +5,43 @@ import { z } from 'zod';
 import { defineMiddleware, nativeBuildInputSymbol } from '@taucad/runtime/middleware';
 import type { NativeBuildInput, NativeBuildInputCarrier } from '@taucad/runtime/middleware';
 import type {
-  CreateGeometryResult,
-  ExportGeometryResult,
-  GeometryResponse,
+  Artifact,
+  EvaluateResult,
   KernelSuccessResult,
-  MeshGeometryResult,
+  RenderResult,
+  KernelExportResult,
 } from '@taucad/runtime/types';
+import { kernelIssueCodeValues } from '@taucad/runtime/types';
+import { nonemptyExportFiles } from '@taucad/runtime/kernel';
 import { traceCacheOperation } from '#_internal/cache-span.js';
 
-type BuildCacheResult = KernelSuccessResult<GeometryResponse | undefined> & NativeBuildInputCarrier;
+type BuildCacheResult = Extract<EvaluateResult, { success: true }> & NativeBuildInputCarrier;
 
 const kernelIssueSchema = z
   .object({
     message: z.string(),
-    code: z.string().min(1),
+    code: z.enum(kernelIssueCodeValues),
     severity: z.enum(['error', 'warning', 'info']),
   })
   .loose();
 
-const geometryResponseSchema = z.discriminatedUnion('format', [
-  z.object({ format: z.literal('gltf'), content: z.instanceof(Uint8Array) }).loose(),
-  z.object({ format: z.literal('svg'), content: z.string(), name: z.string().optional() }).loose(),
-]);
+const offersSchema = z
+  .object({
+    views: z.array(z.string()).optional(),
+    exports: z.array(z.string()).optional(),
+    instances: z.record(z.string(), z.array(z.object({ id: z.string(), title: z.string() }))).optional(),
+  })
+  .strict();
+const artifactSchema = z
+  .object({
+    mimeType: z.string().min(1),
+    content: z.union([z.instanceof(Uint8Array), z.string()]),
+  })
+  .loose();
 const successResultShape = {
   success: z.literal(true),
   issues: z.array(kernelIssueSchema),
-  serializedNativeHandle: z.unknown().optional(),
+  serializedHandle: z.unknown().optional(),
 };
 const nativeBuildInputSchema: z.ZodType<NativeBuildInput> = z
   .object({
@@ -45,7 +56,7 @@ const buildEntrySchema = z
     result: z
       .object({
         ...successResultShape,
-        data: geometryResponseSchema.nullish().transform((value) => value ?? undefined),
+        data: offersSchema,
       })
       .loose(),
     nativeBuildInput: nativeBuildInputSchema,
@@ -54,7 +65,7 @@ const buildEntrySchema = z
 const meshEntrySchema = z
   .object({
     schemaVersion: z.literal(1),
-    result: z.object({ ...successResultShape, data: geometryResponseSchema }).loose(),
+    result: z.object({ ...successResultShape, data: artifactSchema }).loose(),
   })
   .strict();
 const exportFileSchema = z
@@ -72,13 +83,13 @@ const exportEntrySchema = z
   .strict();
 
 const dependencyAction = (
-  operation: 'build' | 'mesh' | 'export',
+  operation: 'evaluate' | 'render' | 'export',
   dependencyHash: string,
   codec: { readonly id: string; readonly version: string },
 ): ComputeAction => ({
   schemaVersion: 1,
   namespace: '@taucad/middleware/geometry-cache',
-  producer: { id: '@taucad/middleware/geometry-cache', version: '2', implementationAssets: [] },
+  producer: { id: '@taucad/middleware/geometry-cache', version: '3', implementationAssets: [] },
   operation,
   inputs: [
     {
@@ -92,31 +103,28 @@ const dependencyAction = (
   codec: { id: codec.id, version: codec.version },
 });
 
-const buildCodec: CacheCodec<CreateGeometryResult> = {
+const buildCodec: CacheCodec<EvaluateResult> = {
   id: '@taucad/middleware/geometry-build',
-  version: '2',
+  version: '3',
   mediaType: 'application/vnd.taucad.geometry-build+msgpack',
   encode: ({ value }) => {
     if (!value.success) {
       throw new Error('Failed geometry results are not reusable.');
     }
-    const result = value as BuildCacheResult;
+    const result = value;
     const nativeBuildInput = result[nativeBuildInputSymbol];
     if (!nativeBuildInput) {
       throw new Error('A reusable native build requires its exact replay input.');
     }
-    if (result.data?.format === 'webrtc') {
-      throw new Error('Live WebRTC geometry is not reusable.');
-    }
     /* D12: a fresh build carries the means to make its snapshot, not the snapshot — nothing on the
      * display path reads one. A cache entry has to hold the value, so this is where it is made. */
-    const serializedNativeHandle = result.serializedNativeHandle ?? result.serializeNativeHandleSnapshot?.();
-    if (result.data === undefined && serializedNativeHandle === undefined) {
-      throw new Error('A reusable build requires geometry or a serialized native handle.');
+    const serializedHandle = result.serializedHandle ?? result.serializeHandleSnapshot?.();
+    if (serializedHandle === undefined) {
+      throw new Error('A reusable build requires a serialized handle.');
     }
     const {
       [nativeBuildInputSymbol]: _nativeBuildInput,
-      serializeNativeHandleSnapshot: _serializeNativeHandleSnapshot,
+      serializeHandleSnapshot: _serializeHandleSnapshot,
       ...publicResult
     } = result;
     // GlTF optional fields use absence. MessagePack's default turns undefined into
@@ -124,7 +132,7 @@ const buildCodec: CacheCodec<CreateGeometryResult> = {
     return msgpackEncode(
       {
         schemaVersion: 1,
-        result: { ...publicResult, ...(serializedNativeHandle === undefined ? {} : { serializedNativeHandle }) },
+        result: { ...publicResult, serializedHandle },
         nativeBuildInput,
       },
       { ignoreUndefined: true },
@@ -137,22 +145,22 @@ const buildCodec: CacheCodec<CreateGeometryResult> = {
   },
 };
 
-const meshCodec: CacheCodec<MeshGeometryResult> = {
+const meshCodec: CacheCodec<RenderResult> = {
   id: '@taucad/middleware/geometry-mesh',
-  version: '1',
+  version: '2',
   mediaType: 'application/vnd.taucad.geometry-mesh+msgpack',
   encode: ({ value }) => {
-    if (!value.success || value.data.format === 'webrtc') {
-      throw new Error('Failed or live mesh results are not reusable.');
+    if (!value.success) {
+      throw new Error('Failed render results are not reusable.');
     }
     return msgpackEncode({ schemaVersion: 1, result: value });
   },
-  decode: ({ bytes }) => meshEntrySchema.parse(msgpackDecode(bytes)).result as KernelSuccessResult<GeometryResponse>,
+  decode: ({ bytes }) => meshEntrySchema.parse(msgpackDecode(bytes)).result as KernelSuccessResult<Artifact>,
 };
 
-const exportCodec: CacheCodec<ExportGeometryResult> = {
+const exportCodec: CacheCodec<KernelExportResult> = {
   id: '@taucad/middleware/geometry-export',
-  version: '1',
+  version: '2',
   mediaType: 'application/vnd.taucad.geometry-export+msgpack',
   encode: ({ value }) => {
     if (!value.success || value.data.length === 0) {
@@ -160,22 +168,28 @@ const exportCodec: CacheCodec<ExportGeometryResult> = {
     }
     return msgpackEncode({ schemaVersion: 1, result: value });
   },
-  decode: ({ bytes }) => exportEntrySchema.parse(msgpackDecode(bytes)).result as ExportGeometryResult,
+  decode: ({ bytes }) => {
+    const { result } = exportEntrySchema.parse(msgpackDecode(bytes));
+    if (result.data.length === 0) {
+      throw new Error('A cached export requires at least one file.');
+    }
+    return { ...result, data: nonemptyExportFiles(result.data) };
+  },
 };
 
 /** Whole-build, display-mesh, and export reuse backed by the runtime compute CAS. @public */
 export const geometryCache = defineMiddleware({
   id: 'geometryCache',
   name: 'GeometryCache',
-  version: '2.0.0',
+  version: '3.0.0',
 
-  async wrapCreateGeometry(input, handler, { compute, dependencyHash, logger, tracer }) {
+  async wrapEvaluate(input, handler, { compute, dependencyHash, logger, tracer }) {
     if (compute.status !== 'on') {
       return handler(input);
     }
     const result = await traceCacheOperation(tracer, 'cache.geometry.build.evaluate', async () =>
       compute.evaluate({
-        action: dependencyAction('build', dependencyHash, buildCodec),
+        action: dependencyAction('evaluate', dependencyHash, buildCodec),
         codec: buildCodec,
         policy: 'best-effort',
         compute: async () => handler(input),
@@ -185,13 +199,13 @@ export const geometryCache = defineMiddleware({
     return result.value;
   },
 
-  async wrapMeshGeometry(input, handler, { compute, dependencyHash, logger, tracer }) {
+  async wrapRender(input, handler, { compute, dependencyHash, logger, tracer }) {
     if (compute.status !== 'on') {
       return handler(input);
     }
     const result = await traceCacheOperation(tracer, 'cache.geometry.mesh.evaluate', async () =>
       compute.evaluate({
-        action: dependencyAction('mesh', dependencyHash, meshCodec),
+        action: dependencyAction('render', dependencyHash, meshCodec),
         codec: meshCodec,
         policy: 'best-effort',
         compute: async () => handler(input),
@@ -201,7 +215,7 @@ export const geometryCache = defineMiddleware({
     return result.value;
   },
 
-  async wrapExportGeometry(input, handler, { compute, dependencyHash, logger, tracer }) {
+  async wrapExport(input, handler, { compute, dependencyHash, logger, tracer }) {
     if (compute.status !== 'on') {
       return handler(input);
     }

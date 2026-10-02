@@ -1,9 +1,9 @@
 /**
- * Integration tests for wrapExportGeometry middleware execution.
+ * Integration tests for wrapExport middleware execution.
  *
  * Tests the onion chain execution model for exportGeometry using
  * MockKernelWorker to verify:
- * 1. wrapExportGeometry hooks are called with correct input and runtime
+ * 1. wrapExport hooks are called with correct input and runtime
  * 2. Middleware can intercept and modify export results
  * 3. Multiple middleware hooks chain correctly in onion order
  * 4. Short-circuiting works correctly
@@ -13,15 +13,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import type { OnWorkerLog } from '@taucad/types';
 import { z } from 'zod';
 import type { ExportGeometryResult } from '#types/runtime.types.js';
-import type { ExportGeometryRequest } from '#types/runtime-kernel.types.js';
-import type { ExportGeometryHandler, KernelMiddlewareRuntime } from '#types/runtime-middleware.types.js';
+import type { ExportRequest, KernelMiddlewareServices } from '#types/runtime-middleware-v2.types.js';
+import { nonemptyExportFiles } from '#types/runtime-kernel-v2.types.js';
+import type { KernelExportResult } from '#types/runtime-kernel-v2.types.js';
 import type { Dependency, ExportDependency } from '#types/runtime-dependency.types.js';
-import { defineMiddleware } from '#middleware/runtime-middleware.js';
+import { defineMiddlewareV2 } from '#middleware/runtime-middleware-v2.js';
 import { defineTranscoder } from '#types/runtime-transcoder.types.js';
 // oxlint-disable-next-line no-restricted-imports, import/extensions -- Runtime-private white-box fixture stays outside the package build graph.
 import { createGeometryFile, MockKernelWorker } from '../../test/support/kernel-worker.fixture.js';
 
-const imageViewSchema = z.object({ id: z.string(), label: z.string().optional(), phi: z.number(), theta: z.number() });
+const imageViewSchema = z.object({
+  id: z.string(),
+  label: z.string().optional(),
+  phi: z.number(),
+  theta: z.number(),
+});
 const imageEdgeSchemas = {
   webp: z.union([
     z
@@ -46,11 +52,55 @@ const imageEdgeSchemas = {
   ]),
 } as const;
 
-describe('kernel-worker wrapExportGeometry middleware', () => {
+let documentSequence = 0;
+const openDocument = async (
+  worker: MockKernelWorker,
+  input: {
+    filename?: string;
+    parameters?: Record<string, unknown>;
+    evaluateOptions?: Record<string, unknown>;
+  } = {},
+): Promise<string> => {
+  const documentId = `export-middleware-${++documentSequence}`;
+  const evaluated: Array<Parameters<NonNullable<MockKernelWorker['onEvaluated']>>[0]> = [];
+  worker.onEvaluated = (event) => {
+    if (event.documentId === documentId) {
+      evaluated.push(event);
+    }
+  };
+  worker.handleOpenDocument({
+    documentId,
+    intent: 1,
+    file: createGeometryFile(input.filename ?? 'main.ts'),
+    parameters: input.parameters ?? {},
+    evaluateOptions: input.evaluateOptions,
+    watch: false,
+  });
+  await vi.waitFor(() => {
+    expect(evaluated).toHaveLength(1);
+  });
+  return documentId;
+};
+
+const exportDocument = async (
+  worker: MockKernelWorker,
+  documentId: string,
+  request: { target?: string; options?: Record<string, unknown> } = {},
+) =>
+  worker.exportDocument({
+    documentId,
+    operationId: `export-${++documentSequence}`,
+    target: request.target ?? 'gltf',
+    options: request.options,
+  });
+
+describe('kernel-worker wrapExport middleware', () => {
   function spyOnExportGeometry(worker: MockKernelWorker) {
     // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- keyof MockKernelWorker not assignable to vi.spyOn; use as unknown as to spy on protected method
     return vi.spyOn(
-      worker as unknown as { onExportGeometry: (...args: unknown[]) => Promise<unknown> },
+      worker as unknown as {
+        onExportGeometry: (...args: unknown[]) => Promise<unknown>;
+      },
       'onExportGeometry',
     );
   }
@@ -73,15 +123,15 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     onLog = vi.fn();
   });
 
-  it('should call wrapExportGeometry hook when middleware is registered', async () => {
-    const wrapExportGeometry = vi.fn(async (input: ExportGeometryRequest, handler: ExportGeometryHandler) =>
-      handler(input),
+  it('should call wrapExport hook when middleware is registered', async () => {
+    const wrapExport = vi.fn(
+      async (input: ExportRequest, handler: (input: ExportRequest) => Promise<KernelExportResult>) => handler(input),
     );
 
-    const middleware = defineMiddleware({
+    const middleware = defineMiddlewareV2({
       id: 'TrackingMiddleware',
       name: 'TrackingMiddleware',
-      wrapExportGeometry,
+      wrapExport,
     });
 
     const worker = new MockKernelWorker({
@@ -91,20 +141,24 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    await worker.runExportGeometry('gltf');
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId);
 
-    expect(wrapExportGeometry).toHaveBeenCalledTimes(1);
+    expect(wrapExport).toHaveBeenCalledTimes(1);
   });
 
-  it('should receive correct export request and KernelMiddlewareRuntime', async () => {
-    let capturedInput: ExportGeometryRequest | undefined;
-    let capturedRuntime: KernelMiddlewareRuntime | undefined;
+  it('should receive correct export request and KernelMiddlewareServices', async () => {
+    let capturedInput: ExportRequest | undefined;
+    let capturedRuntime:
+      | (Pick<KernelMiddlewareServices, 'logger' | 'filesystem'> & {
+          state: unknown;
+        })
+      | undefined;
 
-    const middleware = defineMiddleware({
+    const middleware = defineMiddlewareV2({
       id: 'InspectMiddleware',
       name: 'InspectMiddleware',
-      async wrapExportGeometry(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         capturedInput = input;
         capturedRuntime = runtime;
         return handler(input);
@@ -118,11 +172,13 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    await worker.runExportGeometry('gltf');
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId);
 
     expect(capturedInput).toBeDefined();
-    expect(capturedInput!.format).toBe('gltf');
+    expect(capturedInput!.exportId).toBe('gltf');
+    expect(capturedInput!.extension).toBe('gltf');
+    expect(capturedInput!.mimeType).toBe('model/gltf+json');
     expect(capturedInput).not.toHaveProperty('nativeHandle');
     expect(capturedRuntime).toBeDefined();
     expect(capturedRuntime!.logger).toBeDefined();
@@ -133,18 +189,20 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
   it('should allow middleware to modify the export result', async () => {
     const modifiedData = new TextEncoder().encode('modified-content');
 
-    const middleware = defineMiddleware({
+    const middleware = defineMiddlewareV2({
       id: 'TransformMiddleware',
       name: 'TransformMiddleware',
-      async wrapExportGeometry(input, handler) {
+      async wrapExport(input, handler) {
         const result = await handler(input);
         if (result.success) {
           return {
             ...result,
-            data: result.data.map((entry) => ({
-              ...entry,
-              bytes: modifiedData,
-            })),
+            data: nonemptyExportFiles(
+              result.data.map((entry) => ({
+                ...entry,
+                bytes: modifiedData,
+              })),
+            ),
           };
         }
 
@@ -158,22 +216,22 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    const result = await worker.runExportGeometry();
+    const documentId = await openDocument(worker);
+    const result = await exportDocument(worker, documentId);
 
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data[0]?.bytes).toBe(modifiedData);
+      expect(result.files[0].bytes).toBe(modifiedData);
     }
   });
 
   it('should execute multiple middleware in onion order', async () => {
     const executionOrder: string[] = [];
 
-    const middleware1 = defineMiddleware({
+    const middleware1 = defineMiddlewareV2({
       id: 'M1',
       name: 'M1',
-      async wrapExportGeometry(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('M1-before');
         const result = await handler(input);
         executionOrder.push('M1-after');
@@ -181,10 +239,10 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       },
     });
 
-    const middleware2 = defineMiddleware({
+    const middleware2 = defineMiddlewareV2({
       id: 'M2',
       name: 'M2',
-      async wrapExportGeometry(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('M2-before');
         const result = await handler(input);
         executionOrder.push('M2-after');
@@ -192,10 +250,10 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       },
     });
 
-    const middleware3 = defineMiddleware({
+    const middleware3 = defineMiddlewareV2({
       id: 'M3',
       name: 'M3',
-      async wrapExportGeometry(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('M3-before');
         const result = await handler(input);
         executionOrder.push('M3-after');
@@ -214,9 +272,9 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       return defaultExportResult;
     });
 
-    await worker.runCreateGeometry('main.ts', {});
+    const documentId = await openDocument(worker);
     executionOrder.length = 0;
-    await worker.runExportGeometry();
+    await exportDocument(worker, documentId);
 
     expect(executionOrder).toEqual(['M1-before', 'M2-before', 'M3-before', 'main', 'M3-after', 'M2-after', 'M1-after']);
 
@@ -224,7 +282,7 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
   });
 
   it('should allow middleware to short-circuit by not calling handler', async () => {
-    const cachedResult: ExportGeometryResult = {
+    const cachedResult: KernelExportResult = {
       success: true,
       data: [
         {
@@ -236,10 +294,10 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       issues: [],
     };
 
-    const cacheMiddleware = defineMiddleware({
+    const cacheMiddleware = defineMiddlewareV2({
       id: 'ExportCacheMiddleware',
       name: 'ExportCacheMiddleware',
-      async wrapExportGeometry(_input, _handler) {
+      async wrapExport(_input, _handler) {
         return cachedResult;
       },
     });
@@ -252,34 +310,34 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
 
     const exportSpy = spyOnExportGeometry(worker);
 
-    await worker.runCreateGeometry('main.ts', {});
-    const result = await worker.runExportGeometry();
+    const documentId = await openDocument(worker);
+    const result = await exportDocument(worker, documentId);
 
     expect(exportSpy).not.toHaveBeenCalled();
     expect(result.success).toBe(true);
     if (result.success) {
-      expect(result.data[0]?.name).toBe('cached.stl');
+      expect(result.files[0].name).toBe('cached.stl');
     }
 
     exportSpy.mockRestore();
   });
 
-  it('should skip middleware without wrapExportGeometry hooks', async () => {
+  it('should skip middleware without wrapExport hooks', async () => {
     const executionOrder: string[] = [];
 
-    const withHook = defineMiddleware({
+    const withHook = defineMiddlewareV2({
       id: 'WithHook',
       name: 'WithHook',
-      async wrapExportGeometry(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('WithHook');
         return handler(input);
       },
     });
 
-    const withoutHook = defineMiddleware({
+    const withoutHook = defineMiddlewareV2({
       id: 'WithoutHook',
       name: 'WithoutHook',
-      async wrapCreateGeometry(input, handler) {
+      async wrapEvaluate(input, handler) {
         executionOrder.push('should-not-run');
         return handler(input);
       },
@@ -291,18 +349,18 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
+    const documentId = await openDocument(worker);
     executionOrder.length = 0;
-    await worker.runExportGeometry();
+    await exportDocument(worker, documentId);
 
     expect(executionOrder).toEqual(['WithHook']);
   });
 
   it('should catch middleware errors and return error result', async () => {
-    const middleware = defineMiddleware({
+    const middleware = defineMiddlewareV2({
       id: 'FailingMiddleware',
       name: 'FailingMiddleware',
-      async wrapExportGeometry(_input, _handler) {
+      async wrapExport(_input, _handler) {
         throw new Error('Export middleware failed');
       },
     });
@@ -313,8 +371,8 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    const result = await worker.runExportGeometry();
+    const documentId = await openDocument(worker);
+    const result = await exportDocument(worker, documentId);
 
     expect(result.success).toBe(false);
     if (!result.success && result.issues[0]) {
@@ -326,19 +384,19 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
   it('should skip hooks of disabled middleware', async () => {
     const executionOrder: string[] = [];
 
-    const enabled = defineMiddleware({
+    const enabled = defineMiddlewareV2({
       id: 'Enabled',
       name: 'Enabled',
-      async wrapExportGeometry(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('enabled');
         return handler(input);
       },
     });
 
-    const disabled = defineMiddleware({
+    const disabled = defineMiddlewareV2({
       id: 'Disabled',
       name: 'Disabled',
-      async wrapExportGeometry(input, handler) {
+      async wrapExport(input, handler) {
         executionOrder.push('disabled');
         return handler(input);
       },
@@ -351,19 +409,25 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    await worker.runExportGeometry();
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId);
 
     expect(executionOrder).toEqual(['enabled']);
   });
 
   it('should include parameters in export dependency hashes from the last settled render', async () => {
-    const captures: Array<{ hash: string; dependencies: readonly Dependency[] }> = [];
-    const middleware = defineMiddleware({
+    const captures: Array<{
+      hash: string;
+      dependencies: readonly Dependency[];
+    }> = [];
+    const middleware = defineMiddlewareV2({
       id: 'ParameterCapture',
       name: 'ParameterCapture',
-      async wrapExportGeometry(input, handler, runtime) {
-        captures.push({ hash: runtime.dependencyHash, dependencies: runtime.dependencies });
+      async wrapExport(input, handler, runtime) {
+        captures.push({
+          hash: runtime.dependencyHash,
+          dependencies: runtime.dependencies,
+        });
         return handler(input);
       },
     });
@@ -375,29 +439,47 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', { height: 10 });
-    await worker.runExportGeometry('step');
-    await worker.runCreateGeometry('main.ts', { height: 20 });
-    await worker.runExportGeometry('step');
+    const firstDocument = await openDocument(worker, { parameters: { height: 10 } });
+    await exportDocument(worker, firstDocument, { target: 'step' });
+    const secondDocument = await openDocument(worker, { parameters: { height: 20 } });
+    await exportDocument(worker, secondDocument, { target: 'step' });
 
     expect(captures).toHaveLength(2);
     expect(captures[0]!.hash).not.toBe(captures[1]!.hash);
-    expect(captures[0]!.dependencies).toContainEqual({ type: 'parameter', parameters: { height: 10 } });
-    expect(captures[1]!.dependencies).toContainEqual({ type: 'parameter', parameters: { height: 20 } });
+    expect(captures[0]!.dependencies).toContainEqual({
+      type: 'parameter',
+      parameters: { height: 10 },
+    });
+    expect(captures[1]!.dependencies).toContainEqual({
+      type: 'parameter',
+      parameters: { height: 20 },
+    });
   });
 
-  it('should keep render-only options out of native-build identity while retaining them in export identity', async () => {
-    const createCaptures: Array<{ hash: string; dependencies: readonly Dependency[] }> = [];
-    const exportCaptures: Array<{ hash: string; dependencies: readonly Dependency[] }> = [];
-    const middleware = defineMiddleware({
+  it('should keep view options out of native-build identity while retaining them in view identity', async () => {
+    const createCaptures: Array<{
+      hash: string;
+      dependencies: readonly Dependency[];
+    }> = [];
+    const viewCaptures: Array<{
+      hash: string;
+      dependencies: readonly Dependency[];
+    }> = [];
+    const middleware = defineMiddlewareV2({
       id: 'RenderOptionCapture',
       name: 'RenderOptionCapture',
-      async wrapCreateGeometry(input, handler, runtime) {
-        createCaptures.push({ hash: runtime.dependencyHash, dependencies: runtime.dependencies });
+      async wrapEvaluate(input, handler, runtime) {
+        createCaptures.push({
+          hash: runtime.dependencyHash,
+          dependencies: runtime.dependencies,
+        });
         return handler(input);
       },
-      async wrapExportGeometry(input, handler, runtime) {
-        exportCaptures.push({ hash: runtime.dependencyHash, dependencies: runtime.dependencies });
+      async wrapRender(input, handler, runtime) {
+        viewCaptures.push({
+          hash: runtime.dependencyHash,
+          dependencies: runtime.dependencies,
+        });
         return handler(input);
       },
     });
@@ -409,29 +491,58 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {}, { quality: 'coarse' });
-    await worker.runExportGeometry('step');
-    await worker.runCreateGeometry('main.ts', {}, { quality: 'fine' });
-    await worker.runExportGeometry('step');
+    const documentId = await openDocument(worker);
+    const rendered: Array<Parameters<NonNullable<MockKernelWorker['onRendered']>>[0]> = [];
+    worker.onRendered = (event) => {
+      rendered.push(event);
+    };
+    worker.handleOpenView({
+      documentId,
+      subscriptionId: 'coarse',
+      requestId: 'coarse',
+      view: 'model',
+      options: { quality: 'coarse' },
+    });
+    worker.handleOpenView({
+      documentId,
+      subscriptionId: 'fine',
+      requestId: 'fine',
+      view: 'model',
+      options: { quality: 'fine' },
+    });
+    await vi.waitFor(() => {
+      expect(rendered).toHaveLength(2);
+    });
 
-    expect(createCaptures).toHaveLength(2);
-    expect(createCaptures[0]!.hash).toBe(createCaptures[1]!.hash);
+    expect(createCaptures).toHaveLength(1);
     for (const capture of createCaptures) {
       expect(capture.dependencies.some((dependency) => dependency.type === 'render-options')).toBe(false);
     }
-    expect(exportCaptures).toHaveLength(2);
-    expect(exportCaptures[0]!.hash).not.toBe(exportCaptures[1]!.hash);
-    expect(exportCaptures[0]!.dependencies).toContainEqual({ type: 'render-options', options: { quality: 'coarse' } });
-    expect(exportCaptures[1]!.dependencies).toContainEqual({ type: 'render-options', options: { quality: 'fine' } });
+    expect(viewCaptures).toHaveLength(2);
+    expect(viewCaptures[0]!.hash).not.toBe(viewCaptures[1]!.hash);
+    expect(viewCaptures[0]!.dependencies).toContainEqual({
+      type: 'render-options',
+      options: { quality: 'coarse' },
+    });
+    expect(viewCaptures[1]!.dependencies).toContainEqual({
+      type: 'render-options',
+      options: { quality: 'fine' },
+    });
   });
 
   it('should include export format and options in export dependency hashes', async () => {
-    const captures: Array<{ hash: string; dependencies: readonly Dependency[] }> = [];
-    const middleware = defineMiddleware({
+    const captures: Array<{
+      hash: string;
+      dependencies: readonly Dependency[];
+    }> = [];
+    const middleware = defineMiddlewareV2({
       id: 'ExportDependencyCapture',
       name: 'ExportDependencyCapture',
-      async wrapExportGeometry(input, handler, runtime) {
-        captures.push({ hash: runtime.dependencyHash, dependencies: runtime.dependencies });
+      async wrapExport(input, handler, runtime) {
+        captures.push({
+          hash: runtime.dependencyHash,
+          dependencies: runtime.dependencies,
+        });
         return handler(input);
       },
     });
@@ -446,30 +557,42 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', { height: 10 });
-    await worker.runExportGeometry('step', { unit: 'mm' });
-    await worker.runExportGeometry('step', { unit: 'cm' });
-    await worker.runExportGeometry('stl', { unit: 'mm' });
+    const documentId = await openDocument(worker, { parameters: { height: 10 } });
+    await exportDocument(worker, documentId, { target: 'step', options: { unit: 'mm' } });
+    await exportDocument(worker, documentId, { target: 'step', options: { unit: 'cm' } });
+    await exportDocument(worker, documentId, { target: 'stl', options: { unit: 'mm' } });
 
     expect(captures).toHaveLength(3);
     expect(new Set(captures.map((capture) => capture.hash)).size).toBe(3);
     expect(captures[0]!.dependencies).toContainEqual(
-      expect.objectContaining({ type: 'export', format: 'step', options: { unit: 'mm' } }),
+      expect.objectContaining({
+        type: 'export',
+        format: 'step',
+        options: { unit: 'mm' },
+      }),
     );
     expect(captures[1]!.dependencies).toContainEqual(
-      expect.objectContaining({ type: 'export', format: 'step', options: { unit: 'cm' } }),
+      expect.objectContaining({
+        type: 'export',
+        format: 'step',
+        options: { unit: 'cm' },
+      }),
     );
     expect(captures[2]!.dependencies).toContainEqual(
-      expect.objectContaining({ type: 'export', format: 'stl', options: { unit: 'mm' } }),
+      expect.objectContaining({
+        type: 'export',
+        format: 'stl',
+        options: { unit: 'mm' },
+      }),
     );
   });
 
   it('should include batch image views, labels, projection, and annotations in export dependency hashes', async () => {
     const hashes: string[] = [];
-    const middleware = defineMiddleware({
+    const middleware = defineMiddlewareV2({
       id: 'ImageIdentityCapture',
       name: 'ImageIdentityCapture',
-      async wrapExportGeometry(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         hashes.push(runtime.dependencyHash);
         return handler(input);
       },
@@ -492,7 +615,7 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       async transcode(input) {
         return { success: true, data: input.files, issues: [] };
       },
-      async cleanup() {
+      async onDispose() {
         await Promise.resolve();
       },
     });
@@ -506,10 +629,34 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     const front = { id: 'front', label: 'Front', phi: 90, theta: 0 } as const;
     const top = { id: 'top', label: 'Top', phi: 0, theta: 0 } as const;
     const requests = [
-      { mode: 'batch', projection: 'orthographic', includeAxes: true, includeLabel: true, views: [front, top] },
-      { mode: 'batch', projection: 'orthographic', includeAxes: true, includeLabel: true, views: [top, front] },
-      { mode: 'batch', projection: 'orthographic', includeAxes: false, includeLabel: true, views: [front, top] },
-      { mode: 'batch', projection: 'perspective', includeAxes: true, includeLabel: true, views: [front, top] },
+      {
+        mode: 'batch',
+        projection: 'orthographic',
+        includeAxes: true,
+        includeLabel: true,
+        views: [front, top],
+      },
+      {
+        mode: 'batch',
+        projection: 'orthographic',
+        includeAxes: true,
+        includeLabel: true,
+        views: [top, front],
+      },
+      {
+        mode: 'batch',
+        projection: 'orthographic',
+        includeAxes: false,
+        includeLabel: true,
+        views: [front, top],
+      },
+      {
+        mode: 'batch',
+        projection: 'perspective',
+        includeAxes: true,
+        includeLabel: true,
+        views: [front, top],
+      },
       {
         mode: 'batch',
         projection: 'orthographic',
@@ -527,11 +674,15 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       },
     ] as const;
 
-    await worker.initialize({ callbacks: { onLog: onLog as OnWorkerLog }, transferables: {}, options: {} });
-    await worker.runCreateGeometry('main.ts', {});
+    await worker.initialize({
+      callbacks: { onLog: onLog as OnWorkerLog },
+      transferables: {},
+      options: {},
+    });
+    const documentId = await openDocument(worker);
     for (const request of requests) {
       // oxlint-disable-next-line no-await-in-loop -- each request contributes one ordered identity observation.
-      const result = await worker.runExportGeometry('webp', request);
+      const result = await exportDocument(worker, documentId, { target: 'webp', options: request });
       expect(result.success).toBe(true);
     }
 
@@ -543,10 +694,10 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
     const capture = async (version: string) => {
       let dependencyHash = '';
       let dependencies: readonly Dependency[] = [];
-      const middleware = defineMiddleware({
+      const middleware = defineMiddlewareV2({
         id: `TranscoderCapture${version}`,
         name: `TranscoderCapture${version}`,
-        async wrapExportGeometry(input, handler, runtime) {
+        async wrapExport(input, handler, runtime) {
           dependencyHash = runtime.dependencyHash;
           dependencies = runtime.dependencies;
           return handler(input);
@@ -563,7 +714,7 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
         async transcode(input) {
           return { success: true, data: input.files, issues: [] };
         },
-        async cleanup() {
+        async onDispose() {
           await Promise.resolve();
         },
       });
@@ -572,16 +723,26 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
         transcoders: [transcoder()],
         exportResult: {
           success: true,
-          data: [{ bytes: new Uint8Array([1]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
+          data: [
+            {
+              bytes: new Uint8Array([1]),
+              name: 'model.glb',
+              mimeType: 'model/gltf-binary',
+            },
+          ],
           issues: [],
         },
         exportZodSchemas: { glb: z.object({}) },
         onLog: onLog as OnWorkerLog,
       });
 
-      await worker.initialize({ callbacks: { onLog: onLog as OnWorkerLog }, transferables: {}, options: {} });
-      await worker.runCreateGeometry('main.ts', {});
-      const result = await worker.runExportGeometry('webp');
+      await worker.initialize({
+        callbacks: { onLog: onLog as OnWorkerLog },
+        transferables: {},
+        options: {},
+      });
+      const documentId = await openDocument(worker);
+      const result = await exportDocument(worker, documentId, { target: 'webp' });
       expect(result.success).toBe(true);
       return { dependencyHash, dependencies };
     };
@@ -601,11 +762,11 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
 
   it('should include active kernel id and middleware signatures in export dependencies', async () => {
     let capturedDependencies: readonly Dependency[] = [];
-    const middleware = defineMiddleware({
+    const middleware = defineMiddlewareV2({
       id: 'DependencyCapture',
       name: 'DependencyCapture',
       version: '1.2.3',
-      async wrapExportGeometry(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         capturedDependencies = runtime.dependencies;
         return handler(input);
       },
@@ -619,9 +780,14 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.exportModel({ format: 'step', file: createGeometryFile('main.ts'), parameters: {} });
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId, { target: 'step' });
 
-    expect(capturedDependencies).toContainEqual({ type: 'kernel', id: 'mock-kernel', version: '1.0.0' });
+    expect(capturedDependencies).toContainEqual({
+      type: 'kernel',
+      id: 'mock-kernel',
+      version: '1.0.0',
+    });
     expect(capturedDependencies).toContainEqual({
       type: 'middleware',
       id: 'DependencyCapture',
@@ -633,29 +799,29 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
 
   it('should hash the phase-aware union of middleware that actually participates in export', async () => {
     let capturedDependencies: readonly Dependency[] = [];
-    const unused = defineMiddleware({
+    const unused = defineMiddlewareV2({
       id: 'Unused',
       name: 'Unused',
-      async wrapMeshGeometry(input, handler) {
+      async wrapRender(input, handler) {
         return handler(input);
       },
     });
-    const create = defineMiddleware({
+    const create = defineMiddlewareV2({
       id: 'Create',
       name: 'Create',
-      async wrapCreateGeometry(input, handler) {
+      async wrapEvaluate(input, handler) {
         return handler(input);
       },
     });
-    const exportMiddleware = defineMiddleware({
+    const exportMiddleware = defineMiddlewareV2({
       id: 'Export',
       name: 'Export',
-      async wrapExportGeometry(input, handler, runtime) {
+      async wrapExport(input, handler, runtime) {
         capturedDependencies = runtime.dependencies;
         return handler(input);
       },
     });
-    const noHooks = defineMiddleware({ id: 'NoHooks', name: 'NoHooks' });
+    const noHooks = defineMiddlewareV2({ id: 'NoHooks', name: 'NoHooks' });
     const worker = new MockKernelWorker({
       middleware: [unused, create, noHooks, exportMiddleware],
       exportResult: defaultExportResult,
@@ -663,7 +829,8 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.exportModel({ format: 'step', file: createGeometryFile('main.ts'), parameters: {} });
+    const documentId = await openDocument(worker);
+    await exportDocument(worker, documentId, { target: 'step' });
 
     expect(capturedDependencies.filter((dependency) => dependency.type === 'middleware')).toEqual([
       { type: 'middleware', id: 'Create', version: '1', index: 0, options: {} },
@@ -672,13 +839,13 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
   });
 
   it('should not invoke export middleware when export options fail validation', async () => {
-    const wrapExportGeometry = vi.fn(async (input: ExportGeometryRequest, handler: ExportGeometryHandler) =>
-      handler(input),
+    const wrapExport = vi.fn(
+      async (input: ExportRequest, handler: (input: ExportRequest) => Promise<KernelExportResult>) => handler(input),
     );
-    const middleware = defineMiddleware({
+    const middleware = defineMiddlewareV2({
       id: 'ValidationMiddleware',
       name: 'ValidationMiddleware',
-      wrapExportGeometry,
+      wrapExport,
     });
     const worker = new MockKernelWorker({
       middleware: [middleware],
@@ -687,10 +854,10 @@ describe('kernel-worker wrapExportGeometry middleware', () => {
       onLog: onLog as OnWorkerLog,
     });
 
-    await worker.runCreateGeometry('main.ts', {});
-    const result = await worker.runExportGeometry('step', { unexpected: true });
+    const documentId = await openDocument(worker);
+    const result = await exportDocument(worker, documentId, { target: 'step', options: { unexpected: true } });
 
     expect(result.success).toBe(false);
-    expect(wrapExportGeometry).not.toHaveBeenCalled();
+    expect(wrapExport).not.toHaveBeenCalled();
   });
 });

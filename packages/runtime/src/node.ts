@@ -24,8 +24,7 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
   readonly runtime: Runtime;
   /**
    * Host filesystem directory exposed to the runtime as `/`. Omit for inline-source
-   * mode; the client provisions an in-memory filesystem on the first
-   * `render({ source })` / `export({ source })` call.
+   * mode; the client provisions an in-memory filesystem when opening a document.
    */
   readonly projectPath?: string;
 };
@@ -37,7 +36,7 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
  * `fromNodeFs(projectPath)` when supplied or `fromMemoryFs()` otherwise.
  *
  * @param options - Runtime definition, optional project path, and client options.
- * @returns Configured `RuntimeClient` ready for render and export operations
+ * @returns Configured `RuntimeClient` ready to open documents.
  *
  * @public
  *
@@ -51,9 +50,9 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
  * declare const bundlerPlugin: AnyPluginInstance;
  * const runtime = defineRuntime({ plugins: [kernelPlugin, bundlerPlugin] });
  * const client = await createNodeClient({ runtime });
- * const result = await client.export('glb', {
- *   source: { files: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);' } },
- * });
+ * const document = client.open({ source: { files: { 'main.ts': 'import { makeBaseBox } from "replicad";\nexport default () => makeBaseBox(10, 20, 30);' } } });
+ * const result = await document.export('glb');
+ * document.close();
  * client.terminate();
  * ```
  *
@@ -64,7 +63,9 @@ export type NodeRuntimeClientOptions<Runtime extends AnyRuntimeDefinition = AnyR
  *
  * declare const runtime: AnyRuntimeDefinition;
  * const client = await createNodeClient({ runtime, projectPath: '/path/to/project' });
- * const result = await client.export('glb', { source: { path: 'main.ts' } });
+ * const document = client.open({ source: { path: 'main.ts' } });
+ * const result = await document.export('glb');
+ * document.close();
  * client.terminate();
  * ```
  */

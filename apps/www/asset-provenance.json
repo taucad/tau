@@ -40,8 +40,8 @@
     },
     {
       "path": "apps/www/public/social.png",
-      "bytes": 146080,
-      "sha256": "cd88ce6c4f0deba46e27eb42a1f772807035d87852a474b722357c0bd24818be"
+      "bytes": 143901,
+      "sha256": "672471c1637d00ece2ae3c22a03dfbccd5a1d8f3b097e888ec2fd6e1b4c29c2b"
     }
   ],
   "metalHero": {
@@ -87,18 +87,18 @@
     },
     {
       "path": "apps/www/public/story-2.webp",
-      "bytes": 34558,
-      "sha256": "0a820ccbc619b4e585301cfbb263438563c0d27de2f65155f810b3f647eb7254"
+      "bytes": 36518,
+      "sha256": "f2e9209f10aea39147104bd8848a1890773cb5f5009a6436156f4de1b51cd4b6"
     },
     {
       "path": "apps/www/public/story-3.webp",
-      "bytes": 23594,
-      "sha256": "a6f7cd10201f74b6a7d24ab2987ec7401bbe7eff533e6ab8b609269b102e68ac"
+      "bytes": 18496,
+      "sha256": "372db87a2e632ba723f06ad61aa83fa47f162f7687308d56830d2088975d7833"
     },
     {
       "path": "apps/www/public/story-4.webp",
-      "bytes": 55082,
-      "sha256": "30265eb200757d3e2cc7f65eefbc571c8245a425cc0111893b1b41cb6f4977f8"
+      "bytes": 51800,
+      "sha256": "dfb2740921dd94c14545c006e2a0d3547e5c72db1d6273a107e52d3d14bac540"
     },
     {
       "path": "apps/www/public/story-5.webp",

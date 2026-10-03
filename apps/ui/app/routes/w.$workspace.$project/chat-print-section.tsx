@@ -26,6 +26,12 @@ export const useNow = (): number => {
   return now;
 };
 
+/*
+ * Rule rhythm: every rule between two Print pane blocks has 12 px of ink on each side. The parent
+ * stack's gap-3 sets the space above a rule and the block's own top padding the space below it.
+ * The first block of a stack draws no rule.
+ */
+
 /**
  * One flat section of the Print pane: a heading row and its content, separated
  * from its peers by a rule rather than a nested card (DESIGN, composition).
@@ -48,10 +54,14 @@ export function PrintSection({
     <section
       ref={ref}
       aria-label={title}
-      className={cn('flex min-w-0 flex-col gap-2 border-t border-border/70 pt-3', className)}
+      className={cn(
+        'flex min-w-0 flex-col gap-2 border-t border-border/70 pt-3 first:border-t-0 first:pt-0',
+        className,
+      )}
       {...properties}
     >
-      <div className='flex min-w-0 items-center gap-2'>
+      {/* The row keeps the heading's line height; a taller aside overhangs it instead of pushing the rule away. */}
+      <div className='flex h-4 min-w-0 items-center gap-2'>
         <h3 className='min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground'>{title}</h3>
         {aside}
       </div>
@@ -63,31 +73,43 @@ export function PrintSection({
 /**
  * A section that starts folded: engineering detail on request.
  *
- * @param properties - Heading, optional summary beside it, initial state and the body.
+ * @param properties - Heading, optional summary beside it, an optional control after the trigger,
+ * initial state and the body.
  * @returns The disclosure.
  */
 export function PrintDisclosure({
   title,
   summary,
+  aside,
   isDefaultOpen = false,
   children,
 }: {
   readonly title: string;
   readonly summary?: string;
+  /** Beside the trigger, never inside it: a reset is a button of its own. */
+  readonly aside?: React.ReactNode;
   readonly isDefaultOpen?: boolean;
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <Collapsible defaultOpen={isDefaultOpen} className='border-t border-border/70 pt-1'>
-      <CollapsibleTrigger className='group/disclosure flex min-h-8 w-full items-center gap-2 rounded-md px-1 text-left hover:bg-accent/50'>
-        <ChevronRight
-          aria-hidden
-          className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/disclosure:rotate-90 motion-reduce:transition-none'
-        />
-        <span className='min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground'>{title}</span>
-        {summary ? <span className='shrink-0 text-xs text-muted-foreground'>{summary}</span> : null}
-      </CollapsibleTrigger>
-      <CollapsibleContent className='flex flex-col gap-2 pt-2 pb-1'>{children}</CollapsibleContent>
+    // The 32 px trigger overhangs its text by 8 px; pt-1 and -mb-2 keep the rule rhythm at 12 px.
+    <Collapsible
+      defaultOpen={isDefaultOpen}
+      className='-mb-2 border-t border-border/70 pt-1 first:border-t-0 first:pt-0'
+    >
+      <div className='flex min-w-0 items-center gap-1'>
+        <CollapsibleTrigger className='group/disclosure flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left hover:bg-accent/50'>
+          <ChevronRight
+            aria-hidden
+            className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/disclosure:rotate-90 motion-reduce:transition-none'
+          />
+          {/* The title keeps its width; a long summary truncates instead. */}
+          <span className='shrink-0 text-xs font-medium text-muted-foreground'>{title}</span>
+          <span className='min-w-0 flex-1 truncate text-right text-xs text-muted-foreground'>{summary}</span>
+        </CollapsibleTrigger>
+        {aside}
+      </div>
+      <CollapsibleContent className='flex flex-col gap-2 pb-2'>{children}</CollapsibleContent>
     </Collapsible>
   );
 }

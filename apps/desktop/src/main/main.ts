@@ -55,6 +55,7 @@ import {
 import { installTauHeaderInjection, originOf } from '#main/header-injection.js';
 import {
   contentSecurityPolicy,
+  isMicrophonePermissionGranted,
   isPermissionGranted,
   isTrustedSender,
   navigationDecision,
@@ -414,12 +415,33 @@ const bootstrapElectronApp = async (): Promise<void> => {
   installElectronRuntimeHeaders();
 
   /* Deny by default; see `grantedPermissions` for the explicit grants and why. */
-  session.defaultSession.setPermissionRequestHandler((_contents, permission, callback) => {
-    const granted = isPermissionGranted(permission);
+  const origins = rendererOrigins({ appOrigin, devServerUrl: environment.ELECTRON_RENDERER_URL });
+  session.defaultSession.setPermissionRequestHandler((...[contents, permission, callback, details]) => {
+    const granted =
+      isPermissionGranted(permission) ||
+      isMicrophonePermissionGranted({
+        permission,
+        frame: contents.mainFrame,
+        requester: details.requestingUrl,
+        mainFrame: details.isMainFrame,
+        mediaTypes: 'mediaTypes' in details ? (details.mediaTypes ?? []) : [],
+        origins,
+      });
     log.log(granted ? 'info' : 'warn', granted ? 'permission.granted' : 'permission.denied', { permission });
     callback(granted);
   });
-  session.defaultSession.setPermissionCheckHandler((_contents, permission) => isPermissionGranted(permission));
+  session.defaultSession.setPermissionCheckHandler(
+    (...[contents, permission, requestingOrigin, details]) =>
+      isPermissionGranted(permission) ||
+      isMicrophonePermissionGranted({
+        permission,
+        frame: contents?.mainFrame,
+        requester: details.requestingUrl ?? details.securityOrigin ?? requestingOrigin,
+        mainFrame: details.isMainFrame,
+        mediaTypes: details.mediaType === undefined ? [] : [details.mediaType],
+        origins,
+      }),
+  );
 
   /* Injection covers the API origin and, separately, the WebSocket origin —
    * `ws://localhost:4001` is not `http://localhost:4000`, and the chat RPC and
@@ -799,7 +821,6 @@ const bootstrapElectronApp = async (): Promise<void> => {
    * foreign origin that got loaded in-window would inherit the whole bridge —
    * a filesystem port over every granted root included. The navigation guards
    * below make that hard; these checks make it not worth trying. */
-  const origins = rendererOrigins({ appOrigin, devServerUrl: environment.ELECTRON_RENDERER_URL });
   /* Takes the frame rather than the event because Electron reports it as
    * nullable and the workspace bans `null` in a type position. */
   const trusted = (frame: unknown): boolean => {

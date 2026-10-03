@@ -89,12 +89,60 @@ const useTabsOverflow = ({
   return isOverflowing;
 };
 
+type DockviewTabsComboBoxProperties = Pick<IDockviewHeaderActionsProps, 'activePanel'> &
+  Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'> &
+  Pick<
+    React.ComponentProps<typeof ComboBoxResponsive<IDockviewPanel>>,
+    'children' | 'isOpen' | 'onOpenChange' | 'popoverProperties'
+  > & {
+    readonly panels: readonly IDockviewPanel[];
+    readonly description?: string;
+    /** Runs before the picked panel is activated. */
+    readonly onPick?: (panel: IDockviewPanel) => void;
+  };
+
+/** The searchable "Open tabs" list shared by every surface that jumps to a Dockview tab. */
+export function DockviewTabsComboBox({
+  activePanel,
+  panels,
+  getIcon,
+  leadingIcon,
+  onPick,
+  popoverProperties,
+  description = 'Search and activate an open tab in this pane.',
+  ...properties
+}: DockviewTabsComboBoxProperties): React.JSX.Element {
+  const groupedItems = useMemo(() => [{ name: 'Open tabs', items: [...panels] }], [panels]);
+
+  return (
+    <ComboBoxResponsive<IDockviewPanel>
+      {...properties}
+      groupedItems={groupedItems}
+      value={activePanel}
+      getValue={getPanelSearchValue}
+      renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
+      className='w-72'
+      popoverProperties={{ align: 'end', ...popoverProperties }}
+      searchPlaceHolder='Search open tabs…'
+      emptyListMessage='No open tabs found.'
+      title='Open tabs'
+      description={description}
+      onSelect={(value) => {
+        const panel = panels.find((candidate) => getPanelSearchValue(candidate) === value);
+        if (panel) {
+          onPick?.(panel);
+          panel.api.setActive();
+        }
+      }}
+    />
+  );
+}
+
 export function DockviewTabOverflowPicker(
   properties: DockviewTabOverflowPickerProperties,
 ): React.JSX.Element | undefined {
   const { activePanel, getIcon, leadingIcon, panels } = properties;
   const isOverflowing = useTabsOverflow({ group: properties.group, panelCount: panels.length });
-  const groupedItems = useMemo(() => [{ name: 'Open tabs', items: panels }], [panels]);
 
   if (!isOverflowing) {
     return undefined;
@@ -102,28 +150,14 @@ export function DockviewTabOverflowPicker(
 
   return (
     <Tooltip>
-      <ComboBoxResponsive<IDockviewPanel>
-        groupedItems={groupedItems}
-        value={activePanel}
-        getValue={getPanelSearchValue}
-        renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
-        className='w-72'
-        popoverProperties={{ align: 'end' }}
-        searchPlaceHolder='Search open tabs…'
-        emptyListMessage='No open tabs found.'
-        title='Open tabs'
-        description='Search and activate an open tab in this pane.'
-        onSelect={(value) => {
-          panels.find((panel) => getPanelSearchValue(panel) === value)?.api.setActive();
-        }}
-      >
+      <DockviewTabsComboBox activePanel={activePanel} panels={panels} getIcon={getIcon} leadingIcon={leadingIcon}>
         <TooltipTrigger asChild>
           {/* Not a hover-revealed pane action: while tabs overflow, this is their visible route. */}
           <PaneButton aria-label='Open tabs'>
             <ChevronDown aria-hidden className='size-3.5' />
           </PaneButton>
         </TooltipTrigger>
-      </ComboBoxResponsive>
+      </DockviewTabsComboBox>
       <TooltipContent>Open tabs</TooltipContent>
     </Tooltip>
   );

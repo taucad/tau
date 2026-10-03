@@ -1,5 +1,5 @@
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
-import { DownloadIcon, PanelLeft, PanelRight, Share2 } from 'lucide-react';
+import { DownloadIcon, PanelLeft, Share2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Separator } from '@taucad/ui/components/separator';
@@ -10,25 +10,6 @@ import { useProject } from '#hooks/use-project.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
 import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
-
-type WorkbenchToggleProperties = {
-  readonly isOpen: boolean;
-  readonly onOpenChange: (open: boolean) => void;
-};
-
-export const WorkbenchToggle = ({ isOpen, onOpenChange }: WorkbenchToggleProperties): React.JSX.Element => (
-  <PaneButton
-    className='aria-pressed:text-foreground'
-    aria-label='Toggle Workbench lane'
-    aria-pressed={isOpen}
-    tooltip='Toggle Workbench'
-    onClick={() => {
-      onOpenChange(!isOpen);
-    }}
-  >
-    <PanelRight aria-hidden className='size-3.5' />
-  </PaneButton>
-);
 
 export const WorkbenchToggleSlot = (): React.JSX.Element => (
   <span aria-hidden className='size-7 shrink-0' data-testid='workbench-toggle-slot' />

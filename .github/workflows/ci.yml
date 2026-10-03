@@ -572,7 +572,14 @@ jobs:
       - *download-geospec
       - *verify-geospec
 
-      - name: Check bundle sizes
+      # The budgets gate on this checkout alone. The action below also rebuilds the base branch
+      # for its comparison comment, and that build fails whenever the restored GeoSpec products
+      # belong to this head rather than the base, so the comparison only reports.
+      - name: Enforce bundle size budgets
+        run: pnpm size:build && pnpm size:check
+
+      - name: Compare bundle sizes with the base branch
+        continue-on-error: true
         uses: andresz1/size-limit-action@94bc357df29c36c8f8d50ea497c3e225c3c95d1d # v1.8.0
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}

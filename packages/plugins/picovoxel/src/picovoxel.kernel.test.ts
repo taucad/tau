@@ -444,7 +444,7 @@ describe('picovoxel kernel', () => {
 
     it('should reject a material made invalid by toJSON before caching its snapshot', async () => {
       const issues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: (pico: Pico) => ({
               shape: helloCube(pico),
@@ -468,7 +468,7 @@ describe('picovoxel kernel', () => {
 
     it('should reject a sampler made invalid by toJSON before caching its snapshot', async () => {
       const issues = await buildIssues(
-        createGeometry({
+        evaluate({
           module: {
             default: () => ({
               shapes: [],

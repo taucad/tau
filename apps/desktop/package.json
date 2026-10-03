@@ -19,6 +19,7 @@
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/functions": "catalog:",
     "@parcel/watcher": "catalog:",
+    "@sentry/electron": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/assimp": "workspace:*",

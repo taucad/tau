@@ -874,7 +874,9 @@ jobs:
 
   # L3 billing e2e: real Stripe test-mode objects + `stripe listen` forwarding
   # the live event stream into the app under test. External forks do not run
-  # this job; internal runs fail if an isolated restricted credential is absent.
+  # this job. Until the payments work adds the isolated restricted credentials,
+  # the lane skips with a notice when none is set (operator ruling, 2026-10-02);
+  # a partial set still fails, because that is a misconfiguration.
   billing-e2e:
     name: Billing e2e (Stripe test mode)
     runs-on: ubuntu-latest
@@ -895,39 +897,69 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
 
-      - name: Require isolated Stripe acceptance credentials
+      - name: Skip without isolated Stripe acceptance credentials
+        id: gate
         run: |
-          test -n "$STRIPE_SECRET_KEY"
-          test -n "$STRIPE_READ_SECRET_KEY"
-          test -n "$STRIPE_REFUND_SECRET_KEY"
-          test -n "$STRIPE_ACCOUNT_ID"
+          set=0
+          for value in "$STRIPE_SECRET_KEY" "$STRIPE_READ_SECRET_KEY" "$STRIPE_REFUND_SECRET_KEY" "$STRIPE_ACCOUNT_ID"; do
+            if [ -n "$value" ]; then set=$((set + 1)); fi
+          done
+          if [ "$set" -eq 0 ]; then
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::notice title=Billing e2e skipped::No STRIPE_TEST_* secret is configured; the real Stripe lane runs once the payments work adds them."
+          elif [ "$set" -eq 4 ]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "::error::Only $set of the four STRIPE_TEST_* secrets are set; set all four or none."
+            exit 1
+          fi
 
       - name: Setup Nx Environment
+        if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
 
-      - *download-geospec
-      - *restore-geospec
-      - *verify-geospec
+      - name: Download same-run GeoSpec transport
+        if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached != 'true'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          path: .
+
+      - name: Restore GeoSpec engine products from an earlier run
+        if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true' && needs.plan.outputs.geospec-cached == 'true'
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      - name: Verify GeoSpec products against this checkout
+        if: steps.gate.outputs.enabled == 'true' && needs.plan.outputs.geospec-required == 'true'
+        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
       - name: Install Stripe CLI
+        if: steps.gate.outputs.enabled == 'true'
         run: |
           curl -fsSL https://packages.stripe.dev/api/security/keypair/stripe-cli-gpg/public | gpg --dearmor | sudo tee /usr/share/keyrings/stripe.gpg >/dev/null
           echo "deb [signed-by=/usr/share/keyrings/stripe.gpg] https://packages.stripe.dev/stripe-cli-debian-local stable main" | sudo tee -a /etc/apt/sources.list.d/stripe.list
           sudo apt-get update -qq && sudo apt-get install -y stripe
 
       - name: Prepare API env file
+        if: steps.gate.outputs.enabled == 'true'
         run: cp apps/api/.env.example apps/api/.env
 
       - name: Start Postgres + Redis + MinIO
+        if: steps.gate.outputs.enabled == 'true'
         run: docker compose -f infra/docker-compose.yml up -d postgres redis minio minio-bootstrap
 
       # `api:db-migrate` is the release migration job: DDL, the billing protections and
       # the runtime role, plus the tariff sync when TAU_CLOUD_ENABLED=true (it is false in
       # `.env.example`, so these lanes get schema and protections only, as Fly does).
       - name: Apply the protected migration job
+        if: steps.gate.outputs.enabled == 'true'
         run: BILLING_DATABASE_URL=postgresql://dev_user:dev_password@localhost:5432/tau_dev pnpm nx run-many -t db-migrate --projects tag:scope:api
 
       - name: Run real Stripe billing acceptance (L3)
+        if: steps.gate.outputs.enabled == 'true'
         run: pnpm nx run-many -t test:billing-stripe
 
   # D19's funded cell: one real frontier turn placed on launcher 2, against a local

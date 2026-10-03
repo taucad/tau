@@ -10,6 +10,7 @@
     "@aws-sdk/lib-storage": "catalog:",
     "@aws-sdk/s3-request-presigner": "catalog:",
     "@pyroscope/nodejs": "catalog:",
+    "@sentry/node": "catalog:",
     "@taucad/api-extractor": "workspace:*",
     "@taucad/billing": "workspace:*",
     "@taucad/chat": "workspace:*",

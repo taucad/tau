@@ -185,7 +185,11 @@ function RunGroup({
     return undefined;
   }
   const stage = readableStage(run.stage);
-  const extraStage = stage === undefined || stage.toLowerCase() === run.state ? undefined : stage;
+  /* While calibrating at layer 0 the run line above already names the stage (describeRun). */
+  const extraStage =
+    stage === undefined || stage.toLowerCase() === run.state || describeRun(entry)?.includes(stage) === true
+      ? undefined
+      : stage;
   if (extraStage === undefined && !isStale) {
     return undefined;
   }
@@ -407,6 +411,7 @@ const implementedActions = new Set([
   'material.load',
   'material.unload',
   'material.continue',
+  'material.set',
 ]);
 
 /**

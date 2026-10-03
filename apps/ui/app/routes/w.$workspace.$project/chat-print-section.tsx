@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { ChevronDown, ChevronRight, CircleAlert } from 'lucide-react';
+import { Check, ChevronDown, ChevronRight, Circle, CircleAlert, Hand, LoaderCircle } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import type { PrintRequester } from '@taucad/runtime/machine';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -237,5 +237,68 @@ export function StaleBadge(): React.JSX.Element {
       <CircleAlert aria-hidden className='size-3 text-warning' />
       Stale
     </span>
+  );
+}
+
+/** One step of a send or a filament change, as `PrintSteps` lists it. @public */
+export type PrintStep = Readonly<{
+  label: string;
+  state: 'done' | 'active' | 'todo';
+  /** Who takes the step: while it is active, a step for the person shows a hand instead of a spinner. */
+  actor?: 'machine' | 'person';
+}>;
+
+const stepStateWords = { done: 'done', active: 'in progress', todo: 'to do' } as const;
+
+/**
+ * Something in progress as its steps, in order: what is done, the step in progress and what follows. Sends and
+ * filament changes share it, so the pane reads progress one way everywhere.
+ *
+ * @param properties - The steps and how they flow.
+ * @returns The list.
+ * @public
+ */
+export function PrintSteps({
+  steps,
+  layout = 'inline',
+}: {
+  readonly steps: readonly PrintStep[];
+  /** `inline` wraps a few short steps; `list` stacks longer ones. */
+  readonly layout?: 'inline' | 'list';
+}): React.JSX.Element {
+  return (
+    <ol
+      className={cn(
+        'flex text-xs text-muted-foreground',
+        layout === 'inline' ? 'flex-wrap gap-x-3 gap-y-1' : 'flex-col gap-1',
+      )}
+    >
+      {steps.map((step) => {
+        const needsPerson = step.state === 'active' && step.actor === 'person';
+        return (
+          <li
+            key={step.label}
+            aria-current={step.state === 'active' ? 'step' : undefined}
+            className={cn(
+              'flex min-w-0 items-center gap-1',
+              step.state !== 'todo' && 'text-foreground',
+              needsPerson && 'font-medium',
+            )}
+          >
+            {step.state === 'done' ? (
+              <Check aria-hidden className='size-3 shrink-0 text-success' />
+            ) : needsPerson ? (
+              <Hand aria-hidden className='size-3 shrink-0 text-information' />
+            ) : step.state === 'active' ? (
+              <LoaderCircle aria-hidden className='size-3 shrink-0 animate-spin motion-reduce:animate-none' />
+            ) : (
+              <Circle aria-hidden className='size-3 shrink-0' />
+            )}
+            <span className='min-w-0'>{step.label}</span>
+            <span className='sr-only'> ({needsPerson ? 'needs you' : stepStateWords[step.state]})</span>
+          </li>
+        );
+      })}
+    </ol>
   );
 }

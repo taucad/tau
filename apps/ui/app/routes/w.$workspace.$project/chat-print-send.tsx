@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState } from 'react';
-import { Bot, Check, Circle, Eye, LoaderCircle, Play, SearchCheck, ShieldCheck, X } from 'lucide-react';
+import { Bot, Check, Eye, LoaderCircle, Play, SearchCheck, ShieldCheck, X } from 'lucide-react';
 import type {
   MachineClient,
   MachineDirectoryEntry,
@@ -10,13 +10,13 @@ import type {
 import { Button } from '@taucad/ui/components/button';
 import { Checkbox } from '@taucad/ui/components/checkbox';
 import { Label } from '@taucad/ui/components/label';
-import { cn } from '@taucad/ui/utils/cn';
 import { randomUuid } from '@taucad/utils/id';
 import { isRecord } from '@taucad/utils/schema';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenPrintRequest } from '#hooks/use-machines-print-requests.js';
 import { useProject } from '#hooks/use-project.js';
-import { PrintNotice, operator } from '#routes/w.$workspace.$project/chat-print-section.js';
+import { PrintNotice, PrintSteps, operator } from '#routes/w.$workspace.$project/chat-print-section.js';
+import type { PrintStep } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
   formatDuration,
   formatProducer,
@@ -458,9 +458,7 @@ function ApprovalCard({
   );
 }
 
-const stepStates = (
-  request: PrintRequest,
-): ReadonlyArray<Readonly<{ label: string; state: 'done' | 'active' | 'todo' }>> => {
+const stepStates = (request: PrintRequest): readonly PrintStep[] => {
   const order = ['preparing', 'approved', 'uploading', 'starting', 'confirming'] as const;
   const position = order.indexOf(request.state as (typeof order)[number]);
   const step = (at: number): 'done' | 'active' | 'todo' =>
@@ -510,20 +508,7 @@ export function ProgressCard({
         <LoaderCircle aria-hidden className='size-4 shrink-0 animate-spin motion-reduce:animate-none' />
         <span className='min-w-0 truncate'>{label}</span>
       </p>
-      <ol className='flex flex-wrap gap-x-3 gap-y-1 text-xs text-muted-foreground'>
-        {stepStates(request).map((step) => (
-          <li key={step.label} className={cn('flex items-center gap-1', step.state !== 'todo' && 'text-foreground')}>
-            {step.state === 'done' ? (
-              <Check aria-hidden className='size-3 text-success' />
-            ) : step.state === 'active' ? (
-              <LoaderCircle aria-hidden className='size-3 animate-spin motion-reduce:animate-none' />
-            ) : (
-              <Circle aria-hidden className='size-3' />
-            )}
-            {step.label}
-          </li>
-        ))}
-      </ol>
+      <PrintSteps steps={stepStates(request)} />
       {request.state === 'confirming' ? (
         <p className='text-xs text-muted-foreground'>
           The start was sent. Tau confirms it from the printer&apos;s own status, usually within a minute; nothing more

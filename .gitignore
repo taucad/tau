@@ -102,3 +102,7 @@ packages/geospec-engine/provenance.json
 
 # Vite dep-optimizer caches in mocker fixtures
 fixtures/mocker/*/.cache/
+
+# Local temporary artifacts
+/tmp/
+/temp/

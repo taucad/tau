@@ -120,7 +120,7 @@ Strict-Transport-Security = "max-age=63072000; includeSubDomains; preload"
 # Referrer Policy
 Referrer-Policy = "strict-origin-when-cross-origin"
 # Permissions Policy (Feature Policy)
-Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=(), interest-cohort=()"
+Permissions-Policy = "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(self), payment=(), usb=(), interest-cohort=()"
 # Cross-Origin Policies
 Cross-Origin-Opener-Policy = "same-origin"
 Cross-Origin-Resource-Policy = "same-origin"

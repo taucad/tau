@@ -18,7 +18,7 @@ import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 import { usePrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
-import { useMachinesPrintRequests } from '#hooks/use-machines-print-requests.js';
+import { isOpenPrintRequest, useMachinesPrintRequests } from '#hooks/use-machines-print-requests.js';
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
@@ -45,13 +45,52 @@ export type MachinePresentation = Readonly<{
 }>;
 
 /**
- * Where the machine is and what it needs, from the entry alone.
+ * How a send in flight reads while the printer's own report still describes the moment before it. An `unknown` start
+ * is past that moment, so the printer's report speaks again and the Send card explains.
+ */
+const inFlightPresentation: Partial<Record<PrintRequest['state'], MachinePresentation>> = {
+  approved: {
+    label: 'Sending',
+    nextAction: 'Tau is sending the file to the printer.',
+    icon: LoaderCircle,
+    iconClassName: 'text-information animate-spin motion-reduce:animate-none',
+  },
+  uploading: {
+    label: 'Sending',
+    nextAction: 'Tau is sending the file to the printer.',
+    icon: LoaderCircle,
+    iconClassName: 'text-information animate-spin motion-reduce:animate-none',
+  },
+  starting: {
+    label: 'Starting',
+    nextAction: 'Wait for the printer to confirm the start.',
+    icon: LoaderCircle,
+    iconClassName: 'text-information animate-spin motion-reduce:animate-none',
+  },
+  confirming: {
+    label: 'Starting',
+    nextAction: 'Wait for the printer to confirm the start.',
+    icon: LoaderCircle,
+    iconClassName: 'text-information animate-spin motion-reduce:animate-none',
+  },
+};
+
+/**
+ * Where the machine is and what it needs, from the entry and the send this pane has in flight.
+ *
+ * A send in flight speaks first: the printer keeps reporting its previous state (often idle) until it takes the start,
+ * so the entry alone would say "Ready" while Tau waits for it (blueprint x1c-start-confirmation F7).
  *
  * @param entry - The machine as observed.
+ * @param openRequest - This machine's unsettled request, if any.
  * @returns The status label, glyph and the next safe step.
  * @public
  */
-export const presentMachine = (entry: MachineDirectoryEntry): MachinePresentation => {
+export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: PrintRequest): MachinePresentation => {
+  const inFlight = openRequest === undefined ? undefined : inFlightPresentation[openRequest.state];
+  if (inFlight && entry.freshness === 'current' && entry.snapshot.connection === 'connected') {
+    return inFlight;
+  }
   if (entry.freshness === 'stale') {
     return {
       label: 'Stale observation',
@@ -142,8 +181,11 @@ export const nextAction = ({
           kind: 'review',
         };
       }
+      case 'confirming': {
+        return { label: 'Waiting for the printer to confirm', kind: 'none' };
+      }
       case 'unknown': {
-        return { label: 'Reconcile the start', kind: 'review' };
+        return { label: 'Check the printer', kind: 'review' };
       }
       default: {
         return { label: 'Sending…', kind: 'none' };
@@ -174,12 +216,14 @@ export const nextAction = ({
 
 function MachineCard({
   entry,
+  openRequest,
   prepare,
 }: {
   readonly entry: MachineDirectoryEntry;
+  readonly openRequest: PrintRequest | undefined;
   readonly prepare: PrintPrepare;
 }): React.JSX.Element {
-  const presentation = presentMachine(entry);
+  const presentation = presentMachine(entry, openRequest);
   const { run } = entry.snapshot;
   const runLine = describeRun(entry);
   const model = run && (run.state === 'printing' || run.state === 'paused') ? (run.file ?? run.name) : undefined;
@@ -347,7 +391,8 @@ function MachinePrintPanel({
     isShown: isShown && selected !== undefined,
   });
   const latestReceipt = ledger.find((entry) => entry.kind === 'receipt');
-  const headerPresentation = selected ? presentMachine(selected) : undefined;
+  const openRequest = requests.find((request) => isOpenPrintRequest(request));
+  const headerPresentation = selected ? presentMachine(selected, openRequest) : undefined;
   const HeaderIcon = headerPresentation?.icon ?? Printer;
   const runActive = selected?.snapshot.run?.state === 'printing' || selected?.snapshot.run?.state === 'paused';
 
@@ -376,7 +421,8 @@ function MachinePrintPanel({
                 options: entries.map((entry) => ({
                   value: entry.machineId,
                   label: entry.name,
-                  secondary: presentMachine(entry).label,
+                  secondary: presentMachine(entry, entry.machineId === selected?.machineId ? openRequest : undefined)
+                    .label,
                 })),
               },
             ]}
@@ -408,7 +454,7 @@ function MachinePrintPanel({
         {snapshot && entries.length === 0 ? <NoMachines /> : null}
         {selected ? (
           <div className='flex min-w-0 flex-col gap-3'>
-            <MachineCard entry={selected} prepare={prepare} />
+            <MachineCard entry={selected} openRequest={openRequest} prepare={prepare} />
             <SendSection
               client={client}
               entry={selected}

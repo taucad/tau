@@ -1,4 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
+import { ChannelClosedError } from '@taucad/rpc';
 import type { WebSocketLike } from '@taucad/rpc';
 
 import { prepareMachineWebSocket } from '#transport/machine-web-socket.js';
@@ -53,7 +54,19 @@ describe('prepareMachineWebSocket', () => {
     first.close();
     second.close();
     expect(sockets).toEqual(['wss://host.test/prefix/machines?scope=one', 'wss://host.test/prefix/machines?scope=one']);
-    await expect(first.ready).rejects.toThrow('Channel closed');
-    await expect(second.ready).rejects.toThrow('Channel closed');
+    await expect(first.ready).rejects.toBeInstanceOf(ChannelClosedError);
+    await expect(first.ready).rejects.toMatchObject({
+      name: 'ChannelClosedError',
+      message: 'Channel closed',
+      code: 'CHANNEL_CLOSED',
+      info: { origin: 'local', code: 'CHANNEL_CLOSED' },
+    });
+    await expect(second.ready).rejects.toBeInstanceOf(ChannelClosedError);
+    await expect(second.ready).rejects.toMatchObject({
+      name: 'ChannelClosedError',
+      message: 'Channel closed',
+      code: 'CHANNEL_CLOSED',
+      info: { origin: 'local', code: 'CHANNEL_CLOSED' },
+    });
   });
 });

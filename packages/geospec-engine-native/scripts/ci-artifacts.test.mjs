@@ -41,6 +41,19 @@ void test('malformed process listings cannot prove a producer group exited', (co
   assert.throws(() => darwinGroupAlive(123), /Could not prove GeoSpec producer group exit/);
 });
 
+void test('should report only live members of the owned producer group', (context) => {
+  const listing = context.mock.method(childProcess, 'spawnSync', () => ({
+    status: 0,
+    stdout: ' 123 Z+\n 456 S\n',
+  }));
+  assert.equal(darwinGroupAlive(123), false);
+  assert.equal(darwinGroupAlive(456), true);
+  listing.mock.mockImplementation(() => ({ status: 0, stdout: '123 Z\n123 S+\n456 R\n' }));
+  assert.equal(darwinGroupAlive(123), true);
+  listing.mock.mockImplementation(() => ({ status: 0, stdout: '\n' }));
+  assert.equal(darwinGroupAlive(123), false);
+});
+
 void test('cache key follows source and selected toolchain without generated outputs', (context) => {
   const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
   mkdirSync(scratch, { recursive: true });
@@ -147,7 +160,7 @@ void test('cached preparation target uses verified ensure-delivery on source cha
   /** @type {unknown} */
   const rawProject = JSON.parse(readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8'));
   const project =
-    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], options?: {command?: string}} >}} */ (
+    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], outputs?: string[], options?: {command?: string}} >}} */ (
       rawProject
     );
   const target = project.targets['prepare-geospec-ci-artifacts'];
@@ -155,6 +168,12 @@ void test('cached preparation target uses verified ensure-delivery on source cha
   assert.equal(target.cache, true);
   assert.deepEqual(target.inputs, [
     { runtime: 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs cache-key' },
+  ]);
+  assert.deepEqual(target.outputs, [
+    '{projectRoot}/bindings/node/generated',
+    '{projectRoot}/bindings/emscripten/generated',
+    '{projectRoot}/dist',
+    '{workspaceRoot}/out/artifacts/geospec-native-engine/ci',
   ]);
   assert.equal(target.options?.command, 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs ensure-delivery');
 });

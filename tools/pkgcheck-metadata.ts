@@ -16,8 +16,66 @@ type PublishableManifest = {
   type?: unknown;
 };
 
+/** Concrete, relative assets from a package's npm `files` list that the strict consumer must see. */
+export const declaredPublishAssets = (files: unknown): string[] => {
+  if (!Array.isArray(files)) {
+    return [];
+  }
+  return files.flatMap((entry: unknown) => {
+    if (typeof entry !== 'string' || entry.startsWith('!')) {
+      return [];
+    }
+    const segments = entry.split('/');
+    if (
+      !/^[\w./-]+$/u.test(entry) ||
+      segments.some((segment) => segment === '' || segment === '.' || segment === '..' || segment === 'node_modules')
+    ) {
+      throw new Error(`unsafe package files entry: ${entry}`);
+    }
+    return entry === 'dist' || entry.startsWith('dist/') ? [] : [entry];
+  });
+};
+
+/** JSON default exports need a CommonJS-shaped declaration, without a JavaScript CJS branch. */
+export const isJsonTypesDeclaration = (value: unknown): boolean => {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return false;
+  }
+  const record = value as Record<string, unknown>;
+  return (
+    Object.keys(record).length === 2 &&
+    typeof record['types'] === 'string' &&
+    record['types'].endsWith('.d.cts') &&
+    record['default'] === `${record['types'].slice(0, -'.d.cts'.length)}.json`
+  );
+};
+
 const recordKeys = (value: unknown): string[] =>
   typeof value === 'object' && value !== null && !Array.isArray(value) ? Object.keys(value).sort() : [];
+
+/**
+ * Identify literal Wasm asset exports, not conditional entries that can resolve to code.
+ *
+ * @param exports - The publish-shaped exports map.
+ * @returns Concrete raw Wasm subpaths and their built targets.
+ */
+export const publishedRawWasmAssets = (exports: unknown): Array<{ subpath: string; target: string }> => {
+  if (typeof exports !== 'object' || exports === null || Array.isArray(exports)) {
+    return [];
+  }
+  return Object.entries(exports)
+    .flatMap(([subpath, target]) =>
+      subpath.startsWith('.') &&
+      !subpath.includes('*') &&
+      typeof target === 'string' &&
+      target.startsWith('./') &&
+      !target.split('/').includes('..') &&
+      target.endsWith('.wasm')
+        ? [{ subpath, target }]
+        : [],
+    )
+    .sort((left, right) => left.subpath.localeCompare(right.subpath));
+};
 
 export const packageMetadataIssues = (
   packageJson: PackageMetadata,
@@ -32,6 +90,12 @@ export const packageMetadataIssues = (
 
   for (const specifier of [...publishExports].filter((value) => !developmentExportSet.has(value)).sort()) {
     issues.push(`development exports is missing published export: ${specifier}`);
+  }
+
+  for (const { subpath, target } of publishedRawWasmAssets(packageJson.publishConfig?.exports)) {
+    if (!pathExists(target)) {
+      issues.push(`published raw Wasm asset is missing: ${subpath} -> ${target}`);
+    }
   }
 
   if (Array.isArray(packageJson.files)) {
@@ -747,19 +811,6 @@ export const bundledWorkspaceMirrors = (
     .sort();
 
 /**
- * Published subpaths that resolve straight to a WebAssembly binary. A host
- * resolves them to a URL and fetches the bytes; nothing imports them as a
- * module, so they have no declarations for a type-resolution check to find.
- */
-export const binaryAssetSubpaths = (exports: unknown): string[] =>
-  typeof exports === 'object' && exports !== null && !Array.isArray(exports)
-    ? Object.entries(exports as Readonly<Record<string, unknown>>)
-        .filter(([, target]) => typeof target === 'string' && target.endsWith('.wasm'))
-        .map(([subpath]) => subpath)
-        .sort()
-    : [];
-
-/**
  * Every published subpath as an importable specifier, minus binary assets and
  * the ones with a recorded reason. Wildcards cannot be probed. A reason naming
  * a subpath the package does not publish is itself an issue, so a stale excuse
@@ -773,11 +824,11 @@ export const probedSpecifiers = (
   const published = recordKeys(exports).filter(
     (subpath) => subpath.startsWith('.') && !subpath.includes('*') && subpath !== './package.json',
   );
-  const binaryAssets = new Set(binaryAssetSubpaths(exports));
+  const rawWasmAssets = new Set(publishedRawWasmAssets(exports).map(({ subpath }) => subpath));
 
   return {
     specifiers: published
-      .filter((subpath) => !(subpath in exclusions) && !binaryAssets.has(subpath))
+      .filter((subpath) => !(subpath in exclusions) && !rawWasmAssets.has(subpath))
       .map((subpath) => `${packageName}${subpath.slice(1)}`),
     issues: Object.keys(exclusions)
       .filter((subpath) => !published.includes(subpath))

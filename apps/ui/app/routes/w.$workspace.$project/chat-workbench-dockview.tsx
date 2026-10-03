@@ -1651,8 +1651,11 @@ export function WorkbenchRightHeaderActions(properties: IDockviewHeaderActionsPr
  */
 export const WorkbenchDockview = memo(function ({
   profile = 'editor',
+  onApiChange,
 }: {
   readonly profile?: WorkbenchProfile;
+  /** Reports the Dockview once ready, and `undefined` on unmount, for the workspace's Workbench toggle. */
+  readonly onApiChange?: (api: DockviewApi | undefined) => void;
 } = {}): React.JSX.Element {
   const { editorRef } = useProject();
   const { connectWorkbench, setWorkbenchOpen, layoutController } = useProjectWorkspace();
@@ -1661,6 +1664,13 @@ export const WorkbenchDockview = memo(function ({
   const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
+
+  useEffect(() => {
+    onApiChange?.(api);
+    return () => {
+      onApiChange?.(undefined);
+    };
+  }, [api, onApiChange]);
   const adoptedProjectionRef = useRef<string | undefined>(undefined);
   const pendingUserFilePathRef = useRef<string | undefined>(undefined);
   const pendingFilePlacementRef = useRef(new Map<string, PendingFilePlacement>());

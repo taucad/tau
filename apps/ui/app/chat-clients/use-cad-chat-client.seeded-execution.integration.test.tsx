@@ -203,7 +203,7 @@ const dispatchSeededTurn = async (activeExecution: CadAgentExecution): Promise<H
           harness.commands.push(command);
           return { commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 1 };
         },
-        /* A seed starts only after a fresh, caught-up host read: this host's log for the chat is empty. */
+        // A seed waits for a fresh, caught-up read of its own empty host log.
         subscribe: (...args: Parameters<AgentHostClient['subscribe']>) => {
           queueMicrotask(() =>
             args[3]?.({ status: 'batch', chatId, cursor: 0, nextCursor: 0, endCursor: 0, events: [] }),

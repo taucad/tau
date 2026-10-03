@@ -1,13 +1,14 @@
 // @vitest-environment jsdom
+import { useState } from 'react';
 import { act, render, screen, within } from '@testing-library/react';
 import { userEvent } from '@testing-library/user-event';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { Actor } from 'xstate';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
-import { MeasureOptions } from '#components/geometry/cad/measure-tool-row.js';
+import { MeasurementList, MeasureOptions } from '#components/geometry/cad/measure-tool-row.js';
 import { AxisLabel } from '#components/geometry/cad/section-tool-row.js';
-import { GraphicsProvider } from '#hooks/use-graphics.js';
+import { GraphicsProvider, useGraphicsSelector } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 type GraphicsActor = Actor<typeof graphicsMachine>;
@@ -21,7 +22,9 @@ afterEach(() => {
 
 const startMeasuring = (): GraphicsActor => {
   const actor = createActor(
-    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    graphicsMachine.provide({
+      actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
+    }),
     { input: {} },
   ).start();
   activeActor = actor;
@@ -39,13 +42,29 @@ const measure = (actor: GraphicsActor, metres: number): void => {
 
 /** The Measuring row's options as the bar lays them out, followed by the row's Done. */
 const renderRow = (actor: GraphicsActor): void => {
+  function Row(): React.JSX.Element {
+    const [expanded, setExpanded] = useState(false);
+    const count = useGraphicsSelector((state) => state.context.measurements.length);
+    return (
+      <div data-tool-bar='measure'>
+        {expanded && count > 0 ? (
+          <MeasurementList
+            onEmptied={() => {
+              setExpanded(false);
+            }}
+          />
+        ) : null}
+        <MeasureOptions expanded={expanded} onExpandedChange={setExpanded} />
+        <button type='button' aria-label='Done with measure'>
+          Done
+        </button>
+      </div>
+    );
+  }
   render(
     <TooltipProvider>
       <GraphicsProvider graphicsRef={actor}>
-        <div data-tool-bar='measure'>
-          <MeasureOptions />
-          <button type='button'>Done</button>
-        </div>
+        <Row />
       </GraphicsProvider>
     </TooltipProvider>,
   );
@@ -54,7 +73,11 @@ const renderRow = (actor: GraphicsActor): void => {
 const listedValues = (): string[] =>
   within(screen.getByRole('list', { name: 'Measurements' }))
     .getAllByRole('listitem')
-    .map((item) => within(item).getAllByRole('button')[0]!.getAttribute('aria-label')!.replace('Pin ', ''));
+    .map((item) =>
+      within(item)
+        .getByRole('button', { name: /^Point distance:/ })
+        .textContent.trim(),
+    );
 
 describe('MeasureOptions', () => {
   it('offers a keyboard target chooser and commits an explicitly selected candidate once', async () => {
@@ -72,7 +95,10 @@ describe('MeasureOptions', () => {
     renderRow(actor);
     await user.click(screen.getByRole('button', { name: /^Targets:/ }));
     await user.click(screen.getByRole('button', { name: 'Load more targets' }));
-    expect(actor.getSnapshot().context).toMatchObject({ measureCatalogRequest: 1, measureCatalogAppend: true });
+    expect(actor.getSnapshot().context).toMatchObject({
+      measureCatalogRequest: 1,
+      measureCatalogAppend: true,
+    });
     await user.selectOptions(screen.getByRole('combobox', { name: 'Measurement mode' }), 'point');
     expect(actor.getSnapshot().context.measureMode).toBe('point');
     await user.selectOptions(screen.getByRole('combobox', { name: 'Measurement mode' }), 'auto');
@@ -104,6 +130,31 @@ describe('MeasureOptions', () => {
     expect(screen.getByRole('status')).toHaveTextContent('2 measurements');
   });
 
+  it('should identify an out-of-date value in the collapsed summary', async () => {
+    const actor = startMeasuring();
+    actor.send({
+      type: 'addMeasurementRecord',
+      record: {
+        id: 'stale',
+        frameId: 'tau:root',
+        startPoint: [0, 0, 0],
+        endPoint: [0.01, 0, 0],
+        distance: 0.01,
+        operation: 'edge-length',
+        status: 'out-of-date',
+      },
+    });
+    const user = userEvent.setup();
+    renderRow(actor);
+
+    await user.click(screen.getByRole('button', { name: '1 measurement' }));
+
+    expect(screen.getByRole('button', { name: 'Edge length: 10.0 mm, out of date' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+  });
+
   it('should clear all measurements and move focus to Done', async () => {
     const actor = startMeasuring();
     measure(actor, 0.01);
@@ -115,7 +166,7 @@ describe('MeasureOptions', () => {
 
     expect(actor.getSnapshot().context.measurements).toEqual([]);
     expect(screen.getByRole('status')).toHaveTextContent('Choose a feature or two points');
-    expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Done with measure' })).toHaveFocus();
   });
 
   it('should list measurements newest first, and pinned first once pinned', async () => {
@@ -125,19 +176,30 @@ describe('MeasureOptions', () => {
     const user = userEvent.setup();
     renderRow(actor);
     const count = screen.getByRole('button', { name: '2 measurements' });
+    expect(screen.queryByRole('list', { name: 'Measurements' })).not.toBeInTheDocument();
 
     await user.click(count);
 
     expect(count).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('dialog', { name: 'Measurements' })).toBeInTheDocument();
+    expect(screen.queryByRole('dialog', { name: 'Measurements' })).not.toBeInTheDocument();
     expect(listedValues()).toEqual(['20.0 mm', '10.0 mm']);
-    expect(screen.getAllByRole('listitem')[1]).toHaveTextContent('X 10.0Y 0.0Z 0.0');
+    expect(screen.getByRole('button', { name: 'Point distance: 20.0 mm' })).toHaveFocus();
+    const older = screen.getAllByRole('listitem')[1]!;
+    expect(within(older).getByRole('button', { name: 'Point distance: 10.0 mm' })).toHaveAttribute(
+      'aria-expanded',
+      'false',
+    );
+    expect(within(older).queryByRole('button', { name: 'Pin 10.0 mm' })).not.toBeInTheDocument();
+    await user.click(within(older).getByRole('button', { name: 'Point distance: 10.0 mm' }));
+    expect(older).toHaveTextContent('X 10.0Y 0.0Z 0.0');
 
     await user.click(screen.getByRole('button', { name: 'Pin 10.0 mm', pressed: false }));
 
     expect(screen.getByRole('button', { name: 'Pin 10.0 mm', pressed: true })).toBeInTheDocument();
     expect(listedValues()).toEqual(['10.0 mm', '20.0 mm']);
-    expect(actor.getSnapshot().context.measurements[0]).toMatchObject({ isPinned: true });
+    expect(actor.getSnapshot().context.measurements[0]).toMatchObject({
+      isPinned: true,
+    });
   });
 
   it('should mark the axis letters of each measurement as the Section editor does', async () => {
@@ -147,11 +209,30 @@ describe('MeasureOptions', () => {
     renderRow(actor);
     await user.click(screen.getByRole('button', { name: '1 measurement' }));
     const item = screen.getByRole('listitem');
+    await user.click(within(item).getByRole('button', { name: 'Point distance: 10.0 mm' }));
 
     for (const axis of ['x', 'y', 'z'] as const) {
       const { container } = render(<AxisLabel axis={axis} />);
       expect(within(item).getByText(axis.toUpperCase()).outerHTML).toBe(container.innerHTML);
     }
+  });
+
+  it('should disclose source accuracy on click and dismiss it with Escape', async () => {
+    const actor = startMeasuring();
+    measure(actor, 0.01);
+    const user = userEvent.setup();
+    renderRow(actor);
+
+    await user.click(screen.getByRole('button', { name: '1 measurement' }));
+    await user.click(screen.getByRole('button', { name: 'Point distance: 10.0 mm' }));
+    const info = screen.getByRole('button', {
+      name: 'Measurement source and accuracy for 10.0 mm',
+    });
+    await user.click(info);
+
+    expect(screen.getByRole('tooltip')).toHaveTextContent('Mesh: Source accuracy information is unavailable.');
+    await user.keyboard('{Escape}');
+    expect(screen.queryByRole('tooltip')).not.toBeInTheDocument();
   });
 
   it('should preview a measurement while its row is hovered', async () => {
@@ -169,6 +250,22 @@ describe('MeasureOptions', () => {
     expect(actor.getSnapshot().context.hoveredMeasurementId).toBeUndefined();
   });
 
+  it('should enter the inline list and preview its first item from the keyboard', async () => {
+    const actor = startMeasuring();
+    measure(actor, 0.01);
+    const user = userEvent.setup();
+    renderRow(actor);
+    const count = screen.getByRole('button', { name: '1 measurement' });
+    act(() => {
+      count.focus();
+    });
+
+    await user.keyboard('{Enter}');
+
+    expect(screen.getByRole('button', { name: 'Point distance: 10.0 mm' })).toHaveFocus();
+    expect(actor.getSnapshot().context.hoveredMeasurementId).toBe(actor.getSnapshot().context.measurements[0]!.id);
+  });
+
   it('should keep focus in the list as rows are removed, then move it to Done', async () => {
     const actor = startMeasuring();
     measure(actor, 0.01);
@@ -176,16 +273,18 @@ describe('MeasureOptions', () => {
     const user = userEvent.setup();
     renderRow(actor);
     await user.click(screen.getByRole('button', { name: '2 measurements' }));
+    await user.click(screen.getByRole('button', { name: 'Point distance: 20.0 mm' }));
 
     await user.click(screen.getByRole('button', { name: 'Remove 20.0 mm' }));
 
     expect(screen.getByRole('status')).toHaveTextContent('1 measurement');
-    expect(screen.getByRole('button', { name: 'Remove 10.0 mm' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Point distance: 10.0 mm' })).toHaveFocus();
 
+    await user.click(screen.getByRole('button', { name: 'Point distance: 10.0 mm' }));
     await user.click(screen.getByRole('button', { name: 'Remove 10.0 mm' }));
 
     expect(actor.getSnapshot().context.measurements).toEqual([]);
     expect(screen.queryByRole('list', { name: 'Measurements' })).not.toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'Done' })).toHaveFocus();
+    expect(screen.getByRole('button', { name: 'Done with measure' })).toHaveFocus();
   });
 });

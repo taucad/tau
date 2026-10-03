@@ -1,4 +1,5 @@
 import { CacheCorruptionError, CacheRequiredError } from '#errors.js';
+import { maxEncodedBytes, maxEncodedEntries, ownEncodedContent } from '#encoded-content.js';
 import { actionDigest, canonicalizeComputeAction, contentDigest, digestAction, digestContent } from '#digest.js';
 import type { ActionStore, ComputeActionRecord, ContentStore } from '#store.js';
 import type {
@@ -94,6 +95,12 @@ const validateRecord = (input: {
     for (const dependency of record.dependencies) {
       actionDigest({ value: dependency });
     }
+    for (const required of record.requiredContent ?? []) {
+      contentDigest({ value: required });
+    }
+    if ((record.requiredContent?.length ?? 0) + 1 > maxEncodedEntries) {
+      throw new RangeError('Cached content closure exceeds the entry budget.');
+    }
   } catch (error) {
     throw new CacheCorruptionError('Cached action record failed validation.', { cause: error });
   }
@@ -128,12 +135,50 @@ const readCache = async <T>(input: {
   if (contentResult.bytes.byteLength !== actionResult.record.output.size) {
     throw new CacheCorruptionError('Cached content size does not match its action record.');
   }
-  if ((await digestContent({ bytes: contentResult.bytes })) !== actionResult.record.output.digest) {
+  const rootBytes = new Uint8Array(contentResult.bytes);
+  if ((await digestContent({ bytes: rootBytes })) !== actionResult.record.output.digest) {
     throw new CacheCorruptionError('Cached content does not match its digest.');
   }
   throwIfAborted(signal);
   try {
-    const value = await codec.decode({ bytes: new Uint8Array(contentResult.bytes), signal });
+    const requiredContent = new Set(actionResult.record.requiredContent ?? []);
+    const leaves = new Map<ContentDigest, Uint8Array<ArrayBuffer>>();
+    let size = rootBytes.byteLength;
+    for (const digest of requiredContent) {
+      // oxlint-disable-next-line no-await-in-loop -- verify the entire declared closure once before decode
+      const leaf = await contentStore.read({ digest, signal });
+      if (leaf.status === 'miss') {
+        throw new CacheCorruptionError('Cached action points to missing content leaves.');
+      }
+      size += leaf.bytes.byteLength;
+      if (size > maxEncodedBytes) {
+        throw new CacheCorruptionError('Cached content closure exceeds the byte budget.');
+      }
+      const leafBytes = new Uint8Array(leaf.bytes);
+      // oxlint-disable-next-line no-await-in-loop -- each unique leaf has one integrity check
+      if ((await digestContent({ bytes: leafBytes })) !== digest) {
+        throw new CacheCorruptionError('Cached leaf does not match its digest.');
+      }
+      throwIfAborted(signal);
+      leaves.set(digest, leafBytes);
+    }
+    const readContent = async ({
+      digest,
+    }: {
+      readonly digest: ContentDigest;
+    }): Promise<Uint8Array<ArrayBuffer> | undefined> => {
+      throwIfAborted(signal);
+      contentDigest({ value: digest });
+      if (digest === actionResult.record.output.digest) {
+        return new Uint8Array(rootBytes);
+      }
+      if (!requiredContent.has(digest)) {
+        throw new CacheCorruptionError('Codec requested undeclared content.');
+      }
+      const leaf = leaves.get(digest);
+      return leaf === undefined ? undefined : new Uint8Array(leaf);
+    };
+    const value = await codec.decode({ bytes: new Uint8Array(rootBytes), signal, readContent });
     throwIfAborted(signal);
     return { status: 'hit', value, contentDigest: actionResult.record.output.digest };
   } catch (error) {
@@ -191,8 +236,14 @@ const publishComputed = async <T>(input: {
 }): Promise<ComputeEvaluationResult<T>> => {
   const { evaluation, value, actionKey, contentStore, actionStore, signal } = input;
   let bytes: Uint8Array<ArrayBuffer>;
+  let outputDigest: ContentDigest;
+  let content: ReadonlyMap<ContentDigest, Uint8Array<ArrayBuffer>>;
   try {
-    bytes = new Uint8Array(await evaluation.codec.encode({ value, signal }));
+    ({
+      bytes,
+      digest: outputDigest,
+      content,
+    } = await ownEncodedContent(await evaluation.codec.encode({ value, signal }), signal));
     throwIfAborted(signal);
   } catch (error) {
     throwIfAborted(signal);
@@ -202,13 +253,30 @@ const publishComputed = async <T>(input: {
     return skipped({ value, actionKey, reason: 'encode-failed' });
   }
 
-  const outputDigest = await digestContent({ bytes });
+  const requiredContent = [...content.keys()].sort();
   try {
+    for (const [digest, leaf] of content) {
+      // oxlint-disable-next-line no-await-in-loop -- publication order precedes the action commit point
+      const leafResult = await contentStore.write({ digest, bytes: leaf, signal });
+      if (leafResult.status === 'rejected') {
+        throw new Error('Content store rejected an encoded leaf.');
+      }
+      throwIfAborted(signal);
+    }
     const result = await contentStore.write({ digest: outputDigest, bytes, signal });
     if (result.status === 'rejected') {
       throw new Error('Content store rejected the encoded result.');
     }
     throwIfAborted(signal);
+    for (const digest of requiredContent) {
+      // oxlint-disable-next-line no-await-in-loop -- bounded stores may evict earlier leaves during publication
+      const leaf = await contentStore.read({ digest, signal });
+      // oxlint-disable-next-line no-await-in-loop -- validate each declared leaf before the action commit point
+      if (leaf.status === 'miss' || (await digestContent({ bytes: leaf.bytes })) !== digest) {
+        throw new CacheCorruptionError('Encoded content closure is unavailable before publication.');
+      }
+      throwIfAborted(signal);
+    }
   } catch (error) {
     throwIfAborted(signal);
     if (evaluation.policy === 'required') {
@@ -229,6 +297,7 @@ const publishComputed = async <T>(input: {
     dependencies: evaluation.action.inputs
       .filter((dependency) => dependency.kind === 'action')
       .map((dependency) => actionDigest({ value: dependency.digest })),
+    ...(requiredContent.length > 0 ? { requiredContent } : {}),
   };
   try {
     const result = await actionStore.publish({ record, signal });

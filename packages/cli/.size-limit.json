@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS, library and tau bin) — measured 41.27 kB brotli on 2026-10-03",
+    "name": "total (ESM JS) — measured 41.21 kB brotli on 2026-09-30",
     "path": "dist/**/*.mjs",
-    "limit": "45 kB"
+    "limit": "42 kB"
   }
 ]

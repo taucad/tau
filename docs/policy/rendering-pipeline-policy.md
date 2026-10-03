@@ -3,7 +3,7 @@ title: 'Rendering Pipeline Policy'
 description: 'Unified PBR defaults, material policy, tone mapping, AO, environment strategy, and performance patterns for the CAD viewer.'
 status: active
 created: '2026-02-15'
-updated: '2026-09-27'
+updated: '2026-10-02'
 related:
   - docs/research/onshape-viewer-lighting-profile.md
   - docs/research/headless-gltf-interleaved-accessor-corruption-v2.md
@@ -212,6 +212,12 @@ Convention: prefix with underscore (`_`), declare at module scope outside any co
 ### GLTF Parse / Material Split
 
 The `GltfMesh` component separates GLTF binary parsing (expensive) from material application (cheap). Toggling matcap only re-applies materials to the already-parsed scene, avoiding a full GLTF re-parse. Original PBR materials are cloned and saved during the initial parse so they can be restored when switching from matcap back to PBR mode.
+
+### Shared Surface Presentation
+
+Batch compatible opaque occurrences with the renderer's existing instancing mechanism. Keep canonical scene objects, occurrence identities, hierarchy, geometry and BVHs for picking, measurement, section analysis, poses and capture. Mark presentation subtrees with the existing scene-tag registry so semantic traversals omit them. Cache occurrence-to-slot membership and update affected matrices after actual pose changes; do not rebuild geometry or traverse the scene on unchanged frames.
+
+Compare rendering properties independently of authored material names and metadata, while preserving those values on canonical occurrences. Fall back for unsupported material hooks, transparency, morphs or placements. Presentation batches borrow geometry and materials and own their instance buffers; teardown must release actual backend buffers without disposing resources still used by another occurrence. Verify draw submissions, pixels and allocation/destruction on both WebGL and WebGPU. Sharing GLTF mesh references alone proves storage reuse, not fewer draw calls.
 
 ### Post-Processing Performance
 

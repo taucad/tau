@@ -15,7 +15,9 @@ def test_configured_provider_is_lazy_and_closes_exactly_once(tmp_path: Path, out
     (tmp_path / "conftest.py").write_text(f'''
 import json
 import pytest
+import sys
 from geospec import GeoSpecEngine
+sys.path.insert(0, {str(Path(__file__).resolve().parent)!r})
 from test_canonical_loading import HostEngine
 
 @pytest.fixture

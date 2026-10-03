@@ -1,7 +1,7 @@
 import { LayoutGrid } from 'lucide-react';
 import { formatSharePath } from '@taucad/share/locator';
 import { kernelConfigurations } from '@taucad/types/constants';
-import { useCommandPaletteItems } from '#components/layout/command-palette.js';
+import { CommandPaletteThumbnail, useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { galleryProjects } from '#constants/project-examples.js';
 
@@ -25,11 +25,7 @@ const exampleItems: CommandPaletteItem[] = [
     searchValue: `${project.name} ${project.description} ${kernelName(project.kernel)}`,
     detail: kernelName(project.kernel),
     group: 'Examples',
-    icon: (
-      <span className='flex size-9 items-center justify-center overflow-hidden rounded-md border bg-muted'>
-        <img src={project.thumbnail} alt='' className='size-full object-cover' />
-      </span>
-    ),
+    icon: <CommandPaletteThumbnail src={project.thumbnail} />,
     link: formatSharePath({ providerId: 'builtin', reference: project.locator }),
   })),
 ];

@@ -852,12 +852,11 @@ export function FileManagerProvider({
 
   const machineSettings = useMemo(() => {
     const connection: { proxy?: FileSystemBridgeRootedProxy } = {};
-    // A store serves the bridge it was created for; one created before any bridge opens whichever arrives.
-    const openBridge = bridgeOpener ?? openRootedFileSystemBridge;
     const service = async (): Promise<FileSystemBridgeRootedProxy> => {
       await whenServicesReady();
       const { createFileSystemBridgeProxy } = await import('@taucad/fs-bridge');
-      const proxy = createFileSystemBridgeProxy(openBridge(rootDirectory, 'user'));
+      // A known opener belongs to this store incarnation; the first undefined opener waits for the current one.
+      const proxy = createFileSystemBridgeProxy((bridgeOpener ?? openRootedFileSystemBridge)(rootDirectory, 'user'));
       connection.proxy = proxy;
       await proxy.ready;
       return proxy;

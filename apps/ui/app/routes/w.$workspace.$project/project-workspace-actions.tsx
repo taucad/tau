@@ -1,5 +1,5 @@
 import type { IDockviewHeaderActionsProps } from 'dockview-react';
-import { DownloadIcon, PanelLeft, PanelRight, Share2 } from 'lucide-react';
+import { DownloadIcon, PanelLeft, Share2 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { useSelector } from '@xstate/react';
 import { Separator } from '@taucad/ui/components/separator';
@@ -8,27 +8,9 @@ import { PaneButton } from '#components/ui/pane-button.js';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 import { useProject } from '#hooks/use-project.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
+import { RecordIssuesAction } from '#routes/w.$workspace.$project/record-issues-action.js';
 import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
-
-type WorkbenchToggleProperties = {
-  readonly isOpen: boolean;
-  readonly onOpenChange: (open: boolean) => void;
-};
-
-export const WorkbenchToggle = ({ isOpen, onOpenChange }: WorkbenchToggleProperties): React.JSX.Element => (
-  <PaneButton
-    className='aria-pressed:text-foreground'
-    aria-label='Toggle Workbench lane'
-    aria-pressed={isOpen}
-    tooltip='Toggle Workbench'
-    onClick={() => {
-      onOpenChange(!isOpen);
-    }}
-  >
-    <PanelRight aria-hidden className='size-3.5' />
-  </PaneButton>
-);
 
 export const WorkbenchToggleSlot = (): React.JSX.Element => (
   <span aria-hidden className='size-7 shrink-0' data-testid='workbench-toggle-slot' />
@@ -73,7 +55,7 @@ const GroupSeparator = (): React.JSX.Element => (
 
 /**
  * The viewer's top-right cluster: the project group — the revision trigger,
- * Share and Export — and, while the workbench lane is hidden, the slot its
+ * the settings-records trigger when a record needs a person, Share and Export — and, while the workbench lane is hidden, the slot its
  * floating toggle lands in. One geometry (`PaneButton`, 28 px) and a hairline
  * before every group, the first included, so the cluster reads apart from the
  * tabs on its left. The chat lane's toggle is not here: it heads the chat pane
@@ -107,6 +89,8 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
           time, and this is the one place outside the pane that says where you
           are (review R10). */}
       <RevisionStatusAction />
+      {/* Settings records that need a person; nothing while every record is fine. */}
+      <RecordIssuesAction />
       <ProjectPaneAction icon={Share2} label='Share' tooltip='Share project' panel='share' />
       <ProjectPaneAction icon={DownloadIcon} label='Export' tooltip='Open exporter' panel='export' />
 

@@ -36,6 +36,7 @@
   },
   "devDependencies": {
     "@jscad/modeling": "catalog:",
+    "@taucad/build123d": "workspace:*",
     "@taucad/geometry-core": "workspace:*",
     "@taucad/kinematics": "workspace:*",
     "geospec": "workspace:*",

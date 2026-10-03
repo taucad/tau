@@ -1,4 +1,6 @@
-import { createNodeIo, transformGltfExportBytes } from '@taucad/geometry-core';
+import { contentDigest } from '@taucad/cache-core';
+import { createComputeWorkerTransport } from '#compute-worker-transport.js';
+import { transformGltfExportBytes } from '@taucad/geometry-core';
 import { createWorkspaceMirror } from '@taucad/native-process-core';
 import {
   asBuffer,
@@ -8,7 +10,7 @@ import {
   defineKernel,
 } from '@taucad/runtime/kernel';
 import type { KernelIssue } from '@taucad/runtime/kernel';
-import { createExportFile, lookupMimeType } from '@taucad/runtime/types';
+import { createExportFile } from '@taucad/runtime/types';
 
 import { picogkArtifactToGlb } from '#picogk-mesh.js';
 import { picogkAnalysisSchema, picogkBuildSchema, picogkResolveSchema } from '#picogk.protocol.js';
@@ -56,7 +58,7 @@ export const picogkKernel = defineKernel({
   id: 'picogk',
   extensions: ['cs'],
   name: 'PicogkKernel',
-  version: '2.5.2+dotnet10.roslyn5.9.host18.protocol7.material1.mechanism1',
+  version: '2.5.2+dotnet10.roslyn5.9.host20.protocol8.material2.mechanism2.compute1',
   optionsSchema: picogkOptionsSchema,
   // D2: `cancel` stops an in-flight build at the model's next viewer call and keeps the worker warm.
   cancellation: 'cooperative',
@@ -89,7 +91,32 @@ export const picogkKernel = defineKernel({
       ...mirror,
       logger: services.logger,
     });
-    return { mirror, session };
+    const computeTransport = createComputeWorkerTransport({
+      producer: {
+        id: 'picogk',
+        version: 'operation-v1.codec2.layout1',
+        implementationAssets: [options.workerSha256, ...options.resourceFiles.map(({ sha256 }) => sha256)]
+          .sort()
+          .map((hash) => contentDigest({ value: `sha256:${hash.toLowerCase()}` })),
+      },
+      environment: {
+        platform: process.platform,
+        architecture: process.arch,
+        endian: 'little',
+        arithmetic: 'float32-ordered',
+        archive: 'openvdb-8.1.0-seekless-uuid21',
+        layout: 'tau-vertex-normals-v3.tau-surface-coordinates-v1',
+      },
+      maxEncodedBytes: 256 * 1024 * 1024,
+      maxNativeBytes: 256 * 1024 * 1024,
+      maxEntries: 4096,
+    });
+    return {
+      mirror,
+      session,
+      computeTransport,
+      artifactPath: mirror.artifactPath,
+    };
   },
 
   async resolve({ entryPath }, services, context) {
@@ -156,12 +183,27 @@ export const picogkKernel = defineKernel({
   async evaluate({ entryPath, parameters }, services, context) {
     await context.mirror.sync(services.filesystem, services.fileContentCache, services.operationId);
     const span = services.tracer.startSpan('picogk.build', { entryPath });
+    let computeJob: Awaited<ReturnType<typeof context.computeTransport.open>>;
     try {
+      try {
+        computeJob = await context.computeTransport.open({
+          compute: services.compute,
+          sessionRoot: context.artifactPath,
+          signal: services.signal,
+        });
+      } catch (error) {
+        services.signal.throwIfAborted();
+        services.logger.debug(`PicoGK compute preload bypass: ${String(error)}`);
+      }
       const result = await context.session.request({
         method: 'build',
-        params: { entryPath, parameters },
+        params: {
+          entryPath,
+          parameters,
+          ...(computeJob ? { computeReuse: computeJob.request } : {}),
+        },
         schema: picogkBuildSchema,
-        signal: services.signal,
+        signal: computeJob?.signal ?? services.signal,
         // W17: an abort stops the build cooperatively rather than ending the worker generation.
         cancelMethod: 'cancel',
       });
@@ -180,7 +222,11 @@ export const picogkKernel = defineKernel({
             ...warning,
             code: 'INVALID_ANNOTATION',
             type: 'kernel',
-            details: { producer: { kernelId: 'picogk' }, workerCode, workerType },
+            details: {
+              producer: { kernelId: 'picogk' },
+              workerCode,
+              workerType,
+            },
           }),
         );
         try {
@@ -189,6 +235,13 @@ export const picogkKernel = defineKernel({
           transformSpan.end();
         }
         services.signal.throwIfAborted();
+        if (computeJob) {
+          const receipt = await computeJob.delivered(result.computeReuseManifest);
+          if (receipt.omission) {
+            services.logger.debug(`PicoGK compute result bypass: ${receipt.omission.reason}`);
+          }
+          computeJob = undefined;
+        }
         span.end({ ...result.timings, ...result.metrics });
         return {
           handle: { glb },
@@ -196,10 +249,13 @@ export const picogkKernel = defineKernel({
         };
       } finally {
         if (result.recycleAfterResponse) {
+          await computeJob?.failed();
+          computeJob = undefined;
           await context.session.recycle();
         }
       }
     } catch (error) {
+      await computeJob?.failed();
       throw new PicogkKernelError(issuesFrom(error, entryPath));
     } finally {
       span.end();
@@ -213,26 +269,13 @@ export const picogkKernel = defineKernel({
   async export(input) {
     try {
       const bytes = await transformGltfExportBytes(input.handle.glb, {
-        format: 'glb',
         ...input.options,
+        format: input.exportId,
         preserveMeshTopology: true,
       });
-      if (input.exportId === 'gltf') {
-        const io = await createNodeIo();
-        const document = await io.readBinary(bytes);
-        const output = await io.writeJSON(document);
-        return {
-          files: [
-            createExportFile('gltf', 'model.gltf', asBuffer(new TextEncoder().encode(JSON.stringify(output.json)))),
-            ...Object.entries(output.resources).map(([name, resource]) => ({
-              name,
-              bytes: asBuffer(resource),
-              mimeType: lookupMimeType(name.slice(name.lastIndexOf('.') + 1)),
-            })),
-          ],
-        };
-      }
-      return { files: [createExportFile('glb', 'model.glb', asBuffer(bytes))] };
+      return {
+        files: [createExportFile(input.exportId, `model.${input.exportId}`, asBuffer(bytes))],
+      };
     } catch (error) {
       throw new PicogkKernelError(issuesFrom(error));
     }
@@ -245,9 +288,13 @@ export const picogkKernel = defineKernel({
 
   async onDispose(context) {
     try {
-      await context.session.cleanup();
+      context.computeTransport.dispose();
     } finally {
-      await context.mirror.cleanup();
+      try {
+        await context.session.cleanup();
+      } finally {
+        await context.mirror.cleanup();
+      }
     }
   },
 });

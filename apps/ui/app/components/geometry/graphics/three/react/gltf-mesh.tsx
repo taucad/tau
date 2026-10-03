@@ -1,3 +1,12 @@
+import { installSectionClip, transferSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
+import {
+  createGltfSurfaceBatches,
+  disposeGltfSurfaceBatches,
+  qualifyGltfSurfaceMaterial,
+  sealGltfSurfaceMaterial,
+  gltfSurfacePresentationTag,
+} from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
+import type { GltfSurfaceBatches } from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import { subscribeToMatcapLoad } from '#components/geometry/graphics/three/materials/matcap-material.js';
 import { geometryReceiptAt, recordRendererSpan } from '#lib/renderer-telemetry.js';
 import { invalidateSceneTransparency } from '#components/geometry/graphics/three/utils/scene-transparency-revision.js';
@@ -15,6 +24,7 @@ import type {
   BufferGeometry,
   Mesh,
   MeshPhysicalMaterial,
+  InstancedMesh,
 } from 'three';
 import { Vector2, Box3, Vector3 } from 'three';
 import { useFrame, useThree } from '@react-three/fiber';
@@ -39,7 +49,6 @@ import {
   updateLineMaterialResolution,
 } from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import { applyGltfSurfaceDepthBiasToScene } from '#components/geometry/graphics/three/materials/gltf-surface-depth-bias.js';
-import { transferSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
 import { useSectionClip } from '#components/geometry/graphics/three/react/section-clipping-group.js';
 import { installSectionClipUnder } from '#components/geometry/graphics/three/react/section-view.utils.js';
 import {
@@ -125,7 +134,7 @@ function isLineObject(object: Object3D): boolean {
 
 function isSurfaceObject(object: Object3D): object is Mesh {
   const maybeMesh = object as Object3D & { isMesh?: unknown };
-  return maybeMesh.isMesh === true && !isFatLineSegmentsMesh(object);
+  return maybeMesh.isMesh === true && !isFatLineSegmentsMesh(object) && !object.userData[gltfSurfacePresentationTag];
 }
 
 function isModelRenderableObject(object: Object3D): boolean {
@@ -285,6 +294,9 @@ function saveOriginalMaterials(scene: Group): Map<number, Material | Material[]>
       mesh.material = Array.isArray(mesh.material)
         ? mesh.material.map((material) => material.clone())
         : mesh.material.clone();
+      for (const material of getMaterials(mesh.material)) {
+        qualifyGltfSurfaceMaterial(material);
+      }
     }
   });
   return saved;
@@ -307,6 +319,9 @@ export function restoreOriginalMaterials(scene: Group, saved: Map<number, Materi
       const currentMats = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
       const replacement = Array.isArray(original) ? original.map((material) => material.clone()) : original.clone();
       const restoredMats = Array.isArray(replacement) ? replacement : [replacement];
+      for (const material of restoredMats) {
+        qualifyGltfSurfaceMaterial(material);
+      }
       for (const [index, restoredMat] of restoredMats.entries()) {
         const currentMat = currentMats[index] ?? currentMats[0];
         if (currentMat) {
@@ -364,6 +379,7 @@ type PreparedGltfPresentation = {
   readonly getMeasurementFeatures: ReturnType<typeof prepareGltfMetadata>['getMeasurementFeatures'];
   readonly parser: SectionTopologyGltfParser;
   readonly originalMaterials: Map<number, Material | Material[]>;
+  surfaceBatches: GltfSurfaceBatches;
   /** D22: the buffers a same-topology result may be written into, absent when the scene cannot take one. */
   inPlace?: InPlaceGeometryTargets;
   readonly sourceBytes: Uint8Array<ArrayBuffer>;
@@ -410,7 +426,13 @@ function ownershipSignature(manifest: GeometryComponentManifest): string {
     manifest.nodeOrder.map((id) => {
       const node = manifest.nodesById[id];
       return node
-        ? { ...node, bounds: undefined, reference: undefined, appearance: undefined, capabilities: undefined }
+        ? {
+            ...node,
+            bounds: undefined,
+            reference: undefined,
+            appearance: undefined,
+            capabilities: undefined,
+          }
         : undefined;
     }),
   ]);
@@ -869,7 +891,11 @@ export function annotateSceneComponents(
     const nodeIndex = association?.nodes ?? inheritedNodeIndex;
     const primitiveReference =
       nodeIndex !== undefined && association?.meshes !== undefined && association.primitives !== undefined
-        ? { nodeIndex, meshIndex: association.meshes, primitiveIndex: association.primitives }
+        ? {
+            nodeIndex,
+            meshIndex: association.meshes,
+            primitiveIndex: association.primitives,
+          }
         : undefined;
     const existingComponentId = getModelComponentId(object);
     if (typeof existingComponentId === 'string') {
@@ -922,6 +948,9 @@ export function annotateSceneComponents(
 
     let previousChildRenderableComponentId: string | undefined;
     for (const child of object.children) {
+      if (child.userData[gltfSurfacePresentationTag]) {
+        continue;
+      }
       const childComponentId = annotateObject({
         object: child,
         inheritedComponentId: componentId,
@@ -937,6 +966,9 @@ export function annotateSceneComponents(
   };
 
   for (const child of scene.children) {
+    if (child.userData[gltfSurfacePresentationTag]) {
+      continue;
+    }
     annotateObject({
       object: child,
       inheritedComponentId: undefined,
@@ -965,14 +997,13 @@ function seedSceneMaterialAppearances(scene: Group): void {
   scene.traverse((object) => {
     for (const material of getObjectMaterials(object)) {
       getOrCaptureModelMaterialAppearance(material);
+      sealGltfSurfaceMaterial(material);
     }
   });
 }
 
 export type ApplyModelComponentVisualStateToSceneOptions = Readonly<{
   scene: Group;
-  /** Material mode the scene currently wears; a change re-applies appearance over the swapped materials. */
-  materialSignature?: string;
   /** Stable inventory supplied only by the presentation owner. Other callers collect current membership. */
   inventory?: readonly Object3D[];
   componentManifest: GeometryComponentManifest;
@@ -1000,8 +1031,16 @@ const getComponentInventory = (scene: Group): readonly Object3D[] => {
   let objects = componentInventories.get(scene);
   if (!objects) {
     const collected: Object3D[] = [];
-    const counts: GltfPresentationCounts = { meshCount: 0, triangleCount: 0, sourceLineCount: 0, lineSegmentCount: 0 };
+    const counts: GltfPresentationCounts = {
+      meshCount: 0,
+      triangleCount: 0,
+      sourceLineCount: 0,
+      lineSegmentCount: 0,
+    };
     scene.traverse((object) => {
+      if (object.userData[gltfSurfacePresentationTag]) {
+        return;
+      }
       if (Boolean(getObjectComponentId(object)) || isSurfaceObject(object) || isLineObject(object)) {
         collected.push(object);
       }
@@ -1037,7 +1076,6 @@ export function applyModelComponentVisualStateToScene({
   enableSurfaces,
   enableLines,
   inventory,
-  materialSignature,
 }: ApplyModelComponentVisualStateToSceneOptions): ModelEmphasisSet {
   const previous = appliedAppearance.get(scene);
   const applyAppearance =
@@ -1046,7 +1084,6 @@ export function applyModelComponentVisualStateToScene({
     previous.componentManifest !== componentManifest ||
     previous.enableSurfaces !== enableSurfaces ||
     previous.enableLines !== enableLines ||
-    previous.materialSignature !== materialSignature ||
     previous.modelVisualState.hiddenComponentIds !== modelVisualState.hiddenComponentIds ||
     previous.modelVisualState.isolatedComponentIds !== modelVisualState.isolatedComponentIds ||
     previous.modelVisualState.focusedComponentId !== modelVisualState.focusedComponentId ||
@@ -1057,7 +1094,6 @@ export function applyModelComponentVisualStateToScene({
     modelVisualState,
     enableSurfaces,
     enableLines,
-    ...(materialSignature === undefined ? {} : { materialSignature }),
   });
   const hidden = new Set(modelVisualState.hiddenComponentIds);
   const isolated = new Set(modelVisualState.isolatedComponentIds);
@@ -1079,7 +1115,11 @@ export function applyModelComponentVisualStateToScene({
     invalidateSceneTransparency(scene);
   }
   if (!inventory) {
-    scene.traverse((object) => currentObjects.push(object));
+    scene.traverse((object) => {
+      if (!object.userData[gltfSurfacePresentationTag]) {
+        currentObjects.push(object);
+      }
+    });
   }
   for (const object of inventory ?? currentObjects) {
     const isLine = isLineObject(object);
@@ -1236,7 +1276,11 @@ export function GltfMesh({
     (state) => getKinematicsUnitState(state.context, unitId).hoveredComponentIds,
   );
   const modelVisualState = useMemo(
-    () => ({ ...modelUnitState, isViewerHoverSuppressed, kinematicsHoveredComponentIds }),
+    () => ({
+      ...modelUnitState,
+      isViewerHoverSuppressed,
+      kinematicsHoveredComponentIds,
+    }),
     [isViewerHoverSuppressed, kinematicsHoveredComponentIds, modelUnitState],
   );
   const getModelPickableMeshes = useCallback((): readonly Mesh[] => {
@@ -1382,7 +1426,12 @@ export function GltfMesh({
                 recordRendererSpan('renderer.section-topology', {
                   startTime: analysisStartedAt,
                   duration: performance.now() - analysisStartedAt,
-                  attributes: { key: bundle.key, revision: bundle.revision, backend: graphicsBackendThree, ...timing },
+                  attributes: {
+                    key: bundle.key,
+                    revision: bundle.revision,
+                    backend: graphicsBackendThree,
+                    ...timing,
+                  },
                 });
               },
             });
@@ -1421,8 +1470,13 @@ export function GltfMesh({
     const preparationAt = performance.now();
     const presentationAdmission = holdGeometryPresentation(gltfFile);
     const receivedAt = geometryReceiptAt(gltfFile) ?? preparationAt;
-    const timings: GltfPresentationTimings = { receiptToPreparation: preparationAt - receivedAt };
-    frameProbeRef.current = { revision: presentationRevision, modelEmptyFrames: 0 };
+    const timings: GltfPresentationTimings = {
+      receiptToPreparation: preparationAt - receivedAt,
+    };
+    frameProbeRef.current = {
+      revision: presentationRevision,
+      modelEmptyFrames: 0,
+    };
     graphicsActor.send({
       type: 'gltfPreparationStarted',
       revision: presentationRevision,
@@ -1435,7 +1489,10 @@ export function GltfMesh({
         return candidateMetadata;
       }
       const startedAt = performance.now();
-      candidateMetadata = prepareGltfMetadata(gltfFile, { sourceFile, geometryHash });
+      candidateMetadata = prepareGltfMetadata(gltfFile, {
+        sourceFile,
+        geometryHash,
+      });
       timings.manifest = performance.now() - startedAt;
       return candidateMetadata;
     };
@@ -1474,6 +1531,15 @@ export function GltfMesh({
       }
       if (!applyInPlaceGeometryUpdate(committed.inPlace, gltfFile, parsed)) {
         return false;
+      }
+      committed.surfaceBatches.sync();
+      // Updated prototype bounds affect every placed instance, even when its matrix is unchanged.
+      for (const object of committed.surfaceBatches.group.children) {
+        if ('isInstancedMesh' in object && object.isInstancedMesh) {
+          const batch = object as InstancedMesh;
+          batch.computeBoundingBox();
+          batch.computeBoundingSphere();
+        }
       }
       timings.inPlace = performance.now() - inPlaceStartedAt;
 
@@ -1614,6 +1680,16 @@ export function GltfMesh({
         installSectionClipUnder(gltf.scene, sectionClip);
         seedSceneMaterialAppearances(gltf.scene);
         timings.materials = performance.now() - materialsStartedAt;
+        // Prime the canonical inventory before adding the private presentation subtree.
+        const surfaces = getComponentInventory(gltf.scene).filter((object) => isSurfaceObject(object));
+        const surfaceBatches = createGltfSurfaceBatches(gltf.scene, surfaces, {
+          sources: getComponentInventory(gltf.scene).filter((object): object is Mesh => isFatLineSegmentsMesh(object)),
+          backend: graphicsBackendThree,
+          resolution: resolutionRef.current,
+          prepareMaterial: (material) => {
+            installSectionClip(material, sectionClip);
+          },
+        });
         const bundle: PreparedGltfPresentation = {
           revision: presentationRevision,
           key: geometryHash ?? '',
@@ -1624,6 +1700,7 @@ export function GltfMesh({
           getMeasurementFeatures,
           parser: gltf.parser as unknown as SectionTopologyGltfParser,
           originalMaterials,
+          surfaceBatches,
           sourceBytes: gltfFile,
           presentationAdmission,
           receivedAt,
@@ -1640,7 +1717,11 @@ export function GltfMesh({
           bundle,
           `${materialOptions.enableMatcap}:${materialOptions.matcapTint}:${graphicsBackendThree}`,
         );
-        const disposeResources = createGltfResourceDisposer(bundle.scene, bundle.originalMaterials);
+        const disposeCanonicalResources = createGltfResourceDisposer(bundle.scene, bundle.originalMaterials);
+        const disposeResources = (): void => {
+          disposeGltfSurfaceBatches(bundle.scene);
+          disposeCanonicalResources();
+        };
         bundle.disposeResources = disposeResources;
         bundle.dispose = () => {
           if (bundle.disposed) {
@@ -1883,7 +1964,11 @@ export function GltfMesh({
       recordRendererSpan('renderer.presentation-opportunity', {
         startTime: submittedAt,
         duration: performance.now() - submittedAt,
-        attributes: { key: committed.key, revision: committed.revision, backend: graphicsBackendThree },
+        attributes: {
+          key: committed.key,
+          revision: committed.revision,
+          backend: graphicsBackendThree,
+        },
       });
       committed.presentationAdmission.presented();
     });
@@ -1923,48 +2008,32 @@ export function GltfMesh({
           }
         }
       });
+      presentation.surfaceBatches.sync();
     },
     [presentation],
   );
   useRenderFrameRetarget(retargetMaterialDistances);
 
-  // Material-mode changes mutate only the committed bundle and never reparse the GLB.
+  // Material-mode and visual-state changes commit through one presentation owner.
   useLayoutEffect(() => {
-    if (!presentation) {
+    if (!presentation || !scene || !componentManifest) {
       return;
     }
     const materialSignature = `${enableMatcap}:${matcapTint}:${graphicsBackendThree}`;
-    if (materialSignaturesRef.current.get(presentation) === materialSignature) {
-      return;
+    if (materialSignaturesRef.current.get(presentation) !== materialSignature) {
+      if (enableMatcap) {
+        void applyMatcap({ scene: presentation.scene }, matcapTint, graphicsBackendThree);
+      } else {
+        restoreOriginalMaterials(presentation.scene, presentation.originalMaterials);
+      }
+      retargetMaterialDistances(renderFrame);
+      applyGltfSurfaceDepthBiasToScene(presentation.scene, graphicsBackendThree);
+      seedSceneMaterialAppearances(presentation.scene);
+      invalidateSceneTransparency(presentation.scene);
+      appliedAppearance.delete(presentation.scene);
+      materialSignaturesRef.current.set(presentation, materialSignature);
     }
-    if (enableMatcap) {
-      void applyMatcap({ scene: presentation.scene }, matcapTint, graphicsBackendThree);
-    } else {
-      restoreOriginalMaterials(presentation.scene, presentation.originalMaterials);
-    }
-    retargetMaterialDistances(renderFrame);
-    applyGltfSurfaceDepthBiasToScene(presentation.scene, graphicsBackendThree);
-    seedSceneMaterialAppearances(presentation.scene);
-    invalidateSceneTransparency(presentation.scene);
-    appliedAppearance.delete(presentation.scene);
-    materialSignaturesRef.current.set(presentation, materialSignature);
-    invalidate();
-  }, [
-    enableMatcap,
-    graphicsBackendThree,
-    invalidate,
-    matcapTint,
-    presentation,
-    renderFrame,
-    retargetMaterialDistances,
-  ]);
 
-  // An in-place update keeps the scene but replaces the presentation, so emphasis is re-applied to it.
-  useLayoutEffect(() => {
-    if (!presentation) {
-      return;
-    }
-    const { scene, manifest: componentManifest } = presentation;
     if (enableLines && !expandedEdgeScenes.has(scene)) {
       const bundle = committedPresentationRef.current;
       applyFatLineSegments(
@@ -1984,6 +2053,22 @@ export function GltfMesh({
       appliedAppearance.delete(scene);
       installSectionClipUnder(scene, sectionClip);
       seedSceneMaterialAppearances(scene);
+      if (bundle?.scene === scene) {
+        bundle.surfaceBatches.dispose();
+        const inventory = getComponentInventory(scene);
+        bundle.surfaceBatches = createGltfSurfaceBatches(
+          scene,
+          inventory.filter((object) => isSurfaceObject(object)),
+          {
+            sources: inventory.filter((object): object is Mesh => isFatLineSegmentsMesh(object)),
+            backend: graphicsBackendThree,
+            resolution: resolutionRef.current,
+            prepareMaterial: (material) => {
+              installSectionClip(material, sectionClip);
+            },
+          },
+        );
+      }
     }
 
     const emphasised = applyModelComponentVisualStateToScene({
@@ -1993,26 +2078,29 @@ export function GltfMesh({
       modelVisualState,
       enableSurfaces,
       enableLines,
-      materialSignature: `${enableMatcap}:${matcapTint}`,
     });
+    presentation.surfaceBatches.sync();
     setModelEmphasisSet(rootScene, emphasised);
     invalidate();
   }, [
-    modelVisualState,
-    enableSurfaces,
-    enableLines,
-    presentation,
     activeEdgeColor,
-    sectionClip,
+    componentManifest,
+    enableLines,
     enableMatcap,
-    matcapTint,
+    enableSurfaces,
     graphicsBackendThree,
     invalidate,
+    matcapTint,
+    modelVisualState,
+    presentation,
+    renderFrame,
+    retargetMaterialDistances,
     rootScene,
+    scene,
+    sectionClip,
   ]);
 
-  // Retiring a presented scene clears the emphasis it contributed to the root scene.
-  useEffect(() => {
+  useLayoutEffect(() => {
     if (!scene) {
       return undefined;
     }

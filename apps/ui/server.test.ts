@@ -171,10 +171,10 @@ describeIfBuilt('apps/ui server (cross-origin isolation parity)', () => {
       expect(head.headers.get('etag')).toBe(etag);
       expect(head.headers.get('content-length')).toBe(String(statSync(sidecar).size));
 
-      /* Node's fetch() turns a conditional request into `cache-control: no-cache` unless one is given, and a
-       * no-cache request is never fresh; `max-age=0` revalidates as a browser reload does. */
+      // Explicit revalidation avoids Fetch's default no-store request, which Express treats as a forced reload.
       const fresh = await fetch(url, {
-        headers: { 'accept-encoding': 'br', 'if-none-match': etag, 'cache-control': 'max-age=0' },
+        cache: 'no-cache',
+        headers: { 'accept-encoding': 'br', 'if-none-match': etag },
       });
       expect(fresh.status).toBe(304);
       expect(fresh.headers.get('etag')).toBe(etag);

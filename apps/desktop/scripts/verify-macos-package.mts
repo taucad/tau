@@ -590,7 +590,8 @@ const picoGkResult = picoGkBuild?.['result'] as
       readonly artifactPath?: unknown;
       readonly byteLength?: unknown;
       readonly sha256?: unknown;
-      readonly components?: unknown;
+      readonly prototypes?: unknown;
+      readonly occurrences?: unknown;
     }
   | undefined;
 const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
@@ -600,8 +601,10 @@ if (
   typeof picoGkResult?.byteLength !== 'number' ||
   picoGkResult.byteLength <= 0 ||
   typeof picoGkResult.sha256 !== 'string' ||
-  !Array.isArray(picoGkResult.components) ||
-  picoGkResult.components.length !== 1 ||
+  !Array.isArray(picoGkResult.prototypes) ||
+  picoGkResult.prototypes.length !== 1 ||
+  !Array.isArray(picoGkResult.occurrences) ||
+  picoGkResult.occurrences.length !== 1 ||
   !existsSync(picoGkArtifact) ||
   readFileSync(picoGkArtifact).byteLength !== picoGkResult.byteLength ||
   sha256(picoGkArtifact) !== picoGkResult.sha256

@@ -208,6 +208,45 @@ fn assert_positive(
     budget.used()
 }
 
+fn assert_current_component_budget(
+    prepared: &Prepared,
+    subjects: &[Rc<Subject>],
+    batch: &BatchAnalysis,
+    historical_work: u64,
+) -> u64 {
+    // v5 charged only meshBase (44 per box). v6 additionally proves material
+    // premises; retain that observation without using it as a current oracle.
+    let required = assert_positive(prepared, subjects, Some(batch));
+    assert!(required > historical_work);
+    let normalized = prepared.normalized_payload();
+    for (limit, succeeds) in [(required - 1, false), (required, true)] {
+        let budget = Budget::new(limit);
+        let mut context = EvaluationContext::new(
+            subjects,
+            prepared.capability(),
+            "component-budget",
+            &normalized,
+            &budget,
+            None,
+        )
+        .with_batch(batch);
+        match evaluate(prepared, &mut context) {
+            Evaluation::Geometric {
+                positive_satisfied, ..
+            } => {
+                assert!(succeeds && positive_satisfied);
+                assert_eq!(budget.used(), required);
+            }
+            Evaluation::Refused { diagnostics } => {
+                assert!(!succeeds);
+                assert!(diagnostics.iter().any(|row| row.code == "MATCHER_TIMEOUT"));
+            }
+            _ => panic!("component budget must yield geometry or a budget refusal"),
+        }
+    }
+    required
+}
+
 #[test]
 fn evaluates_all_eight_mesh_matchers_with_full_positive_evidence() {
     let subject = subject(box_record(3.0));
@@ -323,7 +362,7 @@ fn evaluates_all_eight_mesh_matchers_with_full_positive_evidence() {
         },
     )
     .unwrap();
-    assert_eq!(assert_positive(&prepared, &subjects, Some(&batch)), 44);
+    assert_current_component_budget(&prepared, &subjects, &batch, 44);
 }
 
 #[test]
@@ -382,10 +421,16 @@ fn component_tolerances_are_separate_and_cold_warm_charges_are_identical() {
     )
     .unwrap();
 
-    assert_eq!(assert_positive(&separated, &subjects, Some(&batch)), 88);
-    assert_eq!(assert_positive(&joined, &subjects, Some(&batch)), 88);
-    assert_eq!(assert_positive(&separated, &subjects, Some(&batch)), 88);
-    assert_eq!(assert_positive(&joined, &subjects, Some(&batch)), 88);
+    let separated_work = assert_current_component_budget(&separated, &subjects, &batch, 88);
+    let joined_work = assert_current_component_budget(&joined, &subjects, &batch, 88);
+    assert_eq!(
+        assert_current_component_budget(&separated, &subjects, &batch, 88),
+        separated_work
+    );
+    assert_eq!(
+        assert_current_component_budget(&joined, &subjects, &batch, 88),
+        joined_work
+    );
 }
 
 #[test]
@@ -734,6 +779,13 @@ fn projected_mesh_family_results_keep_their_bytes() {
             EvaluationContext::new(&subjects, capability, "pin", &normalized, &budget, None)
                 .with_batch(&batch);
         let evaluation = evaluate(&prepared, &mut context);
+        if capability == Capability::ToHaveConnectedComponents {
+            // This historical fixture includes an open fin. It cannot provide
+            // the closed material premise required by the current profile.
+            assert!(
+                matches!(&evaluation, Evaluation::Refused { diagnostics } if !diagnostics.is_empty())
+            );
+        }
         let result = crate::result::finish(
             "pin",
             capability,
@@ -742,22 +794,117 @@ fn projected_mesh_family_results_keep_their_bytes() {
         )
         .unwrap();
         let bytes = crate::codec::encode(&result).unwrap();
+        let bytes = match capability {
+            Capability::ToHaveVolume => historical_measurement_suggestion(&bytes, "Correct the model or export to match the declared volume expectation; preserve the authored tolerance.", "Correct the model, or widen the declared volume expectation.").unwrap(),
+            Capability::ToHaveMass => historical_measurement_suggestion(&bytes, "Correct the model or export to match the declared mass expectation; preserve the authored tolerance.", "Correct the model, or widen the declared mass expectation.").unwrap(),
+            Capability::ToHaveSurfaceArea => historical_measurement_suggestion(&bytes, "Correct the model or export to match the declared surface area expectation; preserve the authored tolerance.", "Correct the model, or widen the declared surface area expectation.").unwrap(),
+            Capability::ToHaveCenterOfMass => historical_measurement_suggestion(&bytes, "Correct the model or export to match the declared centre of mass; preserve the authored tolerance.", "Correct the model, or widen the declared centre-of-mass tolerance.").unwrap(),
+            _ => bytes,
+        };
         actual.push(crate::sha256_hex(bytes));
     }
-    assert_eq!(
-        actual,
-        [
-            "49a73b4ba21e56b8cc755028b3ef81ce829a365522219da2706b23b974f9d66b",
-            "6b6ea29d7cc0c8df55f01df07fb61d85e97ad9fd5aea9c202bd2388800a10414",
-            "f9342c063b8512ac79f7e4241fafe76d0ca3e8c313ed9ff2ce722bbc00583146",
-            "068054b2ffdcb2e3269d1549e725f5cc1ce0f717f5be07e3c6fe73ed2f049b3d",
-            "1a0d03d9de132def3069f578e48aa032bbc3fe2b10e78f313938b300b43eb973",
-            "a8e4c26aecdc3370d3f385b5bbb3e315eb6862762df11715a25fc273f165b731",
-            "c0160f0160e7000b68a84dcfe0e9f44a4eec98040802774c0b42dcf83a1f4904",
-            "564e601511264fd3a665dd981fd6255b45acf5c1571b21573ace7816fe9fe3be",
-            "3b4421ea05f1226057d5f86a734ab2035d0a5cca6bd9bfd398b808df9ca00e68",
-        ]
-    );
+    let historical = [
+        "49a73b4ba21e56b8cc755028b3ef81ce829a365522219da2706b23b974f9d66b",
+        "6b6ea29d7cc0c8df55f01df07fb61d85e97ad9fd5aea9c202bd2388800a10414",
+        "f9342c063b8512ac79f7e4241fafe76d0ca3e8c313ed9ff2ce722bbc00583146",
+        "068054b2ffdcb2e3269d1549e725f5cc1ce0f717f5be07e3c6fe73ed2f049b3d",
+        "1a0d03d9de132def3069f578e48aa032bbc3fe2b10e78f313938b300b43eb973",
+        "a8e4c26aecdc3370d3f385b5bbb3e315eb6862762df11715a25fc273f165b731",
+        "c0160f0160e7000b68a84dcfe0e9f44a4eec98040802774c0b42dcf83a1f4904",
+        "564e601511264fd3a665dd981fd6255b45acf5c1571b21573ace7816fe9fe3be",
+        "3b4421ea05f1226057d5f86a734ab2035d0a5cca6bd9bfd398b808df9ca00e68",
+    ];
+    assert_eq!(actual.len(), historical.len());
+    for (index, (current, frozen)) in actual.iter().zip(historical).enumerate() {
+        if index == 4 {
+            assert_ne!(
+                current, frozen,
+                "v5 open-fin geometric evidence is not a v6 proof"
+            );
+        } else {
+            assert_eq!(current, frozen);
+        }
+    }
+}
+
+// Reverse only the reviewed metadata literal. Historical hashes still bind
+// every geometry, evidence and numeric byte; JSON is never reserialized.
+fn historical_measurement_suggestion(
+    bytes: &[u8],
+    current: &str,
+    historical: &str,
+) -> Result<Vec<u8>, &'static str> {
+    let parsed = crate::codec::decode(bytes).map_err(|_| "invalid JSON")?;
+    let Json::Object(fields) = parsed else {
+        return Err("missing result");
+    };
+    let Some(Json::Array(diagnostics)) = optional_field(&fields, "diagnostics") else {
+        return Err("missing diagnostics");
+    };
+    let matching: Vec<_> = diagnostics
+        .iter()
+        .filter(|diagnostic| match diagnostic {
+            Json::Object(fields) => {
+                optional_field(fields, "code")
+                    == Some(&Json::string("GEOSPEC_MEASUREMENT_MISMATCH"))
+            }
+            _ => false,
+        })
+        .collect();
+    if matching.len() != 1 {
+        return Err("missing or duplicate approved diagnostic");
+    }
+    let Json::Object(fields) = matching[0] else {
+        unreachable!()
+    };
+    if optional_field(fields, "suggestion") != Some(&Json::string(current)) {
+        return Err("wrong approved suggestion");
+    }
+    let encoded = crate::codec::encode(&Json::string(current)).unwrap();
+    let text = std::str::from_utf8(bytes).map_err(|_| "invalid UTF-8")?;
+    let literal = std::str::from_utf8(&encoded).unwrap();
+    if text.matches(literal).count() != 1 {
+        return Err("missing or duplicate literal");
+    }
+    let replacement = crate::codec::encode(&Json::string(historical)).unwrap();
+    Ok(text
+        .replacen(literal, std::str::from_utf8(&replacement).unwrap(), 1)
+        .into_bytes())
+}
+
+#[test]
+fn historical_metadata_projection_rejects_missing_wrong_and_duplicate_suggestions() {
+    let current = "approved current";
+    let diagnostic = Json::object([
+        ("code", Json::string("GEOSPEC_MEASUREMENT_MISMATCH")),
+        ("suggestion", Json::string(current)),
+    ]);
+    for diagnostics in [
+        vec![],
+        vec![Json::object([
+            ("code", Json::string("wrong")),
+            ("suggestion", Json::string(current)),
+        ])],
+        vec![diagnostic.clone(), diagnostic.clone()],
+        vec![
+            diagnostic.clone(),
+            Json::object([
+                ("code", Json::string("GEOSPEC_MEASUREMENT_MISMATCH")),
+                ("suggestion", Json::string("wrong")),
+            ]),
+        ],
+    ] {
+        let bytes =
+            crate::codec::encode(&Json::object([("diagnostics", Json::Array(diagnostics))]))
+                .unwrap();
+        assert!(historical_measurement_suggestion(&bytes, current, "historical").is_err());
+    }
+    let bytes = br#"{"diagnostics":[{"code":"GEOSPEC_MEASUREMENT_MISMATCH","suggestion":"approved current"}],"numeric":1.0000}"#;
+    let projected = historical_measurement_suggestion(bytes, current, "historical").unwrap();
+    assert_eq!(projected, br#"{"diagnostics":[{"code":"GEOSPEC_MEASUREMENT_MISMATCH","suggestion":"historical"}],"numeric":1.0000}"#);
+    assert!(historical_measurement_suggestion(bytes, "wrong current", "historical").is_err());
+    let duplicate_literal = br#"{"diagnostics":[{"code":"GEOSPEC_MEASUREMENT_MISMATCH","suggestion":"approved current"}],"other":"approved current"}"#;
+    assert!(historical_measurement_suggestion(duplicate_literal, current, "historical").is_err());
 }
 
 #[test]
@@ -862,7 +1009,14 @@ fn negated_claims_skip_the_failure_diagnostics_that_finish_drops() {
             };
             let (before, built) = negated(&subjects, crate::result::Polarity::Positive);
             let (after, skipped) = negated(&subjects, crate::result::Polarity::Negative);
-            assert_eq!((built, skipped), (1, 0), "{} {route}", capability.name());
+            if capability == Capability::ToHaveConnectedComponents {
+                assert_eq!((built, skipped), (0, 0));
+                let result: serde_json::Value = serde_json::from_slice(&after).unwrap();
+                assert_eq!(result["status"], "refused");
+                assert!(result.get("evidence").is_none());
+            } else {
+                assert_eq!((built, skipped), (1, 0), "{} {route}", capability.name());
+            }
             assert_eq!(after, before, "{} {route}", capability.name());
         }
     }

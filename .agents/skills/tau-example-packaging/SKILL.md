@@ -61,7 +61,7 @@ Thumbnails are independent of class: every row with a main file whose kernel is 
    node --import tsx packages/geospec-engine/src/cli/main.ts run libs/tau-examples/src/kernels/<kernel>/<example> --test-timeout 300000 --workers 1 --json
    ```
 
-   Every runnable test must pass; spec-first rows mark unmet requirements `it.skip`, never red.
+   Preserve selected unmet requirements as desired failing or unsupported tests; do not skip them to claim qualification. Explicitly excluded fixtures remain visible exclusions and do not certify their requirements. A runnable qualified row requires every selected requirement to pass.
 
 4. **Regenerate the manifest**: `pnpm nx generate-manifest tau-examples`. Never hand-edit `src/{manifest.json,manifest.ts,builtin.ts,test-fixtures.ts,thumbnail.assets.ts}`.
 5. **Render thumbnails.** A selected run renders only the named rows and rewrites the complete `src/thumbnail.assets.ts` from manifest rows with an existing thumbnail, independently of which runtimes are composed for this run:

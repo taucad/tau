@@ -133,6 +133,68 @@ public sealed partial class WorkerTests
         }
     }
 
+    [Theory]
+    [InlineData(.7f, 0f)]
+    [InlineData(1f, 0f)]
+    [InlineData(1f, -.25f)]
+    [InlineData(1f, .25f)]
+    [InlineData(.5f, 0f)]
+    [InlineData(.5f, -.25f)]
+    [InlineData(.5f, .25f)]
+    public void BooleanShellPreservesCavityPropertiesAndClosedNondegenerateSurface(float size, float offsetCells)
+    {
+        using var library = new Library(size);
+        var center = new Vector3(size * offsetCells, 0, 0);
+        using var outer = Voxels.voxSphere(library, center, 24);
+        using var inner = Voxels.voxSphere(library, center, 20);
+        using var shell = outer - inner;
+        Assert.False(shell.bIsInside(center));
+        Assert.False(shell.bIsInside(center + new Vector3(19, 0, 0)));
+        Assert.True(shell.bIsInside(center + new Vector3(22, 0, 0)));
+        Assert.False(shell.bIsInside(center + new Vector3(25, 0, 0)));
+        using var mesh = shell.mshAsMesh();
+        var welded = new Dictionary<Vector3, int>();
+        var edges = new Dictionary<(int, int), (int Count, int Direction)>();
+        double outerVolume = 0, innerVolume = 0;
+        int Weld(Vector3 point)
+        {
+            if (welded.TryGetValue(point, out var index)) return index;
+            index = welded.Count; welded.Add(point, index); return index;
+        }
+        void Edge(int from, int to)
+        {
+            var key = (Math.Min(from, to), Math.Max(from, to));
+            edges.TryGetValue(key, out var value);
+            edges[key] = (value.Count + 1, value.Direction + (from < to ? 1 : -1));
+        }
+        for (var index = 0; index < mesh.nTriangleCount(); index++)
+        {
+            var triangle = mesh.oTriangleAt(index);
+            var a = mesh.vecVertexAt(triangle.A); var b = mesh.vecVertexAt(triangle.B); var c = mesh.vecVertexAt(triangle.C);
+            var ux = (double)b.X - a.X; var uy = (double)b.Y - a.Y; var uz = (double)b.Z - a.Z;
+            var vx = (double)c.X - a.X; var vy = (double)c.Y - a.Y; var vz = (double)c.Z - a.Z;
+            Assert.True(uy * vz - uz * vy != 0 || uz * vx - ux * vz != 0 || ux * vy - uy * vx != 0);
+            var ai = Weld(a); var bi = Weld(b); var ci = Weld(c);
+            Edge(ai, bi); Edge(bi, ci); Edge(ci, ai);
+            var ax = (double)a.X - center.X; var ay = (double)a.Y - center.Y; var az = (double)a.Z - center.Z;
+            var bx = (double)b.X - center.X; var by = (double)b.Y - center.Y; var bz = (double)b.Z - center.Z;
+            var cx = (double)c.X - center.X; var cy = (double)c.Y - center.Y; var cz = (double)c.Z - center.Z;
+            var volume = (ax * (by * cz - bz * cy) + ay * (bz * cx - bx * cz) + az * (bx * cy - by * cx)) / 6;
+            if (((a + b + c) / 3 - center).Length() < 22) innerVolume += volume;
+            else outerVolume += volume;
+        }
+        Assert.All(edges.Values, edge => Assert.Equal((2, 0), edge));
+        Assert.True(innerVolume < 0); Assert.True(outerVolume > 0);
+        var orientedVolume = outerVolume + innerVolume;
+        var analyticVolume = 4 * Math.PI / 3 * (24 * 24 * 24 - 20 * 20 * 20);
+        Assert.InRange(orientedVolume / analyticVolume, .98, 1.02);
+        shell.CalculateProperties(out var correctedVolume, out _);
+        Assert.InRange(correctedVolume / orientedVolume, .98, 1.02);
+        shell.CalculateProperties(out var cachedVolume, out _);
+        Assert.Equal(correctedVolume, cachedVolume);
+        Assert.False(shell.bIsInside(center));
+    }
+
     private static int[] VectorBits(Vector3 point) => new[] { BitConverter.SingleToInt32Bits(point.X),
         BitConverter.SingleToInt32Bits(point.Y), BitConverter.SingleToInt32Bits(point.Z) };
 

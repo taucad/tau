@@ -22,10 +22,10 @@ import type {
   RevisionStatusProjection,
   RevisionTag,
 } from '@taucad/revisions';
+import type { RevisionFileComparison } from '@taucad/revisions/algorithms';
 import type { EditorConflictInput, EditorConflictOutcome } from '@taucad/revisions/revision-effects';
 import type {
   RevisionToast,
-  RevisionFileComparison,
   WorkerRevisionCommand,
   WorkerRevisionEvent,
   WorkerRevisionRequest,
@@ -81,7 +81,11 @@ export type RevisionClient = Readonly<{
   /** How far `head` and `base` have gone apart, counted by the port without listing either history. */
   divergence: (head: string, base: string) => Promise<RevisionDivergence>;
   /** Which paths one revision changed, against `from` or its own first parent. */
-  diff: (revisionId: string, from?: string) => Promise<readonly RevisionDiffEntry[]>;
+  diff: (
+    revisionId: string,
+    from?: string,
+    options?: Readonly<{ against?: 'checkout' }>,
+  ) => Promise<readonly RevisionDiffEntry[]>;
   /** Name one revision, or re-point an existing name (S31). */
   tag: (input: Readonly<{ name: string; revisionId: string; note?: string }>) => Promise<RevisionTag | undefined>;
   /** Remove one name. The revision it named stays. */
@@ -485,10 +489,11 @@ export const createHostRevisionClient = (input: {
       })) as unknown as readonly RevisionRow[],
     divergence: async (head, base) =>
       (await ask({ command: 'divergence', head, base })) as unknown as RevisionDivergence,
-    diff: async (revisionId, from) =>
+    diff: async (revisionId, from, options) =>
       (await ask({
         command: 'diff',
         revisionId,
+        ...(options?.against === undefined ? {} : { against: options.against }),
         ...(from === undefined ? {} : { from }),
       })) as unknown as readonly RevisionDiffEntry[],
     tag: async (tagInput) => (await ask({ command: 'tag', ...tagInput })) as unknown as RevisionTag | undefined,
@@ -942,10 +947,11 @@ export const getRevisionClient = (input: { readonly projectId: string; readonly 
       }
       return result.divergence;
     },
-    diff: async (revisionId, from) => {
+    diff: async (revisionId, from, options) => {
       const result = await ask({
         command: 'diff',
         revisionId,
+        ...(options?.against === undefined ? {} : { against: options.against }),
         ...(from === undefined ? {} : { from }),
       });
       return result.kind === 'diff' ? result.entries : [];

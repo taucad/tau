@@ -4,4 +4,5 @@
 
 modifiers
 
+  // modifiers.retessellate (function)
   export default function retessellate(geometry: Geom3): Geom3

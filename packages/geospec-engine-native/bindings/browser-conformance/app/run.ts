@@ -1,6 +1,6 @@
 import { Engine, canonicalize, initialize } from '@taucad/geospec-engine-native';
 // oxlint-disable-next-line no-restricted-imports -- Package-owned browser runner shares the pinned fixture join.
-import { joinCurrentCorpus, selectCorpusRecords } from '../../../conformance/current-profile.mjs';
+import { joinCurrentCorpus, loadMaterialCorpus, selectCorpusRecords } from '../../../conformance/current-profile.mjs';
 
 type CorpusRecord = {
   id: string;
@@ -137,6 +137,13 @@ const invoke = (engine: Engine, record: CorpusRecord): ByteArray => {
 };
 
 const readCorpus = async () => {
+  if (new URL(location.href).searchParams.get('suite') === 'material') {
+    const response = await fetch('/material-corpus.json');
+    if (!response.ok) {
+      throw new Error(`Unable to read material authority: ${response.status}`);
+    }
+    return loadMaterialCorpus(new Uint8Array(await response.arrayBuffer()));
+  }
   const [original, profile, successor] = await Promise.all([
     fetch('/early-corpus.json'),
     fetch('/current-profile.json'),
@@ -186,7 +193,13 @@ const run = async () => {
         }
         try {
           const comparison = compareBytes(
-            engine.ingestMesh(encoder.encode(mesh.requestUtf8), fromHex(mesh.meshHex)),
+            mesh.admission === 'subject'
+              ? engine.ingestSubject(
+                  encoder.encode(mesh.requestUtf8),
+                  fromHex(mesh.primaryHex),
+                  mesh.resources.map((resource) => fromHex(resource.hex)),
+                )
+              : engine.ingestMesh(encoder.encode(mesh.requestUtf8), fromHex(mesh.meshHex)),
             mesh.expectedUtf8,
           );
           admissions.push({ meshId, ...comparison });
@@ -272,13 +285,22 @@ const run = async () => {
     schemaVersion: 1,
     host: 'browser-packed-root',
     userAgent: navigator.userAgent,
-    corpus: {
-      sha256: corpus.originalSha256,
-      currentProfileSha256: corpus.profileSha256,
-      bindingProfile: corpus.bindingProfile,
-      records: corpus.records.length,
-      selectedRecords: selected.length,
-    },
+    corpus:
+      'materialSha256' in corpus
+        ? {
+            sha256: corpus.materialSha256,
+            numericProfile: 'geospec-demand-v6',
+            bindingProfile: 'full-backend',
+            records: corpus.records.length,
+            selectedRecords: selected.length,
+          }
+        : {
+            sha256: corpus.originalSha256,
+            currentProfileSha256: corpus.profileSha256,
+            bindingProfile: corpus.bindingProfile,
+            records: corpus.records.length,
+            selectedRecords: selected.length,
+          },
     wasmAsset: { url: wasmUrl, sha256: wasmSha256 },
     admissions: results.reduce((count, result) => count + result.admissions.length, 0),
     passed: results.length - mismatches.length,

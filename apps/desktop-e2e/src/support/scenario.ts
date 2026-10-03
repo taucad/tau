@@ -37,7 +37,7 @@ export const expectCount = async (locator: Locator, count: number, timeout = 30_
 export const composerOf = (page: Page): Locator => page.locator(composerSelector).first();
 
 /** The chat's stop button — present exactly while a run is in flight. */
-export const stopButtonOf = (page: Page): Locator => page.locator('button:has(svg.lucide-square)').last();
+export const stopButtonOf = (page: Page): Locator => page.getByRole('button', { name: 'Stop', exact: true }).last();
 
 const filesPaneOf = (page: Page): Locator => page.getByRole('region', { name: /^Files for /u }).first();
 

@@ -229,15 +229,15 @@ import { loadModel } from 'geospec/model';
 const bytes = new Uint8Array(${JSON.stringify([...fixtureBytes])});
 it('accepts the fixed box volume', async () => {
   const model = await loadModel({ source: bytes, format: 'glb', sourceUnit: 'mm' });
-  await expectGeo(model).toHaveVolume({ value: 6000, tolerance: 0.000001 });
+  expectGeo(model).toHaveVolume({ value: 6000, tolerance: 0.000001 });
 });
 it('rejects the impossible fixed box volume', async () => {
   const model = await loadModel({ source: bytes, format: 'glb', sourceUnit: 'mm' });
-  await expectGeo(model).toHaveVolume({ value: 1, tolerance: 0 });
+  expectGeo(model).toHaveVolume({ value: 1, tolerance: 0 });
 });
 it('accepts the project Runtime mesh', async () => {
   const model = await loadModel({ file: 'main.ts', format: 'glb' });
-  await expectGeo(model).toBeWatertight();
+  expectGeo(model).toBeWatertight();
 });
 `;
   const evidenceRoot = new URL(

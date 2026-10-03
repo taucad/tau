@@ -3,7 +3,7 @@ title: 'npm Publishing Policy'
 description: 'Per-package rules for preparing @taucad/* libraries for npm publication: tsdown shape, dependency hygiene, exports map discipline, validation gates, README requirements.'
 status: active
 created: '2026-05-22'
-updated: '2026-09-30'
+updated: '2026-10-01'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/release-policy.md
@@ -63,6 +63,8 @@ Serialize dependency changes and the resulting install before parallel verificat
 | D. Optional peer dep           | `peerDependencies` + `peerDependenciesMeta.<name>.optional: true` | Build-time integration (e.g., `vite`, `rolldown`)                                                                                                                           |
 | E. Dev-only                    | `devDependencies`                                                 | Test/build tooling — never present at consumer install time                                                                                                                 |
 | F. Vendored third-party engine | `devDependencies`                                                 | Bundle a reviewed upstream graph into a separate `dist/engine/` build; record included packages and actual LICENSE text, and block publication for held or pending entries. |
+
+The sole optional runtime-peer exception to bucket D's build-time treatment is `@parcel/watcher` for native observation selected through `@taucad/filesystem/backend/node` and `@taucad/runtime/filesystem/node`. Each owning publishable package declares it in `peerDependencies` with `peerDependenciesMeta['@parcel/watcher'].optional: true` and in `devDependencies` for its own build/tests. It is not an `optionalDependencies` auto-install in those browser-safe packages. No other runtime integration inherits this exception. Its absence must leave importing the package, constructing its Node filesystem, and non-watch read/write operations usable; selecting watch requires a separately installed peer and a clear install error, without an unready fallback.
 
 **Why**: Mis-classification causes either bloat (bundling a real dep), install failures (bundling a private workspace dep is fine but leaving it in `dependencies` 404s the install), or hidden requirements (forgetting an optional peer in `peerDependenciesMeta`).
 

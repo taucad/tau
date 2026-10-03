@@ -4,10 +4,12 @@
  * The one walk every host records a revision from: the browser worker's
  * revision root, the Node daemon and the Electron utility all reach it through
  * `@taucad/revisions/revision-effects`, whose only capture filter is
- * `classify(path).versioned`. It used to live beside the materialized-workspace
+ * `classify(path).versioned`. Capture itself excludes Tau's reserved staging
+ * and backup siblings, so live comparisons and recording share that rule. It used to live beside the materialized-workspace
  * authority that W3d deleted; nothing about it was ever about materialization.
  */
 
+import { parseTemporarySibling } from '#revision-temporary-sibling.js';
 import { assertRootedPath, joinRelativePath } from '@taucad/utils/path';
 import { bufferToStream } from '@taucad/filesystem/backend/stream-utils';
 import { walk } from '@taucad/filesystem/content-ops';
@@ -121,7 +123,8 @@ const captureOnce = async (
     'maximumTotalBytes',
     Number.MAX_SAFE_INTEGER,
   );
-  const excluded = options?.exclude;
+  const excluded = (path: string): boolean =>
+    parseTemporarySibling(path) !== undefined || options?.exclude?.(path) === true;
   const requiredPaths = new Set(
     (options?.requiredPaths ?? []).map((path) => {
       const requiredPath = assertRootedPath(path);
@@ -185,7 +188,7 @@ const captureOnce = async (
     for (const child of children ?? []) {
       throwIfAborted();
       const childPath = joinRelativePath(path, child.name);
-      if (excluded?.(childPath) === true) {
+      if (excluded(childPath)) {
         continue;
       }
       // oxlint-disable-next-line eslint/no-await-in-loop -- Sequential traversal avoids a second nested concurrency pool.
@@ -263,7 +266,7 @@ const captureOnce = async (
   const listChanged = async (previous: ImmutableRevisionTree, roots: ReadonlySet<string>): Promise<number> => {
     let keptBytes = 0;
     for (const [path, file] of revisionTreeFiles(previous)) {
-      if (!isUnder(path, roots)) {
+      if (!isUnder(path, roots) && !isExcludedPath(path, excluded)) {
         files.set(path, file);
         keptBytes += file.content.byteLength;
       }
@@ -484,6 +487,9 @@ const isUnder = (path: string, roots: ReadonlySet<string>): boolean => roots.has
 const isExcludedPath = (path: string, excluded: ((path: string) => boolean) | undefined): boolean => {
   if (excluded === undefined) {
     return false;
+  }
+  if (excluded(path)) {
+    return true;
   }
   for (let index = path.indexOf('/'); index !== -1; index = path.indexOf('/', index + 1)) {
     if (excluded(path.slice(0, index))) {

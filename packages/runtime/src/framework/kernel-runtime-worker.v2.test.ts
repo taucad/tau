@@ -34,7 +34,10 @@ const parameters = {
 } as const;
 
 describe('v2 kernel boundary with the current client', () => {
-  it('publishes the original evaluation and view failures when watch rearming also fails', async () => {
+  it.each([
+    ['publishes the original evaluation and view failures when watch rearming also fails', true],
+    ['refuses successful evaluation and view publication when initial watch admission fails', false],
+  ] as const)('%s', async (_name, resolveFails) => {
     const kernel = defineKernelV2({
       id: 'lost-filesystem',
       extensions: ['circuit'] as const,
@@ -46,7 +49,10 @@ describe('v2 kernel boundary with the current client', () => {
         return {};
       },
       async resolve() {
-        throw new Error('Bridge proxy closed');
+        if (resolveFails) {
+          throw new Error('Bridge proxy closed');
+        }
+        return { resolved: ['model.circuit'], unresolved: [] };
       },
       async describe() {
         return createKernelSuccess({ parameters });
@@ -96,11 +102,19 @@ describe('v2 kernel boundary with the current client', () => {
       expect(watchReady).toHaveBeenCalledOnce();
       expect(evaluated[0]).toMatchObject({
         success: false,
-        issues: [expect.objectContaining({ message: 'Bridge proxy closed' })],
+        issues: [
+          expect.objectContaining({
+            message: resolveFails ? 'Bridge proxy closed' : 'Filesystem watch channel closed',
+          }),
+        ],
       });
       expect(rendered[0]).toMatchObject({
         success: false,
-        issues: [expect.objectContaining({ message: 'Bridge proxy closed' })],
+        issues: [
+          expect.objectContaining({
+            message: resolveFails ? 'Bridge proxy closed' : 'Filesystem watch channel closed',
+          }),
+        ],
       });
     } finally {
       await worker.cleanup();
@@ -813,10 +827,10 @@ describe('v2 kernel boundary with the current client', () => {
     let changed = false;
     const inlineFileSystem = Object.assign(base, {
       watch: () => () => undefined,
-      watchReady: () => ({
+      watchReady: (request: { paths: readonly string[] }) => ({
         unsubscribe: () => undefined,
         ready: (async () => {
-          if (!changed) {
+          if (!changed && request.paths.includes('dep.circuit')) {
             changed = true;
             await base.writeFile('dep.circuit', new TextEncoder().encode('new'));
           }

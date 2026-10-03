@@ -188,6 +188,7 @@ describe('githubCredentialRenewDelay', () => {
 
 describe('the GitHub credential frame (D2)', () => {
   it('should re-mint the credential before it expires and re-send the frame', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     const soon = expiringIn(renewWindow + 50);
     const later = expiringIn(eightHours);
     githubToken
@@ -196,9 +197,8 @@ describe('the GitHub credential frame (D2)', () => {
 
     const scripted = mountBound();
 
-    await vi.waitFor(() => {
-      expect(scripted.frames()).toHaveLength(2);
-    });
+    await elapse(50);
+    expect(scripted.frames()).toHaveLength(2);
     expect(scripted.frames()).toStrictEqual([
       expect.objectContaining({ repositoryUrl, authorization: basic('first'), expiresAt: soon }),
       expect.objectContaining({ repositoryUrl, authorization: basic('second'), expiresAt: later }),
@@ -207,18 +207,16 @@ describe('the GitHub credential frame (D2)', () => {
   });
 
   it('should keep the held credential when a renewal fails', async () => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
     githubToken
       .mockResolvedValueOnce({ accessToken: 'first', expiresAt: expiringIn(renewWindow + 50), generation: 3 })
       .mockRejectedValueOnce(new GithubRequestError(503, 'GITHUB_UPSTREAM_UNAVAILABLE'));
 
     const scripted = mountBound();
 
-    await vi.waitFor(() => {
-      expect(githubToken).toHaveBeenCalledTimes(2);
-    });
-    await new Promise<void>((resolve) => {
-      globalThis.setTimeout(resolve, 20);
-    });
+    await elapse(50);
+    expect(githubToken).toHaveBeenCalledTimes(2);
+    await elapse(20);
     expect(scripted.frames()).toStrictEqual([expect.objectContaining({ authorization: basic('first') })]);
   });
 

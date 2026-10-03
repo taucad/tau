@@ -231,6 +231,8 @@ describe('NativeImageViewer', () => {
       await waitFor(() => {
         expect(screen.getByRole('img', { name: 'preview.png' })).toHaveAttribute('src', 'blob:second');
       });
+      expect(proxy.readFile).toHaveBeenCalledTimes(3);
+      expect(digest).toHaveBeenCalledTimes(3);
       expect(service.peekOutcome('preview.png')).not.toBe(firstOutcome);
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first');
     } finally {

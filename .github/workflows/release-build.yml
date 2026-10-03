@@ -12,6 +12,9 @@
 #     notarized), Linux and Windows (unsigned), attach the archives to the
 #     release, then publish the update feeds and mark the release "latest", so
 #     installed apps only see a release whose every asset is in place.
+#   - `ui@*` and `desktop@*` also get the GeoSpec engine's complete source and
+#     relink kit and the OCCT licence texts as release assets (`source-kit`),
+#     because both ship OCCT compiled into the engine.
 #
 # Nothing here publishes an npm package or deploys anything.
 #
@@ -142,6 +145,77 @@ jobs:
         env:
           PROJECT: ${{ needs.resolve.outputs.project }}
         run: pnpm nx run-many -t lint typecheck test build --projects="$PROJECT" --parallel=2
+
+  # OCCT (LGPL-2.1 with the Open CASCADE exception) is compiled into the GeoSpec
+  # engine that the UI serves as Wasm and the desktop app bundles, so each UI
+  # and desktop release carries the complete source and relink kit, the OCCT
+  # licence and exception, and the GeoSpec notices as release assets. The kit
+  # comes from the release commit's main CI run and must match the receipt in
+  # packages/geospec-engine-native/licenses/SOURCE-RELINK.json.
+  source-kit:
+    needs: [resolve, verify-app]
+    if: needs.resolve.outputs.project == 'ui' || needs.resolve.outputs.project == 'desktop'
+    name: Attach the GeoSpec source and relink kit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Checkout the release
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Take the GeoSpec artifact from the release commit's main CI run
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Check the kit against its receipt
+        run: |
+          set -euo pipefail
+          receipt=packages/geospec-engine-native/licenses/SOURCE-RELINK.json
+          name=$(jq -r .artifact.fileName "$receipt")
+          kit="out/artifacts/geospec-native-engine/ci/assembly/tarballs/$name"
+          expected=$(jq -r .artifact.sha256 "$receipt")
+          actual=$(sha256sum "$kit" | cut -d' ' -f1)
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::$name is $actual; SOURCE-RELINK.json records $expected."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/source-kit"
+          licenses=packages/geospec-engine-native/licenses
+          cp "$kit" "$RUNNER_TEMP/source-kit/"
+          cp "$licenses/OCCT-LGPL-2.1.txt" "$licenses/OCCT-LGPL-exception.txt" "$RUNNER_TEMP/source-kit/"
+          cp "$licenses/NOTICE.txt" "$RUNNER_TEMP/source-kit/GeoSpec-NOTICE.txt"
+          cp "$licenses/THIRD-PARTY-NOTICES.txt" "$RUNNER_TEMP/source-kit/GeoSpec-THIRD-PARTY-NOTICES.txt"
+          cp "$licenses/SOURCE-RELINK.md" "$RUNNER_TEMP/source-kit/GeoSpec-SOURCE-RELINK.md"
+
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Attach the kit and notices
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        working-directory: ${{ runner.temp }}/source-kit
+        run: gh release upload "$TAG" ./* --clobber
 
   desktop-macos:
     needs: [resolve, verify-app]
@@ -369,7 +443,7 @@ jobs:
           retention-days: 7
 
   desktop-publish:
-    needs: [resolve, desktop-macos, desktop-portable]
+    needs: [resolve, desktop-macos, desktop-portable, source-kit]
     if: needs.resolve.outputs.kind == 'desktop'
     name: Attach assets and publish the update feeds
     runs-on: ubuntu-24.04

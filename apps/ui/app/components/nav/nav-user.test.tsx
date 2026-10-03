@@ -112,6 +112,10 @@ describe('NavUser', () => {
     expect(screen.getByRole('link', { name: 'Documentation' })).toHaveAttribute('href', 'https://docs.tau.new');
     expect(screen.getByRole('link', { name: 'Privacy' })).toHaveAttribute('href', 'https://tau.new/legal/privacy');
     expect(screen.getByRole('link', { name: 'Terms' })).toHaveAttribute('href', 'https://tau.new/legal/terms');
+    expect(screen.getByRole('link', { name: 'Open-source notices' })).toHaveAttribute(
+      'href',
+      'https://tau.new/legal/open-source',
+    );
     expect(screen.getByText('Report a bug')).toBeInTheDocument();
     expect(screen.getByText('GitHub')).toBeInTheDocument();
     expect(screen.getByText('Community Discord')).toBeInTheDocument();

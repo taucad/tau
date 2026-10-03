@@ -445,7 +445,7 @@ export function DesignStoryCanvas({ actor, isPlaying, onReady }: StoryProperties
   const [error, setError] = useState<Error>();
   // Public viewers stay on WebGL; the existing internal override is used for parity checks.
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
-  const gl = useMemo(() => createTauR3fGlProp(backend), [backend]);
+  const gl = useMemo(() => createTauR3fGlProp(backend, [], setError), [backend]);
   useEffect(() => {
     const controller = new AbortController();
     let loaded: StoryAsset[] | undefined;

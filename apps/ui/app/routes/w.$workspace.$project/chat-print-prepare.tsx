@@ -1813,124 +1813,129 @@ export function PrepareSection({
     >
       <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
       <EngineStatus studio={studio} provider={provider} />
-      <MachineProfiles settings={machineSettings} studio={studio} />
-      {/* Keep disabled semantics without Chromium's fieldset anonymous layout box around query containers. */}
-      <fieldset disabled={machineSettings.blocked} className='contents'>
-        <div className='flex min-w-0 flex-col gap-3'>
-          <PlateSelect
-            plates={plates}
-            selected={selectedPlate}
-            isModified={intent?.plate !== undefined}
-            onChange={selectPlate}
-            onReset={resetPlate}
-          />
-          <MaterialChoice
-            entry={entry}
-            manifest={manifest}
-            filamentColors={filamentColors}
-            submission={effectiveSubmission}
-            ownSubmission={submission}
-            onResetMaterial={() => {
-              setSubmission(
-                Object.fromEntries(
-                  Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
-                ),
-              );
-            }}
-            onSelectMaterial={selectMaterial}
-            onSelectFilamentSlot={selectFilamentSlot}
-          />
-          {!isBambuStudio && manifest ? (
-            <QualityChoice
-              presets={manifest.slicing.presets}
-              options={presetState}
-              isModified={intent?.preset !== undefined}
-              onSelect={selectPreset}
-              onReset={resetPreset}
-            />
-          ) : null}
-          {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
-          <BeforeStarting prepare={prepare} />
-          <SliceControls prepare={prepare} />
-          <SliceResult prepare={prepare} entry={entry} manifest={manifest} />
-          <PrintDisclosure title='More settings'>
-            <SearchInput
-              aria-label='Filter settings'
-              placeholder='Filter settings'
-              value={moreSettingsFilter}
-              className='h-6 w-full bg-background text-sm'
-              onChange={(event) => {
-                setMoreSettingsFilter(event.target.value);
-              }}
-              onClear={() => {
-                setMoreSettingsFilter('');
-              }}
-            />
-            {isBambuStudio ? (
-              <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' />
-            ) : null}
-            {isBambuStudio ? (
-              <BambuStudioSettings studio={studio} filterTerm={moreSettingsFilter} />
-            ) : optionsSchema ? (
-              <div className='min-w-0' role='group' aria-label='Slicer options'>
-                {optionsManifest ? (
-                  <Parameters
-                    parameters={options}
-                    defaultParameters={optionsSchema.defaults}
-                    jsonSchema={optionsSchema.schema as RJSFSchema}
-                    onParametersChange={setOptions}
-                    enableSearch={false}
-                    filterTerm={moreSettingsFilter}
-                    presentation='embedded'
-                    units={printUnits}
-                    parameterManifest={optionsManifest}
-                    parameterEdit={{ kind: 'transient' }}
-                    emptyMessage='No slicer options'
-                  />
-                ) : (
-                  <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-                    Preparing slicer options…
-                  </p>
-                )}
-              </div>
-            ) : (
-              <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
-            )}
-            {submissionSchema && provider ? (
-              <div className='min-w-0' role='group' aria-label='Machine mapping'>
-                {submissionManifest ? (
-                  <Parameters
-                    parameters={advancedSubmissionValues(submission)}
-                    defaultParameters={advancedSubmissionValues(
-                      submissionDefaults(provider, entry, { manifest, filamentColors }),
-                    )}
-                    jsonSchema={advancedSubmissionSchema}
-                    onParametersChange={(changed) => {
-                      setSubmission({
-                        ...Object.fromEntries(
-                          Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
-                        ),
-                        ...changed,
-                      });
-                    }}
-                    enableSearch={false}
-                    filterTerm={moreSettingsFilter}
-                    presentation='embedded'
-                    units={printUnits}
-                    parameterManifest={submissionManifest}
-                    parameterEdit={{ kind: 'transient' }}
-                    emptyMessage='No machine mapping'
-                  />
-                ) : (
-                  <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-                    Preparing machine mapping…
-                  </p>
-                )}
-              </div>
-            ) : null}
-          </PrintDisclosure>
-        </div>
-      </fieldset>
+      {/* Setup rows pad themselves (PrintSetupRow py-1.5), so the group adds only the row-to-row gap. */}
+      <div className='flex min-w-0 flex-col gap-1'>
+        <MachineProfiles settings={machineSettings} studio={studio} />
+        {/* Keep disabled semantics without Chromium's fieldset anonymous layout box around query containers. */}
+        <fieldset disabled={machineSettings.blocked} className='contents'>
+          <div className='flex min-w-0 flex-col gap-3'>
+            <div className='flex min-w-0 flex-col gap-1'>
+              <PlateSelect
+                plates={plates}
+                selected={selectedPlate}
+                isModified={intent?.plate !== undefined}
+                onChange={selectPlate}
+                onReset={resetPlate}
+              />
+              <MaterialChoice
+                entry={entry}
+                manifest={manifest}
+                filamentColors={filamentColors}
+                submission={effectiveSubmission}
+                ownSubmission={submission}
+                onResetMaterial={() => {
+                  setSubmission(
+                    Object.fromEntries(
+                      Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
+                    ),
+                  );
+                }}
+                onSelectMaterial={selectMaterial}
+                onSelectFilamentSlot={selectFilamentSlot}
+              />
+              {!isBambuStudio && manifest ? (
+                <QualityChoice
+                  presets={manifest.slicing.presets}
+                  options={presetState}
+                  isModified={intent?.preset !== undefined}
+                  onSelect={selectPreset}
+                  onReset={resetPreset}
+                />
+              ) : null}
+              {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
+            </div>
+            <BeforeStarting prepare={prepare} />
+            <SliceControls prepare={prepare} />
+            <SliceResult prepare={prepare} entry={entry} manifest={manifest} />
+            <PrintDisclosure title='More settings'>
+              <SearchInput
+                aria-label='Filter settings'
+                placeholder='Filter settings'
+                value={moreSettingsFilter}
+                className='h-6 w-full bg-background text-sm'
+                onChange={(event) => {
+                  setMoreSettingsFilter(event.target.value);
+                }}
+                onClear={() => {
+                  setMoreSettingsFilter('');
+                }}
+              />
+              {isBambuStudio ? (
+                <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' />
+              ) : null}
+              {isBambuStudio ? (
+                <BambuStudioSettings studio={studio} filterTerm={moreSettingsFilter} />
+              ) : optionsSchema ? (
+                <div className='min-w-0' role='group' aria-label='Slicer options'>
+                  {optionsManifest ? (
+                    <Parameters
+                      parameters={options}
+                      defaultParameters={optionsSchema.defaults}
+                      jsonSchema={optionsSchema.schema as RJSFSchema}
+                      onParametersChange={setOptions}
+                      enableSearch={false}
+                      filterTerm={moreSettingsFilter}
+                      presentation='embedded'
+                      units={printUnits}
+                      parameterManifest={optionsManifest}
+                      parameterEdit={{ kind: 'transient' }}
+                      emptyMessage='No slicer options'
+                    />
+                  ) : (
+                    <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+                      Preparing slicer options…
+                    </p>
+                  )}
+                </div>
+              ) : (
+                <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
+              )}
+              {submissionSchema && provider ? (
+                <div className='min-w-0' role='group' aria-label='Machine mapping'>
+                  {submissionManifest ? (
+                    <Parameters
+                      parameters={advancedSubmissionValues(submission)}
+                      defaultParameters={advancedSubmissionValues(
+                        submissionDefaults(provider, entry, { manifest, filamentColors }),
+                      )}
+                      jsonSchema={advancedSubmissionSchema}
+                      onParametersChange={(changed) => {
+                        setSubmission({
+                          ...Object.fromEntries(
+                            Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
+                          ),
+                          ...changed,
+                        });
+                      }}
+                      enableSearch={false}
+                      filterTerm={moreSettingsFilter}
+                      presentation='embedded'
+                      units={printUnits}
+                      parameterManifest={submissionManifest}
+                      parameterEdit={{ kind: 'transient' }}
+                      emptyMessage='No machine mapping'
+                    />
+                  ) : (
+                    <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+                      Preparing machine mapping…
+                    </p>
+                  )}
+                </div>
+              ) : null}
+            </PrintDisclosure>
+          </div>
+        </fieldset>
+      </div>
     </PrintSection>
   );
 }

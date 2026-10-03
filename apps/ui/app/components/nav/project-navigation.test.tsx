@@ -165,6 +165,8 @@ const closedRow = (projectId: string): SidebarStatusModule.ProjectSidebarRow => 
   closing: false,
   attention: 0,
   conflicted: false,
+  settings: 0,
+  settingsLabel: undefined,
   failed: 0,
   running: 0,
   unread: 0,

@@ -8,6 +8,7 @@ import { PaneButton } from '#components/ui/pane-button.js';
 import { useIsTopRightGroup } from '#components/panes/use-is-top-right-group.js';
 import { useProject } from '#hooks/use-project.js';
 import { RevisionStatusAction } from '#routes/w.$workspace.$project/revision-status-action.js';
+import { RecordIssuesAction } from '#routes/w.$workspace.$project/record-issues-action.js';
 import { useProjectWorkspace, useWorkspaceLanes } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import type { WorkbenchPanelId } from '#routes/w.$workspace.$project/project-workspace-context.js';
 
@@ -73,7 +74,7 @@ const GroupSeparator = (): React.JSX.Element => (
 
 /**
  * The viewer's top-right cluster: the project group — the revision trigger,
- * Share and Export — and, while the workbench lane is hidden, the slot its
+ * the settings-records trigger when a record needs a person, Share and Export — and, while the workbench lane is hidden, the slot its
  * floating toggle lands in. One geometry (`PaneButton`, 28 px) and a hairline
  * before every group, the first included, so the cluster reads apart from the
  * tabs on its left. The chat lane's toggle is not here: it heads the chat pane
@@ -107,6 +108,8 @@ export function ProjectWorkspaceActions(properties: IDockviewHeaderActionsProps)
           time, and this is the one place outside the pane that says where you
           are (review R10). */}
       <RevisionStatusAction />
+      {/* Settings records that need a person; nothing while every record is fine. */}
+      <RecordIssuesAction />
       <ProjectPaneAction icon={Share2} label='Share' tooltip='Share project' panel='share' />
       <ProjectPaneAction icon={DownloadIcon} label='Export' tooltip='Open exporter' panel='export' />
 

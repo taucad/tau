@@ -137,7 +137,7 @@ describe('UnloadProvider', () => {
           <Probe />
         </UnloadProvider>,
       );
-      await expect(flushProducers?.()).rejects.toThrow('producer flush failed');
+      await expect(flushProducers?.()).rejects.toThrow('checked write unavailable');
       expect(sequence).toEqual(['producer']);
       visibility = 'hidden';
       document.dispatchEvent(new Event('visibilitychange'));

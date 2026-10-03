@@ -1,5 +1,6 @@
 /* oxlint-disable eslint/no-await-in-loop -- Restore must create required view files in order before layout adoption. */
 /* oxlint-disable react/refs -- Store callbacks and Restore read refs only after commit. */
+/* oxlint-disable typescript/no-restricted-types -- Refused record bytes may be absent (null), as the store reports them. */
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Topic } from '@taucad/events';
 import { useSelector } from '@xstate/react';
@@ -16,6 +17,10 @@ import type {
   WorkbenchLayoutSnapshot,
 } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { ensureViewFile } from '#workbench-records/view-actions.js';
+import { confirmFlush } from '#workbench-records/record-health.js';
+import type { RecordHealth } from '#workbench-records/record-health.js';
+import { recordIssueState, usePublishRecordIssue } from '#workbench-records/record-issues.js';
+import type { RecordIssue } from '#workbench-records/record-issues.js';
 import type { PreviousWorkbenchLayout } from '#types/editor.types.js';
 
 const storeMounts = new WeakMap<ReturnType<typeof createWorkbenchLayoutStore>, number>();
@@ -55,10 +60,11 @@ export function WorkbenchRecordHost(): React.JSX.Element {
     setStatus(message);
     setStatusVersion((version) => version + 1);
   }, []);
-  const [refusal, setRefusal] = useState<{
-    code: 'INVALID_RECORD' | 'NEWER_RECORD';
-    message: string;
-  }>();
+  const [refusal, setRefusal] =
+    useState<
+      Readonly<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string; bytes: Uint8Array<ArrayBuffer> | null }>
+    >();
+  const [health, setHealth] = useState<RecordHealth>();
   const snapshotRef = useRef<WorkbenchLayoutSnapshot | undefined>(undefined);
   const changes = useMemo(() => new Topic<void>({ name: 'WorkbenchRecordHost.changes' }), []);
   const restoringRef = useRef(false);
@@ -149,6 +155,7 @@ export function WorkbenchRecordHost(): React.JSX.Element {
         root,
         editDebounce: 500,
         files: parameterFiles,
+        onHealth: setHealth,
         onChange: (state, source, locallyAuthored) => {
           const epoch = ++applicationRef.current.epoch;
           applicationRef.current.viewer = false;
@@ -157,8 +164,7 @@ export function WorkbenchRecordHost(): React.JSX.Element {
           if (state.refusal) {
             appliedViewerRef.current = undefined;
             appliedWorkbenchRef.current = undefined;
-            setRefusal(state.refusal);
-            announce(state.refusal.message);
+            setRefusal({ ...state.refusal, bytes: state.bytes });
             snapshotRef.current = undefined;
             changes.emit();
             return;
@@ -262,14 +268,14 @@ export function WorkbenchRecordHost(): React.JSX.Element {
           acknowledge(epoch);
           announce('Workbench arrangement updated.');
         },
-        onError: (error) => {
+        onError: () => {
+          // The record's health carries the failure to the settings trigger.
           appliedViewerRef.current = undefined;
           appliedWorkbenchRef.current = undefined;
           applicationRef.current.epoch++;
           applicationRef.current.viewer = false;
           applicationRef.current.workbench = false;
           setAppliedWorkbenchRevision(workbenchPaths.layout, undefined);
-          announce(error instanceof Error ? error.message : 'Workbench record could not be read.');
         },
       }),
     [
@@ -284,6 +290,24 @@ export function WorkbenchRecordHost(): React.JSX.Element {
       setAppliedWorkbenchRevision,
     ],
   );
+  const issueState = recordIssueState(refusal, health);
+  const issue = useMemo((): RecordIssue | undefined => {
+    if (!issueState) {
+      return undefined;
+    }
+    return {
+      kind: 'layout',
+      path: workbenchPaths.layout,
+      state: issueState,
+      message: refusal?.message ?? health?.error,
+      bytes: refusal?.bytes ?? null,
+      writing: health?.writing ?? false,
+      retryRead: async () => store.retryRead(),
+      retrySave: async () => store.flush(),
+      reset: async (reviewed) => store.reset(appliedRef.current ?? fallbackLayout(), reviewed),
+    };
+  }, [health?.error, health?.writing, issueState, refusal, store]);
+  usePublishRecordIssue(projectId, workbenchPaths.layout, issue);
   const firstReadRef = useRef<{ store: typeof store; promise: Promise<boolean> } | undefined>(undefined);
   const firstRead = useCallback(async (): Promise<boolean> => {
     const existing = firstReadRef.current;
@@ -342,14 +366,7 @@ export function WorkbenchRecordHost(): React.JSX.Element {
     };
   }, [store]);
   useEffect(() => registerWorkbenchRecordProducer(async () => store.flush()), [registerWorkbenchRecordProducer, store]);
-  useFlushOnClose(
-    async () => {
-      if (!(await store.flush())) {
-        throw new Error('Workbench arrangement could not be saved.');
-      }
-    },
-    { stage: 'producer' },
-  );
+  useFlushOnClose(async () => confirmFlush(store.flush, 'Pane layout is not confirmed saved.'), { stage: 'producer' });
   useEffect(() => {
     const current = store.intendedLayout();
     if (
@@ -553,25 +570,8 @@ export function WorkbenchRecordHost(): React.JSX.Element {
 
   useLayoutEffect(() => registerLayoutController(controller), [controller, registerLayoutController]);
   return (
-    <>
-      <div role='status' aria-live='polite' className='sr-only'>
-        <span key={statusVersion}>{status}</span>
-      </div>
-      {refusal ? (
-        <div role='alert'>
-          {refusal.message}
-          {refusal.code === 'INVALID_RECORD' ? (
-            <button
-              type='button'
-              onClick={() => {
-                void store.reset(appliedRef.current ?? fallbackLayout());
-              }}
-            >
-              Reset
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-    </>
+    <div role='status' aria-live='polite' className='sr-only'>
+      <span key={statusVersion}>{status}</span>
+    </div>
   );
 }

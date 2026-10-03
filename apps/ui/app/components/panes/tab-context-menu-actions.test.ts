@@ -42,6 +42,8 @@ describe('copyPathToClipboard', () => {
 
     await expect(copyPathToClipboard('src/main.ts')).resolves.toBeUndefined();
 
-    expect(mocks.error).toHaveBeenCalledWith('Failed to copy path', { description: expect.stringContaining(message) });
+    expect(mocks.error).toHaveBeenCalledWith('Failed to copy path', {
+      description: expect.stringContaining(message) as string,
+    });
   });
 });

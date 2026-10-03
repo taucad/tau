@@ -12,8 +12,10 @@ import {
   emittedSpecifiers,
   hostTargetIssues,
   internalImportsIssues,
+  knownDeclarationDefects,
   libDependencyIssues,
   packageMetadataIssues,
+  partitionConsumerDiagnostics,
   peerRules,
   peerDependencyIssues,
   pluginRuntimePeerDependencyIssues,
@@ -764,5 +766,23 @@ describe('hostTargetIssues', () => {
         hasPayloadGuardTest: false,
       }),
     ).toEqual([]);
+  });
+});
+
+describe('partitionConsumerDiagnostics', () => {
+  it('explains only the known SDK undici fallbacks and keeps every other diagnostic', () => {
+    const sdk = 'node_modules/@anthropic-ai/sdk/internal/types.d.mts';
+    const output = [
+      `${sdk}(48,181): error TS2307: Cannot find module '../../../node_modules/undici-types/index.d.ts' or its corresponding type declarations.`,
+      `${sdk}(49,170): error TS2307: Cannot find module '../../../../node_modules/undici/index.d.ts' or its corresponding type declarations.`,
+      `node_modules/@taucad/agent-host/dist/index.d.mts(3,1): error TS2322: Type 'string' is not assignable to type 'number'.`,
+      '  The expected type comes from property "count".',
+      `${sdk}(52,10): error TS2307: Cannot find module 'missing-thing' or its corresponding type declarations.`,
+    ].join('\n');
+
+    expect(partitionConsumerDiagnostics(output, knownDeclarationDefects)).toEqual({
+      explained: output.split('\n').slice(0, 2),
+      remaining: output.split('\n').slice(2),
+    });
   });
 });

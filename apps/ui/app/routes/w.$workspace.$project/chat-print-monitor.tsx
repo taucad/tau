@@ -1,9 +1,8 @@
-import { Fragment, useEffect, useRef, useState } from 'react';
+import { Fragment, useState } from 'react';
 import {
-  Camera,
-  Fan,
+  Activity,
+  History,
   Info,
-  Lightbulb,
   LoaderCircle,
   OctagonAlert,
   Pause,
@@ -11,7 +10,6 @@ import {
   ShieldAlert,
   Square,
   TriangleAlert,
-  Wifi,
 } from 'lucide-react';
 import type {
   MachineAlertSnapshot,
@@ -26,24 +24,18 @@ import type {
 } from '@taucad/runtime/machine';
 import { Button } from '@taucad/ui/components/button';
 import { cn } from '@taucad/ui/utils/cn';
-import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { randomUuid } from '@taucad/utils/id';
-import { isRecord } from '@taucad/utils/schema';
 import { ExternalLink } from '#components/external-link.js';
+import type { ApplyMachineAction } from '#routes/w.$workspace.$project/chat-print-controls.js';
+import { MaterialSlots, materialInUse } from '#routes/w.$workspace.$project/chat-print-materials.js';
 import {
-  PrintDisclosure,
   PrintNotice,
   PrintRow,
-  PrintSection,
+  PrintStage,
   StaleBadge,
   useNow,
 } from '#routes/w.$workspace.$project/chat-print-section.js';
-import {
-  formatAge,
-  formatQuantity,
-  formatRemaining,
-  materialSlotLabel,
-} from '#routes/w.$workspace.$project/chat-print-summary.js';
+import { formatQuantity, formatRemaining, readableStage } from '#routes/w.$workspace.$project/chat-print-summary.js';
 import { formatRelativeTime } from '#utils/date.utils.js';
 import { startedRunIdOf } from '#hooks/use-machines-print-requests.js';
 
@@ -71,10 +63,6 @@ export const isObservationStale = ({
   const budget = manifest?.observations.find((candidate) => candidate.group === group)?.staleAfter;
   return budget !== undefined && now - Date.parse(entry.snapshot.observedAt) > budget;
 };
-
-/** A stage phrase to show; a bare number, as a snapshot saved before stages were phrases may hold, is not one. */
-const readableStage = (stage: string | undefined): string | undefined =>
-  stage === undefined || /^\d+$/u.test(stage) ? undefined : stage;
 
 /**
  * The run line a person reads first: "Printing layer 42 of 125 · 9 min left".
@@ -131,191 +119,6 @@ function GroupHeading({ label, isStale }: { readonly label: string; readonly isS
   );
 }
 
-const temperature = (
-  current: Parameters<typeof formatQuantity>[0] | undefined,
-  target: Parameters<typeof formatQuantity>[0] | undefined,
-): string =>
-  current === undefined
-    ? 'Not reported'
-    : target === undefined
-      ? formatQuantity(current)
-      : `${formatQuantity(current)} → ${formatQuantity(target)}`;
-
-const rebind = 'bind it again in Settings under Printers with the access code shown on its screen';
-
-/**
- * What a person reads when a still capture fails, by the fixed code it rejects with: the camera
- * leg (`@taucad/host`), its pinned connection and saved access code, and the host's own checks.
- */
-const stillFailures: ReadonlyMap<string, string> = new Map([
-  [
-    'MACHINE_STILL_FFMPEG_MISSING',
-    'Tau could not find ffmpeg, which capturing a still needs; install it (with Homebrew on macOS: brew install ffmpeg; on Windows: winget install ffmpeg), then capture again.',
-  ],
-  [
-    'MACHINE_STILL_FFMPEG_FAILED',
-    'Tau could not start ffmpeg; reinstall it (with Homebrew on macOS: brew reinstall ffmpeg), then capture again.',
-  ],
-  ['MACHINE_STILL_AUTH_REJECTED', `The camera refused the printer's saved access code; ${rebind}.`],
-  ['MACHINE_SECRET_UNKNOWN', `Tau no longer has this printer's access code; ${rebind}.`],
-  [
-    'MACHINE_TLS_PIN_MISMATCH',
-    'The camera presented a different certificate from the one saved when the printer was bound, so Tau did not connect; if the printer was reset or replaced, bind it again in Settings under Printers.',
-  ],
-  [
-    'MACHINE_CONNECT_FAILED',
-    'Tau could not connect to the camera; check that the printer is on and on this network, then capture again.',
-  ],
-  [
-    'MACHINE_CONNECT_TIMEOUT',
-    'The camera did not answer in time; check that the printer is on and on this network, then capture again.',
-  ],
-  [
-    'MACHINE_STILL_TIMEOUT',
-    'The camera sent no picture in time; check that the printer is on and connected, then capture again.',
-  ],
-  [
-    'MACHINE_STILL_STREAM_FAILED',
-    "The camera's video stream broke off before a picture arrived; capture again in a moment.",
-  ],
-  [
-    'MACHINE_STILL_CAPTURE_FAILED',
-    "The camera's stream ended without a picture, which can happen while the camera wakes up; capture again in a moment.",
-  ],
-  ['MACHINE_STILL_TOO_LARGE', 'The camera sent a picture larger than Tau accepts, so it was discarded; capture again.'],
-  ['MACHINE_STILL_INVALID', 'The camera sent a picture Tau could not accept; capture again.'],
-  [
-    'MACHINE_STILL_PROXY_FAILED',
-    'Tau could not open its local connection to the camera on this computer; capture again, and restart Tau if it keeps failing.',
-  ],
-  [
-    'MACHINE_STILL_REQUEST_INVALID',
-    "Tau built an invalid request for this printer's camera, so nothing was sent; report this as a bug.",
-  ],
-  ['MACHINE_STILL_UNAVAILABLE', 'Tau is not connected to this printer right now; capture again once it reconnects.'],
-  ['MACHINE_STILL_RATE_LIMITED', 'Stills are limited to one every 5 seconds; wait a moment, then capture again.'],
-]);
-
-const unknownStillFailure = 'The camera could not capture a still; capture again in a moment.';
-
-/**
- * A failed still capture in the person's words. The machine channel carries the code as the
- * message and a desktop shell may wrap it in its own words, so the code is looked for anywhere in
- * the message, after the error's own `code`. A failure that names no known code keeps a generic
- * sentence plus the code, or the message when it names none.
- *
- * @param error - What `captureStill` rejected with.
- * @returns One sentence saying what happened and what to do.
- * @public
- */
-export const describeStillFailure = (error: unknown): string => {
-  const message = error instanceof Error ? error.message : String(error);
-  const codes = [
-    ...(isRecord(error) && typeof error['code'] === 'string' ? [error['code']] : []),
-    ...(message.match(/\b[A-Z][\dA-Z]*(?:_[\dA-Z]+)+\b/gu) ?? []),
-  ];
-  const sentence = codes.map((code) => stillFailures.get(code)).find((candidate) => candidate !== undefined);
-  if (sentence !== undefined) {
-    return sentence;
-  }
-  const detail = codes[0] ?? message.trim();
-  return detail === '' ? unknownStillFailure : `${unknownStillFailure} (${detail})`;
-};
-
-function StillCapture({
-  client,
-  entry,
-}: {
-  readonly client: MachineClient;
-  readonly entry: MachineDirectoryEntry;
-}): React.JSX.Element {
-  const [isBusy, setIsBusy] = useState(false);
-  const [error, setError] = useState<string>();
-  const [still, setStill] = useState<Readonly<{ url: string; capturedAt: string; expiresAt: string }>>();
-  const captureAbort = useRef<AbortController | undefined>(undefined);
-  const now = useNow();
-  const isSupported = entry.descriptor.operations.includes('still');
-
-  useEffect(
-    () => () => {
-      captureAbort.current?.abort();
-    },
-    [],
-  );
-  useEffect(() => {
-    if (!still) {
-      return;
-    }
-    const remaining = Date.parse(still.expiresAt) - Date.now();
-    const stillExpiry = globalThis.setTimeout(
-      () => {
-        setStill((current) => (current?.url === still.url ? undefined : current));
-      },
-      Math.max(0, remaining),
-    );
-    return () => {
-      globalThis.clearTimeout(stillExpiry);
-      URL.revokeObjectURL(still.url);
-    };
-  }, [still]);
-
-  const capture = async (): Promise<void> => {
-    const abort = new AbortController();
-    captureAbort.current = abort;
-    setIsBusy(true);
-    setError(undefined);
-    try {
-      const result = await client.captureStill({ machineId: entry.machineId, signal: abort.signal });
-      abort.signal.throwIfAborted();
-      setStill({
-        url: URL.createObjectURL(new Blob([result.bytes], { type: result.mediaType })),
-        capturedAt: result.capturedAt,
-        expiresAt: result.expiresAt,
-      });
-    } catch (error) {
-      if (!abort.signal.aborted) {
-        setError(describeStillFailure(error));
-      }
-    } finally {
-      if (captureAbort.current === abort) {
-        captureAbort.current = undefined;
-        setIsBusy(false);
-      }
-    }
-  };
-
-  return (
-    <div className='flex min-w-0 flex-col gap-1.5'>
-      <div className='flex min-w-0 items-center gap-2'>
-        <h4 className='min-w-0 flex-1 truncate text-xs font-medium'>Camera</h4>
-        {isSupported ? (
-          <Button type='button' size='xs' variant='outline' disabled={isBusy} onClick={capture}>
-            {isBusy ? (
-              <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-            ) : (
-              <Camera aria-hidden />
-            )}
-            Capture still
-          </Button>
-        ) : null}
-      </div>
-      {still ? (
-        <figure className='overflow-hidden rounded-lg border border-border/70 bg-muted/30'>
-          <img src={still.url} alt={`Latest still from ${entry.name}`} className='aspect-video w-full object-contain' />
-          <figcaption className='px-2 py-1 text-xs text-muted-foreground'>
-            Captured <time dateTime={still.capturedAt}>{formatAge(still.capturedAt, now)}</time>
-          </figcaption>
-        </figure>
-      ) : (
-        <p className='text-xs text-muted-foreground'>
-          {isSupported ? 'No still captured.' : 'Still capture is unavailable for this machine.'}
-        </p>
-      )}
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
-    </div>
-  );
-}
-
 /** A member of the archive the printer runs, such as `/data/Metadata/plate_1.gcode`: an internal path, not a name. */
 const archiveMemberPath = /(?:^|\/)Metadata\/plate_\d+\.gcode$/u;
 
@@ -364,7 +167,7 @@ export const runFileName = (entry: MachineDirectoryEntry, requests: readonly Pri
 };
 
 /**
- * What the run block above does not already say: a stage other than the run's own state, and the speed.
+ * What the run block above does not already say during a run: a stage other than the run's own state.
  *
  * @param properties - The machine and whether its run observation is stale.
  * @returns The group, or nothing when it has nothing to add.
@@ -377,27 +180,33 @@ function RunGroup({
   readonly isStale: boolean;
 }): React.JSX.Element | undefined {
   const { run } = entry.snapshot;
-  const speed = run
-    ? [run.speedProfile, run.speedPercent === undefined ? undefined : `${String(run.speedPercent)} %`]
-        .filter((part) => part !== undefined)
-        .join(' · ')
-    : '';
-  const stage = readableStage(run?.stage);
-  const extraStage = stage === undefined || stage.toLowerCase() === run?.state ? undefined : stage;
-  if (extraStage === undefined && speed === '' && !isStale) {
+  /* Without a run the stage belongs to whatever else the printer does, such as a filament change its slot shows. */
+  if (run === undefined || run.state === 'idle' || run.state === 'succeeded') {
+    return undefined;
+  }
+  const stage = readableStage(run.stage);
+  const extraStage = stage === undefined || stage.toLowerCase() === run.state ? undefined : stage;
+  if (extraStage === undefined && !isStale) {
     return undefined;
   }
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <GroupHeading label='Run' isStale={isStale} />
-      <dl className='flex flex-col gap-0.5'>
-        {extraStage === undefined ? null : <PrintRow label='Stage'>{extraStage}</PrintRow>}
-        {speed === '' ? null : <PrintRow label='Speed'>{speed}</PrintRow>}
-      </dl>
+      {extraStage === undefined ? null : (
+        <dl className='flex flex-col gap-0.5'>
+          <PrintRow label='Stage'>{extraStage}</PrintRow>
+        </dl>
+      )}
     </div>
   );
 }
 
+/**
+ * The heaters as three columns a person reads at a glance: where each one is, and where it is heading.
+ *
+ * @param properties - The machine, its manifest and whether the thermal observation is stale.
+ * @returns The group.
+ */
 function TemperatureGroup({
   entry,
   manifest,
@@ -408,118 +217,29 @@ function TemperatureGroup({
   readonly isStale: boolean;
 }): React.JSX.Element {
   const { temperatures } = entry.snapshot;
+  const heaters = [
+    { label: 'Nozzle', current: temperatures?.nozzle, target: temperatures?.nozzleTarget },
+    { label: 'Bed', current: temperatures?.bed, target: temperatures?.bedTarget },
+    ...(manifest?.chamber.enclosed === false && temperatures?.chamber === undefined
+      ? []
+      : [{ label: 'Chamber', current: temperatures?.chamber, target: undefined }]),
+  ];
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <GroupHeading label='Temperatures' isStale={isStale} />
-      <dl className='flex flex-col gap-0.5'>
-        <PrintRow label='Nozzle'>{temperature(temperatures?.nozzle, temperatures?.nozzleTarget)}</PrintRow>
-        <PrintRow label='Bed'>{temperature(temperatures?.bed, temperatures?.bedTarget)}</PrintRow>
-        {manifest?.chamber.enclosed === false && temperatures?.chamber === undefined ? null : (
-          <PrintRow label='Chamber'>{temperature(temperatures?.chamber, undefined)}</PrintRow>
-        )}
-      </dl>
-    </div>
-  );
-}
-
-function EnvironmentGroup({
-  entry,
-  manifest,
-  isStale,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly isStale: boolean;
-}): React.JSX.Element {
-  const { fans, lights, network, removableStorage } = entry.snapshot;
-  return (
-    <div className='flex min-w-0 flex-col gap-1.5'>
-      <GroupHeading label='Fans and environment' isStale={isStale} />
-      <ul className='flex flex-wrap gap-x-4 gap-y-1 text-xs'>
-        {(manifest?.chamber.fans ?? [{ id: 'part', label: 'Part fan' }]).map((fan) => (
-          <li key={fan.id} className='flex items-center gap-1.5 tabular-nums'>
-            <Fan aria-hidden className='size-3.5 text-muted-foreground' />
-            {fan.label} {fans?.[fan.id] === undefined ? 'not reported' : `${String(fans[fan.id])} %`}
-          </li>
+      <dl className='grid grid-cols-3 gap-x-3 gap-y-1'>
+        {heaters.map(({ label, current, target }) => (
+          <div key={label} className='flex min-w-0 flex-col'>
+            <dt className='truncate text-xs text-muted-foreground'>{label}</dt>
+            <dd className='truncate text-sm font-medium tabular-nums'>
+              {current === undefined ? '–' : formatQuantity(current)}
+            </dd>
+            {target === undefined ? null : (
+              <dd className='truncate text-xs text-muted-foreground tabular-nums'>to {formatQuantity(target)}</dd>
+            )}
+          </div>
         ))}
-        <li className='flex items-center gap-1.5'>
-          <Lightbulb
-            aria-hidden
-            className={cn('size-3.5', lights?.chamber === 'on' ? 'text-warning' : 'text-muted-foreground')}
-          />
-          Light {lights?.chamber ?? 'not reported'}
-        </li>
-        <li className='flex items-center gap-1.5 tabular-nums'>
-          <Wifi aria-hidden className='size-3.5 text-muted-foreground' />
-          Wi-Fi {network?.wifiSignalDbm === undefined ? 'not reported' : `${String(network.wifiSignalDbm)} dBm`}
-        </li>
-        {removableStorage === undefined ? null : <li>Storage {removableStorage}</li>}
-      </ul>
-    </div>
-  );
-}
-
-function MaterialGroup({
-  entry,
-  manifest,
-  isStale,
-}: {
-  readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
-  readonly isStale: boolean;
-}): React.JSX.Element {
-  const { materialSystem, setup } = entry.snapshot;
-  return (
-    <div className='flex min-w-0 flex-col gap-1.5'>
-      <GroupHeading label='Material' isStale={isStale} />
-      {setup.materials.length === 0 ? (
-        <p className='text-xs text-muted-foreground'>No material slots observed.</p>
-      ) : (
-        <ul aria-label='Material slots' className='flex flex-wrap gap-1.5 text-xs'>
-          {setup.materials.map((material) => {
-            const isCurrent = materialSystem?.currentSlot === material.slot;
-            return (
-              <li
-                key={material.slot}
-                className={cn(
-                  'flex items-center gap-1.5 rounded-md border border-border/70 px-1.5 py-0.5',
-                  isCurrent && 'border-border bg-accent',
-                )}
-              >
-                <span className='font-mono'>{materialSlotLabel(material.slot, manifest)}</span>
-                {material.color === undefined ? null : (
-                  <MaterialSwatch materials={[{ color: material.color, roughness: 0.35, metalness: 0 }]} />
-                )}
-                <span className={cn(material.state !== 'loaded' && 'text-muted-foreground')}>
-                  {material.state === 'loaded'
-                    ? (material.materialId ?? 'Loaded')
-                    : material.state === 'empty'
-                      ? 'Empty'
-                      : 'Unknown'}
-                </span>
-                {material.remainingPercent === undefined ? null : (
-                  <span className='text-muted-foreground tabular-nums'>{material.remainingPercent} %</span>
-                )}
-                {isCurrent ? <span className='sr-only'>, in use</span> : null}
-              </li>
-            );
-          })}
-        </ul>
-      )}
-      {materialSystem && materialSystem.units.length > 0 ? (
-        <dl className='flex flex-col gap-0.5'>
-          {materialSystem.units.map((unit) => (
-            <PrintRow key={unit.unit} label={`Unit ${String.fromCodePoint(65 + unit.unit)}`}>
-              {[
-                unit.humidityIndex === undefined ? undefined : `humidity ${String(unit.humidityIndex)}`,
-                unit.temperature === undefined ? undefined : formatQuantity(unit.temperature),
-              ]
-                .filter((part) => part !== undefined)
-                .join(' · ') || 'not reported'}
-            </PrintRow>
-          ))}
-        </dl>
-      ) : null}
+      </dl>
     </div>
   );
 }
@@ -602,63 +322,62 @@ function AlertNotice({ alerts }: { readonly alerts: readonly MachineAlertSnapsho
 }
 
 /**
- * Monitor: during a run, its speed, temperatures, material slots and the camera, each group
- * wearing a stale badge past its manifest budget. An idle printer is one fold whose summary is
- * its status line; alerts stay outside any fold.
+ * The printer's alerts, outside every stage: a decision is never folded away.
  *
- * @param properties - The client, machine and manifest.
- * @returns The section.
+ * @param properties - The machine as observed.
+ * @returns The notice, or nothing without alerts.
  * @public
  */
-export function MonitorSection({
-  client,
+export function PrinterAlerts({ entry }: { readonly entry: MachineDirectoryEntry }): React.JSX.Element | undefined {
+  const { alerts } = entry.snapshot;
+  return alerts && alerts.length > 0 ? <AlertNotice alerts={alerts} /> : undefined;
+}
+
+/**
+ * The closed Monitor's summary: the slot in use and the heaters, "A1 PETG · nozzle 255 °C · bed 80 °C".
+ *
+ * @param entry - The machine as observed.
+ * @param manifest - Its manifest, for slot names.
+ * @returns The summary.
+ * @public
+ */
+export const monitorSummary = (entry: MachineDirectoryEntry, manifest: MachineManifest | undefined): string => {
+  const { temperatures } = entry.snapshot;
+  return [
+    materialInUse(entry, manifest),
+    temperatures?.nozzle === undefined ? undefined : `nozzle ${formatQuantity(temperatures.nozzle)}`,
+    temperatures?.bed === undefined ? undefined : `bed ${formatQuantity(temperatures.bed)}`,
+  ]
+    .filter((part) => part !== undefined)
+    .join(' · ');
+};
+
+/**
+ * Monitor, the first stage and open by default: the run's stage, the temperatures and the material
+ * slots, each group wearing a stale badge past its manifest budget. A slot opens in place for its
+ * filament actions.
+ *
+ * @param properties - The machine, its manifest and the action seam.
+ * @returns The stage.
+ * @public
+ */
+export function MonitorStage({
   entry,
   manifest,
+  apply,
 }: {
-  readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
+  readonly apply: ApplyMachineAction | undefined;
 }): React.JSX.Element {
   const now = useNow();
-  const { alerts } = entry.snapshot;
   const stale = (group: string): boolean => isObservationStale({ entry, manifest, group, now });
-  const state = entry.snapshot.run?.state;
-  const active = state !== undefined && state !== 'idle' && state !== 'succeeded';
-  const details = (
-    <>
-      <MaterialGroup entry={entry} manifest={manifest} isStale={stale('material')} />
-      <PrintDisclosure title='Environment and camera' summary='Fans, light, network and stills' isDefaultOpen={active}>
-        <EnvironmentGroup
-          entry={entry}
-          manifest={manifest}
-          isStale={stale('fans') || stale('light') || stale('network')}
-        />
-        {manifest?.camera.stills === false ? null : <StillCapture client={client} entry={entry} />}
-      </PrintDisclosure>
-    </>
-  );
-
   return (
-    <>
-      {alerts && alerts.length > 0 ? <AlertNotice alerts={alerts} /> : null}
-      {active ? (
-        <PrintSection title='Monitor'>
-          <RunGroup entry={entry} isStale={stale('run')} />
-          <TemperatureGroup entry={entry} manifest={manifest} isStale={stale('thermal')} />
-          {details}
-        </PrintSection>
-      ) : (
-        <PrintDisclosure
-          title='Printer'
-          summary={`${state === 'succeeded' ? 'Last run finished' : 'Idle'} · nozzle ${temperature(
-            entry.snapshot.temperatures?.nozzle,
-            undefined,
-          )} · bed ${temperature(entry.snapshot.temperatures?.bed, undefined)}`}
-        >
-          {details}
-        </PrintDisclosure>
-      )}
-    </>
+    <PrintStage icon={Activity} title='Monitor' summary={monitorSummary(entry, manifest)} isDefaultOpen>
+      <RunGroup entry={entry} isStale={stale('run')} />
+      <TemperatureGroup entry={entry} manifest={manifest} isStale={stale('thermal')} />
+      <MaterialSlots entry={entry} manifest={manifest} apply={apply} isStale={stale('material')} />
+    </PrintStage>
   );
 }
 
@@ -675,7 +394,7 @@ const commandVerb: Record<MachineControlRunInput['command'], string> = {
   cancel: 'Cancel',
   'urgent-stop': 'Urgently stop',
 };
-/** Manifest actions the pane implements through the run controls, Send and the camera; Inspect lists the rest. */
+/** Manifest actions the pane offers through Send, the run controls, the Control center and the slots; Inspect lists the rest. */
 const implementedActions = new Set([
   'print.start',
   'run.pause',
@@ -683,6 +402,11 @@ const implementedActions = new Set([
   'run.cancel',
   'run.urgent-stop',
   'camera.still',
+  'light.set',
+  'speed.set',
+  'material.load',
+  'material.unload',
+  'material.continue',
 ]);
 
 /**
@@ -914,10 +638,10 @@ export const startedRunLabel = (
  * History: the print requests and the operation receipts, newest first; nothing while empty.
  *
  * @param properties - The requests, the session ledger and the observed machine.
- * @returns The disclosure, or nothing without an entry.
+ * @returns The stage, or nothing without an entry.
  * @public
  */
-export function HistorySection({
+export function HistoryStage({
   requests,
   ledger,
   entry,
@@ -932,7 +656,7 @@ export function HistorySection({
     return undefined;
   }
   return (
-    <PrintDisclosure title='History' summary={count === 1 ? '1 entry' : `${String(count)} entries`}>
+    <PrintStage icon={History} title='History' summary={count === 1 ? '1 entry' : `${String(count)} entries`}>
       {requests.length > 0 ? (
         <ul aria-label='Print requests' className='flex flex-col gap-1 text-xs'>
           {requests.map((request) => (
@@ -970,7 +694,7 @@ export function HistorySection({
           })}
         </ul>
       ) : null}
-    </PrintDisclosure>
+    </PrintStage>
   );
 }
 
@@ -979,10 +703,10 @@ export function HistorySection({
  * request's artifact, actions not yet available, coverage and provider ids. Engineering detail on request.
  *
  * @param properties - The machine, its provider and manifest, the slicer and the open request.
- * @returns The disclosure.
+ * @returns The stage.
  * @public
  */
-export function InspectSection({
+export function InspectStage({
   entry,
   provider,
   manifest,
@@ -1002,7 +726,7 @@ export function InspectSection({
   const otherActions = (manifest?.actions ?? []).filter((action) => !implementedActions.has(action.id));
   const unavailable = Object.entries(Object.groupBy(otherActions, (action) => action.qualification));
   return (
-    <PrintDisclosure title='Inspect'>
+    <PrintStage icon={Info} title='Inspect' summary={`${descriptor.model} · firmware ${descriptor.firmware}`}>
       <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs'>
         <dt className='text-muted-foreground'>Machine</dt>
         <dd>
@@ -1092,6 +816,6 @@ export function InspectSection({
           </>
         ) : null}
       </dl>
-    </PrintDisclosure>
+    </PrintStage>
   );
 }

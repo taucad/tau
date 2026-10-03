@@ -50,7 +50,7 @@ import { provideAcpSession } from '#acp/acp-session-logic.js';
 import { acpSessionsMachine } from '#acp/acp-sessions.machine.js';
 import type { AcpAcquire } from '#acp/acp-sessions.machine.js';
 import { createAcpMediaStore } from '#acp/media.js';
-import type { AcpLentSeams } from '#acp/acp-session.js';
+import type { AcpLentSeams } from '#acp/acp-session-logic.js';
 import type { AcpLimitReset } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';

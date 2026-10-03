@@ -122,10 +122,10 @@ describe('WorkbenchToggle', () => {
     const menu = hover(trigger);
     expect(screen.getByRole('button', { name: 'Editor' })).toHaveFocus();
     const rows = within(menu).getAllByRole('option');
-    // The pane chevron's menu: title over path, the active tab checked.
-    expect(rows[0]).toHaveTextContent('main.txtsrc/main.txt');
+    // The pane chevron's menu: title only, the active tab checked.
+    expect(rows[0]).toHaveTextContent(/^main.txt$/);
     expect(within(rows[0]!).getByLabelText('Active tab')).toBeInTheDocument();
-    expect(rows[1]).toHaveTextContent('main.txtdocs/main.txt');
+    expect(rows[1]).toHaveTextContent(/^main.txt$/);
     fireEvent.click(rows[1]!);
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(true);
     expect(second.api.setActive).toHaveBeenCalledOnce();
@@ -141,7 +141,7 @@ describe('WorkbenchToggle', () => {
     });
     const menu = hover(screen.getByRole('button', { name: 'Toggle Workbench lane' }));
     expect(within(menu).getByLabelText('Parameters icon')).toBeInTheDocument();
-    expect(within(menu).getAllByRole('option')[1]).toHaveTextContent('main.pymodels/a/main.py');
+    expect(within(menu).getAllByRole('option')[1]).toHaveTextContent(/^main.py$/);
   });
 
   it('should toggle the lane on click and close a hover-opened list until the pointer returns', () => {

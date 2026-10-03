@@ -98,6 +98,8 @@ import {
   testModelOutputSchema,
   arrangeWorkbenchInputSchema,
   arrangeWorkbenchOutputSchema,
+  askQuestionsInputSchema,
+  askQuestionsOutputSchema,
 } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { rpcClientErrorCodeSchema } from '@taucad/chat/schemas/rpc';
@@ -579,6 +581,8 @@ const tauMcpSchemas = {
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },
   [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotMcpOutputSchema },
   [toolName.exportModel]: { input: exportModelInputSchema, output: exportModelOutputSchema },
+  /* The endpoint supplies the chat, so an external call carries none. */
+  [toolName.askQuestions]: { input: askQuestionsInputSchema.omit({ chatId: true }), output: askQuestionsOutputSchema },
 } as const;
 
 /** Tau MCP errors emitted outside the shared business RPC schema. */

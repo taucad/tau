@@ -16,7 +16,11 @@ allowBuilds:
   '@datadog/pprof': false
   '@parcel/watcher': true
   '@swc/core': true
-  canvas: true
+  # canvas is a root devDependency that jsdom loads only when it works. pnpm does not
+  # put its prebuild-install on the install script's PATH here, so building it means a
+  # node-gyp compile against cairo/pango/pixman on every machine. jsdom treats an
+  # unbuilt canvas as absent, which is what the suites expect.
+  canvas: false
   core-js: true
   electron: true
   esbuild: true
@@ -46,8 +50,6 @@ catalog:
   '@aws-sdk/lib-storage': ^3.1073.0
   '@aws-sdk/s3-request-presigner': ^3.1073.0
   '@base-ui/react': ^1.6.0
-  '@better-auth-ui/core': ^1.6.8
-  '@better-auth-ui/react': ^1.6.8
   '@better-auth/api-key': ^1.6.19
   '@eslint-community/eslint-plugin-eslint-comments': ^4.7.2
   '@fastify/cookie': ^11.0.2
@@ -60,16 +62,11 @@ catalog:
   '@kittycad/lib': ^2.0.48
   '@langchain/anthropic': ^1.5.0
   '@langchain/cerebras': ^1.0.4
-  '@langchain/classic': ^1.0.36
-  '@langchain/community': ^1.1.29
   '@langchain/core': ^1.2.0
   '@langchain/google-vertexai': ^2.2.0
   '@langchain/langgraph': ^1.4.4
-  '@langchain/langgraph-checkpoint': ^1.1.2
-  '@langchain/langgraph-checkpoint-postgres': ^1.0.3
   '@langchain/ollama': ^1.3.0
   '@langchain/openai': ^1.5.1
-  '@langchain/tavily': ^1.2.0
   '@langchain/xai': ^1.4.3
   '@modelcontextprotocol/sdk': ^1.29.0
   '@msgpack/msgpack': ^3.1.3
@@ -77,7 +74,6 @@ catalog:
   '@nestjs/common': ^11.1.27
   '@nestjs/core': ^11.1.27
   '@nestjs/platform-fastify': ^11.1.27
-  '@nestjs/platform-ws': ^11.1.27
   '@nestjs/terminus': ^11.1.1
   '@nestjs/testing': ^11.1.27
   '@nx/devkit': 22.7.1
@@ -95,10 +91,8 @@ catalog:
   '@opentelemetry/exporter-logs-otlp-http': ^0.213.0
   '@opentelemetry/exporter-prometheus': ^0.213.0
   '@opentelemetry/exporter-trace-otlp-http': ^0.213.0
-  '@opentelemetry/instrumentation-pino': ^0.59.0
   '@opentelemetry/resources': ^2.8.0
   '@opentelemetry/sdk-logs': ^0.213.0
-  '@opentelemetry/sdk-metrics': ^2.8.0
   '@opentelemetry/sdk-node': ^0.213.0
   '@oxc-node/core': ^0.0.35
   buffer: 6.0.3
@@ -154,14 +148,12 @@ catalog:
   spicets: 0.0.5
   spicey: 0.0.14
   '@taucad/kcl-wasm-lib': 0.1.184
-  '@testing-library/dom': ^10.4.1
   '@testing-library/jest-dom': 6.6.3
   '@testing-library/react': 16.2.0
   '@tiptap/core': ^3.27.1
   '@tiptap/extension-document': ^3.27.1
   '@tiptap/extension-hard-break': ^3.27.1
   '@tiptap/extension-history': ^3.27.1
-  '@tiptap/extension-mention': ^3.27.1
   '@tiptap/extension-paragraph': ^3.27.1
   '@tiptap/extension-placeholder': ^3.27.1
   '@tiptap/extension-text': ^3.27.1
@@ -170,7 +162,6 @@ catalog:
   '@tiptap/suggestion': ^3.27.1
   '@traceloop/instrumentation-langchain': ^0.22.6
   '@types/express': ^5.0.0
-  '@types/ioredis-mock': ^8.2.7
   '@types/js-yaml': ^4.0.9
   '@types/json-schema': ^7.0.15
   '@types/madge': ^5.0.3
@@ -179,7 +170,6 @@ catalog:
   '@types/react-dom': 19.0.4
   '@types/semver': ^7.5.8
   '@types/three': ^0.184.1
-  '@types/turndown': ^5.0.6
   '@typescript/native-preview': 7.0.0-dev.20260223.1
   '@vitejs/plugin-react': 6.1.1
   '@vitest/coverage-v8': 4.1.11
@@ -200,14 +190,12 @@ catalog:
   consola: ^3.4.2
   culori: ^4.0.2
   date-fns: ^4.4.0
-  deepagents: ^1.10.5
   deepmerge: ^4.3.1
   dotenv: ^17.4.2
   es-module-lexer: ^2.1.0
   esbuild: 0.28.2
   esbuild-wasm: 0.28.2
   eslint: 9.32.0
-  eslint-config-next: ^16.2.6
   eslint-plugin-import-x: ^4.16.2
   eslint-plugin-jsdoc: ^62.9.0
   eslint-plugin-max-params-no-constructor: ^0.0.4
@@ -224,17 +212,13 @@ catalog:
   hast-util-sanitize: ^5.0.2
   husky: ^9.1.7
   ink: ^6.8.0
-  ioredis-mock: ^8.13.1
   ipaddr.js: 2.4.0
   isbot: ^5.1.43
   js-yaml: 4.3.0
   jsdom: ~26.0.0
   '@types/jsdom': ^21.1.7
-  json-schema: ^0.4.0
-  json-schema-default: ^1.0.2
   katex: ^0.16.47
   knip: ^6.17.1
-  langchain: ^1.5.0
   libassimp: ^0.3.0
   libcascade: 3.0.2
   lighthouse: ^13.4.0
@@ -268,7 +252,6 @@ catalog:
   rehype-sanitize: ^6.0.0
   rehype-stringify: ^10.0.1
   remark-gfm: 4.0.1
-  remark-math: ^6.0.0
   remark-parse: ^11.0.0
   remark-rehype: ^11.1.2
   remark-stringify: 11.0.0
@@ -287,16 +270,13 @@ catalog:
   three: ^0.184.0
   tsdown: ^0.22.14
   tslib: ^2.8.1
-  turndown: ^7.2.4
   tsx: ^4.22.4
   type-fest: ^4.41.0
-  typedoc: ^0.28.19
   typescript: ~5.9.3
   typescript-eslint: ^8.61.1
   uint8array-extras: ^1.5.0
   unified: ^11.0.5
   unist-util-visit: ^5.1.0
-  uzip: ^0.20201231.0
   vite: 8.0.10
   vite-plugin-mkcert: 2.0.0
   vite-plugin-static-copy: ^4.1.1
@@ -330,10 +310,9 @@ catalog:
   '@streamdown/math': ^1.0.2
   '@streamdown/cjk': ^1.0.3
   '@streamdown/mermaid': ^1.0.2
-  '@fastify/multipart': ^10.0.0
-  '@typescript/vfs': ^1.6.4
   '@napi-rs/cli': 3.8.6
   '@parcel/watcher': ^2.6.0
+  cheerio: 1.2.0
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

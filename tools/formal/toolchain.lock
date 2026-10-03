@@ -1,9 +1,9 @@
 {
   "java": { "ci": "25", "minimum": 21 },
   "tlc": {
-    "build": "2026.09.23.154203-4260e47",
-    "url": "https://github.com/tlaplus/tlaplus/releases/download/v1.8.0/tla2tools.jar",
-    "sha256": "32d64fbbc464559fc7192341b27b885fa4eb6b92d1648d2b49fb9cdcb7aacf81"
+    "build": "2026.10.02.152454-dfd4f7f",
+    "url": "https://raw.githubusercontent.com/taucad/tau/8182371f4fda870df7e08c9de20ce2853723662a/tools/formal/vendor/tla2tools.jar",
+    "sha256": "400ae7f0291bef9459c07840e0da1507196ee707a7102b04186a5f1b820470d7"
   },
   "community": {
     "url": "https://github.com/tlaplus/CommunityModules/releases/download/202609120237/CommunityModules-deps-202609120237.jar",

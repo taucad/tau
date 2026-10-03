@@ -1,0 +1,68 @@
+# Read-only diagnosis of the staging API (`tau-api-staging`, `api.taucad.dev`).
+#
+# Runs in the `staging` environment (admits `main` only) so it can use the same
+# FLY_API_TOKEN as deploy.yml. It changes nothing: no deploy, restart, scale or
+# secret write. Output is limited to platform metadata (machine state, health
+# check results, release history, secret *names*) because this repository is
+# public and its run logs are world-readable. App logs are deliberately not
+# fetched; read them with `fly logs -a tau-api-staging` from an operator shell.
+
+name: Diagnose Staging
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  diagnose:
+    name: Diagnose tau-api-staging
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: staging
+      deployment: false
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+      FLY_APP: tau-api-staging
+    steps:
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master
+
+      - name: Probe public endpoints
+        continue-on-error: true
+        run: |
+          for url in https://api.taucad.dev/health/live https://api.taucad.dev/health/ready https://taucad.dev/health/ready; do
+            curl -sS -m 15 -o /dev/null -w "${url} -> %{http_code} in %{time_total}s (connect %{time_connect}s, tls %{time_appconnect}s)\n" "$url" || true
+          done
+
+      - name: App status
+        continue-on-error: true
+        run: flyctl status --app "$FLY_APP"
+
+      - name: Health checks
+        continue-on-error: true
+        run: flyctl checks list --app "$FLY_APP"
+
+      - name: Machines and recent events
+        continue-on-error: true
+        run: |
+          flyctl machine list --app "$FLY_APP"
+          for id in $(flyctl machine list --app "$FLY_APP" --json | jq -r '.[].id'); do
+            echo "::group::machine ${id}"
+            flyctl machine status "$id" --app "$FLY_APP" --display-config=false
+            echo "::endgroup::"
+          done
+
+      - name: Release history
+        continue-on-error: true
+        run: flyctl releases --app "$FLY_APP" --image | head -n 15
+
+      - name: Secret names (no values or digests)
+        continue-on-error: true
+        run: flyctl secrets list --app "$FLY_APP" --json | jq -r '.[] | (.Name // .name)' | sort
+
+      - name: Fly apps visible to this token
+        continue-on-error: true
+        run: flyctl apps list

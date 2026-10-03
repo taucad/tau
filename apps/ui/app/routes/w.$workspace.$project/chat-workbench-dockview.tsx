@@ -124,6 +124,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { Separator } from '@taucad/ui/components/separator';
 import { formatKeyCombination } from '#utils/keys.utils.js';
+import { capturePointer, releasePointer } from '#utils/pointer-capture.utils.js';
 import type {
   FileViewerPaneContent,
   FileViewerPresentation,
@@ -1573,7 +1574,7 @@ function FilePaneFilesSidecar({
         className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:focus-outline'
         onPointerDown={(event) => {
           drag.current = { x: event.clientX, width, currentWidth: width };
-          event.currentTarget.setPointerCapture(event.pointerId);
+          capturePointer(event.currentTarget, event.pointerId);
         }}
         onPointerMove={(event) => {
           if (!drag.current) {
@@ -1589,7 +1590,7 @@ function FilePaneFilesSidecar({
           }
           const { currentWidth } = drag.current;
           drag.current = undefined;
-          event.currentTarget.releasePointerCapture(event.pointerId);
+          releasePointer(event.currentTarget, event.pointerId);
           onWidthCommit(currentWidth);
         }}
         onKeyDown={(event) => {

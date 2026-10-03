@@ -60,6 +60,11 @@ describe('FloatingPanelContentHeader', () => {
 });
 
 describe('FloatingPanelClose', () => {
+  beforeEach(() => {
+    mockUseIsMobile.mockReset().mockReturnValue(false);
+    mockUseIsInsideDrawer.mockReset().mockReturnValue(false);
+  });
+
   it('uses the same responsive rounding as other header buttons', () => {
     renderInPanel(
       <TooltipProvider>
@@ -69,6 +74,33 @@ describe('FloatingPanelClose', () => {
 
     expect(screen.getByRole('button', { name: 'Close panel' })).toHaveClass('max-md:rounded-md');
     expect(screen.getByRole('button', { name: 'Close panel' })).not.toHaveClass('max-md:rounded-full');
+  });
+
+  // `DrawerClose` is Radix `Dialog.Close`; outside a drawer it throws "`DialogClose` must be used within `Dialog`".
+  it('should not wrap the button in DrawerClose on mobile outside a drawer', () => {
+    mockUseIsMobile.mockReturnValue(true);
+    mockUseIsInsideDrawer.mockReturnValue(false);
+
+    renderInPanel(
+      <TooltipProvider>
+        <FloatingPanelClose icon={<span />} tooltipContent={() => 'Close'} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByRole('button', { name: 'Close panel' })).toBeInTheDocument();
+    expect(screen.queryByTestId('drawer-close')).not.toBeInTheDocument();
+  });
+
+  it('should wrap the button in DrawerClose on mobile inside a drawer', () => {
+    setMobileDrawerContext();
+
+    renderInPanel(
+      <TooltipProvider>
+        <FloatingPanelClose icon={<span />} tooltipContent={() => 'Close'} />
+      </TooltipProvider>,
+    );
+
+    expect(screen.getByTestId('drawer-close')).toContainElement(screen.getByRole('button', { name: 'Close panel' }));
   });
 });
 

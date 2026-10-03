@@ -355,6 +355,21 @@ describe('a provider that cuts a live stream by its status (Finding 3)', () => {
     expect(output).not.toContain('cloud.google.com');
   });
 
+  it('should tell a Cloud customer a trailing context-window refusal by name', async () => {
+    const tooLong = 'The input token count (1100000) exceeds the maximum number of tokens allowed (1048576).';
+    const tail = JSON.stringify([{ error: { code: 400, message: tooLong, status: 'INVALID_ARGUMENT' } }]);
+
+    const output = await filtered({
+      providerId: 'vertexai',
+      accountOwner: 'tau',
+      text: vertexChunk + tail,
+      chunkBytes: 31,
+    });
+
+    expect(output).toContain('"message":"The request exceeds the context window of the selected model."');
+    expect(output).not.toContain(tooLong);
+  });
+
   it('should clamp the supplier sentence an operator is shown to 500 characters', async () => {
     // The message is persisted into the chat's error row, exactly as the pre-stream
     // leg clamps it.

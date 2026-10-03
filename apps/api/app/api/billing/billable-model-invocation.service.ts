@@ -17,6 +17,7 @@ import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.j
 import {
   classifyUpstreamRefusal,
   cloudUpstreamRefusalMessage,
+  isContextWindowRefusal,
   maximumRefusalMessageCharacters,
   readUpstreamRefusal,
   upstreamRetryAfterSeconds,
@@ -439,7 +440,11 @@ export class BillableModelInvocationService {
         ...(retryAfterSeconds === undefined ? {} : { retryAfterSeconds }),
       });
       // Tau owns the key here, so the supplier's own sentence never leaves the API.
-      const message = cloudUpstreamRefusalMessage({ type: classification.type, status: response.status });
+      const message = cloudUpstreamRefusalMessage({
+        type: classification.type,
+        status: response.status,
+        contextWindowExceeded: isContextWindowRefusal(body),
+      });
       throw new LlmGatewayError(classification.status, classification.type, message, classification.details);
     }
     // The supplier answered: the operation is in flight, not abandoned. Losing this

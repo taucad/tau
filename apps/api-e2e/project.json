@@ -16,7 +16,7 @@
     "test:git": {
       "executor": "nx:run-commands",
       "metadata": {
-        "description": "Tau Hosted Remote in real processes (W18, W8): stock git and git-lfs against the built API on :4014 and a second process of the same build on :4016, sharing one Postgres and one MinIO and no disk — the deployed shape, and the proof of S2 across operating-system processes. The CLI build, Docker and db-migrate run ahead of vitest, the same split desktop-e2e uses. No `dependsOn` on `api:build`: that chain reaches `runtime:build`, which is red on Node 24 for a tsdown config-loader bug, so the global setup runs `vite build` in apps/api itself — the same choice desktop-e2e made and documented."
+        "description": "Tau Hosted Remote in real processes (W18, W8): stock git and git-lfs against the built API on :4014 and a second process of the same build on :4016, sharing one Postgres and one MinIO and no disk — the deployed shape, and the proof of S2 across operating-system processes. The CLI build, Docker and db-migrate run ahead of vitest, the same split desktop-e2e uses; db-migrate runs with TAU_CLOUD_ENABLED=true so it publishes the development tariff the cloud-enabled API refuses to boot without. No `dependsOn` on `api:build`: that chain reaches `runtime:build`, which is red on Node 24 for a tsdown config-loader bug, so the global setup runs `vite build` in apps/api itself — the same choice desktop-e2e made and documented."
       },
       "options": {
         "cwd": "{workspaceRoot}/apps/api-e2e",
@@ -24,7 +24,7 @@
         "commands": [
           "pnpm --dir ../.. exec nx run cli:build",
           "docker compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
-          "pnpm --dir ../.. exec nx run api:db-migrate",
+          "TAU_CLOUD_ENABLED=true pnpm --dir ../.. exec nx run api:db-migrate",
           "../../node_modules/.bin/vitest run --config vitest.git.config.ts"
         ],
         "env": {

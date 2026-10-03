@@ -519,6 +519,7 @@ function SpeedRow({
       <ParameterSelect
         label='Print speed'
         value={speed.shown ?? ''}
+        placeholder='Not reported'
         isDisabled={!availability.isAvailable || action.pending === 'speed.set'}
         groups={[
           {

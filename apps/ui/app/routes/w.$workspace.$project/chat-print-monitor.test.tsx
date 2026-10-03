@@ -2,7 +2,7 @@
 import { cleanup, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { Activity, Info } from 'lucide-react';
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
 import type {
   MachineAlertSnapshot,
@@ -18,7 +18,11 @@ import {
   describeWaits,
 } from '#routes/w.$workspace.$project/chat-print-controls.js';
 import type { ApplyMachineAction } from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { MaterialSlots, materialChange } from '#routes/w.$workspace.$project/chat-print-materials.js';
+import {
+  MaterialChangeCard,
+  MaterialSlots,
+  materialChange,
+} from '#routes/w.$workspace.$project/chat-print-materials.js';
 import {
   MonitorStage,
   PrinterAlerts,
@@ -70,8 +74,49 @@ const qualified: MachineManifest = {
     { id: 'material.load', label: 'Load filament', effect: 'material', qualification: 'qualified' },
     { id: 'material.unload', label: 'Unload filament', effect: 'material', qualification: 'qualified' },
     { id: 'material.continue', label: 'Continue filament change', effect: 'material', qualification: 'qualified' },
+    {
+      id: 'material.set',
+      label: 'Set material',
+      effect: 'material',
+      qualification: 'qualified',
+      parameters: {
+        type: 'object',
+        properties: {
+          slot: { type: 'integer' },
+          profile: {
+            oneOf: [
+              { const: 'GFL99', title: 'Generic PLA' },
+              { const: 'GFG99', title: 'Generic PETG' },
+            ],
+          },
+          color: { type: 'string' },
+        },
+        required: ['slot', 'profile', 'color'],
+      },
+    },
   ],
 };
+
+/** A change as the machine-actions guide proposes the printer report it: the external load's steps and its prompt. */
+const externalLoad = (step: string, awaiting?: Readonly<{ kind: 'feed' | 'confirmation'; promptId: string }>) => ({
+  currentSlot: 255,
+  targetSlot: 254,
+  units: [],
+  change: {
+    changeId: 'change-1',
+    kind: 'load',
+    slot: 254,
+    steps: [
+      { id: 'heat', label: 'Heat the nozzle', actor: 'machine' },
+      { id: 'push', label: 'Push new filament into extruder', actor: 'person' },
+      { id: 'grab', label: 'Grab new filament', actor: 'machine' },
+      { id: 'confirm', label: 'Confirm extruded', actor: 'person' },
+      { id: 'purge', label: 'Purge old filament', actor: 'machine' },
+    ],
+    step,
+    ...(awaiting === undefined ? {} : { awaiting }),
+  },
+});
 
 /** An idle X1C with black PLA in the toolhead from A1, grey PETG in A2 and white PETG on the external holder. */
 const withSlots = (
@@ -211,6 +256,12 @@ describe('MonitorStage', () => {
       renderMonitor(observing({ state: 'printing', ...(stage === undefined ? {} : { stage }) }));
 
       expect(rowValue('Stage')).toBe(shown);
+    });
+
+    it('should not repeat the stage the run line names while calibrating', () => {
+      renderMonitor(observing({ state: 'printing', currentLayer: 0, totalLayers: 64, stage: 'Levelling the bed' }));
+
+      expect(rowValue('Stage')).toBeUndefined();
     });
 
     it.each<readonly [string, MachineRunSnapshot, string]>([
@@ -401,6 +452,13 @@ describe('describeWaits', () => {
 });
 
 describe('MaterialSlots', () => {
+  beforeEach(() => {
+    // The jsdom environment has no pointer capture or scrolling, which the Material select's listbox uses.
+    Element.prototype.scrollIntoView = vi.fn();
+    Element.prototype.hasPointerCapture = vi.fn(() => false);
+    Element.prototype.setPointerCapture = vi.fn();
+  });
+
   it('should open a slot in place, ask once, load it, and return focus to its row', async () => {
     const apply = vi.fn<ApplyMachineAction>(async () => undefined);
     const user = userEvent.setup();
@@ -429,7 +487,7 @@ describe('MaterialSlots', () => {
     expect(apply).toHaveBeenCalledExactlyOnceWith(
       expect.objectContaining({ machineId: 'machine-1', action: 'material.load', parameters: { slot: 1 } }),
     );
-    expect(await within(slot).findByRole('status')).toHaveTextContent('Sent; waiting for Workshop X1C to start');
+    expect(await within(slot).findByRole('status')).toHaveTextContent('Waiting for Workshop X1C to confirm the load…');
     await user.click(within(slot).getByRole('button', { name: 'All slots' }));
     expect(
       within(screen.getByRole('list', { name: 'Material slots' })).getByRole('button', { name: /^A2/u }),
@@ -461,30 +519,153 @@ describe('MaterialSlots', () => {
     );
   });
 
-  it('should ask the person to feed the external spool and answer the printer', async () => {
+  it('should leave the extrusion check on the printer while it reports no steps', async () => {
+    const user = userEvent.setup();
+    const loading = withSlots(
+      { currentSlot: 255, targetSlot: 254, units: [] },
+      { state: 'idle', stage: 'Waiting for filament' },
+    );
+    render(
+      <>
+        <MaterialChangeCard entry={loading} manifest={qualified} apply={vi.fn<ApplyMachineAction>()} />
+        <MaterialSlots entry={loading} manifest={qualified} apply={vi.fn<ApplyMachineAction>()} isStale={false} />
+      </>,
+    );
+    const card = screen.getByRole('region', { name: 'Filament change' });
+    expect(within(card).getByRole('status')).toHaveTextContent('Feeding Ext · petg-white…');
+    expect(card).toHaveTextContent('Waiting for filament');
+    expect(card).toHaveTextContent("then confirm on the printer's screen");
+    expect(within(card).queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
+
+    // The slot itself waits for the change the card shows.
+    expect(screen.getByRole('button', { name: /^Ext/u })).toHaveAccessibleName(/Loading/u);
+    await user.click(screen.getByRole('button', { name: /^Ext/u }));
+    expect(screen.getByRole('button', { name: 'Feed into toolhead' })).toHaveAccessibleDescription(
+      'Wait for the filament change to finish.',
+    );
+  });
+
+  it('should list the reported steps and offer Done and Retry only while the printer asks', async () => {
     const apply = vi.fn<ApplyMachineAction>(async () => undefined);
     const user = userEvent.setup();
+    const card = (system: ReturnType<typeof externalLoad>) => (
+      <MaterialChangeCard entry={withSlots(system)} manifest={qualified} apply={apply} />
+    );
+    const { rerender } = render(card(externalLoad('push', { kind: 'feed', promptId: 'prompt-1' })));
+
+    const steps = screen.getAllByRole('listitem');
+    expect(steps.map((step) => step.textContent)).toEqual([
+      'Heat the nozzle (done)',
+      'Push new filament into extruder (needs you)',
+      'Grab new filament (to do)',
+      'Confirm extruded (to do)',
+      'Purge old filament (to do)',
+    ]);
+    expect(steps[1]).toHaveAttribute('aria-current', 'step');
+    expect(Element.prototype.scrollIntoView).toHaveBeenCalledWith({ block: 'nearest' });
+    expect(screen.getByRole('status')).toHaveTextContent('Workshop X1C waits for you to push the filament in.');
+    expect(screen.getByRole('region', { name: 'Filament change' })).toHaveTextContent(
+      'Push the petg-white into the toolhead until the extruder grips it; Workshop X1C carries on by itself.',
+    );
+    expect(screen.queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
+
+    rerender(card(externalLoad('confirm', { kind: 'confirmation', promptId: 'prompt-2' })));
+    const check = screen.getByRole('group', { name: 'Check the extrusion' });
+    await user.click(within(check).getByRole('button', { name: 'Done' }));
+    expect(apply).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({
+        action: 'material.continue',
+        parameters: { promptId: 'prompt-2', answer: 'extruded' },
+      }),
+    );
+    // Answered: the same prompt is not offered again while the printer moves on.
+    expect(within(check).getByRole('status')).toHaveTextContent('Waiting for Workshop X1C to continue…');
+    expect(within(check).queryByRole('button', { name: 'Done' })).not.toBeInTheDocument();
+
+    rerender(card(externalLoad('confirm', { kind: 'confirmation', promptId: 'prompt-3' })));
+    expect(
+      within(screen.getByRole('group', { name: 'Check the extrusion' })).getByRole('button', { name: 'Retry' }),
+    ).toBeEnabled();
+  });
+
+  it('should leave an AMS change during a run to the run line', () => {
+    const changing = withSlots({ currentSlot: 0, targetSlot: 1, units: [] }, { state: 'printing' });
+    const { container } = render(
+      <MaterialChangeCard
+        entry={{ ...changing, snapshot: { ...changing.snapshot, activeRunId: 'provider-run-1' } }}
+        manifest={qualified}
+        apply={vi.fn<ApplyMachineAction>()}
+      />,
+    );
+    expect(container).toBeEmptyDOMElement();
+  });
+
+  it('should set the material of an external spool nobody has set', async () => {
+    const apply = vi.fn<ApplyMachineAction>(async () => undefined);
+    const user = userEvent.setup();
+    const unset = withSlots({ currentSlot: 0, units: [] });
     render(
       <MaterialSlots
-        entry={withSlots(
-          { currentSlot: 255, targetSlot: 254, units: [] },
-          { state: 'idle', stage: 'Waiting for filament' },
-        )}
+        entry={{
+          ...unset,
+          snapshot: {
+            ...unset.snapshot,
+            setup: {
+              ...unset.snapshot.setup,
+              materials: [...unset.snapshot.setup.materials.slice(0, 2), { slot: 254, state: 'unknown' }],
+            },
+          },
+        }}
         manifest={qualified}
         apply={apply}
         isStale={false}
       />,
     );
-    expect(screen.getByRole('button', { name: /^Ext/u })).toHaveAccessibleName(/Loading/u);
+    expect(screen.getByRole('button', { name: /^Ext/u })).toHaveTextContent('Not set');
 
     await user.click(screen.getByRole('button', { name: /^Ext/u }));
-    expect(screen.getByRole('status')).toHaveTextContent('Loading Ext · Waiting for filament');
-    await user.click(
-      within(screen.getByRole('group', { name: 'Feed the external spool' })).getByRole('button', { name: 'Done' }),
-    );
+    expect(screen.queryByRole('button', { name: 'Feed into toolhead' })).not.toBeInTheDocument();
+    expect(
+      screen.getByText('Set the material of the spool on the holder first, so the nozzle heats for it.'),
+    ).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Set material' }));
+    const form = screen.getByRole('form', { name: 'Set the material in Ext' });
+    expect(within(form).getByRole('combobox', { name: 'Material' })).toHaveTextContent('Generic PLA');
+    await user.click(within(form).getByRole('combobox', { name: 'Material' }));
+    await user.click(screen.getByRole('option', { name: 'Generic PETG' }));
+    await user.click(within(form).getByRole('button', { name: 'Save' }));
 
     expect(apply).toHaveBeenCalledExactlyOnceWith(
-      expect.objectContaining({ action: 'material.continue', parameters: { answer: 'extruded' } }),
+      expect.objectContaining({
+        action: 'material.set',
+        // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the colour the form sends for a spool without one
+        parameters: { slot: 254, profile: 'GFG99', color: '#FFFFFF' },
+      }),
+    );
+    expect(await screen.findByRole('status')).toHaveTextContent('Waiting for Workshop X1C to confirm the material…');
+  });
+
+  it('should keep the material of a spool whose tag the AMS read', async () => {
+    const user = userEvent.setup();
+    const tagged = withSlots({ currentSlot: 0, units: [] });
+    // The guide's proposed slot fact; the runtime's snapshot type does not declare it yet.
+    const materials = tagged.snapshot.setup.materials.map((material) =>
+      material.slot === 0 ? { ...material, identifiedBy: 'tag' } : material,
+    );
+    render(
+      <MaterialSlots
+        entry={{ ...tagged, snapshot: { ...tagged.snapshot, setup: { ...tagged.snapshot.setup, materials } } }}
+        manifest={qualified}
+        apply={vi.fn<ApplyMachineAction>()}
+        isStale={false}
+      />,
+    );
+
+    await user.click(screen.getByRole('button', { name: /^A1/u }));
+    expect(screen.getByText('In the toolhead · read from its tag')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Set material' })).toBeDisabled();
+    expect(screen.getByRole('button', { name: 'Set material' })).toHaveAccessibleDescription(
+      "The AMS read this spool's tag, which sets its material.",
     );
   });
 

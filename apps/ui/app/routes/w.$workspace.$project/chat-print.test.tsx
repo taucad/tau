@@ -1593,6 +1593,29 @@ describe('Print pane monitor and controls', () => {
     expect(within(item).queryByText('Started')).not.toBeInTheDocument();
   });
 
+  it('keeps a finished run in view without its controls until the printer reports the next one', async () => {
+    const run = printing();
+    const { activeRunId: _activeRunId, ...snapshot } = run.snapshot;
+    const fixture = createFixture({
+      entries: [
+        {
+          ...run,
+          snapshot: {
+            ...snapshot,
+            readiness: 'idle',
+            run: { state: 'succeeded', currentLayer: 125, totalLayers: 125, progress: 100, file: 'pyramid.gcode.3mf' },
+          },
+        },
+      ],
+    });
+    renderPane(fixture.client);
+    await findMachine('Ready');
+
+    const finished = await screen.findByRole('region', { name: 'Run' });
+    expect(finished).toHaveTextContent('pyramid.gcode.3mf · Finished layer 125 of 125');
+    expect(within(finished).queryByRole('button')).not.toBeInTheDocument();
+  });
+
   it("names the run by the file the person approved, not the printer's upload name", async () => {
     const started = agentRequest({
       state: 'started',

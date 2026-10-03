@@ -23,7 +23,7 @@ import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import { ControlCenterStage } from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { materialChange } from '#routes/w.$workspace.$project/chat-print-materials.js';
+import { MaterialChangeCard, materialChange } from '#routes/w.$workspace.$project/chat-print-materials.js';
 import type { ApplyMachineAction } from '#routes/w.$workspace.$project/chat-print-controls.js';
 import {
   ControlsSection,
@@ -255,7 +255,8 @@ function ObservationNotice({ entry }: { readonly entry: MachineDirectoryEntry })
 }
 
 /**
- * The run in progress: its file and progress with the controls that act on it, together.
+ * The run in progress, or the one the printer last finished: its file and progress with the controls that act on it,
+ * together. A finished run stays until the printer reports the next one, so the pane says how the last print ended.
  *
  * @param properties - The client, machine, its requests and the receipt sink.
  * @returns The run block, or nothing without a run to show.
@@ -273,7 +274,7 @@ function RunBlock({
 }): React.JSX.Element | undefined {
   const { run } = entry.snapshot;
   const runLine = describeRun(entry);
-  if (!run || run.state === 'idle' || run.state === 'succeeded' || runLine === undefined) {
+  if (!run || run.state === 'idle' || runLine === undefined) {
     return undefined;
   }
   const fileName = runFileName(entry, requests);
@@ -296,7 +297,9 @@ function RunBlock({
           value={run.progress}
         />
       )}
-      <ControlsSection client={client} entry={entry} requests={requests} onReceipt={onReceipt} />
+      {run.state === 'succeeded' ? null : (
+        <ControlsSection client={client} entry={entry} requests={requests} onReceipt={onReceipt} />
+      )}
     </section>
   );
 }
@@ -525,6 +528,7 @@ function MachinePrintPanel({
               bridge={bridge}
               onReconciled={recordReconciled}
             />
+            <MaterialChangeCard entry={selected} manifest={manifest} apply={applyAction} />
             <RunBlock client={client} entry={selected} requests={requests} onReceipt={recordReceipt} />
             <PrintStages>
               <MonitorStage entry={selected} manifest={manifest} apply={applyAction} />

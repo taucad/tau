@@ -4,7 +4,8 @@
 
 MathLin_CroutResult: declare class MathLin_CroutResult
 
-  constructor
+  // MathLin_CroutResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -16,15 +17,19 @@ MathLin_CroutResult: declare class MathLin_CroutResult
 
   Determinant: number | null | undefined
 
+  // MathLin_CroutResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathLin_CroutResult.delete (method)
   delete(): void;
 
+  // MathLin_CroutResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathLin_EigenResult: declare class MathLin_EigenResult
 
-  constructor
+  // MathLin_EigenResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -34,15 +39,19 @@ MathLin_EigenResult: declare class MathLin_EigenResult
 
   Dimension: number
 
+  // MathLin_EigenResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathLin_EigenResult.delete (method)
   delete(): void;
 
+  // MathLin_EigenResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathLin_LUResult: declare class MathLin_LUResult
 
-  constructor
+  // MathLin_LUResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -54,15 +63,19 @@ MathLin_LUResult: declare class MathLin_LUResult
 
   Sign: number
 
+  // MathLin_LUResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathLin_LUResult.delete (method)
   delete(): void;
 
+  // MathLin_LUResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathLin_QRResult: declare class MathLin_QRResult
 
-  constructor
+  // MathLin_QRResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -72,17 +85,21 @@ MathLin_QRResult: declare class MathLin_QRResult
 
   Rank: number
 
+  // MathLin_QRResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathLin_QRResult.delete (method)
   delete(): void;
 
+  // MathLin_QRResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathLin_LeastSquaresMethod: typeof MathLin_LeastSquaresMethod[keyof typeof MathLin_LeastSquaresMethod]
 
 MathLin_LeastSquaresResult: declare class MathLin_LeastSquaresResult
 
-  constructor
+  // MathLin_LeastSquaresResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -94,15 +111,19 @@ MathLin_LeastSquaresResult: declare class MathLin_LeastSquaresResult
 
   Rank: number
 
+  // MathLin_LeastSquaresResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathLin_LeastSquaresResult.delete (method)
   delete(): void;
 
+  // MathLin_LeastSquaresResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathLin_SVDResult: declare class MathLin_SVDResult
 
-  constructor
+  // MathLin_SVDResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -114,8 +135,11 @@ MathLin_SVDResult: declare class MathLin_SVDResult
 
   Rank: number
 
+  // MathLin_SVDResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathLin_SVDResult.delete (method)
   delete(): void;
 
+  // MathLin_SVDResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

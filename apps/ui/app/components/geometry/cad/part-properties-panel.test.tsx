@@ -39,6 +39,35 @@ describe('PartPropertiesPanel', () => {
     await user.click(screen.getByRole('button', { name: 'Details' }));
     expect(screen.getByText('Not supplied; a finish is not a material')).toBeVisible();
   });
+  it('opens the gallery from an 80 px identity frame and hides that row on request', async () => {
+    const node: GeometryComponentNode = { ...mock<GeometryComponentNode>(), name: 'Housing', kind: 'part' };
+    const open = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:housing') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const preview = { status: 'ready', bytes: new Uint8Array([1]) } as const;
+    const { rerender } = render(<PartPropertiesPanel node={node} preview={preview} onOpenPreview={open} />);
+    const frame = screen.getByRole('button', { name: 'Preview Housing' });
+    expect(frame).toHaveClass('size-20', 'rounded-xs');
+    await userEvent.setup().click(frame);
+    expect(open).toHaveBeenCalledWith(frame);
+
+    rerender(<PartPropertiesPanel node={node} preview={preview} onOpenPreview={open} isIdentityHidden />);
+    expect(screen.queryByRole('button', { name: 'Preview Housing' })).toBeNull();
+    expect(screen.getByRole('region', { name: 'Physical facts' })).toBeVisible();
+  });
+
+  it('shows the material swatch, not a control, while a part has no preview image', () => {
+    const node: GeometryComponentNode = {
+      ...mock<GeometryComponentNode>(),
+      name: 'Housing',
+      kind: 'part',
+      appearance: { materials: [{ materialIndex: 0, color: 'unavailable' }] },
+    };
+    render(<PartPropertiesPanel node={node} preview={{ status: 'pending' }} onOpenPreview={vi.fn()} />);
+    expect(screen.queryByRole('button', { name: 'Preview Housing' })).toBeNull();
+    expect(document.querySelector('[data-slot="part-properties"] [data-slot="material-swatch"]')).not.toBeNull();
+  });
+
   it('should bound a generated collection of 1709 appearance disclosures', async () => {
     const node: GeometryComponentNode = {
       ...mock<GeometryComponentNode>(),

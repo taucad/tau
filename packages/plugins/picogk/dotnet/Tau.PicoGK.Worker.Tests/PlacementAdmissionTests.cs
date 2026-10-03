@@ -114,11 +114,11 @@ public sealed partial class WorkerTests
         expected.SetGroupMaterial(0, new global::PicoGK.Material { Anisotropy = new() { Strength = .5f } });
         placed.Dispose(); baked.Dispose(); source.Dispose();
         var a = Assert.Single(actual.Extract().Components); var b = Assert.Single(expected.Extract().Components);
-        Assert.Equal(b.Positions.Select(BitConverter.SingleToInt32Bits), a.Positions.Select(BitConverter.SingleToInt32Bits));
-        Assert.Equal(b.Normals.Select(BitConverter.SingleToInt32Bits), a.Normals.Select(BitConverter.SingleToInt32Bits));
+        AssertFloat32ForwardError(WorldPositions(b), WorldPositions(a), 32);
+        AssertFloat32ForwardError(WorldDirections(b.Normals, b.Matrix, 3), WorldDirections(a.Normals, a.Matrix, 3), 256);
         Assert.Equal(b.Indices, a.Indices);
         Assert.Equal(b.TexCoords!.Select(BitConverter.SingleToInt32Bits), a.TexCoords!.Select(BitConverter.SingleToInt32Bits));
-        Assert.Equal(b.Tangents!.Select(BitConverter.SingleToInt32Bits), a.Tangents!.Select(BitConverter.SingleToInt32Bits));
+        AssertFloat32ForwardError(WorldDirections(b.Tangents!, b.Matrix, 4), WorldDirections(a.Tangents!, a.Matrix, 4), 256);
         Assert.Equal(expected.GetBoundingBox().vecMin, actual.GetBoundingBox().vecMin);
         Assert.Equal(expected.GetBoundingBox().vecMax, actual.GetBoundingBox().vecMax);
     }

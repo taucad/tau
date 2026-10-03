@@ -505,7 +505,8 @@ export type GeoSpecMatcher = {
    */
   toHaveConnectedComponents(expected: GeoSpecConnectedComponentsExpectation): GeoSpecAssertion;
   /**
-   * Assert that each mesh surface is closed and manifold-like.
+   * Assert closed mesh edge incidence; this does not prove vertex-manifold
+   * validity, embeddedness, a Boolean fuse, or material connectivity.
    */
   toBeWatertight(): GeoSpecAssertion;
   /**
@@ -744,7 +745,7 @@ export type GeoSpecTestCase = {
 export type RunGeoSpecModuleOptions = {
   /** Filesystem containing the test module and its project imports. */
   filesystem: VmFileSystem;
-  /** Absolute ESM test entry path. */
+  /** Filesystem-root-relative ESM test entry path. */
   entryPath: string;
   /** JavaScript regular expression matched against full `suite > test` names. */
   testNamePattern?: string | RegExp;

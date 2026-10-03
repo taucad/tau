@@ -1,3 +1,4 @@
+import { getGltfOccurrenceLayers } from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import * as THREE from 'three';
 import { isSectionRemoved } from '#components/geometry/graphics/section-cuts.js';
 import type { SectionPiece } from '#components/geometry/graphics/section-cuts.js';
@@ -86,7 +87,11 @@ export function raycastFirstVisibleMeshHit({
 
   for (const mesh of meshes) {
     const positionAttribute = mesh.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
-    if (!isWorldVisible(mesh) || !raycaster.layers.test(mesh.layers) || positionAttribute === undefined) {
+    if (
+      !isWorldVisible(mesh) ||
+      !raycaster.layers.test(getGltfOccurrenceLayers(mesh)) ||
+      positionAttribute === undefined
+    ) {
       continue;
     }
 

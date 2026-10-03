@@ -753,7 +753,7 @@ fn evaluate_bounds(
                 names.join(", "),
                 number(tolerance)
             ),
-            "Correct the model dimensions, or widen the declared bounding-box tolerance.",
+            "Correct the model dimensions to match the declared bounds; preserve the authored tolerance.",
             Json::object([
                 ("matcher", Json::string("toHaveBoundingBox")),
                 ("measured", measured.clone()),
@@ -846,8 +846,7 @@ fn evaluate_components(
         })
     } else if bounded {
         context
-            .mesh_analysis()
-            .map(|analysis| analysis.component_clusters(tolerance_mm))
+            .mesh_component_clusters(tolerance_mm)
             .and_then(|clusters| bounded_components(clusters, expected_count, context))
     } else {
         context.connected_components(tolerance_mm)
@@ -867,7 +866,7 @@ fn evaluate_components(
                 number(tolerance_mm),
                 expected_count
             ),
-            "Join or separate the parts, or loosen `toleranceMm` so intentionally close components collapse into one.",
+            "Join or separate the modeled material to match the declared component count; preserve the authored toleranceMm.",
             Json::object([
                 ("matcher", Json::string("toHaveConnectedComponents")),
                 ("expected", Json::Number(expected_count as f64)),
@@ -1557,7 +1556,7 @@ fn evaluate_scalar(
                 number(expected.tolerance)
             ),
             &format!(
-                "Correct the model, or widen the declared {} expectation.",
+                "Correct the model or export to match the declared {} expectation; preserve the authored tolerance.",
                 quantity.to_lowercase()
             ),
             Json::object([
@@ -1670,7 +1669,7 @@ fn evaluate_center(
                     .join("/"),
                 number(tolerance)
             ),
-            "Correct the model, or widen the declared centre-of-mass tolerance.",
+            "Correct the model or export to match the declared centre of mass; preserve the authored tolerance.",
             Json::object([
                 ("matcher", Json::string("toHaveCenterOfMass")),
                 ("measured", point_json(measured)),

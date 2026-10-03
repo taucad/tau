@@ -96,7 +96,12 @@
         "default": "./dist/runner/node/native-pool-runner.mjs"
       }
     },
-    "imports": {}
+    "imports": {
+      "#model/default-runtime-client.js": {
+        "browser": "./dist/model/default-runtime-client.browser.mjs",
+        "default": "./dist/model/default-runtime-client.node.mjs"
+      }
+    }
   },
   "imports": {
     "#e2e/*.js": "./e2e/*.ts",
@@ -104,6 +109,10 @@
     "#cache/node-evidence-store.js": {
       "browser": "./src/cache/browser-evidence-store.ts",
       "default": "./src/cache/node-evidence-store.ts"
+    },
+    "#model/default-runtime-client.js": {
+      "browser": "./src/model/default-runtime-client.browser.ts",
+      "default": "./src/model/default-runtime-client.node.ts"
     },
     "#*.js": "./src/*.ts",
     "#*": "./src/*"

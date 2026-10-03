@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type * as PartGalleryModule from '#components/geometry/cad/part-gallery.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -13,6 +14,7 @@ import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 
 const mocks = vi.hoisted(() => ({
+  openPartGallery: undefined as undefined | ReturnType<typeof vi.fn>,
   addContextReferences: vi.fn(),
   editorSend: vi.fn(),
   openPanel: vi.fn(),
@@ -21,6 +23,11 @@ const mocks = vi.hoisted(() => ({
 vi.mock('#components/chat/chat-context-insertion.js', () => ({
   geometryReferenceToToken: () => '@cad[src/main.ts#component:first]',
   useChatContextInsertion: () => ({ addContextReferences: mocks.addContextReferences }),
+}));
+
+vi.mock('#components/geometry/cad/part-gallery.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof PartGalleryModule>()),
+  useOpenPartGallery: () => mocks.openPartGallery,
 }));
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -150,6 +157,78 @@ function renderViewerModelComponentActionMenu({
 }
 
 describe('model component action menu', () => {
+  it('heads the menu with the material swatch only and opens a part preview from the first item', async () => {
+    mocks.openPartGallery = vi.fn();
+    const node = {
+      ...createNode(),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+      appearance: { materials: [{ materialIndex: 0, color: carrierBaseColor }] },
+    };
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+    render(
+      <>
+        <button type='button' data-model-part-button='' data-model-component-id={componentId}>
+          Planetary housing row
+        </button>
+        <ModelComponentActionDropdown
+          manifest={createManifest(node)}
+          node={node}
+          graphicsRef={graphicsRef}
+          unitId={unitId}
+          source='explorer'
+          isFocused={false}
+          isIsolated={false}
+          hasHiddenComponents={false}
+          hasOpacityOverrides={false}
+          opacity={1}
+          actionButtonClassName=''
+          preview={{ status: 'pending', bytes: new Uint8Array([1]) }}
+        />
+      </>,
+    );
+    const user = userEvent.setup();
+    await user.click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    const menu = screen.getByRole('menu');
+    expect(menu.querySelector('img')).toBeNull();
+    expect(menu.querySelectorAll('[data-slot="material-swatch"]')).toHaveLength(1);
+    expect(within(menu).queryByText('Preview loading')).toBeNull();
+    const items = within(menu).getAllByRole('menuitem');
+    expect(items[1]).toHaveAccessibleName('Open preview');
+    await user.click(items[1]!);
+    expect(mocks.openPartGallery).toHaveBeenCalledWith({
+      graphicsRef,
+      unitId,
+      componentId,
+      source: 'explorer',
+      // Focus returns to the Explorer row, not the menu trigger.
+      origin: screen.getByRole('button', { name: 'Planetary housing row' }),
+    });
+    mocks.openPartGallery = undefined;
+  });
+
+  it('offers no preview for a group without renderable geometry', async () => {
+    mocks.openPartGallery = vi.fn();
+    const node: ReturnType<typeof createNode> = { ...createNode(), kind: 'assembly' };
+    render(
+      <ModelComponentActionDropdown
+        manifest={createManifest(node)}
+        node={node}
+        graphicsRef={mock<ActorRefFrom<typeof graphicsMachine>>()}
+        unitId={unitId}
+        source='explorer'
+        isFocused={false}
+        isIsolated={false}
+        hasHiddenComponents={false}
+        hasOpacityOverrides={false}
+        opacity={1}
+        actionButtonClassName=''
+      />,
+    );
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Actions for Planetary housing' }));
+    expect(screen.queryByRole('menuitem', { name: 'Open preview' })).toBeNull();
+    mocks.openPartGallery = undefined;
+  });
+
   it('offers retry only for a failed Explorer preview', async () => {
     const node = createNode();
     const retry = vi.fn();

@@ -21,7 +21,11 @@ internal sealed record ExtractedComponent(
     uint[] Indices,
     JsonElement? Material = null,
     float[]? TexCoords = null,
-    float[]? Tangents = null);
+    float[]? Tangents = null)
+{
+    internal Matrix4x4 Matrix { get; init; } = Matrix4x4.Identity;
+    internal object PrototypeIdentity { get; init; } = new();
+}
 
 internal sealed record ModelTimings(
     double EntryPointInvoke,
@@ -38,7 +42,10 @@ internal sealed record ModelExecutionResult(
     ModelTimings Timings,
     JsonElement? Mechanism,
     IReadOnlyList<Issue> Warnings,
-    MaterialResources? Resources = null);
+    MaterialResources? Resources = null, WorkCounters? WorkCounters = null,
+    IReadOnlyList<TauComputeStableRecord>? ComputeRecords = null);
+
+internal sealed record LayoutStability(float MinimumArea, float MaximumEdgeSum, float CreaseMargin, float MinimumFanArea, int MaximumFanFaces, float UvAxisMargin);
 
 internal static class ModelRunner
 {
@@ -62,7 +69,8 @@ internal static class ModelRunner
         CompiledModel compiled,
         string artifactRoot,
         JsonElement? parameters = null,
-        CancellationToken cancellation = default)
+        CancellationToken cancellation = default,
+        ComputeWorkerSession? compute = null)
     {
         var values = CompilationService.BindParameters(
             compiled,
@@ -76,7 +84,7 @@ internal static class ModelRunner
         unload.Stop();
         var assembly = Retain(compiled);
         var invoke = Stopwatch.StartNew();
-        var execution = RunAndExtract(assembly, artifactRoot, values, cancellation);
+        var execution = RunAndExtract(assembly, artifactRoot, values, cancellation, compute);
         invoke.Stop();
         return execution with
         {
@@ -133,9 +141,10 @@ internal static class ModelRunner
         Assembly assembly,
         string artifactRoot,
         IReadOnlyDictionary<string, object?> values,
-        CancellationToken cancellation)
+        CancellationToken cancellation,
+        ComputeWorkerSession? compute)
     {
-        using var host = new HostedLibraryHost(artifactRoot, cancellation);
+        using var host = new HostedLibraryHost(artifactRoot, cancellation, compute);
         using (Library.UseHost(host))
         {
             ApplyParameters(assembly, values);
@@ -202,7 +211,14 @@ internal static class ModelRunner
         => VertexNormals(ref positions, ref indices, out _);
 
     internal static float[] VertexNormals(ref float[] positions, ref uint[] indices, out int[] sources)
+        => VertexNormals(ref positions, ref indices, out sources, out _);
+
+    internal static float[] VertexNormals(ref float[] positions, ref uint[] indices, out int[] sources, out LayoutStability stability)
     {
+        var minimumArea = float.PositiveInfinity;
+        var maximumEdgeSum = 0f;
+        var creaseMargin = float.PositiveInfinity;
+        var uvAxisMargin = float.PositiveInfinity;
         var vertexCount = positions.Length / 3;
         var creaseCosine = MathF.Cos(MathF.PI / 6);
         var faces = new Vector3[indices.Length / 3];
@@ -219,6 +235,12 @@ internal static class ModelRunner
             var ab = new Vector3(positions[b] - positions[a], positions[b + 1] - positions[a + 1], positions[b + 2] - positions[a + 2]);
             var ac = new Vector3(positions[c] - positions[a], positions[c + 1] - positions[a + 1], positions[c + 2] - positions[a + 2]);
             var face = Vector3.Cross(ab, ac);
+            var absolute = Vector3.Abs(face);
+            var dominant = MathF.Max(absolute.X, MathF.Max(absolute.Y, absolute.Z));
+            var runnerUp = MathF.Max(MathF.Min(absolute.X, absolute.Y), MathF.Min(MathF.Max(absolute.X, absolute.Y), absolute.Z));
+            uvAxisMargin = MathF.Min(uvAxisMargin, dominant - runnerUp);
+            minimumArea = MathF.Min(minimumArea, face.Length());
+            maximumEdgeSum = MathF.Max(maximumEdgeSum, ab.Length() + ac.Length());
             faces[triangle / 3] = face;
             directions[triangle / 3] = face.LengthSquared() > 0 ? Vector3.Normalize(face) : Vector3.Zero;
             for (var corner = triangle; corner < triangle + 3; corner++)
@@ -242,7 +264,9 @@ internal static class ModelRunner
             {
                 var first = corners[start];
                 var second = corners[start + 1];
-                if (Vector3.Dot(directions[first / 3], directions[second / 3]) >= creaseCosine)
+                var dot = Vector3.Dot(directions[first / 3], directions[second / 3]);
+                creaseMargin = MathF.Min(creaseMargin, MathF.Abs(dot - creaseCosine));
+                if (dot >= creaseCosine)
                 {
                     var firstEnd = NextCorner(first);
                     var secondEnd = NextCorner(second);
@@ -302,10 +326,14 @@ internal static class ModelRunner
         }
         indices = remapped;
         var normals = new float[positions.Length];
+        var fanFaces = new int[sources.Length];
+        var minimumFanArea = float.PositiveInfinity;
+        var maximumFanFaces = 0;
         for (var corner = 0; corner < indices.Length; corner++)
         {
             var offset = checked((int)indices[corner]) * 3;
             var face = faces[corner / 3];
+            fanFaces[offset / 3]++;
             normals[offset] += face.X;
             normals[offset + 1] += face.Y;
             normals[offset + 2] += face.Z;
@@ -313,12 +341,19 @@ internal static class ModelRunner
         for (var vertex = 0; vertex < sources.Length; vertex++)
         {
             var offset = vertex * 3;
-            var normal = Vector3.Normalize(new Vector3(normals[offset], normals[offset + 1], normals[offset + 2]));
+            var sum = new Vector3(normals[offset], normals[offset + 1], normals[offset + 2]);
+            if (fanFaces[vertex] > 0)
+            {
+                minimumFanArea = MathF.Min(minimumFanArea, sum.Length());
+                maximumFanFaces = Math.Max(maximumFanFaces, fanFaces[vertex]);
+            }
+            var normal = Vector3.Normalize(sum);
             if (!float.IsFinite(normal.X)) normal = Vector3.UnitZ;
             normals[offset] = normal.X;
             normals[offset + 1] = normal.Y;
             normals[offset + 2] = normal.Z;
         }
+        stability = new LayoutStability(minimumArea, maximumEdgeSum, creaseMargin, minimumFanArea, maximumFanFaces, uvAxisMargin);
         return normals;
 
         static int NextCorner(int corner) => corner / 3 * 3 + (corner + 1) % 3;

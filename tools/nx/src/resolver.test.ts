@@ -91,12 +91,12 @@ describe('projects()', () => {
 });
 
 describe('publishable()', () => {
-  it('is every non-private type:package project, sorted — forty-nine today', () => {
+  it('is every non-private type:package project, sorted — fifty-one today', () => {
     const names = publishable(live).map((entry) => entry.name);
 
     // The count is the tripwire; re-baselining it is the point at which a new
     // package is noticed. Pinning the whole list would only restate the rule.
-    expect(names).toHaveLength(49);
+    expect(names).toHaveLength(51);
     expect(names).toEqual([...names].sort());
     // Both ends of the train, and the native package added most recently.
     for (const name of ['runtime', 'runtime-testing', 'geospec-engine', 'opencascade-native']) {
@@ -286,8 +286,8 @@ describe('publishWaves()', () => {
         }
       }
     }
-    // The current publishable graph has nine dependency layers.
-    expect(waves).toHaveLength(9);
+    // The current publishable graph has eleven dependency layers.
+    expect(waves).toHaveLength(11);
     expect(publishWaves(fixture)).toEqual([['base'], ['leaf']]);
   });
 });
@@ -297,12 +297,14 @@ describe('publishableClosure()', () => {
     const closure = publishableClosure(live, ['esbuild', 'replicad']);
     expect(closure).toEqual([
       'cache-core',
-      'filesystem',
       'project-core',
+      'rpc',
       'spatial',
       'units',
       'kinematics',
+      'filesystem',
       'parameters',
+      'revisions',
       'runtime',
       'bundler-core',
       'geometry-core',

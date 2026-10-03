@@ -1,6 +1,7 @@
 import { actionDigest, contentDigest, digestContent } from '#digest.js';
+import { ownEncodedContent } from '#encoded-content.js';
 import type { ActionStore, ComputeActionRecord, ContentStore } from '#store.js';
-import type { CacheCodec } from '#types.js';
+import type { CacheCodec, ContentDigest } from '#types.js';
 
 const assert = (condition: boolean, message: string): void => {
   if (!condition) {
@@ -62,12 +63,25 @@ export const runCacheCodecConformance = async <T>(input: CacheCodecConformanceIn
   for (const sample of input.samples) {
     const { signal } = new AbortController();
     // oxlint-disable-next-line no-await-in-loop -- sample checks are intentionally isolated
-    const first = new Uint8Array(await input.codec.encode({ value: sample, signal }));
+    const first = await ownEncodedContent(await input.codec.encode({ value: sample, signal }), signal);
     // oxlint-disable-next-line no-await-in-loop -- determinism requires a second encoding
-    const second = new Uint8Array(await input.codec.encode({ value: sample, signal }));
-    assert(equalBytes(first, second), 'encoding the same value twice must produce identical bytes');
+    const second = await ownEncodedContent(await input.codec.encode({ value: sample, signal }), signal);
+    assert(equalBytes(first.bytes, second.bytes), 'encoding the same value twice must produce identical bytes');
+    assert(
+      first.content.size === second.content.size &&
+        [...first.content.keys()].every((digest) => second.content.has(digest)),
+      'encoding the same value twice must produce identical content leaves',
+    );
     // oxlint-disable-next-line no-await-in-loop -- each encoded sample must round trip
-    const decoded = await input.codec.decode({ bytes: new Uint8Array(first), signal });
+    const decoded = await input.codec.decode({
+      bytes: new Uint8Array(first.bytes),
+      signal,
+      readContent: async ({ digest }) => {
+        const leaf = digest === first.digest ? first.bytes : first.content.get(digest);
+        assert(leaf !== undefined, 'a codec must resolve only its declared content');
+        return leaf === undefined ? undefined : new Uint8Array(leaf);
+      },
+    });
     assert(input.equal({ actual: decoded, expected: sample }), 'decoded content must equal its source');
   }
 };
@@ -127,12 +141,14 @@ export const runActionStoreConformance = async (input: ActionStoreConformanceInp
   const store = await input.createStore();
   const key = actionDigest({ value: `sha256:${'1'.repeat(64)}` });
   const output = contentDigest({ value: `sha256:${'2'.repeat(64)}` });
+  const leaf = contentDigest({ value: `sha256:${'4'.repeat(64)}` });
   const record: ComputeActionRecord = {
     schemaVersion: 1,
     actionDigest: key,
     codec: { id: 'conformance', version: '1' },
     output: { digest: output, size: 3, mediaType: 'application/octet-stream' },
     dependencies: [],
+    requiredContent: [leaf],
   };
   const initialRead = await store.read({ digest: key });
   assert(initialRead.status === 'miss', 'a fresh action store must miss');
@@ -145,6 +161,10 @@ export const runActionStoreConformance = async (input: ActionStoreConformanceInp
     return;
   }
   assert(firstRead.record.output.mediaType === 'application/octet-stream', 'writes must be copied');
+  assert(firstRead.record.requiredContent?.[0] === leaf, 'writes must preserve required content');
+  if (firstRead.record.requiredContent !== undefined) {
+    (firstRead.record.requiredContent as ContentDigest[])[0] = output;
+  }
   (firstRead.record.output as { mediaType: string }).mediaType = 'mutated-again';
   const secondRead = await store.read({ digest: key });
   assert(secondRead.status === 'hit', 'an action must survive caller mutation');
@@ -152,6 +172,7 @@ export const runActionStoreConformance = async (input: ActionStoreConformanceInp
     return;
   }
   assert(secondRead.record.output.mediaType === 'application/octet-stream', 'reads must be copied');
+  assert(secondRead.record.requiredContent?.[0] === leaf, 'reads must not expose mutable storage closures');
   const duplicate = await store.publish({ record: secondRead.record });
   assert(duplicate.status === 'existing', 'publish must be idempotent');
   let conflictRejected = false;

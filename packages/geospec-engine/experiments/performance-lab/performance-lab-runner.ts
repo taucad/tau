@@ -395,6 +395,7 @@ export const parsePerformanceLabRunInput = async (value: unknown): Promise<Perfo
 const runNative = async (
   input: PerformanceLabRunInput,
   load: () => Promise<PerformanceLabEngineModule>,
+  resultRetention: 'complete' | 'discard',
 ): Promise<PerformanceLabRunResult> => {
   const totalAt = performance.now();
   const startupAt = performance.now();
@@ -441,6 +442,9 @@ const runNative = async (
         const methods: Record<string, unknown> = current.polarity === 'negative' ? matchers.not : matchers;
         const method = current.kind === 'query' ? client.query : methods[current.matcher];
         if (typeof method !== 'function') {
+          if (resultRetention === 'discard') {
+            continue;
+          }
           perCase.push({
             caseId: current.id,
             matcher: current.matcher,
@@ -479,6 +483,10 @@ const runNative = async (
         }
         const elapsed = ms(evaluatedAt);
         evaluation += elapsed;
+        if (resultRetention === 'discard') {
+          firstResult ??= ms(totalAt);
+          continue;
+        }
         const numericProfile = numericProfileOfCanonicalResult(report.canonicalResult);
         profile ??= numericProfile;
         perCase.push({
@@ -497,8 +505,10 @@ const runNative = async (
       }
     }
     /* oxlint-enable no-await-in-loop */
-    engineObservations = engine.observations ? decode(engine.observations()) : null;
-    buildIdentity = engine.cacheProducerIdentity ? decode(engine.cacheProducerIdentity()) : null;
+    if (resultRetention === 'complete') {
+      engineObservations = engine.observations ? decode(engine.observations()) : null;
+      buildIdentity = engine.cacheProducerIdentity ? decode(engine.cacheProducerIdentity()) : null;
+    }
   } finally {
     const cleanupAt = performance.now();
     try {
@@ -534,6 +544,7 @@ const runNative = async (
 const runLegacy = async (
   input: PerformanceLabRunInput,
   load: NonNullable<PerformanceLabModules['legacy']>,
+  resultRetention: 'complete' | 'discard',
 ): Promise<PerformanceLabRunResult> => {
   const totalAt = performance.now();
   const startupAt = performance.now();
@@ -550,6 +561,9 @@ const runLegacy = async (
   if (input.cases.every(({ matcher, polarity }) => !supported.has(matcher) || polarity === 'negative')) {
     for (let repeat = 0; repeat < input.repeats; repeat += 1) {
       for (const current of input.cases) {
+        if (resultRetention === 'discard') {
+          continue;
+        }
         perCase.push({
           caseId: current.id,
           matcher: current.matcher,
@@ -617,6 +631,9 @@ const runLegacy = async (
           current.polarity === 'negative' ||
           (current.kind === 'matcher' && current.payload === undefined)
         ) {
+          if (resultRetention === 'discard') {
+            continue;
+          }
           perCase.push({
             caseId: current.id,
             matcher: current.matcher,
@@ -657,6 +674,9 @@ const runLegacy = async (
         const result = response.results[0];
         if (!result) {
           throw new Error('Legacy GeoSpec matcher returned no report.');
+        }
+        if (resultRetention === 'discard') {
+          continue;
         }
         const canonicalResult = encodeGeoSpecCanonicalJson(toGeoSpecProtocolJson(result));
         perCase.push({
@@ -701,21 +721,23 @@ const runLegacy = async (
  * @internal
  * @param input - Parsed ordinary benchmark input.
  * @param modules - Actual lazy modules supplied by the host.
+ * @param resultRetention - Discard unused prewarm reporting only; calls and cleanup still execute.
  * @returns Raw per-case evidence and complete cell wall timing.
  */
 export const runPerformanceLabCell = async (
   input: PerformanceLabRunInput,
   modules: PerformanceLabModules,
+  resultRetention: 'complete' | 'discard' = 'complete',
 ): Promise<PerformanceLabRunResult> => {
   if (input.engine === 'legacy-wasm') {
     if (!modules.legacy) {
       throw new Error('Legacy GeoSpec engine module is unavailable.');
     }
-    return runLegacy(input, modules.legacy);
+    return runLegacy(input, modules.legacy, resultRetention);
   }
   const load = input.engine === 'combined-wasm' ? modules.combined : modules.native;
   if (!load) {
     throw new Error(`${input.engine} GeoSpec engine module is unavailable.`);
   }
-  return runNative(input, load);
+  return runNative(input, load, resultRetention);
 };

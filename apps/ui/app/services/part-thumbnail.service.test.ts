@@ -253,8 +253,10 @@ describe('PartThumbnailService', () => {
       sourcePath: 'main.ts',
       exportOptions: {
         mode: 'batch',
-        width: 256,
-        height: 256,
+        width: 1536,
+        height: 1536,
+        quality: 0.95,
+        lineWidth: 6,
         views: [
           {
             visiblePrimitives: [

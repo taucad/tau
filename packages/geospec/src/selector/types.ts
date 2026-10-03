@@ -142,7 +142,11 @@ export type PlaneQuery = {
 };
 
 /**
- * Body query predicates over per-occurrence solid aggregates.
+ * Body query predicates over available source facts. The STEP index currently
+ * exposes per-occurrence solid aggregates. Qualified mesh Bodies are material
+ * roots, including their cavities; disconnected roots and cavity islands stay
+ * separate. Mesh measure, probe and ordering predicates without the required
+ * facts refuse, including inside boolean queries.
  *
  * @public
  */
@@ -174,12 +178,15 @@ export type OccurrenceSelector = {
 };
 
 /**
- * Body selector: one solid within an occurrence.
+ * Body selector over source-backed solid evidence. Qualified mesh input exposes
+ * one material root with its cavities; the STEP index currently exposes one
+ * solid aggregate per occurrence. These are not interchangeable body counts.
  *
  * @public
  */
 export type BodySelector = {
   kind: 'body';
+  /** STEP occurrence scope, or the exact retained mesh primitive label including any ordinal suffix. */
   of?: string | RegExp;
   query?: BodyQuery;
   expect?: Cardinality;

@@ -27,7 +27,8 @@ import {
 } from '#components/geometry/cad/model-component-action-menu.js';
 import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
-import { PartPreviewImage } from '#components/geometry/cad/part-preview-image.js';
+import { PartPreviewFrame } from '#components/geometry/cad/part-preview-image.js';
+import { isPreviewablePart, useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
 import { useOptionalHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
@@ -278,6 +279,7 @@ type ModelPaneviewPanelParams = {
 type ModelPropertiesPanelParams = {
   selected?: { readonly node: GeometryComponentNode; readonly entryPath: string };
   preview?: PartThumbnailState;
+  onOpenPreview?: (origin: HTMLElement) => void;
   onRetryPreview?: () => void;
   onPreviewDecodeError?: () => void;
   onPreviewDecoded?: () => void;
@@ -332,6 +334,23 @@ function ModelPaneview({
     preview?.unitId === visibleSelection?.unitId && preview?.componentId === visibleSelection?.node.id
       ? preview
       : undefined;
+  const openPartGallery = useOpenPartGallery();
+  const selectedGraphicsRef = entries.find(([entryPath]) => entryPath === visibleSelection?.entryPath)?.[1];
+  const onOpenPreview = useMemo(
+    () =>
+      openPartGallery && selectedGraphicsRef && visibleSelection && isPreviewablePart(visibleSelection.node)
+        ? (origin: HTMLElement) => {
+            openPartGallery({
+              graphicsRef: selectedGraphicsRef,
+              unitId: visibleSelection.unitId,
+              componentId: visibleSelection.node.id,
+              source: 'explorer',
+              origin,
+            });
+          }
+        : undefined,
+    [openPartGallery, selectedGraphicsRef, visibleSelection],
+  );
 
   const handleReady = useCallback(
     ({ api }: { api: PaneviewApi }) => {
@@ -372,6 +391,7 @@ function ModelPaneview({
         params: {
           selected: visibleSelection,
           preview: selectedPreview?.state,
+          onOpenPreview,
           onRetryPreview: selectedPreview?.retry,
           onPreviewDecodeError: selectedPreview?.decodeError,
           onPreviewDecoded: selectedPreview?.decoded,
@@ -381,6 +401,7 @@ function ModelPaneview({
     [
       connectApi,
       entries,
+      onOpenPreview,
       onPreviewChange,
       onSelectionChange,
       selectedPreview,
@@ -413,11 +434,12 @@ function ModelPaneview({
     paneviewApiRef.current?.getPanel('properties')?.api.updateParameters({
       selected: visibleSelection,
       preview: selectedPreview?.state,
+      onOpenPreview,
       onRetryPreview: selectedPreview?.retry,
       onPreviewDecodeError: selectedPreview?.decodeError,
       onPreviewDecoded: selectedPreview?.decoded,
     });
-  }, [selectedPreview, visibleSelection]);
+  }, [onOpenPreview, selectedPreview, visibleSelection]);
 
   useEffect(() => {
     if (!revealTarget) {
@@ -473,7 +495,11 @@ function LiveComponentTree({
   readonly graphicsRef: GraphicsActorRef;
   readonly modelRef: ModelInteractionRef;
 }): React.JSX.Element {
-  const contentRef = useRef<HTMLDivElement>(null);
+  const [scroller, setScroller] = useState<HTMLDivElement>();
+  // oxlint-disable-next-line typescript/no-restricted-types -- React passes null when a callback ref detaches.
+  const attachScroller = useCallback((element: HTMLDivElement | null) => {
+    setScroller(element ?? undefined);
+  }, []);
   const unitId = deriveModelInteractionUnitId({ sourceFile: params.entryPath });
   const unitState = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
   const {
@@ -492,6 +518,7 @@ function LiveComponentTree({
     () => (manifest ? getVisibleModelComponents(manifest, normalizedQuery) : []),
     [manifest, normalizedQuery],
   );
+  const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
   const leafPartIds = useMemo(
     () =>
       manifest?.nodeOrder.filter((id) => {
@@ -514,19 +541,21 @@ function LiveComponentTree({
   const getPreviewSnapshot = useCallback(() => thumbnails?.snapshot() ?? emptyPreviewSnapshot, [thumbnails]);
   const previews = useSyncExternalStore(subscribePreviews, getPreviewSnapshot, getPreviewSnapshot);
   const selectedPreview = currentSelection ? previews.get(currentSelection) : undefined;
-  const [previewRetryRevision, setPreviewRetryRevision] = useState(0);
-  const manualPreviewRetry = useRef<string | undefined>(undefined);
-  const retryPreview = useCallback(
-    (id?: string) => {
-      manualPreviewRetry.current = id ?? currentSelection;
-      setPreviewRetryRevision((value) => value + 1);
-    },
-    [currentSelection],
-  );
-  const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
   const artifact = useSelector(graphicsRef, (state) => state.context.artifact);
   const artifactKey = useSelector(graphicsRef, (state) => state.context.artifactKey);
   const presentedKey = useSelector(graphicsRef, (state) => state.context.gltfPresentation.presentedKey);
+  const [previewRetry, setPreviewRetry] = useState<{ partId: string; requestId: number; sourceKey: string }>();
+  const submittedRetryId = useRef(0);
+  const retryPreview = useCallback(
+    (id?: string) => {
+      const partId = id ?? currentSelection;
+      if (!partId || !presentedKey) {
+        return;
+      }
+      setPreviewRetry((current) => ({ partId, requestId: (current?.requestId ?? 0) + 1, sourceKey: presentedKey }));
+    },
+    [currentSelection, presentedKey],
+  );
 
   useEffect(() => {
     if (!imageService || sharedThumbnails) {
@@ -544,13 +573,17 @@ function LiveComponentTree({
   useEffect(() => () => thumbnails?.releaseOwner('explorer'), [thumbnails]);
 
   useEffect(() => {
-    const scroller = contentRef.current;
     if (!scroller) {
       return undefined;
     }
+    const visibleIds = new Set(visibleNodes.map((node) => node.id));
     const mounted = new Set<HTMLElement>();
     const inView = new Set<string>();
+    let active = true;
     const publishVisible = (): void => {
+      if (!active) {
+        return;
+      }
       const next = [...inView].slice(0, 127);
       setVisiblePreviewIds((current) =>
         current.length === next.length && current.every((id, index) => id === next[index]) ? current : next,
@@ -561,10 +594,13 @@ function LiveComponentTree({
         ? undefined
         : new IntersectionObserver(
             (entries) => {
+              if (!active) {
+                return;
+              }
               for (const entry of entries) {
                 const row = entry.target as HTMLElement;
                 const id = row.dataset['modelComponentId'];
-                if (!id || !mounted.has(row)) {
+                if (!id || !visibleIds.has(id) || !mounted.has(row)) {
                   continue;
                 }
                 if (entry.isIntersecting) {
@@ -578,7 +614,14 @@ function LiveComponentTree({
             { root: scroller, rootMargin: '56px 0px' },
           );
     const syncMountedRows = (): void => {
-      const rows = new Set(scroller.querySelectorAll<HTMLElement>('[data-model-component-row]'));
+      if (!active) {
+        return;
+      }
+      const rows = new Set(
+        [...scroller.querySelectorAll<HTMLElement>('[data-model-component-row]')].filter((row) =>
+          visibleIds.has(row.dataset['modelComponentId'] ?? ''),
+        ),
+      );
       for (const row of mounted) {
         if (!rows.has(row)) {
           observer?.unobserve(row);
@@ -611,12 +654,17 @@ function LiveComponentTree({
     mountedRows.observe(scroller, { childList: true, subtree: true });
     syncMountedRows();
     return () => {
+      active = false;
       mountedRows.disconnect();
       observer?.disconnect();
     };
-  }, [manifest, normalizedQuery]);
+  }, [scroller, visibleNodes]);
 
   useEffect(() => {
+    if (previewRetry && previewRetry.sourceKey !== presentedKey) {
+      // Retire an unsubmitted retry when its presented-source lifetime ends.
+      submittedRetryId.current = previewRetry.requestId;
+    }
     if (!thumbnails) {
       return;
     }
@@ -634,9 +682,11 @@ function LiveComponentTree({
     let active = true;
     const { content } = artifact;
     const requestedParts = parts.slice(0, 128);
-    const manualPartId = manualPreviewRetry.current;
-    manualPreviewRetry.current = undefined;
-    if (content.byteLength > 64 * 1024 * 1024) {
+    const pendingRetry =
+      previewRetry?.sourceKey === presentedKey && previewRetry.requestId !== submittedRetryId.current
+        ? previewRetry
+        : undefined;
+    if (content.buffer.byteLength > 64 * 1024 * 1024) {
       thumbnails.failPreparationForOwner(
         'explorer',
         requestedParts,
@@ -666,8 +716,11 @@ function LiveComponentTree({
               ...part,
               visualKey: prepared.previews[index]?.key ?? prepared.visualKey,
             })),
-            manualPartId ? { manualPartId } : undefined,
+            pendingRetry ? { manualPartId: pendingRetry.partId } : undefined,
           );
+          if (pendingRetry) {
+            submittedRetryId.current = pendingRetry.requestId;
+          }
         }
       } catch (error) {
         if (active) {
@@ -688,7 +741,7 @@ function LiveComponentTree({
     manifest,
     params.entryPath,
     presentedKey,
-    previewRetryRevision,
+    previewRetry,
     selectedComponentIds,
     thumbnails,
     visiblePreviewIds,
@@ -705,7 +758,9 @@ function LiveComponentTree({
         unitId,
         componentId: currentSelection,
         preview: selectedPreview,
-        retry: retryPreview,
+        retry: () => {
+          retryPreview();
+        },
         decodeError: () => {
           if (selectedPreview?.bytes) {
             thumbnails?.failDecode(currentSelection, selectedPreview.bytes);
@@ -726,7 +781,7 @@ function LiveComponentTree({
 
   return (
     <ModelPaneviewPanelSurface
-      contentRef={contentRef}
+      contentRef={attachScroller}
       footer={
         <Collapsible>
           <div className='flex min-w-0 items-center justify-between gap-2 border-t px-2 py-1 text-xs text-muted-foreground'>
@@ -899,6 +954,7 @@ function ModelPropertiesPaneviewPanel({ params }: { readonly params: ModelProper
         node={params.selected?.node}
         entryPath={params.selected?.entryPath}
         preview={params.preview}
+        onOpenPreview={params.onOpenPreview}
         onRetryPreview={params.onRetryPreview}
         onPreviewDecodeError={params.onPreviewDecodeError}
         onPreviewDecoded={params.onPreviewDecoded}
@@ -1165,6 +1221,18 @@ export const ComponentRow = memo(function ComponentRow({
     ),
   });
   const guideCount = Math.max(0, node.depth - rootDepth - 1);
+  const openPartGallery = useOpenPartGallery();
+  const isPreviewRow = isPreviewablePart(node);
+  const swatch = node.appearance?.materials?.length ? (
+    <MaterialSwatch materials={node.appearance.materials} />
+  ) : (
+    <Box
+      aria-hidden='true'
+      data-testid='component-color-icon'
+      className='size-4 shrink-0'
+      style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
+    />
+  );
 
   const onHover = (componentId: string | undefined): void => {
     graphicsRef.send({ type: 'setHoveredModelComponent', unitId, componentId, source: 'explorer' });
@@ -1187,7 +1255,9 @@ export const ComponentRow = memo(function ComponentRow({
           data-model-component-id={node.id}
           className={cn(
             // The sidebar row's lit states and inset: `pr-0.5` gives a 24 px action the 2 px it has above and below.
-            'group/part relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
+            'group/part relative flex w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
+            // A part row leads with its 80 px preview; groups stay compact.
+            isPreviewRow ? 'h-22 gap-2' : 'h-7',
             'focus-within:bg-sidebar-accent focus-within:text-sidebar-accent-foreground has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
             isSelected ? 'bg-primary/10 text-foreground' : 'text-sidebar-foreground',
             !isSelected && isFocused
@@ -1218,6 +1288,24 @@ export const ComponentRow = memo(function ComponentRow({
               style={{ left: `${8 + depth * 12}px` }}
             />
           ))}
+          {isPreviewRow ? (
+            <PartPreviewFrame
+              name={node.name}
+              preview={preview}
+              className='size-20'
+              fallback={swatch}
+              tabIndex={-1}
+              onOpen={
+                openPartGallery
+                  ? (origin) => {
+                      openPartGallery({ graphicsRef, unitId, componentId: node.id, source: 'explorer', origin });
+                    }
+                  : undefined
+              }
+              onDecodeError={preview?.bytes ? () => onPreviewDecodeError?.(node.id, preview.bytes!) : undefined}
+              onDecoded={preview?.bytes ? () => onPreviewDecoded?.(node.id, preview.bytes!) : undefined}
+            />
+          ) : undefined}
           <button
             type='button'
             data-model-part-button=''
@@ -1249,26 +1337,7 @@ export const ComponentRow = memo(function ComponentRow({
               }
             }}
           >
-            {preview?.bytes ? (
-              <PartPreviewImage
-                bytes={preview.bytes}
-                className={cn(
-                  'size-5 shrink-0 rounded-sm bg-muted object-contain ring-1 ring-border',
-                  preview.status === 'pending' && 'opacity-50',
-                )}
-                onError={() => onPreviewDecodeError?.(node.id, preview.bytes!)}
-                onLoad={() => onPreviewDecoded?.(node.id, preview.bytes!)}
-              />
-            ) : node.appearance?.materials?.length ? (
-              <MaterialSwatch materials={node.appearance.materials} />
-            ) : (
-              <Box
-                aria-hidden='true'
-                data-testid='component-color-icon'
-                className='size-4 shrink-0'
-                style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
-              />
-            )}
+            {isPreviewRow ? undefined : swatch}
             <span className='truncate'>
               <HighlightText text={node.name} searchTerm={query} />
             </span>

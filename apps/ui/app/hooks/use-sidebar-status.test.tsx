@@ -30,6 +30,7 @@ import {
   useSidebarCommands,
 } from '#hooks/use-sidebar-status.js';
 import type { ProjectSidebarRow, useLiveNow } from '#hooks/use-sidebar-status.js';
+import { publishRecordIssue } from '#workbench-records/record-issues.js';
 import { toSnapshotCallback } from '#lib/xstate-test.utils.js';
 import type { SnapshotListener } from '#lib/xstate-test.utils.js';
 
@@ -624,6 +625,44 @@ describe('use-sidebar-status — pin (d): the project row rolls up its chats (A3
     expect(expanded('bracket')).toEqual({ mark: 'none', sentence: 'Live, busy' });
   });
 
+  /* A background project's settings record needs a person: its row says so,
+   * because the focused project's header shows only its own records. */
+  it('counts settings records in attention and names the most urgent in the sentence', () => {
+    liveProject('bracket');
+    driveChat('bracket', 'idle-chat', []);
+    const settings = {
+      kind: 'entries',
+      path: '.tau/workbench/entries.json',
+      message: undefined,
+      bytes: null,
+      writing: false,
+      retryRead: async () => true,
+      retrySave: async () => true,
+    } as const;
+    try {
+      publishRecordIssue('bracket', 'entries', { ...settings, state: 'reading' });
+      expect(collapsed('bracket')).toEqual({ mark: 'none', sentence: 'Live' });
+      publishRecordIssue('bracket', 'entries', { ...settings, state: 'invalid' });
+      publishRecordIssue('bracket', 'layout', {
+        ...settings,
+        kind: 'layout',
+        path: '.tau/workbench/layout.json',
+        state: 'unconfirmed',
+      });
+      expect(rowOf('bracket').attention).toBe(2);
+      expect(collapsed('bracket')).toEqual({
+        mark: 'attention',
+        count: 2,
+        sentence: 'Live · 2 need you · Save not confirmed',
+      });
+      expect(expanded('bracket')).toEqual({ mark: 'attention', count: 2, sentence: 'Live · Save not confirmed' });
+    } finally {
+      publishRecordIssue('bracket', 'entries', undefined);
+      publishRecordIssue('bracket', 'layout', undefined);
+    }
+    expect(collapsed('bracket')).toEqual({ mark: 'none', sentence: 'Live' });
+  });
+
   /* R4: a live project whose kernel was refused says so on the row, with the
    * reason the refusal carried — the sentence is the only channel a screen
    * reader has, because every mark glyph is `aria-hidden`. */
@@ -1031,6 +1070,7 @@ const compiledHooks = await (async () => {
     '#hooks/chat-session-store-provider.js': await import('#hooks/chat-session-store-provider.js'),
     '#lib/xstate.lib.js': await import('#lib/xstate.lib.js'),
     '#machines/chat-projection.logic.js': await import('#machines/chat-projection.logic.js'),
+    '#workbench-records/record-issues.js': await import('#workbench-records/record-issues.js'),
   };
   const linked = compiled.code
     .replaceAll(

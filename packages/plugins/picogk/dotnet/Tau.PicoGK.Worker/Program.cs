@@ -8,7 +8,7 @@ namespace Tau.PicoGK.Worker;
 
 internal static class Program
 {
-    private const int ProtocolVersion = 7;
+    private const int ProtocolVersion = 8;
     private const int MaximumRequestCharacters = 1_048_576;
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web);
     private static readonly object ProtocolGate = new();
@@ -180,7 +180,13 @@ internal static class Program
                 // A build superseded before it started pays nothing beyond its own frame.
                 cancellation.ThrowIfCancellationRequested();
                 var compiled = CompilationService.Compile(arguments.Workspace, entryPath);
-                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation);
+                ComputeWorkerSession? compute = null;
+                if(request.Params.TryGetProperty("computeReuse",out var computeRequest)) {
+                    // Disposable cache metadata cannot make an otherwise valid model fail.
+                    try{compute=new ComputeWorkerSession(computeRequest,arguments.Artifacts,cancellation);}
+                    catch(Exception error) when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("preload",error);}
+                }
+                var execution = ModelRunner.Execute(compiled, arguments.Artifacts, parameters, cancellation, compute);
                 var result = MeshArtifactWriter.Write(
                     arguments.Artifacts,
                     execution,
@@ -202,6 +208,11 @@ internal static class Program
                             ManagedHeapBytesAfterCollection(),
                             execution.PicoGkNativeBytes,
                             Environment.WorkingSet)));
+                if(compute is not null&&execution.ComputeRecords is {} computeRecords) {
+                    try{result=result with{ComputeReuseManifest=compute.WriteSuccessful(computeRecords)};}
+                    catch(Exception error) when(ComputeWorkerSession.IsDisposableFailure(error)){ComputeWorkerSession.ReportBypass("publication",error);}
+                }
+                cancellation.ThrowIfCancellationRequested();
                 Write(new { protocolVersion = ProtocolVersion, requestId = request.RequestId, result });
                 return false;
             }

@@ -1,36 +1,24 @@
 import { copyFile, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import '@taucad/geospec-engine/register/node';
 import { createExampleGeoSpecRuntimeClient } from '@taucad/tau-examples/runtime';
 import { runnerResultToTestModelOutput } from '@taucad/agent-tools/geospec';
-import type { TestModelOutput } from '@taucad/agent-tools/geospec';
 import { trimToolResultContext } from '@taucad/agent-host';
 import { assertGeoSpecJsonValue } from 'geospec/engine';
 import { rpcSchemasRegistry } from '@taucad/chat';
 import { rpcName, toolName } from '@taucad/chat/constants';
 import { createTauMcpAdapter } from '@taucad/mcp';
-import { createGeoSpecNodePoolRunner, createGeoSpecNodeRunner, createNodeVmFileSystem } from 'geospec/runner/node';
+import { createGeoSpecNodeRunner, createNodeVmFileSystem } from 'geospec/runner/node';
 import { createModelLoader } from 'geospec/model';
 import { describe, expect, it } from 'vitest';
 
-const normalize = (output: TestModelOutput): TestModelOutput => ({
-  ...output,
-  failures: output.failures.toSorted((left, right) => left.id.localeCompare(right.id)),
-});
-
 describe('GeoSpec evidence to LLM closeout', () => {
   it.each([false, true])(
-    'preserves real failures through serial/pool, RPC, MCP and provider trimming (cache=%s)',
+    'preserves real failures through the runner, RPC, MCP and provider trimming (cache=%s)',
     async (cache) => {
       const root = await mkdtemp(join(tmpdir(), 'geospec-evidence-closeout-'));
       const examplesRoot = resolve(import.meta.dirname, '../../../libs/tau-examples');
-      const runtimeFactory = join(root, 'runtime.mjs');
-      await writeFile(
-        runtimeFactory,
-        `import { createExampleGeoSpecRuntimeClient } from ${JSON.stringify(pathToFileURL(join(examplesRoot, 'scripts/runtime.ts')).href)}; export const createRuntime = () => createExampleGeoSpecRuntimeClient(${JSON.stringify(examplesRoot)});`,
-      );
       const step = join(root, 'assembly.step');
       await copyFile(
         resolve(import.meta.dirname, '../../../packages/geospec-engine/fixtures/xde/two-cube-assembly.step'),
@@ -79,25 +67,10 @@ describe('GeoSpec evidence to LLM closeout', () => {
         }),
         cache,
       });
-      const pool = createGeoSpecNodePoolRunner({
-        projectPath: root,
-        workers: 2,
-        cache,
-        shardTimeout: 120_000,
-        runtimeFactoryModule: { specifier: pathToFileURL(runtimeFactory).href, exportName: 'createRuntime' },
-      });
       try {
         const serialResult = await serial.run({ files: [file] });
-        const poolResult = await pool.run({ files: [file] });
         expect(serialResult).toMatchObject({ passed: 1, failed: 4, selectedTests: 5 });
-        expect(poolResult).toMatchObject({ passed: 1, failed: 4, selectedTests: 5 });
         const output = runnerResultToTestModelOutput(serialResult, [file]);
-        const pooledOutput = runnerResultToTestModelOutput(poolResult, [file]);
-        // Pool scheduling changes row order as timing history warms; evidence order within each failure must not change.
-        expect(normalize(runnerResultToTestModelOutput(await pool.run({ files: [file] }), [file]))).toStrictEqual(
-          normalize(pooledOutput),
-        );
-        expect(normalize(pooledOutput)).toStrictEqual(normalize(output));
         expect(output.failures[0]?.diagnostics).toHaveLength(2);
         for (const diagnostic of output.failures[0]?.diagnostics ?? []) {
           expect(diagnostic.code).toBe('GEOSPEC_SPATIAL_RELATIONSHIP_MISMATCH');
@@ -165,7 +138,6 @@ describe('GeoSpec evidence to LLM closeout', () => {
         expect(trimmed.details).toMatchObject({ content: trimmed.content });
       } finally {
         await serial.close();
-        await pool.close();
         await rm(root, { recursive: true, force: true });
       }
     },

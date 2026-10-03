@@ -149,6 +149,17 @@ describe('canvas review events', () => {
     });
   });
 
+  it('should refuse a canvas as invalid when the artifacts root is absent', async () => {
+    const { root, canvas } = repository();
+    const missing = join(root, 'missing-artifacts');
+    expect(await appendReviewEvent({ canvas, root: missing, event: comment })).toMatchObject({
+      status: 'refused',
+      code: 'INVALID_EVENT',
+      message: `\`${canvas}\` is not a canvas directory: ${missing} does not exist.`,
+    });
+    await expect(readReviewThreads({ canvas, root: missing })).rejects.toThrow(`${missing} does not exist.`);
+  });
+
   it('should ignore events for unknown threads and order by time when folding', () => {
     const base = { author: { kind: 'agent', name: 'a' } } as const;
     const events = [

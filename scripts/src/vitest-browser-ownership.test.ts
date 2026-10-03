@@ -110,6 +110,7 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-converter.spec.ts',
       'apps/desktop-e2e/src/desktop-ephemeral-isolation.spec.ts',
       'apps/desktop-e2e/src/desktop-kernel-utility-cap.spec.ts',
+      'apps/desktop-e2e/src/desktop-machine-profiles.spec.ts',
       'apps/desktop-e2e/src/desktop-main-editor-kernels.spec.ts',
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
       'apps/desktop-e2e/src/desktop-print-dry-run.spec.ts',
@@ -121,9 +122,11 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/support/two-client/git-faults.test.ts',
       'apps/desktop-e2e/src/support/two-client/git-faults.ts',
       'apps/desktop-e2e/src/two-client.spec.ts',
+      'apps/docs/scripts/verify-browser.mts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
+      'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
       'packages/geospec-engine-native/bindings/browser-conformance/qualify-mt-product.mjs',
       'packages/geospec-engine-native/bindings/browser-conformance/run-browser-conformance.ts',
       'scripts/src/canvas-vite.config.test.ts',
@@ -141,8 +144,9 @@ describe('Vitest Browser test-runner ownership', () => {
 
     expect(driverFiles).toEqual([...allowedDriverFiles].sort());
     // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
+    // The docs deployment gate installs Chromium on the Netlify builder unless one is supplied.
     expect(installFiles.sort()).toEqual(
-      ['.agents/skills/create-repo/templates/ci.yml', '.github/workflows/ci.yml'].sort(),
+      ['.agents/skills/create-repo/templates/ci.yml', '.github/workflows/ci.yml', 'apps/docs/project.json'].sort(),
     );
   });
 
@@ -192,16 +196,23 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/react-e2e/vitest.bundlers.config.ts',
         'apps/react-e2e/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
+        'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
+        'apps/ui/app/components/code/code-editor.vitest.browser.config.ts',
+        'apps/ui/app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts',
+        'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
+        'apps/ui/app/routes/w.$workspace.$project/chat-viewer.vitest.browser.config.ts',
         'apps/ui/app/workers/agent-host.vitest.browser.config.ts',
+        'apps/ui/chat-revision-marker.vitest.browser.config.ts',
         'packages/agent-host/vitest.browser.config.ts',
         'packages/geospec-engine/e2e/vitest.config.ts',
         'packages/plugins/openrscad/e2e/vitest.config.ts',
         'packages/plugins/rolldown/vitest.browser.benchmark.config.ts',
         'packages/plugins/rolldown/vitest.browser.config.ts',
         'packages/plugins/rolldown/vitest.browser.nonisolated.config.ts',
+        'packages/ui/vitest.browser.config.ts',
       ].sort(),
     );
 

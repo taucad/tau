@@ -2,13 +2,14 @@
 /**
  * Prepare or verify the complete Node/mixed package payload for CI transport.
  * Uses existing Nx producers; hashes establish transport identity, not qualification.
- * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery|cache-key
+ * Usage: node packages/geospec-engine-native/scripts/ci-artifacts.mjs prepare|verify|verify-delivery|ensure-delivery|snapshot-delivery|cache-key|product-key
  * Optional env: GEOSPEC_DELIVERY_CACHE and existing delivery tool selectors.
  * GEOSPEC_NATIVE_DELIVERY_CACHE selects independent retained native-prefix reuse;
  * GEOSPEC_NATIVE_OCCT_PRODUCER_BUILDER/RECIPE and GEOSPEC_NATIVE_GIT_CEILING_DIRECTORIES
  * apply only to that prefix's verification. Mixed selectors remain independent.
  * GEOSPEC_NATIVE_PREFIX_PATH overrides PATH only for native-prefix verification.
- * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json
+ * Output: out/artifacts/geospec-native-engine/ci/{inventory,mixed-build-receipt,mixed-inputs,mixed-commands}.json;
+ * product-key prints the digest of the product source closure on any platform, for cross-run reuse.
  * Exit: 0 complete and matching; 1 missing, changed or failed prerequisite.
  */
 import assert from 'node:assert/strict';
@@ -58,6 +59,40 @@ const sourceKitOnly = new Set([
   `${packagePath}/bench/performance-lab.test.ts`,
   `${packagePath}/vitest.config.ts`,
 ]);
+/** Workspace files outside the package that select the Rust toolchain or crate graph. */
+const productWorkspaceFiles = new Set(['rust-toolchain.toml', 'Cargo.toml', 'Cargo.lock']);
+/** Package paths that never reach the five products: the TypeScript facade (bundled into
+ * dist at assembly, which the full source identity still binds), benchmarks, conformance
+ * corpora, host suites, trust helpers, documentation, licence texts and JS/Python tests. */
+const nonProductRoots = ['src/', 'bench/', 'conformance/', 'host-tests/', 'quality/', 'trust/', 'licenses/'];
+const nonProductFiles = new Set([
+  'AGENTS.md',
+  'CLAUDE.md',
+  'README.md',
+  'LICENSE',
+  'NOTICE',
+  '.size-limit.json',
+  'tsdown.config.ts',
+]);
+/** Whether a source-identity path can change the generated bindings, addon or WASM.
+ * @type {(path: string) => boolean}
+ */
+const productInput = (path) => {
+  if (sourceKitOnly.has(path)) {
+    return false;
+  }
+  if (!path.startsWith(`${packagePath}/`)) {
+    return productWorkspaceFiles.has(path) || path.startsWith('.cargo/');
+  }
+  const relative = path.slice(packagePath.length + 1);
+  return (
+    !nonProductRoots.some((root) => relative.startsWith(root)) &&
+    !nonProductFiles.has(relative) &&
+    !/^(?:tsconfig[^/]*\.json|vitest[^/]*\.ts)$/u.test(relative) &&
+    !/\.test\.[cm]?[jt]s$/u.test(relative) &&
+    !/(?:^|\/)test_[^/]*\.py$/u.test(relative)
+  );
+};
 const lockPath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.lock';
 const activePath = 'node_modules/.cache/geospec-engine-native/ci-artifacts.active.json';
 /** @type {number | undefined} */
@@ -261,11 +296,44 @@ const sourceIdentity = (root) => {
  * @type {(root: string) => string}
  */
 const closedRecipe = (root) => digest(JSON.stringify(sourceIdentity(root).files));
-/** @type {(source: ReturnType<typeof sourceIdentity>) => ReturnType<typeof sourceIdentity>} */
-const producerIdentity = (source) => ({
+/** The napi CLI writes the generated Node loader, so its locked release is the one product
+ * input that pnpm selects. Peer suffixes are dropped: they follow unrelated workspace bumps.
+ * @type {(root: string) => ReturnType<typeof fileRecord>[]}
+ */
+const napiCliRecord = (root) => {
+  const lockfile = resolve(root, 'pnpm-lock.yaml');
+  if (!existsSync(lockfile)) {
+    return [];
+  }
+  const lines = readFileSync(lockfile, 'utf8').split('\n');
+  const importer = lines.indexOf(`  ${packagePath}:`);
+  assert.ok(importer !== -1, `pnpm-lock.yaml lacks the ${packagePath} importer.`);
+  const end = lines.findIndex((line, index) => index > importer && /^ {0,3}\S/u.test(line));
+  const block = lines.slice(importer + 1, end === -1 ? undefined : end);
+  const entry = block.indexOf("      '@napi-rs/cli':");
+  const version = block
+    .slice(entry + 1, entry + 3)
+    .map((line) => /^ {8}version: ([^(\s]+)/u.exec(line)?.[1])
+    .find(Boolean);
+  assert.ok(entry !== -1 && version, 'pnpm-lock.yaml lacks the locked @napi-rs/cli release.');
+  const resolution = lines.indexOf(`  '@napi-rs/cli@${version}':`);
+  const integrity = /^ {4}resolution: \{integrity: (\S+)\}$/u.exec(lines[resolution + 1] ?? '')?.[1];
+  assert.ok(resolution !== -1 && integrity, `pnpm-lock.yaml lacks the @napi-rs/cli@${version} integrity.`);
+  const bytes = Buffer.from(`@napi-rs/cli@${version} ${integrity}\n`);
+  return [{ path: 'pnpm-lock.yaml#@napi-rs/cli', bytes: bytes.length, sha256: digest(bytes) }];
+};
+/** Products depend only on the native closure, so a workspace, facade or test edit keeps them.
+ * @type {(root: string, source: ReturnType<typeof sourceIdentity>) => ReturnType<typeof sourceIdentity>}
+ */
+const producerIdentity = (root, source) => ({
   ...source,
-  files: source.files.filter((file) => !sourceKitOnly.has(file.path)),
+  files: [...source.files.filter((file) => productInput(file.path)), ...napiCliRecord(root)],
 });
+/** Digest of the product closure: equal keys mean a transport's products verify on this checkout.
+ * @type {(root: string) => string}
+ * @internal
+ */
+export const productKey = (root) => digest(JSON.stringify(producerIdentity(root, sourceIdentity(root)).files));
 /** Nx's runtime input uses the same source closure as transport verification.
  * The delivery generation covers the selected host tools, compilers, SDK and
  * pinned OCCT recipe without requiring downloads or generated outputs.
@@ -586,7 +654,7 @@ export const verifyArtifacts = (root) => {
   );
   assert.ok(
     schema === 'geospec-ci-artifacts-v3'
-      ? isDeepStrictEqual(producerSource?.files, producerIdentity(source).files)
+      ? isDeepStrictEqual(producerSource?.files, producerIdentity(root, source).files)
       : isDeepStrictEqual(recordedSource.files, source.files),
     'GeoSpec artifact source inputs differ from this checkout.',
   );
@@ -905,7 +973,7 @@ export const prepareArtifacts = (root) => {
   const inventory = {
     schema: 'geospec-ci-artifacts-v3',
     source,
-    producerSource: producerIdentity(source),
+    producerSource: producerIdentity(root, source),
     artifacts,
     mixedReceipt: fileRecord(root, receiptPath),
     mixedInputs: fileRecord(root, mixedInputsPath),
@@ -1064,7 +1132,7 @@ const reassembleDelivery = (root, inventory) => {
     producerSource:
       inventory.schema === 'geospec-ci-artifacts-v3'
         ? /** @type {ReturnType<typeof sourceIdentity>} */ (inventory.producerSource)
-        : producerIdentity(inventory.source),
+        : producerIdentity(root, inventory.source),
     delivery: {
       platform: 'darwin-arm64',
       run: recordedWorkflowRun(inventory.delivery?.run),
@@ -1112,7 +1180,16 @@ export const ensureDelivery = (root) => {
       console.log(`Preparing GeoSpec delivery: ${error instanceof Error ? error.message : String(error)}`);
       return prepareArtifacts(root);
     }
-    return reassembleDelivery(root, compatible);
+    try {
+      return reassembleDelivery(root, compatible);
+    } catch (assemblyError) {
+      // Products restored from an earlier run keep their recorded prefix and Cargo paths; on a
+      // host without them only a full producer run can make a current-source delivery.
+      console.log(
+        `Rebuilding GeoSpec delivery: source-kit assembly failed: ${assemblyError instanceof Error ? assemblyError.message : String(assemblyError)}`,
+      );
+      return prepareArtifacts(root);
+    }
   }
 };
 
@@ -1162,6 +1239,10 @@ if (invokedScript !== undefined && resolve(invokedScript) === fileURLToPath(impo
     const root = resolve(import.meta.dirname, '../../..');
     if (process.argv.length === 3 && process.argv[2] === 'cache-key') {
       console.log(deliveryCacheKey(root));
+      process.exit(0);
+    }
+    if (process.argv.length === 3 && process.argv[2] === 'product-key') {
+      console.log(productKey(root));
       process.exit(0);
     }
     const worker = process.argv[2] === '--producer';

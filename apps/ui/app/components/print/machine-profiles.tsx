@@ -66,6 +66,7 @@ export function MachineProfiles({
     }
     return profiles;
   }, [studio.processes, printer]);
+  // Starting profiles stand in only while no saved settings file exists.
   useEffect(() => {
     if (settings.file.status === 'absent') {
       settings.startingProfiles(qualified);

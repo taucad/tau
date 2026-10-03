@@ -11,7 +11,10 @@ let started;
  * @param stages - Server-rendered stages and chapters; each keeps its static art as fallback.
  * @type {(stages: {heroStage: Element | null, storyStage: Element | null, chapters: Element[]}) => Promise<void>}
  */
-export const start = (stages) => (started ??= run(stages));
+export const start = async (stages) => {
+  started ??= run(stages);
+  return started;
+};
 
 /** @type {(stages: {heroStage: Element | null, storyStage: Element | null, chapters: Element[]}) => Promise<void>} */
 const run = async ({ heroStage, storyStage, chapters }) => {
@@ -21,11 +24,21 @@ const run = async ({ heroStage, storyStage, chapters }) => {
   const controller = new AbortController();
   const { signal } = controller;
   // Leaving the page while geometry downloads must never allocate a renderer.
-  addEventListener('pagehide', () => controller.abort(), { once: true });
-  for (const stage of [hero, story]) stage?.setAttribute('aria-busy', 'true');
+  addEventListener(
+    'pagehide',
+    () => {
+      controller.abort();
+    },
+    { once: true },
+  );
+  for (const stage of [hero, story]) {
+    stage?.setAttribute('aria-busy', 'true');
+  }
   const assembly = await loadAssembly(signal);
   if (signal.aborted || reduced.matches) {
-    for (const stage of [hero, story]) stage?.removeAttribute('aria-busy');
+    for (const stage of [hero, story]) {
+      stage?.removeAttribute('aria-busy');
+    }
     return;
   }
   const scene = createScene(assembly);
@@ -44,7 +57,9 @@ const run = async ({ heroStage, storyStage, chapters }) => {
   /** @type {Set<HTMLElement>} */
   const visible = new Set();
   const dispose = () => {
-    if (disposed) return;
+    if (disposed) {
+      return;
+    }
     disposed = true;
     cancelAnimationFrame(frame);
     controller.abort();
@@ -57,7 +72,9 @@ const run = async ({ heroStage, storyStage, chapters }) => {
   };
   const draw = () => {
     frame = 0;
-    if (disposed || document.hidden || !current) return;
+    if (disposed || document.hidden || !current) {
+      return;
+    }
     current.dataset['frames'] = String(Number(current.dataset['frames'] ?? 0) + 1);
     if (current === hero) {
       scene.draw({ kind: 'hero', sunAngle: (angle * Math.PI) / 180, narrow: innerWidth <= 760 });
@@ -66,12 +83,16 @@ const run = async ({ heroStage, storyStage, chapters }) => {
     }
   };
   const request = () => {
-    if (!frame && !disposed && current && !document.hidden) frame = requestAnimationFrame(draw);
+    if (!frame && !disposed && current && !document.hidden) {
+      frame = requestAnimationFrame(draw);
+    }
   };
   // The canvas lives in whichever stage is on screen; the story wins when both peek in.
   const place = () => {
     const next = story && visible.has(story) && !paused ? story : hero && visible.has(hero) ? hero : undefined;
-    if (next === current) return;
+    if (next === current) {
+      return;
+    }
     current?.classList.remove('is-live');
     current = next;
     if (!current) {
@@ -80,7 +101,9 @@ const run = async ({ heroStage, storyStage, chapters }) => {
       return;
     }
     const host = hosts.get(current);
-    if (host) scene.attach(host);
+    if (host) {
+      scene.attach(host);
+    }
     // Draw before revealing so the poster never gives way to an empty canvas.
     draw();
     current.classList.add('is-live');
@@ -89,28 +112,45 @@ const run = async ({ heroStage, storyStage, chapters }) => {
     (entries) => {
       for (const entry of entries) {
         if (entry.target instanceof HTMLElement) {
-          if (entry.isIntersecting) visible.add(entry.target);
-          else visible.delete(entry.target);
+          if (entry.isIntersecting) {
+            visible.add(entry.target);
+          } else {
+            visible.delete(entry.target);
+          }
         }
       }
       place();
     },
     { threshold: 0 },
   );
-  for (const stage of hosts.keys()) visibility.observe(stage);
+  for (const stage of hosts.keys()) {
+    visibility.observe(stage);
+  }
   await scene.compile();
-  for (const stage of hosts.keys()) stage.removeAttribute('aria-busy');
+  for (const stage of hosts.keys()) {
+    stage.removeAttribute('aria-busy');
+  }
   addEventListener('scroll', request, { passive: true, signal });
   addEventListener('resize', request, { passive: true, signal });
   addEventListener('pagehide', dispose, { once: true, signal });
-  reduced.addEventListener('change', () => reduced.matches && dispose(), { signal });
+  reduced.addEventListener(
+    'change',
+    () => {
+      if (reduced.matches) {
+        dispose();
+      }
+    },
+    { signal },
+  );
   document.addEventListener('visibilitychange', request, { signal });
   scene.canvas.addEventListener(
     'webglcontextlost',
     (event) => {
       event.preventDefault();
       dispose();
-      for (const stage of hosts.keys()) stage.dataset['fallback'] = 'true';
+      for (const stage of hosts.keys()) {
+        stage.dataset['fallback'] = 'true';
+      }
       dispatchEvent(new Event('www:still'));
     },
     { signal },
@@ -127,8 +167,12 @@ const run = async ({ heroStage, storyStage, chapters }) => {
     const turn = (degrees) => {
       angle = Math.max(0, Math.min(1440, degrees));
       const output = angle / 4;
-      if (inValue) inValue.textContent = `${Math.round(angle)}°`;
-      if (outValue) outValue.textContent = `${output.toFixed(1)}°`;
+      if (inValue) {
+        inValue.textContent = `${Math.round(angle)}°`;
+      }
+      if (outValue) {
+        outValue.textContent = `${output.toFixed(1)}°`;
+      }
       if (input instanceof HTMLInputElement) {
         input.value = String(Math.round(angle));
         input.setAttribute('aria-valuetext', `Input ${Math.round(angle)} degrees, output ${output.toFixed(1)} degrees`);
@@ -136,16 +180,30 @@ const run = async ({ heroStage, storyStage, chapters }) => {
       dial?.setAttribute('stroke-dasharray', `${angle % 360 || (angle ? 360 : 0)} 360`);
       request();
     };
-    if (control instanceof HTMLElement) control.hidden = false;
-    if (note instanceof HTMLElement) note.hidden = true;
-    input?.addEventListener('input', () => input instanceof HTMLInputElement && turn(Number(input.value)), { signal });
+    if (control instanceof HTMLElement) {
+      control.hidden = false;
+    }
+    if (note instanceof HTMLElement) {
+      note.hidden = true;
+    }
+    input?.addEventListener(
+      'input',
+      () => {
+        if (input instanceof HTMLInputElement) {
+          turn(Number(input.value));
+        }
+      },
+      { signal },
+    );
     // Drag anywhere on the model to turn the sun; the range input is the non-drag path (WCAG 2.5.7).
     /** @type {number | undefined} */
     let dragX;
     hero.addEventListener(
       'pointerdown',
       (event) => {
-        if (!(event.target instanceof Element) || event.target.closest('input, a, button')) return;
+        if (!(event.target instanceof Element) || event.target.closest('input, a, button')) {
+          return;
+        }
         dragX = event.clientX;
         hero.setPointerCapture(event.pointerId);
         hero.classList.add('is-dragging');
@@ -155,33 +213,34 @@ const run = async ({ heroStage, storyStage, chapters }) => {
     hero.addEventListener(
       'pointermove',
       (event) => {
-        if (dragX === undefined) return;
+        if (dragX === undefined) {
+          return;
+        }
         turn(angle + (event.clientX - dragX) * 0.9);
         dragX = event.clientX;
       },
       { signal },
     );
-    for (const type of ['pointerup', 'pointercancel']) {
-      hero.addEventListener(
-        type,
-        () => {
-          dragX = undefined;
-          hero.classList.remove('is-dragging');
-        },
-        { signal },
-      );
-    }
+    const release = () => {
+      dragX = undefined;
+      hero.classList.remove('is-dragging');
+    };
+    hero.addEventListener('pointerup', release, { signal });
+    hero.addEventListener('pointercancel', release, { signal });
     // One demonstration turn teaches the interaction: the sun turns 90°, the carrier 22.5°.
-    if (!reduced.matches) {
-      const begin = performance.now() + 250;
-      const demo = (/** @type {number} */ now) => {
-        if (disposed || dragX !== undefined || angle > 90) return;
-        const t = Math.min(1, Math.max(0, (now - begin) / 1100));
-        turn(90 * (t * t * (3 - 2 * t)));
-        if (t < 1) requestAnimationFrame(demo);
-      };
-      requestAnimationFrame(demo);
-    }
+    // Reduced motion never reaches this point; a later switch disposes the scene and stops it.
+    const begin = performance.now() + 250;
+    const demo = (/** @type {number} */ now) => {
+      if (disposed || dragX !== undefined || angle > 90) {
+        return;
+      }
+      const t = Math.min(1, Math.max(0, (now - begin) / 1100));
+      turn(90 * (t * t * (3 - 2 * t)));
+      if (t < 1) {
+        requestAnimationFrame(demo);
+      }
+    };
+    requestAnimationFrame(demo);
   }
 
   const toggle = story?.querySelector('[data-story-toggle]');

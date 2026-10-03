@@ -31,15 +31,33 @@ const blend = (from, to, progress) => from + (to - from) * progress;
  * @type {(name: string) => number}
  */
 export const assemblyStep = (name) => {
-  if (name === 'Carrier Rear') return 0;
-  if (/^(Planet Pin|Rear Thrust Spacer)/u.test(name)) return 1;
-  if (/^(Thrust Washer|Flanged Bushing)/u.test(name)) return 2;
-  if (name.startsWith('Planet Gear')) return 3;
-  if (name.startsWith('Sun')) return 4;
-  if (name.startsWith('Internal Ring')) return 5;
-  if (name.startsWith('Front Thrust Spacer')) return 6;
-  if (name.startsWith('Carrier Front')) return 7;
-  if (/Screw Washer/u.test(name)) return 8;
+  if (name === 'Carrier Rear') {
+    return 0;
+  }
+  if (/^(Planet Pin|Rear Thrust Spacer)/u.test(name)) {
+    return 1;
+  }
+  if (/^(Thrust Washer|Flanged Bushing)/u.test(name)) {
+    return 2;
+  }
+  if (name.startsWith('Planet Gear')) {
+    return 3;
+  }
+  if (name.startsWith('Sun')) {
+    return 4;
+  }
+  if (name.startsWith('Internal Ring')) {
+    return 5;
+  }
+  if (name.startsWith('Front Thrust Spacer')) {
+    return 6;
+  }
+  if (name.startsWith('Carrier Front')) {
+    return 7;
+  }
+  if (/Screw Washer/u.test(name)) {
+    return 8;
+  }
   return 9;
 };
 export const assemblySteps = 10;
@@ -56,20 +74,48 @@ export const agentLane = (name) =>
  * @type {(name: string) => number}
  */
 export const explodeLift = (name) => {
-  if (name.includes('Front Socket')) return 104;
-  if (name.includes('Front Screw')) return 88;
-  if (name.includes('Carrier Front')) return 72;
-  if (name.includes('Front Thrust')) return 50;
-  if (name.startsWith('Internal Ring')) return 30;
-  if (name.startsWith('Sun')) return 38;
-  if (name.includes('Thrust Washer')) return -6;
-  if (name.startsWith('Planet Gear')) return 18;
-  if (name.includes('Flanged Bushing')) return 10;
-  if (name.includes('Planet Pin')) return -16;
-  if (name.includes('Rear Thrust')) return -30;
-  if (name.includes('Carrier Rear')) return -44;
-  if (name.includes('Rear Screw')) return -70;
-  if (name.includes('Rear Socket')) return -86;
+  if (name.includes('Front Socket')) {
+    return 104;
+  }
+  if (name.includes('Front Screw')) {
+    return 88;
+  }
+  if (name.includes('Carrier Front')) {
+    return 72;
+  }
+  if (name.includes('Front Thrust')) {
+    return 50;
+  }
+  if (name.startsWith('Internal Ring')) {
+    return 30;
+  }
+  if (name.startsWith('Sun')) {
+    return 38;
+  }
+  if (name.includes('Thrust Washer')) {
+    return -6;
+  }
+  if (name.startsWith('Planet Gear')) {
+    return 18;
+  }
+  if (name.includes('Flanged Bushing')) {
+    return 10;
+  }
+  if (name.includes('Planet Pin')) {
+    return -16;
+  }
+  if (name.includes('Rear Thrust')) {
+    return -30;
+  }
+  if (name.includes('Carrier Rear')) {
+    return -44;
+  }
+  if (name.includes('Rear Screw')) {
+    return -70;
+  }
+  if (name.includes('Rear Socket')) {
+    return -86;
+  }
   return 0;
 };
 
@@ -101,7 +147,9 @@ const track = (keys, p) => {
   for (let i = 1; i < keys.length; i++) {
     const [p0 = 0, v0 = 0] = keys[i - 1] ?? [];
     const [p1 = 0, v1 = 0] = keys[i] ?? [];
-    if (p <= p1) return blend(v0, v1, ease((p - p0) / Math.max(1e-6, p1 - p0)));
+    if (p <= p1) {
+      return blend(v0, v1, ease((p - p0) / Math.max(1e-6, p1 - p0)));
+    }
   }
   return keys.at(-1)?.[1] ?? 0;
 };
@@ -140,14 +188,13 @@ export const storyFrame = (p) => {
 /**
  * Per-part state. Agents create parts in three lanes as point clouds, the geometry forms,
  * then the parts assemble in order, morph to the wider face, and the ring is prepared for print.
- * @param name - Authored part name.
- * @param index - Stable part index, used only for staggering.
+ * @param part - Authored part name and stable index (the index only staggers timing).
  * @param p - Continuous chapter progress.
  * @param frame - Shared frame state from {@link storyFrame}.
  * @returns Rigid placement plus visibility weights.
- * @type {(name: string, index: number, p: number, frame: FrameState) => PartState}
+ * @type {(part: {name: string, index: number}, p: number, frame: FrameState) => PartState}
  */
-export const storyPart = (name, index, p, frame) => {
+export const storyPart = ({ name, index }, p, frame) => {
   const pose = partPose(name, frame.sunAngle);
   const lane = agentLane(name);
   const step = assemblyStep(name);

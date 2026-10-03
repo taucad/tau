@@ -90,21 +90,31 @@ await test('should validate the authored faceWidth variant against the base mesh
     gunzipSync(await readFile(new URL('../public/planetary.bin.gz', import.meta.url))).byteLength,
   );
   const offsets = gunzipSync(await readFile(new URL('../public/planetary-face18.bin.gz', import.meta.url)));
-  const raw = JSON.parse(await readFile(new URL('../public/planetary-face18.json', import.meta.url), 'utf8'));
+  const raw = /** @type {{meshes: unknown[]}} */ (
+    JSON.parse(await readFile(new URL('../public/planetary-face18.json', import.meta.url), 'utf8'))
+  );
   const variant = parseVariantManifest(raw, base, offsets.byteLength);
   assert.deepEqual(variant.axial, { from: 68, to: 72 });
-  const ring = new Float32Array(offsets.buffer, offsets.byteOffset + (variant.meshes[0]?.dz.offset ?? 0), variant.meshes[0]?.dz.length);
+  const ring = new Float32Array(
+    offsets.buffer,
+    offsets.byteOffset + (variant.meshes[0]?.dz.offset ?? 0),
+    variant.meshes[0]?.dz.length,
+  );
   assert.equal(Math.max(...ring), 4, 'Ring top moves by the 4 mm face change');
   assert.equal(Math.min(...ring), 0, 'Ring base stays on the mounting face');
   assert.throws(() => parseVariantManifest({ ...raw, sha256: '0'.repeat(64) }, base, offsets.byteLength), /variant/iu);
-  assert.throws(() => parseVariantManifest({ ...raw, meshes: raw.meshes.slice(1) }, base, offsets.byteLength), /variant/iu);
+  assert.throws(
+    () => parseVariantManifest({ ...raw, meshes: raw.meshes.slice(1) }, base, offsets.byteLength),
+    /variant/iu,
+  );
 });
 
 await test('should assemble from the rear carrier to the screws and keep the ring fixed', async () => {
   const { assemblyStep, storyFrame, storyPart } = await import('#www/story-timeline.js');
-  const manifest = JSON.parse(await readFile(new URL('../public/planetary.json', import.meta.url), 'utf8'));
-  /** @type {string[]} */
-  const names = manifest.meshes.map((/** @type {{name: string}} */ mesh) => mesh.name);
+  const manifest = /** @type {{meshes: Array<{name: string}>}} */ (
+    JSON.parse(await readFile(new URL('../public/planetary.json', import.meta.url), 'utf8'))
+  );
+  const names = manifest.meshes.map((mesh) => mesh.name);
   assert.equal(assemblyStep('Carrier Rear'), 0);
   assert.ok(assemblyStep('Planet Pin 1') < assemblyStep('Planet Gear 1'));
   assert.ok(assemblyStep('Planet Gear 1') < assemblyStep('Carrier Front And Output Hub'));
@@ -112,16 +122,21 @@ await test('should assemble from the rear carrier to the screws and keep the rin
   for (const p of [4.99, 5.5, 6.5]) {
     const frame = storyFrame(p);
     for (const [index, name] of names.entries()) {
-      const state = storyPart(name, index, p, frame);
+      const state = storyPart({ name, index }, p, frame);
       assert.ok(Math.abs(state.z) < 1e-6, `${name} is seated at ${p}`);
-      if (name.startsWith('Internal Ring')) assert.equal(state.rotation, 0);
+      if (name.startsWith('Internal Ring')) {
+        assert.equal(state.rotation, 0);
+      }
     }
   }
   const before = storyFrame(5.1);
   const after = storyFrame(5.99);
   assert.equal(before.variant, 0);
   assert.equal(after.variant, 1);
-  assert.ok(Math.abs(after.sunAngle - (2 * Math.PI + Math.PI / 6)) < 1e-9, 'One demonstration turn plus inputAngle 30°');
+  assert.ok(
+    Math.abs(after.sunAngle - (2 * Math.PI + Math.PI / 6)) < 1e-9,
+    'One demonstration turn plus inputAngle 30°',
+  );
 });
 
 await test('should map reading position to continuous chapter progress', async () => {
@@ -138,11 +153,16 @@ await test('should advertise Tau Cloud sync as available on paid plans and never
   const copy = JSON.stringify({ plans, pricingFaq, storyChapters });
   for (const plan of plans) {
     for (const [label, flag] of plan.features) {
-      if (/sync|backup/iu.test(label)) assert.equal(flag, undefined, `${label} is available now`);
+      if (/sync|backup/iu.test(label)) {
+        assert.equal(flag, undefined, `${label} is available now`);
+      }
     }
   }
   assert.ok(plans.find((plan) => plan.id === 'pro')?.features.some(([label]) => label.includes('10 GB')));
   assert.ok(plans.find((plan) => plan.id === 'enterprise')?.features.some(([label]) => label.includes('100 GB')));
-  assert.equal(plans.find((plan) => plan.id === 'free')?.features.some(([label]) => /Tau Cloud/u.test(label)), false);
+  assert.equal(
+    plans.find((plan) => plan.id === 'free')?.features.some(([label]) => /Tau Cloud/u.test(label)),
+    false,
+  );
   assert.doesNotMatch(copy, /sync[^"]*coming soon|coming soon[^"]*sync/iu);
 });

@@ -7,38 +7,16 @@
   },
   "assemblyParts": 34,
   "illustrationOnly": true,
-  "freshGeospecRun": false,
+  "freshGeospecRun": true,
   "oldHeroGeometry": {
     "path": "apps/ui/app/components/geometry/splash/assets/planetary.glb",
     "bytes": 2806748,
     "sha256": "68a30867ca9c12e9d6a8f4fe481d86bbd8e212fc01dd6ea1bcb1f8d57ef806da"
   },
-  "newViews": [
-    {
-      "path": "apps/www/public/assembly.webp",
-      "bytes": 27824,
-      "sha256": "13d0300c138d611ebb0f6f51146728d4b14816d35947f2c8c45aa8b2f432dca6"
-    },
-    {
-      "path": "apps/www/public/exploded.webp",
-      "bytes": 28456,
-      "sha256": "088711198f47113b45a1c777b605c451dd139224bd9def85db498a5dc48985a3"
-    },
-    {
-      "path": "apps/www/public/assembly-640.webp",
-      "bytes": 12296,
-      "sha256": "2589df6b31f22fd0ecd087570f4a104477fdfe54ec3888c157bb06b96cf570fd"
-    },
-    {
-      "path": "apps/www/public/exploded-640.webp",
-      "bytes": 13282,
-      "sha256": "4fb9835165e389f5720cf05e3c62a1bfbf512a1cfb4c3c2cb412bccca401478f"
-    }
-  ],
-  "renderRecipe": "scripts/render-assets.mjs",
+  "renderRecipe": "scripts/capture-stills.mjs",
   "responsiveAndSocialRecipe": "scripts/optimize-assets.mjs",
   "firstPartySourceLicense": "Apache-2.0",
-  "notes": "Static chrome hero captures existing Tau geometry, TSL material and studio. Below-fold Three.js geometry is a compressed tessellation of the 34-part authored Replicad model; rigid kinematics are prescribed, not physics. No fresh GeoSpec result or live print is represented. Static images and all text remain usable without a GPU.",
+  "notes": "Hero poster and story stills are captured from the shipped scene module (scripts/capture-stills.mjs) so static and live views match. The faceWidth 18 variant stores per-vertex axial offsets exported from the authored model with the same tessellation; XY is unchanged and the committed base mesh is verified identical before export. The GeoSpec evidence is a recorded local run of the example's own spec (3 passed, 0 failed, 7 inconclusive); it is displayed as recorded, not re-run by visitors. Agent lanes and print preparation are illustrations; rigid kinematics are prescribed, not physics. The metal Escher star remains Tau's own metal-morph capture.",
   "refreshedAssets": [
     {
       "path": "apps/www/public/metal-hero.webp",
@@ -62,8 +40,8 @@
     },
     {
       "path": "apps/www/public/social.png",
-      "bytes": 80890,
-      "sha256": "9d36820b616e12cba6c5832cfc99f3ed771bd9a76b10239410987f9f4e573ba8"
+      "bytes": 131647,
+      "sha256": "d1dc0f7cf22e5648feb354aa50746d560d303e81004df3d0a3304f0e38d6764e"
     }
   ],
   "metalHero": {
@@ -79,5 +57,80 @@
     "static": true
   },
   "storyRecipe": "scripts/export-story-assets.mjs",
-  "modelUnchangedThrough": "df1966a64f28dac856d514cb4030ef26a707151a"
+  "modelUnchangedThrough": "df1966a64f28dac856d514cb4030ef26a707151a",
+  "variantRecipe": "scripts/export-variant-assets.mjs",
+  "geospecEvidence": {
+    "path": "apps/www/content/evidence/planetary-geospec-run.json",
+    "bytes": 2261,
+    "sha256": "ceb28fe8e05d231072a4fd7a7afef6f58e21b102ccd021b2adcc887912575e7c"
+  },
+  "liveViews": [
+    {
+      "path": "apps/www/public/hero-gearbox.webp",
+      "bytes": 33596,
+      "sha256": "735bb7a5fd29a6d2f0f3af8a18c485cfc0a9a7ff05f95bf683b94701ea635cf4"
+    },
+    {
+      "path": "apps/www/public/hero-gearbox-720.webp",
+      "bytes": 35804,
+      "sha256": "bf37b5ee72c16932a218272aefe1372bd7cefcf2f9e0c0dc53ec22a19eb498f5"
+    },
+    {
+      "path": "apps/www/public/story-0.webp",
+      "bytes": 1952,
+      "sha256": "a5840d087b04af315519da1b29159a12f356d4ee09abfb6e3e0eb8e647bbe736"
+    },
+    {
+      "path": "apps/www/public/story-1.webp",
+      "bytes": 1952,
+      "sha256": "a5840d087b04af315519da1b29159a12f356d4ee09abfb6e3e0eb8e647bbe736"
+    },
+    {
+      "path": "apps/www/public/story-2.webp",
+      "bytes": 31722,
+      "sha256": "436be09f59e4e184279c26e7f23cf289b8ae6645fffe1f50e75d106f542d5728"
+    },
+    {
+      "path": "apps/www/public/story-3.webp",
+      "bytes": 16816,
+      "sha256": "422230cf34c52e8372581f2fcddd97341710e88d275b7d086ffc5d562308fb13"
+    },
+    {
+      "path": "apps/www/public/story-4.webp",
+      "bytes": 19680,
+      "sha256": "e3ca937eb5ae8f65617f5b865c8483ddf277c59735e9abcf4d3b103aa7eb51e1"
+    },
+    {
+      "path": "apps/www/public/story-5.webp",
+      "bytes": 22402,
+      "sha256": "82a4a8ebbf77dda2e701c975cc04e7f60ea6392c93b025682d0be077d4d23383"
+    },
+    {
+      "path": "apps/www/public/story-6.webp",
+      "bytes": 24788,
+      "sha256": "23a78ac1319a2d85a983a462263d6745ff6625b5ac6d62337615b087bf974bf1"
+    },
+    {
+      "path": "apps/www/public/story-7.webp",
+      "bytes": 45244,
+      "sha256": "a41f7bed130b480309a0090009ca904c2c18a24f9641986436eae61888b41f7b"
+    },
+    {
+      "path": "apps/www/public/story-8.webp",
+      "bytes": 11560,
+      "sha256": "8277a5f3819c662dac7bc4a3641df1548ce47431772f8158448258dc7188b330"
+    }
+  ],
+  "variantGeometry": [
+    {
+      "path": "apps/www/public/planetary-face18.json",
+      "bytes": 2501,
+      "sha256": "6f1d03d761a37b0754004094e08ef79411e5323193f04f56b4d002bc6131711b"
+    },
+    {
+      "path": "apps/www/public/planetary-face18.bin.gz",
+      "bytes": 1776,
+      "sha256": "16816bb5e658dfcab1ab43da40473a9729b865e98f2dcff52f429372550d3603"
+    }
+  ]
 }

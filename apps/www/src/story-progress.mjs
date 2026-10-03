@@ -21,7 +21,9 @@ export const progressFromTops = (tops, anchor) => {
     // The last chapter plays out over the distance the reading line travels through it.
     return Math.min(last + 0.999, last + Math.max(0, (anchor - current) / Math.max(1, innerHeight * 0.6)));
   }
-  if (next === current) return index;
+  if (next === current) {
+    return index;
+  }
   return Math.min(last + 0.999, Math.max(0, index + (anchor - current) / (next - current)));
 };
 

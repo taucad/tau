@@ -23,7 +23,7 @@ const decodeGeometry = async (response) => {
  */
 export const loadAssembly = async (signal) => {
   const urls = ['planetary.json', 'planetary.bin.gz', 'planetary-face18.json', 'planetary-face18.bin.gz'];
-  const responses = await Promise.all(urls.map((url) => fetch(`/_www/assets/${url}`, { signal })));
+  const responses = await Promise.all(urls.map(async (url) => fetch(`/_www/assets/${url}`, { signal })));
   if (responses.some((response) => !response.ok)) {
     throw new Error('Geometry unavailable');
   }
@@ -127,7 +127,7 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
       for (const [i, value] of dz.entries()) {
         morph[i * 3 + 2] = value;
       }
-      geometry.morphAttributes['position'] = [new THREE.BufferAttribute(morph, 3)];
+      geometry.morphAttributes.position = [new THREE.BufferAttribute(morph, 3)];
       geometry.morphTargetsRelative = true;
     }
     // Geometry is authored in place; planets and their bushings rotate about their own axes.
@@ -192,9 +192,13 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
   /** @type {HTMLElement | undefined} */
   let host;
   const fit = () => {
-    if (!host) return;
+    if (!host) {
+      return;
+    }
     const { width, height } = host.getBoundingClientRect();
-    if (!width || !height) return;
+    if (!width || !height) {
+      return;
+    }
     // Size the drawing buffer directly (three.js responsive guidance), capped near three megapixels.
     const ratio = Math.min(devicePixelRatio, 1.75, Math.sqrt(3_000_000 / (width * height)));
     const w = Math.round(width * ratio);
@@ -219,7 +223,9 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
   };
   /** @type {(view: View) => void} */
   const draw = (view) => {
-    if (!host) return;
+    if (!host) {
+      return;
+    }
     if (view.kind === 'hero') {
       for (const part of parts) {
         const pose = partPose(part.name, view.sunAngle);
@@ -228,7 +234,9 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
         part.group.scale.setScalar(1);
         part.mesh.visible = true;
         part.cloud.visible = false;
-        if (part.mesh.morphTargetInfluences?.length) part.mesh.morphTargetInfluences[0] = 0;
+        if (part.mesh.morphTargetInfluences?.length) {
+          part.mesh.morphTargetInfluences[0] = 0;
+        }
       }
       layerPlane.constant = 1e4;
       printer.visible = false;
@@ -239,21 +247,23 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
       const p = view.progress;
       const frame = storyFrame(p);
       for (const part of parts) {
-        const state = storyPart(part.name, part.index, p, frame);
+        const state = storyPart(part, p, frame);
         part.group.position.set(state.x, state.y, state.z);
         part.group.rotation.set(0, 0, state.rotation);
         part.group.scale.setScalar(state.scale);
         part.mesh.visible = state.solid > 0.5;
         part.cloud.visible = state.cloud > 0.02 && !part.mesh.visible;
         part.cloudMaterial.opacity = Math.min(0.9, state.cloud);
-        if (part.mesh.morphTargetInfluences?.length) part.mesh.morphTargetInfluences[0] = frame.variant;
+        if (part.mesh.morphTargetInfluences?.length) {
+          part.mesh.morphTargetInfluences[0] = frame.variant;
+        }
       }
       // The ring sits on the plate and is revealed layer by layer; an illustration, never G-code.
       printer.visible = frame.print > 0.02;
       printer.scale.setScalar(Math.max(0.001, frame.print));
       lineMaterial.opacity = 0.85 * frame.print;
       plateMaterial.opacity = frame.print;
-      root.position.y = 1 * frame.print;
+      root.position.y = Number(frame.print);
       const ringTop = 15 + 4 * frame.variant + 1;
       layerPlane.constant = frame.print > 0.6 ? -1 + (ringTop + 1) * frame.layer : 1e4;
       gantry.position.y = Math.max(4, -1 + (ringTop + 1) * frame.layer) + 4;
@@ -266,7 +276,9 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
   return {
     canvas,
     attach: (next) => {
-      if (host === next) return;
+      if (host === next) {
+        return;
+      }
       host = next;
       next.append(canvas);
       resize?.disconnect();

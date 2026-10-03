@@ -435,7 +435,8 @@ main > .band:first-child::before {
   justify-content: space-between;
   align-items: center;
   gap: 1rem;
-  padding: 1rem var(--gutter);
+  min-height: 3.5rem;
+  padding: 0.75rem var(--gutter);
   font: 500 var(--kicker) / 1.4 var(--font-mono);
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -772,8 +773,11 @@ main > .band:first-child::before {
 .story-chapter:last-child {
   border-bottom: 0;
 }
-.js .story-chapter:not(.is-active) {
-  opacity: 0.4;
+.story-chapter.is-active {
+  box-shadow: inset 2px 0 var(--primary);
+}
+.story-chapter.is-active .step {
+  color: var(--primary);
 }
 .story-chapter h3 {
   font-size: clamp(1.75rem, 2.6vw, 2.25rem);
@@ -879,24 +883,36 @@ main > .band:first-child::before {
 .o-devices svg * {
   vector-effect: non-scaling-stroke;
 }
+.o-idea .rim {
+  stroke: var(--line);
+}
 .o-idea .t1 {
-  top: 12%;
+  top: 9%;
   left: 50%;
   translate: -50% 0;
 }
 .o-idea .t2 {
-  top: 48%;
+  top: 50%;
   left: 50%;
   translate: -50% -50%;
 }
 .o-idea .t3 {
-  top: 66%;
-  left: 18%;
+  top: 72%;
+  right: 8%;
 }
 .o-idea .t4 {
-  bottom: 10%;
+  bottom: 5%;
   left: 50%;
   translate: -50% 0;
+}
+@media (prefers-reduced-motion: no-preference) {
+  .story-stage[data-chapter='0'] .o-idea :is(circle, path) {
+    stroke-dasharray: 1;
+    animation: draw var(--slow) var(--ease) both;
+  }
+  .story-stage[data-chapter='0'] .o-idea circle:nth-child(n + 3) {
+    animation-delay: 150ms;
+  }
 }
 .o-prompt .composer {
   position: absolute;
@@ -1316,6 +1332,12 @@ main > .band:first-child::before {
   grid-template-columns: minmax(0, 1.4fr) minmax(0, 1fr);
   align-items: end;
   gap: 2rem var(--gutter);
+}
+.page-intro:has(> :only-child) {
+  grid-template-columns: minmax(0, 1fr);
+}
+.page-intro h1 {
+  max-width: 13em;
 }
 .page-intro .lead {
   margin-top: 1.5rem;
@@ -1761,7 +1783,18 @@ main > .band:first-child::before {
   .evidence-card {
     width: auto;
     right: auto;
-    padding: 0.5rem 0.75rem;
+    top: 0.5rem;
+    bottom: auto;
+    left: 0.5rem;
+    padding: 0.375rem 0.625rem;
+  }
+  .evidence-card .tally {
+    font-size: 0.75rem;
+    white-space: nowrap;
+  }
+  .evidence-card .tally b {
+    font-size: 0.875rem;
+    margin-left: 0.375rem;
   }
   .evidence-card .kicker {
     display: none;

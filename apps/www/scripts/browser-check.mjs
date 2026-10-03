@@ -99,7 +99,10 @@ try {
   await nojsPage.goto(origin);
   await nojsPage.locator('.mobile-menu summary').click();
   assert.equal(await nojsPage.getByRole('navigation', { name: 'Mobile navigation' }).isVisible(), true);
-  await nojsPage.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('link', { name: 'Pricing', exact: true }).click();
+  await nojsPage
+    .getByRole('navigation', { name: 'Mobile navigation' })
+    .getByRole('link', { name: 'Pricing', exact: true })
+    .click();
   assert.ok(nojsPage.url().endsWith('/pricing/'));
   await nojs.close();
   const context = await browser.newContext();

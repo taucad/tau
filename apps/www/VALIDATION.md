@@ -1,5 +1,34 @@
 # Marketing preview validation
 
+## Planetary refresh — 2026-10-03
+
+Branch `feature/marketing-www-refresh` from `abea9dd26b3fcd7bf8ac33de438a2c5908e999c7`. Measured locally on an Apple M2 Pro under heavy unrelated host load (load average 15–67), Node 24.10.0, installed Google Chrome 154 headless with ANGLE Metal, against `serve.mjs`, which reproduces the emitted headers and gzip. Before = `abea9dd26` built and served the same way. Lab numbers, not field data.
+
+| Check           | Result                                                                                                                                                                                                                                       |
+| --------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Static build    | 13 pages; noindex in HTML and HTTP; analytics off                                                                                                                                                                                            |
+| Unit tests      | 13 pass, including variant mesh validation, assembly order with a fixed ring, progress mapping and a copy guard (sync never “coming soon”, Pro 10 GB, Enterprise 100 GB, no Tau Cloud on Free)                                               |
+| Browser routes  | 52 route/viewport/theme audits, mobile menu, no-JS navigation, 404 and privacy: pass, zero axe A/AA violations                                                                                                                               |
+| Live story      | Hero keyboard and drag; 9 chapters × 1440/390 px with axe; one canvas; zero idle, offscreen and hidden frames; stills toggle; reduced-motion disposal and no-load; no-WebGL; download failure; context loss; page exit during download: pass |
+| Oxlint / ESLint | Zero findings on every `.mjs` in `src`, `scripts`, `tests` plus `scripts/tooling.js`; ESLint’s Nx module-boundary rule skipped without a project graph                                                                                       |
+
+Lighthouse 13.5.0, two interleaved before/after runs, home page (desktop CLS 0 is from a performance-only rerun after the label-row fix; the full run before it read 0.003):
+
+|                 | Perf | A11y | BP  | SEO | FCP   | LCP   | TBT | CLS | Transfer  |
+| --------------- | ---- | ---- | --- | --- | ----- | ----- | --- | --- | --------- |
+| Before, desktop | 100  | 100  | 100 | 66  | 0.3 s | 0.4 s | 0   | 0   | 221 KiB   |
+| After, desktop  | 100  | 100  | 100 | 69  | 0.3 s | 0.5 s | 0   | 0   | 1,219 KiB |
+| Before, mobile  | 99   | 100  | 100 | 66  | 1.2 s | 2.0 s | 0   | 0   | 221 KiB   |
+| After, mobile   | 99   | 100  | 100 | 69  | 1.3 s | 2.1 s | 0   | 0   | 222 KiB   |
+
+The only SEO failure is `is-crawlable`, from the intentional preview noindex. Desktop transfer includes the live hero, which loads after the load event and idle, never before LCP; mobile does not load it until intent or the story approaches.
+
+Payloads (gzip): initial `site.mjs` 2.8 KB; live chunk (three.js r184 plus scene) 136 KB; `planetary.bin.gz` 792 KB; variant offsets 1.3 KB; hero poster 33 KB; story stills 0.2–45 KB each.
+
+Frame cost (Chrome tracing, GPU-backed, `bench-r2`): hero drag GPU p50 1.21 ms / p95 1.32 ms, main-thread p50 0.4 ms; story scroll desktop GPU p50 0.79 ms / p95 1.71 ms / max 3.91 ms; phone emulation at DPR 3 GPU p50 0.48 ms / p95 0.72 ms. Idle hero and story: 0 frames. One long task at scene creation: 56 ms desktop, 51 ms phone. Hero went live about 270 ms after navigation start on localhost.
+
+Not run: hosted Lighthouse and checks on a deployed URL, real phones, Firefox and Safari, physical tab switching (the hidden-state check is synthetic), the full Nx lint/test graph, and `oxfmt` on `site.css` (its Tailwind plugin cannot resolve `@taucad/ui` tokens in this worktree).
+
 ## Cloud QA and provenance follow-up — 2026-10-02
 
 This selective follow-up starts from published `66b1ccda00c97e84aa8fa2fc6148296e2dceaecd`. It declares the existing QA tools, identifies marketing entry points for Knip, and corrects provenance recipe paths plus the formatted metadata's size/hash. No public asset, runtime source, test, rendering recipe or deployment configuration changed.

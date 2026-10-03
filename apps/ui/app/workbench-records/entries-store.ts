@@ -6,6 +6,8 @@
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
+import { createRecordHealth, isPotentiallyApplied } from '#workbench-records/record-health.js';
+import type { RecordHealth } from '#workbench-records/record-health.js';
 
 type Entry = WorkbenchEntries['entries'][string];
 type Files = Readonly<{
@@ -30,8 +32,12 @@ type QueuedPathChange = Readonly<{ operation: EntryPathChange; unsaved: Readonly
 const matchesPath = (path: string, prefix: string): boolean => path === prefix || path.startsWith(`${prefix}/`);
 const rewritePath = (path: string, oldPath: string, newPath: string): string =>
   `${newPath}${path.slice(oldPath.length)}`;
+const withoutTimeout = (entry: Entry | undefined): Entry => {
+  const { renderTimeout: _removed, ...rest } = entry ?? {};
+  return rest;
+};
 const mergeEntry = (existing: Entry | undefined, fields: Patch['fields']): Entry => ({
-  ...existing,
+  ...(Object.hasOwn(fields, 'renderTimeout') ? withoutTimeout(existing) : existing),
   ...(fields.renderTimeout === undefined ? {} : { renderTimeout: fields.renderTimeout }),
   ...(fields.components === undefined
     ? {}
@@ -82,17 +88,22 @@ export function createWorkbenchEntriesStore(
     files: Files;
     onChange: (state: EntriesState, source: 'read' | 'write', locallyAuthored: EntryRecordPatch | undefined) => void;
     onError: (error: unknown) => void;
+    onHealth?: (health: RecordHealth) => void;
     /** Milliseconds. */
     editDebounce?: number;
   }>,
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
+  /** *Try again* after reads stopped: a fresh set of attempts. */
+  retryRead: () => Promise<boolean>;
   edit: (path: string, next: Entry) => Promise<boolean>;
   changePaths: (change: EntryPathChange) => Promise<boolean>;
-  reset: (next: WorkbenchEntries) => Promise<boolean>;
+  /** Replace a refused record; `reviewed` is the exact refused bytes the person saw, and a newer file refuses the reset. */
+  reset: (next: WorkbenchEntries, reviewed?: Uint8Array<ArrayBuffer> | null) => Promise<boolean>;
   flush: () => Promise<boolean>;
   dispose: () => void;
   snapshot: () => EntriesState;
+  health: () => RecordHealth;
   ready: () => boolean;
 }> {
   const filePath = `${input.root}/${workbenchPaths.entries}`;
@@ -112,6 +123,14 @@ export function createWorkbenchEntriesStore(
   let retryDelay = 250;
   let editTimer: ReturnType<typeof setTimeout> | undefined;
   const inFlightWriteBytes = new Set<{ bytes: Uint8Array<ArrayBuffer>; patch: EntryRecordPatch | undefined }>();
+  /** A write whose reply was lost: it may be on disk, so the next write reads first and keeps it for attribution. */
+  let unresolved: { bytes: Uint8Array<ArrayBuffer>; patch: EntryRecordPatch | undefined } | undefined;
+  const health = createRecordHealth({
+    onHealth: input.onHealth,
+    readAgain: () => {
+      void read();
+    },
+  });
   const queuedEdits = new Map<
     string,
     { next: Entry; patch: Patch; sequence: number; resolve: Array<(saved: boolean) => void> }
@@ -139,7 +158,7 @@ export function createWorkbenchEntriesStore(
     }
     observed = true;
     if (bytes === null) {
-      state = { ...state, bytes: null, refusal: undefined };
+      state = { record: undefined, bytes: null, refusal: undefined };
     } else {
       const parsed = workbenchRecords.entries.read(bytes);
       state =
@@ -148,10 +167,17 @@ export function createWorkbenchEntriesStore(
           : { ...state, bytes, refusal: { code: parsed.code, message: parsed.message } };
     }
     input.onChange(state, source, locallyAuthored);
-    if (source === 'read' && state.record && editSequence === settledSequence && deferred.size === 0) {
-      intended.clear();
-      for (const [path, entry] of Object.entries(state.record.entries)) {
-        intended.set(path, entry);
+    if (source === 'read' && !state.refusal && editSequence === settledSequence) {
+      // A deferred change is still owed on its path; every other path follows the file, absent included.
+      for (const path of intended.keys()) {
+        if (!deferred.has(path)) {
+          intended.delete(path);
+        }
+      }
+      for (const [path, entry] of Object.entries(state.record?.entries ?? {})) {
+        if (!deferred.has(path)) {
+          intended.set(path, entry);
+        }
       }
     }
   };
@@ -165,14 +191,20 @@ export function createWorkbenchEntriesStore(
       if (current === generation && !isDisposed()) {
         const recovered = readError;
         readError = false;
-        const ownWrite = bytes && [...inFlightWriteBytes].find((written) => sameBytes(written.bytes, bytes));
+        const ownWrite =
+          bytes &&
+          [...inFlightWriteBytes, ...(unresolved ? [unresolved] : [])].find((written) =>
+            sameBytes(written.bytes, bytes),
+          );
         publish(bytes, ownWrite ? 'write' : 'read', notify || recovered, ownWrite?.patch);
+        health.readSucceeded();
       }
       return observed;
     } catch (error) {
       if (current === generation && !isDisposed()) {
         readError = true;
         input.onError(error);
+        health.readFailed(error);
       }
       return false;
     }
@@ -186,9 +218,10 @@ export function createWorkbenchEntriesStore(
     if (isDisposed()) {
       return 'blocked';
     }
-    if (!observed && !(await read())) {
+    if ((!observed || unresolved) && !(await read())) {
       return 'retry';
     }
+    unresolved = undefined;
     if (state.refusal && (!reset || state.refusal.code === 'NEWER_RECORD')) {
       return 'blocked';
     }
@@ -222,14 +255,21 @@ export function createWorkbenchEntriesStore(
         const attempted = { bytes: new TextEncoder().encode(data), patch: (reset ?? pathChange) ? undefined : patch };
         inFlightWriteBytes.add(attempted);
         let result: CheckedFileWriteResult;
+        health.writeStarted();
         try {
           result = await input.files.writeFileChecked({
             path: filePath,
             data,
             preconditions: [{ path: filePath, expected: reset ? expectedReset : state.bytes }],
           });
+        } catch (error) {
+          if (isPotentiallyApplied(error)) {
+            unresolved = attempted;
+          }
+          throw error;
         } finally {
           inFlightWriteBytes.delete(attempted);
+          health.writeSettled();
         }
         if (result.status !== 'conflict') {
           if (generation === generationAtWrite) {
@@ -257,11 +297,19 @@ export function createWorkbenchEntriesStore(
         }
       } catch (error) {
         input.onError(error);
+        health.writeFailed(error);
         return 'retry';
       }
     }
-    input.onError(new Error('The entry settings changed while saving. Try again.'));
+    const conflicted = new Error('The entry settings changed while saving. Try again.');
+    input.onError(conflicted);
+    health.writeFailed(conflicted);
     return 'retry';
+  };
+  const settleIntent = (): void => {
+    if (deferred.size === 0 && deferredPathChanges.length === 0 && queuedEdits.size === 0) {
+      health.intentSettled();
+    }
   };
   const retry = (): void => {
     if (isDisposed() || (deferred.size === 0 && deferredPathChanges.length === 0) || retryTimer) {
@@ -277,6 +325,7 @@ export function createWorkbenchEntriesStore(
             if (status === 'saved') {
               deferredPathChanges.shift();
               retryDelay = 250;
+              settleIntent();
               retry();
             } else if (status === 'retry') {
               retryDelay = Math.min(retryDelay * 2, 8000);
@@ -296,6 +345,7 @@ export function createWorkbenchEntriesStore(
           if (status === 'saved') {
             deferred.delete(patch.path);
             retryDelay = 250;
+            settleIntent();
             retry();
           } else if (status === 'retry') {
             retryDelay = Math.min(retryDelay * 2, 8000);
@@ -322,6 +372,7 @@ export function createWorkbenchEntriesStore(
         if (saved) {
           deferred.delete(path);
           retryDelay = 250;
+          settleIntent();
         } else {
           const remaining = combine(deferred.get(path), patch);
           if (status === 'retry' || Object.keys(remaining.fields).length > 0) {
@@ -445,11 +496,11 @@ export function createWorkbenchEntriesStore(
       pending = result;
       return result;
     },
-    reset: async (next) => {
+    reset: async (next, reviewed) => {
       if (isDisposed() || state.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
-      const { bytes } = state;
+      const bytes = reviewed === undefined ? state.bytes : reviewed;
       await drainEdits();
       const sequence = ++editSequence;
       const result = pending
@@ -461,6 +512,7 @@ export function createWorkbenchEntriesStore(
           deferred.clear();
           deferredPathChanges.length = 0;
           settledSequence = sequence;
+          settleIntent();
           if (sequence === editSequence) {
             intended.clear();
             for (const [path, entry] of Object.entries(next.entries)) {
@@ -489,6 +541,10 @@ export function createWorkbenchEntriesStore(
         }
       }
       deferredPathChanges.length = 0;
+      if (unresolved && deferred.size === 0 && !(await read())) {
+        retry();
+        return false;
+      }
       for (const patch of deferred.values()) {
         const status = await write(patch, undefined, null);
         if (status !== 'saved') {
@@ -500,11 +556,13 @@ export function createWorkbenchEntriesStore(
         deferred.delete(patch.path);
       }
       retryDelay = 250;
+      settleIntent();
       return true;
     },
     dispose: () => {
       disposed = true;
       generation++;
+      health.dispose();
       if (retryTimer) {
         clearTimeout(retryTimer);
         retryTimer = undefined;
@@ -515,6 +573,11 @@ export function createWorkbenchEntriesStore(
       }
     },
     snapshot: () => state,
+    health: () => health.health(),
+    retryRead: async () => {
+      health.restartReads();
+      return read(true);
+    },
     ready: () => observed,
   };
 }

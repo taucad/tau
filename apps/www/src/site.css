@@ -279,10 +279,16 @@ main > .band:first-child::before {
 .wordmark {
   display: flex;
   align-items: center;
-  gap: 0.5rem;
-  text-decoration: none;
-  font: 600 1.375rem/1 var(--font-sans);
-  letter-spacing: -0.04em;
+  min-height: 2.75rem;
+  color: var(--foreground);
+}
+.wordmark svg {
+  height: 1.5rem;
+  width: auto;
+  fill: currentColor;
+}
+.wordmark-symbol {
+  fill: var(--primary);
 }
 .primary-nav {
   display: flex;
@@ -1861,6 +1867,9 @@ main > .band:first-child::before {
   .sweep,
   .hero .w::after {
     display: none;
+  }
+  .wordmark-symbol {
+    fill: currentColor;
   }
 }
 @media print {

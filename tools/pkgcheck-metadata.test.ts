@@ -398,6 +398,17 @@ describe('peerDependencyIssues', () => {
     ).toEqual([]);
   });
 
+  it('lets a named leaf satisfy zod with a dependency even when its own emit imports zod', () => {
+    expect(
+      peerDependencyIssues({
+        packageName: 'geospec',
+        manifest: { dependencies: { zod: 'catalog:' } },
+        emitted: [{ path: 'dist/mesh/analysis-result.mjs', specifier: 'zod' }],
+        rules: peerRules,
+      }),
+    ).toEqual([]);
+  });
+
   it('requires runtime as a peer except for the named leaf dependency allowlist', () => {
     const runtimeWitness = [{ path: 'dist/index.mjs', specifier: '@taucad/runtime/worker' }];
     expect(

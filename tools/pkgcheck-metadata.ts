@@ -265,13 +265,20 @@ export type PeerRule = {
   readonly dependencyLeafAllowlist?: readonly string[];
 };
 
+/** npm-policy Rule 1 leaves: they never re-export schemas or runtime types, so they satisfy peers with dependencies. */
+const leafPackages = ['@taucad/cli', 'geospec', '@taucad/geospec-engine'];
+
 /** The one registry shared by publishable-peer and internal-library rules. */
 export const peerRules: readonly PeerRule[] = [
-  { name: 'zod', reason: 'schema instance and type identity must not fork across an install' },
+  {
+    name: 'zod',
+    reason: 'schema instance and type identity must not fork across an install',
+    dependencyLeafAllowlist: leafPackages,
+  },
   {
     name: '@taucad/runtime',
     reason: 'one runtime instance must own protocol and type identity across an install',
-    dependencyLeafAllowlist: ['@taucad/cli', 'geospec', '@taucad/geospec-engine'],
+    dependencyLeafAllowlist: leafPackages,
   },
 ];
 

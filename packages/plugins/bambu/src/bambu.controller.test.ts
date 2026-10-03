@@ -476,6 +476,19 @@ describe('Bambu read-only controller', () => {
       await expect(
         session.reconcile({ operationId: 'start-2', command: 'project_file', signal: new AbortController().signal }),
       ).resolves.toMatchObject({ status: 'accepted', providerRunId: lastStart()?.['subtask_id'] });
+      // How each start settled reaches the host log by id alone, so a slow printer can be diagnosed from it.
+      const logged = vi.mocked(runtime.log).mock.calls.map(([entry]) => entry.message);
+      expect(logged).toEqual(
+        expect.arrayContaining([
+          expect.stringMatching(
+            /^Start \d+ proven by reply accepted in the start window, \d+ ms and \d+ status reports after publishing;/u,
+          ),
+          expect.stringMatching(
+            /^Start \d+ proven by status in the start window, .*; printer \w+, run id matches, run name \w+\.$/u,
+          ),
+        ]),
+      );
+      expect(logged.join('\n')).not.toMatch(/00M00A391800004|192\.0\.2\.10/u);
       startReply.mode = 'status-name';
       await expect(start('start-3')).resolves.toMatchObject({ status: 'accepted', providerRunId: '0' });
       await expect(session.getSnapshot({ signal: new AbortController().signal })).resolves.toMatchObject({

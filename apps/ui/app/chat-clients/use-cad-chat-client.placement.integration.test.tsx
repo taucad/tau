@@ -87,6 +87,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: vi.fn(),
   useChatComposer: () => ({
+    execution: { setActiveExecution: () => undefined },
     model: {
       model: {
         id: 'openai-gpt-5.5',
@@ -106,6 +107,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
+    ensureModelCatalog: async () => ({ status: 'loaded', models: [] }),
     resolveModel: (id: string) => {
       const retry = id === 'openai-gpt-retry';
       const model = {

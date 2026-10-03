@@ -4,7 +4,7 @@ import type { ReactNode } from 'react';
 import { isResumableRunFailure, isUserStoppedRun } from '@taucad/agent-host';
 import { useCadAgentConfig } from '#hooks/use-cad-agent-config.js';
 import { useActiveChatInstance } from '#chat-clients/_internal/use-active-chat-instance.js';
-import { useActiveChatSession } from '#hooks/active-chat-provider.js';
+import { useActiveChatSession, useChatComposer } from '#hooks/active-chat-provider.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useModels } from '#hooks/use-models.js';
 import { useTurnAdmission } from '#chat-clients/_internal/use-turn-admission.js';
@@ -25,13 +25,18 @@ export function ChatTurnHost(): ReactNode {
   const chat = useActiveChatInstance();
   const store = useChatSessionStore();
   const { resolveModel } = useModels();
+  const {
+    execution: { setActiveExecution },
+  } = useChatComposer();
   const { admitExecution, surfaceDispatchFailure } = useTurnAdmission(agent.execution);
   const agentRef = useRef(agent);
   const resolveModelRef = useRef(resolveModel);
+  const setActiveExecutionRef = useRef(setActiveExecution);
   useEffect(() => {
     agentRef.current = agent;
     resolveModelRef.current = resolveModel;
-  }, [agent, resolveModel]);
+    setActiveExecutionRef.current = setActiveExecution;
+  }, [agent, resolveModel, setActiveExecution]);
 
   const admit = useCallback(
     async (gesture: ChatTurnGesture): Promise<ChatTurn> => {
@@ -64,6 +69,11 @@ export function ChatTurnHost(): ReactNode {
                 : { kind: 'regenerate' },
         );
         await admitExecution(execution);
+        /* The chat owns what it ran on from its first turn, so a later default
+         * cannot move it — and that choice becomes the next new chat's. */
+        if (execution === liveAgent.execution) {
+          setActiveExecutionRef.current(execution);
+        }
         if (intent.trigger === 'resume') {
           const { runId } = projectedRun!;
           return {

@@ -16,7 +16,7 @@ import { isRecord } from '@taucad/utils/schema';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenPrintRequest } from '#hooks/use-machines-print-requests.js';
 import { useProject } from '#hooks/use-project.js';
-import { PrintNotice, PrintSection, operator } from '#routes/w.$workspace.$project/chat-print-section.js';
+import { PrintNotice, operator } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
   formatDuration,
   formatProducer,
@@ -398,15 +398,6 @@ function ApprovalCard({
           ) : null}
         </div>
       </div>
-      <ArtifactDetails request={request} />
-      {onPreview === undefined ? (
-        <p className='text-xs text-muted-foreground'>From another project</p>
-      ) : (
-        <Button type='button' size='sm' variant='outline' className='self-start' onClick={onPreview}>
-          <Eye aria-hidden />
-          Open printer preview
-        </Button>
-      )}
       {isConfirming ? (
         <StartConfirmationCard
           digest={request.artifact.digest}
@@ -428,7 +419,8 @@ function ApprovalCard({
             </PrintNotice>
           )}
           {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
-          <div className='flex flex-wrap gap-2'>
+          {/* The decision and its evidence on one row; the digest is in Inspect. */}
+          <div className='flex flex-wrap items-center gap-2'>
             <Button
               type='button'
               size='sm'
@@ -448,6 +440,14 @@ function ApprovalCard({
               )}
               {isAgent ? 'Deny' : 'Cancel request'}
             </Button>
+            {onPreview === undefined ? (
+              <span className='text-xs text-muted-foreground'>From another project</span>
+            ) : (
+              <Button type='button' size='sm' variant='ghost' onClick={onPreview}>
+                <Eye aria-hidden />
+                Preview
+              </Button>
+            )}
           </div>
         </>
       )}
@@ -754,7 +754,13 @@ export function SendSection({
   }
 
   return (
-    <PrintSection ref={ref} title='Send' tabIndex={-1} className='outline-none focus-visible:focus-outline'>
+    // The cards carry their own headings; a "Send" heading above them would repeat the decision.
+    <section
+      ref={ref}
+      aria-label='Send'
+      tabIndex={-1}
+      className='flex min-w-0 flex-col gap-2 outline-none focus-visible:focus-outline'
+    >
       {open.map((request) => {
         const isBusy = busyRequestId === request.requestId;
         const error = errors[request.requestId];
@@ -809,6 +815,6 @@ export function SendSection({
           }}
         />
       ) : null}
-    </PrintSection>
+    </section>
   );
 }

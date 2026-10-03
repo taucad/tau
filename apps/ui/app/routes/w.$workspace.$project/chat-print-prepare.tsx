@@ -23,21 +23,20 @@ import type { FileExtension } from '@taucad/types';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Rendering } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
-import { ToggleGroup, ToggleGroupItem } from '@taucad/ui/components/toggle-group';
+import { cn } from '@taucad/ui/utils/cn';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { randomUuid } from '@taucad/utils/id';
 import { Parameters } from '#components/geometry/parameters/parameters.js';
 import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import { ParametersBoolean } from '#components/geometry/parameters/parameters-boolean.js';
-import { ParameterGroupCard } from '#components/geometry/parameters/parameter-group-card.js';
-import { BambuStudioPresets } from '#components/print/bambu-studio-presets.js';
+import { BambuStudioPresets, shortPresetName } from '#components/print/bambu-studio-presets.js';
 import type { BambuTray } from '#components/print/bambu-studio-presets.js';
 import { FilamentSlots } from '#components/print/filament-slots.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import { SearchInput } from '#components/search-input.js';
 import { isRealBambuPrinter, useBambuStudio } from '#components/print/use-bambu-studio.js';
-import type { BambuQualityPreset, BambuStudioMode } from '#components/print/use-bambu-studio.js';
+import type { BambuQualityPreset, BambuStudioChosen, BambuStudioMode } from '#components/print/use-bambu-studio.js';
 import { useMachineSettings } from '#components/print/use-machine-settings.js';
 import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -49,6 +48,7 @@ import { selectCadFailureIssues } from '#machines/cad.machine.js';
 import {
   PrintDisclosure,
   PrintNotice,
+  PrintRow,
   PrintSection,
   operator,
 } from '#routes/w.$workspace.$project/chat-print-section.js';
@@ -698,6 +698,10 @@ export const usePrintPrepare = ({
     [entryPath, optionsKey, cancelSlice],
   );
   const sliceBlocker = ((): string | undefined => {
+    // The settings file's own failure is shown with the profile; slicing waits for it to load.
+    if (machineSettings.blocked) {
+      return machineSettings.error === undefined ? 'Loading print settings…' : 'Waiting for the print settings file.';
+    }
     if (!isBambuStudio || sliceOptions !== undefined) {
       return undefined;
     }
@@ -1077,32 +1081,25 @@ function QualityChoice({
   const selected = presets.find((preset) => active === preset.id || active === preset.layerHeight.value)?.id ?? '';
   return (
     <PrintSetupRow label='Quality' isModified={isModified} onReset={onReset}>
-      <ToggleGroup
-        type='single'
-        variant='outline'
-        size='sm'
-        aria-label='Quality'
-        className='h-(--param-field-h) rounded-(--param-field-radius) border border-border/50 bg-muted p-0'
+      <ParameterSelect
+        label='Quality'
         value={selected}
-        onValueChange={(value) => {
+        groups={[
+          {
+            options: presets.map((preset) => ({
+              value: preset.id,
+              label: preset.label,
+              secondary: formatQuantity(preset.layerHeight),
+            })),
+          },
+        ]}
+        onChange={(value) => {
           const preset = presets.find((candidate) => candidate.id === value);
           if (preset) {
             onSelect(preset);
           }
         }}
-      >
-        {presets.map((preset) => (
-          <ToggleGroupItem
-            key={preset.id}
-            value={preset.id}
-            aria-label={`${preset.label} ${formatQuantity(preset.layerHeight)}`}
-            className='h-full min-w-0 rounded-(--param-field-radius) px-2 text-xs font-normal text-(--param-field-color) data-[state=on]:bg-background data-[state=on]:text-foreground'
-          >
-            {preset.label}
-            <span className='text-muted-foreground'>{formatQuantity(preset.layerHeight)}</span>
-          </ToggleGroupItem>
-        ))}
-      </ToggleGroup>
+      />
     </PrintSetupRow>
   );
 }
@@ -1111,6 +1108,7 @@ function MaterialSelect({
   entry,
   manifest,
   submission,
+  filamentPresets,
   onSelect,
   isModified,
   onReset,
@@ -1118,6 +1116,8 @@ function MaterialSelect({
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
   readonly submission: Record<string, unknown>;
+  /** Bambu Studio filament presets chosen over the printer's, by tray. */
+  readonly filamentPresets: BambuStudioChosen['filaments'];
   readonly onSelect: (slot: number, materialId: string) => void;
   readonly isModified: boolean;
   readonly onReset: () => void;
@@ -1128,8 +1128,15 @@ function MaterialSelect({
   if (materials.length === 0) {
     return <p className='text-xs text-muted-foreground'>No material slots observed.</p>;
   }
+  // The tray and how it is sliced are one choice; an override set in More settings is named here.
+  const override = typeof selectedSlot === 'number' ? filamentPresets?.[selectedSlot] : undefined;
   return (
-    <PrintSetupRow label='Material' isModified={isModified} onReset={onReset}>
+    <PrintSetupRow
+      label='Material'
+      description={override === undefined ? undefined : `Sliced as ${shortPresetName(override)}`}
+      isModified={isModified}
+      onReset={onReset}
+    >
       <ParameterSelect
         label='Material'
         value={typeof selectedSlot === 'number' ? String(selectedSlot) : ''}
@@ -1164,6 +1171,7 @@ function MaterialChoice({
   filamentColors,
   submission,
   ownSubmission,
+  filamentPresets,
   onSelectMaterial,
   onSelectFilamentSlot,
   onResetMaterial,
@@ -1173,6 +1181,7 @@ function MaterialChoice({
   readonly filamentColors: readonly string[];
   readonly submission: Record<string, unknown>;
   readonly ownSubmission: Record<string, unknown>;
+  readonly filamentPresets: BambuStudioChosen['filaments'];
   readonly onSelectMaterial: (slot: number, materialId: string) => void;
   readonly onSelectFilamentSlot: (filament: number, slot: number) => void;
   readonly onResetMaterial: () => void;
@@ -1184,6 +1193,7 @@ function MaterialChoice({
           entry={entry}
           manifest={manifest}
           submission={submission}
+          filamentPresets={filamentPresets}
           isModified={Object.hasOwn(ownSubmission, 'amsMapping')}
           onReset={onResetMaterial}
           onSelect={onSelectMaterial}
@@ -1220,92 +1230,243 @@ function MaterialChoice({
   );
 }
 
-function SliceResult({
-  prepare,
+const formatWeight = (grams: number): string => `${String(Math.round(grams * 10) / 10)} g`;
+
+/** The one decision Prepare offers next: slice, or send a fresh slice. @public */
+export type PrepareAction = Readonly<{
+  label: string;
+  kind: 'slice' | 'send' | 'none';
+  /** Why the action waits, shown under its disabled button. */
+  blocker?: string;
+}>;
+
+/** What {@link prepareAction} reads. @public */
+export type PrepareActionFacts = Pick<
+  PrintPrepare,
+  'slice' | 'isSliceStale' | 'isSlicing' | 'route' | 'sliceBlocker' | 'sendBlocker'
+>;
+
+/**
+ * Prepare's primary action from its own state. A fresh slice that cannot be sent says why (a busy
+ * machine, the wrong spool, no current observation) rather than offering to slice again.
+ *
+ * @param prepare - The prepare state.
+ * @param machineName - The printer's name, for the send label.
+ * @returns The action.
+ * @public
+ */
+export const prepareAction = (prepare: PrepareActionFacts, machineName: string): PrepareAction => {
+  if (prepare.isSlicing) {
+    return { label: 'Slicing…', kind: 'slice' };
+  }
+  if (prepare.slice && !prepare.isSliceStale) {
+    return {
+      label: `Send to ${machineName}`,
+      kind: 'send',
+      ...(prepare.sendBlocker === undefined ? {} : { blocker: prepare.sendBlocker }),
+    };
+  }
+  if (prepare.route === undefined) {
+    return { label: 'Slicing unavailable', kind: 'none' };
+  }
+  return {
+    label: prepare.slice ? 'Slice again' : 'Slice and preview',
+    kind: 'slice',
+    ...(prepare.sliceBlocker === undefined ? {} : { blocker: prepare.sliceBlocker }),
+  };
+};
+
+/**
+ * Prepare's primary action: the action bar's content, or the end of a folded Prepare. Send opens
+ * the start confirmation in its place.
+ *
+ * @param properties - The machine, its manifest and the prepare state.
+ * @returns The actions, or nothing while slicing is unavailable.
+ * @public
+ */
+export function PrepareActions({
   entry,
   manifest,
+  prepare,
 }: {
-  readonly prepare: PrintPrepare;
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
+  readonly prepare: PrintPrepare;
 }): React.JSX.Element | undefined {
-  const {
-    slice,
-    staleReason,
-    openPreview,
-    confirmSend,
-    cancelSend,
-    isConfirmingSend,
-    send,
-    isSending,
-    sendError,
-    sendBlocker,
-  } = prepare;
+  const action = prepareAction(prepare, entry.name);
+  const { slice, isSlicing, isSending, sendError } = prepare;
+  if (action.kind === 'none') {
+    return undefined;
+  }
+  if (action.kind === 'send' && slice && prepare.isConfirmingSend) {
+    return (
+      <StartConfirmationCard
+        digest={slice.digest}
+        confirmations={describeStartConfirmations(prepare.sendConfiguration, entry, manifest)}
+        machineName={entry.name}
+        blocker={prepare.sendBlocker}
+        isBusy={isSending}
+        error={sendError}
+        onConfirm={() => {
+          void prepare.send();
+        }}
+        onBack={prepare.cancelSend}
+      />
+    );
+  }
+  if (action.kind === 'send') {
+    return (
+      <>
+        {sendError ? <PrintNotice tone='destructive'>{sendError}</PrintNotice> : null}
+        <div className='flex min-w-0 flex-wrap items-center gap-2'>
+          <Button type='button' size='sm' variant='outline' onClick={prepare.openPreview}>
+            <Eye aria-hidden />
+            Preview
+          </Button>
+          <Button
+            type='button'
+            size='sm'
+            className='ml-auto'
+            disabled={action.blocker !== undefined}
+            aria-describedby={action.blocker === undefined ? undefined : 'print-send-blocker'}
+            onClick={prepare.confirmSend}
+          >
+            <Send aria-hidden />
+            {action.label}
+          </Button>
+        </div>
+        {action.blocker === undefined ? null : (
+          <p id='print-send-blocker' className='text-xs text-muted-foreground'>
+            {action.blocker}
+          </p>
+        )}
+      </>
+    );
+  }
+  // A Bambu Studio failure is already shown with the presets; the wait is stated only while loading.
+  const waiting = prepare.studio.error === undefined ? action.blocker : undefined;
+  return (
+    <>
+      <div className='flex min-w-0 flex-wrap items-center justify-end gap-2'>
+        {isSlicing ? (
+          <Button type='button' variant='ghost' size='sm' onClick={prepare.cancelSlice}>
+            Cancel slicing
+          </Button>
+        ) : null}
+        <Button
+          type='button'
+          size='sm'
+          disabled={isSlicing || !prepare.hasGeometry || action.blocker !== undefined}
+          aria-describedby={waiting === undefined ? undefined : 'print-slice-blocker'}
+          onClick={prepare.sliceNow}
+        >
+          {isSlicing ? (
+            <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
+          ) : (
+            <Scissors aria-hidden />
+          )}
+          {action.label}
+        </Button>
+      </div>
+      {waiting === undefined ? null : (
+        <p id='print-slice-blocker' role='status' aria-busy='true' className='text-xs text-muted-foreground'>
+          {waiting}
+        </p>
+      )}
+    </>
+  );
+}
+
+/** The slice's file, estimates, bounds, plate fit and producer, on request. */
+function SliceDetails({ slice }: { readonly slice: NonNullable<PrintPrepare['slice']> }): React.JSX.Element {
+  const { summary, fit } = slice;
+  return (
+    <dl className='flex flex-col gap-0.5'>
+      <PrintRow label='File'>
+        <span className='font-mono break-all'>{slice.fileName}</span>
+      </PrintRow>
+      <PrintRow label='Time'>
+        {formatDuration(summary.estimatedDuration)}
+        {summary.isSlicerEstimate
+          ? ` (${summary.producer?.name ?? 'slicer'} estimate)`
+          : summary.coverageComplete
+            ? ''
+            : ' (known motion only)'}
+      </PrintRow>
+      {summary.filamentWeightGrams === undefined ? null : (
+        <PrintRow label='Weight'>{formatWeight(summary.filamentWeightGrams)} (slicer estimate)</PrintRow>
+      )}
+      {summary.bounds === undefined ? null : (
+        <>
+          <PrintRow label='Part'>
+            {summary.partBounds === undefined ? (
+              <span className='text-muted-foreground'>Unknown: this G-code does not label walls or infill</span>
+            ) : (
+              formatSize(summary.partBounds)
+            )}
+          </PrintRow>
+          <PrintRow label='Toolpath'>
+            {formatSize(summary.bounds)}{' '}
+            <span className='text-muted-foreground'>
+              · every nozzle move, including the printer&apos;s start routine
+            </span>
+          </PrintRow>
+        </>
+      )}
+      {fit?.fits === true ? <PrintRow label='Plate'>{fit.message}</PrintRow> : null}
+      {summary.producer ? <PrintRow label='Sliced by'>{formatProducer(summary.producer)}</PrintRow> : null}
+    </dl>
+  );
+}
+
+/** Three numbers people read, with a tick for a passing fit; the rest on request, failures as notices. */
+function SliceResult({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element | undefined {
+  const { slice, staleReason, isSliceStale, isSlicing } = prepare;
   if (!slice) {
     return undefined;
   }
-  const machineName = entry.name;
   const { summary, fit, warnings } = slice;
+  const weight = summary.filamentWeightGrams === undefined ? undefined : formatWeight(summary.filamentWeightGrams);
+  const facts = [
+    `${String(summary.layers)} layers`,
+    formatDuration(summary.estimatedDuration),
+    formatFilament(summary.filamentLength),
+    weight,
+  ].filter((fact) => fact !== undefined);
   return (
-    <div className='flex min-w-0 flex-col gap-2' aria-label='Slice result'>
-      {summary.producer ? (
-        <p className='text-xs text-muted-foreground'>Sliced by {formatProducer(summary.producer)}</p>
-      ) : null}
-      <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs'>
-        <dt className='text-muted-foreground'>File</dt>
-        <dd className='truncate font-mono'>{slice.fileName}</dd>
-        <dt className='text-muted-foreground'>Layers</dt>
-        <dd className='tabular-nums'>{summary.layers}</dd>
-        <dt className='text-muted-foreground'>Time</dt>
-        <dd className='tabular-nums'>
-          {formatDuration(summary.estimatedDuration)}
-          {summary.isSlicerEstimate
-            ? ` (${summary.producer?.name ?? 'slicer'} estimate)`
-            : summary.coverageComplete
-              ? ''
-              : ' (known motion only)'}
-        </dd>
-        <dt className='text-muted-foreground'>Filament</dt>
-        <dd className='tabular-nums'>{formatFilament(summary.filamentLength)}</dd>
-        <dt className='text-muted-foreground'>Weight</dt>
-        <dd className='tabular-nums'>
-          {summary.filamentWeightGrams === undefined
-            ? 'Unknown'
-            : `${String(Math.round(summary.filamentWeightGrams * 10) / 10)} g (slicer estimate)`}
-        </dd>
-        {summary.bounds === undefined ? null : (
-          <>
-            <dt className='text-muted-foreground'>Part</dt>
-            <dd className='tabular-nums'>
-              {summary.partBounds === undefined ? (
-                <span className='text-muted-foreground'>Unknown: this G-code does not label walls or infill</span>
-              ) : (
-                formatSize(summary.partBounds)
-              )}
-            </dd>
-            <dt className='text-muted-foreground'>Toolpath</dt>
-            <dd className='tabular-nums'>
-              {formatSize(summary.bounds)}{' '}
-              <span className='text-muted-foreground'>
-                · every nozzle move, including the printer&apos;s start routine
-              </span>
-            </dd>
-          </>
-        )}
-      </dl>
+    <div role='group' aria-label='Slice result' className='flex min-w-0 flex-col gap-2'>
+      <div className='flex min-w-0 flex-col gap-2 rounded-lg border border-border/70 px-2 pt-1 pb-2'>
+        <div className='flex min-h-6 min-w-0 items-center gap-2 text-xs'>
+          {fit?.fits === true ? (
+            <>
+              <Check aria-hidden className='size-3.5 shrink-0 text-success' />
+              <span className='sr-only'>{fit.message}. </span>
+            </>
+          ) : null}
+          <span className={cn('min-w-0 flex-1 tabular-nums', isSliceStale && 'text-muted-foreground')}>
+            {facts.join(' · ')}
+          </span>
+          {/* A stale slice's Slice again is the primary action; here it would be a second one. */}
+          {isSliceStale ? null : (
+            <Button type='button' size='xs' variant='ghost' disabled={isSlicing} onClick={prepare.sliceNow}>
+              <Scissors aria-hidden />
+              Slice again
+            </Button>
+          )}
+        </div>
+        <PrintDisclosure
+          title='Details'
+          summary={summary.partBounds === undefined ? undefined : formatSize(summary.partBounds)}
+        >
+          <SliceDetails slice={slice} />
+        </PrintDisclosure>
+      </div>
       {summary.previewRefusal === undefined ? null : (
         <PrintNotice tone='neutral' role='status'>
           {summary.previewRefusal}
         </PrintNotice>
       )}
-      {fit === undefined ? null : fit.fits ? (
-        <p className='flex items-center gap-1.5 text-xs'>
-          <Check aria-hidden className='size-3.5 text-success' />
-          {fit.message}
-        </p>
-      ) : (
-        <PrintNotice tone='warning'>{fit.message}</PrintNotice>
-      )}
+      {fit === undefined || fit.fits ? null : <PrintNotice tone='warning'>{fit.message}</PrintNotice>}
       {warnings.map((warning) => (
         <PrintNotice key={warning} tone='warning' role='status'>
           {warning}
@@ -1315,45 +1476,6 @@ function SliceResult({
         <PrintNotice tone='neutral' role='status'>
           {staleReason}
         </PrintNotice>
-      )}
-      {isConfirmingSend ? (
-        <StartConfirmationCard
-          digest={slice.digest}
-          confirmations={describeStartConfirmations(prepare.sendConfiguration, entry, manifest)}
-          machineName={machineName}
-          blocker={sendBlocker}
-          isBusy={isSending}
-          error={sendError}
-          onConfirm={() => {
-            void send();
-          }}
-          onBack={cancelSend}
-        />
-      ) : (
-        <>
-          {sendError ? <PrintNotice tone='destructive'>{sendError}</PrintNotice> : null}
-          <div className='flex flex-wrap gap-2'>
-            <Button type='button' size='sm' variant='outline' onClick={openPreview}>
-              <Eye aria-hidden />
-              Open printer preview
-            </Button>
-            <Button
-              type='button'
-              size='sm'
-              disabled={sendBlocker !== undefined}
-              aria-describedby={sendBlocker === undefined ? undefined : 'print-send-blocker'}
-              onClick={confirmSend}
-            >
-              <Send aria-hidden />
-              {`Send to ${machineName}`}
-            </Button>
-          </div>
-          {sendBlocker === undefined ? null : (
-            <p id='print-send-blocker' className='text-xs text-muted-foreground'>
-              {sendBlocker}
-            </p>
-          )}
-        </>
       )}
     </div>
   );
@@ -1369,7 +1491,12 @@ function ModelSelect({
   readonly onChange: (entryPath: string) => void;
 }): React.JSX.Element | undefined {
   if (entryPaths.length < 2) {
-    return undefined;
+    // One model is not a choice, but it names what will be sliced.
+    return entryPath ? (
+      <PrintSetupRow label='Model'>
+        <span className='min-w-0 flex-1 truncate px-3 font-mono text-xs text-(--param-field-color)'>{entryPath}</span>
+      </PrintSetupRow>
+    ) : undefined;
   }
   return (
     <PrintSetupRow label='Model'>
@@ -1450,11 +1577,9 @@ function BambuStudioChoices({
   );
 }
 
-/** The slice button, why it waits and why the last slice failed. */
-function SliceControls({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element {
-  const { route, hasGeometry, isSlicing, slice, sliceNow, sliceError, studio } = prepare;
-  // A Bambu Studio failure is already shown with the presets; the wait is stated only while loading.
-  const waiting = studio.error === undefined ? prepare.sliceBlocker : undefined;
+/** Why slicing is unavailable and why the last slice failed; the slice button is Prepare's action. */
+function SliceNotices({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element | undefined {
+  const { route, hasGeometry, sliceError } = prepare;
   if (route === undefined) {
     return (
       <PrintNotice tone='neutral' role='status'>
@@ -1462,72 +1587,44 @@ function SliceControls({ prepare }: { readonly prepare: PrintPrepare }): React.J
       </PrintNotice>
     );
   }
-  return (
-    <>
-      <Button
-        type='button'
-        size='sm'
-        className='self-start'
-        disabled={isSlicing || !hasGeometry || prepare.sliceBlocker !== undefined}
-        aria-describedby={waiting === undefined ? undefined : 'print-slice-blocker'}
-        onClick={sliceNow}
-      >
-        {isSlicing ? (
-          <LoaderCircle aria-hidden className='animate-spin motion-reduce:animate-none' />
-        ) : (
-          <Scissors aria-hidden />
-        )}
-        {isSlicing ? 'Slicing…' : slice ? 'Slice again' : 'Slice and preview'}
-      </Button>
-      {isSlicing ? (
-        <Button type='button' variant='ghost' size='sm' className='self-start' onClick={prepare.cancelSlice}>
-          Cancel slicing
-        </Button>
-      ) : null}
-      {waiting === undefined ? null : (
-        <p id='print-slice-blocker' role='status' aria-busy='true' className='text-xs text-muted-foreground'>
-          {waiting}
-        </p>
-      )}
-      {sliceError ? <PrintNotice tone='destructive'>{sliceError}</PrintNotice> : null}
-    </>
-  );
+  return sliceError ? <PrintNotice tone='destructive'>{sliceError}</PrintNotice> : undefined;
 }
 
-/** The host's prestart defaults, visible before Slice and preserved in the submission projection. */
-function BeforeStarting({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element | undefined {
-  const [isOpen, setIsOpen] = useState(true);
-  const rows = [
-    { key: 'bedLeveling', label: 'Bed levelling', description: 'Probe the plate before the first layer.' },
-    {
-      key: 'flowCalibration',
-      label: 'Flow calibration',
-      description: 'Calibrate flow dynamics for the loaded filament.',
-    },
-    { key: 'timelapse', label: 'Timelapse', description: 'Record a frame every layer.' },
-  ] as const;
-  const declared = rows.filter(({ key }) => Object.hasOwn(prepare.submissionSchema?.schema.properties ?? {}, key));
+const startOptions = [
+  {
+    key: 'bedLeveling',
+    label: 'Bed levelling',
+    short: 'Levelling',
+    description: 'Probe the plate before the first layer.',
+  },
+  {
+    key: 'flowCalibration',
+    label: 'Flow calibration',
+    short: 'Flow',
+    description: 'Calibrate flow dynamics for the loaded filament.',
+  },
+  { key: 'timelapse', label: 'Timelapse', short: 'Timelapse', description: 'Record a frame every layer.' },
+] as const;
+
+/** The host's prestart options, folded and summarised by what is on, preserved in the submission projection. */
+function StartOptions({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element | undefined {
+  const declared = startOptions.filter(({ key }) =>
+    Object.hasOwn(prepare.submissionSchema?.schema.properties ?? {}, key),
+  );
   if (declared.length === 0) {
     return undefined;
   }
-  const changed = declared.filter(({ key }) => Object.hasOwn(prepare.submission, key)).length;
+  const on = declared.filter(({ key }) => prepare.effectiveSubmission[key] === true).map(({ short }) => short);
   return (
-    <ParameterGroupCard
-      title='Before starting'
-      isOpen={isOpen}
-      trailing={
-        <span className='shrink-0 text-xs text-muted-foreground tabular-nums'>
-          {changed === 0 ? `(${String(declared.length)})` : `(${String(changed)} changed)`}
-        </span>
-      }
-      onOpenChange={setIsOpen}
+    <PrintDisclosure
+      title='Start options'
+      summary={on.length === 0 ? 'None' : [on[0], ...on.slice(1).map((name) => name.toLowerCase())].join(', ')}
     >
       {declared.map(({ key, label, description }) => (
         <PrintSetupRow
           key={key}
           label={label}
           description={description}
-          className='px-2.5'
           isModified={Object.hasOwn(prepare.submission, key)}
           onReset={() => {
             prepare.setSubmission(
@@ -1545,7 +1642,7 @@ function BeforeStarting({ prepare }: { readonly prepare: PrintPrepare }): React.
           />
         </PrintSetupRow>
       ))}
-    </ParameterGroupCard>
+    </PrintDisclosure>
   );
 }
 
@@ -1677,12 +1774,8 @@ function EngineStatus({
       );
     }
     case 'ready': {
-      return (
-        <p role='status' className='flex min-w-0 items-center gap-1.5 text-xs text-muted-foreground'>
-          <Check aria-hidden className='size-3.5 shrink-0 text-success' />
-          {studio.version === undefined ? 'Slicing with Bambu Studio' : `Slicing with Bambu Studio ${studio.version}`}
-        </p>
-      );
+      // Working as expected needs no line; the version is in Inspect.
+      return undefined;
     }
     default: {
       return isRealBambuPrinter(provider) ? (
@@ -1690,17 +1783,40 @@ function EngineStatus({
           {bambuStudioRequired}
         </PrintNotice>
       ) : (
-        <p role='status' className='text-xs text-muted-foreground'>
+        <PrintNotice tone='neutral' role='status'>
           Slicing with Tau&apos;s reference slicer: Bambu Studio is not available here.
-        </p>
+        </PrintNotice>
       );
     }
   }
 }
 
 /**
- * Prepare: choose a preset, material and plate, slice, read the result, open
- * the preview or send. Advanced holds the full slicer and submission forms.
+ * The slicer Prepare uses, for Inspect.
+ *
+ * @param studio - The Bambu Studio mode.
+ * @returns Its name and version, or nothing while unknown or not a Bambu printer.
+ * @public
+ */
+export const slicerName = (studio: BambuStudioMode): string | undefined => {
+  switch (studio.status) {
+    case 'ready': {
+      return studio.version === undefined ? 'Bambu Studio' : `Bambu Studio ${studio.version}`;
+    }
+    case 'unavailable': {
+      return 'Tau reference slicer';
+    }
+    default: {
+      return undefined;
+    }
+  }
+};
+
+/**
+ * Prepare: choose the model, profile, plate, material and process, read the
+ * slice, set the start options. More settings holds the full slicer and
+ * submission forms. Folded behind a decision or a run, it ends with its own
+ * actions; otherwise the pane's action bar carries them.
  *
  * @param properties - The machine, its manifest and the prepare state.
  * @returns The section.
@@ -1711,11 +1827,14 @@ export function PrepareSection({
   provider,
   manifest,
   prepare,
+  fold,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly provider: MachineProvider | undefined;
   readonly manifest: MachineManifest | undefined;
   readonly prepare: PrintPrepare;
+  /** The fold's title while a decision or a run owns the pane. */
+  readonly fold?: string;
 }): React.JSX.Element {
   const [moreSettingsFilter, setMoreSettingsFilter] = useState('');
   const {
@@ -1801,141 +1920,148 @@ export function PrepareSection({
   const selectedProcess = studio.processes.find((preset) => preset.name === studio.selection?.process);
   const presetState = isBambuStudio ? { layerHeight: selectedProcess?.layerHeight } : options;
 
-  return (
-    <PrintSection
-      title='Prepare'
-      aside={
-        /* Beside the heading, never inside a trigger: a reset is a button of its own. */
-        hasIntentChanges(intent) || Object.keys(machineSettings.machine ?? {}).length > 0 ? (
-          <ModifiedIndicator onReset={resetIntent} tooltip='Reset print settings' />
-        ) : undefined
-      }
-    >
-      <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
+  /* Beside the heading, never inside a trigger: a reset is a button of its own. */
+  const reset =
+    hasIntentChanges(intent) || Object.keys(machineSettings.machine ?? {}).length > 0 ? (
+      <ModifiedIndicator onReset={resetIntent} tooltip='Reset print settings' />
+    ) : undefined;
+  const content = (
+    <>
       <EngineStatus studio={studio} provider={provider} />
       {/* Setup rows pad themselves (PrintSetupRow py-1.5), so the group adds only the row-to-row gap. */}
       <div className='flex min-w-0 flex-col gap-1'>
+        <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
         <MachineProfiles settings={machineSettings} studio={studio} />
         {/* Keep disabled semantics without Chromium's fieldset anonymous layout box around query containers. */}
         <fieldset disabled={machineSettings.blocked} className='contents'>
-          <div className='flex min-w-0 flex-col gap-3'>
-            <div className='flex min-w-0 flex-col gap-1'>
-              <PlateSelect
-                plates={plates}
-                selected={selectedPlate}
-                isModified={intent?.plate !== undefined}
-                onChange={selectPlate}
-                onReset={resetPlate}
-              />
-              <MaterialChoice
-                entry={entry}
-                manifest={manifest}
-                filamentColors={filamentColors}
-                submission={effectiveSubmission}
-                ownSubmission={submission}
-                onResetMaterial={() => {
-                  setSubmission(
-                    Object.fromEntries(
-                      Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
-                    ),
-                  );
-                }}
-                onSelectMaterial={selectMaterial}
-                onSelectFilamentSlot={selectFilamentSlot}
-              />
-              {!isBambuStudio && manifest ? (
-                <QualityChoice
-                  presets={manifest.slicing.presets}
-                  options={presetState}
-                  isModified={intent?.preset !== undefined}
-                  onSelect={selectPreset}
-                  onReset={resetPreset}
-                />
-              ) : null}
-              {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
-            </div>
-            <BeforeStarting prepare={prepare} />
-            <SliceControls prepare={prepare} />
-            <SliceResult prepare={prepare} entry={entry} manifest={manifest} />
-            <PrintDisclosure title='More settings'>
-              <SearchInput
-                aria-label='Filter settings'
-                placeholder='Filter settings'
-                value={moreSettingsFilter}
-                className='h-6 w-full bg-background text-sm'
-                onChange={(event) => {
-                  setMoreSettingsFilter(event.target.value);
-                }}
-                onClear={() => {
-                  setMoreSettingsFilter('');
-                }}
-              />
-              {isBambuStudio ? (
-                <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' />
-              ) : null}
-              {isBambuStudio ? (
-                <BambuStudioSettings studio={studio} filterTerm={moreSettingsFilter} />
-              ) : optionsSchema ? (
-                <div className='min-w-0' role='group' aria-label='Slicer options'>
-                  {optionsManifest ? (
-                    <Parameters
-                      parameters={options}
-                      defaultParameters={optionsSchema.defaults}
-                      jsonSchema={optionsSchema.schema as RJSFSchema}
-                      onParametersChange={setOptions}
-                      enableSearch={false}
-                      filterTerm={moreSettingsFilter}
-                      presentation='embedded'
-                      units={printUnits}
-                      parameterManifest={optionsManifest}
-                      parameterEdit={{ kind: 'transient' }}
-                      emptyMessage='No slicer options'
-                    />
-                  ) : (
-                    <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-                      Preparing slicer options…
-                    </p>
-                  )}
-                </div>
-              ) : (
-                <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
-              )}
-              {submissionSchema && provider ? (
-                <div className='min-w-0' role='group' aria-label='Machine mapping'>
-                  {submissionManifest ? (
-                    <Parameters
-                      parameters={advancedSubmissionValues(submission)}
-                      defaultParameters={advancedSubmissionValues(
-                        submissionDefaults(provider, entry, { manifest, filamentColors }),
-                      )}
-                      jsonSchema={advancedSubmissionSchema}
-                      onParametersChange={(changed) => {
-                        setSubmission({
-                          ...Object.fromEntries(
-                            Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
-                          ),
-                          ...changed,
-                        });
-                      }}
-                      enableSearch={false}
-                      filterTerm={moreSettingsFilter}
-                      presentation='embedded'
-                      units={printUnits}
-                      parameterManifest={submissionManifest}
-                      parameterEdit={{ kind: 'transient' }}
-                      emptyMessage='No machine mapping'
-                    />
-                  ) : (
-                    <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-                      Preparing machine mapping…
-                    </p>
-                  )}
-                </div>
-              ) : null}
-            </PrintDisclosure>
-          </div>
+          <PlateSelect
+            plates={plates}
+            selected={selectedPlate}
+            isModified={intent?.plate !== undefined}
+            onChange={selectPlate}
+            onReset={resetPlate}
+          />
+          <MaterialChoice
+            entry={entry}
+            manifest={manifest}
+            filamentColors={filamentColors}
+            submission={effectiveSubmission}
+            ownSubmission={submission}
+            filamentPresets={isBambuStudio ? studio.chosen.filaments : undefined}
+            onResetMaterial={() => {
+              setSubmission(
+                Object.fromEntries(
+                  Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
+                ),
+              );
+            }}
+            onSelectMaterial={selectMaterial}
+            onSelectFilamentSlot={selectFilamentSlot}
+          />
+          {!isBambuStudio && manifest ? (
+            <QualityChoice
+              presets={manifest.slicing.presets}
+              options={presetState}
+              isModified={intent?.preset !== undefined}
+              onSelect={selectPreset}
+              onReset={resetPreset}
+            />
+          ) : null}
+          {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
         </fieldset>
       </div>
+      <fieldset disabled={machineSettings.blocked} className='contents'>
+        <SliceNotices prepare={prepare} />
+        <SliceResult prepare={prepare} />
+        <StartOptions prepare={prepare} />
+        <PrintDisclosure title='More settings'>
+          <SearchInput
+            aria-label='Filter settings'
+            placeholder='Filter settings'
+            value={moreSettingsFilter}
+            className='h-6 w-full bg-background text-sm'
+            onChange={(event) => {
+              setMoreSettingsFilter(event.target.value);
+            }}
+            onClear={() => {
+              setMoreSettingsFilter('');
+            }}
+          />
+          {isBambuStudio ? (
+            <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' />
+          ) : null}
+          {isBambuStudio ? (
+            <BambuStudioSettings studio={studio} filterTerm={moreSettingsFilter} />
+          ) : optionsSchema ? (
+            <div className='min-w-0' role='group' aria-label='Slicer options'>
+              {optionsManifest ? (
+                <Parameters
+                  parameters={options}
+                  defaultParameters={optionsSchema.defaults}
+                  jsonSchema={optionsSchema.schema as RJSFSchema}
+                  onParametersChange={setOptions}
+                  enableSearch={false}
+                  filterTerm={moreSettingsFilter}
+                  presentation='embedded'
+                  units={printUnits}
+                  parameterManifest={optionsManifest}
+                  parameterEdit={{ kind: 'transient' }}
+                  emptyMessage='No slicer options'
+                />
+              ) : (
+                <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+                  Preparing slicer options…
+                </p>
+              )}
+            </div>
+          ) : (
+            <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
+          )}
+          {submissionSchema && provider ? (
+            <div className='min-w-0' role='group' aria-label='Machine mapping'>
+              {submissionManifest ? (
+                <Parameters
+                  parameters={advancedSubmissionValues(submission)}
+                  defaultParameters={advancedSubmissionValues(
+                    submissionDefaults(provider, entry, { manifest, filamentColors }),
+                  )}
+                  jsonSchema={advancedSubmissionSchema}
+                  onParametersChange={(changed) => {
+                    setSubmission({
+                      ...Object.fromEntries(
+                        Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
+                      ),
+                      ...changed,
+                    });
+                  }}
+                  enableSearch={false}
+                  filterTerm={moreSettingsFilter}
+                  presentation='embedded'
+                  units={printUnits}
+                  parameterManifest={submissionManifest}
+                  parameterEdit={{ kind: 'transient' }}
+                  emptyMessage='No machine mapping'
+                />
+              ) : (
+                <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+                  Preparing machine mapping…
+                </p>
+              )}
+            </div>
+          ) : null}
+        </PrintDisclosure>
+        {fold === undefined ? null : <PrepareActions entry={entry} manifest={manifest} prepare={prepare} />}
+      </fieldset>
+    </>
+  );
+
+  return fold === undefined ? (
+    <PrintSection title='Prepare' aside={reset}>
+      {content}
     </PrintSection>
+  ) : (
+    <PrintDisclosure title={fold} aside={reset}>
+      {content}
+    </PrintDisclosure>
   );
 }

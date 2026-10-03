@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { Fragment, useEffect, useRef, useState } from 'react';
 import {
   Camera,
   Fan,
@@ -345,7 +345,7 @@ const namesUpload = (request: PrintRequest, runName: string | undefined): boolea
  * @param requests - Its print requests.
  * @returns The file name, or `undefined` without a run or a showable name.
  */
-const runFileName = (entry: MachineDirectoryEntry, requests: readonly PrintRequest[]): string | undefined => {
+export const runFileName = (entry: MachineDirectoryEntry, requests: readonly PrintRequest[]): string | undefined => {
   const { activeRunId, run } = entry.snapshot;
   if (!run) {
     return undefined;
@@ -363,15 +363,19 @@ const runFileName = (entry: MachineDirectoryEntry, requests: readonly PrintReque
   );
 };
 
+/**
+ * What the run block above does not already say: a stage other than the run's own state, and the speed.
+ *
+ * @param properties - The machine and whether its run observation is stale.
+ * @returns The group, or nothing when it has nothing to add.
+ */
 function RunGroup({
   entry,
-  fileName,
   isStale,
 }: {
   readonly entry: MachineDirectoryEntry;
-  readonly fileName: string | undefined;
   readonly isStale: boolean;
-}): React.JSX.Element {
+}): React.JSX.Element | undefined {
   const { run } = entry.snapshot;
   const speed = run
     ? [run.speedProfile, run.speedPercent === undefined ? undefined : `${String(run.speedPercent)} %`]
@@ -379,21 +383,17 @@ function RunGroup({
         .join(' · ')
     : '';
   const stage = readableStage(run?.stage);
+  const extraStage = stage === undefined || stage.toLowerCase() === run?.state ? undefined : stage;
+  if (extraStage === undefined && speed === '' && !isStale) {
+    return undefined;
+  }
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <GroupHeading label='Run' isStale={isStale} />
-      {run ? (
-        <>
-          <p className='text-xs'>{describeRun(entry)}</p>
-          <dl className='flex flex-col gap-0.5'>
-            {fileName === undefined ? null : <PrintRow label='File'>{fileName}</PrintRow>}
-            {stage === undefined ? null : <PrintRow label='Stage'>{stage}</PrintRow>}
-            {speed === '' ? null : <PrintRow label='Speed'>{speed}</PrintRow>}
-          </dl>
-        </>
-      ) : (
-        <p className='text-xs text-muted-foreground'>No run in progress.</p>
-      )}
+      <dl className='flex flex-col gap-0.5'>
+        {extraStage === undefined ? null : <PrintRow label='Stage'>{extraStage}</PrintRow>}
+        {speed === '' ? null : <PrintRow label='Speed'>{speed}</PrintRow>}
+      </dl>
     </div>
   );
 }
@@ -602,8 +602,9 @@ function AlertNotice({ alerts }: { readonly alerts: readonly MachineAlertSnapsho
 }
 
 /**
- * Monitor: the run, temperatures, environment, material slots and the camera,
- * each group wearing a stale badge past its manifest budget.
+ * Monitor: during a run, its speed, temperatures, material slots and the camera, each group
+ * wearing a stale badge past its manifest budget. An idle printer is one fold whose summary is
+ * its status line; alerts stay outside any fold.
  *
  * @param properties - The client, machine and manifest.
  * @returns The section.
@@ -613,46 +614,18 @@ export function MonitorSection({
   client,
   entry,
   manifest,
-  requests,
-  onReceipt,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
   readonly manifest: MachineManifest | undefined;
-  readonly requests: readonly PrintRequest[];
-  readonly onReceipt?: (receipt: MachineOperationReceipt) => void;
 }): React.JSX.Element {
   const now = useNow();
   const { alerts } = entry.snapshot;
   const stale = (group: string): boolean => isObservationStale({ entry, manifest, group, now });
   const state = entry.snapshot.run?.state;
   const active = state !== undefined && state !== 'idle' && state !== 'succeeded';
-
-  return (
-    <PrintSection title='Monitor'>
-      {alerts && alerts.length > 0 ? <AlertNotice alerts={alerts} /> : null}
-      {active ? (
-        <>
-          <RunGroup entry={entry} fileName={runFileName(entry, requests)} isStale={stale('run')} />
-          <TemperatureGroup entry={entry} manifest={manifest} isStale={stale('thermal')} />
-          {onReceipt ? (
-            <ControlsSection
-              client={client}
-              entry={entry}
-              manifest={manifest}
-              requests={requests}
-              onReceipt={onReceipt}
-              isEmbedded
-            />
-          ) : null}
-        </>
-      ) : (
-        <p className='text-xs'>
-          {state === 'succeeded' ? 'Last run finished' : 'Idle'} · Nozzle{' '}
-          {temperature(entry.snapshot.temperatures?.nozzle, undefined)} · Bed{' '}
-          {temperature(entry.snapshot.temperatures?.bed, undefined)}
-        </p>
-      )}
+  const details = (
+    <>
       <MaterialGroup entry={entry} manifest={manifest} isStale={stale('material')} />
       <PrintDisclosure title='Environment and camera' summary='Fans, light, network and stills' isDefaultOpen={active}>
         <EnvironmentGroup
@@ -662,17 +635,30 @@ export function MonitorSection({
         />
         {manifest?.camera.stills === false ? null : <StillCapture client={client} entry={entry} />}
       </PrintDisclosure>
-      {!active && onReceipt ? (
-        <ControlsSection
-          client={client}
-          entry={entry}
-          manifest={manifest}
-          requests={requests}
-          onReceipt={onReceipt}
-          isEmbedded
-        />
-      ) : null}
-    </PrintSection>
+    </>
+  );
+
+  return (
+    <>
+      {alerts && alerts.length > 0 ? <AlertNotice alerts={alerts} /> : null}
+      {active ? (
+        <PrintSection title='Monitor'>
+          <RunGroup entry={entry} isStale={stale('run')} />
+          <TemperatureGroup entry={entry} manifest={manifest} isStale={stale('thermal')} />
+          {details}
+        </PrintSection>
+      ) : (
+        <PrintDisclosure
+          title='Printer'
+          summary={`${state === 'succeeded' ? 'Last run finished' : 'Idle'} · nozzle ${temperature(
+            entry.snapshot.temperatures?.nozzle,
+            undefined,
+          )} · bed ${temperature(entry.snapshot.temperatures?.bed, undefined)}`}
+        >
+          {details}
+        </PrintDisclosure>
+      )}
+    </>
   );
 }
 
@@ -689,7 +675,7 @@ const commandVerb: Record<MachineControlRunInput['command'], string> = {
   cancel: 'Cancel',
   'urgent-stop': 'Urgently stop',
 };
-/** Manifest actions the pane implements through the run controls, Send and the camera. */
+/** Manifest actions the pane implements through the run controls, Send and the camera; Inspect lists the rest. */
 const implementedActions = new Set([
   'print.start',
   'run.pause',
@@ -721,41 +707,36 @@ export const availableRunCommands = (
 };
 
 const qualificationReason: Record<MachineManifest['actions'][number]['qualification'], string> = {
-  qualified: 'Not available in this pane yet',
-  designed: 'Designed, not yet qualified on this machine',
+  qualified: 'Not in this pane yet',
+  designed: 'Designed, not yet qualified',
   unsupported: 'Not supported',
 };
 
 /**
  * Controls: pause, resume, cancel and urgent stop for the exact observed run,
- * each behind a named confirmation, plus every other manifest action shown
- * disabled with its qualification (blueprint R3, R7).
+ * each behind a named confirmation (blueprint R3). They wait for a current
+ * observation; the pane's observation notice says so once.
  *
- * @param properties - The client, machine, manifest and receipt sink.
- * @returns The section.
+ * @param properties - The client, machine, its requests and the receipt sink.
+ * @returns The controls, or nothing without a run to control.
  * @public
  */
 export function ControlsSection({
   client,
   entry,
-  manifest,
   requests,
   onReceipt,
-  isEmbedded = false,
 }: {
   readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
-  readonly manifest: MachineManifest | undefined;
   readonly requests: readonly PrintRequest[];
   readonly onReceipt: (receipt: MachineOperationReceipt) => void;
-  readonly isEmbedded?: boolean;
-}): React.JSX.Element {
+}): React.JSX.Element | undefined {
   const [isBusy, setIsBusy] = useState(false);
   const [confirming, setConfirming] = useState<MachineControlRunInput['command']>();
   const [error, setError] = useState<string>();
   const commands = availableRunCommands(entry);
   const isCurrent = entry.freshness === 'current' && entry.snapshot.connection === 'connected';
-  const otherActions = (manifest?.actions ?? []).filter((action) => !implementedActions.has(action.id));
   const fileName = runFileName(entry, requests);
 
   const issue = async (command: MachineControlRunInput['command']): Promise<void> => {
@@ -781,8 +762,11 @@ export function ControlsSection({
     }
   };
 
-  const content = (
-    <>
+  if (commands.length === 0 && confirming === undefined && error === undefined) {
+    return undefined;
+  }
+  return (
+    <div className='flex min-w-0 flex-col gap-2'>
       {commands.length > 0 ? (
         <div role='group' aria-label={`Controls for ${entry.name}`} className='flex flex-wrap gap-2'>
           {commands.map((command) => {
@@ -804,14 +788,7 @@ export function ControlsSection({
             );
           })}
         </div>
-      ) : isEmbedded ? null : (
-        <p className='text-xs text-muted-foreground'>No run to control.</p>
-      )}
-      {commands.length === 0 || isCurrent ? null : (
-        <p role='status' className='text-xs text-muted-foreground'>
-          Run controls wait for a current observation from the machine.
-        </p>
-      )}
+      ) : null}
       {confirming ? (
         <div
           role='alertdialog'
@@ -855,35 +832,7 @@ export function ControlsSection({
         </div>
       ) : null}
       {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
-      {otherActions.length > 0 ? (
-        <PrintDisclosure title='Other actions' summary={`${String(otherActions.length)} declared`}>
-          <ul className='flex flex-col gap-1'>
-            {otherActions.map((action) => (
-              <li key={action.id} className='flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-xs'>
-                <Button
-                  type='button'
-                  size='xs'
-                  variant='outline'
-                  disabled
-                  aria-describedby={`print-action-${action.id}`}
-                >
-                  {action.label}
-                </Button>
-                <span id={`print-action-${action.id}`} className='min-w-0 text-muted-foreground'>
-                  {qualificationReason[action.qualification]}
-                  {action.description ? ` · ${action.description}` : ''}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </PrintDisclosure>
-      ) : null}
-    </>
-  );
-  return isEmbedded ? (
-    <div className='flex min-w-0 flex-col gap-2'>{content}</div>
-  ) : (
-    <PrintSection title='Controls'>{content}</PrintSection>
+    </div>
   );
 }
 
@@ -962,13 +911,13 @@ export const startedRunLabel = (
 };
 
 /**
- * Activity: the print requests and the operation receipts, newest first.
+ * History: the print requests and the operation receipts, newest first; nothing while empty.
  *
  * @param properties - The requests, the session ledger and the observed machine.
- * @returns The disclosure.
+ * @returns The disclosure, or nothing without an entry.
  * @public
  */
-export function ActivitySection({
+export function HistorySection({
   requests,
   ledger,
   entry,
@@ -977,11 +926,13 @@ export function ActivitySection({
   readonly ledger: readonly LedgerEntry[];
   /** The machine as observed, so a started request reads against its run. */
   readonly entry?: MachineDirectoryEntry;
-}): React.JSX.Element {
+}): React.JSX.Element | undefined {
   const count = requests.length + ledger.length;
+  if (count === 0) {
+    return undefined;
+  }
   return (
-    <PrintDisclosure title='Activity' summary={count === 0 ? 'Nothing yet' : `${String(count)} entries`}>
-      {count === 0 ? <p className='text-xs text-muted-foreground'>Requests and receipts appear here.</p> : null}
+    <PrintDisclosure title='History' summary={count === 1 ? '1 entry' : `${String(count)} entries`}>
       {requests.length > 0 ? (
         <ul aria-label='Print requests' className='flex flex-col gap-1 text-xs'>
           {requests.map((request) => (
@@ -1024,10 +975,10 @@ export function ActivitySection({
 }
 
 /**
- * Inspect: identity, firmware and its qualification, geometry, tooling,
- * coverage and provider ids. Engineering detail on request.
+ * Inspect: identity, firmware and its qualification, geometry, tooling, the slicer, the open
+ * request's artifact, actions not yet available, coverage and provider ids. Engineering detail on request.
  *
- * @param properties - The machine, its provider and manifest.
+ * @param properties - The machine, its provider and manifest, the slicer and the open request.
  * @returns The disclosure.
  * @public
  */
@@ -1035,13 +986,21 @@ export function InspectSection({
   entry,
   provider,
   manifest,
+  slicer,
+  request,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly provider: MachineProvider | undefined;
   readonly manifest: MachineManifest | undefined;
+  /** The slicer Prepare uses, with its version when known. */
+  readonly slicer?: string;
+  /** The open print request, whose exact artifact is inspection detail beside its decision. */
+  readonly request?: PrintRequest;
 }): React.JSX.Element {
   const { descriptor } = entry;
   const isQualifiedFirmware = manifest?.identity.qualifiedFirmware.includes(descriptor.firmware);
+  const otherActions = (manifest?.actions ?? []).filter((action) => !implementedActions.has(action.id));
+  const unavailable = Object.entries(Object.groupBy(otherActions, (action) => action.qualification));
   return (
     <PrintDisclosure title='Inspect'>
       <dl className='grid grid-cols-[max-content_minmax(0,1fr)] gap-x-3 gap-y-1 text-xs'>
@@ -1080,6 +1039,30 @@ export function InspectSection({
             </dd>
           </>
         ) : null}
+        {slicer === undefined ? null : (
+          <>
+            <dt className='text-muted-foreground'>Slicer</dt>
+            <dd>{slicer}</dd>
+          </>
+        )}
+        {request === undefined ? null : (
+          <>
+            <dt className='text-muted-foreground'>Request</dt>
+            <dd className='font-mono break-all'>{request.requestId}</dd>
+            <dt className='text-muted-foreground'>Artifact</dt>
+            <dd className='break-all'>{request.artifact.path}</dd>
+            <dt className='text-muted-foreground'>Digest</dt>
+            <dd className='font-mono break-all'>{request.artifact.digest}</dd>
+          </>
+        )}
+        {unavailable.map(([qualification, actions]) => (
+          <Fragment key={qualification}>
+            <dt className='text-muted-foreground'>
+              {qualificationReason[qualification as keyof typeof qualificationReason]}
+            </dt>
+            <dd className='break-words'>{actions.map((action) => action.label).join(', ')}</dd>
+          </Fragment>
+        ))}
         <dt className='text-muted-foreground'>Observed tool</dt>
         <dd>{entry.snapshot.setup.toolId ?? 'Not reported'}</dd>
         <dt className='text-muted-foreground'>Operations</dt>

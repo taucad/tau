@@ -23,22 +23,29 @@ import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import {
-  ActivitySection,
+  ControlsSection,
+  HistorySection,
   InspectSection,
   MonitorSection,
   describeRun,
+  runFileName,
 } from '#routes/w.$workspace.$project/chat-print-monitor.js';
 import type { LedgerEntry } from '#routes/w.$workspace.$project/chat-print-monitor.js';
-import { PrepareSection, usePrintPrepare } from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import type { PrintPrepare } from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import { PrintDisclosure, PrintNotice, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
+import {
+  PrepareActions,
+  PrepareSection,
+  prepareAction,
+  slicerName,
+  usePrintPrepare,
+} from '#routes/w.$workspace.$project/chat-print-prepare.js';
+import type { PrepareActionFacts } from '#routes/w.$workspace.$project/chat-print-prepare.js';
+import { PrintNotice, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
 import { SendSection } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
 /** Plain orientation copy derived solely from the authoritative directory entry. @public */
 export type MachinePresentation = Readonly<{
   label: string;
-  nextAction: string;
   icon: LucideIcon;
   /** Color for the glyph only; the text stays neutral (DESIGN, color usage law). */
   iconClassName: string;
@@ -51,25 +58,21 @@ export type MachinePresentation = Readonly<{
 const inFlightPresentation: Partial<Record<PrintRequest['state'], MachinePresentation>> = {
   approved: {
     label: 'Sending',
-    nextAction: 'Tau is sending the file to the printer.',
     icon: LoaderCircle,
     iconClassName: 'text-information animate-spin motion-reduce:animate-none',
   },
   uploading: {
     label: 'Sending',
-    nextAction: 'Tau is sending the file to the printer.',
     icon: LoaderCircle,
     iconClassName: 'text-information animate-spin motion-reduce:animate-none',
   },
   starting: {
     label: 'Starting',
-    nextAction: 'Wait for the printer to confirm the start.',
     icon: LoaderCircle,
     iconClassName: 'text-information animate-spin motion-reduce:animate-none',
   },
   confirming: {
     label: 'Starting',
-    nextAction: 'Wait for the printer to confirm the start.',
     icon: LoaderCircle,
     iconClassName: 'text-information animate-spin motion-reduce:animate-none',
   },
@@ -83,7 +86,7 @@ const inFlightPresentation: Partial<Record<PrintRequest['state'], MachinePresent
  *
  * @param entry - The machine as observed.
  * @param openRequest - This machine's unsettled request, if any.
- * @returns The status label, glyph and the next safe step.
+ * @returns The status label and glyph.
  * @public
  */
 export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: PrintRequest): MachinePresentation => {
@@ -94,7 +97,6 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
   if (entry.freshness === 'stale') {
     return {
       label: 'Stale observation',
-      nextAction: 'Wait for a current observation before any physical action.',
       icon: CircleAlert,
       iconClassName: 'text-warning',
     };
@@ -102,7 +104,6 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
   if (entry.snapshot.connection !== 'connected') {
     return {
       label: entry.snapshot.connection === 'unreachable' ? 'Unreachable' : 'Disconnected',
-      nextAction: 'Restore the trusted host connection before continuing.',
       icon: CircleAlert,
       iconClassName: 'text-destructive',
     };
@@ -111,7 +112,6 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
   if (run?.state === 'printing') {
     return {
       label: 'Printing',
-      nextAction: 'Monitor the run; pause or cancel only if needed.',
       icon: Printer,
       iconClassName: 'text-information',
     };
@@ -119,7 +119,6 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
   if (run?.state === 'paused') {
     return {
       label: 'Paused',
-      nextAction: 'Inspect the machine, then resume or cancel this run.',
       icon: PauseCircle,
       iconClassName: 'text-warning',
     };
@@ -127,7 +126,6 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
   if (run && ['failed', 'unknown'].includes(run.state)) {
     return {
       label: run.state === 'failed' ? 'Run failed' : 'Run state unknown',
-      nextAction: 'Inspect the printer before issuing another physical command.',
       icon: CircleAlert,
       iconClassName: 'text-destructive',
     };
@@ -135,30 +133,34 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
   if (entry.snapshot.readiness === 'idle') {
     return {
       label: 'Ready',
-      nextAction: 'Slice the model, preview the run, then send it.',
       icon: CircleCheck,
       iconClassName: 'text-success',
     };
   }
   return {
     label: entry.snapshot.readiness === 'busy' ? 'Busy' : 'Not ready',
-    nextAction: 'Wait for the machine to report ready.',
     icon: CircleAlert,
     iconClassName: 'text-warning',
   };
 };
 
-/** The one primary step the orientation card offers. @public */
+/** The one primary step the pane offers. @public */
 export type NextAction = Readonly<{
   label: string;
   kind: 'slice' | 'send' | 'review' | 'none';
+  /** Why the step cannot be taken yet, shown under its disabled button. */
+  blocker?: string;
 }>;
+
+/** Run states the pane treats as a print in progress: Prepare folds and the action bar steps aside. */
+const runInProgress: ReadonlySet<string> = new Set(['printing', 'paused', 'preparing', 'finishing']);
 
 /**
  * The next thing to do, from the machine, the open request and the prepare state.
  *
  * Physical steps (start, accept, reconcile) are never taken from here; the
- * button only brings the gated card into view.
+ * button only brings the gated card into view. A stale or disconnected machine
+ * still slices: only sending waits, and its blocker says so.
  *
  * @param input - The facts the decision reads.
  * @returns The next action.
@@ -171,7 +173,7 @@ export const nextAction = ({
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly openRequest: PrintRequest | undefined;
-  readonly prepare: Pick<PrintPrepare, 'slice' | 'isSliceStale' | 'isSlicing' | 'route' | 'sendBlocker'>;
+  readonly prepare: PrepareActionFacts;
 }): NextAction => {
   if (openRequest) {
     switch (openRequest.state) {
@@ -192,81 +194,82 @@ export const nextAction = ({
       }
     }
   }
-  const runState = entry.snapshot.run?.state;
-  if (entry.freshness === 'stale' || entry.snapshot.connection !== 'connected') {
-    return { label: 'Waiting for the machine', kind: 'none' };
-  }
-  if (runState === 'printing' || runState === 'paused' || runState === 'preparing' || runState === 'finishing') {
+  if (runInProgress.has(entry.snapshot.run?.state ?? 'idle')) {
     return { label: 'Monitor the run', kind: 'none' };
   }
-  if (prepare.isSlicing) {
-    return { label: 'Slicing…', kind: 'none' };
-  }
-  if (prepare.slice && !prepare.isSliceStale) {
-    // A fresh slice that cannot be sent says why (a busy machine, the wrong spool), not "slice again".
-    return prepare.sendBlocker === undefined
-      ? { label: `Send to ${entry.name}`, kind: 'send' }
-      : { label: prepare.sendBlocker, kind: 'none' };
-  }
-  if (prepare.route === undefined) {
-    return { label: 'Slicing unavailable', kind: 'none' };
-  }
-  return { label: prepare.slice ? 'Slice again' : 'Slice and preview', kind: 'slice' };
+  return prepareAction(prepare, entry.name);
 };
 
-function MachineCard({
+/**
+ * One notice for a machine the pane cannot currently trust, saying what waits and what still works.
+ *
+ * @param properties - The machine as observed.
+ * @returns The notice, or nothing for a current, connected machine.
+ */
+function ObservationNotice({ entry }: { readonly entry: MachineDirectoryEntry }): React.JSX.Element | undefined {
+  if (entry.freshness === 'stale') {
+    return (
+      <PrintNotice tone='warning' role='status'>
+        No current observation from {entry.name}. Sending and run controls wait until it reports again; slicing still
+        works.
+      </PrintNotice>
+    );
+  }
+  if (entry.snapshot.connection !== 'connected') {
+    return (
+      <PrintNotice tone='destructive' role='status'>
+        {entry.name} is {entry.snapshot.connection === 'unreachable' ? 'unreachable' : 'disconnected'}. Sending and run
+        controls wait until the host reconnects; slicing still works.
+      </PrintNotice>
+    );
+  }
+  return undefined;
+}
+
+/**
+ * The run in progress: its file and progress with the controls that act on it, together.
+ *
+ * @param properties - The client, machine, its requests and the receipt sink.
+ * @returns The run block, or nothing without a run to show.
+ */
+function RunBlock({
+  client,
   entry,
-  openRequest,
-  prepare,
+  requests,
+  onReceipt,
 }: {
+  readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
-  readonly openRequest: PrintRequest | undefined;
-  readonly prepare: PrintPrepare;
-}): React.JSX.Element {
-  const presentation = presentMachine(entry, openRequest);
+  readonly requests: readonly PrintRequest[];
+  readonly onReceipt: (receipt: MachineOperationReceipt) => void;
+}): React.JSX.Element | undefined {
   const { run } = entry.snapshot;
   const runLine = describeRun(entry);
-  const model = run && (run.state === 'printing' || run.state === 'paused') ? (run.file ?? run.name) : undefined;
-  const Icon = presentation.icon;
-
+  if (!run || run.state === 'idle' || run.state === 'succeeded' || runLine === undefined) {
+    return undefined;
+  }
+  const fileName = runFileName(entry, requests);
   return (
-    <article aria-label={`${entry.name}, ${presentation.label}`} className='flex min-w-0 flex-col gap-2'>
-      <div className='flex min-w-0 items-start gap-2'>
-        <Icon aria-hidden className={cn('mt-0.5 size-4 shrink-0', presentation.iconClassName)} />
-        <div className='min-w-0 flex-1'>
-          <div className='flex min-w-0 items-center gap-2'>
-            <h2 className='min-w-0 truncate text-sm font-medium'>{entry.name}</h2>
-            {entry.providerId.includes('simulator') ? <Badge variant='outline'>Simulated</Badge> : null}
-          </div>
-          <p className='truncate text-xs text-muted-foreground'>
-            {presentation.label} · {entry.descriptor.vendor} {entry.descriptor.model}
-          </p>
-        </div>
-      </div>
-      {runLine && run && run.state !== 'idle' ? (
-        <div className='flex min-w-0 flex-col gap-1'>
-          <p className='text-xs'>{runLine}</p>
-          {run.progress === undefined ? null : (
-            <Progress
-              aria-label={`${entry.name} print progress`}
-              aria-valuenow={run.progress}
-              aria-valuetext={`${String(Math.round(run.progress))} percent`}
-              value={run.progress}
-            />
-          )}
-        </div>
-      ) : null}
-      <dl className='flex flex-col gap-0.5 text-xs'>
-        <div className='flex min-w-0 gap-2'>
-          <dt className='w-24 shrink-0 text-muted-foreground'>{model ? 'Printing' : 'Model'}</dt>
-          <dd className='min-w-0 flex-1 truncate font-mono'>{model ?? prepare.slice?.fileName ?? prepare.entryPath}</dd>
-        </div>
-        <div className='flex min-w-0 gap-2'>
-          <dt className='w-24 shrink-0 text-muted-foreground'>Next</dt>
-          <dd className='min-w-0 flex-1'>{presentation.nextAction}</dd>
-        </div>
-      </dl>
-    </article>
+    <section aria-label='Run' className='flex min-w-0 flex-col gap-2'>
+      <p className='min-w-0 text-xs break-words'>
+        {fileName === undefined ? null : (
+          <>
+            <span className='font-mono'>{fileName}</span>
+            <span aria-hidden> · </span>
+          </>
+        )}
+        {runLine}
+      </p>
+      {run.progress === undefined ? null : (
+        <Progress
+          aria-label={`${entry.name} print progress`}
+          aria-valuenow={run.progress}
+          aria-valuetext={`${String(Math.round(run.progress))} percent`}
+          value={run.progress}
+        />
+      )}
+      <ControlsSection client={client} entry={entry} requests={requests} onReceipt={onReceipt} />
+    </section>
   );
 }
 
@@ -292,26 +295,77 @@ function NoMachines(): React.JSX.Element {
   );
 }
 
+/** The observation's age. It ticks every second, so it is no live region: the notice above announces staleness. */
 function PrintFooter({ entry }: { readonly entry: MachineDirectoryEntry | undefined }): React.JSX.Element {
   const now = useNow();
   return (
-    <p
-      aria-live='polite'
-      role='status'
-      className='flex min-h-8 shrink-0 items-center gap-2 border-t border-border/70 px-3 text-xs text-muted-foreground'
-    >
-      {entry ? (
-        <>
-          <span className='min-w-0 truncate'>Observed {formatAge(entry.snapshot.observedAt, now)}</span>
-          <span aria-hidden>·</span>
-          <span>{entry.freshness}</span>
-          <span aria-hidden>·</span>
-          <span className='min-w-0 truncate'>{entry.providerId}</span>
-        </>
-      ) : (
-        <span>No machine selected</span>
-      )}
+    <p className='flex min-h-8 shrink-0 items-center gap-1.5 border-t border-border/70 px-3 text-xs text-muted-foreground'>
+      {entry?.freshness === 'stale' ? <CircleAlert aria-hidden className='size-3.5 shrink-0 text-warning' /> : null}
+      <span className='min-w-0 truncate'>
+        {entry ? `Observed ${formatAge(entry.snapshot.observedAt, now)}` : 'No machine selected'}
+      </span>
     </p>
+  );
+}
+
+/** The only place the printer is named and chosen, with its status, the Simulated mark and a refresh. */
+function PrintHeader({
+  entries,
+  selected,
+  openRequest,
+  select,
+  refresh,
+}: {
+  readonly entries: readonly MachineDirectoryEntry[];
+  readonly selected: MachineDirectoryEntry | undefined;
+  /** The selected machine's unsettled request, which speaks for it while the printer catches up. */
+  readonly openRequest: PrintRequest | undefined;
+  readonly select: ReturnType<typeof useMachinesSelection>['select'];
+  readonly refresh: () => void;
+}): React.JSX.Element {
+  const presentation = selected ? presentMachine(selected, openRequest) : undefined;
+  const Icon = presentation?.icon ?? Printer;
+  return (
+    <div className='flex min-h-10 shrink-0 items-center gap-2 border-b border-border/70 px-3 text-xs text-muted-foreground'>
+      <Icon aria-hidden className={cn('size-3.5 shrink-0', presentation?.iconClassName)} />
+      {entries.length > 0 ? (
+        <div className='flex min-w-0 flex-1'>
+          <ParameterSelect
+            label='Machine'
+            value={selected?.machineId ?? ''}
+            groups={[
+              {
+                label: 'Printers on this computer',
+                options: entries.map((entry) => ({
+                  value: entry.machineId,
+                  label: entry.name,
+                  secondary: presentMachine(entry, entry.machineId === selected?.machineId ? openRequest : undefined)
+                    .label,
+                })),
+              },
+            ]}
+            onChange={select}
+          />
+        </div>
+      ) : (
+        <span className='min-w-0 flex-1'>No printers</span>
+      )}
+      {selected?.providerId.includes('simulator') ? (
+        <Badge variant='outline' className='shrink-0'>
+          Simulated
+        </Badge>
+      ) : null}
+      <Button
+        type='button'
+        size='icon-xs'
+        variant='ghost'
+        aria-label='Refresh printers'
+        title='Refresh printers'
+        onClick={refresh}
+      >
+        <RefreshCw aria-hidden />
+      </Button>
+    </div>
   );
 }
 
@@ -392,9 +446,13 @@ function MachinePrintPanel({
   });
   const latestReceipt = ledger.find((entry) => entry.kind === 'receipt');
   const openRequest = requests.find((request) => isOpenPrintRequest(request));
-  const headerPresentation = selected ? presentMachine(selected, openRequest) : undefined;
-  const HeaderIcon = headerPresentation?.icon ?? Printer;
-  const runActive = selected?.snapshot.run?.state === 'printing' || selected?.snapshot.run?.state === 'paused';
+  const action = selected ? nextAction({ entry: selected, openRequest, prepare }) : undefined;
+  /* A decision or a run owns the pane; Prepare folds behind it and keeps its own actions. */
+  const prepareFold = openRequest
+    ? 'Prepare a different print'
+    : runInProgress.has(selected?.snapshot.run?.state ?? 'idle')
+      ? 'Prepare the next print'
+      : undefined;
 
   return (
     <div
@@ -409,34 +467,8 @@ function MachinePrintPanel({
         } as React.CSSProperties
       }
     >
-      <div className='flex min-h-10 shrink-0 items-center gap-2 border-b border-border/70 px-3 text-xs text-muted-foreground'>
-        <HeaderIcon aria-hidden className={cn('size-3.5 shrink-0', headerPresentation?.iconClassName)} />
-        {entries.length > 0 ? (
-          <ParameterSelect
-            label='Machine'
-            value={selected?.machineId ?? ''}
-            groups={[
-              {
-                label: 'Printers on this computer',
-                options: entries.map((entry) => ({
-                  value: entry.machineId,
-                  label: entry.name,
-                  secondary: presentMachine(entry, entry.machineId === selected?.machineId ? openRequest : undefined)
-                    .label,
-                })),
-              },
-            ]}
-            onChange={select}
-          />
-        ) : (
-          <span className='min-w-0 flex-1'>No printers</span>
-        )}
-        <Button type='button' size='xs' variant='ghost' onClick={refresh}>
-          <RefreshCw aria-hidden />
-          Refresh
-        </Button>
-      </div>
-      <div className='relative min-h-0 min-w-0 flex-1 scroll-shadows-y overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
+      <PrintHeader entries={entries} selected={selected} openRequest={openRequest} select={select} refresh={refresh} />
+      <div className='relative flex min-h-0 min-w-0 flex-1 scroll-shadows-y flex-col gap-3 overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
         {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
         {requestsError ? <PrintNotice tone='destructive'>{requestsError}</PrintNotice> : null}
         {snapshot ? null : (
@@ -454,7 +486,7 @@ function MachinePrintPanel({
         {snapshot && entries.length === 0 ? <NoMachines /> : null}
         {selected ? (
           <div className='flex min-w-0 flex-col gap-3'>
-            <MachineCard entry={selected} openRequest={openRequest} prepare={prepare} />
+            <ObservationNotice entry={selected} />
             <SendSection
               client={client}
               entry={selected}
@@ -463,22 +495,23 @@ function MachinePrintPanel({
               bridge={bridge}
               onReconciled={recordReconciled}
             />
-            {runActive ? (
-              <PrintDisclosure title='Prepare the next print'>
-                <PrepareSection entry={selected} provider={provider} manifest={manifest} prepare={prepare} />
-              </PrintDisclosure>
-            ) : (
-              <PrepareSection entry={selected} provider={provider} manifest={manifest} prepare={prepare} />
-            )}
-            <MonitorSection
-              client={client}
+            <RunBlock client={client} entry={selected} requests={requests} onReceipt={recordReceipt} />
+            <PrepareSection
               entry={selected}
+              provider={provider}
               manifest={manifest}
-              requests={requests}
-              onReceipt={recordReceipt}
+              prepare={prepare}
+              fold={prepareFold}
             />
-            <ActivitySection requests={requests} ledger={ledger} entry={selected} />
-            <InspectSection entry={selected} provider={provider} manifest={manifest} />
+            <MonitorSection client={client} entry={selected} manifest={manifest} />
+            <HistorySection requests={requests} ledger={ledger} entry={selected} />
+            <InspectSection
+              entry={selected}
+              provider={provider}
+              manifest={manifest}
+              slicer={slicerName(prepare.studio)}
+              request={openRequest}
+            />
           </div>
         ) : null}
         <p aria-live='assertive' role='status' className='sr-only'>
@@ -487,6 +520,12 @@ function MachinePrintPanel({
             : ''}
         </p>
       </div>
+      {selected && prepareFold === undefined && (action?.kind === 'slice' || action?.kind === 'send') ? (
+        /* One primary action at a fixed place; the start confirmation opens where Send was pressed. */
+        <div className='flex max-h-[60%] min-w-0 shrink-0 flex-col gap-2 overflow-y-auto border-t border-border/70 px-3 py-2'>
+          <PrepareActions entry={selected} manifest={manifest} prepare={prepare} />
+        </div>
+      ) : null}
       <PrintFooter entry={selected} />
     </div>
   );

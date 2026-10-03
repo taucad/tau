@@ -30,7 +30,10 @@ const failure = (errorCode: ArrangeWorkbenchErrorCode, message: string): Failure
   message,
 });
 const invalid = (path: string): Failure =>
-  failure('INVALID_RECORD', `\`${path}\` is not valid; the person has been offered Reset.`);
+  failure(
+    'INVALID_RECORD',
+    `\`${path}\` is not valid. The person can review it from the project's Settings not applied action; do not rewrite it to work around this. Nothing was written.`,
+  );
 const key = (tab: WorkbenchTab): string =>
   tab.kind === 'view' ? `view:${tab.view}` : tab.kind === 'pane' ? `pane:${tab.pane}` : `file:${tab.path}`;
 const empty = (): Node => ({ kind: 'group', tabs: [] });
@@ -178,7 +181,9 @@ export async function handleArrangeWorkbench(
           `The workbench arrangement changed since the digest you passed as basedOn (now ${layoutDigest}). Read this turn's workbench snapshot or .tau/workbench/layout.json and arrange again from it.`,
         );
       }
-      const entriesText = await readOptional(fileSystem, workbenchPaths.entries);
+      // Only an entries patch depends on the entries record; an unrelated arrangement must not refuse over it.
+      const entriesText =
+        input.entries === undefined ? undefined : await readOptional(fileSystem, workbenchPaths.entries);
       const parsedLayout = decode(layoutText, workbenchRecords.layout);
       const parsedEntries = decode(entriesText, workbenchRecords.entries);
       if (parsedLayout === 'newer') {

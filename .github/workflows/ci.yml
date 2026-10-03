@@ -251,7 +251,9 @@ jobs:
   affected:
     name: Run affected tasks
     needs: [plan, geospec-producer]
-    if: always()
+    # Not `always()`: that also ignores a cancel, so a superseded run kept this job
+    # going for its full length and held the next run in the concurrency queue.
+    if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs

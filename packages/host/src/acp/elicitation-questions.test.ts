@@ -34,34 +34,35 @@ const claudeRequest: CreateElicitationRequest = {
   },
 };
 
-/* The shape codex-acp sends for request_user_input. */
+/* The shape codex-acp 1.7.0 sends for request_user_input (`buildUserInputRequest`). */
 const codexRequest: CreateElicitationRequest = {
   mode: 'form',
   sessionId: 's1',
   toolCallId: 'item_1',
-  message: 'Codex needs your input to continue.',
+  message: 'How should the fork publish?',
   requestedSchema: {
     type: 'object',
-    required: ['publish'],
+    required: [],
     properties: {
       publish: {
         type: 'string',
-        title: 'How should the fork publish?',
-        description: 'Publish',
+        title: 'Publish',
+        description: 'How should the fork publish?',
         oneOf: [
           { const: 'npm token (Recommended)', title: 'npm token (Recommended)', description: 'CI publishes.' },
           { const: 'From your Mac', title: 'From your Mac' },
-          { const: 'None of the above', title: 'None of the above' },
         ],
         _meta: { codex: { isOther: true, isSecret: false } },
       },
-      publish_note: {
+      publish_other: {
         type: 'string',
-        title: 'Additional answer or note',
-        _meta: { codex: { questionId: 'publish', role: 'user_note', isSecret: false } },
+        title: 'Other',
+        description: 'Type your own answer instead of choosing an option above.',
+        _meta: { codex: { questionId: 'publish', isOtherAnswer: true, isSecret: false } },
       },
     },
   },
+  // oxlint-disable-next-line tau-lint/no-time-unit-suffix -- codex-acp's wire field name.
   _meta: { codex: { autoResolutionMs: 30_000 } },
 };
 
@@ -93,11 +94,12 @@ describe('askOfElicitation', () => {
     });
   });
 
-  it('reads a Codex form, hides its "None of the above" choice and honours autoResolutionMs', () => {
+  it('reads a Codex form with its Other field as own words and honours autoResolutionMs', () => {
     const read = askOfElicitation(codexRequest, { ...context, agentId: 'codex' });
 
     expect(read?.dialect).toBe('codex');
     expect(read?.ask.deadline).toBe(new Date(now + 30_000).toISOString());
+    expect(read?.ask.message).toBeUndefined();
     expect(read?.ask.questions).toEqual([
       {
         id: 'publish',
@@ -160,12 +162,20 @@ describe('elicitationResponseOf', () => {
     expect(JSON.stringify(response)).toContain('no reply from the person in time');
   });
 
-  it('answers Codex own words through "None of the above" and its note field', () => {
+  it('answers Codex own words in its Other field and a default with the answer itself', () => {
     const read = askOfElicitation(codexRequest, { ...context, agentId: 'codex' })!;
 
     expect(elicitationResponseOf(read, { questions: { publish: { text: 'Trusted publishing', at } } })).toEqual({
       action: 'accept',
-      content: { publish: 'None of the above', publish_note: 'Trusted publishing' },
+      content: { publish_other: 'Trusted publishing' },
+    });
+    /* The adapter reads Other before the choice, so the defaulted answer must lead it. */
+    expect(elicitationResponseOf(read, undefined)).toEqual({
+      action: 'accept',
+      content: {
+        publish: 'npm token (Recommended)',
+        publish_other: 'npm token (no reply from the person in time; Tau adopted the recommended option)',
+      },
     });
   });
 

@@ -3,11 +3,13 @@
  *
  * Codex's `request_user_input` and Claude's `AskUserQuestion` reach Tau as ACP
  * `elicitation/create` forms once the client advertises `elicitation.form`.
- * Each choice field becomes one question; the adapters' companion text fields
- * (Codex `<id>_note` tagged `_meta.codex.role = 'user_note'`, Claude
- * `question_<n>_custom` tagged `_meta._askUserQuestionCustomAnswer`) become that
- * question's own-words answer. Only those two question tools get a recommended
- * default; any other form waits for the person and can be declined.
+ * Each choice field becomes one question: its `title` is the header and its
+ * `description` the question. The adapters' companion text fields (Codex's
+ * "Other" field tagged `_meta.codex.isOtherAnswer`, Claude's `question_<n>_custom`
+ * tagged `_meta._askUserQuestionCustomAnswer`) become that question's own-words
+ * answer; both adapters read the companion before the choice. Only those two
+ * question tools get a recommended default; any other form waits for the person
+ * and can be declined.
  */
 import type { CreateElicitationRequest, CreateElicitationResponse } from '@agentclientprotocol/sdk';
 import { askQuestionsDefaultWaitSeconds, resolveAnswers } from '@taucad/chat';
@@ -24,8 +26,6 @@ type QuestionField = {
   readonly values: ReadonlyArray<string | boolean>;
   /** The companion own-words field, when the form has one. */
   readonly textKey?: string;
-  /** Codex's "None of the above" value, chosen when the person answers in their own words. */
-  readonly otherValue?: string;
 };
 
 /** An elicitation read as an ask, with the map back to its fields. @public */
@@ -36,7 +36,8 @@ export type ElicitationAsk = {
 };
 
 const recommendedSuffix = /\s*\(recommended\)\s*$/iu;
-const codexOther = 'None of the above';
+/* The message codex-acp sends for a form of several questions: nothing for the card to repeat. */
+const codexGenericMessage = 'Input requested';
 const claudeCustomMarker = '_askUserQuestionCustomAnswer';
 
 const metaOf = (value: Record<string, unknown>): Record<string, unknown> | undefined =>
@@ -53,7 +54,7 @@ const companionOf = (property: Record<string, unknown>): string | undefined => {
     return claude['questionId'];
   }
   const codex = meta?.['codex'];
-  if (isRecord(codex) && codex['role'] === 'user_note' && typeof codex['questionId'] === 'string') {
+  if (isRecord(codex) && codex['isOtherAnswer'] === true && typeof codex['questionId'] === 'string') {
     return codex['questionId'];
   }
   return undefined;
@@ -138,13 +139,9 @@ export const askOfElicitation = (
     }
     const title = stringOf(property['title']);
     const description = stringOf(property['description']);
-    /* Codex puts the question in `title` and its header in `description`; Claude
-     * the reverse, with a single question's text in `message`. */
-    const question =
-      dialect === 'codex'
-        ? (title ?? description ?? key)
-        : (description ?? (single && dialect === 'claude' ? request.message : undefined) ?? title ?? key);
-    const header = dialect === 'codex' ? description : description === undefined && !single ? undefined : title;
+    /* A single question's text may ride in `message` alone (Claude). */
+    const question = description ?? (single && isQuestionTool ? request.message : undefined) ?? title ?? key;
+    const header = description === undefined && !single ? undefined : title;
     const items = isRecord(property['items']) ? property['items'] : undefined;
     let kind: FieldKind;
     let options: Option[] = [];
@@ -173,28 +170,25 @@ export const askOfElicitation = (
       }
     }
     const textKey = companions.get(key);
-    const otherValue = options.find((option) => option.value === codexOther)?.value;
-    const visible = options.filter((option) => option.value !== otherValue);
-    const recommendedIndex = visible.findIndex((option) => recommendedSuffix.test(option.title));
+    const recommendedIndex = options.findIndex((option) => recommendedSuffix.test(option.title));
     const allowsText = textKey !== undefined || kind === 'text' || kind === 'number';
     questions.push({
       id: key,
       ...(header === undefined || header === question ? {} : { header: header.slice(0, 64) }),
       question: question.slice(0, 2000),
-      options: visible.map((option) => ({
+      options: options.map((option) => ({
         label: option.title.replace(recommendedSuffix, '').slice(0, 120),
         ...(option.description === undefined ? {} : { description: option.description.slice(0, 400) }),
       })),
-      ...(isQuestionTool && visible.length > 0 ? { recommended: Math.max(0, recommendedIndex) } : {}),
+      ...(isQuestionTool && options.length > 0 ? { recommended: Math.max(0, recommendedIndex) } : {}),
       allowsText,
       ...(kind === 'list' ? { isList: true } : {}),
     });
     fields.set(key, {
       key,
       kind,
-      values: kind === 'boolean' ? [true, false] : visible.map((option) => option.value),
+      values: kind === 'boolean' ? [true, false] : options.map((option) => option.value),
       ...(textKey === undefined ? {} : { textKey }),
-      ...(otherValue === undefined ? {} : { otherValue }),
     });
   }
   if (questions.length === 0 || questions.length > 12) {
@@ -215,7 +209,10 @@ export const askOfElicitation = (
       deadline: isQuestionTool ? new Date(context.now + wait).toISOString() : null,
       source: 'acp',
       agentId: context.agentId,
-      ...(single && dialect === 'claude' ? {} : { message: request.message.slice(0, 4000) }),
+      /* A question tool's message repeats its single question, or says nothing (Codex, several). */
+      ...((single && isQuestionTool) || request.message === codexGenericMessage
+        ? {}
+        : { message: request.message.slice(0, 4000) }),
       questions,
     },
   };
@@ -259,17 +256,14 @@ export const elicitationResponseOf = (
       }
     } else if (field.textKey === undefined) {
       content[field.key] = answer.answer;
-    } else if (field.otherValue !== undefined) {
-      content[field.key] = field.otherValue;
     }
+    /* The adapters read the companion first, so it carries the answer itself, never a bare note. */
     if (field.textKey !== undefined && answer.text === true) {
       content[field.textKey] = answer.answer;
     }
     if (field.textKey !== undefined && answer.source === 'recommended') {
       content[field.textKey] =
-        elicitation.dialect === 'claude'
-          ? `${answer.answer} (no reply from the person in time; Tau adopted the recommended option)`
-          : 'No reply from the person in time; Tau adopted the recommended option.';
+        `${answer.answer} (no reply from the person in time; Tau adopted the recommended option)`;
     }
   }
   return { action: 'accept', content };

@@ -3,7 +3,7 @@ import { packageVersion } from '@taucad/runtime/metadata';
 /**
  * Kernel import extensions the publication runtime routes, pinned against
  * `@taucad/geospec-engine`'s `defaultRuntime` by `publication-runtime.parity.test.ts`.
- * `openrscad` and `zoo` are publication-only: they are served by the hosted runtime, not by
+ * `zoo` is publication-only: it is served by the hosted runtime, not by
  * the engine's default plugin set. Never hand-edit an extension here — change the plugin.
  */
 export const publicationKernelExtensions = [

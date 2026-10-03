@@ -118,6 +118,7 @@ await test('a reviewed article builds an escaped detail page and journal entry w
     await mkdir(join(scratch, 'packages/ui/src/styles'), { recursive: true });
     await cp(join(root, '../../packages/ui/src/styles/tokens.css'), join(scratch, 'packages/ui/src/styles/tokens.css'));
     await mkdir(join(fixture, 'content'));
+    await cp(join(root, 'content/evidence'), join(fixture, 'content/evidence'), { recursive: true });
     await writeFile(
       join(fixture, 'content/articles.json'),
       JSON.stringify([

@@ -1,3 +1,4 @@
+/* oxlint-disable typescript/no-restricted-types -- Refused record bytes may be absent (null), as the store reports them. */
 import { useSelector } from '@xstate/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
@@ -6,6 +7,10 @@ import { useFileManager } from '#hooks/use-file-manager.js';
 import { useFlushOnClose } from '#hooks/use-flush-on-close.js';
 import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 import type { ViewRecordPatch } from '#workbench-records/view-store.js';
+import { confirmFlush } from '#workbench-records/record-health.js';
+import type { RecordHealth } from '#workbench-records/record-health.js';
+import { recordIssueState, usePublishRecordIssue } from '#workbench-records/record-issues.js';
+import type { RecordIssue } from '#workbench-records/record-issues.js';
 import { digestBytes } from '#utils/crypto.utils.js';
 import type { ActorRefFrom } from 'xstate';
 import { useProject } from '#hooks/use-project.js';
@@ -53,7 +58,7 @@ function ViewSettingsSyncEntry({
   readonly graphicsRef: ActorRefFrom<typeof graphicsMachine>;
   readonly projectRef: ActorRefFrom<typeof projectMachine>;
   readonly editorRef: ActorRefFrom<typeof editorMachine>;
-}): React.JSX.Element {
+}): null {
   /* The editor record is what names a view's entry; the pane only mirrors it. */
   const {
     projectId,
@@ -66,8 +71,11 @@ function ViewSettingsSyncEntry({
   } = useProject();
   const { parameterFiles, subscribeWorkbenchRecord } = useFileManager();
   const root = `/projects/${projectId}`;
-  const [notice, setNotice] = useState<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string }>();
-  const [ioError, setIoError] = useState<string>();
+  const [notice, setNotice] =
+    useState<
+      Readonly<{ code: 'INVALID_RECORD' | 'NEWER_RECORD'; message: string; bytes: Uint8Array<ArrayBuffer> | null }>
+    >();
+  const [health, setHealth] = useState<RecordHealth>();
   const [, recordTick] = useState(0);
   const [localRecordReceipt, setLocalRecordReceipt] = useState<{
     record: WorkbenchView;
@@ -82,6 +90,7 @@ function ViewSettingsSyncEntry({
         viewId,
         files: parameterFiles,
         editDebounce: 500,
+        onHealth: setHealth,
         onChange: (state, _source, locallyAuthored) => {
           generation++;
           setLocalRecordReceipt(
@@ -90,21 +99,20 @@ function ViewSettingsSyncEntry({
           setAppliedWorkbenchRevision(recordPath, undefined);
           recordTick((value) => value + 1);
           if (state.refusal) {
-            setNotice(state.refusal);
+            setNotice({ ...state.refusal, bytes: state.bytes });
             return;
           }
           setNotice(undefined);
-          setIoError(undefined);
           if (state.record) {
             setViewRecord(viewId, state.record);
             setViewEntryPath(viewId, state.record.entryPath);
           }
         },
-        onError: (error) => {
+        onError: () => {
+          // The record's health carries the failure to the settings trigger.
           generation++;
           setLocalRecordReceipt(undefined);
           setAppliedWorkbenchRevision(recordPath, undefined);
-          setIoError(error instanceof Error ? error.message : 'View record unavailable.');
         },
       }),
       advanceGeneration: () => {
@@ -137,11 +145,8 @@ function ViewSettingsSyncEntry({
   }, [store]);
   useEffect(() => registerWorkbenchRecordProducer(async () => store.flush()), [registerWorkbenchRecordProducer, store]);
   useFlushOnClose(
-    async () => {
-      if (!(await store.flush())) {
-        throw new Error(`View ${viewId} could not be saved.`);
-      }
-    },
+    async () =>
+      confirmFlush(store.flush, `View settings for ${viewEntryPaths.get(viewId) ?? viewId} are not confirmed saved.`),
     { stage: 'producer' },
   );
   const record = viewRecords.get(viewId);
@@ -171,6 +176,29 @@ function ViewSettingsSyncEntry({
     [currentGeneration, recordPath, setAppliedWorkbenchRevision, store],
   );
   const entryPath = record?.entryPath ?? viewEntryPaths.get(viewId);
+  const issueState = recordIssueState(notice, health);
+  const issue = useMemo((): RecordIssue | undefined => {
+    if (!issueState) {
+      return undefined;
+    }
+    return {
+      kind: 'view',
+      path: recordPath,
+      entry: entryPath ?? undefined,
+      state: issueState,
+      message: notice?.message ?? health?.error,
+      bytes: notice?.bytes ?? null,
+      writing: health?.writing ?? false,
+      retryRead: store.retryRead,
+      retrySave: store.flush,
+      reset: async (reviewed) =>
+        store.reset(
+          record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath: entryPath ?? null }),
+          reviewed,
+        ),
+    };
+  }, [entryPath, health?.error, health?.writing, issueState, notice, record, recordPath, store]);
+  usePublishRecordIssue(projectId, recordPath, issue);
   const cadRef = useSelector(projectRef, (state) =>
     entryPath === null || entryPath === undefined ? undefined : state.context.geometryUnits.get(entryPath),
   );
@@ -188,26 +216,5 @@ function ViewSettingsSyncEntry({
     recordReady: store.ready() && store.snapshot().refusal === undefined,
   });
 
-  return (
-    <>
-      {notice ? (
-        <div role='alert'>
-          {notice.message}
-          {notice.code === 'INVALID_RECORD' ? (
-            <button
-              type='button'
-              onClick={() => {
-                const replacement =
-                  record ?? workbenchRecords.view.schema.parse({ version: 1, entryPath: entryPath ?? null });
-                void store.reset(replacement);
-              }}
-            >
-              Reset
-            </button>
-          ) : null}
-        </div>
-      ) : null}
-      {ioError ? <div role='alert'>{ioError}</div> : null}
-    </>
-  );
+  return null;
 }

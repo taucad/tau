@@ -8,6 +8,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchEntries } from '@taucad/workbench';
+import { readRecordIssues } from '#workbench-records/record-issues.js';
 import { EntriesSyncHost, EntryOwner } from '#routes/w.$workspace.$project/entries-sync-host.js';
 
 vi.mock('@xstate/react', () => ({
@@ -33,6 +34,9 @@ const hostFiles = vi.hoisted(() => {
       bytes = next;
     },
     get: () => bytes,
+    remove: () => {
+      bytes = undefined;
+    },
     failOnce: () => {
       fail = true;
     },
@@ -164,6 +168,43 @@ describe('entry owner reconciliation', () => {
     liveRootOnly = false;
     selectedRoot = '/root';
   });
+  it('returns every model to default settings when the entries record is deleted, without writing', async () => {
+    hostFiles.set(
+      new TextEncoder().encode(
+        workbenchRecords.entries.serialize({ version: 1, entries: { 'a.ts': { renderTimeout: 240_000 } } }),
+      ),
+    );
+    hostFiles.writeFileChecked.mockClear();
+    const setEntriesRecord = vi.fn((record: WorkbenchEntries) => {
+      hostProject['entriesRecord'] = record;
+    });
+    hostProject = {
+      projectId: 'p',
+      geometryUnits: new Map(),
+      modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+      entriesRecord: undefined,
+      setEntriesRecord,
+      registerWorkbenchRecordProducer: () => () => undefined,
+      registerEntryPathChange: () => () => undefined,
+      setAppliedEntryRevision: () => undefined,
+    };
+    const view = render(<EntriesSyncHost />);
+    await waitFor(() => {
+      expect(setEntriesRecord).toHaveBeenLastCalledWith({
+        version: 1,
+        entries: { 'a.ts': { renderTimeout: 240_000 } },
+      });
+    });
+    hostFiles.remove();
+    await act(async () => {
+      liveWatchEntries?.();
+    });
+    await waitFor(() => {
+      expect(setEntriesRecord).toHaveBeenLastCalledWith({ version: 1, entries: {} });
+    });
+    expect(hostFiles.writeFileChecked).not.toHaveBeenCalled();
+    view.unmount();
+  });
   it('persists an entry owner edit after first service readiness and StrictMode replay', async () => {
     hostFiles.set(
       new TextEncoder().encode(
@@ -245,6 +286,7 @@ describe('entry owner reconciliation', () => {
     const model = { getSnapshot: () => ({ context: { unitsById: {} } }), send: vi.fn() };
     const geometryUnits = new Map([['a.ts', cad]]);
     hostProject = {
+      projectId: 'p',
       geometryUnits,
       modelInteractionRef: model,
       entriesRecord: undefined,
@@ -264,7 +306,13 @@ describe('entry owner reconciliation', () => {
       liveWatchEntries?.();
     });
     expect(acknowledged.has('a.ts')).toBe(false);
-    expect(screen.getByRole('alert').textContent).toContain('offline');
+    // The failure reaches the settings trigger as a record issue, never as loose page text.
+    expect(screen.queryByRole('alert')).toBeNull();
+    await waitFor(() => {
+      expect(readRecordIssues('p')).toMatchObject([
+        { kind: 'entries', path: '.tau/workbench/entries.json', state: 'reading', message: 'offline' },
+      ]);
+    });
     geometryUnits.set('b.ts', cad);
     view.rerender(<EntriesSyncHost />);
     await act(async () => undefined);
@@ -275,7 +323,7 @@ describe('entry owner reconciliation', () => {
     await waitFor(() => {
       expect(acknowledged.has('a.ts')).toBe(true);
     });
-    expect(screen.queryByRole('alert')).toBeNull();
+    expect(readRecordIssues('p')).toEqual([]);
     view.unmount();
   });
   it('persists a human hide without reverting it and adopts a foreign isolation independently', async () => {

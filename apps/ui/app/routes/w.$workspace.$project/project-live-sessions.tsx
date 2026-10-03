@@ -75,7 +75,7 @@ import {
 import type { RevisionClient, RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
-import { selectProjectKernelRefusal } from '#machines/project.machine.js';
+import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
@@ -166,7 +166,7 @@ function ProjectSessionBinding({
   const { kernel: defaultKernel } = useKernel();
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const computeMode = useComputeReuseMode();
-  const browserHostRelease = useRef<(() => void) | undefined>(undefined);
+  const browserHostRelease = useRef<{ projectId: string; release: () => void } | undefined>(undefined);
   const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel });
   useEffect(() => {
     choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel };
@@ -275,7 +275,7 @@ function ProjectSessionBinding({
         runtimeConfig: createUiRuntimeConfig(ENV),
       } as const;
       const hostClient = createBrowserAgentHostClient(options);
-      browserHostRelease.current ??= retainBrowserAgentHostProject(options);
+      browserHostRelease.current ??= { projectId, release: retainBrowserAgentHostProject(options) };
       return hostClient;
     };
     const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
@@ -300,8 +300,10 @@ function ProjectSessionBinding({
   }, [chatSessions, client, fileManagerRef, projectId, viewsReady, workspace]);
   useEffect(
     () => () => {
-      browserHostRelease.current?.();
-      browserHostRelease.current = undefined;
+      if (browserHostRelease.current?.projectId === projectId) {
+        browserHostRelease.current.release();
+        browserHostRelease.current = undefined;
+      }
     },
     [projectId],
   );
@@ -397,6 +399,7 @@ function ProjectSessionBinding({
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
+      closeRuntime: async () => closeProjectRuntime(projectRef),
       flushProducers: async () =>
         flushProjectSessionPersistence({
           projectId,

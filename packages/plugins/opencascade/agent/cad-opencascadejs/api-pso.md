@@ -4,12 +4,15 @@
 
 PSO_Particle: declare class PSO_Particle
 
-  constructor
+  // PSO_Particle.constructor (constructor)
+  constructor();
 
   Distance: number
 
   BestDistance: number
 
+  // PSO_Particle.delete (method)
   delete(): void;
 
+  // PSO_Particle.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

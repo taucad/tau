@@ -1,7 +1,7 @@
 /* oxlint-disable typescript/no-restricted-types -- Null is the checked-write absence precondition. */
 /* oxlint-disable no-await-in-loop -- Each acquisition establishes a clean capacity entry before the next admission. */
 import { describe, expect, it, vi } from 'vitest';
-import type { RootedFileSystem, WatchEvent } from '@taucad/filesystem';
+import type { RootedFileSystem, WatchEvent, WatchRequest } from '@taucad/filesystem';
 import { defineConfiguration } from '#configuration/configuration.js';
 import { z } from 'zod';
 import { MachineSettingsOwner } from '#host/machine-settings-owner.js';
@@ -114,7 +114,74 @@ const fixture = (record: MachineSettingsRecord = base) => {
   };
 };
 
+const asyncWatchFixture = (
+  watch: (request: WatchRequest, handler: (event: WatchEvent) => void) => Promise<() => void>,
+) => {
+  const backing = fixture();
+  backing.owner.dispose();
+  const filesystem = { readFileStream: backing.reads, writeFileChecked: backing.writes, watch };
+  return {
+    owner: new MachineSettingsOwner({ filesystem, definitions: [definition] }),
+    reads: backing.reads,
+  };
+};
+
 describe('root-owned machine settings', () => {
+  it('should finish an asynchronous watch before reading settings bytes', async () => {
+    let arm!: (release: () => void) => void;
+    const ready = new Promise<() => void>((resolve) => {
+      arm = resolve;
+    });
+    const release = vi.fn();
+    const watch = vi.fn(async () => ready);
+    const { owner, reads } = asyncWatchFixture(watch);
+    const pending = owner.read({ typeId });
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(watch).toHaveBeenCalledOnce();
+    expect(reads).not.toHaveBeenCalled();
+    arm(release);
+    await expect(pending).resolves.toMatchObject({ status: 'current' });
+    expect(reads).toHaveBeenCalledOnce();
+    owner.dispose();
+    expect(release).toHaveBeenCalledOnce();
+  });
+
+  it('should release a watch that finishes starting after disposal', async () => {
+    let arm!: (release: () => void) => void;
+    const ready = new Promise<() => void>((resolve) => {
+      arm = resolve;
+    });
+    const release = vi.fn();
+    let onWatch!: (event: WatchEvent) => void;
+    const { owner, reads } = asyncWatchFixture(async (_request, handler) => {
+      onWatch = handler;
+      return ready;
+    });
+    const read = vi.spyOn(owner, 'read');
+    const onChange = vi.fn();
+    owner.subscribe(typeId, onChange);
+    expect(() => {
+      owner.dispose();
+    }).not.toThrow();
+    arm(release);
+    await vi.waitFor(() => {
+      expect(release).toHaveBeenCalledOnce();
+    });
+    onWatch({ type: 'change', path: machineSettingsPath({ typeId }) });
+    expect(read).not.toHaveBeenCalled();
+    expect(reads).not.toHaveBeenCalled();
+    expect(onChange).not.toHaveBeenCalled();
+  });
+
+  it('should refuse a failed asynchronous watch before reading settings bytes', async () => {
+    const failure = Promise.reject(new Error('watch startup refused'));
+    const { owner, reads } = asyncWatchFixture(async () => failure);
+    await expect(owner.read({ typeId })).rejects.toThrow('watch startup refused');
+    expect(reads).not.toHaveBeenCalled();
+    owner.dispose();
+  });
+
   it('should use one bounded cold read and reuse warm acquisitions across consumers', async () => {
     const { owner, reads, watches } = fixture();
     const [pane, agent, profiles] = await Promise.all([

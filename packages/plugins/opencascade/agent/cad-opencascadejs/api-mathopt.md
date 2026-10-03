@@ -6,19 +6,25 @@ MathOpt_ConjugateGradientFormula: typeof MathOpt_ConjugateGradientFormula[keyof 
 
 MathOpt_FRPRConfig: declare class MathOpt_FRPRConfig extends MathUtils_Config
 
-  constructor
+  // MathOpt_FRPRConfig.constructor (constructor)
+  constructor();
+  constructor(theTolerance: number, theMaxIter?: number);
 
   Formula: MathOpt_ConjugateGradientFormula
 
   RestartInterval: number
 
+  // MathOpt_FRPRConfig.delete (method)
   delete(): void;
 
+  // MathOpt_FRPRConfig.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathOpt_GlobalConfig: declare class MathOpt_GlobalConfig extends MathUtils_NDimConfig
 
-  constructor
+  // MathOpt_GlobalConfig.constructor (constructor)
+  constructor();
+  constructor(theStrategy: MathOpt_GlobalStrategy, theMaxIter?: number);
 
   Strategy: MathOpt_GlobalStrategy
 
@@ -34,29 +40,37 @@ MathOpt_GlobalConfig: declare class MathOpt_GlobalConfig extends MathUtils_NDimC
 
   PolishBudgetPerDim: number
 
+  // MathOpt_GlobalConfig.delete (method)
   delete(): void;
 
+  // MathOpt_GlobalConfig.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathOpt_GlobalStrategy: typeof MathOpt_GlobalStrategy[keyof typeof MathOpt_GlobalStrategy]
 
 MathOpt_NewtonConfig: declare class MathOpt_NewtonConfig extends MathUtils_Config
 
-  constructor
+  // MathOpt_NewtonConfig.constructor (constructor)
+  constructor();
+  constructor(theTolerance: number, theMaxIter?: number);
 
   Regularization: number
 
   UseLineSearch: boolean
 
+  // MathOpt_NewtonConfig.delete (method)
   delete(): void;
 
+  // MathOpt_NewtonConfig.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathOpt_PSOBoundaryMode: typeof MathOpt_PSOBoundaryMode[keyof typeof MathOpt_PSOBoundaryMode]
 
 MathOpt_PSOConfig: declare class MathOpt_PSOConfig extends MathUtils_NDimConfig
 
-  constructor
+  // MathOpt_PSOConfig.constructor (constructor)
+  constructor();
+  constructor(theNbParticles: number, theMaxIter?: number, theTolerance?: number);
 
   NbParticles: number
 
@@ -92,8 +106,10 @@ MathOpt_PSOConfig: declare class MathOpt_PSOConfig extends MathUtils_NDimConfig
 
   PolishBudgetPerDim: number
 
+  // MathOpt_PSOConfig.delete (method)
   delete(): void;
 
+  // MathOpt_PSOConfig.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathOpt_PSOInertiaSchedule: typeof MathOpt_PSOInertiaSchedule[keyof typeof MathOpt_PSOInertiaSchedule]
@@ -102,7 +118,9 @@ MathOpt_PSOInitMode: typeof MathOpt_PSOInitMode[keyof typeof MathOpt_PSOInitMode
 
 MathOpt_PSOSeedParticle: declare class MathOpt_PSOSeedParticle
 
-  constructor
+  // MathOpt_PSOSeedParticle.constructor (constructor)
+  constructor(thePos: math_VectorBase_double);
+  constructor(thePos: math_VectorBase_double, theValue: number);
 
   Position: math_VectorBase_double
 
@@ -110,13 +128,16 @@ MathOpt_PSOSeedParticle: declare class MathOpt_PSOSeedParticle
 
   Velocity: math_VectorBase_double | null | undefined
 
+  // MathOpt_PSOSeedParticle.delete (method)
   delete(): void;
 
+  // MathOpt_PSOSeedParticle.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathOpt_PSOStats: declare class MathOpt_PSOStats
 
-  constructor
+  // MathOpt_PSOStats.constructor (constructor)
+  constructor();
 
   NbFunctionEvals: number
 
@@ -132,13 +153,16 @@ MathOpt_PSOStats: declare class MathOpt_PSOStats
 
   FinalBest: number
 
+  // MathOpt_PSOStats.delete (method)
   delete(): void;
 
+  // MathOpt_PSOStats.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathOpt_UzawaConfig: declare class MathOpt_UzawaConfig
 
-  constructor
+  // MathOpt_UzawaConfig.constructor (constructor)
+  constructor();
 
   EpsLix: number
 
@@ -146,13 +170,16 @@ MathOpt_UzawaConfig: declare class MathOpt_UzawaConfig
 
   MaxIterations: number
 
+  // MathOpt_UzawaConfig.delete (method)
   delete(): void;
 
+  // MathOpt_UzawaConfig.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathOpt_UzawaResult: declare class MathOpt_UzawaResult
 
-  constructor
+  // MathOpt_UzawaResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -168,8 +195,11 @@ MathOpt_UzawaResult: declare class MathOpt_UzawaResult
 
   NbIterations: number
 
+  // MathOpt_UzawaResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathOpt_UzawaResult.delete (method)
   delete(): void;
 
+  // MathOpt_UzawaResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

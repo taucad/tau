@@ -7,7 +7,7 @@ use serde_json::Value;
 const CORPUS: &str = include_str!("../../conformance/early-corpus.json");
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
 const CURRENT_NUMERIC_PROFILE: &str =
-    include_str!("fixtures/current-profile-v5/numeric-profile.txt");
+    include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
 
 fn bytes(hex: &str) -> Vec<u8> {
     (0..hex.len())

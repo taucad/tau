@@ -144,19 +144,68 @@ export const classifyUpstreamRefusal = (input: {
 export const maximumRefusalMessageCharacters = 500;
 
 /**
+ * How each routed provider says a request is past the model's context window
+ * (Anthropic, OpenAI Responses and Completions, Gemini, xAI, Bedrock).
+ */
+const contextWindowRefusalPatterns: readonly RegExp[] = [
+  /prompt is too long/i,
+  /request_too_large/i,
+  /context_length_exceeded/i,
+  /exceeds the context window/i,
+  /maximum context length/i,
+  /input token count.*exceeds the maximum/i,
+  /maximum prompt length is/i,
+  /input is too long for requested model/i,
+];
+
+/**
+ * The sentence a Cloud customer reads when the provider refused a request for
+ * its size. It is Tau's own sentence, so it quotes nothing the supplier said,
+ * and it names the context window in the words the host's overflow recognition
+ * matches, so the host compacts and retries instead of offering a resume the
+ * provider would refuse identically.
+ */
+export const contextWindowRefusalMessage = 'The request exceeds the context window of the selected model.';
+
+/**
+ * Whether a refused upstream call was refused because the prompt is past the
+ * model's context window. Reads the provider's own type, code and sentence from
+ * a body's `error` member, or from the object itself when it is that member
+ * already (an in-band error frame).
+ *
+ * @param body - The parsed provider body or its error object.
+ * @returns `true` for a context-window refusal.
+ */
+export const isContextWindowRefusal = (body: unknown): boolean => {
+  if (body === null || typeof body !== 'object') {
+    return false;
+  }
+  const { error } = body as { error?: unknown };
+  const source = (error !== null && typeof error === 'object' ? error : body) as Record<string, unknown>;
+  return [source['type'], source['code'], source['message']].some(
+    (value) => typeof value === 'string' && contextWindowRefusalPatterns.some((pattern) => pattern.test(value)),
+  );
+};
+
+/**
  * What a Cloud customer is told about a refused upstream call. Tau owns the key
- * on that path, so the supplier's own sentence never leaves the API; these three
+ * on that path, so the supplier's own sentence never leaves the API; these four
  * sentences are all a customer reads. Shared so the pre-stream leg and the
  * mid-stream frame filter cannot drift apart.
  *
- * @param input - The classification this refusal already mapped to, and the
- * upstream status it came from.
+ * @param input - The classification this refusal already mapped to, the
+ * upstream status it came from, and whether the provider refused it for its
+ * size ({@link isContextWindowRefusal}).
  * @returns The message the customer may read.
  */
 export const cloudUpstreamRefusalMessage = (input: {
   readonly type: LlmGatewayErrorType;
   readonly status: number;
+  readonly contextWindowExceeded?: boolean;
 }): string => {
+  if (input.type === 'UPSTREAM_REJECTED' && input.contextWindowExceeded === true) {
+    return contextWindowRefusalMessage;
+  }
   if (input.type === 'UPSTREAM_REJECTED') {
     return `The model provider rejected the request (HTTP ${String(input.status)}).`;
   }

@@ -43,9 +43,11 @@ const flushStage = async (registrations: readonly FlushRegistration[], stage: Fl
   );
   const failures = outcomes.filter((outcome): outcome is PromiseRejectedResult => outcome.status === 'rejected');
   if (failures.length > 0) {
+    const reasons = failures.map((failure) => failure.reason as unknown);
+    // The quit hold shows this message: it names what is not saved, not the stage.
     throw new AggregateError(
-      failures.map((failure) => failure.reason as unknown),
-      `${stage} flush failed`,
+      reasons,
+      reasons.map((reason) => (reason instanceof Error ? reason.message : `${stage} flush failed`)).join(' '),
     );
   }
 };

@@ -17,7 +17,7 @@ import { cn } from '#utils/cn.js';
  * ```
  */
 const toggleVariants = cva(
-  "relative inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium hover:bg-menu-highlight hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-menu-highlight data-[state=on]:text-foreground aria-[pressed=true]:bg-menu-highlight aria-[pressed=true]:text-foreground aria-[checked=true]:bg-menu-highlight aria-[checked=true]:text-foreground after:pointer-events-none after:absolute after:inset-x-1 after:bottom-0 after:h-0.5 after:rounded-full data-[state=on]:after:bg-selected-indicator aria-[pressed=true]:after:bg-selected-indicator aria-[checked=true]:after:bg-selected-indicator [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0 focus-visible:focus-outline outline-none transition-[color,box-shadow] aria-invalid:border-destructive whitespace-nowrap",
+  "relative inline-flex items-center justify-center gap-2 rounded-md text-sm font-medium hover:bg-menu-highlight hover:text-foreground disabled:pointer-events-none disabled:opacity-50 data-[state=on]:bg-menu-highlight data-[state=on]:text-foreground aria-[pressed=true]:bg-menu-highlight aria-[pressed=true]:text-foreground aria-[checked=true]:bg-menu-highlight aria-[checked=true]:text-foreground [&_svg]:pointer-events-none [&_svg:not([class*='size-'])]:size-4 [&_svg]:shrink-0 focus-visible:focus-outline outline-none transition-[color,box-shadow] aria-invalid:border-destructive whitespace-nowrap",
   {
     variants: {
       variant: {

@@ -92,8 +92,8 @@ const writeLicenses = (roots: ReadonlySet<string>): void => {
     const text = licensePath === undefined ? fallback : readText(licensePath);
     return [{ name: manifest.name, version: manifest.version, license: manifest.license, text, upstream }];
   });
-  const unique = [...new Map(entries.map((entry) => [`${entry.name}@${entry.version}`, entry])).values()].sort((a, b) =>
-    a.name.localeCompare(b.name),
+  const unique = [...new Map(entries.map((entry) => [`${entry.name}@${entry.version}`, entry])).values()].sort(
+    (a, b) => a.name.localeCompare(b.name) || a.version.localeCompare(b.version, undefined, { numeric: true }),
   );
   const lines = [
     '# Vendored tscircuit engine licences',

@@ -390,6 +390,7 @@ const config = [
       // `@taucad/api-extractor` output, one per kernel package.
       '**/agent/resources.js',
       '**/agent/resources.d.ts',
+      '**/agent/skills.d.cts',
       '**/assets',
       '**/.netlify',
       '**/*.prompt.example.*',
@@ -478,6 +479,21 @@ const config = [
     plugins: { '@nx': nxEslintPlugin },
     rules: {
       '@nx/enforce-module-boundaries': ['error', moduleBoundaryOptions],
+    },
+  },
+
+  {
+    /* The unpublished X1C qualifier imports the host for hardware-only capture. Nx checks the closing
+     * path (host → agent-tools → bambu), not that import edge, so scope the documented exception here. */
+    files: ['packages/plugins/bambu/scripts/qualify-x1c.mts'],
+    rules: {
+      '@nx/enforce-module-boundaries': [
+        'error',
+        {
+          ...moduleBoundaryOptions,
+          ignoredCircularDependencies: [...moduleBoundaryOptions.ignoredCircularDependencies, ['host', 'agent-tools']],
+        },
+      ],
     },
   },
 

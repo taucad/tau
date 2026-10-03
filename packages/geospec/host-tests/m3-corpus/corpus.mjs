@@ -9,16 +9,56 @@ import { fixturePath, fixtureWorkspaceRoot, readFixture } from '../fixtures/read
 const CURRENT_AUTHORITY = 'packages/geospec/host-tests/m3-corpus/current-authority-v5.json';
 const CURRENT_AUTHORITY_SHA256 = 'ec7d1f97dda08e52f00d418475df2a3a02b4298a49267fd8581b7910a7bbea86';
 
+/** Project only the reviewed current identities after the original byte authority is verified. @internal */
+export function projectCurrentM3Campaign(campaign) {
+  assert.equal(campaign.numericProfile, 'geospec-demand-v5');
+  assert.deepEqual(campaign.definitions.f1, {
+    path: 'packages/geospec-engine-native/rust/src/certificates/definition.rs',
+    sha256: '96b287ff9299888859c4338e9d7b05093dafed7fdfcade9811c7c1c4c9bcadd2',
+  });
+  assert.equal(campaign.rows.length, 352);
+  assert.equal(new Set(campaign.rows.map((row) => row.id)).size, 352);
+  const old = '"numericProfile":"geospec-demand-v5"';
+  const current = '"numericProfile":"geospec-demand-v6"';
+  const definition = 'd0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350';
+  let plates = 0;
+  const rows = campaign.rows.map((row) => {
+    const plan = row.expected.canonicalPlan;
+    const key = plan.canonicalUtf8 === undefined ? 'derivationUtf8' : 'canonicalUtf8';
+    const text = plan[key];
+    assert.equal(typeof text, 'string', `${row.id}: canonical plan authority`);
+    assert.equal(text.split(old).length, 2, `${row.id}: exact old profile`);
+    assert.equal(JSON.parse(text).numericProfile, 'geospec-demand-v5');
+    // No result-byte oracle exists in this authority. Preserve that precise scope.
+    assert.equal(row.expected.canonicalResultUtf8, null);
+    const expected = { ...row.expected, canonicalPlan: { ...plan, [key]: text.replace(old, current) } };
+    if (row.capability === 'toSatisfyRationalPlate') {
+      assert.equal(expected.verifierSourceHash, campaign.definitions.f1.sha256, `${row.id}: original F1 identity`);
+      plates += 1;
+      expected.verifierSourceHash = definition;
+    }
+    return { ...row, expected };
+  });
+  assert.equal(plates, 12);
+  return {
+    ...campaign,
+    numericProfile: 'geospec-demand-v6',
+    definitions: { ...campaign.definitions, f1: { ...campaign.definitions.f1, sha256: definition } },
+    rows,
+  };
+}
+
 /** Load current semantic expectations; binary provenance belongs to execution receipts. @internal */
 export function loadCurrentM3Campaign(backend, workspaceRoot = fixtureWorkspaceRoot) {
   assert.ok(backend === 'native' || backend === 'mixed', 'current campaign requires an explicit native/mixed profile');
   const bytes = readFixture(CURRENT_AUTHORITY, workspaceRoot);
   assert.equal(sha256(bytes), CURRENT_AUTHORITY_SHA256, 'current independent authority changed');
-  const campaign = JSON.parse(bytes);
+  const original = JSON.parse(bytes);
+  const campaign = projectCurrentM3Campaign(original);
   assert.equal(campaign.protocolVersion, 3);
   assert.equal(campaign.registryVersion, 5);
   assert.equal(campaign.canonicalProfile, 'geospec-jcs-v1');
-  assert.equal(campaign.numericProfile, 'geospec-demand-v5');
+  assert.equal(campaign.numericProfile, 'geospec-demand-v6');
   for (const definition of Object.values(campaign.definitions)) {
     const source = readFileSync(resolve(workspaceRoot, definition.path), 'utf8');
     assert.ok(source.includes(`"${definition.sha256}"`), `independent definition changed: ${definition.path}`);

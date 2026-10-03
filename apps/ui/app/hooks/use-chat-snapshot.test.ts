@@ -51,7 +51,7 @@ describe('projectWorkbenchSnapshot', () => {
     });
     const entries = workbenchRecords.entries.schema.parse({
       version: 1,
-      entries: { 'model/main.ts': { operationTimeout: 15_000, components: { hidden: ['a', 'b'] } } },
+      entries: { 'model/main.ts': { renderTimeout: 15_000, components: { hidden: ['a', 'b'] } } },
     });
     const layout = workbenchRecords.layout.schema.parse({
       version: 1,
@@ -82,7 +82,7 @@ describe('projectWorkbenchSnapshot', () => {
         { kind: 'pane', pane: 'kernel' },
       ],
       views: [{ id: 'front', name: 'Front review', entryPath: 'model/main.ts', camera: 'front' }],
-      entries: [{ path: 'model/main.ts', operationTimeout: 15_000, hidden: 2 }],
+      entries: [{ path: 'model/main.ts', renderTimeout: 15_000, hidden: 2 }],
       unavailable: ['kernel', 'console'],
       refused,
     });

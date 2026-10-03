@@ -42,12 +42,14 @@ export type ProjectSessionServices = Readonly<{
   flushProducers: () => Promise<void>;
   flushSync: (boundMilliseconds: number) => Promise<void>;
   cancelRuns: (chatIds: readonly string[]) => Promise<void>;
+  closeRuntime: () => Promise<void>;
 }>;
 
 const noServices: ProjectSessionServices = {
   flushProducers: async () => undefined,
   flushSync: async () => undefined,
   cancelRuns: async () => undefined,
+  closeRuntime: async () => undefined,
 };
 
 const services = new Map<string, ProjectSessionServices>();
@@ -246,6 +248,7 @@ const projectSession = projectSessionMachine.provide({
     }),
     releaseAgentHost: createAsyncLogic<void, { projectId: string }>({
       run: async ({ input }) => {
+        await servicesFor(input.projectId).closeRuntime();
         const registration = agentHostRegistrations.get(input.projectId);
         if (registration !== undefined) {
           const registered = await registration;

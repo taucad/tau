@@ -1,6 +1,7 @@
-import { FlaskConical, X, Lightbulb, Check } from 'lucide-react';
+import { FlaskConical, X, Lightbulb, Check, ChevronRight } from 'lucide-react';
 import type { ToolInvocation } from '@taucad/chat';
-import type { TestFailure, TestPass } from '@taucad/chat/schemas/tools/test-model';
+import type { TestFailure, TestModelOutput, TestPass } from '@taucad/chat/schemas/tools/test-model';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { toolName } from '@taucad/chat/constants';
 import { useChatSelector } from '#hooks/use-chat.js';
 import {
@@ -16,6 +17,8 @@ import { RequirementIndicator } from '#components/chat/requirement-indicator.js'
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { FileLink } from '#components/files/file-link.js';
 import { ChatMessageMedia } from '#routes/w.$workspace.$project/chat-message-media.js';
+import { useFeature } from '#flags/use-feature.js';
+import { formatBytes } from '#lib/format-bytes.js';
 
 function TestPassItem({ pass, index }: { readonly pass: TestPass; readonly index: number }): React.JSX.Element {
   return (
@@ -130,12 +133,47 @@ function FileGroupSection({ group }: { readonly group: FileGroup }): React.JSX.E
   );
 }
 
+/**
+ * The retained GeoSpec report, a Tau Debug download behind a collapsed disclosure.
+ *
+ * The card names what the JSON holds and its size, so the download is not a guess.
+ */
+function FullReportDownload({
+  result,
+  fullResult,
+}: {
+  readonly result: TestModelOutput;
+  readonly fullResult: NonNullable<TestModelOutput['fullResult']>;
+}): React.JSX.Element {
+  const failed = result.total - result.passed;
+  const summary = `All ${result.total} requirements (${result.passed} passed, ${failed} failed) with run accounting, lineage and source revisions · ${formatBytes(fullResult.byteLength)}`;
+
+  return (
+    <Collapsible className='text-xs text-muted-foreground'>
+      <CollapsibleTrigger className='group/report flex items-center gap-1 hover:text-foreground'>
+        Report
+        <ChevronRight
+          aria-hidden
+          className='size-3 transition-transform group-data-[state=open]/report:rotate-90 motion-reduce:transition-none'
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className='mt-1 w-fit max-w-full space-y-1'>
+        <ChatMessageMedia
+          media={{ url: fullResult.path, mediaType: fullResult.mimeType, filename: 'geospec-report.json' }}
+        />
+        <p className='wrap-break-word'>{summary}</p>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
 export function ChatMessageToolTestModel({
   part,
 }: {
   readonly part: ToolInvocation<typeof toolName.testModel>;
 }): React.JSX.Element {
   const chatStatus = useChatSelector((state) => state.status);
+  const isDebug = useFeature('tauDebug');
   const isLoading = chatStatus === 'streaming' && ['input-streaming', 'input-available'].includes(part.state);
 
   switch (part.state) {
@@ -162,6 +200,7 @@ export function ChatMessageToolTestModel({
       const totalRequirements = result.total;
       const requirementNoun = totalRequirements === 1 ? 'requirement' : 'requirements';
       const hasFailures = result.passed < result.total;
+      const fullResult = isDebug ? result.fullResult : undefined;
 
       return (
         <ChatToolCard
@@ -169,7 +208,7 @@ export function ChatMessageToolTestModel({
           variant='minimal'
           status={isLoading ? 'loading' : 'ready'}
           isDefaultOpen={hasFailures}
-          isCollapsible={totalRequirements > 0 || result.fullResult !== undefined}
+          isCollapsible={totalRequirements > 0 || fullResult !== undefined}
         >
           <ChatToolCardHeader>
             <ChatToolCardIcon icon={FlaskConical} tone={hasFailures ? 'destructive' : undefined} />
@@ -181,24 +220,13 @@ export function ChatMessageToolTestModel({
               </ChatToolLabel>
             </ChatToolCardTitle>
           </ChatToolCardHeader>
-          {(totalRequirements > 0 || result.fullResult !== undefined) && (
+          {(totalRequirements > 0 || fullResult !== undefined) && (
             <ChatToolCardContent forceMount>
               <div className='space-y-2 border-l border-foreground/20 py-1 pl-2'>
                 {groups.map((group) => (
                   <FileGroupSection key={group.targetFile} group={group} />
                 ))}
-                {result.fullResult && (
-                  <div className='space-y-1 text-xs text-muted-foreground'>
-                    <span>Full GeoSpec report</span>
-                    <ChatMessageMedia
-                      media={{
-                        url: result.fullResult.path,
-                        mediaType: result.fullResult.mimeType,
-                        filename: 'geospec-report.json',
-                      }}
-                    />
-                  </div>
-                )}
+                {fullResult ? <FullReportDownload result={result} fullResult={fullResult} /> : null}
               </div>
             </ChatToolCardContent>
           )}

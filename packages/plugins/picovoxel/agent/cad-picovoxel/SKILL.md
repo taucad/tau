@@ -1,6 +1,6 @@
 ---
 name: cad-picovoxel
-description: Guides PicoVoxel voxel, SDF and lattice CAD, PBR materials and mechanisms. Use for TypeScript geometry, textures or moving-part authoring.
+description: Guides PicoVoxel voxel, SDF and lattice CAD, named parts, PBR materials and mechanisms. For TypeScript geometry, appearance, textures or moving-part authoring.
 ---
 
 # PicoVoxel authoring
@@ -12,7 +12,7 @@ description: Guides PicoVoxel voxel, SDF and lattice CAD, PBR materials and mech
 3. For moving parts, read `kinematics-reference.md`: return explicitly named bodies and export `mechanism` or `mechanism(params)` with joints and clips. Fix mechanism warnings.
 4. Use the `pico` session Tau passes in. Never call `createPico()` or import `picovoxel/multi`, `picovoxel/raw` or `picovoxel/three`.
 
-For multiple files, import helpers through explicit ESM paths such as `./lib/widget.js` and pass `pico` into them.
+Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` to helpers.
 
 ## Kernel rules
 
@@ -57,12 +57,13 @@ units, UV0 and exports.
 
 ## API reference
 
-All 725 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 964 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-interfaces.md` — Interfaces
+- `api-interfaces-2.md` — Interfaces (2)
 - `api-types.md` — Types
-- `api-classs.md` — Classs
-- `api-classs-2.md` — Classs (2)
+- `api-classes.md` — Classes
+- `api-classes-2.md` — Classes (2)
 - `api-functions.md` — Functions
 - `api-constants.md` — Constants
 

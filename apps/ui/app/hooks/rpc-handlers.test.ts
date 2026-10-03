@@ -1367,6 +1367,7 @@ describe('rpc-handlers', () => {
               committedSectionCuts: cuts,
               modelInteractionUnitId: 'file:src/pen.ts',
               modelInteractionRef: modelRef,
+              kinematicsRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
             },
           }),
         };
@@ -1691,13 +1692,13 @@ describe('rpc-handlers', () => {
           type: string;
           claimId: string;
           entryPath: string;
-          renderTimeout?: number;
+          operationTimeout?: number;
         };
         expect(claim).toEqual({
           type: 'claimGeometryUnit',
           claimId: claim.claimId,
           entryPath: 'parked.scad',
-          renderTimeout: undefined,
+          operationTimeout: undefined,
         });
         expect(typeof claim.claimId).toBe('string');
         expect(projectRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'releaseGeometryUnit' }));
@@ -1818,6 +1819,62 @@ describe('rpc-handlers', () => {
         });
       });
 
+      describe('render timeout lookup', () => {
+        const evaluateWithEntries = async (entriesText: string, targetFile = 'main.scad') => {
+          const geometryUnits = new Map<string, unknown>();
+          const projectRef = createMockProjectRef({ geometryUnits });
+          const fileManager = createMockFileManager();
+          fileManager.readFile.mockResolvedValue(new TextEncoder().encode(entriesText));
+          const result = await buildDeps({ projectRef, fileManager }).kernelClient.evaluateModel({ targetFile });
+          return { result, projectRef };
+        };
+
+        /* A short-lived Tau wrote `operationTimeout`; the strict codec refuses it, and rendering
+         * must not silently fall back to the default timeout. */
+        it.each(['main.scad', 'sibling.scad'])(
+          'should refuse to render %s with the path, reason and recovery when entries are invalid',
+          async (targetFile) => {
+            const stale = '{"version":1,"entries":{"main.scad":{"operationTimeout":5000}}}';
+            const { result, projectRef } = await evaluateWithEntries(stale, targetFile);
+
+            expect(result).toEqual({
+              success: false,
+              errorCode: 'UNKNOWN',
+              message:
+                '`.tau/workbench/entries.json` is not valid, so rendering stopped rather than assume a default render timeout. The person can review it from the project\'s Settings not applied action; do not rewrite it to work around this. The entries record is invalid: entries.main.scad: Unrecognized key: "operationTimeout"',
+            });
+            expect(projectRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'claimGeometryUnit' }));
+          },
+        );
+
+        it('should refuse to render with a distinct newer-format message when entries are newer', async () => {
+          const { result, projectRef } = await evaluateWithEntries('{"version":2}');
+
+          expect(result).toEqual({
+            success: false,
+            errorCode: 'UNKNOWN',
+            message:
+              '`.tau/workbench/entries.json` was written by a newer Tau, so rendering stopped rather than assume a default render timeout. Update Tau to use it; do not rewrite it to work around this.',
+          });
+          expect(projectRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'claimGeometryUnit' }));
+        });
+
+        it('should propagate an entries read failure other than a missing file', async () => {
+          const projectRef = createMockProjectRef({ geometryUnits: new Map<string, unknown>() });
+          const fileManager = createMockFileManager();
+          fileManager.readFile.mockRejectedValue(
+            Object.assign(new Error('EACCES: permission denied'), { code: 'EACCES' }),
+          );
+
+          const result = await buildDeps({ projectRef, fileManager }).kernelClient.evaluateModel({
+            targetFile: 'main.scad',
+          });
+
+          expect(result).toEqual({ success: false, errorCode: 'UNKNOWN', message: 'EACCES: permission denied' });
+          expect(projectRef.send).not.toHaveBeenCalledWith(expect.objectContaining({ type: 'claimGeometryUnit' }));
+        });
+      });
+
       it('should return error status when kernel issues contain errors', async () => {
         const issues = [{ message: 'Syntax error', type: 'compile', severity: 'error' }];
         const kernelIssues = new Map([['main.scad', issues]]);
@@ -1901,13 +1958,13 @@ describe('rpc-handlers', () => {
           type: string;
           claimId: string;
           entryPath: string;
-          renderTimeout?: number;
+          operationTimeout?: number;
         };
         expect(claim).toEqual({
           type: 'claimGeometryUnit',
           claimId: claim.claimId,
           entryPath: 'new-file.scad',
-          renderTimeout: undefined,
+          operationTimeout: undefined,
         });
         expect(typeof claim.claimId).toBe('string');
         expect(result.success).toBe(true);

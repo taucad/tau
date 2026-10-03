@@ -336,18 +336,15 @@ try {
   const sandboxRuntime = await realpath(resolve(desktopRoot, 'node_modules/@anthropic-ai/sandbox-runtime'));
   const sandboxRuntimeMetadata = await readJson<{ readonly version: string }>(resolve(sandboxRuntime, 'package.json'));
   const bundledImports = await Promise.all(
-    ['@gltf-transform/core', '@gltf-transform/functions', 'fflate', 'uint8array-extras', 'xstate'].map(async (name) => {
+    [
+      '@gltf-transform/core',
+      '@gltf-transform/functions',
+      'fflate',
+      'uint8array-extras',
+      'xstate',
+      '@parcel/watcher',
+    ].map(async (name) => {
       const source = await realpath(resolve(desktopRoot, 'node_modules', name));
-      const { version } = await readJson<{ readonly version: string }>(resolve(source, 'package.json'));
-      return { name, source, version };
-    }),
-  );
-  const sharpRoot = dirname(
-    dirname(createRequire(resolve(bundledImports[1]!.source, 'package.json')).resolve('sharp')),
-  );
-  const sharpPlatformImports = await Promise.all(
-    ['@img/sharp-darwin-arm64', '@img/sharp-libvips-darwin-arm64'].map(async (name) => {
-      const source = await realpath(resolve(sharpRoot, '..', name));
       const { version } = await readJson<{ readonly version: string }>(resolve(source, 'package.json'));
       return { name, source, version };
     }),
@@ -412,7 +409,6 @@ try {
             'nanoraster-darwin-arm64': nanorasterMetadata.version,
             '@anthropic-ai/sandbox-runtime': sandboxRuntimeMetadata.version,
             ...Object.fromEntries(bundledImports.map(({ name, version }) => [name, version])),
-            ...Object.fromEntries(sharpPlatformImports.map(({ name, version }) => [name, version])),
             ...Object.fromEntries(acpAdapters.map(({ name, version }) => [name, version])),
           },
         },
@@ -422,12 +418,21 @@ try {
     ),
   ]);
 
-  for (const { name, source } of [
-    ...bundledImports,
-    ...sharpPlatformImports,
-    ...acpAdapters,
-    { name: '@anthropic-ai/sandbox-runtime', source: sandboxRuntime },
-  ]) {
+  for (const { name, source } of bundledImports) {
+    // oxlint-disable-next-line no-await-in-loop -- Package-local native versions require serial nested staging.
+    await copyRuntimeClosure({
+      name,
+      source,
+      modulesRoot: resolve(stageRoot, 'node_modules'),
+      filter: excludesBuildDiagnostics,
+      optionalDependencies: [
+        '@img/sharp-libvips-darwin-arm64',
+        '@img/sharp-darwin-arm64',
+        '@parcel/watcher-darwin-arm64',
+      ],
+    });
+  }
+  for (const { name, source } of [...acpAdapters, { name: '@anthropic-ai/sandbox-runtime', source: sandboxRuntime }]) {
     /* Serial: the closure nests one package inside another, so two adapters
      * racing on the same staged directories would make the layout undecidable. */
     // oxlint-disable-next-line no-await-in-loop -- see above.
@@ -469,11 +474,19 @@ try {
   const appPath = resolve(packagePaths[0]!, 'Tau.app');
   const resources = resolve(appPath, 'Contents/Resources');
   const plugins = resolve(appPath, 'Contents/PlugIns');
-  await mkdir(resolve(resources, 'branding'), { recursive: true });
+  await Promise.all([
+    mkdir(resolve(resources, 'branding'), { recursive: true }),
+    mkdir(resolve(resources, 'legal'), { recursive: true }),
+  ]);
   await Promise.all([
     copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
     cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
     cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
+    /* The legal routes stay web-only; the notices (OCCT's LGPL-2.1 and exception included) still ship offline. */
+    cp(
+      resolve(workspaceRoot, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt'),
+      resolve(resources, 'legal/OPEN-SOURCE-NOTICES.md'),
+    ),
     copyTree(resolve(pythonResourceRoot, 'darwin-arm64'), resolve(resources, 'python/darwin-arm64')),
     copyTree(resolve(picoGkResourceRoot, 'darwin-arm64'), resolve(resources, 'picogk/darwin-arm64')),
     copyGeoSpecSourceRelink(geospecAssemblyRoot, geospecSourceRelinkReceipt, resources),

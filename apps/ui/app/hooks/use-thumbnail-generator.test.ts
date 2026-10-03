@@ -158,7 +158,7 @@ describe('useThumbnailGenerator', () => {
           margin: 0.1,
           projection: { kind: 'perspective', verticalFieldOfView: 45 },
         },
-        quality: 0.9,
+        quality: 0.95,
         ao: {},
       },
     });
@@ -244,7 +244,7 @@ describe('useThumbnailGenerator', () => {
       sourcePath: sourceEntryPath,
       content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
       format: 'webp',
-      exportOptions: { width: 1536, height: 1152, quality: 0.9 },
+      exportOptions: { width: 1536, height: 1152, quality: 0.95 },
     });
   });
 
@@ -265,7 +265,7 @@ describe('useThumbnailGenerator', () => {
     expect(event?.type).toBe('settled');
     if (event?.type === 'settled') {
       expect(event.hash).toBe(
-        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.9:1536x1152:m0.1:lw6:camera-bounds-v1:edges:studio-v5',
+        'proj_aaaaaaaaaaaaaaaaaaaaa:src/main.ts:geometry-hash:webp:q0.95:1536x1152:m0.1:lw6:camera-bounds-v1:edges:studio-v5',
       );
     }
   });

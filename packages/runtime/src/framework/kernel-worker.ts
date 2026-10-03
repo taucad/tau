@@ -1462,6 +1462,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       phase: 'queued',
     });
     this.onDocumentStateChanged?.({ state: 'busy' });
+    let initialWatchRefusal: { error: unknown } | undefined;
     const pending = this.enqueueOperation(async () => {
       const previousProgress = this.onProgress;
       this.activeDocumentEvaluationController = controller;
@@ -1485,6 +1486,19 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           await this.writeFilesAndInvalidate(stage, document.id);
         }
         await this.revalidateRetainedFiles();
+        if (document.watch) {
+          try {
+            if (!(await this.reconcileObservedPaths())) {
+              this.abandonDocumentEvaluation(pendingCommitted);
+              if (this.shouldPublishDocumentEvaluation(document, controller, intent)) {
+                this.scheduleDocumentEvaluation(document, intent, transient);
+              }
+              return;
+            }
+          } catch (error) {
+            initialWatchRefusal = { error };
+          }
+        }
         const dependencyContext: DependencyResolutionContext = {};
         const owner = await this.createOperationOwner(file, 'request');
         const described = await this.getParametersInLane(file, {
@@ -1582,7 +1596,10 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
                 },
               };
         }
-        if (document.watch) {
+        if (initialWatchRefusal && evaluation.result.success) {
+          throw initialWatchRefusal.error;
+        }
+        if (document.watch && initialWatchRefusal === undefined) {
           for (const [path, digest] of Object.entries(evaluation.result.sourceRevision?.files ?? {})) {
             if (!this.fileHashCache.has(path)) {
               this.fileHashCache.set(path, digest === 'missing' ? digest : digest.slice('sha256:'.length));
@@ -1668,7 +1685,13 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           transient,
           result,
         };
-        if (document.watch && !controller.signal.aborted && !document.closed && document.intent === intent) {
+        if (
+          document.watch &&
+          initialWatchRefusal === undefined &&
+          !controller.signal.aborted &&
+          !document.closed &&
+          document.intent === intent
+        ) {
           document.watchPaths.add(assertRootedPath(joinRelativePath(document.file.path, document.file.filename)));
           try {
             await this.reconcileObservedPaths();
@@ -2707,17 +2730,17 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
         ]);
       }
     }
+    /* Every computed description retains the source closure this lane already hashed,
+     * including failures so watched documents can recover when a dependency changes.
+     * Attach it before caching so a success replays the revision it was computed from. */
+    result = {
+      ...result,
+      sourceRevision: Object.freeze({
+        entry: entryPath,
+        files: Object.freeze(parameterSourceFiles),
+      }),
+    };
     if (result.success) {
-      /* R4/I5: the manifest identity already names every source file this lane hashed, so the
-       * result's provenance is that identity, not a second digest scheme. Attached before the
-       * cache is written, so a cache hit replays the revision it was computed from. */
-      result = {
-        ...result,
-        sourceRevision: Object.freeze({
-          entry: entryPath,
-          files: Object.freeze(parameterSourceFiles),
-        }),
-      };
       this.parameterResultCache = {
         key: parameterCacheKey,
         result: { ...result, issues: [...result.issues] },
@@ -3141,6 +3164,35 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
 
     const oldPaths = this.watchedPaths;
     const addedPaths = [...desiredSet].filter((path) => !oldPaths.has(path));
+    const unknownPaths = addedPaths.filter((path) => !this.fileHashCache.has(path));
+    if (unknownPaths.length > 0) {
+      const evaluationSequence = this.documentEvaluationSequence;
+      const stagedWrite = this.stagedWritePublication;
+      if (stagedWrite && unknownPaths.some((path) => stagedWrite.paths.has(path))) {
+        return false;
+      }
+      // Establish the entry's revision before a kernel can retain an operation-local mirror.
+      // A later watch echo is harmless only if it agrees with these already-observed bytes.
+      const baselines = await Promise.all(
+        unknownPaths.map(async (path) => ({ path, revision: await this.readObservedRevision(path) })),
+      );
+      if (
+        !this.operationAdmissionOpen ||
+        this.documentEvaluationSequence !== evaluationSequence ||
+        this.stagedWritePublication !== stagedWrite ||
+        unknownPaths.some((path) => this.fileHashCache.has(path))
+      ) {
+        return false;
+      }
+      for (const { path, revision } of baselines) {
+        this.fileHashCache.set(path, revision.hash);
+        if (revision.content === undefined) {
+          this.fileContentCache.delete(path);
+        } else {
+          this.fileContentCache.set(path, revision.content);
+        }
+      }
+    }
     const addedSet = new Set(addedPaths);
     const armingEvents = { resetObserved: false, addedPathRevision: 0 };
     const handler = (event: WatchEvent): void => {
@@ -5148,15 +5200,34 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     const depsSpan = this.tracer.startSpan('kernel.resolve-deps', {
       phase: 'resolvingDeps',
     });
-    const dependencies = await this.computeDependencies({
-      operations: ['evaluate', 'export'],
-      parameters: options.renderIdentity.parameters,
-      renderOptions: options.renderIdentity.renderOptions,
-      content: options.plan.route.content,
-      exportDependency: options.plan.dependency,
-      resolvedMiddleware: this.getExportExecutionList(options.plan),
-      owner: options.plan.owner,
-    });
+    // The document owns its evaluated source. Only the export leg observes
+    // current files; otherwise old handles would be cached under new source hashes.
+    let dependencies: Dependency[];
+    if (options.pinnedSourceRevision && options.renderArtifact) {
+      const exportDependencies = await this.computeMiddlewareDependencies(
+        options.plan.owner,
+        this.getExportExecutionList(options.plan),
+        ['export'],
+      );
+      dependencies = [
+        ...options.renderArtifact.identity.dependencies.filter(
+          ({ type }) => type !== 'content' && type !== 'export' && type !== 'middleware',
+        ),
+        ...exportDependencies.dependencies,
+        { type: 'content', content: options.plan.route.content as Record<string, boolean> },
+        options.plan.dependency,
+      ];
+    } else {
+      dependencies = await this.computeDependencies({
+        operations: ['evaluate', 'export'],
+        parameters: options.renderIdentity.parameters,
+        renderOptions: options.renderIdentity.renderOptions,
+        content: options.plan.route.content,
+        exportDependency: options.plan.dependency,
+        resolvedMiddleware: this.getExportExecutionList(options.plan),
+        owner: options.plan.owner,
+      });
+    }
     const dependencyHash = await this.computeDependencyHash(dependencies);
     depsSpan.end();
 
@@ -5317,6 +5388,7 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
       renderOptions: renderArtifact.identity.renderOptions,
       exportOptions: exportMaterialization.options,
       content: plan.route.content,
+      ...(pinnedSourceRevision ? { pinnedIdentity: renderArtifact.identity } : {}),
     });
     if (!desiredNativeHandleKey.success) {
       return createKernelError(desiredNativeHandleKey.issues);
@@ -5571,6 +5643,18 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
           return;
         }
         const changedPaths = [...revisions.keys()];
+        // Proven external changes must retire unpinned evaluations before FIFO invalidation.
+        // A committed export keeps its admitted operation; unrelated documents stay live.
+        for (const document of this.documents.values()) {
+          if (
+            document.watch &&
+            !document.closed &&
+            changedPaths.some((path) => document.watchPaths.has(path)) &&
+            (document.pendingCommitted === undefined || document.pendingCommitted.pins === 0)
+          ) {
+            document.evaluationController?.abort(abortReasonEnum.superseded);
+          }
+        }
         await this.enqueueOperation(async () => this.routeExactChangedPaths(changedPaths, revisions));
       });
     } catch (error) {
@@ -7173,17 +7257,28 @@ export abstract class KernelWorker<Options extends Record<string, unknown> = Rec
     renderOptions: Record<string, unknown>;
     exportOptions?: Record<string, unknown>;
     content: RuntimeContentInput;
+    pinnedIdentity?: RenderIdentity;
   }): Promise<{ success: true; key: string } | { success: false; issues: KernelIssue[] }> {
     const createOptions = this.resolveCreateOptions(input.renderOptions, input.exportOptions, input.owner);
     if (!createOptions.success) {
       return createOptions;
     }
-    const dependencies = await this.computeDependencies({
-      operations: ['evaluate'],
-      parameters: input.parameters,
-      resolvedMiddleware: this.getCreateExecutionList(input.owner, input.content, input.exportOptions !== undefined),
-      owner: input.owner,
-    });
+    // Retain the admitted evaluation closure, but still compare parsed
+    // construction options before attempting live/serialized handle reuse.
+    const dependencies = input.pinnedIdentity
+      ? input.pinnedIdentity.dependencies.filter(
+          ({ type }) => type !== 'render-options' && type !== 'content' && type !== 'export',
+        )
+      : await this.computeDependencies({
+          operations: ['evaluate'],
+          parameters: input.parameters,
+          resolvedMiddleware: this.getCreateExecutionList(
+            input.owner,
+            input.content,
+            input.exportOptions !== undefined,
+          ),
+          owner: input.owner,
+        });
     if ('options' in createOptions.input) {
       dependencies.push({
         type: 'option',

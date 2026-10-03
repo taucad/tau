@@ -27,6 +27,7 @@ import type { Object3D } from 'three';
 import { useThree } from '@react-three/fiber';
 import type { Mechanism, Pose } from '@taucad/kinematics';
 import { getModelComponentId } from '#components/geometry/graphics/three/utils/model-component-owner.js';
+import { syncGltfSurfaceBatchMatrices } from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import { useKinematicsRef } from '#hooks/use-graphics.js';
 import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 
@@ -113,13 +114,16 @@ export function createKinematicsPoseComposer(root: Object3D): KinematicsPoseComp
   let mechanism: Mechanism | undefined;
   let revision: number | undefined;
   let targets: PoseTarget[] = [];
+  let targetObjects: Object3D[] = [];
 
   const reset = (): void => {
     applyPose(targets, undefined);
+    syncGltfSurfaceBatchMatrices(root, targetObjects);
     for (const target of targets) {
       target.object.matrixAutoUpdate = target.matrixAutoUpdate;
     }
     targets = [];
+    targetObjects = [];
     mechanism = undefined;
     revision = undefined;
   };
@@ -133,9 +137,11 @@ export function createKinematicsPoseComposer(root: Object3D): KinematicsPoseComp
         reset();
         mechanism = unit.mechanism;
         targets = mechanism ? collectPoseTargets(root, mechanism) : [];
+        targetObjects = targets.map(({ object }) => object);
       }
       revision = unit.revision;
       applyPose(targets, unit.pose);
+      syncGltfSurfaceBatchMatrices(root, targetObjects);
       return true;
     },
     reset,

@@ -9,7 +9,7 @@ import { FitViewControl } from '#components/geometry/cad/fit-view-control.js';
 import { FullscreenViewControl } from '#components/geometry/cad/fullscreen-view-control.js';
 import { GridSizeIndicator } from '#components/geometry/cad/grid-control.js';
 import { MeasureControl } from '#components/geometry/cad/measure-control.js';
-import { MeasureOptions } from '#components/geometry/cad/measure-tool-row.js';
+import { MeasurementList, MeasureOptions } from '#components/geometry/cad/measure-tool-row.js';
 import { SectionViewControl } from '#components/geometry/cad/section-view-control.js';
 import {
   SectionEditor,
@@ -98,6 +98,8 @@ export function ChatViewerControls({
   const is2dGeometry = useGraphicsSelector((state) => state.context.artifact?.mimeType === 'image/svg+xml');
   const isSectionViewActive = useGraphicsSelector((state) => state.context.isSectionViewActive);
   const isMeasureActive = useGraphicsSelector((state) => state.context.isMeasureActive);
+  const measurementCount = useGraphicsSelector((state) => state.context.measurements.length);
+  const [measurementsExpanded, setMeasurementsExpanded] = useState(false);
   // Counted, so a phrase said twice in a row is a new node and is announced again.
   const [announcement, setAnnouncement] = useState({ phrase: '', count: 0 });
   const announce = useCallback((phrase: string) => {
@@ -109,6 +111,7 @@ export function ChatViewerControls({
     graphicsRef.send({ type: 'setSectionViewActive', payload: false });
   }, [graphicsRef]);
   const stopMeasure = useCallback(() => {
+    setMeasurementsExpanded(false);
     graphicsRef.send({ type: 'setMeasureActive', payload: false });
   }, [graphicsRef]);
   const focusSectionRow = useCallback(() => {
@@ -122,7 +125,7 @@ export function ChatViewerControls({
     <div
       ref={barRef}
       data-slot='viewer-controls'
-      className='pointer-events-auto flex max-w-full min-w-min flex-col gap-1 rounded-md border bg-sidebar p-1 shadow-xs'
+      className='pointer-events-auto flex max-w-full min-w-min flex-col gap-1 rounded-lg border bg-sidebar p-1 shadow-xs'
     >
       {!is2dGeometry && isSectionViewActive ? (
         <ToolRow
@@ -145,9 +148,18 @@ export function ChatViewerControls({
           tool='measure'
           name='Measuring'
           icon={<Ruler className='size-4 -rotate-45 text-viewer-tool-active' />}
+          above={
+            measurementsExpanded && measurementCount > 0 ? (
+              <MeasurementList
+                onEmptied={() => {
+                  setMeasurementsExpanded(false);
+                }}
+              />
+            ) : null
+          }
           onDone={stopMeasure}
         >
-          <MeasureOptions />
+          <MeasureOptions expanded={measurementsExpanded} onExpandedChange={setMeasurementsExpanded} />
         </ToolRow>
       ) : null}
       <div

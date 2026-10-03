@@ -28,6 +28,11 @@ const legalPages = [
     description: 'View our list of third-party service providers that process your data.',
     href: '/legal/subprocessors',
   },
+  {
+    title: 'Open-Source Notices',
+    description: 'See the open-source software in Tau, including Open CASCADE, and its licenses.',
+    href: '/legal/open-source',
+  },
 ];
 
 export default function LegalIndex(): React.JSX.Element {

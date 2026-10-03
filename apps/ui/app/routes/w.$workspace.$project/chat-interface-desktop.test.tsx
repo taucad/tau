@@ -45,6 +45,7 @@ vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
 }));
 vi.mock('#routes/w.$workspace.$project/chat-workbench-dockview.js', () => ({
   WorkbenchDockview: () => <div data-testid='workbench-lane' />,
+  getWorkbenchTabIcon: () => undefined,
 }));
 vi.mock('#routes/w.$workspace.$project/project-unavailable-overlay.js', () => ({
   ProjectUnavailableOverlay: () => null,
@@ -228,7 +229,8 @@ describe('ChatInterfaceDesktop', () => {
     const toggle = await screen.findByRole('button', { name: 'Toggle Workbench lane' });
 
     expect(toggle).toHaveAttribute('aria-pressed', 'true');
-    expect(toggle).toHaveAttribute('data-slot', 'pane-button');
+    // The shared 28 px PaneButton; its data-slot names the popover trigger it also is.
+    expect(toggle).toHaveClass('size-7');
     expect(toggle.parentElement).toHaveClass('absolute', 'top-1', 'right-1', 'z-10');
     expect(document.querySelector('[data-project-workspace]')).toHaveClass('relative');
 

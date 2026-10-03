@@ -7,7 +7,10 @@ use crate::{
     analysis::{
         batch::ExactClusters,
         mesh::{
-            exact::{charge, ChargeStage, ChargeStep, ChargeTrace},
+            exact::{
+                atomic_steps, charge, logical_steps, ChargeRun, ChargeStage, ChargeStep,
+                ChargeTrace,
+            },
             Aabb, ClusterReport, PrimitiveRecord,
         },
     },
@@ -24,7 +27,7 @@ const MAX_PAYLOAD_BYTES: usize = 16 * 1024 * 1024;
 // Leaves room for the private control wrapper under the core codec's 16 MiB limit.
 pub(crate) const MAX_CANDIDATE_BYTES: usize = 15 * 1024 * 1024;
 const MAX_ITEMS: usize = 65_536;
-const MAX_STEPS: usize = 4 * 1024 * 1024 / std::mem::size_of::<ChargeStep>();
+const MAX_STEPS: usize = 4 * 1024 * 1024 / 40;
 
 #[derive(Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -120,7 +123,7 @@ struct StepDto {
 pub(crate) struct Completed {
     pub(crate) clusters: Vec<ClusterReport>,
     pub(crate) labels: Vec<String>,
-    pub(crate) trace: Vec<ChargeStep>,
+    pub(crate) trace: Vec<ChargeRun>,
 }
 
 pub(crate) fn replay(
@@ -128,9 +131,9 @@ pub(crate) fn replay(
     budget: &Budget,
     trace: &mut ChargeTrace,
 ) -> Result<(), (BudgetExceeded, Option<(usize, usize)>)> {
-    for step in &completed.trace {
+    for step in atomic_steps(&completed.trace) {
         charge(budget, step.units).map_err(|exceeded| (exceeded, step.pair))?;
-        trace.record(*step);
+        trace.record(step);
     }
     Ok(())
 }
@@ -280,6 +283,11 @@ pub(crate) fn load(
         || payload.codec != CODEC
         || payload.action_sha256 != address.action_sha256
         || payload.trace.len() > MAX_STEPS
+        || payload
+            .trace
+            .len()
+            .saturating_mul(std::mem::size_of::<ChargeRun>())
+            > 4 * 1024 * 1024
         || payload.labels.len() > MAX_ITEMS
         || payload.clusters.len() > MAX_ITEMS
         || payload.clusters.len() > payload.labels.len()
@@ -319,11 +327,14 @@ pub(crate) fn load(
         }
         counted_calls[index] = counted_calls[index].checked_add(1)?;
         counted_units[index] = counted_units[index].checked_add(value)?;
-        trace.push(ChargeStep {
-            units: value,
-            pair,
-            stage,
-        });
+        trace.push(
+            ChargeStep {
+                units: value,
+                pair,
+                stage,
+            }
+            .into(),
+        );
     }
     if counted_calls.as_slice() != calls?.as_slice()
         || counted_units.as_slice() != stage_units?.as_slice()
@@ -362,7 +373,7 @@ pub(crate) fn publish_if_cold(
 
 fn payload_bytes(address: &EvidenceAddress, value: &ExactClusters) -> Option<Vec<u8>> {
     if !value.trace_complete
-        || value.trace.len() > MAX_STEPS
+        || logical_steps(&value.trace).is_none_or(|steps| steps > MAX_STEPS as u64)
         || value.labels.len() > MAX_ITEMS
         || value.clusters.len() > MAX_ITEMS
         || payload_upper_bound(value).is_none_or(|bytes| bytes > MAX_PAYLOAD_BYTES)
@@ -376,9 +387,7 @@ fn payload_bytes(address: &EvidenceAddress, value: &ExactClusters) -> Option<Vec
         action_sha256: address.action_sha256.clone(),
         labels: value.labels.clone(),
         clusters: value.clusters.iter().map(cluster_to_dto).collect(),
-        trace: value
-            .trace
-            .iter()
+        trace: atomic_steps(&value.trace)
             .map(|step| StepDto {
                 units: step.units.to_string(),
                 pair: step.pair.map(|(left, right)| [left, right]),
@@ -417,7 +426,11 @@ fn payload_upper_bound(value: &ExactClusters) -> Option<usize> {
             }
         }
     }
-    bytes.checked_add(value.trace.len().checked_mul(160)?)
+    bytes.checked_add(
+        usize::try_from(logical_steps(&value.trace)?)
+            .ok()?
+            .checked_mul(160)?,
+    )
 }
 
 fn escaped_string_bound(value: &str) -> Option<usize> {
@@ -652,12 +665,14 @@ mod tests {
                     units: 1,
                     pair: None,
                     stage: ChargeStage::BodySetup,
-                },
+                }
+                .into(),
                 ChargeStep {
                     units: 2,
                     pair: Some((0, 1)),
                     stage: ChargeStage::FaceDistance,
-                },
+                }
+                .into(),
             ],
             units: 3,
             trace_complete: true,
@@ -712,7 +727,7 @@ mod tests {
         ));
 
         let mut altered = local;
-        altered.trace[1].units += 1;
+        altered.trace[1].step.units += 1;
         assert!(!matches_candidate(&local_subject, 0.01, &bytes, &altered));
         let mut envelope: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
         envelope["payload"]["units"] = serde_json::json!("4");
@@ -751,6 +766,48 @@ mod tests {
             &crate::canonicalize(&serde_json::to_vec(&payload).unwrap()).unwrap(),
         );
         assert!(load(&store, &address).is_none());
+    }
+
+    #[test]
+    fn compressed_memory_trace_expands_only_bounded_unchanged_v1_wire() {
+        let store = MemoryStore::default();
+        let address = address();
+        let mut value = completed();
+        let step = ChargeStep {
+            units: 1,
+            pair: None,
+            stage: ChargeStage::BodySetup,
+        };
+        value.trace = vec![ChargeRun {
+            step,
+            repetitions: 3,
+        }];
+        value.units = 3;
+        value.stage_calls = [3, 0, 0, 0, 0, 0];
+        value.stage_units = value.stage_calls;
+        publish_if_cold(&store, &address, &value, true);
+        let raw = store.load(&address).unwrap();
+        let wire: serde_json::Value = serde_json::from_slice(&raw).unwrap();
+        assert_eq!(wire["schema"], "geospec-completed-fact-v1");
+        assert_eq!(wire["trace"].as_array().unwrap().len(), 3);
+        assert!(wire["trace"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|step| step.get("repetitions").is_none()));
+        let loaded = load(&store, &address).unwrap();
+        assert_eq!(
+            atomic_steps(&loaded.trace).collect::<Vec<_>>(),
+            atomic_steps(&value.trace).collect::<Vec<_>>()
+        );
+        value.trace[0].repetitions = MAX_STEPS as u64 + 1;
+        value.units = MAX_STEPS as u64 + 1;
+        value.stage_calls[0] = value.units;
+        value.stage_units[0] = value.units;
+        assert!(
+            payload_bytes(&address, &value).is_none(),
+            "optional persistence cannot expand beyond the historical raw-step ceiling"
+        );
     }
 
     #[test]

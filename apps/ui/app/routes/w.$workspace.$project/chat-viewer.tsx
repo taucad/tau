@@ -14,7 +14,7 @@ import type { ModelComponentActionMenuData } from '#components/geometry/cad/mode
 import { ViewerModelComponentActionMenu } from '#components/geometry/cad/viewer-model-component-action-menu.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
-import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
+import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
 import type { ModelComponentSecondaryPointerTarget } from '#components/geometry/graphics/three/react/gltf-mesh.js';
 import { FileSelector } from '#components/files/file-selector.js';
 import { Button } from '@taucad/ui/components/button';
@@ -39,6 +39,7 @@ import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
+import { ViewerProjectionPicker } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isEmptyGlb } from '#utils/inspect-glb.utils.js';
 import { ArButton } from '#components/cad/ar-button.js';
@@ -241,7 +242,9 @@ function usePaneRuntimeView({
         : lastSuccess?.key === pictureKey
           ? lastSuccess.rendering
           : undefined,
-    unavailable: unavailable ?? (viewError?.key === subscriptionKey ? viewError.message : undefined),
+    // A failed evaluation fails every open view with the build's issues; the Issues card owns those.
+    unavailable:
+      unavailable ?? (evaluation?.success && viewError?.key === subscriptionKey ? viewError.message : undefined),
   };
 }
 
@@ -288,6 +291,7 @@ type ChatViewerProps = {
   /** Dockview panel API for updating title, etc. */
   readonly panelApi: IDockviewPanelHeaderProps['api'];
   readonly profile?: 'editor' | 'shared';
+  readonly onOpenProjectionBeside?: (kernelViewId: string) => void;
 };
 
 function MissingViewerFile({
@@ -328,6 +332,7 @@ export const ChatViewer = memo(function ({
   entryPath,
   panelApi,
   profile = 'editor',
+  onOpenProjectionBeside,
 }: ChatViewerProps): React.JSX.Element {
   const { projectRef, viewGraphics, viewRecords, entriesRecord, geometryUnits, mainEntryPath, setViewEntryPath } =
     useProject();
@@ -406,7 +411,7 @@ export const ChatViewer = memo(function ({
         projectRef.send({
           type: 'createGeometryUnit',
           entryPath: path,
-          operationTimeout: entriesRecord?.entries[path]?.operationTimeout,
+          operationTimeout: entriesRecord?.entries[path]?.renderTimeout,
         });
       }
 
@@ -522,7 +527,12 @@ export const ChatViewer = memo(function ({
   return (
     <CadProvider cadRef={cadActor}>
       <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-        <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
+        <ViewerContent
+          viewId={viewId}
+          entryPath={entryPath}
+          profile={profile}
+          onOpenProjectionBeside={onOpenProjectionBeside}
+        />
       </GraphicsProvider>
     </CadProvider>
   );
@@ -551,10 +561,12 @@ const ViewerContent = memo(function ({
   viewId,
   entryPath,
   profile,
+  onOpenProjectionBeside,
 }: {
   readonly viewId: string;
   readonly entryPath: string;
   readonly profile: 'editor' | 'shared';
+  readonly onOpenProjectionBeside?: (kernelViewId: string) => void;
 }): React.JSX.Element {
   const { projectRef, entriesRecord, viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
@@ -618,7 +630,7 @@ const ViewerContent = memo(function ({
     projectRef.send({
       type: 'createGeometryUnit',
       entryPath,
-      operationTimeout: entriesRecord?.entries[entryPath]?.operationTimeout,
+      operationTimeout: entriesRecord?.entries[entryPath]?.renderTimeout,
     });
   }, [entriesRecord, projectRef, entryPath]);
 
@@ -678,12 +690,12 @@ const ViewerContent = memo(function ({
   const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryPath }), [entryPath]);
   const thumbnails = useOptionalPartThumbnailService(modelInteractionUnitId);
   const previewSourceDigests = useRef(new WeakMap<Uint8Array<ArrayBuffer>, Promise<string>>());
-  const [previewRetryRevision, setPreviewRetryRevision] = useState(0);
-  const manualPreviewRetry = useRef<string | undefined>(undefined);
-  const retryPreview = useCallback(() => {
-    manualPreviewRetry.current = viewerActionMenu?.target.componentId;
-    setPreviewRetryRevision((value) => value + 1);
-  }, [viewerActionMenu]);
+  const [previewRetry, setPreviewRetry] = useState<{
+    part: PartThumbnailRequest;
+    requestId: number;
+    sourceKey: string;
+  }>();
+  const submittedRetryId = useRef(0);
   const subscribePreviews = useCallback(
     (listener: () => void) => thumbnails?.subscribe(listener) ?? (() => undefined),
     [thumbnails],
@@ -740,14 +752,30 @@ const ViewerContent = memo(function ({
     viewerActionMenuData?.node.kind === 'part' && viewerActionMenuData.node.primitiveRefs?.length
       ? viewerActionMenuData.node
       : undefined;
+  const retryPreview = useCallback(() => {
+    if (!viewerPart || !presentedKey) {
+      return;
+    }
+    const part = { id: viewerPart.id, primitives: viewerPart.primitiveRefs! };
+    setPreviewRetry((current) => ({ part, requestId: (current?.requestId ?? 0) + 1, sourceKey: presentedKey }));
+  }, [presentedKey, viewerPart]);
   useEffect(() => {
+    if (previewRetry && previewRetry.sourceKey !== presentedKey) {
+      // Retire an unsubmitted retry when its presented-source lifetime ends.
+      submittedRetryId.current = previewRetry.requestId;
+    }
     if (!thumbnails) {
       return;
     }
     thumbnails.announcePresentedSource(presentedKey);
+    const pendingRetry =
+      previewRetry && previewRetry.sourceKey === presentedKey && previewRetry.requestId !== submittedRetryId.current
+        ? previewRetry
+        : undefined;
+    const requestedPart =
+      pendingRetry?.part ?? (viewerPart ? { id: viewerPart.id, primitives: viewerPart.primitiveRefs! } : undefined);
     if (
-      !viewerActionMenu ||
-      !viewerPart ||
+      !requestedPart ||
       presentedArtifact?.mimeType !== 'model/gltf-binary' ||
       presentedArtifactKey !== presentedKey
     ) {
@@ -756,8 +784,7 @@ const ViewerContent = memo(function ({
     }
     let active = true;
     const { content } = presentedArtifact;
-    const requestedPart = { id: viewerPart.id, primitives: viewerPart.primitiveRefs! };
-    if (content.byteLength > 64 * 1024 * 1024) {
+    if (content.buffer.byteLength > 64 * 1024 * 1024) {
       thumbnails.failPreparationForOwner(
         'viewer',
         [requestedPart],
@@ -765,8 +792,6 @@ const ViewerContent = memo(function ({
       );
       return;
     }
-    const manualPartId = manualPreviewRetry.current;
-    manualPreviewRetry.current = undefined;
     let sourceDigest = previewSourceDigests.current.get(content);
     if (!sourceDigest) {
       sourceDigest = sourceGlbDigest(content);
@@ -788,8 +813,11 @@ const ViewerContent = memo(function ({
               renderContent: prepared.renderContent,
             },
             [{ ...requestedPart, visualKey: prepared.previews[0]?.key ?? prepared.visualKey }],
-            manualPartId ? { manualPartId } : undefined,
+            pendingRetry ? { manualPartId: pendingRetry.part.id } : undefined,
           );
+          if (pendingRetry) {
+            submittedRetryId.current = pendingRetry.requestId;
+          }
         }
       } catch (error) {
         if (active) {
@@ -804,16 +832,7 @@ const ViewerContent = memo(function ({
     return () => {
       active = false;
     };
-  }, [
-    entryPath,
-    presentedArtifact,
-    presentedArtifactKey,
-    presentedKey,
-    previewRetryRevision,
-    thumbnails,
-    viewerActionMenu,
-    viewerPart,
-  ]);
+  }, [entryPath, presentedArtifact, presentedArtifactKey, presentedKey, previewRetry, thumbnails, viewerPart]);
   useEffect(() => () => thumbnails?.releaseOwner('viewer'), [thumbnails]);
   const viewerMenuWithPreview = viewerActionMenuData
     ? {
@@ -996,6 +1015,16 @@ const ViewerContent = memo(function ({
         }));
       }}
     >
+      {profile === 'editor' && cadRef ? (
+        <div className='absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)] items-center'>
+          <ViewerProjectionPicker
+            viewId={viewId}
+            entryPath={entryPath}
+            cadActor={cadRef}
+            onOpenBeside={onOpenProjectionBeside}
+          />
+        </div>
+      ) : null}
       {/* Status overlays */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
         <ChatViewerStatus />

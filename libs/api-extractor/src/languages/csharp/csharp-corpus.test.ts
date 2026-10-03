@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 
 import { parseCsharpSurface, toCsharpCorpus } from '#languages/csharp/csharp-corpus.js';
 import picogkCorpus from '#generated/picogk/picogk.corpus.json' with { type: 'json' };
-import { flattenEntries } from '#model/api-corpus.js';
+import { callableKinds, flattenEntries } from '#model/api-corpus.js';
 import type { ApiCorpus, ApiEntry } from '#model/api-corpus.types.js';
 
 const corpus = picogkCorpus as ApiCorpus;
@@ -53,6 +53,22 @@ describe('parseCsharpSurface', () => {
     expect(() => parseCsharpSurface({ ...surface, entries: [{ name: 'Voxels', kind: 'record' }] })).toThrow(
       'unknown kind record',
     );
+  });
+});
+
+describe('C# diagnostic admission', () => {
+  it('should reject missing or invalid diagnostic counts before a corpus can publish', () => {
+    for (const count of [undefined, '0', null, -1, 1.5]) {
+      try {
+        parseCsharpSurface({ ...surface, diagnosticErrors: count });
+        expect.fail('Malformed diagnostic count should reject');
+      } catch (error) {
+        expect(error).toBeInstanceOf(Error);
+        expect((error as Error).message).toBe(
+          'Malformed C# API surface payload: diagnosticErrors is not a nonnegative integer',
+        );
+      }
+    }
   });
 });
 
@@ -147,16 +163,64 @@ describe('the committed PicoGK corpus', () => {
     const documentedUnits = entries.reduce(
       (count, entry) =>
         count +
-        (entry.signatures === undefined
-          ? Number(entry.docs?.summary !== undefined)
-          : entry.signatures.filter(
+        (callableKinds.has(entry.kind)
+          ? (entry.signatures ?? []).filter(
               (signature) =>
                 signature.description !== undefined ||
                 signature.parameters.some((parameter) => parameter.description !== undefined),
-            ).length),
+            ).length
+          : Number(entry.docs?.summary !== undefined)),
       0,
     );
 
     expect(documentedUnits).toBeGreaterThan(600);
+  });
+});
+
+describe('C# reference audience', () => {
+  it('should retain compiler accessibility while classifying host and native plumbing', () => {
+    const classified = toCsharpCorpus(
+      parseCsharpSurface({
+        ...surface,
+        entries: [
+          {
+            name: 'Voxels',
+            kind: 'class',
+            path: 'PicoGK',
+            source: { file: 'Base/Voxels.cs' },
+            members: [
+              { name: 'voxDuplicate', kind: 'method', visibility: 'public', source: { file: 'Base/Voxels.cs' } },
+              { name: '_hCreate', kind: 'method', visibility: 'public', source: { file: 'Internals/Interop.cs' } },
+              { name: 'Dispose', kind: 'method', visibility: 'protected', source: { file: 'Internals/Interop.cs' } },
+            ],
+          },
+          {
+            name: 'ILibraryHost',
+            kind: 'interface',
+            visibility: 'public',
+            path: 'PicoGK',
+            source: { file: 'Library/LibraryHost.cs' },
+          },
+          {
+            name: 'LibHandle',
+            kind: 'struct',
+            visibility: 'public',
+            path: 'PicoGK',
+            source: { file: 'Internals/Types.cs' },
+          },
+        ],
+      }),
+      '2026-10-02',
+    );
+    expect(
+      [...flattenEntries(classified)].map((entry) => [entry.name, entry.visibility, entry.category]),
+    ).toStrictEqual([
+      ['Voxels', undefined, 'CAD authoring'],
+      ['voxDuplicate', 'public', 'CAD authoring'],
+      ['_hCreate', 'public', 'Advanced embedding/native'],
+      ['Dispose', 'protected', 'Subclass-only'],
+      ['ILibraryHost', 'public', 'Advanced embedding/native'],
+      ['LibHandle', 'public', 'Advanced embedding/native'],
+    ]);
   });
 });

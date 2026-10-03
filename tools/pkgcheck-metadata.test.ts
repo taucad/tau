@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- package export maps use literal subpath keys */
 /* oxlint-disable no-restricted-imports, import/extensions -- Standalone tool tests import their adjacent helper. */
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import madge from 'madge';
 import { describe, expect, it } from 'vitest';
 import {
   bundledArtifactIssues,
@@ -7,10 +11,12 @@ import {
   bundleDeclarationClosure,
   bundleWitnessIssues,
   copyTargetPaths,
+  declaredPublishAssets,
   doubledPathSegments,
   emittedSpecifiers,
   hostTargetIssues,
   internalImportsIssues,
+  isJsonTypesDeclaration,
   libDependencyIssues,
   packageMetadataIssues,
   peerRules,
@@ -24,7 +30,63 @@ import {
   workspaceRangeIssues,
 } from './pkgcheck-metadata.js';
 
+describe('pkgcheck cycles', () => {
+  it('ignores erased type imports but rejects runtime import cycles', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pkgcheck-cycles-'));
+    try {
+      const first = join(directory, 'first.ts');
+      writeFileSync(
+        first,
+        "import type { Second } from './second.js';\nexport type First = Second;\nexport const value = 1;\n",
+      );
+      writeFileSync(
+        join(directory, 'second.ts'),
+        "import { value } from './first.js';\nexport type Second = number;\nexport const reverse = value;\n",
+      );
+
+      const options = { fileExtensions: ['ts'], detectiveOptions: { ts: { skipTypeImports: true } } };
+      const typeOnlyGraph = await madge(directory, options);
+      expect(typeOnlyGraph.circular()).toEqual([]);
+
+      writeFileSync(first, "import { reverse } from './second.js';\nexport const value = reverse;\n");
+      const runtimeGraph = await madge(directory, options);
+      expect(runtimeGraph.circular()).toHaveLength(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('pkgcheck metadata', () => {
+  it('recognizes only an exact JSON default with its CommonJS-shaped declaration', () => {
+    expect(isJsonTypesDeclaration({ types: './agent/skills.d.cts', default: './agent/skills.json' })).toBe(true);
+    expect(isJsonTypesDeclaration({ types: './dist/index.d.cts', default: './dist/index.mjs' })).toBe(false);
+    expect(isJsonTypesDeclaration({ types: './agent/skills.d.cts', default: './agent/other.json' })).toBe(false);
+    expect(
+      isJsonTypesDeclaration({
+        types: './agent/skills.d.cts',
+        default: './agent/skills.json',
+        require: './dist/index.cjs',
+      }),
+    ).toBe(false);
+  });
+
+  it('stages only declared safe package assets outside dist', () => {
+    expect(
+      declaredPublishAssets([
+        'dist',
+        '!dist/**/*.node',
+        'agent',
+        'trust/index.d.mts',
+        'README.md',
+        'LICENSE',
+        'CHANGELOG.md',
+      ]),
+    ).toEqual(['agent', 'trust/index.d.mts', 'README.md', 'LICENSE', 'CHANGELOG.md']);
+    expect(() => declaredPublishAssets(['agent', '../source'])).toThrow('unsafe package files entry');
+    expect(() => declaredPublishAssets(['agent', 'node_modules'])).toThrow('unsafe package files entry');
+  });
+
   it('reports development/publish export drift and missing packed files', () => {
     const issues = packageMetadataIssues(
       {
@@ -39,6 +101,17 @@ describe('pkgcheck metadata', () => {
       'publishConfig.exports is missing development export: ./node',
       'files entry does not exist: README.md',
     ]);
+  });
+
+  it('requires a literal published Wasm asset to exist in the build output', () => {
+    const manifest = {
+      exports: { './raw-wasm': './src/raw.wasm' },
+      publishConfig: { exports: { './raw-wasm': './dist/raw.wasm' } },
+    };
+    expect(packageMetadataIssues(manifest, () => false)).toEqual([
+      'published raw Wasm asset is missing: ./raw-wasm -> ./dist/raw.wasm',
+    ]);
+    expect(packageMetadataIssues(manifest, (path) => path === './dist/raw.wasm')).toEqual([]);
   });
 
   it('requires the common publishable manifest fields and packs an existing changelog', () => {
@@ -192,6 +265,24 @@ describe('pkgcheck metadata', () => {
         { './nextjs': 'next ships declaration errors of its own' },
       ),
     ).toEqual({ specifiers: ['@taucad/runtime', '@taucad/runtime/node'], issues: [] });
+  });
+
+  it('treats only a concrete raw Wasm export as an asset rather than a code entrypoint', () => {
+    expect(
+      probedSpecifiers(
+        '@taucad/example',
+        {
+          '.': './dist/index.mjs',
+          './raw-wasm': './dist/raw.wasm',
+          './mixed': { types: './dist/mixed.d.mts', import: './dist/mixed.mjs', default: './dist/mixed.wasm' },
+          './conditional': { browser: './dist/browser.wasm', default: './dist/node.mjs' },
+        },
+        {},
+      ),
+    ).toEqual({
+      specifiers: ['@taucad/example', '@taucad/example/conditional', '@taucad/example/mixed'],
+      issues: [],
+    });
   });
 
   it('reports a recorded reason for a subpath the package no longer publishes', () => {

@@ -93,7 +93,8 @@ export type HostExportFile = ExportFile;
  *
  * Projected from the public runtime contract so published declarations never
  * expose the private agent adapter. `tau serve` passes its loopback client;
- * tests may supply a structural fake of these three operations.
+ * tests may supply a structural fake. Documents expose evaluation, export and
+ * close; views expose rendering and close without requiring plugin options.
  *
  * @public
  */

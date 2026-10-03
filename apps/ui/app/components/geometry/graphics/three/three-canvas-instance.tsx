@@ -70,10 +70,16 @@ export function ThreeCanvasInstance({
   const isInspectorEnabled = useFeature('webGpuInspector');
   const [isCanvasReady, setIsCanvasReady] = useState(false);
   const [isContextLost, setIsContextLost] = useState(false);
+  const [rendererError, setRendererError] = useState<Error>();
   const cameraRig = useCameraRig();
 
   const glProperty: CanvasProps['gl'] = useMemo(
-    () => createTauR3fGlProp(graphicsBackend, [cameraRig.perspectiveCamera, cameraRig.orthographicCamera]),
+    () =>
+      createTauR3fGlProp(
+        graphicsBackend,
+        [cameraRig.perspectiveCamera, cameraRig.orthographicCamera],
+        setRendererError,
+      ),
     [cameraRig, graphicsBackend],
   );
 
@@ -117,6 +123,11 @@ export function ThreeCanvasInstance({
 
     setIsCanvasReady(true);
   }, []);
+
+  if (rendererError) {
+    // The renderer never existed: hand the failure to the viewer's `WebglErrorBoundary` fallback.
+    throw rendererError;
+  }
 
   if (isContextLost) {
     return <GraphicsContextLostFallback onRetry={onRetry} />;

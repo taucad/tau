@@ -1,181 +1,189 @@
 # libcascade — Transfer (2)
 
-9 top-level symbols. Signatures are verbatim typescript.
-
-Transfer_TransferIterator: declare class Transfer_TransferIterator
-
-  constructor
-
-  AddItem(atr: Transfer_Binder): void;
-
-  SelectBinder(atype: Standard_Type, keep: boolean): void;
-
-  SelectResult(atype: Standard_Type, keep: boolean): void;
-
-  SelectUnique(keep: boolean): void;
-
-  SelectItem(num: number, keep: boolean): void;
-
-  Number(): number;
-
-  Start(): void;
-
-  More(): boolean;
-
-  Next(): void;
-
-  Value(): Transfer_Binder;
-
-  HasResult(): boolean;
-
-  HasUniqueResult(): boolean;
-
-  ResultType(): Standard_Type;
-
-  HasTransientResult(): boolean;
-
-  TransientResult(): Standard_Transient;
-
-  Status(): Transfer_StatusExec;
-
-  HasFails(): boolean;
-
-  HasWarnings(): boolean;
-
-  Check(): Interface_Check;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
+8 top-level symbols. Signatures are verbatim typescript.
 
 Transfer_TransferOutput: declare class Transfer_TransferOutput
 
-  constructor
+  // Transfer_TransferOutput.constructor (constructor)
+  constructor(actor: Transfer_ActorOfTransientProcess, amodel: Interface_InterfaceModel);
+  constructor(proc: Transfer_TransientProcess, amodel: Interface_InterfaceModel);
 
+  // Transfer_TransferOutput.Model (method)
   Model(): Interface_InterfaceModel;
 
+  // Transfer_TransferOutput.TransientProcess (method)
   TransientProcess(): Transfer_TransientProcess;
 
+  // Transfer_TransferOutput.Transfer (method)
   Transfer(obj: Standard_Transient, theProgress?: Message_ProgressRange): void;
 
-  TransferRoots(protocol: Interface_Protocol, theProgress: Message_ProgressRange): void;
-  TransferRoots(theProgress: Message_ProgressRange): void;
+  // Transfer_TransferOutput.TransferRoots (method)
   TransferRoots(protocol: Interface_Protocol, theProgress: Message_ProgressRange): void;
   TransferRoots(theProgress: Message_ProgressRange): void;
 
+  // Transfer_TransferOutput.ModelForStatus (method)
   ModelForStatus(protocol: Interface_Protocol, normal: boolean, roots?: boolean): Interface_InterfaceModel;
 
+  // Transfer_TransferOutput.delete (method)
   delete(): void;
 
+  // Transfer_TransferOutput.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 Transfer_TransientListBinder: declare class Transfer_TransientListBinder extends Transfer_Binder
 
-  constructor
+  // Transfer_TransientListBinder.constructor (constructor)
+  constructor();
+  constructor(list: NCollection_HSequence_handle_Standard_Transient);
 
+  // Transfer_TransientListBinder.IsMultiple (method)
   IsMultiple(): boolean;
 
+  // Transfer_TransientListBinder.ResultType (method)
   ResultType(): Standard_Type;
 
+  // Transfer_TransientListBinder.ResultTypeName (method)
   ResultTypeName(): string;
 
-  AddResult(res: Standard_Transient): void;
-  AddResult(next: Transfer_Binder): void;
+  // Transfer_TransientListBinder.AddResult (method)
   AddResult(res: Standard_Transient): void;
   AddResult(next: Transfer_Binder): void;
 
+  // Transfer_TransientListBinder.Result (method)
   Result(): NCollection_HSequence_handle_Standard_Transient;
 
+  // Transfer_TransientListBinder.SetResult (method)
   SetResult(num: number, res: Standard_Transient): void;
 
+  // Transfer_TransientListBinder.NbTransients (method)
   NbTransients(): number;
 
+  // Transfer_TransientListBinder.Transient (method)
   Transient(num: number): Standard_Transient;
 
+  // Transfer_TransientListBinder.get_type_name (method)
   static get_type_name(): string;
 
+  // Transfer_TransientListBinder.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // Transfer_TransientListBinder.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // Transfer_TransientListBinder.delete (method)
   delete(): void;
 
+  // Transfer_TransientListBinder.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 Transfer_TransientMapper: declare class Transfer_TransientMapper extends Transfer_Finder
 
-  constructor
+  // Transfer_TransientMapper.constructor (constructor)
+  constructor(akey: Standard_Transient);
 
+  // Transfer_TransientMapper.Value (method)
   Value(): Standard_Transient;
 
+  // Transfer_TransientMapper.Equates (method)
   Equates(other: Transfer_Finder): boolean;
 
+  // Transfer_TransientMapper.ValueType (method)
   ValueType(): Standard_Type;
 
+  // Transfer_TransientMapper.ValueTypeName (method)
   ValueTypeName(): string;
 
+  // Transfer_TransientMapper.get_type_name (method)
   static get_type_name(): string;
 
+  // Transfer_TransientMapper.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // Transfer_TransientMapper.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // Transfer_TransientMapper.delete (method)
   delete(): void;
 
+  // Transfer_TransientMapper.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 Transfer_TransientProcess: declare class Transfer_TransientProcess extends Transfer_ProcessForTransient
 
-  constructor
+  // Transfer_TransientProcess.constructor (constructor)
+  constructor(nb?: number);
 
+  // Transfer_TransientProcess.SetModel (method)
   SetModel(model: Interface_InterfaceModel): void;
 
+  // Transfer_TransientProcess.Model (method)
   Model(): Interface_InterfaceModel;
 
+  // Transfer_TransientProcess.HasGraph (method)
   HasGraph(): boolean;
 
+  // Transfer_TransientProcess.SetContext (method)
   SetContext(name: string, ctx: Standard_Transient): void;
 
+  // Transfer_TransientProcess.GetContext (method)
   GetContext(name: string, type_: Standard_Type): { returnValue: boolean; ctx: Standard_Transient; [Symbol.dispose](): void };
 
+  // Transfer_TransientProcess.Context (method)
   Context(): NCollection_DataMap_TCollection_AsciiString_handle_Standard_Transient;
 
+  // Transfer_TransientProcess.CheckNum (method)
   CheckNum(start: Standard_Transient): number;
 
+  // Transfer_TransientProcess.IsDataLoaded (method)
   IsDataLoaded(ent: Standard_Transient): boolean;
 
+  // Transfer_TransientProcess.IsDataFail (method)
   IsDataFail(ent: Standard_Transient): boolean;
 
+  // Transfer_TransientProcess.RootsForTransfer (method)
   RootsForTransfer(): NCollection_HSequence_handle_Standard_Transient;
 
+  // Transfer_TransientProcess.get_type_name (method)
   static get_type_name(): string;
 
+  // Transfer_TransientProcess.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // Transfer_TransientProcess.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // Transfer_TransientProcess.delete (method)
   delete(): void;
 
+  // Transfer_TransientProcess.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 Transfer_UndefMode: typeof Transfer_UndefMode[keyof typeof Transfer_UndefMode]
 
 Transfer_VoidBinder: declare class Transfer_VoidBinder extends Transfer_Binder
 
-  constructor
+  // Transfer_VoidBinder.constructor (constructor)
+  constructor();
 
+  // Transfer_VoidBinder.ResultType (method)
   ResultType(): Standard_Type;
 
+  // Transfer_VoidBinder.ResultTypeName (method)
   ResultTypeName(): string;
 
+  // Transfer_VoidBinder.get_type_name (method)
   static get_type_name(): string;
 
+  // Transfer_VoidBinder.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // Transfer_VoidBinder.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // Transfer_VoidBinder.delete (method)
   delete(): void;
 
+  // Transfer_VoidBinder.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 Transfer_HSequenceOfFinder: NCollection_HSequence_handle_Transfer_Finder

@@ -87,7 +87,7 @@ export const snapshotSchema = z.object({
         .array(
           z.strictObject({
             path: projectPathSchema,
-            operationTimeout: z.number().int().optional(),
+            renderTimeout: z.number().int().optional(),
             hidden: z.number().int(),
           }),
         )

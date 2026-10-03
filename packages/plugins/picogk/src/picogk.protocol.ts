@@ -1,7 +1,7 @@
 import { z } from 'zod';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
 
-export const picogkProtocolVersion = 7;
+export const picogkProtocolVersion = 8;
 
 export const picogkIssueSchema = z.object({
   message: z.string(),
@@ -61,7 +61,9 @@ export const picogkWorkerMetricsSchema = z.object({
 });
 
 /** The C# files one entry compiles with: its own program and every helper, as project paths. */
-export const picogkResolveSchema = z.object({ sources: z.array(z.string().min(1)).min(1) });
+export const picogkResolveSchema = z.object({
+  sources: z.array(z.string().min(1)).min(1),
+});
 
 export const picogkAnalysisSchema = z.object({
   defaultParameters: z.record(z.string(), z.unknown()),
@@ -69,67 +71,136 @@ export const picogkAnalysisSchema = z.object({
   timings: picogkCompilationTimingsSchema,
 });
 
-const picogkComponentBase = {
-  id: z.string().regex(/^component:picogk-[1-9]\d*$/u),
-  name: z.string().min(1).optional(),
-  color: z.tuple([
-    z.number().min(0).max(1),
-    z.number().min(0).max(1),
-    z.number().min(0).max(1),
-    z.number().min(0).max(1),
-  ]),
-  metallic: z.number().min(0).max(1),
-  roughness: z.number().min(0).max(1),
-  material: z
-    .custom<GlbMaterial>((value) => value !== null && typeof value === 'object' && !Array.isArray(value))
-    .optional(),
-  texCoordOffset: z.number().int().nonnegative().optional(),
-  texCoordCount: z.number().int().nonnegative().optional(),
-  tangentOffset: z.number().int().nonnegative().optional(),
-  tangentCount: z.number().int().nonnegative().optional(),
-  positionOffset: z.number().int().nonnegative(),
-  positionCount: z.number().int().positive(),
-  normalOffset: z.number().int().nonnegative(),
-  indexOffset: z.number().int().nonnegative(),
-  indexCount: z.number().int().positive(),
-};
+const region = z.number().int().nonnegative();
+const finite = z.number();
+export const picogkPrototypeSchema = z
+  .object({
+    id: z.string().regex(/^prototype:[1-9]\d*$/u),
+    kind: z.enum(['triangles', 'lines']),
+    positionOffset: region,
+    positionCount: region.positive(),
+    normalOffset: region,
+    normalCount: region,
+    indexOffset: region,
+    indexCount: region.positive(),
+    indexComponentType: z.union([z.literal(5123), z.literal(5125)]),
+    texCoordOffset: region.optional(),
+    texCoordCount: region.optional(),
+    tangentOffset: region.optional(),
+    tangentCount: region.optional(),
+  })
+  .strict();
+export const picogkOccurrenceSchema = z
+  .object({
+    id: z.string().regex(/^component:picogk-[1-9]\d*$/u),
+    prototypeId: z.string().regex(/^prototype:[1-9]\d*$/u),
+    name: z
+      .string()
+      .min(1)
+      .refine((value) => value.trim() === value)
+      .optional(),
+    matrix: z
+      .tuple([
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+        finite,
+      ])
+      .refine((value) => value[3] === 0 && value[7] === 0 && value[11] === 0 && value[15] === 1),
+    color: z.tuple([finite.min(0).max(1), finite.min(0).max(1), finite.min(0).max(1), finite.min(0).max(1)]),
+    metallic: finite.min(0).max(1),
+    roughness: finite.min(0).max(1),
+    material: z
+      .custom<GlbMaterial>((value) => value !== null && typeof value === 'object' && !Array.isArray(value))
+      .optional(),
+  })
+  .strict();
 
-export const picogkComponentSchema = z.discriminatedUnion('kind', [
-  z.object({
-    ...picogkComponentBase,
-    kind: z.literal('triangles'),
-    normalCount: z.number().int().positive(),
-  }),
-  z.object({
-    ...picogkComponentBase,
-    kind: z.literal('lines'),
-    normalCount: z.literal(0),
-  }),
-]);
-
-export const picogkBuildSchema = z.object({
-  artifactPath: z.string().min(1),
-  byteLength: z.number().int().nonnegative(),
-  sha256: z.string().regex(/^[\da-f]{64}$/iu),
-  components: z.array(picogkComponentSchema),
-  images: z
-    .array(
-      z.object({
-        offset: z.number().int().nonnegative(),
-        byteLength: z.number().int().positive(),
-        mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
-        name: z.string().nullable().optional(),
-      }),
-    )
-    .nullish(),
-  textures: z.custom<NonNullable<GlbResources['textures']>>((value) => Array.isArray(value)).nullish(),
-  samplers: z.custom<NonNullable<GlbResources['samplers']>>((value) => Array.isArray(value)).nullish(),
-  mechanism: z.unknown().optional(),
-  warnings: z.array(picogkIssueSchema).optional(),
-  recycleAfterResponse: z.boolean(),
-  timings: picogkWorkerTimingsSchema,
-  metrics: picogkWorkerMetricsSchema,
-});
+export const picogkBuildSchema = z
+  .object({
+    artifactPath: z.string().min(1),
+    byteLength: region,
+    sha256: z.string().regex(/^[\da-f]{64}$/iu),
+    prototypes: z.array(picogkPrototypeSchema),
+    occurrences: z.array(picogkOccurrenceSchema),
+    workCounters: z
+      .object({
+        capturedSnapshots: region,
+        geometryReadbacks: region,
+        inputVertices: region,
+        inputIndices: region,
+        normalLayouts: region,
+        uvLayouts: region,
+        materialProjections: region,
+      })
+      .strict()
+      .optional(),
+    images: z
+      .array(
+        z.object({
+          offset: z.number().int().nonnegative(),
+          byteLength: z.number().int().positive(),
+          mimeType: z.enum(['image/png', 'image/jpeg', 'image/webp']),
+          name: z.string().nullable().optional(),
+        }),
+      )
+      .nullish(),
+    textures: z.custom<NonNullable<GlbResources['textures']>>((value) => Array.isArray(value)).nullish(),
+    samplers: z.custom<NonNullable<GlbResources['samplers']>>((value) => Array.isArray(value)).nullish(),
+    mechanism: z.unknown().optional(),
+    warnings: z.array(picogkIssueSchema).optional(),
+    computeReuseManifest: z.string().min(1).optional(),
+    recycleAfterResponse: z.boolean(),
+    timings: picogkWorkerTimingsSchema,
+    metrics: picogkWorkerMetricsSchema,
+  })
+  .strict()
+  .superRefine((scene, context) => {
+    const prototypes = new Set(scene.prototypes.map((prototype) => prototype.id));
+    const referenced = new Set(scene.occurrences.map((occurrence) => occurrence.prototypeId));
+    if (scene.prototypes.some((prototype) => !referenced.has(prototype.id))) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Unreferenced prototype identity.',
+      });
+    }
+    const ids = new Set<string>();
+    const names = new Set<string>();
+    if (prototypes.size !== scene.prototypes.length) {
+      context.addIssue({
+        code: 'custom',
+        message: 'Duplicate prototype identity.',
+      });
+    }
+    for (const occurrence of scene.occurrences) {
+      if (
+        !prototypes.has(occurrence.prototypeId) ||
+        ids.has(occurrence.id) ||
+        (occurrence.name !== undefined && names.has(occurrence.name))
+      ) {
+        context.addIssue({
+          code: 'custom',
+          message: 'Invalid occurrence identity or prototype reference.',
+        });
+      }
+      ids.add(occurrence.id);
+      if (occurrence.name !== undefined) {
+        names.add(occurrence.name);
+      }
+    }
+  });
 
 export const picogkShutdownSchema = z.object({ shutdown: z.literal(true) });
 

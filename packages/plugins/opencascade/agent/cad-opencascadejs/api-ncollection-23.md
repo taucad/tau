@@ -1,803 +1,1159 @@
 # libcascade — NCollection (23)
 
-25 top-level symbols. Signatures are verbatim typescript.
+38 top-level symbols. Signatures are verbatim typescript.
 
-NCollection_List_IntTools_CurveRangeSample: declare class NCollection_List_IntTools_CurveRangeSample extends NCollection_BaseList
+NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern: declare class NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern
 
-  constructor
+  // NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Array1_handle_StepVisual_CurveStyleFontPattern);
+  constructor(theLower: number, theUpper: number);
+  constructor(theLower: number, theUpper: number, theValue: StepVisual_CurveStyleFontPattern);
+  constructor(theBegin: StepVisual_CurveStyleFontPattern, theLower: number, theUpper: number, theUseBuffer: boolean);
 
-  Assign(theOther: NCollection_List_IntTools_CurveRangeSample): NCollection_List_IntTools_CurveRangeSample;
+  // NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern.Array1 (method)
+  Array1(): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern.ChangeArray1 (method)
+  ChangeArray1(): NCollection_Array1_handle_StepVisual_CurveStyleFontPattern;
 
-  First(): IntTools_CurveRangeSample;
+  // NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): IntTools_CurveRangeSample;
+  // NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: IntTools_CurveRangeSample): IntTools_CurveRangeSample;
-  Append(theOther: NCollection_List_IntTools_CurveRangeSample): void;
-  Append(theItem: IntTools_CurveRangeSample): IntTools_CurveRangeSample;
-  Append(theOther: NCollection_List_IntTools_CurveRangeSample): void;
+  // NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: IntTools_CurveRangeSample): IntTools_CurveRangeSample;
-  Prepend(theOther: NCollection_List_IntTools_CurveRangeSample): void;
-  Prepend(theItem: IntTools_CurveRangeSample): IntTools_CurveRangeSample;
-  Prepend(theOther: NCollection_List_IntTools_CurveRangeSample): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_IntTools_CurveRangeSample): void;
-
+  // NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern.delete (method)
   delete(): void;
 
+  // NCollection_HArray1_handle_StepVisual_CurveStyleFontPattern.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_IntTools_SurfaceRangeSample: declare class NCollection_List_IntTools_SurfaceRangeSample extends NCollection_BaseList
+NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment: declare class NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment
 
-  constructor
+  // NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Array1_handle_StepVisual_PresentationStyleAssignment);
+  constructor(theLower: number, theUpper: number);
+  constructor(theLower: number, theUpper: number, theValue: StepVisual_PresentationStyleAssignment);
+  constructor(theBegin: StepVisual_PresentationStyleAssignment, theLower: number, theUpper: number, theUseBuffer: boolean);
 
-  Assign(theOther: NCollection_List_IntTools_SurfaceRangeSample): NCollection_List_IntTools_SurfaceRangeSample;
+  // NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment.Array1 (method)
+  Array1(): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment.ChangeArray1 (method)
+  ChangeArray1(): NCollection_Array1_handle_StepVisual_PresentationStyleAssignment;
 
-  First(): IntTools_SurfaceRangeSample;
+  // NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): IntTools_SurfaceRangeSample;
+  // NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: IntTools_SurfaceRangeSample): IntTools_SurfaceRangeSample;
-  Append(theOther: NCollection_List_IntTools_SurfaceRangeSample): void;
-  Append(theItem: IntTools_SurfaceRangeSample): IntTools_SurfaceRangeSample;
-  Append(theOther: NCollection_List_IntTools_SurfaceRangeSample): void;
+  // NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: IntTools_SurfaceRangeSample): IntTools_SurfaceRangeSample;
-  Prepend(theOther: NCollection_List_IntTools_SurfaceRangeSample): void;
-  Prepend(theItem: IntTools_SurfaceRangeSample): IntTools_SurfaceRangeSample;
-  Prepend(theOther: NCollection_List_IntTools_SurfaceRangeSample): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_IntTools_SurfaceRangeSample): void;
-
+  // NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment.delete (method)
   delete(): void;
 
+  // NCollection_HArray1_handle_StepVisual_PresentationStyleAssignment.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_Message_Msg: declare class NCollection_List_Message_Msg extends NCollection_BaseList
+NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem: declare class NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem
 
-  constructor
+  // NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Array1_handle_StepVisual_TessellatedStructuredItem);
+  constructor(theLower: number, theUpper: number);
+  constructor(theLower: number, theUpper: number, theValue: StepVisual_TessellatedStructuredItem);
+  constructor(theBegin: StepVisual_TessellatedStructuredItem, theLower: number, theUpper: number, theUseBuffer: boolean);
 
-  Assign(theOther: NCollection_List_Message_Msg): NCollection_List_Message_Msg;
+  // NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem.Array1 (method)
+  Array1(): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem.ChangeArray1 (method)
+  ChangeArray1(): NCollection_Array1_handle_StepVisual_TessellatedStructuredItem;
 
-  First(): Message_Msg;
+  // NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): Message_Msg;
+  // NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: Message_Msg): Message_Msg;
-  Append(theOther: NCollection_List_Message_Msg): void;
-  Append(theItem: Message_Msg): Message_Msg;
-  Append(theOther: NCollection_List_Message_Msg): void;
+  // NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: Message_Msg): Message_Msg;
-  Prepend(theOther: NCollection_List_Message_Msg): void;
-  Prepend(theItem: Message_Msg): Message_Msg;
-  Prepend(theOther: NCollection_List_Message_Msg): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_Message_Msg): void;
-
+  // NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem.delete (method)
   delete(): void;
 
+  // NCollection_HArray1_handle_StepVisual_TessellatedStructuredItem.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_NCollection_List_TopoDS_Shape: declare class NCollection_List_NCollection_List_TopoDS_Shape extends NCollection_BaseList
+NCollection_HArray1_handle_TCollection_HAsciiString: declare class NCollection_HArray1_handle_TCollection_HAsciiString
 
-  constructor
+  // NCollection_HArray1_handle_TCollection_HAsciiString.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Array1_handle_TCollection_HAsciiString);
+  constructor(theLower: number, theUpper: number);
+  constructor(theLower: number, theUpper: number, theValue: TCollection_HAsciiString);
+  constructor(theBegin: TCollection_HAsciiString, theLower: number, theUpper: number, theUseBuffer: boolean);
 
-  Assign(theOther: NCollection_List_NCollection_List_TopoDS_Shape): NCollection_List_NCollection_List_TopoDS_Shape;
+  // NCollection_HArray1_handle_TCollection_HAsciiString.Array1 (method)
+  Array1(): NCollection_Array1_handle_TCollection_HAsciiString;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray1_handle_TCollection_HAsciiString.ChangeArray1 (method)
+  ChangeArray1(): NCollection_Array1_handle_TCollection_HAsciiString;
 
-  First(): NCollection_List_TopoDS_Shape;
+  // NCollection_HArray1_handle_TCollection_HAsciiString.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): NCollection_List_TopoDS_Shape;
+  // NCollection_HArray1_handle_TCollection_HAsciiString.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
-  Append(theOther: NCollection_List_NCollection_List_TopoDS_Shape): void;
-  Append(theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
-  Append(theOther: NCollection_List_NCollection_List_TopoDS_Shape): void;
+  // NCollection_HArray1_handle_TCollection_HAsciiString.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
-  Prepend(theOther: NCollection_List_NCollection_List_TopoDS_Shape): void;
-  Prepend(theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
-  Prepend(theOther: NCollection_List_NCollection_List_TopoDS_Shape): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_NCollection_List_TopoDS_Shape): void;
-
+  // NCollection_HArray1_handle_TCollection_HAsciiString.delete (method)
   delete(): void;
 
+  // NCollection_HArray1_handle_TCollection_HAsciiString.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_NCollection_Sequence_int: declare class NCollection_List_NCollection_Sequence_int extends NCollection_BaseList
+NCollection_HArray1_int: declare class NCollection_HArray1_int
 
-  constructor
+  // NCollection_HArray1_int.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Array1_int);
+  constructor(theLower: number, theUpper: number);
+  constructor(theLower: number, theUpper: number, theValue: number);
+  constructor(theBegin: number, theLower: number, theUpper: number, theUseBuffer: boolean);
 
-  Assign(theOther: NCollection_List_NCollection_Sequence_int): NCollection_List_NCollection_Sequence_int;
+  // NCollection_HArray1_int.Array1 (method)
+  Array1(): NCollection_Array1_int;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray1_int.ChangeArray1 (method)
+  ChangeArray1(): NCollection_Array1_int;
 
-  First(): NCollection_Sequence_int;
+  // NCollection_HArray1_int.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): NCollection_Sequence_int;
+  // NCollection_HArray1_int.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: NCollection_Sequence_int): NCollection_Sequence_int;
-  Append(theOther: NCollection_List_NCollection_Sequence_int): void;
-  Append(theItem: NCollection_Sequence_int): NCollection_Sequence_int;
-  Append(theOther: NCollection_List_NCollection_Sequence_int): void;
+  // NCollection_HArray1_int.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: NCollection_Sequence_int): NCollection_Sequence_int;
-  Prepend(theOther: NCollection_List_NCollection_Sequence_int): void;
-  Prepend(theItem: NCollection_Sequence_int): NCollection_Sequence_int;
-  Prepend(theOther: NCollection_List_NCollection_Sequence_int): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_NCollection_Sequence_int): void;
-
+  // NCollection_HArray1_int.delete (method)
   delete(): void;
 
+  // NCollection_HArray1_int.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_Poly_Triangle: declare class NCollection_List_Poly_Triangle extends NCollection_BaseList
+NCollection_HArray1_unsignedchar: declare class NCollection_HArray1_unsignedchar
 
-  constructor
+  // NCollection_HArray1_unsignedchar.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Array1_unsignedchar);
+  constructor(theLower: number, theUpper: number);
+  constructor(theLower: number, theUpper: number, theValue: string);
+  constructor(theBegin: string, theLower: number, theUpper: number, theUseBuffer: boolean);
 
-  Assign(theOther: NCollection_List_Poly_Triangle): NCollection_List_Poly_Triangle;
+  // NCollection_HArray1_unsignedchar.Array1 (method)
+  Array1(): NCollection_Array1_unsignedchar;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray1_unsignedchar.ChangeArray1 (method)
+  ChangeArray1(): NCollection_Array1_unsignedchar;
 
-  First(): Poly_Triangle;
+  // NCollection_HArray1_unsignedchar.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): Poly_Triangle;
+  // NCollection_HArray1_unsignedchar.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: Poly_Triangle): Poly_Triangle;
-  Append(theOther: NCollection_List_Poly_Triangle): void;
-  Append(theItem: Poly_Triangle): Poly_Triangle;
-  Append(theOther: NCollection_List_Poly_Triangle): void;
+  // NCollection_HArray1_unsignedchar.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: Poly_Triangle): Poly_Triangle;
-  Prepend(theOther: NCollection_List_Poly_Triangle): void;
-  Prepend(theItem: Poly_Triangle): Poly_Triangle;
-  Prepend(theOther: NCollection_List_Poly_Triangle): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_Poly_Triangle): void;
-
+  // NCollection_HArray1_unsignedchar.delete (method)
   delete(): void;
 
+  // NCollection_HArray1_unsignedchar.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_Standard_GUID: declare class NCollection_List_Standard_GUID extends NCollection_BaseList
+NCollection_HArray2_TopoDS_Shape: declare class NCollection_HArray2_TopoDS_Shape
 
-  constructor
+  // NCollection_HArray2_TopoDS_Shape.constructor (constructor)
+  constructor(theOther: NCollection_Array2_TopoDS_Shape);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: TopoDS_Shape);
 
-  Assign(theOther: NCollection_List_Standard_GUID): NCollection_List_Standard_GUID;
+  // NCollection_HArray2_TopoDS_Shape.Array2 (method)
+  Array2(): NCollection_Array2_TopoDS_Shape;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_TopoDS_Shape.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_TopoDS_Shape;
 
-  First(): Standard_GUID;
+  // NCollection_HArray2_TopoDS_Shape.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): Standard_GUID;
+  // NCollection_HArray2_TopoDS_Shape.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: Standard_GUID): Standard_GUID;
-  Append(theOther: NCollection_List_Standard_GUID): void;
-  Append(theItem: Standard_GUID): Standard_GUID;
-  Append(theOther: NCollection_List_Standard_GUID): void;
+  // NCollection_HArray2_TopoDS_Shape.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: Standard_GUID): Standard_GUID;
-  Prepend(theOther: NCollection_List_Standard_GUID): void;
-  Prepend(theItem: Standard_GUID): Standard_GUID;
-  Prepend(theOther: NCollection_List_Standard_GUID): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_Standard_GUID): void;
-
+  // NCollection_HArray2_TopoDS_Shape.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_TopoDS_Shape.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_TCollection_AsciiString: declare class NCollection_List_TCollection_AsciiString extends NCollection_BaseList
+NCollection_HArray2_double: declare class NCollection_HArray2_double
 
-  constructor
+  // NCollection_HArray2_double.constructor (constructor)
+  constructor(theOther: NCollection_Array2_double);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: number);
 
-  Assign(theOther: NCollection_List_TCollection_AsciiString): NCollection_List_TCollection_AsciiString;
+  // NCollection_HArray2_double.Array2 (method)
+  Array2(): NCollection_Array2_double;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_double.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_double;
 
-  First(): TCollection_AsciiString;
+  // NCollection_HArray2_double.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): TCollection_AsciiString;
+  // NCollection_HArray2_double.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: TCollection_AsciiString): TCollection_AsciiString;
-  Append(theOther: NCollection_List_TCollection_AsciiString): void;
-  Append(theItem: TCollection_AsciiString): TCollection_AsciiString;
-  Append(theOther: NCollection_List_TCollection_AsciiString): void;
+  // NCollection_HArray2_double.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: TCollection_AsciiString): TCollection_AsciiString;
-  Prepend(theOther: NCollection_List_TCollection_AsciiString): void;
-  Prepend(theItem: TCollection_AsciiString): TCollection_AsciiString;
-  Prepend(theOther: NCollection_List_TCollection_AsciiString): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_TCollection_AsciiString): void;
-
+  // NCollection_HArray2_double.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_double.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_TCollection_ExtendedString: declare class NCollection_List_TCollection_ExtendedString extends NCollection_BaseList
+NCollection_HArray2_gp_Pnt: declare class NCollection_HArray2_gp_Pnt
 
-  constructor
+  // NCollection_HArray2_gp_Pnt.constructor (constructor)
+  constructor(theOther: NCollection_Array2_gp_Pnt);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: gp_Pnt);
 
-  Assign(theOther: NCollection_List_TCollection_ExtendedString): NCollection_List_TCollection_ExtendedString;
+  // NCollection_HArray2_gp_Pnt.Array2 (method)
+  Array2(): NCollection_Array2_gp_Pnt;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_gp_Pnt.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_gp_Pnt;
 
-  First(): TCollection_ExtendedString;
+  // NCollection_HArray2_gp_Pnt.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): TCollection_ExtendedString;
+  // NCollection_HArray2_gp_Pnt.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: TCollection_ExtendedString): TCollection_ExtendedString;
-  Append(theOther: NCollection_List_TCollection_ExtendedString): void;
-  Append(theItem: TCollection_ExtendedString): TCollection_ExtendedString;
-  Append(theOther: NCollection_List_TCollection_ExtendedString): void;
+  // NCollection_HArray2_gp_Pnt.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: TCollection_ExtendedString): TCollection_ExtendedString;
-  Prepend(theOther: NCollection_List_TCollection_ExtendedString): void;
-  Prepend(theItem: TCollection_ExtendedString): TCollection_ExtendedString;
-  Prepend(theOther: NCollection_List_TCollection_ExtendedString): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_TCollection_ExtendedString): void;
-
+  // NCollection_HArray2_gp_Pnt.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_gp_Pnt.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_TDF_Label: declare class NCollection_List_TDF_Label extends NCollection_BaseList
+NCollection_HArray2_gp_Pnt2d: declare class NCollection_HArray2_gp_Pnt2d
 
-  constructor
+  // NCollection_HArray2_gp_Pnt2d.constructor (constructor)
+  constructor(theOther: NCollection_Array2_gp_Pnt2d);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: gp_Pnt2d);
 
-  Assign(theOther: NCollection_List_TDF_Label): NCollection_List_TDF_Label;
+  // NCollection_HArray2_gp_Pnt2d.Array2 (method)
+  Array2(): NCollection_Array2_gp_Pnt2d;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_gp_Pnt2d.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_gp_Pnt2d;
 
-  First(): TDF_Label;
+  // NCollection_HArray2_gp_Pnt2d.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): TDF_Label;
+  // NCollection_HArray2_gp_Pnt2d.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: TDF_Label): TDF_Label;
-  Append(theOther: NCollection_List_TDF_Label): void;
-  Append(theItem: TDF_Label): TDF_Label;
-  Append(theOther: NCollection_List_TDF_Label): void;
+  // NCollection_HArray2_gp_Pnt2d.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: TDF_Label): TDF_Label;
-  Prepend(theOther: NCollection_List_TDF_Label): void;
-  Prepend(theItem: TDF_Label): TDF_Label;
-  Prepend(theOther: NCollection_List_TDF_Label): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_TDF_Label): void;
-
+  // NCollection_HArray2_gp_Pnt2d.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_gp_Pnt2d.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_TopoDS_Shape: declare class NCollection_List_TopoDS_Shape extends NCollection_BaseList
+NCollection_HArray2_gp_XYZ: declare class NCollection_HArray2_gp_XYZ
 
-  constructor
+  // NCollection_HArray2_gp_XYZ.constructor (constructor)
+  constructor(theOther: NCollection_Array2_gp_XYZ);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: gp_XYZ);
 
-  Assign(theOther: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
+  // NCollection_HArray2_gp_XYZ.Array2 (method)
+  Array2(): NCollection_Array2_gp_XYZ;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_gp_XYZ.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_gp_XYZ;
 
-  First(): TopoDS_Shape;
+  // NCollection_HArray2_gp_XYZ.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): TopoDS_Shape;
+  // NCollection_HArray2_gp_XYZ.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: TopoDS_Shape): TopoDS_Shape;
-  Append(theOther: NCollection_List_TopoDS_Shape): void;
-  Append(theItem: TopoDS_Shape): TopoDS_Shape;
-  Append(theOther: NCollection_List_TopoDS_Shape): void;
+  // NCollection_HArray2_gp_XYZ.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: TopoDS_Shape): TopoDS_Shape;
-  Prepend(theOther: NCollection_List_TopoDS_Shape): void;
-  Prepend(theItem: TopoDS_Shape): TopoDS_Shape;
-  Prepend(theOther: NCollection_List_TopoDS_Shape): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_TopoDS_Shape): void;
-
+  // NCollection_HArray2_gp_XYZ.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_gp_XYZ.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_double: declare class NCollection_List_double extends NCollection_BaseList
+NCollection_HArray2_handle_Geom_Surface: declare class NCollection_HArray2_handle_Geom_Surface
 
-  constructor
+  // NCollection_HArray2_handle_Geom_Surface.constructor (constructor)
+  constructor(theOther: NCollection_Array2_handle_Geom_Surface);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: Geom_Surface);
 
-  Assign(theOther: NCollection_List_double): NCollection_List_double;
+  // NCollection_HArray2_handle_Geom_Surface.Array2 (method)
+  Array2(): NCollection_Array2_handle_Geom_Surface;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_handle_Geom_Surface.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_handle_Geom_Surface;
 
-  First(): number;
+  // NCollection_HArray2_handle_Geom_Surface.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): number;
+  // NCollection_HArray2_handle_Geom_Surface.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: number): number;
-  Append(theOther: NCollection_List_double): void;
-  Append(theItem: number): number;
-  Append(theOther: NCollection_List_double): void;
+  // NCollection_HArray2_handle_Geom_Surface.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: number): number;
-  Prepend(theOther: NCollection_List_double): void;
-  Prepend(theItem: number): number;
-  Prepend(theOther: NCollection_List_double): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_double): void;
-
+  // NCollection_HArray2_handle_Geom_Surface.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_handle_Geom_Surface.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_gp_Pnt: declare class NCollection_List_gp_Pnt extends NCollection_BaseList
+NCollection_HArray2_handle_NCollection_HArray1_double: declare class NCollection_HArray2_handle_NCollection_HArray1_double
 
-  constructor
+  // NCollection_HArray2_handle_NCollection_HArray1_double.constructor (constructor)
+  constructor(theOther: NCollection_Array2_handle_NCollection_HArray1_double);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: unknown);
 
-  Assign(theOther: NCollection_List_gp_Pnt): NCollection_List_gp_Pnt;
+  // NCollection_HArray2_handle_NCollection_HArray1_double.Array2 (method)
+  Array2(): NCollection_Array2_handle_NCollection_HArray1_double;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_handle_NCollection_HArray1_double.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_handle_NCollection_HArray1_double;
 
-  First(): gp_Pnt;
+  // NCollection_HArray2_handle_NCollection_HArray1_double.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): gp_Pnt;
+  // NCollection_HArray2_handle_NCollection_HArray1_double.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: gp_Pnt): gp_Pnt;
-  Append(theOther: NCollection_List_gp_Pnt): void;
-  Append(theItem: gp_Pnt): gp_Pnt;
-  Append(theOther: NCollection_List_gp_Pnt): void;
+  // NCollection_HArray2_handle_NCollection_HArray1_double.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: gp_Pnt): gp_Pnt;
-  Prepend(theOther: NCollection_List_gp_Pnt): void;
-  Prepend(theItem: gp_Pnt): gp_Pnt;
-  Prepend(theOther: NCollection_List_gp_Pnt): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_gp_Pnt): void;
-
+  // NCollection_HArray2_handle_NCollection_HArray1_double.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_handle_NCollection_HArray1_double.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_BOPDS_PaveBlock: declare class NCollection_List_handle_BOPDS_PaveBlock extends NCollection_BaseList
+NCollection_HArray2_handle_NCollection_HArray1_int: declare class NCollection_HArray2_handle_NCollection_HArray1_int
 
-  constructor
+  // NCollection_HArray2_handle_NCollection_HArray1_int.constructor (constructor)
+  constructor(theOther: NCollection_Array2_handle_NCollection_HArray1_int);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: unknown);
 
-  Assign(theOther: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_HArray2_handle_NCollection_HArray1_int.Array2 (method)
+  Array2(): NCollection_Array2_handle_NCollection_HArray1_int;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_handle_NCollection_HArray1_int.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_handle_NCollection_HArray1_int;
 
-  First(): BOPDS_PaveBlock;
+  // NCollection_HArray2_handle_NCollection_HArray1_int.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): BOPDS_PaveBlock;
+  // NCollection_HArray2_handle_NCollection_HArray1_int.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: BOPDS_PaveBlock): BOPDS_PaveBlock;
-  Append(theOther: NCollection_List_handle_BOPDS_PaveBlock): void;
-  Append(theItem: BOPDS_PaveBlock): BOPDS_PaveBlock;
-  Append(theOther: NCollection_List_handle_BOPDS_PaveBlock): void;
+  // NCollection_HArray2_handle_NCollection_HArray1_int.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: BOPDS_PaveBlock): BOPDS_PaveBlock;
-  Prepend(theOther: NCollection_List_handle_BOPDS_PaveBlock): void;
-  Prepend(theItem: BOPDS_PaveBlock): BOPDS_PaveBlock;
-  Prepend(theOther: NCollection_List_handle_BOPDS_PaveBlock): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_BOPDS_PaveBlock): void;
-
+  // NCollection_HArray2_handle_NCollection_HArray1_int.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_handle_NCollection_HArray1_int.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_BRepMesh_DiscretAlgoFactory: declare class NCollection_List_handle_BRepMesh_DiscretAlgoFactory extends NCollection_BaseList
+NCollection_HArray2_handle_Standard_Transient: declare class NCollection_HArray2_handle_Standard_Transient
 
-  constructor
+  // NCollection_HArray2_handle_Standard_Transient.constructor (constructor)
+  constructor(theOther: NCollection_Array2_handle_Standard_Transient);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: Standard_Transient);
 
-  Assign(theOther: NCollection_List_handle_BRepMesh_DiscretAlgoFactory): NCollection_List_handle_BRepMesh_DiscretAlgoFactory;
+  // NCollection_HArray2_handle_Standard_Transient.Array2 (method)
+  Array2(): NCollection_Array2_handle_Standard_Transient;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_handle_Standard_Transient.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_handle_Standard_Transient;
 
-  First(): BRepMesh_DiscretAlgoFactory;
+  // NCollection_HArray2_handle_Standard_Transient.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): BRepMesh_DiscretAlgoFactory;
+  // NCollection_HArray2_handle_Standard_Transient.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: BRepMesh_DiscretAlgoFactory): BRepMesh_DiscretAlgoFactory;
-  Append(theOther: NCollection_List_handle_BRepMesh_DiscretAlgoFactory): void;
-  Append(theItem: BRepMesh_DiscretAlgoFactory): BRepMesh_DiscretAlgoFactory;
-  Append(theOther: NCollection_List_handle_BRepMesh_DiscretAlgoFactory): void;
+  // NCollection_HArray2_handle_Standard_Transient.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: BRepMesh_DiscretAlgoFactory): BRepMesh_DiscretAlgoFactory;
-  Prepend(theOther: NCollection_List_handle_BRepMesh_DiscretAlgoFactory): void;
-  Prepend(theItem: BRepMesh_DiscretAlgoFactory): BRepMesh_DiscretAlgoFactory;
-  Prepend(theOther: NCollection_List_handle_BRepMesh_DiscretAlgoFactory): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_BRepMesh_DiscretAlgoFactory): void;
-
+  // NCollection_HArray2_handle_Standard_Transient.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_handle_Standard_Transient.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_BRep_CurveRepresentation: declare class NCollection_List_handle_BRep_CurveRepresentation extends NCollection_BaseList
+NCollection_HArray2_handle_StepGeom_CartesianPoint: declare class NCollection_HArray2_handle_StepGeom_CartesianPoint
 
-  constructor
+  // NCollection_HArray2_handle_StepGeom_CartesianPoint.constructor (constructor)
+  constructor(theOther: NCollection_Array2_handle_StepGeom_CartesianPoint);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: StepGeom_CartesianPoint);
 
-  Assign(theOther: NCollection_List_handle_BRep_CurveRepresentation): NCollection_List_handle_BRep_CurveRepresentation;
+  // NCollection_HArray2_handle_StepGeom_CartesianPoint.Array2 (method)
+  Array2(): NCollection_Array2_handle_StepGeom_CartesianPoint;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_handle_StepGeom_CartesianPoint.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_handle_StepGeom_CartesianPoint;
 
-  First(): BRep_CurveRepresentation;
+  // NCollection_HArray2_handle_StepGeom_CartesianPoint.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): BRep_CurveRepresentation;
+  // NCollection_HArray2_handle_StepGeom_CartesianPoint.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: BRep_CurveRepresentation): BRep_CurveRepresentation;
-  Append(theOther: NCollection_List_handle_BRep_CurveRepresentation): void;
-  Append(theItem: BRep_CurveRepresentation): BRep_CurveRepresentation;
-  Append(theOther: NCollection_List_handle_BRep_CurveRepresentation): void;
+  // NCollection_HArray2_handle_StepGeom_CartesianPoint.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: BRep_CurveRepresentation): BRep_CurveRepresentation;
-  Prepend(theOther: NCollection_List_handle_BRep_CurveRepresentation): void;
-  Prepend(theItem: BRep_CurveRepresentation): BRep_CurveRepresentation;
-  Prepend(theOther: NCollection_List_handle_BRep_CurveRepresentation): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_BRep_CurveRepresentation): void;
-
+  // NCollection_HArray2_handle_StepGeom_CartesianPoint.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_handle_StepGeom_CartesianPoint.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_BRep_PointRepresentation: declare class NCollection_List_handle_BRep_PointRepresentation extends NCollection_BaseList
+NCollection_HArray2_handle_StepGeom_SurfacePatch: declare class NCollection_HArray2_handle_StepGeom_SurfacePatch
 
-  constructor
+  // NCollection_HArray2_handle_StepGeom_SurfacePatch.constructor (constructor)
+  constructor(theOther: NCollection_Array2_handle_StepGeom_SurfacePatch);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: StepGeom_SurfacePatch);
 
-  Assign(theOther: unknown): unknown;
+  // NCollection_HArray2_handle_StepGeom_SurfacePatch.Array2 (method)
+  Array2(): NCollection_Array2_handle_StepGeom_SurfacePatch;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_handle_StepGeom_SurfacePatch.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_handle_StepGeom_SurfacePatch;
 
-  First(): BRep_PointRepresentation;
+  // NCollection_HArray2_handle_StepGeom_SurfacePatch.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): BRep_PointRepresentation;
+  // NCollection_HArray2_handle_StepGeom_SurfacePatch.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: BRep_PointRepresentation): BRep_PointRepresentation;
-  Append(theOther: unknown): void;
-  Append(theItem: BRep_PointRepresentation): BRep_PointRepresentation;
-  Append(theOther: unknown): void;
+  // NCollection_HArray2_handle_StepGeom_SurfacePatch.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: BRep_PointRepresentation): BRep_PointRepresentation;
-  Prepend(theOther: unknown): void;
-  Prepend(theItem: BRep_PointRepresentation): BRep_PointRepresentation;
-  Prepend(theOther: unknown): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: unknown): void;
-
+  // NCollection_HArray2_handle_StepGeom_SurfacePatch.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_handle_StepGeom_SurfacePatch.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_ChFiDS_ElSpine: declare class NCollection_List_handle_ChFiDS_ElSpine extends NCollection_BaseList
+NCollection_HArray2_int: declare class NCollection_HArray2_int
 
-  constructor
+  // NCollection_HArray2_int.constructor (constructor)
+  constructor(theOther: NCollection_Array2_int);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number);
+  constructor(theRowLow: number, theRowUpp: number, theColLow: number, theColUpp: number, theValue: number);
 
-  Assign(theOther: NCollection_List_handle_ChFiDS_ElSpine): NCollection_List_handle_ChFiDS_ElSpine;
+  // NCollection_HArray2_int.Array2 (method)
+  Array2(): NCollection_Array2_int;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HArray2_int.ChangeArray2 (method)
+  ChangeArray2(): NCollection_Array2_int;
 
-  First(): ChFiDS_ElSpine;
+  // NCollection_HArray2_int.get_type_name (method)
+  static get_type_name(): string;
 
-  Last(): ChFiDS_ElSpine;
+  // NCollection_HArray2_int.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Append(theItem: ChFiDS_ElSpine): ChFiDS_ElSpine;
-  Append(theOther: NCollection_List_handle_ChFiDS_ElSpine): void;
-  Append(theItem: ChFiDS_ElSpine): ChFiDS_ElSpine;
-  Append(theOther: NCollection_List_handle_ChFiDS_ElSpine): void;
+  // NCollection_HArray2_int.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  Prepend(theItem: ChFiDS_ElSpine): ChFiDS_ElSpine;
-  Prepend(theOther: NCollection_List_handle_ChFiDS_ElSpine): void;
-  Prepend(theItem: ChFiDS_ElSpine): ChFiDS_ElSpine;
-  Prepend(theOther: NCollection_List_handle_ChFiDS_ElSpine): void;
-
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_ChFiDS_ElSpine): void;
-
+  // NCollection_HArray2_int.delete (method)
   delete(): void;
 
+  // NCollection_HArray2_int.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_ChFiDS_Stripe: declare class NCollection_List_handle_ChFiDS_Stripe extends NCollection_BaseList
+NCollection_HSequence_TCollection_AsciiString: declare class NCollection_HSequence_TCollection_AsciiString
 
-  constructor
+  // NCollection_HSequence_TCollection_AsciiString.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_TCollection_AsciiString);
 
-  Assign(theOther: NCollection_List_handle_ChFiDS_Stripe): NCollection_List_handle_ChFiDS_Stripe;
+  // NCollection_HSequence_TCollection_AsciiString.Sequence (method)
+  Sequence(): NCollection_Sequence_TCollection_AsciiString;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HSequence_TCollection_AsciiString.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_TCollection_AsciiString;
 
-  First(): ChFiDS_Stripe;
+  // NCollection_HSequence_TCollection_AsciiString.Append (method)
+  Append(theItem: TCollection_AsciiString): void;
+  Append(theSequence: NCollection_Sequence_TCollection_AsciiString): void;
+  Append(theSeq: unknown): void;
 
-  Last(): ChFiDS_Stripe;
+  // NCollection_HSequence_TCollection_AsciiString.get_type_name (method)
+  static get_type_name(): string;
 
-  Append(theItem: ChFiDS_Stripe): ChFiDS_Stripe;
-  Append(theOther: NCollection_List_handle_ChFiDS_Stripe): void;
-  Append(theItem: ChFiDS_Stripe): ChFiDS_Stripe;
-  Append(theOther: NCollection_List_handle_ChFiDS_Stripe): void;
+  // NCollection_HSequence_TCollection_AsciiString.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Prepend(theItem: ChFiDS_Stripe): ChFiDS_Stripe;
-  Prepend(theOther: NCollection_List_handle_ChFiDS_Stripe): void;
-  Prepend(theItem: ChFiDS_Stripe): ChFiDS_Stripe;
-  Prepend(theOther: NCollection_List_handle_ChFiDS_Stripe): void;
+  // NCollection_HSequence_TCollection_AsciiString.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_ChFiDS_Stripe): void;
-
+  // NCollection_HSequence_TCollection_AsciiString.delete (method)
   delete(): void;
 
+  // NCollection_HSequence_TCollection_AsciiString.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_Law_Function: declare class NCollection_List_handle_Law_Function extends NCollection_BaseList
+NCollection_HSequence_TCollection_ExtendedString: declare class NCollection_HSequence_TCollection_ExtendedString
 
-  constructor
+  // NCollection_HSequence_TCollection_ExtendedString.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_TCollection_ExtendedString);
 
-  Assign(theOther: NCollection_List_handle_Law_Function): NCollection_List_handle_Law_Function;
+  // NCollection_HSequence_TCollection_ExtendedString.Sequence (method)
+  Sequence(): NCollection_Sequence_TCollection_ExtendedString;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HSequence_TCollection_ExtendedString.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_TCollection_ExtendedString;
 
-  First(): Law_Function;
+  // NCollection_HSequence_TCollection_ExtendedString.Append (method)
+  Append(theItem: TCollection_ExtendedString): void;
+  Append(theSequence: NCollection_Sequence_TCollection_ExtendedString): void;
+  Append(theSeq: unknown): void;
 
-  Last(): Law_Function;
+  // NCollection_HSequence_TCollection_ExtendedString.get_type_name (method)
+  static get_type_name(): string;
 
-  Append(theItem: Law_Function): Law_Function;
-  Append(theOther: NCollection_List_handle_Law_Function): void;
-  Append(theItem: Law_Function): Law_Function;
-  Append(theOther: NCollection_List_handle_Law_Function): void;
+  // NCollection_HSequence_TCollection_ExtendedString.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Prepend(theItem: Law_Function): Law_Function;
-  Prepend(theOther: NCollection_List_handle_Law_Function): void;
-  Prepend(theItem: Law_Function): Law_Function;
-  Prepend(theOther: NCollection_List_handle_Law_Function): void;
+  // NCollection_HSequence_TCollection_ExtendedString.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_Law_Function): void;
-
+  // NCollection_HSequence_TCollection_ExtendedString.delete (method)
   delete(): void;
 
+  // NCollection_HSequence_TCollection_ExtendedString.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_Message_Alert: declare class NCollection_List_handle_Message_Alert extends NCollection_BaseList
+NCollection_HSequence_TopoDS_Shape: declare class NCollection_HSequence_TopoDS_Shape
 
-  constructor
+  // NCollection_HSequence_TopoDS_Shape.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_TopoDS_Shape);
 
-  Assign(theOther: NCollection_List_handle_Message_Alert): NCollection_List_handle_Message_Alert;
+  // NCollection_HSequence_TopoDS_Shape.Sequence (method)
+  Sequence(): NCollection_Sequence_TopoDS_Shape;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HSequence_TopoDS_Shape.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_TopoDS_Shape;
 
-  First(): Message_Alert;
+  // NCollection_HSequence_TopoDS_Shape.Append (method)
+  Append(theItem: TopoDS_Shape): void;
+  Append(theSequence: NCollection_Sequence_TopoDS_Shape): void;
+  Append(theSeq: unknown): void;
 
-  Last(): Message_Alert;
+  // NCollection_HSequence_TopoDS_Shape.get_type_name (method)
+  static get_type_name(): string;
 
-  Append(theItem: Message_Alert): Message_Alert;
-  Append(theOther: NCollection_List_handle_Message_Alert): void;
-  Append(theItem: Message_Alert): Message_Alert;
-  Append(theOther: NCollection_List_handle_Message_Alert): void;
+  // NCollection_HSequence_TopoDS_Shape.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Prepend(theItem: Message_Alert): Message_Alert;
-  Prepend(theOther: NCollection_List_handle_Message_Alert): void;
-  Prepend(theItem: Message_Alert): Message_Alert;
-  Prepend(theOther: NCollection_List_handle_Message_Alert): void;
+  // NCollection_HSequence_TopoDS_Shape.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_Message_Alert): void;
-
+  // NCollection_HSequence_TopoDS_Shape.delete (method)
   delete(): void;
 
+  // NCollection_HSequence_TopoDS_Shape.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_Poly_Triangulation: declare class NCollection_List_handle_Poly_Triangulation extends NCollection_BaseList
+NCollection_HSequence_double: declare class NCollection_HSequence_double
 
-  constructor
+  // NCollection_HSequence_double.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_double);
 
-  Assign(theOther: NCollection_List_handle_Poly_Triangulation): NCollection_List_handle_Poly_Triangulation;
+  // NCollection_HSequence_double.Sequence (method)
+  Sequence(): NCollection_Sequence_double;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HSequence_double.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_double;
 
-  First(): Poly_Triangulation;
+  // NCollection_HSequence_double.Append (method)
+  Append(theItem: number): void;
+  Append(theSequence: NCollection_Sequence_double): void;
+  Append(theSeq: unknown): void;
 
-  Last(): Poly_Triangulation;
+  // NCollection_HSequence_double.get_type_name (method)
+  static get_type_name(): string;
 
-  Append(theItem: Poly_Triangulation): Poly_Triangulation;
-  Append(theOther: NCollection_List_handle_Poly_Triangulation): void;
-  Append(theItem: Poly_Triangulation): Poly_Triangulation;
-  Append(theOther: NCollection_List_handle_Poly_Triangulation): void;
+  // NCollection_HSequence_double.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Prepend(theItem: Poly_Triangulation): Poly_Triangulation;
-  Prepend(theOther: NCollection_List_handle_Poly_Triangulation): void;
-  Prepend(theItem: Poly_Triangulation): Poly_Triangulation;
-  Prepend(theOther: NCollection_List_handle_Poly_Triangulation): void;
+  // NCollection_HSequence_double.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_Poly_Triangulation): void;
-
+  // NCollection_HSequence_double.delete (method)
   delete(): void;
 
+  // NCollection_HSequence_double.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_TDF_Attribute: declare class NCollection_List_handle_TDF_Attribute extends NCollection_BaseList
+NCollection_HSequence_gp_Pnt: declare class NCollection_HSequence_gp_Pnt
 
-  constructor
+  // NCollection_HSequence_gp_Pnt.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_gp_Pnt);
 
-  Assign(theOther: NCollection_List_handle_TDF_Attribute): NCollection_List_handle_TDF_Attribute;
+  // NCollection_HSequence_gp_Pnt.Sequence (method)
+  Sequence(): NCollection_Sequence_gp_Pnt;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HSequence_gp_Pnt.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_gp_Pnt;
 
-  First(): TDF_Attribute;
+  // NCollection_HSequence_gp_Pnt.Append (method)
+  Append(theItem: gp_Pnt): void;
+  Append(theSequence: NCollection_Sequence_gp_Pnt): void;
+  Append(theSeq: unknown): void;
 
-  Last(): TDF_Attribute;
+  // NCollection_HSequence_gp_Pnt.get_type_name (method)
+  static get_type_name(): string;
 
-  Append(theItem: TDF_Attribute): TDF_Attribute;
-  Append(theOther: NCollection_List_handle_TDF_Attribute): void;
-  Append(theItem: TDF_Attribute): TDF_Attribute;
-  Append(theOther: NCollection_List_handle_TDF_Attribute): void;
+  // NCollection_HSequence_gp_Pnt.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Prepend(theItem: TDF_Attribute): TDF_Attribute;
-  Prepend(theOther: NCollection_List_handle_TDF_Attribute): void;
-  Prepend(theItem: TDF_Attribute): TDF_Attribute;
-  Prepend(theOther: NCollection_List_handle_TDF_Attribute): void;
+  // NCollection_HSequence_gp_Pnt.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_TDF_Attribute): void;
-
+  // NCollection_HSequence_gp_Pnt.delete (method)
   delete(): void;
 
+  // NCollection_HSequence_gp_Pnt.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_TDF_AttributeDelta: declare class NCollection_List_handle_TDF_AttributeDelta extends NCollection_BaseList
+NCollection_HSequence_handle_ChFiDS_SurfData: declare class NCollection_HSequence_handle_ChFiDS_SurfData
 
-  constructor
+  // NCollection_HSequence_handle_ChFiDS_SurfData.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_ChFiDS_SurfData);
 
-  Assign(theOther: NCollection_List_handle_TDF_AttributeDelta): NCollection_List_handle_TDF_AttributeDelta;
+  // NCollection_HSequence_handle_ChFiDS_SurfData.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_ChFiDS_SurfData;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HSequence_handle_ChFiDS_SurfData.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_ChFiDS_SurfData;
 
-  First(): TDF_AttributeDelta;
+  // NCollection_HSequence_handle_ChFiDS_SurfData.Append (method)
+  Append(theItem: ChFiDS_SurfData): void;
+  Append(theSequence: NCollection_Sequence_handle_ChFiDS_SurfData): void;
+  Append(theSeq: unknown): void;
 
-  Last(): TDF_AttributeDelta;
+  // NCollection_HSequence_handle_ChFiDS_SurfData.get_type_name (method)
+  static get_type_name(): string;
 
-  Append(theItem: TDF_AttributeDelta): TDF_AttributeDelta;
-  Append(theOther: NCollection_List_handle_TDF_AttributeDelta): void;
-  Append(theItem: TDF_AttributeDelta): TDF_AttributeDelta;
-  Append(theOther: NCollection_List_handle_TDF_AttributeDelta): void;
+  // NCollection_HSequence_handle_ChFiDS_SurfData.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Prepend(theItem: TDF_AttributeDelta): TDF_AttributeDelta;
-  Prepend(theOther: NCollection_List_handle_TDF_AttributeDelta): void;
-  Prepend(theItem: TDF_AttributeDelta): TDF_AttributeDelta;
-  Prepend(theOther: NCollection_List_handle_TDF_AttributeDelta): void;
+  // NCollection_HSequence_handle_ChFiDS_SurfData.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_TDF_AttributeDelta): void;
-
+  // NCollection_HSequence_handle_ChFiDS_SurfData.delete (method)
   delete(): void;
 
+  // NCollection_HSequence_handle_ChFiDS_SurfData.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_List_handle_TDF_Delta: declare class NCollection_List_handle_TDF_Delta extends NCollection_BaseList
+NCollection_HSequence_handle_Geom2d_BoundedCurve: declare class NCollection_HSequence_handle_Geom2d_BoundedCurve
 
-  constructor
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_Geom2d_BoundedCurve);
 
-  Assign(theOther: NCollection_List_handle_TDF_Delta): NCollection_List_handle_TDF_Delta;
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_Geom2d_BoundedCurve;
 
-  Clear(theAllocator?: NCollection_BaseAllocator): void;
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_Geom2d_BoundedCurve;
 
-  First(): TDF_Delta;
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.Append (method)
+  Append(theItem: Geom2d_BoundedCurve): void;
+  Append(theSequence: NCollection_Sequence_handle_Geom2d_BoundedCurve): void;
+  Append(theSeq: unknown): void;
 
-  Last(): TDF_Delta;
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.get_type_name (method)
+  static get_type_name(): string;
 
-  Append(theItem: TDF_Delta): TDF_Delta;
-  Append(theOther: NCollection_List_handle_TDF_Delta): void;
-  Append(theItem: TDF_Delta): TDF_Delta;
-  Append(theOther: NCollection_List_handle_TDF_Delta): void;
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
 
-  Prepend(theItem: TDF_Delta): TDF_Delta;
-  Prepend(theOther: NCollection_List_handle_TDF_Delta): void;
-  Prepend(theItem: TDF_Delta): TDF_Delta;
-  Prepend(theOther: NCollection_List_handle_TDF_Delta): void;
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.DynamicType (method)
+  DynamicType(): Standard_Type;
 
-  RemoveFirst(): void;
-
-  Reverse(): void;
-
-  Exchange(theOther: NCollection_List_handle_TDF_Delta): void;
-
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.delete (method)
   delete(): void;
 
+  // NCollection_HSequence_handle_Geom2d_BoundedCurve.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Geom_BoundedCurve: declare class NCollection_HSequence_handle_Geom_BoundedCurve
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_Geom_BoundedCurve);
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_Geom_BoundedCurve;
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_Geom_BoundedCurve;
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.Append (method)
+  Append(theItem: Geom_BoundedCurve): void;
+  Append(theSequence: NCollection_Sequence_handle_Geom_BoundedCurve): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_Geom_BoundedCurve.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt: declare class NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt);
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt;
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt;
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.Append (method)
+  Append(theItem: unknown): void;
+  Append(theSequence: NCollection_Sequence_handle_NCollection_HSequence_gp_Pnt): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_NCollection_HSequence_gp_Pnt.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_STEPSelections_AssemblyLink: declare class NCollection_HSequence_handle_STEPSelections_AssemblyLink
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_STEPSelections_AssemblyLink);
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_STEPSelections_AssemblyLink;
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_STEPSelections_AssemblyLink;
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.Append (method)
+  Append(theItem: STEPSelections_AssemblyLink): void;
+  Append(theSequence: NCollection_Sequence_handle_STEPSelections_AssemblyLink): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_STEPSelections_AssemblyLink.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData: declare class NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData);
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData;
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData;
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.Append (method)
+  Append(theItem: ShapeAnalysis_FreeBoundData): void;
+  Append(theSequence: NCollection_Sequence_handle_ShapeAnalysis_FreeBoundData): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_ShapeAnalysis_FreeBoundData.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Standard_Transient: declare class NCollection_HSequence_handle_Standard_Transient
+
+  // NCollection_HSequence_handle_Standard_Transient.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_Standard_Transient);
+
+  // NCollection_HSequence_handle_Standard_Transient.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_Standard_Transient;
+
+  // NCollection_HSequence_handle_Standard_Transient.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_Standard_Transient;
+
+  // NCollection_HSequence_handle_Standard_Transient.Append (method)
+  Append(theItem: Standard_Transient): void;
+  Append(theSequence: NCollection_Sequence_handle_Standard_Transient): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_Standard_Transient.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_Standard_Transient.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_Standard_Transient.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_Standard_Transient.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_Standard_Transient.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_StepElement_CurveElementPurposeMember: declare class NCollection_HSequence_handle_StepElement_CurveElementPurposeMember
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.Sequence (method)
+  Sequence(): unknown;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.ChangeSequence (method)
+  ChangeSequence(): unknown;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.Append (method)
+  Append(theItem: StepElement_CurveElementPurposeMember): void;
+  Append(theSequence: unknown): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementPurposeMember.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition: declare class NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition);
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.Append (method)
+  Append(theItem: StepElement_CurveElementSectionDefinition): void;
+  Append(theSequence: NCollection_Sequence_handle_StepElement_CurveElementSectionDefinition): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_StepElement_CurveElementSectionDefinition.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_StepElement_ElementMaterial: declare class NCollection_HSequence_handle_StepElement_ElementMaterial
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_StepElement_ElementMaterial);
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_StepElement_ElementMaterial;
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_StepElement_ElementMaterial;
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.Append (method)
+  Append(theItem: StepElement_ElementMaterial): void;
+  Append(theSequence: NCollection_Sequence_handle_StepElement_ElementMaterial): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_StepElement_ElementMaterial.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember: declare class NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.Sequence (method)
+  Sequence(): unknown;
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.ChangeSequence (method)
+  ChangeSequence(): unknown;
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.Append (method)
+  Append(theItem: StepElement_SurfaceElementPurposeMember): void;
+  Append(theSequence: unknown): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_StepElement_SurfaceElementPurposeMember.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship: declare class NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship);
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship;
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship;
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.Append (method)
+  Append(theItem: StepFEA_ElementGeometricRelationship): void;
+  Append(theSequence: NCollection_Sequence_handle_StepFEA_ElementGeometricRelationship): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_StepFEA_ElementGeometricRelationship.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_StepFEA_ElementRepresentation: declare class NCollection_HSequence_handle_StepFEA_ElementRepresentation
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_StepFEA_ElementRepresentation);
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_StepFEA_ElementRepresentation;
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_StepFEA_ElementRepresentation;
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.Append (method)
+  Append(theItem: StepFEA_ElementRepresentation): void;
+  Append(theSequence: NCollection_Sequence_handle_StepFEA_ElementRepresentation): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_StepFEA_ElementRepresentation.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_Storage_Root: declare class NCollection_HSequence_handle_Storage_Root
+
+  // NCollection_HSequence_handle_Storage_Root.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_Storage_Root);
+
+  // NCollection_HSequence_handle_Storage_Root.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_Storage_Root;
+
+  // NCollection_HSequence_handle_Storage_Root.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_Storage_Root;
+
+  // NCollection_HSequence_handle_Storage_Root.Append (method)
+  Append(theItem: Storage_Root): void;
+  Append(theSequence: NCollection_Sequence_handle_Storage_Root): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_Storage_Root.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_Storage_Root.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_Storage_Root.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_Storage_Root.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_Storage_Root.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+NCollection_HSequence_handle_TCollection_HAsciiString: declare class NCollection_HSequence_handle_TCollection_HAsciiString
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_Sequence_handle_TCollection_HAsciiString);
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.Sequence (method)
+  Sequence(): NCollection_Sequence_handle_TCollection_HAsciiString;
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.ChangeSequence (method)
+  ChangeSequence(): NCollection_Sequence_handle_TCollection_HAsciiString;
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.Append (method)
+  Append(theItem: TCollection_HAsciiString): void;
+  Append(theSequence: NCollection_Sequence_handle_TCollection_HAsciiString): void;
+  Append(theSeq: unknown): void;
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.get_type_name (method)
+  static get_type_name(): string;
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.get_type_descriptor (method)
+  static get_type_descriptor(): Standard_Type;
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.DynamicType (method)
+  DynamicType(): Standard_Type;
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.delete (method)
+  delete(): void;
+
+  // NCollection_HSequence_handle_TCollection_HAsciiString.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

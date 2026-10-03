@@ -32,7 +32,7 @@ const packageRoot = resolve(directory, '../..');
 const browserRoot = directory;
 const corpusPath = join(packageRoot, 'conformance/early-corpus.json');
 const profilePath = join(packageRoot, 'rust/tests/fixtures/current-profile-01/plan-corpus.json');
-const successorPath = join(packageRoot, 'rust/tests/fixtures/current-profile-v5/numeric-profile.txt');
+const successorPath = join(packageRoot, 'rust/tests/fixtures/current-profile-v6/numeric-profile.txt');
 const ids = ['a2/raw/asymmetric-all-fields', 'a2/invalid-claim/null-expected'];
 // Frozen M3 authority rows (exact ingest and claim requests) that reach each OCCT grant route of the
 // `native/occt/rust/src/lib.rs` Document. `witness` is a work counter or response marker proving the row

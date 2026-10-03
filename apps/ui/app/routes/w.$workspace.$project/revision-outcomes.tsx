@@ -56,7 +56,7 @@ export const useTurnOutcomes = (projectId: string): readonly TurnOutcomeNotice[]
   );
 
 const noticeOf = (projectId: string, event: WorkerRevisionEvent): TurnOutcomeNotice | undefined => {
-  if (event.type === 'turn.finalized' || event.type === 'chats.projected') {
+  if (event.type === 'turn.finalized' || event.type === 'chats.projected' || event.type === 'checkout.changed') {
     return undefined;
   }
   return {

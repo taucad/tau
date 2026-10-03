@@ -4,12 +4,15 @@
 
 PeriodicityInfo: declare class PeriodicityInfo
 
-  constructor
+  // PeriodicityInfo.constructor (constructor)
+  constructor();
 
   isPeriodic: boolean
 
   myPeriod: number
 
+  // PeriodicityInfo.delete (method)
   delete(): void;
 
+  // PeriodicityInfo.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

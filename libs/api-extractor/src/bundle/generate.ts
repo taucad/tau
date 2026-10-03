@@ -27,6 +27,7 @@ import type { TauSkillsManifest } from '#bundle/bundle.types.js';
 import { doctrineFile, skillsManifestFile } from '#bundle/bundle.types.js';
 import type { WrittenBundle } from '#bundle/write-bundle.js';
 import { readDoctrine, writeCorpusBundle, writeDoctrineBundle } from '#bundle/write-bundle.js';
+import { csharpReferenceCorpus } from '#languages/csharp/reference.js';
 import { loadKclCorpus } from '#languages/kcl/extract.js';
 import { loadOpenscadCorpus } from '#languages/openscad/extract.js';
 import { extractTypescriptApi } from '#languages/typescript/extract.js';
@@ -41,6 +42,23 @@ const readJson = <T>(path: string): T => JSON.parse(readFileSync(path, 'utf8')) 
 
 const resourcesModuleFile = 'resources.js';
 const resourcesTypesFile = 'resources.d.ts';
+
+const skillsTypesFile = 'skills.d.cts';
+
+const skillsTypes = `declare const manifest: {
+  readonly bundles: ReadonlyArray<{
+    readonly slug: string;
+    readonly name: string;
+    readonly description: string;
+    readonly version: string;
+    readonly whenToUse: string;
+    readonly directory: string;
+    readonly files: readonly string[];
+    readonly body: string;
+  }>;
+};
+export = manifest;
+`;
 
 const resourcesTypes = `declare const bundles: readonly {
   readonly slug: string;
@@ -139,7 +157,15 @@ type BundledTypescriptPackage = {
 
 /** Extract a TypeScript corpus from the committed declaration bundle produced for GeoSpec. */
 const bundledTypescriptCorpus =
-  (relativePath: string, packageName: string, packageDirectory: string) => (): ApiCorpus => {
+  (
+    relativePath: string,
+    packageName: string,
+    options: {
+      readonly packageDirectory: string;
+      readonly publicEntries?: readonly string[];
+    },
+  ) =>
+  (): ApiCorpus => {
     const bundled = readJson<Record<string, BundledTypescriptPackage>>(join(generatedRoot, relativePath))[packageName];
     if (bundled === undefined) {
       throw new Error(`missing ${packageName} declaration bundle in ${relativePath}`);
@@ -155,8 +181,10 @@ const bundledTypescriptCorpus =
       }
       return extractTypescriptApi({
         packageName,
-        packageVersion: versionOf(join(workspaceRoot, packageDirectory)),
-        entryPoints: Object.values(bundled.packageJson.exports).map(({ types }) => join(directory, types)),
+        packageVersion: versionOf(join(workspaceRoot, options.packageDirectory)),
+        entryPoints: Object.entries(bundled.packageJson.exports)
+          .filter(([entry]) => options.publicEntries === undefined || options.publicEntries.includes(entry))
+          .map(([, { types }]) => join(directory, types)),
       });
     } finally {
       rmSync(directory, { force: true, recursive: true });
@@ -187,7 +215,8 @@ const stripCorpusProse = (corpus: ApiCorpus): ApiCorpus => {
 };
 
 /** Group label for a language whose only neutral axis is the kind of declaration. */
-const byKind = (entry: ApiEntry): string => `${entry.kind.charAt(0).toUpperCase()}${entry.kind.slice(1)}s`;
+const byKind = (entry: ApiEntry): string =>
+  entry.kind === 'class' ? 'Classes' : `${entry.kind.charAt(0).toUpperCase()}${entry.kind.slice(1)}s`;
 
 /** OCCT's own namespacing: the prefix before the first underscore (R14). */
 const byOcctPackage = (entry: ApiEntry): string => entry.name.split('_')[0] ?? 'other';
@@ -236,7 +265,9 @@ export const bundleOwners: readonly BundleOwner[] = [
     corpus: typescriptCorpus('replicad', 'dist/replicad.d.ts'),
     groupBy: byKind,
     supplementalApi: {
-      corpus: bundledTypescriptCorpus('replicad/model.bundled.json', '@taucad/replicad', 'packages/plugins/replicad'),
+      corpus: bundledTypescriptCorpus('replicad/model.bundled.json', '@taucad/replicad', {
+        packageDirectory: 'packages/plugins/replicad',
+      }),
       prefix: 'tau',
       groupBy: byKind,
     },
@@ -304,10 +335,14 @@ export const bundleOwners: readonly BundleOwner[] = [
       'Guides PicoGK C# geometry, PBR materials, textures, named parts and mechanisms. Use for PicoGK modeling, appearance or moving-part requests in Tau Desktop.',
     whenToUse:
       'Use for PicoGK C# models, physical materials, textures, named parts and moving mechanisms in Tau Desktop.',
-    corpus: committedCorpus('picogk/picogk.corpus.json'),
-    // C# namespaces: `PicoGK`, `PicoGK.Shapes`, `System.Numerics`.
-    groupBy: (entry) => entry.path ?? 'other',
-    authoredReferences: ['kinematics-reference.md', 'materials-reference.md'],
+    corpus: () => csharpReferenceCorpus(committedCorpus('picogk/picogk.corpus.json')(), 'modeling'),
+    groupBy: (entry) => `${entry.category ?? 'CAD authoring'} — ${entry.path ?? 'other'}`,
+    supplementalApi: {
+      corpus: () => csharpReferenceCorpus(committedCorpus('picogk/picogk.corpus.json')(), 'embedding'),
+      prefix: 'embedding',
+      groupBy: (entry) => `${entry.category ?? 'Advanced embedding'} — ${entry.path ?? 'other'}`,
+    },
+    authoredReferences: ['kinematics-reference.md', 'materials-reference.md', 'runtime-reference.md'],
   },
   {
     slug: 'cad-picovoxel',
@@ -315,16 +350,16 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'PicoVoxel authoring',
     title: 'PicoVoxel authoring',
     description:
-      'Guides PicoVoxel voxel, SDF and lattice CAD, PBR materials and mechanisms. Use for TypeScript geometry, textures or moving-part authoring.',
-    whenToUse: 'Use for TypeScript PicoVoxel models, materials, textures and moving mechanisms.',
-    corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', 'picovoxel', 'packages/plugins/picovoxel'),
+      'Guides PicoVoxel voxel, SDF and lattice CAD, named parts, PBR materials and mechanisms. For TypeScript geometry, appearance, textures or moving-part authoring.',
+    whenToUse: 'Use for TypeScript PicoVoxel models, named parts, physical materials, textures and moving mechanisms.',
+    corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', 'picovoxel', {
+      packageDirectory: 'packages/plugins/picovoxel',
+    }),
     groupBy: byKind,
     supplementalApi: {
-      corpus: bundledTypescriptCorpus(
-        'picovoxel/picovoxel.bundled.json',
-        '@taucad/picovoxel',
-        'packages/plugins/picovoxel',
-      ),
+      corpus: bundledTypescriptCorpus('picovoxel/picovoxel.bundled.json', '@taucad/picovoxel', {
+        packageDirectory: 'packages/plugins/picovoxel',
+      }),
       prefix: 'tau',
       groupBy: byKind,
     },
@@ -368,10 +403,20 @@ export const bundleOwners: readonly BundleOwner[] = [
     name: 'GeoSpec authoring',
     title: 'GeoSpec authoring',
     description:
-      'Guides deterministic GeoSpec test authoring and repair. Use before creating or editing *.geospec.ts or *.geospec.js files.',
-    whenToUse: 'Use before creating or editing *.geospec.ts or *.geospec.js files.',
-    corpus: bundledTypescriptCorpus('geospec/geospec.bundled.json', 'geospec', 'packages/geospec'),
+      'Guides canonical GeoSpec tests in TypeScript, JavaScript and Python/pytest. Use for *.geospec.ts, *.geospec.js and GeoSpec pytest *.py tests.',
+    whenToUse: 'Use before creating or editing *.geospec.ts, *.geospec.js or GeoSpec pytest *.py tests.',
+    corpus: bundledTypescriptCorpus('geospec/geospec.bundled.json', 'geospec', {
+      packageDirectory: 'packages/geospec',
+      publicEntries: ['.', './model'],
+    }),
     groupBy: byKind,
+    supplementalApi: {
+      corpus: bundledTypescriptCorpus('geospec/geospec.bundled.json', 'geospec', {
+        packageDirectory: 'packages/geospec',
+      }),
+      prefix: 'public',
+      groupBy: byKind,
+    },
   },
   {
     slug: 'workbench',
@@ -454,6 +499,8 @@ export const generateBundles = async (
     const manifest: TauSkillsManifest = { bundles: [bundle.declaration] };
     // oxlint-disable-next-line no-await-in-loop -- See above.
     await writeFile(join(outputAgent, skillsManifestFile), `${JSON.stringify(manifest, undefined, 2)}\n`, 'utf8');
+    // oxlint-disable-next-line no-await-in-loop -- The declaration ships beside this owner's generated manifest.
+    await writeFile(join(outputAgent, skillsTypesFile), skillsTypes, 'utf8');
     // oxlint-disable-next-line no-await-in-loop -- The module describes files written by this owner iteration.
     const resourcesModule = await renderResourcesModule(outputAgent, bundle.declaration);
     // oxlint-disable-next-line no-await-in-loop -- See above.

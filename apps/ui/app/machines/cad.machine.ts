@@ -1,6 +1,6 @@
 import { interactiveViewContent } from '#lib/interactive-view-content.js';
 import { markGeometryReceipt } from '#lib/renderer-telemetry.js';
-import { setup, types, waitFor } from 'xstate';
+import { createAsyncLogic, setup, types, waitFor } from 'xstate';
 import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import type { CodeIssue, LogLevel, LogOrigin } from '@taucad/types';
 import type {
@@ -59,6 +59,9 @@ export type CadContext = {
   telemetryEntries: TelemetrySpanRecord[];
   operationTimeout: number;
   kernelClient?: AppRuntimeClient;
+  /** Allocated ownership, not connected readiness. */
+  connectingClient?: AppRuntimeClient;
+  runtimeCloseError?: Error;
   document?: RuntimeDocument;
   defaultView?: ViewSubscription;
   capabilities?: AppCapabilitiesManifest;
@@ -135,6 +138,8 @@ type CadEvent =
   | { type: 'activeKernelChanged'; kernelId: string | undefined }
   | { type: 'parkRuntime' }
   | { type: 'resumeRuntime' }
+  | { type: 'closeRuntime' }
+  | { type: 'kernelAllocated'; client: AppRuntimeClient; cleanups: Array<() => void> }
   | KernelConnectedEvent
   | FileSystemBindingChangedEvent;
 
@@ -164,7 +169,10 @@ type CadInput = {
 
 /** Release the runtime resources held by one CAD unit. */
 export const disposeCadRuntime = (
-  context: Pick<CadContext, 'eventCleanups' | 'documentCleanups' | 'document' | 'defaultView' | 'kernelClient'>,
+  context: Pick<
+    CadContext,
+    'eventCleanups' | 'documentCleanups' | 'document' | 'defaultView' | 'kernelClient' | 'connectingClient'
+  >,
 ): void => {
   for (const cleanup of context.documentCleanups) {
     safeDispose(cleanup);
@@ -175,6 +183,26 @@ export const disposeCadRuntime = (
     safeDispose(cleanup);
   }
   safeDispose(() => context.kernelClient?.terminate());
+  if (context.connectingClient !== context.kernelClient) {
+    safeDispose(() => context.connectingClient?.terminate());
+  }
+};
+
+/** Await this unit's owned shutdown before its project drops the actor tree. */
+export const closeCadRuntime = async (actor: ActorRefFrom<typeof cadMachine>, signal?: AbortSignal): Promise<void> => {
+  actor.send({ type: 'closeRuntime' });
+  const snapshot = await waitFor(
+    actor,
+    (state) => state.matches('runtimeClosed') || state.matches('runtimeCloseFailed'),
+    { signal },
+  );
+  if (snapshot.matches('runtimeCloseFailed')) {
+    const error: unknown = snapshot.context.runtimeCloseError;
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('CAD runtime shutdown failed');
+  }
 };
 
 type ConnectKernelInput = {
@@ -280,8 +308,9 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   });
 
   let tornDown = false;
+  let ownershipTransferred = false;
   const teardown = () => {
-    if (tornDown) {
+    if (tornDown || ownershipTransferred) {
       return;
     }
     tornDown = true;
@@ -296,6 +325,7 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
   signal.throwIfAborted();
 
   const [{ createRuntimeClient }, { fromFileSystemBridge }, resolveKernelOptions] = await modules;
+  signal.throwIfAborted();
 
   const computeConnection =
     getComputeReuseMode() === 'durable' && snapshot.context.projectId
@@ -339,7 +369,11 @@ const connectKernelActor = fromSafeAsync<KernelConnectedEvent, ConnectKernelInpu
 
   signal.throwIfAborted();
 
+  machineRef.send({ type: 'kernelAllocated', client, cleanups });
+  ownershipTransferred = true;
+
   await client.connect();
+  signal.throwIfAborted();
 
   const currentSnapshot = fileManagerRef.getSnapshot();
   if (!currentSnapshot.matches('ready') || currentSnapshot.context.contentService !== capturedContentService) {
@@ -441,8 +475,22 @@ const renderModelActor = fromSafeAsync<void, RenderModelInput>(async ({ input, s
         input.machineRef.send({ type: 'documentStatusChanged', status });
       }),
       () => {
+        const failures: unknown[] = [];
+        const failedCleanups: Array<() => void> = [];
         for (const cleanup of viewCleanups) {
-          cleanup();
+          try {
+            cleanup();
+          } catch (error) {
+            failures.push(error);
+            failedCleanups.push(cleanup);
+          }
+        }
+        viewCleanups = failedCleanups;
+        if (failures.length === 1 && failures[0] instanceof Error) {
+          throw failures[0];
+        }
+        if (failures.length > 0) {
+          throw new AggregateError(failures, 'CAD view subscription cleanup failed');
         }
       },
     ];
@@ -508,6 +556,78 @@ const boundTelemetryEntries = (entries: TelemetrySpanRecord[]): TelemetrySpanRec
 const cadActors = {
   connectKernelActor,
   renderModelActor,
+  shutdownKernelActor: createAsyncLogic<
+    {
+      clientClosed: boolean;
+      eventCleanups: Array<() => void>;
+      documentCleanups: Array<() => void>;
+      attemptedDocumentCleanups: Array<() => void>;
+      document: RuntimeDocument | undefined;
+      defaultView: ViewSubscription | undefined;
+      error?: Error;
+    },
+    Pick<
+      CadContext,
+      'kernelClient' | 'connectingClient' | 'eventCleanups' | 'documentCleanups' | 'document' | 'defaultView'
+    >
+  >({
+    run: async ({ input }) => {
+      const failures: unknown[] = [];
+      const eventCleanups: Array<() => void> = [];
+      const documentCleanups: Array<() => void> = [];
+      let { document, defaultView } = input;
+      let clientClosed = false;
+      try {
+        await (input.kernelClient ?? input.connectingClient)?.shutdown();
+        clientClosed = true;
+      } catch (error) {
+        failures.push(error);
+      }
+      for (const cleanup of input.documentCleanups) {
+        try {
+          cleanup();
+        } catch (error) {
+          failures.push(error);
+          documentCleanups.push(cleanup);
+        }
+      }
+      try {
+        defaultView?.close();
+        defaultView = undefined;
+      } catch (error) {
+        failures.push(error);
+      }
+      try {
+        document?.close();
+        document = undefined;
+      } catch (error) {
+        failures.push(error);
+      }
+      for (const cleanup of input.eventCleanups) {
+        try {
+          cleanup();
+        } catch (error) {
+          failures.push(error);
+          eventCleanups.push(cleanup);
+        }
+      }
+      const error =
+        failures.length === 0
+          ? undefined
+          : failures.length === 1 && failures[0] instanceof Error
+            ? failures[0]
+            : new AggregateError(failures, 'CAD runtime cleanup failed');
+      return {
+        clientClosed,
+        eventCleanups,
+        documentCleanups,
+        attemptedDocumentCleanups: input.documentCleanups,
+        document,
+        defaultView,
+        error,
+      };
+    },
+  }),
 };
 
 type CadEnqueue = EnqueueObject<CadEvent, CadEmitted, SystemRegistry, typeof cadActors>;
@@ -518,6 +638,20 @@ type CadArgs<EventType extends CadEvent['type']> = Readonly<{
   context: CadContext;
   event: Extract<CadEvent, { type: EventType }>;
 }>;
+
+/** Retain late open ownership without adopting a new document during shutdown. */
+const retainClosingDocument = ({ context, event }: CadArgs<'documentOpened'>): { context: CadPatch } => ({
+  context: {
+    documentCleanups: [
+      ...context.documentCleanups,
+      ...event.cleanups,
+      () => event.defaultView?.close(),
+      () => {
+        event.document.close();
+      },
+    ],
+  },
+});
 type RenderTrigger = Extract<
   CadEvent,
   {
@@ -547,9 +681,9 @@ const notifyKernelRefusal = (
 
 /** Release the kernel. The disposal runs as an effect; the refs clear with the transition. */
 const destroyKernel = (context: CadContext, enq: CadEnqueue): CadPatch => {
-  const { eventCleanups, documentCleanups, document, defaultView, kernelClient } = context;
+  const { eventCleanups, documentCleanups, document, defaultView, kernelClient, connectingClient } = context;
   enq(() => {
-    disposeCadRuntime({ eventCleanups, documentCleanups, document, defaultView, kernelClient });
+    disposeCadRuntime({ eventCleanups, documentCleanups, document, defaultView, kernelClient, connectingClient });
   });
   return {
     eventCleanups: [],
@@ -557,6 +691,7 @@ const destroyKernel = (context: CadContext, enq: CadEnqueue): CadPatch => {
     document: undefined,
     defaultView: undefined,
     kernelClient: undefined,
+    connectingClient: undefined,
   };
 };
 
@@ -849,6 +984,10 @@ export const cadMachine = setup({
   }),
   exit: ({ context }, enq) => ({ context: destroyKernel(context, enq) }),
   on: {
+    closeRuntime: { target: '.runtimeClosing', context: { runtimeCloseError: undefined } },
+    kernelAllocated: ({ event }) => ({
+      context: { connectingClient: event.client, eventCleanups: event.cleanups },
+    }),
     stateChanged: ({ event }) => (event.state === 'error' ? { target: '.error' } : {}),
     documentOpened: ({ context, event }, enq) => {
       if (event.requestId !== context.openAttempt || context.parkWhenIdle) {
@@ -922,6 +1061,88 @@ export const cadMachine = setup({
   },
   initial: 'connecting',
   states: {
+    runtimeClosing: {
+      on: {
+        closeRuntime: {},
+        filesystemBindingChanged: {},
+        restoreParameters: {},
+        stateChanged: {},
+        documentStatusChanged: {},
+        defaultViewStatusChanged: {},
+        defaultViewChanged: {},
+        documentOpened: retainClosingDocument,
+      },
+      invoke: {
+        src: 'shutdownKernelActor',
+        input: ({ context }) => ({
+          kernelClient: context.kernelClient,
+          connectingClient: context.connectingClient,
+          eventCleanups: context.eventCleanups,
+          documentCleanups: context.documentCleanups,
+          document: context.document,
+          defaultView: context.defaultView,
+        }),
+        onDone: ({ context, event }) => {
+          const pendingCleanups = context.documentCleanups.filter(
+            (cleanup) => !event.output.attemptedDocumentCleanups.includes(cleanup),
+          );
+          return {
+            target: event.output.error
+              ? 'runtimeCloseFailed'
+              : pendingCleanups.length > 0
+                ? 'runtimeClosing'
+                : 'runtimeClosed',
+            reenter: pendingCleanups.length > 0,
+            context: {
+              ...(event.output.clientClosed ? { kernelClient: undefined, connectingClient: undefined } : {}),
+              eventCleanups: event.output.eventCleanups,
+              documentCleanups: [...event.output.documentCleanups, ...pendingCleanups],
+              document: event.output.document,
+              defaultView: event.output.defaultView,
+              runtimeCloseError: event.output.error,
+            },
+          };
+        },
+        onError: ({ event }) => ({
+          target: 'runtimeCloseFailed',
+          context: {
+            runtimeCloseError:
+              event.error instanceof Error
+                ? event.error
+                : new Error(errorMessageOf(event.error, 'CAD shutdown failed')),
+          },
+        }),
+      },
+    },
+    runtimeClosed: {
+      entry: ({ context, self }, enq) => {
+        if (context.parentRef) {
+          enq.sendTo(context.parentRef, { type: 'geometryUnit.runtimeClosed', unit: self });
+        }
+        return {};
+      },
+      on: {
+        closeRuntime: {},
+        filesystemBindingChanged: {},
+        restoreParameters: {},
+        stateChanged: {},
+        documentStatusChanged: {},
+        defaultViewStatusChanged: {},
+        defaultViewChanged: {},
+        documentOpened: (args) => ({ ...retainClosingDocument(args), target: 'runtimeClosing' }),
+      },
+    },
+    runtimeCloseFailed: {
+      on: {
+        filesystemBindingChanged: {},
+        restoreParameters: {},
+        stateChanged: {},
+        documentStatusChanged: {},
+        defaultViewStatusChanged: {},
+        defaultViewChanged: {},
+        documentOpened: retainClosingDocument,
+      },
+    },
     connecting: {
       tags: ['cad-loading'],
       /* R4: a unit that is trying again is not refused. */
@@ -966,7 +1187,7 @@ export const cadMachine = setup({
           }
           return {
             target: context.entryPath ? '#cad.rendering.submitting' : 'idle',
-            context: { kernelClient: event.client, eventCleanups: event.cleanups },
+            context: { kernelClient: event.client, connectingClient: undefined, eventCleanups: event.cleanups },
           };
         },
         initializeModel: renderRequest(),

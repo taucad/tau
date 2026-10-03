@@ -956,7 +956,12 @@ export const graphicsMachine = setup({
             pickableMeshesVersion: context.pickableMeshesVersion + 1,
           }),
         },
-        setLinesVisibility: { context: ({ event }) => ({ enableLines: event.payload }) },
+        setLinesVisibility: {
+          context: ({ context, event }) => ({
+            enableLines: event.payload,
+            pickableMeshesVersion: context.pickableMeshesVersion + 1,
+          }),
+        },
         setGizmoVisibility: { context: ({ event }) => ({ enableGizmo: event.payload }) },
         setGridVisibility: { context: ({ event }) => ({ enableGrid: event.payload }) },
         setAxesVisibility: { context: ({ event }) => ({ enableAxes: event.payload }) },

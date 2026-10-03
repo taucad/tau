@@ -4,6 +4,7 @@ import type { SseEvent } from '#api/llm/llm-gateway.stream.js';
 import {
   classifyUpstreamRefusal,
   cloudUpstreamRefusalMessage,
+  isContextWindowRefusal,
   maximumRefusalMessageCharacters,
 } from '#api/llm/upstream-refusal.js';
 import {
@@ -306,7 +307,7 @@ export const createProviderAccountFrameFilter = (input: {
         code: type,
         message:
           input.accountOwner === 'tau' || supplierSentence === undefined
-            ? cloudUpstreamRefusalMessage({ type, status })
+            ? cloudUpstreamRefusalMessage({ type, status, contextWindowExceeded: isContextWindowRefusal(error) })
             : supplierSentence,
         details: {
           providerId: input.providerId,

@@ -101,6 +101,7 @@
     "type-fest": "catalog:"
   },
   "devDependencies": {
+    "@parcel/watcher": "catalog:",
     "@taucad/events": "workspace:*",
     "@taucad/memory": "workspace:*",
     "@taucad/nx": "workspace:*",
@@ -111,7 +112,13 @@
     "zod": "catalog:"
   },
   "peerDependencies": {
+    "@parcel/watcher": "catalog:",
     "zod": "^4.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@parcel/watcher": {
+      "optional": true
+    }
   },
   "homepage": "https://github.com/taucad/tau/tree/main/packages/filesystem#readme",
   "bugs": {

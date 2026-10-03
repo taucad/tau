@@ -43,6 +43,7 @@ export function CopyButton({
      can never be on screen together. */
   const { ticked, trigger } = useTickAnimation();
   const [outcome, setOutcome] = useState<'copied' | 'failed'>('copied');
+  const iconOnly = size?.startsWith('icon') ?? false;
   const copied = ticked && outcome === 'copied';
   const failed = ticked && outcome === 'failed';
 
@@ -66,11 +67,11 @@ export function CopyButton({
           <Button
             size={size}
             variant='ghost'
-            aria-label={size === 'icon' ? tooltip : undefined}
+            aria-label={iconOnly ? tooltip : undefined}
             onClick={handleCopy}
             {...properties}
           >
-            {size !== 'icon' && (
+            {!iconOnly && (
               <span data-slot='label'>{failed ? copyFailedLabel : copied ? copiedText : readyToCopyText}</span>
             )}
             {/* Colour lives on the glyph, never the prose, and a refused copy is

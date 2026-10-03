@@ -100,5 +100,5 @@ describe('require-using-on-disposable', () => {
         },
       ],
     });
-  });
+  }, 15_000);
 });

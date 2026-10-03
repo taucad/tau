@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
+import type { HostEngine, HostSubjectLifecycle } from '@taucad/geospec-engine-native/node';
 // eslint-disable-next-line @nx/enforce-module-boundaries -- Private bench test consumes the public protocol types.
 import type { GeoSpecEngineImplementation, GeoSpecEngineProtocol } from 'geospec/engine';
 import {
@@ -57,6 +58,92 @@ const input = async () =>
   });
 
 describe('ordinary performance lab runner', () => {
+  it('should discard prewarm reports without omitting calls, refusals or cleanup', async () => {
+    const encode = (value: unknown): Uint8Array<ArrayBuffer> => new TextEncoder().encode(JSON.stringify(value));
+    const calls: string[] = [];
+    const engine = mock<HostEngine & HostSubjectLifecycle>({
+      ingestSubject: vi.fn(() => {
+        calls.push('admit');
+        return encode({ result: { subject: { subjectHash: '0'.repeat(64) } } });
+      }),
+      subjectHandle: vi.fn(() => encode({ result: { subjectHandle: { id: 1 } } })),
+      releaseSubject: vi.fn(() => {
+        calls.push('release');
+        return encode({});
+      }),
+      close: vi.fn(() => {
+        calls.push('close');
+      }),
+      observations: vi.fn(() => encode({})),
+      evaluateClaim: vi.fn<HostEngine['evaluateClaim']>((request) => {
+        const decoded = JSON.parse(new TextDecoder().decode(request)) as {
+          plan: { claims: Array<{ claimId: string }> };
+        };
+        const claim = decoded.plan.claims[0]!;
+        calls.push(claim.claimId);
+        return {
+          canonicalPlan: encode({}),
+          canonicalClaim: encode(claim),
+          canonicalResult: encode({
+            numericProfile: 'profile',
+            results: [
+              { claimId: claim.claimId, status: claim.claimId === 'query' ? 'refused' : 'passed', diagnostics: [] },
+            ],
+          }),
+        };
+      }),
+    });
+    Object.assign(engine, { cacheProducerIdentity: () => encode({}) });
+    const module = mock<PerformanceLabEngineModule>({
+      Engine: vi.fn(function createEngine() {
+        return engine;
+      }),
+    });
+    const base = await input();
+    const ordinary = {
+      ...base,
+      engine: 'native-desktop',
+      fixture: { ...base.fixture, format: 'rational-plate' },
+      cases: base.cases.map((entry) => ({ ...entry, claimId: entry.claimId ?? 'query', workUnitBudget: 10_000 })),
+    } as const;
+    const decodeSpy = vi.spyOn(TextDecoder.prototype, 'decode');
+    try {
+      const discarded = await runPerformanceLabCell(ordinary, { native: async () => module }, 'discard');
+      expect(discarded.perCase).toEqual([]);
+      expect(discarded.profile).toBeNull();
+      expect(engine.observations).not.toHaveBeenCalled();
+      expect(calls).toEqual(['admit', 'bounds-authority', 'query', 'release', 'close']);
+      const discardedDecodes = decodeSpy.mock.calls.length;
+      calls.length = 0;
+      decodeSpy.mockClear();
+      const complete = await runPerformanceLabCell(ordinary, { native: async () => module });
+      expect(complete.perCase.map(({ status }) => status)).toEqual(['passed', 'refused']);
+      expect(complete.perCase[0]!.result).toEqual({ claimId: 'bounds-authority', status: 'passed', diagnostics: [] });
+      expect(JSON.parse(complete.perCase[0]!.canonicalResultUtf8!)).toEqual({
+        numericProfile: 'profile',
+        results: [{ claimId: 'bounds-authority', status: 'passed', diagnostics: [] }],
+      });
+      expect(engine.observations).toHaveBeenCalledOnce();
+      expect(
+        complete.perCase.every(
+          ({ canonicalResultUtf8, canonicalResultSha256 }) =>
+            typeof canonicalResultUtf8 === 'string' && typeof canonicalResultSha256 === 'string',
+        ),
+      ).toBe(true);
+      expect(calls).toEqual(['admit', 'bounds-authority', 'query', 'release', 'close']);
+      expect(decodeSpy.mock.calls.length).toBeGreaterThan(discardedDecodes);
+      calls.length = 0;
+      engine.evaluateClaim.mockImplementation(() => {
+        throw new TypeError('claim failed');
+      });
+      await expect(runPerformanceLabCell(ordinary, { native: async () => module }, 'discard')).rejects.toThrow(
+        new TypeError('claim failed'),
+      );
+      expect(calls).toEqual(['admit', 'release', 'close']);
+    } finally {
+      decodeSpy.mockRestore();
+    }
+  });
   it('requires an explicit valid MT receipt and confines execution to combined WASM', async () => {
     const ordinary = await input();
     const combined = { ...ordinary, engine: 'combined-wasm' };
@@ -235,5 +322,16 @@ describe('ordinary performance lab runner', () => {
       workUnitBudget: 10_000,
     });
     expect(result.perCase.every(({ canonicalResultSha256 }) => typeof canonicalResultSha256 === 'string')).toBe(true);
+    const discarded = await runPerformanceLabCell(
+      await input(),
+      {
+        legacy: async () => ({ geoSpecEngineImplementation: implementation }),
+      },
+      'discard',
+    );
+    expect(discarded.perCase).toEqual([]);
+    expect(protocol.ingestSubject).toHaveBeenCalledTimes(2);
+    expect(protocol.submitClaims).toHaveBeenCalledTimes(4);
+    expect(protocol.releaseSubject).toHaveBeenCalledTimes(2);
   });
 });

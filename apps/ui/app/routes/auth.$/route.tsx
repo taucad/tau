@@ -31,20 +31,6 @@ export const handle: Handle = {
  * @returns The handoff panel.
  */
 function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): React.JSX.Element | undefined {
-  /* Main only announces that the session changed; the link a signed-out window
-     was holding (`redirectTo`, e.g. a `tau://invitations/…` arrival) is opened
-     here, or the person is left on this panel with a session and nowhere to go. */
-  const { data: session } = useSession(authClient);
-  const [searchParameters] = useSearchParams();
-  const navigate = useNavigate();
-  const redirectTo = sanitizeVerifyEmailRedirectTo(searchParameters.get('redirectTo') ?? undefined);
-  const isSignedIn = handoff.action === 'signIn' && Boolean(session);
-  useEffect(() => {
-    if (isSignedIn) {
-      void navigate(redirectTo, { replace: true });
-    }
-  }, [isSignedIn, navigate, redirectTo]);
-
   if (!handoff.isBridgeAvailable) {
     return (
       <div className='w-full max-w-md text-center'>
@@ -85,6 +71,21 @@ function ShellHandoff({ handoff }: { readonly handoff: ShellAuthHandoff }): Reac
 export default function AuthPage(): React.JSX.Element {
   const { '*': segment } = useParams();
   const shellHandoff = useShellAuthHandoff(`/auth/${segment ?? ''}`);
+  /* A session on a sign-in page continues to `redirectTo`: in the desktop window
+     main only announces that the session changed, and a browser that is already
+     signed in (e.g. `/auth/desktop` bouncing here) must not ask again. */
+  const { data: session } = useSession(authClient);
+  const [searchParameters] = useSearchParams();
+  const navigate = useNavigate();
+  const redirectTo = sanitizeVerifyEmailRedirectTo(searchParameters.get('redirectTo') ?? undefined);
+  const isSignInPage =
+    shellHandoff === undefined ? segment === 'sign-in' || segment === 'sign-up' : shellHandoff.action === 'signIn';
+  const isSignedIn = isSignInPage && Boolean(session);
+  useEffect(() => {
+    if (isSignedIn) {
+      void navigate(redirectTo, { replace: true });
+    }
+  }, [isSignedIn, navigate, redirectTo]);
   return (
     <AuthEmailDraftProvider>
       <div className='grid min-h-svh lg:grid-cols-2'>

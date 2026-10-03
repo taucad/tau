@@ -1,5 +1,20 @@
 # Marketing preview validation
 
+## Hero polish — 2026-10-03
+
+Branch `claude/marketing-hero-polish-kb4ruy` from `26b93cbdd` on `feature/marketing-www-design-verify-print`. The headline reads “Design, Verify, Print.” (title, footer and social card too); the studio is rebuilt for brighter, truer colour under PBR Neutral tone mapping, with a soft floor shadow; the floor drawing is projected with the hero camera, so the dial, input arc and Ø 174 mm dimension register with the gearbox. Run in a cloud container without a GPU: Node 22.22.0, Playwright 1.62.1 Chromium with SwiftShader software WebGL. Poster and stills were captured from the shipped `scene.mjs` with the recipe’s encoder settings and a temporary SwiftShader launch override.
+
+| Check            | Result                                                                                                                                                                                                                                                                                                |
+| ---------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Static build     | 13 pages; noindex in HTML and HTTP; analytics off                                                                                                                                                                                                                                                     |
+| Unit tests       | 13 pass                                                                                                                                                                                                                                                                                               |
+| Browser routes   | 52 route/viewport/theme audits plus interaction and privacy checks: pass, zero axe violations                                                                                                                                                                                                         |
+| Live story       | All `check-story.mjs` gates pass with two waits lengthened for software GL (hero settle 1.6 → 8 s, reduced-motion disposal 0.2 → 3 s). Unmodified, the script fails the same hero-idle assertion on the unchanged baseline here; hero frames take about 445 ms before and 480 ms after on SwiftShader |
+| Oxlint / ESLint  | Zero findings on every changed `.mjs`; ESLint’s Nx module-boundary rule skipped without a project graph                                                                                                                                                                                               |
+| Asset provenance | 12 refreshed size/hash pairs match the committed files                                                                                                                                                                                                                                                |
+
+Payloads: hero poster 33.6 → 88.9 KB at 1200 px and 35.8 → 53.2 KB at 720 px; assembled-gearbox stills grow to 55–73 KB; social card 131.5 → 146.1 KB. The soft shadow lives in the alpha channel, so stills now use lossless alpha: lossy alpha at quality 60–70 banded visibly, and lossless costs no more than the previous quality 90. Not run: Lighthouse, GPU or real-device frame timing, Firefox and Safari, hosted checks, and `oxfmt` on `site.css`.
+
 ## Planetary refresh — 2026-10-03
 
 Branch `feature/marketing-www-refresh` from `abea9dd26b3fcd7bf8ac33de438a2c5908e999c7`. Measured locally on an Apple M2 Pro under heavy unrelated host load (load average 15–67), Node 24.10.0, installed Google Chrome 154 headless with ANGLE Metal, against `serve.mjs`, which reproduces the emitted headers and gzip. Before = `abea9dd26` built and served the same way. Lab numbers, not field data.

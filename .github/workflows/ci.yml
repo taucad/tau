@@ -488,10 +488,13 @@ jobs:
       # `test:e2e:non-isolated` serves the UI without COOP/COEP: the mode production
       # web runs in until go-live row X-5 closes (D19), so kernels must degrade to
       # their serial builds there.
+      # `--parallel=1`: the suites' ui:build, ui:build:serve and ui:build:desktop
+      # prerequisites each peak near the same 10 GB as above, so building them together
+      # loses the runner ("The operation was canceled.") a few minutes in.
       - name: Run affected end-to-end suites
         env:
           TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated
+        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.

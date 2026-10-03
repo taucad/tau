@@ -158,6 +158,7 @@ const printRequestStateSchema = z.enum([
   'approved',
   'uploading',
   'starting',
+  'confirming',
   'started',
   'denied',
   'withdrawn',
@@ -204,6 +205,14 @@ const nextStepSchema = z
     'What to tell the person and do next, such as whether to retry; absent while the host is still working on the request.',
   );
 
+/** What became of a started request's run: `started` means the printer took the start, not that it still prints. */
+const startedRunSchema = z
+  .enum(['running', 'ended', 'not-yet-reported'])
+  .optional()
+  .describe(
+    "A started request's run: running while the printer reports it, ended once the printer reports anything else after the start (a finished print does not keep the machine busy), not-yet-reported until then.",
+  );
+
 /** @public */
 export const getMachineOutputSchema = z.looseObject({ machineId: z.string() });
 
@@ -240,12 +249,13 @@ export const getPrintProfilesOutputSchema = z.looseObject({
 /** @public */
 export const getPrintRequestOutputSchema = z.looseObject({
   request: printRequestRecordSchema,
+  run: startedRunSchema,
   nextStep: nextStepSchema,
 });
 
 /** @public */
 export const listPrintRequestsOutputSchema = z.looseObject({
-  requests: z.array(printRequestRecordSchema),
+  requests: z.array(printRequestRecordSchema.extend({ run: startedRunSchema })),
   total: z.number().int().nonnegative(),
 });
 

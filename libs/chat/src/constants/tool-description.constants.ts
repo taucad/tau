@@ -151,8 +151,9 @@ Returns the written path (\`.tau/chats/<chatId>/todo.yaml\`) and a count per sta
 
 For a Bambu printer with Bambu Studio available it returns engine "bambu-studio": defaults (the presets chosen from the printer's model, nozzle, loaded filament and reported plate), the compatible printers, processes and filaments (source "user" marks the person's own), plates, and every setting's current value by group with enum choices. Pass profiles to read another selection, and keys for full descriptors (units, ranges, descriptions). Otherwise it returns engine "reference" and why. The project’s .tau/machines/settings/<typeId>.json retains named profiles shared by machines of that type. savedProfiles lists stable IDs and the active selection. Pass profileId to inspect or prepare a different saved profile without changing that selection. machinePreferences reports the exact profile and source versions used; request_print arguments override its sparse values. Edit the versioned record to change saved preferences.`,
   [toolName.getPrintRequest]:
-    'Read one print request by its exact request ID: state, summary, receipts, any failure, and a nextStep saying what to tell the person and do next.',
-  [toolName.listPrintRequests]: 'List print requests, newest first, optionally for one machine.',
+    'Read one print request by its exact request ID: state, summary, receipts, any failure, and a nextStep saying what to tell the person and do next. A started request also says whether its run is still running or has ended; only get_machine says whether the machine is ready.',
+  [toolName.listPrintRequests]:
+    "List print requests, newest first, optionally for one machine. A started request's run says whether it is still running or has ended, so a finished print is not read as a busy machine.",
   [toolName.cancelPrint]:
     'Stop a print. Withdraws a request that has not started, or cancels the exact observed provider run of a started one, which stops the printer. Give requestId alone, or machineId with expectedProviderRunId.',
   [toolName.revisions]: `Read this project's saved revisions. Read-only.

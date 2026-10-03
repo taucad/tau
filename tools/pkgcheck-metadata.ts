@@ -740,10 +740,23 @@ export const bundledWorkspaceMirrors = (
     .sort();
 
 /**
- * Every published subpath as an importable specifier, minus the ones with a
- * recorded reason. Wildcards cannot be probed. A reason naming a subpath the
- * package does not publish is itself an issue, so a stale excuse cannot linger
- * after the export it excused moved or was removed.
+ * Published subpaths that resolve straight to a WebAssembly binary. A host
+ * resolves them to a URL and fetches the bytes; nothing imports them as a
+ * module, so they have no declarations for a type-resolution check to find.
+ */
+export const binaryAssetSubpaths = (exports: unknown): string[] =>
+  typeof exports === 'object' && exports !== null && !Array.isArray(exports)
+    ? Object.entries(exports as Readonly<Record<string, unknown>>)
+        .filter(([, target]) => typeof target === 'string' && target.endsWith('.wasm'))
+        .map(([subpath]) => subpath)
+        .sort()
+    : [];
+
+/**
+ * Every published subpath as an importable specifier, minus binary assets and
+ * the ones with a recorded reason. Wildcards cannot be probed. A reason naming
+ * a subpath the package does not publish is itself an issue, so a stale excuse
+ * cannot linger after the export it excused moved or was removed.
  */
 export const probedSpecifiers = (
   packageName: string,
@@ -753,10 +766,11 @@ export const probedSpecifiers = (
   const published = recordKeys(exports).filter(
     (subpath) => subpath.startsWith('.') && !subpath.includes('*') && subpath !== './package.json',
   );
+  const binaryAssets = new Set(binaryAssetSubpaths(exports));
 
   return {
     specifiers: published
-      .filter((subpath) => !(subpath in exclusions))
+      .filter((subpath) => !(subpath in exclusions) && !binaryAssets.has(subpath))
       .map((subpath) => `${packageName}${subpath.slice(1)}`),
     issues: Object.keys(exclusions)
       .filter((subpath) => !published.includes(subpath))

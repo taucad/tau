@@ -28,6 +28,7 @@ import process from 'node:process';
 import { pathToFileURL } from 'node:url';
 import { bundledLibraries, publishable, workspace } from '@taucad/nx';
 import {
+  binaryAssetSubpaths,
   bundledArtifactIssues,
   bundledWorkspaceMirrors,
   bundleDeclarationClosure,
@@ -1064,9 +1065,19 @@ async function runAttw(): Promise<CheckResult> {
       cpSync(attwConfigSource, join(stagingDirectory, '.attw.json'));
     }
 
+    // A subpath that resolves to a WebAssembly binary has no declarations to resolve.
+    const binaryAssets = binaryAssetSubpaths(publishPackage.exports);
     const output = execFileSync(
       resolve('node_modules/.bin/attw'),
-      ['--pack', '.', '--format', 'table', '--profile', 'esm-only'],
+      [
+        '--pack',
+        '.',
+        '--format',
+        'table',
+        '--profile',
+        'esm-only',
+        ...(binaryAssets.length > 0 ? ['--exclude-entrypoints', ...binaryAssets] : []),
+      ],
       {
         cwd: stagingDirectory,
         encoding: 'utf8',

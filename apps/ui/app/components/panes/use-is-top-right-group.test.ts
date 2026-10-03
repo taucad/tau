@@ -1,384 +1,203 @@
-import { afterEach, describe, expect, it } from 'vitest';
-import type { DockviewGroupPanel, DockviewPanelApi } from 'dockview-react';
+import { act, renderHook } from '@testing-library/react';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
+import type { DockviewApi, DockviewGroupPanel, DockviewGroupPanelApi } from 'dockview-react';
 import {
   checkGroupIsTopCorner,
   checkGroupIsTopRight,
-  checkPanelIsTopRight,
-  edgeTolerance,
+  useIsTopLeftGroup,
+  useIsTopRightGroup,
 } from '#components/panes/use-is-top-right-group.js';
 
-// ── Test helpers ─────────────────────────────────────────────────────────────
-
-type RectLike = {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-  width: number;
-  height: number;
-};
-
-function domRect(partial: Partial<RectLike> = {}): DOMRect {
-  const rect = {
-    top: 0,
-    right: 0,
-    bottom: 0,
-    left: 0,
-    width: 0,
-    height: 0,
-    x: 0,
-    y: 0,
-    ...partial,
-  };
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- mock
-  return { ...rect, toJSON: () => rect } satisfies DOMRect;
-}
-
-/** Tracks root elements appended to `document.body` for cleanup. */
 const roots: HTMLElement[] = [];
 
+const createGroup = (): DockviewGroupPanel => {
+  const element = document.createElement('div');
+  element.className = 'dv-groupview';
+  const group = mock<DockviewGroupPanel>({
+    api: mock<DockviewGroupPanelApi>({ location: { type: 'grid' }, isVisible: true, isMaximized: () => false }),
+  });
+  Object.defineProperty(group, 'element', { value: element });
+  return group;
+};
+
+/** Match Dockview's native split wrappers, including its visibility class. */
+const split = (orientation: 'horizontal' | 'vertical', children: HTMLElement[]): HTMLElement => {
+  const branch = document.createElement('div');
+  branch.className = 'dv-branch-node';
+  const container = document.createElement('div');
+  container.className = `dv-split-view-container dv-${orientation}`;
+  const views = document.createElement('div');
+  views.className = 'dv-view-container';
+  for (const child of children) {
+    const view = document.createElement('div');
+    view.className = 'dv-view visible';
+    view.append(child);
+    views.append(view);
+  }
+  container.append(views);
+  branch.append(container);
+  return branch;
+};
+
+const mount = (branch: HTMLElement): HTMLElement => {
+  const root = document.createElement('div');
+  root.className = 'dv-dockview';
+  const grid = document.createElement('div');
+  grid.className = 'dv-grid-view';
+  grid.append(branch);
+  root.append(grid);
+  document.body.append(root);
+  roots.push(root);
+  return root;
+};
+
+const createLayoutEvents = () => {
+  const listeners = new Set<() => void>();
+  const subscribe = (listener: () => void) => {
+    listeners.add(listener);
+    return { dispose: () => listeners.delete(listener) };
+  };
+  return {
+    api: mock<DockviewApi>({ onDidLayoutChange: subscribe, onDidMaximizedGroupChange: () => ({ dispose: vi.fn() }) }),
+    fire: () => {
+      for (const listener of listeners) {
+        listener();
+      }
+    },
+    listeners,
+  };
+};
+
 afterEach(() => {
-  for (const root of roots) {
+  for (const root of roots.splice(0)) {
     root.remove();
   }
-
-  roots.length = 0;
+  vi.restoreAllMocks();
 });
 
-/**
- * Builds a mock `DockviewGroupPanel` whose `.element` is (optionally) nested
- * inside a floating-panel ancestor so that `closest()` resolves correctly.
- */
-function buildGroupInFloatingPanel(options: {
-  locationType?: string;
-  groupRect?: Partial<RectLike>;
-  panelRect?: Partial<RectLike>;
-  panelState?: string;
-  omitPanel?: boolean;
-}): DockviewGroupPanel {
-  const {
-    locationType = 'grid',
-    groupRect = { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-    panelRect = { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-    panelState = 'open',
-    omitPanel = false,
-  } = options;
+describe('Dockview corner ownership', () => {
+  it('should own both corners before dimensions are available', () => {
+    const group = createGroup();
+    mount(split('horizontal', [group.element]));
 
-  const groupElement = document.createElement('div');
-  groupElement.getBoundingClientRect = () => domRect(groupRect);
-
-  let root: HTMLElement = groupElement;
-
-  if (!omitPanel) {
-    const panel = document.createElement('div');
-    panel.dataset['slot'] = 'floating-panel';
-    panel.dataset['state'] = panelState;
-    panel.getBoundingClientRect = () => domRect(panelRect);
-    panel.append(groupElement);
-    root = panel;
-  }
-
-  document.body.append(root);
-  roots.push(root);
-
-  return {
-    api: { location: { type: locationType } },
-    element: groupElement,
-  } as unknown as DockviewGroupPanel;
-}
-
-/**
- * Builds a mock `DockviewPanelApi` whose group `.element` is (optionally)
- * nested inside a `.dv-dockview` ancestor.
- */
-function buildPanelInDockview(options: {
-  locationType?: string;
-  groupRect?: Partial<RectLike>;
-  containerRect?: Partial<RectLike>;
-  omitContainer?: boolean;
-}): DockviewPanelApi {
-  const {
-    locationType = 'grid',
-    groupRect = { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-    containerRect = { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-    omitContainer = false,
-  } = options;
-
-  const groupElement = document.createElement('div');
-  groupElement.getBoundingClientRect = () => domRect(groupRect);
-
-  let root: HTMLElement = groupElement;
-
-  if (!omitContainer) {
-    const container = document.createElement('div');
-    container.classList.add('dv-dockview');
-    container.getBoundingClientRect = () => domRect(containerRect);
-    container.append(groupElement);
-    root = container;
-  }
-
-  document.body.append(root);
-  roots.push(root);
-
-  return {
-    group: {
-      api: { location: { type: locationType } },
-      element: groupElement,
-    },
-  } as unknown as DockviewPanelApi;
-}
-
-// ── checkGroupIsTopRight ─────────────────────────────────────────────────────
-
-describe('checkGroupIsTopRight', () => {
-  describe('returns false', () => {
-    it('when group location is not "grid"', () => {
-      const group = buildGroupInFloatingPanel({ locationType: 'floating' });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('when no floating panel ancestor exists', () => {
-      const group = buildGroupInFloatingPanel({ omitPanel: true });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('when floating panel is closed (data-state != "open")', () => {
-      const group = buildGroupInFloatingPanel({ panelState: 'closed' });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('when group element has zero width (not laid out)', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 0, width: 0, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('when group element has zero height (not laid out)', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 500, width: 500, height: 0, left: 0, bottom: 0 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('when right edge exceeds tolerance', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 500 - edgeTolerance, width: 400, height: 400, left: 100, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('when top edge exceeds tolerance', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: edgeTolerance, right: 500, width: 500, height: 400, left: 0, bottom: 400 + edgeTolerance },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('when group is at top-left instead of top-right', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 250, width: 250, height: 400, left: 0, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('when group is at bottom-right instead of top-right', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 200, right: 500, width: 500, height: 200, left: 0, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
+    expect(checkGroupIsTopCorner(group, 'left')).toBe(true);
+    expect(checkGroupIsTopRight(group)).toBe(true);
   });
 
-  describe('returns true', () => {
-    it('when group edges exactly align with floating panel', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(true);
-    });
+  it('should retain corner ownership while its outer workspace lane is hidden or resized', () => {
+    const group = createGroup();
+    const root = mount(split('horizontal', [group.element]));
+    root.style.display = 'none';
 
-    it('when group is a smaller pane filling the top-right corner', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 500, width: 250, height: 200, left: 250, bottom: 200 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(true);
-    });
-
-    it('when right edge is within tolerance (1px off)', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 499, width: 499, height: 400, left: 0, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(true);
-    });
-
-    it('when top edge is within tolerance (1px off)', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 1, right: 500, width: 500, height: 399, left: 0, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(true);
-    });
-
-    it('when both edges are within tolerance simultaneously', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 1, right: 499, width: 499, height: 399, left: 0, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(true);
-    });
+    expect(checkGroupIsTopRight(group)).toBe(true);
+    root.style.display = '';
+    root.style.width = '600px';
+    expect(checkGroupIsTopRight(group)).toBe(true);
   });
 
-  describe('edge tolerance boundary', () => {
-    it('returns true at exactly (tolerance - epsilon) offset', () => {
-      const offset = edgeTolerance - 0.01;
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: offset, right: 500 - offset, width: 400, height: 400, left: 100, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(true);
-    });
+  it('should find unique corners through alternating nested splits', () => {
+    const left = createGroup();
+    const upperMiddle = createGroup();
+    const upperRight = createGroup();
+    const bottom = createGroup();
+    mount(
+      split('horizontal', [
+        left.element,
+        split('vertical', [split('horizontal', [upperMiddle.element, upperRight.element]), bottom.element]),
+      ]),
+    );
 
-    it('returns false at exactly the tolerance value (strict less-than)', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 500 - edgeTolerance, width: 400, height: 400, left: 100, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(false);
-    });
-
-    it('handles negative offset (group slightly past panel edge)', () => {
-      const group = buildGroupInFloatingPanel({
-        groupRect: { top: 0, right: 501, width: 501, height: 400, left: 0, bottom: 400 },
-        panelRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkGroupIsTopRight(group)).toBe(true);
-    });
+    const groups = [left, upperMiddle, upperRight, bottom];
+    expect(groups.filter((group) => checkGroupIsTopCorner(group, 'left'))).toEqual([left]);
+    expect(groups.filter((group) => checkGroupIsTopRight(group))).toEqual([upperRight]);
   });
-});
 
-// ── checkPanelIsTopRight ─────────────────────────────────────────────────────
+  it('should ignore hidden leaves and branches with no visible groups', () => {
+    const top = createGroup();
+    const bottom = createGroup();
+    const hidden = createGroup();
+    mount(split('horizontal', [split('vertical', [top.element, bottom.element]), split('vertical', [hidden.element])]));
+    top.element.parentElement?.classList.remove('visible');
+    hidden.element.parentElement?.classList.remove('visible');
 
-describe('checkGroupIsTopCorner', () => {
-  it('finds the top-left group, where the chat lane toggle heads the tabs', () => {
-    const left = buildGroupInFloatingPanel({
-      groupRect: { top: 0, right: 250, width: 250, height: 400, left: 0, bottom: 400 },
-    });
-    const right = buildGroupInFloatingPanel({
-      groupRect: { top: 0, right: 500, width: 250, height: 400, left: 250, bottom: 400 },
-    });
+    expect(checkGroupIsTopRight(bottom)).toBe(true);
+    expect(checkGroupIsTopCorner(bottom, 'left')).toBe(true);
+    expect(checkGroupIsTopRight(top)).toBe(false);
+    expect(checkGroupIsTopRight(hidden)).toBe(false);
+  });
+
+  it('should stop at the nearest Dockview when a pane contains another Dockview', () => {
+    const outerLeft = createGroup();
+    const outerRight = createGroup();
+    mount(split('horizontal', [outerLeft.element, outerRight.element]));
+    const inner = createGroup();
+    const innerRoot = mount(split('horizontal', [inner.element]));
+    outerLeft.element.append(innerRoot);
+
+    expect(checkGroupIsTopRight(inner)).toBe(true);
+    expect(checkGroupIsTopRight(outerLeft)).toBe(false);
+    expect(checkGroupIsTopRight(outerRight)).toBe(true);
+  });
+
+  it('should reject detached and non-grid groups', () => {
+    const group = createGroup();
+    expect(checkGroupIsTopRight(group)).toBe(false);
+    mount(split('horizontal', [group.element]));
+    Object.defineProperty(group.api, 'location', { value: { type: 'floating' } });
+    expect(checkGroupIsTopRight(group)).toBe(false);
+  });
+
+  it('should give both corners to the maximized visible group', () => {
+    const left = createGroup();
+    const right = createGroup();
+    mount(split('horizontal', [left.element, right.element]));
+    Object.defineProperty(left.api, 'isMaximized', { value: () => true });
+    Object.defineProperty(right.api, 'isVisible', { value: false });
 
     expect(checkGroupIsTopCorner(left, 'left')).toBe(true);
-    expect(checkGroupIsTopCorner(right, 'left')).toBe(false);
-    expect(checkGroupIsTopCorner(right, 'right')).toBe(true);
+    expect(checkGroupIsTopRight(left)).toBe(true);
+    expect(checkGroupIsTopRight(right)).toBe(false);
+  });
+
+  it('should derive corner ownership without reading pixel geometry', () => {
+    const group = createGroup();
+    mount(split('horizontal', [group.element]));
+    const measure = vi.spyOn(Element.prototype, 'getBoundingClientRect');
+
+    expect(checkGroupIsTopRight(group)).toBe(true);
+    expect(measure).not.toHaveBeenCalled();
   });
 });
 
-describe('checkPanelIsTopRight', () => {
-  describe('returns false', () => {
-    it('when group location is not "grid"', () => {
-      const panelApi = buildPanelInDockview({ locationType: 'floating' });
-      expect(checkPanelIsTopRight(panelApi)).toBe(false);
-    });
+describe('corner hooks', () => {
+  it('should expose the corner on the first render without waiting for a frame', () => {
+    const group = createGroup();
+    mount(split('horizontal', [group.element]));
+    const events = createLayoutEvents();
+    const { result } = renderHook(() => ({
+      left: useIsTopLeftGroup(group, events.api),
+      right: useIsTopRightGroup(group, events.api),
+    }));
 
-    it('when no .dv-dockview ancestor exists', () => {
-      const panelApi = buildPanelInDockview({ omitContainer: true });
-      expect(checkPanelIsTopRight(panelApi)).toBe(false);
-    });
-
-    it('when group has zero dimensions', () => {
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: 0, right: 0, width: 0, height: 0, left: 0, bottom: 0 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(false);
-    });
-
-    it('when group is not at the top-right corner', () => {
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: 200, right: 250, width: 250, height: 200, left: 0, bottom: 400 },
-        containerRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(false);
-    });
-
-    it('when right edge exceeds tolerance', () => {
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: 0, right: 500 - edgeTolerance, width: 400, height: 400, left: 100, bottom: 400 },
-        containerRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(false);
-    });
-
-    it('when top edge exceeds tolerance', () => {
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: edgeTolerance, right: 500, width: 500, height: 400, left: 0, bottom: 400 + edgeTolerance },
-        containerRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(false);
-    });
+    expect(result.current).toEqual({ left: true, right: true });
   });
 
-  describe('returns true', () => {
-    it('when group edges exactly align with dockview container', () => {
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-        containerRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(true);
+  it('should transfer ownership on a structural layout event and release its subscription', () => {
+    const left = createGroup();
+    const right = createGroup();
+    mount(split('horizontal', [left.element, right.element]));
+    const events = createLayoutEvents();
+    const { result, unmount } = renderHook(() => useIsTopRightGroup(left, events.api));
+    expect(result.current).toBe(false);
+
+    act(() => {
+      right.element.parentElement?.remove();
+      events.fire();
     });
 
-    it('when group is a smaller pane filling the top-right corner', () => {
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: 0, right: 800, width: 400, height: 300, left: 400, bottom: 300 },
-        containerRect: { top: 0, right: 800, width: 800, height: 600, left: 0, bottom: 600 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(true);
-    });
-
-    it('when edges are within tolerance', () => {
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: 1, right: 799, width: 399, height: 299, left: 400, bottom: 300 },
-        containerRect: { top: 0, right: 800, width: 800, height: 600, left: 0, bottom: 600 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(true);
-    });
-  });
-
-  describe('edge tolerance boundary', () => {
-    it('returns true at exactly (tolerance - epsilon) offset', () => {
-      const offset = edgeTolerance - 0.01;
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: offset, right: 500 - offset, width: 400, height: 400, left: 100, bottom: 400 },
-        containerRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(true);
-    });
-
-    it('returns false at exactly the tolerance value (strict less-than)', () => {
-      const panelApi = buildPanelInDockview({
-        groupRect: { top: 0, right: 500 - edgeTolerance, width: 400, height: 400, left: 100, bottom: 400 },
-        containerRect: { top: 0, right: 500, width: 500, height: 400, left: 0, bottom: 400 },
-      });
-      expect(checkPanelIsTopRight(panelApi)).toBe(false);
-    });
-  });
-});
-
-// ── edgeTolerance constant ───────────────────────────────────────────────────
-
-describe('edgeTolerance', () => {
-  it('is a positive number', () => {
-    expect(edgeTolerance).toBeGreaterThan(0);
-  });
-
-  it('equals 2 (current documented value)', () => {
-    expect(edgeTolerance).toBe(2);
+    expect(result.current).toBe(true);
+    unmount();
+    expect(events.listeners.size).toBe(0);
   });
 });

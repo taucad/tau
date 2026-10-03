@@ -34,15 +34,12 @@ const renderPanelLabel = (
   iconOptions: Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'>,
 ): React.JSX.Element => {
   const title = getPanelTitle(panel);
-  const path = getPanelPath(panel);
 
+  // Title only: the path stays in the search value, not on the row.
   return (
     <span className='flex min-w-0 flex-1 items-center gap-2'>
       <DockviewTabIcon title={title} leadingIcon={iconOptions.leadingIcon} icon={iconOptions.getIcon?.(panel)} />
-      <span className='flex min-w-0 flex-1 flex-col'>
-        <span className='truncate'>{title}</span>
-        {path && path !== title ? <span className='truncate text-xs text-muted-foreground'>{path}</span> : null}
-      </span>
+      <span className='min-w-0 flex-1 truncate'>{title}</span>
       {activePanel?.id === panel.id ? <Check aria-label='Active tab' className='size-3.5 shrink-0' /> : null}
     </span>
   );

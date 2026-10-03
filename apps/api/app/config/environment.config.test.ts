@@ -509,6 +509,17 @@ describe('environmentSchema', () => {
     });
   });
 
+  it('should treat the empty Vertex AI credentials of a copied .env.example as unset', () => {
+    const result = environmentSchema.safeParse({
+      ...withRequiredCookieSecret(process.env),
+      NODE_ENV: 'development',
+      GOOGLE_VERTEX_AI_CREDENTIALS: '',
+    });
+
+    expect(result.error?.issues).toBeUndefined();
+    expect(result.data?.GOOGLE_VERTEX_AI_CREDENTIALS).toBeUndefined();
+  });
+
   it('should leave the App unconfigured when only the callback URL and connection key are set', () => {
     const result = environmentSchema.safeParse({
       ...withRequiredCookieSecret(process.env),

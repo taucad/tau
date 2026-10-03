@@ -867,6 +867,11 @@ jobs:
       - name: Run the git end-to-end tier (two API processes, one object store)
         run: pnpm nx run-many -t test:git
 
+      # The L2 fixture starts its own PostgreSQL with pull_policy "never", so
+      # the image must already be on the runner.
+      - name: Pull the billing foundation PostgreSQL image
+        run: docker pull postgres:17-alpine
+
       # L2 billing lane (every PR, zero Stripe credentials): the complete local
       # PostgreSQL/Redis foundation, including signed webhook settlement.
       - name: Run billing foundation (L2)

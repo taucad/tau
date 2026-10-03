@@ -188,7 +188,7 @@ describe('createServicesHost — machines', () => {
     try {
       const client = machines.connect();
       const providers = await client.listProviders({});
-      expect(providers.map((provider) => provider.id).sort()).toEqual(['bambu', 'bambu-simulator']);
+      expect(providers.map((provider) => provider.id).sort()).toEqual(['bambu', 'bambu-a1-mini', 'bambu-simulator']);
       expect(existsSync(join(machines.store, 'store.json'))).toBe(true);
 
       await expect(machines.completeCeremony('bind-unknown', 'no-such-ceremony', accessCode)).resolves.toEqual({
@@ -287,7 +287,7 @@ describe('createServicesHost — machines', () => {
       expect(machines.log).toHaveBeenCalledWith('machines.unavailable', { reason: 'owned-elsewhere' }, 'warn');
 
       /* The renderer dials again for its next call, and the store is free now. */
-      await expect(machines.connect().listProviders({})).resolves.toHaveLength(2);
+      await expect(machines.connect().listProviders({})).resolves.toHaveLength(3);
     } finally {
       await machines.cleanup();
     }

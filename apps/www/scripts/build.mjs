@@ -36,7 +36,12 @@ if (analyticsEndpoint && analyticsEndpoint !== '/api/marketing-events') {
 }
 const publicDirectory = join(root, 'public');
 const artifacts = await readdir(publicDirectory);
-for (const required of ['hero-gearbox.webp', 'hero-gearbox-720.webp', 'social.png', ...Array.from({ length: 9 }, (_, i) => `story-${i}.webp`)]) {
+for (const required of [
+  'hero-gearbox.webp',
+  'hero-gearbox-720.webp',
+  'social.png',
+  ...Array.from({ length: 9 }, (_, i) => `story-${i}.webp`),
+]) {
   if (!artifacts.includes(required)) {
     throw new Error(`Missing required public asset: ${required}`);
   }

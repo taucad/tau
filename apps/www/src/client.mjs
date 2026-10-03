@@ -192,7 +192,7 @@ const saveData =
 const storyStage = document.querySelector('[data-story-stage]');
 const heroStage = document.querySelector('[data-hero-stage]');
 const chapters = [...document.querySelectorAll('[data-story-chapter]')];
-const labels = chapters.map((chapter) => chapter.querySelector('.kicker')?.textContent?.trim() ?? '');
+const labels = chapters.map((chapter) => chapter.querySelector('.kicker')?.textContent.trim() ?? '');
 
 // Still frames follow the reading position whenever the live scene is not running.
 if (storyStage instanceof HTMLElement && chapters.length > 0) {
@@ -208,13 +208,25 @@ if (storyStage instanceof HTMLElement && chapters.length > 0) {
       poster.dataset['chapter'] = String(chapter);
       poster.src = `/_www/assets/story-${chapter}.webp`;
     }
-    if (chapter === shown) return;
+    if (chapter === shown) {
+      return;
+    }
     shown = chapter;
-    for (const [i, element] of chapters.entries()) element.classList.toggle('is-active', i === chapter);
+    for (const [i, element] of chapters.entries()) {
+      element.classList.toggle('is-active', i === chapter);
+    }
     storyStage.dataset['chapter'] = String(chapter);
-    if (count) count.textContent = `${labels[chapter]?.replace(/^(\d+)\s*/u, '$1 / 09 · ')}`;
+    if (count) {
+      count.textContent = `${labels[chapter]?.replace(/^(\d+)\s*/u, '$1 / 09 · ')}`;
+    }
   };
-  addEventListener('scroll', () => (pending ||= requestAnimationFrame(sync)), { passive: true });
+  addEventListener(
+    'scroll',
+    () => {
+      pending ||= requestAnimationFrame(sync);
+    },
+    { passive: true },
+  );
   addEventListener('www:still', sync);
   sync();
 }
@@ -223,27 +235,42 @@ const capable =
   'WebGL2RenderingContext' in globalThis && 'DecompressionStream' in globalThis && !saveData && !reduced.matches;
 /** @type {Promise<typeof import('#www/live.js')> | undefined} */
 let live;
-const startLive = () => {
-  live ??= import('#www/live.js');
-  return live
-    .then((module) => module.start({ heroStage, storyStage, chapters }))
-    .catch(() => {
-      for (const stage of [heroStage, storyStage]) {
-        if (stage instanceof HTMLElement) stage.dataset['fallback'] = 'true';
+const startLive = async () => {
+  try {
+    live ??= import('#www/live.js');
+    const module = await live;
+    await module.start({ heroStage, storyStage, chapters });
+  } catch {
+    for (const stage of [heroStage, storyStage]) {
+      if (stage instanceof HTMLElement) {
+        stage.dataset['fallback'] = 'true';
       }
-    });
+    }
+  }
 };
-if (capable && (heroStage || storyStage)) {
+if (capable && (heroStage ?? storyStage)) {
   // Desktop: upgrade the hero once the page has painted and gone idle, never before LCP.
   const idle = (/** @type {() => void} */ run) =>
     'requestIdleCallback' in globalThis ? requestIdleCallback(run, { timeout: 3000 }) : setTimeout(run, 1200);
   if (heroStage && matchMedia('(pointer: fine) and (min-width: 761px)').matches) {
-    const kick = () => idle(() => void startLive());
-    if (document.readyState === 'complete') kick();
-    else addEventListener('load', kick, { once: true });
+    const kick = () =>
+      idle(() => {
+        void startLive();
+      });
+    if (document.readyState === 'complete') {
+      kick();
+    } else {
+      addEventListener('load', kick, { once: true });
+    }
   }
   // Touch and narrow screens: load on intent at the hero, or when the story comes near.
-  heroStage?.addEventListener('pointerdown', () => void startLive(), { once: true, passive: true });
+  heroStage?.addEventListener(
+    'pointerdown',
+    () => {
+      void startLive();
+    },
+    { once: true, passive: true },
+  );
   if (storyStage) {
     const near = new IntersectionObserver(
       ([entry]) => {

@@ -19,14 +19,22 @@ const chapterCount = 9;
 const frames = async (page, selector) => Number((await page.locator(selector).getAttribute('data-frames')) ?? 0);
 /** @type {(page: import('playwright').Page, index: number, width: number) => Promise<void>} */
 const readChapter = async (page, index, width) => {
-  await page.locator('[data-story-chapter]').nth(index).evaluate(
-    (element, { width }) => {
-      if (!(element instanceof HTMLElement)) throw new Error('Chapter must be HTML');
-      const anchor = innerHeight * (width <= 760 ? 0.72 : 0.5);
-      scrollTo({ top: scrollY + element.getBoundingClientRect().top + element.offsetHeight * 0.4 - anchor, behavior: 'instant' });
-    },
-    { width },
-  );
+  await page
+    .locator('[data-story-chapter]')
+    .nth(index)
+    .evaluate(
+      (element, { width }) => {
+        if (!(element instanceof HTMLElement)) {
+          throw new Error('Chapter must be HTML');
+        }
+        const anchor = innerHeight * (width <= 760 ? 0.72 : 0.5);
+        scrollTo({
+          top: scrollY + element.getBoundingClientRect().top + element.offsetHeight * 0.4 - anchor,
+          behavior: 'instant',
+        });
+      },
+      { width },
+    );
   await page.waitForTimeout(250);
 };
 const evidence = [];
@@ -48,12 +56,19 @@ try {
       false,
       '3D must not load before the hero has painted',
     );
-    assert.equal(requests.some((url) => /marketing-events|posthog/u.test(url)), false);
+    assert.equal(
+      requests.some((url) => /marketing-events|posthog/u.test(url)),
+      false,
+    );
     const hero = page.locator('[data-hero-stage]');
     let heroTurns = false;
     if (width > 760) {
       // Desktop upgrades the hero after load and idle; the poster remains until a frame exists.
-      await page.waitForFunction(() => document.querySelector('[data-hero-stage]')?.classList.contains('is-live'), undefined, { timeout: 30_000 });
+      await page.waitForFunction(
+        () => document.querySelector('[data-hero-stage]')?.classList.contains('is-live'),
+        undefined,
+        { timeout: 30_000 },
+      );
       const slider = page.getByRole('slider', { name: 'Turn the input' });
       await page.waitForTimeout(1600);
       const settled = await frames(page, '[data-hero-stage]');
@@ -79,13 +94,21 @@ try {
       async (index) => {
         await readChapter(page, index, width);
         if (index === 0) {
-          await page.waitForFunction(() => document.querySelector('[data-story-stage]')?.classList.contains('is-live'), undefined, { timeout: 30_000 });
+          await page.waitForFunction(
+            () => document.querySelector('[data-story-stage]')?.classList.contains('is-live'),
+            undefined,
+            { timeout: 30_000 },
+          );
         }
         assert.equal(await stage.getAttribute('data-chapter'), String(index));
         assert.equal(await page.locator('[data-story-stage] canvas').count(), 1, 'One shared canvas in the story');
         assert.equal(await page.locator('canvas').count(), 1, 'Exactly one WebGL canvas on the page');
         const audit = await new AxeBuilder({ page }).withTags(['wcag2a', 'wcag2aa', 'wcag21aa', 'wcag22aa']).analyze();
-        assert.deepEqual(audit.violations.map((v) => v.id), [], `chapter ${index}`);
+        assert.deepEqual(
+          audit.violations.map((v) => v.id),
+          [],
+          `chapter ${index}`,
+        );
         await page.screenshot({ path: join(output, `${width}-chapter-${index}.png`) });
       },
     );
@@ -102,7 +125,9 @@ try {
     await page.mouse.wheel(0, 120);
     await page.waitForTimeout(250);
     assert.ok((await frames(page, '[data-story-stage]')) > paused, 'Live view resumes');
-    await page.evaluate(() => scrollTo({ top: document.body.scrollHeight, behavior: 'instant' }));
+    await page.evaluate(() => {
+      scrollTo({ top: document.body.scrollHeight, behavior: 'instant' });
+    });
     await page.waitForTimeout(250);
     const offscreen = await frames(page, '[data-story-stage]');
     await page.mouse.wheel(0, -200);
@@ -125,7 +150,16 @@ try {
     assert.equal(await page.locator('canvas').count(), 0, 'Reduced motion disposes the renderer');
     assert.equal(await page.locator('[data-story-poster]').isVisible(), true);
     assert.deepEqual(errors, []);
-    evidence.push({ width, chapters: chapterCount, heroTurns, idleFrames: 0, stillToggle: true, offscreenFrames: 0, reducedMotionDisposal: true, errors });
+    evidence.push({
+      width,
+      chapters: chapterCount,
+      heroTurns,
+      idleFrames: 0,
+      stillToggle: true,
+      offscreenFrames: 0,
+      reducedMotionDisposal: true,
+      errors,
+    });
     await context.close();
   });
 
@@ -137,7 +171,10 @@ try {
   rp.on('request', (r) => reducedRequests.push(r.url()));
   await rp.goto(origin);
   await readChapter(rp, 6, 1280);
-  assert.equal(reducedRequests.some((url) => /live\.|planetary/u.test(url)), false);
+  assert.equal(
+    reducedRequests.some((url) => /live\.|planetary/u.test(url)),
+    false,
+  );
   assert.match((await rp.locator('[data-story-poster]').getAttribute('src')) ?? '', /story-6\.webp$/u);
   assert.equal(await rp.locator('[data-story-chapter]').count(), chapterCount);
   await reduced.close();
@@ -151,7 +188,10 @@ try {
   np.on('request', (r) => noGlRequests.push(r.url()));
   await np.goto(origin);
   await readChapter(np, 7, 1280);
-  assert.equal(noGlRequests.some((url) => /live\.|planetary/u.test(url)), false);
+  assert.equal(
+    noGlRequests.some((url) => /live\.|planetary/u.test(url)),
+    false,
+  );
   assert.match((await np.locator('[data-story-poster]').getAttribute('src')) ?? '', /story-7\.webp$/u);
   await np.screenshot({ path: join(output, 'no-webgl-chapter-7.png') });
   await noGl.close();
@@ -172,11 +212,19 @@ try {
   const lp = await loss.newPage();
   await lp.goto(origin);
   await lp.locator('[data-story-stage]').scrollIntoViewIfNeeded();
-  await lp.waitForFunction(() => document.querySelector('[data-story-stage]')?.classList.contains('is-live') === true, undefined, { timeout: 30_000 });
+  await lp.waitForFunction(
+    () => document.querySelector('[data-story-stage]')?.classList.contains('is-live') === true,
+    undefined,
+    { timeout: 30_000 },
+  );
   await lp.locator('canvas').evaluate((canvas) => {
-    if (!(canvas instanceof HTMLCanvasElement)) throw new Error('Expected canvas');
+    if (!(canvas instanceof HTMLCanvasElement)) {
+      throw new Error('Expected canvas');
+    }
     const extension = canvas.getContext('webgl2')?.getExtension('WEBGL_lose_context');
-    if (!extension) throw new Error('Context loss extension required by this check');
+    if (!extension) {
+      throw new Error('Context loss extension required by this check');
+    }
     extension.loseContext();
   });
   await lp.waitForTimeout(250);
@@ -188,8 +236,10 @@ try {
   const leavingPage = await leaving.newPage();
   /** @type {(() => void) | undefined} */
   let releaseResponse;
-  const responseGate = new Promise((done) => {
-    releaseResponse = () => done(undefined);
+  const responseGate = new Promise((resolve) => {
+    releaseResponse = () => {
+      resolve(undefined);
+    };
   });
   await leavingPage.route('**/planetary.bin.gz', async (route) => {
     const response = await route.fetch();
@@ -222,7 +272,9 @@ try {
       2,
     ),
   );
-  console.log('PASS: hero drag/keyboard, 18 live chapters, idle/offscreen/hidden gates, stills, reduced motion, no-WebGL, network, context loss and page exit.');
+  console.log(
+    'PASS: hero drag/keyboard, 18 live chapters, idle/offscreen/hidden gates, stills, reduced motion, no-WebGL, network, context loss and page exit.',
+  );
 } finally {
   await browser.close();
 }

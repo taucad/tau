@@ -215,6 +215,7 @@ const extensionInfo = (options: { manifest: Manifest; point: string; principal: 
 
 const hostInfo = (manifest: Manifest): string =>
   plist({
+    NSMicrophoneUsageDescription: 'Tau uses your microphone to dictate messages when you start dictation.',
     CFBundleDocumentTypes: manifest.formats.map((format) => ({
       CFBundleTypeName: format.description,
       CFBundleTypeRole: 'Viewer',

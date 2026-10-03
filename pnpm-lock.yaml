@@ -4485,6 +4485,9 @@ importers:
       minicssgrid:
         specifier: 'catalog:'
         version: 0.0.9(typescript@5.9.3)
+      nanoid:
+        specifier: 'catalog:'
+        version: 5.1.14
       react:
         specifier: 'catalog:'
         version: 19.2.7
@@ -21880,6 +21883,7 @@ packages:
   nanoid@5.1.14:
     resolution: {integrity: sha512-5c8l8kVzqpnDPaicbEop/fV0Q1w16FmbWtVhMqugTozAwYdlIQojWH5a/M7UfziFmGdQRrUdV+EPzc9Xng3VAQ==}
     engines: {node: ^18 || >=20}
+    hasBin: true
 
   nanoraster-android-arm-eabi@0.5.7:
     resolution: {integrity: sha512-YJZYAPgQCplnm1tY5WWrnfS1w7/UBrQyHCe9/z8gK3kipxk1CalO/xWhQGXUtCDudyNzuzASeLjFOEFOQVlxEA==}

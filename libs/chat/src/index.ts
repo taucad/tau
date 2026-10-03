@@ -20,6 +20,8 @@ export * from '#schemas/tools/revisions.tool.schema.js';
 export * from '#schemas/tools/update-todos.tool.schema.js';
 export * from '#schemas/tools/print.tool.schema.js';
 export * from '#schemas/todo-list.schema.js';
+export * from '#schemas/tools/ask-questions.tool.schema.js';
+export * from '#schemas/questions.schema.js';
 export * from '#schemas/agent-config.schema.js';
 export * from '#schemas/chat-record.schema.js';
 export * from '#schemas/chat-turn-request.schema.js';

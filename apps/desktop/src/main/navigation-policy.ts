@@ -185,8 +185,11 @@ export const contentSecurityPolicy = (connectOrigins: readonly string[]): string
  * still requires a user gesture and owns Escape to exit. This does not grant
  * `automatic-fullscreen`, pointer lock or keyboard lock.
  *
- * Everything else (camera, microphone, geolocation, notifications, clipboard
- * read, background sync, …) is refused: nothing in the app asks for one, so a
+ * Microphone access is narrower and lives in
+ * {@link isMicrophonePermissionGranted}: composer dictation asks for audio only.
+ *
+ * Everything else (camera, geolocation, notifications, clipboard read,
+ * background sync, …) is refused: nothing in the app asks for one, so a
  * request is either a dependency doing something unexpected or a document that
  * should not have loaded.
  */
@@ -203,3 +206,26 @@ export const grantedPermissions: ReadonlySet<string> = new Set([
  * @returns True only for {@link grantedPermissions}.
  */
 export const isPermissionGranted = (permission: string): boolean => grantedPermissions.has(permission);
+
+/**
+ * Whether a `media` request is composer dictation: audio only, from the trusted
+ * top-level renderer. Camera and screen capture stay refused.
+ *
+ * @param request - Electron's permission details, normalized across the request and check handlers.
+ * @returns True only for an audio-only request from a renderer origin.
+ */
+export const isMicrophonePermissionGranted = (request: {
+  readonly permission: string;
+  readonly frame?: SenderFrame | undefined;
+  readonly requester?: string | undefined;
+  readonly mainFrame: boolean;
+  readonly mediaTypes: readonly string[];
+  readonly origins: readonly string[];
+}): boolean =>
+  request.permission === 'media' &&
+  request.mainFrame &&
+  request.mediaTypes.length === 1 &&
+  request.mediaTypes[0] === 'audio' &&
+  request.requester !== undefined &&
+  isRendererUrl(request.requester, request.origins) &&
+  isTrustedSender(request.frame, request.origins);

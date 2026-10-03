@@ -122,6 +122,7 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.webBrowser,
       toolName.revisions,
       toolName.updateTodos,
+      toolName.askQuestions,
       toolName.getMachine,
       toolName.getPrintProfiles,
       toolName.requestPrint,

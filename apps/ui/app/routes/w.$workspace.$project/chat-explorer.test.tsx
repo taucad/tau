@@ -1,4 +1,5 @@
 // @vitest-environment jsdom
+import type * as PartGalleryModule from '#components/geometry/cad/part-gallery.js';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
@@ -25,6 +26,12 @@ const mocks = vi.hoisted(() => ({
   useProject: vi.fn(),
   imageService: undefined as undefined | { export: ReturnType<typeof vi.fn> },
   paneBodyVisible: true,
+  openPartGallery: undefined as undefined | ReturnType<typeof vi.fn>,
+}));
+
+vi.mock('#components/geometry/cad/part-gallery.js', async (importOriginal) => ({
+  ...(await importOriginal<typeof PartGalleryModule>()),
+  useOpenPartGallery: () => mocks.openPartGallery,
 }));
 const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, 'createObjectURL');
 const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, 'revokeObjectURL');
@@ -1108,6 +1115,54 @@ describe('Chat explorer component rows', () => {
     expect(row).toHaveClass('text-sm');
     expect(row).toHaveClass('leading-5');
     expect(row).toHaveStyle({ paddingLeft: '8px' });
+  });
+
+  it('leads a renderable part row with an 80 px preview that opens the gallery', async () => {
+    mocks.openPartGallery = vi.fn();
+    Object.defineProperty(URL, 'createObjectURL', { configurable: true, value: vi.fn(() => 'blob:housing') });
+    Object.defineProperty(URL, 'revokeObjectURL', { configurable: true, value: vi.fn() });
+    const node = {
+      ...createNode(firstComponentId, 'planetary_housing'),
+      primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+    };
+    const graphicsRef = mock<ActorRefFrom<typeof graphicsMachine>>();
+    renderComponentRow({
+      manifest: createManifest([node]),
+      node,
+      graphicsRef,
+      unitId: internalUnitId,
+      rootDepth: 0,
+      hoveredComponentId: undefined,
+      isSelected: false,
+      isHidden: false,
+      isIsolated: false,
+      isFocused: false,
+      opacity: 1,
+      preview: { status: 'pending', bytes: new Uint8Array([1]) },
+    });
+
+    const preview = screen.getByRole('button', { name: 'Preview planetary_housing' });
+    const row = preview.parentElement;
+    expect(row).toHaveClass('h-22');
+    expect(preview).toHaveClass('size-20', 'rounded-xs');
+    expect(preview).toHaveAttribute('tabindex', '-1');
+    // A refreshing preview keeps its last image, dimmed.
+    expect(preview.querySelector('img')).toHaveClass('opacity-50');
+    // The frame is a sibling of the selection button, never nested in it.
+    expect(screen.getByRole('button', { name: 'planetary_housing' }).querySelector('button')).toBeNull();
+
+    await userEvent.setup().click(preview);
+    expect(mocks.openPartGallery).toHaveBeenCalledWith({
+      graphicsRef,
+      unitId: internalUnitId,
+      componentId: firstComponentId,
+      source: 'explorer',
+      origin: preview,
+    });
+    expect(graphicsRef.send).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'toggleModelComponentSelection' }),
+    );
+    mocks.openPartGallery = undefined;
   });
 
   it('should toggle selection from the label row instead of adding the part to chat', async () => {

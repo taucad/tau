@@ -575,7 +575,9 @@ jobs:
         with:
           github_token: ${{ secrets.GITHUB_TOKEN }}
           build_script: 'size:build'
-          script: cd node_modules/.cache/size-limit && ../../.bin/size-limit --json
+          # The action runs `script` without a shell, so the `cd` lives in the package script.
+          # `--silent` keeps pnpm's banner out of the JSON the action parses.
+          script: pnpm --silent size:check --json
           package_manager: pnpm
 
       - name: Check workspace root hygiene

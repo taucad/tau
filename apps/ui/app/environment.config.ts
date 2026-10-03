@@ -98,6 +98,10 @@ const environmentSchema = z.preprocess(
       .default('us-assets.i.posthog.com')
       .describe('PostHog asset host for the PostHog client.'),
     POSTHOG_CLIENT_KEY: z.string().optional().describe('PostHog client key. Set to enable analytics.'),
+
+    // Sentry error reporting (launch gate OBS-7). Written to the Netlify site by tau-cloud; a DSN is public by design.
+    SENTRY_DSN: z.string().optional().describe('Sentry DSN for browser error reporting. Set to enable it.'),
+    SENTRY_ENVIRONMENT: z.string().optional().describe('Sentry environment name, such as staging or production.'),
     /* eslint-enable @typescript-eslint/naming-convention -- environment variables are not camelCase */
   }),
 );
@@ -136,6 +140,8 @@ const baseClientEnvironmentKeys = [
   'POSTHOG_UI_HOST',
   'POSTHOG_ASSET_HOST',
   'POSTHOG_CLIENT_KEY',
+  'SENTRY_DSN',
+  'SENTRY_ENVIRONMENT',
 ] as const satisfies ReadonlyArray<keyof Environment>;
 const clientEnvironmentKeys = [...baseClientEnvironmentKeys, ...cloudClientEnvironmentKeys] as const;
 

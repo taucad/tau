@@ -40,8 +40,8 @@
     },
     {
       "path": "apps/www/public/social.png",
-      "bytes": 131537,
-      "sha256": "f4962e5456c08ab0519aed4943246fdde40b7e0cbcb1c37d84bc363daebda92d"
+      "bytes": 146080,
+      "sha256": "cd88ce6c4f0deba46e27eb42a1f772807035d87852a474b722357c0bd24818be"
     }
   ],
   "metalHero": {
@@ -67,58 +67,58 @@
   "liveViews": [
     {
       "path": "apps/www/public/hero-gearbox.webp",
-      "bytes": 33596,
-      "sha256": "735bb7a5fd29a6d2f0f3af8a18c485cfc0a9a7ff05f95bf683b94701ea635cf4"
+      "bytes": 88854,
+      "sha256": "2cc3fb6a35e1d52e4aa9abaaaa7442a4c33fac58990c062c893c5fa6b679e9ee"
     },
     {
       "path": "apps/www/public/hero-gearbox-720.webp",
-      "bytes": 35804,
-      "sha256": "bf37b5ee72c16932a218272aefe1372bd7cefcf2f9e0c0dc53ec22a19eb498f5"
+      "bytes": 53210,
+      "sha256": "826939304ce339a4193e3560b053f56e8027318ecef69265fc56920d61a32ee2"
     },
     {
       "path": "apps/www/public/story-0.webp",
       "bytes": 1952,
-      "sha256": "a5840d087b04af315519da1b29159a12f356d4ee09abfb6e3e0eb8e647bbe736"
+      "sha256": "ccd1b54012fed2798a0c967a6b9b6787676c2d0d8f2ee83899e3703867d92f5f"
     },
     {
       "path": "apps/www/public/story-1.webp",
       "bytes": 1952,
-      "sha256": "a5840d087b04af315519da1b29159a12f356d4ee09abfb6e3e0eb8e647bbe736"
+      "sha256": "ccd1b54012fed2798a0c967a6b9b6787676c2d0d8f2ee83899e3703867d92f5f"
     },
     {
       "path": "apps/www/public/story-2.webp",
-      "bytes": 31722,
-      "sha256": "436be09f59e4e184279c26e7f23cf289b8ae6645fffe1f50e75d106f542d5728"
+      "bytes": 34558,
+      "sha256": "0a820ccbc619b4e585301cfbb263438563c0d27de2f65155f810b3f647eb7254"
     },
     {
       "path": "apps/www/public/story-3.webp",
-      "bytes": 16816,
-      "sha256": "422230cf34c52e8372581f2fcddd97341710e88d275b7d086ffc5d562308fb13"
+      "bytes": 23594,
+      "sha256": "a6f7cd10201f74b6a7d24ab2987ec7401bbe7eff533e6ab8b609269b102e68ac"
     },
     {
       "path": "apps/www/public/story-4.webp",
-      "bytes": 19680,
-      "sha256": "e3ca937eb5ae8f65617f5b865c8483ddf277c59735e9abcf4d3b103aa7eb51e1"
+      "bytes": 55082,
+      "sha256": "30265eb200757d3e2cc7f65eefbc571c8245a425cc0111893b1b41cb6f4977f8"
     },
     {
       "path": "apps/www/public/story-5.webp",
-      "bytes": 22402,
-      "sha256": "82a4a8ebbf77dda2e701c975cc04e7f60ea6392c93b025682d0be077d4d23383"
+      "bytes": 69882,
+      "sha256": "d34d4a85ad9cbe1910f8b418d898d21b1370094b07bb625d2df8f93081d4e558"
     },
     {
       "path": "apps/www/public/story-6.webp",
-      "bytes": 24788,
-      "sha256": "23a78ac1319a2d85a983a462263d6745ff6625b5ac6d62337615b087bf974bf1"
+      "bytes": 73082,
+      "sha256": "ef46da38d73f8d0256beaa1169b0b515ad2987be5e6a2867ecbc45da63a52239"
     },
     {
       "path": "apps/www/public/story-7.webp",
-      "bytes": 45244,
-      "sha256": "a41f7bed130b480309a0090009ca904c2c18a24f9641986436eae61888b41f7b"
+      "bytes": 47946,
+      "sha256": "e50969c939d81e4eb2699666beb13f6432e9a316f08fec1093b025e7d86af080"
     },
     {
       "path": "apps/www/public/story-8.webp",
-      "bytes": 11560,
-      "sha256": "8277a5f3819c662dac7bc4a3641df1548ce47431772f8158448258dc7188b330"
+      "bytes": 16208,
+      "sha256": "d6481c2280209039c55217bda54aad86319de714668874f07288ecfd713c431c"
     }
   ],
   "variantGeometry": [

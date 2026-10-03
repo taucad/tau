@@ -1,7 +1,7 @@
 import * as Sentry from '@sentry/react';
 import type { Breadcrumb, ErrorEvent } from '@sentry/react';
 import { ENV } from '#environment.config.js';
-import { redactInvitationTokens } from '#lib/posthog.lib.js';
+import { redactInvitationTokens } from '#lib/invitation-token.lib.js';
 
 /**
  * Remove the query string and fragment, then any invitation token, from a URL.

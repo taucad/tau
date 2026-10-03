@@ -4,9 +4,8 @@ import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { defaultFilamentSlots, machineSliceOptions } from '@taucad/agent-tools/registry';
-import type { RJSFSchema } from '@rjsf/utils';
 import { Check, Eye, LoaderCircle, Scissors, Send } from 'lucide-react';
-import type { JSONSchema7 } from '@taucad/json-schema';
+import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import type {
   MachineArtifactReference,
@@ -1726,7 +1725,7 @@ function BambuStudioSettings({
       <Parameters
         parameters={parameters}
         defaultParameters={shown.form.resolved.defaults}
-        jsonSchema={shown.form.resolved.schema as RJSFSchema}
+        jsonSchema={shown.form.resolved.schema}
         searchPlaceholder='Filter settings'
         filterTerm={filterTerm}
         enableSearch={false}
@@ -1863,22 +1862,23 @@ export function PrepareSection({
     : undefined;
   const optionsManifest = useCompiledConfigurationManifest(providerKey, 'print/options', optionsSchema);
   const submissionManifest = useCompiledConfigurationManifest(provider?.id, 'print/submission', submissionSchema);
-  const advancedSubmissionSchema = useMemo<RJSFSchema | undefined>(() => {
+  /* The submission schema without the fields Prepare sets itself; the observed diameters are read-only. */
+  const advancedSubmissionSchema = useMemo<JSONSchema7 | undefined>(() => {
     if (!submissionSchema) {
       return undefined;
     }
-    const schema = submissionSchema.schema as RJSFSchema;
+    const { schema } = submissionSchema;
+    const properties = Object.entries(schema.properties ?? {})
+      .filter(([key]) => !prepareSubmissionFields.has(key))
+      .map(([key, field]): [string, JSONSchema7Definition] => [
+        key,
+        observedDiameterFields.has(key) && typeof field === 'object' ? { ...field, readOnly: true } : field,
+      ]);
+    const required = schema.required?.filter((key) => !prepareSubmissionFields.has(key));
     return {
       ...schema,
-      properties: Object.fromEntries(
-        Object.entries(schema.properties ?? {})
-          .filter(([key]) => !prepareSubmissionFields.has(key))
-          .map(([key, field]) => [
-            key,
-            observedDiameterFields.has(key) && typeof field === 'object' ? { ...field, readOnly: true } : field,
-          ]),
-      ),
-      required: schema.required?.filter((key) => !prepareSubmissionFields.has(key)),
+      properties: Object.fromEntries(properties),
+      ...(required === undefined ? {} : { required }),
     };
   }, [submissionSchema]);
   const { choosePreset } = studio;
@@ -1998,7 +1998,7 @@ export function PrepareSection({
                 <Parameters
                   parameters={options}
                   defaultParameters={optionsSchema.defaults}
-                  jsonSchema={optionsSchema.schema as RJSFSchema}
+                  jsonSchema={optionsSchema.schema}
                   onParametersChange={setOptions}
                   enableSearch={false}
                   filterTerm={moreSettingsFilter}

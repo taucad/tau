@@ -28,11 +28,10 @@ npx vitest run --root apps/ui app/hooks/rpc-handlers.test.ts -t 'preserves both 
 
 Recorded Tier-L fixtures must use `source.kind: 'recorded'` and `argumentsVerbatim: true`. Authored deterministic seeds name the checked-in source from which their starting bytes were copied. The suite compares those authored snapshots with the source files byte-for-byte, so corpus drift fails instead of silently changing the benchmark.
 
-The current store has 20 fixtures:
+The current store has 15 fixtures:
 
 | Case                                   | Fixtures |
 | -------------------------------------- | -------: |
-| Legacy portable qualification rows     |        5 |
 | Unique match                           |        1 |
 | Context widening                       |        1 |
 | Ambiguous match/no write               |        1 |
@@ -51,11 +50,11 @@ The current store has 20 fixtures:
 
 The wrong-but-valid probe is a schema-valid `edit_file` call that commits exact bytes and introduces a TypeScript syntax error. The in-process TypeScript parser classifies it as `WRONG_BUT_VALID`. The SCAD/KCL fixtures assert edit bytes only; they do not claim kernel compilation evidence.
 
-## Legacy evidence limits
+## Fixture provenance
 
-The stash JSONL contains 35 aggregate qualification rows but deliberately omits file bytes and tool-call arguments. Of those rows, only the five xAI/Grok `edit_file` rows used the exact portable field names of the one-format contract. They are represented as `qualification-derived` seeds with `argumentsVerbatim: false`; their arguments reconstruct the common qualification task and are **not** live-emission evidence. The Anthropic/Kimi rows used different native field names, and the 20 OpenAI rows used `apply_patch`, so neither maps verbatim to this contract.
+Every stored fixture is authored from a named Tau source. The five rebuilt xAI/Grok qualification seeds were dropped on 2026-10-03 because their source evidence (an untracked spike JSONL) was lost; recorded emissions arrive with Tier L.
 
-The current `libs/tau-examples` tree contains the real OpenSCAD main but no `.kcl` file. The KCL case therefore freezes Tau's checked-in `zoo.prompt.example.kcl` and names that path explicitly. Tier L should replace this fallback with a recorded corpus KCL emission when the corpus contains one.
+The current `libs/tau-examples` tree contains the real OpenSCAD main but no `.kcl` file. The KCL case therefore freezes the bench's own tracked `kcl-teapot.fixture.kcl` and names that path explicitly. Tier L should replace this fallback with a recorded corpus KCL emission when the corpus contains one.
 
 ## Tier L append workflow
 

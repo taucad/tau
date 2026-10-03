@@ -31,10 +31,12 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
+import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses';
+
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { parseMacosPackageMode } from './macos-package-mode.mjs';
+import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
@@ -492,6 +494,19 @@ for (const path of filesUnder(appPath)) {
     throw new Error(`${path} is not arm64-only: ${architectures.join(', ')}`);
   }
   arm64MachObjectCount += 1;
+}
+
+/* A package with Electron's default fuses is a general-purpose Node runtime that
+ * honours NODE_OPTIONS and loads an unchecked ASAR (security assessment F-3). */
+const fuseWire = await getCurrentFuseWire(appPath);
+for (const [fuse, enabled] of Object.entries(macosPackageFuses({ release }))) {
+  const option = Number(fuse) as FuseV1Options;
+  const expected = enabled ? FuseState.ENABLE : FuseState.DISABLE;
+  if (fuseWire[option] !== expected) {
+    throw new Error(
+      `Electron fuse ${FuseV1Options[option]} is ${String(fuseWire[option])}, expected ${String(expected)}.`,
+    );
+  }
 }
 
 verifyPythonResource('arm64');

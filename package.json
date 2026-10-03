@@ -34,6 +34,7 @@
     "db:drop": "nx run api:db-drop",
     "update-license-deps": "node --import tsx scripts/src/update-license-deps.mts",
     "license-deps:validate": "nx run scripts:validate-license-deps",
+    "update-open-source-notices": "node --import tsx scripts/src/update-open-source-notices.mts",
     "registry:check": "nx run scripts:check-registry-dependencies",
     "runtime:npm-local-smoke": "nx run runtime:npm-local-smoke",
     "pkgcheck": "nx run-many -t pkgcheck",

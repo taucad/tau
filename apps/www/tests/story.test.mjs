@@ -111,6 +111,7 @@ await test('should validate the authored faceWidth variant against the base mesh
 
 await test('should assemble from the rear carrier to the screws and keep the ring fixed', async () => {
   const { assemblyStep, storyFrame, storyPart } = await import('#www/story-timeline.js');
+  const { partPose } = await import('#www/story-kinematics.js');
   const manifest = /** @type {{meshes: Array<{name: string}>}} */ (
     JSON.parse(await readFile(new URL('../public/planetary.json', import.meta.url), 'utf8'))
   );
@@ -119,6 +120,20 @@ await test('should assemble from the rear carrier to the screws and keep the rin
   assert.ok(assemblyStep('Planet Pin 1') < assemblyStep('Planet Gear 1'));
   assert.ok(assemblyStep('Planet Gear 1') < assemblyStep('Carrier Front And Output Hub'));
   assert.ok(assemblyStep('Carrier Front And Output Hub') < assemblyStep('Front Socket Screw 1'));
+  // Parts enter along the axis only: once gathered over the build point nothing moves sideways,
+  // and each later step waits above (or, for the rear screws, below) everything before it.
+  const gathered = storyFrame(3.99);
+  const states = names.map((name, index) => ({ name, ...storyPart({ name, index }, 3.99, gathered) }));
+  for (const state of states) {
+    const pose = partPose(state.name, 0);
+    assert.ok(Math.hypot(state.x - pose.x, state.y - pose.y) < 1e-6, `${state.name} is over its seat`);
+  }
+  const lift = (/** @type {string} */ name) => states.find((state) => state.name === name)?.z ?? Number.NaN;
+  assert.ok(lift('Planet Pin 1') > lift('Rear Thrust Spacer 1'));
+  assert.ok(lift('Sun Gear And Input Shaft') > lift('Planet Gear 1'));
+  assert.ok(lift('Internal Ring Gear') > lift('Sun Gear And Input Shaft'));
+  assert.ok(lift('Front Socket Screw 1') > lift('Carrier Front And Output Hub'));
+  assert.ok(lift('Rear Socket Screw 1') < lift('Rear Screw Washer 1') && lift('Rear Screw Washer 1') < 0);
   for (const p of [4.99, 5.5, 6.5]) {
     const frame = storyFrame(p);
     for (const [index, name] of names.entries()) {

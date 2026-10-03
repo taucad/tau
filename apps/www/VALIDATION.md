@@ -1,5 +1,19 @@
 # Marketing preview validation
 
+## Hero copy and axial assembly — 2026-10-03
+
+Hero reads “Design Verify Print.” under an “AI-native CAD” kicker; the fine print under the hero and the closing band was removed, and the copy stays centred in the hero at 1440, 1840 and 390 px. The assembly now follows the gearbox axis: spacers, pins, washers, bushed planets, sun, front spacers, ring, front carrier and front screws enter from above in that order, and the rear screws come up from below. The exploded stack is laid out from each part's measured axial extent with a 6 mm gap, the lanes gather fully before anything seats, and the camera drops slightly so the stack reads as a column, and holds it until the front screws seat.
+
+| Check               | Result                                                                                                                  |
+| ------------------- | ----------------------------------------------------------------------------------------------------------------------- |
+| Unit tests          | 13 pass; the assembly test now also checks that gathered parts sit over their seats and wait in build order             |
+| Build               | 13 pages                                                                                                                |
+| `browser-check.mjs` | 52 route/viewport/theme audits pass                                                                                     |
+| `check-story.mjs`   | Passes with four waits lengthened for software GL; unmodified it fails the same hero-idle assertion as on the base here |
+| Lint and format     | Oxlint, ESLint and oxfmt clean on the changed files                                                                     |
+
+Story stills 2–4 and the social card are regenerated; the other stills reproduce byte for byte. Not run: GPU or real-device frame timing, Lighthouse, Firefox and Safari.
+
 ## Hero polish — 2026-10-03
 
 Branch `claude/marketing-hero-polish-kb4ruy` from `26b93cbdd` on `feature/marketing-www-design-verify-print`. The headline reads “Design, Verify, Print.” (title, footer and social card too); the studio is rebuilt for brighter, truer colour under PBR Neutral tone mapping, with a soft floor shadow; the floor drawing is projected with the hero camera, so the dial, input arc and Ø 174 mm dimension register with the gearbox. Run in a cloud container without a GPU: Node 22.22.0, Playwright 1.62.1 Chromium with SwiftShader software WebGL. Poster and stills were captured from the shipped `scene.mjs` with the recipe’s encoder settings and a temporary SwiftShader launch override.

@@ -10,5 +10,6 @@ export const projectTagVocabulary = {
   type: ['app', 'app-lib', 'lib', 'package', 'tool', 'example', 'e2e'],
   scope: ['shared', 'api', 'ui', 'example'],
   host: ['darwin-arm64'],
+  release: ['app'],
   layer: ['feature', 'ui', 'data-access', 'util'],
 } as const;

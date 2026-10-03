@@ -112,8 +112,17 @@ describe('packagedEsbuildEnvironment', () => {
     expect(packagedEsbuildEnvironment(false, '/unused', { architecture: 'arm64', platform: 'darwin' })).toEqual({});
   });
 
+  it('should point packaged Linux and Windows utilities at their staged executables', () => {
+    expect(packagedEsbuildEnvironment(true, '/opt/Tau/resources', { architecture: 'x64', platform: 'linux' })).toEqual({
+      ESBUILD_BINARY_PATH: '/opt/Tau/resources/app.asar.unpacked/node_modules/@esbuild/linux-x64/bin/esbuild',
+    });
+    expect(packagedEsbuildEnvironment(true, 'C:/Tau/resources', { architecture: 'x64', platform: 'win32' })).toEqual({
+      ESBUILD_BINARY_PATH: join('C:/Tau/resources', 'app.asar.unpacked/node_modules', '@esbuild/win32-x64/esbuild.exe'),
+    });
+  });
+
   it('should preserve normal resolution on packaged targets without a qualified staged executable', () => {
-    expect(packagedEsbuildEnvironment(true, '/unused', { architecture: 'x64', platform: 'win32' })).toEqual({});
+    expect(packagedEsbuildEnvironment(true, '/unused', { architecture: 'arm64', platform: 'linux' })).toEqual({});
   });
 });
 

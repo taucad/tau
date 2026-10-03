@@ -155,6 +155,7 @@ const dialog = {
 
 vi.mock('electron', () => ({
   app,
+  autoUpdater: { setFeedURL: vi.fn(), checkForUpdates: vi.fn(), quitAndInstall: vi.fn(), on: vi.fn() },
   BrowserWindow: Object.assign(
     vi.fn(function BrowserWindow() {
       return fakeWindow;

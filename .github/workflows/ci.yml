@@ -1038,10 +1038,9 @@ jobs:
           retention-days: 7
 
   # Staging deployments — deploy after builds pass so the Nx Cloud cache is populated.
-  # The staging UI is hosted on Netlify (`taucad` site, custom domain `taucad.dev`)
-  # and rebuilt automatically by the Netlify GitHub integration on every push to
-  # `main` (production context) and on every PR (deploy-preview context); only
-  # the API ships to Fly here (`tau-api-staging`).
+  # The API ships to Fly here (`tau-api-staging`); the UI is built here and published
+  # to Netlify (`taucad` site, `taucad.dev`) by `deploy-ui-staging` below. Netlify
+  # no longer builds from Git and there are no PR deploy previews.
   # `api` is in `needs` because the API's own suites left the `affected` lane: since
   # the git storage substrate landed, `test` for `tag:scope:api` — the repository
   # store, the commit protocol, the git transport, the lifecycle jobs and the git
@@ -1060,4 +1059,27 @@ jobs:
     with:
       environment: staging
       app: api
+    secrets: inherit
+
+  # The staging UI: built in Actions with this run's GeoSpec products (Netlify
+  # cannot produce them), from the producer's artifact or, when the native source
+  # matched an earlier build, from the products cache, and published by the Netlify CLI. It waits for the same
+  # gates as a merge plus the browser suites when they ran.
+  deploy-ui-staging:
+    name: Deploy UI (Staging)
+    needs: [workspace, affected, plan, geospec-producer, e2e]
+    if: >-
+      !cancelled() && github.ref == 'refs/heads/main' && github.event_name == 'push' &&
+      contains(fromJSON(needs.plan.outputs.apps), 'ui') &&
+      needs.workspace.result == 'success' && needs.affected.result == 'success' &&
+      (needs.geospec-producer.result == 'success' || needs.plan.outputs.geospec-cached == 'true') &&
+      (needs.e2e.result == 'success' || needs.e2e.result == 'skipped')
+    permissions:
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy-ui.yml
+    with:
+      environment: staging
+      transport: ${{ needs.plan.outputs.geospec-cached == 'true' && 'cache' || 'this-run' }}
+      geospec-key: ${{ needs.plan.outputs.geospec-key }}
     secrets: inherit

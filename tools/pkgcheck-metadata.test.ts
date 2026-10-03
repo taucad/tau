@@ -93,7 +93,7 @@ describe('pkgcheck metadata', () => {
     const issues = packageMetadataIssues(
       {
         exports: { '.': './src/index.ts', './node': './src/node.ts' },
-        files: ['dist', 'README.md'],
+        files: ['dist', 'README.md', '!dist/**/*.node'],
         publishConfig: { exports: { '.': './dist/index.mjs' } },
       },
       (path) => path === 'dist',

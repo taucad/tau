@@ -100,7 +100,8 @@ export const packageMetadataIssues = (
 
   if (Array.isArray(packageJson.files)) {
     for (const path of packageJson.files) {
-      if (typeof path !== 'string' || pathExists(path)) {
+      // A `!` entry excludes from the packed set rather than naming a path to pack.
+      if (typeof path !== 'string' || path.startsWith('!') || pathExists(path)) {
         continue;
       }
       issues.push(`files entry does not exist: ${path}`);

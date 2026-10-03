@@ -1,4 +1,4 @@
-import { BookOpen, Bug, CircleHelp, Files, FileText, Settings, Shield, WifiOff } from 'lucide-react';
+import { BookOpen, Bug, CircleHelp, Files, FileText, Scale, Settings, Shield, WifiOff } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -45,6 +45,12 @@ export function NavUser(): React.JSX.Element {
       <a href={legalUrl('terms')} target='_blank' rel='noopener noreferrer'>
         <FileText />
         Terms
+      </a>
+    </DropdownMenuItem>,
+    <DropdownMenuItem key='open-source' asChild>
+      <a href={legalUrl('open-source')} target='_blank' rel='noopener noreferrer'>
+        <Scale />
+        Open-source notices
       </a>
     </DropdownMenuItem>,
     <DropdownMenuItem key='bug' asChild>

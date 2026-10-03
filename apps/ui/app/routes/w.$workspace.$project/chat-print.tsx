@@ -390,7 +390,7 @@ function MachinePrintPanel({
           Refresh
         </Button>
       </div>
-      <div className='min-h-0 min-w-0 flex-1 scroll-shadows-y overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
+      <div className='relative min-h-0 min-w-0 flex-1 scroll-shadows-y overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
         {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
         {requestsError ? <PrintNotice tone='destructive'>{requestsError}</PrintNotice> : null}
         {snapshot ? null : (

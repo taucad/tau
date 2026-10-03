@@ -4,7 +4,7 @@ import { fileURLToPath } from 'node:url';
 import { resolve, join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { createRequire } from 'node:module';
-import { pages, renderPage, escapeHtml } from '#www/templates.js';
+import { pages, renderPage, escapeHtml, bootScript } from '#www/templates.js';
 import { validateArticles } from '#www/editorial.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const output = join(root, 'dist');
@@ -36,7 +36,7 @@ if (analyticsEndpoint && analyticsEndpoint !== '/api/marketing-events') {
 }
 const publicDirectory = join(root, 'public');
 const artifacts = await readdir(publicDirectory);
-for (const required of ['assembly.webp', 'exploded.webp', 'social.png']) {
+for (const required of ['hero-gearbox.webp', 'hero-gearbox-720.webp', 'social.png', ...Array.from({ length: 9 }, (_, i) => `story-${i}.webp`)]) {
   if (!artifacts.includes(required)) {
     throw new Error(`Missing required public asset: ${required}`);
   }
@@ -101,10 +101,10 @@ await Promise.all(
     let html = renderPage({ page, origin, launch, asset, analyticsEndpoint });
     if (page.path === '/blog/' && articlePages.length > 0) {
       html = html
-        .replace(/<section class="journal-empty">.*?<\/section>/su, '')
+        .replace(/<div class="cell journal-empty">.*?<\/div><\/div>/su, '')
         .replace(
           '<div id="articles"></div>',
-          `<div class="feature-rows">${articlePages.map((article) => `<article><h2><a href="${article.path}">${escapeHtml(article.title.replace(' · Tau', ''))}</a></h2><p>${escapeHtml(article.description)}</p></article>`).join('')}</div>`,
+          `<div class="feature-grid">${articlePages.map((article) => `<article class="cell"><h2><a href="${article.path}">${escapeHtml(article.title.replace(' · Tau', ''))}</a></h2><p>${escapeHtml(article.description)}</p></article>`).join('')}</div>`,
         );
     }
     const filename = page.path.endsWith('.html') ? join(output, page.path) : join(output, page.path, 'index.html');
@@ -128,6 +128,7 @@ await writeFile(
   }</urlset>`,
 );
 const hashes = [
+  `'sha256-${createHash('sha256').update(bootScript).digest('base64')}'`,
   ...new Set(
     allPages.map((page) => {
       const html = renderPage({ page, origin, launch, asset, analyticsEndpoint });

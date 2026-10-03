@@ -64,11 +64,20 @@ vi.mock('#hooks/active-chat-provider.js', () => ({
   }),
 }));
 
+const models: {
+  defaultExecution: ChatComposerContextValue['execution']['execution'];
+  catalog: { status: 'loading' } | { status: 'unavailable' } | { status: 'loaded'; models: Model[] };
+} = {
+  defaultExecution: { kind: 'tau', model: fable.id, effort: 'low' },
+  catalog: { status: 'loaded', models: catalog },
+};
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
     data: catalog,
     availableModels: catalog,
-    defaultExecution: { kind: 'tau', model: fable.id, effort: 'low' },
+    defaultExecution: models.defaultExecution,
+    lastTauExecution: { kind: 'tau', model: fable.id, effort: 'low' },
+    catalog: models.catalog,
   }),
 }));
 
@@ -129,6 +138,8 @@ describe('ChatAgentSheet', () => {
     state.model = fable;
     state.effort = 'high';
     state.placements = [];
+    models.defaultExecution = { kind: 'tau', model: fable.id, effort: 'low' };
+    models.catalog = { status: 'loaded', models: catalog };
   });
 
   it('names the trigger with the model and its level, and shows the model’s own glyph', () => {
@@ -235,6 +246,28 @@ describe('ChatAgentSheet', () => {
       agentId: 'codex',
       model: 'gpt-5.6-sol',
     });
+  });
+
+  it('returns from an external agent to the last Tau level, even when the new-chat default is that agent', async () => {
+    const acp = { kind: 'acp', hostId: 'desktop', agentId: 'codex', model: 'gpt-5.6-sol' } as const;
+    state.execution = acp;
+    models.defaultExecution = acp;
+    state.placements = [codex()];
+    renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+    await userEvent.click(screen.getByRole('button', { name: /^Agent: Codex/u }));
+    await userEvent.click(screen.getByRole('option', { name: /^Tau/u }));
+    await userEvent.click(screen.getByRole('option', { name: /^Haiku 4\.5/u }));
+
+    expect(setActiveExecution).toHaveBeenCalledWith({ kind: 'tau', model: haiku.id, effort: 'low' });
+  });
+
+  it('says before send that Tau cannot start while its model list is unreachable', async () => {
+    models.catalog = { status: 'unavailable' };
+    renderSheet();
+    await userEvent.click(screen.getByRole('button', { name: /^Agent and model/u }));
+
+    expect(screen.getByText(/can't reach its model list/u)).toBeInTheDocument();
   });
 
   it('still offers an agent whose model probe came back empty, on its own default model', async () => {

@@ -94,6 +94,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: vi.fn(),
   useChatComposer: () => ({
+    execution: { setActiveExecution: () => undefined },
     model: {
       model: {
         id: 'openai-gpt-5.5',
@@ -113,6 +114,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
+    ensureModelCatalog: async () => ({ status: 'loaded', models: [] }),
     defaultExecution: { kind: 'tau', model: 'openai-gpt-5.5' },
     resolveModel: (id: string) => {
       /* What the real hook answers while the catalog cannot load: no row, so no provider. */

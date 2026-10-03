@@ -23,8 +23,8 @@ vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: mockState.edit }),
 }));
 
-const { ViewerProjectionPicker, viewerPanelTitle } =
-  await import('#routes/w.$workspace.$project/chat-viewer-dockview.js');
+const { ViewerProjectionPicker } = await import('#routes/w.$workspace.$project/chat-viewer-projection-picker.js');
+const { viewerPanelTitle } = await import('#routes/w.$workspace.$project/chat-viewer-dockview.js');
 const cadActor = mock<ActorRefFrom<typeof cadMachine>>();
 const model = { id: 'model', title: '3D Model', mimeType: 'model/gltf-binary' } as const;
 const drawing = {
@@ -34,7 +34,7 @@ const drawing = {
   options: { schema: {}, defaults: { scale: 2 } },
 } as const;
 
-describe('viewer header projection picker', () => {
+describe('viewer pane projection picker', () => {
   it('adds an offered projection suffix only for duplicate-file multi-view panels', () => {
     const record = workbenchRecords.view.schema.parse({
       version: 1,
@@ -58,11 +58,12 @@ describe('viewer header projection picker', () => {
     mockState.record = undefined;
     mockState.evaluation = { id: 'e1', success: true, transient: false, views: [model], exports: [], issues: [] };
     const pane = render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
-    expect(screen.queryByRole('combobox', { name: 'Projection view' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /Projection view/ })).not.toBeInTheDocument();
 
     mockState.evaluation = { ...mockState.evaluation, views: [model, drawing] };
     pane.rerender(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
-    expect(screen.getByRole('option', { name: 'Drawing' })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('button', { name: /Projection view/ }), { key: 'ArrowDown' });
+    expect(screen.getByRole('menuitemradio', { name: 'Drawing' })).toBeInTheDocument();
     pane.unmount();
   });
 
@@ -79,7 +80,8 @@ describe('viewer header projection picker', () => {
     };
     render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Projection view' }), { target: { value: 'drawing' } });
+    fireEvent.keyDown(screen.getByRole('button', { name: /Projection view/ }), { key: 'ArrowDown' });
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Drawing' }));
 
     expect(mockState.edit).toHaveBeenCalledWith('pane-1', expect.any(Function));
     const update = mockState.edit.mock.lastCall?.[1] as (
@@ -106,9 +108,9 @@ describe('viewer header projection picker', () => {
       <ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} onOpenBeside={openBeside} />,
     );
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Open projection beside' }), {
-      target: { value: 'drawing' },
-    });
+    fireEvent.keyDown(screen.getByRole('button', { name: /Projection view/ }), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Open beside…' }), { key: 'ArrowRight' });
+    fireEvent.click(screen.getByRole('menuitem', { name: 'Drawing' }));
     expect(openBeside).toHaveBeenCalledExactlyOnceWith('drawing');
     expect(mockState.edit).not.toHaveBeenCalled();
   });
@@ -122,9 +124,9 @@ describe('viewer header projection picker', () => {
     mockState.evaluation = { id: 'e3', success: true, transient: false, views: [model], exports: [], issues: [] };
     render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
 
-    expect(screen.getByRole('combobox', { name: 'Projection view' })).toHaveValue('old');
-    expect(screen.getByRole('combobox', { name: 'Projection view' })).not.toHaveClass('@min-[520px]/viewer:hidden');
-    expect(screen.getByRole('option', { name: 'old (unavailable)' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Projection view: old unavailable' })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('button', { name: /Projection view/ }), { key: 'ArrowDown' });
+    expect(screen.getByRole('menuitemradio', { name: 'old (unavailable)' })).toBeInTheDocument();
   });
 
   it('persists declared boolean options and stable authored instances', () => {

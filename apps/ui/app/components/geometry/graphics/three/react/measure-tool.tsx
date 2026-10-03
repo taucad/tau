@@ -178,6 +178,19 @@ const _cameraUpProjected = new THREE.Vector3();
 const _lineDir = new THREE.Vector3();
 const _coneOffset = new THREE.Vector3();
 
+function raycastVisibleLabel(this: THREE.Mesh, raycaster: THREE.Raycaster, intersections: THREE.Intersection[]): void {
+  if (!this.visible) {
+    return;
+  }
+  const { parent } = this;
+  for (let ancestor = parent; ancestor; ancestor = ancestor.parent) {
+    if (!ancestor.visible) {
+      return;
+    }
+  }
+  THREE.Mesh.prototype.raycast.call(this, raycaster, intersections);
+}
+
 type MeasureHoverState = {
   hoveredSnapPoints: MeasurementTarget[];
   activeSnapPoint?: MeasurementTarget;
@@ -2073,15 +2086,27 @@ function MeasurementLine({
 
       // 2) Compute rotation around the line axis so the label's normal faces the camera
       _currentNormal.set(0, 0, 1).applyQuaternion(_baseQuat);
-      const axisRotation = computeAxisRotationForCamera({
+      const projectedAxisLength = computeAxisRotationForCamera({
         axis: lineDirection,
         position: midpoint,
         camera,
         referenceUp: _currentNormal,
+        target: _axisRotation,
       });
 
+      // A line aimed toward the eye has too little screen-space length for a
+      // legible label. Separate hide/show angles avoid flicker at the cutoff.
+      const labelVisible = projectedAxisLength >= (labelGroupRef.current.visible ? 0.5 : 0.55);
+      if (!labelVisible && labelGroupRef.current.visible && isLabelHovered) {
+        setIsLabelHovered(false);
+        if (id && graphicsActor.getSnapshot().context.hoveredMeasurementId === id) {
+          graphicsActor.send({ type: 'setHoveredMeasurement', payload: undefined });
+        }
+      }
+      labelGroupRef.current.visible = labelVisible;
+
       // 3) Combine rotations: base alignment then axis rotation in world space
-      _finalQuat.multiplyQuaternions(axisRotation, _baseQuat);
+      _finalQuat.multiplyQuaternions(_axisRotation, _baseQuat);
 
       // 4) Ensure text is upright relative to the camera
       _labelNormal.set(0, 0, 1).applyQuaternion(_finalQuat).normalize();
@@ -2194,6 +2219,7 @@ function MeasurementLine({
           <mesh
             position={[0, 0, 0]}
             userData={sceneTagData(sceneTag.measurementUi)}
+            raycast={raycastVisibleLabel}
             onPointerEnter={(event) => {
               event.stopPropagation();
               setIsLabelHovered(true);
@@ -2234,17 +2260,17 @@ function MeasurementLine({
             })()}
           </mesh>
           {/* Background */}
-          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)}>
+          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)} raycast={raycastVisibleLabel}>
             <primitive object={backgroundOutlineGeometry!} attach='geometry' />
             <primitive object={derivedMaterials.textMaterial} attach='material' />
           </mesh>
-          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)}>
+          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)} raycast={raycastVisibleLabel}>
             <primitive object={backgroundGeometry!} attach='geometry' />
             <primitive object={derivedMaterials.backgroundMaterial} attach='material' />
           </mesh>
 
           {/* Text */}
-          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)}>
+          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)} raycast={raycastVisibleLabel}>
             <primitive object={textGeometry!} attach='geometry' />
             <primitive object={derivedMaterials.textMaterial} attach='material' />
           </mesh>
@@ -2267,6 +2293,7 @@ function MeasurementLine({
               {/* Yellow/gold circular pin button (appears only on label hover) */}
               <mesh
                 userData={sceneTagData(sceneTag.measurementUi)}
+                raycast={raycastVisibleLabel}
                 onPointerOver={(event) => {
                   event.stopPropagation();
                   // Keep hover state active when over pin button
@@ -2308,6 +2335,7 @@ function MeasurementLine({
               <mesh
                 position={[0, labelCharWidth * 0.15, 0]}
                 userData={sceneTagData(sceneTag.measurementUi)}
+                raycast={raycastVisibleLabel}
                 onPointerOver={(event) => {
                   event.stopPropagation();
                 }}
@@ -2321,6 +2349,7 @@ function MeasurementLine({
               <mesh
                 position={[0, -labelCharWidth * 0.2, 0]}
                 userData={sceneTagData(sceneTag.measurementUi)}
+                raycast={raycastVisibleLabel}
                 onPointerOver={(event) => {
                   event.stopPropagation();
                 }}

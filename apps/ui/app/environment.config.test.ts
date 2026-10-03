@@ -290,6 +290,8 @@ describe('getClientEnvironment', () => {
       'POSTHOG_ASSET_HOST',
       'POSTHOG_CLIENT_KEY',
       'POSTHOG_UI_HOST',
+      'SENTRY_DSN',
+      'SENTRY_ENVIRONMENT',
       'TAU_API_URL',
       'TAU_BILLING_ENVIRONMENT',
       'TAU_DEBUG',
@@ -330,6 +332,8 @@ describe('window.ENV host contract', () => {
       POSTHOG_UI_HOST: 'https://analytics.host.test',
       POSTHOG_ASSET_HOST: 'assets.host.test',
       POSTHOG_CLIENT_KEY: 'phc_host',
+      SENTRY_DSN: 'https://public@sentry.host.test/1',
+      SENTRY_ENVIRONMENT: 'staging',
       /* eslint-enable @typescript-eslint/naming-convention -- environment variable keys are uppercase by contract. */
     } as const satisfies ClientEnvironment;
     Object.defineProperty(globalThis, 'window', {

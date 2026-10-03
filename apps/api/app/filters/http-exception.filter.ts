@@ -10,6 +10,7 @@ import { wirePaymentActionSchema } from '@taucad/billing';
 import type { WirePaymentAction } from '@taucad/billing';
 import { httpHeader } from '#constants/http-header.constant.js';
 import { LlmGatewayError } from '#api/llm/llm-gateway.error.js';
+import { reportServerError } from '#telemetry/sentry.js';
 
 /**
  * Bounded retry estimates for the funded-admission refusals (B9 `:292`).
@@ -58,6 +59,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // a second reply only produces `FST_ERR_REP_ALREADY_SENT` and hides the cause.
     if (response.sent) {
       this.logger.error({ err: exception, requestId }, 'Request failed after its response was already sent');
+      reportServerError(exception, requestId);
       return;
     }
 
@@ -148,6 +150,7 @@ export class HttpExceptionFilter implements ExceptionFilter {
     // Log error details
     if (statusCode >= 500) {
       this.logger.error(exception, `Unhandled exception: ${errorResponse.error}`);
+      reportServerError(exception, requestId);
 
       const span = trace.getSpan(otelContext.active());
       if (span) {

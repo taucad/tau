@@ -86,7 +86,8 @@ export const startTranscriptionStub = async (text: string): Promise<Transcriptio
         response.write(`data: ${JSON.stringify({ type: 'transcript.text.delta', delta: first })}\n\n`);
         await gate?.promise;
         response.write(`data: ${JSON.stringify({ type: 'transcript.text.delta', delta: ` ${rest.join(' ')}` })}\n\n`);
-        response.end(`data: ${JSON.stringify({ type: 'transcript.text.done', text })}\n\n`);
+        response.write(`data: ${JSON.stringify({ type: 'transcript.text.done', text })}\n\n`);
+        response.end('data: [DONE]\n\n');
       } catch (error) {
         console.error('[desktop-transcription-stub] rejected request', error);
         response.destroy(error instanceof Error ? error : new Error(String(error)));

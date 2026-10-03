@@ -15,3 +15,4 @@ export * from '#schemas/tools/use-skill.tool.schema.js';
 export type * from '#schemas/tool-schemas-registry.js';
 export * from '#schemas/rpc.schema.js';
 export * from '#schemas/tools/arrange-workbench.tool.schema.js';
+export * from '#schemas/dictation.schema.js';

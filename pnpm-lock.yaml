@@ -3645,6 +3645,9 @@ importers:
       minimatch:
         specifier: ^10.2.5
         version: 10.2.6
+      nanoid:
+        specifier: 'catalog:'
+        version: 5.1.14
       safe-regex:
         specifier: ^2.1.1
         version: 2.1.1

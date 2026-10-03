@@ -30,7 +30,7 @@ it builds and links OCCT, is at [github.com/taucad/tau](https://github.com/tauca
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 648 packages, with the license each declares.
+The web and desktop apps include the following 654 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -97,14 +97,14 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@floating-ui/dom](https://github.com/floating-ui/floating-ui) | 1.7.6 | MIT |
 | [@floating-ui/react-dom](https://github.com/floating-ui/floating-ui) | 2.1.8 | MIT |
 | [@floating-ui/utils](https://github.com/floating-ui/floating-ui) | 0.2.12 | MIT |
-| [@gltf-transform/core](https://github.com/donmccurdy/glTF-Transform) | 4.4.1 | MIT |
-| [@gltf-transform/extensions](https://github.com/donmccurdy/glTF-Transform) | 4.4.1 | MIT |
-| [@gltf-transform/functions](https://github.com/donmccurdy/glTF-Transform) | 4.4.1 | MIT |
+| [@gltf-transform/core](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
+| [@gltf-transform/extensions](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
+| [@gltf-transform/functions](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
 | [@google/genai](https://github.com/googleapis/js-genai) | 1.52.0 | Apache-2.0 |
 | [@hono/node-server](https://github.com/honojs/node-server) | 2.1.1 | MIT |
 | [@img/colour](https://github.com/lovell/colour) | 1.1.0 | MIT |
-| [@img/sharp-{platform}](https://github.com/lovell/sharp) | 0.34.5 | Apache-2.0 |
-| [@img/sharp-libvips-{platform}](https://github.com/lovell/sharp-libvips) | 1.2.4 | LGPL-3.0-or-later |
+| [@img/sharp-{platform}](https://github.com/lovell/sharp) | 0.35.3 | Apache-2.0 |
+| [@img/sharp-libvips-{platform}](https://github.com/lovell/sharp-libvips) | 1.3.2 | LGPL-3.0-or-later |
 | [@jridgewell/resolve-uri](https://github.com/jridgewell/resolve-uri) | 3.1.2 | MIT |
 | [@jridgewell/sourcemap-codec](https://github.com/jridgewell/sourcemaps) | 1.5.5 | MIT |
 | [@jridgewell/trace-mapping](https://github.com/jridgewell/sourcemaps) | 0.3.31 | MIT |
@@ -125,6 +125,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@openai/codex](https://github.com/openai/codex) | 0.148.0 | Apache-2.0 |
 | [@opentelemetry/api](https://github.com/open-telemetry/opentelemetry-js) | 1.9.1 | Apache-2.0 |
 | [@opentelemetry/semantic-conventions](https://github.com/open-telemetry/opentelemetry-js) | 1.43.0 | Apache-2.0 |
+| [@parcel/watcher](https://github.com/parcel-bundler/watcher) | 2.6.0 | MIT |
+| [@parcel/watcher-{platform}](https://github.com/parcel-bundler/watcher) | 2.6.0 | MIT |
 | [@pondwader/socks5-server](https://github.com/PondWader/node-socks5-server) | 1.0.10 | MIT |
 | [@protobufjs/aspromise](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
 | [@protobufjs/base64](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
@@ -441,7 +443,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [is-buffer](https://github.com/feross/is-buffer) | 1.1.6 | MIT |
 | [is-callable](https://github.com/inspect-js/is-callable) | 1.2.7 | MIT |
 | [is-docker](https://github.com/sindresorhus/is-docker) | 3.0.0 | MIT |
+| [is-extglob](https://github.com/jonschlinkert/is-extglob) | 2.1.1 | MIT |
 | [is-finite](https://github.com/sindresorhus/is-finite) | 1.1.0 | MIT |
+| [is-glob](https://github.com/micromatch/is-glob) | 4.0.3 | MIT |
 | [is-in-ssh](https://github.com/sindresorhus/is-in-ssh) | 1.0.0 | MIT |
 | [is-inside-container](https://github.com/sindresorhus/is-inside-container) | 1.0.0 | MIT |
 | [is-integer](https://github.com/parshap/js-is-integer) | 1.0.7 | WTFPL OR ISC |
@@ -509,9 +513,10 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.0.19 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |
 | [ndarray-ops](https://github.com/mikolalysenko/ndarray-ops) | 1.2.2 | MIT |
-| [ndarray-pixels](https://github.com/donmccurdy/ndarray-pixels) | 5.0.1 | MIT |
+| [ndarray-pixels](https://github.com/donmccurdy/ndarray-pixels) | 5.2.0 | MIT |
 | [negotiator](https://github.com/jshttp/negotiator) | 1.0.0 | MIT |
 | [next-themes](https://github.com/pacocoursey/next-themes) | 0.4.6 | MIT |
+| [node-addon-api](https://github.com/nodejs/node-addon-api) | 7.1.1 | MIT |
 | [node-domexception](https://github.com/jimmywarting/node-domexception) | 1.0.0 | MIT |
 | [node-fetch](https://github.com/node-fetch/node-fetch) | 3.3.2 | MIT |
 | [node-forge](https://github.com/digitalbazaar/forge) | 1.4.0 | (BSD-3-Clause OR GPL-2.0) |
@@ -535,6 +540,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [path-expression-matcher](https://github.com/NaturalIntelligence/path-expression-matcher) | 1.6.2 | MIT |
 | [path-key](https://github.com/sindresorhus/path-key) | 3.1.1 | MIT |
 | [path-to-regexp](https://github.com/pillarjs/path-to-regexp) | 8.4.2 | MIT |
+| [picomatch](https://github.com/micromatch/picomatch) | 4.0.7 | MIT |
 | [picovoxel](https://github.com/taucad/picovoxel) | 0.1.0 | Apache-2.0 |
 | [pify](https://github.com/sindresorhus/pify) | 4.0.1 | MIT |
 | [pino-abstract-transport](https://github.com/pinojs/pino-abstract-transport) | 3.0.0 | MIT |
@@ -596,7 +602,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [setimmediate](https://github.com/YuzuJS/setImmediate) | 1.0.5 | MIT |
 | [setprototypeof](https://github.com/wesleytodd/setprototypeof) | 1.2.0 | ISC |
 | [sha.js](https://github.com/crypto-browserify/sha.js) | 2.4.12 | (MIT AND BSD-3-Clause) |
-| [sharp](https://github.com/lovell/sharp) | 0.34.5 | Apache-2.0 |
+| [sharp](https://github.com/lovell/sharp) | 0.35.3 | Apache-2.0 |
 | [shebang-command](https://github.com/kevva/shebang-command) | 2.0.0 | MIT |
 | [shebang-regex](https://github.com/sindresorhus/shebang-regex) | 3.0.0 | MIT |
 | [shiki](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
@@ -710,16 +716,16 @@ The circuit kernel bundles the following components. Their full license texts ac
 | @tscircuit/infer-cable-insertion-point | 0.0.4 | MIT |
 | @tscircuit/infgrid-ijump-astar | 0.0.35 | no SPDX field, license text pending |
 | @tscircuit/matchpack | 0.0.91 | MIT |
-| @tscircuit/math-utils | 0.0.38 | MIT |
 | @tscircuit/math-utils | 0.0.9 | MIT |
+| @tscircuit/math-utils | 0.0.38 | MIT |
 | @tscircuit/miniflex | 0.0.4 | MIT |
 | @tscircuit/mm | 0.0.8 | MIT |
 | @tscircuit/mm | 0.0.9 | MIT |
 | @tscircuit/modelprinter | 0.0.2 | MIT |
 | @tscircuit/props | 0.0.646 | MIT |
 | @tscircuit/schematic-trace-solver | 0.0.184 | MIT |
-| @tscircuit/solver-utils | 0.0.21 | MIT |
 | @tscircuit/solver-utils | 0.0.19 | MIT |
+| @tscircuit/solver-utils | 0.0.21 | MIT |
 | @tscircuit/soup-util | 0.0.41 | MIT |
 | base64-js | 1.5.1 | MIT |
 | boolbase | 1.0.0 | ISC |
@@ -766,7 +772,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | jscad-to-gltf | 0.0.5 | MIT |
 | minicssgrid | 0.0.9 | MIT |
 | ms | 2.1.3 | MIT |
-| nanoid | 5.1.14 | MIT |
+| nanoid | 3.3.16 | MIT |
 | nth-check | 2.1.1 | BSD-2-Clause |
 | object-hash | 3.0.0 | MIT |
 | papaparse | 5.5.4 | MIT |
@@ -783,8 +789,8 @@ The circuit kernel bundles the following components. Their full license texts ac
 | svg-path-commander | 2.3.3 | MIT |
 | svgson | 5.3.1 | MIT |
 | three | 0.184.0 | MIT |
-| transformation-matrix | 3.1.0 | MIT |
 | transformation-matrix | 2.16.1 | MIT |
+| transformation-matrix | 3.1.0 | MIT |
 
 ## GNU Lesser General Public License version 2.1
 

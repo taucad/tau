@@ -96,11 +96,13 @@ All content provided by TauCAD Limited, including the Service, website, text, gr
 
 We grant you a limited, non-exclusive, non-transferable, revocable license to use the Service for your internal business purposes or personal use. This license does not include the right to modify, copy, resell, sublicense, reverse engineer, or distribute the Service, except as permitted by applicable open-source licenses.
 
+These restrictions do not apply to the open-source software in the Service, including the web and desktop apps, which you may use, modify, reverse engineer and distribute under its own license. In particular, for Open CASCADE Technology and the other libraries in the Service licensed under the GNU Lesser General Public License, you may modify them for your own use and reverse engineer them to debug such modifications. Our [Open-Source Notices](/legal/open-source) list these components and their licenses.
+
 ### 6.2 Open Source
 
 TauCAD is built on open-source software. The source code is publicly available at [https://github.com/taucad/tau](https://github.com/taucad/tau).
 
-All TauCAD-authored source, including the GeoSpec engine, is licensed under **Apache-2.0**. Third-party components retain their own licenses.
+All TauCAD-authored source, including the GeoSpec engine, is licensed under **Apache-2.0**. Third-party components retain their own licenses, listed in our [Open-Source Notices](/legal/open-source).
 
 Nothing in these Terms restricts your rights under the applicable open-source licenses. The following elements remain proprietary: the hosted SaaS infrastructure, API rate limits and subscription tiers, your User Data, the TauCAD name and trademarks, and any content we create that is not part of the open-source codebase.
 

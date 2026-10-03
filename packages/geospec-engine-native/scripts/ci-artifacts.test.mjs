@@ -13,7 +13,7 @@ import fs, {
   writeFileSync,
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import process from 'node:process';
 /* oxlint-disable no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export. */
@@ -344,6 +344,8 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       join(kit, 'manifest.json'),
       JSON.stringify({
         schema: 'geospec-native-source-relink-v2',
+        // A real assembly renews every archive; name the attempt so two fixture assemblies in one second differ.
+        assembly: basename(assembly),
         sourceTree: { files: entries.length, sha256: sourceTreeSha256, entries },
       }),
     );

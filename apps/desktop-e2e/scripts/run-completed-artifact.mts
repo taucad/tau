@@ -126,7 +126,9 @@ const main = async (): Promise<void> => {
           healthcheck: { test: ['CMD', 'redis-cli', 'ping'], interval: '1s', timeout: '3s', retries: 30 },
         },
         minio: {
-          image: 'quay.io/minio/minio:RELEASE.2025-09-07T16-13-09Z',
+          // Same pinned community MinIO image as infra/docker-compose.yml, which pulls it.
+          image:
+            'pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372',
           pull_policy: 'never',
           command: ['server', '/data'],
           environment: { MINIO_ROOT_USER: storageUser, MINIO_ROOT_PASSWORD: storagePassword },
@@ -134,7 +136,8 @@ const main = async (): Promise<void> => {
           healthcheck: { test: ['CMD', 'mc', 'ready', 'local'], interval: '1s', timeout: '3s', retries: 30 },
         },
         storage_bootstrap: {
-          image: 'quay.io/minio/mc:RELEASE.2025-08-13T08-35-41Z',
+          image:
+            'pgsty/minio:RELEASE.2026-08-04T00-00-00Z@sha256:b6bfe7239bfc83fb90d31612d9704d86039dd714f7904b3f1ad68f211e602372',
           pull_policy: 'never',
           depends_on: { minio: { condition: 'service_healthy' } },
           environment: { MINIO_ROOT_USER: storageUser, MINIO_ROOT_PASSWORD: storagePassword },

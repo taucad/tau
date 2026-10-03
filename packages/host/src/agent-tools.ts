@@ -56,8 +56,7 @@ import { assertRootedPath } from '@taucad/utils/path';
  * and re-exports the same declaration by name, so the emitted `.d.mts` keeps it
  * as an external import. */
 import type { ExportFile, RuntimeFileSystemBase } from '@taucad/runtime/types';
-import type { RuntimeClient } from '@taucad/runtime/client';
-import type { WideViewRequest } from '@taucad/runtime';
+import type { RuntimeClient, WideViewRequest } from '@taucad/runtime/client';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';

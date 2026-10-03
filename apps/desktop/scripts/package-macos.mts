@@ -474,11 +474,19 @@ try {
   const appPath = resolve(packagePaths[0]!, 'Tau.app');
   const resources = resolve(appPath, 'Contents/Resources');
   const plugins = resolve(appPath, 'Contents/PlugIns');
-  await mkdir(resolve(resources, 'branding'), { recursive: true });
+  await Promise.all([
+    mkdir(resolve(resources, 'branding'), { recursive: true }),
+    mkdir(resolve(resources, 'legal'), { recursive: true }),
+  ]);
   await Promise.all([
     copyTree(uiClientRoot, resolve(resources, 'ui/client'), excludesBuildDiagnostics),
     cp(resolve(desktopRoot, 'resources/icon.png'), resolve(resources, 'branding/icon.png')),
     cp(resolve(desktopRoot, 'resources/icon-dark.png'), resolve(resources, 'branding/icon-dark.png')),
+    /* The legal routes stay web-only; the notices (OCCT's LGPL-2.1 and exception included) still ship offline. */
+    cp(
+      resolve(workspaceRoot, 'apps/ui/app/routes/legal.open-source/open-source-notices.txt'),
+      resolve(resources, 'legal/OPEN-SOURCE-NOTICES.md'),
+    ),
     copyTree(resolve(pythonResourceRoot, 'darwin-arm64'), resolve(resources, 'python/darwin-arm64')),
     copyTree(resolve(picoGkResourceRoot, 'darwin-arm64'), resolve(resources, 'picogk/darwin-arm64')),
     copyGeoSpecSourceRelink(geospecAssemblyRoot, geospecSourceRelinkReceipt, resources),

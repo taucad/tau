@@ -24,6 +24,7 @@
     "content/docs/**/examples/**/*.ts",
     "vite-environment.d.ts",
     "../../node_modules/.cache/fumadocs/apps/docs/**/*",
-    "package.json"
+    "package.json",
+    "scripts/**/*.mts"
   ]
 }

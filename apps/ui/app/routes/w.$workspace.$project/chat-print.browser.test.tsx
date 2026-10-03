@@ -1,11 +1,10 @@
 import '#styles/global.css';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { page } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   agentRequest,
-  bambuStudioVersion,
   createBambuStudio,
   createBridge,
   createFixture,
@@ -94,22 +93,25 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     </TooltipProvider>,
   );
   if (scenario === 'studio') {
-    // The real printer with Bambu Studio: presets, then the Quality settings open with one change.
-    await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`);
+    // The real printer with Bambu Studio: presets, then More settings with its overrides and one change.
     await screen.findByRole('group', { name: 'Bambu Studio presets' });
     await page.getByRole('button', { name: 'More settings' }).click();
+    await screen.findByRole('group', { name: 'Bambu Studio overrides' });
     await page.getByRole('button', { name: 'Group: Quality' }).click();
     await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
     fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
     await screen.findByRole('button', { name: 'Reset Layer Height' });
   } else if (scenario === 'prepare') {
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await page.getByRole('region', { name: 'Prepare' }).getByRole('button', { name: 'Slice and preview' }).click();
-    await screen.findByLabelText('Slice result');
+    // The Machine select names the printer and its status; slicing is the pane's action bar.
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Machine' })).toHaveTextContent('Workshop X1CReady');
+    });
+    await page.getByRole('button', { name: 'Slice and preview' }).click();
+    await screen.findByRole('group', { name: 'Slice result' });
   } else {
     const name = 'Print request awaiting you: pyramid.gcode.3mf';
     const region = await screen.findByRole('region', { name });
-    expect(within(region).getByRole('button', { name: 'Open printer preview' })).toBeEnabled();
+    expect(within(region).getByRole('button', { name: 'Preview' })).toBeEnabled();
     await page.getByRole('region', { name }).getByRole('button', { name: 'Accept' }).click();
     const confirmation = await within(region).findByRole('group', { name: 'Confirm before starting' });
     if (scenario === 'busy') {
@@ -170,7 +172,8 @@ describe('Print pane screenshots', () => {
   it('should space the Prepare setup rows evenly', async () => {
     await page.viewport(800, 1200);
     await mount('studio', 720);
-    const rows = ['Profile', 'Plate', 'Material', 'Process', 'Filament A1'].map((label) =>
+    // The filament presets are overrides under More settings, not Prepare setup rows.
+    const rows = ['Profile', 'Plate', 'Material', 'Process'].map((label) =>
       screen
         .getByRole('combobox', { name: label })
         .closest(String.raw`.group\/field`)!

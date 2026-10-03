@@ -53,7 +53,7 @@ const visibleComposer = async (page: Page): Promise<Locator> => {
         }),
       );
       return visible;
-    })
+    }, poll)
     .toHaveLength(1);
   return composers.nth(visible[0]!);
 };
@@ -132,6 +132,8 @@ test.skipIf(live)(
       await wait(1100);
       await composer.screenshot({ path: join(evidenceRoot, 'recording-composer.png') });
       const stop = composer.getByRole('button', { name: 'Stop dictation', exact: true });
+      // Radix keeps a clicked trigger's tooltip closed until the pointer leaves it.
+      await editor.hover();
       await stop.hover();
       await expect.poll(async () => page.getByRole('tooltip').textContent(), poll).toContain('Stop dictation');
       stub.hold();

@@ -98,6 +98,8 @@ import {
   testModelOutputSchema,
   arrangeWorkbenchInputSchema,
   arrangeWorkbenchOutputSchema,
+  askQuestionsInputSchema,
+  askQuestionsOutputSchema,
 } from '@taucad/chat';
 import { toolName } from '@taucad/chat/constants';
 import { rpcClientErrorCodeSchema } from '@taucad/chat/schemas/rpc';
@@ -113,6 +115,10 @@ export const authRequiredCode = -32_000;
 
 /**
  * What Tau tells the agent it can do, which is what the agent offers back.
+ *
+ * `elicitation.form` lets Codex's `request_user_input` and Claude's
+ * `AskUserQuestion` reach the person on Tau's question card instead of being
+ * answered empty (agent questions blueprint D6).
  *
  * Two of these are the whole of V11's login story. `elicitation.url` is what
  * makes Codex offer its device-code flow — a verification URL and a code Tau
@@ -138,7 +144,7 @@ export const authRequiredCode = -32_000;
 export const clientCapabilities: ClientCapabilities = {
   fs: { readTextFile: true, writeTextFile: true },
   terminal: false,
-  elicitation: { url: {} },
+  elicitation: { url: {}, form: {} },
   _meta: {
     'terminal-auth': true,
     jetbrains: { air: { version: 1, capabilities: ['sessionFailure'] } },
@@ -575,6 +581,8 @@ const tauMcpSchemas = {
   [toolName.testModel]: { input: testModelInputSchema, output: testModelOutputSchema },
   [toolName.screenshot]: { input: screenshotInputSchema, output: screenshotMcpOutputSchema },
   [toolName.exportModel]: { input: exportModelInputSchema, output: exportModelOutputSchema },
+  /* The endpoint supplies the chat, so an external call carries none. */
+  [toolName.askQuestions]: { input: askQuestionsInputSchema.omit({ chatId: true }), output: askQuestionsOutputSchema },
 } as const;
 
 /** Tau MCP errors emitted outside the shared business RPC schema. */

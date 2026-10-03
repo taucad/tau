@@ -29,6 +29,7 @@
 // EVAL(decompose-design-brief): pending benchmark — strengthens workflow step 0 from generic component enumeration to a mini design brief for multi-component / real-world / reference-based / high-fidelity / spec requests. Validates fewer dropped named features and better assembly-tree recall on Orion, gearbox, hydraulic hinge, and architectural facade fixtures.
 // EVAL(geospec-coverage-floor): pending benchmark — adds explicit GeoSpec coverage floor: whole-model bounding box plus physical properties is never sufficient for high-fidelity assemblies; tests must cover major components/named features and disclose unsupported coverage. Validates that agents no longer stop after basic geometric tests on hyper-real assembly prompts.
 // EVAL(task-tracking): pending benchmark — new static <task_tracking> section (after <transcript_search>) asks the agent to keep the person's task list through `update_todos` on work with three or more steps (design-to-print workbench blueprint D8). Validates that multi-step turns write `.tau/chats/<chatId>/todo.yaml` before the first step and mark items done as they finish, with no scratchpad notes in titles.
+// EVAL(asking-questions): pending benchmark — the workflow Plan step names `ask_questions` for hard forks only the person can decide (agent questions blueprint D9); the tool description carries the full rules (recommendation first, never for permission, continue on a defaulted answer). The parallel-tool-call bullet of <tool_usage_policy> was compressed to the same instruction to keep the core budget. Validates fewer prose multiple-choice questions, no permission questions, and turns that keep working after a default.
 // EVAL(display-name-title-case): pending benchmark — adds <display_names> as the single CAD-prompt source of truth for agent-authored visible labels. Validates fewer PascalCase/snake_case part labels in generated model code while preserving kernel-native code identifier casing.
 
 import { toolName } from '#constants/index.js';
@@ -103,14 +104,14 @@ export function getCadSystemPrompt(
 
   const workflowSteps = testingEnabled
     ? `${decomposeStep}
-1. **Plan**: Outline parameters, components, and assembly order
+1. **Plan**: Outline parameters, components, and assembly order; settle hard forks only the person can decide with \`${toolName.askQuestions}\`, then keep going
 2. **Test Setup**: Activate the \`geospec-authoring\` skill, then use \`${toolName.createFile}\` or \`${toolName.editFile}\` to define repeatable checks in \`*.geospec.ts\` (TDD approach)
 3. **Implement**: Use \`${toolName.editFile}\` to write code in the project entry file
 4. **Verify**: Call \`${toolName.evaluateModel}\` after file changes
 5. **Test**: Call \`${toolName.testModel}\` to validate the GeoSpec tests
 6. **Inspect & iterate**: After tests pass, ${inspectStep}. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`
     : `${decomposeStep}
-1. **Plan**: Outline parameters, components, and assembly order
+1. **Plan**: Outline parameters, components, and assembly order; settle hard forks only the person can decide with \`${toolName.askQuestions}\`, then keep going
 2. **Implement**: Use \`${toolName.editFile}\` to write code in the project entry file
 3. **Verify**: Call \`${toolName.evaluateModel}\` after file changes
 4. **Inspect & iterate**: ${supportsImageInput ? `Use \`${toolName.screenshot}\` and evaluate as if reviewing someone else's work against the \`<visual_inspection>\` checklist` : `Use \`${toolName.evaluateModel}\`, targeted measurements, and exported geometry evidence when needed`}. If any defect is found, fix and re-render. Continue iterating until no defects remain — do not declare done after a single render when defects were observed.`;
@@ -178,7 +179,7 @@ Check \`<project_layout>\` for existing files. Read before editing.${tddNote}
     name: 'tool_usage_policy',
     cacheBreak: false,
     compute: () => `<tool_usage_policy>
-- You can call multiple tools in a single response. If multiple tool calls are independent, make all of them in parallel in one response. If a tool call depends on the result of a previous one, run them sequentially.
+- Make independent tool calls in parallel in one response; run a call that depends on another's result after it.
 - Never use placeholders or guess missing parameters in tool calls. If a required value is unknown, read the source first.
 - When reading source files, prefer \`offset\` + \`limit\` over reading whole files; large files (>2000 lines) require explicit \`offset\` and \`limit\`.
 - When searching dense generated code (declaration files, lockfiles, bundled libs), use \`grep\` with a narrow regex and a small \`headLimit\`, then \`read_file\` only the most-relevant ranges.

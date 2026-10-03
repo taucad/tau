@@ -65,7 +65,8 @@ export function ActorBridge(): ReactNode {
 
     const publish = (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
       const previous = lastPublicationRef.current;
-      const currentControls = get().controls;
+      // Read the rendered controls so a late-mounted instance re-runs this effect and is republished.
+      const currentControls = controls;
       if (
         previous?.camera === camera &&
         previous.controls === currentControls &&

@@ -820,7 +820,7 @@ export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
             ],
           }
         : framedPartBox(geometry, part),
-    [geometry, isWholePrinter, part, program.bounds],
+    [geometry, isWholePrinter, part],
   );
   return (
     <Canvas

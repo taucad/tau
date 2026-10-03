@@ -751,7 +751,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
         unsubscribe();
       }
     };
-  }, [chatStore, fileManager.workerChangeChannel, queryClient, scheduleProjectsListInvalidation]);
+  }, [fileManager.workerChangeChannel, queryClient, scheduleProjectsListInvalidation]);
 
   // Select state from the machine
   const error = useSelector(actorRef, (state) => state.context.error);

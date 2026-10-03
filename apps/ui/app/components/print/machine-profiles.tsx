@@ -66,8 +66,11 @@ export function MachineProfiles({
     }
     return profiles;
   }, [studio.processes, printer]);
+  // Starting profiles stand in only while no saved settings file exists.
   useEffect(() => {
-    settings.startingProfiles(qualified);
+    if (settings.file.status === 'absent') {
+      settings.startingProfiles(qualified);
+    }
   }, [qualified, settings.startingProfiles, settings.file.status]);
   const { record } = settings;
   const activeId = record?.activeProfile ?? 'default';

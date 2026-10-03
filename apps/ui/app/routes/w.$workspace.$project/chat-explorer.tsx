@@ -473,7 +473,11 @@ function LiveComponentTree({
   readonly graphicsRef: GraphicsActorRef;
   readonly modelRef: ModelInteractionRef;
 }): React.JSX.Element {
-  const contentRef = useRef<HTMLDivElement>(null);
+  // Held in state: the scroller is attached only once a manifest renders, and that attachment re-runs the row observer.
+  const [contentElement, setContentElement] = useState<HTMLDivElement>();
+  const attachContent = useCallback<React.RefCallback<HTMLDivElement>>((element) => {
+    setContentElement(element ?? undefined);
+  }, []);
   const unitId = deriveModelInteractionUnitId({ sourceFile: params.entryPath });
   const unitState = useSelector(modelRef, (state) => getModelInteractionUnitState(state.context, unitId));
   const {
@@ -514,12 +518,15 @@ function LiveComponentTree({
   const getPreviewSnapshot = useCallback(() => thumbnails?.snapshot() ?? emptyPreviewSnapshot, [thumbnails]);
   const previews = useSyncExternalStore(subscribePreviews, getPreviewSnapshot, getPreviewSnapshot);
   const selectedPreview = currentSelection ? previews.get(currentSelection) : undefined;
-  const [previewRetryRevision, setPreviewRetryRevision] = useState(0);
-  const manualPreviewRetry = useRef<string | undefined>(undefined);
+  // A Retry names the part it asks for; the effect takes each request once.
+  const [previewRetry, setPreviewRetry] = useState<Readonly<{ revision: number; partId: string | undefined }>>({
+    revision: 0,
+    partId: undefined,
+  });
+  const handledPreviewRetryRef = useRef(0);
   const retryPreview = useCallback(
     (id?: string) => {
-      manualPreviewRetry.current = id ?? currentSelection;
-      setPreviewRetryRevision((value) => value + 1);
+      setPreviewRetry((current) => ({ revision: current.revision + 1, partId: id ?? currentSelection }));
     },
     [currentSelection],
   );
@@ -544,7 +551,7 @@ function LiveComponentTree({
   useEffect(() => () => thumbnails?.releaseOwner('explorer'), [thumbnails]);
 
   useEffect(() => {
-    const scroller = contentRef.current;
+    const scroller = contentElement;
     if (!scroller) {
       return undefined;
     }
@@ -614,7 +621,7 @@ function LiveComponentTree({
       mountedRows.disconnect();
       observer?.disconnect();
     };
-  }, [manifest, normalizedQuery]);
+  }, [contentElement]);
 
   useEffect(() => {
     if (!thumbnails) {
@@ -634,8 +641,8 @@ function LiveComponentTree({
     let active = true;
     const { content } = artifact;
     const requestedParts = parts.slice(0, 128);
-    const manualPartId = manualPreviewRetry.current;
-    manualPreviewRetry.current = undefined;
+    const manualPartId = previewRetry.revision === handledPreviewRetryRef.current ? undefined : previewRetry.partId;
+    handledPreviewRetryRef.current = previewRetry.revision;
     if (content.byteLength > 64 * 1024 * 1024) {
       thumbnails.failPreparationForOwner(
         'explorer',
@@ -688,7 +695,7 @@ function LiveComponentTree({
     manifest,
     params.entryPath,
     presentedKey,
-    previewRetryRevision,
+    previewRetry,
     selectedComponentIds,
     thumbnails,
     visiblePreviewIds,
@@ -726,7 +733,7 @@ function LiveComponentTree({
 
   return (
     <ModelPaneviewPanelSurface
-      contentRef={contentRef}
+      contentRef={attachContent}
       footer={
         <Collapsible>
           <div className='flex min-w-0 items-center justify-between gap-2 border-t px-2 py-1 text-xs text-muted-foreground'>

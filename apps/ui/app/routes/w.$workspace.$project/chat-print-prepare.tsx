@@ -1897,7 +1897,12 @@ function AdvancedSettingsStage({
 
   return (
     <PrintStage icon={Settings2} title='Advanced settings'>
-      <fieldset disabled={machineSettings.blocked} className='contents'>
+      {/* The stage is the forms' frame, as the catalog card is in Parameters: top-level fields take no inset of
+          their own, so their labels line up with the stage's rows; fields inside a group keep the group's. */}
+      <fieldset
+        disabled={machineSettings.blocked}
+        className='contents [&_[data-slot=embedded-form-root]>[data-slot=parameter-field]]:px-0'
+      >
         <SearchInput
           aria-label='Filter settings'
           placeholder='Filter settings'
@@ -1930,7 +1935,7 @@ function AdvancedSettingsStage({
                 emptyMessage='No slicer options'
               />
             ) : (
-              <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+              <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
                 Preparing slicer options…
               </p>
             )}
@@ -1964,7 +1969,7 @@ function AdvancedSettingsStage({
                 emptyMessage='No machine mapping'
               />
             ) : (
-              <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+              <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
                 Preparing machine mapping…
               </p>
             )}

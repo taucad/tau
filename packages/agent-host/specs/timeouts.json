@@ -772,14 +772,6 @@
       "owner": "machines"
     },
     {
-      "id": "D21",
-      "bound": "GeoSpec candidate fetch and publication deadline (15 s): abort the remote Git transport and clear the timer when its operation settles",
-      "site": "apps/ui/app/machines/file-manager.worker.revisions.ts",
-      "token": "const candidateTimeout = setTimeout",
-      "class": "External edge",
-      "owner": "GeoSpec candidate transport"
-    },
-    {
       "id": "N3",
       "bound": "Not a timer: the RevisionClock host-clock interface declares setTimeout without scheduling it",
       "site": "packages/revisions/src/revision-effects.types.ts",

@@ -228,7 +228,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@taucad/kcl-wasm-lib](https://github.com/taucad/modeling-app) | 0.1.184 | MIT |
 | [@taulabs/openrscad-engine](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
 | [@taulabs/openrscad-engine-{platform}](https://github.com/taucad/openrscad) | 0.11.0-beta.4 | Apache-2.0 OR MIT |
-| [@taulabs/replicad](https://github.com/taucad/replicad) | 0.23.4-beta.2 | MIT |
+| [@taulabs/replicad](https://github.com/taucad/replicad) | 1.1.0-taulabs.0 | MIT |
 | [@taulabs/replicad-opencascadejs](https://github.com/taucad/replicad) | 0.23.0-beta.0 | MIT |
 | [@tscircuit/manifold-2d](https://github.com/tscircuit/manifold-2d) | 0.0.6 | Apache-2.0 |
 | [@tsconfig/node10](https://github.com/tsconfig/bases) | 1.0.12 | MIT |
@@ -249,7 +249,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@types/mdast](https://github.com/DefinitelyTyped/DefinitelyTyped) | 4.0.4 | MIT |
 | [@types/ndarray](https://github.com/DefinitelyTyped/DefinitelyTyped) | 1.0.14 | MIT |
 | [@types/node](https://github.com/DefinitelyTyped/DefinitelyTyped) | 26.3.0 | MIT |
-| [@types/opentype.js](https://github.com/DefinitelyTyped/DefinitelyTyped) | 1.3.4 | MIT |
+| [@types/opentype.js](https://github.com/DefinitelyTyped/DefinitelyTyped) | 1.3.10 | MIT |
 | [@types/readable-stream](https://github.com/DefinitelyTyped/DefinitelyTyped) | 4.0.24 | MIT |
 | [@types/retry](https://github.com/DefinitelyTyped/DefinitelyTyped) | 0.12.0 | MIT |
 | [@types/trusted-types](https://github.com/DefinitelyTyped/DefinitelyTyped) | 2.0.7 | MIT |

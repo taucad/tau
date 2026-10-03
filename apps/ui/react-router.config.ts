@@ -54,7 +54,6 @@ export default {
       const { listStaticPrerenderPaths } = await import('./app/lib/static-paths');
       return listStaticPrerenderPaths().filter((path) => tauCloudEnabled || path !== '/usage');
     },
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- React Router config field is `unstable_concurrency` (snake_case in upstream API).
-    unstable_concurrency: prerenderConcurrency,
+    concurrency: prerenderConcurrency,
   },
 } satisfies Config;

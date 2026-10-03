@@ -78,7 +78,7 @@ describe('ChatMessageToolRequestPrint', () => {
     ).toHaveAttribute('aria-expanded', 'true');
     expect(
       screen.getByText(
-        'The printer did not confirm the start. Check the printer, or Reconcile the request in the Print pane.',
+        "The printer hasn't confirmed the start. Check the printer's screen; Tau updates this when the printer reports the run.",
       ),
     ).toBeVisible();
     /* Whether it prints is unknown, so nothing invites a second start. */

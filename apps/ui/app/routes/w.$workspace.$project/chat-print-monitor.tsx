@@ -72,6 +72,10 @@ export const isObservationStale = ({
   return budget !== undefined && now - Date.parse(entry.snapshot.observedAt) > budget;
 };
 
+/** A stage phrase to show; a bare number, as a snapshot saved before stages were phrases may hold, is not one. */
+const readableStage = (stage: string | undefined): string | undefined =>
+  stage === undefined || /^\d+$/u.test(stage) ? undefined : stage;
+
 /**
  * The run line a person reads first: "Printing layer 42 of 125 · 9 min left".
  *
@@ -94,6 +98,17 @@ export const describeRun = (entry: MachineDirectoryEntry): string | undefined =>
     idle: 'Idle',
     unknown: 'Run state unknown',
   };
+  const stage = readableStage(run.stage);
+  // Bambu reports a run as printing while it levels the bed and calibrates at layer 0 (blueprint
+  // x1c-start-confirmation F7), so the stage says what it is doing until the first layer starts.
+  if (run.state === 'printing' && run.currentLayer === 0 && stage !== undefined) {
+    return [
+      `Preparing · ${stage}`,
+      run.remainingSeconds === undefined ? undefined : formatRemaining(run.remainingSeconds),
+    ]
+      .filter(Boolean)
+      .join(' · ');
+  }
   const layer =
     run.currentLayer === undefined
       ? undefined
@@ -347,10 +362,6 @@ const runFileName = (entry: MachineDirectoryEntry, requests: readonly PrintReque
     (run.file === undefined || archiveMemberPath.test(run.file) ? undefined : run.file)
   );
 };
-
-/** A stage phrase to show; a bare number, as a snapshot saved before stages were phrases may hold, is not one. */
-const readableStage = (stage: string | undefined): string | undefined =>
-  stage === undefined || /^\d+$/u.test(stage) ? undefined : stage;
 
 function RunGroup({
   entry,
@@ -882,11 +893,12 @@ const requestStateLabel: Record<PrintRequest['state'], string> = {
   approved: 'Approved',
   uploading: 'Uploading',
   starting: 'Starting',
+  confirming: 'Confirming the start',
   started: 'Started',
   denied: 'Denied',
   withdrawn: 'Cancelled',
   rejected: 'Rejected',
-  unknown: 'Start unconfirmed',
+  unknown: 'Start not confirmed',
   failed: 'Refused',
 };
 

@@ -10,7 +10,7 @@ import type {
   MachineRunSnapshot,
   PrintRequest,
 } from '@taucad/runtime/machine';
-import { MonitorSection, describeStillFailure } from '#routes/w.$workspace.$project/chat-print-monitor.js';
+import { MonitorSection, describeRun, describeStillFailure } from '#routes/w.$workspace.$project/chat-print-monitor.js';
 import {
   agentRequest,
   artifact,
@@ -155,6 +155,26 @@ describe('MonitorSection', () => {
       renderMonitor(observing({ state: 'printing', ...(stage === undefined ? {} : { stage }) }));
 
       expect(rowValue('Stage')).toBe(shown);
+    });
+
+    it.each<readonly [string, MachineRunSnapshot, string]>([
+      [
+        'calibration at layer 0 as preparing with its stage',
+        { state: 'printing', currentLayer: 0, totalLayers: 64, stage: 'Calibrating extrusion', remainingSeconds: 1320 },
+        'Preparing · Calibrating extrusion · 22 min left',
+      ],
+      [
+        'the layer once printing starts',
+        { state: 'printing', currentLayer: 4, totalLayers: 64, remainingSeconds: 960 },
+        'Printing layer 4 of 64 · 16 min left',
+      ],
+      [
+        'layer 0 without a stage phrase as printing',
+        { state: 'printing', currentLayer: 0, totalLayers: 64, stage: '54' },
+        'Printing layer 0 of 64',
+      ],
+    ])('should describe %s', (_case, run, line) => {
+      expect(describeRun(observing(run))).toBe(line);
     });
   });
 

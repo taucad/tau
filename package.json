@@ -47,6 +47,7 @@
     "canvas:dev": "vite --config scripts/src/canvas-vite.config.ts",
     "canvas:typecheck": "node scripts/src/canvas-typecheck.ts",
     "size:build": "node tools/size-build.mjs",
+    "size:check": "cd node_modules/.cache/size-limit && size-limit",
     "prepare": "husky"
   },
   "dependencies": {

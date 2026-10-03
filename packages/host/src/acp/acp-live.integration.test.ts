@@ -12,15 +12,27 @@
  * the suite still skips unless both adapters resolve and both CLIs answer.
  */
 
-import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { access, chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { execFile } from 'node:child_process';
 import { createServer } from 'node:http';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { promisify } from 'node:util';
 
 import { afterAll, describe, expect, it } from 'vitest';
+import { z } from 'zod';
+
+import {
+  answersPath,
+  askQuestionsInputSchema,
+  parseQuestionsFile,
+  questionsPath,
+  serializeAnswersFile,
+} from '@taucad/chat';
+import { toolDescriptions, toolName } from '@taucad/chat/constants';
+import { handleAskQuestions } from '@taucad/chat/rpc';
+import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 
@@ -30,6 +42,7 @@ import type {
   AgentLiveEvent,
   AgentLogEvent,
   ExternalAgentLogEvent,
+  JsonObject,
   ProviderMessage,
   ToolRegistry,
 } from '@taucad/agent-host';
@@ -399,6 +412,211 @@ describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex screensh
       });
     }
   }, 240_000);
+});
+
+/* Codex in its default mode has no question tool of its own (request_user_input is a Plan-mode
+ * tool), so a hard fork reaches the person through Tau's `ask_questions` (agent questions
+ * blueprint W4): the real handler over the workspace record, and a person who answers B. */
+describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex question through Tau', () => {
+  it("asks through mcp.tau.ask_questions and continues with the person's answer", async () => {
+    if (!codexAdapter) {
+      throw new Error('The selected Codex adapter is unavailable.');
+    }
+    const workspaceRoot = await mkdtemp(join(tmpdir(), 'tau-acp-questions-'));
+    roots.push(workspaceRoot);
+    const chatId = 'chat-live-questions';
+    const runId = 'run-live-questions';
+    const record: QuestionRecordFileSystem = {
+      exists: async (path) => {
+        try {
+          await access(join(workspaceRoot, path));
+          return true;
+        } catch {
+          return false;
+        }
+      },
+      readFile: async (path) => readFile(join(workspaceRoot, path), 'utf8'),
+      writeFile: async (path, content) => {
+        await mkdir(dirname(join(workspaceRoot, path)), { recursive: true });
+        await writeFile(join(workspaceRoot, path), content, 'utf8');
+      },
+    };
+    const answerWithSecondOption = async (): Promise<void> => {
+      const { asks } = parseQuestionsFile(await record.readFile(questionsPath(chatId)));
+      const at = new Date().toISOString();
+      const answers = Object.fromEntries(
+        asks.map((ask) => [
+          ask.id,
+          {
+            questions: Object.fromEntries(
+              ask.questions.map((question) => [question.id, { choice: question.options[1]?.label ?? 'B', at }]),
+            ),
+          },
+        ]),
+      );
+      await record.writeFile(answersPath(chatId), serializeAnswersFile({ version: 1, answers }));
+    };
+    const registry: ToolRegistry = {
+      list: () => [
+        {
+          name: toolName.askQuestions,
+          description: toolDescriptions[toolName.askQuestions],
+          inputSchema: z.toJSONSchema(askQuestionsInputSchema) as JsonObject,
+        },
+      ],
+      invoke: async (invocation) => {
+        const person = setTimeout(() => {
+          void answerWithSecondOption();
+        }, 2000);
+        try {
+          const input = askQuestionsInputSchema.parse(invocation.input);
+          const output = await handleAskQuestions(
+            { ...input, toolCallId: invocation.toolCallId },
+            record,
+            invocation.signal,
+          );
+          return { content: output as unknown as JsonObject, isError: false };
+        } finally {
+          clearTimeout(person);
+        }
+      },
+    };
+    const endpoint = createHostMcpEndpoint({ secret: randomBytes(32).toString('base64url'), workspaceRoot, registry });
+    const server = createServer((request, response) => {
+      void endpoint.handle(request, response);
+    });
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('The questions MCP server did not open a TCP port.');
+    }
+    const capability = endpoint.mint({ chatId, runId });
+    const release = endpoint.activate({ token: capability.token, chatId, runId, signal: new AbortController().signal });
+    let session: Awaited<ReturnType<typeof openAcpSession>> | undefined;
+    const events: ExternalAgentLogEvent[] = [];
+    try {
+      session = await openAcpSession({
+        adapter: codexAdapter,
+        cwd: workspaceRoot,
+        createId: randomUUID,
+        mcpServers: [
+          {
+            type: 'http',
+            name: 'tau',
+            url: `http://127.0.0.1:${String(address.port)}/mcp`,
+            headers: [{ name: 'Authorization', value: `Bearer ${capability.token}` }],
+          },
+        ],
+      });
+      await session.prompt(
+        'Before you design anything, ask me with mcp.tau.ask_questions which material the desk ornament should be printed in, offering PLA (recommended) and PETG. Then reply with one sentence naming the material I chose. Do not edit files.',
+        {
+          append: async (batch) => {
+            events.push(...batch);
+          },
+          approve: async () => ({ interruptId: 'questions', outcome: 'approved' }),
+          publishLive: async () => undefined,
+          signal: AbortSignal.timeout(240_000),
+        },
+        selectedModel('codex'),
+      );
+      const messages = events.flatMap((event) => (event.type === 'message.appended' ? [event.message] : []));
+      const answered = messages.find(
+        (message) => message.role === 'tool-output' && message.toolName === toolName.askQuestions && !message.isError,
+      );
+      console.log(`[acp-live] codex questions result=${JSON.stringify(answered?.content).slice(0, 400)}`);
+      expect(JSON.stringify(answered?.content)).toContain('"source":"person"');
+      const { asks } = parseQuestionsFile(await record.readFile(questionsPath(chatId)));
+      expect(asks).toHaveLength(1);
+      expect(asks[0]?.resolution?.outcome).toBe('answered');
+      const reply = messages
+        .filter((message) => message.role === 'assistant')
+        .map((message) => textOf(message))
+        .join(' ');
+      expect(reply).toMatch(/PETG/u);
+    } finally {
+      await session?.close();
+      await release();
+      await endpoint.close();
+      await new Promise<void>((resolve) => {
+        server.close(() => {
+          resolve();
+        });
+      });
+    }
+  }, 300_000);
+});
+
+/* In Plan mode Codex has its own question tool, `request_user_input`; codex-acp sends it as a form
+ * elicitation, which Tau records as an ask in the chat (agent questions blueprint D6). */
+describe.skipIf(!liveEnabled || codexAdapter === undefined)('live Codex plan-mode question', () => {
+  it("records request_user_input as a chat question and returns the person's answer", async () => {
+    const { launcher, workspaceRoot } = await startHarness();
+    const chatId = 'chat-live-plan-question';
+    const runId = 'run-live-plan-question';
+    const recordPath = join(workspaceRoot, questionsPath(chatId));
+    let answered = false;
+    /* The person answers B once the card appears. */
+    const answerOnce = async (): Promise<void> => {
+      const { asks } = parseQuestionsFile(await readFile(recordPath, 'utf8').catch(() => undefined));
+      if (answered || asks.length === 0) {
+        return;
+      }
+      answered = true;
+      const at = new Date().toISOString();
+      const choices = (ask: (typeof asks)[number]) =>
+        Object.fromEntries(
+          ask.questions.map((question) => [question.id, { choice: question.options[1]?.label ?? 'B', at }]),
+        );
+      const answers = Object.fromEntries(asks.map((ask) => [ask.id, { questions: choices(ask) }]));
+      await writeFile(join(workspaceRoot, answersPath(chatId)), serializeAnswersFile({ version: 1, answers }), 'utf8');
+    };
+    const person = setInterval(() => {
+      void answerOnce();
+    }, 500);
+    try {
+      await launcher.execute({
+        type: 'start',
+        commandId: `start-${runId}`,
+        payload: {
+          trigger: 'submit',
+          chatId,
+          runId,
+          message: {
+            id: `user-${runId}`,
+            role: 'user',
+            content:
+              'Use your request_user_input tool to ask me one question: should the desk ornament be printed in PLA or PETG? Recommend PLA. After I answer, reply with one sentence naming the material I chose and stop. Do not edit files.',
+          },
+          config: {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- codex-acp's config option id
+            agent: { kind: 'acp', id: 'codex', config: { collaboration_mode: 'plan' } },
+            systemPrompt: '',
+            toolChoice: 'auto',
+          },
+        },
+      });
+      const state = await settled(async () => readLog(workspaceRoot, chatId));
+      const events = await readLog(workspaceRoot, chatId);
+      const { asks } = parseQuestionsFile(await readFile(recordPath, 'utf8').catch(() => undefined));
+      console.log(`[acp-live] codex plan question state=${state} asks=${JSON.stringify(asks).slice(0, 600)}`);
+      expect(state, JSON.stringify(events.slice(-3))).toBe('completed');
+      expect(asks).toHaveLength(1);
+      expect(asks[0]).toMatchObject({ source: 'acp', agentId: 'codex', resolution: { outcome: 'answered' } });
+      expect(asks[0]?.questions).toHaveLength(1);
+      expect(asks[0]?.questions[0]?.question).toMatch(/PLA|PETG/u);
+      expect(asks[0]?.questions[0]?.allowsText).toBe(true);
+      const reply = messagesOf(events)
+        .filter((message) => message.role === 'assistant')
+        .map((message) => textOf(message))
+        .join(' ');
+      expect(reply).toMatch(/PETG/u);
+    } finally {
+      clearInterval(person);
+    }
+  }, 300_000);
 });
 
 describe.skipIf(!liveEnabled || codexAdapter === undefined)('native Codex skill discovery through ACP', () => {

@@ -21,7 +21,11 @@ import type {
   AcpPresentationInput,
   AcpVendorAnswer,
 } from '#acp/acp-session.machine.js';
+import { createAskId, recordAsk, settleAsk, waitForAnswers } from '@taucad/chat/rpc';
+import { askOutcomeOf } from '@taucad/chat';
+
 import { createAdapterConnection } from '#acp/adapter-connection.js';
+import { askOfElicitation, elicitationResponseOf } from '#acp/elicitation-questions.js';
 import {
   asJson,
   chooseOption,
@@ -190,6 +194,51 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
     background.add(binding);
     void forget(background, binding);
 
+    /**
+     * One form elicitation, asked through the chat's question record (agent questions blueprint D6).
+     *
+     * The person answers on the same card a Tau `ask_questions` call uses; a
+     * question tool's form adopts its recommended options at its deadline. A
+     * form Tau cannot present, or a turn with no record, is declined as before.
+     */
+    const serveForm = (
+      params: Extract<AcpLentTurnCommand, { readonly type: 'serve'; readonly method: 'elicitation/create' }>['params'],
+      answered: (answer: AcpVendorAnswer) => void,
+    ): void => {
+      const { questions } = seams;
+      const elicitation =
+        questions === undefined
+          ? undefined
+          : askOfElicitation(params, { agentId: input.adapter.id, askId: createAskId(), now: Date.now() });
+      if (questions === undefined || elicitation === undefined) {
+        answered({ result: { action: 'decline' } });
+        return;
+      }
+      const { chatId, fileSystem } = questions;
+      track(background, async () => {
+        let answer: AcpVendorAnswer = { result: { action: 'cancel' } };
+        try {
+          await recordAsk(fileSystem, chatId, elicitation.ask);
+          const answers = await waitForAnswers(fileSystem, { chatId, ask: elicitation.ask, signal: seams.signal });
+          const response = elicitationResponseOf(elicitation, answers);
+          await settleAsk(fileSystem, {
+            chatId,
+            askId: elicitation.ask.id,
+            outcome: askOutcomeOf(elicitation.ask, answers),
+          });
+          answer = { result: response };
+        } catch {
+          /* The turn stopped or the record failed: nobody decided. */
+          try {
+            await settleAsk(fileSystem, { chatId, askId: elicitation.ask.id, outcome: 'cancelled' });
+          } catch {
+            /* The cancel answer below is what the agent needs. */
+          }
+        }
+        answered(answer);
+      });
+    };
+
     /* One vendor request of this turn; its answer arrives as `vendorAnswered`. */
     const serveRequest = (command: Extract<AcpLentTurnCommand, { readonly type: 'serve' }>): void => {
       const { id } = command;
@@ -221,8 +270,7 @@ export const provideAcpSession = (effects: AcpSessionEffects): typeof acpSession
         case 'elicitation/create': {
           const login = urlLoginOf(input.adapter.id, command.params);
           if (!login?.elicitationId) {
-            /* A form Tau has no surface for: declining is the honest answer. */
-            answered({ result: { action: 'decline' } });
+            serveForm(command.params, answered);
             return;
           }
           const { elicitationId } = login;

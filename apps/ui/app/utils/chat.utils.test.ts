@@ -422,6 +422,37 @@ describe('serializeMessage', () => {
         '<tool_call name="arrange_workbench">\narrange_workbench(open, lanes)\n</tool_call>\n<tool_result>\n-> .tau/workbench/layout.json\n</tool_result>',
       );
     });
+    it('serializes the questions with lettered options and the answers with their source', () => {
+      const message = baseMessage([
+        {
+          type: 'tool-ask_questions',
+          toolCallId: 'ask-1',
+          state: 'output-available',
+          input: {
+            chatId: 'chat_a',
+            questions: [
+              {
+                id: 'form',
+                header: 'Form',
+                question: 'Which form?',
+                options: [
+                  { label: 'Ribbon', description: 'Prints without supports.' },
+                  { label: 'Gem', description: 'Crisp facets.' },
+                ],
+              },
+            ],
+          },
+          output: {
+            status: 'defaulted',
+            path: '.tau/chats/chat_a/questions.yaml',
+            answers: [{ id: 'form', answer: 'Ribbon', source: 'recommended' }],
+          },
+        },
+      ]);
+      expect(serializeMessage(message)).toBe(
+        '<tool_call name="ask_questions">\nWhich form?\n  A. Ribbon\n  B. Gem\n</tool_call>\n<tool_result>\nform: Ribbon (recommended, no reply)\n</tool_result>',
+      );
+    });
     it('serializes tool-web_search output-available', () => {
       const message = baseMessage([
         {

@@ -66,7 +66,7 @@ const renderToggle = (properties: Partial<React.ComponentProps<typeof WorkbenchT
 
 const hover = (trigger: HTMLElement): HTMLElement => {
   fireEvent.pointerEnter(trigger, { pointerType: 'mouse' });
-  return screen.getByRole('dialog', { name: 'Workbench tabs' });
+  return screen.getByRole('dialog');
 };
 
 const scrollDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
@@ -122,10 +122,10 @@ describe('WorkbenchToggle', () => {
     const menu = hover(trigger);
     expect(screen.getByRole('button', { name: 'Editor' })).toHaveFocus();
     const rows = within(menu).getAllByRole('option');
-    expect(rows[0]).toHaveTextContent('main.txtsrc');
-    expect(rows[0]).toHaveAttribute('title', 'src/main.txt');
-    expect(rows[0]).toHaveAttribute('aria-current', 'page');
-    expect(rows[1]).toHaveTextContent('main.txtdocs');
+    // The pane chevron's menu: title only, the active tab checked.
+    expect(rows[0]).toHaveTextContent(/^main.txt$/);
+    expect(within(rows[0]!).getByLabelText('Active tab')).toBeInTheDocument();
+    expect(rows[1]).toHaveTextContent(/^main.txt$/);
     fireEvent.click(rows[1]!);
     expect(onOpenChange).toHaveBeenCalledExactlyOnceWith(true);
     expect(second.api.setActive).toHaveBeenCalledOnce();
@@ -133,7 +133,7 @@ describe('WorkbenchToggle', () => {
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
   });
 
-  it('should keep unique titles single-line and use the workbench tab icons', () => {
+  it('should use the workbench tab icons', () => {
     const utility = createPanel('parameters');
     renderToggle({
       api: createApi([utility, createPanel('models/a/main.py', 'models/a/main.py')]).api,

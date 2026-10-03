@@ -28,6 +28,7 @@ import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
 import type { AgentLogEvent, ExternalAgentTurn, JsonValue, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
 import { reduceEventLog } from '@taucad/agent-host';
+import { parseQuestionsFile, serializeAnswersFile } from '@taucad/chat';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -2590,6 +2591,53 @@ describe('authentication, initialize and prompt content', () => {
     expect(sent(harness.frames, 'session/prompt')).toBe(0);
   }, 30_000);
 
+  it('asks a form elicitation through the chat question record and answers with the person’s choice', async () => {
+    const harness = await startHarness();
+    const chatDirectory = join(harness.workspaceRoot, '.tau', 'chats', 'chat-ask');
+    /* The person's client: answer the ask as soon as it is recorded. */
+    const answerWhenAsked = async (): Promise<void> => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+        const text = await readFile(join(chatDirectory, 'questions.yaml'), 'utf8').catch(() => undefined);
+        const [recorded] = parseQuestionsFile(text).asks;
+        if (recorded !== undefined) {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+          await writeFile(
+            join(chatDirectory, 'answers.yaml'),
+            serializeAnswersFile({
+              version: 1,
+              answers: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- claude-agent-acp's wire field name
+                [recorded.id]: { questions: { question_0: { choice: 'PLA', at: new Date().toISOString() } } },
+              },
+            }),
+          );
+          return;
+        }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+        await new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+      }
+    };
+    await Promise.all([
+      runTurn(harness, { chatId: 'chat-ask', runId: 'run-ask', text: 'ask-form noask' }),
+      answerWhenAsked(),
+    ]);
+
+    const [ask] = parseQuestionsFile(await readFile(join(chatDirectory, 'questions.yaml'), 'utf8')).asks;
+    expect(ask).toMatchObject({
+      callId: 'ask-1',
+      source: 'acp',
+      agentId: 'codex',
+      questions: [{ id: 'question_0', header: 'Material', recommended: 0, allowsText: true }],
+      resolution: { outcome: 'answered' },
+    });
+    const events = await readLog(harness.workspaceRoot, 'chat-ask');
+    expect(JSON.stringify(events)).toContain(String.raw`ask-form: accept {\"question_0\":\"PLA\"}`);
+    expect(lifecycleOf(events).at(-1)).toBe('completed');
+  }, 30_000);
+
   it('records a url elicitation as a durable login, resolves it, and finishes the turn', async () => {
     const harness = await startHarness();
 
@@ -2608,7 +2656,7 @@ describe('authentication, initialize and prompt content', () => {
     /* The agent was told Tau can present one; that is why it offered the flow. */
     expect(
       harness.frames.some(
-        (frame) => frame.direction === 'client->agent' && frame.frame.includes('"elicitation":{"url":{}}'),
+        (frame) => frame.direction === 'client->agent' && frame.frame.includes('"elicitation":{"url":{},"form":{}}'),
       ),
     ).toBe(true);
   }, 30_000);

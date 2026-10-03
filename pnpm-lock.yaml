@@ -3001,6 +3001,9 @@ importers:
 
   libs/oxlint:
     dependencies:
+      '@typescript-eslint/types':
+        specifier: ^8.61.1
+        version: 8.61.1
       typescript:
         specifier: 'catalog:'
         version: 5.9.3
@@ -3011,9 +3014,6 @@ importers:
       '@types/estree':
         specifier: ^1.0.9
         version: 1.0.9
-      '@typescript-eslint/types':
-        specifier: ^8.61.1
-        version: 8.61.1
 
   libs/tau-examples:
     dependencies:

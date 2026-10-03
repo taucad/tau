@@ -163,6 +163,12 @@ export const setup = async (): Promise<() => void> => {
     environment['ANTHROPIC_API_KEY'] = desktopE2EProviderStubKey;
   }
 
+  /* Dictation reaches the voice spec's local stub through the API's development-only
+   * transcription seam; the live voice tier keeps the real OpenAI provider. */
+  if (process.env['TAU_E2E_LIVE_VOICE'] !== 'true') {
+    environment['TAU_TRANSCRIPTION_UPSTREAM_URL'] = desktopE2EProviderStubUrl;
+  }
+
   /* Kept, unlike `ui-e2e`'s `stdio: 'ignore'`: a chat run that fails
    * server-side is otherwise invisible from the Electron side of the glass. */
   const logDirectory = resolve(import.meta.dirname, '../../out/test-results/desktop-e2e');

@@ -269,6 +269,47 @@
         }
       }
     },
+    "test:e2e:voice": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" },
+        { "projects": ["api"], "target": "build" }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-voice.spec.ts"
+        ],
+        "parallel": false
+      },
+      "metadata": {
+        "description": "Chromium's real capture driver reads a 440 Hz WAV through the composer's AudioWorklet into a WAV upload to the real Tau API, whose OpenAI provider reaches a local stub through TAU_TRANSCRIPTION_UPSTREAM_URL; the stub measures the tone and streams the fixed transcript into the editable draft, and Cancel sends nothing. No provider key is needed."
+      }
+    },
+    "test:e2e:voice:live": {
+      "executor": "nx:run-commands",
+      "cache": false,
+      "parallelism": false,
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" },
+        { "projects": ["api"], "target": "build" }
+      ],
+      "options": {
+        "cwd": "{workspaceRoot}/apps/desktop-e2e",
+        "commands": [
+          "./scripts/ensure-services.sh",
+          "../../node_modules/.bin/vitest run --config vitest.config.ts src/desktop-voice.spec.ts"
+        ],
+        "parallel": false,
+        "env": { "TAU_E2E_LIVE_VOICE": "true" }
+      },
+      "metadata": {
+        "description": "Opt-in macOS synthesized speech through Chromium's file microphone, the Tau API and the real OpenAI transcription provider. Needs a funded OPENAI_API_KEY in apps/api/.env and spends its quota."
+      }
+    },
     "test:e2e:machine-profiles": {
       "executor": "nx:run-commands",
       "parallelism": false,

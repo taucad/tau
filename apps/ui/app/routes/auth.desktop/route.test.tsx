@@ -119,7 +119,10 @@ describe('AuthDesktopRoute', () => {
     await userEvent.click(await screen.findByRole('button', { name: 'Tau Desktop didn’t open' }));
 
     expect(screen.getByText('Tau Desktop didn’t open')).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Get Tau Desktop' })).toHaveAttribute('href', 'https://docs.tau.new');
+    expect(screen.getByRole('link', { name: 'Get Tau Desktop' })).toHaveAttribute(
+      'href',
+      'https://github.com/taucad/tau/releases/latest',
+    );
     expect(
       screen.getByText('To sign in without the desktop app, close this tab and use Tau in the browser.'),
     ).toBeInTheDocument();

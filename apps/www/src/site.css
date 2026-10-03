@@ -453,23 +453,25 @@ main > .band:first-child::before {
   color: var(--foreground);
   font-variant-numeric: tabular-nums;
 }
+/* The drafting lies on the floor beneath the model: it shares the canvas box and camera, so the
+   dial, input arc and rim dimension register with the render; the model paints over it. */
 .drafting {
   position: absolute;
   inset: 50% auto auto 50%;
-  width: min(92%, 40rem);
+  width: min(86%, 37rem);
+  height: auto;
   aspect-ratio: 1;
   translate: -50% -50%;
   overflow: visible;
+  pointer-events: none;
   fill: none;
   stroke: var(--line-strong);
   stroke-width: 1;
-  vector-effect: non-scaling-stroke;
 }
 .drafting * {
   vector-effect: non-scaling-stroke;
 }
-.drafting .d-axes path,
-.drafting .d-pitch {
+.drafting .d-axes {
   stroke: var(--line);
 }
 .drafting .d-ticks path {
@@ -478,17 +480,21 @@ main > .band:first-child::before {
 .drafting .d-ticks .long {
   stroke: var(--line-strong);
 }
-.drafting text {
+/* A halo in the page colour keeps the centre lines from running through the labels. */
+.drafting .d-label {
   fill: var(--muted-foreground);
-  stroke: none;
+  stroke: var(--background);
+  stroke-width: 6px;
+  stroke-linejoin: round;
+  paint-order: stroke;
   font: 500 12px var(--font-mono);
   letter-spacing: 0.06em;
 }
 .drafting .d-input {
   stroke: var(--primary);
   stroke-width: 2;
-  stroke-dasharray: 0 360;
   stroke-linecap: round;
+  stroke-linejoin: round;
 }
 .drafting .d-dim path {
   stroke: var(--ink-soft);
@@ -504,6 +510,9 @@ main > .band:first-child::before {
   width: min(86%, 37rem);
   aspect-ratio: 1;
   transition: opacity var(--medium) var(--ease);
+}
+.hero-model .poster {
+  position: relative;
 }
 .hero-stage .stage-canvas {
   position: absolute;
@@ -571,34 +580,24 @@ main > .band:first-child::before {
 /* Intro: the construction draws (design), the dimension reads (verify), layers sweep (print).
    Every transition is ≤500 ms; the final state is the static default, so no script is required. */
 @media (prefers-reduced-motion: no-preference) {
-  .drafting .d-axes path,
+  .drafting .d-axes,
   .drafting .d-ring,
-  .drafting .d-pitch,
   .drafting .d-dim path {
     stroke-dasharray: 1;
     animation: draw var(--slow) var(--ease) both;
   }
-  .drafting .d-axes path:nth-child(2) {
-    animation-delay: 80ms;
-  }
   .drafting .d-ring {
     animation-delay: 160ms;
   }
-  .drafting .d-pitch {
-    animation-delay: 260ms;
-  }
-  .drafting .d-pitch.inner {
-    animation-delay: 340ms;
-  }
   .drafting .d-ticks,
-  .drafting .d-labels {
+  .drafting .d-label {
     animation: appear var(--medium) var(--ease) 380ms both;
   }
   .drafting .d-dim path {
     animation-delay: 900ms;
   }
-  .drafting .d-dim text {
-    animation: appear var(--medium) var(--ease) 1100ms both;
+  .drafting .d-size {
+    animation-delay: 1100ms;
   }
   .hero-model .poster {
     animation: settle var(--slow) var(--ease) both;

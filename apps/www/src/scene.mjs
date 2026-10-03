@@ -1,6 +1,7 @@
+import { heroCamera } from '#www/hero-view.js';
 import { parseStoryManifest, parseVariantManifest } from '#www/story-geometry.js';
 import { partPose } from '#www/story-kinematics.js';
-import { storyFrame, storyPart } from '#www/story-timeline.js';
+import { ease, storyFrame, storyPart } from '#www/story-timeline.js';
 import * as THREE from 'three';
 
 /** @typedef {import('#www/story-timeline.js').FrameState} FrameState */
@@ -38,41 +39,112 @@ export const loadAssembly = async (signal) => {
   return { manifest, binary, variant, offsets };
 };
 
+/** @type {(hex: string, intensity: number) => THREE.Color} */
+const radiance = (hex, intensity) => new THREE.Color(hex).multiplyScalar(intensity);
+
 /**
- * A dark studio with long softboxes, so authored metals read as metal instead of grey plastic.
+ * Softboxes as [colour, intensity, azimuth°, elevation°, distance, width, height], aimed at the model.
+ * Azimuth 0 faces the camera side and grows towards +x; the hero camera sits at about -26°.
+ * @type {Array<[string, number, number, number, number, number, number]>}
+ */
+const softboxes = [
+  // Top-back softbox: flat faces reflect this region, so it sweeps a gradient across the ring and gears.
+  ['#ffffff', 3.2, 160, 40, 20, 14, 9],
+  // An overhead fill keeps the tops even without washing out their colour.
+  ['#ffffff', 2, 0, 85, 20, 12, 12],
+  // Tall strips either side draw highlight bands down the ring wall, the hub and the gear teeth.
+  ['#fff3e6', 6, -100, -20, 20, 3, 22],
+  ['#eef4ff', 5, 70, -20, 20, 3, 22],
+  // A strip above and behind the camera catches the front chamfers.
+  ['#ffffff', 2, -26, 50, 20, 14, 3],
+  // A dim bounce card below the camera lifts the near walls just enough to read as blue metal.
+  ['#ffffff', 0.5, -26, -35, 20, 14, 6],
+];
+
+/**
+ * A high-key product studio, prefiltered once. Metal shows what it reflects, so this is built for the
+ * hero camera: a soft grey dome with a bright horizon for chamfer glints, the softboxes above, and a
+ * darker floor that the vertical faces pick up.
  * @type {(renderer: THREE.WebGLRenderer) => THREE.WebGLRenderTarget}
  */
 const studio = (renderer) => {
   const scene = new THREE.Scene();
-  scene.background = new THREE.Color(0x5e_63_68);
-  const box = new THREE.BoxGeometry(1, 1, 1);
-  /** @type {Array<[number, [number, number, number], [number, number, number]]>} */
-  const panels = [
-    [7, [0, 9, 0], [14, 0.2, 3]],
-    [3.2, [-9, 2, 4], [0.2, 7, 2.2]],
-    [1.4, [9, 1, -3], [0.2, 5, 1.4]],
-    [0.9, [0, -2, -10], [12, 1.1, 0.2]],
-    [0.22, [0, -8, 0], [20, 0.2, 20]],
-  ];
-  const materials = [];
-  for (const [intensity, position, size] of panels) {
-    const material = new THREE.MeshBasicMaterial({ color: new THREE.Color(intensity, intensity, intensity) });
+  const dome = new THREE.SphereGeometry(50, 64, 32);
+  const top = radiance('#f4f6f8', 0.5);
+  const horizon = radiance('#ffffff', 0.9);
+  const floor = radiance('#b8bdc2', 0.25);
+  const position = dome.getAttribute('position');
+  const colors = new Float32Array(position.count * 3);
+  const color = new THREE.Color();
+  for (let i = 0; i < position.count; i++) {
+    const y = position.getY(i) / 50;
+    color
+      .copy(horizon)
+      .lerp(y >= 0 ? top : floor, Math.abs(y) ** 0.7)
+      .toArray(colors, i * 3);
+  }
+  dome.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+  const domeMaterial = new THREE.MeshBasicMaterial({ vertexColors: true, side: THREE.BackSide });
+  scene.add(new THREE.Mesh(dome, domeMaterial));
+  const panel = new THREE.PlaneGeometry(1, 1);
+  const materials = [domeMaterial];
+  for (const [hex, intensity, azimuth, elevation, distance, width, height] of softboxes) {
+    const material = new THREE.MeshBasicMaterial({ color: radiance(hex, intensity), side: THREE.DoubleSide });
     materials.push(material);
-    const panel = new THREE.Mesh(box, material);
-    panel.position.set(...position);
-    panel.scale.set(...size);
-    scene.add(panel);
+    const mesh = new THREE.Mesh(panel, material);
+    const theta = (azimuth * Math.PI) / 180;
+    const phi = (elevation * Math.PI) / 180;
+    mesh.position.set(
+      distance * Math.sin(theta) * Math.cos(phi),
+      distance * Math.sin(phi),
+      distance * Math.cos(theta) * Math.cos(phi),
+    );
+    mesh.scale.set(width, height, 1);
+    mesh.lookAt(0, 0, 0);
+    scene.add(mesh);
   }
   const pmrem = new THREE.PMREMGenerator(renderer);
   try {
-    return pmrem.fromScene(scene, 0.035);
+    return pmrem.fromScene(scene, 0.02);
   } finally {
     pmrem.dispose();
-    box.dispose();
+    dome.dispose();
+    panel.dispose();
     for (const material of materials) {
       material.dispose();
     }
   }
+};
+
+/**
+ * Contact shadow under the ring: a tight dark line where the 174 mm base meets the floor and a faint
+ * wide penumbra, so the model sits on its drawing instead of floating above the page.
+ * @type {() => THREE.DataTexture}
+ */
+const contactShadow = () => {
+  const size = 256;
+  // The texture spans a 240 mm square plane.
+  const rim = 87 / 120;
+  const data = new Uint8Array(size * size * 4);
+  /** @type {(from: number, to: number, value: number) => number} */
+  const step = (from, to, value) => {
+    const t = Math.min(1, Math.max(0, (value - from) / (to - from)));
+    return t * t * (3 - 2 * t);
+  };
+  for (let y = 0; y < size; y++) {
+    for (let x = 0; x < size; x++) {
+      const r = Math.hypot(((x + 0.5) / size) * 2 - 1, ((y + 0.5) / size) * 2 - 1);
+      const line = Math.exp(-(((r - rim) / 0.05) ** 2)) * step(rim * 0.9, rim * 1.1, r);
+      const alpha = 0.06 * (1 - step(rim * 0.7, 1, r)) + 0.3 * line;
+      data[(y * size + x) * 4 + 3] = Math.round(Math.min(1, alpha) * 255);
+    }
+  }
+  const texture = new THREE.DataTexture(data, size, size);
+  texture.generateMipmaps = true;
+  texture.minFilter = THREE.LinearMipmapLinearFilter;
+  texture.magFilter = THREE.LinearFilter;
+  texture.needsUpdate = true;
+  return texture;
 };
 
 /**
@@ -84,10 +156,15 @@ const studio = (renderer) => {
 export const createScene = ({ manifest, binary, variant, offsets }) => {
   const renderer = new THREE.WebGLRenderer({ antialias: true, alpha: true, powerPreference: 'default' });
   renderer.outputColorSpace = THREE.SRGBColorSpace;
-  renderer.toneMapping = THREE.ACESFilmicToneMapping;
-  renderer.toneMappingExposure = 1.15;
+  // Khronos PBR Neutral keeps the authored colours true; ACES greyed and darkened them.
+  renderer.toneMapping = THREE.NeutralToneMapping;
+  renderer.toneMappingExposure = 1;
   renderer.setClearColor(0, 0);
   renderer.localClippingEnabled = true;
+  // The floor shadow is redrawn only on frames that show the floor.
+  renderer.shadowMap.enabled = true;
+  renderer.shadowMap.type = THREE.VSMShadowMap;
+  renderer.shadowMap.autoUpdate = false;
   const canvas = renderer.domElement;
   canvas.setAttribute('aria-hidden', 'true');
   /** @type {Set<{dispose: () => void}>} */
@@ -100,15 +177,44 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
   const scene = new THREE.Scene();
   const environment = own(studio(renderer));
   scene.environment = environment.texture;
-  scene.add(new THREE.HemisphereLight(0xff_ff_ff, 0x4a_50_56, 0.6));
-  const key = new THREE.DirectionalLight(0xff_ff_ff, 1.6);
-  key.position.set(-160, 260, 180);
+  // A soft key almost overhead: specular sparkle on the teeth and a soft shadow on the floor.
+  const key = new THREE.DirectionalLight(0xff_ff_ff, 1.5);
+  key.position.set(-40, 400, 60);
+  key.castShadow = true;
+  key.shadow.mapSize.set(512, 512);
+  Object.assign(key.shadow.camera, { left: -130, right: 130, top: 130, bottom: -130, near: 10, far: 900 });
+  key.shadow.radius = 20;
+  key.shadow.blurSamples = 24;
+  key.shadow.bias = -0.0005;
+  key.shadow.normalBias = 0.6;
   scene.add(key);
-  const camera = new THREE.PerspectiveCamera(30, 1, 1, 3000);
+  const camera = new THREE.PerspectiveCamera(heroCamera.fov, 1, 1, 3000);
   const layerPlane = new THREE.Plane(new THREE.Vector3(0, -1, 0), 1e4);
   const root = new THREE.Group();
   root.rotation.x = -Math.PI / 2;
   scene.add(root);
+  // The floor is the ring's base plane: a soft cast shadow plus a contact line, never an opaque surface,
+  // so the drafting drawn beneath the canvas stays visible around and through the gearbox.
+  // Neither floor layer writes depth, so they never fight each other and the model always occludes them.
+  const floorShadow = own(new THREE.ShadowMaterial({ opacity: 0.28, depthWrite: false }));
+  const floor = new THREE.Mesh(own(new THREE.PlaneGeometry(600, 600)), floorShadow);
+  floor.position.z = heroCamera.floorY;
+  floor.receiveShadow = true;
+  const contactMaterial = own(
+    new THREE.MeshBasicMaterial({ map: own(contactShadow()), transparent: true, depthWrite: false, toneMapped: false }),
+  );
+  const contact = new THREE.Mesh(own(new THREE.PlaneGeometry(240, 240)), contactMaterial);
+  contact.position.z = heroCamera.floorY;
+  contact.renderOrder = -1;
+  root.add(floor, contact);
+  /** @type {(weight: number) => void} */
+  const ground = (weight) => {
+    floor.visible = weight > 0.01;
+    contact.visible = floor.visible;
+    floorShadow.opacity = 0.28 * weight;
+    contactMaterial.opacity = weight;
+    renderer.shadowMap.needsUpdate = floor.visible;
+  };
   const parts = manifest.meshes.map((part, index) => {
     const geometry = own(new THREE.BufferGeometry());
     geometry.setAttribute(
@@ -143,6 +249,7 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
     );
     const mesh = new THREE.Mesh(geometry, material);
     mesh.morphTargetInfluences = range ? [0] : [];
+    mesh.castShadow = true;
     const positions = geometry.getAttribute('position');
     const samples = [];
     for (let i = 0; i < positions.count; i += 6) {
@@ -242,7 +349,16 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
       printer.visible = false;
       root.position.y = 0;
       root.scale.setScalar(1);
-      aim({ distance: 400, elevation: 0.72, azimuth: -0.45, targetY: -6 });
+      ground(1);
+      // The drafting beneath the canvas is projected with this exact camera (hero-view.mjs).
+      const { distance, elevation, azimuth, floorY } = heroCamera;
+      camera.position.set(
+        distance * Math.sin(azimuth) * Math.cos(elevation),
+        floorY + distance * Math.sin(elevation),
+        distance * Math.cos(azimuth) * Math.cos(elevation),
+      );
+      camera.lookAt(0, floorY, 0);
+      camera.setViewOffset(1, 1, 0, heroCamera.shift, 1, 1);
     } else {
       const p = view.progress;
       const frame = storyFrame(p);
@@ -269,6 +385,9 @@ export const createScene = ({ manifest, binary, variant, offsets }) => {
       gantry.position.y = Math.max(4, -1 + (ringTop + 1) * frame.layer) + 4;
       head.position.set(Math.sin(p * 47) * 70, gantry.position.y + 12, Math.cos(p * 31) * 40);
       root.scale.setScalar(1 - 0.38 * frame.device);
+      // The assembled gearbox stands on the same soft floor as the hero; it lifts away for printing.
+      ground(ease((p - 4.3) / 0.4) * (1 - ease((p - 6.85) / 0.2)));
+      camera.clearViewOffset();
       aim(frame);
     }
     renderer.render(scene, camera);

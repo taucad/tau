@@ -75,9 +75,9 @@ const authored = (sourcePath: string): ReplayFixture['source'] => ({ kind: 'auth
 const jscadCubePath = 'libs/tau-examples/src/kernels/jscad/cube/main.ts';
 const openScadKitchenSinkPath = 'libs/tau-examples/src/kernels/openscad/kitchen-sink/main.scad';
 const foldedUnicodeSourcePath = 'apps/api/app/testing/edit-bench/folded-unicode-source.fixture.txt';
-// The prompt-config example was deleted by the KS-5 prompt surgery; the
-// execution-verified verbatim copy lives in the KS-2 fixture set.
-const kclTeapotPath = 'apps/runtime-e2e/src/prompt-examples/fixtures/zoo.canonical-example/main.kcl.fixture';
+// The prompt-config example was deleted by the KS-5 prompt surgery and the KS-2
+// copy was never tracked, so the bench keeps its own tracked copy.
+const kclTeapotPath = 'apps/api/app/testing/edit-bench/kcl-teapot.fixture.kcl';
 const qualificationEvidencePath = 'spikes/stash1-edit-reference/file-edit-interface-qualification.jsonl';
 
 const foldedUnicodeSource =
@@ -187,7 +187,7 @@ rotate(rotation)
     label_3d(label_text, [0, 0]);
 `;
 
-/** Tau's checked-in KCL example; tau-examples currently has no KCL entry. */
+/** Byte-for-byte copy of the tracked KCL teapot; tau-examples currently has no KCL entry. */
 const kclTeapot = `// Parametric Teapot
 // Comprehensive KCL example demonstrating the full Resilient Modeling Strategy
 //

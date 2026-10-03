@@ -908,12 +908,17 @@ describe('machine tool registry', () => {
       [
         'started',
         { receipt: { ...start, status: 'accepted', providerRunId: 'provider-run-7' } },
-        'The printer confirmed the start of pyramid.gcode.3mf and the print is running. Observe it with get_machine or get_print_request.',
+        "The printer took the start of pyramid.gcode.3mf and has not reported the run since. Observe it with get_machine; don't start another print on this machine until it does.",
+      ],
+      [
+        'confirming',
+        { receipt: { ...start, status: 'unknown', reason: 'reply-lost-after-possible-acceptance' } },
+        "Tau sent the start of pyramid.gcode.3mf and is waiting for the printer to confirm it; the printer's own status usually does within a minute. Call get_print_request again shortly. Do not retry or start another print.",
       ],
       [
         'unknown',
         { receipt: { ...start, status: 'unknown', reason: 'reply-lost-after-possible-acceptance' } },
-        "The printer did not confirm the start of pyramid.gcode.3mf, so whether it is printing is unknown. Tell the person that, and to check the printer or Reconcile the request in Tau's Print pane. Do not retry or start another print.",
+        "The printer has not confirmed the start of pyramid.gcode.3mf for several minutes, so whether it is printing is unknown. Tell the person to check the printer's screen; Tau keeps watching and updates the request if the printer reports the run. Do not retry or start another print.",
       ],
       [
         'rejected',
@@ -949,7 +954,12 @@ describe('machine tool registry', () => {
         fixture.requests.set('call-1', recorded(state, overrides));
         await expect(invoke(fixture.client, 'get_print_request', { requestId: 'call-1' })).resolves.toEqual({
           isError: false,
-          content: { request: recorded(state, overrides), nextStep },
+          /* The fixture printer has not reported since the start, so a started request says so. */
+          content: {
+            request: recorded(state, overrides),
+            ...(state === 'started' ? { run: 'not-yet-reported' } : {}),
+            nextStep,
+          },
         });
       },
     );
@@ -983,6 +993,71 @@ describe('machine tool registry', () => {
         expect(result).toMatchObject({ isError: false, content: { approval: answer, request: { state }, nextStep } });
       },
     );
+  });
+
+  describe('a started request and its run', () => {
+    const startedAt = '2026-09-14T00:00:10.000Z';
+    const reportedAt = '2026-09-14T00:30:00.000Z';
+    const started: PrintRequest = {
+      requestId: 'call-1',
+      machineId: 'machine-1',
+      artifact: artifactFixture,
+      configuration: {},
+      requestedBy: { kind: 'agent', id: 'tau', label: 'Tau agent' },
+      summary: { fileName: 'pyramid.gcode.3mf' },
+      state: 'started',
+      createdAt: timestamp,
+      updatedAt: startedAt,
+      receipt: {
+        operationId: 'start-1',
+        machineId: 'machine-1',
+        kind: 'start',
+        status: 'accepted',
+        providerRunId: 'provider-run-7',
+        observedAt: startedAt,
+      },
+    };
+    const reporting = (snapshot: Partial<MachineDirectoryEntry['snapshot']>): MachineDirectoryEntry => {
+      const machine = entry('machine-1', 'Workshop X1C');
+      return { ...machine, snapshot: { ...machine.snapshot, observedAt: reportedAt, ...snapshot } };
+    };
+
+    it.each<{ title: string; machine: MachineDirectoryEntry; run: string; nextStep: string }>([
+      {
+        title: 'running while the printer reports that run',
+        machine: reporting({ readiness: 'busy', activeRunId: 'provider-run-7', run: { state: 'printing' } }),
+        run: 'running',
+        nextStep:
+          'The print of pyramid.gcode.3mf is running on Workshop X1C. Observe it with get_machine; this request needs nothing more.',
+      },
+      {
+        title: 'ended once the printer reports something else after the start',
+        machine: reporting({ readiness: 'idle', run: { state: 'succeeded' } }),
+        run: 'ended',
+        nextStep:
+          'The print of pyramid.gcode.3mf has ended; Workshop X1C now reports its run as succeeded. This request is finished and does not keep the machine busy: read get_machine for whether it is ready.',
+      },
+      {
+        title: 'not yet reported before the printer reports again',
+        machine: entry('machine-1', 'Workshop X1C'),
+        run: 'not-yet-reported',
+        nextStep:
+          "The printer took the start of pyramid.gcode.3mf and has not reported the run since. Observe it with get_machine; don't start another print on this machine until it does.",
+      },
+    ])('should read a started request as $title', async ({ machine, run, nextStep }) => {
+      const fixture = clientFixture({ entries: [machine] });
+      fixture.requests.set('call-1', started);
+
+      await expect(invoke(fixture.client, 'get_print_request', { requestId: 'call-1' })).resolves.toEqual({
+        isError: false,
+        content: { request: started, run, nextStep },
+      });
+      /* The list says the same, so a finished print is never read as a busy machine. */
+      await expect(invoke(fixture.client, 'list_print_requests', {})).resolves.toEqual({
+        isError: false,
+        content: { requests: [{ ...started, run }], total: 1 },
+      });
+    });
   });
 
   describe('get_print_profiles', () => {

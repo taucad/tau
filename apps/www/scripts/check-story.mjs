@@ -255,6 +255,8 @@ try {
   releaseResponse();
   await leavingPage.waitForTimeout(300);
   assert.equal(await leavingPage.locator('canvas').count(), 0, 'Page exit during fetch must not allocate a renderer');
+  // Over a real network the held download can outlive the check; drop it rather than fail on teardown.
+  await leavingPage.unrouteAll({ behavior: 'ignoreErrors' });
   await leaving.close();
   await writeFile(
     join(output, 'results.json'),

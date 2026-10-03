@@ -1,5 +1,5 @@
-import { lstatSync, readFileSync, readdirSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { existsSync, lstatSync, readFileSync, readdirSync } from 'node:fs';
+import { dirname, relative, resolve } from 'node:path';
 
 import { load as yamlLoad } from 'js-yaml';
 import { describe, expect, it } from 'vitest';
@@ -30,6 +30,15 @@ type SkillMetadata = {
 };
 
 const skillPath = (skill: string): string => resolve(skillsRoot, skill, 'SKILL.md');
+
+// Tracked symlinks into the optional Tau Brain checkout; links into them are checked only when it is present.
+const optionalBrainDocuments = ['docs/handbooks', 'docs/incidents', 'docs/reference', 'docs/research'];
+const inAbsentBrain = (target: string): boolean => {
+  const local = relative(repoRoot, target);
+  return optionalBrainDocuments.some(
+    (prefix) => local.startsWith(`${prefix}/`) && !existsSync(resolve(repoRoot, prefix)),
+  );
+};
 
 const metadata = (text: string): SkillMetadata => {
   const match = /^---\n(?<frontmatter>[\s\S]*?)\n---\n/u.exec(text);
@@ -74,8 +83,9 @@ describe('clean-room research skills', () => {
       for (const match of text.matchAll(/\[[^\]]+\]\((?<target>[^)]+\.md)\)/gu)) {
         const target = match.groups?.['target'];
         expect(target).toBeDefined();
-        if (target) {
-          expect(lstatSync(resolve(dirname(path), target)).isFile()).toBe(true);
+        const resolved = resolve(dirname(path), target ?? '');
+        if (target && !inAbsentBrain(resolved)) {
+          expect(lstatSync(resolved).isFile(), target).toBe(true);
         }
       }
     }

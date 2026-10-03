@@ -17,13 +17,14 @@ type GraphicsState = {
     readonly graphicsBackendPreference: 'webgl' | 'webgpu';
     readonly webGpuAvailable: boolean;
     readonly upDirection: 'x' | 'y' | 'z';
-    readonly geometry: { readonly format: 'gltf' | 'svg' };
+    /** The presented artifact; an SVG drawing is 2D. */
+    readonly artifact: { readonly mimeType: string };
   };
 };
 
 type CadState = {
   readonly context: {
-    readonly renderTimeout: number;
+    readonly operationTimeout: number;
   };
 };
 
@@ -56,7 +57,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
         graphicsBackendPreference: 'webgpu',
         webGpuAvailable: true,
         upDirection: 'z',
-        geometry: { format: mocks.geometryFormat },
+        artifact: { mimeType: mocks.geometryFormat === 'svg' ? 'image/svg+xml' : 'model/gltf-binary' },
       },
     }),
   useCameraRig: () => ({ actorRef: { send: mocks.cameraSend } }),
@@ -66,7 +67,7 @@ vi.mock('#hooks/use-graphics.js', () => ({
 
 vi.mock('#hooks/use-cad.js', () => ({
   useCad: () => ({ send: mocks.cadSend }),
-  useCadSelector: <T,>(selector: (state: CadState) => T): T => selector({ context: { renderTimeout: 60_000 } }),
+  useCadSelector: <T,>(selector: (state: CadState) => T): T => selector({ context: { operationTimeout: 60_000 } }),
 }));
 
 const fieldOfViewName = 'Field of view, 0° is orthographic';

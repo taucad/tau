@@ -58,7 +58,7 @@ afterEach(() => {
  * click stops reaching the inner handler. These assertions pin every layer.
  */
 describe('chat-tool title-row truncation cascade', () => {
-  it('progressively discloses collapsible row chevrons', () => {
+  it('shows collapsible row chevrons at rest and turns them when open', () => {
     render(
       <ChatToolCard variant='minimal' status='ready'>
         <ChatToolCardHeader>
@@ -67,9 +67,9 @@ describe('chat-tool title-row truncation cascade', () => {
       </ChatToolCard>,
     );
 
-    expect(screen.getByRole('button', { name: 'Ran command' }).querySelector('.lucide-chevron-right')).toHaveClass(
-      'opacity-0',
-    );
+    const chevron = screen.getByRole('button', { name: 'Ran command' }).querySelector('.lucide-chevron-right');
+    expect(chevron).not.toHaveClass('opacity-0');
+    expect(chevron).not.toHaveClass('rotate-90');
   });
 
   it('keeps ChatToolCardTitle as the single block-level truncation owner', () => {

@@ -49,6 +49,12 @@ vi.mock('#components/icons/tau-wordmark.js', () => ({ TauWordmark: () => <svg />
 vi.mock('#components/cookie-consent.js', () => ({ CookieConsent: () => null }));
 vi.mock('#components/settings/settings-dialog.js', () => ({ SettingsDialog: () => null }));
 
+/* A server render reads its environment from process.env, as the SSR server is configured; the command
+ * palette's project navigation reaches modules that read it at load. */
+vi.stubEnv('TAU_API_URL', 'http://localhost:4000');
+vi.stubEnv('TAU_WEBSOCKET_URL', 'ws://localhost:4001');
+vi.stubEnv('TAU_FRONTEND_URL', 'http://localhost:3000');
+
 const { Page } = await import('#components/layout/page.js');
 
 describe('Page server rendering', () => {

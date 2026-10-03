@@ -11,7 +11,8 @@ import { chatRunState, emptyChatLedger, foldChatLedger } from '#log/chat-ledger.
 import type { LogRowBody } from '#log/chat-ledger.js';
 import { isResumableRunFailure } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
-import type { ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
+import type { ExternalAgentPort } from '#host/external-agent.js';
+import type { TauAgentHost } from '#host/tau-agent-host.js';
 import { reduceEventLog } from '#log/reducer.js';
 import { ScriptedParityModelTransport, scriptedParityResponses } from '#host/scripted-model.fixture.js';
 import type { ScriptedParityResponse } from '#host/scripted-model.fixture.js';

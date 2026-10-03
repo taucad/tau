@@ -6,12 +6,12 @@
   "private": true,
   "license": "Apache-2.0",
   "dependencies": {
+    "@typescript-eslint/types": "^8.61.1",
     "typescript": "catalog:"
   },
   "devDependencies": {
     "@taucad/nx": "workspace:*",
-    "@types/estree": "^1.0.9",
-    "@typescript-eslint/types": "^8.61.1"
+    "@types/estree": "^1.0.9"
   },
   "exports": {
     "./tau-lint": {

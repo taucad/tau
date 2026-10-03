@@ -7,6 +7,8 @@
 
 import path from 'node:path';
 
+import { AST_NODE_TYPES } from '@typescript-eslint/types';
+
 /**
  * Default locations permitted to declare hand-rolled pub/sub fan-out registries.
  */
@@ -68,55 +70,40 @@ function isAllowlisted(relativePathPosix, patterns) {
 
 /**
  * @param {import('@typescript-eslint/types').TSESTree.TypeNode | undefined | null} typeNode
- * @returns {import('@typescript-eslint/types').TSESTree.TypeNode | undefined | null}
- */
-function unwrapType(typeNode) {
-  if (!typeNode) {
-    return typeNode;
-  }
-  if (typeNode.type === 'TSParenthesizedType') {
-    return unwrapType(typeNode.typeAnnotation);
-  }
-  return typeNode;
-}
-
-/**
- * @param {import('@typescript-eslint/types').TSESTree.TypeNode | undefined | null} typeNode
  * @returns {boolean}
  */
 function isHandrolledFanoutElementType(typeNode) {
-  const unwrapped = unwrapType(typeNode);
-  if (!unwrapped) {
+  if (!typeNode) {
     return false;
   }
 
-  if (unwrapped.type === 'TSFunctionType') {
+  if (typeNode.type === AST_NODE_TYPES.TSFunctionType) {
     return true;
   }
 
-  if (unwrapped.type === 'TSTypeReference' && unwrapped.typeName.type === 'Identifier') {
-    return /(?:Callback|Handler|Listener)$/.test(unwrapped.typeName.name);
+  if (typeNode.type === AST_NODE_TYPES.TSTypeReference && typeNode.typeName.type === AST_NODE_TYPES.Identifier) {
+    return /(?:Callback|Handler|Listener)$/.test(typeNode.typeName.name);
   }
 
-  if (unwrapped.type === 'TSTypeLiteral') {
-    return unwrapped.members.some((member) => {
-      if (member.type !== 'TSPropertySignature' && member.type !== 'TSMethodSignature') {
+  if (typeNode.type === AST_NODE_TYPES.TSTypeLiteral) {
+    return typeNode.members.some((member) => {
+      if (member.type !== AST_NODE_TYPES.TSPropertySignature && member.type !== AST_NODE_TYPES.TSMethodSignature) {
         return false;
       }
       const keyName =
-        member.key.type === 'Identifier'
+        member.key.type === AST_NODE_TYPES.Identifier
           ? member.key.name
-          : member.key.type === 'Literal' && typeof member.key.value === 'string'
+          : member.key.type === AST_NODE_TYPES.Literal && typeof member.key.value === 'string'
             ? member.key.value
             : undefined;
       if (keyName !== 'handler' && keyName !== 'callback' && keyName !== 'listener') {
         return false;
       }
-      if (member.type === 'TSMethodSignature') {
+      if (member.type === AST_NODE_TYPES.TSMethodSignature) {
         return true;
       }
       const inner = member.typeAnnotation?.typeAnnotation;
-      return unwrapType(inner)?.type === 'TSFunctionType';
+      return inner?.type === AST_NODE_TYPES.TSFunctionType;
     });
   }
 
@@ -129,14 +116,13 @@ function isHandrolledFanoutElementType(typeNode) {
  * @returns {boolean}
  */
 function isHandrolledFanoutContainerType(typeNode, allowBareArray = false) {
-  const unwrapped = unwrapType(typeNode);
-  if (!unwrapped) {
+  if (!typeNode) {
     return false;
   }
 
-  if (unwrapped.type === 'TSTypeReference' && unwrapped.typeName.type === 'Identifier') {
-    const containerName = unwrapped.typeName.name;
-    const parameters = unwrapped.typeParameters?.params ?? unwrapped.typeArguments?.params ?? [];
+  if (typeNode.type === AST_NODE_TYPES.TSTypeReference && typeNode.typeName.type === AST_NODE_TYPES.Identifier) {
+    const containerName = typeNode.typeName.name;
+    const parameters = typeNode.typeParameters?.params ?? typeNode.typeArguments?.params ?? [];
     if (containerName === 'Map' || containerName === 'ReadonlyMap') {
       return isHandrolledFanoutContainerType(parameters[1], true);
     }
@@ -144,8 +130,9 @@ function isHandrolledFanoutContainerType(typeNode, allowBareArray = false) {
       return isHandrolledFanoutElementType(parameters[0]) || isHandrolledFanoutContainerType(parameters[0], true);
     }
     if (containerName === 'Array' || containerName === 'ReadonlyArray') {
-      const element = unwrapType(parameters[0]);
-      const namedSubscription = element?.type === 'TSTypeLiteral' && isHandrolledFanoutElementType(element);
+      const [element] = parameters;
+      const namedSubscription =
+        element?.type === AST_NODE_TYPES.TSTypeLiteral && isHandrolledFanoutElementType(element);
       return (
         namedSubscription ||
         (allowBareArray && isHandrolledFanoutElementType(element)) ||
@@ -164,30 +151,30 @@ function isHandrolledFanoutContainerType(typeNode, allowBareArray = false) {
  */
 function declaresHandrolledFanout(node) {
   const declarationName =
-    node.type === 'PropertyDefinition'
-      ? node.key.type === 'Identifier'
+    node.type === AST_NODE_TYPES.PropertyDefinition
+      ? node.key.type === AST_NODE_TYPES.Identifier
         ? node.key.name
         : undefined
-      : node.id.type === 'Identifier'
+      : node.id.type === AST_NODE_TYPES.Identifier
         ? node.id.name
         : undefined;
   const allowBareArray =
     declarationName !== undefined && /(?:callback|handler|listener|subscriber)s?$/i.test(declarationName);
   const fromAnnotation =
-    node.type === 'PropertyDefinition'
+    node.type === AST_NODE_TYPES.PropertyDefinition
       ? node.typeAnnotation?.typeAnnotation
-      : node.id.type === 'Identifier'
+      : node.id.type === AST_NODE_TYPES.Identifier
         ? node.id.typeAnnotation?.typeAnnotation
         : undefined;
   if (isHandrolledFanoutContainerType(fromAnnotation, allowBareArray)) {
     return true;
   }
 
-  const init = node.type === 'PropertyDefinition' ? node.value : node.init;
-  if (init?.type === 'NewExpression' && init.callee.type === 'Identifier') {
+  const init = node.type === AST_NODE_TYPES.PropertyDefinition ? node.value : node.init;
+  if (init?.type === AST_NODE_TYPES.NewExpression && init.callee.type === AST_NODE_TYPES.Identifier) {
     const parameters = init.typeArguments?.params ?? init.typeParameters?.params ?? [];
     const containerType = {
-      type: 'TSTypeReference',
+      type: AST_NODE_TYPES.TSTypeReference,
       typeName: init.callee,
       typeArguments: { params: parameters },
     };

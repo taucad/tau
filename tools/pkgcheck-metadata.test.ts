@@ -17,8 +17,10 @@ import {
   hostTargetIssues,
   internalImportsIssues,
   isJsonTypesDeclaration,
+  knownDeclarationDefects,
   libDependencyIssues,
   packageMetadataIssues,
+  partitionConsumerDiagnostics,
   peerRules,
   peerDependencyIssues,
   pluginRuntimePeerDependencyIssues,
@@ -91,7 +93,7 @@ describe('pkgcheck metadata', () => {
     const issues = packageMetadataIssues(
       {
         exports: { '.': './src/index.ts', './node': './src/node.ts' },
-        files: ['dist', 'README.md'],
+        files: ['dist', 'README.md', '!dist/**/*.node'],
         publishConfig: { exports: { '.': './dist/index.mjs' } },
       },
       (path) => path === 'dist',
@@ -474,6 +476,17 @@ describe('peerDependencyIssues', () => {
     ).toEqual([]);
   });
 
+  it('lets a named leaf satisfy zod with a dependency even when its own emit imports zod', () => {
+    expect(
+      peerDependencyIssues({
+        packageName: 'geospec',
+        manifest: { dependencies: { zod: 'catalog:' } },
+        emitted: [{ path: 'dist/mesh/analysis-result.mjs', specifier: 'zod' }],
+        rules: peerRules,
+      }),
+    ).toEqual([]);
+  });
+
   it('requires runtime as a peer except for the named leaf dependency allowlist', () => {
     const runtimeWitness = [{ path: 'dist/index.mjs', specifier: '@taucad/runtime/worker' }];
     expect(
@@ -829,5 +842,23 @@ describe('hostTargetIssues', () => {
         hasPayloadGuardTest: false,
       }),
     ).toEqual([]);
+  });
+});
+
+describe('partitionConsumerDiagnostics', () => {
+  it('explains only the known SDK undici fallbacks and keeps every other diagnostic', () => {
+    const sdk = 'node_modules/@anthropic-ai/sdk/internal/types.d.mts';
+    const output = [
+      `${sdk}(48,181): error TS2307: Cannot find module '../../../node_modules/undici-types/index.d.ts' or its corresponding type declarations.`,
+      `${sdk}(49,170): error TS2307: Cannot find module '../../../../node_modules/undici/index.d.ts' or its corresponding type declarations.`,
+      `node_modules/@taucad/agent-host/dist/index.d.mts(3,1): error TS2322: Type 'string' is not assignable to type 'number'.`,
+      '  The expected type comes from property "count".',
+      `${sdk}(52,10): error TS2307: Cannot find module 'missing-thing' or its corresponding type declarations.`,
+    ].join('\n');
+
+    expect(partitionConsumerDiagnostics(output, knownDeclarationDefects)).toEqual({
+      explained: output.split('\n').slice(0, 2),
+      remaining: output.split('\n').slice(2),
+    });
   });
 });

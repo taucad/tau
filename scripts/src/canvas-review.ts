@@ -101,6 +101,10 @@ const refusal = (error: unknown): Refused =>
     : { status: 'refused', code: 'WRITE_FAILED', message: error instanceof Error ? error.message : String(error) };
 
 const canvasDirectory = ({ canvas, root = artifactsRoot }: CanvasInput): string => {
+  // The default root lives in the optional Tau Brain checkout, so it can be absent.
+  if (!existsSync(root)) {
+    refuse('INVALID_EVENT', `\`${canvas}\` is not a canvas directory: ${root} does not exist.`);
+  }
   const base = realpathSync(root);
   const directory = resolve(base, canvas);
   const inside = relative(base, directory);

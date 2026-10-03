@@ -2,6 +2,7 @@
 /* oxlint-disable no-restricted-imports, import/extensions -- Standalone tool tests import their adjacent helper. */
 import { describe, expect, it } from 'vitest';
 import {
+  binaryAssetSubpaths,
   bundledArtifactIssues,
   bundledWorkspaceMirrors,
   bundleDeclarationClosure,
@@ -192,6 +193,20 @@ describe('pkgcheck metadata', () => {
         { './nextjs': 'next ships declaration errors of its own' },
       ),
     ).toEqual({ specifiers: ['@taucad/runtime', '@taucad/runtime/node'], issues: [] });
+  });
+
+  it('does not probe a subpath that resolves to a WebAssembly binary', () => {
+    const exports = {
+      '.': { types: './dist/index.d.mts', default: './dist/index.mjs' },
+      './engine/wasm': './dist/engine/engine.wasm',
+      './engine/wasm-url': { types: './dist/engine/wasm-url.d.mts', default: './dist/engine/wasm-url.mjs' },
+    };
+
+    expect(binaryAssetSubpaths(exports)).toEqual(['./engine/wasm']);
+    expect(probedSpecifiers('@taucad/engine', exports, {})).toEqual({
+      specifiers: ['@taucad/engine', '@taucad/engine/engine/wasm-url'],
+      issues: [],
+    });
   });
 
   it('reports a recorded reason for a subpath the package no longer publishes', () => {

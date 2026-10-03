@@ -17,6 +17,8 @@ import type { TranscriptionStub } from '#support/transcription-stub.js';
 const workspaceRoot = resolve(import.meta.dirname, '../../..');
 const evidenceRoot = join(workspaceRoot, 'out/research/codex-voice');
 const live = process.env['TAU_E2E_LIVE_VOICE'] === 'true';
+/** Capture start-up, upload and the stub's held stream each outlast the default one-second poll. */
+const poll = { timeout: 15_000 };
 
 let session: DesktopSession | undefined;
 let stub: TranscriptionStub | undefined;
@@ -122,26 +124,26 @@ test.skipIf(live)(
       expect(sendBounds!.x - microphoneBounds!.x - microphoneBounds!.width).toBeLessThan(24);
 
       await dictate.click();
-      await expect.poll(async () => composer.getByRole('status').textContent()).toContain('Recording');
+      await expect.poll(async () => composer.getByRole('status').textContent(), poll).toContain('Recording');
       const waveform = composer.getByRole('img', { name: 'Microphone waveform' });
-      await expect.poll(async () => Number(await waveform.getAttribute('data-level'))).toBeGreaterThan(0.05);
+      await expect.poll(async () => Number(await waveform.getAttribute('data-level')), poll).toBeGreaterThan(0.05);
       await mkdir(evidenceRoot, { recursive: true });
       // Capture at least a second of measured microphone history for visual review.
       await wait(1100);
       await composer.screenshot({ path: join(evidenceRoot, 'recording-composer.png') });
       const stop = composer.getByRole('button', { name: 'Stop dictation', exact: true });
       await stop.hover();
-      await expect.poll(async () => page.getByRole('tooltip').textContent()).toContain('Stop dictation');
+      await expect.poll(async () => page.getByRole('tooltip').textContent(), poll).toContain('Stop dictation');
       stub.hold();
       await stop.click();
-      await expect.poll(async () => composer.getByRole('status').textContent()).toContain('Transcribing');
+      await expect.poll(async () => composer.getByRole('status').textContent(), poll).toContain('Transcribing');
       await expect
-        .poll(async () => composer.locator('[data-slot="dictation-transcript"]').textContent())
+        .poll(async () => composer.locator('[data-slot="dictation-transcript"]').textContent(), poll)
         .toContain('Build');
       expect(await send.getAttribute('aria-disabled')).toBe('true');
       await composer.screenshot({ path: join(evidenceRoot, 'transcribing-composer.png') });
       stub.release();
-      await expect.poll(async () => editor.textContent()).toBe('Existing draft. Build a calibrated bracket.');
+      await expect.poll(async () => editor.textContent(), poll).toBe('Existing draft. Build a calibrated bracket.');
 
       expect(stub.receipts).toHaveLength(1);
       const [receipt] = stub.receipts;
@@ -154,9 +156,9 @@ test.skipIf(live)(
       await writeFile(join(evidenceRoot, 'fake-microphone-receipt.json'), JSON.stringify(receipt, undefined, 2));
 
       await dictate.click();
-      await expect.poll(async () => composer.getByRole('status').textContent()).toContain('Recording');
+      await expect.poll(async () => composer.getByRole('status').textContent(), poll).toContain('Recording');
       await composer.getByRole('button', { name: 'Cancel dictation', exact: true }).click();
-      await expect.poll(async () => dictate.isVisible()).toBe(true);
+      await expect.poll(async () => dictate.isVisible(), poll).toBe(true);
       expect(stub.receipts).toHaveLength(1);
       expect(await editor.textContent()).toBe('Existing draft. Build a calibrated bracket.');
       expect(page.url()).toBe(composerUrl);
@@ -187,7 +189,7 @@ test.skipIf(!live || process.platform !== 'darwin')(
       const dictate = composer.getByRole('button', { name: 'Dictate', exact: true });
       await expect.poll(async () => dictate.isVisible(), { timeout: 30_000 }).toBe(true);
       await dictate.click();
-      await expect.poll(async () => composer.getByRole('status').textContent()).toContain('Recording');
+      await expect.poll(async () => composer.getByRole('status').textContent(), poll).toContain('Recording');
       // Await the WAV's duration plus capture buffering, then finalize through the real provider.
       const speech = await readFile(wavPath);
       await wait((speech.length / 96_000) * 1000 + 500);

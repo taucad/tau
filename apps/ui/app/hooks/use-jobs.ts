@@ -346,7 +346,7 @@ export const useJobs = (): JobsView => {
     if (!canConnect()) {
       setIsLoading(false);
       const pausedMessage = navigator.onLine
-        ? 'Job updates are paused while this tab is hidden.'
+        ? 'Job updates are paused while Tau is in the background.'
         : 'Job updates are paused offline.';
       setError(pausedMessage);
       for (const projection of projectionsRef.current.values()) {

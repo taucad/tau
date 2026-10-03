@@ -240,7 +240,7 @@ export function ProjectLibrary(): React.JSX.Element {
         if (trashed) {
           if (announce) {
             toast.success(`Moved ${project.name} to Trash`, {
-              description: 'Its files remain on disk and can be restored from this browser profile.',
+              description: 'Its files remain on disk and can be restored from Trash.',
             });
           }
           return true;

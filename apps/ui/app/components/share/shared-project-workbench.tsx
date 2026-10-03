@@ -20,6 +20,7 @@ import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-
 import { PublicationTopbar } from '#components/share/publication-topbar.js';
 import { ephemeralKernelOptions, ephemeralPreviewStage } from '#constants/ephemeral-kernel-options.js';
 import type { ParsedPublication } from '#components/share/parsed-publication.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 type SharedProjectFiles = Record<string, { content: Uint8Array<ArrayBuffer> }>;
 
@@ -63,8 +64,9 @@ const SharedRunConsent = ({
         {title}
       </h1>
       <p className='mt-2 text-sm text-muted-foreground'>
-        This model is code written by its author. Running it executes that code in this browser, with access to this
-        site and your signed-in session. Run it only if you trust where it came from.
+        {isDesktopTarget()
+          ? 'This model is code written by its author. Running it executes that code in Tau on your computer, with access to your signed-in session. Run it only if you trust where it came from.'
+          : 'This model is code written by its author. Running it executes that code in this browser, with access to this site and your signed-in session. Run it only if you trust where it came from.'}
       </p>
       <div className='mt-6 flex flex-col gap-3 sm:flex-row sm:justify-center'>
         <Button type='button' className='flex-1 sm:flex-none' onClick={onRun}>

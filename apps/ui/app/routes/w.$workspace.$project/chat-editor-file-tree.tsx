@@ -332,7 +332,7 @@ function surfaceDropIngestionResult(result: Exclude<DropIngestionResult, { type:
     case 'unsupported': {
       toast.error(
         result.reason === 'recursive-folder-drop-unavailable'
-          ? 'This browser cannot read dropped folders here.'
+          ? 'Dropped folders cannot be read here.'
           : 'Dropped items could not be read.',
       );
       return;

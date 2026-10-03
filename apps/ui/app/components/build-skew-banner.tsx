@@ -25,7 +25,7 @@ export function BuildSkewBanner(): React.JSX.Element | undefined {
       className='fixed inset-x-4 bottom-4 z-50 mx-auto flex max-w-md items-center gap-3 rounded-md border border-warning/40 bg-background p-3 shadow-lg'
     >
       <AlertCircle className='size-4 shrink-0 text-warning' />
-      <div className='min-w-0 flex-1 text-sm'>A newer version of Tau is running — reload this tab.</div>
+      <div className='min-w-0 flex-1 text-sm'>A newer version of Tau is running — reload to use it.</div>
       <Button size='sm' variant='outline' onClick={reload}>
         Reload
       </Button>

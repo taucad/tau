@@ -96,9 +96,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
         // external-agent turns only.
         if (!isBrowserAgentHostProviderKind(resolved.provider.id)) {
           throw Object.assign(
-            new Error(
-              `Tau cannot run the ${resolved.provider.id} provider wire in your browser. Pick a different model.`,
-            ),
+            new Error(`Tau cannot run the ${resolved.provider.id} provider wire. Pick a different model.`),
             { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
           );
         }

@@ -125,7 +125,7 @@ export const workspaceIdentityConflictCopy =
  */
 export class StorageQuotaExceededError extends Error {
   public constructor(options?: { cause?: unknown }) {
-    super('Browser storage is full. Free up space or remove unused projects to continue.');
+    super("Tau's local storage is full. Free up space or remove unused projects to continue.");
     this.name = 'StorageQuotaExceededError';
     if (options?.cause !== undefined) {
       (this as { cause?: unknown }).cause = options.cause;

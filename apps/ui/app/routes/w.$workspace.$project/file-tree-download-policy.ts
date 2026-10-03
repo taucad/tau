@@ -112,7 +112,7 @@ function getDownloadErrorMessage(code: FileTreeDownloadErrorCode, path: string, 
       return `Failed to create ZIP for '${path}': ${formatCause(cause)}`;
     }
     case 'browser-download-failed': {
-      return `Browser download failed for '${path}': ${formatCause(cause)}`;
+      return `Download failed for '${path}': ${formatCause(cause)}`;
     }
     case 'user-cancelled': {
       return `Download cancelled for '${path}'.`;

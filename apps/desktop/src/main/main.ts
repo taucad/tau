@@ -23,6 +23,7 @@ import {
   screen,
   session,
   shell,
+  systemPreferences,
   utilityProcess,
 } from 'electron';
 import type { IpcMainInvokeEvent } from 'electron';
@@ -416,17 +417,19 @@ const bootstrapElectronApp = async (): Promise<void> => {
 
   /* Deny by default; see `grantedPermissions` for the explicit grants and why. */
   const origins = rendererOrigins({ appOrigin, devServerUrl: environment.ELECTRON_RENDERER_URL });
-  session.defaultSession.setPermissionRequestHandler((...[contents, permission, callback, details]) => {
+  // The macOS consent prompt appears once; later answers come from System Settings without a prompt.
+  session.defaultSession.setPermissionRequestHandler(async (...[contents, permission, callback, details]) => {
+    const microphone = isMicrophonePermissionGranted({
+      permission,
+      frame: contents.mainFrame,
+      requester: details.requestingUrl,
+      mainFrame: details.isMainFrame,
+      mediaTypes: 'mediaTypes' in details ? (details.mediaTypes ?? []) : [],
+      origins,
+    });
     const granted =
       isPermissionGranted(permission) ||
-      isMicrophonePermissionGranted({
-        permission,
-        frame: contents.mainFrame,
-        requester: details.requestingUrl,
-        mainFrame: details.isMainFrame,
-        mediaTypes: 'mediaTypes' in details ? (details.mediaTypes ?? []) : [],
-        origins,
-      });
+      (microphone && (process.platform !== 'darwin' || (await systemPreferences.askForMediaAccess('microphone'))));
     log.log(granted ? 'info' : 'warn', granted ? 'permission.granted' : 'permission.denied', { permission });
     callback(granted);
   });

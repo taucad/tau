@@ -93,14 +93,21 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     </TooltipProvider>,
   );
   if (scenario === 'studio') {
-    // The real printer with Bambu Studio: presets, then More settings with its overrides and one change.
+    // The real printer with Bambu Studio: presets, then Advanced settings with its overrides and one change.
     await screen.findByRole('group', { name: 'Bambu Studio presets' });
-    await page.getByRole('button', { name: 'More settings' }).click();
+    await page.getByRole('button', { name: /^Advanced settings/u }).click();
     await screen.findByRole('group', { name: 'Bambu Studio overrides' });
     await page.getByRole('button', { name: 'Group: Quality' }).click();
     await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
     fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
     await screen.findByRole('button', { name: 'Reset Layer Height' });
+    // Headless Chromium draws few frames between actions, so the stages' open animations would still
+    // be running when measured; finish them (time-based only: scroll shadows follow the scroller).
+    for (const animation of document.getAnimations()) {
+      if (animation.timeline === document.timeline && animation.effect?.getComputedTiming().endTime !== Infinity) {
+        animation.finish();
+      }
+    }
   } else if (scenario === 'prepare') {
     // The Machine select names the printer and its status; slicing is the pane's action bar.
     await waitFor(() => {
@@ -172,7 +179,7 @@ describe('Print pane screenshots', () => {
   it('should space the Prepare setup rows evenly', async () => {
     await page.viewport(800, 1200);
     await mount('studio', 720);
-    // The filament presets are overrides under More settings, not Prepare setup rows.
+    // The filament presets are overrides under Advanced settings, not Prepare setup rows.
     const rows = ['Profile', 'Plate', 'Material', 'Process'].map((label) =>
       screen
         .getByRole('combobox', { name: label })

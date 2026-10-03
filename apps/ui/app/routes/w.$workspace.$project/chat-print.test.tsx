@@ -151,30 +151,21 @@ const openDisclosure = (name: RegExp): HTMLElement => {
   return trigger;
 };
 
-/** The titles Prepare folds under while a run or an open request owns the pane. */
-const prepareFolds = ['Prepare the next print', 'Prepare a different print'] as const;
-const prepareFold = (): HTMLElement | undefined =>
-  prepareFolds.map((name) => screen.queryByRole('button', { name })).find((trigger) => trigger !== null) ?? undefined;
-
-/** Prepare: its section, or the opened fold's content during a run or a request. */
+/** Prepare's stage, opened: during a run or an open request it starts closed and ends with its own actions. */
 const prepareRegion = (): HTMLElement => {
-  const fold = prepareFold();
-  if (fold === undefined) {
-    return screen.getByRole('region', { name: 'Prepare' });
+  const region = screen.getByRole('region', { name: 'Prepare' });
+  const trigger = within(region).getByRole('button', { name: /^Prepare/u });
+  if (trigger.getAttribute('aria-expanded') !== 'true') {
+    fireEvent.click(trigger);
   }
-  if (fold.getAttribute('aria-expanded') !== 'true') {
-    fireEvent.click(fold);
-  }
-  const content = document.querySelector<HTMLElement>(`[id="${fold.getAttribute('aria-controls') ?? ''}"]`);
-  if (content === null) {
-    throw new Error('The Prepare fold controls no content.');
-  }
-  return content;
+  return region;
 };
 
-/** Where Prepare's one primary action (slice or send) sits: the pane's action bar, or the end of a folded Prepare. */
-const prepareActions = (): BoundFunctions<typeof queries> =>
-  within(prepareFold() === undefined ? document.body : prepareRegion());
+/** Where Prepare's one primary action (slice or send) sits: the pane's action bar, or the end of Prepare. */
+const prepareActions = (): BoundFunctions<typeof queries> => {
+  const bar = document.querySelector<HTMLElement>('[data-slot="print-action-bar"]');
+  return within(bar ?? prepareRegion());
+};
 
 /** The slice result with its folded details open. */
 const sliceDetails = async (): Promise<HTMLElement> => {
@@ -186,8 +177,8 @@ const sliceDetails = async (): Promise<HTMLElement> => {
   return result;
 };
 
-const openMoreSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
-  const trigger = screen.getByRole('button', { name: 'More settings' });
+const openAdvancedSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
+  const trigger = screen.getByRole('button', { name: /^Advanced settings/u });
   if (trigger.getAttribute('aria-expanded') !== 'true') {
     await user.click(trigger);
   }
@@ -495,10 +486,9 @@ describe('Print pane orientation', () => {
     };
     globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
     renderPane(captureClient);
-    // An idle printer folds into one disclosure whose summary is its status line.
+    // The camera leads the Control center, which an idle printer keeps closed.
     await findMachine('Ready');
-    openDisclosure(/^Printer\s*Idle · /u);
-    openDisclosure(/^Environment and camera/u);
+    openDisclosure(/^Control center/u);
     fireEvent.click(await screen.findByRole('button', { name: 'Capture still' }));
     await waitFor(() => {
       expect(captureSignal).toBeDefined();
@@ -507,8 +497,7 @@ describe('Print pane orientation', () => {
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Mini');
     expect(captureSignal?.aborted).toBe(true);
     await findMachine('Ready', 'Mini');
-    openDisclosure(/^Printer\s*Idle · /u);
-    openDisclosure(/^Environment and camera/u);
+    openDisclosure(/^Control center/u);
     expect(screen.getByRole('button', { name: 'Capture still' })).toBeEnabled();
     await act(async () => {
       pending.resolve({
@@ -936,7 +925,7 @@ describe('Print pane prepare and send', () => {
     await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
 
-    await openMoreSettings(user);
+    await openAdvancedSettings(user);
     const options = await screen.findByLabelText('Slicer options');
     await user.click(await within(options).findByRole('button', { name: 'Set layer height' }));
     await waitFor(() => {
@@ -1043,7 +1032,7 @@ describe('Print pane prepare and send', () => {
     const startOptions = screen.getByRole('button', { name: /^Start options/u });
     expect(startOptions).toHaveTextContent(/^Start options\s*Levelling, flow$/u);
     openDisclosure(/^Start options/u);
-    await openMoreSettings(user);
+    await openAdvancedSettings(user);
     const mapping = await screen.findByLabelText('Machine mapping');
     expect(await screen.findByRole('switch', { name: 'Toggle for Bed levelling' })).toBeChecked();
     expect(screen.getByRole('switch', { name: 'Toggle for Flow calibration' })).toBeChecked();
@@ -1245,7 +1234,7 @@ describe('Print pane external spool', () => {
     renderPane(createFixture({ entries: [machine] }).client);
     const slots = await screen.findByRole('list', { name: 'Material slots' });
     const external = within(slots).getByText('Ext').closest('li');
-    expect(external).toHaveTextContent('Extpetg-white, in use');
+    expect(external).toHaveTextContent('Extpetg-whiteIn use');
   });
 });
 
@@ -1487,7 +1476,8 @@ describe('Print pane agent requests', () => {
     expect(alert).not.toHaveTextContent('reply-lost-after-possible-acceptance');
     expect(within(alert).getByRole('button', { name: 'Check again' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/iu })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^(Start|Accept)/u })).not.toBeInTheDocument();
+    // The Start options stage is settings, not a start.
+    expect(screen.queryByRole('button', { name: /^(?:Start(?! options)|Accept)/u })).not.toBeInTheDocument();
 
     await user.click(within(alert).getByRole('button', { name: 'Check again' }));
     await waitFor(() => {
@@ -1550,10 +1540,12 @@ describe('Print pane monitor and controls', () => {
     });
     expect(await screen.findByText('cancel accepted for machine-1')).toBeInTheDocument();
 
-    // Actions the pane does not implement are listed in Inspect by their qualification, never as controls.
-    expect(screen.queryByRole('button', { name: 'Chamber light' })).not.toBeInTheDocument();
+    // The light belongs to the Control center, open during a run: disabled, with why, while it is only designed.
+    const controlCenter = screen.getByRole('region', { name: 'Control center' });
+    expect(within(controlCenter).getByRole('switch', { name: 'Chamber light' })).toBeDisabled();
+    expect(controlCenter).toHaveTextContent('Chamber light is designed but not yet qualified on this printer.');
+    // Actions the pane does not offer are listed in Inspect by their qualification, never as controls.
     openDisclosure(/^Inspect/u);
-    expect(screen.getByText('Designed, not yet qualified').nextElementSibling).toHaveTextContent('Chamber light');
     expect(screen.getByText('Not supported').nextElementSibling).toHaveTextContent('Format storage');
   });
 
@@ -1692,13 +1684,13 @@ describe('Print pane Bambu Studio mode', () => {
   };
   /** The real printer, which takes only Bambu Studio archives. */
   const realPrinter = (): ReturnType<typeof entry> => entry({ providerId: 'bambu' });
-  /** The printer and filament presets are overrides under More settings; the process stays in Prepare. */
+  /** The printer and filament presets are overrides under Advanced settings; the process stays in Prepare. */
   const combobox = (name: string): HTMLElement => {
     if (
       (name === 'Printer preset' || name.startsWith('Filament ')) &&
       screen.queryByRole('combobox', { name }) === null
     ) {
-      fireEvent.click(screen.getByRole('button', { name: 'More settings' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced settings/u }));
     }
     return screen.getByRole('combobox', { name });
   };
@@ -1720,7 +1712,7 @@ describe('Print pane Bambu Studio mode', () => {
   /** Open Advanced and one settings group of the shared Parameters form. */
   const openGroup = async (user: ReturnType<typeof userEvent.setup>, group: string): Promise<void> => {
     if (screen.queryByRole('group', { name: 'Bambu Studio settings' }) === null) {
-      await openMoreSettings(user);
+      await openAdvancedSettings(user);
     }
     const settings = await screen.findByRole('group', { name: 'Bambu Studio settings' });
     const trigger = within(settings).getByRole('button', { name: `Group: ${group}` });
@@ -1818,7 +1810,7 @@ describe('Print pane Bambu Studio mode', () => {
     expect(screen.queryByText('(changed)')).not.toBeInTheDocument();
     expect(within(settings).queryByRole('button', { name: 'Reset all' })).not.toBeInTheDocument();
     expect(within(settings).getByRole('button', { name: 'Group: Strength' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'More settings' })).toHaveTextContent('More settings');
+    expect(screen.getByRole('button', { name: /^Advanced settings/u })).toHaveTextContent(/^Advanced settings$/u);
     await user.click(screen.getByRole('button', { name: 'Reset Wall Loops' }));
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Reset Wall Loops' })).not.toBeInTheDocument();
@@ -2310,13 +2302,13 @@ describe('Print pane print settings file', () => {
   const fine = '0.12mm Fine @BBL X1C';
   const gyroid = '0.20mm Standard Gyroid PETG @BBL X1C';
   const petg = 'Bambu PETG Basic @BBL X1C';
-  /** The printer and filament presets are overrides under More settings; the process stays in Prepare. */
+  /** The printer and filament presets are overrides under Advanced settings; the process stays in Prepare. */
   const combobox = (name: string): HTMLElement => {
     if (
       (name === 'Printer preset' || name.startsWith('Filament ')) &&
       screen.queryByRole('combobox', { name }) === null
     ) {
-      fireEvent.click(screen.getByRole('button', { name: 'More settings' }));
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced settings/u }));
     }
     return screen.getByRole('combobox', { name });
   };
@@ -2346,7 +2338,7 @@ describe('Print pane print settings file', () => {
       }),
     );
     const studio = await renderStudio(fine);
-    // The filament override in More settings is named where the material is chosen.
+    // The filament override in Advanced settings is named where the material is chosen.
     expect(screen.getByText('Sliced as Bambu PETG Basic')).toBeInTheDocument();
 
     expect(studio.resolveSelection).toHaveBeenLastCalledWith({
@@ -2367,7 +2359,7 @@ describe('Print pane print settings file', () => {
       expect(reset(name)).toBeInTheDocument();
     }
     expect(queryReset('Printer preset')).not.toBeInTheDocument();
-    await openMoreSettings(user);
+    await openAdvancedSettings(user);
     await user.click(
       within(await screen.findByRole('group', { name: 'Bambu Studio settings' })).getByRole('button', {
         name: 'Group: Strength',
@@ -2468,7 +2460,7 @@ describe('Print pane print settings file', () => {
     const user = userEvent.setup();
     renderPane(createFixture().client);
     await findMachine('Ready');
-    await openMoreSettings(user);
+    await openAdvancedSettings(user);
     const options = await screen.findByLabelText('Slicer options');
 
     await user.click(await within(options).findByRole('button', { name: 'Set layer height' }));
@@ -2568,10 +2560,14 @@ describe('Saved machine profiles', () => {
     expect(projectFiles.read(settingsPath)).toBeUndefined();
     await chooseOption(user, screen.getByRole('combobox', { name: 'Quality' }), 'Fine');
     await expectPreferences({ preset: 'fine' });
+    // Each verb is a menu item; naming opens the shared naming form under the menu's button.
     await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
-    await user.clear(screen.getByRole('textbox', { name: 'Profile name' }));
-    await user.type(screen.getByRole('textbox', { name: 'Profile name' }), 'Production');
-    await user.click(screen.getByRole('button', { name: 'Save a copy' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Duplicate profile…' }));
+    const copyName = await screen.findByRole('textbox', { name: 'Name for the copy of Default' });
+    expect(copyName).toHaveValue('Default copy');
+    await user.clear(copyName);
+    await user.type(copyName, 'Production');
+    await user.click(screen.getByRole('button', { name: 'Duplicate profile' }));
     await waitFor(() => {
       expect(profile()).toHaveTextContent('Production');
     });
@@ -2586,20 +2582,31 @@ describe('Saved machine profiles', () => {
     await expectPreferences({ preset: 'fine' });
     await chooseOption(user, profile(), 'Production');
     await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
-    await user.clear(screen.getByRole('textbox', { name: 'Profile name' }));
-    await user.type(screen.getByRole('textbox', { name: 'Profile name' }), 'Batch');
-    await user.click(screen.getByRole('button', { name: 'Rename' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Rename profile…' }));
+    const newName = await screen.findByRole('textbox', { name: 'New name for Production' });
+    await user.clear(newName);
+    await user.type(newName, 'Batch');
+    await user.click(screen.getByRole('button', { name: 'Rename profile' }));
     await waitFor(() => {
       expect(profile()).toHaveTextContent('Batch');
     });
     await waitFor(() => {
       expect(projectFiles.read(settingsPath)).toContain('Batch');
     });
-    await user.click(screen.getByRole('button', { name: 'Reset to defaults' }));
-    await user.click(screen.getByRole('button', { name: 'Confirm reset' }));
+    // Verbs that lose settings confirm with the profile named, then hand focus back to the menu's button.
+    await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Reset to defaults…' }));
+    const reset = await screen.findByRole('alertdialog', { name: 'Reset “Batch” to defaults?' });
+    await user.click(within(reset).getByRole('button', { name: 'Reset profile' }));
     await expectPreferences({});
-    await user.click(screen.getByRole('button', { name: 'Delete profile' }));
-    await user.click(screen.getByRole('button', { name: 'Confirm delete' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Manage profiles' })).toHaveFocus();
+    });
+    await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete profile…' }));
+    const remove = await screen.findByRole('alertdialog', { name: 'Delete “Batch”?' });
+    expect(remove).toHaveTextContent('“Default” becomes the profile for printers of this type.');
+    await user.click(within(remove).getByRole('button', { name: 'Delete profile' }));
     await waitFor(() => {
       expect(profile()).toHaveTextContent('Default');
     });

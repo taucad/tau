@@ -22,24 +22,28 @@ import { isOpenPrintRequest, useMachinesPrintRequests } from '#hooks/use-machine
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
+import { ControlCenterStage } from '#routes/w.$workspace.$project/chat-print-controls.js';
+import { materialChange } from '#routes/w.$workspace.$project/chat-print-materials.js';
+import type { ApplyMachineAction } from '#routes/w.$workspace.$project/chat-print-controls.js';
 import {
   ControlsSection,
-  HistorySection,
-  InspectSection,
-  MonitorSection,
+  HistoryStage,
+  InspectStage,
+  MonitorStage,
+  PrinterAlerts,
   describeRun,
   runFileName,
 } from '#routes/w.$workspace.$project/chat-print-monitor.js';
 import type { LedgerEntry } from '#routes/w.$workspace.$project/chat-print-monitor.js';
 import {
   PrepareActions,
-  PrepareSection,
+  PrepareStages,
   prepareAction,
   slicerName,
   usePrintPrepare,
 } from '#routes/w.$workspace.$project/chat-print-prepare.js';
 import type { PrepareActionFacts } from '#routes/w.$workspace.$project/chat-print-prepare.js';
-import { PrintNotice, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
+import { PrintNotice, PrintStages, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
 import { SendSection } from '#routes/w.$workspace.$project/chat-print-send.js';
 import { formatAge } from '#routes/w.$workspace.$project/chat-print-summary.js';
 
@@ -130,6 +134,13 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
       iconClassName: 'text-destructive',
     };
   }
+  if (materialChange(entry) !== undefined) {
+    return {
+      label: 'Changing filament',
+      icon: LoaderCircle,
+      iconClassName: 'text-information animate-spin motion-reduce:animate-none',
+    };
+  }
   if (entry.snapshot.readiness === 'idle') {
     return {
       label: 'Ready',
@@ -198,6 +209,23 @@ export const nextAction = ({
     return { label: 'Monitor the run', kind: 'none' };
   }
   return prepareAction(prepare, entry.name);
+};
+
+/**
+ * What Prepare is for while a decision or a run owns the pane: it starts closed behind them and keeps its own actions.
+ *
+ * @param entry - The selected machine.
+ * @param openRequest - Its unsettled request.
+ * @returns The closed stage's words, or nothing while Prepare leads.
+ */
+const deferredPrepare = (
+  entry: MachineDirectoryEntry | undefined,
+  openRequest: PrintRequest | undefined,
+): string | undefined => {
+  if (openRequest) {
+    return 'For a different print';
+  }
+  return runInProgress.has(entry?.snapshot.run?.state ?? 'idle') ? 'For the next print' : undefined;
 };
 
 /**
@@ -373,10 +401,12 @@ function ConnectedPrintPanel({
   client,
   bridge,
   isShown,
+  applyAction,
 }: {
   readonly client: MachineClient;
   readonly bridge: PrintApprovalBridge;
   readonly isShown: boolean;
+  readonly applyAction: ApplyMachineAction | undefined;
 }): React.JSX.Element {
   const { projectId } = useProject();
   const { snapshot, providers, error, refresh } = useMachineDirectory(client);
@@ -388,6 +418,7 @@ function ConnectedPrintPanel({
       client={client}
       bridge={bridge}
       isShown={isShown}
+      applyAction={applyAction}
       projectId={projectId}
       directory={{ snapshot, providers, error, refresh }}
       entries={entries}
@@ -401,6 +432,7 @@ function MachinePrintPanel({
   client,
   bridge,
   isShown,
+  applyAction,
   projectId,
   directory,
   entries,
@@ -410,6 +442,7 @@ function MachinePrintPanel({
   readonly client: MachineClient;
   readonly bridge: PrintApprovalBridge;
   readonly isShown: boolean;
+  readonly applyAction: ApplyMachineAction | undefined;
   readonly projectId: string;
   readonly directory: ReturnType<typeof useMachineDirectory>;
   readonly entries: readonly MachineDirectoryEntry[];
@@ -447,12 +480,7 @@ function MachinePrintPanel({
   const latestReceipt = ledger.find((entry) => entry.kind === 'receipt');
   const openRequest = requests.find((request) => isOpenPrintRequest(request));
   const action = selected ? nextAction({ entry: selected, openRequest, prepare }) : undefined;
-  /* A decision or a run owns the pane; Prepare folds behind it and keeps its own actions. */
-  const prepareFold = openRequest
-    ? 'Prepare a different print'
-    : runInProgress.has(selected?.snapshot.run?.state ?? 'idle')
-      ? 'Prepare the next print'
-      : undefined;
+  const prepareDeferred = deferredPrepare(selected, openRequest);
 
   return (
     <div
@@ -486,7 +514,9 @@ function MachinePrintPanel({
         {snapshot && entries.length === 0 ? <NoMachines /> : null}
         {selected ? (
           <div className='flex min-w-0 flex-col gap-3'>
+            {/* What needs the person stays outside the stages: a decision is never folded away. */}
             <ObservationNotice entry={selected} />
+            <PrinterAlerts entry={selected} />
             <SendSection
               client={client}
               entry={selected}
@@ -496,22 +526,25 @@ function MachinePrintPanel({
               onReconciled={recordReconciled}
             />
             <RunBlock client={client} entry={selected} requests={requests} onReceipt={recordReceipt} />
-            <PrepareSection
-              entry={selected}
-              provider={provider}
-              manifest={manifest}
-              prepare={prepare}
-              fold={prepareFold}
-            />
-            <MonitorSection client={client} entry={selected} manifest={manifest} />
-            <HistorySection requests={requests} ledger={ledger} entry={selected} />
-            <InspectSection
-              entry={selected}
-              provider={provider}
-              manifest={manifest}
-              slicer={slicerName(prepare.studio)}
-              request={openRequest}
-            />
+            <PrintStages>
+              <MonitorStage entry={selected} manifest={manifest} apply={applyAction} />
+              <ControlCenterStage client={client} entry={selected} manifest={manifest} apply={applyAction} />
+              <PrepareStages
+                entry={selected}
+                provider={provider}
+                manifest={manifest}
+                prepare={prepare}
+                deferred={prepareDeferred}
+              />
+              <HistoryStage requests={requests} ledger={ledger} entry={selected} />
+              <InspectStage
+                entry={selected}
+                provider={provider}
+                manifest={manifest}
+                slicer={slicerName(prepare.studio)}
+                request={openRequest}
+              />
+            </PrintStages>
           </div>
         ) : null}
         <p aria-live='assertive' role='status' className='sr-only'>
@@ -520,9 +553,12 @@ function MachinePrintPanel({
             : ''}
         </p>
       </div>
-      {selected && prepareFold === undefined && (action?.kind === 'slice' || action?.kind === 'send') ? (
+      {selected && prepareDeferred === undefined && (action?.kind === 'slice' || action?.kind === 'send') ? (
         /* One primary action at a fixed place; the start confirmation opens where Send was pressed. */
-        <div className='flex max-h-[60%] min-w-0 shrink-0 flex-col gap-2 overflow-y-auto border-t border-border/70 px-3 py-2'>
+        <div
+          data-slot='print-action-bar'
+          className='flex max-h-[60%] min-w-0 shrink-0 flex-col gap-2 overflow-y-auto border-t border-border/70 px-3 py-2'
+        >
           <PrepareActions entry={selected} manifest={manifest} prepare={prepare} />
         </div>
       ) : null}
@@ -534,7 +570,8 @@ function MachinePrintPanel({
 /**
  * The Print pane over an injectable machines facet and chat bridge, for fixture and host parity checks.
  *
- * @param properties - The negotiated facet and the chat approval bridge.
+ * @param properties - The negotiated facet, the chat approval bridge and, until the machines API applies
+ * actions itself, the seam that applies the Control center's and the slots' actions.
  * @returns The pane, or the refusal the runtime negotiated.
  * @public
  */
@@ -542,10 +579,12 @@ export const PrintPanel = ({
   machines,
   bridge,
   isShown = true,
+  applyAction,
 }: {
   readonly machines: RuntimeTransportFacet<MachineClient>;
   readonly bridge: PrintApprovalBridge;
   readonly isShown?: boolean;
+  readonly applyAction?: ApplyMachineAction;
 }): React.JSX.Element => {
   if (!machines.available) {
     return (
@@ -561,7 +600,7 @@ export const PrintPanel = ({
       />
     );
   }
-  return <ConnectedPrintPanel client={machines} bridge={bridge} isShown={isShown} />;
+  return <ConnectedPrintPanel client={machines} bridge={bridge} isShown={isShown} applyAction={applyAction} />;
 };
 
 /**

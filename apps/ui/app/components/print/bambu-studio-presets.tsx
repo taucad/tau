@@ -1,4 +1,4 @@
-/** Bambu Studio's selected process; the printer and filament presets are overrides in More settings. */
+/** Bambu Studio's selected process; the printer and filament presets are overrides in Advanced settings. */
 import type { BambuPresetSummary } from '@taucad/slicer/bambu-studio';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import type { ParameterSelectGroup } from '#components/geometry/parameters/parameter-select.js';
@@ -61,7 +61,7 @@ function PresetRow({
 }
 
 /**
- * Primary mode: the process. Printer mode, in More settings: the printer preset and a filament
+ * Primary mode: the process. Printer mode, in Advanced settings: the printer preset and a filament
  * preset per used tray, each an override of what the printer reports. The selected presets are
  * written through the root-owned machine settings profile.
  *

@@ -1,14 +1,32 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Ellipsis } from 'lucide-react';
-import { Button } from '@taucad/ui/components/button';
-import { Input } from '@taucad/ui/components/input';
-import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Copy, Ellipsis, ListRestart, Pencil, Plus, RotateCcw, Trash2 } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '@taucad/ui/components/alert-dialog';
+import { Button, buttonVariants } from '@taucad/ui/components/button';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
 import type { MachineSettingsRecord } from '@taucad/types';
 import { slicingPreferences } from '@taucad/slicer/preferences';
 import { ParameterSelect } from '#components/geometry/parameters/parameter-select.js';
 import { PrintSetupRow } from '#components/print/print-setup-row.js';
 import type { MachineSettingsHandle } from '#components/print/use-machine-settings.js';
 import type { BambuStudioMode } from '#components/print/use-bambu-studio.js';
+import { NamePopover } from '#components/revisions/name-popover.js';
+import type { NameFormCopy } from '#components/revisions/name-popover.js';
 
 const slug = (name: string): string =>
   name
@@ -28,6 +46,269 @@ const nextId = (name: string, existing: Readonly<Record<string, unknown>>): stri
 const replacementId = (profiles: MachineSettingsRecord['profiles'], activeId: string): string | undefined =>
   activeId !== 'default' && profiles['default'] ? 'default' : Object.keys(profiles).find((id) => id !== activeId);
 
+const profileLimit = 16;
+const nameLimit = 128;
+
+/** A verb that names a profile, in the naming form every revision surface uses. */
+type Naming = 'rename' | 'copy' | 'empty';
+/** A verb that loses settings, confirmed with the profile named. */
+type Confirmation = 'reset' | 'reset-all' | 'delete';
+
+const namingCopy = (naming: Naming, name: string): NameFormCopy =>
+  ({
+    rename: {
+      label: `New name for ${name}`,
+      placeholder: name,
+      initial: name,
+      note: 'Its settings stay as they are.',
+      saveLabel: 'Rename profile',
+    },
+    copy: {
+      label: `Name for the copy of ${name}`,
+      placeholder: `${name} copy`,
+      initial: `${name} copy`,
+      note: 'The copy starts with these settings; changing one leaves the other as it is.',
+      saveLabel: 'Duplicate profile',
+    },
+    empty: {
+      label: 'Name for the new profile',
+      placeholder: 'New profile',
+      note: 'It uses the printer’s defaults until you change a setting.',
+      saveLabel: 'Create profile',
+    },
+  })[naming];
+
+const confirmationCopy = (
+  confirmation: Confirmation,
+  name: string,
+  replacement: string | undefined,
+): Readonly<{ title: string; description: string; action: string }> =>
+  ({
+    reset: {
+      title: `Reset “${name}” to defaults?`,
+      description:
+        'Its print settings return to the printer’s defaults. Other profiles, and settings Tau does not recognise, stay as they are.',
+      action: 'Reset profile',
+    },
+    'reset-all': {
+      title: 'Reset all profiles for this printer type?',
+      description:
+        'Every profile’s print settings return to the printer’s defaults. Names, the chosen profile and settings Tau does not recognise stay as they are.',
+      action: 'Reset all profiles',
+    },
+    delete: {
+      title: `Delete “${name}”?`,
+      description: `“${replacement ?? ''}” becomes the profile for printers of this type.`,
+      action: 'Delete profile',
+    },
+  })[confirmation];
+
+/**
+ * A verb in the profile menu; an unavailable one stays in place and says why (DESIGN, explain unavailable
+ * actions), as the composer's attach item does.
+ *
+ * @param properties - The glyph, the verb, why it is unavailable (if it is) and what choosing it does.
+ * @returns The menu item.
+ */
+function ProfileVerb({
+  icon: Icon,
+  label,
+  reason,
+  variant,
+  onSelect,
+}: {
+  readonly icon: LucideIcon;
+  readonly label: string;
+  readonly reason?: string;
+  readonly variant?: 'destructive';
+  readonly onSelect: () => void;
+}): React.JSX.Element {
+  return reason === undefined ? (
+    <DropdownMenuItem variant={variant} onSelect={onSelect}>
+      <Icon aria-hidden />
+      {label}
+    </DropdownMenuItem>
+  ) : (
+    <DropdownMenuItem disabled variant={variant} className='h-auto items-start'>
+      <Icon aria-hidden className='mt-0.5' />
+      <span className='flex flex-col'>
+        {label}
+        <span className='text-xs text-muted-foreground'>{reason}</span>
+      </span>
+    </DropdownMenuItem>
+  );
+}
+
+/**
+ * The Profile row's More: each verb with its glyph, as a revision branch's More is. Naming verbs open the
+ * shared naming form under the menu's button; verbs that lose settings confirm with the profile named.
+ *
+ * @param properties - The settings handle, the saved profiles and the active one.
+ * @returns The menu, its naming form and its confirmation.
+ */
+function ProfileMenu({
+  settings,
+  profiles,
+  activeId,
+}: {
+  readonly settings: MachineSettingsHandle;
+  readonly profiles: MachineSettingsRecord['profiles'];
+  readonly activeId: string;
+}): React.JSX.Element {
+  const moreRef = useRef<HTMLButtonElement>(null);
+  // The chosen verb opens its form or confirmation once the menu has handed focus back to its button.
+  const chosen = useRef<Naming | Confirmation>(undefined);
+  // The last verb stays while its surface closes, so the closing form or dialog keeps its words.
+  const [naming, setNaming] = useState<Naming>('rename');
+  const [isNaming, setIsNaming] = useState(false);
+  const [confirmation, setConfirmation] = useState<Confirmation>('reset');
+  const [isConfirming, setIsConfirming] = useState(false);
+  const name = profiles[activeId]?.name ?? 'Default';
+  const replacement = replacementId(profiles, activeId);
+  const isAtLimit = Object.keys(profiles).length >= profileLimit;
+  const savingReason = settings.pending > 0 ? 'Wait for changes to save' : undefined;
+  const limitReason = isAtLimit ? `Keep up to ${profileLimit} profiles for each printer type` : undefined;
+  const choose = (verb: Naming | Confirmation) => () => {
+    chosen.current = verb;
+  };
+  const saveName = (next: string): void => {
+    if (next.length > nameLimit) {
+      throw new Error(`Use ${nameLimit} characters or fewer.`);
+    }
+    if (naming === 'rename' && next === name) {
+      return;
+    }
+    settings.updateRecord((current) => {
+      const profile = current.profiles[current.activeProfile]!;
+      if (naming === 'rename') {
+        return { ...current, profiles: { ...current.profiles, [current.activeProfile]: { ...profile, name: next } } };
+      }
+      if (Object.keys(current.profiles).length >= profileLimit) {
+        return current;
+      }
+      const id = nextId(next, current.profiles);
+      return {
+        ...current,
+        activeProfile: id,
+        profiles: {
+          ...current.profiles,
+          [id]: { name: next, configurations: naming === 'copy' ? structuredClone(profile.configurations) : {} },
+        },
+      };
+    });
+  };
+  const confirm = (): void => {
+    if (confirmation !== 'delete') {
+      settings.reset(confirmation === 'reset-all');
+      return;
+    }
+    settings.updateRecord((current) => {
+      const next = replacementId(current.profiles, current.activeProfile);
+      return next === undefined
+        ? current
+        : {
+            ...current,
+            activeProfile: next,
+            profiles: Object.fromEntries(
+              Object.entries(current.profiles).filter(([id]) => id !== current.activeProfile),
+            ),
+          };
+    });
+  };
+  const words = confirmationCopy(
+    confirmation,
+    name,
+    replacement === undefined ? undefined : profiles[replacement]?.name,
+  );
+  return (
+    <>
+      <DropdownMenu>
+        <NamePopover
+          anchor={
+            <DropdownMenuTrigger asChild>
+              <Button
+                ref={moreRef}
+                type='button'
+                size='icon-xs'
+                variant='ghost'
+                className='shrink-0'
+                aria-label='Manage profiles'
+                title='Manage profiles'
+                disabled={settings.selectionBlocked}
+              >
+                <Ellipsis aria-hidden />
+              </Button>
+            </DropdownMenuTrigger>
+          }
+          isOpen={isNaming}
+          returnFocus={moreRef}
+          align='end'
+          {...namingCopy(naming, name)}
+          onOpenChange={setIsNaming}
+          onSave={saveName}
+        />
+        <DropdownMenuContent
+          align='end'
+          onCloseAutoFocus={(event) => {
+            const verb = chosen.current;
+            if (verb === undefined) {
+              return;
+            }
+            chosen.current = undefined;
+            event.preventDefault();
+            if (verb === 'rename' || verb === 'copy' || verb === 'empty') {
+              setNaming(verb);
+              setIsNaming(true);
+            } else {
+              setConfirmation(verb);
+              setIsConfirming(true);
+            }
+          }}
+        >
+          <ProfileVerb icon={Pencil} label='Rename profile…' onSelect={choose('rename')} />
+          <ProfileVerb icon={Copy} label='Duplicate profile…' reason={limitReason} onSelect={choose('copy')} />
+          <ProfileVerb icon={Plus} label='New empty profile…' reason={limitReason} onSelect={choose('empty')} />
+          <DropdownMenuSeparator />
+          <ProfileVerb icon={RotateCcw} label='Reset to defaults…' reason={savingReason} onSelect={choose('reset')} />
+          <ProfileVerb
+            icon={ListRestart}
+            label='Reset all profiles…'
+            reason={savingReason}
+            onSelect={choose('reset-all')}
+          />
+          <DropdownMenuSeparator />
+          <ProfileVerb
+            icon={Trash2}
+            label='Delete profile…'
+            variant='destructive'
+            reason={replacement === undefined ? 'Keep at least one profile' : savingReason}
+            onSelect={choose('delete')}
+          />
+        </DropdownMenuContent>
+      </DropdownMenu>
+      <AlertDialog open={isConfirming} onOpenChange={setIsConfirming}>
+        <AlertDialogContent
+          onCloseAutoFocus={(event) => {
+            event.preventDefault();
+            moreRef.current?.focus();
+          }}
+        >
+          <AlertDialogHeader>
+            <AlertDialogTitle>{words.title}</AlertDialogTitle>
+            <AlertDialogDescription>{words.description}</AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>Cancel</AlertDialogCancel>
+            <AlertDialogAction className={buttonVariants({ variant: 'destructive' })} onClick={confirm}>
+              {words.action}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+    </>
+  );
+}
+
 /** The saved profile selector and its adjacent management menu. */
 export function MachineProfiles({
   settings,
@@ -36,9 +317,6 @@ export function MachineProfiles({
   readonly settings: MachineSettingsHandle;
   readonly studio: BambuStudioMode;
 }): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-  const [name, setName] = useState('');
-  const [confirmation, setConfirmation] = useState<'delete' | 'reset' | 'reset-all'>();
   const [message, setMessage] = useState<string>();
   const printer = studio.selection?.printer;
   const qualified = useMemo(() => {
@@ -74,7 +352,6 @@ export function MachineProfiles({
   }, [qualified, settings.startingProfiles, settings.file.status]);
   const { record } = settings;
   const activeId = record?.activeProfile ?? 'default';
-  const active = record?.profiles[activeId];
   const profiles = record?.profiles ?? {
     default: { name: 'Default', configurations: {} },
   };
@@ -95,7 +372,7 @@ export function MachineProfiles({
         .map((process) => ({
           value: `starting:${process.name}`,
           label: process.name.replace(/ @.*$/u, ''),
-          disabled: Object.keys(profiles).length >= 16,
+          disabled: Object.keys(profiles).length >= profileLimit,
         })),
     [studio.processes, profiles],
   );
@@ -109,15 +386,13 @@ export function MachineProfiles({
           { label: 'Starting profiles', options: starting },
         ]
       : [{ options: saved }];
-  const atLimit = saved.length >= 16;
-  const validName = name.trim().length > 0 && name.trim().length <= 128;
   const choose = (value: string): void => {
     settings.updateRecord((current) => {
       if (!value.startsWith('starting:')) {
         return { ...current, activeProfile: value };
       }
       const process = studio.processes.find((preset) => `starting:${preset.name}` === value);
-      if (!process || Object.keys(current.profiles).length >= 16) {
+      if (!process || Object.keys(current.profiles).length >= profileLimit) {
         return current;
       }
       const label = process.name.replace(/ @.*$/u, '');
@@ -143,57 +418,10 @@ export function MachineProfiles({
       };
     });
   };
-  const manage = (action: 'rename' | 'copy' | 'empty' | 'delete'): void => {
-    if ((action === 'copy' || action === 'empty') && atLimit) {
-      setMessage('Keep up to 16 profiles for each machine type.');
-      return;
-    }
-    if (action !== 'delete' && !validName) {
-      setMessage('Enter a profile name.');
-      return;
-    }
-    settings.updateRecord((current) => {
-      const profile = current.profiles[current.activeProfile]!;
-      if (action === 'rename') {
-        return {
-          ...current,
-          profiles: {
-            ...current.profiles,
-            [current.activeProfile]: { ...profile, name: name.trim() },
-          },
-        };
-      }
-      if (action === 'delete') {
-        const remaining = Object.fromEntries(
-          Object.entries(current.profiles).filter(([id]) => id !== current.activeProfile),
-        );
-        const replacement = replacementId(current.profiles, current.activeProfile);
-        return replacement ? { ...current, activeProfile: replacement, profiles: remaining } : current;
-      }
-      const id = nextId(name, current.profiles);
-      return {
-        ...current,
-        activeProfile: id,
-        profiles: {
-          ...current.profiles,
-          [id]: {
-            name: name.trim(),
-            configurations: action === 'copy' ? structuredClone(profile.configurations) : {},
-          },
-        },
-      };
-    });
-    setConfirmation(undefined);
-    setMessage(undefined);
-    if (action !== 'rename') {
-      setOpen(false);
-    }
-  };
-  const replacement = saved.find(({ value }) => value === replacementId(profiles, activeId));
   return (
     <div className='space-y-2' role='group' aria-label='Machine profiles'>
       <PrintSetupRow label='Profile'>
-        <div className='flex min-w-0 flex-1 items-center'>
+        <div className='flex min-w-0 flex-1 items-center gap-1'>
           <ParameterSelect
             label='Profile'
             value={activeId}
@@ -201,169 +429,7 @@ export function MachineProfiles({
             isDisabled={settings.selectionBlocked}
             onChange={choose}
           />
-          <Popover
-            open={open}
-            onOpenChange={(next) => {
-              setOpen(next);
-              setName(active?.name ?? 'Default');
-              setConfirmation(undefined);
-              setMessage(undefined);
-            }}
-          >
-            <PopoverTrigger asChild>
-              <Button
-                type='button'
-                size='xs'
-                variant='ghost'
-                className='ml-1 shrink-0'
-                aria-label='Manage profiles'
-                title='Manage profiles'
-                disabled={settings.selectionBlocked}
-              >
-                <Ellipsis aria-hidden className='size-4' />
-              </Button>
-            </PopoverTrigger>
-            <PopoverContent align='end' className='w-72 max-w-[calc(100vw-2rem)] space-y-3'>
-              <h4 className='text-sm font-medium'>Manage “{active?.name ?? 'Default'}”</h4>
-              <label className='block space-y-1 text-xs'>
-                Profile name
-                <Input
-                  aria-label='Profile name'
-                  value={name}
-                  maxLength={128}
-                  onChange={(event) => {
-                    setName(event.target.value);
-                  }}
-                />
-              </label>
-              <div className='flex flex-wrap gap-2'>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={!validName}
-                  onClick={() => {
-                    manage('rename');
-                  }}
-                >
-                  Rename
-                </Button>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={!validName || atLimit}
-                  onClick={() => {
-                    manage('copy');
-                  }}
-                >
-                  Save a copy
-                </Button>
-                <Button
-                  size='sm'
-                  variant='outline'
-                  disabled={!validName || atLimit}
-                  onClick={() => {
-                    manage('empty');
-                  }}
-                >
-                  New empty profile
-                </Button>
-              </div>
-              <p className='text-xs text-muted-foreground'>
-                Copies are independent. Empty profiles use the machine’s defaults until edited.
-              </p>
-              {message && (
-                <p role='alert' className='text-xs'>
-                  {message}
-                </p>
-              )}
-              {atLimit && (
-                <p className='text-xs text-muted-foreground'>Keep up to 16 profiles for each machine type.</p>
-              )}
-              {confirmation ? (
-                <div className='space-y-2 border-t pt-3'>
-                  <p className='text-sm'>
-                    {confirmation === 'delete' ? (
-                      <>
-                        Delete “{active?.name}”? “{replacement?.label}” becomes active for this type.
-                      </>
-                    ) : confirmation === 'reset-all' ? (
-                      <>
-                        Reset all profiles for this machine type? Names, selection and unknown configuration sections
-                        are retained.
-                      </>
-                    ) : (
-                      <>
-                        Reset “{active?.name ?? 'Default'}” to defaults? Other profiles and unknown configuration
-                        sections are retained.
-                      </>
-                    )}
-                  </p>
-                  <div className='flex gap-2'>
-                    <Button
-                      size='sm'
-                      variant='destructive'
-                      onClick={() => {
-                        if (confirmation === 'delete') {
-                          manage('delete');
-                        } else {
-                          settings.reset(confirmation === 'reset-all');
-                          setConfirmation(undefined);
-                        }
-                      }}
-                    >
-                      Confirm {confirmation === 'reset-all' ? 'reset all profiles' : confirmation}
-                    </Button>
-                    <Button
-                      size='sm'
-                      variant='outline'
-                      onClick={() => {
-                        setConfirmation(undefined);
-                      }}
-                    >
-                      Cancel
-                    </Button>
-                  </div>
-                </div>
-              ) : (
-                <div className='flex flex-wrap gap-2'>
-                  <Button
-                    size='sm'
-                    variant='ghost'
-                    disabled={settings.pending > 0}
-                    onClick={() => {
-                      setConfirmation('reset');
-                    }}
-                  >
-                    Reset to defaults
-                  </Button>
-                  <Button
-                    size='sm'
-                    variant='ghost'
-                    disabled={settings.pending > 0}
-                    onClick={() => {
-                      setConfirmation('reset-all');
-                    }}
-                  >
-                    Reset all profiles for this type
-                  </Button>
-                  <Button
-                    size='sm'
-                    variant='ghost'
-                    disabled={!replacement || settings.pending > 0}
-                    onClick={() => {
-                      setConfirmation('delete');
-                    }}
-                  >
-                    Delete profile
-                  </Button>
-                </div>
-              )}
-              {settings.pending > 0 && (
-                <p className='text-xs text-muted-foreground'>Wait for pending saves before deleting.</p>
-              )}
-              {!replacement && <p className='text-xs text-muted-foreground'>Keep at least one profile.</p>}
-            </PopoverContent>
-          </Popover>
+          <ProfileMenu settings={settings} profiles={profiles} activeId={activeId} />
         </div>
       </PrintSetupRow>
       {settings.pending > 0 && (
@@ -372,7 +438,10 @@ export function MachineProfiles({
         </p>
       )}
       {settings.error && (
-        <div role='alert' className='space-y-2 rounded-md border p-2 text-sm'>
+        <div
+          role='alert'
+          className='flex min-w-0 flex-col items-start gap-2 rounded-lg border border-border/70 bg-muted/30 p-2 text-xs'
+        >
           <p>
             {settings.failure
               ? `Changes to “${profiles[settings.failure.profileId]?.name ?? settings.failure.profileId}” were not saved. `

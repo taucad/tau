@@ -62,8 +62,9 @@ export function ParameterSelect({
           <MaterialSwatch materials={[{ color: option.swatch, roughness: 0.35, metalness: 0 }]} />
         )}
         <span className='truncate'>{option.label}</span>
+        {/* Short values ("72 %") stay whole; a long one ("Changing filament") takes at most half and truncates. */}
         {option.secondary === undefined ? null : (
-          <span className='shrink-0 text-muted-foreground tabular-nums'>{option.secondary}</span>
+          <span className='max-w-1/2 shrink-0 truncate text-muted-foreground tabular-nums'>{option.secondary}</span>
         )}
       </span>
     </SelectItem>

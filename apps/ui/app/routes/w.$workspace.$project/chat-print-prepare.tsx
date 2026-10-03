@@ -4,7 +4,7 @@ import { printerPreparation } from '#components/printer/printer-preparation.js';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import { defaultFilamentSlots, machineSliceOptions } from '@taucad/agent-tools/registry';
-import { Check, Eye, LoaderCircle, Scissors, Send } from 'lucide-react';
+import { Check, Eye, Layers, ListChecks, LoaderCircle, Scissors, Send, Settings2 } from 'lucide-react';
 import type { JSONSchema7, JSONSchema7Definition } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import type {
@@ -48,7 +48,7 @@ import {
   PrintDisclosure,
   PrintNotice,
   PrintRow,
-  PrintSection,
+  PrintStage,
   operator,
 } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
@@ -1127,7 +1127,7 @@ function MaterialSelect({
   if (materials.length === 0) {
     return <p className='text-xs text-muted-foreground'>No material slots observed.</p>;
   }
-  // The tray and how it is sliced are one choice; an override set in More settings is named here.
+  // The tray and how it is sliced are one choice; an override set in Advanced settings is named here.
   const override = typeof selectedSlot === 'number' ? filamentPresets?.[selectedSlot] : undefined;
   return (
     <PrintSetupRow
@@ -1605,8 +1605,8 @@ const startOptions = [
   { key: 'timelapse', label: 'Timelapse', short: 'Timelapse', description: 'Record a frame every layer.' },
 ] as const;
 
-/** The host's prestart options, folded and summarised by what is on, preserved in the submission projection. */
-function StartOptions({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element | undefined {
+/** The host's prestart options, a stage summarised by what is on, preserved in the submission projection. */
+function StartOptionsStage({ prepare }: { readonly prepare: PrintPrepare }): React.JSX.Element | undefined {
   const declared = startOptions.filter(({ key }) =>
     Object.hasOwn(prepare.submissionSchema?.schema.properties ?? {}, key),
   );
@@ -1615,33 +1615,38 @@ function StartOptions({ prepare }: { readonly prepare: PrintPrepare }): React.JS
   }
   const on = declared.filter(({ key }) => prepare.effectiveSubmission[key] === true).map(({ short }) => short);
   return (
-    <PrintDisclosure
+    <PrintStage
+      icon={ListChecks}
       title='Start options'
       summary={on.length === 0 ? 'None' : [on[0], ...on.slice(1).map((name) => name.toLowerCase())].join(', ')}
     >
-      {declared.map(({ key, label, description }) => (
-        <PrintSetupRow
-          key={key}
-          label={label}
-          description={description}
-          isModified={Object.hasOwn(prepare.submission, key)}
-          onReset={() => {
-            prepare.setSubmission(
-              Object.fromEntries(Object.entries(prepare.submission).filter(([name]) => name !== key)),
-            );
-          }}
-        >
-          <ParametersBoolean
-            id={`print-${key}`}
-            aria-label={`Toggle for ${label}`}
-            value={prepare.effectiveSubmission[key] === true}
-            onChange={(value) => {
-              prepare.setSubmission({ ...prepare.submission, [key]: value });
-            }}
-          />
-        </PrintSetupRow>
-      ))}
-    </PrintDisclosure>
+      <fieldset disabled={prepare.machineSettings.blocked} className='contents'>
+        <div className='-my-1.5 flex min-w-0 flex-col gap-1'>
+          {declared.map(({ key, label, description }) => (
+            <PrintSetupRow
+              key={key}
+              label={label}
+              description={description}
+              isModified={Object.hasOwn(prepare.submission, key)}
+              onReset={() => {
+                prepare.setSubmission(
+                  Object.fromEntries(Object.entries(prepare.submission).filter(([name]) => name !== key)),
+                );
+              }}
+            >
+              <ParametersBoolean
+                id={`print-${key}`}
+                aria-label={`Toggle for ${label}`}
+                value={prepare.effectiveSubmission[key] === true}
+                onChange={(value) => {
+                  prepare.setSubmission({ ...prepare.submission, [key]: value });
+                }}
+              />
+            </PrintSetupRow>
+          ))}
+        </div>
+      </fieldset>
+    </PrintStage>
   );
 }
 
@@ -1812,38 +1817,50 @@ export const slicerName = (studio: BambuStudioMode): string | undefined => {
 };
 
 /**
- * Prepare: choose the model, profile, plate, material and process, read the
- * slice, set the start options. More settings holds the full slicer and
- * submission forms. Folded behind a decision or a run, it ends with its own
- * actions; otherwise the pane's action bar carries them.
+ * The closed Prepare stage's summary: the fresh slice's numbers, else why it waits, else the model.
  *
- * @param properties - The machine, its manifest and the prepare state.
- * @returns The section.
- * @public
+ * @param prepare - The prepare state.
+ * @param deferred - What Prepare is for while a decision or a run owns the pane.
+ * @returns A few words.
  */
-export function PrepareSection({
+const prepareSummary = (prepare: PrintPrepare, deferred: string | undefined): string | undefined => {
+  const { slice, isSliceStale, isSlicing, entryPath } = prepare;
+  if (isSlicing) {
+    return 'Slicing…';
+  }
+  if (slice && !isSliceStale) {
+    const weight =
+      slice.summary.filamentWeightGrams === undefined ? undefined : formatWeight(slice.summary.filamentWeightGrams);
+    return ['Sliced', formatDuration(slice.summary.estimatedDuration), weight]
+      .filter((part) => part !== undefined)
+      .join(' · ');
+  }
+  return deferred ?? (slice ? 'Changed since the slice' : entryPath === '' ? undefined : modelName(entryPath));
+};
+
+/**
+ * Advanced settings: the full slicer form (Bambu Studio's printer and filament overrides and settings, or
+ * the kernel's slicer options) and the machine mapping, behind one filter.
+ *
+ * @param properties - The machine, its provider and manifest, and the prepare state.
+ * @returns The stage.
+ */
+function AdvancedSettingsStage({
   entry,
   provider,
   manifest,
   prepare,
-  fold,
 }: {
   readonly entry: MachineDirectoryEntry;
   readonly provider: MachineProvider | undefined;
   readonly manifest: MachineManifest | undefined;
   readonly prepare: PrintPrepare;
-  /** The fold's title while a decision or a run owns the pane. */
-  readonly fold?: string;
 }): React.JSX.Element {
-  const [moreSettingsFilter, setMoreSettingsFilter] = useState('');
+  const [advancedFilter, setAdvancedFilter] = useState('');
   const {
-    entryPath,
-    entryPaths,
-    setEntryPath,
     route,
     studio,
     filamentColors,
-    selectFilamentSlot,
     isBambuStudio,
     optionsSchema,
     options,
@@ -1851,10 +1868,8 @@ export function PrepareSection({
     submissionSchema,
     submission,
     setSubmission,
-    effectiveSubmission,
     machineSettings,
   } = prepare;
-  const { intent, update: updateIntent, reset: resetIntent } = machineSettings;
   const providerKey = route
     ? route.transcoderId === undefined
       ? String(route.kernelId)
@@ -1881,6 +1896,128 @@ export function PrepareSection({
       ...(required === undefined ? {} : { required }),
     };
   }, [submissionSchema]);
+
+  return (
+    <PrintStage icon={Settings2} title='Advanced settings'>
+      <fieldset disabled={machineSettings.blocked} className='contents'>
+        <SearchInput
+          aria-label='Filter settings'
+          placeholder='Filter settings'
+          value={advancedFilter}
+          className='h-6 w-full bg-background text-sm'
+          onChange={(event) => {
+            setAdvancedFilter(event.target.value);
+          }}
+          onClear={() => {
+            setAdvancedFilter('');
+          }}
+        />
+        {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' /> : null}
+        {isBambuStudio ? (
+          <BambuStudioSettings studio={studio} filterTerm={advancedFilter} />
+        ) : optionsSchema ? (
+          <div className='min-w-0' role='group' aria-label='Slicer options'>
+            {optionsManifest ? (
+              <Parameters
+                parameters={options}
+                defaultParameters={optionsSchema.defaults}
+                jsonSchema={optionsSchema.schema}
+                onParametersChange={setOptions}
+                enableSearch={false}
+                filterTerm={advancedFilter}
+                presentation='embedded'
+                units={printUnits}
+                parameterManifest={optionsManifest}
+                parameterEdit={{ kind: 'transient' }}
+                emptyMessage='No slicer options'
+              />
+            ) : (
+              <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+                Preparing slicer options…
+              </p>
+            )}
+          </div>
+        ) : (
+          <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
+        )}
+        {submissionSchema && provider ? (
+          <div className='min-w-0' role='group' aria-label='Machine mapping'>
+            {submissionManifest ? (
+              <Parameters
+                parameters={advancedSubmissionValues(submission)}
+                defaultParameters={advancedSubmissionValues(
+                  submissionDefaults(provider, entry, { manifest, filamentColors }),
+                )}
+                jsonSchema={advancedSubmissionSchema}
+                onParametersChange={(changed) => {
+                  setSubmission({
+                    ...Object.fromEntries(
+                      Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
+                    ),
+                    ...changed,
+                  });
+                }}
+                enableSearch={false}
+                filterTerm={advancedFilter}
+                presentation='embedded'
+                units={printUnits}
+                parameterManifest={submissionManifest}
+                parameterEdit={{ kind: 'transient' }}
+                emptyMessage='No machine mapping'
+              />
+            ) : (
+              <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+                Preparing machine mapping…
+              </p>
+            )}
+          </div>
+        ) : null}
+      </fieldset>
+    </PrintStage>
+  );
+}
+
+/**
+ * Prepare's three stages. Prepare chooses the model, profile, plate, material and process and reads
+ * the slice; Start options sets what the printer does first; Advanced settings holds the full slicer
+ * and submission forms. Prepare opens by default; behind a decision or a run it starts closed and
+ * ends with its own actions, otherwise the pane's action bar carries them.
+ *
+ * @param properties - The machine, its manifest and the prepare state.
+ * @returns The stages.
+ * @public
+ */
+export function PrepareStages({
+  entry,
+  provider,
+  manifest,
+  prepare,
+  deferred,
+}: {
+  readonly entry: MachineDirectoryEntry;
+  readonly provider: MachineProvider | undefined;
+  readonly manifest: MachineManifest | undefined;
+  readonly prepare: PrintPrepare;
+  /** While a decision or a run owns the pane, what Prepare is for: "For the next print". */
+  readonly deferred?: string;
+}): React.JSX.Element {
+  const {
+    entryPath,
+    entryPaths,
+    setEntryPath,
+    studio,
+    filamentColors,
+    selectFilamentSlot,
+    isBambuStudio,
+    optionsSchema,
+    options,
+    setOptions,
+    submission,
+    setSubmission,
+    effectiveSubmission,
+    machineSettings,
+  } = prepare;
+  const { intent, update: updateIntent, reset: resetIntent } = machineSettings;
   const { choosePreset } = studio;
   const selectPreset = useCallback(
     (preset: MachineManifest['slicing']['presets'][number]) => {
@@ -1920,148 +2057,76 @@ export function PrepareSection({
   const selectedProcess = studio.processes.find((preset) => preset.name === studio.selection?.process);
   const presetState = isBambuStudio ? { layerHeight: selectedProcess?.layerHeight } : options;
 
-  /* Beside the heading, never inside a trigger: a reset is a button of its own. */
+  /* Beside the trigger, never inside it: a reset is a button of its own. */
   const reset =
     hasIntentChanges(intent) || Object.keys(machineSettings.machine ?? {}).length > 0 ? (
       <ModifiedIndicator onReset={resetIntent} tooltip='Reset print settings' />
     ) : undefined;
-  const content = (
-    <>
-      <EngineStatus studio={studio} provider={provider} />
-      {/* Setup rows pad themselves (PrintSetupRow py-1.5), so the group adds only the row-to-row gap. */}
-      <div className='flex min-w-0 flex-col gap-1'>
-        <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
-        <MachineProfiles settings={machineSettings} studio={studio} />
-        {/* Keep disabled semantics without Chromium's fieldset anonymous layout box around query containers. */}
-        <fieldset disabled={machineSettings.blocked} className='contents'>
-          <PlateSelect
-            plates={plates}
-            selected={selectedPlate}
-            isModified={intent?.plate !== undefined}
-            onChange={selectPlate}
-            onReset={resetPlate}
-          />
-          <MaterialChoice
-            entry={entry}
-            manifest={manifest}
-            filamentColors={filamentColors}
-            submission={effectiveSubmission}
-            ownSubmission={submission}
-            filamentPresets={isBambuStudio ? studio.chosen.filaments : undefined}
-            onResetMaterial={() => {
-              setSubmission(
-                Object.fromEntries(
-                  Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
-                ),
-              );
-            }}
-            onSelectMaterial={selectMaterial}
-            onSelectFilamentSlot={selectFilamentSlot}
-          />
-          {!isBambuStudio && manifest ? (
-            <QualityChoice
-              presets={manifest.slicing.presets}
-              options={presetState}
-              isModified={intent?.preset !== undefined}
-              onSelect={selectPreset}
-              onReset={resetPreset}
-            />
-          ) : null}
-          {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
-        </fieldset>
-      </div>
-      <fieldset disabled={machineSettings.blocked} className='contents'>
-        <SliceNotices prepare={prepare} />
-        <SliceResult prepare={prepare} />
-        <StartOptions prepare={prepare} />
-        <PrintDisclosure title='More settings'>
-          <SearchInput
-            aria-label='Filter settings'
-            placeholder='Filter settings'
-            value={moreSettingsFilter}
-            className='h-6 w-full bg-background text-sm'
-            onChange={(event) => {
-              setMoreSettingsFilter(event.target.value);
-            }}
-            onClear={() => {
-              setMoreSettingsFilter('');
-            }}
-          />
-          {isBambuStudio ? (
-            <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} mode='printer' />
-          ) : null}
-          {isBambuStudio ? (
-            <BambuStudioSettings studio={studio} filterTerm={moreSettingsFilter} />
-          ) : optionsSchema ? (
-            <div className='min-w-0' role='group' aria-label='Slicer options'>
-              {optionsManifest ? (
-                <Parameters
-                  parameters={options}
-                  defaultParameters={optionsSchema.defaults}
-                  jsonSchema={optionsSchema.schema}
-                  onParametersChange={setOptions}
-                  enableSearch={false}
-                  filterTerm={moreSettingsFilter}
-                  presentation='embedded'
-                  units={printUnits}
-                  parameterManifest={optionsManifest}
-                  parameterEdit={{ kind: 'transient' }}
-                  emptyMessage='No slicer options'
-                />
-              ) : (
-                <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-                  Preparing slicer options…
-                </p>
-              )}
-            </div>
-          ) : (
-            <p className='text-xs text-muted-foreground'>The slicer declares no options.</p>
-          )}
-          {submissionSchema && provider ? (
-            <div className='min-w-0' role='group' aria-label='Machine mapping'>
-              {submissionManifest ? (
-                <Parameters
-                  parameters={advancedSubmissionValues(submission)}
-                  defaultParameters={advancedSubmissionValues(
-                    submissionDefaults(provider, entry, { manifest, filamentColors }),
-                  )}
-                  jsonSchema={advancedSubmissionSchema}
-                  onParametersChange={(changed) => {
-                    setSubmission({
-                      ...Object.fromEntries(
-                        Object.entries(submission).filter(([key]) => prepareSubmissionFields.has(key)),
-                      ),
-                      ...changed,
-                    });
-                  }}
-                  enableSearch={false}
-                  filterTerm={moreSettingsFilter}
-                  presentation='embedded'
-                  units={printUnits}
-                  parameterManifest={submissionManifest}
-                  parameterEdit={{ kind: 'transient' }}
-                  emptyMessage='No machine mapping'
-                />
-              ) : (
-                <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
-                  Preparing machine mapping…
-                </p>
-              )}
-            </div>
-          ) : null}
-        </PrintDisclosure>
-        {fold === undefined ? null : <PrepareActions entry={entry} manifest={manifest} prepare={prepare} />}
-      </fieldset>
-    </>
-  );
 
-  return fold === undefined ? (
-    <PrintSection title='Prepare' aside={reset}>
-      {content}
-    </PrintSection>
-  ) : (
-    <PrintDisclosure title={fold} aside={reset}>
-      {content}
-    </PrintDisclosure>
+  return (
+    <>
+      <PrintStage
+        icon={Layers}
+        title='Prepare'
+        summary={prepareSummary(prepare, deferred)}
+        aside={reset}
+        isDefaultOpen={deferred === undefined}
+      >
+        <EngineStatus studio={studio} provider={provider} />
+        {/* Setup rows pad themselves (PrintSetupRow py-1.5), so the group adds only the row-to-row gap. */}
+        <div className='-my-1.5 flex min-w-0 flex-col gap-1'>
+          <ModelSelect entryPath={entryPath} entryPaths={entryPaths} onChange={setEntryPath} />
+          <MachineProfiles settings={machineSettings} studio={studio} />
+          {/* Keep disabled semantics without Chromium's fieldset anonymous layout box around query containers; the
+              rows sit in a box of their own, as Chromium stops laying out query containers that are a contents
+              fieldset's direct children once an ancestor relayouts. */}
+          <fieldset disabled={machineSettings.blocked} className='contents'>
+            <div className='flex min-w-0 flex-col gap-1'>
+              <PlateSelect
+                plates={plates}
+                selected={selectedPlate}
+                isModified={intent?.plate !== undefined}
+                onChange={selectPlate}
+                onReset={resetPlate}
+              />
+              <MaterialChoice
+                entry={entry}
+                manifest={manifest}
+                filamentColors={filamentColors}
+                submission={effectiveSubmission}
+                ownSubmission={submission}
+                filamentPresets={isBambuStudio ? studio.chosen.filaments : undefined}
+                onResetMaterial={() => {
+                  setSubmission(
+                    Object.fromEntries(
+                      Object.entries(submission).filter(([key]) => key !== 'amsMapping' && key !== 'expectedMaterials'),
+                    ),
+                  );
+                }}
+                onSelectMaterial={selectMaterial}
+                onSelectFilamentSlot={selectFilamentSlot}
+              />
+              {!isBambuStudio && manifest ? (
+                <QualityChoice
+                  presets={manifest.slicing.presets}
+                  options={presetState}
+                  isModified={intent?.preset !== undefined}
+                  onSelect={selectPreset}
+                  onReset={resetPreset}
+                />
+              ) : null}
+              {isBambuStudio ? <BambuStudioChoices studio={studio} entry={entry} manifest={manifest} /> : null}
+            </div>
+          </fieldset>
+        </div>
+        <fieldset disabled={machineSettings.blocked} className='contents'>
+          <SliceNotices prepare={prepare} />
+          <SliceResult prepare={prepare} />
+          {deferred === undefined ? null : <PrepareActions entry={entry} manifest={manifest} prepare={prepare} />}
+        </fieldset>
+      </PrintStage>
+      <StartOptionsStage prepare={prepare} />
+      <AdvancedSettingsStage entry={entry} provider={provider} manifest={manifest} prepare={prepare} />
+    </>
   );
 }

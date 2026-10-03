@@ -78,6 +78,24 @@ export type CommandPaletteItem = {
   visible?: boolean;
 };
 
+/**
+ * The 80 × 60 frame for a project or example image in a search result: the whole 4:3 thumbnail,
+ * or `fallback` while there is none.
+ */
+export function CommandPaletteThumbnail({
+  src,
+  fallback,
+}: {
+  readonly src?: string;
+  readonly fallback?: React.ReactNode;
+}): React.JSX.Element {
+  return (
+    <span className='flex h-15 w-20 items-center justify-center overflow-hidden rounded-xs bg-muted ring-1 ring-border'>
+      {src ? <img src={src} alt='' className='size-full object-contain' /> : fallback}
+    </span>
+  );
+}
+
 function CommandPaletteItemLabel({ item }: { readonly item: CommandPaletteItem }): React.JSX.Element {
   return (
     <div className={cn(menuItemLayoutClass, 'min-w-0')}>
@@ -156,7 +174,8 @@ function CommandPaletteResults({ items, onRun }: CommandPaletteResultsProperties
     getScrollElement: () => listRef.current,
     estimateSize: (index) => {
       const row = rows[index];
-      return row?.kind === 'item' ? (row.item.detail ? 46 : 30) : 24;
+      // Detailed rows are projects and examples, which lead with a 60 px tall thumbnail.
+      return row?.kind === 'item' ? (row.item.detail ? 68 : 30) : 24;
     },
     getItemKey: (index) => rows[index]?.key ?? index,
     overscan: 8,

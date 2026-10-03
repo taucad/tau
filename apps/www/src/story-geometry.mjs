@@ -106,3 +106,61 @@ export const parseStoryManifest = (value, byteLength) => {
     meshes,
   };
 };
+
+/** @typedef {{source: string, sha256: string, from: {faceWidth: number}, to: {faceWidth: number}, axial: {from: number, to: number}, meshes: Array<{name: string, dz: {offset: number, length: number}}>}} VariantManifest */
+
+/**
+ * Validate the authored faceWidth variant against the base manifest it offsets.
+ * @internal
+ * @param value - JSON response or local manifest.
+ * @param base - Validated base manifest.
+ * @param byteLength - Decoded offset buffer length.
+ * @returns One axial offset range per base vertex.
+ * @type {(value: unknown, base: StoryManifest, byteLength: number) => VariantManifest}
+ */
+export const parseVariantManifest = (value, base, byteLength) => {
+  if (
+    !isRecord(value) ||
+    value['sha256'] !== base.sha256 ||
+    value['source'] !== base.source ||
+    !isRecord(value['from']) ||
+    !isRecord(value['to']) ||
+    value['from']['faceWidth'] !== 14 ||
+    value['to']['faceWidth'] !== 18 ||
+    !isRecord(value['axial']) ||
+    typeof value['axial']['from'] !== 'number' ||
+    typeof value['axial']['to'] !== 'number' ||
+    !Array.isArray(value['meshes']) ||
+    value['meshes'].length !== base.meshes.length
+  ) {
+    throw new Error('Unexpected variant geometry manifest');
+  }
+  /** @type {unknown[]} */
+  const entries = value['meshes'];
+  const meshes = entries.map((entry, index) => {
+    const part = base.meshes[index];
+    if (!isRecord(entry) || !part || entry['name'] !== part.name || !isRecord(entry['dz'])) {
+      throw new Error('Variant geometry part mismatch');
+    }
+    const { offset, length } = entry['dz'];
+    if (
+      typeof offset !== 'number' ||
+      typeof length !== 'number' ||
+      !Number.isSafeInteger(offset) ||
+      offset % 4 !== 0 ||
+      length * 3 !== part.position.length ||
+      offset + length * 4 > byteLength
+    ) {
+      throw new Error('Invalid variant geometry range');
+    }
+    return { name: part.name, dz: { offset, length } };
+  });
+  return {
+    source: base.source,
+    sha256: base.sha256,
+    from: { faceWidth: 14 },
+    to: { faceWidth: 18 },
+    axial: { from: value['axial']['from'], to: value['axial']['to'] },
+    meshes,
+  };
+};

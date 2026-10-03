@@ -8,7 +8,9 @@ const output = resolve(process.env.WWW_REPORT_DIR ?? 'out/research/marketing-www
 const origin = process.env.WWW_TEST_URL ?? 'http://127.0.0.1:4173';
 await mkdir(output, { recursive: true });
 const browser = await chromium.launch({
-  executablePath: process.env.CHROME_PATH ?? '/usr/bin/chromium',
+  ...(process.env.CHROME_CHANNEL
+    ? { channel: process.env.CHROME_CHANNEL }
+    : { executablePath: process.env.CHROME_PATH ?? '/usr/bin/chromium' }),
   args: ['--no-sandbox'],
 });
 const results = [];
@@ -70,22 +72,9 @@ try {
         `${name} ${path}`,
       );
     });
-    await page.goto(origin + '/vision/');
-    await page.getByRole('button', { name: 'Assembled', exact: true }).click();
-    await page.waitForFunction(
-      () => document.querySelector('#assembly-image')?.getAttribute('src')?.endsWith('/assembly.webp') === true,
-    );
-    assert.equal(
-      await page.getByRole('button', { name: 'Assembled', exact: true }).getAttribute('aria-pressed'),
-      'true',
-    );
-    await page.getByRole('button', { name: 'Exploded', exact: true }).click();
-    await page.waitForFunction(
-      () => document.querySelector('#assembly-image')?.getAttribute('src')?.endsWith('/exploded.webp') === true,
-    );
     await page.goto(origin);
-    if (width < 760) {
-      await page.getByText('Menu', { exact: true }).click();
+    if (width < 1080) {
+      await page.locator('.mobile-menu summary').click();
       assert.equal(await page.getByRole('navigation', { name: 'Mobile navigation' }).isVisible(), true);
       await page.keyboard.press('Escape');
       assert.equal(await page.getByRole('navigation', { name: 'Mobile navigation' }).isVisible(), false);
@@ -108,9 +97,9 @@ try {
   const nojs = await browser.newContext({ javaScriptEnabled: false, viewport: { width: 390, height: 844 } });
   const nojsPage = await nojs.newPage();
   await nojsPage.goto(origin);
-  await nojsPage.getByText('Menu', { exact: true }).click();
+  await nojsPage.locator('.mobile-menu summary').click();
   assert.equal(await nojsPage.getByRole('navigation', { name: 'Mobile navigation' }).isVisible(), true);
-  await nojsPage.getByRole('navigation').getByRole('link', { name: 'Pricing', exact: true }).click();
+  await nojsPage.getByRole('navigation', { name: 'Mobile navigation' }).getByRole('link', { name: 'Pricing', exact: true }).click();
   assert.ok(nojsPage.url().endsWith('/pricing/'));
   await nojs.close();
   const context = await browser.newContext();
@@ -157,13 +146,13 @@ try {
   await page.getByRole('button', { name: 'Allow analytics', exact: true }).click();
   await page.waitForTimeout(100);
   assert.equal(events.length, 1);
-  await page.getByRole('link', { name: 'Open Tau', exact: true }).evaluate((element) => {
+  await page.locator('a[data-placement="header"]').evaluate((element) => {
     element.addEventListener('click', (event) => {
       event.preventDefault();
     });
   });
-  await page.getByRole('link', { name: 'Open Tau', exact: true }).click();
-  await page.getByRole('link', { name: 'Open Tau', exact: true }).click();
+  await page.locator('a[data-placement="header"]').click();
+  await page.locator('a[data-placement="header"]').click();
   await page.waitForTimeout(100);
   assert.equal(events.filter((item) => item.body.event === 'marketing_cta_click').length, 1);
   await page.goto(origin + '/privacy/');
@@ -206,7 +195,7 @@ try {
         results,
         checks: [
           `${results.length} route/viewport accessibility audits`,
-          'assembled/exploded view switching',
+          'mobile menu open/close',
           'menu and Escape',
           'no-JS navigation',
           'real 404',

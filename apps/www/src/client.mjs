@@ -1,3 +1,4 @@
+import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from '#www/analytics.js';
 
@@ -8,46 +9,6 @@ document.addEventListener('keydown', (event) => {
     mobileMenu.querySelector('summary')?.focus();
   }
 });
-
-// Static art is the fallback. Alternative views are loaded only on intent.
-const controls = document.querySelector('.view-controls');
-const modelImage = document.querySelector('#assembly-image');
-if (controls && modelImage instanceof HTMLImageElement) {
-  controls.removeAttribute('aria-hidden');
-  controls.classList.add('ready');
-  let requestedView = 'exploded';
-  controls.addEventListener('click', async (event) => {
-    const button = event.target instanceof Element ? event.target.closest('button[data-view]') : null;
-    if (!(button instanceof HTMLButtonElement) || !controls.contains(button)) {
-      return;
-    }
-    const selectedView = button.dataset['view'];
-    if (selectedView !== 'assembly' && selectedView !== 'exploded') {
-      return;
-    }
-    requestedView = selectedView;
-    const view = requestedView;
-    const next = new Image();
-    next.src = `/_www/assets/${view}.webp`;
-    try {
-      await next.decode();
-    } catch {
-      return;
-    }
-    if (view !== requestedView) {
-      return;
-    }
-    modelImage.removeAttribute('srcset');
-    modelImage.src = next.src;
-    modelImage.alt =
-      view === 'exploded'
-        ? 'Exploded view of the authored planetary assembly showing the ring, carrier plates, gears and bearing hardware'
-        : 'Assembled view of the authored planetary stage with three planet gears and a blue carrier';
-    for (const control of controls.querySelectorAll('button')) {
-      control.setAttribute('aria-pressed', String(control === button));
-    }
-  });
-}
 
 const consentKey = 'tau-www-analytics-consent-v1';
 const visitKey = 'tau-www-visited-v1';
@@ -220,51 +181,79 @@ document.addEventListener('click', (event) => {
   void send({ name, placement });
 });
 
-// Leave the hero and the full reading path static; load 3D only at the story.
-const storyStage = document.querySelector('[data-story-stage]');
-const motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+// Everything below is progressive: the page is complete with static art and text alone.
+const reduced = matchMedia('(prefers-reduced-motion: reduce)');
 const saveData =
   'connection' in navigator &&
   typeof navigator.connection === 'object' &&
   navigator.connection !== null &&
   'saveData' in navigator.connection &&
   navigator.connection.saveData === true;
-if (
-  storyStage instanceof HTMLElement &&
-  'DecompressionStream' in globalThis &&
-  !motionPreference.matches &&
-  !saveData
-) {
-  let loading = false;
-  let departed = false;
-  const cannotStart = () => departed || document.hidden || motionPreference.matches;
-  const observer = new IntersectionObserver(
-    async ([entry]) => {
-      if (!entry?.isIntersecting || loading || cannotStart()) {
-        return;
+const storyStage = document.querySelector('[data-story-stage]');
+const heroStage = document.querySelector('[data-hero-stage]');
+const chapters = [...document.querySelectorAll('[data-story-chapter]')];
+const labels = chapters.map((chapter) => chapter.querySelector('.kicker')?.textContent?.trim() ?? '');
+
+// Still frames follow the reading position whenever the live scene is not running.
+if (storyStage instanceof HTMLElement && chapters.length > 0) {
+  const poster = storyStage.querySelector('[data-story-poster]');
+  const count = storyStage.querySelector('[data-story-count]');
+  let shown = -1;
+  let pending = 0;
+  const sync = () => {
+    pending = 0;
+    const chapter = Math.min(chapters.length - 1, Math.floor(readStoryProgress(chapters) + 0.12));
+    const live = storyStage.classList.contains('is-live');
+    if (poster instanceof HTMLImageElement && !live && poster.dataset['chapter'] !== String(chapter)) {
+      poster.dataset['chapter'] = String(chapter);
+      poster.src = `/_www/assets/story-${chapter}.webp`;
+    }
+    if (chapter === shown) return;
+    shown = chapter;
+    for (const [i, element] of chapters.entries()) element.classList.toggle('is-active', i === chapter);
+    storyStage.dataset['chapter'] = String(chapter);
+    if (count) count.textContent = `${labels[chapter]?.replace(/^(\d+)\s*/u, '$1 / 09 · ')}`;
+  };
+  addEventListener('scroll', () => (pending ||= requestAnimationFrame(sync)), { passive: true });
+  addEventListener('www:still', sync);
+  sync();
+}
+
+const capable =
+  'WebGL2RenderingContext' in globalThis && 'DecompressionStream' in globalThis && !saveData && !reduced.matches;
+/** @type {Promise<typeof import('#www/live.js')> | undefined} */
+let live;
+const startLive = () => {
+  live ??= import('#www/live.js');
+  return live
+    .then((module) => module.start({ heroStage, storyStage, chapters }))
+    .catch(() => {
+      for (const stage of [heroStage, storyStage]) {
+        if (stage instanceof HTMLElement) stage.dataset['fallback'] = 'true';
       }
-      loading = true;
-      observer.disconnect();
-      try {
-        const { mountStory } = await import('#www/story-scene.js');
-        if (cannotStart()) {
-          return;
+    });
+};
+if (capable && (heroStage || storyStage)) {
+  // Desktop: upgrade the hero once the page has painted and gone idle, never before LCP.
+  const idle = (/** @type {() => void} */ run) =>
+    'requestIdleCallback' in globalThis ? requestIdleCallback(run, { timeout: 3000 }) : setTimeout(run, 1200);
+  if (heroStage && matchMedia('(pointer: fine) and (min-width: 761px)').matches) {
+    const kick = () => idle(() => void startLive());
+    if (document.readyState === 'complete') kick();
+    else addEventListener('load', kick, { once: true });
+  }
+  // Touch and narrow screens: load on intent at the hero, or when the story comes near.
+  heroStage?.addEventListener('pointerdown', () => void startLive(), { once: true, passive: true });
+  if (storyStage) {
+    const near = new IntersectionObserver(
+      ([entry]) => {
+        if (entry?.isIntersecting) {
+          near.disconnect();
+          void startLive();
         }
-        await mountStory(storyStage);
-      } catch {
-        // The image, chapters and source link remain the complete fallback.
-        storyStage.dataset['fallback'] = 'true';
-      }
-    },
-    { threshold: 0.05 },
-  );
-  observer.observe(storyStage);
-  globalThis.addEventListener(
-    'pagehide',
-    () => {
-      departed = true;
-      observer.disconnect();
-    },
-    { once: true },
-  );
+      },
+      { rootMargin: '600px 0px' },
+    );
+    near.observe(storyStage);
+  }
 }

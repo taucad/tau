@@ -44,11 +44,11 @@ describe('extractTypescriptApi over replicad', () => {
   });
 
   it('emits one entry per exported name, with no duplicates', () => {
-    // 201 is what `checker.getExportsOfModule` reports for replicad's bundle.
-    // The research document's 218 was the syntactic extractor's count, which
-    // included 17 bare `declare` statements that the module never exports.
-    expect(corpus.entries).toHaveLength(201);
-    expect(new Set(corpus.entries.map((entry) => entry.name)).size).toBe(201);
+    // 223 is what `checker.getExportsOfModule` reports for replicad 1.1's
+    // bundle; a syntactic count would add 17 bare `declare` statements that the
+    // module never exports.
+    expect(corpus.entries).toHaveLength(223);
+    expect(new Set(corpus.entries.map((entry) => entry.name)).size).toBe(223);
     expect(duplicateNames(corpus.entries)).toStrictEqual([]);
   });
 
@@ -57,9 +57,8 @@ describe('extractTypescriptApi over replicad', () => {
     // Names the syntactic extractor admitted through `ModifierFlags.Ambient`.
     const ambientOnly = [
       'ApproximationOptions',
-      'BooleanOptimisation',
+      'CartesianAxis',
       'CoordSystem',
-      'Direction',
       'FaceOrEdge',
       'Finder',
       'Finder3d',
@@ -67,14 +66,16 @@ describe('extractTypescriptApi over replicad', () => {
       'Offset2DConfig',
       'PhysicalProperties',
       'PlaneConfig',
+      'ShapeExtremumFilter',
       'SplineTangent',
       'StandardPlane',
       'StartSplineTangent',
-      'TopoEntity',
+      'TOPOLOGY_KINDS',
+      'TopologyKind',
       'UVBounds',
     ];
     for (const name of ambientOnly) {
-      expect(source).toMatch(new RegExp(`^declare (?:type|interface|class|abstract class) ${name}\\b`, 'mu'));
+      expect(source).toMatch(new RegExp(`^declare (?:type|interface|class|abstract class|const) ${name}\\b`, 'mu'));
     }
 
     const emitted = new Set(corpus.entries.map((entry) => entry.name));

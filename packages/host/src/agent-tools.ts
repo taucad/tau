@@ -110,8 +110,14 @@ export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | '
   };
 };
 
-/** Filesystem capability the host tool registry consumes. @public */
-export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;
+/**
+ * Filesystem capability the host tool registry consumes. The project's print intent is read in bounded chunks and
+ * written with a precondition, so both are required: a filesystem without them is refused when the host is composed,
+ * rather than every print tool failing at the agent (blueprint x1c-start-confirmation F8).
+ * @public
+ */
+export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'> &
+  Required<Pick<RuntimeFileSystemBase, 'readFileStream' | 'writeFileChecked'>>;
 
 /** One package-owned skill bundle accepted by the host. @public */
 export type HostSystemSkillBundle = {
@@ -458,13 +464,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     );
     const recordView = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
-    const settingsOwner =
-      view.readFileStream && view.writeFileChecked
-        ? new MachineSettingsOwner({ filesystem: view, definitions: [] })
-        : undefined;
-    if (settingsOwner) {
-      settingsOwners.set(workspaceRoot, settingsOwner);
-    }
+    const settingsOwner = new MachineSettingsOwner({ filesystem: view, definitions: [] });
+    settingsOwners.set(workspaceRoot, settingsOwner);
     const mutations = workspaceRoot === options.workspaceRoot ? liveMutations : new ResourceQueue();
     const { runtimeClient } = options;
 
@@ -594,13 +595,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * finds through the same project id. */
     const { revisions, machines, projectId } = options;
     return createChatToolRegistry({
-      ...(settingsOwner
-        ? {
-            machineSettings: {
-              readMachineSettings: async (typeId: MachineTypeId) => settingsOwner.read({ typeId }),
-            },
-          }
-        : {}),
+      machineSettings: {
+        readMachineSettings: async (typeId: MachineTypeId) => settingsOwner.read({ typeId }),
+      },
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       workbenchFileSystemFor: (signal) =>

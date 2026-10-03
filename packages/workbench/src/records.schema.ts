@@ -372,20 +372,11 @@ export const componentDisplaySchema = z.strictObject({
 });
 
 /** @public */
-export const entrySettingsSchema = z
-  .strictObject({
-    /** Operation timeout in milliseconds; `0` disables it. */
-    operationTimeout: z.number().int().min(0).max(600_000).optional(),
-    /** Legacy v1 field, read only; serialization writes `operationTimeout`. */
-    renderTimeout: z.number().int().min(0).max(600_000).optional(),
-    components: componentDisplaySchema.optional(),
-  })
-  .transform(({ operationTimeout, renderTimeout, components }) => ({
-    ...((operationTimeout ?? renderTimeout) === undefined
-      ? {}
-      : { operationTimeout: operationTimeout ?? renderTimeout }),
-    ...(components === undefined ? {} : { components }),
-  }));
+export const entrySettingsSchema = z.strictObject({
+  /** Rendering timeout in milliseconds; `0` disables it. */
+  renderTimeout: z.number().int().min(0).max(600_000).optional(),
+  components: componentDisplaySchema.optional(),
+});
 
 /** `.tau/workbench/entries.json`, keyed by entry path. */
 /** @public */

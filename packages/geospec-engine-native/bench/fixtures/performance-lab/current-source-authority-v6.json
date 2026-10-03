@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "id": "n8-current-source-v6-a1",
+  "predecessorSha256": "d44d66f6f921727ac2c91645ec9c04d18c13cc14ac806d9aad50903b96b8fbcd",
+  "frozenManifestSha256": "bf1435f48ce7b574f8b89601859218bd9a1a39a26870b7138d7f8cbfcd14e7c5",
+  "nativeContract": {
+    "sourceId": "native-contract",
+    "path": "packages/geospec-engine-native/rust/src/matchers/brep.rs",
+    "frozenSha256": "aad545c2f0b37e0d2bacb2934dfdc95fba1da343c611881dd047950500b36bae",
+    "currentSha256": "5c0cc1737815c2295e2801d991d20891db53a1caa213630ea2671da6523c696b"
+  },
+  "approvedNumericProfile": "geospec-demand-v6",
+  "numericProfileSource": {
+    "path": "packages/geospec-engine-native/rust/tests/fixtures/current-profile-v6/numeric-profile.txt",
+    "sha256": "c36f2296878e3daa57cc0cdfe8c86dac3b77ed80d6ddbd60de68b31a64bba5f7"
+  },
+  "affectedCaseIds": [
+    "m3-toHaveAssemblyOccurrences-positive",
+    "m3-toHaveAssemblyOccurrences-negative",
+    "m3-toHaveStepUnits-positive",
+    "m3-toHaveStepUnits-negative",
+    "m3-toHaveProductStructure-positive",
+    "m3-toHaveProductStructure-negative"
+  ],
+  "affectedExpectedStatus": "unverified"
+}

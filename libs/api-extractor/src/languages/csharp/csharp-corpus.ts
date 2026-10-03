@@ -70,6 +70,13 @@ export const parseCsharpSurface = (value: unknown): CsharpSurfacePayload => {
       fail(`${field} is not a string`);
     }
   }
+  if (
+    typeof payload.diagnosticErrors !== 'number' ||
+    !Number.isSafeInteger(payload.diagnosticErrors) ||
+    payload.diagnosticErrors < 0
+  ) {
+    fail('diagnosticErrors is not a nonnegative integer');
+  }
   const entries: readonly unknown[] = Array.isArray(payload.entries) ? (payload.entries as readonly unknown[]) : [];
   if (entries.length === 0) {
     fail('entries is empty');
@@ -95,6 +102,54 @@ export const parseCsharpSurface = (value: unknown): CsharpSurfacePayload => {
     entries: entries.map((entry) => check(entry, (entry as CsharpEntryPayload).path ?? '')),
   };
 };
+
+/** Curated reference audience; compiler accessibility remains unchanged. */
+const referenceAudience = (entry: CsharpEntryPayload): string => {
+  const file = entry.source?.file ?? '';
+  if (entry.visibility === 'protected') {
+    return 'Subclass-only';
+  }
+  if (entry.path?.startsWith('System') === true) {
+    return 'Selected BCL reference';
+  }
+  if (file.startsWith('Diagnostics/')) {
+    return 'Diagnostics';
+  }
+  if (/^Viewer\/Viewer(?:GpuTex|ImageQuad|_Gui|Keyboard|Camera|Timelapse)\.cs$/u.test(file)) {
+    return 'Native viewer';
+  }
+  if (
+    file === 'Internals/Types.cs' ||
+    file === 'Library/LibraryHost.cs' ||
+    file === 'Viewer/ViewerBackend.cs' ||
+    entry.name.startsWith('_h') ||
+    entry.name === 'hThis' ||
+    entry.name === 'lib' ||
+    (entry.kind === 'constructor' && ['Library', 'Viewer'].includes(entry.name)) ||
+    entry.signatures?.some((signature) =>
+      signature.parameters.some(
+        (parameter) => parameter.type?.text.endsWith('Handle') === true || parameter.type?.text === 'IViewerBackend',
+      ),
+    ) === true ||
+    [
+      'UseHost',
+      'RegisterGlobalLibrary',
+      'UnregisterGlobalLibrary',
+      'RegisterGlobalViewer',
+      'UnregisterGlobalViewer',
+      'bPoll',
+    ].includes(entry.name)
+  ) {
+    return 'Advanced embedding/native';
+  }
+  return 'CAD authoring';
+};
+
+const classifyReference = (entry: CsharpEntryPayload): ApiEntryDraft => ({
+  ...entry,
+  category: referenceAudience(entry),
+  ...(entry.members === undefined ? {} : { members: entry.members.map(classifyReference) }),
+});
 
 /**
  * Build the corpus for one C# surface.
@@ -122,5 +177,5 @@ export const toCsharpCorpus = (payload: CsharpSurfacePayload, extractionDate: st
       extractor: payload.extractor,
       extractionDate,
     },
-    payload.entries as readonly ApiEntryDraft[],
+    payload.entries.map(classifyReference),
   );

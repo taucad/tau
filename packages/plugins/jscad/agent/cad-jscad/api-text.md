@@ -4,6 +4,7 @@
 
 text
 
+  // text.vectorChar (function)
   declare function vectorChar(): VectorChar
   declare function vectorChar(char: string): VectorChar
   declare function vectorChar(options: VectorCharOptions): VectorChar
@@ -29,6 +30,7 @@ text
 
     input: string
 
+  // text.vectorText (function)
   declare function vectorText(): VectorText
   declare function vectorText(text: string): VectorText
   declare function vectorText(options: VectorTextOptions): VectorText

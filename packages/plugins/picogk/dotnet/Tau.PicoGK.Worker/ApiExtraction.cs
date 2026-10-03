@@ -281,7 +281,7 @@ internal static class ApiExtraction
             type.Name,
             TypeKindName(type),
             path,
-            null,
+            Declaration(TypeDeclaration(type)),
             null,
             documentation.Docs,
             Deprecated(type),
@@ -316,7 +316,8 @@ internal static class ApiExtraction
         var methods = new List<(string Name, string Kind, List<IMethodSymbol> Overloads)>();
         foreach (var member in type.GetMembers())
         {
-            if (member.IsImplicitlyDeclared || !IsExternallyVisible(member))
+            if ((member.IsImplicitlyDeclared && !(type.TypeKind is TypeKind.Class or TypeKind.Struct && member is IMethodSymbol { MethodKind: MethodKind.Constructor, Parameters.Length: 0 }))
+                || !IsExternallyVisible(member))
             {
                 continue;
             }
@@ -344,6 +345,9 @@ internal static class ApiExtraction
                     break;
                 case IFieldSymbol field:
                     members.Add(FieldEntry(field, path, sourceRoot));
+                    break;
+                case IEventSymbol eventSymbol:
+                    members.Add(EventEntry(eventSymbol, path, sourceRoot));
                     break;
                 default:
                     break;
@@ -423,7 +427,7 @@ internal static class ApiExtraction
         return new ApiSignaturePayload(
             parameters,
             method.MethodKind == MethodKind.Constructor ? null : new ApiTypeRefPayload(method.ReturnType.ToDisplayString(TypeFormat)),
-            method.ToDisplayString(SignatureFormat),
+            MethodDeclaration(method),
             typeParameters.Length == 0 ? null : typeParameters,
             description);
     }
@@ -452,10 +456,12 @@ internal static class ApiExtraction
     {
         var documentation = Documentation(property);
         return new ApiEntryPayload(
-            property.IsIndexer ? "this[]" : property.Name,
+            property.IsIndexer
+                ? $"this[{string.Join(", ", property.Parameters.Select(parameter => parameter.ToDisplayString(SignatureFormat)))}]"
+                : property.Name,
             "property",
             path,
-            null,
+            Declaration(PropertyDeclaration(property)),
             new ApiTypeRefPayload(property.Type.ToDisplayString(TypeFormat)),
             documentation.Docs,
             Deprecated(property),
@@ -474,7 +480,7 @@ internal static class ApiExtraction
             field.Name,
             kind,
             path,
-            null,
+            Declaration(FieldDeclaration(field)),
             new ApiTypeRefPayload(kind == "enumMember"
                 ? field.ToDisplayString(DeclarationFormat)
                 : field.Type.ToDisplayString(TypeFormat)),
@@ -485,6 +491,132 @@ internal static class ApiExtraction
             Source(field, sourceRoot),
             null,
             LanguageSpecific(field, null));
+    }
+
+    // Non-callables reuse signature text as their declaration authority. No parallel
+    // C# schema is required, and the shared renderer does not reconstruct syntax.
+    private static ApiSignaturePayload[] Declaration(string text) =>
+        [new([], null, text, null, null)];
+
+    private static string Clean(SyntaxNode syntax) =>
+        syntax.WithoutTrivia().NormalizeWhitespace().ToFullString().Trim();
+
+    private static string TypeDeclaration(INamedTypeSymbol type)
+    {
+        foreach (var reference in type.DeclaringSyntaxReferences)
+        {
+            var syntax = reference.GetSyntax();
+            if (syntax is TypeDeclarationSyntax declaration)
+            {
+                // Partial declarations may supply different interfaces. Render the
+                // effective declared type, not just the first file's fragment.
+                var bases = type.DeclaringSyntaxReferences.Select(item => item.GetSyntax())
+                    .OfType<TypeDeclarationSyntax>().SelectMany(item => item.BaseList?.Types ?? [])
+                    .DistinctBy(item => item.ToString()).ToArray();
+                var complete = declaration.WithBaseList(bases.Length == 0 ? null : SyntaxFactory.BaseList(SyntaxFactory.SeparatedList(bases)))
+                    .WithMembers(default).WithOpenBraceToken(default).WithCloseBraceToken(default).WithSemicolonToken(default);
+                return Clean(complete);
+            }
+            if (syntax is EnumDeclarationSyntax enumeration)
+                return Clean(enumeration.WithMembers(default).WithOpenBraceToken(default).WithCloseBraceToken(default).WithSemicolonToken(default));
+            if (syntax is DelegateDeclarationSyntax callback)
+                return Clean(callback.WithAttributeLists(default));
+        }
+        // Roslyn metadata identifies record classes; source record structs retain their syntax above.
+        var kind = type.IsRecord ? "record class" : type.TypeKind switch
+        {
+            TypeKind.Interface => "interface",
+            TypeKind.Struct => "struct",
+            TypeKind.Enum => "enum",
+            _ => "class",
+        };
+        var modifiers = type.IsStatic ? "static " : type.IsAbstract && type.TypeKind == TypeKind.Class ? "abstract "
+            : type.IsSealed && !type.IsValueType ? "sealed " : "";
+        if (type.IsReadOnly) modifiers += "readonly ";
+        if (type.IsRefLikeType) modifiers += "ref ";
+        var declarationFormat = new SymbolDisplayFormat(
+            globalNamespaceStyle: SymbolDisplayGlobalNamespaceStyle.Omitted,
+            typeQualificationStyle: SymbolDisplayTypeQualificationStyle.NameOnly,
+            genericsOptions: SymbolDisplayGenericsOptions.IncludeTypeParameters
+                | SymbolDisplayGenericsOptions.IncludeVariance | SymbolDisplayGenericsOptions.IncludeTypeConstraints,
+            miscellaneousOptions: SymbolDisplayMiscellaneousOptions.EscapeKeywordIdentifiers
+                | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
+        return $"{Visibility(type)} {modifiers}{kind} {type.ToDisplayString(declarationFormat)}";
+    }
+
+    private static string MethodDeclaration(IMethodSymbol method)
+    {
+        foreach (var reference in method.DeclaringSyntaxReferences)
+        {
+            var syntax = reference.GetSyntax();
+            SyntaxNode? declaration = syntax switch
+            {
+                MethodDeclarationSyntax value => value.WithAttributeLists(default).WithBody(null).WithExpressionBody(null).WithSemicolonToken(default),
+                ConstructorDeclarationSyntax value => value.WithAttributeLists(default).WithInitializer(null).WithBody(null).WithExpressionBody(null).WithSemicolonToken(default),
+                OperatorDeclarationSyntax value => value.WithAttributeLists(default).WithBody(null).WithExpressionBody(null).WithSemicolonToken(default),
+                ConversionOperatorDeclarationSyntax value => value.WithAttributeLists(default).WithBody(null).WithExpressionBody(null).WithSemicolonToken(default),
+                _ => null,
+            };
+            if (declaration is not null) return Clean(declaration);
+        }
+        return method.ToDisplayString(SignatureFormat);
+    }
+
+    private static string PropertyDeclaration(IPropertySymbol property)
+    {
+        foreach (var reference in property.DeclaringSyntaxReferences)
+        {
+            var syntax = reference.GetSyntax();
+            if (syntax is PropertyDeclarationSyntax value)
+            {
+                var accessors = value.AccessorList is { } list
+                    ? list.WithAccessors(SyntaxFactory.List(list.Accessors.Select(accessor => accessor.WithAttributeLists(default).WithBody(null).WithExpressionBody(null).WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken)))))
+                    : SyntaxFactory.AccessorList(SyntaxFactory.SingletonList(SyntaxFactory.AccessorDeclaration(SyntaxKind.GetAccessorDeclaration).WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken))));
+                return Clean(value.WithAttributeLists(default).WithExpressionBody(null).WithAccessorList(accessors).WithSemicolonToken(value.Initializer is null ? default : SyntaxFactory.Token(SyntaxKind.SemicolonToken)));
+            }
+            if (syntax is IndexerDeclarationSyntax indexer)
+            {
+                var accessors = indexer.AccessorList is { } list
+                    ? list.WithAccessors(SyntaxFactory.List(list.Accessors.Select(accessor => accessor.WithAttributeLists(default).WithBody(null).WithExpressionBody(null).WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken)))))
+                    : SyntaxFactory.AccessorList(SyntaxFactory.SingletonList(SyntaxFactory.AccessorDeclaration(SyntaxKind.GetAccessorDeclaration).WithSemicolonToken(SyntaxFactory.Token(SyntaxKind.SemicolonToken))));
+                return Clean(indexer.WithAttributeLists(default).WithExpressionBody(null).WithAccessorList(accessors).WithSemicolonToken(default));
+            }
+        }
+        // Metadata and positional record properties have no PropertyDeclarationSyntax.
+        var header = property.ToDisplayString(SignatureFormat);
+        var accessorsText = new List<string>();
+        if (property.GetMethod is { } getter)
+            accessorsText.Add($"{AccessorVisibility(getter, property)}get;");
+        if (property.SetMethod is { } setter)
+            accessorsText.Add($"{AccessorVisibility(setter, property)}{(setter.IsInitOnly ? "init" : "set")};");
+        return $"{(property.IsRequired ? "required " : "")}{header} {{ {string.Join(" ", accessorsText)} }}";
+    }
+
+    private static string AccessorVisibility(IMethodSymbol accessor, IPropertySymbol property) =>
+        accessor.DeclaredAccessibility == property.DeclaredAccessibility ? "" : $"{accessor.DeclaredAccessibility switch {
+            Accessibility.ProtectedAndInternal => "private protected",
+            Accessibility.ProtectedOrInternal => "protected internal",
+            _ => accessor.DeclaredAccessibility.ToString().ToLowerInvariant(),
+        }} ";
+
+    private static string FieldDeclaration(IFieldSymbol field)
+    {
+        foreach (var reference in field.DeclaringSyntaxReferences)
+        {
+            if (reference.GetSyntax() is EnumMemberDeclarationSyntax member) return Clean(member.WithAttributeLists(default));
+            if (reference.GetSyntax() is VariableDeclaratorSyntax variable && variable.Parent!.Parent is FieldDeclarationSyntax declaration)
+                return $"{declaration.Modifiers} {declaration.Declaration.Type} {Clean(variable)};".Trim();
+        }
+        return field.ToDisplayString(DeclarationFormat.WithMemberOptions(DeclarationFormat.MemberOptions | SymbolDisplayMemberOptions.IncludeConstantValue));
+    }
+
+    private static ApiEntryPayload EventEntry(IEventSymbol symbol, string path, string sourceRoot)
+    {
+        var documentation = Documentation(symbol);
+        return new ApiEntryPayload(symbol.Name, "field", path,
+            Declaration(symbol.ToDisplayString(SignatureFormat)), new ApiTypeRefPayload(symbol.Type.ToDisplayString(TypeFormat)),
+            documentation.Docs, Deprecated(symbol), Visibility(symbol), symbol.IsStatic ? true : null,
+            Source(symbol, sourceRoot), null, LanguageSpecific(symbol, null));
     }
 
     private static ApiLanguageSpecificPayload LanguageSpecific(ISymbol symbol, IReadOnlyDictionary<string, string>? refKinds) =>
@@ -508,7 +640,8 @@ internal static class ApiExtraction
 
     private static ApiSourcePayload? Source(ISymbol symbol, string sourceRoot)
     {
-        foreach (var reference in symbol.DeclaringSyntaxReferences)
+        foreach (var reference in (symbol.IsImplicitlyDeclared && symbol is IMethodSymbol { MethodKind: MethodKind.Constructor }
+            ? symbol.ContainingType.DeclaringSyntaxReferences : symbol.DeclaringSyntaxReferences))
         {
             var path = reference.SyntaxTree.FilePath;
             if (string.IsNullOrEmpty(path))

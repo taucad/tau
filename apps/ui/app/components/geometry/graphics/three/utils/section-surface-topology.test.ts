@@ -379,8 +379,7 @@ describe('section surface topology', () => {
   });
 
   it('closes every admitted cut in the reduced Racing Drone conformance fixture', async () => {
-    // Vendored from taucad/nanoraster tests/fixtures (Apache-2.0) at 167d1f0c5 so CI needs no optional checkout.
-    const bytes = await readFile(resolve(import.meta.dirname, '__fixtures__/racing-drone-section-repro.glb'));
+    const bytes = await readFile(resolve(import.meta.dirname, './fixtures/racing-drone-section-repro.glb'));
     const gltf = await new GLTFLoader().parseAsync(Uint8Array.from(bytes).buffer, '');
     await registerGltfSectionSurfaceSources({
       scene: gltf.scene,

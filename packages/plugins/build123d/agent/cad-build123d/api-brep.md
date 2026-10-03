@@ -1,14 +1,18 @@
 # build123d — BRep
 
-2 top-level symbols. Signatures are verbatim python.
+1 top-level symbols. Signatures are verbatim python.
 
+// Category: BRep
 // A framework providing advanced tolerance control
 BRep_Builder
 
   // __init__(self
+  // OCP.OCP.BRep.BRep_Builder.__init__ (constructor)
   __init__(self: OCP.OCP.BRep.BRep_Builder) -> None
 
   // MakeFace(*args, **kwargs)
+  // Remarks: Overloaded function. 1. MakeFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face) -> None Makes an undefined Face. 2. MakeFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face, S: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None Makes a Face with a surface. 3. MakeFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None Makes a Face with a surface and a location. 4. MakeFace(self: OCP.OCP.BRep.BRep_Builder, theFace: OCP.OCP.TopoDS.TopoDS_Face, theTriangulation: OCP.OCP.Poly.Poly_Triangulation) -> None Makes a theFace with a single triangulation. The triangulation is in the same reference system than the TFace. 5. MakeFace(self: OCP.OCP.BRep.BRep_Builder, theFace: OCP.OCP.TopoDS.TopoDS_Face, theTriangulations: OCP.OCP.Poly.Poly_ListOfTriangulation, theActiveTriangulation: OCP.OCP.Poly.Poly_Triangulation = None) -> None Makes a Face with a list of triangulations and active one. Use NULL active triangulation to set the first triangulation in list as active. The triangulations is in the same reference system than the TFace. 6. MakeFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face) -> None Makes an undefined Face.
+  // OCP.OCP.BRep.BRep_Builder.MakeFace (method)
   MakeFace(*args, **kwargs)
   MakeFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
   MakeFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face, S: OCP.OCP.Geom.Geom_Surface, Tol: float) -> None
@@ -18,15 +22,21 @@ BRep_Builder
   MakeFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face) -> None
 
   // UpdateFace(*args, **kwargs)
+  // Remarks: Overloaded function. 1. UpdateFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None Updates the face F using the tolerance value Tol, surface S and location Location. 2. UpdateFace(self: OCP.OCP.BRep.BRep_Builder, theFace: OCP.OCP.TopoDS.TopoDS_Face, theTriangulation: OCP.OCP.Poly.Poly_Triangulation, theToReset: bool = True) -> None Changes a face triangulation. A NULL theTriangulation removes face triangulations. If theToReset is TRUE face triangulations will be reset to new list with only one input triangulation that will be active. Else if theTriangulation is contained in internal triangulations list it will be made active, else the active triangulation will be replaced to theTriangulation one. 3. UpdateFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None Updates the face Tolerance.
+  // OCP.OCP.BRep.BRep_Builder.UpdateFace (method)
   UpdateFace(*args, **kwargs)
   UpdateFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None
   UpdateFace(self: OCP.OCP.BRep.BRep_Builder, theFace: OCP.OCP.TopoDS.TopoDS_Face, theTriangulation: OCP.OCP.Poly.Poly_Triangulation, theToReset: bool = True) -> None
   UpdateFace(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None
 
   // NaturalRestriction(self
+  // Remarks: Sets the NaturalRestriction flag of the face.
+  // OCP.OCP.BRep.BRep_Builder.NaturalRestriction (method)
   NaturalRestriction(self: OCP.OCP.BRep.BRep_Builder, F: OCP.OCP.TopoDS.TopoDS_Face, N: bool) -> None
 
   // MakeEdge(*args, **kwargs)
+  // Remarks: Overloaded function. 1. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge) -> None Makes an undefined Edge (no geometry). 2. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, Tol: float) -> None Makes an Edge with a curve. 3. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None Makes an Edge with a curve and a location. 4. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_Polygon3D) -> None Makes an Edge with a polygon 3d. 5. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, N: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation) -> None makes an Edge polygon on Triangulation. 6. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, N: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation, L: OCP.OCP.TopLoc.TopLoc_Location) -> None makes an Edge polygon on Triangulation. 7. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, Tol: float) -> None Makes an Edge with a curve. 8. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_Polygon3D) -> None Makes an Edge with a polygon 3d. 9. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation) -> None makes an Edge polygon on Triangulation. 10. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation, L: OCP.OCP.TopLoc.TopLoc_Location) -> None makes an Edge polygon on Triangulation. 11. MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None Makes an Edge with a curve and a location.
+  // OCP.OCP.BRep.BRep_Builder.MakeEdge (method)
   MakeEdge(*args, **kwargs)
   MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge) -> None
   MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, Tol: float) -> None
@@ -41,6 +51,8 @@ BRep_Builder
   MakeEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None
 
   // UpdateEdge(*args, **kwargs)
+  // Remarks: Overloaded function. 1. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, Tol: float) -> None Sets a 3D curve for the edge. If <C> is a null handle, remove any existing 3d curve. 2. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None Sets a 3D curve for the edge. If <C> is a null handle, remove any existing 3d curve. 3. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom2d.Geom2d_Curve, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None Sets a pcurve for the edge on the face. If <C> is a null handle, remove any existing pcurve. 4. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C1: OCP.OCP.Geom2d.Geom2d_Curve, C2: OCP.OCP.Geom2d.Geom2d_Curve, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None Sets pcurves for the edge on the closed face. If <C1> or <C2> is a null handle, remove any existing pcurve. 5. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom2d.Geom2d_Curve, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None Sets a pcurve for the edge on the face. If <C> is a null handle, remove any existing pcurve. 6. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom2d.Geom2d_Curve, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float, Pf: OCP.OCP.gp.gp_Pnt2d, Pl: OCP.OCP.gp.gp_Pnt2d) -> None Sets a pcurve for the edge on the face. If <C> is a null handle, remove any existing pcurve. Sets UV bounds for curve repsentation 7. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C1: OCP.OCP.Geom2d.Geom2d_Curve, C2: OCP.OCP.Geom2d.Geom2d_Curve, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None Sets pcurves for the edge on the closed surface. <C1> or <C2> is a null handle, remove any existing pcurve. 8. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C1: OCP.OCP.Geom2d.Geom2d_Curve, C2: OCP.OCP.Geom2d.Geom2d_Curve, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float, Pf: OCP.OCP.gp.gp_Pnt2d, Pl: OCP.OCP.gp.gp_Pnt2d) -> None Sets pcurves for the edge on the closed surface. <C1> or <C2> is a null handle, remove any existing pcurve. Sets UV bounds for curve repsentation 9. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_Polygon3D) -> None Changes an Edge 3D polygon. A null Polygon removes the 3d Polygon. 10. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_Polygon3D, L: OCP.OCP.TopLoc.TopLoc_Location) -> None Changes an Edge 3D polygon. A null Polygon removes the 3d Polygon. 11. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, N: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation) -> None Changes an Edge polygon on Triangulation. 12. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, N: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation, L: OCP.OCP.TopLoc.TopLoc_Location) -> None Changes an Edge polygon on Triangulation. 13. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, N1: OCP.OCP.Poly.Poly_PolygonOnTriangulation, N2: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation) -> None Changes an Edge polygon on Triangulation. 14. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, N1: OCP.OCP.Poly.Poly_PolygonOnTriangulation, N2: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation, L: OCP.OCP.TopLoc.TopLoc_Location) -> None Changes an Edge polygon on Triangulation. 15. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_Polygon2D, S: OCP.OCP.TopoDS.TopoDS_Face) -> None Changes Edge polygon on a face. 16. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_Polygon2D, S: OCP.OCP.Geom.Geom_Surface, T: OCP.OCP.TopLoc.TopLoc_Location) -> None Changes Edge polygon on a face. 17. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P1: OCP.OCP.Poly.Poly_Polygon2D, P2: OCP.OCP.Poly.Poly_Polygon2D, S: OCP.OCP.TopoDS.TopoDS_Face) -> None Changes Edge polygons on a face. 18. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P1: OCP.OCP.Poly.Poly_Polygon2D, P2: OCP.OCP.Poly.Poly_Polygon2D, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location) -> None Changes Edge polygons on a face. 19. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, Tol: float) -> None Updates the edge tolerance. 20. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, Tol: float) -> None Sets a 3D curve for the edge. If <C> is a null handle, remove any existing 3d curve. 21. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom2d.Geom2d_Curve, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None Sets a pcurve for the edge on the face. If <C> is a null handle, remove any existing pcurve. 22. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C1: OCP.OCP.Geom2d.Geom2d_Curve, C2: OCP.OCP.Geom2d.Geom2d_Curve, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None Sets pcurves for the edge on the closed face. If <C1> or <C2> is a null handle, remove any existing pcurve. 23. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_Polygon3D) -> None Changes an Edge 3D polygon. A null Polygon removes the 3d Polygon. 24. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation) -> None Changes an Edge polygon on Triangulation. 25. UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P1: OCP.OCP.Poly.Poly_PolygonOnTriangulation, P2: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation) -> None Changes an Edge polygon on Triangulation.
+  // OCP.OCP.BRep.BRep_Builder.UpdateEdge (method)
   UpdateEdge(*args, **kwargs)
   UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, Tol: float) -> None
   UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom.Geom_Curve, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None
@@ -69,20 +81,30 @@ BRep_Builder
   UpdateEdge(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, P1: OCP.OCP.Poly.Poly_PolygonOnTriangulation, P2: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation) -> None
 
   // Continuity(*args, **kwargs)
+  // Remarks: Overloaded function. 1. Continuity(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, F1: OCP.OCP.TopoDS.TopoDS_Face, F2: OCP.OCP.TopoDS.TopoDS_Face, C: OCP.OCP.GeomAbs.GeomAbs_Shape) -> None Sets the geometric continuity on the edge. 2. Continuity(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, L1: OCP.OCP.TopLoc.TopLoc_Location, L2: OCP.OCP.TopLoc.TopLoc_Location, C: OCP.OCP.GeomAbs.GeomAbs_Shape) -> None Sets the geometric continuity on the edge.
+  // OCP.OCP.BRep.BRep_Builder.Continuity (method)
   Continuity(*args, **kwargs)
   Continuity(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, F1: OCP.OCP.TopoDS.TopoDS_Face, F2: OCP.OCP.TopoDS.TopoDS_Face, C: OCP.OCP.GeomAbs.GeomAbs_Shape) -> None
   Continuity(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, L1: OCP.OCP.TopLoc.TopLoc_Location, L2: OCP.OCP.TopLoc.TopLoc_Location, C: OCP.OCP.GeomAbs.GeomAbs_Shape) -> None
 
   // SameParameter(self
+  // Remarks: Sets the same parameter flag for the edge <E>.
+  // OCP.OCP.BRep.BRep_Builder.SameParameter (method)
   SameParameter(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, S: bool) -> None
 
   // SameRange(self
+  // Remarks: Sets the same range flag for the edge <E>.
+  // OCP.OCP.BRep.BRep_Builder.SameRange (method)
   SameRange(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, S: bool) -> None
 
   // Degenerated(self
+  // Remarks: Sets the degenerated flag for the edge <E>.
+  // OCP.OCP.BRep.BRep_Builder.Degenerated (method)
   Degenerated(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, D: bool) -> None
 
   // Range(*args, **kwargs)
+  // Remarks: Overloaded function. 1. Range(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, First: float, Last: float, Only3d: bool = False) -> None Sets the range of the 3d curve if Only3d=TRUE, otherwise sets the range to all the representations 2. Range(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, First: float, Last: float) -> None Sets the range of the edge on the pcurve on the surface. 3. Range(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, First: float, Last: float) -> None Sets the range of the edge on the pcurve on the face. 4. Range(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, First: float, Last: float) -> None Sets the range of the edge on the pcurve on the face.
+  // OCP.OCP.BRep.BRep_Builder.Range (method)
   Range(*args, **kwargs)
   Range(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, First: float, Last: float, Only3d: bool = False) -> None
   Range(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, First: float, Last: float) -> None
@@ -90,11 +112,15 @@ BRep_Builder
   Range(self: OCP.OCP.BRep.BRep_Builder, E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, First: float, Last: float) -> None
 
   // Transfert(*args, **kwargs)
+  // Remarks: Overloaded function. 1. Transfert(self: OCP.OCP.BRep.BRep_Builder, Ein: OCP.OCP.TopoDS.TopoDS_Edge, Eout: OCP.OCP.TopoDS.TopoDS_Edge) -> None Add to <Eout> the geometric representations of <Ein>. 2. Transfert(self: OCP.OCP.BRep.BRep_Builder, Ein: OCP.OCP.TopoDS.TopoDS_Edge, Eout: OCP.OCP.TopoDS.TopoDS_Edge, Vin: OCP.OCP.TopoDS.TopoDS_Vertex, Vout: OCP.OCP.TopoDS.TopoDS_Vertex) -> None Transfert the parameters of Vin on Ein as the parameter of Vout on Eout.
+  // OCP.OCP.BRep.BRep_Builder.Transfert (method)
   Transfert(*args, **kwargs)
   Transfert(self: OCP.OCP.BRep.BRep_Builder, Ein: OCP.OCP.TopoDS.TopoDS_Edge, Eout: OCP.OCP.TopoDS.TopoDS_Edge) -> None
   Transfert(self: OCP.OCP.BRep.BRep_Builder, Ein: OCP.OCP.TopoDS.TopoDS_Edge, Eout: OCP.OCP.TopoDS.TopoDS_Edge, Vin: OCP.OCP.TopoDS.TopoDS_Vertex, Vout: OCP.OCP.TopoDS.TopoDS_Vertex) -> None
 
   // MakeVertex(*args, **kwargs)
+  // Remarks: Overloaded function. 1. MakeVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None Makes an udefined vertex without geometry. 2. MakeVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: OCP.OCP.gp.gp_Pnt, Tol: float) -> None Makes a vertex from a 3D point. 3. MakeVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None Makes an udefined vertex without geometry. 4. MakeVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: OCP.OCP.gp.gp_Pnt, Tol: float) -> None Makes a vertex from a 3D point.
+  // OCP.OCP.BRep.BRep_Builder.MakeVertex (method)
   MakeVertex(*args, **kwargs)
   MakeVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex) -> None
   MakeVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: OCP.OCP.gp.gp_Pnt, Tol: float) -> None
@@ -102,6 +128,8 @@ BRep_Builder
   MakeVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: OCP.OCP.gp.gp_Pnt, Tol: float) -> None
 
   // UpdateVertex(*args, **kwargs)
+  // Remarks: Overloaded function. 1. UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: OCP.OCP.gp.gp_Pnt, Tol: float) -> None Sets a 3D point on the vertex. 2. UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: float, E: OCP.OCP.TopoDS.TopoDS_Edge, Tol: float) -> None Sets the parameter for the vertex on the edge curves. 3. UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: float, E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None Sets the parameter for the vertex on the edge pcurve on the face. 4. UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: float, E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Tol: float) -> None Sets the parameter for the vertex on the edge pcurve on the surface. 5. UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, Ve: OCP.OCP.TopoDS.TopoDS_Vertex, U: float, V: float, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None Sets the parameters for the vertex on the face. 6. UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, Tol: float) -> None Updates the vertex tolerance. 7. UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, Par: float, E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None Sets the parameter for the vertex on the edge pcurve on the face.
+  // OCP.OCP.BRep.BRep_Builder.UpdateVertex (method)
   UpdateVertex(*args, **kwargs)
   UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: OCP.OCP.gp.gp_Pnt, Tol: float) -> None
   UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, P: float, E: OCP.OCP.TopoDS.TopoDS_Edge, Tol: float) -> None
@@ -110,127 +138,3 @@ BRep_Builder
   UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, Ve: OCP.OCP.TopoDS.TopoDS_Vertex, U: float, V: float, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None
   UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, Tol: float) -> None
   UpdateVertex(self: OCP.OCP.BRep.BRep_Builder, V: OCP.OCP.TopoDS.TopoDS_Vertex, Par: float, E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, Tol: float) -> None
-
-// Provides class methods to access to the geometry of BRep shapes
-BRep_Tool
-
-  // __init__(self
-  __init__(self: OCP.OCP.BRep.BRep_Tool) -> None
-
-  // IsClosed_s(*args, **kwargs)
-  IsClosed_s(*args, **kwargs)
-  IsClosed_s(S: OCP.OCP.TopoDS.TopoDS_Shape) -> bool
-  IsClosed_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face) -> bool
-  IsClosed_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location) -> bool
-  IsClosed_s(E: OCP.OCP.TopoDS.TopoDS_Edge, T: OCP.OCP.Poly.Poly_Triangulation, L: OCP.OCP.TopLoc.TopLoc_Location) -> bool
-
-  // Surface_s(*args, **kwargs)
-  Surface_s(*args, **kwargs)
-  Surface_s(F: OCP.OCP.TopoDS.TopoDS_Face, L: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.Geom.Geom_Surface
-  Surface_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> OCP.OCP.Geom.Geom_Surface
-
-  // Triangulation_s(theFace
-  Triangulation_s(theFace: OCP.OCP.TopoDS.TopoDS_Face, theLocation: OCP.OCP.TopLoc.TopLoc_Location, theMeshPurpose: int = 0) -> OCP.OCP.Poly.Poly_Triangulation
-
-  // Triangulations_s(theFace
-  Triangulations_s(theFace: OCP.OCP.TopoDS.TopoDS_Face, theLocation: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.Poly.Poly_ListOfTriangulation
-
-  // Tolerance_s(*args, **kwargs)
-  Tolerance_s(*args, **kwargs)
-  Tolerance_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> float
-  Tolerance_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> float
-  Tolerance_s(V: OCP.OCP.TopoDS.TopoDS_Vertex) -> float
-
-  // NaturalRestriction_s(F
-  NaturalRestriction_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> bool
-
-  // IsGeometric_s(*args, **kwargs)
-  IsGeometric_s(*args, **kwargs)
-  IsGeometric_s(F: OCP.OCP.TopoDS.TopoDS_Face) -> bool
-  IsGeometric_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
-
-  // Curve_s(*args, **kwargs)
-  Curve_s(*args, **kwargs)
-  Curve_s(E: OCP.OCP.TopoDS.TopoDS_Edge, L: OCP.OCP.TopLoc.TopLoc_Location, First: float, Last: float) -> OCP.OCP.Geom.Geom_Curve
-  Curve_s(E: OCP.OCP.TopoDS.TopoDS_Edge, First: float, Last: float) -> OCP.OCP.Geom.Geom_Curve
-
-  // Polygon3D_s(E
-  Polygon3D_s(E: OCP.OCP.TopoDS.TopoDS_Edge, L: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.Poly.Poly_Polygon3D
-
-  // CurveOnSurface_s(*args, **kwargs)
-  CurveOnSurface_s(*args, **kwargs)
-  CurveOnSurface_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, First: float, Last: float, theIsStored: bool = None) -> OCP.OCP.Geom2d.Geom2d_Curve
-  CurveOnSurface_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, First: float, Last: float, theIsStored: bool = None) -> OCP.OCP.Geom2d.Geom2d_Curve
-  CurveOnSurface_s(E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom2d.Geom2d_Curve, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location) -> tuple[float, float]
-  CurveOnSurface_s(E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Geom2d.Geom2d_Curve, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Index: int) -> tuple[float, float]
-
-  // CurveOnPlane_s(E
-  CurveOnPlane_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, First: float, Last: float) -> OCP.OCP.Geom2d.Geom2d_Curve
-
-  // PolygonOnSurface_s(*args, **kwargs)
-  PolygonOnSurface_s(*args, **kwargs)
-  PolygonOnSurface_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face) -> OCP.OCP.Poly.Poly_Polygon2D
-  PolygonOnSurface_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.Poly.Poly_Polygon2D
-  PolygonOnSurface_s(E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Poly.Poly_Polygon2D, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location) -> None
-  PolygonOnSurface_s(E: OCP.OCP.TopoDS.TopoDS_Edge, C: OCP.OCP.Poly.Poly_Polygon2D, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, Index: int) -> None
-
-  // PolygonOnTriangulation_s(*args, **kwargs)
-  PolygonOnTriangulation_s(*args, **kwargs)
-  PolygonOnTriangulation_s(E: OCP.OCP.TopoDS.TopoDS_Edge, T: OCP.OCP.Poly.Poly_Triangulation, L: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.Poly.Poly_PolygonOnTriangulation
-  PolygonOnTriangulation_s(E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation, L: OCP.OCP.TopLoc.TopLoc_Location) -> None
-  PolygonOnTriangulation_s(E: OCP.OCP.TopoDS.TopoDS_Edge, P: OCP.OCP.Poly.Poly_PolygonOnTriangulation, T: OCP.OCP.Poly.Poly_Triangulation, L: OCP.OCP.TopLoc.TopLoc_Location, Index: int) -> None
-
-  // SameParameter_s(E
-  SameParameter_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
-
-  // SameRange_s(E
-  SameRange_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
-
-  // Degenerated_s(E
-  Degenerated_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
-
-  // UVPoints_s(*args, **kwargs)
-  UVPoints_s(*args, **kwargs)
-  UVPoints_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, PFirst: OCP.OCP.gp.gp_Pnt2d, PLast: OCP.OCP.gp.gp_Pnt2d) -> None
-  UVPoints_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, PFirst: OCP.OCP.gp.gp_Pnt2d, PLast: OCP.OCP.gp.gp_Pnt2d) -> None
-
-  // SetUVPoints_s(*args, **kwargs)
-  SetUVPoints_s(*args, **kwargs)
-  SetUVPoints_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location, PFirst: OCP.OCP.gp.gp_Pnt2d, PLast: OCP.OCP.gp.gp_Pnt2d) -> None
-  SetUVPoints_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face, PFirst: OCP.OCP.gp.gp_Pnt2d, PLast: OCP.OCP.gp.gp_Pnt2d) -> None
-
-  // HasContinuity_s(*args, **kwargs)
-  HasContinuity_s(*args, **kwargs)
-  HasContinuity_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F1: OCP.OCP.TopoDS.TopoDS_Face, F2: OCP.OCP.TopoDS.TopoDS_Face) -> bool
-  HasContinuity_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, L1: OCP.OCP.TopLoc.TopLoc_Location, L2: OCP.OCP.TopLoc.TopLoc_Location) -> bool
-  HasContinuity_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> bool
-
-  // Continuity_s(*args, **kwargs)
-  Continuity_s(*args, **kwargs)
-  Continuity_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F1: OCP.OCP.TopoDS.TopoDS_Face, F2: OCP.OCP.TopoDS.TopoDS_Face) -> OCP.OCP.GeomAbs.GeomAbs_Shape
-  Continuity_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S1: OCP.OCP.Geom.Geom_Surface, S2: OCP.OCP.Geom.Geom_Surface, L1: OCP.OCP.TopLoc.TopLoc_Location, L2: OCP.OCP.TopLoc.TopLoc_Location) -> OCP.OCP.GeomAbs.GeomAbs_Shape
-
-  // MaxContinuity_s(theEdge
-  MaxContinuity_s(theEdge: OCP.OCP.TopoDS.TopoDS_Edge) -> OCP.OCP.GeomAbs.GeomAbs_Shape
-
-  // Pnt_s(V
-  Pnt_s(V: OCP.OCP.TopoDS.TopoDS_Vertex) -> OCP.OCP.gp.gp_Pnt
-
-  // Parameter_s(*args, **kwargs)
-  Parameter_s(*args, **kwargs)
-  Parameter_s(theV: OCP.OCP.TopoDS.TopoDS_Vertex, theE: OCP.OCP.TopoDS.TopoDS_Edge, theParam: float) -> bool
-  Parameter_s(V: OCP.OCP.TopoDS.TopoDS_Vertex, E: OCP.OCP.TopoDS.TopoDS_Edge) -> float
-  Parameter_s(V: OCP.OCP.TopoDS.TopoDS_Vertex, E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face) -> float
-  Parameter_s(V: OCP.OCP.TopoDS.TopoDS_Vertex, E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location) -> float
-
-  // Parameters_s(V
-  Parameters_s(V: OCP.OCP.TopoDS.TopoDS_Vertex, F: OCP.OCP.TopoDS.TopoDS_Face) -> OCP.OCP.gp.gp_Pnt2d
-
-  // MaxTolerance_s(theShape
-  MaxTolerance_s(theShape: OCP.OCP.TopoDS.TopoDS_Shape, theSubShape: OCP.OCP.TopAbs.TopAbs_ShapeEnum) -> float
-
-  // Range_s(*args, **kwargs)
-  Range_s(*args, **kwargs)
-  Range_s(E: OCP.OCP.TopoDS.TopoDS_Edge) -> tuple[float, float]
-  Range_s(E: OCP.OCP.TopoDS.TopoDS_Edge, S: OCP.OCP.Geom.Geom_Surface, L: OCP.OCP.TopLoc.TopLoc_Location) -> tuple[float, float]
-  Range_s(E: OCP.OCP.TopoDS.TopoDS_Edge, F: OCP.OCP.TopoDS.TopoDS_Face) -> tuple[float, float]

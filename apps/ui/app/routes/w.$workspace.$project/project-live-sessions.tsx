@@ -75,7 +75,7 @@ import {
 import type { RevisionClient, RevisionCommands } from '#hooks/use-revision-status.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import type { ParameterSetService } from '#services/parameter-set-service.js';
-import { selectProjectKernelRefusal } from '#machines/project.machine.js';
+import { closeProjectRuntime, selectProjectKernelRefusal } from '#machines/project.machine.js';
 import type { projectMachine } from '#machines/project.machine.js';
 import type { editorMachine } from '#machines/editor.machine.js';
 import { UnsavedParameterDraftsDialog } from '#routes/w.$workspace.$project/unsaved-parameter-drafts-dialog.js';
@@ -166,8 +166,7 @@ function ProjectSessionBinding({
   const { kernel: defaultKernel } = useKernel();
   const [testingEnabled] = useCookie(cookieName.chatTestingEnabled, true);
   const computeMode = useComputeReuseMode();
-  /* The browser host retention, held for the project it was taken for. */
-  const browserHostRelease = useRef<Readonly<{ projectId: string; release: () => void }> | undefined>(undefined);
+  const browserHostRelease = useRef<{ projectId: string; release: () => void } | undefined>(undefined);
   const choices = useRef({ defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel });
   useEffect(() => {
     choices.current = { defaultExecution, defaultKernel, testingEnabled, computeMode, resolveModel };
@@ -276,10 +275,7 @@ function ProjectSessionBinding({
         runtimeConfig: createUiRuntimeConfig(ENV),
       } as const;
       const hostClient = createBrowserAgentHostClient(options);
-      if (browserHostRelease.current?.projectId !== projectId) {
-        browserHostRelease.current?.release();
-        browserHostRelease.current = { projectId, release: retainBrowserAgentHostProject(options) };
-      }
+      browserHostRelease.current ??= { projectId, release: retainBrowserAgentHostProject(options) };
       return hostClient;
     };
     const unpublish = chatSessions.publishProjectHostConnector(projectId, connect, async (chatId) => {
@@ -304,9 +300,8 @@ function ProjectSessionBinding({
   }, [chatSessions, client, fileManagerRef, projectId, viewsReady, workspace]);
   useEffect(
     () => () => {
-      const retained = browserHostRelease.current;
-      if (retained?.projectId === projectId) {
-        retained.release();
+      if (browserHostRelease.current?.projectId === projectId) {
+        browserHostRelease.current.release();
         browserHostRelease.current = undefined;
       }
     },
@@ -404,6 +399,7 @@ function ProjectSessionBinding({
 
   useEffect(() => {
     return registerProjectSessionServices(projectId, {
+      closeRuntime: async () => closeProjectRuntime(projectRef),
       flushProducers: async () =>
         flushProjectSessionPersistence({
           projectId,

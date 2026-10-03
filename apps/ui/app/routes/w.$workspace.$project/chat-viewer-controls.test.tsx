@@ -38,18 +38,27 @@ afterEach(() => {
 
 const startGraphics = (): GraphicsActor => {
   const actor = createActor(
-    graphicsMachine.provide({ actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) } }),
+    graphicsMachine.provide({
+      actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
+    }),
     { input: {} },
   ).start();
   activeActor = actor;
-  actor.send({ type: 'sceneRadiusUpdated', radius: 0.1, centerMeters: [0, 0, 0] });
+  actor.send({
+    type: 'sceneRadiusUpdated',
+    radius: 0.1,
+    centerMeters: [0, 0, 0],
+  });
   return actor;
 };
 
 const showSvg = (actor: GraphicsActor): void => {
   actor.send({
     type: 'updateArtifact',
-    artifact: { mimeType: 'image/svg+xml', content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>' },
+    artifact: {
+      mimeType: 'image/svg+xml',
+      content: '<svg xmlns="http://www.w3.org/2000/svg"></svg>',
+    },
     hash: 'svg',
   });
 };
@@ -115,7 +124,10 @@ describe('ChatViewerControls', () => {
         // oxlint-disable-next-line no-await-in-loop -- one tooltip at a time.
         await user.hover(screen.getByRole('button', { name }));
         // oxlint-disable-next-line no-await-in-loop -- one tooltip at a time.
-        expect(await screen.findByRole('tooltip', { name: new RegExp(`^${name}\\s*${key}$`) })).toBeInTheDocument();
+        const tooltip = await screen.findByRole('tooltip', {
+          name: new RegExp(`^${name}\\s*${key}$`),
+        });
+        expect(tooltip).toBeInTheDocument();
       }
     });
 
@@ -161,6 +173,24 @@ describe('ChatViewerControls', () => {
   });
 
   describe('rows', () => {
+    it('should unfold measurements above the Measuring options line inside the bar', async () => {
+      const actor = startGraphics();
+      actor.send({ type: 'setMeasureActive', payload: true });
+      actor.send({ type: 'startMeasurement', payload: [0, 0, 0] });
+      actor.send({ type: 'completeMeasurement', payload: [0.01, 0, 0] });
+      const user = userEvent.setup();
+      renderBar(actor);
+
+      const row = measuringRow();
+      const count = within(row).getByRole('button', { name: '1 measurement' });
+      expect(within(row).queryByRole('list', { name: 'Measurements' })).not.toBeInTheDocument();
+      await user.click(count);
+
+      const list = within(row).getByRole('list', { name: 'Measurements' });
+      expect(list.compareDocumentPosition(count)).toBe(Node.DOCUMENT_POSITION_FOLLOWING);
+      expect(row.closest('[data-slot="viewer-controls"]')).toHaveClass('rounded-lg');
+    });
+
     it('should stack the Section row and its editor above the Measuring row, above the controls', async () => {
       const user = userEvent.setup();
       renderBar(startGraphics());
@@ -190,7 +220,11 @@ describe('ChatViewerControls', () => {
       const user = userEvent.setup();
       renderBar(actor);
 
-      await user.click(within(sectionRow()).getByRole('button', { name: 'Remove plane XZ 0 mm' }));
+      await user.click(
+        within(sectionRow()).getByRole('button', {
+          name: 'Remove plane XZ 0 mm',
+        }),
+      );
 
       expect(screen.queryByRole('group', { name: 'Section view options' })).not.toBeInTheDocument();
       expect(screen.getByRole('button', { name: 'Section view', pressed: false })).toHaveFocus();
@@ -200,14 +234,20 @@ describe('ChatViewerControls', () => {
       const actor = startGraphics();
       actor.send({ type: 'setSectionViewActive', payload: true });
       const { sectionCuts } = actor.getSnapshot().context;
-      actor.send({ type: 'setSectionCertification', payload: { status: 'certified', cuts: sectionCuts } });
+      actor.send({
+        type: 'setSectionCertification',
+        payload: { status: 'certified', cuts: sectionCuts },
+      });
       renderBar(actor);
       // Present, and empty, before there is anything to say, so that the words are announced when they come.
       const status = within(sectionRow()).getByRole('status');
       expect(status).toBeEmptyDOMElement();
 
       act(() => {
-        actor.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: sectionCuts } });
+        actor.send({
+          type: 'setSectionCertification',
+          payload: { status: 'rejected', cuts: sectionCuts },
+        });
       });
 
       expect(status).toHaveTextContent('Section unavailable for this model; showing the last section');
@@ -219,7 +259,10 @@ describe('ChatViewerControls', () => {
       renderBar(actor);
 
       act(() => {
-        actor.send({ type: 'setSectionCertification', payload: { status: 'rejected', cuts: [] } });
+        actor.send({
+          type: 'setSectionCertification',
+          payload: { status: 'rejected', cuts: [] },
+        });
       });
 
       expect(within(sectionRow()).getByRole('status')).toHaveTextContent(/^Section unavailable for this model$/);
@@ -246,7 +289,10 @@ describe('ChatViewerControls', () => {
       await press('s');
       // A second cut, open, so Delete leaves Section on.
       act(() => {
-        actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+        actor.send({
+          type: 'addSectionCut',
+          payload: { kind: 'plane', plane: 'xy' },
+        });
       });
       for (const keys of ['m', 'g', 'g', 'p', 'p', 'f', 'f', '{Escape}', '{Delete}', '{Escape}']) {
         // oxlint-disable-next-line no-await-in-loop -- each key is pressed in turn.
@@ -357,7 +403,10 @@ describe('ChatViewerControls', () => {
       await user.click(within(sectionRow()).getByRole('spinbutton', { name: 'Offset in mm' }));
       await user.keyboard('12{Enter}');
 
-      const chip = within(sectionRow()).getByRole('button', { name: 'Plane XZ 12 mm', expanded: true });
+      const chip = within(sectionRow()).getByRole('button', {
+        name: 'Plane XZ 12 mm',
+        expanded: true,
+      });
       expect(chip).toHaveFocus();
 
       await user.click(within(sectionRow()).getByRole('spinbutton', { name: 'Offset in mm' }));
@@ -375,7 +424,10 @@ describe('ChatViewerControls', () => {
     it('should remove the cut of the chip holding focus with Delete, rather than the open cut', async () => {
       const actor = startGraphics();
       actor.send({ type: 'setSectionViewActive', payload: true });
-      actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
+      actor.send({
+        type: 'addSectionCut',
+        payload: { kind: 'plane', plane: 'xy' },
+      });
       const user = userEvent.setup();
       renderBar(actor);
       expect(within(sectionRow()).getByRole('button', { name: 'Plane XY 0 mm' })).toHaveAttribute(
@@ -394,8 +446,14 @@ describe('ChatViewerControls', () => {
     it('should move focus to the next chip when Delete removes the open cut from inside its editor', async () => {
       const actor = startGraphics();
       actor.send({ type: 'setSectionViewActive', payload: true });
-      actor.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'xy' } });
-      actor.send({ type: 'selectSectionCut', payload: actor.getSnapshot().context.sectionCuts[0]!.id });
+      actor.send({
+        type: 'addSectionCut',
+        payload: { kind: 'plane', plane: 'xy' },
+      });
+      actor.send({
+        type: 'selectSectionCut',
+        payload: actor.getSnapshot().context.sectionCuts[0]!.id,
+      });
       const user = userEvent.setup();
       renderBar(actor);
       act(() => {

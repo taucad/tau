@@ -1,420 +1,212 @@
 # libcascade — BRepGraph (3)
 
-56 top-level symbols. Signatures are verbatim typescript.
-
-BRepGraph_MeshView_PersistentView_CoEdgeOps: declare class BRepGraph_MeshView_PersistentView_CoEdgeOps
-
-  Has(theCoEdge: BRepGraph_CoEdgeId): boolean;
-
-  PolygonOnSurface(theCoEdge: BRepGraph_CoEdgeId): Poly_Polygon2D;
-
-  HasPolygonOnTriangulation(theCoEdge: BRepGraph_CoEdgeId): boolean;
-
-  PolygonOnTriangulation(theCoEdge: BRepGraph_CoEdgeId): Poly_PolygonOnTriangulation;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_MeshView_PersistentView_EdgeOps: declare class BRepGraph_MeshView_PersistentView_EdgeOps
-
-  Has(theEdge: BRepGraph_EdgeId): boolean;
-
-  Polygon3D(theEdge: BRepGraph_EdgeId): Poly_Polygon3D;
-
-  HasPolygonOnTriangulation(theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId): boolean;
-
-  PolygonOnTriangulation(theEdge: BRepGraph_EdgeId, theFace: BRepGraph_FaceId): Poly_PolygonOnTriangulation;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_MeshView_PersistentView_FaceOps: declare class BRepGraph_MeshView_PersistentView_FaceOps
-
-  Has(theFace: BRepGraph_FaceId): boolean;
-
-  Triangulation(theFace: BRepGraph_FaceId): Poly_Triangulation;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_MeshView_PolyOps: declare class BRepGraph_MeshView_PolyOps
-
-  NbFaceTriangulations(): number;
-
-  NbEdgePolygons3D(): number;
-
-  NbCoEdgePolygons2D(): number;
-
-  NbCoEdgePolygonsOnTri(): number;
-
-  NbActiveTriangulations(): number;
-
-  NbActivePolygons3D(): number;
-
-  NbActivePolygons2D(): number;
-
-  NbActivePolygonsOnTri(): number;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_CoEdgeId: declare class BRepGraph_CoEdgeId
-
-  constructor
-
-  Index: number
-
-  static Start(): unknown;
-
-  static Invalid(): unknown;
-
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_CompSolidId: declare class BRepGraph_CompSolidId
-
-  constructor
-
-  Index: number
-
-  static Start(): unknown;
-
-  static Invalid(): unknown;
-
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_CompoundId: declare class BRepGraph_CompoundId
-
-  constructor
-
-  Index: number
-
-  static Start(): unknown;
-
-  static Invalid(): unknown;
-
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_EdgeId: declare class BRepGraph_EdgeId
-
-  constructor
-
-  Index: number
-
-  static Start(): unknown;
-
-  static Invalid(): unknown;
-
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_FaceId: declare class BRepGraph_FaceId
-
-  constructor
-
-  Index: number
-
-  static Start(): unknown;
-
-  static Invalid(): unknown;
-
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_NodeId: declare class BRepGraph_NodeId
-
-  constructor
-
-  NodeKind: BRepGraph_NodeId_Kind
-
-  Index: number
-
-  static IsValidKind(theKind: BRepGraph_NodeId_Kind): boolean;
-
-  static IsTopologyKind(theKind: BRepGraph_NodeId_Kind): boolean;
-
-  static IsAssemblyKind(theKind: BRepGraph_NodeId_Kind): boolean;
-
-  static Start(theKind: BRepGraph_NodeId_Kind): BRepGraph_NodeId;
-
-  static Invalid(theKind?: BRepGraph_NodeId_Kind): BRepGraph_NodeId;
-
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_NodeId_Kind: typeof BRepGraph_NodeId_Kind[keyof typeof BRepGraph_NodeId_Kind]
-
-BRepGraph_OccurrenceId: declare class BRepGraph_OccurrenceId
-
-  constructor
-
-  Index: number
-
-  static Start(): unknown;
-
-  static Invalid(): unknown;
-
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-BRepGraph_ProductId: declare class BRepGraph_ProductId
-
-  constructor
-
-  Index: number
-
-  static Start(): unknown;
-
-  static Invalid(): unknown;
-
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
-
-  static FromNodeId(theId: BRepGraph_NodeId): unknown;
-
-  IsRemoved(theGraph: BRepGraph): boolean;
-
-  IsOwned(theGraph: BRepGraph): boolean;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
+53 top-level symbols. Signatures are verbatim typescript.
 
 BRepGraph_ShellId: declare class BRepGraph_ShellId
 
-  constructor
+  // BRepGraph_ShellId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theId: BRepGraph_NodeId);
 
   Index: number
 
+  // BRepGraph_ShellId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_ShellId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_ShellId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_ShellId.FromNodeId (method)
   static FromNodeId(theId: BRepGraph_NodeId): unknown;
 
+  // BRepGraph_ShellId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_ShellId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_ShellId.delete (method)
   delete(): void;
 
+  // BRepGraph_ShellId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_SolidId: declare class BRepGraph_SolidId
 
-  constructor
+  // BRepGraph_SolidId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theId: BRepGraph_NodeId);
 
   Index: number
 
+  // BRepGraph_SolidId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_SolidId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_SolidId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_SolidId.FromNodeId (method)
   static FromNodeId(theId: BRepGraph_NodeId): unknown;
 
+  // BRepGraph_SolidId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_SolidId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_SolidId.delete (method)
   delete(): void;
 
+  // BRepGraph_SolidId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_VertexId: declare class BRepGraph_VertexId
 
-  constructor
+  // BRepGraph_VertexId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theId: BRepGraph_NodeId);
 
   Index: number
 
+  // BRepGraph_VertexId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_VertexId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_VertexId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_VertexId.FromNodeId (method)
   static FromNodeId(theId: BRepGraph_NodeId): unknown;
 
+  // BRepGraph_VertexId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_VertexId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_VertexId.delete (method)
   delete(): void;
 
+  // BRepGraph_VertexId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_WireId: declare class BRepGraph_WireId
 
-  constructor
+  // BRepGraph_WireId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theId: BRepGraph_NodeId);
 
   Index: number
 
+  // BRepGraph_WireId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_WireId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_WireId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_WireId.FromNodeId (method)
   static FromNodeId(theId: BRepGraph_NodeId): unknown;
 
+  // BRepGraph_WireId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_WireId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_WireId.delete (method)
   delete(): void;
 
+  // BRepGraph_WireId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_ParallelPolicy: declare class BRepGraph_ParallelPolicy
 
-  constructor
+  // BRepGraph_ParallelPolicy.constructor (constructor)
+  constructor();
 
+  // BRepGraph_ParallelPolicy.WorkerCount (method)
   static WorkerCount(): number;
 
+  // BRepGraph_ParallelPolicy.IsParallelAllowed (method)
   static IsParallelAllowed(theAllowParallel: boolean): boolean;
 
-  static ShouldRun(theAllowParallel: boolean, theWorkers: number, theWorkload: BRepGraph_ParallelPolicy_Workload): boolean;
-  static ShouldRun(theAllowParallel: boolean, theWorkload: BRepGraph_ParallelPolicy_Workload): boolean;
+  // BRepGraph_ParallelPolicy.ShouldRun (method)
   static ShouldRun(theAllowParallel: boolean, theWorkers: number, theWorkload: BRepGraph_ParallelPolicy_Workload): boolean;
   static ShouldRun(theAllowParallel: boolean, theWorkload: BRepGraph_ParallelPolicy_Workload): boolean;
 
+  // BRepGraph_ParallelPolicy.delete (method)
   delete(): void;
 
+  // BRepGraph_ParallelPolicy.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_ParentExplorer: declare class BRepGraph_ParentExplorer
 
-  constructor
+  // BRepGraph_ParentExplorer.constructor (constructor)
+  constructor(theGraph: BRepGraph, theNode: BRepGraph_NodeId);
+  constructor(theGraph: BRepGraph, theNode: BRepGraph_NodeId, theConfig: BRepGraph_ParentExplorer_Config);
+  constructor(theGraph: BRepGraph, theNode: BRepGraph_NodeId, theMode: BRepGraph_ParentExplorer_TraversalMode);
+  constructor(theGraph: BRepGraph, theNode: BRepGraph_NodeId, theTargetKind: BRepGraph_NodeId_Kind);
+  constructor(theGraph: BRepGraph, theNode: BRepGraph_NodeId, theTargetKind: BRepGraph_NodeId_Kind, theMode: BRepGraph_ParentExplorer_TraversalMode);
+  constructor(theGraph: BRepGraph, theNode: BRepGraph_NodeId, theAvoidKind: BRepGraph_NodeId_Kind | null | undefined, theEmitAvoidKind: boolean, theMode?: BRepGraph_ParentExplorer_TraversalMode);
+  constructor(theGraph: BRepGraph, theNode: BRepGraph_NodeId, theTargetKind: BRepGraph_NodeId_Kind, theAvoidKind: BRepGraph_NodeId_Kind | null | undefined, theEmitAvoidKind: boolean, theMode?: BRepGraph_ParentExplorer_TraversalMode);
 
+  // BRepGraph_ParentExplorer.GetConfig (method)
   GetConfig(): BRepGraph_ParentExplorer_Config;
 
+  // BRepGraph_ParentExplorer.More (method)
   More(): boolean;
 
+  // BRepGraph_ParentExplorer.Next (method)
   Next(): void;
 
+  // BRepGraph_ParentExplorer.Current (method)
   Current(): any;
 
+  // BRepGraph_ParentExplorer.CurrentChild (method)
   CurrentChild(): BRepGraph_NodeId;
 
+  // BRepGraph_ParentExplorer.CurrentLinkKind (method)
   CurrentLinkKind(): BRepGraph_ParentExplorer_LinkKind;
 
+  // BRepGraph_ParentExplorer.CurrentRef (method)
   CurrentRef(): BRepGraph_RefId;
 
+  // BRepGraph_ParentExplorer.LeafLocation (method)
   LeafLocation(): TopLoc_Location;
 
+  // BRepGraph_ParentExplorer.LeafOrientation (method)
   LeafOrientation(): TopAbs_Orientation;
 
+  // BRepGraph_ParentExplorer.IsCurrentBranchRoot (method)
   IsCurrentBranchRoot(): boolean;
 
+  // BRepGraph_ParentExplorer.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_ParentExplorer.delete (method)
   delete(): void;
 
+  // BRepGraph_ParentExplorer.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_ParentExplorer_LinkKind: typeof BRepGraph_ParentExplorer_LinkKind[keyof typeof BRepGraph_ParentExplorer_LinkKind]
@@ -423,664 +215,1176 @@ BRepGraph_ParentExplorer_TraversalMode: typeof BRepGraph_ParentExplorer_Traversa
 
 BRepGraph_ChildRefId: declare class BRepGraph_ChildRefId
 
-  constructor
+  // BRepGraph_ChildRefId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theRefId: BRepGraph_RefId);
 
   Index: number
 
+  // BRepGraph_ChildRefId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_ChildRefId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_ChildRefId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_ChildRefId.FromRefId (method)
   static FromRefId(theRefId: BRepGraph_RefId): unknown;
 
+  // BRepGraph_ChildRefId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_ChildRefId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_ChildRefId.delete (method)
   delete(): void;
 
+  // BRepGraph_ChildRefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_FaceRefId: declare class BRepGraph_FaceRefId
 
-  constructor
+  // BRepGraph_FaceRefId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theRefId: BRepGraph_RefId);
 
   Index: number
 
+  // BRepGraph_FaceRefId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_FaceRefId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_FaceRefId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_FaceRefId.FromRefId (method)
   static FromRefId(theRefId: BRepGraph_RefId): unknown;
 
+  // BRepGraph_FaceRefId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_FaceRefId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_FaceRefId.delete (method)
   delete(): void;
 
+  // BRepGraph_FaceRefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_OccurrenceRefId: declare class BRepGraph_OccurrenceRefId
 
-  constructor
+  // BRepGraph_OccurrenceRefId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theRefId: BRepGraph_RefId);
 
   Index: number
 
+  // BRepGraph_OccurrenceRefId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_OccurrenceRefId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_OccurrenceRefId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_OccurrenceRefId.FromRefId (method)
   static FromRefId(theRefId: BRepGraph_RefId): unknown;
 
+  // BRepGraph_OccurrenceRefId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_OccurrenceRefId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_OccurrenceRefId.delete (method)
   delete(): void;
 
+  // BRepGraph_OccurrenceRefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefId: declare class BRepGraph_RefId
 
-  constructor
+  // BRepGraph_RefId.constructor (constructor)
+  constructor();
+  constructor(theKind: BRepGraph_RefId_Kind, theIdx: number);
 
   RefKind: BRepGraph_RefId_Kind
 
   Index: number
 
+  // BRepGraph_RefId.IsValidKind (method)
   static IsValidKind(theKind: BRepGraph_RefId_Kind): boolean;
 
+  // BRepGraph_RefId.IsTopologyRefKind (method)
   static IsTopologyRefKind(theKind: BRepGraph_RefId_Kind): boolean;
 
+  // BRepGraph_RefId.Start (method)
   static Start(theKind: BRepGraph_RefId_Kind): BRepGraph_RefId;
 
+  // BRepGraph_RefId.Invalid (method)
   static Invalid(theKind?: BRepGraph_RefId_Kind): BRepGraph_RefId;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_RefId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_RefId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_RefId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_RefId.delete (method)
   delete(): void;
 
+  // BRepGraph_RefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefId_Kind: typeof BRepGraph_RefId_Kind[keyof typeof BRepGraph_RefId_Kind]
 
 BRepGraph_ShellRefId: declare class BRepGraph_ShellRefId
 
-  constructor
+  // BRepGraph_ShellRefId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theRefId: BRepGraph_RefId);
 
   Index: number
 
+  // BRepGraph_ShellRefId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_ShellRefId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_ShellRefId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_ShellRefId.FromRefId (method)
   static FromRefId(theRefId: BRepGraph_RefId): unknown;
 
+  // BRepGraph_ShellRefId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_ShellRefId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_ShellRefId.delete (method)
   delete(): void;
 
+  // BRepGraph_ShellRefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_SolidRefId: declare class BRepGraph_SolidRefId
 
-  constructor
+  // BRepGraph_SolidRefId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theRefId: BRepGraph_RefId);
 
   Index: number
 
+  // BRepGraph_SolidRefId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_SolidRefId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_SolidRefId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_SolidRefId.FromRefId (method)
   static FromRefId(theRefId: BRepGraph_RefId): unknown;
 
+  // BRepGraph_SolidRefId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_SolidRefId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_SolidRefId.delete (method)
   delete(): void;
 
+  // BRepGraph_SolidRefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_VertexRefId: declare class BRepGraph_VertexRefId
 
-  constructor
+  // BRepGraph_VertexRefId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theRefId: BRepGraph_RefId);
 
   Index: number
 
+  // BRepGraph_VertexRefId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_VertexRefId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_VertexRefId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_VertexRefId.FromRefId (method)
   static FromRefId(theRefId: BRepGraph_RefId): unknown;
 
+  // BRepGraph_VertexRefId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_VertexRefId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_VertexRefId.delete (method)
   delete(): void;
 
+  // BRepGraph_VertexRefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_WireRefId: declare class BRepGraph_WireRefId
 
-  constructor
+  // BRepGraph_WireRefId.constructor (constructor)
+  constructor();
+  constructor(theIdx: number);
+  constructor(theRefId: BRepGraph_RefId);
 
   Index: number
 
+  // BRepGraph_WireRefId.Start (method)
   static Start(): unknown;
 
+  // BRepGraph_WireRefId.Invalid (method)
   static Invalid(): unknown;
 
-  IsValid(): boolean;
-  IsValid(theMaxCount: number): boolean;
+  // BRepGraph_WireRefId.IsValid (method)
   IsValid(): boolean;
   IsValid(theMaxCount: number): boolean;
 
+  // BRepGraph_WireRefId.FromRefId (method)
   static FromRefId(theRefId: BRepGraph_RefId): unknown;
 
+  // BRepGraph_WireRefId.IsRemoved (method)
   IsRemoved(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_WireRefId.IsOwned (method)
   IsOwned(theGraph: BRepGraph): boolean;
 
+  // BRepGraph_WireRefId.delete (method)
   delete(): void;
 
+  // BRepGraph_WireRefId.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefUID: declare class BRepGraph_RefUID
 
-  constructor
+  // BRepGraph_RefUID.constructor (constructor)
+  constructor();
+  constructor(theKind: BRepGraph_RefId_Kind, theCounter: number);
 
   Kind: BRepGraph_RefId_Kind
 
   Counter: number
 
+  // BRepGraph_RefUID.Invalid (method)
   static Invalid(): BRepGraph_RefUID;
 
+  // BRepGraph_RefUID.IsValid (method)
   IsValid(): boolean;
 
+  // BRepGraph_RefUID.HashValue (method)
   HashValue(): number;
 
+  // BRepGraph_RefUID.delete (method)
   delete(): void;
 
+  // BRepGraph_RefUID.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_CoEdgesOfWire: declare class BRepGraph_CoEdgesOfWire
 
-  constructor
+  // BRepGraph_CoEdgesOfWire.constructor (constructor)
+  constructor(theGraph: BRepGraph, theParent: unknown);
 
+  // BRepGraph_CoEdgesOfWire.More (method)
   More(): boolean;
 
+  // BRepGraph_CoEdgesOfWire.Next (method)
   Next(): void;
 
+  // BRepGraph_CoEdgesOfWire.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_CoEdgesOfWire.Index (method)
   Index(): number;
 
+  // BRepGraph_CoEdgesOfWire.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_CoEdgesOfWire.delete (method)
   delete(): void;
 
+  // BRepGraph_CoEdgesOfWire.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_FullChildRefIterator: declare class BRepGraph_FullChildRefIterator
 
-  constructor
+  // BRepGraph_FullChildRefIterator.constructor (constructor)
+  constructor(theGraph: BRepGraph);
+  constructor(theGraph: BRepGraph, theStartId: unknown);
 
+  // BRepGraph_FullChildRefIterator.More (method)
   More(): boolean;
 
+  // BRepGraph_FullChildRefIterator.Next (method)
   Next(): void;
 
+  // BRepGraph_FullChildRefIterator.Current (method)
   Current(): unknown;
 
+  // BRepGraph_FullChildRefIterator.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_FullChildRefIterator.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_FullChildRefIterator.delete (method)
   delete(): void;
 
+  // BRepGraph_FullChildRefIterator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_FullFaceRefIterator: declare class BRepGraph_FullFaceRefIterator
 
-  constructor
+  // BRepGraph_FullFaceRefIterator.constructor (constructor)
+  constructor(theGraph: BRepGraph);
+  constructor(theGraph: BRepGraph, theStartId: unknown);
 
+  // BRepGraph_FullFaceRefIterator.More (method)
   More(): boolean;
 
+  // BRepGraph_FullFaceRefIterator.Next (method)
   Next(): void;
 
+  // BRepGraph_FullFaceRefIterator.Current (method)
   Current(): unknown;
 
+  // BRepGraph_FullFaceRefIterator.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_FullFaceRefIterator.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_FullFaceRefIterator.delete (method)
   delete(): void;
 
+  // BRepGraph_FullFaceRefIterator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_FullOccurrenceRefIterator: declare class BRepGraph_FullOccurrenceRefIterator
 
-  constructor
+  // BRepGraph_FullOccurrenceRefIterator.constructor (constructor)
+  constructor(theGraph: BRepGraph);
+  constructor(theGraph: BRepGraph, theStartId: unknown);
 
+  // BRepGraph_FullOccurrenceRefIterator.More (method)
   More(): boolean;
 
+  // BRepGraph_FullOccurrenceRefIterator.Next (method)
   Next(): void;
 
+  // BRepGraph_FullOccurrenceRefIterator.Current (method)
   Current(): unknown;
 
+  // BRepGraph_FullOccurrenceRefIterator.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_FullOccurrenceRefIterator.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_FullOccurrenceRefIterator.delete (method)
   delete(): void;
 
+  // BRepGraph_FullOccurrenceRefIterator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_FullShellRefIterator: declare class BRepGraph_FullShellRefIterator
 
-  constructor
+  // BRepGraph_FullShellRefIterator.constructor (constructor)
+  constructor(theGraph: BRepGraph);
+  constructor(theGraph: BRepGraph, theStartId: unknown);
 
+  // BRepGraph_FullShellRefIterator.More (method)
   More(): boolean;
 
+  // BRepGraph_FullShellRefIterator.Next (method)
   Next(): void;
 
+  // BRepGraph_FullShellRefIterator.Current (method)
   Current(): unknown;
 
+  // BRepGraph_FullShellRefIterator.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_FullShellRefIterator.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_FullShellRefIterator.delete (method)
   delete(): void;
 
+  // BRepGraph_FullShellRefIterator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_FullSolidRefIterator: declare class BRepGraph_FullSolidRefIterator
 
-  constructor
+  // BRepGraph_FullSolidRefIterator.constructor (constructor)
+  constructor(theGraph: BRepGraph);
+  constructor(theGraph: BRepGraph, theStartId: unknown);
 
+  // BRepGraph_FullSolidRefIterator.More (method)
   More(): boolean;
 
+  // BRepGraph_FullSolidRefIterator.Next (method)
   Next(): void;
 
+  // BRepGraph_FullSolidRefIterator.Current (method)
   Current(): unknown;
 
+  // BRepGraph_FullSolidRefIterator.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_FullSolidRefIterator.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_FullSolidRefIterator.delete (method)
   delete(): void;
 
+  // BRepGraph_FullSolidRefIterator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_FullVertexRefIterator: declare class BRepGraph_FullVertexRefIterator
 
-  constructor
+  // BRepGraph_FullVertexRefIterator.constructor (constructor)
+  constructor(theGraph: BRepGraph);
+  constructor(theGraph: BRepGraph, theStartId: unknown);
 
+  // BRepGraph_FullVertexRefIterator.More (method)
   More(): boolean;
 
+  // BRepGraph_FullVertexRefIterator.Next (method)
   Next(): void;
 
+  // BRepGraph_FullVertexRefIterator.Current (method)
   Current(): unknown;
 
+  // BRepGraph_FullVertexRefIterator.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_FullVertexRefIterator.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_FullVertexRefIterator.delete (method)
   delete(): void;
 
+  // BRepGraph_FullVertexRefIterator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_FullWireRefIterator: declare class BRepGraph_FullWireRefIterator
 
-  constructor
+  // BRepGraph_FullWireRefIterator.constructor (constructor)
+  constructor(theGraph: BRepGraph);
+  constructor(theGraph: BRepGraph, theStartId: unknown);
 
+  // BRepGraph_FullWireRefIterator.More (method)
   More(): boolean;
 
+  // BRepGraph_FullWireRefIterator.Next (method)
   Next(): void;
 
+  // BRepGraph_FullWireRefIterator.Current (method)
   Current(): unknown;
 
+  // BRepGraph_FullWireRefIterator.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_FullWireRefIterator.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_FullWireRefIterator.delete (method)
   delete(): void;
 
+  // BRepGraph_FullWireRefIterator.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsChildOfCompound: declare class BRepGraph_RefsChildOfCompound
 
-  constructor
+  // BRepGraph_RefsChildOfCompound.constructor (constructor)
+  constructor(theGraph: BRepGraph, theParent: unknown);
 
+  // BRepGraph_RefsChildOfCompound.More (method)
   More(): boolean;
 
+  // BRepGraph_RefsChildOfCompound.Next (method)
   Next(): void;
 
+  // BRepGraph_RefsChildOfCompound.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_RefsChildOfCompound.Index (method)
   Index(): number;
 
+  // BRepGraph_RefsChildOfCompound.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_RefsChildOfCompound.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsChildOfCompound.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsFaceOfShell: declare class BRepGraph_RefsFaceOfShell
 
-  constructor
+  // BRepGraph_RefsFaceOfShell.constructor (constructor)
+  constructor(theGraph: BRepGraph, theParent: unknown);
 
+  // BRepGraph_RefsFaceOfShell.More (method)
   More(): boolean;
 
+  // BRepGraph_RefsFaceOfShell.Next (method)
   Next(): void;
 
+  // BRepGraph_RefsFaceOfShell.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_RefsFaceOfShell.Index (method)
   Index(): number;
 
+  // BRepGraph_RefsFaceOfShell.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_RefsFaceOfShell.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsFaceOfShell.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsIterator_ChildOfCompoundTraits: declare class BRepGraph_RefsIterator_ChildOfCompoundTraits
 
-  constructor
+  // BRepGraph_RefsIterator_ChildOfCompoundTraits.constructor (constructor)
+  constructor();
 
+  // BRepGraph_RefsIterator_ChildOfCompoundTraits.IsParentValid (method)
   static IsParentValid(theGraph: BRepGraph, theParent: BRepGraph_CompoundId): boolean;
 
+  // BRepGraph_RefsIterator_ChildOfCompoundTraits.RefIds (method)
   static RefIds(theGraph: BRepGraph, theParent: BRepGraph_CompoundId): BRepGraph_ChildRefId[];
 
+  // BRepGraph_RefsIterator_ChildOfCompoundTraits.Ref (method)
   static Ref(theGraph: BRepGraph, theRefId: BRepGraph_ChildRefId): BRepGraphInc_ChildRef;
 
+  // BRepGraph_RefsIterator_ChildOfCompoundTraits.ChildIdOf (method)
   static ChildIdOf(argNo0: BRepGraph, theRef: BRepGraphInc_ChildRef): BRepGraph_NodeId;
 
+  // BRepGraph_RefsIterator_ChildOfCompoundTraits.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsIterator_ChildOfCompoundTraits.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsIterator_CoEdgeOfWireTraits: declare class BRepGraph_RefsIterator_CoEdgeOfWireTraits
 
-  constructor
+  // BRepGraph_RefsIterator_CoEdgeOfWireTraits.constructor (constructor)
+  constructor();
 
+  // BRepGraph_RefsIterator_CoEdgeOfWireTraits.IsParentValid (method)
   static IsParentValid(theGraph: BRepGraph, theParent: BRepGraph_WireId): boolean;
 
+  // BRepGraph_RefsIterator_CoEdgeOfWireTraits.RefIds (method)
   static RefIds(theGraph: BRepGraph, theParent: BRepGraph_WireId): BRepGraph_CoEdgeId[];
 
+  // BRepGraph_RefsIterator_CoEdgeOfWireTraits.Ref (method)
   static Ref(theGraph: BRepGraph, theRefId: BRepGraph_CoEdgeId): BRepGraphInc_CoEdgeDef;
 
+  // BRepGraph_RefsIterator_CoEdgeOfWireTraits.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsIterator_CoEdgeOfWireTraits.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsIterator_FaceOfShellTraits: declare class BRepGraph_RefsIterator_FaceOfShellTraits
 
-  constructor
+  // BRepGraph_RefsIterator_FaceOfShellTraits.constructor (constructor)
+  constructor();
 
+  // BRepGraph_RefsIterator_FaceOfShellTraits.IsParentValid (method)
   static IsParentValid(theGraph: BRepGraph, theParent: BRepGraph_ShellId): boolean;
 
+  // BRepGraph_RefsIterator_FaceOfShellTraits.RefIds (method)
   static RefIds(theGraph: BRepGraph, theParent: BRepGraph_ShellId): BRepGraph_FaceRefId[];
 
+  // BRepGraph_RefsIterator_FaceOfShellTraits.Ref (method)
   static Ref(theGraph: BRepGraph, theRefId: BRepGraph_FaceRefId): BRepGraphInc_FaceRef;
 
+  // BRepGraph_RefsIterator_FaceOfShellTraits.ChildIdOf (method)
   static ChildIdOf(argNo0: BRepGraph, theRef: BRepGraphInc_FaceRef): BRepGraph_FaceId;
 
+  // BRepGraph_RefsIterator_FaceOfShellTraits.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsIterator_FaceOfShellTraits.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsIterator_OccurrenceOfProductTraits: declare class BRepGraph_RefsIterator_OccurrenceOfProductTraits
 
-  constructor
+  // BRepGraph_RefsIterator_OccurrenceOfProductTraits.constructor (constructor)
+  constructor();
 
+  // BRepGraph_RefsIterator_OccurrenceOfProductTraits.IsParentValid (method)
   static IsParentValid(theGraph: BRepGraph, theParent: BRepGraph_ProductId): boolean;
 
+  // BRepGraph_RefsIterator_OccurrenceOfProductTraits.RefIds (method)
   static RefIds(theGraph: BRepGraph, theParent: BRepGraph_ProductId): BRepGraph_OccurrenceRefId[];
 
+  // BRepGraph_RefsIterator_OccurrenceOfProductTraits.Ref (method)
   static Ref(theGraph: BRepGraph, theRefId: BRepGraph_OccurrenceRefId): BRepGraphInc_OccurrenceRef;
 
+  // BRepGraph_RefsIterator_OccurrenceOfProductTraits.ChildIdOf (method)
   static ChildIdOf(argNo0: BRepGraph, theRef: BRepGraphInc_OccurrenceRef): BRepGraph_OccurrenceId;
 
+  // BRepGraph_RefsIterator_OccurrenceOfProductTraits.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsIterator_OccurrenceOfProductTraits.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsIterator_RefsVertexOfEdge: declare class BRepGraph_RefsIterator_RefsVertexOfEdge
 
-  constructor
+  // BRepGraph_RefsIterator_RefsVertexOfEdge.constructor (constructor)
+  constructor(theGraph: BRepGraph, theEdgeId: BRepGraph_EdgeId);
 
+  // BRepGraph_RefsIterator_RefsVertexOfEdge.More (method)
   More(): boolean;
 
+  // BRepGraph_RefsIterator_RefsVertexOfEdge.Next (method)
   Next(): void;
 
+  // BRepGraph_RefsIterator_RefsVertexOfEdge.CurrentId (method)
   CurrentId(): BRepGraph_VertexRefId;
 
+  // BRepGraph_RefsIterator_RefsVertexOfEdge.Index (method)
   Index(): number;
 
+  // BRepGraph_RefsIterator_RefsVertexOfEdge.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_RefsIterator_RefsVertexOfEdge.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsIterator_RefsVertexOfEdge.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsIterator_ShellOfSolidTraits: declare class BRepGraph_RefsIterator_ShellOfSolidTraits
 
-  constructor
+  // BRepGraph_RefsIterator_ShellOfSolidTraits.constructor (constructor)
+  constructor();
 
+  // BRepGraph_RefsIterator_ShellOfSolidTraits.IsParentValid (method)
   static IsParentValid(theGraph: BRepGraph, theParent: BRepGraph_SolidId): boolean;
 
+  // BRepGraph_RefsIterator_ShellOfSolidTraits.RefIds (method)
   static RefIds(theGraph: BRepGraph, theParent: BRepGraph_SolidId): BRepGraph_ShellRefId[];
 
+  // BRepGraph_RefsIterator_ShellOfSolidTraits.Ref (method)
   static Ref(theGraph: BRepGraph, theRefId: BRepGraph_ShellRefId): BRepGraphInc_ShellRef;
 
+  // BRepGraph_RefsIterator_ShellOfSolidTraits.ChildIdOf (method)
   static ChildIdOf(argNo0: BRepGraph, theRef: BRepGraphInc_ShellRef): BRepGraph_ShellId;
 
+  // BRepGraph_RefsIterator_ShellOfSolidTraits.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsIterator_ShellOfSolidTraits.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsIterator_SolidOfCompSolidTraits: declare class BRepGraph_RefsIterator_SolidOfCompSolidTraits
 
-  constructor
+  // BRepGraph_RefsIterator_SolidOfCompSolidTraits.constructor (constructor)
+  constructor();
 
+  // BRepGraph_RefsIterator_SolidOfCompSolidTraits.IsParentValid (method)
   static IsParentValid(theGraph: BRepGraph, theParent: BRepGraph_CompSolidId): boolean;
 
+  // BRepGraph_RefsIterator_SolidOfCompSolidTraits.RefIds (method)
   static RefIds(theGraph: BRepGraph, theParent: BRepGraph_CompSolidId): BRepGraph_SolidRefId[];
 
+  // BRepGraph_RefsIterator_SolidOfCompSolidTraits.Ref (method)
   static Ref(theGraph: BRepGraph, theRefId: BRepGraph_SolidRefId): BRepGraphInc_SolidRef;
 
+  // BRepGraph_RefsIterator_SolidOfCompSolidTraits.ChildIdOf (method)
   static ChildIdOf(argNo0: BRepGraph, theRef: BRepGraphInc_SolidRef): BRepGraph_SolidId;
 
+  // BRepGraph_RefsIterator_SolidOfCompSolidTraits.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsIterator_SolidOfCompSolidTraits.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsIterator_WireOfFaceTraits: declare class BRepGraph_RefsIterator_WireOfFaceTraits
 
-  constructor
+  // BRepGraph_RefsIterator_WireOfFaceTraits.constructor (constructor)
+  constructor();
 
+  // BRepGraph_RefsIterator_WireOfFaceTraits.IsParentValid (method)
   static IsParentValid(theGraph: BRepGraph, theParent: BRepGraph_FaceId): boolean;
 
+  // BRepGraph_RefsIterator_WireOfFaceTraits.RefIds (method)
   static RefIds(theGraph: BRepGraph, theParent: BRepGraph_FaceId): BRepGraph_WireRefId[];
 
+  // BRepGraph_RefsIterator_WireOfFaceTraits.Ref (method)
   static Ref(theGraph: BRepGraph, theRefId: BRepGraph_WireRefId): BRepGraphInc_WireRef;
 
+  // BRepGraph_RefsIterator_WireOfFaceTraits.ChildIdOf (method)
   static ChildIdOf(argNo0: BRepGraph, theRef: BRepGraphInc_WireRef): BRepGraph_WireId;
 
+  // BRepGraph_RefsIterator_WireOfFaceTraits.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsIterator_WireOfFaceTraits.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsOccurrenceOfProduct: declare class BRepGraph_RefsOccurrenceOfProduct
 
-  constructor
+  // BRepGraph_RefsOccurrenceOfProduct.constructor (constructor)
+  constructor(theGraph: BRepGraph, theParent: unknown);
 
+  // BRepGraph_RefsOccurrenceOfProduct.More (method)
   More(): boolean;
 
+  // BRepGraph_RefsOccurrenceOfProduct.Next (method)
   Next(): void;
 
+  // BRepGraph_RefsOccurrenceOfProduct.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_RefsOccurrenceOfProduct.Index (method)
   Index(): number;
 
+  // BRepGraph_RefsOccurrenceOfProduct.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_RefsOccurrenceOfProduct.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsOccurrenceOfProduct.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsShellOfSolid: declare class BRepGraph_RefsShellOfSolid
 
-  constructor
+  // BRepGraph_RefsShellOfSolid.constructor (constructor)
+  constructor(theGraph: BRepGraph, theParent: unknown);
 
+  // BRepGraph_RefsShellOfSolid.More (method)
   More(): boolean;
 
+  // BRepGraph_RefsShellOfSolid.Next (method)
   Next(): void;
 
+  // BRepGraph_RefsShellOfSolid.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_RefsShellOfSolid.Index (method)
   Index(): number;
 
+  // BRepGraph_RefsShellOfSolid.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_RefsShellOfSolid.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsShellOfSolid.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsSolidOfCompSolid: declare class BRepGraph_RefsSolidOfCompSolid
 
-  constructor
+  // BRepGraph_RefsSolidOfCompSolid.constructor (constructor)
+  constructor(theGraph: BRepGraph, theParent: unknown);
 
+  // BRepGraph_RefsSolidOfCompSolid.More (method)
   More(): boolean;
 
+  // BRepGraph_RefsSolidOfCompSolid.Next (method)
   Next(): void;
 
+  // BRepGraph_RefsSolidOfCompSolid.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_RefsSolidOfCompSolid.Index (method)
   Index(): number;
 
+  // BRepGraph_RefsSolidOfCompSolid.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_RefsSolidOfCompSolid.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsSolidOfCompSolid.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsWireOfFace: declare class BRepGraph_RefsWireOfFace
 
-  constructor
+  // BRepGraph_RefsWireOfFace.constructor (constructor)
+  constructor(theGraph: BRepGraph, theParent: unknown);
 
+  // BRepGraph_RefsWireOfFace.More (method)
   More(): boolean;
 
+  // BRepGraph_RefsWireOfFace.Next (method)
   Next(): void;
 
+  // BRepGraph_RefsWireOfFace.CurrentId (method)
   CurrentId(): unknown;
 
+  // BRepGraph_RefsWireOfFace.Index (method)
   Index(): number;
 
+  // BRepGraph_RefsWireOfFace.end (method)
   end(): NCollection_ForwardRangeSentinel;
 
+  // BRepGraph_RefsWireOfFace.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsWireOfFace.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsView: declare class BRepGraph_RefsView
 
+  // BRepGraph_RefsView.Shells (method)
   Shells(): BRepGraph_RefsView_ShellOps;
 
+  // BRepGraph_RefsView.Faces (method)
   Faces(): BRepGraph_RefsView_FaceOps;
 
+  // BRepGraph_RefsView.Wires (method)
   Wires(): BRepGraph_RefsView_WireOps;
 
+  // BRepGraph_RefsView.Vertices (method)
   Vertices(): BRepGraph_RefsView_VertexOps;
 
+  // BRepGraph_RefsView.Solids (method)
   Solids(): BRepGraph_RefsView_SolidOps;
 
+  // BRepGraph_RefsView.Children (method)
   Children(): BRepGraph_RefsView_ChildOps;
 
+  // BRepGraph_RefsView.Occurrences (method)
   Occurrences(): BRepGraph_RefsView_OccurrenceOps;
 
+  // BRepGraph_RefsView.Gen (method)
   Gen(): BRepGraph_RefsView_GenOps;
 
+  // BRepGraph_RefsView.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsView.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsView_ChildOps: declare class BRepGraph_RefsView_ChildOps
 
+  // BRepGraph_RefsView_ChildOps.Nb (method)
   Nb(): number;
 
+  // BRepGraph_RefsView_ChildOps.NbActive (method)
   NbActive(): number;
 
+  // BRepGraph_RefsView_ChildOps.StartId (method)
   StartId(): BRepGraph_ChildRefId;
 
+  // BRepGraph_RefsView_ChildOps.EndId (method)
   EndId(): BRepGraph_ChildRefId;
 
+  // BRepGraph_RefsView_ChildOps.Entry (method)
   Entry(theRefId: BRepGraph_ChildRefId): BRepGraphInc_ChildRef;
 
+  // BRepGraph_RefsView_ChildOps.IdsOf (method)
   IdsOf(theCompound: BRepGraph_CompoundId): BRepGraph_ChildRefId[];
 
+  // BRepGraph_RefsView_ChildOps.IdsReferencing (method)
   IdsReferencing(theChild: BRepGraph_NodeId): BRepGraph_ChildRefId[];
 
+  // BRepGraph_RefsView_ChildOps.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsView_ChildOps.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 BRepGraph_RefsView_FaceOps: declare class BRepGraph_RefsView_FaceOps
 
+  // BRepGraph_RefsView_FaceOps.Nb (method)
   Nb(): number;
 
+  // BRepGraph_RefsView_FaceOps.NbActive (method)
   NbActive(): number;
 
+  // BRepGraph_RefsView_FaceOps.StartId (method)
   StartId(): BRepGraph_FaceRefId;
 
+  // BRepGraph_RefsView_FaceOps.EndId (method)
   EndId(): BRepGraph_FaceRefId;
 
+  // BRepGraph_RefsView_FaceOps.Entry (method)
   Entry(theRefId: BRepGraph_FaceRefId): BRepGraphInc_FaceRef;
 
+  // BRepGraph_RefsView_FaceOps.IdsOf (method)
   IdsOf(theShell: BRepGraph_ShellId): BRepGraph_FaceRefId[];
 
+  // BRepGraph_RefsView_FaceOps.delete (method)
   delete(): void;
 
+  // BRepGraph_RefsView_FaceOps.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+BRepGraph_RefsView_GenOps: declare class BRepGraph_RefsView_GenOps
+
+  // BRepGraph_RefsView_GenOps.Nb (method)
+  Nb(theKind: BRepGraph_RefId_Kind): number;
+
+  // BRepGraph_RefsView_GenOps.IsValid (method)
+  IsValid(theRef: BRepGraph_RefId): boolean;
+
+  // BRepGraph_RefsView_GenOps.IsActive (method)
+  IsActive(theRef: BRepGraph_RefId): boolean;
+
+  // BRepGraph_RefsView_GenOps.IsRemoved (method)
+  IsRemoved(theRef: BRepGraph_RefId): boolean;
+
+  // BRepGraph_RefsView_GenOps.RefAtStep (method)
+  RefAtStep(theParent: BRepGraph_NodeId, theStep: number): BRepGraph_RefId;
+
+  // BRepGraph_RefsView_GenOps.ChildNode (method)
+  ChildNode(theRef: BRepGraph_RefId): BRepGraph_NodeId;
+
+  // BRepGraph_RefsView_GenOps.LocalLocation (method)
+  LocalLocation(theRef: BRepGraph_RefId): TopLoc_Location;
+
+  // BRepGraph_RefsView_GenOps.Orientation (method)
+  Orientation(theRef: BRepGraph_RefId): TopAbs_Orientation;
+
+  // BRepGraph_RefsView_GenOps.delete (method)
+  delete(): void;
+
+  // BRepGraph_RefsView_GenOps.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+BRepGraph_RefsView_OccurrenceOps: declare class BRepGraph_RefsView_OccurrenceOps
+
+  // BRepGraph_RefsView_OccurrenceOps.Nb (method)
+  Nb(): number;
+
+  // BRepGraph_RefsView_OccurrenceOps.NbActive (method)
+  NbActive(): number;
+
+  // BRepGraph_RefsView_OccurrenceOps.StartId (method)
+  StartId(): BRepGraph_OccurrenceRefId;
+
+  // BRepGraph_RefsView_OccurrenceOps.EndId (method)
+  EndId(): BRepGraph_OccurrenceRefId;
+
+  // BRepGraph_RefsView_OccurrenceOps.Entry (method)
+  Entry(theRefId: BRepGraph_OccurrenceRefId): BRepGraphInc_OccurrenceRef;
+
+  // BRepGraph_RefsView_OccurrenceOps.IdsOf (method)
+  IdsOf(theProduct: BRepGraph_ProductId): BRepGraph_OccurrenceRefId[];
+
+  // BRepGraph_RefsView_OccurrenceOps.IdsReferencing (method)
+  IdsReferencing(theChild: BRepGraph_NodeId): BRepGraph_OccurrenceRefId[];
+
+  // BRepGraph_RefsView_OccurrenceOps.delete (method)
+  delete(): void;
+
+  // BRepGraph_RefsView_OccurrenceOps.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+BRepGraph_RefsView_ShellOps: declare class BRepGraph_RefsView_ShellOps
+
+  // BRepGraph_RefsView_ShellOps.Nb (method)
+  Nb(): number;
+
+  // BRepGraph_RefsView_ShellOps.NbActive (method)
+  NbActive(): number;
+
+  // BRepGraph_RefsView_ShellOps.StartId (method)
+  StartId(): BRepGraph_ShellRefId;
+
+  // BRepGraph_RefsView_ShellOps.EndId (method)
+  EndId(): BRepGraph_ShellRefId;
+
+  // BRepGraph_RefsView_ShellOps.Entry (method)
+  Entry(theRefId: BRepGraph_ShellRefId): BRepGraphInc_ShellRef;
+
+  // BRepGraph_RefsView_ShellOps.IdsOf (method)
+  IdsOf(theSolid: BRepGraph_SolidId): BRepGraph_ShellRefId[];
+
+  // BRepGraph_RefsView_ShellOps.delete (method)
+  delete(): void;
+
+  // BRepGraph_RefsView_ShellOps.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+BRepGraph_RefsView_SolidOps: declare class BRepGraph_RefsView_SolidOps
+
+  // BRepGraph_RefsView_SolidOps.Nb (method)
+  Nb(): number;
+
+  // BRepGraph_RefsView_SolidOps.NbActive (method)
+  NbActive(): number;
+
+  // BRepGraph_RefsView_SolidOps.StartId (method)
+  StartId(): BRepGraph_SolidRefId;
+
+  // BRepGraph_RefsView_SolidOps.EndId (method)
+  EndId(): BRepGraph_SolidRefId;
+
+  // BRepGraph_RefsView_SolidOps.Entry (method)
+  Entry(theRefId: BRepGraph_SolidRefId): BRepGraphInc_SolidRef;
+
+  // BRepGraph_RefsView_SolidOps.IdsOf (method)
+  IdsOf(theCompSolid: BRepGraph_CompSolidId): BRepGraph_SolidRefId[];
+
+  // BRepGraph_RefsView_SolidOps.delete (method)
+  delete(): void;
+
+  // BRepGraph_RefsView_SolidOps.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+BRepGraph_RefsView_VertexOps: declare class BRepGraph_RefsView_VertexOps
+
+  // BRepGraph_RefsView_VertexOps.Nb (method)
+  Nb(): number;
+
+  // BRepGraph_RefsView_VertexOps.NbActive (method)
+  NbActive(): number;
+
+  // BRepGraph_RefsView_VertexOps.StartId (method)
+  StartId(): BRepGraph_VertexRefId;
+
+  // BRepGraph_RefsView_VertexOps.EndId (method)
+  EndId(): BRepGraph_VertexRefId;
+
+  // BRepGraph_RefsView_VertexOps.Entry (method)
+  Entry(theRefId: BRepGraph_VertexRefId): BRepGraphInc_VertexRef;
+
+  // BRepGraph_RefsView_VertexOps.delete (method)
+  delete(): void;
+
+  // BRepGraph_RefsView_VertexOps.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+BRepGraph_RefsView_WireOps: declare class BRepGraph_RefsView_WireOps
+
+  // BRepGraph_RefsView_WireOps.Nb (method)
+  Nb(): number;
+
+  // BRepGraph_RefsView_WireOps.NbActive (method)
+  NbActive(): number;
+
+  // BRepGraph_RefsView_WireOps.StartId (method)
+  StartId(): BRepGraph_WireRefId;
+
+  // BRepGraph_RefsView_WireOps.EndId (method)
+  EndId(): BRepGraph_WireRefId;
+
+  // BRepGraph_RefsView_WireOps.Entry (method)
+  Entry(theRefId: BRepGraph_WireRefId): BRepGraphInc_WireRef;
+
+  // BRepGraph_RefsView_WireOps.IdsOf (method)
+  IdsOf(theFace: BRepGraph_FaceId): BRepGraph_WireRefId[];
+
+  // BRepGraph_RefsView_WireOps.delete (method)
+  delete(): void;
+
+  // BRepGraph_RefsView_WireOps.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+BRepGraph_RelatedIterator: declare class BRepGraph_RelatedIterator
+
+  // BRepGraph_RelatedIterator.constructor (constructor)
+  constructor(theGraph: BRepGraph, theNode: BRepGraph_NodeId);
+
+  // BRepGraph_RelatedIterator.More (method)
+  More(): boolean;
+
+  // BRepGraph_RelatedIterator.Next (method)
+  Next(): void;
+
+  // BRepGraph_RelatedIterator.Current (method)
+  Current(): BRepGraph_NodeId;
+
+  // BRepGraph_RelatedIterator.CurrentRelation (method)
+  CurrentRelation(): BRepGraph_RelatedIterator_RelationKind;
+
+  // BRepGraph_RelatedIterator.end (method)
+  end(): NCollection_ForwardRangeSentinel;
+
+  // BRepGraph_RelatedIterator.delete (method)
+  delete(): void;
+
+  // BRepGraph_RelatedIterator.[Symbol.dispose] (method)
+  [Symbol.dispose](): void;
+
+BRepGraph_RelatedIterator_RelationKind: typeof BRepGraph_RelatedIterator_RelationKind[keyof typeof BRepGraph_RelatedIterator_RelationKind]
+
+BRepGraph_RelatedIterator_Stage: typeof BRepGraph_RelatedIterator_Stage[keyof typeof BRepGraph_RelatedIterator_Stage]
+
+BRepGraph_CoEdgesOfEdge: declare class BRepGraph_CoEdgesOfEdge
+
+  // BRepGraph_CoEdgesOfEdge.constructor (constructor)
+  constructor(theGraph: BRepGraph, theParents: unknown);
+  constructor(theGraph: BRepGraph, theParents: unknown, theStartIndex: number);
+
+  // BRepGraph_CoEdgesOfEdge.More (method)
+  More(): boolean;
+
+  // BRepGraph_CoEdgesOfEdge.Next (method)
+  Next(): void;
+
+  // BRepGraph_CoEdgesOfEdge.CurrentId (method)
+  CurrentId(): BRepGraph_CoEdgeId;
+
+  // BRepGraph_CoEdgesOfEdge.Current (method)
+  Current(): BRepGraph_CoEdgeId;
+
+  // BRepGraph_CoEdgesOfEdge.Definition (method)
+  Definition(): BRepGraphInc_CoEdgeDef;
+
+  // BRepGraph_CoEdgesOfEdge.Index (method)
+  Index(): number;
+
+  // BRepGraph_CoEdgesOfEdge.Size (method)
+  Size(): number;
+
+  // BRepGraph_CoEdgesOfEdge.Value (method)
+  Value(theIndex: number): BRepGraph_CoEdgeId;
+
+  // BRepGraph_CoEdgesOfEdge.end (method)
+  end(): NCollection_ForwardRangeSentinel;
+
+  // BRepGraph_CoEdgesOfEdge.delete (method)
+  delete(): void;
+
+  // BRepGraph_CoEdgesOfEdge.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

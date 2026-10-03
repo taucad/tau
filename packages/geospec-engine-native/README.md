@@ -38,12 +38,14 @@ BRep features and PMI, spatial/CSG analysis, and separately bounded proof querie
 Unsupported or insufficient evidence produces an explicit refusal/error rather
 than a geometric pass, including under negation.
 
-Use `@taucad/geospec/assertion-client` for standalone JS assertions,
-`@taucad/geospec/vitest` for Vitest integration, and the wheel's `geospec` facade
+Use `geospec/assertion-client` for standalone JS host composition,
+`geospec/vitest` for Vitest integration, and the wheel's `geospec` facade
 and pytest plugin for Python. These clients retain canonical claims/results from
 the same engine. Jest integration is deferred. The existing VM runner has an
-opt-in native assertion host; application activation and full chat qualification
-are separate from engine-package qualification.
+automatic compiled binding in qualified product composition. Ordinary authored
+tests use `loadModel` from `geospec/model` and `expectGeo` from `geospec`, not
+an engine-selection dialect. Full chat qualification remains separate from
+engine-package qualification.
 
 ## Identity and numerical policy
 

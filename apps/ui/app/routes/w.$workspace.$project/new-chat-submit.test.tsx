@@ -68,6 +68,7 @@ it('keeps a newly focused chat’s error write on its own chatId', async () => {
   expect(newSession.chat).not.toBe(oldSession.chat);
   expect(newSession.chat.id).toBe('chat_new');
   await vi.waitFor(() => {
+    expect(getChat).toHaveBeenCalledWith('chat_old', 'project_test');
     expect(getChat).toHaveBeenCalledWith('chat_new', 'project_test');
     expect(newSession.persistenceActorRef.getSnapshot().context.isLoadingChat).toBe(false);
   });

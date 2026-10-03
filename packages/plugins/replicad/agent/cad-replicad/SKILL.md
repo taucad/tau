@@ -41,11 +41,11 @@ Check invalid dimensions, open/self-intersecting sketches, coincident boolean fa
 
 ## API reference
 
-All 742 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 756 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-functions.md` — Functions
-- `api-classs.md` — Classs
-- `api-classs-2.md` — Classs (2)
+- `api-classes.md` — Classes
+- `api-classes-2.md` — Classes (2)
 - `api-types.md` — Types
 - `api-interfaces.md` — Interfaces
 - `api-constants.md` — Constants

@@ -110,7 +110,7 @@ impl PreparedFamily {
     ) -> Result<(), Evaluation> {
         match self {
             Self::Relationships(value) => {
-                if let Some(index) = subject.selector_index().map_err(backend_refusal)? {
+                if let Some(index) = subject.selector_index(budget).map_err(backend_refusal)? {
                     value.resolve_selectors(&index, regex, subject.brep.as_deref(), budget);
                 }
             }
@@ -128,7 +128,7 @@ impl PreparedFamily {
                     }
                 }
                 proofs::Prepared::VoidContinuity(_) => {
-                    if let Some(index) = subject.selector_index().map_err(backend_refusal)? {
+                    if let Some(index) = subject.selector_index(budget).map_err(backend_refusal)? {
                         value.resolve_void(&index);
                     }
                 }

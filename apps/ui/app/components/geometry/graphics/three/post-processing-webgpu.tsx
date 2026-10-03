@@ -108,37 +108,6 @@ const updateGtaoSpatialScale = ({
   }
 };
 
-type AoSettings = Readonly<{
-  aoCompositeStage: PostProcessingSettings['aoCompositeStage'];
-  displayMode: PostProcessingSettings['displayMode'];
-  gtaoDistanceFalloff: number;
-  gtaoIntensity: number;
-  radiusCssPixels: PostProcessingSettings['radiusCssPixels'];
-  size: { readonly width: number; readonly height: number };
-  viewport: { readonly dpr: number };
-}>;
-
-/** Writes the AO settings into one endpoint's uniforms, scaling the radius at the orbit target. */
-const applyAoSettings = (resource: PostProcessingPipelineResources, at: Vector3, settings: AoSettings): void => {
-  if (!resource.aoNode) {
-    return;
-  }
-  resource.aoNode.scale.value = settings.gtaoIntensity;
-  resource.aoNode.distanceFallOff.value = settings.gtaoDistanceFalloff;
-  resource.displayMode.value = aoDisplayModes[settings.displayMode];
-  resource.compositeStage.value = settings.aoCompositeStage === 'display' ? 1 : 0;
-  updateGtaoSpatialScale({
-    at,
-    resources: [resource],
-    size: settings.size,
-    viewport: settings.viewport,
-    radiusCssPixels: resolveAoRadiusCssPixels(settings.radiusCssPixels, {
-      ...settings.size,
-      dpr: settings.viewport.dpr,
-    }),
-  });
-};
-
 const createOutputQuad = (fragmentNode: NodeMaterial['fragmentNode']): QuadMesh => {
   const material = new NodeMaterial();
   material.fragmentNode = fragmentNode;
@@ -310,22 +279,34 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
     };
   }, [gl, invalidate, scene, toneMapping, withAo]);
 
-  // A settings change rewrites every prepared endpoint's uniforms, then asks for the frame that shows it.
+  const updateAoSettings = useCallback(
+    (selected: PostProcessingPipelineResources): void => {
+      if (!selected.aoNode) {
+        return;
+      }
+      selected.aoNode.scale.value = gtaoIntensity;
+      selected.aoNode.distanceFallOff.value = gtaoDistanceFalloff;
+      selected.displayMode.value = aoDisplayModes[displayMode];
+      selected.compositeStage.value = aoCompositeStage === 'display' ? 1 : 0;
+      updateGtaoSpatialScale({
+        at: targetRef.current,
+        resources: [selected],
+        size,
+        viewport,
+        radiusCssPixels: resolveAoRadiusCssPixels(radiusCssPixels, { ...size, dpr: viewport.dpr }),
+      });
+      selected.updateAoCamera?.();
+    },
+    [aoCompositeStage, displayMode, gtaoDistanceFalloff, gtaoIntensity, radiusCssPixels, size, viewport],
+  );
+
   useLayoutEffect(() => {
-    const aoSettings = {
-      aoCompositeStage,
-      displayMode,
-      gtaoDistanceFalloff,
-      gtaoIntensity,
-      radiusCssPixels,
-      size,
-      viewport,
-    };
-    for (const resource of resourcesRef.current.values()) {
-      applyAoSettings(resource, targetRef.current, aoSettings);
+    const selected = resourcesRef.current.get(selectedCameraRef.current);
+    if (selected) {
+      updateAoSettings(selected);
     }
     invalidate();
-  }, [aoCompositeStage, displayMode, gtaoDistanceFalloff, gtaoIntensity, invalidate, radiusCssPixels, size, viewport]);
+  }, [invalidate, updateAoSettings]);
 
   const retarget = useCallback(
     (camera: ThreeCamera, snapshot: CameraDriverSnapshot): void => {
@@ -370,19 +351,7 @@ function PostProcessingWebGpuActive({ settings, aoAllowed, toneMapping }: PostPr
       });
       resourcesRef.current.set(camera, selected);
     }
-    // The orbit target moves between settings changes, so the radius is rescaled every frame.
-    applyAoSettings(selected, targetRef.current, {
-      aoCompositeStage,
-      displayMode,
-      gtaoDistanceFalloff,
-      gtaoIntensity,
-      radiusCssPixels,
-      size,
-      viewport,
-    });
-    if (selected.aoNode) {
-      selected.updateAoCamera?.();
-    }
+    updateAoSettings(selected);
     (selected.outputQuad ?? selected.outputQuadWithoutAo).render(state.gl as unknown as WebGPURenderer);
   }, 1);
   return null;

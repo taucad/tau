@@ -39,11 +39,11 @@ Check missing imports, undefined returns, invalid boolean inputs, and non-positi
 
 ## API reference
 
-All 160 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
+All 166 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
 - `api-functions.md` — Functions
 - `api-types.md` — Types
-- `api-classs.md` — Classs
+- `api-classes.md` — Classes
 - `api-interfaces.md` — Interfaces
 
 Read ranges, not whole files. Never copy a reference into a source file.

@@ -8,7 +8,45 @@ use serde_json::Value;
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
 const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
 const CURRENT_NUMERIC_PROFILE: &str =
-    include_str!("fixtures/current-profile-v5/numeric-profile.txt");
+    include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
+fn project_material_repair(id: &str, text: &str) -> String {
+    let ids = [
+        "a2/raw/all-axis-failure-order",
+        "plan/a2/all-axis-failure-order/evaluate",
+        "a2/raw/tolerance-outside",
+        "plan/a2/tolerance-outside/evaluate",
+        "a2/raw/default-tolerance-outside",
+        "plan/a2/default-tolerance-outside/evaluate",
+        "a2/raw/zero-tolerance",
+        "plan/a2/zero-tolerance/evaluate",
+    ];
+    if !ids.contains(&id) {
+        return text.into();
+    }
+    let old = "Correct the model dimensions, or widen the declared bounding-box tolerance.";
+    let approved = "Correct the model dimensions to match the declared bounds; preserve the authored tolerance.";
+    let parsed: Value = serde_json::from_str(text).unwrap();
+    let results = if id.starts_with("plan/") {
+        &parsed["results"]
+    } else {
+        &parsed["result"]["results"]
+    };
+    let matches = results
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|row| row["diagnostics"].as_array().unwrap())
+        .filter(|row| row["code"] == "GEOSPEC_BOUNDING_BOX_MISMATCH" && row["suggestion"] == old)
+        .count();
+    let old_literal = serde_json::to_string(old).unwrap();
+    assert_eq!(matches, 1, "{id}: exact diagnostic");
+    assert_eq!(
+        text.matches(&old_literal).count(),
+        1,
+        "{id}: unique raw literal"
+    );
+    text.replace(&old_literal, &serde_json::to_string(approved).unwrap())
+}
 
 fn current() -> Value {
     assert_eq!(sha256_hex(CURRENT), CURRENT_SHA256);
@@ -43,7 +81,8 @@ fn assert_exact(
 ) -> Option<Value> {
     if let Some(bytes) = expected["expectedUtf8"].as_str() {
         let actual = actual.unwrap_or_else(|error| panic!("{name}: {error}"));
-        let bytes = bytes.replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE);
+        let bytes = project_material_repair(name, bytes)
+            .replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE);
         assert_eq!(actual, bytes.as_bytes(), "{name}: canonical bytes");
         assert_eq!(canonicalize(&actual).unwrap(), actual, "{name}: canonical");
         Some(serde_json::from_slice(&actual).unwrap())

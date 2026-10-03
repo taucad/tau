@@ -29,7 +29,6 @@ describe('runnerResultToTestModelOutput', () => {
         targetFile: '*.geospec.ts',
       }),
     ]);
-    // `total` counts selected tests; the synthetic failure explains why none ran.
     expect(output.total).toBe(0);
   });
 
@@ -45,7 +44,6 @@ describe('runnerResultToTestModelOutput', () => {
         targetFile: '*.geospec.ts',
       }),
     ]);
-    // `total` counts selected tests; the synthetic failure explains why none ran.
     expect(output.total).toBe(0);
   });
 

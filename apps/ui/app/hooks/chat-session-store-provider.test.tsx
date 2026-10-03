@@ -151,7 +151,6 @@ describe('ChatSessionStoreProvider', () => {
     await Promise.resolve();
     await Promise.resolve();
 
-    // Hydration names the chat's project, so the row is read from that project's records.
     expect(harness.projectManager.getChat).toHaveBeenCalledWith('chat_a', 'proj_a');
     // The chat's composer record is read through the file manager's client.
     await vi.waitFor(() => {

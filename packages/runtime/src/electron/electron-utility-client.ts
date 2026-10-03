@@ -102,6 +102,7 @@ const createElectronUtilityClient = (
   const machines = createLazyMachineFacet(hooks.machines);
 
   let openPromise: Promise<TransportClientReady> | undefined;
+  let closePromise: Promise<void> | undefined;
   let channel: Channel<RuntimeDocumentProtocol> | undefined;
   let isClosed = false;
   /* A utility that dies before its hello failed to start; one that dies after
@@ -167,7 +168,7 @@ const createElectronUtilityClient = (
    * disentangles the port first, so finishing on it immediately is what threw
    * the exit code away. Hold the close for the relay window instead — the relay
    * finishes at once whenever it arrives, before or after. */
-  wrappedPort.onClose?.(() => {
+  const scheduleHostExit = (): void => {
     if (isClosed || relayWait !== undefined) {
       return;
     }
@@ -175,7 +176,8 @@ const createElectronUtilityClient = (
       relayWait = undefined;
       void finish(hostExitResult(undefined));
     }, hostExitRelayWindow);
-  });
+  };
+  wrappedPort.onClose?.(scheduleHostExit);
   subscribeHostExit?.((detail) => {
     void finish(hostExitResult(detail));
   });
@@ -185,7 +187,7 @@ const createElectronUtilityClient = (
       return openPromise;
     }
     openPromise = (async () => {
-      if (isClosed) {
+      if (isClosed || closePromise) {
         throw new Error('electronUtilityClient: closed before open()');
       }
       channel = createChannelClient<RuntimeDocumentProtocol>({
@@ -201,6 +203,9 @@ const createElectronUtilityClient = (
       channel.onClose((info) => {
         if (info.origin === 'remote' && info.reason !== portClosedReason) {
           wireReason = info.reason;
+        }
+        if (info.origin === 'remote') {
+          scheduleHostExit();
         }
       });
       await channel.ready;
@@ -241,7 +246,22 @@ const createElectronUtilityClient = (
       return materialiseBinaryContent(transport, undefined);
     },
     async close(): Promise<void> {
-      await finish({ cause: 'requested' });
+      closePromise ??= (async () => {
+        try {
+          if (!isClosed && phase === 'session') {
+            // The existing document worker owner makes disposal idempotent.
+            await channel?.call('dispose', null);
+          }
+        } catch {
+          // A failed/dead peer must still release its utility; synchronous terminate cannot await errors.
+          if (relayWait !== undefined) {
+            await closed;
+          }
+        } finally {
+          await finish({ cause: 'requested' });
+        }
+      })();
+      await closePromise;
     },
     closed,
   };

@@ -1,378 +1,387 @@
 # geospec API index
 
-geospec 0.1.0-beta.1 · 361 symbols · extracted by TypeScript 5.9.3.
+geospec 0.1.0-beta.1 · 370 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
 ## Functions — `api-functions.md`
 
-createGeoSpec (function) — Create a GeoSpec instance
-describe (function) — GeoSpec suite helper used inside VM-executed test modules
-expectGeo (function) — Start a geometry assertion chain
-it (function) — GeoSpec test helper used inside VM-executed test modules
-test (function) — Alias for {@link it}
-analyzeBrep (function) — Read BRep evidence from a loaded GeoSpec subject
-normalizeGeoSpecExpected (function) — Derive the `expected` value an assertion records from the call…
-assertGeoSpecJsonValue (function) — Reject a non-wire value rather than letting JSON.stringify erase it
-decodeGeoSpecCanonicalJson (function) — Parse and validate canonical bytes without re-canonicalizing them
-encodeGeoSpecCanonicalJson (function) — Encode client-owned canonical claim bytes
-isGeoSpecJsonValue (function) — Runtime JSON-value guard used at every protocol trust boundary
-toGeoSpecProtocolJson (function) — Convert an authoring value to protocol JSON, including the two…
-clearGeoSpecEngine (function) — Remove the registered engine
-describeGeoSpecEngine (function) — Describe the registered engine and its advertised capabilities
-geoSpecEngineUnavailableDiagnostic (function)
-getGeoSpecEngine (function) — The registered engine, if any
-getGeoSpecEngineHostBinding (function) — Look up one engine export
-getGeoSpecEngineProtocol (function) — The registered Contract-B binding, if any
-registerGeoSpecEngine (function) — Register the engine that executes GeoSpec claims
-requireGeoSpecEngineHostBinding (function) — Look up one engine export or fail with the engine-unavailable…
-inspectGeometry (function) — Resolve selectors against a subject and report the matched entities
-analyzeMeshOverlap (function) — Find positive-volume intersections between a subject's components
-analyzeMesh (function) — Return a detached full-statistics snapshot
-loadMesh (function) — Load mesh evidence into a GeoSpec geometry subject
-createModelLoader (function) — Create a {@link loadModel} function with shared defaults
-loadModel (function) — Load a CAD model into GeoSpec evidence
-resolveRuntimeExportIntent (function)
-clearCollectorGlobals (function)
-createCollector (function)
-installCollector (function)
-chargeBudget (function)
-checkBudget (function)
-compileGeoSpecTestNamePattern (function) — Compile a Vitest-style test-name pattern once for a GeoSpec run
-filterGeoSpecTests (function) — Filter collected GeoSpec tests by compiled test-name pattern
-matchesGeoSpecTestName (function) — Return true when a collected GeoSpec test matches the supplied…
-discoverGeoSpecFiles (function) — Discover GeoSpec test files from exact files or directory roots
-isGeoSpecTestFile (function) — Return true when a project-relative path names a GeoSpec test…
-runGeoSpecModule (function) — Execute an ESM GeoSpec module using the shared Tau VM…
-createNativeGeoSpecRunner (function) — Compose compiled assertion and model bindings with the SDK's serial…
-allocateNativePoolGrants (function) — Assign a bounded CPU budget across already-selected worker isolates
-createGeoSpecNativeModelLoader (function) — Create a native model loader that admits actual STEP/GLB bytes…
-createGeoSpecNodeRunner (function) — Create a GeoSpec runner for Node.js and CLI environments
-createGeoSpecNodePoolRunner (function) — Create a worker-pool GeoSpec runner for Node.js
-createNodeVmFileSystem (function) — Create a Node `VmFileSystem` rooted at `root`
-createGeoSpecWebRunner (function) — Create a GeoSpec runner for browser environments
-createGeoSpecWebPoolRunner (function) — Create a worker-pool GeoSpec runner for browser environments
-createNoMatchingGeoSpecTestsIssue (function) — Create a run-level issue when filters select no tests
-startGeoSpecPoolWorkerHost (function) — Start serving shards
-composeFullName (function) — Compose a full selector name from an occurrence path and…
-isValidStoredName (function) — Validate a stored (artifact-side) interface or occurrence name against the…
-parseSelectorPath (function) — Parse a selector-side dotted path into segments
-resolveTolerances (function) — Resolve effective tolerances from optional overrides
-deserializeSelector (function) — Reconstruct a selector from its JSON-safe serialized form
-serializeSelector (function) — Serialize a selector to a JSON-safe value (RegExp as `{…
-buildSelectorIndex (function) — Build the per-subject selector index from an SB1 XDE read…
-resolve (function) — Resolve a geometry selector against a per-subject selector index
-ambiguousDiagnostic (function) — Build a `GEOSPEC_SELECTOR_AMBIGUOUS` diagnostic
-unmatchedDiagnostic (function) — Build a `GEOSPEC_SELECTOR_UNMATCHED` diagnostic
-unsupportedEvidenceDiagnostic (function) — Build a `GEOSPEC_SELECTOR_UNSUPPORTED_EVIDENCE` diagnostic
-createStepLoader (function) — Create a {@link loadStep} function with shared defaults
-loadStep (function) — Load STEP/XDE/BRep evidence into a GeoSpec geometry subject
-parseXdeReadResultJson (function) — Parse the native reader's JSON payload into a structured XDE…
-createGeoSpecAssertionClient (function) — Create a standalone native GeoSpec assertion client
-createGeoSpecMatcherMethods (function) — Create the one registry-derived matcher surface used by every JavaScript…
-evaluateGeoSpecNativeQuery (function) — Submit an ancillary query with positive polarity through the native…
-createGeoSpecVitestAdapter (function) — Create Vitest matchers over an existing runner-independent client
-installGeoSpecVitest (function) — Register GeoSpec matchers and their settlement hook in the active…
-setupGeoSpecVitest (function) — Create a native client and register it with the active…
-exportTauProjectArtifact (function) — Export one Tau project from Runtime's coherent source snapshot
-loadGeoSpecConfig (function) — Load one trusted project config using Node's native module loader
+createGeoSpec (function) — Create a GeoSpec instance [id: typescript:createGeoSpec]
+describe (function) [1 members] — GeoSpec suite helper used inside VM-executed test modules [id: typescript:describe]
+  describe.skip (method) [id: typescript:describe.skip]
+expectGeo (function) — Start a geometry assertion chain [id: typescript:expectGeo]
+it (function) [1 members] — GeoSpec test helper used inside VM-executed test modules [id: typescript:it]
+  it.skip (method) [id: typescript:it.skip]
+test (function) [1 members] — Alias for {@link it} [id: typescript:test]
+  test.skip (method) [id: typescript:test.skip]
+createModelLoader (function) — Create a {@link loadModel} function with shared defaults [id: typescript:createModelLoader]
+loadModel (function) — Load a CAD model into GeoSpec evidence [id: typescript:loadModel]
+resolveRuntimeExportIntent (function) [id: typescript:resolveRuntimeExportIntent]
 
 ## Constants — `api-constants.md`
 
-geoSpecMatcherNames (constant) — Every matcher name exposed by {@link expectGeo}, derived from the…
-geoSpecMatcherDescriptors (constant) — The 26-entry matcher registry
-geoSpecEngineProtocolVersion (constant) — Contract-B protocol version spoken by this substrate
-geoSpecMatcherRegistryVersion (constant) — Registry version consumed by the Wave-1 matcher vocabulary
-geoSpecEngineGlobalKey (constant)
-geoSpecEngineUnavailableCode (constant)
-GeoSpecEngineUnavailableError (constant) — Registry error constructor, re-exported without changing its identity
-defaultGeoSpecIgnoredDirectories (constant) — Directories skipped by recursive GeoSpec discovery unless callers provide their…
-defaultGeoSpecInclude (constant) — Default file globs used by GeoSpec test discovery
-storedNamePattern (constant) — Full-name regex for stored interface names per the profile
-defaultSelectorTolerances (constant) — Default selector tolerances
-selectorDiagnosticCodes (constant) — Diagnostic codes emitted by selector resolution
+geoSpecMatcherNames (constant) — Every matcher name exposed by {@link expectGeo}, derived from the… [id: typescript:geoSpecMatcherNames]
 
 ## Types — `api-types.md`
 
-GeoSpec (type) — Stateful GeoSpec API created by {@link createGeoSpec}
-GeoSpecSubject (type) — A model admitted by one live GeoSpec host scope
-GeoSpecUnit (type) — Geometry units accepted at GeoSpec evidence-loading boundaries
-GeoSpecAssertion (type) — Geometry assertion collected from a GeoSpec test module
-GeoSpecAssemblyOccurrenceExpectation (type) — Assembly occurrence rule accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)`
-GeoSpecAssemblyOccurrencesExpectation (type) — Assembly occurrence expectation accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)`
-GeoSpecAxisExpectation (type) — Axis-keyed numeric expectation used by high-level geometry matchers
-GeoSpecBoundingBoxExpectation (type) — Bounding-box expectation accepted by `expectGeo(...).toHaveBoundingBox(...)`
-GeoSpecCenterOfMassExpectation (type) — Center-of-mass expectation accepted by `expectGeo(...).toHaveCenterOfMass(...)`
-GeoSpecChamferFeatureExpectation (type) — Chamfer-feature expectation accepted by `expectGeo(...).toHaveChamferFeature(...)`
-GeoSpecCircularHoleExpectation (type) — Circular-hole expectation accepted by `expectGeo(...).toHaveCircularHole(...)`
-GeoSpecCylindricalFaceExpectation (type) — Cylindrical-face expectation accepted by `expectGeo(...).toHaveCylindricalFace(...)`
-GeoSpecComponentInterferenceAllowance (type) — Intentional component interference allowance accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
-GeoSpecComponentInterferenceExpectation (type) — Component-interference expectation accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
-GeoSpecComponentInterferencePairExpectation (type) — A pair-specific component-interference check accepted by `expectGeo(...).toHaveNoComponentInterference(...)`
-GeoSpecConnectedComponentsExpectation (type) — Connected-components expectation accepted by `expectGeo(...).toHaveConnectedComponents(...)`
-GeoSpecGeometrySelector (type) — Geometry selector used by inspection and spatial relationship matchers
-GeoSpecMatcher (type) — Assertion chain returned by `expectGeo(subject)`
-GeoSpecMassExpectation (type) — Mass expectation accepted by `expectGeo(...).toHaveMass(...)`
-GeoSpecMeshIntegrityExpectation (type) — Mesh integrity expectation accepted by `expectGeo(...).toHaveMeshIntegrity(...)`
-GeoSpecNoDiagnosticsExpectation (type) — Diagnostic severities rejected by `expectGeo(...).toHaveNoDiagnostics(...)`
-GeoSpecMinimumWallThicknessExpectation (type) — Minimum-wall-thickness expectation accepted by `expectGeo(...).toHaveMinimumWallThickness(...)`
-GeoSpecCircularHolePatternExpectation (type) — Circular-hole-pattern expectation accepted by `expectGeo(...).toHaveCircularHolePattern(...)`
-GeoSpecFilletFeatureExpectation (type) — Fillet-feature expectation accepted by `expectGeo(...).toHaveFilletFeature(...)`
-GeoSpecNumericExpectation (type) — Shared scalar expectation used by geometry measurements
-GeoSpecPlanarFaceExpectation (type) — Planar-face expectation accepted by `expectGeo(...).toHavePlanarFace(...)`
-GeoSpecPointExpectation (type) — Point expectation accepted by center and feature matchers
-GeoSpecProductStructureExpectation (type) — Product-structure expectation accepted by `expectGeo(...).toHaveProductStructure(...)`
-GeoSpecSpatialRelationshipExpectation (type) — One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
-GeoSpecSpatialRelationshipsExpectation (type) — Spatial relationship expectation accepted by `expectGeo(...).toHaveSpatialRelationships(...)`
-GeoSpecStepUnitsExpectation (type) — STEP unit expectation accepted by `expectGeo(...).toHaveStepUnits(...)`
-GeoSpecSurfaceAreaExpectation (type) — Surface-area expectation accepted by `expectGeo(...).toHaveSurfaceArea(...)`
-GeoSpecTopologyCountsExpectation (type) — Topology-count expectation accepted by `expectGeo(...).toHaveTopologyCounts(...)`
-GeoSpecValidBrepExpectation (type) — Exact BRep validity expectation accepted by `expectGeo(...).toBeValidBrep(...)`
-GeoSpecVoidContinuityExpectation (type) — Void-continuity expectation accepted by `expectGeo(...).toHaveVoidContinuity(...)`
-GeoSpecVoidWaypoint (type) — One void-continuity waypoint
-GeoSpecVolumeExpectation (type) — Volume expectation accepted by `expectGeo(...).toHaveVolume(...)`
-BrepEvidence (type) — Basic exact or topology-derived BRep evidence consumed by early feature…
-GeometryFileFormat (type) — Geometry file formats understood by GeoSpec provenance
-GeometryCapability (type) — Capability exposed by a loaded subject
-GeometryDiagnostic (type) — Diagnostic emitted by GeoSpec loaders, analyzers, and matchers
-GeometryProvenance (type) — Provenance recorded by GeoSpec loaders
-GeometrySource (type) — Source metadata for a loaded geometry subject
-GeometrySubject (type) — Canonical P0 object under test for GeoSpec
-GeometrySubjectMeshEvidence (type) — Wire-safe mesh summary carried by an opaque geometry subject
-MeshEvidence (type) — Mesh evidence loaded from geometry bytes or buffers
-MeshFileFormat (type) — Geometry file formats supported by the P0 mesh loader
-MeshQualityStats (type) — Triangle quality and scalar mesh metrics used by P0 GeoSpec…
-MeshTriangle (type) — One triangle from mesh evidence, in geometry document coordinates
-StepEvidence (type) — STEP/XDE evidence extracted while loading a STEP subject
-Vec3 (type) — Numeric 3D vector
-AnalyzeMeshOptions (type) — Analyze source bytes or an already retained subject, never both
-AnalyzeMeshResult (type) — Mesh analysis result
-LoadMeshOptions (type) — Options for loading mesh evidence
-LoadMeshResult (type) — Result of loading mesh evidence into a GeoSpec geometry subject
-GeoSpecVec3 (type) — Numeric 3D vector
-AnalyzeBrepOptions (type) — Options for BRep evidence analysis
-AnalyzeBrepResult (type) — Typed result returned by {@link analyzeBrep}
-GeoSpecMatcherDescriptor (type) — One matcher's contract entry
-GeoSpecMatcherExpectedShape (type) — How the substrate derives an assertion's recorded `expected` value from…
-GeoSpecMatcherMode (type) — Whether a matcher settles synchronously (throwing its `GeoSpecAssertionError` inside the…
-GeoSpecMatcherName (type) — Every matcher name exposed by `expectGeo(...)`
-GeoSpecCancelRequest (type) — Per-request or per-claim cancellation
-GeoSpecCancelResult (type) — Idempotent cancellation acknowledgement
-GeoSpecClaim (type) — Canonical JSON payload encoded into one claim byte lane
-GeoSpecClaimId (type) — Opaque claim identifier
-GeoSpecClaimResult (type) — One serializable claim result
-GeoSpecDeterminismClass (type) — Determinism class negotiated during initialization (DL6)
-GeoSpecEngineProtocol (type) — First TypeScript binding of Contract B
-GeoSpecExecutionOptions (type) — Resolved operational controls carried outside canonical claim bytes
-GeoSpecIngestSubjectRequest (type) — Metadata lane for subject ingestion
-GeoSpecIngestSubjectResult (type) — Subject-ingestion response
-GeoSpecInitializeRequest (type) — Client half of the Contract-B initialization handshake
-GeoSpecInitializeResult (type) — Engine half of the Contract-B initialization handshake
-GeoSpecProtocolCapability (type) — One capability honestly advertised by an engine build
-GeoSpecProtocolEvent (type) — Advisory event
-GeoSpecProtocolProvenance (type) — Serializable build provenance returned by initialization
-GeoSpecReleaseSubjectRequest (type) — Idempotent subject-release request
-GeoSpecReleaseSubjectResult (type) — Subject-release acknowledgement
-GeoSpecRequestId (type) — Opaque request identifier
-GeoSpecSubjectFrame (type) — Canonical frame attached to bytes entering the engine
-GeoSpecSubjectId (type) — Opaque engine-owned subject identifier
-GeoSpecSubjectReference (type) — Opaque subject handle returned after ingestion
-GeoSpecSubmitClaimsRequest (type) — A canonical claim batch
-GeoSpecSubmitClaimsResult (type) — Claim-batch response
-GeoSpecEngineCapability (type) — A capability name an engine build may advertise
-GeoSpecEngineDescriptor (type) — Serializable description of the registered engine — the capability discovery…
-GeoSpecEngineHostBindings (type) — Host-only bootstrap operations
-GeoSpecEngineImplementation (type) — What an engine registers with the substrate
-GeometryInspectionEntity (type) — One inspected geometry entity
-GeometryInspectionSelection (type) — Result of one selector inspection
-InspectGeometryOptions (type) — Options for {@link inspectGeometry}
-InspectGeometryResult (type) — Structured inspection result used by relationship and occurrence matchers
-AnalyzeMeshOverlapOptions (type) — Options for component-overlap analysis
-AnalyzeMeshOverlapResult (type) — Typed result for component-overlap analysis
-MeshComponentOverlap (type) — One overlapping component pair found by {@link analyzeMeshOverlap}
-MeshOverlapEvidence (type) — Successful overlap analysis
-LoadMeshFailure (type) — Failed mesh load result
-LoadMeshSuccess (type) — Successful mesh load result
-MeshBufferSource (type) — In-memory triangle mesh source
-MeshSource (type) — Mesh source forms accepted by {@link loadMesh}
-AabbMeters (type) — Axis-aligned bounding box in glTF document units (meters)
-BoundingBoxAxisExtremum (type) — Dominant primitive on an axis extremum for `boundingBox` failures
-BoundingBoxAxisFailure (type) — One axis failure for `boundingBox` checks
-BoundingBoxFailure (type) — Structured payload when `boundingBox` fails
-BoundingBoxStats (type) — Scene bounding box with per-primitive contributors in the subject's unit…
-CheckResult (type) — Result of evaluating a single test requirement against geometry stats
-ClusterGap (type) — Smallest clearance between two clusters along the dominant separation axis
-ClusterReport (type) — One spatial cluster from AABB overlap grouping
-ConnectedComponentsFailure (type) — Structured payload when `connectedComponents` fails
-ConnectedComponentsResult (type) — Full connected-components analysis at one tolerance
-GeometryEvidenceDiagnostic (type) — Diagnostic form permitted inside a wire-safe subject snapshot
-GeometryStats (type) — Statistics about a parsed GLB geometry
-PrimitiveRecord (type) — One TRIANGLES primitive with identity for spatial-test feedback
-WatertightFailure (type) — Structured payload when `watertight` fails
-WatertightIrregularEdgeCluster (type) — Spatial cluster of related irregular edges
-WatertightIrregularEdgeKind (type) — Class of irregular mesh edge found during watertight analysis
-WatertightIrregularEdgeSample (type) — Representative irregular edge, in glTF document coordinates
-WatertightPrimitiveBreakdown (type) — Per-primitive watertight diagnostic (local tessellation only)
-WatertightResult (type) — Full watertight analysis (global + per-primitive breakdown)
-GeoSpecExportRoute (type) — Runtime route metadata used to decide whether a runtime export…
-RuntimeBackedModelFormat (type)
-RuntimeClientWithRoutes (type) — Runtime client shape for route-aware Tau runtimes
-RuntimeExportIntent (type) — Resolved runtime export request and provenance for a GeoSpec model…
-RuntimeExportIntentFailure (type) — Structured failure returned when a runtime cannot provide the requested…
-CreateModelLoaderOptions (type) — Defaults accepted by {@link import ('./load-model.js').createModelLoader}
-GeoSpecModelFormat (type) — Geometry formats accepted by {@link import ('./load-model.js').loadModel}
-GeoSpecModelLoader (type) — Function shape used by GeoSpec runners to provide model loading…
-ManagedGeoSpecModelLoader (type) — A configured loader whose shared runtime can be released with…
-GeoSpecRuntimeClient (type)
-GeoSpecRuntimeClientFactory (type) — Lazy runtime factory consumed by `geospec/model`
-GeoSpecRuntimeSourceAdapter (type) — Explicit source adapter for formats whose runtime setup is not…
-LoadModelCodeOptions (type) — Inline code-CAD model load options
-LoadModelFileOptions (type) — Filesystem-backed model load options
-LoadModelOptions (type) — Options accepted by {@link import ('./load-model.js').loadModel}
-LoadModelSourceOptions (type) — Direct geometry-source model load options
-RelationshipBroadPhase (type) — Labeled broad-phase record
-RelationshipEndpointReport (type) — Selector resolution summary attached to relationship diagnostics so every failure…
-RelationshipEvidence (type) — Structured result of one relationship proof (L4)
-RelationshipFinalEvidence (type) — Final exact-evidence record for a relationship verdict
-RelationshipWitness (type) — One geometric witness backing a relationship verdict
-GeoSpecCollector (type) — Collects suites, tests, assertions, and async completion state for one…
-GeoSpecNativeCollector (type) — Native collector surface for hosts that explicitly supply a native…
-GeoSpecCollectorOptions (type) — Per-module collector configuration
-GeoSpecTestNamePattern (type) — Compiled Vitest-style test-name pattern used by a GeoSpec run
-DiscoverGeoSpecFilesOptions (type) — Options for recursive GeoSpec test discovery
-GeoSpecDiscoveryFileKind (type) — File kind returned by a GeoSpec discovery filesystem
-GeoSpecDiscoveryFileStat (type) — Minimal stat object required for recursive GeoSpec test discovery
-GeoSpecDiscoveryFileSystem (type) — Minimal filesystem contract used by GeoSpec test discovery
-GeoSpecDiscoveryResult (type) — Result returned by recursive GeoSpec test discovery
-GeoSpecModuleBundleCache (type) — Worker-local cache for successful GeoSpec bundles
-GeoSpecRunFailure (type) — Failed GeoSpec run result
-GeoSpecRunResult (type) — Result returned by {@link import ('./run-geospec-module.js').runGeoSpecModule}
-GeoSpecRunSuccess (type) — Successful GeoSpec run result
-GeoSpecTestCase (type) — A collected GeoSpec test case
-GeoSpecTestStatus (type) — Test case status after runner collection
-RunGeoSpecModuleOptions (type) — Options for executing a GeoSpec ESM test module
-GeoSpecNativeRunnerAssertions (type) — Native assertion options whose engine can also admit and release…
-GeoSpecNativeRunnerOptions (type) — Options for the native serial runner
-CreateGeoSpecNativeModelLoaderOptions (type) — Defaults and host dependencies for a managed native model loader
-GeoSpecNativeLoadModelOptions (type) — Native additions accepted by the injected `geospec/runner/native` loader
-GeoSpecNativeModelEngine (type) — Native engine operations required for model admission and run-level cleanup
-GeoSpecNativeModelLoader (type) — Model loader injected into native VM runs
-GeoSpecNativeModelSubject (type) — Subject identity returned by native STEP/GLB admission
-GeoSpecNativeModelResource (type) — One named external resource referenced by a direct glTF-family source
-GeoSpecNativeSourceReader (type) — Resolve a non-memory source into ordinary ArrayBuffer-backed bytes
-ManagedGeoSpecNativeModelLoader (type) — Reusable native model loader whose admitted subjects can be released…
-GeoSpecNodeRunnerOptions (type) — Options accepted by {@link createGeoSpecNodeRunner}
-GeoSpecNodePoolRunnerOptions (type) — Options accepted by {@link createGeoSpecNodePoolRunner}
-GeoSpecWebRunnerOptions (type) — Options accepted by {@link createGeoSpecWebRunner}
-GeoSpecWebPoolRunnerOptions (type) — Options accepted by {@link createGeoSpecWebPoolRunner}
-GeoSpecPoolWorkerHostOptions (type) — Options accepted by {@link startGeoSpecPoolWorkerHost}
-GeoSpecPoolHostMessage (type)
-GeoSpecPoolShard (type) — One schedulable work unit
-GeoSpecPoolWorkerHandle (type)
-GeoSpecPoolWorkerMessage (type)
-GeoSpecForensicEvent (type) — One structured forensic measurement emitted by a runner
-GeoSpecRunner (type) — Public GeoSpec runner lifecycle surface
-GeoSpecRunnerEvent (type) — Lifecycle event emitted by GeoSpec worker-style runners
-GeoSpecRunnerFileResult (type) — One GeoSpec test file executed by a worker-style runner
-GeoSpecRunnerOptions (type) — Shared options for Node and browser GeoSpec runner factories
-GeoSpecRunnerResult (type) — Aggregate result returned by GeoSpec worker-style runners
-GeoSpecRunnerRunOptions (type) — Options accepted by a GeoSpec worker-style runner run
-SelectorPathSegment (type) — One parsed segment of a selector path (`name`, `name[3]`, or…
-SelectorTolerances (type) — Tolerance vocabulary consumed by selector predicates
-AxisQuery (type) — Axis query predicates over cylindrical/conical face facts
-AxisSelector (type) — Axis selector resolved from cylindrical/conical face facts
-BodyQuery (type) — Body query predicates over per-occurrence solid aggregates
-BodySelector (type) — Body selector
-CandidateEntity (type) — Ranked candidate reported on ambiguous/unmatched resolutions, with the disambiguating facts…
-Cardinality (type) — Cardinality expectation for a selector resolution (master catalog G7)
-DatumSelector (type) — Datum selector
-DirectionPredicate (type) — Direction predicate with optional angular tolerance in degrees
-FaceQuery (type) — Face query predicates (master catalog G1/G2)
-FaceSelector (type) — Face selector resolved via query/probe predicates
-GeometryFacts (type) — Typed geometric facts carried by a resolved entity — full…
-GeometrySelection (type) — Structured result of resolving one selector against a selector index
-GeometrySelectionSource (type) — Evidence source a selection resolved against
-GeometrySelectionStability (type) — Durability-ladder stability class of a resolution
-GeometrySelectionStatus (type) — Resolution status
-GeometrySelector (type) — The V1 geometry selector union (D4 scope)
-GroupSelector (type) — Group selector
-InterfaceSelector (type) — Interface selector
-NumericRange (type) — Inclusive numeric band
-OccurrenceSelector (type) — Occurrence selector
-PlaneQuery (type) — Plane query predicates over planar face facts
-PlaneSelector (type) — Plane selector resolved from planar face facts
-RayPredicate (type) — Ray probe predicate (world-space origin and direction, millimetres)
-ResolvedEntity (type) — One resolved geometry entity (index-local, snapshot-scoped identity)
-ResolvedEntityType (type) — Entity kind a resolved entity denotes
-SelectorFaceFacts (type) — Per-face analytic facts in the subject frame, matching the verification…
-SelectorSurfaceType (type) — Surface classification carried by selector face facts, matching the verification…
-SerializedRegExp (type) — JSON-serialized RegExp representation used by selector serialization
-Vec3Record (type) — Cartesian coordinate record used by coordinate-band (`near`) predicates
-BuildSelectorIndexOptions (type) — Inputs for {@link buildSelectorIndex}
-SelectorBodyRow (type) — One per-occurrence solid aggregate row backing body selectors
-SelectorDatumRow (type) — One materialized datum row (subject frame)
-SelectorFaceFactsTable (type) — Per-occurrence face facts keyed by occurrence path, matching the verification…
-SelectorFaceRow (type) — One BRep face row with subject-frame analytic facts
-SelectorGroupRow (type) — One reconstructed group row (shared `prefix[i]` family per occurrence)
-SelectorIndex (type) — The per-subject selector index consumed by the L3 resolution engine
-SelectorInterfaceRow (type) — One authored interface record joining a subshape name to its…
-SelectorOccurrenceRow (type) — One placed occurrence row in the selector index
-SelectorDiagnosticOptions (type) — Payload accepted by the selector diagnostic builders
-GeoSpecStepLoader (type) — A configured STEP loader
-BrepFacetName (type) — The five lazily materialized BRep evidence facets
-CreateStepLoaderOptions (type) — Defaults accepted by {@link import ('./load-step.js').createStepLoader}
-LoadStepOptions (type) — Options for loading STEP/XDE/BRep evidence
-StepLoadProgressEvent (type) — Progress event emitted while GeoSpec normalizes a STEP source
-StepSource (type) — STEP source forms accepted by {@link import ('./load-step.js').loadStep}
-StepStreamingMode (type) — STEP reader strategy used by GeoSpec
-XdeDatumPlacement (type) — One native AP242 datum placement row (a coordinate *frame* from…
-XdeDatumSystem (type) — One GD&T datum reference frame (`DATUM_SYSTEM`) with its precedence compartments,…
-XdeOccurrence (type) — One placed occurrence recovered from an AP242 STEP structure read
-XdeReadResult (type) — Structured AP242 read result produced by the GeoSpec verification kernel's…
-XdeSemanticDatum (type) — One semantic GD&T datum (`DATUM` + `DATUM_FEATURE` family) recovered from…
-XdeSubshapeName (type) — One part-relative authored subshape name, expanded per occurrence of the…
-XdeSupplementalPlane (type) — One supplemental-geometry `PLANE` item (e.g
-GeoSpecAssertionClient (type) — Runner-independent native assertion client
-GeoSpecAssertionClientOptions (type) — Flat construction options for a runner-independent native assertion client
-GeoSpecAssertionMatchers (type) — Standalone native matcher chain, including core-owned negation
-GeoSpecAuthoringInvocation (type) — One authored call shared by the collector and native assertion…
-GeoSpecMatcherMethods (type) — Matcher methods derived mechanically from the existing GeoSpec registry
-GeoSpecQueryOptions (type) — One positive-only ancillary query
-MinimumDistanceFact (type) — Complete native minimum and ordered finite witnesses in canonical millimetres/Z-up
-MinimumDistanceQuery (type) — Complete AP242 minimum over two subject-bound occurrence paths
-MinimumDistanceResult (type) — Geometry refusal and infrastructure interruption never masquerade as facts
-GeoSpecNativeQueryOptions (type) — Flat native query transport options
-GeoSpecQueryCapability (type) — Existing positive-only ancillary operations owned by the native core
-GeoSpecPmiField (type) — Explicit support state for one source-attributed inventory field
-GeoSpecPmiRawEntity (type) — Original Part21 entity ID and exact source argument tokens
-GeoSpecPmiNumber (type) — Source-authored scalar and Rust-normalized reduced rational millimetres
-GeoSpecPmiFaceAssociation (type) — A uniquely forward-transferred face
-GeoSpecPmiShapeReference (type) — One ordered role reference, including incomplete source/transfer evidence
-GeoSpecPmiLimits (type) — Normalized authored limits
-GeoSpecPmiRecord (type) — Source record preserving semantic/presentation separation and ordered roles
-GeoSpecPmiInventory (type) — Positive-only inventory value inside the ordinary canonical query report
-GeoSpecPmiQueryPayload (type) — Strict inventory output limits
-GeoSpecPmiQueryValue (type) — Complete inventory value
-GeoSpecCanonicalClaimReport (type) — Full native assertion result with the exact core-owned bytes retained
-GeoSpecNativeClaimEvaluation (type) — Exact core bytes of one claim evaluated in one engine…
-GeoSpecNativeEngine (type) — Byte-only engine surface consumed by the runner-independent assertion client
-GeoSpecNativeEvidenceProfile (type) — Success-evidence profile a product selects for its plans (PERF-OUTPUT-01)
-GeoSpecNativeSubject (type) — Content-addressed subject accepted by a protocol-3 assertion plan
-GeoSpecFixedMatcherDescriptor (type) — A canonical fixed-contract matcher
-GeoSpecVitestAdapter (type) — Installed Vitest matcher map and lifecycle settlement hook
-ExportTauProjectArtifactOptions (type) — Input for exporting one validated Tau project descriptor
-GeoSpecTauProjectArtifact (type) — Finalized geometry bytes and the exact source/export metadata that produced…
-GeoSpecTauProjectRuntime (type) — Runtime surface required to snapshot and export one Tau project
-GeoSpecConfig (type) — Trusted project configuration using existing discovery and runner options
-GeoSpecTauProjectDescriptor (type) — Imported Tau project data for later host resolution
-LoadedGeoSpecConfig (type) — Resolved file identity and validated configuration data
-LoadGeoSpecConfigOptions (type) — Options for one trusted Node configuration load
+GeoSpec (type) [2 members] — Stateful GeoSpec API created by {@link createGeoSpec} [id: typescript:GeoSpec]
+  GeoSpec.loadMesh (method) [id: typescript:GeoSpec.loadMesh]
+  GeoSpec.analyzeMesh (method) [id: typescript:GeoSpec.analyzeMesh]
+GeoSpecSubject (type) [1 members] — A model admitted by one live GeoSpec host scope [id: typescript:GeoSpecSubject]
+  GeoSpecSubject.[subjectBrand] (property) [id: typescript:GeoSpecSubject.[subjectBrand]]
+GeoSpecUnit (type) — Geometry units accepted at GeoSpec evidence-loading boundaries [id: typescript:GeoSpecUnit]
+GeoSpecAssertion (type) [8 members] — Geometry assertion collected from a GeoSpec test module [id: typescript:GeoSpecAssertion]
+  GeoSpecAssertion.kind (property) — Assertion kind [id: typescript:GeoSpecAssertion.kind]
+  GeoSpecAssertion.subject (property) — User-authored value passed to expectGeo() [id: typescript:GeoSpecAssertion.subject]
+  GeoSpecAssertion.expected (property) — Expected geometry condition [id: typescript:GeoSpecAssertion.expected]
+  GeoSpecAssertion.passed (property) — True when the assertion evaluated successfully [id: typescript:GeoSpecAssertion.passed]
+  GeoSpecAssertion.diagnostics (property) — Structured diagnostics from matcher evaluation [id: typescript:GeoSpecAssertion.diagnostics]
+  GeoSpecAssertion.report (property) — Exact compiled assertion report, including core-owned bytes and polarity [id: typescript:GeoSpecAssertion.report]
+  GeoSpecAssertion.loadId (property) — The host load which admitted this assertion's subject [id: typescript:GeoSpecAssertion.loadId]
+  GeoSpecAssertion.durationMs (property) — Wall-clock cost of matcher evaluation in milliseconds (R1 [id: typescript:GeoSpecAssertion.durationMs]
+GeoSpecAssemblyOccurrenceExpectation (type) [3 members] — Assembly occurrence rule accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)` [id: typescript:GeoSpecAssemblyOccurrenceExpectation]
+  GeoSpecAssemblyOccurrenceExpectation.name (property) [id: typescript:GeoSpecAssemblyOccurrenceExpectation.name]
+  GeoSpecAssemblyOccurrenceExpectation.count (property) [id: typescript:GeoSpecAssemblyOccurrenceExpectation.count]
+  GeoSpecAssemblyOccurrenceExpectation.bounds (property) [id: typescript:GeoSpecAssemblyOccurrenceExpectation.bounds]
+GeoSpecAssemblyOccurrencesExpectation (type) [2 members] — Assembly occurrence expectation accepted by `expectGeo(...).toHaveAssemblyOccurrences(...)` [id: typescript:GeoSpecAssemblyOccurrencesExpectation]
+  GeoSpecAssemblyOccurrencesExpectation.occurrences (property) [id: typescript:GeoSpecAssemblyOccurrencesExpectation.occurrences]
+  GeoSpecAssemblyOccurrencesExpectation.uniqueNames (property) [id: typescript:GeoSpecAssemblyOccurrencesExpectation.uniqueNames]
+GeoSpecAxisExpectation (type) [3 members] — Axis-keyed numeric expectation used by high-level geometry matchers [id: typescript:GeoSpecAxisExpectation]
+  GeoSpecAxisExpectation.x (property) [id: typescript:GeoSpecAxisExpectation.x]
+  GeoSpecAxisExpectation.y (property) [id: typescript:GeoSpecAxisExpectation.y]
+  GeoSpecAxisExpectation.z (property) [id: typescript:GeoSpecAxisExpectation.z]
+GeoSpecBoundingBoxExpectation (type) [5 members] — Bounding-box expectation accepted by `expectGeo(...).toHaveBoundingBox(...)` [id: typescript:GeoSpecBoundingBoxExpectation]
+  GeoSpecBoundingBoxExpectation.min (property) [id: typescript:GeoSpecBoundingBoxExpectation.min]
+  GeoSpecBoundingBoxExpectation.max (property) [id: typescript:GeoSpecBoundingBoxExpectation.max]
+  GeoSpecBoundingBoxExpectation.size (property) [id: typescript:GeoSpecBoundingBoxExpectation.size]
+  GeoSpecBoundingBoxExpectation.center (property) [id: typescript:GeoSpecBoundingBoxExpectation.center]
+  GeoSpecBoundingBoxExpectation.tolerance (property) [id: typescript:GeoSpecBoundingBoxExpectation.tolerance]
+GeoSpecCenterOfMassExpectation (type) [2 members] — Center-of-mass expectation accepted by `expectGeo(...).toHaveCenterOfMass(...)` [id: typescript:GeoSpecCenterOfMassExpectation]
+  GeoSpecCenterOfMassExpectation.point (property) [id: typescript:GeoSpecCenterOfMassExpectation.point]
+  GeoSpecCenterOfMassExpectation.tolerance (property) [id: typescript:GeoSpecCenterOfMassExpectation.tolerance]
+GeoSpecChamferFeatureExpectation (type) [3 members] — Chamfer-feature expectation accepted by `expectGeo(...).toHaveChamferFeature(...)` [id: typescript:GeoSpecChamferFeatureExpectation]
+  GeoSpecChamferFeatureExpectation.distance (property) [id: typescript:GeoSpecChamferFeatureExpectation.distance]
+  GeoSpecChamferFeatureExpectation.selection (property) [id: typescript:GeoSpecChamferFeatureExpectation.selection]
+  GeoSpecChamferFeatureExpectation.tolerance (property) [id: typescript:GeoSpecChamferFeatureExpectation.tolerance]
+GeoSpecCircularHoleExpectation (type) [5 members] — Circular-hole expectation accepted by `expectGeo(...).toHaveCircularHole(...)` [id: typescript:GeoSpecCircularHoleExpectation]
+  GeoSpecCircularHoleExpectation.diameter (property) [id: typescript:GeoSpecCircularHoleExpectation.diameter]
+  GeoSpecCircularHoleExpectation.through (property) [id: typescript:GeoSpecCircularHoleExpectation.through]
+  GeoSpecCircularHoleExpectation.axis (property) [id: typescript:GeoSpecCircularHoleExpectation.axis]
+  GeoSpecCircularHoleExpectation.center (property) [id: typescript:GeoSpecCircularHoleExpectation.center]
+  GeoSpecCircularHoleExpectation.tolerance (property) [id: typescript:GeoSpecCircularHoleExpectation.tolerance]
+GeoSpecCylindricalFaceExpectation (type) [3 members] — Cylindrical-face expectation accepted by `expectGeo(...).toHaveCylindricalFace(...)` [id: typescript:GeoSpecCylindricalFaceExpectation]
+  GeoSpecCylindricalFaceExpectation.radius (property) [id: typescript:GeoSpecCylindricalFaceExpectation.radius]
+  GeoSpecCylindricalFaceExpectation.axis (property) [id: typescript:GeoSpecCylindricalFaceExpectation.axis]
+  GeoSpecCylindricalFaceExpectation.tolerance (property) [id: typescript:GeoSpecCylindricalFaceExpectation.tolerance]
+GeoSpecComponentInterferenceAllowance (type) [5 members] — Intentional component interference allowance accepted by `expectGeo(...).toHaveNoComponentInterference(...)` [id: typescript:GeoSpecComponentInterferenceAllowance]
+  GeoSpecComponentInterferenceAllowance.kind (property) [id: typescript:GeoSpecComponentInterferenceAllowance.kind]
+  GeoSpecComponentInterferenceAllowance.left (property) [id: typescript:GeoSpecComponentInterferenceAllowance.left]
+  GeoSpecComponentInterferenceAllowance.right (property) [id: typescript:GeoSpecComponentInterferenceAllowance.right]
+  GeoSpecComponentInterferenceAllowance.maxVolume (property) [id: typescript:GeoSpecComponentInterferenceAllowance.maxVolume]
+  GeoSpecComponentInterferenceAllowance.reason (property) [id: typescript:GeoSpecComponentInterferenceAllowance.reason]
+GeoSpecComponentInterferenceExpectation (type) [3 members] — Component-interference expectation accepted by `expectGeo(...).toHaveNoComponentInterference(...)` [id: typescript:GeoSpecComponentInterferenceExpectation]
+  GeoSpecComponentInterferenceExpectation.tolerance (property) [id: typescript:GeoSpecComponentInterferenceExpectation.tolerance]
+  GeoSpecComponentInterferenceExpectation.pairs (property) [id: typescript:GeoSpecComponentInterferenceExpectation.pairs]
+  GeoSpecComponentInterferenceExpectation.allowances (property) [id: typescript:GeoSpecComponentInterferenceExpectation.allowances]
+GeoSpecComponentInterferencePairExpectation (type) [2 members] — A pair-specific component-interference check accepted by `expectGeo(...).toHaveNoComponentInterference(...)` [id: typescript:GeoSpecComponentInterferencePairExpectation]
+  GeoSpecComponentInterferencePairExpectation.left (property) [id: typescript:GeoSpecComponentInterferencePairExpectation.left]
+  GeoSpecComponentInterferencePairExpectation.right (property) [id: typescript:GeoSpecComponentInterferencePairExpectation.right]
+GeoSpecConnectedComponentsExpectation (type) [3 members] — Connected-components expectation accepted by `expectGeo(...).toHaveConnectedComponents(...)` [id: typescript:GeoSpecConnectedComponentsExpectation]
+  GeoSpecConnectedComponentsExpectation.count (property) [id: typescript:GeoSpecConnectedComponentsExpectation.count]
+  GeoSpecConnectedComponentsExpectation.tolerance (property) [id: typescript:GeoSpecConnectedComponentsExpectation.tolerance]
+  GeoSpecConnectedComponentsExpectation.toleranceMm (property) [id: typescript:GeoSpecConnectedComponentsExpectation.toleranceMm]
+GeoSpecGeometrySelector (type) — Geometry selector used by inspection and spatial relationship matchers [id: typescript:GeoSpecGeometrySelector]
+GeoSpecMatcher (type) [27 members] — Assertion chain returned by `expectGeo(subject)` [id: typescript:GeoSpecMatcher]
+  GeoSpecMatcher.not (property) — Core-owned negation [id: typescript:GeoSpecMatcher.not]
+  GeoSpecMatcher.toSatisfyRationalPlate (method) — Assert the fixed rational plate contract [id: typescript:GeoSpecMatcher.toSatisfyRationalPlate]
+  GeoSpecMatcher.toSatisfyParallelPlaneDistance (method) — Assert the fixed parallel-plane distance contract [id: typescript:GeoSpecMatcher.toSatisfyParallelPlaneDistance]
+  GeoSpecMatcher.toHaveBoundingBox (method) — Assert axis-aligned bounds, size, or center for a loaded geometry… [id: typescript:GeoSpecMatcher.toHaveBoundingBox]
+  GeoSpecMatcher.toHaveConnectedComponents (method) — Assert how many spatially disjoint chunks the mesh contains [id: typescript:GeoSpecMatcher.toHaveConnectedComponents]
+  GeoSpecMatcher.toBeWatertight (method) — Assert closed mesh edge incidence [id: typescript:GeoSpecMatcher.toBeWatertight]
+  GeoSpecMatcher.toHaveNoComponentInterference (method) — Assert that separate assembly components do not occupy the same… [id: typescript:GeoSpecMatcher.toHaveNoComponentInterference]
+  GeoSpecMatcher.toHaveAssemblyOccurrences (method) — Assert that named assembly occurrences exist with expected counts and… [id: typescript:GeoSpecMatcher.toHaveAssemblyOccurrences]
+  GeoSpecMatcher.toHaveSpatialRelationships (method) — Assert that selected entities satisfy declared spatial relationships [id: typescript:GeoSpecMatcher.toHaveSpatialRelationships]
+  GeoSpecMatcher.toHaveMeshIntegrity (method) — Assert rendered mesh evidence is internally trustworthy for downstream checks [id: typescript:GeoSpecMatcher.toHaveMeshIntegrity]
+  GeoSpecMatcher.toHaveNoDiagnostics (method) — Assert that the subject carries no diagnostics at the rejected… [id: typescript:GeoSpecMatcher.toHaveNoDiagnostics]
+  GeoSpecMatcher.toHaveSurfaceArea (method) — Assert total surface area, preferring exact BRep mass properties when… [id: typescript:GeoSpecMatcher.toHaveSurfaceArea]
+  GeoSpecMatcher.toHaveVolume (method) — Assert enclosed volume, preferring exact BRep mass properties when available [id: typescript:GeoSpecMatcher.toHaveVolume]
+  GeoSpecMatcher.toHaveMass (method) — Assert mass derived from exact mass properties or volume times… [id: typescript:GeoSpecMatcher.toHaveMass]
+  GeoSpecMatcher.toHaveCenterOfMass (method) — Assert the center of mass or mesh-derived centroid for a… [id: typescript:GeoSpecMatcher.toHaveCenterOfMass]
+  GeoSpecMatcher.toBeValidBrep (method) — Assert that exact BRep evidence reports a valid shape [id: typescript:GeoSpecMatcher.toBeValidBrep]
+  GeoSpecMatcher.toHaveTopologyCounts (method) — Assert exact BRep topology counts [id: typescript:GeoSpecMatcher.toHaveTopologyCounts]
+  GeoSpecMatcher.toHaveStepUnits (method) — Assert the STEP unit evidence [id: typescript:GeoSpecMatcher.toHaveStepUnits]
+  GeoSpecMatcher.toHaveProductStructure (method) — Assert STEP product-structure evidence [id: typescript:GeoSpecMatcher.toHaveProductStructure]
+  GeoSpecMatcher.toHavePlanarFace (method) — Assert that BRep evidence contains a planar face matching the… [id: typescript:GeoSpecMatcher.toHavePlanarFace]
+  GeoSpecMatcher.toHaveCylindricalFace (method) — Assert that BRep evidence contains a cylindrical face with the… [id: typescript:GeoSpecMatcher.toHaveCylindricalFace]
+  GeoSpecMatcher.toHaveCircularHole (method) — Assert that BRep evidence contains a circular hole matching diameter,… [id: typescript:GeoSpecMatcher.toHaveCircularHole]
+  GeoSpecMatcher.toHaveCircularHolePattern (method) — Assert that BRep evidence contains a repeated circular-hole pattern [id: typescript:GeoSpecMatcher.toHaveCircularHolePattern]
+  GeoSpecMatcher.toHaveChamferFeature (method) — Assert that BRep evidence contains a chamfer feature with the… [id: typescript:GeoSpecMatcher.toHaveChamferFeature]
+  GeoSpecMatcher.toHaveFilletFeature (method) — Assert that BRep evidence contains a fillet feature with the… [id: typescript:GeoSpecMatcher.toHaveFilletFeature]
+  GeoSpecMatcher.toHaveMinimumWallThickness (method) — Assert that BRep evidence reports a minimum wall thickness satisfying… [id: typescript:GeoSpecMatcher.toHaveMinimumWallThickness]
+  GeoSpecMatcher.toHaveVoidContinuity (method) — Assert that the declared waypoints share one connected void, stay… [id: typescript:GeoSpecMatcher.toHaveVoidContinuity]
+GeoSpecMassExpectation (type) [3 members] — Mass expectation accepted by `expectGeo(...).toHaveMass(...)` [id: typescript:GeoSpecMassExpectation]
+  GeoSpecMassExpectation.value (property) [id: typescript:GeoSpecMassExpectation.value]
+  GeoSpecMassExpectation.density (property) [id: typescript:GeoSpecMassExpectation.density]
+  GeoSpecMassExpectation.tolerance (property) [id: typescript:GeoSpecMassExpectation.tolerance]
+GeoSpecMeshIntegrityExpectation (type) [5 members] — Mesh integrity expectation accepted by `expectGeo(...).toHaveMeshIntegrity(...)` [id: typescript:GeoSpecMeshIntegrityExpectation]
+  GeoSpecMeshIntegrityExpectation.finitePositions (property) [id: typescript:GeoSpecMeshIntegrityExpectation.finitePositions]
+  GeoSpecMeshIntegrityExpectation.degenerateTriangles (property) [id: typescript:GeoSpecMeshIntegrityExpectation.degenerateTriangles]
+  GeoSpecMeshIntegrityExpectation.duplicateFaces (property) [id: typescript:GeoSpecMeshIntegrityExpectation.duplicateFaces]
+  GeoSpecMeshIntegrityExpectation.watertight (property) [id: typescript:GeoSpecMeshIntegrityExpectation.watertight]
+  GeoSpecMeshIntegrityExpectation.triangleCount (property) [id: typescript:GeoSpecMeshIntegrityExpectation.triangleCount]
+GeoSpecNoDiagnosticsExpectation (type) [1 members] — Diagnostic severities rejected by `expectGeo(...).toHaveNoDiagnostics(...)` [id: typescript:GeoSpecNoDiagnosticsExpectation]
+  GeoSpecNoDiagnosticsExpectation.severities (property) [id: typescript:GeoSpecNoDiagnosticsExpectation.severities]
+GeoSpecMinimumWallThicknessExpectation (type) [2 members] — Minimum-wall-thickness expectation accepted by `expectGeo(...).toHaveMinimumWallThickness(...)` [id: typescript:GeoSpecMinimumWallThicknessExpectation]
+  GeoSpecMinimumWallThicknessExpectation.value (property) [id: typescript:GeoSpecMinimumWallThicknessExpectation.value]
+  GeoSpecMinimumWallThicknessExpectation.tolerance (property) [id: typescript:GeoSpecMinimumWallThicknessExpectation.tolerance]
+GeoSpecCircularHolePatternExpectation (type) [6 members] — Circular-hole-pattern expectation accepted by `expectGeo(...).toHaveCircularHolePattern(...)` [id: typescript:GeoSpecCircularHolePatternExpectation]
+  GeoSpecCircularHolePatternExpectation.count (property) [id: typescript:GeoSpecCircularHolePatternExpectation.count]
+  GeoSpecCircularHolePatternExpectation.holeDiameter (property) [id: typescript:GeoSpecCircularHolePatternExpectation.holeDiameter]
+  GeoSpecCircularHolePatternExpectation.boltCircleDiameter (property) [id: typescript:GeoSpecCircularHolePatternExpectation.boltCircleDiameter]
+  GeoSpecCircularHolePatternExpectation.axis (property) [id: typescript:GeoSpecCircularHolePatternExpectation.axis]
+  GeoSpecCircularHolePatternExpectation.center (property) [id: typescript:GeoSpecCircularHolePatternExpectation.center]
+  GeoSpecCircularHolePatternExpectation.tolerance (property) [id: typescript:GeoSpecCircularHolePatternExpectation.tolerance]
+GeoSpecFilletFeatureExpectation (type) [3 members] — Fillet-feature expectation accepted by `expectGeo(...).toHaveFilletFeature(...)` [id: typescript:GeoSpecFilletFeatureExpectation]
+  GeoSpecFilletFeatureExpectation.radius (property) [id: typescript:GeoSpecFilletFeatureExpectation.radius]
+  GeoSpecFilletFeatureExpectation.selection (property) [id: typescript:GeoSpecFilletFeatureExpectation.selection]
+  GeoSpecFilletFeatureExpectation.tolerance (property) [id: typescript:GeoSpecFilletFeatureExpectation.tolerance]
+GeoSpecNumericExpectation (type) — Shared scalar expectation used by geometry measurements [id: typescript:GeoSpecNumericExpectation]
+GeoSpecPlanarFaceExpectation (type) [4 members] — Planar-face expectation accepted by `expectGeo(...).toHavePlanarFace(...)` [id: typescript:GeoSpecPlanarFaceExpectation]
+  GeoSpecPlanarFaceExpectation.normal (property) [id: typescript:GeoSpecPlanarFaceExpectation.normal]
+  GeoSpecPlanarFaceExpectation.offset (property) [id: typescript:GeoSpecPlanarFaceExpectation.offset]
+  GeoSpecPlanarFaceExpectation.area (property) [id: typescript:GeoSpecPlanarFaceExpectation.area]
+  GeoSpecPlanarFaceExpectation.tolerance (property) [id: typescript:GeoSpecPlanarFaceExpectation.tolerance]
+GeoSpecPointExpectation (type) — Point expectation accepted by center and feature matchers [id: typescript:GeoSpecPointExpectation]
+GeoSpecProductStructureExpectation (type) [2 members] — Product-structure expectation accepted by `expectGeo(...).toHaveProductStructure(...)` [id: typescript:GeoSpecProductStructureExpectation]
+  GeoSpecProductStructureExpectation.names (property) [id: typescript:GeoSpecProductStructureExpectation.names]
+  GeoSpecProductStructureExpectation.count (property) [id: typescript:GeoSpecProductStructureExpectation.count]
+GeoSpecSpatialRelationshipExpectation (type) [13 members] — One spatial relationship accepted by `expectGeo(...).toHaveSpatialRelationships(...)` [id: typescript:GeoSpecSpatialRelationshipExpectation]
+  GeoSpecSpatialRelationshipExpectation.id (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.id]
+  GeoSpecSpatialRelationshipExpectation.kind (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.kind]
+  GeoSpecSpatialRelationshipExpectation.subject (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.subject]
+  GeoSpecSpatialRelationshipExpectation.target (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.target]
+  GeoSpecSpatialRelationshipExpectation.tolerance (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.tolerance]
+  GeoSpecSpatialRelationshipExpectation.angularToleranceDegrees (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.angularToleranceDegrees]
+  GeoSpecSpatialRelationshipExpectation.angleDegrees (property) — Expected angle in degrees for `kind [id: typescript:GeoSpecSpatialRelationshipExpectation.angleDegrees]
+  GeoSpecSpatialRelationshipExpectation.axis (property) — Declared insertion axis (subject-frame direction) for `kind [id: typescript:GeoSpecSpatialRelationshipExpectation.axis]
+  GeoSpecSpatialRelationshipExpectation.min (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.min]
+  GeoSpecSpatialRelationshipExpectation.max (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.max]
+  GeoSpecSpatialRelationshipExpectation.minVolume (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.minVolume]
+  GeoSpecSpatialRelationshipExpectation.maxVolume (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.maxVolume]
+  GeoSpecSpatialRelationshipExpectation.reason (property) [id: typescript:GeoSpecSpatialRelationshipExpectation.reason]
+GeoSpecSpatialRelationshipsExpectation (type) [1 members] — Spatial relationship expectation accepted by `expectGeo(...).toHaveSpatialRelationships(...)` [id: typescript:GeoSpecSpatialRelationshipsExpectation]
+  GeoSpecSpatialRelationshipsExpectation.relationships (property) [id: typescript:GeoSpecSpatialRelationshipsExpectation.relationships]
+GeoSpecStepUnitsExpectation (type) [1 members] — STEP unit expectation accepted by `expectGeo(...).toHaveStepUnits(...)` [id: typescript:GeoSpecStepUnitsExpectation]
+  GeoSpecStepUnitsExpectation.unit (property) [id: typescript:GeoSpecStepUnitsExpectation.unit]
+GeoSpecSurfaceAreaExpectation (type) [2 members] — Surface-area expectation accepted by `expectGeo(...).toHaveSurfaceArea(...)` [id: typescript:GeoSpecSurfaceAreaExpectation]
+  GeoSpecSurfaceAreaExpectation.value (property) [id: typescript:GeoSpecSurfaceAreaExpectation.value]
+  GeoSpecSurfaceAreaExpectation.tolerance (property) [id: typescript:GeoSpecSurfaceAreaExpectation.tolerance]
+GeoSpecTopologyCountsExpectation (type) [8 members] — Topology-count expectation accepted by `expectGeo(...).toHaveTopologyCounts(...)` [id: typescript:GeoSpecTopologyCountsExpectation]
+  GeoSpecTopologyCountsExpectation.vertices (property) [id: typescript:GeoSpecTopologyCountsExpectation.vertices]
+  GeoSpecTopologyCountsExpectation.edges (property) [id: typescript:GeoSpecTopologyCountsExpectation.edges]
+  GeoSpecTopologyCountsExpectation.wires (property) [id: typescript:GeoSpecTopologyCountsExpectation.wires]
+  GeoSpecTopologyCountsExpectation.faces (property) [id: typescript:GeoSpecTopologyCountsExpectation.faces]
+  GeoSpecTopologyCountsExpectation.shells (property) [id: typescript:GeoSpecTopologyCountsExpectation.shells]
+  GeoSpecTopologyCountsExpectation.solids (property) [id: typescript:GeoSpecTopologyCountsExpectation.solids]
+  GeoSpecTopologyCountsExpectation.compounds (property) [id: typescript:GeoSpecTopologyCountsExpectation.compounds]
+  GeoSpecTopologyCountsExpectation.tolerance (property) [id: typescript:GeoSpecTopologyCountsExpectation.tolerance]
+GeoSpecValidBrepExpectation (type) [6 members] — Exact BRep validity expectation accepted by `expectGeo(...).toBeValidBrep(...)` [id: typescript:GeoSpecValidBrepExpectation]
+  GeoSpecValidBrepExpectation.maxTolerance (property) [id: typescript:GeoSpecValidBrepExpectation.maxTolerance]
+  GeoSpecValidBrepExpectation.freeBounds (property) [id: typescript:GeoSpecValidBrepExpectation.freeBounds]
+  GeoSpecValidBrepExpectation.minEdgeLength (property) [id: typescript:GeoSpecValidBrepExpectation.minEdgeLength]
+  GeoSpecValidBrepExpectation.sameParameter (property) [id: typescript:GeoSpecValidBrepExpectation.sameParameter]
+  GeoSpecValidBrepExpectation.closedShells (property) [id: typescript:GeoSpecValidBrepExpectation.closedShells]
+  GeoSpecValidBrepExpectation.closedWires (property) [id: typescript:GeoSpecValidBrepExpectation.closedWires]
+GeoSpecVoidContinuityExpectation (type) [5 members] — Void-continuity expectation accepted by `expectGeo(...).toHaveVoidContinuity(...)` [id: typescript:GeoSpecVoidContinuityExpectation]
+  GeoSpecVoidContinuityExpectation.path (property) — Ordered waypoints (>= 1) known to lie in the void… [id: typescript:GeoSpecVoidContinuityExpectation.path]
+  GeoSpecVoidContinuityExpectation.material (property) — Occurrence names whose solids bound the void [id: typescript:GeoSpecVoidContinuityExpectation.material]
+  GeoSpecVoidContinuityExpectation.minCrossSection (property) — Minimum required bottleneck cross-section (mm²), sampled [id: typescript:GeoSpecVoidContinuityExpectation.minCrossSection]
+  GeoSpecVoidContinuityExpectation.isolatedFrom (property) — Points that must NOT be reachable from the path void… [id: typescript:GeoSpecVoidContinuityExpectation.isolatedFrom]
+  GeoSpecVoidContinuityExpectation.bounds (property) — Region bounded for the proof (subject frame) [id: typescript:GeoSpecVoidContinuityExpectation.bounds]
+GeoSpecVoidWaypoint (type) — One void-continuity waypoint [id: typescript:GeoSpecVoidWaypoint]
+GeoSpecVolumeExpectation (type) [2 members] — Volume expectation accepted by `expectGeo(...).toHaveVolume(...)` [id: typescript:GeoSpecVolumeExpectation]
+  GeoSpecVolumeExpectation.value (property) [id: typescript:GeoSpecVolumeExpectation.value]
+  GeoSpecVolumeExpectation.tolerance (property) [id: typescript:GeoSpecVolumeExpectation.tolerance]
+BrepEvidence (type) [11 members] — Basic exact or topology-derived BRep evidence consumed by early feature… [id: typescript:BrepEvidence]
+  BrepEvidence.validity (property) [id: typescript:BrepEvidence.validity]
+  BrepEvidence.topologyCounts (property) [id: typescript:BrepEvidence.topologyCounts]
+  BrepEvidence.boundingBox (property) [id: typescript:BrepEvidence.boundingBox]
+  BrepEvidence.massProperties (property) [id: typescript:BrepEvidence.massProperties]
+  BrepEvidence.planarFaces (property) [id: typescript:BrepEvidence.planarFaces]
+  BrepEvidence.cylindricalFaces (property) [id: typescript:BrepEvidence.cylindricalFaces]
+  BrepEvidence.circularHoles (property) [id: typescript:BrepEvidence.circularHoles]
+  BrepEvidence.circularHolePatterns (property) [id: typescript:BrepEvidence.circularHolePatterns]
+  BrepEvidence.chamferFeatures (property) [id: typescript:BrepEvidence.chamferFeatures]
+  BrepEvidence.filletFeatures (property) [id: typescript:BrepEvidence.filletFeatures]
+  BrepEvidence.minimumWallThickness (property) [id: typescript:BrepEvidence.minimumWallThickness]
+GeometryFileFormat (type) — Geometry file formats understood by GeoSpec provenance [id: typescript:GeometryFileFormat]
+GeometryCapability (type) [2 members] — Capability exposed by a loaded subject [id: typescript:GeometryCapability]
+  GeometryCapability.kind (property) [id: typescript:GeometryCapability.kind]
+  GeometryCapability.feature (property) [id: typescript:GeometryCapability.feature]
+GeometryDiagnostic (type) [6 members] — Diagnostic emitted by GeoSpec loaders, analyzers, and matchers [id: typescript:GeometryDiagnostic]
+  GeometryDiagnostic.code (property) [id: typescript:GeometryDiagnostic.code]
+  GeometryDiagnostic.severity (property) [id: typescript:GeometryDiagnostic.severity]
+  GeometryDiagnostic.message (property) [id: typescript:GeometryDiagnostic.message]
+  GeometryDiagnostic.suggestion (property) [id: typescript:GeometryDiagnostic.suggestion]
+  GeometryDiagnostic.spatial (property) [id: typescript:GeometryDiagnostic.spatial]
+  GeometryDiagnostic.details (property) [id: typescript:GeometryDiagnostic.details]
+GeometryProvenance (type) [6 members] — Provenance recorded by GeoSpec loaders [id: typescript:GeometryProvenance]
+  GeometryProvenance.source (property) [id: typescript:GeometryProvenance.source]
+  GeometryProvenance.unit (property) [id: typescript:GeometryProvenance.unit]
+  GeometryProvenance.loader (property) [id: typescript:GeometryProvenance.loader]
+  GeometryProvenance.contentHash (property) [id: typescript:GeometryProvenance.contentHash]
+  GeometryProvenance.parameters (property) [id: typescript:GeometryProvenance.parameters]
+  GeometryProvenance.exportIntent (property) [id: typescript:GeometryProvenance.exportIntent]
+GeometrySource (type) [5 members] — Source metadata for a loaded geometry subject [id: typescript:GeometrySource]
+  GeometrySource.kind (property) [id: typescript:GeometrySource.kind]
+  GeometrySource.format (property) [id: typescript:GeometrySource.format]
+  GeometrySource.path (property) [id: typescript:GeometrySource.path]
+  GeometrySource.name (property) [id: typescript:GeometrySource.name]
+  GeometrySource.byteLength (property) [id: typescript:GeometrySource.byteLength]
+GeometrySubject (type) [8 members] — Canonical P0 object under test for GeoSpec [id: typescript:GeometrySubject]
+  GeometrySubject.kind (property) [id: typescript:GeometrySubject.kind]
+  GeometrySubject.subjectId (property) — Opaque engine-owned identifier used by every protocol claim [id: typescript:GeometrySubject.subjectId]
+  GeometrySubject.mesh (property) [id: typescript:GeometrySubject.mesh]
+  GeometrySubject.brep (property) [id: typescript:GeometrySubject.brep]
+  GeometrySubject.step (property) [id: typescript:GeometrySubject.step]
+  GeometrySubject.provenance (property) [id: typescript:GeometrySubject.provenance]
+  GeometrySubject.capabilities (property) [id: typescript:GeometrySubject.capabilities]
+  GeometrySubject.diagnostics (property) [id: typescript:GeometrySubject.diagnostics]
+GeometrySubjectMeshEvidence (type) [2 members] — Wire-safe mesh summary carried by an opaque geometry subject [id: typescript:GeometrySubjectMeshEvidence]
+  GeometrySubjectMeshEvidence.format (property) [id: typescript:GeometrySubjectMeshEvidence.format]
+  GeometrySubjectMeshEvidence.stats (property) [id: typescript:GeometrySubjectMeshEvidence.stats]
+MeshEvidence (type) [2 members] — Mesh evidence loaded from geometry bytes or buffers [id: typescript:MeshEvidence]
+  MeshEvidence.format (property) [id: typescript:MeshEvidence.format]
+  MeshEvidence.stats (property) [id: typescript:MeshEvidence.stats]
+MeshFileFormat (type) — Geometry file formats supported by the P0 mesh loader [id: typescript:MeshFileFormat]
+MeshQualityStats (type) [8 members] — Triangle quality and scalar mesh metrics used by P0 GeoSpec… [id: typescript:MeshQualityStats]
+  MeshQualityStats.triangleCount (property) [id: typescript:MeshQualityStats.triangleCount]
+  MeshQualityStats.nonFiniteVertices (property) [id: typescript:MeshQualityStats.nonFiniteVertices]
+  MeshQualityStats.degenerateTriangles (property) [id: typescript:MeshQualityStats.degenerateTriangles]
+  MeshQualityStats.duplicateFaces (property) [id: typescript:MeshQualityStats.duplicateFaces]
+  MeshQualityStats.triangles (property) [id: typescript:MeshQualityStats.triangles]
+  MeshQualityStats.surfaceArea (property) [id: typescript:MeshQualityStats.surfaceArea]
+  MeshQualityStats.signedVolume (property) [id: typescript:MeshQualityStats.signedVolume]
+  MeshQualityStats.centerOfMass (property) [id: typescript:MeshQualityStats.centerOfMass]
+MeshTriangle (type) [7 members] — One triangle from mesh evidence, in geometry document coordinates [id: typescript:MeshTriangle]
+  MeshTriangle.primitive (property) [id: typescript:MeshTriangle.primitive]
+  MeshTriangle.triangleIndex (property) [id: typescript:MeshTriangle.triangleIndex]
+  MeshTriangle.a (property) [id: typescript:MeshTriangle.a]
+  MeshTriangle.b (property) [id: typescript:MeshTriangle.b]
+  MeshTriangle.c (property) [id: typescript:MeshTriangle.c]
+  MeshTriangle.center (property) [id: typescript:MeshTriangle.center]
+  MeshTriangle.area (property) [id: typescript:MeshTriangle.area]
+StepEvidence (type) [6 members] — STEP/XDE evidence extracted while loading a STEP subject [id: typescript:StepEvidence]
+  StepEvidence.schema (property) [id: typescript:StepEvidence.schema]
+  StepEvidence.unit (property) [id: typescript:StepEvidence.unit]
+  StepEvidence.productStructure (property) [id: typescript:StepEvidence.productStructure]
+  StepEvidence.readStrategy (property) [id: typescript:StepEvidence.readStrategy]
+  StepEvidence.capabilities (property) [id: typescript:StepEvidence.capabilities]
+  StepEvidence.xde (property) — Structured AP242 XDE read result (occurrences, subshape names, datum placements) [id: typescript:StepEvidence.xde]
+Vec3 (type) — Numeric 3D vector [id: typescript:Vec3]
+AnalyzeMeshOptions (type) [8 members] — Analyze source bytes or an already retained subject, never both [id: typescript:AnalyzeMeshOptions]
+  AnalyzeMeshOptions.source (property) [id: typescript:AnalyzeMeshOptions.source]
+  AnalyzeMeshOptions.format (property) [id: typescript:AnalyzeMeshOptions.format]
+  AnalyzeMeshOptions.path (property) [id: typescript:AnalyzeMeshOptions.path]
+  AnalyzeMeshOptions.name (property) [id: typescript:AnalyzeMeshOptions.name]
+  AnalyzeMeshOptions.unit (property) — Unit exposed by the returned GeoSpec subject [id: typescript:AnalyzeMeshOptions.unit]
+  AnalyzeMeshOptions.sourceUnit (property) — Coordinate unit of the supplied mesh data before normalization [id: typescript:AnalyzeMeshOptions.sourceUnit]
+  AnalyzeMeshOptions.parameters (property) [id: typescript:AnalyzeMeshOptions.parameters]
+  AnalyzeMeshOptions.subject (property) [id: typescript:AnalyzeMeshOptions.subject]
+AnalyzeMeshResult (type) [1 members] — Mesh analysis result [id: typescript:AnalyzeMeshResult]
+  AnalyzeMeshResult.success (property) [id: typescript:AnalyzeMeshResult.success]
+LoadMeshOptions (type) [7 members] — Options for loading mesh evidence [id: typescript:LoadMeshOptions]
+  LoadMeshOptions.source (property) [id: typescript:LoadMeshOptions.source]
+  LoadMeshOptions.format (property) [id: typescript:LoadMeshOptions.format]
+  LoadMeshOptions.path (property) [id: typescript:LoadMeshOptions.path]
+  LoadMeshOptions.name (property) [id: typescript:LoadMeshOptions.name]
+  LoadMeshOptions.unit (property) — Unit exposed by the returned GeoSpec subject [id: typescript:LoadMeshOptions.unit]
+  LoadMeshOptions.sourceUnit (property) — Coordinate unit of the supplied mesh data before normalization [id: typescript:LoadMeshOptions.sourceUnit]
+  LoadMeshOptions.parameters (property) [id: typescript:LoadMeshOptions.parameters]
+LoadMeshResult (type) [1 members] — Result of loading mesh evidence into a GeoSpec geometry subject [id: typescript:LoadMeshResult]
+  LoadMeshResult.success (property) [id: typescript:LoadMeshResult.success]
+GeoSpecVec3 (type) — Numeric 3D vector [id: typescript:GeoSpecVec3]
+GeoSpecExportRoute (type) — Runtime route metadata used to decide whether a runtime export… [id: typescript:GeoSpecExportRoute]
+RuntimeBackedModelFormat (type) [id: typescript:RuntimeBackedModelFormat]
+RuntimeClientWithRoutes (type) [3 members] — Runtime client shape for route-aware Tau runtimes [id: typescript:RuntimeClientWithRoutes]
+  RuntimeClientWithRoutes.open (property) [id: typescript:RuntimeClientWithRoutes.open]
+  RuntimeClientWithRoutes.on (method) [id: typescript:RuntimeClientWithRoutes.on]
+  RuntimeClientWithRoutes.bestRouteFor (method) [id: typescript:RuntimeClientWithRoutes.bestRouteFor]
+RuntimeExportIntent (type) [3 members] — Resolved runtime export request and provenance for a GeoSpec model… [id: typescript:RuntimeExportIntent]
+  RuntimeExportIntent.options (property) [id: typescript:RuntimeExportIntent.options]
+  RuntimeExportIntent.provenance (property) [id: typescript:RuntimeExportIntent.provenance]
+  RuntimeExportIntent.sourceUnit (property) [id: typescript:RuntimeExportIntent.sourceUnit]
+RuntimeExportIntentFailure (type) [2 members] — Structured failure returned when a runtime cannot provide the requested… [id: typescript:RuntimeExportIntentFailure]
+  RuntimeExportIntentFailure.success (property) [id: typescript:RuntimeExportIntentFailure.success]
+  RuntimeExportIntentFailure.diagnostics (property) [id: typescript:RuntimeExportIntentFailure.diagnostics]
+CreateModelLoaderOptions (type) [10 members] — Defaults accepted by {@link import ('./load-model.js').createModelLoader} [id: typescript:CreateModelLoaderOptions]
+  CreateModelLoaderOptions.engine (property) — Initialized compiled engine supplied by the host, never selected by… [id: typescript:CreateModelLoaderOptions.engine]
+  CreateModelLoaderOptions.readSource (property) — Rooted host reader for direct filesystem or URL sources [id: typescript:CreateModelLoaderOptions.readSource]
+  CreateModelLoaderOptions.format (property) — Geometry format to export when an individual call does not… [id: typescript:CreateModelLoaderOptions.format]
+  CreateModelLoaderOptions.runtime (property) — Runtime client or lazy runtime factory [id: typescript:CreateModelLoaderOptions.runtime]
+  CreateModelLoaderOptions.sourceAdapters (property) — Source-specific runtime adapters, e.g [id: typescript:CreateModelLoaderOptions.sourceAdapters]
+  CreateModelLoaderOptions.projectPath (property) — Project root used by runtime integrations [id: typescript:CreateModelLoaderOptions.projectPath]
+  CreateModelLoaderOptions.stepStreaming (property) — STEP reader strategy used for STEP sources or exports [id: typescript:CreateModelLoaderOptions.stepStreaming]
+  CreateModelLoaderOptions.mesh (property) — Whether STEP loading should also produce mesh evidence [id: typescript:CreateModelLoaderOptions.mesh]
+  CreateModelLoaderOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence [id: typescript:CreateModelLoaderOptions.meshLinearTolerance]
+  CreateModelLoaderOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence [id: typescript:CreateModelLoaderOptions.meshAngularToleranceDegrees]
+GeoSpecModelFormat (type) — Geometry formats accepted by {@link import ('./load-model.js').loadModel} [id: typescript:GeoSpecModelFormat]
+GeoSpecModelLoader (type) — Function shape used by GeoSpec runners to provide model loading… [id: typescript:GeoSpecModelLoader]
+ManagedGeoSpecModelLoader (type) [1 members] — A configured loader whose shared runtime can be released with… [id: typescript:ManagedGeoSpecModelLoader]
+  ManagedGeoSpecModelLoader.dispose (method) [id: typescript:ManagedGeoSpecModelLoader.dispose]
+GeoSpecRuntimeClient (type) [2 members] — Runtime client surface consumed by `geospec/model` [id: typescript:GeoSpecRuntimeClient]
+  GeoSpecRuntimeClient.open (property) [id: typescript:GeoSpecRuntimeClient.open]
+  GeoSpecRuntimeClient.on (method) [id: typescript:GeoSpecRuntimeClient.on]
+GeoSpecRuntimeClientFactory (type) — Lazy runtime factory consumed by `geospec/model` [id: typescript:GeoSpecRuntimeClientFactory]
+GeoSpecRuntimeSourceAdapter (type) [3 members] — Explicit source adapter for formats whose runtime setup is not… [id: typescript:GeoSpecRuntimeSourceAdapter]
+  GeoSpecRuntimeSourceAdapter.id (property) [id: typescript:GeoSpecRuntimeSourceAdapter.id]
+  GeoSpecRuntimeSourceAdapter.extensions (property) [id: typescript:GeoSpecRuntimeSourceAdapter.extensions]
+  GeoSpecRuntimeSourceAdapter.createRuntime (method) [id: typescript:GeoSpecRuntimeSourceAdapter.createRuntime]
+LoadModelCodeOptions (type) [11 members] — Inline code-CAD model load options [id: typescript:LoadModelCodeOptions]
+  LoadModelCodeOptions.code (property) — Source files keyed by project-relative path [id: typescript:LoadModelCodeOptions.code]
+  LoadModelCodeOptions.file (property) — Entry path to render from {@link code } [id: typescript:LoadModelCodeOptions.file]
+  LoadModelCodeOptions.format (property) — Geometry format to export [id: typescript:LoadModelCodeOptions.format]
+  LoadModelCodeOptions.parameters (property) — Explicit parameters passed to the runtime [id: typescript:LoadModelCodeOptions.parameters]
+  LoadModelCodeOptions.runtime (property) — Runtime client or lazy runtime factory [id: typescript:LoadModelCodeOptions.runtime]
+  LoadModelCodeOptions.sourceAdapters (property) — Source-specific runtime adapters, e.g [id: typescript:LoadModelCodeOptions.sourceAdapters]
+  LoadModelCodeOptions.projectPath (property) — Project root used by runtime integrations [id: typescript:LoadModelCodeOptions.projectPath]
+  LoadModelCodeOptions.stepStreaming (property) — STEP reader strategy used for STEP exports [id: typescript:LoadModelCodeOptions.stepStreaming]
+  LoadModelCodeOptions.mesh (property) — Whether STEP loading should also produce mesh evidence [id: typescript:LoadModelCodeOptions.mesh]
+  LoadModelCodeOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence [id: typescript:LoadModelCodeOptions.meshLinearTolerance]
+  LoadModelCodeOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence [id: typescript:LoadModelCodeOptions.meshAngularToleranceDegrees]
+LoadModelFileOptions (type) [10 members] — Filesystem-backed model load options [id: typescript:LoadModelFileOptions]
+  LoadModelFileOptions.file (property) — Project-relative model file to render [id: typescript:LoadModelFileOptions.file]
+  LoadModelFileOptions.projectPath (property) — Project root used by runtime integrations [id: typescript:LoadModelFileOptions.projectPath]
+  LoadModelFileOptions.format (property) — Geometry format to export [id: typescript:LoadModelFileOptions.format]
+  LoadModelFileOptions.parameters (property) — Explicit parameters passed to the runtime [id: typescript:LoadModelFileOptions.parameters]
+  LoadModelFileOptions.runtime (property) — Runtime client or lazy runtime factory [id: typescript:LoadModelFileOptions.runtime]
+  LoadModelFileOptions.sourceAdapters (property) — Source-specific runtime adapters, e.g [id: typescript:LoadModelFileOptions.sourceAdapters]
+  LoadModelFileOptions.stepStreaming (property) — STEP reader strategy used for STEP exports [id: typescript:LoadModelFileOptions.stepStreaming]
+  LoadModelFileOptions.mesh (property) — Whether STEP loading should also produce mesh evidence [id: typescript:LoadModelFileOptions.mesh]
+  LoadModelFileOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence [id: typescript:LoadModelFileOptions.meshLinearTolerance]
+  LoadModelFileOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence [id: typescript:LoadModelFileOptions.meshAngularToleranceDegrees]
+LoadModelOptions (type) [6 members] — Options accepted by {@link import ('./load-model.js').loadModel} [id: typescript:LoadModelOptions]
+  LoadModelOptions.format (property) — Geometry format to export [id: typescript:LoadModelOptions.format]
+  LoadModelOptions.parameters (property) — Explicit parameters passed to the runtime [id: typescript:LoadModelOptions.parameters]
+  LoadModelOptions.stepStreaming (property) — STEP reader strategy used for STEP exports [id: typescript:LoadModelOptions.stepStreaming]
+  LoadModelOptions.mesh (property) — Whether STEP loading should also produce mesh evidence [id: typescript:LoadModelOptions.mesh]
+  LoadModelOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence [id: typescript:LoadModelOptions.meshLinearTolerance]
+  LoadModelOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence [id: typescript:LoadModelOptions.meshAngularToleranceDegrees]
+LoadModelSourceOptions (type) [11 members] — Direct geometry-source model load options [id: typescript:LoadModelSourceOptions]
+  LoadModelSourceOptions.source (property) — Geometry bytes, path, browser file/blob, or in-memory mesh buffer [id: typescript:LoadModelSourceOptions.source]
+  LoadModelSourceOptions.resources (property) — Named external resources consumed alongside the direct geometry bytes [id: typescript:LoadModelSourceOptions.resources]
+  LoadModelSourceOptions.format (property) — Source geometry format [id: typescript:LoadModelSourceOptions.format]
+  LoadModelSourceOptions.path (property) — Source path recorded in provenance [id: typescript:LoadModelSourceOptions.path]
+  LoadModelSourceOptions.name (property) — Human-readable source name recorded in provenance [id: typescript:LoadModelSourceOptions.name]
+  LoadModelSourceOptions.sourceUnit (property) — Coordinate unit of raw GLB/glTF or mesh-buffer data before canonical… [id: typescript:LoadModelSourceOptions.sourceUnit]
+  LoadModelSourceOptions.parameters (property) — Explicit parameters recorded in provenance [id: typescript:LoadModelSourceOptions.parameters]
+  LoadModelSourceOptions.stepStreaming (property) — STEP reader strategy used for STEP sources [id: typescript:LoadModelSourceOptions.stepStreaming]
+  LoadModelSourceOptions.mesh (property) — Whether STEP loading should also produce mesh evidence [id: typescript:LoadModelSourceOptions.mesh]
+  LoadModelSourceOptions.meshLinearTolerance (property) — Linear tolerance used while meshing exact BRep evidence [id: typescript:LoadModelSourceOptions.meshLinearTolerance]
+  LoadModelSourceOptions.meshAngularToleranceDegrees (property) — Angular tolerance in degrees used while meshing exact BRep evidence [id: typescript:LoadModelSourceOptions.meshAngularToleranceDegrees]
 
-## Classs — `api-classs.md`
+## Classes — `api-classes.md`
 
-GeoSpecModelLoadError (class) [2 members] — Error thrown by {@link import ('./load-model.js').loadModel} when geometry cannot be…
-  GeoSpecModelLoadError.diagnostics (property) — Structured diagnostics explaining why model loading failed
-  GeoSpecModelLoadError.constructor (constructor)
-GeoSpecAssertionError (class) [2 members] — Assertion error thrown by GeoSpec matchers when an expectation does…
-  GeoSpecAssertionError.diagnostics (property)
-  GeoSpecAssertionError.constructor (constructor)
+GeoSpecModelLoadError (class) [2 members] — Error thrown by {@link import ('./load-model.js').loadModel} when geometry cannot be… [id: typescript:GeoSpecModelLoadError]
+  GeoSpecModelLoadError.diagnostics (property) — Structured diagnostics explaining why model loading failed [id: typescript:GeoSpecModelLoadError.diagnostics]
+  GeoSpecModelLoadError.constructor (constructor) [id: typescript:GeoSpecModelLoadError.constructor]

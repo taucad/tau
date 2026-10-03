@@ -1,10 +1,10 @@
 import '#styles/global.css';
 import 'dockview-react/dist/styles/dockview.css';
-import { cleanup, fireEvent, render, screen } from '@testing-library/react';
+import { cleanup, render, screen } from '@testing-library/react';
 import { page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState, useSyncExternalStore } from 'react';
-import type { DockviewApi, DockviewReadyEvent } from 'dockview-react';
+import type { DockviewApi, DockviewReadyEvent, IDockviewPanelProps } from 'dockview-react';
 import type { Evaluation } from '@taucad/runtime';
 import type { WorkbenchView } from '@taucad/workbench';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
@@ -14,7 +14,7 @@ import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { newViewRecord } from '#workbench-records/projection.js';
 
 const state = vi.hoisted(() => ({
-  records: new Map(),
+  records: new Map<string, WorkbenchView>(),
   edits: vi.fn<(viewId: string, change: (current: WorkbenchView | undefined) => WorkbenchView) => void>(),
   paletteItems: [] as CommandPaletteItem[],
   revision: 0,
@@ -63,7 +63,9 @@ vi.mock('#hooks/use-project.js', () => ({
 vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: state.edits }),
 }));
-vi.mock('#routes/w.$workspace.$project/project-workspace-actions.js', () => ({ ProjectWorkspaceActions: () => null }));
+vi.mock('#routes/w.$workspace.$project/project-workspace-actions.js', () => ({
+  ProjectWorkspaceActions: () => <button type='button'>Workspace actions</button>,
+}));
 vi.mock('#components/layout/command-palette.js', () => ({
   useCommandPaletteItems: (_id: string, factory: () => CommandPaletteItem[]) => {
     state.paletteItems = factory();
@@ -71,26 +73,67 @@ vi.mock('#components/layout/command-palette.js', () => ({
 }));
 
 const { Dockview } = await import('#components/panes/dockview.js');
-const { ViewerProjectionCommandItems, ViewerRightActions } =
+const { ViewerRightActions, ViewerProjectionCommandItems } =
   await import('#routes/w.$workspace.$project/chat-viewer-dockview.js');
+const { ViewerProjectionPicker } = await import('#routes/w.$workspace.$project/chat-viewer-projection-picker.js');
 
-function DockFixture({ width, tabs }: { readonly width: number; readonly tabs: number }): React.JSX.Element {
+type Params = { viewId: string; entryPath: string };
+function BrowserViewerPane({ api, containerApi, params }: IDockviewPanelProps<Params>): React.JSX.Element {
+  return (
+    <div data-testid={`viewer-pane-${params.viewId}`} className='relative size-full overflow-hidden bg-background'>
+      <div className='absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)]'>
+        <ViewerProjectionPicker
+          viewId={params.viewId}
+          entryPath={params.entryPath}
+          cadActor={actor as ActorRefFrom<typeof cadMachine>}
+          onOpenBeside={(kernelViewId) => {
+            const viewId = `pane-${String(containerApi.panels.length)}`;
+            containerApi.addPanel({
+              id: viewId,
+              component: 'viewer',
+              title: 'main.tsx',
+              params: { viewId, entryPath: params.entryPath },
+              position: { direction: 'right', referenceGroup: api.group },
+            });
+            state.edits(viewId, () => ({ ...newViewRecord(params.entryPath), selectedKernelView: kernelViewId }));
+          }}
+        />
+      </div>
+      <div className='flex size-full items-center justify-center'>Viewer content</div>
+    </div>
+  );
+}
+
+function DockFixture({
+  width,
+  isSplit = false,
+}: {
+  readonly width: number;
+  readonly isSplit?: boolean;
+}): React.JSX.Element {
   const [api, setApi] = useState<DockviewApi>();
   const ready = (event: DockviewReadyEvent): void => {
     setApi(event.api);
-    for (let index = 0; index < tabs; index += 1) {
+    const first = event.api.addPanel({
+      id: 'pane-0',
+      component: 'viewer',
+      title: 'main.tsx',
+      params: { viewId: 'pane-0', entryPath: 'main.tsx' },
+    });
+    if (isSplit) {
       event.api.addPanel({
-        id: `pane-${String(index)}`,
+        id: 'pane-1',
         component: 'viewer',
-        title: `main.tsx ${String(index)}`,
-        params: { viewId: `pane-${String(index)}`, entryPath: 'main.tsx' },
+        title: 'main.tsx',
+        params: { viewId: 'pane-1', entryPath: 'main.tsx' },
+        position: { direction: 'right', referenceGroup: first.api.group },
       });
     }
   };
   return (
     <div data-testid='frame' className='@container/viewer' style={{ width, height: 400 }}>
       <Dockview
-        components={{ viewer: () => <div>Viewer content</div> }}
+        components={{ viewer: BrowserViewerPane }}
         rightHeaderActionsComponent={ViewerRightActions}
         onReady={ready}
       />
@@ -116,131 +159,83 @@ afterEach(() => {
   state.singleView = false;
 });
 
-describe('viewer Dockview header in Chromium', () => {
-  it('omits palette and switch commands for a sole offered view', async () => {
-    state.singleView = true;
+describe('viewer pane projection picker in Chromium', () => {
+  it('keeps the header free of picker controls and gives split panes independent choices', async () => {
     await page.viewport(760, 480);
     render(
       <TooltipProvider>
-        <DockFixture width={720} tabs={1} />
+        <DockFixture width={720} isSplit />
       </TooltipProvider>,
     );
-    await screen.findByTestId('panel-count');
-    expect(state.paletteItems).toEqual([]);
-    expect(screen.queryByRole('group', { name: 'Views' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('combobox', { name: 'Projection view' })).not.toBeInTheDocument();
-  });
-
-  it('exposes each offered projection through the palette with active-pane actions', async () => {
-    await page.viewport(760, 480);
-    render(
-      <TooltipProvider>
-        <DockFixture width={720} tabs={1} />
-      </TooltipProvider>,
-    );
-    await vi.waitFor(() => {
-      expect(state.paletteItems).toHaveLength(6);
-    });
-    expect(state.paletteItems.map((item) => item.label)).toContain('Show PCB');
-    expect(state.paletteItems.map((item) => item.label)).toContain('Open PCB beside');
-    state.paletteItems.find((item) => item.label === 'Show PCB')?.action?.();
-    expect(state.edits).toHaveBeenCalledOnce();
-    const saved = state.edits.mock.calls[0]![1](newViewRecord('main.tsx'));
-    expect(saved.selectedKernelView).toBe('pcb');
-    state.paletteItems.find((item) => item.label === 'Open PCB beside')?.action?.();
-    await vi.waitFor(() => {
-      expect(document.querySelectorAll('.dv-tab')).toHaveLength(2);
-    });
-  });
-
-  it('opens another real Dockview panel for the chosen projection', async () => {
-    await page.viewport(760, 480);
-    render(
-      <TooltipProvider>
-        <DockFixture width={720} tabs={1} />
-      </TooltipProvider>,
-    );
-    fireEvent.change(await screen.findByRole('combobox', { name: 'Open projection beside' }), {
-      target: { value: 'drawing' },
-    });
-    await vi.waitFor(() => {
-      expect(document.querySelectorAll('.dv-tab')).toHaveLength(2);
-    });
-    expect(state.edits).toHaveBeenCalledOnce();
-  });
-
-  it('shows the saved instance and options for the selected projection', async () => {
-    state.records.set('pane-0', { ...newViewRecord('main.tsx'), selectedKernelView: 'drawing' });
-    await page.viewport(760, 480);
-    render(
-      <TooltipProvider>
-        <DockFixture width={720} tabs={1} />
-      </TooltipProvider>,
-    );
-    expect(await screen.findByRole('combobox', { name: 'Drawing instance' })).toBeVisible();
-    expect(screen.getByRole('option', { name: 'Power' })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole('button', { name: 'Drawing options' }));
-    expect(screen.getByRole('checkbox', { name: 'Labels' })).toBeVisible();
-  });
-
-  it('keeps visible focus and selected state while changing a view and its instance', async () => {
-    await page.viewport(760, 480);
-    render(
-      <TooltipProvider>
-        <DockFixture width={720} tabs={1} />
-      </TooltipProvider>,
-    );
-    const drawing = await screen.findByRole('button', { name: 'Drawing' });
-    expect(drawing).toHaveAttribute('aria-pressed', 'false');
-    drawing.focus();
-    await userEvent.keyboard('{Enter}');
-    expect(drawing).toHaveFocus();
-    expect(drawing.matches(':focus-visible')).toBe(true);
-    expect(getComputedStyle(drawing).outlineWidth).toBe('2px');
-    const selected = state.edits.mock.calls[0]![1](newViewRecord('main.tsx'));
-    state.records.set('pane-0', selected);
+    const first = await screen.findByTestId('viewer-pane-pane-0');
+    const second = await screen.findByTestId('viewer-pane-pane-1');
+    expect(first.querySelector('button[aria-label^="Projection view"]')).toBeVisible();
+    expect(second.querySelector('button[aria-label^="Projection view"]')).toBeVisible();
+    expect(document.querySelector('.dv-tabs-container button[aria-label^="Projection view"]')).toBeNull();
+    expect(screen.getAllByRole('button', { name: 'Workspace actions' })).toHaveLength(2);
+    await userEvent.click(first.querySelector('button[aria-label^="Projection view"]')!);
+    await userEvent.click(await screen.findByRole('menuitemradio', { name: 'Drawing' }));
+    expect(state.edits).toHaveBeenCalledWith('pane-0', expect.any(Function));
+    expect(state.edits).not.toHaveBeenCalledWith('pane-1', expect.any(Function));
+    const selected = state.edits.mock.lastCall?.[1](newViewRecord('main.tsx'));
+    state.records.set('pane-0', selected!);
     state.revision += 1;
     for (const listener of state.listeners) {
       listener();
     }
     await vi.waitFor(() => {
-      expect(screen.getByRole('button', { name: 'Drawing' })).toHaveAttribute('aria-pressed', 'true');
+      expect(first.querySelector('button[aria-label="Projection view: Drawing"]')).toBeVisible();
+      expect(second.querySelector('button[aria-label="Projection view: Model"]')).toBeVisible();
     });
-    const instance = screen.getByRole('combobox', { name: 'Drawing instance' });
-    instance.focus();
-    fireEvent.change(instance, { target: { value: 'sheet:power' } });
-    expect(instance).toHaveFocus();
-    const withInstance = state.edits.mock.calls[1]![1](selected);
-    expect(withInstance.kernelViews?.find((view) => view.id === 'drawing')?.authoredInstance).toBe('sheet:power');
-    expect(drawing.getBoundingClientRect().height).toBeGreaterThanOrEqual(24);
   });
 
-  for (const width of [480, 720, 1024]) {
-    for (const tabs of [1, 3, 6]) {
-      it(`keeps the projection controls visible at ${String(width)}px with ${String(tabs)} tabs`, async () => {
-        await page.viewport(width + 40, 480);
-        render(
-          <TooltipProvider>
-            <DockFixture width={width} tabs={tabs} />
-          </TooltipProvider>,
-        );
-        expect(await screen.findByRole('group', { name: 'Projection controls' })).toBeVisible();
-        const frame = screen.getByTestId('frame');
-        expect(frame.scrollWidth).toBeLessThanOrEqual(width);
-        expect(screen.getByTestId('panel-count')).toHaveTextContent(String(tabs));
-        if (width === 480) {
-          expect(screen.getByRole('combobox', { name: 'Projection view' })).toBeVisible();
-        } else {
-          expect(screen.getByRole('group', { name: 'Views' })).toBeVisible();
-        }
-        if (tabs === 6) {
-          const screenshot = await page.screenshot({
-            element: frame,
-            path: `../../../../../out/tscircuit-closeout/viewer-header-${String(width)}-${String(tabs)}.png`,
-          });
-          expect(screenshot).toContain(`viewer-header-${String(width)}-${String(tabs)}.png`);
-        }
-      });
-    }
-  }
+  it('keeps the command palette and pane-bound Open beside action', async () => {
+    await page.viewport(760, 480);
+    render(
+      <TooltipProvider>
+        <DockFixture width={720} />
+      </TooltipProvider>,
+    );
+    expect(state.paletteItems.map((item) => item.label)).toContain('Show PCB');
+    const first = await screen.findByTestId('viewer-pane-pane-0');
+    await userEvent.click(first.querySelector('button[aria-label^="Projection view"]')!);
+    await userEvent.hover(await screen.findByRole('menuitem', { name: 'Open beside…' }));
+    await userEvent.click(await screen.findByRole('menuitem', { name: 'Drawing' }));
+    expect(state.edits).toHaveBeenCalledWith('pane-1', expect.any(Function));
+    await vi.waitFor(() => {
+      expect(document.querySelectorAll('.dv-tab')).toHaveLength(2);
+    });
+  });
+
+  it('keeps instance and options reachable in a narrow pane without overflow', async () => {
+    state.records.set('pane-0', { ...newViewRecord('main.tsx'), selectedKernelView: 'drawing' });
+    await page.viewport(360, 520);
+    render(
+      <TooltipProvider>
+        <DockFixture width={320} />
+      </TooltipProvider>,
+    );
+    const frame = screen.getByTestId('frame');
+    const pane = await screen.findByTestId('viewer-pane-pane-0');
+    expect(frame.scrollWidth).toBeLessThanOrEqual(320);
+    expect(pane.querySelector('button[aria-label="Projection view: Drawing"]')).toBeVisible();
+    expect(screen.getByRole('combobox', { name: 'Drawing instance' })).toBeVisible();
+    await userEvent.click(screen.getByRole('button', { name: 'Drawing options' }));
+    expect(screen.getByRole('checkbox', { name: 'Labels' })).toBeVisible();
+  });
+
+  it('opens by keyboard and returns focus on Escape', async () => {
+    await page.viewport(480, 480);
+    render(
+      <TooltipProvider>
+        <DockFixture width={440} />
+      </TooltipProvider>,
+    );
+    const trigger = await screen.findByRole('button', { name: 'Projection view: Model' });
+    trigger.focus();
+    await userEvent.keyboard('{ArrowDown}');
+    expect(await screen.findByRole('menuitemradio', { name: 'PCB' })).toBeVisible();
+    await userEvent.keyboard('{Escape}');
+    expect(trigger).toHaveFocus();
+  });
 });

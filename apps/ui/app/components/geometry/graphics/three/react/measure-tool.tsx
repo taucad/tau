@@ -36,6 +36,7 @@ import {
   hasSceneTagInHierarchy,
 } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { SceneTagKey } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { getGltfOccurrenceLayers } from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import {
   useGraphics,
   useGraphicsSelector,
@@ -60,7 +61,11 @@ import { measureExactOccurrenceDistance } from '#workers/measurement-exact.clien
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
 
-const measurementPickBlockingSceneTags = new Set<SceneTagKey>([sceneTag.measurementUi, sceneTag.sectionViewHelper]);
+const measurementPickBlockingSceneTags = new Set<SceneTagKey>([
+  sceneTag.measurementUi,
+  sceneTag.sectionViewHelper,
+  sceneTag.gltfSurfacePresentation,
+]);
 const featureOrdinals = new WeakMap<MeshFeatureGraph, Map<string, number>>();
 
 /** Human-facing target names use build-local feature order while opaque IDs remain the selection values. */
@@ -172,6 +177,19 @@ const _cameraUpProjected = new THREE.Vector3();
 // oxlint-disable-next-line unicorn-js/prevent-abbreviations -- dir refers to direction vector, not directory
 const _lineDir = new THREE.Vector3();
 const _coneOffset = new THREE.Vector3();
+
+function raycastVisibleLabel(this: THREE.Mesh, raycaster: THREE.Raycaster, intersections: THREE.Intersection[]): void {
+  if (!this.visible) {
+    return;
+  }
+  const { parent } = this;
+  for (let ancestor = parent; ancestor; ancestor = ancestor.parent) {
+    if (!ancestor.visible) {
+      return;
+    }
+  }
+  THREE.Mesh.prototype.raycast.call(this, raycaster, intersections);
+}
 
 type MeasureHoverState = {
   hoveredSnapPoints: MeasurementTarget[];
@@ -303,7 +321,6 @@ export function MeasureTool(): React.JSX.Element {
   const catalogVersionRef = useRef(0);
   const catalogScanRef = useRef<
     | {
-        filter: typeof measureFilter | 'point';
         meshes: Array<THREE.Object3D & { geometry: THREE.BufferGeometry }>;
         meshIndex: number;
         graph?: MeshFeatureGraph;
@@ -322,6 +339,8 @@ export function MeasureTool(): React.JSX.Element {
         geometryKey: typeof geometryKey;
         graphicsActor: typeof graphicsActor;
         isMeasureActive: boolean;
+        measureFilter: typeof measureFilter;
+        measureMode: typeof measureMode;
         modelDisplayRevision: typeof modelDisplayRevision;
         pickableMeshesVersion: typeof pickableMeshesVersion;
         poseRevision: number;
@@ -344,18 +363,33 @@ export function MeasureTool(): React.JSX.Element {
   const mouseRef = useRef(new THREE.Vector2());
   const measureInputActor = useMemo(() => createActor(measureInputMachine), []);
   const pointerMoveCoalescerRef = useRef<RafCoalescer<MeasurePointerCoordinates> | undefined>(undefined);
-  const graphClientRef = useRef<MeasurementFeatureWorkerClient | undefined>(undefined);
   const pointerGraphPendingRef = useRef(new WeakSet<THREE.Mesh>());
+  const graphSource = useMemo(
+    () => ({
+      geometryKey,
+      isMeasureActive,
+      modelDisplayRevision,
+      pickableMeshesVersion,
+    }),
+    [geometryKey, isMeasureActive, modelDisplayRevision, pickableMeshesVersion],
+  );
+  const graphSourceRef = useRef<typeof graphSource | undefined>(undefined);
+  const graphClientRef = useRef<MeasurementFeatureWorkerClient | undefined>(undefined);
   const graphClient = useCallback(() => {
     graphClientRef.current ??= createMeasurementFeatureWorkerClient();
     return graphClientRef.current;
   }, []);
-  const retireGraphClient = useCallback(() => {
-    graphClientRef.current?.dispose();
-    graphClientRef.current = undefined;
-    pointerGraphPendingRef.current = new WeakSet();
-  }, []);
-  useEffect(() => retireGraphClient, [retireGraphClient]);
+  useEffect(() => {
+    graphSourceRef.current = graphSource;
+    return () => {
+      if (graphSourceRef.current === graphSource) {
+        graphSourceRef.current = undefined;
+      }
+      graphClientRef.current?.dispose();
+      graphClientRef.current = undefined;
+      pointerGraphPendingRef.current = new WeakSet();
+    };
+  }, [graphSource]);
   // Where the pointer last moved, so a cut change can raycast its snaps again from there.
   const lastPointerRef = useRef<MeasurePointerCoordinates | undefined>(undefined);
   const wasCameraMovingRef = useRef(cameraMoving);
@@ -406,7 +440,7 @@ export function MeasureTool(): React.JSX.Element {
     const lines: Array<THREE.Object3D & { geometry: THREE.BufferGeometry }> = [];
     sceneRef.current.traverseVisible((object) => {
       if (
-        !object.layers.test(cameraRef.current.layers) ||
+        !getGltfOccurrenceLayers(object).test(cameraRef.current.layers) ||
         hasSceneTagInHierarchy(object, measurementPickBlockingSceneTags)
       ) {
         return;
@@ -415,6 +449,7 @@ export function MeasureTool(): React.JSX.Element {
         meshes.push(object as THREE.Mesh);
       } else if (
         object.userData['measurementFeatures']?.kind === 'line' &&
+        object.userData['fatLineSource'] !== true &&
         'geometry' in object &&
         object.geometry instanceof THREE.BufferGeometry
       ) {
@@ -432,12 +467,19 @@ export function MeasureTool(): React.JSX.Element {
   }, [getCachedMeshes]);
   const requestPointerGraph = useCallback(
     async (surface: THREE.Mesh, presentedKey: string | undefined): Promise<void> => {
-      if (pointerGraphPendingRef.current.has(surface)) {
+      if (graphSourceRef.current !== graphSource) {
         return;
       }
-      pointerGraphPendingRef.current.add(surface);
+      const pending = pointerGraphPendingRef.current;
+      if (pending.has(surface)) {
+        return;
+      }
+      pending.add(surface);
       try {
         const ready = await graphClient().prepare(surface);
+        if (graphSourceRef.current !== graphSource) {
+          return;
+        }
         if (
           ready &&
           graphicsActor.getSnapshot().context.measureMessage ===
@@ -449,6 +491,9 @@ export function MeasureTool(): React.JSX.Element {
           pointerMoveCoalescerRef.current?.schedule(lastPointerRef.current);
         }
       } catch {
+        if (graphSourceRef.current !== graphSource) {
+          return;
+        }
         const { context } = graphicsActor.getSnapshot();
         if (
           presentedKey === geometryKeyRef.current &&
@@ -461,10 +506,10 @@ export function MeasureTool(): React.JSX.Element {
           });
         }
       } finally {
-        pointerGraphPendingRef.current.delete(surface);
+        pending.delete(surface);
       }
     },
-    [graphClient, graphicsActor],
+    [graphClient, graphSource, graphicsActor],
   );
 
   useEffect(() => {
@@ -1081,22 +1126,14 @@ export function MeasureTool(): React.JSX.Element {
       geometryKey,
       graphicsActor,
       isMeasureActive,
+      measureFilter,
+      measureMode,
       modelDisplayRevision,
       pickableMeshesVersion,
       poseRevision,
     };
     catalogVersionRef.current++;
     catalogScanRef.current = undefined;
-    // Feature graphs belong to one measuring session over one geometry, display and pickable-mesh set.
-    if (
-      previous &&
-      (previous.geometryKey !== geometryKey ||
-        previous.isMeasureActive !== isMeasureActive ||
-        previous.modelDisplayRevision !== modelDisplayRevision ||
-        previous.pickableMeshesVersion !== pickableMeshesVersion)
-    ) {
-      retireGraphClient();
-    }
     if (!isMeasureActive) {
       return;
     }
@@ -1106,6 +1143,8 @@ export function MeasureTool(): React.JSX.Element {
       previous.geometryKey === geometryKey &&
       previous.graphicsActor === graphicsActor &&
       previous.isMeasureActive === isMeasureActive &&
+      previous.measureFilter === measureFilter &&
+      previous.measureMode === measureMode &&
       previous.modelDisplayRevision === modelDisplayRevision &&
       previous.pickableMeshesVersion === pickableMeshesVersion &&
       previous.poseRevision === poseRevision
@@ -1128,9 +1167,10 @@ export function MeasureTool(): React.JSX.Element {
     graphicsActor,
     isMeasureActive,
     modelDisplayRevision,
+    measureFilter,
+    measureMode,
     pickableMeshesVersion,
     poseRevision,
-    retireGraphClient,
   ]);
 
   useEffect(() => {
@@ -1139,11 +1179,8 @@ export function MeasureTool(): React.JSX.Element {
     }
     handledCatalogRequestRef.current = measureCatalogRequest;
     const append = graphicsActor.getSnapshot().context.measureCatalogAppend;
-    const filter = measureMode === 'point' ? 'point' : measureFilter;
-    // A page is appended only to a scan of the same filter; a new filter or mode starts the catalog over.
-    if (!append || catalogScanRef.current?.filter !== filter) {
+    if (!append || !catalogScanRef.current) {
       catalogScanRef.current = {
-        filter,
         meshes: [...getCachedMeshes(), ...getCachedLines()],
         meshIndex: 0,
         featureIndex: 0,
@@ -1176,7 +1213,12 @@ export function MeasureTool(): React.JSX.Element {
       graphicsActor.send({ type: 'setMeasureMessage', message: preparingMessage });
       try {
         const ready = await graphClient().prepare(surface);
-        if (cancelled || version !== catalogVersionRef.current || presentedKey !== geometryKeyRef.current) {
+        if (
+          cancelled ||
+          graphSourceRef.current !== graphSource ||
+          version !== catalogVersionRef.current ||
+          presentedKey !== geometryKeyRef.current
+        ) {
           return;
         }
         if (ready) {
@@ -1192,7 +1234,7 @@ export function MeasureTool(): React.JSX.Element {
           publish(false);
         }
       } catch {
-        if (!cancelled && version === catalogVersionRef.current) {
+        if (!cancelled && graphSourceRef.current === graphSource && version === catalogVersionRef.current) {
           graphicsActor.send({
             type: 'setMeasureMessage',
             message: 'Measurement features could not be prepared. Reopen the target list to retry.',
@@ -1238,7 +1280,7 @@ export function MeasureTool(): React.JSX.Element {
               mesh,
               camera,
               canvas: gl.domElement,
-              filter: scan.filter,
+              filter: measureMode === 'point' ? 'point' : measureFilter,
               isKept: isKept ?? undefined,
             },
           );
@@ -1294,6 +1336,7 @@ export function MeasureTool(): React.JSX.Element {
     getCachedLines,
     getCachedMeshes,
     graphClient,
+    graphSource,
     gl.domElement,
     graphicsActor,
     isMeasureActive,
@@ -2043,15 +2086,27 @@ function MeasurementLine({
 
       // 2) Compute rotation around the line axis so the label's normal faces the camera
       _currentNormal.set(0, 0, 1).applyQuaternion(_baseQuat);
-      const axisRotation = computeAxisRotationForCamera({
+      const projectedAxisLength = computeAxisRotationForCamera({
         axis: lineDirection,
         position: midpoint,
         camera,
         referenceUp: _currentNormal,
+        target: _axisRotation,
       });
 
+      // A line aimed toward the eye has too little screen-space length for a
+      // legible label. Separate hide/show angles avoid flicker at the cutoff.
+      const labelVisible = projectedAxisLength >= (labelGroupRef.current.visible ? 0.5 : 0.55);
+      if (!labelVisible && labelGroupRef.current.visible && isLabelHovered) {
+        setIsLabelHovered(false);
+        if (id && graphicsActor.getSnapshot().context.hoveredMeasurementId === id) {
+          graphicsActor.send({ type: 'setHoveredMeasurement', payload: undefined });
+        }
+      }
+      labelGroupRef.current.visible = labelVisible;
+
       // 3) Combine rotations: base alignment then axis rotation in world space
-      _finalQuat.multiplyQuaternions(axisRotation, _baseQuat);
+      _finalQuat.multiplyQuaternions(_axisRotation, _baseQuat);
 
       // 4) Ensure text is upright relative to the camera
       _labelNormal.set(0, 0, 1).applyQuaternion(_finalQuat).normalize();
@@ -2164,6 +2219,7 @@ function MeasurementLine({
           <mesh
             position={[0, 0, 0]}
             userData={sceneTagData(sceneTag.measurementUi)}
+            raycast={raycastVisibleLabel}
             onPointerEnter={(event) => {
               event.stopPropagation();
               setIsLabelHovered(true);
@@ -2204,17 +2260,17 @@ function MeasurementLine({
             })()}
           </mesh>
           {/* Background */}
-          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)}>
+          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)} raycast={raycastVisibleLabel}>
             <primitive object={backgroundOutlineGeometry!} attach='geometry' />
             <primitive object={derivedMaterials.textMaterial} attach='material' />
           </mesh>
-          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)}>
+          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)} raycast={raycastVisibleLabel}>
             <primitive object={backgroundGeometry!} attach='geometry' />
             <primitive object={derivedMaterials.backgroundMaterial} attach='material' />
           </mesh>
 
           {/* Text */}
-          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)}>
+          <mesh position={[0, 0, 0]} userData={sceneTagData(sceneTag.measurementUi)} raycast={raycastVisibleLabel}>
             <primitive object={textGeometry!} attach='geometry' />
             <primitive object={derivedMaterials.textMaterial} attach='material' />
           </mesh>
@@ -2237,6 +2293,7 @@ function MeasurementLine({
               {/* Yellow/gold circular pin button (appears only on label hover) */}
               <mesh
                 userData={sceneTagData(sceneTag.measurementUi)}
+                raycast={raycastVisibleLabel}
                 onPointerOver={(event) => {
                   event.stopPropagation();
                   // Keep hover state active when over pin button
@@ -2278,6 +2335,7 @@ function MeasurementLine({
               <mesh
                 position={[0, labelCharWidth * 0.15, 0]}
                 userData={sceneTagData(sceneTag.measurementUi)}
+                raycast={raycastVisibleLabel}
                 onPointerOver={(event) => {
                   event.stopPropagation();
                 }}
@@ -2291,6 +2349,7 @@ function MeasurementLine({
               <mesh
                 position={[0, -labelCharWidth * 0.2, 0]}
                 userData={sceneTagData(sceneTag.measurementUi)}
+                raycast={raycastVisibleLabel}
                 onPointerOver={(event) => {
                   event.stopPropagation();
                 }}

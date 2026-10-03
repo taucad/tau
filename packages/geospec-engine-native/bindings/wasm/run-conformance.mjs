@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 // eslint-disable-next-line no-restricted-imports -- The WASM runner shares the adjacent frozen-corpus executor.
 import { runEarlyCorpus } from '../node/run-conformance.mjs';
 
-/** @typedef {{ ingestMesh: (request: Uint8Array, mesh: Uint8Array) => Uint8Array, processRequest: (request: Uint8Array) => Uint8Array, canonicalPlan: (request: Uint8Array) => Uint8Array, evaluatePlan: (plan: Uint8Array) => Uint8Array }} BindingEngine */
+/** @typedef {{ ingestMesh: (request: Uint8Array, mesh: Uint8Array) => Uint8Array, ingestSubject: (request: Uint8Array, primary: Uint8Array, resources: Uint8Array[]) => Uint8Array, processRequest: (request: Uint8Array) => Uint8Array, canonicalPlan: (request: Uint8Array) => Uint8Array, evaluatePlan: (plan: Uint8Array) => Uint8Array }} BindingEngine */
 /** @typedef {{ Engine: new () => BindingEngine, canonicalize: (input: Uint8Array) => Uint8Array, initialize: (input: URL) => Promise<void> }} WasmBinding */
 
 /** @type {() => Map<string, string>} */
@@ -18,12 +18,13 @@ const parseArguments = () => {
   return argumentsByName;
 };
 
-/** @type {(options: { modulePath?: string, binaryPath?: string, output?: string, host?: string, recordIds?: string[] }) => ReturnType<typeof runEarlyCorpus>} */
+/** @type {(options: { modulePath?: string, binaryPath?: string, output?: string, host?: string, recordIds?: string[], suite?: 'early' | 'material' }) => ReturnType<typeof runEarlyCorpus>} */
 export const runWasmCorpus = async ({
   modulePath = fileURLToPath(new URL('../../dist/wasm.mjs', import.meta.url)),
   binaryPath,
   output,
   recordIds,
+  suite = 'early',
   host = 'wasm-node',
 } = {}) => {
   if (binaryPath === undefined) {
@@ -42,11 +43,15 @@ export const runWasmCorpus = async ({
     throw new Error('Current WASM facade has no mixed-module initializer.');
   }
   await binding.initialize(pathToFileURL(binaryPath));
-  return runEarlyCorpus({ binding, host, artifacts: [modulePath, binaryPath], output, recordIds });
+  return runEarlyCorpus({ binding, host, artifacts: [modulePath, binaryPath], output, recordIds, suite });
 };
 
 if (import.meta.main) {
   const argumentsByName = parseArguments();
+  const suite = argumentsByName.get('--suite') ?? 'early';
+  if (suite !== 'early' && suite !== 'material') {
+    throw new Error(`Unknown WASM conformance suite: ${suite}`);
+  }
   const modulePath = argumentsByName.get('--module');
   const binaryPath = argumentsByName.get('--binary');
   const report = await runWasmCorpus({
@@ -54,6 +59,7 @@ if (import.meta.main) {
     binaryPath: binaryPath === undefined ? undefined : resolve(binaryPath),
     output: argumentsByName.get('--output'),
     recordIds: argumentsByName.get('--ids')?.split(','),
+    suite,
   });
   process.stdout.write(`${JSON.stringify({ passed: report.passed, failed: report.failed })}\n`);
   if (report.failed > 0) {

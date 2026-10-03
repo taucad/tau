@@ -9,12 +9,16 @@
  * chats this project has.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, onTestFinished } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { renderHook, waitFor } from '@testing-library/react';
+import { act, renderHook, waitFor } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import type { Chat } from '@taucad/chat';
 import type { RevisionRow } from '@taucad/revisions';
+import type { ComposerRecordClient } from '#db/composer-record-store.js';
+import type { ChatSessionDeps } from '#services/chat-session-store.js';
+import { ChatSessionStoreProvider, useChatSessionStore } from '#hooks/chat-session-store-provider.js';
 import { useRevisions } from '#hooks/use-revisions.js';
 import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.js';
 
@@ -30,7 +34,13 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 
 const chatsRef: { current: readonly Chat[] } = { current: [] };
-vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: chatsRef.current }) }));
+const sessionDependencies = mock<ChatSessionDeps>({
+  client: mock<ComposerRecordClient>({ readdir: vi.fn(async () => []) }),
+});
+vi.mock('#hooks/use-project-manager.js', () => ({ useProjectManager: () => sessionDependencies }));
+vi.mock('#hooks/use-file-manager.js', () => ({
+  useFileManager: () => ({ recordFiles: sessionDependencies.client }),
+}));
 
 const chat = (id: string): Chat =>
   ({ id, resourceId: 'p', name: id, messages: [], createdAt: 0, updatedAt: 0 }) satisfies Partial<Chat> as Chat;
@@ -54,7 +64,7 @@ const row = (turnId: string, revisionId: string, parentOrdinal: number): Revisio
 
 const wrapper = ({ children }: { readonly children: ReactNode }): React.JSX.Element => (
   <QueryClientProvider client={new QueryClient({ defaultOptions: { queries: { retry: false } } })}>
-    {children}
+    <ChatSessionStoreProvider>{children}</ChatSessionStoreProvider>
   </QueryClientProvider>
 );
 
@@ -80,15 +90,33 @@ describe('revision numbering across chat deletion (north star W0)', () => {
   });
 
   it('should keep a revision number stable when another chat is deleted', async () => {
-    const { result, rerender } = renderHook(() => useRevisions(), { wrapper });
+    const { result, rerender } = renderHook(() => ({ ...useRevisions(), store: useChatSessionStore() }), { wrapper });
+    const releases: Array<() => void> = [];
+    onTestFinished(async () => {
+      await act(async () => {
+        for (const release of releases) {
+          release();
+        }
+      });
+    });
+    await act(async () => {
+      for (const entry of chatsRef.current) {
+        releases.push(result.current.store.observe(entry.id, 'p'));
+      }
+    });
     await waitFor(() => {
+      expect(result.current.store.observedChatIdsOf('p')).toStrictEqual(['chat_first', 'chat_second']);
       expect(result.current.byTurnId.get('u2')?.n).toBe(2);
     });
     const before = result.current.byTurnId.get('u2')?.n;
 
-    chatsRef.current = [chat('chat_second')];
+    await act(async () => {
+      chatsRef.current = [chat('chat_second')];
+      releases.shift()?.();
+    });
     rerender();
 
+    expect(result.current.store.observedChatIdsOf('p')).toStrictEqual(chatsRef.current.map((entry) => entry.id));
     expect(result.current.byTurnId.get('u2')?.n).toBe(before);
   });
 });

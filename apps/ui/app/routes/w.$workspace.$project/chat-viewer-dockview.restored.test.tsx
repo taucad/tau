@@ -182,6 +182,34 @@ describe('restored viewer layout admission', () => {
     expect(fixture.setViewEntryPath).toHaveBeenCalledWith('main-view', 'main.ts');
   });
 
+  it('admits hidden editor view settings without geometry or canvas demand', () => {
+    render(<ViewerDockview profile='editor' />);
+    expect(screen.queryByTestId('content:other.ts')).not.toBeInTheDocument();
+    expect(fixture.projectSend).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'createViewGraphics', viewId: 'secondary-view' }),
+    );
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'createGeometryUnit', entryPath: 'other.ts' }),
+    );
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'setViewerGeometryDemand', viewId: 'secondary-view', entryPath: 'other.ts' }),
+    );
+  });
+
+  it('defers hidden shared-profile view settings and geometry until reveal', () => {
+    render(<ViewerDockview profile='shared' />);
+    expect(screen.queryByTestId('content:other.ts')).not.toBeInTheDocument();
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'createViewGraphics', viewId: 'secondary-view' }),
+    );
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'createGeometryUnit', entryPath: 'other.ts' }),
+    );
+    expect(fixture.projectSend).not.toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'setViewerGeometryDemand', viewId: 'secondary-view', entryPath: 'other.ts' }),
+    );
+  });
+
   it('admits main immediately and defers a distinct hidden entry until reveal', () => {
     render(<ViewerDockview />);
 

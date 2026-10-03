@@ -4,72 +4,102 @@
 
 TopTools: declare class TopTools
 
-  constructor
+  // TopTools.constructor (constructor)
+  constructor();
 
+  // TopTools.Dummy (method)
   static Dummy(I: number): void;
 
+  // TopTools.delete (method)
   delete(): void;
 
+  // TopTools.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 TopTools_FormatVersion: typeof TopTools_FormatVersion[keyof typeof TopTools_FormatVersion]
 
 TopTools_LocationSet: declare class TopTools_LocationSet
 
-  constructor
+  // TopTools_LocationSet.constructor (constructor)
+  constructor();
 
+  // TopTools_LocationSet.Clear (method)
   Clear(): void;
 
+  // TopTools_LocationSet.Add (method)
   Add(L: TopLoc_Location): number;
 
+  // TopTools_LocationSet.Location (method)
   Location(I: number): TopLoc_Location;
 
+  // TopTools_LocationSet.Index (method)
   Index(L: TopLoc_Location): number;
 
+  // TopTools_LocationSet.delete (method)
   delete(): void;
 
+  // TopTools_LocationSet.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 TopTools_ShapeMapHasher: declare class TopTools_ShapeMapHasher
 
-  constructor
+  // TopTools_ShapeMapHasher.constructor (constructor)
+  constructor();
 
+  // TopTools_ShapeMapHasher.delete (method)
   delete(): void;
 
+  // TopTools_ShapeMapHasher.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 TopTools_ShapeSet: declare class TopTools_ShapeSet
 
-  constructor
+  // TopTools_ShapeSet.constructor (constructor)
+  constructor();
 
+  // TopTools_ShapeSet.SetFormatNb (method)
   SetFormatNb(theFormatNb: number): void;
 
+  // TopTools_ShapeSet.FormatNb (method)
   FormatNb(): number;
 
+  // TopTools_ShapeSet.Clear (method)
   Clear(): void;
 
+  // TopTools_ShapeSet.Add (method)
   Add(S: TopoDS_Shape): number;
 
+  // TopTools_ShapeSet.Shape (method)
   Shape(I: number): TopoDS_Shape;
 
+  // TopTools_ShapeSet.Index (method)
   Index(S: TopoDS_Shape): number;
 
+  // TopTools_ShapeSet.Locations (method)
   Locations(): TopTools_LocationSet;
 
+  // TopTools_ShapeSet.ChangeLocations (method)
   ChangeLocations(): TopTools_LocationSet;
 
+  // TopTools_ShapeSet.DumpExtent (method)
   DumpExtent(S: TCollection_AsciiString): void;
 
+  // TopTools_ShapeSet.AddGeometry (method)
   AddGeometry(S: TopoDS_Shape): void;
 
+  // TopTools_ShapeSet.AddShapes (method)
   AddShapes(S1: TopoDS_Shape, S2: TopoDS_Shape): void;
 
+  // TopTools_ShapeSet.Check (method)
   Check(T: TopAbs_ShapeEnum, S: TopoDS_Shape): void;
 
+  // TopTools_ShapeSet.NbShapes (method)
   NbShapes(): number;
 
+  // TopTools_ShapeSet.delete (method)
   delete(): void;
 
+  // TopTools_ShapeSet.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 TopTools_Array1OfShape: NCollection_Array1_TopoDS_Shape

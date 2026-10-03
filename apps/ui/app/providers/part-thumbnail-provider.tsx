@@ -32,23 +32,28 @@ const PartThumbnailContext = createContext<PartThumbnailRegistry | undefined>(un
 /** One project-scoped preview scheduler shared by Model and viewer menus. */
 export function PartThumbnailProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const project = useProject({ enableNoContext: true });
-  const imageService = useOptionalHeadlessImageService();
   const projectId = project?.projectId;
-  const [registry, setRegistry] = useState<PartThumbnailRegistry>();
-  // Each project gets its own registry, so no preview outlives the project it was scheduled for.
+  const imageService = useOptionalHeadlessImageService();
+  const [registryRecord, setRegistryRecord] = useState<{ projectId: string; registry: PartThumbnailRegistry }>();
   useEffect(() => {
-    if (!imageService || projectId === undefined) {
+    if (!imageService || !projectId) {
       return undefined;
     }
     const next = new PartThumbnailRegistry(imageService);
     // oxlint-disable-next-line react/set-state-in-effect -- This effect owns the StrictMode and project lifecycle.
-    setRegistry(next);
+    setRegistryRecord({ projectId, registry: next });
     return () => {
       next.dispose();
-      setRegistry((current) => (current === next ? undefined : current));
+      setRegistryRecord((current) => (current?.registry === next ? undefined : current));
     };
   }, [imageService, projectId]);
-  return <PartThumbnailContext.Provider value={registry}>{children}</PartThumbnailContext.Provider>;
+  return (
+    <PartThumbnailContext.Provider
+      value={registryRecord && registryRecord.projectId === projectId ? registryRecord.registry : undefined}
+    >
+      {children}
+    </PartThumbnailContext.Provider>
+  );
 }
 
 export const useOptionalPartThumbnailService = (unitId: string): PartThumbnailService | undefined =>

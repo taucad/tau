@@ -36,7 +36,7 @@ import {
   sendCommand,
 } from '#commands/agent/client.js';
 import type { ExternalAgentFacts, ExternalRefusal } from '#commands/agent/client.js';
-import { sanitize } from '#output.js';
+import { exitCodeFor, exitCodes, sanitize } from '#output.js';
 
 /** Most transcript rows kept in memory; the oldest are dropped (P5). */
 const rowLimit = 2000;
@@ -46,6 +46,9 @@ const chromeRows = 5;
 
 /** Terminal height assumed when the stream reports none. */
 const fallbackRows = 24;
+
+/** The keyboard waits this long for a settling run to release admission. */
+const admissionTimeout = 20_000;
 
 /** One choice the pending request offered, exactly as it named it. */
 type ApprovalOption = {
@@ -234,6 +237,26 @@ const chosenOption = (approval: Approval, approved: boolean): ApprovalOption | u
 /** The external agent every turn this invocation starts is admitted with. */
 type AgentSelection = { readonly id: string; readonly model?: string | undefined };
 
+/** One answered-refusal retry whose keypress may also carry a later cancel request. */
+type PendingAdmission = {
+  readonly stop: AbortController;
+  readonly kind: 'start' | 'resolve';
+  cancelRequested: boolean;
+};
+
+/**
+ * Send a cancel only after its target run is known.
+ *
+ * @param client - The connected agent channel.
+ * @param chatId - The chat containing the run.
+ * @param runId - The exact run to cancel.
+ * @returns The host's cancel answer as a notice.
+ */
+const cancelRun = async (client: AgentChannelClient, chatId: string, runId: string): Promise<string> => {
+  const answer = await sendCommand(client, { type: 'cancel', commandId: randomUUID(), payload: { chatId, runId } });
+  return `cancel: ${answerLine(answer)}`;
+};
+
 /** What a mounted app needs to reach its chat. */
 type AppProps = {
   /** Absent until the channel is open: the first frame paints before the dial. */
@@ -262,6 +285,9 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
   const [draft, setDraft] = useState('');
   const [notice, setNotice] = useState(`Connecting to ${origin}…`);
   const [rows, setRows] = useState(stdout.rows > 0 ? stdout.rows : fallbackRows);
+  const pendingAdmission = useRef<PendingAdmission | undefined>(undefined);
+
+  useEffect(() => () => pendingAdmission.current?.stop.abort(), []);
 
   /* One follow from its own cursor, one long-poll read at a time (SC-R14).
    * Unlike `tau agent tail` this never stops at settlement: the next prompt
@@ -360,6 +386,10 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
     if (prompt === '' || client === undefined) {
       return;
     }
+    if (pendingAdmission.current !== undefined) {
+      setNotice('Waiting for the previous command to be admitted. The prompt is kept.');
+      return;
+    }
     const running = isSettled(session.state) ? undefined : session.runId;
     /* No external protocol Tau speaks has a steering frame, so the host refuses
      * `steer` on an external run outright. Sending it anyway to be told so would
@@ -376,68 +406,110 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
     const commandId = randomUUID();
     const label = running === undefined ? 'start' : 'steer';
     act(label, async () => {
-      const answer = await sendCommand(
-        client,
-        running === undefined
-          ? {
-              type: 'start',
-              commandId,
-              payload: {
-                chatId,
-                runId: started,
-                trigger: 'submit',
-                message: { id: randomUUID(), role: 'user', content: prompt },
-                /* The same literal `tau agent run --agent` sends: the host routes
-                 * on `agent` before it composes anything, so the two Tau fields
-                 * beside it are inert for this turn. */
-                ...(agent === undefined
-                  ? {}
-                  : {
-                      config: {
-                        agent: {
-                          kind: 'acp',
-                          id: agent.id,
-                          ...(agent.model === undefined ? {} : { model: agent.model }),
-                        },
-                        systemPrompt: '',
-                        toolChoice: 'auto',
-                      } as const,
-                    }),
-              },
-            }
-          : { type: 'steer', commandId, payload: { chatId, runId: running, message: prompt } },
-      );
-      /* The admission row may reach this view's read after the answer does, and
-       * `c` in the meantime must cancel the run this keystroke started — not
-       * report that no run exists. An applied start is a durable admission; rows
-       * the view already read for this run are newer than that. */
-      if (running === undefined) {
-        setSession((current) =>
-          current.runId === started
-            ? current
-            : {
-                ...current,
-                runId: started,
-                state: 'admitted',
-                agent: undefined,
-                approval: undefined,
-                refusal: undefined,
-              },
-        );
+      const admission: PendingAdmission | undefined =
+        running === undefined ? { stop: new AbortController(), kind: 'start', cancelRequested: false } : undefined;
+      if (admission !== undefined) {
+        pendingAdmission.current = admission;
       }
-      return `${label}: ${answerLine(answer)}`;
+      let admitted = false;
+      try {
+        const answer = await sendCommand(
+          client,
+          running === undefined
+            ? {
+                type: 'start',
+                commandId,
+                payload: {
+                  chatId,
+                  runId: started,
+                  trigger: 'submit',
+                  message: { id: randomUUID(), role: 'user', content: prompt },
+                  /* The same literal `tau agent run --agent` sends: the host routes
+                   * on `agent` before it composes anything, so the two Tau fields
+                   * beside it are inert for this turn. */
+                  ...(agent === undefined
+                    ? {}
+                    : {
+                        config: {
+                          agent: {
+                            kind: 'acp',
+                            id: agent.id,
+                            ...(agent.model === undefined ? {} : { model: agent.model }),
+                          },
+                          systemPrompt: '',
+                          toolChoice: 'auto',
+                        } as const,
+                      }),
+                },
+              }
+            : { type: 'steer', commandId, payload: { chatId, runId: running, message: prompt } },
+          admission === undefined
+            ? undefined
+            : AbortSignal.any([
+                admission.stop.signal,
+                AbortSignal.timeout(admissionTimeout), // Start settling retry ceiling
+              ]),
+        );
+        /* The admission row may reach this view's read after the answer does, and
+         * `c` in the meantime must cancel the run this keystroke started — not
+         * report that no run exists. An applied start is a durable admission; rows
+         * the view already read for this run are newer than that. */
+        if (running === undefined) {
+          admitted = answer.effect === 'durable';
+          if (admitted) {
+            const selectStarted = (current: Session): Session =>
+              current.runId === started
+                ? current
+                : {
+                    ...current,
+                    runId: started,
+                    state: 'admitted',
+                    agent: undefined,
+                    approval: undefined,
+                    refusal: undefined,
+                  };
+            sessionRef.current = selectStarted(sessionRef.current);
+            setSession(selectStarted);
+          }
+          if (admission?.cancelRequested === true && admitted) {
+            try {
+              const cancelled = await cancelRun(client, chatId, started);
+              return `start: ${answerLine(answer)}; ${cancelled}`;
+            } catch (error) {
+              return `start: ${answerLine(answer)}; cancel failed: ${oneLine(error instanceof Error ? error.message : String(error))}`;
+            }
+          }
+        }
+        return `${label}: ${answerLine(answer)}`;
+      } catch (error) {
+        if (running === undefined && !admitted && exitCodeFor(error) !== exitCodes.unknown) {
+          setDraft((current) => (current === '' ? prompt : current));
+        }
+        throw error;
+      } finally {
+        if (pendingAdmission.current === admission) {
+          pendingAdmission.current = undefined;
+        }
+      }
     });
   }, [act, agent, chatId, client, draft, session.agent, session.runId, session.state]);
 
   const cancel = useCallback((): void => {
+    const pending = pendingAdmission.current;
+    if (pending?.kind === 'start') {
+      pending.cancelRequested = true;
+      pending.stop.abort();
+      setNotice('Cancel requested; waiting for the start answer.');
+      return;
+    }
+    pending?.stop.abort();
     const { runId } = sessionRef.current;
     if (runId === undefined || client === undefined) {
       setNotice('No run has started in this chat yet.');
       return;
     }
     act('cancel', async () => {
-      const answer = await sendCommand(client, { type: 'cancel', commandId: randomUUID(), payload: { chatId, runId } });
-      return `cancel: ${answerLine(answer)}`;
+      return cancelRun(client, chatId, runId);
     });
   }, [act, chatId, client]);
 
@@ -447,21 +519,39 @@ const TauTui = ({ client, origin, chatId, from, agent }: AppProps): ReactElement
       if (approval === undefined || client === undefined) {
         return;
       }
+      if (pendingAdmission.current !== undefined) {
+        return;
+      }
       const option = chosenOption(approval, approved);
       const label = approved ? 'approve' : 'deny';
       act(label, async () => {
-        const answer = await sendCommand(client, {
-          type: 'resolve-interrupt',
-          commandId: randomUUID(),
-          payload: {
-            chatId,
-            runId: approval.runId,
-            interruptId: approval.interruptId,
-            outcome: approved ? 'approved' : 'denied',
-            ...(option === undefined ? {} : { optionId: option.optionId }),
-          },
-        });
-        return `${label}: ${answerLine(answer)}`;
+        const admission: PendingAdmission = { stop: new AbortController(), kind: 'resolve', cancelRequested: false };
+        pendingAdmission.current = admission;
+        try {
+          const answer = await sendCommand(
+            client,
+            {
+              type: 'resolve-interrupt',
+              commandId: randomUUID(),
+              payload: {
+                chatId,
+                runId: approval.runId,
+                interruptId: approval.interruptId,
+                outcome: approved ? 'approved' : 'denied',
+                ...(option === undefined ? {} : { optionId: option.optionId }),
+              },
+            },
+            AbortSignal.any([
+              admission.stop.signal,
+              AbortSignal.timeout(admissionTimeout), // Approval settling retry ceiling
+            ]),
+          );
+          return `${label}: ${answerLine(answer)}`;
+        } finally {
+          if (pendingAdmission.current === admission) {
+            pendingAdmission.current = undefined;
+          }
+        }
       });
     },
     [act, chatId, client],

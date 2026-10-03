@@ -417,6 +417,7 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
 
   it('keeps beauty ahead of AO dependencies and preserves its alpha in the AO visualization', async () => {
     await mount();
+    expect(mocks.updateAoCamera).toHaveBeenCalledOnce();
     mocks.getFrame()?.(mocks.state, 0);
     expect(mocks.aoNodes).toHaveLength(1);
     const composed = mocks.outputQuads.find((quad) => !isBeautyOnly(quad));
@@ -435,19 +436,25 @@ describe('PostProcessingWebGPU retained endpoint pipelines', () => {
       samples: { value: 8 },
     });
     expect(mocks.aoNodes[0]!.radius.value).toBeCloseTo(0.3605551275, 9);
-    expect(mocks.updateAoCamera).toHaveBeenCalledOnce();
+    expect(mocks.updateAoCamera).toHaveBeenCalledTimes(2);
   });
 
   it('updates AO output and estimator uniforms without rebuilding the production graph', async () => {
     const mounted = await mount();
     const { PostProcessingWebGPU: PostProcessingWebGpu } =
       await import('#components/geometry/graphics/three/post-processing-webgpu.js');
+    const invalidationsBeforeSettings = mocks.invalidate.mock.calls.length;
     mounted.rerender(
       <PostProcessingWebGpu
         {...endpointProperties}
         settings={{ gtaoIntensity: 2, gtaoDistanceFalloff: 0.4, displayMode: 'ao', aoCompositeStage: 'display' }}
       />,
     );
+    // Demand rendering must receive current uniforms before the next frame is submitted.
+    expect(mocks.aoNodes[0]!.scale.value).toBe(2);
+    expect(mocks.aoNodes[0]!.distanceFallOff.value).toBe(0.4);
+    expect(mocks.displayUniforms.map(({ value }) => value)).toEqual([1, 1]);
+    expect(mocks.invalidate.mock.calls.length).toBeGreaterThan(invalidationsBeforeSettings);
     mocks.getFrame()?.(mocks.state, 0);
     expect(mocks.pass).toHaveBeenCalledTimes(1);
     expect(mocks.aoNodes[0]!.scale.value).toBe(2);

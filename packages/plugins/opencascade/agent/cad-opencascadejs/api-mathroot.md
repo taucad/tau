@@ -4,7 +4,8 @@
 
 MathRoot_AllRootsResult: declare class MathRoot_AllRootsResult
 
-  constructor
+  // MathRoot_AllRootsResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -14,19 +15,25 @@ MathRoot_AllRootsResult: declare class MathRoot_AllRootsResult
 
   NullIntervals: NCollection_DynamicArray_MathRoot_NullInterval
 
+  // MathRoot_AllRootsResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathRoot_AllRootsResult.NbRoots (method)
   NbRoots(): number;
 
+  // MathRoot_AllRootsResult.NbIntervals (method)
   NbIntervals(): number;
 
+  // MathRoot_AllRootsResult.delete (method)
   delete(): void;
 
+  // MathRoot_AllRootsResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathRoot_NullInterval: declare class MathRoot_NullInterval
 
-  constructor
+  // MathRoot_NullInterval.constructor (constructor)
+  constructor();
 
   A: number
 
@@ -34,13 +41,16 @@ MathRoot_NullInterval: declare class MathRoot_NullInterval
 
   State: number
 
+  // MathRoot_NullInterval.delete (method)
   delete(): void;
 
+  // MathRoot_NullInterval.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathRoot_MultipleConfig: declare class MathRoot_MultipleConfig
 
-  constructor
+  // MathRoot_MultipleConfig.constructor (constructor)
+  constructor();
 
   NbSamples: number
 
@@ -54,21 +64,27 @@ MathRoot_MultipleConfig: declare class MathRoot_MultipleConfig
 
   Offset: number
 
+  // MathRoot_MultipleConfig.delete (method)
   delete(): void;
 
+  // MathRoot_MultipleConfig.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathRoot_MultipleNoExtraHandler: declare class MathRoot_MultipleNoExtraHandler
 
-  constructor
+  // MathRoot_MultipleNoExtraHandler.constructor (constructor)
+  constructor();
 
+  // MathRoot_MultipleNoExtraHandler.delete (method)
   delete(): void;
 
+  // MathRoot_MultipleNoExtraHandler.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathRoot_MultipleResult: declare class MathRoot_MultipleResult
 
-  constructor
+  // MathRoot_MultipleResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -80,17 +96,22 @@ MathRoot_MultipleResult: declare class MathRoot_MultipleResult
 
   IsAllNull: boolean
 
+  // MathRoot_MultipleResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathRoot_MultipleResult.NbRoots (method)
   NbRoots(): number;
 
+  // MathRoot_MultipleResult.delete (method)
   delete(): void;
 
+  // MathRoot_MultipleResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 MathRoot_TrigResult: declare class MathRoot_TrigResult
 
-  constructor
+  // MathRoot_TrigResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -100,8 +121,11 @@ MathRoot_TrigResult: declare class MathRoot_TrigResult
 
   InfiniteRoots: boolean
 
+  // MathRoot_TrigResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathRoot_TrigResult.delete (method)
   delete(): void;
 
+  // MathRoot_TrigResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

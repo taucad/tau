@@ -42,5 +42,6 @@ export type {
   ComputeEvaluationResult,
   ComputeReuseService,
   ContentDigest,
+  EncodedContent,
   SceneDigest,
 } from '#types.js';

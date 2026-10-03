@@ -25,20 +25,13 @@ import type { HostCommand } from '@taucad/agent-host/wire';
 /* Whether the project's revision root is connected yet (W8 TS-S5): the host places turns through it. */
 const revisionRoot = vi.hoisted(() => ({ connected: true }));
 const browserHostHarness = vi.hoisted(() => ({
-  run: undefined as
-    | {
-        runId: string;
-        state?: 'paused' | 'failed' | 'cancelled';
-        failure?: { code: string };
-        committed?: boolean;
-        eventCount?: number;
-      }
-    | undefined,
+  run: undefined as { runId: string; state?: 'paused'; eventCount?: number } | undefined,
   /** Whether this chat has a browser host registered, and whether its run can be resumed. */
   placed: false,
   resumable: false,
   /** The run the host last named for this chat when no stream of this page publishes one (a daemon-placed chat). */
   hostRunId: undefined as string | undefined,
+  projectedFailure: undefined as { code: string; message: string } | undefined,
   runKind: 'tau' as 'tau' | 'external',
   createClient: vi.fn((_options: AgentHostClientOptions): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient;
@@ -344,12 +337,9 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
           position: { cursor: 1 },
           currentRunId: runId,
           runs: {
-            [runId]: {
-              lifecycle: browserHostHarness.run?.state ?? 'paused',
-              failure: browserHostHarness.run?.failure,
-              committed: browserHostHarness.run?.committed ?? false,
-              kind: browserHostHarness.runKind,
-            },
+            [runId]: browserHostHarness.projectedFailure
+              ? { lifecycle: 'failed', failure: browserHostHarness.projectedFailure }
+              : { lifecycle: browserHostHarness.run?.state ?? 'paused' },
           },
         },
         endCursor: 1,
@@ -401,6 +391,7 @@ beforeEach(() => {
   browserHostHarness.placed = false;
   browserHostHarness.resumable = false;
   browserHostHarness.hostRunId = undefined;
+  browserHostHarness.projectedFailure = undefined;
   browserHostHarness.runKind = 'tau';
   availabilityHarness.gate = undefined;
   revisionRoot.connected = true;
@@ -1080,7 +1071,7 @@ describe('useCadChatClient', () => {
   });
 
   /* Resume never changes kind into a replay after its gesture was taken. */
-  it('refuses Resume without a projected resumable run and resumes that run once observed', async () => {
+  it('refuses Resume for a projected paused run and resumes its failed run once observed', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     /* One user message, because a continuation leases it: a transcript with
      * none has no turn to continue and `turnIntentOf` refuses it (W10-B). */
@@ -1089,41 +1080,20 @@ describe('useCadChatClient', () => {
     installActions(buildActions());
     renderClient();
 
-    await expect(composeTurn({ kind: 'continue' })).rejects.toThrow('This turn cannot be resumed.');
-
-    // A run waiting on an approval is answered through that approval, never continued.
+    browserHostHarness.placed = true;
+    browserHostHarness.resumable = false;
     browserHostHarness.run = { runId: 'run_live', state: 'paused' };
     await expect(composeTurn({ kind: 'continue' })).rejects.toThrow('This turn cannot be resumed.');
 
-    browserHostHarness.run = { runId: 'run_live', state: 'failed', failure: { code: 'RUN_ABANDONED' } };
+    browserHostHarness.projectedFailure = { code: 'RUN_ABANDONED', message: 'The host closed.' };
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
       runId: 'run_live',
       request: { kind: 'continue' },
     });
-  });
 
-  /* The composer offers Resume after a Stop that kept committed work, so the turn host must accept it. */
-  it('resumes a deliberately stopped run only when it kept committed work', async () => {
-    const chat = mock<Chat<MyUIMessage>>();
-    Object.defineProperty(chat, 'messages', { get: () => [{ id: 'user_1', role: 'user', parts: [] }] });
-    useActiveChatInstanceMock.mockReturnValue(chat);
-    installActions(buildActions());
-    renderClient();
-
-    browserHostHarness.run = { runId: 'run_stopped', state: 'cancelled', failure: { code: 'USER_STOPPED' } };
-    await expect(composeTurn({ kind: 'continue' })).rejects.toThrow('This turn cannot be resumed.');
-
-    browserHostHarness.run = {
-      runId: 'run_stopped',
-      state: 'cancelled',
-      failure: { code: 'USER_STOPPED' },
-      committed: true,
-    };
-    await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
-      runId: 'run_stopped',
-      leaseTurnId: 'user_1',
-      request: { kind: 'continue', command: { type: 'resume', payload: { runId: 'run_stopped' } } },
-    });
+    // A placement with no browser host answers its own resume over the wire.
+    browserHostHarness.placed = false;
+    await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({ request: { kind: 'continue' } });
   });
 
   /*
@@ -1143,7 +1113,9 @@ describe('useCadChatClient', () => {
     installActions(buildActions());
     renderClient();
 
-    browserHostHarness.run = { runId: 'run_live', state: 'failed', failure: { code: 'RUN_ABANDONED' } };
+    browserHostHarness.placed = true;
+    browserHostHarness.run = { runId: 'run_live' };
+    browserHostHarness.projectedFailure = { code: 'RUN_ABANDONED', message: 'The host closed.' };
 
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
       runId: 'run_live',

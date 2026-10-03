@@ -62,12 +62,34 @@ pub(crate) struct ChargeStep {
     pub(crate) stage: ChargeStage,
 }
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub(crate) struct ChargeRun {
+    pub(crate) step: ChargeStep,
+    pub(crate) repetitions: u64,
+}
+impl From<ChargeStep> for ChargeRun {
+    fn from(step: ChargeStep) -> Self {
+        Self {
+            step,
+            repetitions: 1,
+        }
+    }
+}
+pub(crate) fn atomic_steps(runs: &[ChargeRun]) -> impl Iterator<Item = ChargeStep> + '_ {
+    runs.iter()
+        .flat_map(|run| (0..run.repetitions).map(move |_| run.step))
+}
+pub(crate) fn logical_steps(runs: &[ChargeRun]) -> Option<u64> {
+    runs.iter()
+        .try_fold(0u64, |sum, run| sum.checked_add(run.repetitions))
+}
+
 /// Bound the side-channel independently of work units: a native callback may
 /// make arbitrarily many accepted zero-unit charges.
 const MAX_TRACE_BYTES: usize = 4 * 1024 * 1024;
 
 pub(crate) struct ChargeTrace {
-    pub(crate) steps: Vec<ChargeStep>,
+    pub(crate) steps: Vec<ChargeRun>,
     pub(crate) complete: bool,
     pub(crate) stage_calls: [u64; 6],
     pub(crate) stage_units: [u64; 6],
@@ -81,12 +103,28 @@ impl Default for ChargeTrace {
             complete: true,
             stage_calls: [0; 6],
             stage_units: [0; 6],
-            limit: MAX_TRACE_BYTES / std::mem::size_of::<ChargeStep>(),
+            limit: MAX_TRACE_BYTES / std::mem::size_of::<ChargeRun>(),
         }
     }
 }
 
 impl ChargeTrace {
+    /// Declared Vec request ceiling; allocator metadata is not a heap claim.
+    #[cfg(test)]
+    pub(crate) fn reservation_bytes(&self) -> usize {
+        self.limit.saturating_mul(std::mem::size_of::<ChargeRun>())
+    }
+
+    /// Optional retained trace never consumes the required geometry workspace.
+    /// This can only lower the existing side-channel ceiling.
+    pub(crate) fn limit_to_bytes(&mut self, bytes: u64) {
+        self.limit = self
+            .limit
+            .min(usize::try_from(bytes).unwrap_or(usize::MAX) / std::mem::size_of::<ChargeRun>());
+        if self.steps.capacity() > self.limit {
+            self.discard();
+        }
+    }
     pub(crate) fn disabled() -> Self {
         Self {
             steps: Vec::new(),
@@ -106,18 +144,59 @@ impl ChargeTrace {
             self.discard();
             return;
         };
+        let Some(stage_calls) = self.stage_calls[stage].checked_add(1) else {
+            self.discard();
+            return;
+        };
+        if self
+            .stage_calls
+            .iter()
+            .try_fold(0u64, |sum, calls| sum.checked_add(*calls))
+            .and_then(|sum| sum.checked_add(1))
+            .is_none()
+        {
+            self.discard();
+            return;
+        }
+        if let Some(last) = self.steps.last_mut().filter(|run| run.step == step) {
+            let Some(repetitions) = last.repetitions.checked_add(1) else {
+                self.discard();
+                return;
+            };
+            last.repetitions = repetitions;
+            self.stage_calls[stage] = stage_calls;
+            self.stage_units[stage] = stage_units;
+            return;
+        }
         if self.steps.len() == self.limit {
             self.discard();
             return;
         }
-        self.stage_calls[stage] += 1;
+        if self.steps.len() == self.steps.capacity() {
+            let capacity = self
+                .steps
+                .capacity()
+                .saturating_mul(2)
+                .max(8)
+                .min(self.limit);
+            if self
+                .steps
+                .try_reserve_exact(capacity.saturating_sub(self.steps.len()))
+                .is_err()
+                || self.steps.capacity() > self.limit
+            {
+                self.discard();
+                return;
+            }
+        }
+        self.stage_calls[stage] = stage_calls;
         self.stage_units[stage] = stage_units;
-        self.steps.push(step);
+        self.steps.push(step.into());
     }
 
     fn discard(&mut self) {
         self.complete = false;
-        self.steps.clear();
+        self.steps = Vec::new();
         self.stage_calls = [0; 6];
         self.stage_units = [0; 6];
     }
@@ -859,6 +938,87 @@ mod tests {
         assert!(fake.calls.borrow().is_empty());
         // 63 sweep comparisons, each ending its body's scan: one batch.
         assert_eq!(budget.used(), 1);
+    }
+
+    #[test]
+    fn trace_capacity_is_bounded_and_incomplete_trace_releases_storage() {
+        let mut trace = ChargeTrace {
+            limit: 17,
+            ..ChargeTrace::default()
+        };
+        let step = ChargeStep {
+            units: 1,
+            pair: None,
+            stage: ChargeStage::BodySetup,
+        };
+        for count in 1..=17 {
+            trace.record(ChargeStep {
+                units: count as u64,
+                ..step
+            });
+            assert!(trace.complete);
+            assert_eq!(trace.steps.len(), count);
+            assert!(trace.steps.capacity() <= 17);
+        }
+        assert_eq!(
+            trace.reservation_bytes(),
+            17 * std::mem::size_of::<ChargeRun>()
+        );
+        trace.record(ChargeStep { units: 18, ..step });
+        assert!(!trace.complete);
+        assert_eq!(trace.steps.capacity(), 0);
+        assert_eq!(trace.stage_calls, [0; 6]);
+        trace.record(step);
+        assert!(trace.steps.is_empty());
+    }
+
+    #[test]
+    fn trace_runs_preserve_atomic_refusals_zero_steps_and_checked_counts() {
+        let step = ChargeStep {
+            units: 3,
+            pair: Some((0, 1)),
+            stage: ChargeStage::FaceDistance,
+        };
+        let mut trace = ChargeTrace::default();
+        for _ in 0..1000 {
+            trace.record(step);
+        }
+        assert!(trace.complete);
+        assert_eq!(trace.steps.len(), 1);
+        assert_eq!(logical_steps(&trace.steps), Some(1000));
+        for limit in [0, 1, 2, 3, 2998, 2999, 3000] {
+            let cold = crate::budget::Budget::new(limit);
+            let warm = crate::budget::Budget::new(limit);
+            let expected = (0..1000).try_for_each(|_| charge(&cold, 3));
+            let actual = atomic_steps(&trace.steps).try_for_each(|step| charge(&warm, step.units));
+            assert_eq!(expected, actual);
+            assert_eq!(cold.used(), warm.used());
+        }
+        let zero = ChargeStep {
+            units: 0,
+            pair: None,
+            stage: ChargeStage::BodySetup,
+        };
+        let mut trace = ChargeTrace::default();
+        for _ in 0..1000 {
+            trace.record(zero);
+        }
+        assert!(trace.complete);
+        assert_eq!(logical_steps(&trace.steps), Some(1000));
+        assert_eq!(trace.stage_units, [0; 6]);
+        trace.steps[0].repetitions = u64::MAX;
+        trace.record(zero);
+        assert!(!trace.complete);
+        assert!(trace.steps.is_empty());
+        let mut trace = ChargeTrace::default();
+        trace.stage_calls[0] = u64::MAX;
+        trace.record(zero);
+        assert!(!trace.complete);
+        let mut trace = ChargeTrace::default();
+        trace.limit_to_bytes(0);
+        trace.record(zero);
+        assert!(!trace.complete);
+        assert_eq!(trace.steps.capacity(), 0);
     }
 
     /// Review R5-3: bars whose x extents all overlap but which lie apart in

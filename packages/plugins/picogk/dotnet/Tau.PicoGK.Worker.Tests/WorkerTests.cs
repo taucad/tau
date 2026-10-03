@@ -243,8 +243,8 @@ static class Second
         var arguments = new[] { "--workspace", root, "--artifacts", Path.Combine(root, "artifacts"), "--parent-pid", Environment.ProcessId.ToString() };
 
         var output = Run(arguments, """
-{"protocolVersion":7,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
-{"protocolVersion":7,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
+{"protocolVersion":8,"requestId":"1","method":"resolve","params":{"entryPath":"./regions/other.cs"}}
+{"protocolVersion":8,"requestId":"2","method":"resolve","params":{"entryPath":"Shared.cs"}}
 """);
 
         Assert.Contains("\"sources\":[\"Shared.cs\",\"regions/other.cs\"]", output);
@@ -611,13 +611,13 @@ Library.Go(2f, () =>
         Assert.Equal([0x11 / 255f, 0x22 / 255f, 0x33 / 255f, 0x80 / 255f], mesh.Color);
         Assert.Equal(0.25f, mesh.Metallic);
         Assert.Equal(0.75f, mesh.Roughness);
-        Assert.True(mesh.Positions.Max() >= 10);
+        Assert.True(WorldPositions(mesh).Max() >= 10);
         Assert.Equal(mesh.Positions.Length, mesh.Normals.Length);
         Assert.NotEmpty(mesh.Indices);
         var line = result.Components[1];
         Assert.Empty(line.Normals);
         Assert.Equal(new uint[] { 0, 1, 1, 2 }, line.Indices);
-        Assert.Contains(5f, line.Positions);
+        Assert.Contains(5f, WorldPositions(line));
         Assert.All(new[]
         {
             result.Timings.EntryPointInvoke,
@@ -756,7 +756,7 @@ Library.Go(2f, () => Library.oViewer().Add(Voxels.voxSphere(Vector3.Zero, 3)));
 
             backend.SetObjectMatrix(first, Matrix4x4.CreateTranslation(10, 0, 0));
             var transformed = backend.Extract();
-            Assert.True(transformed.Components[1].Positions.Max() >= 10);
+            Assert.True(WorldPositions(transformed.Components[1]).Max() >= 10);
             backend.Dispose();
         }
         finally
@@ -792,7 +792,7 @@ Library.Go(1f, () => {
         Assert.Equal(["Assembly/Rotor", "Assembly/Axis", "Assembly/Ball"],
             MeshArtifactWriter.Write(Path.Combine(root, "named-artifacts"), result,
                 new WorkerDiagnostics(new WorkerTimings(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new WorkerMetrics(0, 0, 0)))
-                .Components.Select(component => component.Name));
+                .Occurrences.Select(component => component.Name));
         Write("main.cs", "using PicoGK; Library.Go(1f, () => { });");
         var next = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "next-artifacts"));
         Assert.False(next.RecycleAfterResponse); // The source type did not root its collectible assembly.
@@ -933,8 +933,8 @@ Library.Go(1f, () =>
 """);
         var result = ModelRunner.Execute(CompilationService.Compile(root, "main.cs"), Path.Combine(root, "animation-artifacts"));
 
-        Assert.True(AxisExtent(result.Components[0].Positions, 0) > 5f);
-        Assert.True(AxisExtent(result.Components[0].Positions, 1) < 3f);
+        Assert.True(AxisExtent(WorldPositions(result.Components[0]), 0) > 5f);
+        Assert.True(AxisExtent(WorldPositions(result.Components[0]), 1) < 3f);
     }
 
     [Fact]
@@ -1365,15 +1365,15 @@ Library.Go(1f, () =>
                 new WorkerMetrics(1, 2, 3)));
 
         Assert.True(result.RecycleAfterResponse);
-        Assert.Equal(116, result.ByteLength);
-        Assert.Equal("triangles", result.Components[0].Kind);
-        Assert.Equal("lines", result.Components[1].Kind);
-        Assert.Equal(0, result.Components[0].PositionOffset);
-        Assert.Equal(36, result.Components[0].NormalOffset);
-        Assert.Equal(72, result.Components[0].IndexOffset);
-        Assert.Equal(84, result.Components[1].PositionOffset);
-        Assert.Equal(108, result.Components[1].NormalOffset);
-        Assert.Equal(108, result.Components[1].IndexOffset);
+        Assert.Equal(108, result.ByteLength);
+        Assert.Equal("triangles", result.Prototypes[0].Kind);
+        Assert.Equal("lines", result.Prototypes[1].Kind);
+        Assert.Equal(0, result.Prototypes[0].PositionOffset);
+        Assert.Equal(36, result.Prototypes[0].NormalOffset);
+        Assert.Equal(72, result.Prototypes[0].IndexOffset);
+        Assert.Equal(80, result.Prototypes[1].PositionOffset);
+        Assert.Equal(104, result.Prototypes[1].NormalOffset);
+        Assert.Equal(104, result.Prototypes[1].IndexOffset);
         Assert.Equal(1, result.Metrics.ManagedHeapBytes);
         Assert.Equal(2, result.Metrics.PicoGkNativeBytes);
         Assert.Equal(3, result.Metrics.ProcessWorkingSetBytes);
@@ -1405,9 +1405,9 @@ Library.Go(2f, () =>
         Assert.Throws<KeyNotFoundException>(() => Program.ParseArguments(["--workspace", root]));
 
         var output = Run(arguments, """
-{"protocolVersion":7,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
-{"protocolVersion":7,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
-{"protocolVersion":7,"requestId":"3","method":"shutdown","params":{}}
+{"protocolVersion":8,"requestId":"1","method":"analyze","params":{"entryPath":"main.cs"}}
+{"protocolVersion":8,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{}}}
+{"protocolVersion":8,"requestId":"3","method":"shutdown","params":{}}
 """);
         Assert.Contains("\"type\":\"ready\"", output);
         Assert.Contains("\"defaultParameters\":{}", output);
@@ -1435,9 +1435,9 @@ Library.Go(2f, () =>
         Assert.Equal(2, Program.Run(arguments, new StringReader("{\"protocolVersion\":3,\"requestId\":\"1\",\"method\":\"x\",\"params\":{}}"), new StringWriter(), new StringWriter()));
         Assert.Equal(2, Program.Run(arguments, new StringReader(new string('x', 1_048_577)), new StringWriter(), new StringWriter()));
 
-        var output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
+        var output = Run(arguments, "{\"protocolVersion\":8,\"requestId\":\"2\",\"method\":\"unknown\",\"params\":{}}");
         Assert.Contains("CS_TAU_PROTOCOL", output);
-        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
+        output = Run(arguments, "{\"protocolVersion\":8,\"requestId\":\"3\",\"method\":\"analyze\",\"params\":{}}");
         Assert.Contains("CS_TAU_RUNTIME", output);
         Assert.DoesNotContain("\"location\":null", output);
 
@@ -1448,11 +1448,11 @@ Library.Go(2f, () =>
         {
             Assert.ThrowsAny<Exception>(() => Program.ValidateEntryPath(Json(json), root));
         }
-        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":8,\"requestId\":\"3a\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("CS_TAU_NO_SCENE", output);
 
         Write("main.cs", "using System; using System.Numerics; using PicoGK; Library.Go(1f, () => { Library.oViewer().Add(Utils.mshCreateCube(Vector3.One)); throw new InvalidOperationException(\"failed after start\"); });");
-        output = Run(arguments, "{\"protocolVersion\":7,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
+        output = Run(arguments, "{\"protocolVersion\":8,\"requestId\":\"4\",\"method\":\"build\",\"params\":{\"entryPath\":\"main.cs\",\"parameters\":{}}}");
         Assert.Contains("failed after start", output);
     }
 
@@ -1490,11 +1490,11 @@ public static class Params
         var frames = new[]
         {
             // A cancel with nothing in flight has nothing to stop.
-            """{"protocolVersion":7,"requestId":"0","method":"cancel"}""",
-            """{"protocolVersion":7,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":7,"requestId":"1","method":"cancel"}""",
-            """{"protocolVersion":7,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
-            """{"protocolVersion":7,"requestId":"3","method":"shutdown","params":{}}""",
+            """{"protocolVersion":8,"requestId":"0","method":"cancel"}""",
+            """{"protocolVersion":8,"requestId":"1","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":100,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":8,"requestId":"1","method":"cancel"}""",
+            """{"protocolVersion":8,"requestId":"2","method":"build","params":{"entryPath":"main.cs","parameters":{"Iterations":0,"SentinelPath":SENTINEL}}}""".Replace("SENTINEL", sentinel, StringComparison.Ordinal),
+            """{"protocolVersion":8,"requestId":"3","method":"shutdown","params":{}}""",
         };
 
         // The cancel is held back until the model is demonstrably running, so it stops a build in flight.
@@ -1571,7 +1571,7 @@ public static class Params
         var originalError = Console.Error;
         try
         {
-            Console.SetIn(new StringReader("{\"protocolVersion\":7,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
+            Console.SetIn(new StringReader("{\"protocolVersion\":8,\"requestId\":\"main\",\"method\":\"shutdown\",\"params\":{}}"));
             var output = new StringWriter();
             Console.SetOut(output);
             Console.SetError(new StringWriter());

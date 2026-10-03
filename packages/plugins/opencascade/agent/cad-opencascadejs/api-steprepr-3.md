@@ -1,443 +1,209 @@
 # libcascade — StepRepr (3)
 
-18 top-level symbols. Signatures are verbatim typescript.
+16 top-level symbols. Signatures are verbatim typescript.
 
-StepRepr_QuantifiedAssemblyComponentUsage: declare class StepRepr_QuantifiedAssemblyComponentUsage extends StepRepr_AssemblyComponentUsage
+StepRepr_SpecifiedHigherUsageOccurrence: declare class StepRepr_SpecifiedHigherUsageOccurrence extends StepRepr_AssemblyComponentUsage
 
-  constructor
+  // StepRepr_SpecifiedHigherUsageOccurrence.constructor (constructor)
+  constructor();
 
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinition, aRelatedProductDefinition: StepBasic_ProductDefinition): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aRelatedProductDefinition: StepBasic_ProductDefinitionOrReference): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinition, aRelatedProductDefinition: StepBasic_ProductDefinition): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aRelatedProductDefinition: StepBasic_ProductDefinitionOrReference): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinition, aRelatedProductDefinition: StepBasic_ProductDefinition): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aRelatedProductDefinition: StepBasic_ProductDefinitionOrReference): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinition, aRelatedProductDefinition: StepBasic_ProductDefinition): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aRelatedProductDefinition: StepBasic_ProductDefinitionOrReference): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinition, aRelatedProductDefinition: StepBasic_ProductDefinition): void;
-  Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aRelatedProductDefinition: StepBasic_ProductDefinitionOrReference): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
-  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aQuantity: Standard_Transient): void;
+  // StepRepr_SpecifiedHigherUsageOccurrence.Init (method)
+  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aUpperUsage: StepRepr_AssemblyComponentUsage, aNextUsage: StepRepr_NextAssemblyUsageOccurrence): void;
+  Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasAssemblyComponentUsage_ReferenceDesignator: boolean, aAssemblyComponentUsage_ReferenceDesignator: TCollection_HAsciiString, aUpperUsage: StepRepr_AssemblyComponentUsage, aNextUsage: StepRepr_NextAssemblyUsageOccurrence): void;
   Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinition, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinition, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
   Init(aProductDefinitionRelationship_Id: TCollection_HAsciiString, aProductDefinitionRelationship_Name: TCollection_HAsciiString, hasProductDefinitionRelationship_Description: boolean, aProductDefinitionRelationship_Description: TCollection_HAsciiString, aProductDefinitionRelationship_RelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aProductDefinitionRelationship_RelatedProductDefinition: StepBasic_ProductDefinitionOrReference, hasReferenceDesignator: boolean, aReferenceDesignator: TCollection_HAsciiString): void;
   Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinition, aRelatedProductDefinition: StepBasic_ProductDefinition): void;
   Init(aId: TCollection_HAsciiString, aName: TCollection_HAsciiString, hasDescription: boolean, aDescription: TCollection_HAsciiString, aRelatingProductDefinition: StepBasic_ProductDefinitionOrReference, aRelatedProductDefinition: StepBasic_ProductDefinitionOrReference): void;
 
-  Quantity(): Standard_Transient;
+  // StepRepr_SpecifiedHigherUsageOccurrence.UpperUsage (method)
+  UpperUsage(): StepRepr_AssemblyComponentUsage;
 
-  SetQuantity(Quantity: Standard_Transient): void;
+  // StepRepr_SpecifiedHigherUsageOccurrence.SetUpperUsage (method)
+  SetUpperUsage(UpperUsage: StepRepr_AssemblyComponentUsage): void;
 
+  // StepRepr_SpecifiedHigherUsageOccurrence.NextUsage (method)
+  NextUsage(): StepRepr_NextAssemblyUsageOccurrence;
+
+  // StepRepr_SpecifiedHigherUsageOccurrence.SetNextUsage (method)
+  SetNextUsage(NextUsage: StepRepr_NextAssemblyUsageOccurrence): void;
+
+  // StepRepr_SpecifiedHigherUsageOccurrence.get_type_name (method)
   static get_type_name(): string;
 
+  // StepRepr_SpecifiedHigherUsageOccurrence.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // StepRepr_SpecifiedHigherUsageOccurrence.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // StepRepr_SpecifiedHigherUsageOccurrence.delete (method)
   delete(): void;
 
+  // StepRepr_SpecifiedHigherUsageOccurrence.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-StepRepr_RealRepresentationItem: declare class StepRepr_RealRepresentationItem extends StepRepr_RepresentationItem
+StepRepr_StructuralResponseProperty: declare class StepRepr_StructuralResponseProperty extends StepRepr_PropertyDefinition
 
-  constructor
+  // StepRepr_StructuralResponseProperty.constructor (constructor)
+  constructor();
 
-  Init(theName: TCollection_HAsciiString, theValue: number): void;
-  Init(aName: TCollection_HAsciiString): void;
-  Init(theName: TCollection_HAsciiString, theValue: number): void;
-  Init(aName: TCollection_HAsciiString): void;
-
-  SetValue(theValue: number): void;
-
-  Value(): number;
-
+  // StepRepr_StructuralResponseProperty.get_type_name (method)
   static get_type_name(): string;
 
+  // StepRepr_StructuralResponseProperty.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // StepRepr_StructuralResponseProperty.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // StepRepr_StructuralResponseProperty.delete (method)
   delete(): void;
 
+  // StepRepr_StructuralResponseProperty.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-StepRepr_ReprItemAndLengthMeasureWithUnit: declare class StepRepr_ReprItemAndLengthMeasureWithUnit extends StepRepr_ReprItemAndMeasureWithUnit
+StepRepr_StructuralResponsePropertyDefinitionRepresentation: declare class StepRepr_StructuralResponsePropertyDefinitionRepresentation extends StepRepr_PropertyDefinitionRepresentation
 
-  constructor
+  // StepRepr_StructuralResponsePropertyDefinitionRepresentation.constructor (constructor)
+  constructor();
 
-  SetLengthMeasureWithUnit(aLMWU: StepBasic_LengthMeasureWithUnit): void;
-
-  GetLengthMeasureWithUnit(): StepBasic_LengthMeasureWithUnit;
-
+  // StepRepr_StructuralResponsePropertyDefinitionRepresentation.get_type_name (method)
   static get_type_name(): string;
 
+  // StepRepr_StructuralResponsePropertyDefinitionRepresentation.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // StepRepr_StructuralResponsePropertyDefinitionRepresentation.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // StepRepr_StructuralResponsePropertyDefinitionRepresentation.delete (method)
   delete(): void;
 
+  // StepRepr_StructuralResponsePropertyDefinitionRepresentation.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-StepRepr_ReprItemAndLengthMeasureWithUnitAndQRI: declare class StepRepr_ReprItemAndLengthMeasureWithUnitAndQRI extends StepRepr_ReprItemAndMeasureWithUnitAndQRI
+StepRepr_SuppliedPartRelationship: declare class StepRepr_SuppliedPartRelationship extends StepBasic_ProductDefinitionRelationship
 
-  constructor
+  // StepRepr_SuppliedPartRelationship.constructor (constructor)
+  constructor();
 
-  SetLengthMeasureWithUnit(aLMWU: StepBasic_LengthMeasureWithUnit): void;
-
-  GetLengthMeasureWithUnit(): StepBasic_LengthMeasureWithUnit;
-
+  // StepRepr_SuppliedPartRelationship.get_type_name (method)
   static get_type_name(): string;
 
+  // StepRepr_SuppliedPartRelationship.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // StepRepr_SuppliedPartRelationship.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // StepRepr_SuppliedPartRelationship.delete (method)
   delete(): void;
 
+  // StepRepr_SuppliedPartRelationship.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-StepRepr_ReprItemAndMeasureWithUnit: declare class StepRepr_ReprItemAndMeasureWithUnit extends StepRepr_RepresentationItem
+StepRepr_Tangent: declare class StepRepr_Tangent extends StepRepr_DerivedShapeAspect
 
-  constructor
+  // StepRepr_Tangent.constructor (constructor)
+  constructor();
 
-  Init(aMWU: StepBasic_MeasureWithUnit, aRI: StepRepr_RepresentationItem): void;
-  Init(aName: TCollection_HAsciiString): void;
-  Init(aMWU: StepBasic_MeasureWithUnit, aRI: StepRepr_RepresentationItem): void;
-  Init(aName: TCollection_HAsciiString): void;
-
-  GetMeasureRepresentationItem(): StepRepr_MeasureRepresentationItem;
-
-  SetMeasureWithUnit(aMWU: StepBasic_MeasureWithUnit): void;
-
-  GetMeasureWithUnit(): StepBasic_MeasureWithUnit;
-
-  GetRepresentationItem(): StepRepr_RepresentationItem;
-
+  // StepRepr_Tangent.get_type_name (method)
   static get_type_name(): string;
 
+  // StepRepr_Tangent.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // StepRepr_Tangent.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // StepRepr_Tangent.delete (method)
   delete(): void;
 
+  // StepRepr_Tangent.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-StepRepr_ReprItemAndMeasureWithUnitAndQRI: declare class StepRepr_ReprItemAndMeasureWithUnitAndQRI extends StepRepr_ReprItemAndMeasureWithUnit
+StepRepr_Transformation: declare class StepRepr_Transformation extends StepData_SelectType
 
-  constructor
+  // StepRepr_Transformation.constructor (constructor)
+  constructor();
 
-  Init(aMWU: StepBasic_MeasureWithUnit, aRI: StepRepr_RepresentationItem, aQRI: StepShape_QualifiedRepresentationItem): void;
-  Init(aMWU: StepBasic_MeasureWithUnit, aRI: StepRepr_RepresentationItem): void;
-  Init(aName: TCollection_HAsciiString): void;
-  Init(aMWU: StepBasic_MeasureWithUnit, aRI: StepRepr_RepresentationItem, aQRI: StepShape_QualifiedRepresentationItem): void;
-  Init(aMWU: StepBasic_MeasureWithUnit, aRI: StepRepr_RepresentationItem): void;
-  Init(aName: TCollection_HAsciiString): void;
-  Init(aMWU: StepBasic_MeasureWithUnit, aRI: StepRepr_RepresentationItem, aQRI: StepShape_QualifiedRepresentationItem): void;
-  Init(aMWU: StepBasic_MeasureWithUnit, aRI: StepRepr_RepresentationItem): void;
-  Init(aName: TCollection_HAsciiString): void;
-
-  SetQualifiedRepresentationItem(aQRI: StepShape_QualifiedRepresentationItem): void;
-
-  GetQualifiedRepresentationItem(): StepShape_QualifiedRepresentationItem;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_ReprItemAndPlaneAngleMeasureWithUnit: declare class StepRepr_ReprItemAndPlaneAngleMeasureWithUnit extends StepRepr_ReprItemAndMeasureWithUnit
-
-  constructor
-
-  SetPlaneAngleMeasureWithUnit(aLMWU: StepBasic_PlaneAngleMeasureWithUnit): void;
-
-  GetPlaneAngleMeasureWithUnit(): StepBasic_PlaneAngleMeasureWithUnit;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_ReprItemAndPlaneAngleMeasureWithUnitAndQRI: declare class StepRepr_ReprItemAndPlaneAngleMeasureWithUnitAndQRI extends StepRepr_ReprItemAndMeasureWithUnitAndQRI
-
-  constructor
-
-  SetPlaneAngleMeasureWithUnit(aLMWU: StepBasic_PlaneAngleMeasureWithUnit): void;
-
-  GetPlaneAngleMeasureWithUnit(): StepBasic_PlaneAngleMeasureWithUnit;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_Representation: declare class StepRepr_Representation extends Standard_Transient
-
-  constructor
-
-  Init(aName: TCollection_HAsciiString, aItems: NCollection_HArray1_handle_StepRepr_RepresentationItem, aContextOfItems: StepRepr_RepresentationContext): void;
-
-  SetName(aName: TCollection_HAsciiString): void;
-
-  Name(): TCollection_HAsciiString;
-
-  SetItems(aItems: NCollection_HArray1_handle_StepRepr_RepresentationItem): void;
-
-  Items(): NCollection_HArray1_handle_StepRepr_RepresentationItem;
-
-  ItemsValue(num: number): StepRepr_RepresentationItem;
-
-  NbItems(): number;
-
-  SetContextOfItems(aContextOfItems: StepRepr_RepresentationContext): void;
-
-  ContextOfItems(): StepRepr_RepresentationContext;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_RepresentationContext: declare class StepRepr_RepresentationContext extends Standard_Transient
-
-  constructor
-
-  Init(aContextIdentifier: TCollection_HAsciiString, aContextType: TCollection_HAsciiString): void;
-
-  SetContextIdentifier(aContextIdentifier: TCollection_HAsciiString): void;
-
-  ContextIdentifier(): TCollection_HAsciiString;
-
-  SetContextType(aContextType: TCollection_HAsciiString): void;
-
-  ContextType(): TCollection_HAsciiString;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_RepresentationContextReference: declare class StepRepr_RepresentationContextReference extends Standard_Transient
-
-  constructor
-
-  Init(theContextIdentifier: TCollection_HAsciiString): void;
-
-  ContextIdentifier(): TCollection_HAsciiString;
-
-  SetContextIdentifier(theContextIdentifier: TCollection_HAsciiString): void;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_RepresentationItem: declare class StepRepr_RepresentationItem extends Standard_Transient
-
-  constructor
-
-  Init(aName: TCollection_HAsciiString): void;
-
-  SetName(aName: TCollection_HAsciiString): void;
-
-  Name(): TCollection_HAsciiString;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_RepresentationMap: declare class StepRepr_RepresentationMap extends Standard_Transient
-
-  constructor
-
-  Init(aMappingOrigin: StepRepr_RepresentationItem, aMappedRepresentation: StepRepr_Representation): void;
-
-  SetMappingOrigin(aMappingOrigin: StepRepr_RepresentationItem): void;
-
-  MappingOrigin(): StepRepr_RepresentationItem;
-
-  SetMappedRepresentation(aMappedRepresentation: StepRepr_Representation): void;
-
-  MappedRepresentation(): StepRepr_Representation;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_RepresentationOrRepresentationReference: declare class StepRepr_RepresentationOrRepresentationReference extends StepData_SelectType
-
-  constructor
-
+  // StepRepr_Transformation.CaseNum (method)
   CaseNum(ent: Standard_Transient): number;
 
-  Representation(): StepRepr_Representation;
+  // StepRepr_Transformation.ItemDefinedTransformation (method)
+  ItemDefinedTransformation(): StepRepr_ItemDefinedTransformation;
 
-  RepresentationReference(): StepRepr_RepresentationReference;
+  // StepRepr_Transformation.FunctionallyDefinedTransformation (method)
+  FunctionallyDefinedTransformation(): StepRepr_FunctionallyDefinedTransformation;
 
+  // StepRepr_Transformation.delete (method)
   delete(): void;
 
+  // StepRepr_Transformation.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-StepRepr_RepresentationReference: declare class StepRepr_RepresentationReference extends Standard_Transient
+StepRepr_ValueRange: declare class StepRepr_ValueRange extends StepRepr_CompoundRepresentationItem
 
-  constructor
+  // StepRepr_ValueRange.constructor (constructor)
+  constructor();
 
-  Init(theId: TCollection_HAsciiString, theContextOfItems: StepRepr_RepresentationContextReference): void;
-
-  Id(): TCollection_HAsciiString;
-
-  SetId(theId: TCollection_HAsciiString): void;
-
-  ContextOfItems(): StepRepr_RepresentationContextReference;
-
-  SetContextOfItems(theContextOfItems: StepRepr_RepresentationContextReference): void;
-
+  // StepRepr_ValueRange.get_type_name (method)
   static get_type_name(): string;
 
+  // StepRepr_ValueRange.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // StepRepr_ValueRange.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // StepRepr_ValueRange.delete (method)
   delete(): void;
 
+  // StepRepr_ValueRange.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-StepRepr_RepresentationRelationship: declare class StepRepr_RepresentationRelationship extends Standard_Transient
+StepRepr_ValueRepresentationItem: declare class StepRepr_ValueRepresentationItem extends StepRepr_RepresentationItem
 
-  constructor
+  // StepRepr_ValueRepresentationItem.constructor (constructor)
+  constructor();
 
-  Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation): void;
+  // StepRepr_ValueRepresentationItem.Init (method)
+  Init(theName: TCollection_HAsciiString, theValueComponentMember: StepBasic_MeasureValueMember): void;
+  Init(aName: TCollection_HAsciiString): void;
 
-  SetName(aName: TCollection_HAsciiString): void;
+  // StepRepr_ValueRepresentationItem.SetValueComponentMember (method)
+  SetValueComponentMember(theValueComponentMember: StepBasic_MeasureValueMember): void;
 
-  Name(): TCollection_HAsciiString;
+  // StepRepr_ValueRepresentationItem.ValueComponentMember (method)
+  ValueComponentMember(): StepBasic_MeasureValueMember;
 
-  HasDescription(): boolean;
-
-  SetDescription(aDescription: TCollection_HAsciiString): void;
-
-  Description(): TCollection_HAsciiString;
-
-  SetRep1(aRep1: StepRepr_Representation): void;
-
-  Rep1(): StepRepr_Representation;
-
-  SetRep2(aRep2: StepRepr_Representation): void;
-
-  Rep2(): StepRepr_Representation;
-
+  // StepRepr_ValueRepresentationItem.get_type_name (method)
   static get_type_name(): string;
 
+  // StepRepr_ValueRepresentationItem.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // StepRepr_ValueRepresentationItem.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // StepRepr_ValueRepresentationItem.delete (method)
   delete(): void;
 
+  // StepRepr_ValueRepresentationItem.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-StepRepr_RepresentationRelationshipWithTransformation: declare class StepRepr_RepresentationRelationshipWithTransformation extends StepRepr_ShapeRepresentationRelationship
+StepRepr_Array1OfMaterialPropertyRepresentation: NCollection_Array1_handle_StepRepr_MaterialPropertyRepresentation
 
-  constructor
+StepRepr_Array1OfPropertyDefinitionRepresentation: NCollection_Array1_handle_StepRepr_PropertyDefinitionRepresentation
 
-  Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation, aTransf: StepRepr_Transformation): void;
-  Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation): void;
-  Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation, aTransf: StepRepr_Transformation): void;
-  Init(aName: TCollection_HAsciiString, aDescription: TCollection_HAsciiString, aRep1: StepRepr_Representation, aRep2: StepRepr_Representation): void;
+StepRepr_Array1OfRepresentationItem: NCollection_Array1_handle_StepRepr_RepresentationItem
 
-  TransformationOperator(): StepRepr_Transformation;
+StepRepr_Array1OfShapeAspect: NCollection_Array1_handle_StepRepr_ShapeAspect
 
-  SetTransformationOperator(aTrans: StepRepr_Transformation): void;
+StepRepr_HArray1OfMaterialPropertyRepresentation: NCollection_HArray1_handle_StepRepr_MaterialPropertyRepresentation
 
-  static get_type_name(): string;
+StepRepr_HArray1OfPropertyDefinitionRepresentation: NCollection_HArray1_handle_StepRepr_PropertyDefinitionRepresentation
 
-  static get_type_descriptor(): Standard_Type;
+StepRepr_HArray1OfRepresentationItem: NCollection_HArray1_handle_StepRepr_RepresentationItem
 
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-StepRepr_RepresentedDefinition: declare class StepRepr_RepresentedDefinition extends StepData_SelectType
-
-  constructor
-
-  CaseNum(ent: Standard_Transient): number;
-
-  GeneralProperty(): StepBasic_GeneralProperty;
-
-  PropertyDefinition(): StepRepr_PropertyDefinition;
-
-  PropertyDefinitionRelationship(): StepRepr_PropertyDefinitionRelationship;
-
-  ShapeAspect(): StepRepr_ShapeAspect;
-
-  ShapeAspectRelationship(): StepRepr_ShapeAspectRelationship;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
+StepRepr_HArray1OfShapeAspect: NCollection_HArray1_handle_StepRepr_ShapeAspect

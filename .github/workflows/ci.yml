@@ -491,7 +491,10 @@ jobs:
       # `--parallel=1`: the suites' ui:build, ui:build:serve and ui:build:desktop
       # prerequisites each peak near the same 10 GB as above, so building them together
       # loses the runner ("The operation was canceled.") a few minutes in.
+      # A step-level bound: a hung suite otherwise holds the job for the 6 h default
+      # with no logs, while this still runs the always() diagnostics below.
       - name: Run affected end-to-end suites
+        timeout-minutes: 120
         env:
           TAU_E2E_WEBGPU_PROFILE: software
         run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1

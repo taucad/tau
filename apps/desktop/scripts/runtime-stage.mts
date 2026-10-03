@@ -26,8 +26,12 @@ export type RuntimePlatformPackages = Readonly<{
   esbuild: string;
   libassimp: string;
   nanoraster: string;
-  /** Sharp's binding and, where it is a separate package, its libvips. */
-  sharp: readonly string[];
+  /**
+   * Native payloads the bundled imports load through `optionalDependencies`: sharp's libvips (where it
+   * is a separate package) before sharp's addon, so the addon finds it as a sibling, then
+   * `@parcel/watcher`'s addon. Each is staged at the version its consumer installed.
+   */
+  bundledOptionalDependencies: readonly string[];
 }>;
 
 /** Platform package names, exactly as each engine's `optionalDependencies` declares them. */
@@ -37,14 +41,22 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     esbuild: '@esbuild/darwin-arm64',
     libassimp: 'libassimp-darwin-arm64',
     nanoraster: 'nanoraster-darwin-arm64',
-    sharp: ['@img/sharp-darwin-arm64', '@img/sharp-libvips-darwin-arm64'],
+    bundledOptionalDependencies: [
+      '@img/sharp-libvips-darwin-arm64',
+      '@img/sharp-darwin-arm64',
+      '@parcel/watcher-darwin-arm64',
+    ],
   },
   'linux-x64': {
     openrscadEngine: '@taulabs/openrscad-engine-linux-x64-gnu',
     esbuild: '@esbuild/linux-x64',
     libassimp: 'libassimp-linux-x64-gnu',
     nanoraster: 'nanoraster-linux-x64-gnu',
-    sharp: ['@img/sharp-linux-x64', '@img/sharp-libvips-linux-x64'],
+    bundledOptionalDependencies: [
+      '@img/sharp-libvips-linux-x64',
+      '@img/sharp-linux-x64',
+      '@parcel/watcher-linux-x64-glibc',
+    ],
   },
   'win32-x64': {
     openrscadEngine: '@taulabs/openrscad-engine-win32-x64-msvc',
@@ -52,7 +64,7 @@ export const runtimePlatformPackages: Readonly<Record<RuntimeTarget, RuntimePlat
     libassimp: 'libassimp-win32-x64-msvc',
     nanoraster: 'nanoraster-win32-x64-msvc',
     /* `@img/sharp-win32-x64` carries libvips itself; there is no separate libvips package. */
-    sharp: ['@img/sharp-win32-x64'],
+    bundledOptionalDependencies: ['@img/sharp-win32-x64', '@parcel/watcher-win32-x64'],
   },
 };
 
@@ -71,7 +83,6 @@ export type ResolvedRuntimePackages = Readonly<{
   nanorasterPlatform: string;
   sandboxRuntime: InstalledPackage;
   bundledImports: readonly InstalledPackage[];
-  sharpPlatformImports: readonly InstalledPackage[];
   acpAdapters: readonly InstalledPackage[];
   geospecEngine: string;
 }>;
@@ -135,19 +146,15 @@ export const resolveRuntimePackages = async (
     await realpath(resolve(desktopRoot, 'node_modules/@anthropic-ai/sandbox-runtime')),
   );
   const bundledImports = await Promise.all(
-    ['@gltf-transform/core', '@gltf-transform/functions', 'fflate', 'uint8array-extras', 'xstate'].map(
-      async (name) => ({
-        ...(await installed(await realpath(resolve(desktopRoot, 'node_modules', name)))),
-        name,
-      }),
-    ),
-  );
-  const sharpRoot = dirname(
-    dirname(createRequire(resolve(bundledImports[1]!.source, 'package.json')).resolve('sharp')),
-  );
-  const sharpPlatformImports = await Promise.all(
-    platform.sharp.map(async (name) => ({
-      ...(await installed(await realpath(resolve(sharpRoot, '..', name)))),
+    [
+      '@gltf-transform/core',
+      '@gltf-transform/functions',
+      'fflate',
+      'uint8array-extras',
+      'xstate',
+      '@parcel/watcher',
+    ].map(async (name) => ({
+      ...(await installed(await realpath(resolve(desktopRoot, 'node_modules', name)))),
       name,
     })),
   );
@@ -163,7 +170,6 @@ export const resolveRuntimePackages = async (
     nanorasterPlatform: platformPackage(nanoraster.source, platform.nanoraster),
     sandboxRuntime,
     bundledImports,
-    sharpPlatformImports,
     acpAdapters,
     geospecEngine: await realpath(resolve(desktopRoot, 'node_modules/@taucad/geospec-engine')),
   };
@@ -248,7 +254,6 @@ export const stageRuntimePackages = async (
             [platform.nanoraster]: packages.nanoraster.version,
             '@anthropic-ai/sandbox-runtime': packages.sandboxRuntime.version,
             ...Object.fromEntries(packages.bundledImports.map(({ name, version }) => [name, version])),
-            ...Object.fromEntries(packages.sharpPlatformImports.map(({ name, version }) => [name, version])),
             ...Object.fromEntries(packages.acpAdapters.map(({ name, version }) => [name, version])),
           },
         },
@@ -258,9 +263,17 @@ export const stageRuntimePackages = async (
     ),
   ]);
 
+  for (const { name, source } of packages.bundledImports) {
+    // oxlint-disable-next-line no-await-in-loop -- Package-local native versions require serial nested staging.
+    await copyRuntimeClosure({
+      name,
+      source,
+      modulesRoot: resolve(stageRoot, 'node_modules'),
+      filter: excludesBuildDiagnostics,
+      optionalDependencies: platform.bundledOptionalDependencies,
+    });
+  }
   for (const { name, source } of [
-    ...packages.bundledImports,
-    ...packages.sharpPlatformImports,
     ...packages.acpAdapters,
     { name: '@anthropic-ai/sandbox-runtime', source: packages.sandboxRuntime.source },
   ]) {

@@ -1,12 +1,14 @@
 /** Exact document/view source revisions and separate pinned-export/export dependencies (R4/I5). */
 import { randomUUID } from 'node:crypto';
 import { afterEach, describe, it, expect, vi } from 'vitest';
+import { z } from 'zod';
 import { digestContent } from '@taucad/cache-core';
 import { KernelRuntimeWorker } from '#framework/kernel-runtime-worker.js';
 import { defineRuntime } from '#worker/runtime-definition.js';
 import { defineKernelV2 } from '#types/runtime-kernel-v2.types.js';
 import { defineMiddlewareV2 as defineMiddleware } from '#middleware/runtime-middleware-v2.js';
 import type { MiddlewarePlugin } from '#plugins/plugin-types.js';
+import type { MaterializedRender } from '#framework/render-artifact.js';
 /* oxlint-disable no-restricted-imports, import/extensions -- Runtime-private white-box fixture. */
 import { createMockFileSystem, createGeometryFile } from '../../test/support/kernel-worker.fixture.js';
 /* oxlint-enable no-restricted-imports, import/extensions */
@@ -31,7 +33,7 @@ const declaration = {
 const createHarness = async (
   initial: Record<string, string>,
   middleware: readonly MiddlewarePlugin[] = [],
-  measured = false,
+  options: { measured?: boolean; construction?: boolean } = {},
 ) => {
   const files = new Map(Object.entries(initial));
   const filesystem = createMockFileSystem({
@@ -55,14 +57,23 @@ const createHarness = async (
       }),
     ),
   );
-  const counts = { evaluations: 0, writes: 0 };
+  const counts = { evaluations: 0, writes: 0, restores: 0 };
+  const handles = { valid: true, restoreFails: false };
   const kernel = defineKernelV2({
     id: 'provenance',
     extensions: ['ts'],
     name: 'Provenance',
     version: '1.0.0',
     views: { model: { title: 'Model', mimeType: 'image/svg+xml' } },
-    exports: { text: { title: 'Text', mimeType: 'text/plain', extension: 'txt' } },
+    evaluateOptionsSchema: z.object({ size: z.number().default(1), quality: z.number().default(1) }),
+    exports: {
+      text: {
+        title: 'Text',
+        mimeType: 'text/plain',
+        extension: 'txt',
+        optionsSchema: z.object({ size: z.number().optional(), quality: z.number().optional() }),
+      },
+    },
     async initialize() {
       return {};
     },
@@ -87,11 +98,20 @@ const createHarness = async (
             name: 'export.txt',
             mimeType: 'text/plain',
             bytes: new TextEncoder().encode(
-              measured ? `${handle.value}:${files.get('export.flag') ?? 'missing'}` : handle.value,
+              options.measured ? `${handle.value}:${files.get('export.flag') ?? 'missing'}` : handle.value,
             ),
           },
         ],
       };
+    },
+    isHandleValid: () => handles.valid,
+    serializeHandle: ({ handle }) => handle.value,
+    deserializeHandle: ({ serialized }: { serialized: string }) => {
+      counts.restores++;
+      if (handles.restoreFails) {
+        throw new Error('Corrupt pinned handle snapshot');
+      }
+      return { value: serialized };
     },
   })();
   const worker = new KernelRuntimeWorker({ runtime: defineRuntime({ kernels: [kernel], middleware }) });
@@ -123,12 +143,15 @@ const createHarness = async (
   };
   const render = async () => {
     const events: Array<Parameters<NonNullable<KernelRuntimeWorker['onRendered']>>[0]> = [];
+    const subscriptionId = `view-${intent}`;
     worker.onRendered = (event) => {
-      events.push(event);
+      if (event.subscriptionId === subscriptionId) {
+        events.push(event);
+      }
     };
     worker.handleOpenView({
       documentId: 'live',
-      subscriptionId: `view-${intent}`,
+      subscriptionId,
       requestId: `request-${intent}`,
       view: 'model',
     });
@@ -152,10 +175,202 @@ const createHarness = async (
       worker.handleCloseDocument({ documentId });
     }
   };
-  return { worker, files, filesystem, counts, evaluate, render, freshExport };
+  return { worker, files, filesystem, counts, handles, evaluate, render, freshExport };
 };
 
 describe('document results name the source revision they evaluated (R4)', () => {
+  it('should keep pinned evaluation bytes and export-cache identity after external source rewrites', async () => {
+    const dependencies: Array<{ hash: string; files: string[] }> = [];
+    const middleware = defineMiddleware({
+      id: 'pinned-export-dependencies',
+      name: 'Pinned export dependencies',
+      resolve: () => [
+        { path: 'geometry.flag', affects: ['evaluate'] },
+        { path: 'export.flag', affects: ['export'] },
+      ],
+      async wrapExport(input, handler, runtime) {
+        dependencies.push({
+          hash: runtime.dependencyHash,
+          files: runtime.dependencies
+            .filter((dependency) => dependency.type === 'file')
+            .map(({ path, contentHash }) => `${path}:${contentHash}`),
+        });
+        return handler(input);
+      },
+    });
+    const { worker, files, counts, evaluate } = await createHarness(
+      { 'main.ts': 'original', 'geometry.flag': 'g1', 'export.flag': 'e1' },
+      [middleware()],
+      { measured: true },
+    );
+    const pinned = await evaluate();
+    const first = await worker.exportDocument({ documentId: 'live', operationId: 'first', target: 'text' });
+    files.set('main.ts', 'rewritten');
+    files.set('geometry.flag', 'g2');
+    const second = await worker.exportDocument({ documentId: 'live', operationId: 'second', target: 'text' });
+    files.set('export.flag', 'e2');
+    const third = await worker.exportDocument({ documentId: 'live', operationId: 'third', target: 'text' });
+    for (const [result, expected] of [
+      [first, 'g1:e1'],
+      [second, 'g1:e1'],
+      [third, 'g1:e2'],
+    ] as const) {
+      expect(result.success, JSON.stringify(result.issues)).toBe(true);
+      if (!result.success) {
+        throw new Error('Expected a pinned export');
+      }
+      expect(new TextDecoder().decode(result.files[0].bytes)).toBe(expected);
+      expect(result.sourceRevision).toEqual(pinned.sourceRevision);
+    }
+    expect(counts.evaluations).toBe(1);
+    expect(dependencies[0]?.hash).toBe(dependencies[1]?.hash);
+    expect(dependencies[1]?.hash).not.toBe(dependencies[2]?.hash);
+    const originalDigest = await writtenDigest('original');
+    const geometryDigest = await writtenDigest('g1');
+    const exportDigest = await writtenDigest('e2');
+    expect(dependencies[1]?.files).toContain(`main.ts:${originalDigest.slice('sha256:'.length)}`);
+    expect(dependencies[1]?.files).toContain(`geometry.flag:${geometryDigest.slice('sha256:'.length)}`);
+    expect(dependencies[2]?.files).toContain(`export.flag:${exportDigest.slice('sha256:'.length)}`);
+  });
+
+  it.each(['lost', 'stale', 'restore-failed', 'restored'] as const)(
+    'should preserve pinned source refusal and restoration when the original handle is %s',
+    async (scenario) => {
+      const { worker, files, counts, handles, evaluate } = await createHarness({ 'main.ts': 'original' });
+      const pinned = await evaluate();
+      // @ts-expect-error -- Owner regression injects loss into the retained private document artifact.
+      const artifact: MaterializedRender = worker.documents.get('live').current.artifact;
+      if (artifact.serializedNativeHandleSlot) {
+        artifact.serializedNativeHandleSlot.serializedNativeHandle = structuredClone(
+          artifact.serializedNativeHandleSlot.serializedNativeHandle,
+        );
+      }
+      if (scenario === 'stale') {
+        handles.valid = false;
+      } else {
+        artifact.liveNativeHandleSlot = undefined;
+      }
+      if (scenario === 'lost' || scenario === 'stale') {
+        artifact.serializedNativeHandleSlot = undefined;
+      }
+      handles.restoreFails = scenario === 'restore-failed';
+      files.set('main.ts', 'rewritten');
+      const result = await worker.exportDocument({ documentId: 'live', operationId: scenario, target: 'text' });
+      if (scenario === 'restored') {
+        expect(result.success, JSON.stringify(result.issues)).toBe(true);
+        if (!result.success) {
+          throw new Error('Expected restored pinned export');
+        }
+        expect(new TextDecoder().decode(result.files[0].bytes)).toBe('original');
+        expect(result.sourceRevision).toEqual(pinned.sourceRevision);
+        expect(counts.restores).toBe(1);
+      } else {
+        expect(result).toMatchObject({
+          success: false,
+          issues: [
+            {
+              code: 'SOURCE_SNAPSHOT_CHANGED',
+              type: 'runtime',
+              severity: 'error',
+              message: 'The committed source changed before its native export handle could be rebuilt.',
+            },
+          ],
+        });
+        expect(counts.writes).toBe(0);
+        expect(counts.restores).toBe(scenario === 'restore-failed' ? 1 : 0);
+      }
+      expect(counts.evaluations).toBe(1);
+    },
+  );
+
+  it('should refuse incompatible construction options after pinned source changes', async () => {
+    const { worker, files, counts, evaluate } = await createHarness({ 'main.ts': 'original' }, [], {
+      construction: true,
+    });
+    await evaluate();
+    files.set('main.ts', 'rewritten');
+    const result = await worker.exportDocument({
+      documentId: 'live',
+      operationId: 'incompatible',
+      target: 'text',
+      options: { quality: 2 },
+    });
+    expect(result).toMatchObject({ success: false, issues: [{ code: 'SOURCE_SNAPSHOT_CHANGED' }] });
+    expect(counts.evaluations).toBe(1);
+    expect(counts.writes).toBe(0);
+  });
+
+  it('keeps a live document export pinned after its source file changes', async () => {
+    const { worker, files, counts, evaluate, freshExport } = await createHarness({ 'main.ts': 'first' });
+    const committed = await evaluate();
+    const first = await worker.exportDocument({ documentId: 'live', operationId: 'first', target: 'text' });
+    files.set('main.ts', 'second');
+    const second = await worker.exportDocument({ documentId: 'live', operationId: 'second', target: 'text' });
+    expect(first.success).toBe(true);
+    expect(second.success).toBe(true);
+    if (!first.success || !second.success) {
+      throw new Error('Expected exports from the committed document');
+    }
+    expect(new TextDecoder().decode(second.files[0].bytes)).toBe('first');
+    expect(second.sourceRevision).toEqual(committed.sourceRevision);
+    expect(counts.evaluations).toBe(1);
+
+    const fresh = await freshExport();
+    expect(fresh.success).toBe(true);
+    if (!fresh.success) {
+      throw new Error('Expected a new document export');
+    }
+    expect(new TextDecoder().decode(fresh.files[0].bytes)).toBe('second');
+  });
+
+  it('restores a pinned serialized handle after its source file changes', async () => {
+    const { worker, files, counts, evaluate } = await createHarness({ 'main.ts': 'first' });
+    await evaluate();
+    // @ts-expect-error Runtime-private materialized artifact fixture.
+    const artifact: MaterializedRender = worker.documents.get('live')?.current?.artifact;
+    expect(artifact).toBeDefined();
+    artifact.liveNativeHandleSlot = undefined;
+    files.set('main.ts', 'second');
+
+    const result = await worker.exportDocument({ documentId: 'live', operationId: 'restored', target: 'text' });
+    expect(result.success).toBe(true);
+    if (!result.success) {
+      throw new Error('Expected export from the committed serialized handle');
+    }
+    expect(new TextDecoder().decode(result.files[0].bytes)).toBe('first');
+    expect(counts.evaluations).toBe(1);
+  });
+
+  it('refuses to rebuild a missing pinned handle after its source file changes', async () => {
+    const { worker, files, counts, evaluate } = await createHarness({ 'main.ts': 'first' });
+    await evaluate();
+    // @ts-expect-error Runtime-private materialized artifact fixture.
+    const artifact: MaterializedRender = worker.documents.get('live')?.current?.artifact;
+    expect(artifact).toBeDefined();
+    artifact.liveNativeHandleSlot = undefined;
+    artifact.serializedNativeHandleSlot = undefined;
+    files.set('main.ts', 'second');
+
+    const result = await worker.exportDocument({ documentId: 'live', operationId: 'missing-handle', target: 'text' });
+    expect(result).toMatchObject({ success: false, issues: [{ code: 'SOURCE_SNAPSHOT_CHANGED' }] });
+    expect(counts.evaluations).toBe(1);
+  });
+
+  it('refuses a changed native construction route after its source file changes', async () => {
+    const { worker, files, counts, evaluate } = await createHarness({ 'main.ts': 'first' });
+    await evaluate();
+    files.set('main.ts', 'second');
+
+    const result = await worker.exportDocument({
+      documentId: 'live',
+      operationId: 'changed-construction',
+      target: 'text',
+      options: { size: 2 },
+    });
+    expect(result).toMatchObject({ success: false, issues: [{ code: 'SOURCE_SNAPSHOT_CHANGED' }] });
+    expect(counts.evaluations).toBe(1);
+  });
+
   it('measures scoped export admission and export freshness without treating evaluation provenance as the export key', async () => {
     const geometryPath = 'geometry.flag';
     const exportPath = 'export.flag';
@@ -190,7 +405,7 @@ describe('document results name the source revision they evaluated (R4)', () => 
     const { worker, files, filesystem, counts, freshExport } = await createHarness(
       { 'main.ts': 'same', [geometryPath]: 'g1' },
       [middleware()],
-      true,
+      { measured: true },
     );
     const reads: Array<{ paths: string[]; bytes: number }> = [];
     const singleReads: Array<{ path: string; bytes: number }> = [];

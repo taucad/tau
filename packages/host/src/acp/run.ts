@@ -45,7 +45,7 @@ import { isRecord } from '@taucad/utils/schema';
 
 import { failureError } from '#acp/acp-session.machine.js';
 import type { AcpFailure, AcpTurnResult } from '#acp/acp-session.machine.js';
-import { provideAcpSession } from '#acp/acp-session.js';
+import { provideAcpSession } from '#acp/acp-session-logic.js';
 import { acpSessionsMachine } from '#acp/acp-sessions.machine.js';
 import type { AcpAcquire } from '#acp/acp-sessions.machine.js';
 import { createAcpMediaStore } from '#acp/media.js';

@@ -5,7 +5,7 @@
 3. For moving parts, read `kinematics-reference.md`: return explicitly named bodies and export `mechanism` or `mechanism(params)` with joints and clips. Fix mechanism warnings.
 4. Use the `pico` session Tau passes in. Never call `createPico()` or import `picovoxel/multi`, `picovoxel/raw` or `picovoxel/three`.
 
-For multiple files, import helpers through explicit ESM paths such as `./lib/widget.js` and pass `pico` into them.
+Across files, use explicit ESM paths such as `./lib/widget.js` and pass `pico` to helpers.
 
 ## Kernel rules
 

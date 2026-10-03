@@ -1,4 +1,4 @@
-import { describe, expect, it, vi, beforeEach } from 'vitest';
+import { afterEach, describe, expect, it, vi, beforeEach } from 'vitest';
 import { OrthographicCamera, PerspectiveCamera, Vector3, WebGLCoordinateSystem, WebGPUCoordinateSystem } from 'three';
 
 const hoisted = vi.hoisted(() => ({
@@ -17,6 +17,10 @@ describe('createTauR3fGlProp', () => {
         //
       }),
     }));
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
   });
 
   it('delegates WebGPU canvases to createRenderer viewport presets', async () => {
@@ -49,6 +53,35 @@ describe('createTauR3fGlProp', () => {
 
     expect(hoisted.createRenderer).toHaveBeenCalledTimes(1);
     expect(hoisted.createRenderer).toHaveBeenCalledWith('viewport', 'webgl', canvas);
+  });
+
+  it('should report renderer creation failure and never settle so R3F leaves no unhandled rejection', async () => {
+    const { createTauR3fGlProp } = await import('#components/geometry/graphics/three/canvas-three-gl.js');
+    const failure = new Error('Error creating WebGL context.');
+    hoisted.createRenderer.mockRejectedValue(failure);
+    vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const onCreateError = vi.fn();
+    const glFactory = createTauR3fGlProp('webgl', [], onCreateError);
+    if (typeof glFactory !== 'function') {
+      throw new TypeError('Expected the R3F renderer factory.');
+    }
+    const settlement = async (): Promise<'settled'> => {
+      try {
+        await glFactory({ canvas: document.createElement('canvas') });
+      } catch {
+        return 'settled';
+      }
+      return 'settled';
+    };
+    const stillPending = async (): Promise<'pending'> => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, 20);
+      });
+      return 'pending';
+    };
+
+    expect(await Promise.race([settlement(), stillPending()])).toBe('pending');
+    expect(onCreateError).toHaveBeenCalledWith(failure);
   });
 
   it('should restore both retained cameras to forward depth before a WebGL canvas starts', async () => {

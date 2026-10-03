@@ -11,15 +11,127 @@ import type { AddressInfo } from 'node:net';
 
 import { runCommand } from 'citty';
 import { describe, expect, it, vi } from 'vitest';
+import { mock } from 'vitest-mock-extended';
 import { WebSocketServer } from 'ws';
 
-import type { AgentChannelClient, AgentLogEvent } from '@taucad/agent-host';
+import type { AgentLogEvent } from '@taucad/agent-host';
+import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { CommandAnswer, HostCommand, ReadAnswer, ReadInput } from '@taucad/agent-host/wire';
 
 import { agentCommand } from '#commands/agent.js';
-import { eventLine, replayChat } from '#commands/agent/client.js';
+import { eventLine, replayChat, sendCommand } from '#commands/agent/client.js';
+
+describe('sendCommand settling admission', () => {
+  const command: HostCommand = {
+    type: 'start',
+    commandId: 'one-gesture',
+    payload: {
+      chatId: 'chat-1',
+      runId: 'run-1',
+      trigger: 'submit',
+      message: { id: 'message-1', role: 'user', content: 'make a plate' },
+    },
+  };
+  const settling: CommandAnswer = {
+    commandId: command.commandId,
+    generation: 1,
+    status: 'refused',
+    effect: 'not-applied',
+    code: 'CHAT_RUN_LIVE',
+    message: 'The previous run is settling.',
+    details: { state: 'settling' },
+  };
+
+  it('should admit once with the original key after a settling refusal', async () => {
+    const client = mock<AgentChannelClient>();
+    client.execute.mockResolvedValueOnce(settling).mockResolvedValueOnce({
+      commandId: command.commandId,
+      generation: 1,
+      status: 'applied',
+      effect: 'durable',
+      cursor: 12,
+    });
+
+    await expect(sendCommand(client, command, AbortSignal.timeout(1000))).resolves.toMatchObject({
+      status: 'applied',
+      cursor: 12,
+    });
+    expect(client.execute).toHaveBeenCalledTimes(2);
+    expect(client.execute.mock.calls.map(([sent]) => sent.commandId)).toEqual(['one-gesture', 'one-gesture']);
+    expect(client.execute.mock.calls.map(([sent]) => sent.payload)).toEqual([command.payload, command.payload]);
+  });
+
+  it('should retry a settling approval with its original key', async () => {
+    const client = mock<AgentChannelClient>();
+    const approval: HostCommand = {
+      type: 'resolve-interrupt',
+      commandId: 'one-approval',
+      payload: { chatId: 'chat-1', runId: 'run-1', interruptId: 'interrupt-1', outcome: 'approved' },
+    };
+    client.execute.mockResolvedValueOnce({ ...settling, commandId: approval.commandId }).mockResolvedValueOnce({
+      commandId: approval.commandId,
+      generation: 1,
+      status: 'applied',
+      effect: 'durable',
+      cursor: 13,
+    });
+
+    await expect(sendCommand(client, approval, AbortSignal.timeout(1000))).resolves.toMatchObject({ cursor: 13 });
+    expect(client.execute.mock.calls.map(([sent]) => sent.commandId)).toEqual(['one-approval', 'one-approval']);
+  });
+
+  it('should leave scripted commands on their one-answer path', async () => {
+    const client = mock<AgentChannelClient>();
+    client.execute.mockResolvedValue(settling);
+
+    await expect(sendCommand(client, command)).rejects.toMatchObject({ code: 'CHAT_RUN_LIVE' });
+    expect(client.execute).toHaveBeenCalledOnce();
+  });
+
+  it('should refuse a non-settling or unknown outcome without resending', async () => {
+    const answers: CommandAnswer[] = [
+      { ...settling, details: { state: 'running' } },
+      { ...settling, effect: 'unknown' },
+    ];
+    for (const answer of answers) {
+      const client = mock<AgentChannelClient>();
+      client.execute.mockResolvedValue(answer);
+      // oxlint-disable-next-line no-await-in-loop -- each refusal is an independent command outcome.
+      await expect(sendCommand(client, command, AbortSignal.timeout(1000))).rejects.toMatchObject({
+        code: 'CHAT_RUN_LIVE',
+      });
+      expect(client.execute).toHaveBeenCalledOnce();
+    }
+  });
+
+  it('should stop a settling retry when its caller detaches', async () => {
+    const client = mock<AgentChannelClient>();
+    const stop = new AbortController();
+    client.execute.mockImplementation(async () => {
+      stop.abort();
+      return settling;
+    });
+
+    await expect(sendCommand(client, command, stop.signal)).rejects.toMatchObject({ name: 'AbortError' });
+    expect(client.execute).toHaveBeenCalledOnce();
+  });
+
+  it('should keep an unanswered command under the channel outbox after retry cancellation', async () => {
+    const client = mock<AgentChannelClient>();
+    const answer = Promise.withResolvers<CommandAnswer>();
+    const stop = new AbortController();
+    client.execute.mockReturnValue(answer.promise);
+
+    const sent = sendCommand(client, command, stop.signal);
+    stop.abort();
+    answer.resolve({ commandId: command.commandId, generation: 1, status: 'applied', effect: 'durable', cursor: 14 });
+
+    await expect(sent).resolves.toMatchObject({ status: 'applied', cursor: 14 });
+    expect(client.execute).toHaveBeenCalledOnce();
+  });
+});
 
 const base = {
   version: 1,

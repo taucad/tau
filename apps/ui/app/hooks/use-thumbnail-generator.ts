@@ -17,6 +17,7 @@ const thumbnailPath = 'thumbnail.webp';
 const thumbnailWidth = 1536;
 const thumbnailHeight = 1152;
 const thumbnailLineWidth = 6;
+const thumbnailQuality = 0.95;
 
 const validateThumbnailWebp = async (bytes: Uint8Array<ArrayBuffer>): Promise<void> => {
   if (
@@ -121,7 +122,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
                 sourcePath: snapshot.context.entryPath,
                 content: artifact.content,
                 format: 'webp',
-                exportOptions: { width: thumbnailWidth, height: thumbnailHeight, quality: 0.9 },
+                exportOptions: { width: thumbnailWidth, height: thumbnailHeight, quality: thumbnailQuality },
               }
             : {
                 kind: request.kind,
@@ -145,7 +146,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
                     margin: 0.1,
                     projection: { kind: 'perspective', verticalFieldOfView: 45 },
                   },
-                  quality: 0.9,
+                  quality: thumbnailQuality,
                   ao: {},
                 },
               },
@@ -235,7 +236,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
         clearThumbnail(event.rendering.evaluationId);
         return;
       }
-      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q0.9:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
+      const identity = `${projectId}:${mainEntryPath}:${event.rendering.hash}:webp:q${thumbnailQuality}:${thumbnailWidth}x${thumbnailHeight}:m0.1:lw${thumbnailLineWidth}:camera-bounds-v1:edges:studio-v5`;
       if (identityRef.current !== identity) {
         generationRef.current += 1;
         identityRef.current = identity;

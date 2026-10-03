@@ -1,7 +1,7 @@
 import { WebIO } from '@gltf-transform/core';
 import type { Document, JSONDocument } from '@gltf-transform/core';
 
-import { KHRMaterialsUnlit } from '@gltf-transform/extensions';
+import { allExtensions } from '#gltf.extensions.js';
 import { admitMechanism, transformMechanism } from '@taucad/kinematics';
 import { createCoordinateTransform, createScalingTransform, gltfCoordinateTransformMatrix } from '#gltf.transforms.js';
 import { registerTauGltfExtensions } from '#extensions/registry.js';
@@ -108,22 +108,26 @@ export async function transformGltfExportBytes(
 ): Promise<Uint8Array<ArrayBuffer>> {
   const shouldRotate = options.coordinateSystem === 'z-up';
   const shouldScale = options.unit?.length === 'millimeter';
-  if (!shouldRotate && !shouldScale) {
+  const sourceIsGlb =
+    bytes.byteLength >= 4 &&
+    new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength).getUint32(0, true) === 0x46_54_6c_67;
+  if (!shouldRotate && !shouldScale && sourceIsGlb === (options.format === 'glb')) {
     return bytes;
   }
 
-  const io = registerTauGltfExtensions(new WebIO()).registerExtensions([KHRMaterialsUnlit]);
-  const document =
-    options.format === 'glb'
-      ? await io.readBinary(bytes)
-      : await io.readJSON({
-          json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'],
-          resources: {},
-        });
+  const io = registerTauGltfExtensions(new WebIO()).registerExtensions(allExtensions);
+  const document = sourceIsGlb
+    ? await io.readBinary(bytes)
+    : await io.readJSON({
+        json: JSON.parse(new TextDecoder().decode(bytes)) as JSONDocument['json'],
+        resources: {},
+      });
 
-  await document.transform(createCoordinateTransform(shouldRotate), createScalingTransform(shouldScale));
-  if (!options.preserveMeshTopology || !preserveTransformedMeshTopology(document, options)) {
-    stripTopologyMetadataForTransformedExport(document);
+  if (shouldRotate || shouldScale) {
+    await document.transform(createCoordinateTransform(shouldRotate), createScalingTransform(shouldScale));
+    if (!options.preserveMeshTopology || !preserveTransformedMeshTopology(document, options)) {
+      stripTopologyMetadataForTransformedExport(document);
+    }
   }
 
   if (options.format === 'glb') {

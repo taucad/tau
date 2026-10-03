@@ -50,3 +50,7 @@ export type {
   FileSystemBridgeUnrootedCalls,
   FileSystemBridgeWorkspaceService,
 } from '#filesystem-bridge-protocol.js';
+
+export { slowFileSystemBridgeCalls, slowFileSystemBridgeCallThreshold } from '#filesystem-bridge-slow-calls.js';
+
+export type { SlowFileSystemBridgeCall } from '#filesystem-bridge-slow-calls.js';

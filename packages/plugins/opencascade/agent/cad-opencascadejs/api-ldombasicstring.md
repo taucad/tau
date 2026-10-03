@@ -4,18 +4,30 @@
 
 LDOMBasicString: declare class LDOMBasicString
 
-  constructor
+  // LDOMBasicString.constructor (constructor)
+  constructor();
+  constructor(anOther: LDOMBasicString);
+  constructor(aValue: number);
+  constructor(aValue: string);
+  constructor(aValue: string, aDoc: LDOM_MemManager);
+  constructor(aValue: string, aLen: number, aDoc: LDOM_MemManager);
 
+  // LDOMBasicString.Type (method)
   Type(): LDOMBasicString_StringType;
 
+  // LDOMBasicString.GetInteger (method)
   GetInteger(aResult?: number): { returnValue: boolean; aResult: number };
 
+  // LDOMBasicString.GetString (method)
   GetString(): string;
 
+  // LDOMBasicString.equals (method)
   equals(anOther: LDOMBasicString): boolean;
 
+  // LDOMBasicString.delete (method)
   delete(): void;
 
+  // LDOMBasicString.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 LDOMBasicString_StringType: typeof LDOMBasicString_StringType[keyof typeof LDOMBasicString_StringType]

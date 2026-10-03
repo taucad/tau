@@ -493,11 +493,10 @@ const composeProjectHost = async (
       code: 'COMPUTE_AUTHORITY_INVALID',
     });
   }
-  let computeConnection = provide.computeStorePort ? connectComputeStoreChannel(provide.computeStorePort) : undefined;
+  const computeConnection = provide.computeStorePort ? connectComputeStoreChannel(provide.computeStorePort) : undefined;
   opened(() => computeConnection?.dispose());
-  const computeStore = computeConnection ? swappable(computeConnection.store) : undefined;
-  const compute = computeStore
-    ? ({ mode: 'durable', store: computeStore.view } as const)
+  const compute = computeConnection
+    ? ({ mode: 'durable', store: computeConnection.store } as const)
     : provide.computeMode === 'off'
       ? ({ mode: 'off' } as const)
       : ({ mode: 'memory' } as const);
@@ -774,11 +773,8 @@ const composeProjectHost = async (
         throw error;
       }
       const replaced = [fileSystemSlot.swap(next.fileSystem), projectRootSlot.swap(next.projectRoot)];
-      if (ports.computeStorePort !== undefined && computeStore !== undefined) {
-        const nextCompute = connectComputeStoreChannel(ports.computeStorePort);
-        computeStore.swap(nextCompute.store);
-        computeConnection?.dispose();
-        computeConnection = nextCompute;
+      if (ports.computeStorePort !== undefined && computeConnection !== undefined) {
+        computeConnection.rebind(ports.computeStorePort);
       } else {
         ports.computeStorePort?.close();
       }

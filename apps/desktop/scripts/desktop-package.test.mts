@@ -127,14 +127,22 @@ assert.deepEqual(runtimePlatformPackages['darwin-arm64'], {
   esbuild: '@esbuild/darwin-arm64',
   libassimp: 'libassimp-darwin-arm64',
   nanoraster: 'nanoraster-darwin-arm64',
-  sharp: ['@img/sharp-darwin-arm64', '@img/sharp-libvips-darwin-arm64'],
+  bundledOptionalDependencies: [
+    '@img/sharp-libvips-darwin-arm64',
+    '@img/sharp-darwin-arm64',
+    '@parcel/watcher-darwin-arm64',
+  ],
 });
 for (const [target, packages] of Object.entries(runtimePlatformPackages)) {
   const [platform, arch] = target.split('-') as [string, string];
   for (const name of [packages.openrscadEngine, packages.esbuild, packages.libassimp, packages.nanoraster]) {
     assert.ok(name.includes(`${platform}-${arch}`), `${name} is a ${target} package`);
   }
-  assert.ok(packages.sharp[0] === `@img/sharp-${target}`, `${target} stages sharp's own binding`);
+  assert.ok(packages.bundledOptionalDependencies.includes(`@img/sharp-${target}`), `${target} stages sharp's addon`);
+  assert.ok(
+    packages.bundledOptionalDependencies.some((name) => name.startsWith(`@parcel/watcher-${target}`)),
+    `${target} stages the file watcher's addon`,
+  );
 }
 console.log('✓ each target stages its own native platform packages');
 

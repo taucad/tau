@@ -24,6 +24,8 @@ Nx Release with version plans provides native monorepo integration and decouples
 | ------------------------- | --------------------------------------------------------- |
 | `@taucad/runtime`         | Multi-kernel CAD runtime for browser and Node.js          |
 | `@taucad/runtime-testing` | Runtime harnesses, mocks, and geometry assertions         |
+| `@taucad/filesystem`      | Portable filesystem abstraction and backends              |
+| `@taucad/rpc`             | Typed RPC channel primitives                              |
 | `@taucad/units`           | Portable unit parsing, conversion, and quantity semantics |
 | `@taucad/cli`             | Headless CAD export CLI                                   |
 | `@taucad/react`           | React bindings for the runtime                            |
@@ -33,7 +35,7 @@ Nx Release with version plans provides native monorepo integration and decouples
 | `packages/plugins/*`      | Publishable runtime capability toolkits                   |
 | `packages/core/*`         | Publishable shared implementation packages                |
 
-The following internal libraries remain in the fixed Nx version group but are not published independently: `@taucad/events`, `@taucad/filesystem`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/types`, and `@taucad/utils`. Runtime bundles all seven. `@taucad/rpc` is published as its own leaf package (host-agnostic R3, W4 SC-S4), a dependency of `@taucad/runtime` and `@taucad/agent-host`. The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
+The following private libraries are outside the fixed Nx release group: `@taucad/events`, `@taucad/fs-bridge`, `@taucad/json-schema`, `@taucad/memory`, `@taucad/types`, and `@taucad/utils`. All six are runtime bundle candidates. `@taucad/filesystem` and `@taucad/rpc` publish separately and remain external runtime dependencies; RPC is also an `@taucad/agent-host` dependency (host-agnostic R3, W4 SC-S4). The former `@taucad/vm` library is no longer one of them: its sources live inside `@taucad/esbuild`, which owns and publishes them directly. Public `@taucad/units`, plugin, and core packages remain external dependencies and publish in the same fixed train.
 
 `@taucad/runtime/types` is the public owner for runtime contract types. JSON Schema inference remains an implementation library with no public runtime veneer or subpath. `@taucad/units` owns the portable public units API.
 
@@ -43,9 +45,9 @@ The following internal libraries remain in the fixed Nx version group but are no
 
 ### Fixed Versioning
 
-All packages in the release group share a single version number. When any member changes, Nx aligns the group to the same version. This includes the versioned-but-not-published bundled libraries so their changes cannot ship without a corresponding runtime version.
+The fixed release group selects `tag:type:package` projects in `nx.json`; its packages share one version number. Private `type:lib` bundle candidates are outside that selector. When a private-library change affects a published package, include the affected package in the release plan; Nx does not version the private library as a release-group member.
 
-**Rationale**: The packages are tightly coupled, and `@taucad/runtime` bundles seven private implementation libraries. Independent versioning would create a combinatorial compatibility matrix that is difficult to test and communicate.
+**Rationale**: The packages are tightly coupled, and `@taucad/runtime` may bundle six private implementation libraries. Independent versioning would create a combinatorial compatibility matrix that is difficult to test and communicate.
 
 ### Semantic Versioning
 
@@ -203,7 +205,7 @@ This section specifies the operator-owned release procedure. It does not authori
 
 The closeout Decision Register has settled the former C1/C5/C6 and OQ2/OQ4/OQ7 branches:
 
-1. Runtime bundles seven private implementation libraries: events, fs-bridge, JSON Schema, memory, RPC, types, and utils. `@taucad/filesystem` and `@taucad/units` publish separately and remain external.
+1. Runtime may bundle six private implementation libraries: events, fs-bridge, JSON Schema, memory, types, and utils. `@taucad/filesystem`, `@taucad/rpc`, and `@taucad/units` publish separately and remain external.
 2. `@taucad/runtime/types` is the public runtime-contract type surface. JSON Schema inference has no public veneer or runtime subpath; `@taucad/units` owns portable unit parsing, conversion, and quantity semantics.
 3. Concrete backend dependencies are owned by their plugin packages; runtime does not depend on them.
 4. `@taucad/geospec-engine` publishes after runtime and `geospec`.
@@ -242,7 +244,6 @@ Only after the replacement train is installed and verified, deprecate the exact 
 ```bash
 npm deprecate '@taucad/converter@0.1.0-beta.0' 'Use @taucad/assimp, @taucad/brep, @taucad/gltf, or @taucad/rhino.'
 npm deprecate '@taucad/events@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
-npm deprecate '@taucad/filesystem@0.1.0-beta.0' 'Use @taucad/runtime/filesystem.'
 npm deprecate '@taucad/memory@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
 npm deprecate '@taucad/types@0.1.0-beta.0' 'Use @taucad/runtime/types.'
 npm deprecate '@taucad/json-schema@0.1.0-beta.0' 'Bundled into @taucad/runtime.'
@@ -281,7 +282,8 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 | 2026-02 | tsdown for package builds                               | Already in use; Rolldown-based, fast ESM output with tree-shaking                                                                                         |
 | 2026-02 | CI-only publishing                                      | Prevents accidental or unauthorized publishes from dev machines                                                                                           |
 | 2026-08 | Include `@taucad/geospec-engine` in the train           | The settled package split keeps authoring in `geospec` and publishes execution/proof plus the CLI from the fair-source engine package                     |
-| 2026-08 | Close C1/C5/C6 and OQ2/OQ4/OQ7                          | Bundle RPC/converter, use scoped Replicad aliases, publish GeoSpec engine, replace render with nanoraster, and internalize telemetry                      |
+| 2026-08 | Close C1/C5/C6 and OQ2/OQ4/OQ7                          | Originally selected bundled RPC/converter, scoped Replicad aliases, GeoSpec engine, nanoraster, and private telemetry; RPC bundling was later superseded  |
 | 2026-08 | Batch fixed-group publication through generated targets | Nx rejects project-filtered publication within a fixed group; explicit generated-target batches preserve fixed versioning and registry-dependent ordering |
 | 2026-08 | Supersede the batches with one `nx release publish`     | `nx-release-publish` already depends on `^nx-release-publish` (+ `pkgcheck` via `targetDefaults`), so Nx orders and fail-stops the fixed group natively   |
+| 2026-09 | Publish filesystem and RPC separately                   | Runtime and agent-host consume public dependency layers; six private libraries remain runtime bundle candidates                                           |
 | 2026-10 | Release applications from GitHub Releases               | One bot-owned release PR versions the UI, API and desktop from commits; a GitHub Release triggers the full build and production is an explicit dispatch   |

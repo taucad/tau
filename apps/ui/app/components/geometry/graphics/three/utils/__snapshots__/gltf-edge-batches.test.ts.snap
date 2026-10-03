@@ -1,0 +1,149 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`edge occurrence semantics > should retain the stripped occurrence endpoint graph 1`] = `
+"{
+  "blendColor": 0,
+  "blending": 0,
+  "color": 0,
+  "dashSize": 3,
+  "depthWrite": false,
+  "gapSize": 1,
+  "inputNodes": {
+    "edgeEndNode": "<nodeRef>",
+    "edgeStartNode": "<nodeRef>"
+  },
+  "linewidth": 2,
+  "metadata": {
+    "generator": "Material.toJSON",
+    "type": "Material",
+    "version": 4.7
+  },
+  "nodes": [
+    {
+      "components": "xyz",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "nodes": ["<nodeRef>", "<nodeRef>", "<nodeRef>", "<nodeRef>"]
+      },
+      "type": "JoinNode"
+    },
+    {
+      "_attributeName": "tauOccurrence0",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "_attributeName": "tauOccurrence1",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "_attributeName": "tauOccurrence2",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "_attributeName": "tauOccurrence3",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "nodes": ["<nodeRef>", "<nodeRef>"]
+      },
+      "type": "JoinNode"
+    },
+    {
+      "_attributeName": "instanceStart",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "nodeType": null,
+      "precision": null,
+      "type": "ConstNode",
+      "value": 1,
+      "valueType": "float"
+    },
+    {
+      "components": "xyz",
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "SplitNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "aNode": "<nodeRef>",
+        "bNode": "<nodeRef>"
+      },
+      "op": "*",
+      "type": "OperatorNode"
+    },
+    {
+      "inputNodes": {
+        "node": "<nodeRef>"
+      },
+      "type": "VarNode"
+    },
+    {
+      "inputNodes": {
+        "nodes": ["<nodeRef>", "<nodeRef>"]
+      },
+      "type": "JoinNode"
+    },
+    {
+      "_attributeName": "instanceEnd",
+      "global": true,
+      "type": "AttributeNode"
+    },
+    {
+      "nodeType": null,
+      "precision": null,
+      "type": "ConstNode",
+      "value": 1,
+      "valueType": "float"
+    }
+  ],
+  "scale": 1,
+  "type": "Line2NodeMaterial"
+}
+"
+`;

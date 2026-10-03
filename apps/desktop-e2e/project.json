@@ -36,6 +36,14 @@
           "target": "build"
         },
         {
+          "projects": ["desktop"],
+          "target": "prepare-build123d-python"
+        },
+        {
+          "projects": ["desktop"],
+          "target": "prepare-picogk-dotnet"
+        },
+        {
           "projects": ["api"],
           "target": "build"
         }
@@ -60,7 +68,11 @@
     "test:e2e:workbench": {
       "executor": "nx:run-commands",
       "parallelism": false,
-      "dependsOn": [{ "projects": ["desktop"], "target": "build" }],
+      "dependsOn": [
+        { "projects": ["desktop"], "target": "build" },
+        { "projects": ["desktop"], "target": "prepare-build123d-python" },
+        { "projects": ["desktop"], "target": "prepare-picogk-dotnet" }
+      ],
       "options": {
         "cwd": "{workspaceRoot}/apps/desktop-e2e",
         "parallel": false,

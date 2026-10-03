@@ -188,7 +188,14 @@ fn inspection_entity(entity: &Entity) -> Option<Json> {
                 Json::string(entity.occurrence_path.as_deref().unwrap_or(&entity.id)),
             ),
             ("center".into(), point(centre(entity, bounds))),
-            ("source".into(), Json::string("step")),
+            (
+                "source".into(),
+                Json::string(if entity.facts.material_region.is_some() {
+                    "mesh"
+                } else {
+                    "step"
+                }),
+            ),
         ];
     }
     if let Some(bounds) = bounds {

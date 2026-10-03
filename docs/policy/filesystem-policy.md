@@ -3,7 +3,7 @@ title: 'Filesystem Policy'
 description: 'Standards for filesystem access, data transfer, caching, concurrency, and watcher architecture in the Tau application. Covers read/write semantics, bridge RPC, and kernel/UI watch planes.'
 status: active
 created: '2026-03-05'
-updated: '2026-09-21'
+updated: '2026-10-03'
 related:
   - docs/policy/compatibility-policy.md
   - docs/policy/filesystem-authority-policy.md
@@ -446,13 +446,19 @@ When a bridge proxy is disposed, the main-thread port (`port2`) is closed. The w
 
 A bridge client may report that a mutation timed out only when the server-side operation is causally cancelled before that result is returned. Never reject a mutation locally while allowing the authority to continue writing in the background.
 
-Keep the 30-second default for ordinary bridge calls. A journal-backed, idempotent authority command may explicitly opt out of the wall-clock client timer when its durable operation can be replayed and its caller does not place unrelated discovery or navigation behind completion. Configure that exception by method identity; do not add a generic “disable timeouts” option.
+Keep the 30-second default for ordinary bridge calls. Two classes of mutation may explicitly opt out of the wall-clock client timer, each by method identity:
+
+- A journal-backed, idempotent authority command whose durable operation can be replayed and whose caller does not place unrelated discovery or navigation behind completion.
+- A precondition-checked (compare-and-swap) mutation such as `writeFileChecked` or `deleteFileChecked`, whose caller serialises only that one resource's writes behind completion. A late original and a replacement can never both apply, so the call waits for the authority's terminal result instead of guessing. Connection loss or disposal still settles it as potentially applied.
+
+The cost of an opt-out is that a hung authority holds that resource's writes until it answers or the connection closes. Callers must surface the unconfirmed state while they wait, and bound their own close-time waits without reporting a mutation timeout. Do not add a generic “disable timeouts” option.
 
 CORRECT:
 
 ```typescript
 createBridgeProxy(port, {
-  resolveCallTimeout: (method) => (method === 'commitPendingProjectDirectory' ? 'none' : undefined),
+  resolveCallTimeout: (method) =>
+    method === 'writeFileChecked' || method === 'deleteFileChecked' ? 'none' : undefined,
 });
 ```
 

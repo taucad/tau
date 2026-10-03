@@ -5,28 +5,40 @@
 // DEPRECATED
 TColStd_HPackedMapOfInteger: declare class TColStd_HPackedMapOfInteger extends Standard_Transient
 
-  constructor
+  // TColStd_HPackedMapOfInteger.constructor (constructor)
+  constructor(theNbBuckets?: number);
+  constructor(theOther: TColStd_PackedMapOfInteger);
 
+  // TColStd_HPackedMapOfInteger.Map (method)
   Map(): TColStd_PackedMapOfInteger;
 
+  // TColStd_HPackedMapOfInteger.ChangeMap (method)
   ChangeMap(): TColStd_PackedMapOfInteger;
 
+  // TColStd_HPackedMapOfInteger.get_type_name (method)
   static get_type_name(): string;
 
+  // TColStd_HPackedMapOfInteger.get_type_descriptor (method)
   static get_type_descriptor(): Standard_Type;
 
+  // TColStd_HPackedMapOfInteger.DynamicType (method)
   DynamicType(): Standard_Type;
 
+  // TColStd_HPackedMapOfInteger.delete (method)
   delete(): void;
 
+  // TColStd_HPackedMapOfInteger.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 TColStd_IndexedDataMapOfStringString: declare class TColStd_IndexedDataMapOfStringString
 
-  constructor
+  // TColStd_IndexedDataMapOfStringString.constructor (constructor)
+  constructor();
 
+  // TColStd_IndexedDataMapOfStringString.delete (method)
   delete(): void;
 
+  // TColStd_IndexedDataMapOfStringString.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 TColStd_Array1OfAsciiString: NCollection_Array1_TCollection_AsciiString

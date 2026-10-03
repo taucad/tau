@@ -1,4 +1,8 @@
 import { afterEach, expect, it, vi } from 'vitest';
+import { Topic } from '@taucad/events';
+import { toolName } from '@taucad/chat/constants';
+import { createMemoryComputeEngine, exposeComputeStoreChannel } from '@taucad/runtime/host';
+import type { HostRunSnapshot, TurnPlacementFact } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
 import { createAgentChannelClient } from '@taucad/agent-host/channel-client';
 import { createBrowserAgentHostClient, residentAgentWorker } from '#services/agent-host-client.js';
@@ -8,11 +12,52 @@ import {
   disposeOpfsProject,
   opfsProject,
   opfsProvider,
+  placementFacts,
   retireWorkers,
 } from '#workers/test/agent-host-resident.fixture.js';
 import { rootedProvider } from '#workers/test/rooted-provider.fixture.js';
 
 afterEach(disposeOpfsProject);
+
+it('should release settlement waits on abort and after a fact wakes them', async () => {
+  const wakes = new Topic<void>();
+  const facts: TurnPlacementFact[] = [
+    {
+      kind: 'leaseHeld',
+      key: { chatId: 'chat', turnId: 'turn', runId: 'run', attempt: 1 },
+      checkoutId: 'checkout',
+    },
+  ];
+  const abort = new AbortController();
+  const iterator = placementFacts(facts, wakes, abort.signal);
+
+  const first = await iterator.next();
+  expect(first.value).toEqual(facts[0]);
+  abort.abort();
+  await expect(iterator.next()).resolves.toEqual({ done: true, value: undefined });
+  expect(wakes.size).toBe(0);
+
+  const nextAbort = new AbortController();
+  const nextIterator = placementFacts([], wakes, nextAbort.signal);
+  const pending = nextIterator.next();
+  expect(wakes.size).toBe(1);
+  nextAbort.abort();
+  await expect(pending).resolves.toEqual({ done: true, value: undefined });
+  expect(wakes.size).toBe(0);
+
+  const wakeAbort = new AbortController();
+  const removeAbortListener = vi.spyOn(wakeAbort.signal, 'removeEventListener');
+  const wakeIterator = placementFacts(facts, wakes, wakeAbort.signal);
+  const wakeFirst = await wakeIterator.next();
+  expect(wakeFirst.value).toEqual(facts[0]);
+  const waking = wakeIterator.next();
+  expect(wakes.size).toBe(1);
+  wakes.emit();
+  expect(wakes.size).toBe(0);
+  expect(removeAbortListener).toHaveBeenCalledWith('abort', expect.any(Function));
+  wakeAbort.abort();
+  await expect(waking).resolves.toEqual({ done: true, value: undefined });
+});
 
 const visibility = { visible: () => true, subscribe: () => () => undefined };
 
@@ -211,5 +256,197 @@ it('should rebridge an open project host without replacing it', async () => {
   } finally {
     await client.close();
     await retireWorkers(worker);
+  }
+});
+
+/* CBR-RED: the first real runtime evaluation must accept the registered durable store handed to this host. */
+it('should use registered durable compute before and after a project-host rebridge', async () => {
+  const options = await opfsProject('durable-compute');
+  await opfsProvider().writeFile(`${options.projectStorage.providerBasePath}/main.scad`, 'cube(10);\n');
+  const authority = createMemoryComputeEngine();
+  const computePorts = new MessageChannel();
+  const computeServer = exposeComputeStoreChannel({
+    port: computePorts.port1,
+    engine: authority.engine,
+    workspace: options.authority.workspaceId,
+    control: authority.control({ workspace: options.authority.workspaceId }),
+  });
+  const { createFileSystemBridgePort } = await import('@taucad/fs-bridge');
+  const runtimeRoot = rootedProvider(opfsProvider(), options.projectStorage.providerBasePath);
+  const fileSystem = createFileSystemBridgePort(runtimeRoot);
+  const projectRoot = options.openProjectRootBridge();
+  const placementPort = options.openPlacementPort();
+  const {
+    openFileSystemBridge: _fileSystem,
+    openProjectRootBridge: _projectRoot,
+    openPlacementPort: _placement,
+    durability: _durability,
+    ...rest
+  } = options;
+  const realFetch = globalThis.fetch.bind(globalThis);
+  let modelCalls = 0;
+  globalThis.fetch = async (input, init) => {
+    const url = input instanceof Request ? input.url : String(input);
+    if (!url.includes('/v1/llm/')) {
+      return realFetch(input, init);
+    }
+    const call = modelCalls++;
+    const tool = {
+      choices: [
+        {
+          delta: {
+            // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible provider wire keys use snake_case.
+            tool_calls: [
+              {
+                index: 0,
+                id: `call-durable-compute-${String(call)}`,
+                function: { name: toolName.evaluateModel, arguments: JSON.stringify({ targetFile: 'main.scad' }) },
+              },
+            ],
+          },
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- OpenAI-compatible provider wire keys use snake_case.
+          finish_reason: 'tool_calls',
+        },
+      ],
+    };
+    const frames =
+      call % 2 === 0
+        ? [
+            `data: ${JSON.stringify(tool)}\n\n`,
+            'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+            'data: [DONE]\n\n',
+          ]
+        : [
+            'data: {"choices":[{"delta":{"content":"Done."},"finish_reason":"stop"}]}\n\n',
+            'data: {"choices":[],"usage":{"prompt_tokens":12,"completion_tokens":4}}\n\n',
+            'data: [DONE]\n\n',
+          ];
+    return new Response(frames.join(''), {
+      status: 200,
+      headers: { 'content-type': 'text/event-stream', 'x-tau-operation-id': 'operation-durable-compute' },
+    });
+  };
+  let host: Awaited<ReturnType<typeof openBrowserProjectHost>> | undefined;
+  let client: AgentChannelClient | undefined;
+  let reboundServer: ReturnType<typeof exposeComputeStoreChannel> | undefined;
+  let reboundFileSystem: ReturnType<typeof options.openFileSystemBridge> | undefined;
+  let reboundProjectRoot: ReturnType<typeof options.openProjectRootBridge> | undefined;
+  let reboundPorts: MessageChannel | undefined;
+  try {
+    host = await openBrowserProjectHost(
+      {
+        ...rest,
+        projectId: options.authority.projectId,
+        hostId: 'host-durable-compute',
+        computeMode: 'durable',
+        computeStorePort: computePorts.port2,
+        fileSystemPort: fileSystem.port,
+        projectRootPort: projectRoot.port,
+        placementPort,
+      },
+      { tabId: `tab-${crypto.randomUUID()}`, visibility },
+    );
+    const channel = new MessageChannel();
+    host.connect(channel.port1);
+    const openClient = createAgentChannelClient({ connect: () => channel.port2, sessionKey: 'durable-compute' });
+    client = openClient;
+    let priorRunId: string | undefined;
+    const runKernelTurn = async (runId: string, toolCallId: string) => {
+      const deadline = Date.now() + 20_000;
+      const command: Parameters<AgentChannelClient['execute']>[0] = {
+        type: 'start',
+        commandId: runId,
+        payload: {
+          chatId: 'chat-durable-compute',
+          runId,
+          trigger: 'submit',
+          message: { id: `user-${runId}`, role: 'user', content: 'Evaluate main.scad.' },
+        },
+      };
+      const started = await vi.waitUntil(
+        async () => {
+          const answer = await openClient.execute(command);
+          if (
+            answer.status === 'refused' &&
+            answer.code === 'CHAT_RUN_LIVE' &&
+            answer.details?.['state'] === 'settling' &&
+            priorRunId !== undefined &&
+            answer.details['runId'] === priorRunId
+          ) {
+            return false;
+          }
+          return answer;
+        },
+        { timeout: Math.max(1, deadline - Date.now()), interval: 50 },
+      );
+      expect(started, JSON.stringify(started)).toMatchObject({ status: 'applied', effect: 'durable' });
+      const output = await vi.waitFor(
+        async () => {
+          const answer = await openClient.execute({
+            type: 'attach',
+            commandId: `attach-${runId}-${crypto.randomUUID()}`,
+            payload: { chatId: 'chat-durable-compute' },
+          } as Parameters<AgentChannelClient['execute']>[0]);
+          expect(answer).toMatchObject({
+            status: 'applied',
+            details: { snapshot: { runId, state: 'completed' } },
+          });
+          if (answer.status !== 'applied' || answer.effect !== 'not-applied') {
+            throw new Error('Expected a completed host snapshot.');
+          }
+          const snapshot = answer.details['snapshot'] as HostRunSnapshot;
+          return snapshot.messages.find(
+            (message) =>
+              message.role === 'tool-output' &&
+              message.toolName === toolName.evaluateModel &&
+              message.toolCallId === toolCallId,
+          );
+        },
+        { timeout: Math.max(1, deadline - Date.now()), interval: 50 },
+      );
+      expect(output, JSON.stringify(output)).toMatchObject({ content: { success: true, status: 'ready' } });
+      priorRunId = runId;
+    };
+    await runKernelTurn('run-durable-before', 'call-durable-compute-0');
+
+    reboundPorts = new MessageChannel();
+    let reboundOpens = 0;
+    reboundServer = exposeComputeStoreChannel({
+      port: reboundPorts.port1,
+      engine: {
+        open: async (input) => {
+          reboundOpens += 1;
+          return authority.engine.open(input);
+        },
+      },
+      workspace: options.authority.workspaceId,
+      control: authority.control({ workspace: options.authority.workspaceId }),
+    });
+    reboundFileSystem = createFileSystemBridgePort(runtimeRoot);
+    reboundProjectRoot = options.openProjectRootBridge();
+    await host.rebridge({
+      projectId: options.authority.projectId,
+      hostId: 'host-durable-compute',
+      fileSystemPort: reboundFileSystem.port,
+      projectRootPort: reboundProjectRoot.port,
+      computeStorePort: reboundPorts.port2,
+    });
+    await opfsProvider().writeFile(`${options.projectStorage.providerBasePath}/main.scad`, 'cube(20);\n');
+    await runKernelTurn('run-durable-after', 'call-durable-compute-2');
+    expect(reboundOpens).toBe(1);
+  } finally {
+    globalThis.fetch = realFetch;
+    client?.close();
+    await host?.close();
+    fileSystem.dispose();
+    projectRoot.dispose();
+    computeServer.dispose();
+    reboundFileSystem?.dispose();
+    reboundProjectRoot?.dispose();
+    reboundServer?.dispose();
+    computePorts.port1.close();
+    computePorts.port2.close();
+    reboundPorts?.port1.close();
+    reboundPorts?.port2.close();
   }
 });

@@ -52,6 +52,8 @@ import {
   selectToolsInFlight,
 } from '#machines/chat-projection.logic.js';
 import type { ChatProjection } from '#machines/chat-projection.logic.js';
+import { readRecordIssues, subscribeRecordIssues, summarizeRecordIssues } from '#workbench-records/record-issues.js';
+import type { RecordIssue } from '#workbench-records/record-issues.js';
 
 /**
  * Everything a chat row draws, from that chat's own machine.
@@ -86,6 +88,8 @@ export type ProjectSidebarStatus = Readonly<{
   revisions: RevisionStatusProjection | undefined;
   /** The session's runtime-region failure: why the kernel is not there (R4). */
   runtimeFailure: string | undefined;
+  /** Settings records that need a person, most urgent first. */
+  settings: readonly RecordIssue[];
 }>;
 
 /** What a project row draws, aggregated from its chats and its session. @public */
@@ -103,6 +107,9 @@ export type ProjectSidebarRow = Readonly<{
   attention: number;
   /** A sync conflict: counted in `attention`, named in the sentence (v2 R4). */
   conflicted: boolean;
+  /** Settings records needing a person: counted in `attention`, the most urgent named in the sentence. */
+  settings: number;
+  settingsLabel: string | undefined;
   /** Failed runs nobody has seen yet (P57). */
   failed: number;
   /** Chats with a run in flight. */
@@ -424,13 +431,17 @@ export const selectProjectRow = (status: ProjectSidebarStatus, idleWindowMillise
   /* One conflict, counted once (R2). It is the project's checkout that is
    * conflicted, not each of its chats. */
   const conflicted = revisions?.sync.state === 'conflicted';
+  /* A read still retrying is the trigger's quiet state, not a reason to call the person. */
+  const settings = summarizeRecordIssues(status.settings.filter((issue) => issue.state !== 'reading'));
   const closing = session.live && session.status?.state === 'closing';
   return {
     projectId: session.projectId,
     glyph: projectGlyph(session, running),
     closing,
-    attention: attention + (conflicted ? 1 : 0),
+    attention: attention + (conflicted ? 1 : 0) + (settings?.count ?? 0),
     conflicted,
+    settings: settings?.count ?? 0,
+    settingsLabel: settings?.label,
     failed,
     running,
     unread,
@@ -457,7 +468,7 @@ const chatRollup = (row: ProjectSidebarRow): SidebarFacts | undefined => {
       count: row.attention,
       /* R4: "1 needs you" alone sends the person into the chats to look for a
        * conflict that lives in the checkout, so the sentence names it. */
-      sentence: `${needsYou(row.attention)}${row.conflicted ? ' · Needs your decision' : ''}`,
+      sentence: `${needsYou(row.attention)}${row.conflicted ? ' · Needs your decision' : ''}${row.settingsLabel === undefined ? '' : ` · ${row.settingsLabel}`}`,
     };
   }
   if (row.failed > 0) {
@@ -520,9 +531,17 @@ export const selectProjectFacts = (row: ProjectSidebarRow, expanded: boolean): S
       : { ...rollup, sentence: `${liveness} · ${rollup.sentence ?? ''} · ${kernel}` };
   }
   if (rollup === undefined) {
-    /* An expanded conflict still names itself: no chat row can carry it. */
-    return row.conflicted
-      ? { mark: 'attention', sentence: `${liveness} · Needs your decision` }
+    /* An expanded conflict or settings record still names itself: no chat row can carry it. */
+    const clauses = [
+      ...(row.conflicted ? ['Needs your decision'] : []),
+      ...(row.settingsLabel === undefined ? [] : [row.settingsLabel]),
+    ];
+    return clauses.length > 0
+      ? {
+          mark: 'attention',
+          ...(row.settings > 0 ? { count: row.settings + (row.conflicted ? 1 : 0) } : {}),
+          sentence: [liveness, ...clauses].join(' · '),
+        }
       : { mark: 'none', sentence: liveness };
   }
   return { ...rollup, sentence: `${liveness} · ${rollup.sentence ?? ''}` };
@@ -595,6 +614,7 @@ export const readProjectStatus = (
             }),
           ),
     revisions: peekRevisionClient(projectId)?.status(),
+    settings: readRecordIssues(projectId),
   };
 };
 
@@ -713,7 +733,9 @@ const bindProject = ({
     listener();
   });
   const unsubscribeUnread = chats.subscribeUnread(listener);
+  const unsubscribeSettings = subscribeRecordIssues(projectId, listener);
   return () => {
+    unsubscribeSettings();
     registry.unsubscribe();
     sessionScan?.unsubscribe();
     unsubscribeMembership();

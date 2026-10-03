@@ -7,19 +7,19 @@ const defaultProductNames = ['Tablet', 'Logo', 'Back URL'] as const;
 
 const expectedEnvelope = {
   size: {
-    x: Number('20.023802773390287'),
-    y: Number('20.023802773390287'),
-    z: Number('2.823802773390286'),
+    x: 20,
+    y: Number('20.0000001'),
+    z: Number('2.8000001000003145'),
   },
   center: {
     x: 0,
-    y: 0,
-    z: Number('1.3999999999999997'),
+    y: Number('-4.999999969612645e-8'),
+    z: Number('1.3999999500001574'),
   },
 } as const;
 
 const expectedHoleCenter = {
-  x: Number('-5.9999999999998685'),
+  x: -6,
   y: -6,
 } as const;
 
@@ -52,7 +52,7 @@ describe('logo keychain exact BRep evidence', () => {
 
     expectGeo(model).toHaveCircularHole({
       diameter: defaultParams.holeRadius * 2,
-      through: false,
+      through: true,
       axis: 'z',
       center: expectedHoleCenter,
       tolerance: exactTolerance,

@@ -493,13 +493,112 @@ describe('workbench view checked store', () => {
     await store.read();
     data.setBytes(null);
     await store.read();
-    expect(store.snapshot().record?.entryPath).toBe('a.ts');
+    expect(store.snapshot().record).toBeUndefined();
     expect(data.writes).not.toHaveBeenCalled();
-    expect(await store.edit({ ...store.snapshot().record!, name: 'Renamed' })).toBe(true);
+    expect(await store.edit({ ...seed(), name: 'Renamed' })).toBe(true);
     expect(workbenchRecords.view.read(data.get()!)).toMatchObject({
       status: 'current',
       record: { name: 'Renamed', entryPath: 'a.ts' },
     });
+  });
+
+  it('recreates a deleted view from the live view without restoring deleted saved fields', async () => {
+    const data = memory();
+    data.set({ ...seed(), name: 'Saved', grid: { unit: 'in' } });
+    const store = makeStore(data);
+    await store.read();
+    data.setBytes(null);
+    await store.read();
+    const live = { ...seed(), entryPath: 'b.ts' };
+    expect(await store.edit(live)).toBe(true);
+    expect(workbenchRecords.view.read(data.get()!)).toMatchObject({ status: 'current', record: live });
+  });
+
+  it('keeps a pending view edit across deletion without stale saved fields', async () => {
+    vi.useFakeTimers();
+    const data = memory();
+    data.set({ ...seed(), name: 'Saved' });
+    let failures = 1;
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: {
+        ...data.files,
+        writeFileChecked: async (input) => {
+          if (failures-- > 0) {
+            throw Object.assign(new Error('offline'), { applicationState: 'known-not-applied' });
+          }
+          return data.writes(input);
+        },
+      },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read();
+      expect(await store.edit({ ...seed(), name: 'Saved', grid: { unit: 'cm' } })).toBe(false);
+      data.setBytes(null);
+      await store.read();
+      expect(await store.flush()).toBe(true);
+      const read = workbenchRecords.view.read(data.get()!);
+      expect(read).toMatchObject({ status: 'current', record: { name: 'Saved', grid: { unit: 'cm' } } });
+    } finally {
+      store.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('resets only against the bytes the person reviewed', async () => {
+    const data = memory();
+    const reviewed = encoder.encode('{broken');
+    data.setBytes(reviewed);
+    const store = makeStore(data);
+    await store.read();
+    const newer = encoder.encode('{still broken');
+    data.setBytes(newer);
+    await store.read();
+    expect(await store.reset(seed(), reviewed)).toBe(false);
+    expect(data.get()).toEqual(newer);
+    expect(await store.reset(seed(), newer)).toBe(true);
+  });
+
+  it('reports read health and reconciles a potentially-applied write before writing again', async () => {
+    vi.useFakeTimers();
+    const data = memory();
+    const readFile = vi.fn(async (): Promise<Uint8Array<ArrayBuffer>> => {
+      throw new Error('disk busy');
+    });
+    const writeFileChecked = vi.fn(async (input: Parameters<typeof data.writes>[0]) => {
+      if (writeFileChecked.mock.calls.length === 1) {
+        await data.writes(input);
+        throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+      }
+      return data.writes(input);
+    });
+    const store = createWorkbenchViewStore({
+      root: '/root',
+      viewId: 'v-abcd1234',
+      files: { ...data.files, readFile, writeFileChecked },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read();
+      await vi.runAllTimersAsync();
+      expect(store.health().read).toBe('unavailable');
+      readFile.mockImplementation(async () => data.get()!);
+      await store.retryRead();
+      await vi.runAllTimersAsync();
+      expect(store.health().read).toBe('ok');
+      expect(await store.edit({ ...seed(), name: 'Renamed' })).toBe(false);
+      expect(store.health().unconfirmed).toBe(true);
+      expect(await store.flush()).toBe(true);
+      expect(writeFileChecked).toHaveBeenCalledTimes(1);
+      expect(store.health().unconfirmed).toBe(false);
+    } finally {
+      store.dispose();
+      vi.useRealTimers();
+    }
   });
 
   it('persists an explicit null entry binding', async () => {

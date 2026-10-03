@@ -22,7 +22,10 @@ afterEach(async () => {
 const notFound = (path: string): NodeJS.ErrnoException =>
   Object.assign(new Error(`ENOENT: no such file or directory, open '${path}'`), { code: 'ENOENT' });
 
-const createHarness = async (initial: Record<string, string>, options?: { readonly watchable?: boolean }) => {
+const createHarness = async (
+  initial: Record<string, string>,
+  options?: { readonly watchable?: boolean; readonly dependency?: string },
+) => {
   const files = new Map(Object.entries(initial));
   const filesystem = createMockFileSystem({
     existsResult: (path) => files.has(path),
@@ -59,7 +62,7 @@ const createHarness = async (initial: Record<string, string>, options?: { readon
     },
     async resolve({ entryPath }) {
       counts.dependencies++;
-      return { resolved: [entryPath], unresolved: [] };
+      return { resolved: [entryPath, ...(options?.dependency ? [options.dependency] : [])], unresolved: [] };
     },
     async describe({ entryPath }, runtime) {
       const source = await runtime.filesystem.readFile(entryPath, 'utf8');
@@ -323,16 +326,21 @@ describe('a refused arm leaves nothing stale reusable (I2, R2)', () => {
   });
 
   it('(j) rejects products resolved from bytes changed during watch installation', async () => {
-    const harness = await createHarness({ 'main.ts': 'v1' });
-    harness.watch.mockImplementationOnce(() => {
-      harness.files.set('main.ts', 'v2');
+    const harness = await createHarness({ 'main.ts': 'v1', 'dep.ts': 'old' }, { dependency: 'dep.ts' });
+    harness.watch.mockImplementation((request) => {
+      if (request.paths.includes('dep.ts')) {
+        harness.files.set('main.ts', 'v2');
+        harness.files.set('dep.ts', 'new');
+      }
       return harness.unsubscribe;
     });
     const observed = await evaluationHash(harness.worker, 'main.ts', { watch: true });
     const description = await harness.worker.describe({ file: createGeometryFile('main.ts') });
     expect(description.success && description.parameters.defaults['label']).toBe('v2');
     expect(harness.counts.dependencies).toBeGreaterThan(1);
-    expect(harness.watch).toHaveBeenCalledTimes(2);
+    // The entry is armed before discovery; the discovered closure still refuses then retries once.
+    expect(harness.watch.mock.calls.filter(([request]) => request.paths.includes('dep.ts'))).toHaveLength(2);
+    expect(harness.watch).toHaveBeenCalledTimes(3);
     expect(await evaluationHash(harness.worker, 'main.ts', { watch: true })).toBe(observed);
   });
 });

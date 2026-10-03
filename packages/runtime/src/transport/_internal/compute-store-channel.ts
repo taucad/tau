@@ -1,4 +1,4 @@
-import { createChannelClient, createChannelServer, wrapMessagePort } from '@taucad/rpc';
+import { ChannelClosedError, createChannelClient, createChannelServer, wrapMessagePort } from '@taucad/rpc';
 import type { ChannelServerHandle, MessagePortLike, Port } from '@taucad/rpc';
 import { _registerComputeStore } from '#cache/kernel-compute-runtime.js';
 import type {
@@ -90,6 +90,10 @@ export const exposeComputeStoreChannel = (input: {
         switch (name) {
           case 'open': {
             const session = await input.engine.open({ workspace: input.workspace, signal });
+            if (signal.aborted) {
+              await session.close();
+              signal.throwIfAborted();
+            }
             const sessionId = nextSessionId++;
             sessions.set(sessionId, session);
             return { sessionId, generation: session.generation, durable: session.durable };
@@ -161,21 +165,112 @@ export const createComputeStoreChannelClient = (
   readonly store: ComputeStore;
   readonly engine: ComputeStoreEngine;
   readonly control: ComputeStoreControl;
+  readonly rebind: (port: MessagePortLike | Port<unknown>) => void;
   readonly dispose: () => void;
 } => {
-  const channel = createChannelClient<ComputeStoreProtocol>({ port: asPort(port), sessionKey });
+  const openChannel = (nextPort: MessagePortLike | Port<unknown>) =>
+    createChannelClient<ComputeStoreProtocol>({ port: asPort(nextPort), sessionKey });
+  type Channel = ReturnType<typeof openChannel>;
+  type PhysicalSession = {
+    readonly channel: Channel;
+    readonly epoch: number;
+    readonly sessionId: number;
+  };
+  let channel = openChannel(port);
+  let epoch = 0;
+  let disposed = false;
+  const closedError = (): ChannelClosedError => new ChannelClosedError({ origin: 'local', code: 'CHANNEL_CLOSED' });
+  const assertOpen = (): void => {
+    if (disposed) {
+      throw closedError();
+    }
+  };
   const engine: ComputeStoreEngine = {
     open: async () => {
-      const opened = await channel.call('open');
-      const { sessionId } = opened;
+      assertOpen();
+      const initialChannel = channel;
+      const initialEpoch = epoch;
+      const opened = await initialChannel.call('open');
+      if (disposed || initialEpoch !== epoch) {
+        throw closedError();
+      }
+      let physical: PhysicalSession = { channel: initialChannel, epoch: initialEpoch, sessionId: opened.sessionId };
+      let opening: { readonly epoch: number; readonly promise: Promise<PhysicalSession> } | undefined;
+      let closed = false;
+      const assertSessionOpen = (): void => {
+        assertOpen();
+        if (closed) {
+          throw closedError();
+        }
+      };
+      const physicalFor = async (): Promise<PhysicalSession> => {
+        assertSessionOpen();
+        const currentChannel = channel;
+        const currentEpoch = epoch;
+        if (physical.epoch === currentEpoch) {
+          return physical;
+        }
+        if (opening?.epoch !== currentEpoch) {
+          opening = {
+            epoch: currentEpoch,
+            promise: (async () => {
+              const { sessionId } = await currentChannel.call('open');
+              return { channel: currentChannel, epoch: currentEpoch, sessionId };
+            })(),
+          };
+        }
+        const pendingOpening = opening;
+        const pending = pendingOpening.promise;
+        try {
+          const reopened = await pending;
+          assertSessionOpen();
+          if (currentEpoch !== epoch) {
+            throw closedError();
+          }
+          physical = reopened;
+          return reopened;
+        } finally {
+          if (opening === pendingOpening) {
+            opening = undefined;
+          }
+        }
+      };
       return {
         generation: opened.generation as ComputeStoreSession['generation'],
         durable: opened.durable,
-        get: async ({ signal, ...input }) => channel.call('get', { sessionId, input }, signal),
-        put: async ({ signal, ...input }) => channel.call('put', { sessionId, input }, signal),
-        pin: async ({ signal, ...input }) => channel.call('pin', { sessionId, input }, signal),
-        release: async ({ signal, ...input }) => channel.call('release', { sessionId, input }, signal),
-        close: async () => channel.call('close', { sessionId }),
+        get: async ({ signal, ...input }) => {
+          const current = await physicalFor();
+          return current.channel.call('get', { sessionId: current.sessionId, input }, signal);
+        },
+        put: async ({ signal, ...input }) => {
+          const current = await physicalFor();
+          return current.channel.call('put', { sessionId: current.sessionId, input }, signal);
+        },
+        pin: async ({ signal, ...input }) => {
+          const current = await physicalFor();
+          return current.channel.call('pin', { sessionId: current.sessionId, input }, signal);
+        },
+        release: async ({ signal, ...input }) => {
+          const current = await physicalFor();
+          return current.channel.call('release', { sessionId: current.sessionId, input }, signal);
+        },
+        close: async () => {
+          if (closed) {
+            return;
+          }
+          closed = true;
+          let toClose = physical;
+          if (opening?.epoch === epoch) {
+            try {
+              toClose = await opening.promise;
+            } catch {
+              return;
+            }
+          }
+          if (!disposed && toClose.epoch === epoch) {
+            await toClose.channel.call('close', { sessionId: toClose.sessionId });
+          }
+        },
       };
     },
   };
@@ -195,7 +290,22 @@ export const createComputeStoreChannelClient = (
     store,
     engine,
     control,
+    rebind: (nextPort) => {
+      if (disposed) {
+        asPort(nextPort).close();
+        throw closedError();
+      }
+      const nextChannel = openChannel(nextPort);
+      const previous = channel;
+      channel = nextChannel;
+      epoch += 1;
+      previous.close('compute store rebound');
+    },
     dispose: () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
       channel.close();
     },
   };
@@ -209,7 +319,11 @@ export const createComputeStoreChannelClient = (
  */
 export const connectComputeStoreChannel = (
   port: MessagePortLike | Port<unknown>,
-): { readonly store: ComputeStore; readonly dispose: () => void } => {
+): {
+  readonly store: ComputeStore;
+  readonly rebind: (port: MessagePortLike | Port<unknown>) => void;
+  readonly dispose: () => void;
+} => {
   const client = createComputeStoreChannelClient(port);
-  return { store: client.store, dispose: client.dispose };
+  return { store: client.store, rebind: client.rebind, dispose: client.dispose };
 };

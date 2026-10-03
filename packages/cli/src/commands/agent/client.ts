@@ -11,6 +11,7 @@
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { text as readStream } from 'node:stream/consumers';
+import { setTimeout as delay } from 'node:timers/promises';
 
 import type { AgentLogEvent, ChatLedger, ProviderMessage } from '@taucad/agent-host';
 import type { AgentChannelClient } from '@taucad/agent-host/channel-client';
@@ -24,6 +25,9 @@ const promptByteLimit = 1_048_576;
 
 /** Silence from the daemon after which a connection counts as dead; the daemon keeps alive every 2 s (T9 E4). */
 const livenessTimeout = 10_000;
+
+/** A settling refusal is answered and not memoized; wait briefly before asking with the same key. */
+const settlingRetryDelay = 50;
 
 /** Run states past which nothing more will be appended for that run. */
 const terminalStates = new Set(['completed', 'failed', 'cancelled']);
@@ -182,19 +186,42 @@ const closedError = async (error: unknown, what: string): Promise<unknown> => {
  * @internal
  * @param client - The connected client.
  * @param command - The command, with its key.
+ * @param settlingSignal - Opts a TUI admission into bounded settling retries; abort stops retries after answered refusals.
  * @returns The answer, when the host applied it.
  */
 export const sendCommand = async (
   client: AgentChannelClient,
   command: HostCommand,
+  settlingSignal?: AbortSignal,
 ): Promise<Exclude<CommandAnswer, { status: 'refused' }>> => {
-  let answer: CommandAnswer;
-  try {
-    answer = await client.execute(command);
-  } catch (error) {
-    throw await closedError(error, `${command.type} command`);
-  }
-  if (answer.status === 'refused') {
+  for (;;) {
+    settlingSignal?.throwIfAborted();
+    let answer: CommandAnswer;
+    try {
+      /* `execute` owns unanswered outcomes and redials its outbox. The signal
+       * only stops re-sending an answered, not-applied settling refusal. */
+      // oxlint-disable-next-line eslint/no-await-in-loop -- only an answered, explicitly not-applied settling refusal is resent.
+      answer = await client.execute(command);
+    } catch (error) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- classify this sequential command's failure before returning.
+      throw await closedError(error, `${command.type} command`);
+    }
+    if (answer.status !== 'refused') {
+      return answer;
+    }
+    if (
+      settlingSignal !== undefined &&
+      (command.type === 'start' || command.type === 'resolve-interrupt') &&
+      answer.code === 'CHAT_RUN_LIVE' &&
+      answer.effect === 'not-applied' &&
+      answer.details?.['state'] === 'settling'
+    ) {
+      // The host did not record this key. Its command owner checks the durable key before dispatching a retry.
+      // oxlint-disable-next-line eslint/no-await-in-loop -- one bounded wait follows one answered settling refusal.
+      await delay(settlingRetryDelay, undefined, { signal: settlingSignal });
+      continue;
+    }
+    // oxlint-disable-next-line eslint/no-await-in-loop -- load refusal metadata only for the final answer.
     const { refusalOf } = await import('@taucad/agent-host/wire');
     throw cliError(
       answer.code,
@@ -202,7 +229,6 @@ export const sendCommand = async (
       answer.effect === 'unknown' ? exitCodes.unknown : exitCodes.refused,
     );
   }
-  return answer;
 };
 
 /**

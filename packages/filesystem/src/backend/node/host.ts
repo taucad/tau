@@ -12,6 +12,7 @@ import type { NodeFsRequest, NodeFsResponse } from '#backend/node/protocol.js';
 import { nodeFsProtocolVersion, nodeFsRequestSchema, parseNodeFsFrame } from '#backend/node/protocol.js';
 import {
   NodeFsProvider,
+  drainNodeFsProviderWatchClosures,
   writeNodeFileCheckedWithAuthority,
   deleteNodeFileCheckedWithAuthority,
 } from '#backend/node/provider.js';
@@ -516,12 +517,28 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
         try {
           const provider = await providerFor(request.root);
           if (!pending.cancelled && pendingSubscriptions.get(request.id) === pending) {
-            const unsubscribe = provider.watch(request.request, (watchEvent) => {
-              send({ v: nodeFsProtocolVersion, id: request.id, type: 'watch', event: watchEvent });
+            const active = { unsubscribe: undefined as (() => void) | undefined };
+            const isCurrent = (): boolean =>
+              !pending.cancelled &&
+              !disposed &&
+              (pendingSubscriptions.get(request.id) === pending ||
+                (active.unsubscribe !== undefined && subscriptions.get(request.id) === active.unsubscribe));
+            const unsubscribe = await provider.watch(request.request, (watchEvent) => {
+              if (isCurrent()) {
+                send({ v: nodeFsProtocolVersion, id: request.id, type: 'watch', event: watchEvent });
+              }
             });
-            subscriptions.set(request.id, unsubscribe);
+            active.unsubscribe = unsubscribe;
+            if (isCurrent()) {
+              subscriptions.set(request.id, unsubscribe);
+            } else {
+              unsubscribe();
+            }
           }
-          response = { v: nodeFsProtocolVersion, id: request.id, type: 'result', value: undefined };
+          response =
+            pending.cancelled || pendingSubscriptions.get(request.id) !== pending || disposed
+              ? errorFrame(request.id, new Error('Node filesystem watch was cancelled before admission.'))
+              : { v: nodeFsProtocolVersion, id: request.id, type: 'result', value: undefined };
         } catch (error) {
           response = errorFrame(request.id, error);
         } finally {
@@ -579,12 +596,12 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
       return;
     }
     port.removeEventListener?.('message', listener);
+    disposed = true;
     for (const pending of pendingSubscriptions.values()) {
       pending.cancelled = true;
     }
     pendingSubscriptions.clear();
     await Promise.allSettled(operations);
-    disposed = true;
     const failures: unknown[] = [];
     for (const unsubscribe of subscriptions.values()) {
       try {
@@ -599,6 +616,14 @@ export function serveNodeFsProvider(port: NodeFsPort, options: NodeFsHostOptions
         provider.dispose();
       } catch (error) {
         failures.push(error);
+      }
+    }
+    const closureResults = await Promise.allSettled(
+      [...providers.values()].map(async (provider) => drainNodeFsProviderWatchClosures(provider)),
+    );
+    for (const result of closureResults) {
+      if (result.status === 'rejected') {
+        failures.push(result.reason);
       }
     }
     providers.clear();

@@ -14,6 +14,8 @@ export type ComputeActionRecord = {
   readonly codec: { readonly id: string; readonly version: string };
   readonly output: ComputeOutputReference;
   readonly dependencies: readonly ActionDigest[];
+  /** Storage closure; distinct from the semantic action dependencies. */
+  readonly requiredContent?: readonly ContentDigest[];
 };
 
 /**

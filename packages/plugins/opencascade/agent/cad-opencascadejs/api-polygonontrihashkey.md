@@ -4,12 +4,15 @@
 
 PolygonOnTriHashKey: declare class PolygonOnTriHashKey
 
-  constructor
+  // PolygonOnTriHashKey.constructor (constructor)
+  constructor();
 
   Poly: Poly_PolygonOnTriangulation
 
   TriRepId: number
 
+  // PolygonOnTriHashKey.delete (method)
   delete(): void;
 
+  // PolygonOnTriHashKey.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

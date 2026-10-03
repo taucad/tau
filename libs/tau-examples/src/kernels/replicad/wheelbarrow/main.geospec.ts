@@ -1,8 +1,9 @@
 import { describe, expectGeo, it } from 'geospec';
 import { loadModel } from 'geospec/model';
+import type { GeoSpecSubject } from 'geospec/model';
 
 // Dimensions are millimetres. x: front to handles, y: axle, z: ground up.
-const cache = new Map<string, ReturnType<typeof loadModel>>();
+const cache = new Map<string, Promise<GeoSpecSubject>>();
 async function model(
   part = 'assembly',
   format: 'glb' | 'step' = 'glb',
@@ -16,10 +17,13 @@ async function model(
       : {}),
   };
   const key = JSON.stringify(options);
-  if (!cache.has(key)) {
-    cache.set(key, loadModel(options));
+  const cached = cache.get(key);
+  if (cached) {
+    return cached;
   }
-  return cache.get(key)!;
+  const pending = loadModel(options);
+  cache.set(key, pending);
+  return pending;
 }
 
 const parts = [

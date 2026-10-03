@@ -29,11 +29,11 @@ const admissionsHash = 'f4454477a775cb0ade226d6f89a2cff460b0bfdb2f2c2655419da6c4
 const authorityRoot =
   'docs/research/artifacts/geospec-native-engine-charter/runs/2026-09-08-worktree-implementation/lanes/matcher-full-f1-fullwire-a1/revisions/metadata-a2';
 const priorNumericProfile = '"numericProfile":"geospec-st-logical-requests-v2"';
-const currentNumericProfile = '"numericProfile":"geospec-demand-v5"';
+const currentNumericProfile = '"numericProfile":"geospec-demand-v6"';
 const priorRegistryVersion = '"registryVersion":4';
 const currentRegistryVersion = '"registryVersion":5';
 const priorVerifierSourceHash = 'cbf1df63a329f71fdc772938eb3a8a16f42d52983f82ccaf6966ea4182f4542c';
-const currentVerifierSourceHash = '96b287ff9299888859c4338e9d7b05093dafed7fdfcade9811c7c1c4c9bcadd2';
+const currentVerifierSourceHash = 'd0af57f6550b508cc9fdb63b84180a554541ff3c7b8f53346ba1350449043350';
 
 /** @type {(name: string) => string} */
 const requiredEnvironment = (name) => {

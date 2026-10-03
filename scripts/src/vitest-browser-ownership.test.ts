@@ -193,6 +193,7 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/react-e2e/vitest.config.ts',
         'apps/ui-e2e/vitest.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
+        'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-print.vitest.browser.config.ts',
         'apps/ui/app/workers/agent-host.vitest.browser.config.ts',
         'packages/agent-host/vitest.browser.config.ts',

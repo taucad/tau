@@ -6,7 +6,7 @@ import { chromium, firefox, webkit } from 'playwright';
 import type { Browser, BrowserType } from 'playwright';
 import { createServer } from 'vite';
 // oxlint-disable-next-line no-restricted-imports -- Runner and browser use the same pinned data-only selection.
-import { joinCurrentCorpus, selectCorpusRecords } from '../../conformance/current-profile.mjs';
+import { joinCurrentCorpus, loadMaterialCorpus, selectCorpusRecords } from '../../conformance/current-profile.mjs';
 // oxlint-disable-next-line no-restricted-imports -- Executable test fixture loads its nonpublished sibling input owner.
 import { loadM2BrowserInputs, loadSupplementalBrowserInputs } from './m2-inputs.ts';
 
@@ -48,13 +48,14 @@ const repositoryRoot = resolve(conformanceDirectory, '../../../..');
 const applicationDirectory = resolve(conformanceDirectory, 'app');
 const m2ApplicationDirectory = resolve(repositoryRoot, 'packages/geospec/host-tests/m2-browser');
 const corpusPath = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance/early-corpus.json');
+const materialCorpusPath = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance/material-v6.json');
 const profilePath = resolve(
   repositoryRoot,
   'packages/geospec-engine-native/rust/tests/fixtures/current-profile-01/plan-corpus.json',
 );
 const successorPath = resolve(
   repositoryRoot,
-  'packages/geospec-engine-native/rust/tests/fixtures/current-profile-v5/numeric-profile.txt',
+  'packages/geospec-engine-native/rust/tests/fixtures/current-profile-v6/numeric-profile.txt',
 );
 const currentProfileDirectory = resolve(repositoryRoot, 'packages/geospec-engine-native/conformance');
 const m2ApplicationPath = resolve(m2ApplicationDirectory, 'app.ts');
@@ -95,15 +96,15 @@ const errorText = (error: unknown): string => (error instanceof Error ? (error.s
 
 const run = async (): Promise<void> => {
   const suite = argument('--suite') ?? process.env['GEOSPEC_CONFORMANCE_SUITE'] ?? 'early';
-  if (suite !== 'early' && suite !== 'm2') {
+  if (suite !== 'early' && suite !== 'm2' && suite !== 'material') {
     throw new TypeError(`Unknown browser conformance suite: ${suite}.`);
   }
   const idsArgument = argument('--ids');
   if (process.argv.includes('--ids') && idsArgument === undefined) {
     throw new TypeError('--ids requires a comma-separated allowlist.');
   }
-  if (suite !== 'early' && idsArgument !== undefined) {
-    throw new TypeError('--ids selects engine records in the early suite only.');
+  if (suite === 'm2' && idsArgument !== undefined) {
+    throw new TypeError('--ids selects engine records in the early or material suite only.');
   }
   const recordIds = idsArgument?.split(',');
   const inputPath = argument('--inputs') ?? process.env['GEOSPEC_CONFORMANCE_INPUTS'];
@@ -160,18 +161,20 @@ const run = async (): Promise<void> => {
   }
   const assertionModulePath =
     assertionExport === undefined ? undefined : await realpath(resolve(geospecPackageDirectory, assertionExport));
-  const corpusText = await readFile(corpusPath, 'utf8');
+  const corpusText = await readFile(suite === 'material' ? materialCorpusPath : corpusPath, 'utf8');
   const profileText = suite === 'early' ? await readFile(profilePath, 'utf8') : undefined;
   const successorText = suite === 'early' ? await readFile(successorPath, 'utf8') : undefined;
   const corpus =
-    profileText === undefined || successorText === undefined
-      ? undefined
-      : await joinCurrentCorpus(
-          Buffer.from(corpusText),
-          Buffer.from(profileText),
-          'full-backend',
-          Buffer.from(successorText),
-        );
+    suite === 'material'
+      ? await loadMaterialCorpus(Buffer.from(corpusText))
+      : profileText === undefined || successorText === undefined
+        ? undefined
+        : await joinCurrentCorpus(
+            Buffer.from(corpusText),
+            Buffer.from(profileText),
+            'full-backend',
+            Buffer.from(successorText),
+          );
   const selected = corpus === undefined ? [] : selectCorpusRecords(corpus, recordIds);
   const selectedIds = selected.map(({ id }) => id);
   const expectedAdmissions = selected.reduce((count, record) => count + record.ingest.length, 0);
@@ -234,15 +237,18 @@ const run = async (): Promise<void> => {
           return suite === 'm2' ? html.replace('src="/run.ts"', 'src="/m2.ts"') : html;
         },
         configureServer(developmentServer) {
-          developmentServer.middlewares.use('/early-corpus.json', (request, response, next) => {
-            if (request.method !== 'GET') {
-              next();
-              return;
-            }
-            response.setHeader('Content-Type', 'application/json; charset=utf-8');
-            response.setHeader('Cache-Control', 'no-store');
-            response.end(corpusText);
-          });
+          developmentServer.middlewares.use(
+            suite === 'material' ? '/material-corpus.json' : '/early-corpus.json',
+            (request, response, next) => {
+              if (request.method !== 'GET') {
+                next();
+                return;
+              }
+              response.setHeader('Content-Type', 'application/json; charset=utf-8');
+              response.setHeader('Cache-Control', 'no-store');
+              response.end(corpusText);
+            },
+          );
           developmentServer.middlewares.use('/current-profile.json', (request, response, next) => {
             if (request.method !== 'GET' || profileText === undefined) {
               next();
@@ -334,6 +340,9 @@ const run = async (): Promise<void> => {
           );
         }
         const pageUrl = new URL(url);
+        if (suite === 'material') {
+          pageUrl.searchParams.set('suite', 'material');
+        }
         if (idsArgument !== undefined) {
           pageUrl.searchParams.set('ids', idsArgument);
         }
@@ -426,17 +435,23 @@ const run = async (): Promise<void> => {
     const report = {
       schemaVersion: 1,
       suite,
-      ...(suite === 'early'
-        ? {
+      ...(suite === 'm2'
+        ? {}
+        : {
             selection: {
               ids: selectedIds,
               records: selected.length,
               admissions: expectedAdmissions,
               equivalentCanonicalGroups: expectedGroups,
-              bindingProfile: corpus?.bindingProfile,
+              bindingProfile:
+                suite === 'material'
+                  ? 'full-backend'
+                  : corpus !== undefined && 'bindingProfile' in corpus
+                    ? corpus.bindingProfile
+                    : undefined,
+              ...(corpus !== undefined && 'materialSha256' in corpus ? { materialSha256: corpus.materialSha256 } : {}),
             },
-          }
-        : {}),
+          }),
       consumerDirectory: packedConsumerDirectory,
       route: {
         import: '@taucad/geospec-engine-native',

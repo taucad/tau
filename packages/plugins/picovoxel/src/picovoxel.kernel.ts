@@ -534,10 +534,8 @@ const ownedUint32 = (values: Uint32Array): Uint32Array<ArrayBuffer> =>
 const snapshotBytes = (values: Float32Array<ArrayBuffer> | Uint32Array<ArrayBuffer>): Uint8Array<ArrayBuffer> =>
   new Uint8Array(values.buffer, values.byteOffset, values.byteLength).slice();
 
-const restoredWords = (value: unknown, index: number, field: 'vertices' | 'triangles'): ArrayBuffer => {
-  if (!(value instanceof Uint8Array)) {
-    throw new TypeError(`Invalid PicoVoxel serialized shape ${index}: ${field} must be bytes.`);
-  }
+// oxlint-disable-next-line enforce-uint8array-arraybuffer/enforce-uint8array-arraybuffer -- Validated serialized views may have shared backing; restoration copies into an owned ArrayBuffer.
+const restoredWords = (value: Uint8Array, index: number, field: 'vertices' | 'triangles'): ArrayBuffer => {
   if (value.byteLength % Uint32Array.BYTES_PER_ELEMENT !== 0) {
     throw new TypeError(`Invalid PicoVoxel serialized shape ${index}: ${field} byte length must be divisible by four.`);
   }
@@ -636,6 +634,8 @@ const snapshotResources = (value: unknown): GlbResources => {
   try {
     validateGlbResources(value);
     const snapshot: unknown = {
+      ...(value.textures ? { textures: snapshotJson(value.textures) } : {}),
+      ...(value.samplers ? { samplers: snapshotJson(value.samplers) } : {}),
       ...(value.images
         ? {
             images: value.images.map((image) => ({
@@ -645,8 +645,6 @@ const snapshotResources = (value: unknown): GlbResources => {
             })),
           }
         : {}),
-      ...(value.textures ? { textures: snapshotJson(value.textures) } : {}),
-      ...(value.samplers ? { samplers: snapshotJson(value.samplers) } : {}),
     };
     validateGlbResources(snapshot);
     return snapshot;

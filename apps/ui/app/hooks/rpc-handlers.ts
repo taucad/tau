@@ -698,10 +698,17 @@ export function createRpcHandlers(deps: RpcHandlerDependencies): RpcHandlers {
       throw error;
     }
     const read = workbenchRecords.entries.read(bytes);
+    // Refuse rather than render with an assumed default timeout the person never chose.
     if (read.status !== 'current') {
-      throw new Error('Workbench entry settings need repair before rendering.');
+      const record = `\`${workbenchPaths.entries}\``;
+      const stopped = 'so rendering stopped rather than assume a default render timeout.';
+      throw new Error(
+        read.code === 'NEWER_RECORD'
+          ? `${record} was written by a newer Tau, ${stopped} Update Tau to use it; do not rewrite it to work around this.`
+          : `${record} is not valid, ${stopped} The person can review it from the project's Settings not applied action; do not rewrite it to work around this. ${read.message}`,
+      );
     }
-    return read.record.entries[path]?.operationTimeout;
+    return read.record.entries[path]?.renderTimeout;
   };
   const fileSystem = createBrowserRpcFileSystem(fileManager);
   const skillResolver = createSkillResolver({

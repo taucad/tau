@@ -20,6 +20,7 @@ import { SceneOverlay } from '#components/geometry/graphics/three/scene-overlay.
 import { useThreeGraphicsBackend } from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import { createRafCoalescer } from '#components/geometry/graphics/three/utils/raf-coalescer.js';
 import { setRaycasterFromCamera } from '#components/geometry/graphics/three/utils/raycaster-from-camera.js';
+import { capturePointer, releasePointer } from '#utils/pointer-capture.utils.js';
 import {
   useCameraRig,
   useCameraSelector,
@@ -272,9 +273,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       }
       press = undefined;
       ended.release();
-      if (surface.hasPointerCapture(ended.pointerId)) {
-        surface.releasePointerCapture(ended.pointerId);
-      }
+      releasePointer(surface, ended.pointerId);
       paint();
     };
 
@@ -328,7 +327,7 @@ export function SectionHandles({ planePicker }: SectionHandlesProperties): React
       event.preventDefault();
       isPressOwned = true;
       hoverPicks.cancel();
-      surface.setPointerCapture(event.pointerId);
+      capturePointer(surface, event.pointerId);
       // Only the selected cut has drag handles, so a press on one leaves the selection; a press on an unselected
       // revolution's fan selects it and drags nothing.
       const isSelect = handle?.target.kind === 'select';

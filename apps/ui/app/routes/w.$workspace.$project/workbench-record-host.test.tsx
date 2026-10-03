@@ -8,6 +8,7 @@ import type { WorkbenchLayout, WorkbenchView } from '@taucad/workbench';
 import type { PreviousWorkbenchLayout } from '#types/editor.types.js';
 import type { WorkbenchLayoutController } from '#routes/w.$workspace.$project/workbench-layout-controller.js';
 import { WorkbenchRecordHost } from '#routes/w.$workspace.$project/workbench-record-host.js';
+import { readRecordIssues } from '#workbench-records/record-issues.js';
 
 let fileManager: unknown;
 let project: unknown;
@@ -429,7 +430,7 @@ describe('live workbench record host', () => {
       initialServiceMissing: true,
     });
     await waitFor(() => {
-      expect(screen.getByRole('status').textContent).toContain('offline');
+      expect(readRecordIssues('p')).toMatchObject([{ kind: 'layout', state: 'reading', message: 'offline' }]);
     });
     act(() => {
       host.readyService();
@@ -521,13 +522,15 @@ describe('live workbench record host', () => {
     expect(host.applied.has(workbenchPaths.layout)).toBe(true);
     await host.failRead();
     expect(host.applied.has(workbenchPaths.layout)).toBe(false);
-    expect(screen.getByRole('status').textContent).toContain('offline');
+    expect(readRecordIssues('p')).toMatchObject([{ kind: 'layout', state: 'reading', message: 'offline' }]);
     const priorApplications = apply.mock.calls.length;
     await host.set(host.bytes!);
     await waitFor(() => {
       expect(host.applied.has(workbenchPaths.layout)).toBe(true);
     });
-    expect(screen.getByRole('status').textContent).not.toContain('offline');
+    await waitFor(() => {
+      expect(readRecordIssues('p')).toEqual([]);
+    });
     expect(apply.mock.calls.length).toBeGreaterThan(priorApplications);
     expect(host.writes).not.toHaveBeenCalled();
     host.unmount();
@@ -789,6 +792,7 @@ describe('live workbench record host', () => {
   });
 
   it('clears the reactive snapshot for invalid/newer bytes and offers Reset only for invalid bytes', async () => {
+    // Offered through the settings trigger: the host publishes the issue and renders no page text.
     const host = mount();
     await waitFor(() => {
       expect(host.controller.snapshot()?.layout).toEqual(first());
@@ -800,13 +804,16 @@ describe('live workbench record host', () => {
       expect(host.controller.snapshot()).toBeUndefined();
     });
     expect(changed).toHaveBeenCalled();
-    expect(screen.getByRole('button', { name: 'Reset' })).toBeDefined();
+    expect(screen.queryByRole('alert')).toBeNull();
+    await waitFor(() => {
+      expect(readRecordIssues('p')).toMatchObject([{ kind: 'layout', state: 'invalid' }]);
+    });
     await host.set(encoder.encode('{"version":2}'));
     await waitFor(() => {
       expect(host.controller.snapshot()).toBeUndefined();
     });
     await waitFor(() => {
-      expect(screen.queryByRole('button', { name: 'Reset' })).toBeNull();
+      expect(readRecordIssues('p')).toMatchObject([{ kind: 'layout', state: 'newer' }]);
     });
     expect(host.writes).not.toHaveBeenCalled();
     host.unmount();

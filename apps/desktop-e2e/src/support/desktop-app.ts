@@ -37,6 +37,46 @@ const clientRoot = process.env['TAU_DESKTOP_CLIENT_ROOT'] ?? join(workspaceRoot,
 const desktopRoot = join(workspaceRoot, 'apps/desktop');
 const defaultPackagedExecutable = join(desktopRoot, 'package-out/Tau-darwin-arm64/Tau.app/Contents/MacOS/Tau');
 const diagnosticsRoot = join(workspaceRoot, 'out/test-results/desktop-e2e');
+
+/** Select the complete descendant command records from one successful ps snapshot. */
+export const desktopDescendants = (
+  electronPid: number | undefined,
+  snapshot: string,
+): ReadonlyArray<{ pid: number; command: string }> => {
+  const records = snapshot
+    .trim()
+    .split('\n')
+    .flatMap((line) => {
+      const match = /^\s*(\d+)\s+(\d+)\s+(.+)$/u.exec(line);
+      return match ? [{ pid: Number(match[1]), parent: Number(match[2]), command: match[3] ?? '' }] : [];
+    });
+  const parents = new Map(records.map(({ pid, parent }) => [pid, parent]));
+  if (
+    electronPid === undefined ||
+    !Number.isSafeInteger(electronPid) ||
+    electronPid <= 0 ||
+    !parents.has(electronPid)
+  ) {
+    throw new Error('Electron owner is absent or invalid');
+  }
+  return records
+    .filter(({ pid }) => {
+      if (pid === electronPid) {
+        return false;
+      }
+      const visited = new Set<number>();
+      let current: number | undefined = pid;
+      while (current && !visited.has(current)) {
+        if (current === electronPid) {
+          return true;
+        }
+        visited.add(current);
+        current = parents.get(current);
+      }
+      return false;
+    })
+    .map(({ pid, command }) => ({ pid, command }));
+};
 const completedArtifactForbiddenEnvironment = [
   'NODE_OPTIONS',
   'NODE_PATH',

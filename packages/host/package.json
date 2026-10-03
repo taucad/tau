@@ -64,6 +64,7 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
+    "@parcel/watcher": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/bambu": "workspace:*",
     "@taucad/filesystem": "workspace:*",

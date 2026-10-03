@@ -257,7 +257,7 @@ Library.Go(1f, () => {
         Assert.Equal(component.Positions.Length / 3 * 4, component.Tangents!.Length);
         Assert.All(component.Tangents, value => Assert.True(float.IsFinite(value)));
         var artifact = MeshArtifactWriter.Write(root, execution, new WorkerDiagnostics(new(false, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0), new(0, 0, 0)));
-        Assert.True(artifact.Components[0].TangentCount > 0);
+        Assert.True(artifact.Prototypes[0].TangentCount > 0);
         using var backend = new CaptureViewerBackend(root);
         using var library = new Library(1f);
         Library.RegisterGlobalLibrary(library);

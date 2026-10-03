@@ -1,0 +1,139 @@
+# Reusable workflow that builds the UI in GitHub Actions and deploys it to Netlify.
+#
+# Netlify does not build Tau itself: the UI build needs the GeoSpec engine
+# products (the emscripten binding and the CI assembly), which only the macOS
+# `geospec-producer` job in `ci.yml` can make. So Actions brings those products
+# into the checkout, then `netlify deploy` runs the Netlify build itself: it
+# reads `apps/ui/netlify.toml` and the site's environment variables as a
+# Netlify Git build did, and publishes the result.
+#
+#   - staging (taucad.dev): `ci.yml` → `deploy-ui-staging` on every push to
+#     `main` that affects the UI, using this run's `geospec-ci-*` artifact.
+#   - production (tau.new): `prod-deploy-on-merge.yml` on every push to
+#     `production` (made only by `deploy-production.yml`), using the artifact of
+#     the `ci.yml` push run on `main` for the same commit.
+#
+# Both Netlify sites run with `deploy_mode = "ci"` in tau-cloud, so Netlify's Git
+# integration no longer builds them. Each environment holds a `NETLIFY_AUTH_TOKEN`
+# secret, set by hand by the account owner; the site IDs below are not secrets.
+#
+# Manual redeploy of the current commit: `gh workflow run deploy-ui.yml -f
+# environment=staging` from `main`, or `-f environment=production` from
+# `production`.
+
+name: Deploy UI to Netlify
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'staging or production'
+      transport:
+        required: true
+        type: string
+        description: '`this-run`: the calling run produced the GeoSpec artifact; `cache`: the calling run restored its products from an earlier run under `geospec-key`; `main-run`: take it from the passed ci.yml push run on main for this commit'
+      geospec-key:
+        required: false
+        type: string
+        default: ''
+        description: 'The products cache key, for `transport: cache`'
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: choice
+        description: 'Environment to deploy'
+        options:
+          - staging
+          - production
+
+permissions:
+  contents: read
+  actions: read
+
+jobs:
+  deploy:
+    name: Deploy UI to ${{ inputs.environment }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 75
+    environment: ${{ inputs.environment }}
+    concurrency:
+      group: deploy-ui-${{ inputs.environment }}
+      cancel-in-progress: false
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    steps:
+      - name: Resolve the Netlify site
+        id: site
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+        run: |
+          case "$ENVIRONMENT" in
+            staging) site_id=a006a282-6254-499d-a38c-d089b47359c7; url=https://taucad.dev ;;
+            production) site_id=7077c956-6b41-4056-b589-2b3c837435eb; url=https://tau.new ;;
+            *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
+          esac
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "::error::NETLIFY_AUTH_TOKEN is not set on the $ENVIRONMENT environment."
+            exit 1
+          fi
+          echo "site_id=$site_id" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Download this run's GeoSpec artifact
+        if: inputs.transport == 'this-run'
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: geospec-ci-${{ github.sha }}-${{ github.run_attempt }}
+          path: .
+
+      - name: Verify this run's GeoSpec artifact against the checkout
+        if: inputs.transport == 'this-run'
+        run: pnpm nx run-many -t require-geospec-delivery --parallel=1
+
+      # A run whose native source closure matched an earlier build skips the producer, so
+      # there is no same-run artifact: restore the products as the Linux CI lanes do.
+      - name: Restore GeoSpec engine products from an earlier run
+        if: inputs.transport == 'cache'
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ inputs.geospec-key }}
+          mode: restore
+
+      - name: Verify the restored GeoSpec products against the checkout
+        if: inputs.transport == 'cache'
+        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
+
+      - name: Take the GeoSpec artifact from this commit's main CI run
+        if: inputs.transport != 'this-run' && inputs.transport != 'cache'
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          sha: ${{ github.sha }}
+          github-token: ${{ github.token }}
+
+      # The CLI comes from the workspace lockfile (`scripts` owns it); its build
+      # runs `apps/ui/netlify.toml`'s production command with the site's variables.
+      - name: Build and deploy with the Netlify CLI
+        working-directory: apps/ui
+        env:
+          SITE_ID: ${{ steps.site.outputs.site_id }}
+          MESSAGE: ${{ github.workflow }} ${{ github.sha }}
+        run: |
+          "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
+            --prod --context production \
+            --site "$SITE_ID" --message "$MESSAGE"
+
+      - name: Check the site answers
+        env:
+          URL: ${{ steps.site.outputs.url }}
+        run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"

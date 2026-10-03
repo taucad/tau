@@ -86,6 +86,9 @@ export async function installApiRuntimeRole(client: postgres.Sql): Promise<void>
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tau_api_runtime') THEN CREATE ROLE tau_api_runtime NOLOGIN; END IF;
     END $$`;
     await transaction`GRANT tau_billing_runtime TO tau_api_runtime`;
+    // The migration login must be able to SET ROLE into the runtime roles (Supabase withholds this from
+    // its owner login), without inheriting their privileges.
+    await transaction`GRANT tau_api_runtime, tau_billing_runtime TO CURRENT_USER WITH INHERIT FALSE, SET TRUE`;
     // PostgreSQL 15+ already withholds this; stating it keeps an adopted older database fail-closed.
     await transaction`REVOKE CREATE ON SCHEMA public FROM PUBLIC`;
     await transaction`GRANT USAGE ON SCHEMA public TO tau_api_runtime`;

@@ -73,21 +73,24 @@ const environmentSchemaBase = z.object({
   // and editing never require it (V6).
   MORPH_API_KEY: z.string().optional(),
   ANTHROPIC_API_KEY: z.string().optional(),
-  GOOGLE_VERTEX_AI_CREDENTIALS: jsonCodec(
-    z.object({
-      type: z.string(),
-      project_id: z.string(),
-      private_key_id: z.string(),
-      private_key: z.string(),
-      client_email: z.string(),
-      client_id: z.string(),
-      auth_uri: z.string(),
-      token_uri: z.string(),
-      auth_provider_x509_cert_url: z.string(),
-      client_x509_cert_url: z.string(),
-      universe_domain: z.string(),
-    }),
-  ).optional(),
+  // A copied `.env.example` leaves this empty; empty means unset, not malformed JSON.
+  GOOGLE_VERTEX_AI_CREDENTIALS: unsetWhenEmpty(
+    jsonCodec(
+      z.object({
+        type: z.string(),
+        project_id: z.string(),
+        private_key_id: z.string(),
+        private_key: z.string(),
+        client_email: z.string(),
+        client_id: z.string(),
+        auth_uri: z.string(),
+        token_uri: z.string(),
+        auth_provider_x509_cert_url: z.string(),
+        client_x509_cert_url: z.string(),
+        universe_domain: z.string(),
+      }),
+    ).optional(),
+  ),
   TAVILY_API_KEY: z.string().optional(),
   CEREBRAS_API_KEY: z.string().optional(),
   TOGETHER_API_KEY: z.string().optional(),

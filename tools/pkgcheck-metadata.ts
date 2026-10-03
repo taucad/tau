@@ -100,7 +100,8 @@ export const packageMetadataIssues = (
 
   if (Array.isArray(packageJson.files)) {
     for (const path of packageJson.files) {
-      if (typeof path !== 'string' || pathExists(path)) {
+      // A `!` entry excludes from the packed set rather than naming a path to pack.
+      if (typeof path !== 'string' || path.startsWith('!') || pathExists(path)) {
         continue;
       }
       issues.push(`files entry does not exist: ${path}`);
@@ -329,13 +330,20 @@ export type PeerRule = {
   readonly dependencyLeafAllowlist?: readonly string[];
 };
 
+/** Leaves under npm-policy Rule 1: they never re-export schemas or runtime types, so they satisfy peers with dependencies. */
+const leafPackages = ['@taucad/cli', 'geospec', '@taucad/geospec-engine'];
+
 /** The one registry shared by publishable-peer and internal-library rules. */
 export const peerRules: readonly PeerRule[] = [
-  { name: 'zod', reason: 'schema instance and type identity must not fork across an install' },
+  {
+    name: 'zod',
+    reason: 'schema instance and type identity must not fork across an install',
+    dependencyLeafAllowlist: leafPackages,
+  },
   {
     name: '@taucad/runtime',
     reason: 'one runtime instance must own protocol and type identity across an install',
-    dependencyLeafAllowlist: ['@taucad/cli', 'geospec', '@taucad/geospec-engine'],
+    dependencyLeafAllowlist: leafPackages,
   },
 ];
 
@@ -804,10 +812,10 @@ export const bundledWorkspaceMirrors = (
     .sort();
 
 /**
- * Every published subpath as an importable specifier, minus the ones with a
- * recorded reason. Wildcards cannot be probed. A reason naming a subpath the
- * package does not publish is itself an issue, so a stale excuse cannot linger
- * after the export it excused moved or was removed.
+ * Every published subpath as an importable specifier, minus binary assets and
+ * the ones with a recorded reason. Wildcards cannot be probed. A reason naming
+ * a subpath the package does not publish is itself an issue, so a stale excuse
+ * cannot linger after the export it excused moved or was removed.
  */
 export const probedSpecifiers = (
   packageName: string,
@@ -828,6 +836,52 @@ export const probedSpecifiers = (
       .sort()
       .map((subpath) => `recorded strict-consumer exclusion names a subpath this package does not publish: ${subpath}`),
   };
+};
+
+/**
+ * A third-party declaration defect the strict-consumer probe reaches through a
+ * dependency. Unlike a subpath exclusion it drops only the matching diagnostic,
+ * so every other error in the same subpath still fails the probe.
+ */
+export type KnownDeclarationDefect = {
+  /** Matches one `file(line,col): error TSnnnn: message` line of `tsc --pretty false`. */
+  readonly diagnostic: RegExp;
+  readonly reason: string;
+};
+
+export const knownDeclarationDefects: readonly KnownDeclarationDefect[] = [
+  {
+    diagnostic:
+      /@anthropic-ai\/sdk\/internal\/types\.d\.mts\(\d+,\d+\): error TS2307: Cannot find module '(?:\.\.\/)+node_modules\/undici(?:-types)?\/index\.d\.ts'/u,
+    reason:
+      '@anthropic-ai/sdk 0.91.1 (pinned by pi-ai) puts `@ts-ignore` on the same line as its relative undici-types fallbacks, so it suppresses nothing under pnpm; fixed in 0.103.0',
+  },
+];
+
+/**
+ * Split `tsc --pretty false` output into the diagnostics a known third-party
+ * defect explains and the ones that remain. Continuation lines (indented)
+ * stay with the diagnostic they belong to.
+ */
+export const partitionConsumerDiagnostics = (
+  output: string,
+  defects: readonly KnownDeclarationDefect[],
+): { remaining: string[]; explained: string[] } => {
+  const remaining: string[] = [];
+  const explained: string[] = [];
+  let target: string[] | undefined;
+  for (const line of output.split('\n')) {
+    if (line.trim() === '') {
+      continue;
+    }
+    if (/^\s/u.test(line) && target !== undefined) {
+      target.push(line);
+      continue;
+    }
+    target = defects.some(({ diagnostic }) => diagnostic.test(line)) ? explained : remaining;
+    target.push(line);
+  }
+  return { remaining, explained };
 };
 
 export const strictConsumerCompilerOptions = (moduleResolution: 'bundler' | 'nodenext'): Record<string, unknown> => ({

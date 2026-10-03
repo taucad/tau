@@ -258,10 +258,10 @@ export function getBetterAuthConfig(options: BetterAuthConfigOptions): BetterAut
         ...staticAuthConfig.advanced.defaultCookieAttributes,
         secure: secureCookies,
       },
-      crossSubDomainCookies: {
-        enabled: true,
-        domain: undefined, // Will be set based on request
-      },
+      // No `crossSubDomainCookies`: the UI reaches the API cross-origin with
+      // `credentials: 'include'`, so the session cookie only ever needs to reach
+      // the API host. Enabling it added `Domain=<AUTH_URL host>`, which also sent
+      // the cookie to every subdomain of that host. Host-only is the narrowest scope.
       database: {
         generateId(options) {
           const prefix = prefixFromModel[options.model];

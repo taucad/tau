@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import axe from 'axe-core';
 import { act, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { BoundFunctions, queries } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { MemoryRouter, useLocation } from 'react-router';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
@@ -127,17 +128,57 @@ const [red, blue] = ['#FF0000', '#0000FF'] as const;
 // oxlint-disable-next-line tau-lint/no-hardcoded-color -- the RGBA a machine reports for a red and a blue spool
 const [redTray, blueTray] = ['#FF0000FF', '#0000FFFF'] as const;
 
-/** The next print folds during a run; opening it keeps the preparation assertions about its actual controls. */
-const prepareRegion = (): HTMLElement => {
-  const folded = screen.queryByRole('button', { name: 'Prepare the next print' });
-  if (folded?.getAttribute('aria-expanded') === 'false') {
-    fireEvent.click(folded);
-  }
-  return screen.getByRole('region', { name: 'Prepare' });
+/**
+ * The header's Machine select is the pane's only machine heading: it names the chosen printer and its status.
+ *
+ * @param status - The status label the select shows beside the name.
+ * @param name - The printer's name.
+ * @returns The select.
+ */
+const findMachine = async (status: string, name = 'Workshop X1C'): Promise<HTMLElement> => {
+  await waitFor(() => {
+    expect(screen.getByRole('combobox', { name: 'Machine' })).toHaveTextContent(`${name}${status}`);
+  });
+  return screen.getByRole('combobox', { name: 'Machine' });
 };
 
-const openMoreSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
-  const trigger = screen.getByRole('button', { name: 'More settings' });
+/** Open a folded disclosure by its trigger, whose name starts with the title and continues with its summary. */
+const openDisclosure = (name: RegExp): HTMLElement => {
+  const trigger = screen.getByRole('button', { name });
+  if (trigger.getAttribute('aria-expanded') !== 'true') {
+    fireEvent.click(trigger);
+  }
+  return trigger;
+};
+
+/** Prepare's stage, opened: during a run or an open request it starts closed and ends with its own actions. */
+const prepareRegion = (): HTMLElement => {
+  const region = screen.getByRole('region', { name: 'Prepare' });
+  const trigger = within(region).getByRole('button', { name: /^Prepare/u });
+  if (trigger.getAttribute('aria-expanded') !== 'true') {
+    fireEvent.click(trigger);
+  }
+  return region;
+};
+
+/** Where Prepare's one primary action (slice or send) sits: the pane's action bar, or the end of Prepare. */
+const prepareActions = (): BoundFunctions<typeof queries> => {
+  const bar = document.querySelector<HTMLElement>('[data-slot="print-action-bar"]');
+  return within(bar ?? prepareRegion());
+};
+
+/** The slice result with its folded details open. */
+const sliceDetails = async (): Promise<HTMLElement> => {
+  const result = await screen.findByRole('group', { name: 'Slice result' });
+  const trigger = within(result).getByRole('button', { name: /^Details/u });
+  if (trigger.getAttribute('aria-expanded') !== 'true') {
+    fireEvent.click(trigger);
+  }
+  return result;
+};
+
+const openAdvancedSettings = async (user: ReturnType<typeof userEvent.setup>): Promise<void> => {
+  const trigger = screen.getByRole('button', { name: /^Advanced settings/u });
   if (trigger.getAttribute('aria-expanded') !== 'true') {
     await user.click(trigger);
   }
@@ -327,8 +368,8 @@ describe('Print pane orientation', () => {
         <PrintPanel machines={{ available: true, ...client }} bridge={bridge} isShown />
       </TooltipProvider>,
     );
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    fireEvent.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await findMachine('Ready');
+    fireEvent.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     const claims = mockProjectSend.mock.calls
       .map(([event]) => event as { type: string; claimId: string })
       .filter((event) => event.type === 'claimGeometryUnit');
@@ -358,9 +399,9 @@ describe('Print pane orientation', () => {
       failedCadSnapshot() as unknown as Awaited<ReturnType<typeof awaitFreshRender>>,
     );
     renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
     const beforeSlice = mockProjectSend.mock.calls.length;
-    fireEvent.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    fireEvent.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
 
     expect(await within(prepareRegion()).findByText('radius must be positive')).toBeInTheDocument();
     expect(mockExport).not.toHaveBeenCalled();
@@ -378,12 +419,42 @@ describe('Print pane orientation', () => {
       label: 'A 0.6 mm nozzle is installed',
     });
   });
-  it('names the machine state and the one safe next step from the observation alone', () => {
+  it('names the machine state and the one safe next step from the observation alone', async () => {
     expect(presentMachine(entry())).toMatchObject({ label: 'Ready' });
     expect(presentMachine(printing())).toMatchObject({ label: 'Printing' });
-    expect(presentMachine(entry({ freshness: 'stale' })).nextAction).toContain('before any physical action');
+    expect(presentMachine(entry({ freshness: 'stale' })).label).toBe('Stale observation');
     expect(presentMachine(entry({ snapshot: { ...entry().snapshot, connection: 'unreachable' } })).label).toBe(
       'Unreachable',
+    );
+
+    // One notice says what waits on a machine the pane cannot trust, and what still works.
+    const unreachable = entry({ snapshot: { ...entry().snapshot, connection: 'unreachable' } });
+    const view = renderPane(createFixture({ entries: [unreachable] }).client);
+    await findMachine('Unreachable');
+    expect(
+      screen.getByText(
+        'Workshop X1C is unreachable. Sending and run controls wait until the host reconnects; slicing still works.',
+      ),
+    ).toBeInTheDocument();
+    expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+    view.unmount();
+
+    renderPane(createFixture({ entries: [entry({ freshness: 'stale' })] }).client);
+    await findMachine('Stale observation');
+    expect(
+      screen.getByText(
+        'No current observation from Workshop X1C. Sending and run controls wait until it reports again; slicing still works.',
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it('names a send in flight while the printer still reports the moment before it', () => {
+    expect(presentMachine(entry(), agentRequest({ state: 'uploading' })).label).toBe('Sending');
+    expect(presentMachine(entry(), agentRequest({ state: 'confirming' }))).toMatchObject({ label: 'Starting' });
+    // An unconfirmed start is past that moment: the printer's own report speaks again.
+    expect(presentMachine(entry(), agentRequest({ state: 'unknown' })).label).toBe('Ready');
+    expect(presentMachine(entry({ freshness: 'stale' }), agentRequest({ state: 'confirming' })).label).toBe(
+      'Stale observation',
     );
   });
 
@@ -415,7 +486,9 @@ describe('Print pane orientation', () => {
     };
     globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
     renderPane(captureClient);
-    fireEvent.click(await screen.findByRole('button', { name: /^Environment and camera/u }));
+    // The camera leads the Control center, which an idle printer keeps closed.
+    await findMachine('Ready');
+    openDisclosure(/^Control center/u);
     fireEvent.click(await screen.findByRole('button', { name: 'Capture still' }));
     await waitFor(() => {
       expect(captureSignal).toBeDefined();
@@ -423,7 +496,8 @@ describe('Print pane orientation', () => {
     const user = userEvent.setup();
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Mini');
     expect(captureSignal?.aborted).toBe(true);
-    fireEvent.click(await screen.findByRole('button', { name: /^Environment and camera/u }));
+    await findMachine('Ready', 'Mini');
+    openDisclosure(/^Control center/u);
     expect(screen.getByRole('button', { name: 'Capture still' })).toBeEnabled();
     await act(async () => {
       pending.resolve({
@@ -442,6 +516,7 @@ describe('Print pane orientation', () => {
       isSliceStale: false,
       isSlicing: false,
       route: gcodeRoute,
+      sliceBlocker: undefined,
       sendBlocker: 'x',
     };
     expect(nextAction({ entry: entry(), openRequest: undefined, prepare })).toEqual({
@@ -459,19 +534,58 @@ describe('Print pane orientation', () => {
       label: 'Review the print request',
       kind: 'review',
     });
+    expect(nextAction({ entry: entry(), openRequest: agentRequest({ state: 'confirming' }), prepare })).toEqual({
+      label: 'Waiting for the printer to confirm',
+      kind: 'none',
+    });
     expect(nextAction({ entry: entry(), openRequest: agentRequest({ state: 'unknown' }), prepare })).toEqual({
-      label: 'Reconcile the start',
+      label: 'Check the printer',
       kind: 'review',
     });
-    expect(nextAction({ entry: entry({ freshness: 'stale' }), openRequest: undefined, prepare }).kind).toBe('none');
+    // A stale machine still slices; only sending waits, and its blocker says why.
+    expect(nextAction({ entry: entry({ freshness: 'stale' }), openRequest: undefined, prepare })).toEqual({
+      label: 'Slice and preview',
+      kind: 'slice',
+    });
+    expect(
+      nextAction({
+        entry: entry({ freshness: 'stale' }),
+        openRequest: undefined,
+        prepare: {
+          ...prepare,
+          slice: sliceFixture,
+          sendBlocker: 'Wait for a current observation from Workshop X1C before starting.',
+        },
+      }),
+    ).toEqual({
+      label: 'Send to Workshop X1C',
+      kind: 'send',
+      blocker: 'Wait for a current observation from Workshop X1C before starting.',
+    });
     expect(nextAction({ entry: printing(), openRequest: undefined, prepare }).kind).toBe('none');
+    expect(nextAction({ entry: entry(), openRequest: undefined, prepare: { ...prepare, isSlicing: true } })).toEqual({
+      label: 'Slicing…',
+      kind: 'slice',
+    });
+    expect(
+      nextAction({ entry: entry(), openRequest: undefined, prepare: { ...prepare, sliceBlocker: 'Loading presets…' } }),
+    ).toEqual({ label: 'Slice and preview', kind: 'slice', blocker: 'Loading presets…' });
+    // A fresh slice that cannot be sent says why, rather than offering to slice again.
     expect(
       nextAction({
         entry: entry(),
         openRequest: undefined,
         prepare: { ...prepare, slice: sliceFixture, sendBlocker: 'Workshop X1C is busy. Wait until it reports ready.' },
       }),
-    ).toEqual({ label: 'Workshop X1C is busy. Wait until it reports ready.', kind: 'none' });
+    ).toEqual({
+      label: 'Send to Workshop X1C',
+      kind: 'send',
+      blocker: 'Workshop X1C is busy. Wait until it reports ready.',
+    });
+    expect(nextAction({ entry: entry(), openRequest: undefined, prepare: { ...prepare, route: undefined } })).toEqual({
+      label: 'Slicing unavailable',
+      kind: 'none',
+    });
   });
 
   it('names the one reason a physical start must wait, in the order a person resolves them', () => {
@@ -508,8 +622,9 @@ describe('Print pane orientation', () => {
   it('marks the simulator as simulated', async () => {
     const fixture = createFixture({ entries: [entry({ providerId: 'bambu-simulator' })] });
     renderPane(fixture.client);
-    const card = await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    expect(within(card).getByText('Simulated')).toBeInTheDocument();
+    // The header names the printer once, with its status and the Simulated mark beside the picker.
+    const picker = await findMachine('Ready');
+    expect(picker.parentElement?.parentElement).toContainElement(screen.getByText('Simulated'));
   });
 });
 
@@ -555,15 +670,15 @@ describe('Print pane prepare and send', () => {
     const user = userEvent.setup();
     try {
       renderPane(createFixture().client);
-      await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-      await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+      await findMachine('Ready');
+      await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
       await waitFor(() => {
         expect(mockExport).toHaveBeenCalledOnce();
       });
       const oldSignal = signalAt(0);
       await chooseOption(user, within(prepareRegion()).getByRole('combobox', { name: 'Plate' }), 'Cool plate');
       expect(oldSignal.aborted).toBe(true);
-      await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+      await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
       await waitFor(() => {
         expect(mockExport).toHaveBeenCalledTimes(2);
       });
@@ -613,13 +728,13 @@ describe('Print pane prepare and send', () => {
     });
     const user = userEvent.setup();
     renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await findMachine('Ready');
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledOnce();
     });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Cancel slicing' }));
-    expect(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+    await user.click(prepareActions().getByRole('button', { name: 'Cancel slicing' }));
+    expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
     const sent = mockProjectSend.mock.calls.length;
     finish();
     await waitFor(() => {
@@ -634,18 +749,22 @@ describe('Print pane prepare and send', () => {
     const user = userEvent.setup();
     const { container } = renderPane(fixture.client);
 
-    expect(await screen.findByRole('article', { name: 'Workshop X1C, Ready' })).toBeInTheDocument();
+    await findMachine('Ready');
     expect(container.querySelector('[data-slot="print-panel-body"]')).toHaveClass('min-w-0', 'flex-col');
+    // History is hidden while it has nothing to list.
+    expect(screen.queryByRole('button', { name: /^History/u })).not.toBeInTheDocument();
 
-    const presets = screen.getByRole('radiogroup', { name: 'Quality' });
-    expect(
-      within(presets)
-        .getAllByRole('radio')
-        .map((button) => button.textContent),
-    ).toEqual(['Fast0.28 mm', 'Standard0.2 mm', 'Fine0.12 mm']);
-    await user.click(within(presets).getByRole('radio', { name: /Fine/u }));
+    const quality = screen.getByRole('combobox', { name: 'Quality' });
+    await user.click(quality);
+    expect(screen.getAllByRole('option').map((option) => option.textContent)).toEqual([
+      'Fast0.28 mm',
+      'Standard0.2 mm',
+      'Fine0.12 mm',
+    ]);
+    await user.keyboard('{Escape}');
+    await chooseOption(user, quality, 'Fine');
     await waitFor(() => {
-      expect(within(presets).getByRole('radio', { name: /Fine/u })).toHaveAttribute('aria-checked', 'true');
+      expect(quality).toHaveTextContent('Fine0.12 mm');
     });
     // The choice is the project's: saved as the only changed key beside the printer model.
     expect(preferencesText()).toBe('{\n  "preset": "fine"\n}\n');
@@ -656,7 +775,7 @@ describe('Print pane prepare and send', () => {
     expect(screen.getByRole('option', { name: /A2/u })).toHaveAttribute('data-disabled');
     await user.keyboard('{Escape}');
 
-    const slice = within(prepareRegion()).getByRole('button', { name: 'Slice and preview' });
+    const slice = prepareActions().getByRole('button', { name: 'Slice and preview' });
     slice.focus();
     await user.keyboard('{Enter}');
     await waitFor(() => {
@@ -669,22 +788,23 @@ describe('Print pane prepare and send', () => {
       [slicePath]: { content: new Uint8Array([0x50, 0x4b, 0x03, 0x04]) },
     });
 
-    const result = await screen.findByLabelText('Slice result');
-    expect(within(result).getByText('125')).toBeInTheDocument();
-    expect(within(result).getByText('about 42 min')).toBeInTheDocument();
-    expect(within(result).getByText('3.2 m')).toBeInTheDocument();
+    // The numbers people read stay in view; the rest folds into Details, summarised by the part's size.
+    const result = await screen.findByRole('group', { name: 'Slice result' });
+    expect(within(result).getByText('125 layers · about 42 min · 3.2 m')).toBeInTheDocument();
+    expect(within(result).getByRole('button', { name: /^Details/u })).toHaveTextContent('50 × 50 × 25 mm');
+    await sliceDetails();
     // The part alone decides the plate fit; every move, start routine included, is shown beside it.
     expect(within(result).getByText('Part').nextElementSibling).toHaveTextContent('50 × 50 × 25 mm');
     expect(within(result).getByText('Toolpath').nextElementSibling).toHaveTextContent(
       "236 × 153 × 35 mm · every nozzle move, including the printer's start routine",
     );
-    expect(within(result).getByText('The part fits the plate')).toBeInTheDocument();
+    expect(within(result).getByText('Plate').nextElementSibling).toHaveTextContent('The part fits the plate');
 
-    await user.click(screen.getByRole('button', { name: 'Open printer preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Preview' }));
     expect(mockEditorSend).toHaveBeenCalledExactlyOnceWith({ type: 'openFile', path: slicePath, source: 'user' });
 
-    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' }));
+    expect(prepareActions().getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await user.click(prepareActions().getByRole('button', { name: 'Send to Workshop X1C' }));
     const confirmation = screen.getByRole('group', { name: 'Confirm before starting' });
     expect(fixture.requestPrint).not.toHaveBeenCalled();
     expect(within(confirmation).getByText(/^sha256:[0-9a-f]{64}$/u)).toBeInTheDocument();
@@ -744,7 +864,7 @@ describe('Print pane prepare and send', () => {
     });
     expect(screen.queryByRole('region', { name: /^Print request awaiting you/u })).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /^Activity/u }));
+    await user.click(screen.getByRole('button', { name: /^History/u }));
     expect(within(screen.getByRole('list', { name: 'Print requests' })).getByText('Started')).toBeInTheDocument();
 
     const accessibility = await axe.run(container, { rules: { region: { enabled: false } } });
@@ -755,7 +875,7 @@ describe('Print pane prepare and send', () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
 
     const names: string[] = [];
     for (let index = 0; index < 20 && !names.includes('Slice and preview'); index += 1) {
@@ -774,7 +894,7 @@ describe('Print pane prepare and send', () => {
   it('should name the plate select by its label and slice for the plate chosen there', async () => {
     const user = userEvent.setup();
     renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
 
     const plate = within(prepareRegion()).getByRole('combobox', { name: 'Plate' });
     // Playwright reads a wrapping label's whole text, options included, so only an explicit name keeps
@@ -786,7 +906,7 @@ describe('Print pane prepare and send', () => {
       expect(plate).toHaveTextContent('Cool plate');
     });
     await expectPreferences({ plate: 'cool' });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
 
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
@@ -800,12 +920,12 @@ describe('Print pane prepare and send', () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
 
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
 
-    await openMoreSettings(user);
+    await openAdvancedSettings(user);
     const options = await screen.findByLabelText('Slicer options');
     await user.click(await within(options).findByRole('button', { name: 'Set layer height' }));
     await waitFor(() => {
@@ -813,7 +933,9 @@ describe('Print pane prepare and send', () => {
     });
     await expectPreferences({ options: { layerHeight: 0.16 } });
     expect(screen.getByText(/Options changed since this slice/u)).toBeInTheDocument();
-    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+    // A stale slice is never offered for sending: Slice again takes Send's place.
+    expect(prepareActions().queryByRole('button', { name: 'Send to Workshop X1C' })).not.toBeInTheDocument();
+    expect(prepareActions().getByRole('button', { name: 'Slice again' })).toBeEnabled();
 
     act(() => {
       fixture.observe(entry({ snapshot: { ...entry().snapshot, observedAt: later } }));
@@ -824,14 +946,14 @@ describe('Print pane prepare and send', () => {
     );
     expect(screen.getByText(/Options changed since this slice/u)).toBeInTheDocument();
 
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice again' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
         signal: signalMatcher,
         options: { ...machineSliceOptions, layerHeight: 0.16 },
       });
     });
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
   });
 
   it('should discard a prepared slice when switching printers and prepare again for the selected machine', async () => {
@@ -841,12 +963,12 @@ describe('Print pane prepare and send', () => {
     globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await findMachine('Ready');
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Mini');
     expect(screen.queryByRole('button', { name: 'Send to Mini' })).not.toBeInTheDocument();
-    expect(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+    expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
     expect(fixture.requestPrint).not.toHaveBeenCalled();
   });
 
@@ -854,13 +976,13 @@ describe('Print pane prepare and send', () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
     mockExport.mockResolvedValueOnce({
       success: false,
       issues: [{ code: 'GEOMETRY_INVALID', severity: 'error', message: 'The GLB carries no triangle primitives.' }],
     });
 
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     expect(await within(prepareRegion()).findByText('The GLB carries no triangle primitives.')).toBeInTheDocument();
 
     act(() => {
@@ -868,29 +990,31 @@ describe('Print pane prepare and send', () => {
     });
 
     expect(within(prepareRegion()).queryByText('The GLB carries no triangle primitives.')).not.toBeInTheDocument();
-    expect(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+    expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
   });
 
   it('marks a slice stale once the model renders again, so the old toolpath cannot be sent', async () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
 
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
 
     act(() => {
       renderGeometry();
     });
 
-    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+    // A stale slice is never offered for sending: Slice again takes Send's place.
+    expect(prepareActions().queryByRole('button', { name: 'Send to Workshop X1C' })).not.toBeInTheDocument();
+    expect(prepareActions().getByRole('button', { name: 'Slice again' })).toBeEnabled();
     expect(
       screen.getByText('The model changed since this slice. Slice again to send the current model.'),
     ).toBeInTheDocument();
 
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await user.click(prepareActions().getByRole('button', { name: 'Slice again' }));
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
   });
 
   it("starts the machine mapping from the provider schema's own defaults, so bed leveling and flow calibration show on", async () => {
@@ -903,8 +1027,12 @@ describe('Print pane prepare and send', () => {
     });
     const user = userEvent.setup();
     renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await openMoreSettings(user);
+    await findMachine('Ready');
+    // Start options fold, summarised by what is on.
+    const startOptions = screen.getByRole('button', { name: /^Start options/u });
+    expect(startOptions).toHaveTextContent(/^Start options\s*Levelling, flow$/u);
+    openDisclosure(/^Start options/u);
+    await openAdvancedSettings(user);
     const mapping = await screen.findByLabelText('Machine mapping');
     expect(await screen.findByRole('switch', { name: 'Toggle for Bed levelling' })).toBeChecked();
     expect(screen.getByRole('switch', { name: 'Toggle for Flow calibration' })).toBeChecked();
@@ -930,16 +1058,19 @@ describe('Print pane prepare and send', () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await findMachine('Ready');
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
 
+    openDisclosure(/^Start options/u);
     const bed = screen.getByRole('switch', { name: 'Toggle for Bed levelling' });
     await user.click(bed);
     expect(bed).not.toBeChecked();
-    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
-    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    expect(screen.getByRole('button', { name: /^Start options/u })).toHaveTextContent(/^Start options\s*Flow$/u);
+    // A stale slice is never offered for sending: Slice again takes Send's place.
+    expect(prepareActions().queryByRole('button', { name: 'Send to Workshop X1C' })).not.toBeInTheDocument();
+    await user.click(prepareActions().getByRole('button', { name: 'Slice again' }));
+    const send = await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' });
     await waitFor(() => {
       expect(send).toBeEnabled();
     });
@@ -957,10 +1088,10 @@ describe('Print pane prepare and send', () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
     expect(screen.getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
 
     act(() => {
       fixture.observe(
@@ -974,7 +1105,7 @@ describe('Print pane prepare and send', () => {
       );
     });
 
-    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    const send = await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' });
     await waitFor(() => {
       expect(send).toBeDisabled();
     });
@@ -986,11 +1117,11 @@ describe('Print pane prepare and send', () => {
     const fixture = createFixture();
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await findMachine('Ready');
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
 
-    const send = (): HTMLElement => within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' });
+    const send = (): HTMLElement => prepareActions().getByRole('button', { name: 'Send to Workshop X1C' });
     const expectSendHeld = async (next: ReturnType<typeof entry>, reason: string): Promise<void> => {
       act(() => {
         fixture.observe(next);
@@ -1008,9 +1139,9 @@ describe('Print pane prepare and send', () => {
       entry({ snapshot: { ...entry().snapshot, readiness: 'busy' } }),
       'Workshop X1C is busy. Wait until it reports ready.',
     );
-    // The orientation card stays a summary; the Send control carries the actionable reason.
-    const card = screen.getByRole('article', { name: 'Workshop X1C, Busy' });
-    expect(within(card).queryByRole('button', { name: /^Send|^Slice/u })).not.toBeInTheDocument();
+    // The header's status stays a summary; the one Send control carries the actionable reason.
+    await findMachine('Busy');
+    expect(screen.getAllByRole('button', { name: /^Send/u })).toEqual([send()]);
 
     act(() => {
       fixture.observe(entry());
@@ -1054,8 +1185,8 @@ describe('Print pane external spool', () => {
     await chooseOption(user, selector, 'Ext');
     expect(selector).toHaveTextContent('Ext');
 
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    const send = await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' });
     await user.click(send);
     const confirmation = screen.getByRole('group', { name: 'Confirm before starting' });
     expect(within(confirmation).getByText('petg-white is loaded on the external spool')).toBeInTheDocument();
@@ -1103,7 +1234,7 @@ describe('Print pane external spool', () => {
     renderPane(createFixture({ entries: [machine] }).client);
     const slots = await screen.findByRole('list', { name: 'Material slots' });
     const external = within(slots).getByText('Ext').closest('li');
-    expect(external).toHaveTextContent('Extpetg-white, in use');
+    expect(external).toHaveTextContent('Extpetg-whiteIn use');
   });
 });
 
@@ -1223,7 +1354,7 @@ describe('Print pane agent requests', () => {
     expect(fixture.uploadPrint).not.toHaveBeenCalled();
 
     // Preview the exact recorded artifact before deciding, the way Prepare opens a fresh slice.
-    await user.click(within(region).getByRole('button', { name: 'Open printer preview' }));
+    await user.click(within(region).getByRole('button', { name: 'Preview' }));
     expect(mockEditorSend).toHaveBeenCalledExactlyOnceWith({ type: 'openFile', path: artifact.path, source: 'user' });
     expect(respond).not.toHaveBeenCalled();
 
@@ -1264,7 +1395,7 @@ describe('Print pane agent requests', () => {
     await waitFor(() => {
       expect(screen.queryByRole('region', { name: requestRegionName })).not.toBeInTheDocument();
     });
-    await user.click(screen.getByRole('button', { name: /^Activity/u }));
+    await user.click(screen.getByRole('button', { name: /^History/u }));
     expect(within(screen.getByRole('list', { name: 'Print requests' })).getByText('Denied')).toBeInTheDocument();
   });
 
@@ -1288,7 +1419,36 @@ describe('Print pane agent requests', () => {
     expect(fixture.resolvePrintRequest).not.toHaveBeenCalled();
   });
 
-  it('offers only Reconcile for an unconfirmed start, never Retry', async () => {
+  it('shows a sent start waiting for the printer to confirm it, with nothing to click', async () => {
+    renderPane(
+      createFixture({
+        requests: [
+          agentRequest({
+            state: 'confirming',
+            uploadOperationId: 'operation-upload-1',
+            startOperationId: 'operation-start-1',
+            receipt: {
+              operationId: 'operation-start-1',
+              machineId: 'machine-1',
+              kind: 'start',
+              status: 'unknown',
+              reason: 'reply-lost-after-possible-acceptance',
+              observedAt: timestamp,
+            },
+          }),
+        ],
+      }).client,
+    );
+
+    const progress = await screen.findByRole('status', { name: 'Waiting for Workshop X1C to confirm the start…' });
+    expect(within(progress).getByText('Confirm')).toBeInTheDocument();
+    expect(progress).toHaveTextContent("Tau confirms it from the printer's own status");
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText(/reply-lost/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry|check again|reconcile/iu })).not.toBeInTheDocument();
+  });
+
+  it('offers only Check again for an unconfirmed start, never Retry', async () => {
     const fixture = createFixture({
       requests: [
         agentRequest({
@@ -1300,7 +1460,7 @@ describe('Print pane agent requests', () => {
             machineId: 'machine-1',
             kind: 'start',
             status: 'unknown',
-            reason: 'The MQTT reply timed out',
+            reason: 'reply-lost-after-possible-acceptance',
             observedAt: timestamp,
           },
         }),
@@ -1310,20 +1470,23 @@ describe('Print pane agent requests', () => {
     renderPane(fixture.client);
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('The printer did not confirm the start of pyramid.gcode.3mf.');
-    expect(alert).toHaveTextContent('The MQTT reply timed out');
-    expect(within(alert).getByRole('button', { name: 'Reconcile' })).toBeInTheDocument();
+    expect(alert).toHaveTextContent("The printer hasn't confirmed the start of pyramid.gcode.3mf.");
+    expect(alert).toHaveTextContent("Check the printer's screen.");
+    // The protocol's reason code is for the log, not the person.
+    expect(alert).not.toHaveTextContent('reply-lost-after-possible-acceptance');
+    expect(within(alert).getByRole('button', { name: 'Check again' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/iu })).not.toBeInTheDocument();
-    expect(screen.queryByRole('button', { name: /^(Start|Accept)/u })).not.toBeInTheDocument();
+    // The Start options stage is settings, not a start.
+    expect(screen.queryByRole('button', { name: /^(?:Start(?! options)|Accept)/u })).not.toBeInTheDocument();
 
-    await user.click(within(alert).getByRole('button', { name: 'Reconcile' }));
+    await user.click(within(alert).getByRole('button', { name: 'Check again' }));
     await waitFor(() => {
       expect(fixture.reconcileOperation).toHaveBeenCalledExactlyOnceWith({
         machineId: 'machine-1',
         operationId: 'operation-start-1',
       });
     });
-    expect(await within(alert).findByText('Reconciled: accepted · run provider-run-9')).toBeInTheDocument();
+    expect(await within(alert).findByText('Checked: accepted · run provider-run-9')).toBeInTheDocument();
     expect(fixture.startPrint).not.toHaveBeenCalled();
   });
 });
@@ -1334,12 +1497,19 @@ describe('Print pane monitor and controls', () => {
     const user = userEvent.setup();
     renderPane(fixture.client);
 
-    expect(await screen.findByRole('article', { name: 'Workshop X1C, Printing' })).toBeInTheDocument();
-    expect(screen.getAllByText('Printing layer 42 of 125 · 9 min left').length).toBeGreaterThan(0);
-    expect(screen.getAllByRole('progressbar', { name: 'Workshop X1C print progress' })[0]).toHaveAttribute(
+    await findMachine('Printing');
+    // The run block says the run once, its file first, with the controls that act on it.
+    const run = screen.getByRole('region', { name: 'Run' });
+    expect(run).toHaveTextContent('pyramid.gcode.3mf · Printing layer 42 of 125 · 9 min left');
+    expect(within(run).getByRole('progressbar', { name: 'Workshop X1C print progress' })).toHaveAttribute(
       'aria-valuenow',
       '42',
     );
+    expect(within(run).getByRole('group', { name: 'Controls for Workshop X1C' })).toBeInTheDocument();
+    // Monitor adds only what the run block does not say.
+    expect(
+      within(screen.getByRole('region', { name: 'Monitor' })).queryByText(/Printing layer/u),
+    ).not.toBeInTheDocument();
 
     const urgentStop = screen.getByRole('button', { name: 'Urgent stop' });
     expect(urgentStop).toBeEnabled();
@@ -1370,11 +1540,13 @@ describe('Print pane monitor and controls', () => {
     });
     expect(await screen.findByText('cancel accepted for machine-1')).toBeInTheDocument();
 
-    await user.click(screen.getByRole('button', { name: /^Other actions/u }));
-    const light = await screen.findByRole('button', { name: 'Chamber light' });
-    expect(light).toBeDisabled();
-    expect(light).toHaveAccessibleDescription('Designed, not yet qualified on this machine');
-    expect(screen.getByRole('button', { name: 'Format storage' })).toHaveAccessibleDescription('Not supported');
+    // The light belongs to the Control center, open during a run: disabled, with why, while it is only designed.
+    const controlCenter = screen.getByRole('region', { name: 'Control center' });
+    expect(within(controlCenter).getByRole('switch', { name: 'Chamber light' })).toBeDisabled();
+    expect(controlCenter).toHaveTextContent('Chamber light is designed but not yet qualified on this printer.');
+    // Actions the pane does not offer are listed in Inspect by their qualification, never as controls.
+    openDisclosure(/^Inspect/u);
+    expect(screen.getByText('Not supported').nextElementSibling).toHaveTextContent('Format storage');
   });
 
   it('stops calling a started request "Started" once the machine reports idle after an urgent stop', async () => {
@@ -1396,8 +1568,8 @@ describe('Print pane monitor and controls', () => {
     });
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Printing' });
-    await user.click(screen.getByRole('button', { name: /^Activity/u }));
+    await findMachine('Printing');
+    await user.click(screen.getByRole('button', { name: /^History/u }));
     const activity = screen.getByRole('list', { name: 'Print requests' });
     expect(within(activity).getByRole('listitem')).toHaveTextContent(/^Printingpyramid\.gcode\.3mf/u);
 
@@ -1412,7 +1584,10 @@ describe('Print pane monitor and controls', () => {
       fixture.observe(entry({ snapshot: { ...entry().snapshot, observedAt: later } }));
     });
 
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
+    // Without a run to control, the run block and its controls step aside.
+    expect(screen.queryByRole('region', { name: 'Run' })).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Urgent stop' })).not.toBeInTheDocument();
     const item = within(screen.getByRole('list', { name: 'Print requests' })).getByRole('listitem');
     expect(item).toHaveTextContent(/^Stoppedpyramid\.gcode\.3mf/u);
     expect(within(item).queryByText('Started')).not.toBeInTheDocument();
@@ -1442,11 +1617,12 @@ describe('Print pane monitor and controls', () => {
     });
     const user = userEvent.setup();
     renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Printing' });
+    await findMachine('Printing');
 
     await waitFor(() => {
-      expect(screen.getByText('File').nextElementSibling).toHaveTextContent('pyramid.gcode.3mf');
+      expect(screen.getByRole('region', { name: 'Run' })).toHaveTextContent(/^pyramid\.gcode\.3mf · /u);
     });
+    expect(screen.getByRole('region', { name: 'Run' })).not.toHaveTextContent('tau-3f2a9c');
     await user.click(screen.getByRole('button', { name: 'Urgent stop' }));
     const dialog = screen.getByRole('alertdialog', { name: 'Confirm urgent stop' });
     expect(dialog).toHaveTextContent('current run (pyramid.gcode.3mf)?');
@@ -1480,8 +1656,12 @@ describe('Print pane monitor and controls', () => {
       fixture.goStale();
     });
 
-    expect(await screen.findByRole('article', { name: 'Workshop X1C, Stale observation' })).toBeInTheDocument();
-    expect(screen.getByText('Run controls wait for a current observation from the machine.')).toBeInTheDocument();
+    await findMachine('Stale observation');
+    expect(
+      screen.getByText(
+        'No current observation from Workshop X1C. Sending and run controls wait until it reports again; slicing still works.',
+      ),
+    ).toBeInTheDocument();
     expect(screen.getByRole('button', { name: 'Pause' })).toBeDisabled();
     expect(screen.getByRole('button', { name: 'Urgent stop' })).toBeDisabled();
     expect(start).toBeDisabled();
@@ -1504,9 +1684,13 @@ describe('Print pane Bambu Studio mode', () => {
   };
   /** The real printer, which takes only Bambu Studio archives. */
   const realPrinter = (): ReturnType<typeof entry> => entry({ providerId: 'bambu' });
+  /** The printer and filament presets are overrides under Advanced settings; the process stays in Prepare. */
   const combobox = (name: string): HTMLElement => {
-    if (name === 'Printer preset' && screen.queryByRole('combobox', { name }) === null) {
-      fireEvent.click(screen.getByRole('button', { name: 'More settings' }));
+    if (
+      (name === 'Printer preset' || name.startsWith('Filament ')) &&
+      screen.queryByRole('combobox', { name }) === null
+    ) {
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced settings/u }));
     }
     return screen.getByRole('combobox', { name });
   };
@@ -1518,7 +1702,7 @@ describe('Print pane Bambu Studio mode', () => {
     desktopHost.bambuStudio = studio;
     const fixture = createFixture({ entries: [machine] });
     renderPane(fixture.client);
-    expect(await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`)).toBeInTheDocument();
+    // Bambu Studio working as expected needs no line of its own: its process preset is the sign.
     await waitFor(() => {
       expect(combobox('Process')).toHaveTextContent(selectedLabel(standard));
     });
@@ -1528,7 +1712,7 @@ describe('Print pane Bambu Studio mode', () => {
   /** Open Advanced and one settings group of the shared Parameters form. */
   const openGroup = async (user: ReturnType<typeof userEvent.setup>, group: string): Promise<void> => {
     if (screen.queryByRole('group', { name: 'Bambu Studio settings' }) === null) {
-      await openMoreSettings(user);
+      await openAdvancedSettings(user);
     }
     const settings = await screen.findByRole('group', { name: 'Bambu Studio settings' });
     const trigger = within(settings).getByRole('button', { name: `Group: ${group}` });
@@ -1554,6 +1738,10 @@ describe('Print pane Bambu Studio mode', () => {
     expect(studio.catalog).toHaveBeenCalledWith({ model: 'X1C', nozzleDiameter: 0.4 });
     expect(studio.resolveSelection).toHaveBeenLastCalledWith({ hints, partial: { plate: 'textured-pei' } });
     expect(studio.settings).toHaveBeenLastCalledWith({ printer: x1c, process: standard, filaments: [plaMatte] });
+    // The slicer and its version are inspection detail.
+    openDisclosure(/^Inspect/u);
+    expect(screen.getByText('Slicer').nextElementSibling).toHaveTextContent(`Bambu Studio ${bambuStudioVersion}`);
+    expect(screen.queryByText(/^Slicing with/u)).not.toBeInTheDocument();
     expect(combobox('Printer preset')).toHaveTextContent(selectedLabel(x1c));
     // The tray's Bambu filament id picks the preset; the tray's own type and colour sit beside it.
     expect(combobox('Filament A1')).toHaveTextContent(selectedLabel(plaMatte));
@@ -1564,7 +1752,7 @@ describe('Print pane Bambu Studio mode', () => {
     await user.keyboard('{Escape}');
 
     summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
@@ -1574,14 +1762,16 @@ describe('Print pane Bambu Studio mode', () => {
         },
       });
     });
-    const result = await screen.findByLabelText('Slice result');
-    expect(within(result).getByText(`Sliced by Bambu Studio ${bambuStudioVersion}`)).toBeInTheDocument();
+    const result = await sliceDetails();
+    expect(within(result).getByText('Sliced by').nextElementSibling).toHaveTextContent(
+      `Bambu Studio ${bambuStudioVersion}`,
+    );
     expect(within(result).getByText('Time').nextElementSibling).toHaveTextContent(
       'about 28 min (Bambu Studio estimate)',
     );
 
     // A Bambu Studio archive is what the real printer takes: the request names its producer.
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Send to Workshop X1C' }));
     const confirmation = screen.getByRole('group', { name: 'Confirm before starting' });
     confirmAll(confirmation);
     await user.click(within(confirmation).getByRole('button', { name: 'Start print on Workshop X1C' }));
@@ -1620,7 +1810,7 @@ describe('Print pane Bambu Studio mode', () => {
     expect(screen.queryByText('(changed)')).not.toBeInTheDocument();
     expect(within(settings).queryByRole('button', { name: 'Reset all' })).not.toBeInTheDocument();
     expect(within(settings).getByRole('button', { name: 'Group: Strength' })).toBeInTheDocument();
-    expect(screen.getByRole('button', { name: 'More settings' })).toHaveTextContent('More settings');
+    expect(screen.getByRole('button', { name: /^Advanced settings/u })).toHaveTextContent(/^Advanced settings$/u);
     await user.click(screen.getByRole('button', { name: 'Reset Wall Loops' }));
     await waitFor(() => {
       expect(screen.queryByRole('button', { name: 'Reset Wall Loops' })).not.toBeInTheDocument();
@@ -1665,7 +1855,7 @@ describe('Print pane Bambu Studio mode', () => {
     enter('Bridge Flow', '95%');
     await expectPreferences({ settings: { bridge_flow: '95%' } });
 
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
@@ -1681,7 +1871,7 @@ describe('Print pane Bambu Studio mode', () => {
         },
       });
     });
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeInTheDocument();
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeInTheDocument();
 
     // A changed setting after slicing makes the slice stale, as a changed option does.
     await user.clear(screen.getByRole('searchbox', { name: 'Filter settings' }));
@@ -1690,7 +1880,9 @@ describe('Print pane Bambu Studio mode', () => {
     expect(
       await screen.findByText('Options changed since this slice. Slice again to send the current settings.'),
     ).toBeInTheDocument();
-    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+    // A stale slice is never offered for sending: Slice again takes Send's place.
+    expect(prepareActions().queryByRole('button', { name: 'Send to Workshop X1C' })).not.toBeInTheDocument();
+    expect(prepareActions().getByRole('button', { name: 'Slice again' })).toBeEnabled();
 
     const accessibility = await axe.run(document.body, { rules: { region: { enabled: false } } });
     expect(accessibility.violations).toEqual([]);
@@ -1700,14 +1892,17 @@ describe('Print pane Bambu Studio mode', () => {
     const user = userEvent.setup();
     const { studio } = await renderStudio();
     summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    const sendButton = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    const sendButton = await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' });
     expect(sendButton).toBeEnabled();
 
     studio.resolveSelection.mockRejectedValueOnce(new Error('No compatible process for Bambu PETG Basic @BBL X1C.'));
     await chooseOption(user, combobox('Filament A1'), 'Bambu PETG Basic @BBL X1C');
     expect(await screen.findByText('No compatible process for Bambu PETG Basic @BBL X1C.')).toBeInTheDocument();
-    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+    // The previous slice no longer matches the chosen filament: it is never offered for sending, and
+    // slicing again waits until the presets resolve.
+    expect(prepareActions().queryByRole('button', { name: 'Send to Workshop X1C' })).not.toBeInTheDocument();
+    expect(prepareActions().getByRole('button', { name: 'Slice again' })).toBeDisabled();
   });
 
   describe('with a model of several colours', () => {
@@ -1740,7 +1935,7 @@ describe('Print pane Bambu Studio mode', () => {
     ): Promise<ReturnType<typeof createFixture>> => {
       const { fixture } = await renderStudio(machine);
       summarizeGcodeContainerMock.mockReturnValueOnce(twoColours);
-      await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+      await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
       await screen.findByRole('group', { name: 'Filaments' });
       return fixture;
     };
@@ -1786,7 +1981,7 @@ describe('Print pane Bambu Studio mode', () => {
       ]);
       await user.keyboard('{Escape}');
       // Both trays hold Bambu PLA Matte, which the slice already printed both filaments with.
-      const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+      const send = await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' });
       await waitFor(() => {
         expect(send).toBeEnabled();
       });
@@ -1815,20 +2010,22 @@ describe('Print pane Bambu Studio mode', () => {
       const user = userEvent.setup();
       await sliceTwoColours(user, colourful());
       await waitFor(() => {
-        expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+        expect(prepareActions().getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
       });
 
       await chooseOption(user, slot(1), '2');
       expect(
         await screen.findByText('Options changed since this slice. Slice again to send the current settings.'),
       ).toBeInTheDocument();
-      expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+      // A stale slice is never offered for sending: Slice again takes Send's place.
+      expect(prepareActions().queryByRole('button', { name: 'Send to Workshop X1C' })).not.toBeInTheDocument();
+      expect(prepareActions().getByRole('button', { name: 'Slice again' })).toBeEnabled();
       // Presets per tray, as Bambu Studio resolves them.
       await waitFor(() => {
         expect(combobox('Filament A3')).toHaveTextContent(selectedLabel(petg));
       });
       summarizeGcodeContainerMock.mockReturnValueOnce(twoColours);
-      await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice again' }));
+      await user.click(prepareActions().getByRole('button', { name: 'Slice again' }));
       await waitFor(() => {
         expect(mockExport).toHaveBeenLastCalledWith('gcode.3mf', {
           signal: signalMatcher,
@@ -1858,9 +2055,11 @@ describe('Print pane Bambu Studio mode', () => {
       expect(slot(1)).toHaveTextContent(selectedLabel(''));
       expect(slot(2)).toHaveTextContent(selectedLabel('0'));
       expect(
-        await within(prepareRegion()).findByText('Filament 1 has no slot. Choose a loaded slot for it before sending.'),
+        await prepareActions().findByText('Filament 1 has no slot. Choose a loaded slot for it before sending.'),
       ).toBeInTheDocument();
-      expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeDisabled();
+      const send = prepareActions().getByRole('button', { name: 'Send to Workshop X1C' });
+      expect(send).toBeDisabled();
+      expect(send).toHaveAccessibleDescription('Filament 1 has no slot. Choose a loaded slot for it before sending.');
     });
   });
 
@@ -1874,12 +2073,12 @@ describe('Print pane Bambu Studio mode', () => {
       partBounds: undefined,
       previewRefusal: refusal,
     });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    const result = await screen.findByLabelText('Slice result');
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    const result = await sliceDetails();
     expect(within(result).getByRole('status')).toHaveTextContent(refusal);
     expect(within(result).queryByText('Toolpath')).not.toBeInTheDocument();
     expect(within(result).queryByText(/fits the plate/u)).not.toBeInTheDocument();
-    expect(within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    expect(prepareActions().getByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
   });
 
   it('shows what the slicer warned about a slice it still made', async () => {
@@ -1894,7 +2093,7 @@ describe('Print pane Bambu Studio mode', () => {
       files: [{ name: 'main.gcode.3mf', bytes: new Uint8Array([1]), mimeType: 'application/vnd.bambulab.gcode-3mf' }],
       issues: [{ message: merged, code: 'REPRESENTATION_UNSUPPORTED', severity: 'warning' }],
     });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     const result = await screen.findByLabelText('Slice result');
     expect(within(result).getByText(merged)).toBeInTheDocument();
     // One colour prints as the material chips choose it.
@@ -1915,16 +2114,16 @@ describe('Print pane Bambu Studio mode', () => {
     const user = userEvent.setup();
     await renderStudio();
     summarizeGcodeContainerMock.mockReturnValueOnce(cubeOnX1c);
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
 
-    const result = await screen.findByLabelText('Slice result');
+    const result = await sliceDetails();
     expect(within(result).getByText('Part').nextElementSibling).toHaveTextContent('19.6 × 19.6 × 20 mm');
     expect(within(result).getByText('Toolpath').nextElementSibling).toHaveTextContent(
       "240 × 268 × 121.5 mm · every nozzle move, including the printer's start routine",
     );
-    expect(within(result).getByText('The part fits the plate')).toBeInTheDocument();
+    expect(within(result).getByText('Plate').nextElementSibling).toHaveTextContent('The part fits the plate');
     expect(within(result).queryByRole('alert')).not.toBeInTheDocument();
-    const send = within(prepareRegion()).getByRole('button', { name: 'Send to Workshop X1C' });
+    const send = prepareActions().getByRole('button', { name: 'Send to Workshop X1C' });
     expect(send).toBeEnabled();
     expect(send).not.toHaveAccessibleDescription();
   });
@@ -1936,10 +2135,10 @@ describe('Print pane Bambu Studio mode', () => {
       ...cubeOnX1c,
       partBounds: { min: [240.4, 118.2, 0], max: [260, 137.8, 20] },
     });
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
 
     const reason = 'The part does not fit the plate: 260 mm is larger than the 256 mm plate on X.';
-    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    const send = await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' });
     expect(send).toBeDisabled();
     expect(send).toHaveAccessibleDescription(reason);
     expect(within(screen.getByLabelText('Slice result')).getByRole('alert')).toHaveTextContent(reason);
@@ -2010,19 +2209,19 @@ describe('Print pane Bambu Studio mode', () => {
     desktopHost.bambuStudio = unavailable;
     const fixture = createFixture({ entries: [realPrinter()] });
     const { unmount } = renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
     expect(await within(prepareRegion()).findByText(bambuStudioRequired)).toBeInTheDocument();
     expect(unavailable.catalog).not.toHaveBeenCalled();
 
     // The reference engine still slices and previews; only Send waits.
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
         options: machineSliceOptions,
       });
     });
-    const send = await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' });
+    const send = await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' });
     expect(send).toBeDisabled();
     expect(send).toHaveAccessibleDescription(bambuStudioRequired);
     unmount();
@@ -2033,8 +2232,8 @@ describe('Print pane Bambu Studio mode', () => {
     expect(
       await screen.findByText("Slicing with Tau's reference slicer: Bambu Studio is not available here."),
     ).toBeInTheDocument();
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
-    expect(await within(prepareRegion()).findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    expect(await prepareActions().findByRole('button', { name: 'Send to Workshop X1C' })).toBeEnabled();
   });
 
   it("names the slicer on an agent's request and states a producer refusal plainly", async () => {
@@ -2103,9 +2302,13 @@ describe('Print pane print settings file', () => {
   const fine = '0.12mm Fine @BBL X1C';
   const gyroid = '0.20mm Standard Gyroid PETG @BBL X1C';
   const petg = 'Bambu PETG Basic @BBL X1C';
+  /** The printer and filament presets are overrides under Advanced settings; the process stays in Prepare. */
   const combobox = (name: string): HTMLElement => {
-    if (name === 'Printer preset' && screen.queryByRole('combobox', { name }) === null) {
-      fireEvent.click(screen.getByRole('button', { name: 'More settings' }));
+    if (
+      (name === 'Printer preset' || name.startsWith('Filament ')) &&
+      screen.queryByRole('combobox', { name }) === null
+    ) {
+      fireEvent.click(screen.getByRole('button', { name: /^Advanced settings/u }));
     }
     return screen.getByRole('combobox', { name });
   };
@@ -2117,7 +2320,6 @@ describe('Print pane print settings file', () => {
     const studio = createBambuStudio();
     desktopHost.bambuStudio = studio;
     renderPane(createFixture({ entries: [entry({ providerId: 'bambu' })] }).client);
-    expect(await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`)).toBeInTheDocument();
     await waitFor(() => {
       expect(combobox('Process')).toHaveTextContent(selectedLabel(process));
     });
@@ -2136,6 +2338,8 @@ describe('Print pane print settings file', () => {
       }),
     );
     const studio = await renderStudio(fine);
+    // The filament override in Advanced settings is named where the material is chosen.
+    expect(screen.getByText('Sliced as Bambu PETG Basic')).toBeInTheDocument();
 
     expect(studio.resolveSelection).toHaveBeenLastCalledWith({
       hints: {
@@ -2155,7 +2359,7 @@ describe('Print pane print settings file', () => {
       expect(reset(name)).toBeInTheDocument();
     }
     expect(queryReset('Printer preset')).not.toBeInTheDocument();
-    await openMoreSettings(user);
+    await openAdvancedSettings(user);
     await user.click(
       within(await screen.findByRole('group', { name: 'Bambu Studio settings' })).getByRole('button', {
         name: 'Group: Strength',
@@ -2165,7 +2369,7 @@ describe('Print pane print settings file', () => {
     expect(reset('Wall Loops')).toBeInTheDocument();
 
     summarizeGcodeContainerMock.mockReturnValueOnce(bambuStudioSliceSummary);
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
@@ -2255,8 +2459,8 @@ describe('Print pane print settings file', () => {
   it("should save the slicer's options but keep the machine's own on screen, and reset one option alone", async () => {
     const user = userEvent.setup();
     renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await openMoreSettings(user);
+    await findMachine('Ready');
+    await openAdvancedSettings(user);
     const options = await screen.findByLabelText('Slicer options');
 
     await user.click(await within(options).findByRole('button', { name: 'Set layer height' }));
@@ -2272,7 +2476,7 @@ describe('Print pane print settings file', () => {
     expect(projectFiles.writes).toHaveLength(1);
     expect(within(prepareRegion()).queryByRole('alert')).not.toBeInTheDocument();
 
-    await user.click(within(prepareRegion()).getByRole('button', { name: 'Slice and preview' }));
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledExactlyOnceWith('gcode.3mf', {
         signal: signalMatcher,
@@ -2290,15 +2494,13 @@ describe('Print pane print settings file', () => {
     projectFiles.write(settingsPath, unreadable);
 
     renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
 
     expect(await within(prepareRegion()).findByRole('alert')).toHaveTextContent(/newer|unsupported/iu);
     expect(within(prepareRegion()).getByRole('combobox', { name: 'Profile' })).toBeDisabled();
-    expect(
-      within(prepareRegion()).getByRole('button', {
-        name: 'Slice and preview',
-      }),
-    ).toBeDisabled();
+    const slice = prepareActions().getByRole('button', { name: 'Slice and preview' });
+    expect(slice).toBeDisabled();
+    expect(slice).toHaveAccessibleDescription('Waiting for the print settings file.');
     expect(projectFiles.read(settingsPath)).toBe(unreadable);
     expect(projectFiles.writes).toHaveLength(0);
   });
@@ -2311,9 +2513,9 @@ describe('Print pane print settings file', () => {
     projectFiles.write(otherPath, other);
     const user = userEvent.setup();
     renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
 
-    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Quality' }), 'Fine');
     await expectPreferences({ preset: 'fine' });
     expect(projectFiles.read(otherPath)).toBe(other);
     expect(within(prepareRegion()).queryByText(/another printer model/u)).not.toBeInTheDocument();
@@ -2322,16 +2524,16 @@ describe('Print pane print settings file', () => {
   it('should rebase a disjoint external edit and refuse a concurrent change to the same preference', async () => {
     const user = userEvent.setup();
     renderPane(createFixture().client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    const presets = screen.getByRole('radiogroup', { name: 'Quality' });
+    await findMachine('Ready');
+    const quality = (): HTMLElement => screen.getByRole('combobox', { name: 'Quality' });
     // First create the profile so subsequent conflicts refer to its captured fields.
-    await user.click(within(presets).getByRole('radio', { name: /Standard/u }));
+    await chooseOption(user, quality(), 'Standard');
     await expectPreferences({ preset: 'standard' });
     projectFiles.race(preferencesBytes({ plate: 'cool', preset: 'standard' }));
-    await user.click(within(presets).getByRole('radio', { name: /Fine/u }));
+    await chooseOption(user, quality(), 'Fine');
     await expectPreferences({ plate: 'cool', preset: 'fine' });
     projectFiles.race(preferencesBytes({ plate: 'cool', preset: 'standard' }));
-    await user.click(within(presets).getByRole('radio', { name: /Fast/u }));
+    await chooseOption(user, quality(), 'Fast');
     expect(await within(prepareRegion()).findByRole('alert')).toHaveTextContent(/changed|conflict/iu);
     await user.click(
       within(prepareRegion()).getByRole('button', {
@@ -2350,22 +2552,26 @@ describe('Saved machine profiles', () => {
     const fixture = createFixture({ entries: [first, second] });
     globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
     const pane = renderPane(fixture.client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
+    await findMachine('Ready');
     const profile = () => within(prepareRegion()).getByRole('combobox', { name: 'Profile' });
     await waitFor(() => {
       expect(profile()).toBeEnabled();
     });
     expect(projectFiles.read(settingsPath)).toBeUndefined();
-    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Quality' }), 'Fine');
     await expectPreferences({ preset: 'fine' });
+    // Each verb is a menu item; naming opens the shared naming form under the menu's button.
     await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
-    await user.clear(screen.getByRole('textbox', { name: 'Profile name' }));
-    await user.type(screen.getByRole('textbox', { name: 'Profile name' }), 'Production');
-    await user.click(screen.getByRole('button', { name: 'Save a copy' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Duplicate profile…' }));
+    const copyName = await screen.findByRole('textbox', { name: 'Name for the copy of Default' });
+    expect(copyName).toHaveValue('Default copy');
+    await user.clear(copyName);
+    await user.type(copyName, 'Production');
+    await user.click(screen.getByRole('button', { name: 'Duplicate profile' }));
     await waitFor(() => {
       expect(profile()).toHaveTextContent('Production');
     });
-    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fast/u }));
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Quality' }), 'Fast');
     await expectPreferences({ preset: 'fast' });
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Second X1C');
     await waitFor(() => {
@@ -2376,20 +2582,31 @@ describe('Saved machine profiles', () => {
     await expectPreferences({ preset: 'fine' });
     await chooseOption(user, profile(), 'Production');
     await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
-    await user.clear(screen.getByRole('textbox', { name: 'Profile name' }));
-    await user.type(screen.getByRole('textbox', { name: 'Profile name' }), 'Batch');
-    await user.click(screen.getByRole('button', { name: 'Rename' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Rename profile…' }));
+    const newName = await screen.findByRole('textbox', { name: 'New name for Production' });
+    await user.clear(newName);
+    await user.type(newName, 'Batch');
+    await user.click(screen.getByRole('button', { name: 'Rename profile' }));
     await waitFor(() => {
       expect(profile()).toHaveTextContent('Batch');
     });
     await waitFor(() => {
       expect(projectFiles.read(settingsPath)).toContain('Batch');
     });
-    await user.click(screen.getByRole('button', { name: 'Reset to defaults' }));
-    await user.click(screen.getByRole('button', { name: 'Confirm reset' }));
+    // Verbs that lose settings confirm with the profile named, then hand focus back to the menu's button.
+    await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Reset to defaults…' }));
+    const reset = await screen.findByRole('alertdialog', { name: 'Reset “Batch” to defaults?' });
+    await user.click(within(reset).getByRole('button', { name: 'Reset profile' }));
     await expectPreferences({});
-    await user.click(screen.getByRole('button', { name: 'Delete profile' }));
-    await user.click(screen.getByRole('button', { name: 'Confirm delete' }));
+    await waitFor(() => {
+      expect(screen.getByRole('button', { name: 'Manage profiles' })).toHaveFocus();
+    });
+    await user.click(screen.getByRole('button', { name: 'Manage profiles' }));
+    await user.click(screen.getByRole('menuitem', { name: 'Delete profile…' }));
+    const remove = await screen.findByRole('alertdialog', { name: 'Delete “Batch”?' });
+    expect(remove).toHaveTextContent('“Default” becomes the profile for printers of this type.');
+    await user.click(within(remove).getByRole('button', { name: 'Delete profile' }));
     await waitFor(() => {
       expect(profile()).toHaveTextContent('Default');
     });
@@ -2442,14 +2659,14 @@ describe('Saved machine profiles', () => {
     };
     globalThis.localStorage.setItem(`tau:print:selected-machine:${projectId}`, first.machineId);
     renderPane(client);
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }));
+    await findMachine('Ready');
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Quality' }), 'Fine');
     await expectPreferences({ preset: 'fine' });
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Mini');
     await waitFor(() => {
       expect(screen.getByRole('combobox', { name: 'Profile' })).toBeEnabled();
     });
-    await user.click(within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fast/u }));
+    await chooseOption(user, screen.getByRole('combobox', { name: 'Quality' }), 'Fast');
     const miniPath = machineSettingsPath({ typeId: 'bambu.a1-mini' });
     await waitFor(() => {
       expect(
@@ -2459,9 +2676,7 @@ describe('Saved machine profiles', () => {
     });
     await chooseOption(user, screen.getByRole('combobox', { name: 'Machine' }), 'Workshop X1C');
     await waitFor(() => {
-      expect(
-        within(screen.getByRole('radiogroup', { name: 'Quality' })).getByRole('radio', { name: /Fine/u }),
-      ).toHaveAttribute('aria-checked', 'true');
+      expect(screen.getByRole('combobox', { name: 'Quality' })).toHaveTextContent('Fine');
     });
     await expectPreferences({ preset: 'fine' });
     expect(within(prepareRegion()).queryByText(/another printer model/u)).not.toBeInTheDocument();
@@ -2476,23 +2691,25 @@ describe('Print pane artifacts and history', () => {
     projectFiles.write(slicePath, 'not the slice');
     const user = userEvent.setup();
     renderPane(createFixture().client);
-    expect(await screen.findByRole('article', { name: 'Workshop X1C, Ready' })).toBeInTheDocument();
-    const slice = within(prepareRegion()).getByRole('button', { name: 'Slice and preview' });
-
-    await user.click(slice);
+    await findMachine('Ready');
+    await user.click(prepareActions().getByRole('button', { name: 'Slice and preview' }));
+    // A fresh slice offers Send as the action; slicing again is the slice result's own control.
+    const result = await screen.findByRole('group', { name: 'Slice result' });
     await waitFor(() => {
-      expect(slice).toHaveTextContent('Slice again');
+      expect(within(result).getByRole('button', { name: 'Slice again' })).toBeEnabled();
     });
     expect(mockWriteFiles).toHaveBeenCalledOnce();
     expect(projectFiles.read(slicePath)).toBe('PK\u0003\u0004');
 
     // The same bytes again: the file already holds them, so nothing is written.
-    await user.click(slice);
+    await user.click(within(result).getByRole('button', { name: 'Slice again' }));
     await waitFor(() => {
       expect(mockExport).toHaveBeenCalledTimes(2);
     });
     await waitFor(() => {
-      expect(slice).toHaveTextContent('Slice again');
+      expect(
+        within(screen.getByRole('group', { name: 'Slice result' })).getByRole('button', { name: 'Slice again' }),
+      ).toBeEnabled();
     });
     expect(mockWriteFiles).toHaveBeenCalledOnce();
   });
@@ -2513,7 +2730,7 @@ describe('Print pane artifacts and history', () => {
     });
     renderPane(createFixture({ requests: [ours, theirs] }).client);
 
-    await user.click(await screen.findByRole('button', { name: /^Activity/u }));
+    await user.click(await screen.findByRole('button', { name: /^History/u }));
 
     const list = screen.getByRole('list', { name: 'Print requests' });
     expect(within(list).getByText('ours.gcode.3mf')).toBeInTheDocument();
@@ -2528,7 +2745,7 @@ describe('Print pane artifacts and history', () => {
 
     const region = await screen.findByRole('region', { name: requestRegionName });
     expect(within(region).getByText('From another project')).toBeInTheDocument();
-    expect(within(region).queryByRole('button', { name: 'Open printer preview' })).not.toBeInTheDocument();
+    expect(within(region).queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
   });
 });
 

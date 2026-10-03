@@ -2,12 +2,15 @@ import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
+import { strToU8, zipSync } from 'fflate';
 import { afterAll, beforeAll, describe, expect, it, vi } from 'vitest';
 
 import { writeFakeInstall } from '#bambu-studio/fake-install.test-helpers.js';
 import type { FakeInstall } from '#bambu-studio/fake-install.test-helpers.js';
+import { stlFootprint } from '#bambu-studio/plate-layout.js';
 import { sliceWithBambuStudio } from '#bambu-studio/slice.js';
 import type { BambuStudioSelection } from '#bambu-studio/types.js';
+import { writeBinaryStl } from '#glb-mesh.js';
 
 /* eslint-disable @typescript-eslint/naming-convention -- Bambu Studio preset and result keys are fixed snake_case names. */
 
@@ -30,6 +33,47 @@ const selection: BambuStudioSelection = {
 const stl = new TextEncoder().encode('demo stl');
 const parts = [{ stl }];
 const text = (base64: string): string => Buffer.from(base64, 'base64').toString();
+const square = (minX: number, minY: number, size: number) =>
+  writeBinaryStl({
+    positions: Float32Array.from([
+      minX,
+      minY,
+      0,
+      minX + size,
+      minY,
+      0,
+      minX + size,
+      minY + size,
+      0,
+      minX,
+      minY + size,
+      2,
+    ]),
+    indices: Uint32Array.from([0, 1, 2, 0, 2, 3]),
+    bounds: { min: [minX, minY, 0], max: [minX + size, minY + size, 2] },
+    color: undefined,
+  });
+const mini: BambuStudioSelection = {
+  printer: 'Bambu Lab A1 mini 0.4 nozzle',
+  process: '0.20mm Standard @BBL A1M',
+  filaments: ['Bambu PETG Basic @BBL A1M'],
+  plate: 'textured-pei',
+};
+// What Bambu Studio 02.08.02.61 exported, checks off, for the A1 mini slice that failed on 3 October:
+// the assembly arranged flush against the 45 mm prime tower it then printed at (15, 124.523).
+const miniMeasurement = Buffer.from(
+  zipSync({
+    'Metadata/plate_1.json': strToU8(
+      JSON.stringify({
+        bbox_objects: [
+          { name: 'Assembly', bbox: [52.74, 38.43, 154.85, 140.4] },
+          { name: 'wipe_tower', bbox: [11.79, 121.3, 57.25, 166.06] },
+        ],
+      }),
+    ),
+    'Metadata/project_settings.config': strToU8(JSON.stringify({ wipe_tower_x: ['15'], wipe_tower_y: ['124.523'] })),
+  }),
+).toString('base64');
 
 const gone = async (path: string): Promise<boolean> => {
   try {
@@ -199,6 +243,62 @@ describe('sliceWithBambuStudio', () => {
     const { files } = await recorded();
     expect(Object.keys(files)).toEqual(['machine.json', 'process.json', 'filament-1.json', 'filament-2.json']);
     expect(result.presets.filaments).toEqual(selection.filaments);
+  });
+
+  it('should move an assembly clear of the prime tower when Bambu Studio arranges it into the tower', async () => {
+    await rm(fake.runs, { force: true });
+    await fake.control({ mode: 'tower-conflict', measurement: miniMeasurement });
+    const result = await sliceWithBambuStudio({
+      install: fake.install,
+      selection: mini,
+      parts: [{ stl: square(-78.5, -81, 102.5) }, { stl: square(0, 0, 20) }],
+      signal: new AbortController().signal,
+    });
+    const log = await readFile(fake.runs, 'utf8');
+    const runs = log
+      .trim()
+      .split('\n')
+      .map((line) => JSON.parse(line) as Recorded);
+    // Arranged and refused, measured with checks off, then sliced again where Tau placed it.
+    expect(
+      runs.map(({ args }) => ({ arrange: args[args.indexOf('--arrange') + 1], checks: !args.includes('--no-check') })),
+    ).toEqual([
+      { arrange: '1', checks: true },
+      { arrange: '1', checks: false },
+      { arrange: '0', checks: true },
+    ]);
+    // Bambu Studio checks a slice anyway when `--no-check` follows `--slice`.
+    const measuring = runs[1]!.args;
+    expect(measuring.indexOf('--no-check')).toBeLessThan(measuring.indexOf('--slice'));
+    const placed = runs[2]!;
+    expect(placed.files['process.json']).toMatchObject({ wipe_tower_x: ['15'], wipe_tower_y: ['124.523'] });
+    const [base, logo] = placed.stls.map((part) => stlFootprint(Uint8Array.from(Buffer.from(part, 'base64'))));
+    // Right of the tower by 3 mm, centred front to back where Bambu Studio put it; both parts move together.
+    expect(base!.minX).toBeCloseTo(57.25 + 3, 4);
+    expect(base!.maxX).toBeLessThanOrEqual(180);
+    expect((base!.minY + base!.maxY) / 2).toBeCloseTo((38.43 + 140.4) / 2, 4);
+    expect(logo!.minX - base!.minX).toBeCloseTo(78.5, 4);
+    expect(result.result.returnCode).toBe(0);
+  });
+
+  it('should say the assembly and its prime tower do not fit when no side of the tower has room', async () => {
+    await rm(fake.runs, { force: true });
+    await fake.control({ mode: 'tower-conflict', measurement: miniMeasurement });
+    await expect(
+      sliceWithBambuStudio({
+        install: fake.install,
+        selection: mini,
+        parts: [{ stl: square(0, 0, 170) }, { stl: square(0, 0, 20) }],
+        signal: new AbortController().signal,
+      }),
+    ).rejects.toMatchObject({
+      code: 'BAMBU_STUDIO_SLICE_FAILED',
+      message:
+        'Bambu Studio could not slice: the model and its prime tower do not fit on the Bambu Lab A1 mini 0.4 nozzle ' +
+        'plate together. Print fewer colours, scale the model down, or use a printer with a larger plate.',
+    });
+    const runs = await readFile(fake.runs, 'utf8');
+    expect(runs.trim().split('\n')).toHaveLength(2);
   });
 
   it('should refuse a colour that is not #RRGGBB before running Bambu Studio', async () => {

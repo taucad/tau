@@ -10,9 +10,9 @@
 import { createAsyncLogic, createCallbackLogic } from 'xstate';
 
 import type { ExternalAgentLogEvent, ProviderMessage } from '@taucad/agent-host';
+import type { ExternalAgentTurn } from '@taucad/agent-host/launcher';
 
 import type { AcpSessionEvent } from '#acp/acp-machine-schemas.js';
-import type { AcpSessionEffects } from '#acp/acp-session.js';
 import { acpSessionMachine, failureOfError } from '#acp/acp-session.machine.js';
 import type {
   AcpFailure,
@@ -22,6 +22,7 @@ import type {
   AcpVendorAnswer,
 } from '#acp/acp-session.machine.js';
 import { createAskId, recordAsk, settleAsk, waitForAnswers } from '@taucad/chat/rpc';
+import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 import { askOutcomeOf } from '@taucad/chat';
 
 import { createAdapterConnection } from '#acp/adapter-connection.js';
@@ -34,7 +35,29 @@ import {
   urlLoginOf,
   writeSessionTextFile,
 } from '#acp/session.js';
-import type { AcpSessionPresentation } from '#acp/session.js';
+import type { AcpPromptTurn, AcpSessionPresentation } from '#acp/session.js';
+import type { AcpWireFrame } from '#acp/spawn.js';
+
+/** A lent turn's seams: the prompt seams, and the record writer when the turn has one. */
+export type AcpLentSeams = AcpPromptTurn & {
+  readonly remember?: ExternalAgentTurn['remember'] | undefined;
+  /** Where this turn's chat records questions, so form elicitations reach the person (agent questions blueprint D6). */
+  readonly questions?: { readonly chatId: string; readonly fileSystem: QuestionRecordFileSystem } | undefined;
+};
+
+/** What {@link provideAcpSession} needs from its owner. */
+export type AcpSessionEffects = {
+  readonly createId: () => string;
+  readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
+  /** The seams of the turn lent under this request id. */
+  readonly seams: (requestId: string) => AcpLentSeams | undefined;
+  /** Activate the MCP binding for this turn; the returned function releases it (EA-R6). */
+  readonly bind?:
+    | ((requestId: string, token: string | undefined) => (() => void | Promise<void>) | undefined)
+    | undefined;
+  /** The skill publication's directories, named on every session open (D-040). */
+  readonly publishSkills: (signal: AbortSignal) => Promise<readonly string[]>;
+};
 
 type SessionWriter = (events: readonly ExternalAgentLogEvent[]) => Promise<void>;
 

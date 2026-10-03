@@ -29,7 +29,8 @@ import type {
   TurnAttemptKey,
   TurnPlacementPort,
 } from '#waist/ports.js';
-import type { ExternalAgentPort, ExternalAgentTurn, TauAgentHost } from '#host/tau-agent-host.js';
+import type { ExternalAgentPort, ExternalAgentTurn } from '#host/external-agent.js';
+import type { TauAgentHost } from '#host/tau-agent-host.js';
 import type { CommandAnswer } from '#wire/commands.schema.js';
 import { emptyChatLedger } from '#log/chat-ledger.js';
 

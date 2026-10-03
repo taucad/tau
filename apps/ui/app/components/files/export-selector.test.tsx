@@ -4,6 +4,8 @@ import { readFile } from 'node:fs/promises';
 import { pathToFileURL } from 'node:url';
 import type { ActorRefFrom } from 'xstate';
 import type { CapabilitiesManifest, ExportRoute } from '@taucad/runtime';
+import type { ExportResult } from '@taucad/runtime/client';
+import { createMockRuntimeDocument } from '@taucad/runtime-testing';
 import type * as FileUtilsModuleType from '@taucad/utils/file';
 import type { FileExtension } from '@taucad/types';
 import type { cadMachine } from '#machines/cad.machine.js';
@@ -28,11 +30,15 @@ function directnessRank(route: ExportRoute): number {
   return route.transcoderId === undefined ? 0 : 1;
 }
 
-const mockExport = vi.fn().mockResolvedValue({
+/* Exports run on the unit's scoped runtime document, not the kernel client. */
+const { document: mockDocument } = createMockRuntimeDocument();
+const mockExport = vi.mocked(mockDocument.export).mockResolvedValue({
   success: true,
-  data: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
+  exportId: 'glb',
+  evaluationId: 'mock-evaluation',
+  files: [{ bytes: new Uint8Array([1, 2, 3]), name: 'model.glb', mimeType: 'model/gltf-binary' }],
   issues: [],
-});
+} satisfies ExportResult);
 
 const mockKernelClient = {
   get capabilities(): CapabilitiesManifest | undefined {
@@ -68,7 +74,6 @@ const mockKernelClient = {
     });
     return indexed[0]?.route;
   },
-  export: mockExport,
 };
 
 const mockCadRef = {
@@ -77,6 +82,7 @@ const mockCadRef = {
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
+      document: mockDocument,
     },
   })),
 } as unknown as ActorRefFrom<typeof cadMachine>;
@@ -87,6 +93,7 @@ const mockCadRef2 = {
       capabilities: mockCapabilities,
       activeKernelId: mockActiveKernelId,
       kernelClient: mockKernelClient,
+      document: mockDocument,
     },
   })),
 } as unknown as ActorRefFrom<typeof cadMachine>;
@@ -287,7 +294,7 @@ describe('ExportSelector', () => {
     fireEvent.click(screen.getByRole('button', { name: /stl/i }));
 
     await vi.waitFor(() => {
-      expect(mockExport).toHaveBeenCalledWith('stl', { exportOptions: { binary: true } });
+      expect(mockExport).toHaveBeenCalledWith('stl', { options: { binary: true } });
     });
 
     await vi.waitFor(() => {
@@ -301,7 +308,7 @@ describe('ExportSelector', () => {
   it('should show an error toast when the export fails', async () => {
     mockExport.mockResolvedValueOnce({
       success: false,
-      issues: [{ message: 'kernel exploded' }],
+      issues: [{ code: 'RUNTIME', message: 'kernel exploded', severity: 'error', type: 'kernel' }],
     });
 
     render(<ExportSelector cadActor={mockCadRef} filenameBase='test-project' variant='inline' />);

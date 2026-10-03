@@ -1,4 +1,5 @@
 import '#telemetry/otel.js'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- OTEL SDK must initialize before any other module
+import '#telemetry/sentry.js'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- error reporting must initialize before the app can throw
 
 import { Logger, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';
@@ -18,6 +19,7 @@ import { getFastifyLoggingConfig } from '#logger/fastify.logger.js';
 import { redactUrlQuery } from '#logger/logger-factory.js';
 import { corsBaseConfiguration } from '#constants/cors.constant.js';
 import { createTauCorsOriginValidator } from '#utils/cors.utils.js';
+import { getTrustProxyOption } from '#utils/trust-proxy.utils.js';
 import { httpBodyLimit } from '#constants/http-body.constant.js';
 import { installApiUnhandledRejectionHandler } from '#api-unhandled-rejection-handler.js';
 import { closeGracefullyOnSignal, drainingServerOptions } from '#lifecycle/graceful-shutdown.js';
@@ -27,6 +29,9 @@ async function createApiApp() {
     bodyLimit: httpBodyLimit,
     genReqId: () => generatePrefixedId(idPrefix.request),
     disableRequestLogging: true, // Disables automatic 'incoming request'/'request completed' logs - these are handled by custom loggers.
+    // On Fly, `request.ip` is the client address Fly Proxy forwards rather than the proxy's own;
+    // every per-IP budget keys on it. See `trustFlyProxy` for why it cannot be spoofed.
+    trustProxy: getTrustProxyOption(),
     logger: getFastifyLoggingConfig(),
     ...drainingServerOptions,
   });

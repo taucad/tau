@@ -45,6 +45,7 @@
     "/packages/geospec-engine-native/rust/tests/fixtures/current-profile-v5/*.json",
     "/packages/geospec-engine-native/licenses/**",
     "/packages/geospec-engine-native/bindings/python/licenses/**",
+    "/packages/plugins/brep/licenses/**",
     // Vendored upstream sources; PROVENANCE.json pins each file's sha256 to its original bytes.
     "/packages/plugins/picogk/dotnet/fixtures/**",
     // Same: PicoVoxel example ports are pinned by sha256 in provenance.json; Tau's main.ts adapters

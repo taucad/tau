@@ -275,7 +275,11 @@ describe('ProjectRouteNotice', () => {
 
       await userEvent.click(screen.getByRole('button', { name: 'Get Tau Desktop' }));
 
-      expect(open).toHaveBeenCalledWith('https://docs.tau.new', '_blank', 'noopener,noreferrer');
+      expect(open).toHaveBeenCalledWith(
+        'https://github.com/taucad/tau/releases/latest',
+        '_blank',
+        'noopener,noreferrer',
+      );
     } finally {
       open.mockRestore();
     }

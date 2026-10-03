@@ -238,7 +238,7 @@ Resources: Pick<GLTF.IGLTF, 'textures' | 'samplers'> & {
 // Named face selector declaration resolved by the Tau Replicad kernel before export
 FaceDeclaration: {
     kind: 'face';
-    select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>;
+    select: (finder: FaceFinder) => FaceFinder;
 }
 
   kind: 'face'
@@ -248,7 +248,7 @@ FaceDeclaration: {
 // Named cylindrical or conical axis selector declaration resolved from a Replicad face
 AxisDeclaration: {
     kind: 'axis';
-    select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>;
+    select: (finder: FaceFinder) => FaceFinder;
 }
 
   kind: 'axis'

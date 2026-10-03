@@ -106,8 +106,7 @@ const recoveryFailure: Record<
   'local-state-error': {
     icon: DatabaseZap,
     title: 'Local state could not be restored',
-    description:
-      "The project files were written, but this browser profile's record of the project could not be restored.",
+    description: "The project files were written, but Tau's local record of the project could not be restored.",
     actions: [retryAction, libraryAction],
   },
   'filesystem-error': {

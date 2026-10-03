@@ -176,7 +176,7 @@ function NativeImageViewerContent({ name, format, readAll, renderPane }: NativeI
                 setDimensions({ width: event.currentTarget.naturalWidth, height: event.currentTarget.naturalHeight });
               }}
               onError={() => {
-                setResource({ kind: 'error', message: 'The browser could not decode this image.' });
+                setResource({ kind: 'error', message: 'This image could not be decoded.' });
               }}
             />
           </div>

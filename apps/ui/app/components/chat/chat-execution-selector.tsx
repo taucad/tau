@@ -303,7 +303,7 @@ export const ChatExecutionSelector = memo(function ({
       }}
       value={selectedTarget}
       title='Select an agent'
-      description='Choose Tau in this browser, or a Tau Host workspace.'
+      description={`Choose Tau ${isDesktopTarget() ? 'on this computer' : 'in this browser'}, or a Tau Host workspace.`}
       searchPlaceHolder='Search agents…'
       emptyListMessage='No agents discovered.'
       onClose={onClose}

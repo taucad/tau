@@ -26,6 +26,7 @@ import { useProjectCreationLocationError } from '#hooks/use-project-creation-loc
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { projectLocationDescriptor, projectLocationFullLabel } from '#utils/project-creation-location.utils.js';
 import { projectUrl } from '#utils/project-url.utils.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 const homeLocationLabel = projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }));
 
@@ -233,9 +234,11 @@ export default function ProjectsNew(): React.JSX.Element {
               ) : (
                 <p className='text-sm'>{homeLocationLabel}</p>
               )}
-              <p className='text-xs text-muted-foreground'>
-                Browser storage can be cleared or evicted. Export important work.
-              </p>
+              {isDesktopTarget() ? undefined : (
+                <p className='text-xs text-muted-foreground'>
+                  Browser storage can be cleared or evicted. Export important work.
+                </p>
+              )}
             </div>
           </CardContent>
 

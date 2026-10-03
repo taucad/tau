@@ -1078,7 +1078,7 @@ describe('projectAgentHostEvent', () => {
 
   it('falls back to the generic host failure only when the run recorded no reason', () => {
     expect(projectAgentHostEvent({ ...base, type: 'run.lifecycle', state: 'failed' })).toEqual([
-      { type: 'error', errorText: 'Browser agent host failed.' },
+      { type: 'error', errorText: 'The agent host failed.' },
     ]);
   });
 

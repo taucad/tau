@@ -604,6 +604,11 @@ jobs:
       - name: Enforce bundle size budgets
         run: pnpm size:build && pnpm size:check
 
+      # Before the comparison: the action below leaves the checkout on the base branch.
+      - name: Check workspace root hygiene
+        if: always()
+        run: pnpm nx run scripts:validate-workspace-root
+
       - name: Compare bundle sizes with the base branch
         continue-on-error: true
         uses: andresz1/size-limit-action@94bc357df29c36c8f8d50ea497c3e225c3c95d1d # v1.8.0
@@ -614,10 +619,6 @@ jobs:
           # `--silent` keeps pnpm's banner out of the JSON the action parses.
           script: pnpm --silent size:check --json
           package_manager: pnpm
-
-      - name: Check workspace root hygiene
-        if: always()
-        run: pnpm nx run scripts:validate-workspace-root
 
   performance:
     needs: [plan, geospec-producer]

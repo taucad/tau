@@ -90,7 +90,8 @@ describe('systemSkillsCatalog', () => {
 
     expect(catalog).toEqual(configured);
     expect(createModelRows).toEqual(configured);
-    expect(progressiveDisclosureSkillNames).toHaveLength(11);
+    // Every configured kernel's cad-* skill plus create-model and geospec-authoring.
+    expect(progressiveDisclosureSkillNames).toHaveLength(configured.length + 2);
   });
 
   it('preserves JSCAD multi-shape output as one flat array of named geometries', () => {

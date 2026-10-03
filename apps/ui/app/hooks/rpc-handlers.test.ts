@@ -1367,6 +1367,7 @@ describe('rpc-handlers', () => {
               committedSectionCuts: cuts,
               modelInteractionUnitId: 'file:src/pen.ts',
               modelInteractionRef: modelRef,
+              kinematicsRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
             },
           }),
         };

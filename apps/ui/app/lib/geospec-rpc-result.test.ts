@@ -29,7 +29,8 @@ describe('runnerResultToTestModelOutput', () => {
         targetFile: '*.geospec.ts',
       }),
     ]);
-    expect(output.total).toBe(1);
+    // `total` counts selected tests; the synthetic failure explains why none ran.
+    expect(output.total).toBe(0);
   });
 
   it('should report no matching tests when file or directory filters select nothing', () => {
@@ -44,7 +45,8 @@ describe('runnerResultToTestModelOutput', () => {
         targetFile: '*.geospec.ts',
       }),
     ]);
-    expect(output.total).toBe(1);
+    // `total` counts selected tests; the synthetic failure explains why none ran.
+    expect(output.total).toBe(0);
   });
 
   it('should preserve runtime export diagnostics in compact failures', () => {

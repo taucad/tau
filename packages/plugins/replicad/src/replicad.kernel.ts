@@ -607,7 +607,7 @@ export const replicadKernel = defineKernel({
     }
     const computeProducer = {
       id: '@taucad/replicad',
-      version: 'replicad@0.23.4-beta.2|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
+      version: 'replicad@1.1.0-taulabs.0|replicad-opencascadejs@0.23.0-beta.0|adapter@1',
       implementationAssets,
     };
     const computeEnvironment = {

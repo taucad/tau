@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import { betterAuth } from 'better-auth';
+import { getCookies } from 'better-auth/cookies';
 import { memoryAdapter } from 'better-auth/adapters/memory';
 import { github as githubProvider } from 'better-auth/social-providers';
 import { getBetterAuthConfig } from '#config/better-auth.config.js';
@@ -405,7 +406,7 @@ describe('getBetterAuthConfig email callbacks', () => {
  * The pre-existing bearer suite builds its instance from `staticAuthConfig`, so
  * it could not speak to the served composition. These cases run the **runtime**
  * config — `getBetterAuthConfig` with its runtime plugin options, `baseURL`,
- * `trustedOrigins`, `crossSubDomainCookies` and prefixed `generateId` — and swap
+ * `trustedOrigins`, cookie attributes and prefixed `generateId` — and swap
  * only the drizzle adapter for an in-memory one.
  *
  * B6's actual cause was a stale `apps/api/dist/main.js` predating the bearer
@@ -475,6 +476,15 @@ describe('getBetterAuthConfig runtime bearer composition', () => {
 
     expect(session.status).toBe(200);
     expect(await session.json()).toMatchObject({ user: { email } });
+  });
+
+  it('sets a host-only session cookie with no Domain attribute', () => {
+    const { config } = createConfig('https://api.tau.new');
+    const cookies = getCookies(config);
+
+    expect(config.advanced?.crossSubDomainCookies?.enabled).not.toBe(true);
+    expect(cookies.sessionToken.attributes.domain).toBeUndefined();
+    expect(cookies.sessionData.attributes.domain).toBeUndefined();
   });
 
   it('completes the desktop one-time-token handoff through the runtime composition', async () => {

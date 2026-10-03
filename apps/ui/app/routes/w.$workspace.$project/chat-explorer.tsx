@@ -27,7 +27,8 @@ import {
 } from '#components/geometry/cad/model-component-action-menu.js';
 import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
-import { PartPreviewImage } from '#components/geometry/cad/part-preview-image.js';
+import { PartPreviewFrame } from '#components/geometry/cad/part-preview-image.js';
+import { isPreviewablePart, useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
 import { useOptionalHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
@@ -278,6 +279,7 @@ type ModelPaneviewPanelParams = {
 type ModelPropertiesPanelParams = {
   selected?: { readonly node: GeometryComponentNode; readonly entryPath: string };
   preview?: PartThumbnailState;
+  onOpenPreview?: (origin: HTMLElement) => void;
   onRetryPreview?: () => void;
   onPreviewDecodeError?: () => void;
   onPreviewDecoded?: () => void;
@@ -332,6 +334,23 @@ function ModelPaneview({
     preview?.unitId === visibleSelection?.unitId && preview?.componentId === visibleSelection?.node.id
       ? preview
       : undefined;
+  const openPartGallery = useOpenPartGallery();
+  const selectedGraphicsRef = entries.find(([entryPath]) => entryPath === visibleSelection?.entryPath)?.[1];
+  const onOpenPreview = useMemo(
+    () =>
+      openPartGallery && selectedGraphicsRef && visibleSelection && isPreviewablePart(visibleSelection.node)
+        ? (origin: HTMLElement) => {
+            openPartGallery({
+              graphicsRef: selectedGraphicsRef,
+              unitId: visibleSelection.unitId,
+              componentId: visibleSelection.node.id,
+              source: 'explorer',
+              origin,
+            });
+          }
+        : undefined,
+    [openPartGallery, selectedGraphicsRef, visibleSelection],
+  );
 
   const handleReady = useCallback(
     ({ api }: { api: PaneviewApi }) => {
@@ -372,6 +391,7 @@ function ModelPaneview({
         params: {
           selected: visibleSelection,
           preview: selectedPreview?.state,
+          onOpenPreview,
           onRetryPreview: selectedPreview?.retry,
           onPreviewDecodeError: selectedPreview?.decodeError,
           onPreviewDecoded: selectedPreview?.decoded,
@@ -381,6 +401,7 @@ function ModelPaneview({
     [
       connectApi,
       entries,
+      onOpenPreview,
       onPreviewChange,
       onSelectionChange,
       selectedPreview,
@@ -413,11 +434,12 @@ function ModelPaneview({
     paneviewApiRef.current?.getPanel('properties')?.api.updateParameters({
       selected: visibleSelection,
       preview: selectedPreview?.state,
+      onOpenPreview,
       onRetryPreview: selectedPreview?.retry,
       onPreviewDecodeError: selectedPreview?.decodeError,
       onPreviewDecoded: selectedPreview?.decoded,
     });
-  }, [selectedPreview, visibleSelection]);
+  }, [onOpenPreview, selectedPreview, visibleSelection]);
 
   useEffect(() => {
     if (!revealTarget) {
@@ -932,6 +954,7 @@ function ModelPropertiesPaneviewPanel({ params }: { readonly params: ModelProper
         node={params.selected?.node}
         entryPath={params.selected?.entryPath}
         preview={params.preview}
+        onOpenPreview={params.onOpenPreview}
         onRetryPreview={params.onRetryPreview}
         onPreviewDecodeError={params.onPreviewDecodeError}
         onPreviewDecoded={params.onPreviewDecoded}
@@ -1198,6 +1221,18 @@ export const ComponentRow = memo(function ComponentRow({
     ),
   });
   const guideCount = Math.max(0, node.depth - rootDepth - 1);
+  const openPartGallery = useOpenPartGallery();
+  const isPreviewRow = isPreviewablePart(node);
+  const swatch = node.appearance?.materials?.length ? (
+    <MaterialSwatch materials={node.appearance.materials} />
+  ) : (
+    <Box
+      aria-hidden='true'
+      data-testid='component-color-icon'
+      className='size-4 shrink-0'
+      style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
+    />
+  );
 
   const onHover = (componentId: string | undefined): void => {
     graphicsRef.send({ type: 'setHoveredModelComponent', unitId, componentId, source: 'explorer' });
@@ -1220,7 +1255,9 @@ export const ComponentRow = memo(function ComponentRow({
           data-model-component-id={node.id}
           className={cn(
             // The sidebar row's lit states and inset: `pr-0.5` gives a 24 px action the 2 px it has above and below.
-            'group/part relative flex h-7 w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
+            'group/part relative flex w-full items-center justify-between rounded-md py-1 pr-0.5 pl-2 text-sm leading-5',
+            // A part row leads with its 80 px preview; groups stay compact.
+            isPreviewRow ? 'h-22 gap-2' : 'h-7',
             'focus-within:bg-sidebar-accent focus-within:text-sidebar-accent-foreground has-[[aria-haspopup=menu][data-state=open]]:bg-sidebar-accent',
             isSelected ? 'bg-primary/10 text-foreground' : 'text-sidebar-foreground',
             !isSelected && isFocused
@@ -1251,6 +1288,24 @@ export const ComponentRow = memo(function ComponentRow({
               style={{ left: `${8 + depth * 12}px` }}
             />
           ))}
+          {isPreviewRow ? (
+            <PartPreviewFrame
+              name={node.name}
+              preview={preview}
+              className='size-20'
+              fallback={swatch}
+              tabIndex={-1}
+              onOpen={
+                openPartGallery
+                  ? (origin) => {
+                      openPartGallery({ graphicsRef, unitId, componentId: node.id, source: 'explorer', origin });
+                    }
+                  : undefined
+              }
+              onDecodeError={preview?.bytes ? () => onPreviewDecodeError?.(node.id, preview.bytes!) : undefined}
+              onDecoded={preview?.bytes ? () => onPreviewDecoded?.(node.id, preview.bytes!) : undefined}
+            />
+          ) : undefined}
           <button
             type='button'
             data-model-part-button=''
@@ -1282,26 +1337,7 @@ export const ComponentRow = memo(function ComponentRow({
               }
             }}
           >
-            {preview?.bytes ? (
-              <PartPreviewImage
-                bytes={preview.bytes}
-                className={cn(
-                  'size-5 shrink-0 rounded-sm bg-muted object-contain ring-1 ring-border',
-                  preview.status === 'pending' && 'opacity-50',
-                )}
-                onError={() => onPreviewDecodeError?.(node.id, preview.bytes!)}
-                onLoad={() => onPreviewDecoded?.(node.id, preview.bytes!)}
-              />
-            ) : node.appearance?.materials?.length ? (
-              <MaterialSwatch materials={node.appearance.materials} />
-            ) : (
-              <Box
-                aria-hidden='true'
-                data-testid='component-color-icon'
-                className='size-4 shrink-0'
-                style={node.appearance?.color ? { fill: node.appearance.color } : undefined}
-              />
-            )}
+            {isPreviewRow ? undefined : swatch}
             <span className='truncate'>
               <HighlightText text={node.name} searchTerm={query} />
             </span>

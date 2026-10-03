@@ -1,3 +1,4 @@
+import { floorArc, heroDial } from '#www/hero-view.js';
 import { createScene, loadAssembly } from '#www/scene.js';
 import { readStoryProgress } from '#www/story-progress.js';
 
@@ -162,7 +163,7 @@ const run = async ({ heroStage, storyStage, chapters }) => {
     const note = hero.querySelector('[data-note]');
     const inValue = hero.querySelector('[data-in]');
     const outValue = hero.querySelector('[data-out]');
-    const dial = hero.querySelector('.d-input');
+    const dial = hero.querySelector('[data-dial-input]');
     /** @type {(degrees: number) => void} */
     const turn = (degrees) => {
       angle = Math.max(0, Math.min(1440, degrees));
@@ -177,7 +178,8 @@ const run = async ({ heroStage, storyStage, chapters }) => {
         input.value = String(Math.round(angle));
         input.setAttribute('aria-valuetext', `Input ${Math.round(angle)} degrees, output ${output.toFixed(1)} degrees`);
       }
-      dial?.setAttribute('stroke-dasharray', `${angle % 360 || (angle ? 360 : 0)} 360`);
+      // The input arc runs on the floor dial, sweeping the way the sun turns.
+      dial?.setAttribute('d', floorArc(heroDial.radius, 0, angle % 360 || (angle ? 360 : 0)));
       request();
     };
     if (control instanceof HTMLElement) {

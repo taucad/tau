@@ -54,6 +54,13 @@ const otlpEndpoint = process.env['OTEL_EXPORTER_OTLP_ENDPOINT'];
 
 const hasOtlpEndpoint = Boolean(otlpEndpoint);
 
+// An omitted exporter is not "off": NodeSDK falls back to OTLP on localhost:4318, so a process without an
+// endpoint failed its shutdown flush (and the billing worker exited 1). Explicit settings still win.
+if (!hasOtlpEndpoint) {
+  process.env['OTEL_TRACES_EXPORTER'] ??= 'none';
+  process.env['OTEL_LOGS_EXPORTER'] ??= 'none';
+}
+
 const sdk = new NodeSDK({
   resource,
 

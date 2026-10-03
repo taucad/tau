@@ -763,6 +763,38 @@ export class ChatSessionStore {
     return 'stopped';
   }
 
+  /**
+   * Add a message to the chat's running Tau turn, which reads it before its next step.
+   *
+   * Only a native run takes steering; an external agent's turn refuses it.
+   *
+   * @param chatId - The chat.
+   * @param message - The text to add.
+   * @returns `true` when the host accepted the message into the running turn.
+   * @public
+   */
+  public async steerProjectedRun(chatId: string, message: string): Promise<boolean> {
+    const projection = this.#projectionContext(chatId);
+    if (projection === undefined || !selectCaughtUp(projection)) {
+      return false;
+    }
+    const run = selectCurrentRun(projection);
+    if (run?.kind !== 'tau' || !opensRun(selectRunPhase(projection))) {
+      return false;
+    }
+    const projectId = this.#sessions.get(chatId)?.projectId ?? this.#observed.get(chatId)?.projectId;
+    const connector = projectId === undefined ? undefined : this.#projectHostConnectors.get(projectId);
+    if (connector === undefined) {
+      return false;
+    }
+    const answer = await sendHostCommand(async () => connector.connect(chatId), {
+      type: 'steer',
+      commandId: generatePrefixedId(idPrefix.request),
+      payload: { chatId, runId: run.runId, message },
+    });
+    return answer.status !== 'refused';
+  }
+
   /** Answer only an interrupt the caught-up host log still holds, including after reload. @public */
   public async respondToProjectedApproval(
     chatId: string,

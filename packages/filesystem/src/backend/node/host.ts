@@ -314,6 +314,19 @@ const runOperation = async (
     case 'readFile': {
       return provider.readFile(request.path);
     }
+    case 'readFileRange': {
+      // At most one chunk of the provider's own bounded stream: `length` never exceeds its chunk size.
+      const bytes = new Uint8Array(request.length);
+      let filled = 0;
+      for await (const chunk of provider.readFileStream(request.path, {
+        position: request.position,
+        length: request.length,
+      })) {
+        bytes.set(chunk, filled);
+        filled += chunk.byteLength;
+      }
+      return bytes.slice(0, filled);
+    }
     case 'writeFile': {
       const data = typeof request.data === 'string' ? request.data : new Uint8Array(request.data);
       return mutate(request.root, [request.path], async () => provider.writeFile(request.path, data));

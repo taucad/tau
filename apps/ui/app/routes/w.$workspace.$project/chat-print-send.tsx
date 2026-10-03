@@ -16,7 +16,7 @@ import { isRecord } from '@taucad/utils/schema';
 import type { PrintApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { isOpenPrintRequest } from '#hooks/use-machines-print-requests.js';
 import { useProject } from '#hooks/use-project.js';
-import { PrintNotice, PrintSection, operator } from '#routes/w.$workspace.$project/chat-print-section.js';
+import { PrintNotice, operator } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
   formatDuration,
   formatProducer,
@@ -398,15 +398,6 @@ function ApprovalCard({
           ) : null}
         </div>
       </div>
-      <ArtifactDetails request={request} />
-      {onPreview === undefined ? (
-        <p className='text-xs text-muted-foreground'>From another project</p>
-      ) : (
-        <Button type='button' size='sm' variant='outline' className='self-start' onClick={onPreview}>
-          <Eye aria-hidden />
-          Open printer preview
-        </Button>
-      )}
       {isConfirming ? (
         <StartConfirmationCard
           digest={request.artifact.digest}
@@ -428,7 +419,8 @@ function ApprovalCard({
             </PrintNotice>
           )}
           {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
-          <div className='flex flex-wrap gap-2'>
+          {/* The decision and its evidence on one row; the digest is in Inspect. */}
+          <div className='flex flex-wrap items-center gap-2'>
             <Button
               type='button'
               size='sm'
@@ -448,6 +440,14 @@ function ApprovalCard({
               )}
               {isAgent ? 'Deny' : 'Cancel request'}
             </Button>
+            {onPreview === undefined ? (
+              <span className='text-xs text-muted-foreground'>From another project</span>
+            ) : (
+              <Button type='button' size='sm' variant='ghost' onClick={onPreview}>
+                <Eye aria-hidden />
+                Preview
+              </Button>
+            )}
           </div>
         </>
       )}
@@ -461,16 +461,28 @@ function ApprovalCard({
 const stepStates = (
   request: PrintRequest,
 ): ReadonlyArray<Readonly<{ label: string; state: 'done' | 'active' | 'todo' }>> => {
-  const order = ['preparing', 'approved', 'uploading', 'starting'] as const;
+  const order = ['preparing', 'approved', 'uploading', 'starting', 'confirming'] as const;
   const position = order.indexOf(request.state as (typeof order)[number]);
+  const step = (at: number): 'done' | 'active' | 'todo' =>
+    position > at ? 'done' : position === at ? 'active' : 'todo';
   return [
     { label: 'Preflight', state: position >= 1 || request.prepared !== undefined ? 'done' : 'active' },
-    { label: 'Upload', state: position > 2 ? 'done' : position === 2 ? 'active' : 'todo' },
-    { label: 'Start', state: position === 3 ? 'active' : 'todo' },
+    { label: 'Upload', state: step(2) },
+    { label: 'Start', state: step(3) },
+    { label: 'Confirm', state: step(4) },
   ];
 };
 
-function ProgressCard({
+/**
+ * One send in flight: what the host is doing now, and the steps from preflight to the printer's confirmation.
+ *
+ * @param props - The request and its machine.
+ * @param props.request - The request in flight.
+ * @param props.entry - The machine it is sent to.
+ * @returns The card.
+ * @public
+ */
+export function ProgressCard({
   request,
   entry,
 }: {
@@ -484,7 +496,9 @@ function ProgressCard({
         ? `Uploading ${request.summary.fileName} to ${entry.name}…`
         : request.state === 'starting'
           ? `Starting on ${entry.name}…`
-          : `Sending ${request.summary.fileName} to ${entry.name}…`;
+          : request.state === 'confirming'
+            ? `Waiting for ${entry.name} to confirm the start…`
+            : `Sending ${request.summary.fileName} to ${entry.name}…`;
   return (
     <div
       role='status'
@@ -510,11 +524,30 @@ function ProgressCard({
           </li>
         ))}
       </ol>
+      {request.state === 'confirming' ? (
+        <p className='text-xs text-muted-foreground'>
+          The start was sent. Tau confirms it from the printer&apos;s own status, usually within a minute; nothing more
+          is sent.
+        </p>
+      ) : null}
     </div>
   );
 }
 
-function UnknownCard({
+/**
+ * A start the printer has not proven for the whole confirmation window. Tau keeps checking the printer's reports, so
+ * this card clears itself when the run shows up; "Check again" runs the same check at once. Nothing is resent.
+ *
+ * @param props - The request and the last manual check.
+ * @param props.request - The unconfirmed request.
+ * @param props.isBusy - Whether a check is running.
+ * @param props.reconciled - The last manual check's result, if any.
+ * @param props.error - Why the last check failed, if it did.
+ * @param props.onReconcile - Run the check now.
+ * @returns The card.
+ * @public
+ */
+export function UnknownCard({
   request,
   isBusy,
   reconciled,
@@ -529,15 +562,15 @@ function UnknownCard({
 }): React.JSX.Element {
   return (
     <div role='alert' className='flex min-w-0 flex-col gap-2 rounded-lg border border-warning/30 bg-warning/10 p-3'>
-      <p className='text-sm font-medium'>The printer did not confirm the start of {request.summary.fileName}.</p>
+      <p className='text-sm font-medium'>The printer hasn&apos;t confirmed the start of {request.summary.fileName}.</p>
       <p className='text-xs text-muted-foreground'>
-        {request.receipt?.status === 'unknown' ? `${request.receipt.reason}. ` : ''}
-        Nothing is resent automatically. Reconcile to read what the printer actually did.
+        Check the printer&apos;s screen. Tau keeps watching and moves this to the Monitor as soon as the printer reports
+        the run. Nothing is resent.
       </p>
       <ArtifactDetails request={request} />
       {reconciled ? (
         <p className='text-xs' role='status'>
-          Reconciled: {reconciled.status}
+          {reconciled.status === 'unknown' ? 'Still not confirmed by the printer' : `Checked: ${reconciled.status}`}
           {reconciled.receipt?.status === 'accepted' &&
           reconciled.receipt.kind !== 'upload' &&
           reconciled.receipt.providerRunId
@@ -553,14 +586,23 @@ function UnknownCard({
           ) : (
             <SearchCheck aria-hidden />
           )}
-          Reconcile
+          Check again
         </Button>
       </div>
     </div>
   );
 }
 
-function FailureCard({
+/**
+ * A request that ended without printing: the printer refused the start, or the host refused the request first.
+ *
+ * @param props - The request and its dismissal.
+ * @param props.request - The rejected or failed request.
+ * @param props.onDismiss - Hide the card.
+ * @returns The card.
+ * @public
+ */
+export function FailureCard({
   request,
   onDismiss,
 }: {
@@ -712,7 +754,13 @@ export function SendSection({
   }
 
   return (
-    <PrintSection ref={ref} title='Send' tabIndex={-1} className='outline-none focus-visible:focus-outline'>
+    // The cards carry their own headings; a "Send" heading above them would repeat the decision.
+    <section
+      ref={ref}
+      aria-label='Send'
+      tabIndex={-1}
+      className='flex min-w-0 flex-col gap-2 outline-none focus-visible:focus-outline'
+    >
       {open.map((request) => {
         const isBusy = busyRequestId === request.requestId;
         const error = errors[request.requestId];
@@ -767,6 +815,6 @@ export function SendSection({
           }}
         />
       ) : null}
-    </PrintSection>
+    </section>
   );
 }

@@ -203,6 +203,8 @@ export const launchDesktopApp = async (options: {
   readonly preserveProfile?: boolean | undefined;
   /** Capture startup traffic before Playwright can attach its request listener. */
   readonly captureStartupNetwork?: boolean | undefined;
+  /** WAV input for Chromium's fake capture driver; leaves the OS microphone unchanged. */
+  readonly fakeMicrophonePath?: string | undefined;
 }): Promise<DesktopSession> => {
   if (desktopE2ECompletedArtifact && options.packaged === false) {
     throw new Error('A completed-artifact run cannot launch the workspace desktop app.');
@@ -246,6 +248,15 @@ export const launchDesktopApp = async (options: {
       `--user-data-dir=${userData}`,
       ...(startupNetworkLogPath ? [`--log-net-log=${startupNetworkLogPath}`] : []),
       ...webGpuArguments(),
+      ...(options.fakeMicrophonePath
+        ? [
+            '--use-fake-device-for-media-stream',
+            '--use-fake-ui-for-media-stream',
+            // Chromium's sandboxed audio service cannot read the test-owned WAV on macOS.
+            '--no-sandbox',
+            `--use-file-for-fake-audio-capture=${options.fakeMicrophonePath}`,
+          ]
+        : []),
     ],
     cwd: packaged ? userData : desktopRoot,
     env: {
@@ -303,6 +314,27 @@ export const launchDesktopApp = async (options: {
      * Configure the main-process test overrides only after that startup boundary. */
     page = await application.firstWindow();
     await page.waitForLoadState('domcontentloaded');
+    if (options.fakeMicrophonePath) {
+      // Chromium recommends disabling DSP for calibrated file microphone input.
+      // Keep the real capture driver; change only its audio-processing constraints.
+      await page.addInitScript(() => {
+        const capture = navigator.mediaDevices.getUserMedia.bind(navigator.mediaDevices);
+        navigator.mediaDevices.getUserMedia = async (constraints) => {
+          if (!constraints?.audio) {
+            return capture(constraints);
+          }
+          return capture({
+            ...constraints,
+            audio: {
+              ...(typeof constraints.audio === 'object' ? constraints.audio : {}),
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false,
+            },
+          });
+        };
+      });
+    }
     await application.evaluate(({ dialog, shell }, selectedDirectory) => {
       const testState = globalThis as typeof globalThis & { __TAU_E2E_EXTERNAL_URL__?: string };
       shell.openExternal = async (url): Promise<void> => {

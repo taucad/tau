@@ -34,6 +34,7 @@ const presentation: Record<PrintRequestState, Presentation> = {
   approved: { verb: 'Starting' },
   uploading: { verb: 'Starting' },
   starting: { verb: 'Starting' },
+  confirming: { verb: 'Starting' },
   started: { verb: 'Printing', tone: 'success' },
   denied: { verb: 'Print declined', separated: true },
   withdrawn: { verb: 'Print withdrawn', separated: true },
@@ -42,9 +43,9 @@ const presentation: Record<PrintRequestState, Presentation> = {
   unknown: { verb: 'Start not confirmed', tone: 'warning', separated: true },
 };
 
-/** Said when the printer never confirmed a start: whether it prints is unknown, so nothing invites a retry. */
+/** Said when the printer has not confirmed a start for minutes: whether it prints is unknown, so nothing invites a retry. */
 const unconfirmedStart =
-  'The printer did not confirm the start. Check the printer, or Reconcile the request in the Print pane.';
+  "The printer hasn't confirmed the start. Check the printer's screen; Tau updates this when the printer reports the run.";
 
 /**
  * Why a request settled as it did, in the words the agent's `nextStep` and the

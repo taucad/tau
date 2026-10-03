@@ -812,7 +812,14 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
     await expect(restartClient.list({})).resolves.toMatchObject({
       entries: [{ machineId: 'workshop-x1c', name: 'Workshop X1C', freshness: 'current' }],
     });
-    await expect(restartClient.startPrint(restartInput)).resolves.toMatchObject({ status: 'unknown' });
+    // The restart left the start unknown; the reconnected printer's report proved it before this call (blueprint
+    // x1c-start-confirmation R1), so the stored receipt answers and nothing is sent.
+    await vi.waitFor(async () => {
+      await expect(restartClient.startPrint(restartInput)).resolves.toMatchObject({
+        status: 'accepted',
+        providerRunId: 'run-late',
+      });
+    });
     expect(submit).toHaveBeenCalledTimes(3);
     await expect(
       restartClient.uploadPrint({
@@ -885,12 +892,11 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
       ? { status: 'unknown', reason: 'reply-lost-after-possible-acceptance', observedAt: currentTimestamp() }
       : { status: 'accepted', providerRunId: `run-${input.operationId}`, observedAt: currentTimestamp() };
   });
-  const reconcile = vi.fn(
-    async (input: Parameters<MachineSession['reconcile']>[0]): Promise<MachineCommandReceipt> =>
-      input.command === 'project_file'
-        ? { status: 'accepted', providerRunId: 'run-late', observedAt: currentTimestamp() }
-        : { status: 'unknown', reason: 'no-correlated-provider-reply', observedAt: currentTimestamp() },
-  );
+  const reconcileLate = async (input: Parameters<MachineSession['reconcile']>[0]): Promise<MachineCommandReceipt> =>
+    input.command === 'project_file'
+      ? { status: 'accepted', providerRunId: 'run-late', observedAt: currentTimestamp() }
+      : { status: 'unknown', reason: 'no-correlated-provider-reply', observedAt: currentTimestamp() };
+  const reconcile = vi.fn(reconcileLate);
   /** Reports every bound session streams once resolved; each session idles until its signal aborts. */
   let telemetry = Promise.withResolvers<Iterable<MachineSnapshot>>();
   const provider_ = bindingProvider(() => undefined, {
@@ -1117,7 +1123,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
       startOperationId: 'start-unknown-5',
     });
     expect(unknown).toMatchObject({
-      state: 'unknown',
+      state: 'confirming',
       transferId: 'transfer-upload-5',
       receipt: { operationId: 'start-unknown-5', kind: 'start', status: 'unknown' },
     });
@@ -1321,7 +1327,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
 
     const starting = await restart('start-sending');
     expect(await state(starting.client)).toMatchObject({
-      state: 'unknown',
+      state: 'confirming',
       transferId: 'transfer-upload-1',
       receipt: { operationId: 'start-1', kind: 'start', status: 'unknown' },
     });
@@ -1346,6 +1352,82 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
     expect(uploadPrint).not.toHaveBeenCalled();
     expect(submit).not.toHaveBeenCalled();
     await complete.close();
+  });
+
+  it('should settle a confirming start from printer reports alone, escalating it while unproven', async () => {
+    uploadPrint.mockClear();
+    submit.mockClear();
+    telemetry = Promise.withResolvers();
+    let isProven = false;
+    // This test moves the shared clock 410 s; later tests bind candidates that expire on it.
+    const clockBefore = currentTime;
+    reconcile.mockImplementation(async (input) =>
+      input.command === 'project_file' && isProven
+        ? { status: 'accepted', providerRunId: 'run-late', observedAt: currentTimestamp() }
+        : { status: 'unknown', reason: 'no-correlated-provider-reply', observedAt: currentTimestamp() },
+    );
+    try {
+      const root = await storeRoot();
+      const { client, host, close } = await openLedgerHost(root);
+      await bind(host, client);
+      await request(client, 'request-1');
+      await expect(
+        client.resolvePrintRequest({
+          requestId: 'request-1',
+          decision: 'approve',
+          resolvedBy: operator,
+          uploadOperationId: 'upload-1',
+          startOperationId: 'start-unknown-1',
+        }),
+      ).resolves.toMatchObject({ state: 'confirming', receipt: { status: 'unknown' } });
+      const seen: string[] = [];
+      const watching = new AbortController();
+      const watched = (async (): Promise<void> => {
+        try {
+          for await (const update of client.watchPrintRequests({ signal: watching.signal })) {
+            if (seen.at(-1) !== update.state) {
+              seen.push(update.state);
+            }
+          }
+        } catch {
+          // The watch ends when the test aborts it.
+        }
+      })();
+      const startedAt = currentTime;
+      // One report a second: 400 s without proof outlast the 180 s window, then the run shows up.
+      const reports = function* (): Generator<MachineSnapshot> {
+        for (let second = 1; second <= 410; second += 1) {
+          currentTime = startedAt + second * 1000;
+          isProven = second > 400;
+          yield {
+            connection: 'connected',
+            readiness: isProven ? 'busy' : 'idle',
+            ...(isProven ? { activeRunId: 'run-late' } : {}),
+            observedAt: currentTimestamp(),
+            setup: { materials: [] },
+            run: { state: isProven ? 'printing' : 'idle' },
+          };
+        }
+      };
+      telemetry.resolve(reports());
+      await vi.waitFor(async () => {
+        const [settled] = await client.listPrintRequests({});
+        expect(settled).toMatchObject({ state: 'started', receipt: { providerRunId: 'run-late' } });
+      });
+      expect(seen).toContain('unknown');
+      expect(seen.at(-1)).toBe('started');
+      // Settling only read what the printer reported: one upload, one start, never a resend.
+      expect(uploadPrint).toHaveBeenCalledOnce();
+      expect(submit).toHaveBeenCalledOnce();
+      const journal = await readFile(join(root, 'workshop-x1c', 'operations.jsonl'), 'utf8');
+      expect(journal.match(/"source":"reconciliation"/gu)).toHaveLength(1);
+      watching.abort();
+      await watched;
+      await close();
+    } finally {
+      reconcile.mockImplementation(reconcileLate);
+      currentTime = clockBefore;
+    }
   });
 
   it(

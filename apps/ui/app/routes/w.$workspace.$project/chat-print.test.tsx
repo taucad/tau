@@ -387,6 +387,19 @@ describe('Print pane orientation', () => {
     );
   });
 
+  it('names a send in flight while the printer still reports the moment before it', () => {
+    expect(presentMachine(entry(), agentRequest({ state: 'uploading' })).label).toBe('Sending');
+    expect(presentMachine(entry(), agentRequest({ state: 'confirming' }))).toMatchObject({
+      label: 'Starting',
+      nextAction: 'Wait for the printer to confirm the start.',
+    });
+    // An unconfirmed start is past that moment: the printer's own report speaks again.
+    expect(presentMachine(entry(), agentRequest({ state: 'unknown' })).label).toBe('Ready');
+    expect(presentMachine(entry({ freshness: 'stale' }), agentRequest({ state: 'confirming' })).label).toBe(
+      'Stale observation',
+    );
+  });
+
   it('lists machines by the names people gave them, not the names the devices report', async () => {
     const attic = entry({ machineId: 'attic-p1s', name: 'Attic P1S' });
     renderPane(createFixture({ entries: [entry(), attic] }).client);
@@ -459,8 +472,12 @@ describe('Print pane orientation', () => {
       label: 'Review the print request',
       kind: 'review',
     });
+    expect(nextAction({ entry: entry(), openRequest: agentRequest({ state: 'confirming' }), prepare })).toEqual({
+      label: 'Waiting for the printer to confirm',
+      kind: 'none',
+    });
     expect(nextAction({ entry: entry(), openRequest: agentRequest({ state: 'unknown' }), prepare })).toEqual({
-      label: 'Reconcile the start',
+      label: 'Check the printer',
       kind: 'review',
     });
     expect(nextAction({ entry: entry({ freshness: 'stale' }), openRequest: undefined, prepare }).kind).toBe('none');
@@ -1288,7 +1305,36 @@ describe('Print pane agent requests', () => {
     expect(fixture.resolvePrintRequest).not.toHaveBeenCalled();
   });
 
-  it('offers only Reconcile for an unconfirmed start, never Retry', async () => {
+  it('shows a sent start waiting for the printer to confirm it, with nothing to click', async () => {
+    renderPane(
+      createFixture({
+        requests: [
+          agentRequest({
+            state: 'confirming',
+            uploadOperationId: 'operation-upload-1',
+            startOperationId: 'operation-start-1',
+            receipt: {
+              operationId: 'operation-start-1',
+              machineId: 'machine-1',
+              kind: 'start',
+              status: 'unknown',
+              reason: 'reply-lost-after-possible-acceptance',
+              observedAt: timestamp,
+            },
+          }),
+        ],
+      }).client,
+    );
+
+    const progress = await screen.findByRole('status', { name: 'Waiting for Workshop X1C to confirm the start…' });
+    expect(within(progress).getByText('Confirm')).toBeInTheDocument();
+    expect(progress).toHaveTextContent("Tau confirms it from the printer's own status");
+    expect(screen.queryByRole('alert')).not.toBeInTheDocument();
+    expect(screen.queryByText(/reply-lost/u)).not.toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: /retry|check again|reconcile/iu })).not.toBeInTheDocument();
+  });
+
+  it('offers only Check again for an unconfirmed start, never Retry', async () => {
     const fixture = createFixture({
       requests: [
         agentRequest({
@@ -1300,7 +1346,7 @@ describe('Print pane agent requests', () => {
             machineId: 'machine-1',
             kind: 'start',
             status: 'unknown',
-            reason: 'The MQTT reply timed out',
+            reason: 'reply-lost-after-possible-acceptance',
             observedAt: timestamp,
           },
         }),
@@ -1310,20 +1356,22 @@ describe('Print pane agent requests', () => {
     renderPane(fixture.client);
 
     const alert = await screen.findByRole('alert');
-    expect(alert).toHaveTextContent('The printer did not confirm the start of pyramid.gcode.3mf.');
-    expect(alert).toHaveTextContent('The MQTT reply timed out');
-    expect(within(alert).getByRole('button', { name: 'Reconcile' })).toBeInTheDocument();
+    expect(alert).toHaveTextContent("The printer hasn't confirmed the start of pyramid.gcode.3mf.");
+    expect(alert).toHaveTextContent("Check the printer's screen.");
+    // The protocol's reason code is for the log, not the person.
+    expect(alert).not.toHaveTextContent('reply-lost-after-possible-acceptance');
+    expect(within(alert).getByRole('button', { name: 'Check again' })).toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /retry/iu })).not.toBeInTheDocument();
     expect(screen.queryByRole('button', { name: /^(Start|Accept)/u })).not.toBeInTheDocument();
 
-    await user.click(within(alert).getByRole('button', { name: 'Reconcile' }));
+    await user.click(within(alert).getByRole('button', { name: 'Check again' }));
     await waitFor(() => {
       expect(fixture.reconcileOperation).toHaveBeenCalledExactlyOnceWith({
         machineId: 'machine-1',
         operationId: 'operation-start-1',
       });
     });
-    expect(await within(alert).findByText('Reconciled: accepted · run provider-run-9')).toBeInTheDocument();
+    expect(await within(alert).findByText('Checked: accepted · run provider-run-9')).toBeInTheDocument();
     expect(fixture.startPrint).not.toHaveBeenCalled();
   });
 });

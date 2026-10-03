@@ -14,6 +14,7 @@ import { rpcName } from '#constants/rpc.constants.js';
 import { readFileInputSchema, readFileOutputSchema } from '#schemas/tools/read-file.tool.schema.js';
 import { createFileInputSchema, createFileOutputSchema } from '#schemas/tools/create-file.tool.schema.js';
 import { updateTodosInputSchema, updateTodosOutputSchema } from '#schemas/tools/update-todos.tool.schema.js';
+import { askQuestionsInputSchema, askQuestionsOutputSchema } from '#schemas/tools/ask-questions.tool.schema.js';
 import { deleteFileInputSchema, deleteFileOutputSchema } from '#schemas/tools/delete-file.tool.schema.js';
 import {
   directoryEntrySchema,
@@ -175,6 +176,12 @@ const writeTodosRpc = defineRpc({
   success: updateTodosOutputSchema,
 });
 
+const askQuestionsRpc = defineRpc({
+  /* The trusted call id joins after parsing, as export_model's does; model input cannot choose it. */
+  input: askQuestionsInputSchema.extend({ toolCallId: zod.string().min(1).max(256).optional() }),
+  success: askQuestionsOutputSchema,
+});
+
 const deleteFileRpc = defineRpc({
   input: deleteFileInputSchema,
   success: deleteFileOutputSchema,
@@ -321,6 +328,7 @@ export type RpcSchemasRegistry = {
   [rpcName.getParameters]: RpcSchemaEntry<GetParametersRpcInput, GetParametersRpcResult>;
   [rpcName.applyParameterOperation]: RpcSchemaEntry<ApplyParameterOperationRpcInput, ApplyParameterOperationRpcResult>;
   [rpcName.writeTodos]: RpcSchemaEntry<WriteTodosRpcInput, WriteTodosRpcResult>;
+  [rpcName.askQuestions]: typeof askQuestionsRpc;
   [rpcName.arrangeWorkbench]: typeof arrangeWorkbenchRpc;
 };
 
@@ -398,6 +406,7 @@ export const rpcSchemasRegistry: RpcSchemasRegistry = {
     inputSchema: writeTodosRpc.inputSchema,
     resultSchema: writeTodosRpc.resultSchema,
   },
+  [rpcName.askQuestions]: askQuestionsRpc,
   [rpcName.arrangeWorkbench]: arrangeWorkbenchRpc,
 };
 
@@ -493,6 +502,11 @@ export type WriteTodosRpcInput = z.infer<typeof writeTodosRpc.inputSchema>;
 export type WriteTodosRpcSuccess = z.infer<typeof writeTodosRpc.successSchema>;
 /** @public */
 export type WriteTodosRpcResult = z.infer<typeof writeTodosRpc.resultSchema>;
+
+/** @public */
+export type AskQuestionsRpcInput = z.infer<typeof askQuestionsRpc.inputSchema>;
+/** @public */
+export type AskQuestionsRpcResult = z.infer<typeof askQuestionsRpc.resultSchema>;
 
 /** @public */
 export type CreateFileRpcInput = z.infer<typeof createFileRpc.inputSchema>;

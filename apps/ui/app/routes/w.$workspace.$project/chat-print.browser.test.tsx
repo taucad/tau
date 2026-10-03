@@ -167,6 +167,19 @@ describe('Print pane screenshots', () => {
     },
   );
 
+  it('should space the Prepare setup rows evenly', async () => {
+    await page.viewport(800, 1200);
+    await mount('studio', 720);
+    const rows = ['Profile', 'Plate', 'Material', 'Process', 'Filament A1'].map((label) =>
+      screen
+        .getByRole('combobox', { name: label })
+        .closest(String.raw`.group\/field`)!
+        .getBoundingClientRect(),
+    );
+    const gaps = rows.slice(1).map((row, index) => row.top - rows[index]!.bottom);
+    expect(gaps).toEqual(gaps.map(() => gaps[0]));
+  });
+
   for (const scenario of ['prepare', 'approval', 'busy', 'studio'] as const) {
     for (const [size, width] of Object.entries(widths)) {
       for (const theme of themes) {

@@ -43,6 +43,7 @@ import type {
 import {
   advancePrintRequest,
   createNodeMachinePrintRequestOperations,
+  escalateUnconfirmedStart,
   terminalRequestStates,
 } from '#host/node-machine-print-requests.js';
 import { openNodeMachineStore } from '#host/node-machine-store.js';
@@ -487,9 +488,12 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
           : machines.get(request.machineId)?.operations.status === 'open'
             ? advancePrintRequest(request, effects)
             : undefined;
-      if (next) {
+      // A start that went unproven for the whole window while the host was down is a person's to check.
+      const settled = next ?? request;
+      const lapsed = escalateUnconfirmedStart(settled, effects, now()) ?? next;
+      if (lapsed) {
         // oxlint-disable-next-line eslint/no-await-in-loop -- recovered requests settle one at a time.
-        await commitRequest(next);
+        await commitRequest(lapsed);
       }
     }
     directory = createMachineDirectory({
@@ -663,6 +667,88 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     await appendEffectResult(state, receipt, 'attempt');
     return receipt;
   };
+  // Ask the connected session whether an unknown effect happened, from what the printer has already reported, and record
+  // a settled answer. Callers hold the effect's queue slot. Nothing is sent to the printer.
+  const reconcileUnknown = async (state: NodeMachineEffectState, signal: AbortSignal): Promise<void> => {
+    const { machineId, operationId, intent } = state.intent;
+    const session = connectedSessions.get(machineId);
+    if (state.status !== 'unknown' || !session) {
+      return;
+    }
+    const command =
+      intent.kind === 'start'
+        ? 'project_file'
+        : intent.kind === 'cancel' || intent.kind === 'urgent-stop'
+          ? 'stop'
+          : intent.kind;
+    let providerReceipt: MachineSubmissionReceipt;
+    try {
+      providerReceipt = await session.reconcile({
+        operationId,
+        command,
+        ...(intent.kind === 'start' ? { transferId: intent.transferId } : {}),
+        signal,
+      });
+    } catch {
+      return;
+    }
+    if (providerReceipt.status === 'unknown') {
+      return;
+    }
+    let receipt: MachineOperationReceipt;
+    try {
+      receipt = publicOperationReceipt({ operationId, machineId, intent, receipt: providerReceipt });
+    } catch {
+      return;
+    }
+    await appendEffectResult(state, receipt, 'reconciliation');
+  };
+  // A sent start is settled by evidence, not by a person (blueprint x1c-start-confirmation R1, R3): every printer report
+  // re-runs the same check as Reconcile for each unknown run effect of a connected machine, then escalates a start left
+  // unproven for the confirmation window. ponytail: scans every effect on each report (~1 Hz per printer); index the
+  // unknown ones if a store ever holds thousands.
+  /** The check running for each effect; one at a time per effect. */
+  const settling = new Map<string, Promise<void>>();
+  /** Effects a report reached while their check was running; each is checked once more when it finishes. */
+  const reportedWhileSettling = new Set<string>();
+  const settlement = new AbortController();
+  const settle = async (operationId: string, state: NodeMachineEffectState): Promise<void> => {
+    try {
+      await effectQueue.queueFor(`effect:${operationId}`, async () => {
+        await reconcileUnknown(state, settlement.signal);
+        const request = [...requests.values()].find((candidate) => candidate.startOperationId === operationId);
+        const lapsed = request ? escalateUnconfirmedStart(request, effects, now()) : undefined;
+        if (lapsed) {
+          await commitRequest(lapsed);
+        }
+      });
+    } catch (error) {
+      report(error);
+    } finally {
+      settling.delete(operationId);
+      if (reportedWhileSettling.delete(operationId)) {
+        settleFromEvidence();
+      }
+    }
+  };
+  function settleFromEvidence(): void {
+    for (const [operationId, state] of effects) {
+      if (
+        closed ||
+        state.status !== 'unknown' ||
+        state.intent.intent.kind === 'upload' ||
+        !connectedSessions.has(state.intent.machineId)
+      ) {
+        continue;
+      }
+      if (settling.has(operationId)) {
+        reportedWhileSettling.add(operationId);
+        continue;
+      }
+      settling.set(operationId, settle(operationId, state));
+    }
+  }
+  const stopSettling = commits.subscribe(settleFromEvidence);
   const deviceOperations: Pick<
     MachineChannelHostOperations,
     'preparePrint' | 'uploadPrint' | 'startPrint' | 'controlRun' | 'captureStill' | 'reconcileOperation'
@@ -1064,43 +1150,7 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         if (state.status !== 'unknown') {
           return effectSnapshot(state);
         }
-        const session = connectedSessions.get(machineId);
-        if (!session) {
-          return effectSnapshot(state);
-        }
-        const command =
-          state.intent.intent.kind === 'start'
-            ? 'project_file'
-            : state.intent.intent.kind === 'cancel' || state.intent.intent.kind === 'urgent-stop'
-              ? 'stop'
-              : state.intent.intent.kind;
-        let providerReceipt: MachineSubmissionReceipt;
-        try {
-          const { intent } = state.intent;
-          providerReceipt = await session.reconcile({
-            operationId,
-            command,
-            ...(intent.kind === 'start' ? { transferId: intent.transferId } : {}),
-            signal: operationInput.signal,
-          });
-        } catch {
-          return effectSnapshot(state);
-        }
-        if (providerReceipt.status === 'unknown') {
-          return effectSnapshot(state);
-        }
-        let receipt: MachineOperationReceipt;
-        try {
-          receipt = publicOperationReceipt({
-            operationId,
-            machineId,
-            intent: state.intent.intent,
-            receipt: providerReceipt,
-          });
-        } catch {
-          return effectSnapshot(state);
-        }
-        await appendEffectResult(state, receipt, 'reconciliation');
+        await reconcileUnknown(state, operationInput.signal);
         return effectSnapshot(state);
       });
     },
@@ -1187,6 +1237,8 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         return closing;
       }
       closed = true;
+      stopSettling();
+      settlement.abort();
       // No reconnect starts from here on: pending retries are cancelled and attempts in flight abandoned.
       const supervised = [...supervisors.values()];
       supervisors.clear();

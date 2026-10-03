@@ -93,6 +93,8 @@ const rpcForTool: Readonly<
     sequential: true,
   },
   [toolName.updateTodos]: { rpc: rpcName.writeTodos },
+  /* Waits on the person; one ask at a time keeps their questions in order. */
+  [toolName.askQuestions]: { rpc: rpcName.askQuestions, sequential: true },
   [toolName.arrangeWorkbench]: { rpc: rpcName.arrangeWorkbench, needs: 'workbench' },
 };
 
@@ -104,7 +106,12 @@ const geospecAuthoringRecipe =
  * `.tau/artifacts` and `.tau/chats` read-only, so these writes go through the
  * host's record filesystem; each handler fences its own target path.
  */
-const recordRpcNames = new Set<RpcName>([rpcName.exportModel, rpcName.writeTodos, rpcName.arrangeWorkbench]);
+const recordRpcNames = new Set<RpcName>([
+  rpcName.exportModel,
+  rpcName.writeTodos,
+  rpcName.askQuestions,
+  rpcName.arrangeWorkbench,
+]);
 
 /**
  * The verdict tools whose answers the gate checks.
@@ -429,7 +436,7 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
           }
           /* The trusted ID joins after parsing; model input cannot choose it. */
           const args =
-            mapped.rpc === rpcName.exportModel
+            mapped.rpc === rpcName.exportModel || mapped.rpc === rpcName.askQuestions
               ? {
                   ...parsed.data,
                   toolCallId: invocation.toolCallId,

@@ -11,11 +11,16 @@ import { provideAcpSession } from '#acp/acp-session-logic.js';
 import { failureError, failureOfError } from '#acp/acp-session.machine.js';
 import type { AcpFailure, AcpTurnResult } from '#acp/acp-session.machine.js';
 import { confirmedConfiguration, modelChoice } from '#acp/session.js';
+import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 import type { AcpPromptTurn, AcpSession, AcpTurnOutcome, OpenAcpSessionOptions } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 
 /** A lent turn's seams: the prompt seams, and the record writer when the turn has one. */
-export type AcpLentSeams = AcpPromptTurn & { readonly remember?: ExternalAgentTurn['remember'] | undefined };
+export type AcpLentSeams = AcpPromptTurn & {
+  readonly remember?: ExternalAgentTurn['remember'] | undefined;
+  /** Where this turn's chat records questions, so form elicitations reach the person (agent questions blueprint D6). */
+  readonly questions?: { readonly chatId: string; readonly fileSystem: QuestionRecordFileSystem } | undefined;
+};
 
 /** What {@link provideAcpSession} needs from its owner. */
 export type AcpSessionEffects = {

@@ -87,6 +87,7 @@ export const hostMcpAllowedTools = [
   toolName.getPrintRequest,
   toolName.listPrintRequests,
   toolName.cancelPrint,
+  toolName.askQuestions,
 ] as const;
 
 /** One name from {@link hostMcpAllowedTools}. @public */
@@ -100,6 +101,7 @@ export type HostMcpAllowedTool = (typeof hostMcpAllowedTools)[number];
  */
 const hostMcpRegistryTools: ReadonlySet<HostMcpAllowedTool> = new Set<HostMcpAllowedTool>([
   toolName.arrangeWorkbench,
+  toolName.askQuestions,
   toolName.getPrintProfiles,
   toolName.requestPrint,
   toolName.getPrintRequest,
@@ -122,10 +124,42 @@ const hostMcpAnnotationOverrides: Readonly<Partial<Record<string, NonNullable<Ta
     idempotentHint: true,
     openWorldHint: false,
   },
+  /* Records a question for the person and waits for them; nothing outside the chat changes. */
+  [toolName.askQuestions]: {
+    readOnlyHint: false,
+    destructiveHint: false,
+    idempotentHint: false,
+    openWorldHint: false,
+  },
 };
 
 const isJsonObject = (value: JsonValue): value is JsonObject =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
+
+/**
+ * Registry tools whose `chatId` input the endpoint supplies from the signed claim.
+ * An external agent does not know Tau's chat id, and must not choose another chat.
+ */
+const chatScopedRegistryTools: ReadonlySet<string> = new Set<string>([toolName.askQuestions]);
+
+/**
+ * A tool's input schema without its `chatId` property.
+ *
+ * @param schema - The registry's JSON Schema.
+ * @returns The schema an external agent sees.
+ */
+const withoutChatId = (schema: JsonObject): JsonObject => {
+  const { properties, required } = schema;
+  if (properties === undefined || !isJsonObject(properties)) {
+    return schema;
+  }
+  const { chatId: _chatId, ...rest } = properties;
+  return {
+    ...schema,
+    properties: rest,
+    ...(Array.isArray(required) ? { required: required.filter((name) => name !== 'chatId') } : {}),
+  };
+};
 
 /** Keep a diagnostic summary bounded while the full report remains readable by path. */
 const shortDiagnostic = (value: string): string => (value.length > 300 ? `${value.slice(0, 300)}…` : value);
@@ -141,7 +175,9 @@ const hostToolOf = (definition: ReturnType<ToolRegistry['list']>[number]): TauMc
   return {
     name: definition.name,
     description: definition.description,
-    inputSchema: definition.inputSchema,
+    inputSchema: chatScopedRegistryTools.has(definition.name)
+      ? withoutChatId(definition.inputSchema)
+      : definition.inputSchema,
     annotations: hostMcpAnnotationOverrides[definition.name] ?? {
       readOnlyHint: reads,
       destructiveHint: definition.name === toolName.cancelPrint,
@@ -508,7 +544,7 @@ export const createHostMcpEndpoint = (options: HostMcpEndpointOptions): HostMcpE
          * falls back to it, so a stale id is never a stale directory. */
         runId: binding.runId,
         // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- `@taucad/mcp` validated these args against the tool's own schema.
-        input: args as unknown as JsonValue,
+        input: (chatScopedRegistryTools.has(tool) ? { ...args, chatId: claims.chatId } : args) as unknown as JsonValue,
         signal: AbortSignal.any(
           [binding.signal, dispatchOptions.signal, signal].filter(
             (candidate): candidate is AbortSignal => candidate !== undefined,

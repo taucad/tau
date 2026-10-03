@@ -24,7 +24,7 @@ import { screenshotMcpOutputSchema } from '@taucad/chat/schemas/tools/screenshot
 import { testModelOutputSchema } from '@taucad/chat/schemas/tools/test-model';
 
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
-import type { HostToolInvocation, ToolRegistry } from '@taucad/agent-host';
+import type { HostToolDefinition, HostToolInvocation, HostToolResult, ToolRegistry } from '@taucad/agent-host';
 import {
   createChatToolRegistry,
   createMachineToolRegistry,
@@ -256,6 +256,7 @@ describe('createHostMcpEndpoint capability', () => {
       'get_print_request',
       'list_print_requests',
       'cancel_print',
+      'ask_questions',
     ]);
     expect(claims.allowedTools).not.toContain('start_machine_print');
 
@@ -753,16 +754,36 @@ describe('the mounted /mcp route', () => {
       secret,
       workspaceRoot,
       registry: {
-        list: () => [
+        list: (): HostToolDefinition[] => [
           ...machineRegistry.list(),
           {
             name: 'arrange_workbench',
             description: 'Arrange the workbench.',
             inputSchema: { type: 'object', properties: { open: { type: 'array', items: { type: 'object' } } } },
           },
+          {
+            name: 'ask_questions',
+            description: 'Ask the person.',
+            inputSchema: {
+              type: 'object',
+              properties: { chatId: { type: 'string' }, questions: { type: 'array', items: { type: 'object' } } },
+              required: ['chatId', 'questions'],
+            },
+          },
         ],
-        invoke: async (invocation) => {
+        invoke: async (invocation): Promise<HostToolResult> => {
           invocations.push(invocation);
+          if (invocation.toolName === 'ask_questions') {
+            return {
+              content: {
+                success: true,
+                status: 'answered',
+                path: '.tau/chats/chat-1/questions.yaml',
+                answers: [{ id: 'material', answer: 'PLA', source: 'person' }],
+              },
+              isError: false,
+            };
+          }
           if (invocation.toolName === 'arrange_workbench') {
             return {
               content: {
@@ -809,7 +830,18 @@ describe('the mounted /mcp route', () => {
       'list_print_requests',
       'cancel_print',
       'arrange_workbench',
+      'ask_questions',
     ]);
+    /* The endpoint supplies the chat; the agent never sees or chooses it. */
+    const askSchema = tools.find(({ name }) => name === 'ask_questions')?.inputSchema;
+    expect(askSchema).toMatchObject({ type: 'object', required: ['questions'] });
+    expect(Object.keys((askSchema?.['properties'] ?? {}) as Record<string, unknown>)).toEqual(['questions']);
+    expect(tools.find(({ name }) => name === 'ask_questions')?.annotations).toEqual({
+      readOnlyHint: false,
+      destructiveHint: false,
+      idempotentHint: false,
+      openWorldHint: false,
+    });
     expect(tools.find(({ name }) => name === 'arrange_workbench')?.annotations).toEqual({
       readOnlyHint: false,
       destructiveHint: false,
@@ -868,6 +900,14 @@ describe('the mounted /mcp route', () => {
       structuredContent: { status: 'written', visible: [{ kind: 'pane', pane: 'model' }] },
     });
     expect(invocations[0]).toMatchObject({ toolName: 'arrange_workbench', runId: 'run-1' });
+    invocations.length = 0;
+    expect(await call('ask_questions', { questions: [{ id: 'material' }] })).toMatchObject({
+      structuredContent: { status: 'answered', answers: [{ answer: 'PLA', source: 'person' }] },
+    });
+    expect(invocations[0]).toMatchObject({
+      toolName: 'ask_questions',
+      input: { chatId: 'chat-1', questions: [{ id: 'material' }] },
+    });
     invocations.length = 0;
     const options = { layerHeight: 0.2, supports: { enabled: true, angles: [45, 60] } };
     const requested = await call('request_print', { targetFile: 'main.ts', options });

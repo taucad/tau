@@ -58,6 +58,10 @@ import { ChatMessageToolScreenshot } from '#routes/w.$workspace.$project/chat-me
 import { ChatMessageToolRevisions } from '#routes/w.$workspace.$project/chat-message-tool-revisions.js';
 import { ChatMessageToolExportGeometry } from '#routes/w.$workspace.$project/chat-message-tool-export-geometry.js';
 import { ChatMessageToolUpdateTodos } from '#routes/w.$workspace.$project/chat-message-tool-update-todos.js';
+import {
+  ChatMessageToolAskQuestions,
+  ChatMessageToolExternalOrQuestion,
+} from '#routes/w.$workspace.$project/chat-message-tool-ask-questions.js';
 import { ChatMessageToolArrangeWorkbench } from '#routes/w.$workspace.$project/chat-message-tool-arrange-workbench.js';
 import { ChatMessageToolRequestPrint } from '#routes/w.$workspace.$project/chat-message-tool-request-print.js';
 import { ChatMessagePartUnknown } from '#routes/w.$workspace.$project/chat-message-tool-unknown.js';
@@ -371,9 +375,22 @@ function renderAssistantPart(
               />
             );
           }
+          case 'ask_questions': {
+            return (
+              <ChatMessageToolAskQuestions
+                key={part.toolCallId}
+                part={
+                  { ...part, type: 'tool-ask_questions', state } as Extract<
+                    MyMessagePart,
+                    { type: 'tool-ask_questions' }
+                  >
+                }
+              />
+            );
+          }
         }
       }
-      return <ChatMessageToolExternal key={part.toolCallId} part={part} />;
+      return <ChatMessageToolExternalOrQuestion key={part.toolCallId} part={part} />;
     }
 
     case 'source-url': {
@@ -478,6 +495,10 @@ function renderAssistantPart(
 
     case 'tool-update_todos': {
       return <ChatMessageToolUpdateTodos key={part.toolCallId} part={part} />;
+    }
+
+    case 'tool-ask_questions': {
+      return <ChatMessageToolAskQuestions key={part.toolCallId} part={part} />;
     }
 
     case 'tool-arrange_workbench': {

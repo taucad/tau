@@ -155,6 +155,16 @@ describe('getCadSystemPrompt progressive-disclosure contract', () => {
     },
   );
 
+  it.each(promptBranches)(
+    'should name ask_questions in the plan step for $mode/testing=$testingEnabled/images=$supportsImageInput',
+    ({ mode, testingEnabled, supportsImageInput }) => {
+      const prompt = getCadSystemPrompt('replicad', mode, testingEnabled, { supportsImageInput });
+
+      expect(prompt.static).toContain(`settle hard forks only the person can decide with \`${toolName.askQuestions}\``);
+      expect(toolDescriptions[toolName.askQuestions]).toContain('Never ask for permission');
+    },
+  );
+
   it('should omit content migrated to kernel and GeoSpec skills from Block 1', () => {
     const sections: ResolvedSection[] = [];
     getCadSystemPrompt('replicad', 'agent', true, {

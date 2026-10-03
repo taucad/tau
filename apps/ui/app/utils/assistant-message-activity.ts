@@ -181,6 +181,9 @@ const familyLabels: Record<Exclude<ActivityFamily, 'other'>, Record<ActivityStat
   },
 };
 
+/** External agents' own question tools, whose forms Tau presents as question cards. */
+const questionToolNames = new Set(['AskUserQuestion', 'request_user_input']);
+
 const tauFacts = (part: MyMessagePart): Record<string, unknown> | undefined =>
   part.type === 'dynamic-tool' && isRecord(part.toolMetadata?.['tau']) ? part.toolMetadata['tau'] : undefined;
 
@@ -242,6 +245,10 @@ export const classifyActivityPart = (part: MyMessagePart): ActivityCategory => {
       return 'skip';
     }
     const nativeName = tauMcpToolName(part);
+    /* A question is a decision, never folded into routine activity (agent questions blueprint D7). */
+    if (nativeName === 'ask_questions' || questionToolNames.has(String(tauFacts(part)?.['nativeName']))) {
+      return 'data';
+    }
     return nativeName === 'export_model' || nativeName === 'export_geometry' || nativeName === 'arrange_workbench'
       ? 'write'
       : 'research';

@@ -25,9 +25,10 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
   const descriptionId = useId();
   const scrollerRef = useRef<HTMLDivElement>(null);
 
+  // Each file shown reveals its own filename at the end of the trail; with no file there is no trail.
   useEffect(() => {
     const scroller = scrollerRef.current;
-    if (!scroller) {
+    if (!scroller || filePath === '') {
       return;
     }
     const revealFilename = (): void => {

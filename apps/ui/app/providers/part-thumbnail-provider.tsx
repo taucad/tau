@@ -33,9 +33,11 @@ const PartThumbnailContext = createContext<PartThumbnailRegistry | undefined>(un
 export function PartThumbnailProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const project = useProject({ enableNoContext: true });
   const imageService = useOptionalHeadlessImageService();
+  const projectId = project?.projectId;
   const [registry, setRegistry] = useState<PartThumbnailRegistry>();
+  // Each project gets its own registry, so no preview outlives the project it was scheduled for.
   useEffect(() => {
-    if (!imageService || !project) {
+    if (!imageService || projectId === undefined) {
       return undefined;
     }
     const next = new PartThumbnailRegistry(imageService);
@@ -45,7 +47,7 @@ export function PartThumbnailProvider({ children }: { readonly children: ReactNo
       next.dispose();
       setRegistry((current) => (current === next ? undefined : current));
     };
-  }, [imageService, project?.projectId]);
+  }, [imageService, projectId]);
   return <PartThumbnailContext.Provider value={registry}>{children}</PartThumbnailContext.Provider>;
 }
 

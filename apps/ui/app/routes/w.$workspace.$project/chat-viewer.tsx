@@ -678,11 +678,15 @@ const ViewerContent = memo(function ({
   const modelInteractionUnitId = useMemo(() => deriveModelInteractionUnitId({ sourceFile: entryPath }), [entryPath]);
   const thumbnails = useOptionalPartThumbnailService(modelInteractionUnitId);
   const previewSourceDigests = useRef(new WeakMap<Uint8Array<ArrayBuffer>, Promise<string>>());
-  const [previewRetryRevision, setPreviewRetryRevision] = useState(0);
-  const manualPreviewRetry = useRef<string | undefined>(undefined);
+  // A Retry names the part it asks for; the effect takes each request once.
+  const [previewRetry, setPreviewRetry] = useState<Readonly<{ revision: number; partId: string | undefined }>>({
+    revision: 0,
+    partId: undefined,
+  });
+  const handledPreviewRetryRef = useRef(0);
   const retryPreview = useCallback(() => {
-    manualPreviewRetry.current = viewerActionMenu?.target.componentId;
-    setPreviewRetryRevision((value) => value + 1);
+    const partId = viewerActionMenu?.target.componentId;
+    setPreviewRetry((current) => ({ revision: current.revision + 1, partId }));
   }, [viewerActionMenu]);
   const subscribePreviews = useCallback(
     (listener: () => void) => thumbnails?.subscribe(listener) ?? (() => undefined),
@@ -765,8 +769,8 @@ const ViewerContent = memo(function ({
       );
       return;
     }
-    const manualPartId = manualPreviewRetry.current;
-    manualPreviewRetry.current = undefined;
+    const manualPartId = previewRetry.revision === handledPreviewRetryRef.current ? undefined : previewRetry.partId;
+    handledPreviewRetryRef.current = previewRetry.revision;
     let sourceDigest = previewSourceDigests.current.get(content);
     if (!sourceDigest) {
       sourceDigest = sourceGlbDigest(content);
@@ -809,7 +813,7 @@ const ViewerContent = memo(function ({
     presentedArtifact,
     presentedArtifactKey,
     presentedKey,
-    previewRetryRevision,
+    previewRetry,
     thumbnails,
     viewerActionMenu,
     viewerPart,

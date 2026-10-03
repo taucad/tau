@@ -16,7 +16,7 @@
  * settlement's own card. One schema, two transports.
  */
 
-import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useQueries, useQuery, useQueryClient } from '@tanstack/react-query';
 import type { RevisionDiffEntry, RevisionLine, RevisionRow } from '@taucad/revisions';
 import { useProject } from '#hooks/use-project.js';
@@ -26,6 +26,7 @@ import { useRevisionClient, useRevisionStatus } from '#hooks/use-revision-status
 import type { RevisionClient } from '#hooks/use-revision-status.js';
 import type { RevisionFileComparison } from '#machines/file-manager.worker.revisions.js';
 import { useChatSessionStore } from '#hooks/chat-session-store-provider.js';
+import type { ChatSessionStore } from '#services/chat-session-store.js';
 
 /** One revision, as every card and history row reads it. @public */
 export type RevisionCard = {
@@ -250,6 +251,40 @@ const attachTurnCard = (
 /** Host-attested settlements selected directly from every observed chat's projection. */
 type FinalizedRevision = Readonly<{ branch: string | undefined; card: RevisionCard }>;
 
+const noFinalizedRevisions: readonly FinalizedRevision[] = [];
+
+const finalizedRevisionsOf = (store: ChatSessionStore, projectId: string): readonly FinalizedRevision[] =>
+  store.observedChatIdsOf(projectId).flatMap((chatId): FinalizedRevision[] => {
+    const projection = store.getProjection(chatId);
+    if (projection === undefined) {
+      return [];
+    }
+    return Object.values(projection.ledger.runs).flatMap((run) =>
+      run.settlements.flatMap(({ event }): FinalizedRevision[] =>
+        event.type === 'turn.finalized' && event.revisionId !== undefined
+          ? [
+              {
+                branch: event.branch,
+                card: {
+                  revisionId: event.revisionId,
+                  n: undefined,
+                  createdAt: 0,
+                  summary: '',
+                  actor: '',
+                  turnId: event.turnId,
+                  conflicted: false,
+                  tags: [],
+                  trigger: 'turn',
+                  changedPaths: event.changedPaths,
+                  ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
+                },
+              },
+            ]
+          : [],
+      ),
+    );
+  });
+
 const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] => {
   const store = useChatSessionStore();
   const subscribe = useCallback(
@@ -279,52 +314,22 @@ const useHostFinalizedTurns = (projectId: string): readonly FinalizedRevision[] 
     },
     [projectId, store],
   );
-  const snapshot = useCallback(
-    () =>
-      store
-        .observedChatIdsOf(projectId)
-        .map((chatId) => {
-          const projection = store.getProjection(chatId);
-          return `${chatId}:${projection?.ledger.position.cursor ?? 0}:${projection?.remote?.digest ?? ''}`;
-        })
-        .join('|'),
-    [projectId, store],
-  );
-  const version = useSyncExternalStore(subscribe, snapshot, () => '');
-  return useMemo(
-    () =>
-      store.observedChatIdsOf(projectId).flatMap((chatId): FinalizedRevision[] => {
+  // The snapshot is the settlements themselves, recomputed only when a ledger cursor or remote digest moves.
+  const cachedRef = useRef<Readonly<{ key: string; revisions: readonly FinalizedRevision[] }>>(undefined);
+  const snapshot = useCallback((): readonly FinalizedRevision[] => {
+    const key = [
+      projectId,
+      ...store.observedChatIdsOf(projectId).map((chatId) => {
         const projection = store.getProjection(chatId);
-        if (projection === undefined) {
-          return [];
-        }
-        return Object.values(projection.ledger.runs).flatMap((run) =>
-          run.settlements.flatMap(({ event }): FinalizedRevision[] =>
-            event.type === 'turn.finalized' && event.revisionId !== undefined
-              ? [
-                  {
-                    branch: event.branch,
-                    card: {
-                      revisionId: event.revisionId,
-                      n: undefined,
-                      createdAt: 0,
-                      summary: '',
-                      actor: '',
-                      turnId: event.turnId,
-                      conflicted: false,
-                      tags: [],
-                      trigger: 'turn',
-                      changedPaths: event.changedPaths,
-                      ...(event.treeId === undefined ? {} : { treeId: event.treeId }),
-                    },
-                  },
-                ]
-              : [],
-          ),
-        );
+        return `${chatId}:${projection?.ledger.position.cursor ?? 0}:${projection?.remote?.digest ?? ''}`;
       }),
-    [projectId, store, version],
-  );
+    ].join('|');
+    if (cachedRef.current?.key !== key) {
+      cachedRef.current = { key, revisions: finalizedRevisionsOf(store, projectId) };
+    }
+    return cachedRef.current.revisions;
+  }, [projectId, store]);
+  return useSyncExternalStore(subscribe, snapshot, () => noFinalizedRevisions);
 };
 
 /**

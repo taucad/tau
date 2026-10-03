@@ -68,6 +68,7 @@ const expectHealthyServer = async (mode: 'development' | 'production', port: num
       AUTH_SECRET: 'smoke-secret',
       AUTH_URL: 'https://api.example.com',
       DATABASE_URL: 'postgresql://dev_user:dev_password@localhost:5432/tau_dev',
+      DATABASE_RUNTIME_ROLE: 'tau_api_runtime',
       GITHUB_CLIENT_ID: 'smoke',
       GITHUB_CLIENT_SECRET: 'smoke',
       GOOGLE_VERTEX_AI_CREDENTIALS: JSON.stringify({

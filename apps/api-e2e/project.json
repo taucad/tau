@@ -23,7 +23,7 @@
         "parallel": false,
         "commands": [
           "pnpm --dir ../.. exec nx run cli:build",
-          "docker-compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
+          "docker compose -f ../../infra/docker-compose.yml up -d postgres redis minio minio-bootstrap",
           "pnpm --dir ../.. exec nx run api:db-migrate",
           "../../node_modules/.bin/vitest run --config vitest.git.config.ts"
         ],

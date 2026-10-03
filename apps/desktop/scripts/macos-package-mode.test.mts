@@ -54,5 +54,5 @@ for (const release of [false, true]) {
 }
 const fuseFlip = packageSource.indexOf('await flipFuses(appPath');
 assert.ok(fuseFlip !== -1 && fuseFlip < packageSource.indexOf('await sign({'));
-assert.ok(packageSource.includes('...(release ? {} : { tauDesktop: { environmentOverrides: true } }),'));
+assert.ok(packageSource.includes('manifestFields: release ? {} : { tauDesktop: { environmentOverrides: true } },'));
 console.log('✓ macOS packages flip the hardening fuses before signing, and only a release refuses --inspect');

@@ -800,7 +800,7 @@ export function PrinterScene(props: PrinterSceneProps): React.JSX.Element {
   const { geometry, program, frameRequest, isReducedMotion, onContextLost, isWholePrinter } = props;
   // Public viewers stay on WebGL; the existing internal override is used for parity checks.
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
-  const gl = useMemo(() => createTauR3fGlProp(backend), [backend]);
+  const gl = useMemo(() => createTauR3fGlProp(backend, [], onContextLost), [backend, onContextLost]);
   // The whole printer frames the plate and its travel; the plate alone frames the finished part. Neither
   // depends on playback or the G-code filter, so the camera holds still while the part prints.
   const part = useMemo(() => props.preparedBounds ?? partBounds(program), [program, props.preparedBounds]);

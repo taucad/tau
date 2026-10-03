@@ -20,7 +20,9 @@ describe.skipIf(key === '' || process.platform !== 'darwin')('OpenAI dictation t
       const wavPath = join(directory, 'speech.wav');
       await promisify(execFile)('say', ['-o', wavPath, '--data-format=LEI16@24000', phrase]);
       // Only the key is read; a stub keeps the live suite free of the whole environment schema.
-      const config = { get: () => key } as unknown as ConfigService<Environment, true>;
+      const config = {
+        get: (name: string) => (name === 'OPENAI_API_KEY' ? key : undefined),
+      } as unknown as ConfigService<Environment, true>;
       const provider = new OpenAiTranscriptionProvider(config);
 
       let final = '';

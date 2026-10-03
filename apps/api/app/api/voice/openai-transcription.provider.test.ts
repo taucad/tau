@@ -71,7 +71,8 @@ describe('OpenAiTranscriptionProvider', () => {
         sse(
           'data: {"type":"transcript.text.delta","delta":"Create"}\n\ndata: {"type":"transcript.te',
           'xt.delta","delta":" a bracket"}\n\n',
-          'data: {"type":"transcript.text.done","text":"Create a bracket."}',
+          'data: {"type":"transcript.text.done","text":"Create a bracket."}\n\n',
+          'data: [DONE]\n\n',
         ),
       );
     vi.stubGlobal('fetch', fetchMock);

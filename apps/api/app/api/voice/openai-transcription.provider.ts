@@ -70,10 +70,12 @@ export class OpenAiTranscriptionProvider implements TranscriptionProvider {
 }
 
 const parseEvent = (line: string): TranscriptionEvent | undefined => {
-  if (!line.startsWith('data:')) {
+  const payload = line.startsWith('data:') ? line.slice(5).trim() : '';
+  // OpenAI ends the stream with `data: [DONE]` after `transcript.text.done`.
+  if (payload === '' || payload === '[DONE]') {
     return undefined;
   }
-  const data: unknown = JSON.parse(line.slice(5));
+  const data: unknown = JSON.parse(payload);
   if (typeof data !== 'object' || data === null || !('type' in data)) {
     return undefined;
   }

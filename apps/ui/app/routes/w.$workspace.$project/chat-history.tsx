@@ -11,6 +11,8 @@ import { ChatError } from '#routes/w.$workspace.$project/chat-error.js';
 import type { ChatTextareaProperties, ChatTextareaHandle } from '#components/chat/chat-textarea-types.js';
 import { ChatTextarea } from '#components/chat/chat-textarea.js';
 import { ChatTodoList } from '#components/chat/chat-todo-list.js';
+import { ChatQuestionQueue } from '#components/chat/chat-question-queue.js';
+import { ChatQuestionsProvider } from '#components/chat/chat-questions-context.js';
 import { useChatContext, useChatSelector } from '#hooks/use-chat.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { ChatTitleBar } from '#routes/w.$workspace.$project/chat-title-bar.js';
@@ -290,50 +292,51 @@ const ExpandedChatHistory = memo(function ({
 
   return (
     <ChatAttachmentDirectoriesContext.Provider value={attachmentDirectories}>
-      <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
-        <FloatingPanelContent
-          // `ph-no-capture`: session replay never records chat transcripts.
-          className={cn('ph-no-capture min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
-          errorFallback={(errorProps) => (
-            <FloatingPanelErrorContent
-              {...errorProps}
-              title='Chat Unavailable'
-              description='Something went wrong while loading the chat.'
-            />
-          )}
-        >
-          {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
-          {/* The one header row: name, rename in place, chat menu, close. */}
-          <FloatingPanelContentHeader className='gap-1'>
-            <ChatTitleBar
-              closeButton={
-                <FloatingPanelClose
-                  icon={XIcon}
-                  tooltipContent={(isOpen) => (
-                    <div className='flex items-center gap-2'>
-                      {isOpen ? 'Close' : 'Open'} Chat
-                      <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
-                    </div>
-                  )}
-                />
-              }
-            />
-          </FloatingPanelContentHeader>
+      <ChatQuestionsProvider>
+        <FloatingPanel isOpen={isExpanded} side='right' className={className} onOpenChange={setIsExpanded}>
+          <FloatingPanelContent
+            // `ph-no-capture`: session replay never records chat transcripts.
+            className={cn('ph-no-capture min-h-0 overflow-hidden [container-type:size]', !isExpanded && 'hidden')}
+            errorFallback={(errorProps) => (
+              <FloatingPanelErrorContent
+                {...errorProps}
+                title='Chat Unavailable'
+                description='Something went wrong while loading the chat.'
+              />
+            )}
+          >
+            {/* Chat-restore time-travel: wire the store seams + surface a fork marker. */}
+            {/* The one header row: name, rename in place, chat menu, close. */}
+            <FloatingPanelContentHeader className='gap-1'>
+              <ChatTitleBar
+                closeButton={
+                  <FloatingPanelClose
+                    icon={XIcon}
+                    tooltipContent={(isOpen) => (
+                      <div className='flex items-center gap-2'>
+                        {isOpen ? 'Close' : 'Open'} Chat
+                        <KeyShortcut variant='tooltip'>{formattedKeyCombination}</KeyShortcut>
+                      </div>
+                    )}
+                  />
+                }
+              />
+            </FloatingPanelContentHeader>
 
-          {/* Main chat content area */}
-          <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
-            <Virtuoso
-              ref={virtuosoRef}
-              data={groups}
-              itemContent={renderItem}
-              computeItemKey={computeItemKey}
-              followOutput={followOutput}
-              className='mt-1 min-h-0 min-w-0 flex-1'
-              atBottomStateChange={handleAtBottomStateChange}
-              components={virtuosoComponents}
-            />
-          </AtReferenceProvider>
-          {/*
+            {/* Main chat content area */}
+            <AtReferenceProvider treeService={treeService} chats={chats} knownTokens={knownTokens}>
+              <Virtuoso
+                ref={virtuosoRef}
+                data={groups}
+                itemContent={renderItem}
+                computeItemKey={computeItemKey}
+                followOutput={followOutput}
+                className='mt-1 min-h-0 min-w-0 flex-1'
+                atBottomStateChange={handleAtBottomStateChange}
+                components={virtuosoComponents}
+              />
+            </AtReferenceProvider>
+            {/*
           A refusal on an empty chat has to land somewhere (I12, W19-b).
 
           `ChatError` rides the last `TurnGroup`, and a submit that fails before
@@ -342,24 +345,29 @@ const ExpandedChatHistory = memo(function ({
           all: their text still in the composer, no row, no banner. One banner
           at a time: while there are turns, the group above owns it.
         */}
-          {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
-          {/* Chat input area. The agent's task list sits directly above the
-              composer, keyed by chat so its fold never carries across chats (D8). */}
-          <div
-            role='region'
-            aria-label='Chat composer'
-            className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
-          >
-            <ScrollDownButton
-              hasContent={messageIds.length > 0}
-              isVisible={!atBottom}
-              onScrollToBottom={scrollToBottom}
-            />
-            <ChatTodoList key={activeChatId} />
-            <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
-          </div>
-        </FloatingPanelContent>
-      </FloatingPanel>
+            {groups.length === 0 ? <ChatError className='mx-4 mb-1 shrink-0' /> : null}
+            {/* Chat input area. The agent's task list and its questions share one
+              tray directly above the composer; the task list is keyed by chat so
+              its fold never carries across chats (D8, agent questions D8). */}
+            <div
+              role='region'
+              aria-label='Chat composer'
+              className='relative mx-auto mb-2 w-[calc(100%_-_1rem)] max-w-xl shrink-0'
+            >
+              <ScrollDownButton
+                hasContent={messageIds.length > 0}
+                isVisible={!atBottom}
+                onScrollToBottom={scrollToBottom}
+              />
+              <div className='mx-2 -mb-3 flex flex-col rounded-t-lg border border-b-0 bg-muted/40 pb-3 empty:hidden'>
+                <ChatTodoList key={activeChatId} />
+                <ChatQuestionQueue key={`${activeChatId}:questions`} />
+              </div>
+              <ChatTextarea ref={chatTextareaRef} mode='main' enableAutoFocus={false} onSubmit={onSubmit} />
+            </div>
+          </FloatingPanelContent>
+        </FloatingPanel>
+      </ChatQuestionsProvider>
     </ChatAttachmentDirectoriesContext.Provider>
   );
 });

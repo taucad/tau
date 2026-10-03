@@ -23,8 +23,13 @@ export type ParameterSelectGroup = Readonly<{
   options: readonly ParameterSelectOption[];
 }>;
 
-export const parameterSelectTriggerClass =
-  'min-w-0 flex-1 border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)';
+/**
+ * A parameter field's height (`--param-field-h`, 1.5rem in every pane), shared by the trigger and its options so the
+ * selected option still lands on the trigger. The options are portaled outside the pane, so they read the fallback.
+ */
+const parameterFieldHeight = 'h-[var(--param-field-h,1.5rem)] py-0';
+
+export const parameterSelectTriggerClass = `${parameterFieldHeight} min-w-0 flex-1 border-border/50 bg-muted text-(--param-field-color) shadow-none transition-colors hover:border-border hover:text-(--param-field-color-focus) focus-visible:border-border focus-visible:text-(--param-field-color-focus)`;
 
 /** The Parameters select presentation, shared by schema fields and print setup. */
 export function ParameterSelect({
@@ -51,7 +56,7 @@ export function ParameterSelect({
   readonly onBlur?: () => void;
 }): React.JSX.Element {
   const item = (option: ParameterSelectOption): React.JSX.Element => (
-    <SelectItem key={option.value} value={option.value} disabled={option.disabled}>
+    <SelectItem key={option.value} value={option.value} disabled={option.disabled} className={parameterFieldHeight}>
       <span className='flex min-w-0 items-center gap-1.5'>
         {option.swatch === undefined ? null : (
           <MaterialSwatch materials={[{ color: option.swatch, roughness: 0.35, metalness: 0 }]} />

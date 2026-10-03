@@ -50,6 +50,7 @@ const machines = (origin: string): Presets => ({
     instantiation: 'true',
     printer_model: 'Bambu Lab A1 mini',
     nozzle_diameter: ['0.4'],
+    printable_area: ['0x0', '180x0', '180x180', '0x180'],
   },
 });
 
@@ -216,14 +217,27 @@ for (const file of [...option('--load-settings').split(';'), ...option('--load-f
   files[file] = JSON.parse(fs.readFileSync(file, 'utf8'));
 }
 fs.appendFileSync(control.log, 'start\\n');
-fs.writeFileSync(control.record, JSON.stringify({
+const record = JSON.stringify({
   args, cwd: process.cwd(), pid: process.pid, files,
   stls: args.filter((arg) => arg.endsWith('.stl')).map((file) => fs.readFileSync(file).toString('base64')),
   datadir: fs.readdirSync(option('--datadir')),
-}));
+});
+fs.writeFileSync(control.record, record);
+fs.appendFileSync(control.runs, record + '\\n');
 const out = option('--outputdir');
 const finish = () => {
   fs.appendFileSync(control.log, 'end\\n');
+  // Like Bambu Studio on a crowded multi-colour plate: the arranged slice fails its path-conflict check,
+  // a slice without checks exports the measured plate, and a slice that keeps the placement succeeds.
+  if (control.mode === 'tower-conflict' && args.includes('--no-check')) {
+    fs.writeFileSync(path.join(out, option('--export-3mf')), Buffer.from(control.measurement, 'base64'));
+    fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({ return_code: 0, error_string: 'Success.' }));
+    process.exit(0);
+  }
+  if (control.mode === 'tower-conflict' && option('--arrange') === '1') {
+    fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({ return_code: -101, error_string: ' G-code conflicts detected after slicing.' }));
+    process.exit(155);
+  }
   if (control.mode === 'fail') {
     fs.writeFileSync(path.join(out, 'result.json'), JSON.stringify({ return_code: -50, error_string: 'Nothing to slice here.' }));
     process.exit(206);
@@ -253,9 +267,19 @@ export type FakeInstall = Readonly<{
   app: string;
   /** Home directory whose data directory holds the OTA and user presets. */
   home: string;
-  /** `finishDelay` is milliseconds before a succeeding slice writes its output. */
-  control: (options: { mode: 'succeed' | 'fail' | 'crash' | 'hang'; finishDelay?: number }) => Promise<void>;
+  /**
+   * `finishDelay` is milliseconds before a succeeding slice writes its output. `tower-conflict` fails the
+   * arranged slice with Bambu Studio's path-conflict code and exports `measurement` (base64) when checks are off.
+   */
+  control: (options: {
+    mode: 'succeed' | 'fail' | 'crash' | 'hang' | 'tower-conflict';
+    finishDelay?: number;
+    measurement?: string;
+  }) => Promise<void>;
+  /** The last slice's arguments, files and STLs. */
   record: string;
+  /** Every slice's record, one JSON line each. */
+  runs: string;
   log: string;
 }>;
 
@@ -298,14 +322,16 @@ export const writeFakeInstall = async (
   }
   const record = join(root, 'record.json');
   const log = join(root, 'log.txt');
+  const runs = join(root, 'runs.jsonl');
   return {
     install: { executable, version: '09.08.07.06', resourcesDir: resourcesDirectory, dataDir: dataDirectory },
     app,
     home,
     record,
+    runs,
     log,
     control: async (control) =>
-      writeFile(join(app, 'Contents', 'MacOS', 'control.json'), JSON.stringify({ ...control, record, log })),
+      writeFile(join(app, 'Contents', 'MacOS', 'control.json'), JSON.stringify({ ...control, record, runs, log })),
   };
 };
 /* eslint-enable @typescript-eslint/naming-convention -- End of Bambu Studio keys. */

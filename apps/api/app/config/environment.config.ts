@@ -166,6 +166,12 @@ const environmentSchemaBase = z.object({
     .describe(
       'Development-only provider upstream origin. Every funded provider call keeps its path and is sent to this origin instead, so an e2e run can drive the real gateway against a local stub. Refused outside BILLING_ENVIRONMENT=development.',
     ),
+  TAU_TRANSCRIPTION_UPSTREAM_URL: z
+    .url()
+    .optional()
+    .describe(
+      'Development-only dictation upstream origin. OpenAI transcription keeps its path and is sent to this origin, and dictation is offered without OPENAI_API_KEY, so an e2e run can drive the real voice route against a local stub. Refused under NODE_ENV=production.',
+    ),
   BILLING_INVOCATION_DEADLINE: z.coerce
     .number()
     .int()
@@ -278,6 +284,14 @@ export const environmentSchema = environmentSchemaBase.superRefine((data, contex
       code: 'custom',
       message: 'TAU_LLM_PROVIDER_UPSTREAM_URL requires BILLING_ENVIRONMENT=development',
       path: ['TAU_LLM_PROVIDER_UPSTREAM_URL'],
+    });
+  }
+
+  if (data.TAU_TRANSCRIPTION_UPSTREAM_URL !== undefined && data.NODE_ENV === 'production') {
+    context.addIssue({
+      code: 'custom',
+      message: 'TAU_TRANSCRIPTION_UPSTREAM_URL is refused under NODE_ENV=production',
+      path: ['TAU_TRANSCRIPTION_UPSTREAM_URL'],
     });
   }
 

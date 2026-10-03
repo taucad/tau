@@ -347,6 +347,69 @@ const approvalPrompt = (request: PrintRequest, machine: MachineDirectoryEntry): 
   return `Print ${request.summary.fileName} on ${machine.descriptor.name}?${facts.length === 0 ? '' : ` ${facts.join(', ')}.`}`;
 };
 
+/** What became of a started request's run, as the printer has reported it since the start. */
+type StartedRun = 'running' | 'ended' | 'not-yet-reported';
+
+/**
+ * Whether a started request's run is still the printer's run. `started` records that the printer took the start, not
+ * that it still prints: only a report newer than the start can say the run ended (blueprint x1c-start-confirmation F9).
+ *
+ * @param request - Any request.
+ * @param machine - Its machine as the directory lists it, if bound.
+ * @returns The run's fate for a started request, or `undefined` for any other.
+ */
+const startedRunOf = (request: PrintRequest, machine: MachineDirectoryEntry | undefined): StartedRun | undefined => {
+  const { receipt } = request;
+  if (request.state !== 'started' || receipt?.status !== 'accepted') {
+    return undefined;
+  }
+  if (machine?.freshness !== 'current') {
+    return 'not-yet-reported';
+  }
+  const runId = 'providerRunId' in receipt ? receipt.providerRunId : undefined;
+  if (runId !== undefined && machine.snapshot.activeRunId === runId) {
+    return 'running';
+  }
+  return Date.parse(machine.snapshot.observedAt) > Date.parse(receipt.observedAt) ? 'ended' : 'not-yet-reported';
+};
+
+/**
+ * The next step for a started request, from what the printer has reported since the start.
+ *
+ * @param request - The started request.
+ * @param machine - The request's machine, as the directory lists it.
+ * @returns The started run and its next step.
+ */
+const startedNextStep = (
+  request: PrintRequest,
+  machine?: MachineDirectoryEntry,
+): Readonly<{ run: StartedRun; nextStep: string }> => {
+  const { fileName } = request.summary;
+  const run = startedRunOf(request, machine) ?? 'not-yet-reported';
+  const machineName = machine?.descriptor.name ?? request.machineId;
+  switch (run) {
+    case 'running': {
+      return {
+        run,
+        nextStep: `The print of ${fileName} is running on ${machineName}. Observe it with get_machine; this request needs nothing more.`,
+      };
+    }
+    case 'ended': {
+      const reported = machine?.snapshot.run?.state ?? machine?.snapshot.readiness ?? 'unknown';
+      return {
+        run,
+        nextStep: `The print of ${fileName} has ended; ${machineName} now reports its run as ${reported}. This request is finished and does not keep the machine busy: read get_machine for whether it is ready.`,
+      };
+    }
+    case 'not-yet-reported': {
+      return {
+        run,
+        nextStep: `The printer took the start of ${fileName} and has not reported the run since. Observe it with get_machine; don't start another print on this machine until it does.`,
+      };
+    }
+  }
+};
+
 /**
  * What the agent tells the person and does next, for a request awaiting the person or settled:
  * the start outcome in words, so an unconfirmed start is never reported as submitted or started.
@@ -354,7 +417,10 @@ const approvalPrompt = (request: PrintRequest, machine: MachineDirectoryEntry): 
  * @param request - The request as the ledger recorded it.
  * @returns `{ nextStep }`, or nothing while the host is still preparing, uploading or starting.
  */
-const nextStepOf = (request: PrintRequest): Readonly<{ nextStep?: string }> => {
+const nextStepOf = (
+  request: PrintRequest,
+  machine?: MachineDirectoryEntry,
+): Readonly<{ run?: StartedRun; nextStep?: string }> => {
   const { requestId } = request;
   const { fileName } = request.summary;
   switch (request.state) {
@@ -364,13 +430,16 @@ const nextStepOf = (request: PrintRequest): Readonly<{ nextStep?: string }> => {
       };
     }
     case 'started': {
+      return startedNextStep(request, machine);
+    }
+    case 'confirming': {
       return {
-        nextStep: `The printer confirmed the start of ${fileName} and the print is running. Observe it with get_machine or get_print_request.`,
+        nextStep: `Tau sent the start of ${fileName} and is waiting for the printer to confirm it; the printer's own status usually does within a minute. Call get_print_request again shortly. Do not retry or start another print.`,
       };
     }
     case 'unknown': {
       return {
-        nextStep: `The printer did not confirm the start of ${fileName}, so whether it is printing is unknown. Tell the person that, and to check the printer or Reconcile the request in Tau's Print pane. Do not retry or start another print.`,
+        nextStep: `The printer has not confirmed the start of ${fileName} for several minutes, so whether it is printing is unknown. Tell the person to check the printer's screen; Tau keeps watching and updates the request if the printer reports the run. Do not retry or start another print.`,
       };
     }
     case 'rejected':
@@ -487,10 +556,15 @@ const requestPrint = async (
       /* Settled already, by the hand-over or by the Print pane: the ledger's answer is the effective one. */
       const approval =
         request.state === 'denied' ? 'denied' : request.state === 'withdrawn' ? 'cancelled' : prior.resolution.outcome;
-      return asJson({ request, machineName, approval, ...nextStepOf(request) });
+      return asJson({ request, machineName, approval, ...nextStepOf(request, machine) });
     }
     const settled = await settleApproval(client, { requestId: priorRequestId, resolution: prior.resolution, signal });
-    return asJson({ request: settled, machineName, approval: prior.resolution.outcome, ...nextStepOf(settled) });
+    return asJson({
+      request: settled,
+      machineName,
+      approval: prior.resolution.outcome,
+      ...nextStepOf(settled, machine),
+    });
   }
   const providers = await client.listProviders({ signal });
   const provider = providers.find(({ id }) => id === machine.providerId);
@@ -530,7 +604,7 @@ const requestPrint = async (
   if (request.state !== 'awaiting-approval' || invocation.approve === undefined) {
     /* Preflight refused, the retry found a request already past its approval,
      * or no person can answer here: the record and its next step say which. */
-    return asJson({ request, machineName, ...nextStepOf(request), ...reported });
+    return asJson({ request, machineName, ...nextStepOf(request, machine), ...reported });
   }
   const resolution = await invocation.approve({
     key: approvalKey,
@@ -544,7 +618,13 @@ const requestPrint = async (
     },
   });
   const settled = await settleApproval(client, { requestId, resolution, signal });
-  return asJson({ request: settled, machineName, approval: resolution.outcome, ...nextStepOf(settled), ...reported });
+  return asJson({
+    request: settled,
+    machineName,
+    approval: resolution.outcome,
+    ...nextStepOf(settled, machine),
+    ...reported,
+  });
 };
 
 /**
@@ -674,12 +754,30 @@ const invokeMachine = async (
     case 'get_print_request': {
       const { requestId } = inputs.get_print_request.parse(input);
       const request = await findRequest(client, requestId, signal);
-      return asJson({ request, ...nextStepOf(request) });
+      const { entries } = await client.list({ signal });
+      return asJson({
+        request,
+        ...nextStepOf(
+          request,
+          entries.find(({ machineId }) => machineId === request.machineId),
+        ),
+      });
     }
     case 'list_print_requests': {
       const parsed = inputs.list_print_requests.parse(input);
-      const requests = await client.listPrintRequests({ ...parsed, signal });
-      return asJson({ requests: requests.slice(0, 64), total: requests.length });
+      const [requests, { entries }] = await Promise.all([
+        client.listPrintRequests({ ...parsed, signal }),
+        client.list({ signal }),
+      ]);
+      /* A started request names its run's fate, so a finished print is never read as a busy machine. */
+      const listed = requests.slice(0, 64).map((request) => {
+        const run = startedRunOf(
+          request,
+          entries.find(({ machineId }) => machineId === request.machineId),
+        );
+        return run === undefined ? request : { ...request, run };
+      });
+      return asJson({ requests: listed, total: requests.length });
     }
     case 'cancel_print': {
       return cancelPrint(client, invocation, inputs.cancel_print.parse(input));

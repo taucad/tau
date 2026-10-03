@@ -44,4 +44,13 @@ export { handleResolveSkill } from '#rpc/handlers/handle-resolve-skill.js';
 export { handleReadRevisions } from '#rpc/handlers/handle-read-revisions.js';
 export { handleApplyParameterOperation, handleGetParameters } from '#rpc/handlers/handle-parameters.js';
 export { handleWriteTodos } from '#rpc/handlers/handle-write-todos.js';
+export {
+  createAskId,
+  handleAskQuestions,
+  readAskAnswers,
+  recordAsk,
+  settleAsk,
+  waitForAnswers,
+} from '#rpc/handlers/handle-ask-questions.js';
+export type { QuestionRecordFileSystem } from '#rpc/handlers/handle-ask-questions.js';
 export { handleArrangeWorkbench } from '#rpc/handlers/handle-arrange-workbench.js';

@@ -1,4 +1,5 @@
-import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
+import type { ComponentProps, ReactNode } from 'react';
+import { act, render, screen } from '@testing-library/react';
 import type {
   DockviewApi,
   DockviewGroupPanel,
@@ -9,190 +10,331 @@ import type {
 } from 'dockview-react';
 import { mock } from 'vitest-mock-extended';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import { DockviewTabOverflowPicker } from '#components/panes/dockview-tab-overflow-picker.js';
+import type { Mock } from 'vitest';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
-const createPanel = (id: string, path = `${id}.txt`): IDockviewPanel => {
+const mobileState = vi.hoisted(() => ({ current: false }));
+const comboBoxSpy = vi.hoisted(() => vi.fn());
+
+vi.mock('#components/ui/combobox-responsive.js', async () => {
+  const { createElement } = await import('react');
+  return {
+    ComboBoxResponsive: (properties: { readonly children: ReactNode; readonly isNested?: boolean }) => {
+      comboBoxSpy(properties);
+      return createElement(
+        'div',
+        {
+          'data-is-nested': String(properties.isNested ?? false),
+          'data-testid': mobileState.current ? 'drawer-root' : 'popover-root',
+        },
+        properties.children,
+      );
+    },
+  };
+});
+
+const { DockviewTabOverflowPicker } = await import('#components/panes/dockview-tab-overflow-picker.js');
+
+type CapturedComboBoxProperties = {
+  readonly groupedItems: Array<{ readonly name: string; readonly items: IDockviewPanel[] }>;
+  readonly value: IDockviewPanel | undefined;
+  readonly getValue: (panel: IDockviewPanel) => string;
+  readonly renderLabel: (panel: IDockviewPanel, activePanel: IDockviewPanel | undefined) => ReactNode;
+  readonly onSelect: (value: string) => void;
+  readonly title: string;
+  readonly description: string;
+  readonly searchPlaceHolder: string;
+  readonly emptyListMessage: string;
+  readonly popoverProperties: { readonly align: string };
+};
+
+type ObserverRecord = {
+  readonly callback: ResizeObserverCallback;
+  readonly disconnect: Mock<() => void>;
+  readonly observe: Mock<(target: Element) => void>;
+};
+
+const observers: ObserverRecord[] = [];
+const roots: HTMLElement[] = [];
+
+const createPanel = ({
+  id,
+  title,
+  params,
+}: {
+  readonly id: string;
+  readonly title?: string;
+  readonly params?: Record<string, unknown>;
+}): IDockviewPanel => {
   const api = mock<DockviewPanelApi>({ id, setActive: vi.fn() });
-  Object.defineProperty(api, 'title', { value: path.split('/').at(-1) });
+  Object.defineProperty(api, 'title', { value: title });
   const panel = mock<IDockviewPanel>({ id });
-  Object.defineProperties(panel, { api: { value: api }, params: { value: { filePath: path } } });
+  Object.defineProperties(panel, {
+    api: { value: api },
+    params: { value: params },
+  });
   return panel;
 };
 
-const createProperties = (panels: IDockviewPanel[]): IDockviewHeaderActionsProps => ({
+const createProperties = ({
   panels,
-  activePanel: panels[0],
-  group: mock<DockviewGroupPanel>(),
-  api: mock<DockviewGroupPanelApi>(),
-  containerApi: mock<DockviewApi>(),
-  isGroupActive: true,
-  headerPosition: 'top',
-});
+  activePanel = panels[0],
+  clientWidth,
+  scrollWidth,
+}: {
+  readonly panels: IDockviewPanel[];
+  readonly activePanel?: IDockviewPanel;
+  readonly clientWidth: number;
+  readonly scrollWidth: number;
+}): { readonly properties: IDockviewHeaderActionsProps; readonly tabs: HTMLElement } => {
+  const groupElement = document.createElement('div');
+  const tabs = document.createElement('div');
+  tabs.className = 'dv-tabs-container';
+  Object.defineProperties(tabs, {
+    clientWidth: { configurable: true, value: clientWidth },
+    scrollWidth: { configurable: true, value: scrollWidth },
+  });
+  groupElement.append(tabs);
+  document.body.append(groupElement);
+  roots.push(groupElement);
 
-const openWithHover = (): HTMLElement => {
-  fireEvent.pointerEnter(screen.getByRole('button', { name: 'Open tabs' }), { pointerType: 'mouse' });
-  return screen.getByRole('dialog', { name: 'Open tabs' });
+  const group = mock<DockviewGroupPanel>();
+  Object.defineProperty(group, 'element', { value: groupElement });
+
+  return {
+    tabs,
+    properties: {
+      activePanel,
+      panels,
+      group,
+      api: mock<DockviewGroupPanelApi>(),
+      containerApi: mock<DockviewApi>(),
+      isGroupActive: true,
+      headerPosition: 'top',
+    },
+  };
 };
 
-const scrollDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
+const renderPicker = (properties: ComponentProps<typeof DockviewTabOverflowPicker>) =>
+  render(
+    <TooltipProvider>
+      <DockviewTabOverflowPicker {...properties} />
+    </TooltipProvider>,
+  );
+
+const flushMeasurement = (): void => {
+  act(() => {
+    vi.advanceTimersByTime(16);
+  });
+};
+
+const getComboBoxProperties = (): CapturedComboBoxProperties =>
+  comboBoxSpy.mock.lastCall?.[0] as CapturedComboBoxProperties;
 
 beforeEach(() => {
-  Object.defineProperty(Element.prototype, 'scrollIntoView', { configurable: true, value: vi.fn() });
+  vi.useFakeTimers();
+  mobileState.current = false;
+  comboBoxSpy.mockClear();
+  observers.length = 0;
+
+  globalThis.ResizeObserver = class ResizeObserver {
+    public readonly record: ObserverRecord;
+
+    public constructor(callback: ResizeObserverCallback) {
+      this.record = { callback, disconnect: vi.fn(), observe: vi.fn() };
+      observers.push(this.record);
+    }
+
+    public observe(target: Element): void {
+      this.record.observe(target);
+    }
+
+    public unobserve(): void {
+      // No-op: the production hook only needs observe/disconnect.
+    }
+
+    public disconnect(): void {
+      this.record.disconnect();
+    }
+  };
 });
 
 afterEach(() => {
-  if (scrollDescriptor) {
-    Object.defineProperty(Element.prototype, 'scrollIntoView', scrollDescriptor);
-  } else {
-    Reflect.deleteProperty(Element.prototype, 'scrollIntoView');
-  }
-  cleanup();
   vi.useRealTimers();
+  for (const root of roots.splice(0)) {
+    root.remove();
+  }
 });
 
 describe('DockviewTabOverflowPicker', () => {
-  it('should show the count even when tabs fit and disappear when the group is empty', () => {
-    const panels = Array.from({ length: 12 }, (_, index) => createPanel(`tab-${index}`));
-    const properties = createProperties(panels);
-    const view = render(<DockviewTabOverflowPicker {...properties} />);
-    const trigger = screen.getByRole('button', { name: 'Open tabs' });
-    expect(trigger).toHaveTextContent('9+');
-    expect(trigger).toHaveAttribute('aria-description', '12 open tabs in this pane');
-    expect(trigger).toHaveClass('size-7');
-    expect(trigger).not.toHaveClass('dv-pane-action');
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+  it('stays absent while all tabs fit', () => {
+    const panel = createPanel({ id: 'one', title: 'One' });
+    const { properties } = createProperties({ panels: [panel], clientWidth: 300, scrollWidth: 300 });
 
-    view.rerender(<DockviewTabOverflowPicker {...properties} panels={panels.slice(0, 2)} />);
-    expect(trigger).toHaveTextContent('2');
-    view.rerender(<DockviewTabOverflowPicker {...properties} panels={[]} activePanel={undefined} />);
+    renderPicker(properties);
+    flushMeasurement();
+
     expect(screen.queryByRole('button', { name: 'Open tabs' })).not.toBeInTheDocument();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(comboBoxSpy).not.toHaveBeenCalled();
   });
 
-  it('should open on hover without stealing focus and retain ordered paths and active selection', () => {
-    const first = createPanel('first', 'src/main.txt');
-    const second = createPanel('second', 'docs/main.txt');
-    render(
-      <>
-        <button type='button'>Editor</button>
-        <DockviewTabOverflowPicker {...createProperties([first, second])} />
-      </>,
-    );
-    screen.getByRole('button', { name: 'Editor' }).focus();
-    const menu = openWithHover();
-    expect(screen.getByRole('button', { name: 'Editor' })).toHaveFocus();
-    const rows = within(menu).getAllByRole('option');
-    expect(rows[0]).toHaveTextContent('main.txtsrc');
-    expect(rows[0]).toHaveAttribute('title', 'src/main.txt');
-    expect(rows[0]).toHaveAttribute('aria-description', 'src/main.txt');
-    expect(rows[0]).toHaveAttribute('aria-current', 'page');
-    expect(rows[1]).toHaveTextContent('main.txtdocs');
-    expect(rows[1]).toHaveAttribute('title', 'docs/main.txt');
-    expect(within(menu).getByLabelText('Active tab')).toBeInTheDocument();
-    fireEvent.click(rows[1]!);
-    expect(second.api.setActive).toHaveBeenCalledOnce();
-    expect(first.api.setActive).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-  });
+  it('renders a named 28px action visible at rest and exposes every group panel with searchable identity', () => {
+    const source = createPanel({ id: 'file-1', title: 'main.ts', params: { filePath: 'src/main.ts' } });
+    const viewer = createPanel({ id: 'view-2', title: 'assembly.step', params: { entryPath: 'models/assembly.step' } });
+    const fallback = createPanel({ id: 'panel-without-title' });
+    const { properties } = createProperties({
+      panels: [source, viewer, fallback],
+      activePanel: viewer,
+      clientWidth: 200,
+      scrollWidth: 480,
+    });
 
-  it('should keep unique titles single-line and reveal folders only for duplicate titles', () => {
-    const panels = [createPanel('first', 'models/a/main.py'), createPanel('second', 'models/b/main.py')];
-    const properties = createProperties(panels);
-    const view = render(<DockviewTabOverflowPicker {...properties} />);
-    openWithHover();
-    expect(screen.getAllByRole('option')[0]).toHaveTextContent('main.pymodels/a');
-    view.rerender(<DockviewTabOverflowPicker {...properties} panels={[panels[0]!]} />);
-    const row = screen.getByRole('option');
-    expect(row).toHaveTextContent(/^main.py$/);
-    expect(row).toHaveAttribute('title', 'models/a/main.py');
-    expect(row).toHaveAttribute('aria-description', 'models/a/main.py');
-  });
+    renderPicker(properties);
+    flushMeasurement();
 
-  it('should keep the hover menu reachable across the portal gap and close after leaving it', () => {
-    vi.useFakeTimers();
-    render(<DockviewTabOverflowPicker {...createProperties([createPanel('one')])} />);
     const trigger = screen.getByRole('button', { name: 'Open tabs' });
-    const menu = openWithHover();
-    fireEvent.pointerLeave(trigger);
-    act(() => {
-      vi.advanceTimersByTime(100);
+    expect(trigger).toHaveClass('size-7');
+    // Overflowed tabs need a route visible at rest, not the pane actions' hover reveal.
+    expect(trigger).not.toHaveClass('dv-pane-action');
+    const comboBox = getComboBoxProperties();
+    expect(comboBox.groupedItems).toEqual([{ name: 'Open tabs', items: [source, viewer, fallback] }]);
+    expect(comboBox.value).toBe(viewer);
+    expect(comboBox.getValue(source)).toBe('main.ts src/main.ts file-1');
+    expect(comboBox.getValue(viewer)).toBe('assembly.step models/assembly.step view-2');
+    expect(comboBox.getValue(fallback)).toBe('panel-without-title panel-without-title');
+    expect(comboBox).toMatchObject({
+      title: 'Open tabs',
+      description: 'Search and activate an open tab in this pane.',
+      searchPlaceHolder: 'Search open tabs…',
+      emptyListMessage: 'No open tabs found.',
+      popoverProperties: { align: 'end' },
     });
-    fireEvent.pointerEnter(menu);
-    act(() => {
-      vi.advanceTimersByTime(150);
-    });
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    fireEvent.pointerLeave(menu);
-    act(() => {
-      vi.advanceTimersByTime(150);
-    });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+
+    render(<>{comboBox.renderLabel(viewer, viewer)}</>);
+    expect(screen.getByText('models/assembly.step')).toBeInTheDocument();
+    expect(screen.getByLabelText('Active tab')).toBeInTheDocument();
   });
 
-  it('should keep a click-opened menu open until explicitly dismissed', () => {
-    vi.useFakeTimers();
-    render(<DockviewTabOverflowPicker {...createProperties([createPanel('one')])} />);
-    const trigger = screen.getByRole('button', { name: 'Open tabs' });
-    const menu = openWithHover();
-    fireEvent.click(trigger);
-    fireEvent.pointerLeave(trigger);
-    fireEvent.pointerLeave(menu);
-    act(() => {
-      vi.advanceTimersByTime(150);
+  it('uses the same custom and fallback icons as the owning tab renderer', () => {
+    const utility = createPanel({ id: 'parameters', title: 'Parameters' });
+    const viewer = createPanel({ id: 'viewer', title: 'Model' });
+    const { properties } = createProperties({
+      panels: [utility, viewer],
+      activePanel: viewer,
+      clientWidth: 100,
+      scrollWidth: 300,
     });
-    expect(screen.getByRole('dialog')).toBeInTheDocument();
-    fireEvent.keyDown(screen.getByRole('dialog'), { key: 'Escape' });
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    act(() => {
-      vi.advanceTimersByTime(0);
+
+    renderPicker({
+      ...properties,
+      leadingIcon: 'viewer',
+      getIcon: (panel) => (panel.api.id === utility.api.id ? <span data-testid='parameters-tab-icon' /> : undefined),
     });
-    expect(trigger).toHaveFocus();
+    flushMeasurement();
+
+    const comboBox = getComboBoxProperties();
+    const utilityLabel = render(<>{comboBox.renderLabel(utility, viewer)}</>);
+    expect(screen.getByTestId('parameters-tab-icon')).toBeInTheDocument();
+    utilityLabel.unmount();
+
+    const viewerLabel = render(<>{comboBox.renderLabel(viewer, viewer)}</>);
+    expect(viewerLabel.container.querySelector('svg[aria-hidden=true]')).toHaveClass('size-3', 'shrink-0');
   });
 
-  it('should reuse the custom utility icons and viewer fallback from the tab renderer', () => {
-    const utility = createPanel('parameters');
-    const viewer = createPanel('viewer');
-    render(
-      <DockviewTabOverflowPicker
-        {...createProperties([utility, viewer])}
-        leadingIcon='viewer'
-        getIcon={(panel) => (panel.api.id === utility.api.id ? <span aria-label='Parameters icon' /> : undefined)}
-      />,
-    );
-    const menu = openWithHover();
-    expect(within(menu).getByLabelText('Parameters icon')).toBeInTheDocument();
-    expect(within(menu).getAllByRole('option')[1]).toHaveTextContent('viewer.txt');
-  });
+  it('activates only the selected panel', () => {
+    const first = createPanel({ id: 'first', title: 'First' });
+    const second = createPanel({ id: 'second', title: 'Second' });
+    const { properties } = createProperties({ panels: [first, second], clientWidth: 100, scrollWidth: 300 });
 
-  it('should filter duplicate titles by path and activate a result with the keyboard', async () => {
-    const first = createPanel('first', 'src/main.txt');
-    const second = createPanel('second', 'docs/main.txt');
-    render(<DockviewTabOverflowPicker {...createProperties([first, second])} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Open tabs' }));
-    const input = screen.getByRole('combobox');
-    await waitFor(() => {
-      expect(input).toHaveFocus();
-    });
-    fireEvent.change(input, { target: { value: 'docs/main' } });
-    await waitFor(() => {
-      expect(screen.getAllByRole('option')).toHaveLength(1);
-    });
-    expect(screen.getByRole('option')).toHaveTextContent('main.txtdocs');
-    expect(screen.getByRole('option')).toHaveAttribute('aria-description', 'docs/main.txt');
-    fireEvent.keyDown(input, { key: 'Enter' });
-    expect(second.api.setActive).toHaveBeenCalledOnce();
+    renderPicker(properties);
+    flushMeasurement();
+    const comboBox = getComboBoxProperties();
+    comboBox.onSelect(comboBox.getValue(second));
+
     expect(first.api.setActive).not.toHaveBeenCalled();
-    expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
+    expect(second.api.setActive).toHaveBeenCalledOnce();
   });
 
-  it('should cancel a pending hover dismissal on unmount', () => {
-    vi.useFakeTimers();
-    const view = render(<DockviewTabOverflowPicker {...createProperties([createPanel('one')])} />);
-    openWithHover();
-    fireEvent.pointerLeave(screen.getByRole('button', { name: 'Open tabs' }));
-    const clearTimer = vi.spyOn(globalThis, 'clearTimeout');
+  it('remeasures when the group panel count changes', () => {
+    const first = createPanel({ id: 'first', title: 'First' });
+    const second = createPanel({ id: 'second', title: 'Second' });
+    const { properties, tabs } = createProperties({ panels: [first], clientWidth: 300, scrollWidth: 300 });
+    const view = renderPicker(properties);
+    flushMeasurement();
+    expect(screen.queryByRole('button', { name: 'Open tabs' })).not.toBeInTheDocument();
+
+    Object.defineProperty(tabs, 'scrollWidth', { configurable: true, value: 500 });
+    view.rerender(
+      <TooltipProvider>
+        <DockviewTabOverflowPicker {...properties} panels={[first, second]} />
+      </TooltipProvider>,
+    );
+    flushMeasurement();
+
+    expect(screen.getByRole('button', { name: 'Open tabs' })).toBeInTheDocument();
+    expect(observers).toHaveLength(2);
+    expect(observers[0]?.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it('clears stale overflow when the last panel closes', () => {
+    const panel = createPanel({ id: 'one', title: 'One' });
+    const { properties } = createProperties({ panels: [panel], clientWidth: 100, scrollWidth: 300 });
+    const view = renderPicker(properties);
+    flushMeasurement();
+    expect(screen.getByRole('button', { name: 'Open tabs' })).toBeInTheDocument();
+
+    view.rerender(
+      <TooltipProvider>
+        <DockviewTabOverflowPicker {...properties} activePanel={undefined} panels={[]} />
+      </TooltipProvider>,
+    );
+    flushMeasurement();
+
+    expect(screen.queryByRole('button', { name: 'Open tabs' })).not.toBeInTheDocument();
+  });
+
+  it('responds to tab-strip resize and disposes its observer', () => {
+    const panel = createPanel({ id: 'one', title: 'One' });
+    const { properties, tabs } = createProperties({ panels: [panel], clientWidth: 100, scrollWidth: 300 });
+    const view = renderPicker(properties);
+    flushMeasurement();
+    expect(screen.getByRole('button', { name: 'Open tabs' })).toBeInTheDocument();
+
+    Object.defineProperty(tabs, 'scrollWidth', { configurable: true, value: 100 });
+    act(() => {
+      observers[0]?.callback([], {} as ResizeObserver);
+    });
+    flushMeasurement();
+    expect(screen.queryByRole('button', { name: 'Open tabs' })).not.toBeInTheDocument();
+
     view.unmount();
-    expect(clearTimer).toHaveBeenCalled();
-    clearTimer.mockRestore();
+    expect(observers[0]?.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it('cancels a pending post-layout measurement when unmounted', () => {
+    const cancelFrame = vi.spyOn(globalThis, 'cancelAnimationFrame');
+    const panel = createPanel({ id: 'one', title: 'One' });
+    const { properties } = createProperties({ panels: [panel], clientWidth: 100, scrollWidth: 300 });
+
+    const view = renderPicker(properties);
+    view.unmount();
+
+    expect(cancelFrame).toHaveBeenCalledOnce();
+    expect(observers[0]?.disconnect).toHaveBeenCalledOnce();
+  });
+
+  it('uses the responsive combobox as a desktop popover and standalone mobile drawer', () => {
+    const panel = createPanel({ id: 'one', title: 'One' });
+    const desktop = createProperties({ panels: [panel], clientWidth: 100, scrollWidth: 300 });
+    const view = renderPicker(desktop.properties);
+    flushMeasurement();
+    expect(screen.getByTestId('popover-root')).toHaveAttribute('data-is-nested', 'false');
+
+    view.unmount();
+    mobileState.current = true;
+    const mobile = createProperties({ panels: [panel], clientWidth: 100, scrollWidth: 300 });
+    renderPicker(mobile.properties);
+    flushMeasurement();
+    expect(screen.getByTestId('drawer-root')).toHaveAttribute('data-is-nested', 'false');
   });
 });

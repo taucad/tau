@@ -1,12 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import type { IDockviewHeaderActionsProps, IDockviewPanel } from 'dockview-react';
-import { Check, Square } from 'lucide-react';
+import { Check, ChevronDown } from 'lucide-react';
 import { DockviewTabIcon } from '#components/panes/dockview-tab.js';
 import type { DockviewTabIconRenderer, DockviewTabProps } from '#components/panes/dockview-tab.js';
+import { ComboBoxResponsive } from '#components/ui/combobox-responsive.js';
 import { PaneButton } from '#components/ui/pane-button.js';
-import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
-import { Command, CommandEmpty, CommandInput, CommandItem, CommandList } from '@taucad/ui/components/command';
-import { menuContentVariants, menuLabelVariants } from '@taucad/ui/components/menu.variants';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 
 export type DockviewTabOverflowPickerProperties = IDockviewHeaderActionsProps & {
   readonly getIcon?: DockviewTabIconRenderer;
@@ -26,174 +25,106 @@ const getPanelPath = (panel: IDockviewPanel): string | undefined => {
 
 const getPanelTitle = (panel: IDockviewPanel): string => panel.api.title ?? panel.id;
 
+const getPanelSearchValue = (panel: IDockviewPanel): string =>
+  [getPanelTitle(panel), getPanelPath(panel), panel.id].filter(Boolean).join(' ');
+
 const renderPanelLabel = (
   panel: IDockviewPanel,
   activePanel: IDockviewPanel | undefined,
-  iconOptions: Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'> & { readonly pathHint?: string },
+  iconOptions: Pick<DockviewTabOverflowPickerProperties, 'getIcon' | 'leadingIcon'>,
 ): React.JSX.Element => {
   const title = getPanelTitle(panel);
+  const path = getPanelPath(panel);
 
   return (
     <span className='flex min-w-0 flex-1 items-center gap-2'>
       <DockviewTabIcon title={title} leadingIcon={iconOptions.leadingIcon} icon={iconOptions.getIcon?.(panel)} />
-      <span className='min-w-0 flex-1 truncate'>{title}</span>
-      {iconOptions.pathHint ? (
-        <span className='max-w-1/2 truncate text-xs text-muted-foreground'>{iconOptions.pathHint}</span>
-      ) : null}
+      <span className='flex min-w-0 flex-1 flex-col'>
+        <span className='truncate'>{title}</span>
+        {path && path !== title ? <span className='truncate text-xs text-muted-foreground'>{path}</span> : null}
+      </span>
       {activePanel?.id === panel.id ? <Check aria-label='Active tab' className='size-3.5 shrink-0' /> : null}
     </span>
   );
+};
+
+const useTabsOverflow = ({
+  group,
+  panelCount,
+}: {
+  readonly group: IDockviewHeaderActionsProps['group'];
+  readonly panelCount: number;
+}): boolean => {
+  const [isOverflowing, setIsOverflowing] = useState(false);
+
+  useEffect(() => {
+    const tabs = group.element.querySelector<HTMLElement>('.dv-tabs-container');
+    if (!tabs) {
+      return;
+    }
+
+    let frame: number | undefined;
+    const measure = (): void => {
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame);
+      }
+      frame = requestAnimationFrame(() => {
+        frame = undefined;
+        setIsOverflowing(panelCount > 0 && tabs.scrollWidth > tabs.clientWidth + 1);
+      });
+    };
+
+    const observer = new ResizeObserver(measure);
+    observer.observe(tabs);
+    measure();
+
+    return () => {
+      if (frame !== undefined) {
+        cancelAnimationFrame(frame);
+      }
+      observer.disconnect();
+    };
+  }, [group, panelCount]);
+
+  return isOverflowing;
 };
 
 export function DockviewTabOverflowPicker(
   properties: DockviewTabOverflowPickerProperties,
 ): React.JSX.Element | undefined {
   const { activePanel, getIcon, leadingIcon, panels } = properties;
-  const [isOpen, setIsOpen] = useState(false);
-  const isHoverOpen = useRef(false);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const isOverflowing = useTabsOverflow({ group: properties.group, panelCount: panels.length });
+  const groupedItems = useMemo(() => [{ name: 'Open tabs', items: panels }], [panels]);
 
-  const cancelClose = (): void => {
-    clearTimeout(closeTimer.current);
-    closeTimer.current = undefined;
-  };
-
-  const scheduleClose = (): void => {
-    cancelClose();
-    if (isHoverOpen.current) {
-      // Milliseconds: allow the pointer to cross the gap between the button and portal.
-      closeTimer.current = setTimeout(() => {
-        setIsOpen(false);
-      }, 150);
-    }
-  };
-
-  useEffect(
-    () => () => {
-      clearTimeout(closeTimer.current);
-    },
-    [],
-  );
-
-  if (panels.length === 0) {
+  if (!isOverflowing) {
     return undefined;
   }
 
-  const titleCounts = new Map<string, number>();
-  for (const panel of panels) {
-    const title = getPanelTitle(panel);
-    titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
-  }
-
   return (
-    <Popover
-      modal={false}
-      open={isOpen}
-      onOpenChange={(nextOpen) => {
-        cancelClose();
-        setIsOpen(nextOpen);
-      }}
-    >
-      <PopoverTrigger asChild>
-        <PaneButton
-          aria-label='Open tabs'
-          aria-description={`${panels.length} open tabs in this pane`}
-          className='relative'
-          onPointerEnter={(event) => {
-            if (event.pointerType === 'touch') {
-              return;
-            }
-            cancelClose();
-            if (!isOpen) {
-              isHoverOpen.current = true;
-              setIsOpen(true);
-            }
-          }}
-          onPointerLeave={scheduleClose}
-          onClick={(event) => {
-            if (isOpen && isHoverOpen.current && event.button === 0) {
-              // A click after hover keeps the already-visible menu open.
-              event.preventDefault();
-            }
-            isHoverOpen.current = false;
-            cancelClose();
-          }}
-          onKeyDown={() => {
-            isHoverOpen.current = false;
-            cancelClose();
-          }}
-        >
-          <Square aria-hidden className='size-5' />
-          <span aria-hidden className='absolute text-xs leading-none tabular-nums'>
-            {panels.length > 9 ? '9+' : panels.length}
-          </span>
-        </PaneButton>
-      </PopoverTrigger>
-      <PopoverContent
-        aria-label='Open tabs'
-        align='end'
-        side='bottom'
-        collisionPadding={8}
-        className={menuContentVariants({
-          className: 'h-(--radix-popover-content-available-height) w-80 max-w-[calc(100vw-1rem)] overflow-hidden',
-        })}
-        onPointerDown={() => {
-          isHoverOpen.current = false;
-          cancelClose();
-        }}
-        onKeyDown={() => {
-          isHoverOpen.current = false;
-          cancelClose();
-        }}
-        onPointerEnter={cancelClose}
-        onPointerLeave={scheduleClose}
-        onOpenAutoFocus={(event) => {
-          if (isHoverOpen.current) {
-            event.preventDefault();
-          }
-        }}
-        onCloseAutoFocus={(event) => {
-          if (isHoverOpen.current) {
-            event.preventDefault();
-          }
+    <Tooltip>
+      <ComboBoxResponsive<IDockviewPanel>
+        groupedItems={groupedItems}
+        value={activePanel}
+        getValue={getPanelSearchValue}
+        renderLabel={(panel, selectedPanel) => renderPanelLabel(panel, selectedPanel, { getIcon, leadingIcon })}
+        className='w-72'
+        popoverProperties={{ align: 'end' }}
+        searchPlaceHolder='Search open tabs…'
+        emptyListMessage='No open tabs found.'
+        title='Open tabs'
+        description='Search and activate an open tab in this pane.'
+        onSelect={(value) => {
+          panels.find((panel) => getPanelSearchValue(panel) === value)?.api.setActive();
         }}
       >
-        <Command label='Open tabs' defaultValue={activePanel?.id} className='bg-transparent'>
-          <div className={menuLabelVariants({ className: 'flex shrink-0 items-center justify-between font-normal' })}>
-            <span>Open tabs</span>
-            <span className='tabular-nums'>{panels.length}</span>
-          </div>
-          <CommandInput aria-label='Search open tabs' placeholder='Search open tabs…' />
-          <CommandList label='Open tabs' className='max-h-none min-h-0 flex-1 overscroll-contain'>
-            <CommandEmpty className='border-none'>No open tabs found.</CommandEmpty>
-            {panels.map((panel) => (
-              <CommandItem
-                key={panel.id}
-                value={panel.id}
-                keywords={[getPanelTitle(panel), getPanelPath(panel) ?? '']}
-                title={getPanelPath(panel) ?? getPanelTitle(panel)}
-                aria-description={getPanelPath(panel)}
-                aria-current={activePanel?.id === panel.id ? 'page' : undefined}
-                className='min-h-7 shrink-0 aria-current:bg-menu-highlight'
-                onSelect={() => {
-                  panel.api.setActive();
-                  cancelClose();
-                  setIsOpen(false);
-                }}
-              >
-                {renderPanelLabel(panel, activePanel, {
-                  getIcon,
-                  leadingIcon,
-                  pathHint:
-                    (titleCounts.get(getPanelTitle(panel)) ?? 0) > 1
-                      ? getPanelPath(panel)?.split('/').slice(0, -1).join('/')
-                      : undefined,
-                })}
-              </CommandItem>
-            ))}
-          </CommandList>
-        </Command>
-      </PopoverContent>
-    </Popover>
+        <TooltipTrigger asChild>
+          {/* Not a hover-revealed pane action: while tabs overflow, this is their visible route. */}
+          <PaneButton aria-label='Open tabs'>
+            <ChevronDown aria-hidden className='size-3.5' />
+          </PaneButton>
+        </TooltipTrigger>
+      </ComboBoxResponsive>
+      <TooltipContent>Open tabs</TooltipContent>
+    </Tooltip>
   );
 }

@@ -12,7 +12,8 @@
 
 import { isOrphaned } from '#host/chat-run.machine.js';
 import { createTauAgentHost } from '#host/tau-agent-host.js';
-import type { CreateTauAgentHostOptions, ExternalAgentPort, TauAgentHost } from '#host/tau-agent-host.js';
+import type { ExternalAgentPort } from '#host/external-agent.js';
+import type { CreateTauAgentHostOptions, TauAgentHost } from '#host/tau-agent-host.js';
 import { externalTurnOf, latestTurnId } from '#host/run-history.js';
 import { createPortableId, transportFailureOfRun } from '#harness/session-record.js';
 import { createEventLogAppender } from '#log/event-log-appender.js';

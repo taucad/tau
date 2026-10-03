@@ -1,0 +1,60 @@
+# Deploy Fly's log shipper (`infra/fly-log-shipper`, launch gate OBS-5).
+#
+# Manual only, in the `production` environment (admits `main` only, and its
+# reviewer approves the run). The shipper is org-wide, so one deploy covers
+# staging and production. Its secrets are written by tau-cloud
+# `stacks/observability`; this workflow never reads or prints them, and it
+# fetches no logs, because this repository's run logs are public.
+#
+# One-time setup by an operator: `fly apps create tau-log-shipper`, then
+# `fly tokens create deploy -a tau-log-shipper` stored as the environment
+# secret FLY_LOG_SHIPPER_DEPLOY_TOKEN (the same token tau-cloud uses to write
+# the app's secrets).
+
+name: Deploy Log Shipper
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-log-shipper
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy tau-log-shipper
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    environment:
+      name: production
+      deployment: false
+    env:
+      FLY_API_TOKEN: ${{ secrets.FLY_LOG_SHIPPER_DEPLOY_TOKEN }}
+      FLY_APP: tau-log-shipper
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: infra/fly-log-shipper
+
+      - name: Setup Fly.io CLI
+        uses: superfly/flyctl-actions/setup-flyctl@ed8efb33836e8b2096c7fd3ba1c8afe303ebbff1 # master
+
+      - name: Require the shipper's secrets
+        run: |
+          names="$(flyctl secrets list --app "$FLY_APP" --json | jq -r '.[] | (.Name // .name)')"
+          missing=0
+          for key in ORG ACCESS_TOKEN LOKI_URL LOKI_USERNAME LOKI_PASSWORD; do
+            grep -qx "$key" <<<"$names" || { echo "::error::Missing Fly secret $key on $FLY_APP; apply tau-cloud stacks/observability first."; missing=1; }
+          done
+          exit "$missing"
+
+      - name: Deploy
+        run: flyctl deploy --config infra/fly-log-shipper/fly.toml --app "$FLY_APP" --ha=false --yes
+
+      - name: Machine state
+        run: flyctl machine list --app "$FLY_APP"

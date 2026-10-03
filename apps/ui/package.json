@@ -16,6 +16,7 @@
     "@better-auth/api-key": "catalog:",
     "@react-router/express": "catalog:",
     "@react-router/node": "catalog:",
+    "@sentry/react": "catalog:",
     "@tanstack/react-pacer": "catalog:",
     "@tanstack/react-query": "catalog:",
     "@taucad/agent-host": "workspace:*",

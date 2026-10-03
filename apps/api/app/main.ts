@@ -1,4 +1,5 @@
 import '#telemetry/otel.js'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- OTEL SDK must initialize before any other module
+import '#telemetry/sentry.js'; // oxlint-disable-line eslint-plugin-import/no-unassigned-import -- error reporting must initialize before the app can throw
 
 import { Logger, VersioningType } from '@nestjs/common';
 import { NestFactory } from '@nestjs/core';

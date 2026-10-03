@@ -35,6 +35,11 @@ allowBuilds:
   # Downloads the platform vale binary at install time; required for prose linting.
   '@vvago/vale': true
 catalog:
+  # Error tracking (launch gate OBS-7). Exact pins, one @sentry/core across the
+  # API, UI and desktop: @sentry/electron 7.20.0 bundles @sentry/node 10.75.0.
+  '@sentry/electron': 7.20.0
+  '@sentry/node': 10.75.0
+  '@sentry/react': 10.75.0
   ajv: ^8.20.0
   '@rolldown/browser': 1.2.3
   # ACP client + the two vendor-co-authored registry adapters, exact pins by

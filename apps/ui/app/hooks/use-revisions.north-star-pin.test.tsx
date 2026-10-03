@@ -24,6 +24,11 @@ vi.mock('#hooks/use-revision-status.js', async () => {
   return harness.revisionStatusMock();
 });
 
+// No chat projection has settled a turn: every ordinal must come from the graph alone.
+vi.mock('#hooks/chat-session-store-provider.js', () => ({
+  useChatSessionStore: () => ({ observedChatIdsOf: () => [], subscribeMembership: () => () => undefined }),
+}));
+
 const chatsRef: { current: readonly Chat[] } = { current: [] };
 vi.mock('#hooks/use-chats.js', () => ({ useChats: () => ({ chats: chatsRef.current }) }));
 

@@ -35,6 +35,12 @@ const runHook = async (
     });
     const stderr: Array<Uint8Array<ArrayBuffer>> = [];
     child.stderr.on('data', (chunk: Uint8Array<ArrayBuffer>) => stderr.push(chunk));
+    child.stdin.on('error', (error: NodeJS.ErrnoException) => {
+      /* A refusing hook can exit before it reads stdin; its exit code and stderr carry the verdict. */
+      if (error.code !== 'EPIPE') {
+        throw error;
+      }
+    });
     child.stdin.end(
       (typeof ref === 'string' ? [ref] : ref)
         /* A bare name is a ref *creation*; a caller that needs a particular

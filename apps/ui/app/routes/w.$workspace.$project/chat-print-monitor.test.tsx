@@ -10,7 +10,12 @@ import type {
   MachineRunSnapshot,
   PrintRequest,
 } from '@taucad/runtime/machine';
-import { MonitorSection, describeRun, describeStillFailure } from '#routes/w.$workspace.$project/chat-print-monitor.js';
+import {
+  MonitorSection,
+  describeRun,
+  describeStillFailure,
+  runFileName,
+} from '#routes/w.$workspace.$project/chat-print-monitor.js';
 import {
   agentRequest,
   artifact,
@@ -32,11 +37,8 @@ const observing = (
   return { ...machine, snapshot: { ...snapshot, ...extra, run } };
 };
 
-const renderMonitor = (
-  machine: MachineDirectoryEntry,
-  requests: readonly PrintRequest[] = [],
-  client: MachineClient = mock<MachineClient>(),
-) => render(<MonitorSection client={client} entry={machine} manifest={manifest} requests={requests} />);
+const renderMonitor = (machine: MachineDirectoryEntry, client: MachineClient = mock<MachineClient>()) =>
+  render(<MonitorSection client={client} entry={machine} manifest={manifest} />);
 
 /** The value beside a label, as the person reads the row, or nothing without the row. */
 const rowValue = (label: string): string | undefined =>
@@ -72,6 +74,7 @@ const unconfirmedStart = agentRequest({
 });
 
 describe('MonitorSection', () => {
+  // The run block names the run by this file; Monitor no longer repeats it.
   describe('run file', () => {
     const member = '/data/Metadata/plate_1.gcode';
 
@@ -138,11 +141,8 @@ describe('MonitorSection', () => {
         requests: [],
         fileName: undefined,
       },
-    ])('should show $scenario', ({ run, activeRunId, requests, fileName }) => {
-      renderMonitor(observing(run, activeRunId === undefined ? {} : { activeRunId }), requests);
-
-      expect(rowValue('File')).toBe(fileName);
-      expect(screen.queryByText(member)).not.toBeInTheDocument();
+    ])('should name $scenario', ({ run, activeRunId, requests, fileName }) => {
+      expect(runFileName(observing(run, activeRunId === undefined ? {} : { activeRunId }), requests)).toBe(fileName);
     });
   });
 
@@ -243,7 +243,7 @@ describe('MonitorSection', () => {
         throw new Error('MACHINE_STILL_FFMPEG_MISSING');
       });
       const user = userEvent.setup();
-      renderMonitor(observing({ state: 'printing' }), [], mock<MachineClient>({ captureStill }));
+      renderMonitor(observing({ state: 'printing' }), mock<MachineClient>({ captureStill }));
 
       await user.click(screen.getByRole('button', { name: 'Capture still' }));
 

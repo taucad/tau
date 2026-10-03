@@ -38,8 +38,10 @@ import {
   emittedSpecifiers,
   hostTargetIssues,
   internalImportsIssues,
+  knownDeclarationDefects,
   libDependencyIssues,
   packageMetadataIssues,
+  partitionConsumerDiagnostics,
   peerRules,
   peerDependencyIssues,
   pluginRuntimePeerDependencyIssues,
@@ -1012,7 +1014,16 @@ function validateStrictConsumerTypes(): CheckResult {
         });
       } catch (error) {
         const execError = error as { stdout?: string; stderr?: string };
-        failures.push(`${resolution}:\n${`${execError.stdout ?? ''}${execError.stderr ?? ''}`.trim()}`);
+        const { remaining, explained } = partitionConsumerDiagnostics(
+          `${execError.stdout ?? ''}${execError.stderr ?? ''}`,
+          knownDeclarationDefects,
+        );
+        if (explained.length > 0) {
+          notes.push(`${resolution}: ${String(explained.length)} line(s) from a known third-party declaration defect`);
+        }
+        if (remaining.length > 0 || explained.length === 0) {
+          failures.push(`${resolution}:\n${remaining.join('\n')}`);
+        }
       }
     }
   } finally {

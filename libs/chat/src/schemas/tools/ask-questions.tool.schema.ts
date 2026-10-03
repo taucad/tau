@@ -19,8 +19,8 @@ export const askQuestionsQuestionSchema = z.object({
     .string()
     .min(1)
     .max(64)
-    .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u, 'Use a lowercase slug such as "wall-material".')
-    .describe('Lowercase slug that keys the answer, e.g. "wall-material".'),
+    // ponytail: only a key in the record, so any short id is accepted; a strict slug cost models a retry.
+    .describe('A short id that keys the answer, e.g. "wall-material".'),
   header: z.string().min(1).max(16).describe('A 1–2 word topic shown above the question, e.g. "Material".'),
   question: z
     .string()

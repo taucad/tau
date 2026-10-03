@@ -338,8 +338,9 @@ describe('the external tool-call renderer', () => {
     for (const name of tauToolKinds.keys()) {
       expect(toolNames, `kind for unknown tool ${name}`).toContain(name);
     }
-    // The external card, not the red unknown-part fallback, owns every other call.
-    expect(chatMessageSource).toContain('<ChatMessageToolExternal key={part.toolCallId} part={part} />');
+    // The external card (or its question card, for an agent's own question tool), not the red
+    // unknown-part fallback, owns every other call.
+    expect(chatMessageSource).toContain('<ChatMessageToolExternalOrQuestion key={part.toolCallId} part={part} />');
   });
 
   it('renders the Codex "List files" pair as a titled card holding the files it found', async () => {

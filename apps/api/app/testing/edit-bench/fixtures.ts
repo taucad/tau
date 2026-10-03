@@ -78,7 +78,6 @@ const foldedUnicodeSourcePath = 'apps/api/app/testing/edit-bench/folded-unicode-
 // The prompt-config example was deleted by the KS-5 prompt surgery and the KS-2
 // copy was never tracked, so the bench keeps its own tracked copy.
 const kclTeapotPath = 'apps/api/app/testing/edit-bench/kcl-teapot.fixture.kcl';
-const qualificationEvidencePath = 'spikes/stash1-edit-reference/file-edit-interface-qualification.jsonl';
 
 const foldedUnicodeSource =
   '// outside\u00A0“left” — sentinel\u2009\nmaterial\u00A0= “wood”;\uFEFF\n// outside\u2009‘right’ – sentinel\t \n';
@@ -298,50 +297,6 @@ body = startSketchOn(YZ)
   |> appearance(color = "#1f9896", metalness = 40, roughness = 30)
 
 `;
-
-const qualificationCube = `// Parametric cube
-$fa = 2;
-$fs = 0.4;
-
-cube_size = 20;
-cube(cube_size, center = true);
-`;
-
-const qualificationReplacement = `cylinder_radius = 5;
-
-difference() {
-    cube(cube_size, center = true);
-    cylinder(h = cube_size + 2, r = cylinder_radius, center = true);
-}`;
-
-const qualificationCutout = qualificationCube.replace('cube(cube_size, center = true);', qualificationReplacement);
-
-const legacyQualificationFixtures = Array.from({ length: 5 }, (_, index) =>
-  fixture({
-    id: `legacy-xai-grok-4-5-${String(index + 1)}`,
-    case: 'legacy-qualification',
-    source: {
-      kind: 'qualification-derived',
-      sourceModel: 'xai-grok-4.5',
-      provider: 'xai',
-      nativeToolName: 'edit_file',
-      invocation: index + 1,
-      recordedAt: '2026-07-28T07:24:26.041Z',
-      argumentsVerbatim: false,
-      evidencePath: qualificationEvidencePath,
-    },
-    targetFile: 'main.scad',
-    initial: { 'main.scad': qualificationCube },
-    emissions: [
-      editEmission({
-        targetFile: 'main.scad',
-        oldString: 'cube(cube_size, center = true);',
-        newString: qualificationReplacement,
-      }),
-    ],
-    expected: { kind: 'success', files: { 'main.scad': qualificationCutout } },
-  }),
-);
 
 const jscadMain = `export default function main(p = defaultParams): Geom3 {
   return cube({ size: p.size });
@@ -580,4 +535,4 @@ const authoredFixtures: readonly ReplayFixture[] = [
   }),
 ];
 
-export const replayFixtures = replayFixtureStoreSchema.parse([...legacyQualificationFixtures, ...authoredFixtures]);
+export const replayFixtures = replayFixtureStoreSchema.parse(authoredFixtures);

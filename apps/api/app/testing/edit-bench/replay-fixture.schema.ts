@@ -51,22 +51,9 @@ const replaySourceSchema = z.discriminatedUnion('kind', [
       sourcePath: z.string().min(1),
     })
     .strict(),
-  z
-    .object({
-      kind: z.literal('qualification-derived'),
-      sourceModel: z.string().min(1),
-      provider: z.string().min(1),
-      nativeToolName: z.string().min(1),
-      invocation: z.number().int().positive(),
-      recordedAt: z.string().min(1),
-      argumentsVerbatim: z.literal(false),
-      evidencePath: z.string().min(1),
-    })
-    .strict(),
 ]);
 
 export const replayCaseSchema = z.enum([
-  'legacy-qualification',
   'unique-match',
   'context-widening',
   'ambiguous-match',

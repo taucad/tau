@@ -3300,6 +3300,9 @@ importers:
       '@jscad/modeling':
         specifier: 'catalog:'
         version: 2.13.0
+      '@taucad/build123d':
+        specifier: workspace:*
+        version: link:../../packages/plugins/build123d
       '@taucad/geometry-core':
         specifier: workspace:*
         version: link:../../packages/core/geometry

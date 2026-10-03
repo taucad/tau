@@ -238,7 +238,7 @@ export function useChatTextareaLogic({
   containerReference: React.RefObject<HTMLDivElement | null>;
 
   // Handlers
-  handleSubmit: () => Promise<void>;
+  handleSubmit: (finalizedText?: string) => Promise<void>;
   handleCancelClick: () => void;
   handleTextareaKeyDown: (event: React.KeyboardEvent) => void;
   handleDragOver: (event: React.DragEvent) => void;
@@ -449,7 +449,7 @@ export function useChatTextareaLogic({
     sendBlockReason,
   ]);
 
-  const handleSubmit = useCallback(async (): Promise<void> => {
+  const handleSubmit = useCallback(async (finalizedText?: string): Promise<void> => {
     if (
       isSubmittingRef.current ||
       submitInFlightRef.current ||
@@ -460,7 +460,8 @@ export function useChatTextareaLogic({
       return;
     }
 
-    if (inputTextRef.current.trim().length === 0 && attachmentsRef.current.length === 0) {
+    const content = finalizedText ?? inputTextRef.current;
+    if (content.trim().length === 0 && attachmentsRef.current.length === 0) {
       resumeRef.current?.();
       return;
     }
@@ -469,7 +470,7 @@ export function useChatTextareaLogic({
     setIsSubmitting(true);
     try {
       await onSubmitRef.current({
-        content: inputTextRef.current,
+        content,
         attachments: attachmentsRef.current,
       });
     } finally {

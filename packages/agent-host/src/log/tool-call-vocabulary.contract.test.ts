@@ -163,7 +163,8 @@ describe('the durable tool-call vocabulary', () => {
     expect(tauToolKinds.get('apply_parameter_operation')).toBe('edit');
     expect(tauToolKinds.get('arrange_workbench')).toBe('edit');
     expect(tauToolKinds.get('get_print_profiles')).toBe('read');
-    expect(tauToolKinds.size).toBe(25);
+    expect(tauToolKinds.get('ask_questions')).toBe('other');
+    expect(tauToolKinds.size).toBe(26);
   });
 
   it('preserves an ACP fact this vocabulary has no event for without acting on it', async () => {

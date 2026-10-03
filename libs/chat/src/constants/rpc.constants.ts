@@ -30,6 +30,7 @@ export const rpcName = {
   resolveSkill: 'resolve_skill',
   readRevisions: 'read_revisions',
   writeTodos: 'write_todos',
+  askQuestions: 'ask_questions',
 } as const satisfies Record<string, string>;
 
 /**
@@ -63,6 +64,7 @@ export const mutatingRpcNames = new Set<(typeof rpcName)[keyof typeof rpcName]>(
   rpcName.arrangeWorkbench,
   rpcName.applyParameterOperation,
   rpcName.writeTodos,
+  rpcName.askQuestions,
 ]);
 
 /**

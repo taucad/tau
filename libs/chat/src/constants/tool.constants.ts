@@ -19,6 +19,7 @@ export const toolName = {
   screenshot: 'screenshot',
   revisions: 'revisions',
   updateTodos: 'update_todos',
+  askQuestions: 'ask_questions',
   getMachine: 'get_machine',
   getPrintProfiles: 'get_print_profiles',
   requestPrint: 'request_print',

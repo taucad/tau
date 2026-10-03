@@ -144,6 +144,13 @@ For searching file contents, use \`grep\`.`,
 Send the whole list every time: an item you leave out is removed. Keep one item \`in_progress\` at a time and mark items \`done\` as they finish. Titles are short and outcome-shaped ("Slice the pyramid"), not step narration.
 
 Returns the written path (\`.tau/chats/<chatId>/todo.yaml\`) and a count per status.`,
+  [toolName.askQuestions]: `Ask the person 1–3 multiple-choice questions at a hard fork, keep the turn moving, and get their answers back.
+
+Ask only what the person alone can decide and what changes the work: what to build, scope, intent, or a trade-off with no conventional default, especially a costly or irreversible one. Look up discoverable facts in files, the model and tools instead. Never ask for permission or "should I continue?". Usually ask one question; add another only when it is a second hard fork. Do not ask about what has a sensible default you can state and change later, such as size, detail or print settings.
+
+Ask early, before investing in a direction. Put your recommendation first: it is adopted if nobody answers within waitSeconds. The person can always answer in their own words. Use waitSeconds 0 when you can start on the recommendation now.
+
+Returns each answer and who settled it. Unless status is "answered", proceed with the recommended option and say once which you assumed; a later answer arrives as a message. Never repeat a question or write a multiple-choice question as prose.`,
   [toolName.getMachine]:
     'Read one bound machine: its readiness, loaded setup and printable envelope. Omit machineId when exactly one machine is bound; otherwise the error names every bound machine.',
   [toolName.requestPrint]: `The only way to print. Slices one CAD source file to a .gcode.3mf in the project and opens a print request on a bound machine; nothing is uploaded or started until a person accepts, which starts the print. A Tau-hosted turn waits for the answer and the start; elsewhere it returns the request awaiting-approval for the Print pane. Report the outcome as nextStep states it; an unconfirmed start is unknown, never "submitted" or "started". Never retry or work around a request with other machine tools. First run test_model, check the part fits get_machine's printable envelope, and call get_print_profiles. When get_machine shows no bedType, ask which plate is installed and pass it as plate. Under engine "bambu-studio" presets follow what the printer reports; change them with profiles and settings as get_print_profiles names them. Under the reference engine, options accept only ${requestPrintOptionKeys.join(', ')}.`,

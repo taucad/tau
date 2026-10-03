@@ -21,6 +21,7 @@ import { JobsModule } from '#api/jobs/jobs.module.js';
 import { RepositoriesModule } from '#api/repositories/repositories.module.js';
 import { GithubModule } from '#api/github/github.module.js';
 import { ModelInvocationModule } from '#api/llm/model-invocation.module.js';
+import { VoiceModule } from '#api/voice/voice.module.js';
 import { CommercialEntitlementsModule } from '#api/entitlements/commercial-entitlements.module.js';
 
 @Module({})
@@ -50,6 +51,7 @@ export class ApiModule {
         PublicationsModule,
         RepositoriesModule,
         TelemetryIngestModule,
+        VoiceModule,
         ...(import.meta.env.DEV ? [TestApiModule] : []),
       ],
     };

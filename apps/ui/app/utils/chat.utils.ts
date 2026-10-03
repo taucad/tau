@@ -257,6 +257,22 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     output: (output) =>
       `${output.path}: ${String(output.counts.done)} done, ${String(output.counts.in_progress)} in progress, ${String(output.counts.pending)} pending`,
   },
+  [toolName.askQuestions]: {
+    input: (input) =>
+      (input.questions ?? [])
+        .map(
+          (question) =>
+            `${question?.question ?? ''}\n${(question?.options ?? []).map((option, index) => `  ${String.fromCodePoint(65 + index)}. ${option?.label ?? ''}`).join('\n')}`,
+        )
+        .join('\n'),
+    output: (output) =>
+      output.answers
+        .map(
+          (answer) =>
+            `${answer.id}: ${answer.answer}${answer.source === 'recommended' ? ' (recommended, no reply)' : ''}`,
+        )
+        .join('\n'),
+  },
   [toolName.arrangeWorkbench]: {
     input: (input) => `arrange_workbench(${Object.keys(input).join(', ')})`,
     output: (output) => `-> ${output.revisions.map((revision) => revision.path).join(', ')}`,

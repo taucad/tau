@@ -6,7 +6,9 @@ import {
   Get,
   Headers,
   HttpCode,
+  HttpException,
   HttpStatus,
+  Ip,
   Param,
   Patch,
   Post,
@@ -28,18 +30,45 @@ import {
   UpdateHostDeviceDto,
 } from '#api/hosts/hosts.dto.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
+import { PublicationRateLimiterService } from '#api/publications/publication-rate-limiter.service.js';
+
+/**
+ * Pairings one address may start per window. `POST /v1/agents/pairings` is
+ * anonymous and each call writes two Redis keys for the pairing lifetime, so
+ * the window matches that lifetime: one address holds at most this many
+ * pending pairings at once. A person pairing a few machines stays well inside it.
+ */
+export const pairingsPerIpPerWindow = 20;
+const pairingWindowSeconds = 600;
 
 @Controller({ path: 'agents', version: '1' })
 @UseGuards(AuthGuard)
 export class HostsController {
-  public constructor(private readonly hostsService: HostsService) {}
+  public constructor(
+    private readonly hostsService: HostsService,
+    private readonly rateLimiter: PublicationRateLimiterService,
+  ) {}
 
   @Post('pairings')
   @PublicAuth()
   @HttpCode(HttpStatus.CREATED)
   public async createPairing(
     @Body() body: CreateHostPairingDto,
+    @Ip() ip: string,
+    @Res({ passthrough: true }) reply: FastifyReply,
   ): Promise<Awaited<ReturnType<HostsService['createPairing']>>> {
+    const budget = await this.rateLimiter.consumeWindowBudget({
+      key: `hosts:pairings:${ip}`,
+      limit: pairingsPerIpPerWindow,
+      windowSeconds: pairingWindowSeconds,
+    });
+    if (!budget.allowed) {
+      void reply.header('retry-after', String(budget.retryAfterSeconds));
+      throw new HttpException(
+        { code: 'PAIRING_RATE_LIMITED', message: 'Too many pairing requests; retry later.' },
+        HttpStatus.TOO_MANY_REQUESTS,
+      );
+    }
     return this.hostsService.createPairing(body.deviceLabel);
   }
 

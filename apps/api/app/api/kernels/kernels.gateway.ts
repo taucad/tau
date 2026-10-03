@@ -7,11 +7,13 @@ import type { Auth } from 'better-auth';
 import { fromNodeHeaders } from 'better-auth/node';
 import { WebSocketServer, WebSocket } from 'ws';
 import { authInstanceKey } from '#constants/auth.constant.js';
+import { httpBodyLimit } from '#constants/http-body.constant.js';
 import { KernelsService } from '#api/kernels/kernels.service.js';
 import { zooCloseCodes } from '#api/billing/billing.constants.js';
 import type { CommercialEntitlementsService } from '#api/entitlements/commercial-entitlements.js';
 import { commercialEntitlementsKey } from '#api/entitlements/commercial-entitlements.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
+import { absorbSocketErrors } from '#api/websocket/socket-error.js';
 import { Span } from '#telemetry/tracer.service.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
@@ -141,13 +143,15 @@ export class KernelsGateway implements OnModuleInit, OnModuleDestroy {
    */
   private initFastifyWebSocket(): void {
     const fastify = this.httpAdapterHost.httpAdapter.getInstance<FastifyInstance>();
-    const wss = new WebSocketServer({ noServer: true });
+    // `ws` otherwise accepts 100 MiB per message; the HTTP body limit is the API's bound for one client payload.
+    const wss = new WebSocketServer({ noServer: true, maxPayload: httpBodyLimit });
 
     this.upgradeRouter.route(
       fastify.server,
       (pathname) => pathname === zooWebSocketPath,
       (request, socket, head) => {
         wss.handleUpgrade(request, socket, head, (ws) => {
+          absorbSocketErrors(ws);
           const url = new URL(request.url ?? '/', `http://${request.headers.host}`);
           void this.handleZooProxy(ws, url.searchParams, request);
         });

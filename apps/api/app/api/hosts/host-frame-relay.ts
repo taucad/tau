@@ -6,6 +6,13 @@ import { z } from 'zod';
 const queuedBytesLimit = 16 * 1024 * 1024;
 
 /**
+ * The largest single frame a host socket accepts. A bigger frame could never
+ * be relayed (it alone exceeds the queue bound above), so `ws` refuses it with
+ * 1009 before buffering it rather than after.
+ */
+export const hostFrameMaxPayload = queuedBytesLimit;
+
+/**
  * `ws` refuses any status code it will not put on the wire — `isValidStatusCode`
  * rejects 1004, 1005, 1006 and 1015–2999 — and it throws *after* moving the
  * socket to CLOSING and *before* arming its close timer. One unmappable code

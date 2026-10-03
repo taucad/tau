@@ -1,4 +1,5 @@
 import type { DockviewPanelApi } from 'dockview-react';
+import { toast } from '#components/ui/sonner.js';
 
 /**
  * Close all panels in the same group except the given one.
@@ -64,7 +65,17 @@ export function closeAllPanelsInGroup(api: DockviewPanelApi): void {
 
 /**
  * Copy a path string to the clipboard.
+ *
+ * The browser can refuse the write (`NotAllowedError` when the document lost
+ * focus or the platform denies clipboard access), so a refusal is reported to
+ * the person instead of escaping the menu action as an unhandled rejection.
  */
 export async function copyPathToClipboard(path: string): Promise<void> {
-  await navigator.clipboard.writeText(path);
+  try {
+    await navigator.clipboard.writeText(path);
+  } catch (error) {
+    toast.error('Failed to copy path', {
+      description: error instanceof Error ? error.message : String(error),
+    });
+  }
 }

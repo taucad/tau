@@ -211,7 +211,7 @@ export const VisionScene = memo(function VisionScene(properties: VisionSceneProp
   const [error, setError] = useState<Error>();
   const { onReady } = properties;
   const backend = readGraphicsBackendQueryOverride() ?? 'webgl';
-  const renderer = useMemo(() => createTauR3fGlProp(backend), [backend]);
+  const renderer = useMemo(() => createTauR3fGlProp(backend, [], setError), [backend]);
   useEffect(() => {
     const controller = new AbortController();
     let owned: ModelPart[] = [];

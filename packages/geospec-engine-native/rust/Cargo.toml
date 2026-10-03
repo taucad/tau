@@ -23,6 +23,10 @@ sha2 = { version = "=0.11.0", default-features = false }
 path = "src/lib.rs"
 
 [[test]]
+name = "mesh_material_relationships"
+path = "tests/mesh_material_relationships.rs"
+
+[[test]]
 name = "protocol_conformance"
 path = "tests/protocol_conformance.rs"
 

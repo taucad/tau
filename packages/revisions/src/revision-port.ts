@@ -14,6 +14,10 @@
 
 import type { ImmutableRevisionTree, RevisionId } from '#algorithms/index.js';
 import type { RevisionActor, RevisionProvenance, RevisionSummary } from '#revision-authority.js';
+import type {
+  RevisionDiffKind as ComparisonDiffKind,
+  RevisionDiffEntry as ComparisonDiffEntry,
+} from '#algorithms/revision-comparison.js';
 import type { ObjectFormat } from '#object-hash.js';
 /** Which of the two remote kinds a project's remote is. @public */
 export type RemoteKind = 'tau' | 'git';
@@ -104,13 +108,10 @@ export type RevisionLogEntry = Readonly<{
 }>;
 
 /** How one path changed between two revisions. @public */
-export type RevisionDiffKind = 'added' | 'modified' | 'deleted';
+export type RevisionDiffKind = ComparisonDiffKind;
 
 /** One changed path as `diff` reports it. Tree-free by contract: paths, never content. @public */
-export type RevisionDiffEntry = Readonly<{
-  path: string;
-  kind: RevisionDiffKind;
-}>;
+export type RevisionDiffEntry = ComparisonDiffEntry;
 
 /** One named ref and the revision it points at. @public */
 export type RevisionRef = Readonly<{

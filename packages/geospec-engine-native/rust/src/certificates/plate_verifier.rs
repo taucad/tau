@@ -372,7 +372,7 @@ fn check_plan(request: &VerificationRequest<'_>) -> Result<(), PlateError> {
     if field(root, "protocolVersion")? != &Json::Number(3.0)
         || field(root, "registryVersion")? != &Json::Number(5.0)
         || text(field(root, "canonicalProfile")?)? != "geospec-jcs-v1"
-        || text(field(root, "numericProfile")?)? != "geospec-demand-v5"
+        || text(field(root, "numericProfile")?)? != "geospec-demand-v6"
         || request.claim_id.is_empty()
         || request.subject_slot.is_empty()
         || !hash(request.expected_subject_hash)

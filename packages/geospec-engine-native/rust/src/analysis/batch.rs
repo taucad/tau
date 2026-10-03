@@ -9,7 +9,7 @@ use std::{
 };
 
 use super::mesh::{
-    exact::{charge, ChargeStep, ChargeTrace},
+    exact::{atomic_steps, charge, logical_steps, ChargeRun, ChargeTrace},
     ClusterGap, ClusterReport, ConnectedComponents, MeshAnalysis, PrimitiveRecord,
 };
 use crate::{
@@ -61,23 +61,36 @@ impl BatchAnalysis {
         subject: &str,
         tolerance: f64,
         analysis: &MeshAnalysis,
+        budget: &Budget,
+        slot: &OnceCell<(u64, Rc<ExactClusters>)>,
     ) -> Result<Rc<ConnectedComponents>, BackendError> {
+        let clusters = self.exact_clusters(
+            slot,
+            tolerance,
+            budget,
+            |trace| {
+                analysis
+                    .component_clusters_traced(tolerance, budget, self.byte_limit, trace)
+                    .map(|clusters| (clusters, Vec::new()))
+            },
+            |error, _, _| BackendError {
+                kind: BackendErrorKind::BudgetExceeded {
+                    limit: error.limit,
+                    used: error.used,
+                },
+                message: "Material component work exceeds the declared budget.".into(),
+            },
+        )?;
         let bits = tolerance_bits(tolerance);
         let cell = self.cell(subject, bits)?;
         if let Some(value) = cell.get() {
-            self.observe(WorkCounter::DerivedHits);
             return Ok(Rc::clone(value));
         }
-        // A result an earlier plan accepted skips the build; the exact check
-        // in `keep` implies the floor, so this plan's accounting is unchanged.
         let value = if let Some(value) = analysis.retained_components(bits) {
-            self.observe(WorkCounter::DerivedHits);
             value
         } else {
-            self.observe(WorkCounter::ComponentBuilds);
-            self.gaps(analysis.component_clusters(tolerance))?
+            self.gaps(clusters.clusters.clone())?
         };
-        // The analysis holds only what the batch accounts.
         if self.keep(cell, &value)? {
             analysis.retain_components(bits, &value);
         }
@@ -100,7 +113,7 @@ impl BatchAnalysis {
         let bits = tolerance_bits(tolerance);
         if let Some((_, value)) = slot.get().filter(|(key, _)| *key == bits) {
             if trace_matches(value) {
-                for step in &value.trace {
+                for step in atomic_steps(&value.trace) {
                     charge(budget, step.units)
                         .map_err(|exceeded| on_exceeded(exceeded, step.pair, &value.labels))?;
                 }
@@ -205,16 +218,16 @@ pub(crate) struct ExactClusters {
     pub(crate) clusters: Vec<ClusterReport>,
     pub(crate) units: u64,
     pub(crate) labels: Vec<String>,
-    pub(crate) trace: Vec<ChargeStep>,
+    pub(crate) trace: Vec<ChargeRun>,
     pub(crate) trace_complete: bool,
     pub(crate) stage_calls: [u64; 6],
     pub(crate) stage_units: [u64; 6],
 }
 
-fn trace_units(trace: &[ChargeStep]) -> Option<u64> {
-    trace
-        .iter()
-        .try_fold(0_u64, |sum, step| sum.checked_add(step.units))
+fn trace_units(trace: &[ChargeRun]) -> Option<u64> {
+    trace.iter().try_fold(0_u64, |sum, step| {
+        sum.checked_add(step.step.units.checked_mul(step.repetitions)?)
+    })
 }
 
 fn trace_matches(value: &ExactClusters) -> bool {
@@ -225,13 +238,17 @@ fn trace_matches(value: &ExactClusters) -> bool {
             .iter()
             .try_fold(0_u64, |sum, units| sum.checked_add(*units))
             == Some(value.units)
-        && value.stage_calls.iter().sum::<u64>() == value.trace.len() as u64
+        && value
+            .stage_calls
+            .iter()
+            .try_fold(0u64, |sum, calls| sum.checked_add(*calls))
+            == logical_steps(&value.trace)
 }
 
 fn retained_exact_bytes(value: &ExactClusters) -> u64 {
     let mut bytes = retained_component_bytes(&value.clusters, &Vec::new());
     bytes = bytes.saturating_add((2 * size_of::<[u64; 6]>()) as u64);
-    bytes = bytes.saturating_add((value.trace.capacity() * size_of::<ChargeStep>()) as u64);
+    bytes = bytes.saturating_add((value.trace.capacity() * size_of::<ChargeRun>()) as u64);
     bytes = bytes.saturating_add((value.labels.capacity() * size_of::<String>()) as u64);
     for label in &value.labels {
         bytes = bytes.saturating_add(label.capacity() as u64);
@@ -316,7 +333,8 @@ fn retained_component_bytes_floor(clusters: &Vec<ClusterReport>) -> u64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::analysis::mesh::{analyze, exact::ChargeStage, MeshAnalysisRecord, Primitive};
+    use crate::analysis::mesh::exact::ChargeStep;
+    use crate::analysis::mesh::{exact::ChargeStage, Aabb};
     use std::alloc::{GlobalAlloc, Layout, System};
 
     /// Passes every request to `System`, noting each thread's largest one.
@@ -361,39 +379,49 @@ mod tests {
     }
 
     /// Separate clusters, each joining a short-named and a long-named primitive.
-    fn scattered_clusters(count: u32) -> MeshAnalysis {
-        let mut record = MeshAnalysisRecord {
-            positions: Vec::new(),
-            triangles: Vec::new(),
-            triangle_primitives: Vec::new(),
-            primitives: Vec::new(),
-        };
-        for cluster in 0..count {
-            let x = f64::from(cluster) * 10.0;
-            for (offset, name) in [
-                (0.0, format!("p{cluster}#0")),
-                (0.5, format!("primitive-{cluster}#0")),
-            ] {
-                let vertex_start = record.positions.len() as u32;
-                record.positions.extend([
-                    [x + offset, offset, 0.0],
-                    [x + offset + 1.0, offset, 0.0],
-                    [x + offset, offset + 1.0, 0.0],
-                ]);
-                record
-                    .triangles
-                    .push([vertex_start, vertex_start + 1, vertex_start + 2]);
-                record
-                    .triangle_primitives
-                    .push(record.primitives.len() as u32);
-                record.primitives.push(Primitive {
+    fn scattered_clusters(count: u32) -> Vec<ClusterReport> {
+        (0..count)
+            .map(|cluster| {
+                let x = f64::from(cluster) * 10.0;
+                let primitives = [
+                    (0.0, format!("p{cluster}#0")),
+                    (0.5, format!("primitive-{cluster}#0")),
+                ]
+                .into_iter()
+                .map(|(offset, name)| PrimitiveRecord {
                     name,
-                    vertex_start,
-                    vertex_count: 3,
-                });
-            }
+                    color: None,
+                    vertices: 3,
+                    aabb: Aabb {
+                        min: [x + offset, offset, 0.0],
+                        max: [x + offset + 1.0, offset + 1.0, 0.0],
+                    },
+                })
+                .collect();
+                ClusterReport {
+                    label: format!("p{cluster}"),
+                    primitives,
+                    aabb: Aabb {
+                        min: [x, 0.0, 0.0],
+                        max: [x + 1.5, 1.5, 0.0],
+                    },
+                    centroid: [x + 0.75, 0.75, 0.0],
+                    total_vertices: 6,
+                }
+            })
+            .collect()
+    }
+
+    fn exact_fixture(clusters: Vec<ClusterReport>) -> ExactClusters {
+        ExactClusters {
+            clusters,
+            units: 0,
+            labels: Vec::new(),
+            trace: Vec::new(),
+            trace_complete: true,
+            stage_calls: [0; 6],
+            stage_units: [0; 6],
         }
-        analyze(&Rc::new(record))
     }
 
     fn batch(max_mesh_bytes: u64) -> BatchAnalysis {
@@ -410,7 +438,7 @@ mod tests {
         // W2-COMP open issue 3: a later claim reuses the subject's exact STEP
         // clusters, charging what their build charged, and rebuilds when its
         // budget cannot cover that total, refusing exactly as a cold claim.
-        let clusters = scattered_clusters(2).component_clusters(0.0);
+        let clusters = scattered_clusters(2);
         let batch = batch(u64::MAX);
         let slot = OnceCell::new();
         let builds = Cell::new(0);
@@ -544,11 +572,15 @@ mod tests {
         assert!(overflow.steps.is_empty());
 
         let mut trace = ChargeTrace::with_limit(2);
-        for _ in 0..3 {
+        for index in 0..3 {
             trace.record(ChargeStep {
                 units: 0,
                 pair: None,
-                stage: ChargeStage::BodySetup,
+                stage: if index % 2 == 0 {
+                    ChargeStage::BodySetup
+                } else {
+                    ChargeStage::FaceDistance
+                },
             });
         }
         assert!(!trace.complete);
@@ -572,11 +604,15 @@ mod tests {
                 0.0,
                 &budget,
                 |trace| {
-                    for _ in 0..callbacks {
+                    for index in 0..callbacks {
                         trace.record(ChargeStep {
                             units: 0,
                             pair: None,
-                            stage: ChargeStage::BodySetup,
+                            stage: if index % 2 == 0 {
+                                ChargeStage::BodySetup
+                            } else {
+                                ChargeStage::FaceDistance
+                            },
                         });
                     }
                     Ok::<_, crate::budget::BudgetExceeded>((Vec::new(), Vec::new()))
@@ -595,8 +631,8 @@ mod tests {
                 "Connected-component results exceed the declared analysis retention byte limit."
                     .into(),
         });
-        let analysis = scattered_clusters(400);
-        let clusters = analysis.component_clusters(0.0);
+        let input = exact_fixture(scattered_clusters(400));
+        let clusters = input.clusters.clone();
         let floor = retained_component_bytes_floor(&clusters);
         let expected = ConnectedComponents::from_clusters(clusters);
         let exact = retained_component_bytes(&expected.clusters, &expected.gaps);
@@ -606,15 +642,13 @@ mod tests {
 
         // The floor fits, so the gaps are built and then refused as before.
         let post_hoc = batch(exact - 1);
-        let (result, largest) =
-            largest_request(|| post_hoc.connected_components("a", 0.0, &analysis));
+        let (result, largest) = largest_request(|| post_hoc.step_components("a", 0.0, &input));
         assert_eq!(result.err(), refusal);
         assert!(largest >= gap_bytes);
 
         // Below the floor, the same refusal comes without a gap-sized request.
         let pre_check = batch(floor - 1);
-        let (result, largest) =
-            largest_request(|| pre_check.connected_components("a", 0.0, &analysis));
+        let (result, largest) = largest_request(|| pre_check.step_components("a", 0.0, &input));
         assert_eq!(result.err(), refusal);
         assert!(largest * 16 < gap_bytes);
         assert_eq!(pre_check.retained_bytes.get(), 0);
@@ -623,21 +657,17 @@ mod tests {
         // size answers too, as it does alone, but is not retained, by the
         // batch or by its analysis, so neither holds more than the limit.
         let two_claims = batch(exact);
-        let value = two_claims
-            .connected_components("a", 0.0, &analysis)
-            .unwrap();
+        let value = two_claims.step_components("a", 0.0, &input).unwrap();
         assert_eq!(*value, expected);
         assert_eq!(two_claims.retained_bytes.get(), exact);
-        let value = two_claims
-            .connected_components("b", 0.0, &analysis)
-            .unwrap();
+        let value = two_claims.step_components("b", 0.0, &input).unwrap();
         assert_eq!(*value, expected);
         assert_eq!(two_claims.retained_bytes.get(), exact);
         assert!(two_claims.cell("b", 0).unwrap().get().is_none());
-        let fresh = scattered_clusters(400);
-        let value = two_claims.connected_components("b", 0.0, &fresh).unwrap();
+        let fresh = exact_fixture(scattered_clusters(400));
+        let value = two_claims.step_components("b", 0.0, &fresh).unwrap();
         assert_eq!(*value, expected);
-        assert!(fresh.retained_components(0).is_none());
+        assert!(two_claims.cell("b", 0).unwrap().get().is_none());
     }
 
     #[test]
@@ -645,7 +675,7 @@ mod tests {
         // Ruling 12: two complete-profile STEP claims on different
         // cells, each B bytes with B <= limit < 2B, both answer in one plan
         // as each does alone; only the first is retained.
-        let clusters = scattered_clusters(40).component_clusters(0.0);
+        let clusters = scattered_clusters(40);
         let expected = ConnectedComponents::from_clusters(clusters.clone());
         let bytes = retained_component_bytes(&expected.clusters, &expected.gaps);
         let exact = ExactClusters {

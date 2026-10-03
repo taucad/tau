@@ -11,11 +11,12 @@
  * closure fails the handshake — nothing else in the suite would notice.
  */
 
-import { spawn } from 'node:child_process';
-import { mkdtemp, realpath, rm, stat } from 'node:fs/promises';
+import { execFile, spawn } from 'node:child_process';
+import { mkdtemp, readFile, realpath, rm, stat } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
+import { promisify } from 'node:util';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 import { acpAgentProfiles } from '@taucad/host';
@@ -25,6 +26,7 @@ import { copyRuntimeClosure } from '../scripts/runtime-closure.mjs';
 
 const appRoot = join(import.meta.dirname, '..');
 const require = createRequire(join(appRoot, 'package.json'));
+const execFileAsync = promisify(execFile);
 const adapters = acpAgentProfiles.flatMap((profile) => (profile.package === undefined ? [] : [profile.package]));
 
 /**
@@ -138,4 +140,112 @@ describe('ACP adapter staging', () => {
     },
     60_000,
   );
+});
+
+describe.runIf(process.platform === 'darwin' && process.arch === 'arm64')('desktop native runtime staging', () => {
+  let stageRoot: string;
+  let modulesRoot: string;
+  let sharpVersions: readonly string[];
+
+  beforeAll(async () => {
+    stageRoot = await realpath(await mkdtemp(join(tmpdir(), 'tau-native-stage-')));
+    modulesRoot = resolve(stageRoot, 'node_modules');
+    const functionsRoot = await realpath(resolve(appRoot, 'node_modules/@gltf-transform/functions'));
+    const functionsRequire = createRequire(resolve(functionsRoot, 'package.json'));
+    const sharpRoot = dirname(dirname(functionsRequire.resolve('sharp')));
+    const pixelsRequire = createRequire(functionsRequire.resolve('ndarray-pixels'));
+    const nestedSharpRoot = dirname(dirname(pixelsRequire.resolve('sharp')));
+    sharpVersions = await Promise.all(
+      [sharpRoot, nestedSharpRoot].map(async (source) => {
+        const manifest = JSON.parse(await readFile(resolve(source, 'package.json'), 'utf8')) as {
+          readonly version: string;
+        };
+        return manifest.version;
+      }),
+    );
+    for (const name of ['@parcel/watcher', 'sharp', '@gltf-transform/core', '@gltf-transform/functions']) {
+      // oxlint-disable-next-line no-await-in-loop -- Each closure must see the earlier staged packages.
+      await copyRuntimeClosure({
+        name,
+        // oxlint-disable-next-line no-await-in-loop -- Installed package paths preserve their dependency contexts.
+        source: name === 'sharp' ? sharpRoot : await realpath(resolve(appRoot, 'node_modules', name)),
+        modulesRoot,
+        optionalDependencies: [
+          '@img/sharp-libvips-darwin-arm64',
+          '@img/sharp-darwin-arm64',
+          '@parcel/watcher-darwin-arm64',
+        ],
+      });
+    }
+  }, 120_000);
+
+  afterAll(async () => {
+    await rm(stageRoot, { recursive: true, force: true });
+  });
+
+  it('should admit and close the staged native filesystem watcher', async () => {
+    const watcherRequire = createRequire(resolve(modulesRoot, '@parcel/watcher/package.json'));
+    expect(watcherRequire.resolve('@parcel/watcher-darwin-arm64')).toBe(
+      resolve(modulesRoot, '@parcel/watcher/node_modules/@parcel/watcher-darwin-arm64/watcher.node'),
+    );
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { createRequire } from 'node:module';
+const require = createRequire(${JSON.stringify(resolve(modulesRoot, '@parcel/watcher/package.json'))});
+const watcher = require('@parcel/watcher');
+const subscription = await watcher.subscribe(process.cwd(), () => undefined);
+await subscription.unsubscribe();
+process.stdout.write('admitted-and-closed');`,
+      ],
+      { cwd: stageRoot, timeout: 5000 },
+    );
+    expect(stdout).toBe('admitted-and-closed');
+    await expect(
+      stat(resolve(modulesRoot, '@parcel/watcher/node_modules/@parcel/watcher-darwin-x64')),
+    ).rejects.toMatchObject({
+      code: 'ENOENT',
+    });
+  });
+
+  it('should load both Sharp consumers with their own staged native versions', async () => {
+    const { stdout } = await execFileAsync(
+      process.execPath,
+      [
+        '--input-type=module',
+        '-e',
+        `import { createRequire } from 'node:module';
+const require = createRequire(${JSON.stringify(resolve(stageRoot, 'package.json'))});
+const functionsRequire = createRequire(require.resolve('@gltf-transform/functions'));
+const pixelsRequire = createRequire(functionsRequire.resolve('ndarray-pixels'));
+const rootSharp = require('sharp');
+const nestedSharp = pixelsRequire('sharp');
+process.stdout.write(JSON.stringify([rootSharp.versions.sharp, nestedSharp.versions.sharp, typeof rootSharp, typeof nestedSharp]));`,
+      ],
+      { cwd: stageRoot, timeout: 5000 },
+    );
+    expect(JSON.parse(stdout)).toEqual([...sharpVersions, 'function', 'function']);
+  });
+
+  it('should exclude optional payloads when the caller selects none', async () => {
+    const defaultStage = await realpath(await mkdtemp(join(tmpdir(), 'tau-default-native-stage-')));
+    try {
+      const defaultModules = resolve(defaultStage, 'node_modules');
+      await copyRuntimeClosure({
+        name: '@parcel/watcher',
+        source: await realpath(resolve(appRoot, 'node_modules/@parcel/watcher')),
+        modulesRoot: defaultModules,
+      });
+      expect(await readFile(resolve(defaultModules, '@parcel/watcher/index.js'))).toEqual(
+        await readFile(resolve(appRoot, 'node_modules/@parcel/watcher/index.js')),
+      );
+      await expect(
+        stat(resolve(defaultModules, '@parcel/watcher/node_modules/@parcel/watcher-darwin-arm64')),
+      ).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(defaultStage, { recursive: true, force: true });
+    }
+  });
 });

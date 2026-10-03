@@ -41,6 +41,9 @@ const cloneRecord = (record: ComputeActionRecord): ComputeActionRecord => ({
     mediaType: record.output.mediaType,
   },
   dependencies: [...record.dependencies],
+  ...((record.requiredContent?.length ?? 0) > 0
+    ? { requiredContent: [...new Set(record.requiredContent)].sort() }
+    : {}),
 });
 
 const recordsEqual = (left: ComputeActionRecord, right: ComputeActionRecord): boolean =>
@@ -51,7 +54,9 @@ const recordsEqual = (left: ComputeActionRecord, right: ComputeActionRecord): bo
   left.output.size === right.output.size &&
   left.output.mediaType === right.output.mediaType &&
   left.dependencies.length === right.dependencies.length &&
-  left.dependencies.every((dependency, index) => dependency === right.dependencies[index]);
+  left.dependencies.every((dependency, index) => dependency === right.dependencies[index]) &&
+  (left.requiredContent?.length ?? 0) === (right.requiredContent?.length ?? 0) &&
+  (left.requiredContent ?? []).every((digest, index) => digest === right.requiredContent?.[index]);
 
 const recordSize = (record: ComputeActionRecord): number => new TextEncoder().encode(JSON.stringify(record)).byteLength;
 
@@ -226,16 +231,19 @@ export const createMemoryActionStore = (options: MemoryStoreOptions): ActionStor
       for (const dependency of record.dependencies) {
         actionDigest({ value: dependency });
       }
+      for (const required of record.requiredContent ?? []) {
+        contentDigest({ value: required });
+      }
+      const owned = cloneRecord(record);
       const existing = entries.get(record.actionDigest);
       if (existing !== undefined) {
-        if (!recordsEqual(existing.record, record)) {
+        if (!recordsEqual(existing.record, owned)) {
           throw new CacheCorruptionError('Action digest has a conflicting published record.');
         }
         entries.delete(record.actionDigest);
         entries.set(record.actionDigest, existing);
         return { status: 'existing' };
       }
-      const owned = cloneRecord(record);
       const size = recordSize(owned);
       if (size > limits.maxEntryBytes || size > limits.maxBytes || limits.maxEntries === 0) {
         return { status: 'rejected', reason: 'entry-too-large' };

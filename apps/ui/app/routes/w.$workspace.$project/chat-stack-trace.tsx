@@ -10,7 +10,7 @@ import { FileLink } from '#components/files/file-link.js';
 import { MarkdownViewer } from '#components/markdown/markdown-viewer.js';
 import { KeyShortcut } from '#components/ui/key-shortcut.js';
 import { useProject } from '#hooks/use-project.js';
-import { useCad, useCadSelector } from '#hooks/use-cad.js';
+import { useCadSelector } from '#hooks/use-cad.js';
 import { useChats } from '#hooks/use-chats.js';
 import { useCadChatClient } from '#chat-clients/use-cad-chat-client.js';
 import { useModifiers } from '#hooks/use-keyboard.js';
@@ -21,7 +21,6 @@ import { decodeTextFile } from '#utils/filesystem.utils.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { selectCadEntryIssues, selectCadFailureIssues } from '#machines/cad.machine.js';
-import { actorIdOf } from '#lib/xstate.lib.js';
 
 const shiftKey = formatKeyCombination({ key: 'Shift' });
 
@@ -438,18 +437,18 @@ type ChatStackTraceProps = React.HTMLAttributes<HTMLDivElement> & {
 };
 
 export function ChatStackTrace({ entryPath, className, side, ...props }: ChatStackTraceProps): React.ReactNode {
-  const { getMainFilename, projectId, setFocusedChatId } = useProject();
+  const { getMainFilename, projectId, projectRef, setFocusedChatId } = useProject();
   const { setChatOpen } = useProjectWorkspace();
   const fileManager = useFileManager();
   const { createChat } = useChats(projectId, { enabled: false });
   const [isOpen, setIsOpen] = useState(true);
 
-  // Guard against stale cadActor during project transitions.
-  // CadProvider may still hold the previous project's actor while projectId has
-  // already changed to the new project. Check that the actor ID matches the
-  // expected pattern "cad-{projectId}-{entryPath}" before reading its state.
-  const cadRef = useCad();
-  const isCadActorStale = cadRef ? !actorIdOf(cadRef).includes(projectId) : true;
+  // CadProvider may retain the previous project's actor during a transition.
+  const selectIsCadActorStale = useCallback(
+    (snapshot: Parameters<typeof selectCadFailureIssues>[0]) => snapshot.context.parentRef !== projectRef,
+    [projectRef],
+  );
+  const isCadActorStale = useCadSelector(selectIsCadActorStale, true);
 
   const failureIssues = useCadSelector(selectCadFailureIssues, undefined);
   const selectEntryIssues = useMemo(() => selectCadEntryIssues(entryPath), [entryPath]);

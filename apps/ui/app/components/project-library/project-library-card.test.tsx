@@ -203,7 +203,7 @@ describe('ProjectLibraryCard live preview', () => {
     expect(preview).toHaveAttribute('data-project-id', mockProject.id);
     expect(preview).toHaveAttribute('data-main-file', 'main.scad');
     expect(preview).toHaveAttribute('data-has-files', 'false');
-    expect(screen.getByTestId('cad-preview-viewer')).toBeInTheDocument();
+    expect(await screen.findByTestId('cad-preview-viewer')).toBeInTheDocument();
   });
 
   it('should unmount the preview subtree when preview is toggled off', async () => {

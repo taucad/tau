@@ -12,11 +12,11 @@ import { GraphicsProvider } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import type { AddSectionCutPayload } from '#machines/graphics.machine.js';
 import type { SectionCutPatch } from '#components/geometry/graphics/section-cuts.js';
-import { getMeshMeasurementFeatures } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import { MeasureTool } from '#components/geometry/graphics/three/react/measure-tool.js';
 import { SectionHandles } from '#components/geometry/graphics/three/react/section-handles.js';
 import type { SectionPlanePicker } from '#components/geometry/graphics/three/controls/section-plane-picker.js';
 import { hasSceneTag, sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
+import { getMeshMeasurementFeatures } from '#components/geometry/graphics/three/utils/measurement-features.js';
 
 // The handles draw in their own overlay; a press picks their objects directly, which need no scene.
 vi.mock('#components/geometry/graphics/three/scene-overlay.js', () => ({ SceneOverlay: () => null }));
@@ -175,6 +175,9 @@ describe('MeasureTool with section cuts', () => {
     };
 
     root = createRoot(canvas);
+    model = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
+    // These section interactions start with a ready feature graph, as they do after the worker prepares the mesh.
+    getMeshMeasurementFeatures(model);
     await act(async () => {
       await root.configure({
         camera,
@@ -187,9 +190,6 @@ describe('MeasureTool with section cuts', () => {
           state.events.connect?.(parent);
         },
       });
-      model = new THREE.Mesh(new THREE.BoxGeometry(2, 2, 2), new THREE.MeshBasicMaterial());
-      // These checks isolate cut/pointer behavior; cold worker preparation has its own suite.
-      getMeshMeasurementFeatures(model);
       const store = root.render(
         <GraphicsProvider graphicsRef={actor}>
           <primitive object={model} />

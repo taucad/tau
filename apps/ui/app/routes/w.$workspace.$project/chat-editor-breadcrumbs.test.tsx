@@ -73,6 +73,59 @@ describe('ChatEditorBreadcrumbs', () => {
     expect(send).toHaveBeenCalledWith({ type: 'openFile', path: 'replacement.ts', source: 'user' });
   });
 
+  it('should reveal the new filename on navigation without resetting an unrelated rerender', () => {
+    const observers: Array<{ observe: ReturnType<typeof vi.fn>; disconnect: ReturnType<typeof vi.fn> }> = [];
+    vi.stubGlobal(
+      'ResizeObserver',
+      class {
+        public readonly observe = vi.fn();
+        public readonly disconnect = vi.fn();
+        public constructor() {
+          observers.push(this);
+        }
+      },
+    );
+    vi.spyOn(Element.prototype, 'scrollWidth', 'get').mockReturnValue(400);
+    let unmount: (() => void) | undefined;
+    try {
+      const rendered = render(<ChatEditorBreadcrumbs filePath='src/first.ts' />);
+      unmount = rendered.unmount;
+      const first = document.querySelector<HTMLElement>('[data-slot="omni-scroller"]');
+      if (!first) {
+        throw new Error('Editor breadcrumb scroller was missing.');
+      }
+      expect(first.scrollLeft).toBe(400);
+      expect(observers).toHaveLength(1);
+      first.scrollLeft = 37;
+
+      rendered.rerender(
+        <ChatEditorBreadcrumbs filePath='src/first.ts'>
+          <button type='button'>Action</button>
+        </ChatEditorBreadcrumbs>,
+      );
+      expect(first.scrollLeft).toBe(37);
+      expect(observers).toHaveLength(1);
+      expect(observers[0]?.disconnect).not.toHaveBeenCalled();
+
+      rendered.rerender(<ChatEditorBreadcrumbs filePath='src/second.ts' />);
+      const second = document.querySelector<HTMLElement>('[data-slot="omni-scroller"]');
+      if (!second) {
+        throw new Error('Navigated breadcrumb scroller was missing.');
+      }
+      expect(second.scrollLeft).toBe(400);
+      expect(observers).toHaveLength(2);
+      expect(observers[0]?.disconnect).toHaveBeenCalledOnce();
+      expect(observers[1]?.observe).toHaveBeenCalledWith(second);
+      rendered.unmount();
+      unmount = undefined;
+      expect(observers[1]?.disconnect).toHaveBeenCalledOnce();
+    } finally {
+      unmount?.();
+      vi.restoreAllMocks();
+      vi.unstubAllGlobals();
+    }
+  });
+
   it('should render nothing without a file path', () => {
     const { container } = render(<ChatEditorBreadcrumbs filePath='' />);
 

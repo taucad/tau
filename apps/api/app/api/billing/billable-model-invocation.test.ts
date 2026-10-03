@@ -1260,6 +1260,29 @@ describe('BillableModelInvocationService', () => {
     );
   });
 
+  /* Issue 201: an Anthropic 400 "prompt is too long" reached the host as the generic
+   * rejection sentence, so the host's overflow lane never compacted and retried. */
+  it('should name a context-window refusal without quoting the supplier on the funded path', async () => {
+    const supplierSentence = 'prompt is too long: 217210 tokens > 200000 maximum';
+    const qualified = qualification();
+    qualified.adapter.executeOnce = vi.fn(
+      async () =>
+        new Response(
+          JSON.stringify({ type: 'error', error: { type: 'invalid_request_error', message: supplierSentence } }),
+          { status: 400, headers: { 'content-type': 'application/json' } },
+        ),
+    );
+    const { service } = exhaustionHarness(qualified);
+
+    await expect(service.invoke(intent())).rejects.toSatisfy(
+      (error: unknown) =>
+        error instanceof LlmGatewayError &&
+        gatewayErrorType(error) === 'UPSTREAM_REJECTED' &&
+        error.message === 'The request exceeds the context window of the selected model.' &&
+        !error.message.includes(supplierSentence),
+    );
+  });
+
   it('should answer the Vertex 499 CANCELLED as a provider outage on the funded path', async () => {
     const qualified = qualification();
     qualified.adapter.executeOnce = vi.fn(

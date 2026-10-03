@@ -18,7 +18,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
 import { revisionId as toRevisionId } from '#algorithms/index.js';
-import type { RootedFileSystem } from '@taucad/filesystem';
 import { createActor } from 'xstate';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
@@ -34,7 +33,7 @@ import { createIsomorphicGitRevisionPort } from '#isomorphic-git-adapter.js';
 import { createNativeGitRevisionPort } from '#native-git-port.js';
 import { createProjectRevisionsActor } from '#revision-effects.js';
 import { StepClock } from '@taucad/xstate-testing/clock';
-import type { TurnPlacement } from '#revision-effects.js';
+import type { RevisionFileSystem, TurnPlacement } from '#revision-effects.js';
 import { publishMachine, selectPublishFacet } from '#publish.machine.js';
 import { syncMachine } from '#sync.machine.js';
 import { turnMachine } from '#turn.machine.js';
@@ -646,7 +645,7 @@ const storedJsonUnder = (root: string, directory = root): ReadonlyArray<Readonly
 const runScriptedTurn = async (set: ActorSet): Promise<Dump> => {
   const root = await mkdtemp(join(tmpdir(), `tau-w22-${set}-`));
   temporaryRoots.push(root);
-  const filesystem: RootedFileSystem = new NodeFsProvider(root);
+  const filesystem: RevisionFileSystem = new NodeFsProvider(root);
   await filesystem.writeFile('main.ts', 'export const size = 1;\n');
   const port =
     set === 'browser'
@@ -814,7 +813,7 @@ describe('composition root options (MC-R4)', () => {
   it('should forward the injected clock, inspector and rejection hook to the tree', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-root-options-'));
     temporaryRoots.push(root);
-    const filesystem: RootedFileSystem = new NodeFsProvider(root);
+    const filesystem: RevisionFileSystem = new NodeFsProvider(root);
     const port = createIsomorphicGitRevisionPort({
       filesystem,
       checkouts: { projectId: 'project-1', root: () => filesystem },
@@ -856,7 +855,7 @@ describe('placement over a real port (RM-R12)', () => {
   it('should report the placement to the host only after the base is minted', async () => {
     const root = await mkdtemp(join(tmpdir(), 'tau-placement-'));
     temporaryRoots.push(root);
-    const filesystem: RootedFileSystem = new NodeFsProvider(root);
+    const filesystem: RevisionFileSystem = new NodeFsProvider(root);
     const port = createIsomorphicGitRevisionPort({
       filesystem,
       checkouts: { projectId: 'project-1', root: () => filesystem },

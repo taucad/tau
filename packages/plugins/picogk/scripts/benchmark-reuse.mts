@@ -406,7 +406,7 @@ const main = async (): Promise<void> => {
     manifest,
     timingQualification: 'Host jobs are uncontrolled; load averages qualify provisional timings, not latency gains.',
     unavailableCounters:
-      'This protocol exposes phase timings and live memory snapshots, not measured extraction/copy/layout/allocation counters or owned peak bytes.',
+      'Work counters report captured snapshots, geometry readbacks, input elements, normal/UV layouts and material projections; allocations, copied bytes and owned peak bytes remain unavailable.',
   };
   writeFileSync(join(settings.output, 'receipt.json'), `${JSON.stringify(receipt, undefined, 2)}\n`);
   writeFileSync(join(settings.output, 'main.cs'), source);
@@ -473,6 +473,22 @@ const main = async (): Promise<void> => {
         const decoded = await shapes(glb);
         references.set(mode, validate(decoded.shapes, references.get(mode), { mode, count }));
         ok(!existsSync(built.artifactPath), 'Consumed mesh artifact must be unlinked.');
+        const prototypes = new Map(built.prototypes.map((prototype) => [prototype.id, prototype]));
+        let occurrenceRenderVertices = 0;
+        let surfaceTriangles = 0;
+        for (const occurrence of built.occurrences) {
+          const prototype = prototypes.get(occurrence.prototypeId);
+          ok(prototype !== undefined, 'Every occurrence must reference an artifact prototype.');
+          occurrenceRenderVertices += prototype.positionCount / 3;
+          if (prototype.kind === 'triangles') {
+            surfaceTriangles += prototype.indexCount / 3;
+          }
+        }
+        strictEqual(built.occurrences.length, decoded.shapes.length, 'Artifact occurrences match GLB shapes.');
+        strictEqual(
+          surfaceTriangles,
+          decoded.shapes.reduce((sum, shape) => sum + shape.corners.length / 3, 0),
+        );
         const measured = cold || iteration >= settings.warmup;
         const sample = {
           mode: modes[mode]!,
@@ -489,17 +505,26 @@ const main = async (): Promise<void> => {
           artifactBytes: artifact.byteLength,
           glbBytes: glb.byteLength,
           binBytes: decoded.binBytes,
-          finalComponents: built.components.length,
+          finalComponents: built.occurrences.length,
+          artifactPrototypes: built.prototypes.length,
+          uniqueArtifactRenderVertices: built.prototypes.reduce(
+            (sum, prototype) => sum + prototype.positionCount / 3,
+            0,
+          ),
+          uniqueArtifactSurfaceTriangles: built.prototypes.reduce(
+            (sum, prototype) => sum + (prototype.kind === 'triangles' ? prototype.indexCount / 3 : 0),
+            0,
+          ),
           gltfMeshes: decoded.meshes,
           positionAccessors: decoded.positionAccessors,
-          occurrenceRenderVertices: built.components.reduce((sum, component) => sum + component.positionCount / 3, 0),
+          occurrenceRenderVertices,
           uniqueGltfRenderVertices: decoded.uniqueRenderVertices,
-          surfaceTriangles: built.components.reduce((sum, component) => sum + component.indexCount / 3, 0),
+          surfaceTriangles,
           inputExpectation: mode === 0 || mode === 3 ? { indexedPrototypeVertices: 98, prototypeTriangles: 192 } : null,
           workerTimings: built.timings,
           compilationTimings: analyzed.timings,
           memorySnapshots: built.metrics,
-          workCounters: 'counters' in built ? built.counters : null,
+          workCounters: built.workCounters ?? null,
           geometry: {
             referenceBounds: references.get(mode)!.bounds,
             referenceVolumeCubicMm: references.get(mode)!.volume,

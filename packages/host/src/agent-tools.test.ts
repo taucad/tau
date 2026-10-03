@@ -835,8 +835,12 @@ describe('createHostToolRegistry', () => {
 
     const alphaEvents: Array<{ readonly type: string; readonly path?: string }> = [];
     const betaEvents: Array<{ readonly type: string; readonly path?: string }> = [];
-    const stopAlpha = new NodeFsProvider(alphaRoot).watch({ paths: ['main.ts'] }, (event) => alphaEvents.push(event));
-    const stopBeta = new NodeFsProvider(betaRoot).watch({ paths: ['main.ts'] }, (event) => betaEvents.push(event));
+    const stopAlpha = await new NodeFsProvider(alphaRoot).watch({ paths: ['main.ts'] }, (event) =>
+      alphaEvents.push(event),
+    );
+    const stopBeta = await new NodeFsProvider(betaRoot).watch({ paths: ['main.ts'] }, (event) =>
+      betaEvents.push(event),
+    );
     const opened = new Map<string, RuntimeDocument[]>();
     const runtimeFor = (root: string, label: string): HostRuntimeClient =>
       fakeRuntime({

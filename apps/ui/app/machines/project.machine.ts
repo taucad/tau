@@ -1,5 +1,13 @@
-import { setup, types } from 'xstate';
-import type { ActorRefFrom, AnyActorRef, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
+import { createAsyncLogic, setup, types, waitFor } from 'xstate';
+import type {
+  ActorFromLogic,
+  ActorRefFrom,
+  AnyActor,
+  AnyActorRef,
+  EnqueueObject,
+  SnapshotFrom,
+  SystemRegistry,
+} from 'xstate';
 import { produce } from 'immer';
 import type { ProjectManifest, ProjectManifestParseIssue } from '@taucad/types';
 import { assertRootedPath, normalizePath } from '@taucad/utils/path';
@@ -9,7 +17,7 @@ import type { LazyKernelOptionsFactory } from '#types/runtime-client.alias.js';
 import type { GraphicsOwnedSettings, GraphicsViewSettings } from '#constants/editor.constants.js';
 import { defaultGraphicsSettings } from '#constants/editor.constants.js';
 import { actorIdOf, eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
-import { cadMachine } from '#machines/cad.machine.js';
+import { cadMachine, closeCadRuntime, disposeCadRuntime } from '#machines/cad.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
 import { modelInteractionMachine } from '#machines/model-interaction.machine.js';
@@ -100,6 +108,21 @@ const writeProjectActor = fromSafeAsync<void, { project: ProjectManifest; repair
 const projectActors = {
   loadProjectActor,
   writeProjectActor,
+  closeRuntimeActor: createAsyncLogic<void, { units: ReadonlyArray<ActorRefFrom<typeof cadMachine>> }>({
+    run: async ({ input, signal }) => {
+      const outcomes = await Promise.allSettled(input.units.map(async (unit) => closeCadRuntime(unit, signal)));
+      const failures: unknown[] = [];
+      for (const outcome of outcomes) {
+        if (outcome.status === 'rejected') {
+          const reason: unknown = outcome.reason;
+          failures.push(reason);
+        }
+      }
+      if (failures.length > 0) {
+        throw new AggregateError(failures, 'Project runtime shutdown failed');
+      }
+    },
+  }),
   graphics: graphicsMachine,
   modelInteraction: modelInteractionMachine,
   cad: cadMachine,
@@ -141,6 +164,8 @@ export function isProjectContentActivityPath(projectRelativePath: string): boole
  */
 type ProjectEventInternal =
   | { type: 'reloadProject' }
+  | { type: 'closeRuntime' }
+  | { type: 'geometryUnit.runtimeClosed'; unit: ActorRefFrom<typeof cadMachine> }
   /* The change observer: tau.json no longer identifies this project; keep the last good manifest open. */
   | { type: 'manifestIssueObserved'; issue: ProjectManifestParseIssue }
   /* The one explicit write over a degraded or unidentifiable tau.json: the manifest this workspace holds. */
@@ -202,6 +227,8 @@ type ProjectArgs<EventType extends ProjectEvent['type']> = Readonly<{
 }>;
 type CadUnitRef = ActorRefFrom<typeof cadMachine>;
 
+const isCadChild = (child: AnyActor | undefined): child is ActorFromLogic<typeof cadMachine> => child?.src === 'cad';
+
 const setError = (error: unknown): ProjectPatch => ({
   error: error instanceof Error ? error : new Error('Unknown error'),
   isLoading: false,
@@ -226,8 +253,8 @@ const withProject = (context: ProjectContext, recipe: (project: ProjectManifest)
 /**
  * Spawn one headless CAD unit for an entry and ask it to render that entry.
  *
- * The unit's id is fixed at spawn; a later rename re-keys the map but not the
- * id, which is why lookups by id read the ref rather than recompute it.
+ * XState assigns each invocation its own id, so a retired unit may finish
+ * closing while a replacement renders the same entry.
  */
 const spawnGeometryUnit = (
   context: ProjectContext,
@@ -240,7 +267,6 @@ const spawnGeometryUnit = (
 ): CadUnitRef => {
   const { self, entryPath, options } = unit;
   const cadUnit = enq.spawn('cad', {
-    id: `cad-${context.projectId}-${entryPath.replaceAll('/', '-')}`,
     input: {
       shouldInitializeKernelOnStart: options.shouldInitializeKernelOnStart,
       parentRef: self,
@@ -475,6 +501,16 @@ export const projectMachine = setup({
     };
   },
   on: {
+    closeRuntime: { target: '.runtimeClosing', context: { error: undefined } },
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
+    'geometryUnit.runtimeClosed': ({ context, event, children }, enq) => {
+      const owned = Object.values(children).some((child) => child === event.unit);
+      const active = [...context.geometryUnits.values()].includes(event.unit);
+      if (owned && !active && event.unit.getSnapshot().matches('runtimeClosed')) {
+        enq.stop(event.unit);
+      }
+      return {};
+    },
     /* R4: the project keeps the refusal so its live session can report the
      * runtime region failed, which is what puts the reason on the row. */
     // eslint-disable-next-line @typescript-eslint/naming-convention -- XState event name
@@ -507,9 +543,12 @@ export const projectMachine = setup({
     },
   },
   /* Stop the stateful children; they'll be garbage collected. */
-  exit: ({ context }, enq) => {
-    for (const unit of context.geometryUnits.values()) {
-      enq.stop(unit);
+  exit: ({ context, children }, enq) => {
+    for (const child of Object.values(children).filter((child) => isCadChild(child))) {
+      enq(() => {
+        disposeCadRuntime(child.getSnapshot().context);
+      });
+      enq.stop(child);
     }
     for (const gfx of context.viewGraphics.values()) {
       enq.stop(gfx);
@@ -518,6 +557,19 @@ export const projectMachine = setup({
   },
   initial: 'checkEnvironment',
   states: {
+    runtimeClosing: {
+      on: { closeRuntime: {}, parkRuntime: {}, resumeRuntime: {} },
+      invoke: {
+        src: 'closeRuntimeActor',
+        input: ({ self }) => ({
+          units: Object.values(self.getSnapshot().children).filter((child) => isCadChild(child)),
+        }),
+        onDone: { target: 'runtimeClosed' },
+        onError: ({ event }) => ({ target: 'runtimeCloseFailed', context: setError(event.error) }),
+      },
+    },
+    runtimeClosed: { on: { closeRuntime: {}, parkRuntime: {}, resumeRuntime: {} } },
+    runtimeCloseFailed: { on: { parkRuntime: {}, resumeRuntime: {} } },
     checkEnvironment: {
       always: ({ guards }) => {
         if (guards.isNotBrowser()) {
@@ -714,7 +766,7 @@ export const projectMachine = setup({
                 return {};
               }
 
-              enq.stop(unit);
+              enq.sendTo(unit, { type: 'closeRuntime' });
               return {
                 context: {
                   ...withoutUnits(context, (entryPath) => entryPath === event.entryPath),
@@ -790,7 +842,7 @@ export const projectMachine = setup({
               enq.sendTo(context.modelInteractionRef, { type: 'pruneSourceUnits', path });
               const unit = context.geometryUnits.get(path);
               if (unit) {
-                enq.stop(unit);
+                enq.sendTo(unit, { type: 'closeRuntime' });
               }
               return { context: withoutUnits(context, (entryPath) => entryPath === path) };
             },
@@ -802,7 +854,7 @@ export const projectMachine = setup({
 
               for (const [key, unit] of context.geometryUnits) {
                 if (matches(key)) {
-                  enq.stop(unit);
+                  enq.sendTo(unit, { type: 'closeRuntime' });
                 }
               }
               return { context: withoutUnits(context, matches) };
@@ -887,6 +939,22 @@ export const projectMachine = setup({
     },
   },
 });
+
+/** Close every project CAD owner after persistence, before its session stops. */
+export const closeProjectRuntime = async (actor: ActorRefFrom<typeof projectMachine>): Promise<void> => {
+  actor.send({ type: 'closeRuntime' });
+  const snapshot = await waitFor(
+    actor,
+    (state) => state.matches('runtimeClosed') || state.matches('runtimeCloseFailed'),
+  );
+  if (snapshot.matches('runtimeCloseFailed')) {
+    const error: unknown = snapshot.context.error;
+    if (error instanceof Error) {
+      throw error;
+    }
+    throw new Error('Project runtime shutdown failed');
+  }
+};
 
 /**
  * Why this project has no kernel, or `undefined` when it has one (R4).

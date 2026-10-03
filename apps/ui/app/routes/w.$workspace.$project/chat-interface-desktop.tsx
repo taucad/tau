@@ -1,12 +1,13 @@
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import type { DockviewApi } from 'dockview-react';
 import { LayoutPriority } from 'allotment';
 import { Allotment } from '#components/panes/allotment.js';
 import { useSelector } from '@xstate/react';
 import { ChatHistory } from '#routes/w.$workspace.$project/chat-history.js';
 import { ChatHistoryGate, ChatInterfaceSessionGate } from '#routes/w.$workspace.$project/focused-chat-gate.js';
 import { ViewerDockview } from '#routes/w.$workspace.$project/chat-viewer-dockview.js';
-import { WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
-import { WorkbenchToggle } from '#routes/w.$workspace.$project/project-workspace-actions.js';
+import { getWorkbenchTabIcon, WorkbenchDockview } from '#routes/w.$workspace.$project/chat-workbench-dockview.js';
+import { WorkbenchToggle } from '#routes/w.$workspace.$project/workbench-toggle.js';
 import { ProjectUnavailableOverlay } from '#routes/w.$workspace.$project/project-unavailable-overlay.js';
 import { ProjectManifestIssueBanner } from '#routes/w.$workspace.$project/project-manifest-issue-banner.js';
 import { WorkspaceSkeleton } from '#routes/w.$workspace.$project/workspace-skeleton.js';
@@ -49,6 +50,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
   const containerRef = useRef<HTMLDivElement>(null);
   const { width } = useResizeObserver({ ref: containerRef });
   const [isClient, setIsClient] = useState(false);
+  const [workbenchApi, setWorkbenchApi] = useState<DockviewApi>();
   const isEditorReady = useSelector(editorRef, (state) => state.matches('ready'));
   const desktopLayout = useSelector(editorRef, (state) => state.context.panelState.desktopLayout);
   const isCompact = width !== undefined && width < compactWorkspaceWidth;
@@ -91,7 +93,12 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
         >
           {isClient && isEditorReady ? (
             <div className='absolute top-1 right-1 z-10 flex gap-1'>
-              <WorkbenchToggle isOpen={workbenchVisible} onOpenChange={setWorkbenchOpen} />
+              <WorkbenchToggle
+                isOpen={workbenchVisible}
+                api={workbenchApi}
+                getIcon={getWorkbenchTabIcon}
+                onOpenChange={setWorkbenchOpen}
+              />
             </div>
           ) : null}
           {/* Until the editor state has loaded and the focused chat exists, the
@@ -152,7 +159,7 @@ export const ChatInterfaceDesktop = memo(function (): React.JSX.Element {
                   priority={LayoutPriority.Low}
                   visible={workbenchVisible}
                 >
-                  <WorkbenchDockview />
+                  <WorkbenchDockview onApiChange={setWorkbenchApi} />
                 </Allotment.Pane>
               </Allotment>
             ) : (

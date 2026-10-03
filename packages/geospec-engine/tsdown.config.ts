@@ -42,6 +42,8 @@ const packageConfig: UserConfig = {
     'src/runner/node/native-pool-runner.ts',
     'src/runner/node/node-vm-filesystem.ts',
     'src/native/opencascade-wasm.ts',
+    'src/model/default-runtime-client.browser.ts',
+    'src/model/default-runtime-client.node.ts',
   ],
   sourcemap: false,
   clean: ['dist'],
@@ -51,7 +53,7 @@ const packageConfig: UserConfig = {
   unbundle: true,
   format: 'esm',
   outDir: 'dist',
-  deps: { neverBundle: ['@taucad/geospec-engine/native/opencascade/single'] },
+  deps: { neverBundle: ['@taucad/geospec-engine/native/opencascade/single', '#model/default-runtime-client.js'] },
   copy: nativeOpenCascadeArtifacts.map((artifact) => ({
     from: `native/opencascade/dist/${artifact}`,
     to: 'dist/native/opencascade',

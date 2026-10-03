@@ -685,6 +685,8 @@ fn validate_query_kind(kind: EntityType, query: &Query) -> Result<(), ProtocolEr
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub(crate) struct EntityFacts {
+    /// Genuine retained mesh material identity; never a STEP occurrence address.
+    pub material_region: Option<(u32, u32)>,
     /// Typed raw support and address from the same placed face inventory.
     /// Never reconstructed from a rounded plane offset or a selector label.
     pub nominal_support: Option<super::continuous::NominalSupport>,
@@ -755,6 +757,68 @@ pub(crate) struct SelectorIndex {
     /// (C11); `faces` must not change after either is built.
     pub axes: OnceCell<Vec<Entity>>,
     pub planes: OnceCell<Vec<Entity>>,
+}
+
+pub(crate) fn mesh_index_units(regions: &[super::mesh::material::MaterialRegion]) -> u64 {
+    regions.iter().fold(0u64, |sum, region| {
+        sum.saturating_add(4)
+            .saturating_add(region.label.encode_utf16().count() as u64)
+    })
+}
+
+/// Owned capacities of the mesh-only index and its retained Rc allocation.
+/// Other pools remain empty; mesh Body facts besides the label are inline.
+pub(crate) fn mesh_index_owned_bytes(index: &SelectorIndex) -> u64 {
+    (std::mem::size_of::<SelectorIndex>() + 2 * std::mem::size_of::<usize>()) as u64
+        + index.bodies.capacity() as u64 * std::mem::size_of::<Entity>() as u64
+        + index.bodies.iter().fold(0u64, |sum, entity| {
+            sum.saturating_add(entity.id.capacity() as u64)
+                .saturating_add(
+                    entity
+                        .facts
+                        .product_name
+                        .as_ref()
+                        .map_or(0, |name| name.capacity() as u64),
+                )
+        })
+}
+
+pub(crate) fn build_mesh_index(
+    regions: &[super::mesh::material::MaterialRegion],
+    _budget: &Budget,
+    byte_limit: u64,
+) -> Result<SelectorIndex, BackendError> {
+    let bytes = regions.iter().fold(0u64, |sum, region| {
+        sum.saturating_add(std::mem::size_of::<Entity>() as u64)
+            .saturating_add(region.label.len() as u64)
+            .saturating_add(64)
+    });
+    if bytes > byte_limit {
+        return Err(BackendError {
+            kind: BackendErrorKind::Unsupported,
+            message: "Mesh Body selector metadata exceeds the declared byte limit.".into(),
+        });
+    }
+    Ok(SelectorIndex {
+        bodies: regions
+            .iter()
+            .map(|region| Entity {
+                id: format!("body:mesh:{}:{}", region.primitive, region.root),
+                entity_type: EntityType::Body,
+                occurrence_path: None,
+                occurrence: None,
+                face: None,
+                facts: EntityFacts {
+                    material_region: Some((region.primitive, region.root)),
+                    product_name: Some(region.label.clone()),
+                    bounds: Some(region.bounds),
+                    ..EntityFacts::default()
+                },
+                topology_ref: None,
+            })
+            .collect(),
+        ..SelectorIndex::default()
+    })
 }
 
 #[cfg(test)]
@@ -1795,6 +1859,28 @@ pub(crate) fn resolve_budgeted_with_brep(
     brep: Option<&dyn BrepSubject>,
     budget: Option<&Budget>,
 ) -> Selection {
+    if index
+        .bodies
+        .iter()
+        .any(|entity| entity.facts.material_region.is_some())
+    {
+        let (expected, unsupported) = match selector {
+            Selector::Path(_) => (&Cardinality::One, true),
+            Selector::Query {
+                kind,
+                query,
+                expect,
+                ..
+            } => (
+                expect,
+                *kind != EntityType::Body || mesh_query_missing(query),
+            ),
+            Selector::Occurrence { expect, .. } | Selector::Named { expect, .. } => (expect, true),
+        };
+        if unsupported {
+            return probe_unsupported(expected.clone(), BackendError { kind: BackendErrorKind::Unsupported, message: "This selector needs source occurrence, analytic or material measure facts absent from the mesh Body index.".into() });
+        }
+    }
     match selector {
         Selector::Occurrence { name, path, expect } => {
             let mut matches = Vec::new();
@@ -1889,6 +1975,18 @@ pub(crate) fn resolve_budgeted_with_brep(
                             }
                         }
                         matched
+                    }
+                    (Some(scope), None) if entity.facts.material_region.is_some() => {
+                        match entity
+                            .facts
+                            .product_name
+                            .as_deref()
+                            .map(|label| scope.matches(label, Some(regex)))
+                        {
+                            Some(Ok(value)) => value,
+                            Some(Err(error)) => return regex_unsupported(expect.clone(), error),
+                            None => false,
+                        }
                     }
                     (Some(_), None) => false,
                     (None, _) => true,
@@ -2068,6 +2166,25 @@ pub(crate) fn resolve_budgeted_with_brep(
         }
         Selector::Path(path) => resolve_path(path, index),
     }
+}
+
+fn mesh_query_missing(query: &Query) -> bool {
+    query.surface_type.is_some()
+        || query.normal.is_some()
+        || query.axis.is_some()
+        || query.radius.is_some()
+        || query.area.is_some()
+        || query.offset.is_some()
+        || query.near.is_some()
+        || query.contains_point.is_some()
+        || query.nearest_to.is_some()
+        || query.hit_by_ray.is_some()
+        || query.within.is_some()
+        || query.order_by.is_some()
+        || query.along.is_some()
+        || query.all_of.iter().any(mesh_query_missing)
+        || query.any_of.iter().any(mesh_query_missing)
+        || query.not.as_deref().is_some_and(mesh_query_missing)
 }
 
 fn regex_unsupported(expected: Cardinality, error: EcmaRegexError) -> Selection {

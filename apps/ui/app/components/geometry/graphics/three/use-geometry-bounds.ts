@@ -5,13 +5,21 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { fromThreeRenderBounds } from '@taucad/three/spatial';
 import { useGraphics, useGraphicsSelector, useKinematicsRef, useRenderFrame } from '#hooks/use-graphics.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { KinematicsMachineContext } from '#machines/kinematics.machine.js';
+
+/** Retains Three's default object bounds while omitting presentation-only subtrees. */
+class GeometryBoundsBox extends THREE.Box3 {
+  public override expandByObject(object: THREE.Object3D, precise = false): this {
+    return object.userData[sceneTag.gltfSurfacePresentation] ? this : super.expandByObject(object, precise);
+  }
+}
 
 // Reusable temporaries for per-frame bounding calculations (avoids GC pressure).
 // Safe for multi-Canvas use because JavaScript is single-threaded and each
 // Canvas's render loop runs sequentially. Values are snapshotted into locals
 // before any state updater runs to prevent cross-contamination from batching.
-const _box3 = new THREE.Box3();
+const _box3 = new GeometryBoundsBox();
 const _centerPoint = new THREE.Vector3();
 const _sphere = new THREE.Sphere();
 

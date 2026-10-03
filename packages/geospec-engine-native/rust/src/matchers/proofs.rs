@@ -524,6 +524,9 @@ fn evaluate_interference(
         return phase_two_refusal(Capability::ToHaveNoComponentInterference);
     };
     let subject = std::rc::Rc::clone(&context.subjects[0]);
+    if subject.brep.is_none() && subject.mesh_record().is_some() {
+        return evaluate_mesh_interference(prepared, context);
+    }
     let normalized = normalized_expected(context);
     let identities = match interference::component_labels(&subject) {
         Ok(value) => value,
@@ -669,6 +672,164 @@ fn evaluate_interference(
                     Json::string("inclusive-upper-bound-no-scalar-fallback"),
                 ),
                 ("tolerance", Json::Number(prepared.tolerance)),
+            ]),
+        ),
+        negated_diagnostic: None,
+    }
+}
+
+fn evaluate_mesh_interference(
+    prepared: &Interference,
+    context: &mut EvaluationContext<'_>,
+) -> Evaluation {
+    use crate::analysis::continuous::exact;
+    use num_traits::Zero;
+    let subject = std::rc::Rc::clone(&context.subjects[0]);
+    if let Err(error) = context.charge_mesh_demand() {
+        return error;
+    }
+    let identities = match interference::component_labels(&subject) {
+        Ok(value) => value,
+        Err(error) => return backend_refusal(error),
+    };
+    let Some(selected) = &prepared.selected_pairs else {
+        return phase_two_refusal(Capability::ToHaveNoComponentInterference);
+    };
+    let Some(allowances) = &prepared.allowance_by_pair else {
+        return phase_two_refusal(Capability::ToHaveNoComponentInterference);
+    };
+    let count = selected.as_ref().map_or_else(
+        || {
+            identities
+                .len()
+                .saturating_mul(identities.len().saturating_sub(1))
+                / 2
+        },
+        Vec::len,
+    );
+    subject.mark_material_demand();
+    if let Err(error) = context.check_continuous_output(
+        (count as u64)
+            .saturating_mul(32 * 1024)
+            .saturating_add(crate::analysis::mesh::material_intersection::WORKSPACE_BYTES),
+    ) {
+        return error;
+    }
+    let mut pairs = Vec::with_capacity(count);
+    if let Some(selected) = selected {
+        pairs.extend(selected.iter().map(|p| (p.left, p.right)));
+    } else {
+        for (i, a) in identities.iter().enumerate() {
+            for b in &identities[i + 1..] {
+                pairs.push((a.id, b.id));
+            }
+        }
+    }
+    let mut results = Vec::with_capacity(count);
+    let mut satisfied = true;
+    let mut checked_pairs = 0usize;
+    let mut waived_pairs = 0usize;
+    for (left, right) in pairs {
+        let label = |id| {
+            identities
+                .iter()
+                .find(|value| value.id == id)
+                .map_or("", |value| value.label.as_str())
+        };
+        let allowance = allowances
+            .get(&(left.min(right), left.max(right)))
+            .map(|&i| (i, &prepared.allowances[i]));
+        if let Some((index, value)) = allowance {
+            if value.max_volume.is_none() {
+                waived_pairs += 1;
+                results.push(Json::object([
+                    ("leftComponentId", Json::Number(left as f64)),
+                    ("rightComponentId", Json::Number(right as f64)),
+                    ("leftComponentLabel", Json::string(label(left))),
+                    ("rightComponentLabel", Json::string(label(right))),
+                    ("allowanceIndex", Json::Number(index as f64)),
+                    ("criterion", Json::string("explicit-unbounded-allowance")),
+                ]));
+                continue;
+            }
+        }
+        let maximum = allowance
+            .and_then(|(_, value)| value.max_volume)
+            .unwrap_or(0.0);
+        let volume = match interference::material_overlap(
+            &subject,
+            left,
+            right,
+            context.budget,
+            (count as u64).saturating_mul(32 * 1024),
+        ) {
+            Ok(value) => value,
+            Err(error) => return backend_refusal(error),
+        };
+        checked_pairs += 1;
+        let maximum_exact = match exact::rational(maximum) {
+            Ok(value) => value,
+            Err(error) => return continuous_refusal(error),
+        };
+        // The final complete rational value, not display rounding or tolerance³,
+        // decides every inclusive whole-operand allowance.
+        let pair_satisfied = volume <= maximum_exact;
+        satisfied &= pair_satisfied;
+        results.push(Json::object([
+            ("leftComponentId", Json::Number(left as f64)),
+            ("rightComponentId", Json::Number(right as f64)),
+            ("leftComponentLabel", Json::string(label(left))),
+            ("rightComponentLabel", Json::string(label(right))),
+            ("maximumVolume", Json::Number(maximum)),
+            (
+                "intersectionNumerator",
+                Json::string(&volume.numer().to_string()),
+            ),
+            (
+                "intersectionDenominator",
+                Json::string(&volume.denom().to_string()),
+            ),
+            ("interiorOverlap", Json::Bool(!volume.is_zero())),
+            ("withinAllowance", Json::Bool(pair_satisfied)),
+        ]));
+    }
+    if let Err(error) = context.check_continuous_output(
+        (count as u64)
+            .saturating_mul(32 * 1024)
+            .saturating_add(crate::analysis::mesh::material_intersection::WORKSPACE_BYTES),
+    ) {
+        return error;
+    }
+    Evaluation::Geometric {
+        positive_satisfied: satisfied,
+        diagnostics: if satisfied {
+            Vec::new()
+        } else {
+            vec![Diagnostic::error(
+                "GEOSPEC_COMPONENT_INTERFERENCE",
+                "Selected components have material intersection exceeding the declared allowance.",
+            )]
+        },
+        evidence: family_evidence(
+            &subject.content_hash,
+            normalized_expected(context),
+            Json::object([
+                ("requestedPairs", Json::Number(count as f64)),
+                ("checkedPairs", Json::Number(checked_pairs as f64)),
+                ("waivedPairs", Json::Number(waived_pairs as f64)),
+                ("pairs", Json::Array(results)),
+            ]),
+            Json::object([
+                (
+                    "representation",
+                    Json::string("qualified-retained-dyadic-material-boundary"),
+                ),
+                (
+                    "comparison",
+                    Json::string("exact-complete-rational-inclusive-upper-bound"),
+                ),
+                ("tolerance", Json::Number(prepared.tolerance)),
+                ("sourceUncertainty", Json::string("unknown")),
             ]),
         ),
         negated_diagnostic: None,

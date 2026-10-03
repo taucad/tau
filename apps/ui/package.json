@@ -105,6 +105,7 @@
     "@taucad/vite": "workspace:*",
     "@taucad/xstate-testing": "workspace:*",
     "@types/express": "^5.0.6",
+    "@types/json-schema": "catalog:",
     "@types/pluralize": "^0.0.33",
     "@vitejs/plugin-react": "catalog:",
     "bson": "^6.10.4",

@@ -1,6 +1,6 @@
 import { Folder, MessageSquare } from 'lucide-react';
 import { useMemo } from 'react';
-import { useCommandPaletteItems } from '#components/layout/command-palette.js';
+import { CommandPaletteThumbnail, useCommandPaletteItems } from '#components/layout/command-palette.js';
 import type { CommandPaletteItem } from '#components/layout/command-palette.js';
 import { useAllChats } from '#hooks/use-all-chats.js';
 import { useProjects } from '#hooks/use-projects.js';
@@ -16,15 +16,7 @@ const hasSlugs = (
 
 function ProjectThumbnail({ projectId }: { readonly projectId: string }): React.JSX.Element {
   const thumbnailSource = useProjectThumbnail(projectId);
-  return (
-    <span className='flex size-9 items-center justify-center overflow-hidden rounded-md border bg-muted'>
-      {thumbnailSource ? (
-        <img src={thumbnailSource} alt='' className='size-full object-cover' />
-      ) : (
-        <Folder aria-hidden />
-      )}
-    </span>
-  );
+  return <CommandPaletteThumbnail src={thumbnailSource} fallback={<Folder aria-hidden />} />;
 }
 
 /** Registers every navigable project and non-deleted chat with global search. */

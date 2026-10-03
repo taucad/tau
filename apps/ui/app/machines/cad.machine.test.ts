@@ -1,7 +1,7 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
-import { createActor, waitFor } from 'xstate';
+import { createActor, setup, waitFor } from 'xstate';
 import type { AnyRuntimeDefinition, Evaluation, KernelIssue, Rendering, RuntimeContentInput } from '@taucad/runtime';
 import { createRuntimeClient, defineRuntime } from '@taucad/runtime';
 import { defineKernel, createKernelSuccess } from '@taucad/runtime/kernel';
@@ -449,4 +449,287 @@ describe('cadMachine watched document', () => {
     expect(f.cleanup).toHaveBeenCalledOnce();
     f.actor.stop();
   });
+  it.each(['first', 'both'] as const)('should retain only refused real view subscriptions: %s', async (mode) => {
+    const f = fixture();
+    const firstError = new Error('rendered subscription refused');
+    const secondError = new Error('status subscription refused');
+    const first = vi.fn<() => void>(() => {
+      throw firstError;
+    });
+    const second = vi.fn<() => void>(() => {
+      if (mode === 'both') {
+        throw secondError;
+      }
+    });
+    vi.mocked(f.runtime.view.on).mockReturnValueOnce(first).mockReturnValueOnce(second);
+    await opened(f);
+    try {
+      f.actor.send({ type: 'closeRuntime' });
+      await waitFor(f.actor, (state) => state.matches('runtimeCloseFailed'));
+      expect(first).toHaveBeenCalledOnce();
+      expect(second).toHaveBeenCalledOnce();
+      expect(f.actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+      const error = f.actor.getSnapshot().context.runtimeCloseError;
+      if (mode === 'both') {
+        expect(error).toBeInstanceOf(AggregateError);
+        if (!(error instanceof AggregateError)) {
+          throw new Error('Expected both subscription failures');
+        }
+        expect(error.errors).toEqual([firstError, secondError]);
+      } else {
+        expect(error).toBe(firstError);
+      }
+      first.mockImplementation(() => undefined);
+      second.mockImplementation(() => undefined);
+      f.actor.send({ type: 'closeRuntime' });
+      await waitFor(f.actor, (state) => state.matches('runtimeClosed'));
+      expect(first).toHaveBeenCalledTimes(2);
+      expect(second).toHaveBeenCalledTimes(mode === 'both' ? 2 : 1);
+      expect(f.client.shutdown).toHaveBeenCalledOnce();
+    } finally {
+      f.actor.stop();
+    }
+  });
+
+  it('should not leave closing on late document, view or worker status', async () => {
+    const f = await opened(fixture());
+    const release = Promise.withResolvers<void>();
+    vi.mocked(f.client.shutdown).mockImplementation(async () => release.promise);
+    try {
+      f.actor.send({ type: 'closeRuntime' });
+      await vi.waitFor(() => {
+        expect(f.client.shutdown).toHaveBeenCalledOnce();
+      });
+      for (const event of [
+        { type: 'documentStatusChanged', status: 'ready' },
+        { type: 'defaultViewStatusChanged', status: 'rendering' },
+        { type: 'stateChanged', state: 'error' },
+      ] as const) {
+        f.actor.send(event);
+        expect(f.actor.getSnapshot().matches('runtimeClosing')).toBe(true);
+      }
+    } finally {
+      release.resolve();
+      f.actor.stop();
+    }
+  });
+
+  it('should attempt document, view and all subscriptions and retry only failed owners', async () => {
+    const f = await opened(fixture());
+    const refusal = new Error('document listener refused');
+    const failed = vi.fn<() => void>(() => {
+      throw refusal;
+    });
+    const successful = vi.fn();
+    f.actor.send({
+      type: 'documentOpened',
+      document: f.runtime.document,
+      defaultView: f.runtime.view,
+      cleanups: [failed, successful],
+      requestId: f.actor.getSnapshot().context.openAttempt,
+    });
+    try {
+      f.actor.send({ type: 'closeRuntime' });
+      await waitFor(f.actor, (state) => state.matches('runtimeCloseFailed'));
+      expect(f.actor.getSnapshot().context.runtimeCloseError).toBe(refusal);
+      expect(f.actor.getSnapshot().context.documentCleanups).toEqual([failed]);
+      expect(successful).toHaveBeenCalledOnce();
+      expect(f.runtime.document.close).toHaveBeenCalledOnce();
+      expect(f.runtime.view.close).toHaveBeenCalledOnce();
+      expect(f.cleanup).toHaveBeenCalledOnce();
+      failed.mockImplementation(() => undefined);
+      f.actor.send({ type: 'closeRuntime' });
+      await waitFor(f.actor, (state) => state.matches('runtimeClosed'));
+      expect(failed).toHaveBeenCalledTimes(2);
+      expect(successful).toHaveBeenCalledOnce();
+      expect(f.client.shutdown).toHaveBeenCalledOnce();
+      expect(f.runtime.document.close).toHaveBeenCalledOnce();
+      expect(f.runtime.view.close).toHaveBeenCalledOnce();
+    } finally {
+      f.actor.stop();
+    }
+  });
+
+  it('should drain late document ownership without replacing the closing document', async () => {
+    const f = await opened(fixture());
+    const release = Promise.withResolvers<void>();
+    vi.mocked(f.client.shutdown).mockImplementation(async () => release.promise);
+    const late = createMockRuntimeDocument();
+    const refusal = new Error('late listener refused');
+    const failed = vi.fn<() => void>(() => {
+      throw refusal;
+    });
+    const successful = vi.fn();
+    try {
+      f.actor.send({ type: 'closeRuntime' });
+      await vi.waitFor(() => {
+        expect(f.client.shutdown).toHaveBeenCalledOnce();
+      });
+      f.actor.send({
+        type: 'documentOpened',
+        document: late.document,
+        defaultView: late.view,
+        cleanups: [failed, successful],
+        requestId: f.actor.getSnapshot().context.openAttempt,
+      });
+      expect(f.actor.getSnapshot().context.document).toBe(f.runtime.document);
+      release.resolve();
+      await waitFor(f.actor, (state) => state.matches('runtimeCloseFailed'));
+      expect(f.actor.getSnapshot().context.runtimeCloseError).toBe(refusal);
+      expect(f.actor.getSnapshot().context.documentCleanups).toEqual([failed]);
+      expect(successful).toHaveBeenCalledOnce();
+      expect(late.view.close).toHaveBeenCalledOnce();
+      expect(late.document.close).toHaveBeenCalledOnce();
+      failed.mockImplementation(() => undefined);
+      f.actor.send({ type: 'closeRuntime' });
+      await waitFor(f.actor, (state) => state.matches('runtimeClosed'));
+      expect(f.client.shutdown).toHaveBeenCalledOnce();
+      expect(failed).toHaveBeenCalledTimes(2);
+      expect(successful).toHaveBeenCalledOnce();
+    } finally {
+      release.resolve();
+      f.actor.stop();
+    }
+  });
+
+  it.each(['connected', 'parked', 'refused'] as const)(
+    'should acknowledge repeated close of a %s owner without projection success',
+    async (mode) => {
+      const f =
+        mode === 'refused'
+          ? (() => {
+              const actor = createActor(
+                cadMachine.provide({
+                  actors: {
+                    connectKernelActor: fromSafeAsync(async () => {
+                      throw new Error('initialization refused');
+                    }),
+                  },
+                }),
+                { input: { shouldInitializeKernelOnStart: false, fileSystemRoot: '', kernelOptionsFactory } },
+              ).start();
+              return { actor, client: createMockRuntimeClient() };
+            })()
+          : await connected(fixture());
+      try {
+        if (mode === 'refused') {
+          await waitFor(f.actor, (state) => state.matches('error'));
+        }
+        if (mode === 'parked') {
+          f.actor.send({ type: 'parkRuntime' });
+        }
+        f.actor.send({ type: 'closeRuntime' });
+        await waitFor(f.actor, (state) => state.matches('runtimeClosed'));
+        f.actor.send({ type: 'closeRuntime' });
+        expect(f.actor.getSnapshot().matches('runtimeClosed')).toBe(true);
+        expect(f.client.shutdown).toHaveBeenCalledTimes(mode === 'connected' ? 1 : 0);
+        expect(f.actor.getSnapshot().context.kernelClient).toBeUndefined();
+      } finally {
+        f.actor.stop();
+      }
+    },
+  );
+
+  it('should await the privately connecting client and fence binding and restore intents', async () => {
+    const runtime = await import('@taucad/runtime/client');
+    const client = createMockRuntimeClient();
+    const ready = Promise.withResolvers<void>();
+    const closed = Promise.withResolvers<void>();
+    vi.mocked(client.connect).mockImplementation(async () => ready.promise);
+    vi.mocked(client.shutdown).mockImplementation(async () => closed.promise);
+    vi.spyOn(runtime, 'createRuntimeClient').mockReturnValue(client);
+    const fileManager = createActor(
+      setup({}).createMachine({
+        initial: 'ready',
+        context: {
+          contentService: { id: 'original' },
+          openFileSystemBridge: () => ({ port: new MessageChannel().port1, dispose: () => undefined }),
+        },
+        on: { replace: { context: { contentService: { id: 'replacement' } } } },
+        states: { ready: {} },
+      }),
+    ).start();
+    const actor = createActor(cadMachine, {
+      input: {
+        shouldInitializeKernelOnStart: false,
+        // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- real ready actor supplies the connection owner's read-only filesystem seam
+        fileManagerRef: fileManager as unknown as NonNullable<CadContext['fileManagerRef']>,
+        kernelOptionsFactory,
+        fileSystemRoot: '/projects/test',
+      },
+    }).start();
+    try {
+      await vi.waitFor(() => {
+        expect(client.connect).toHaveBeenCalledOnce();
+      });
+      expect(actor.getSnapshot().context.kernelClient).toBeUndefined();
+      actor.send({ type: 'closeRuntime' });
+      await vi.waitFor(() => {
+        expect(client.shutdown).toHaveBeenCalledOnce();
+      });
+      fileManager.send({ type: 'replace' });
+      actor.send({ type: 'restoreParameters' });
+      expect(actor.getSnapshot().matches('runtimeClosed')).toBe(false);
+      expect(client.terminate).not.toHaveBeenCalled();
+      expect(client.open).not.toHaveBeenCalled();
+      closed.resolve();
+      await waitFor(actor, (state) => state.matches('runtimeClosed'));
+      ready.resolve();
+      await Promise.resolve();
+      expect(actor.getSnapshot().context.kernelClient).toBeUndefined();
+      actor.send({ type: 'filesystemBindingChanged' });
+      expect(actor.getSnapshot().matches('runtimeClosed')).toBe(true);
+      expect(runtime.createRuntimeClient).toHaveBeenCalledOnce();
+    } finally {
+      closed.resolve();
+      ready.resolve();
+      actor.stop();
+      fileManager.stop();
+    }
+  });
+
+  it.each(['client', 'subscription', 'both'] as const)(
+    'should retain exact %s failures and retry only failed cleanup ownership',
+    async (owner) => {
+      const f = await connected(fixture());
+      const clientFailure = new Error('shutdown refused');
+      const callbackFailure = new Error('subscription refused');
+      const failed = vi.fn(() => undefined);
+      const successful = vi.fn();
+      if (owner !== 'subscription') {
+        vi.mocked(f.client.shutdown).mockRejectedValue(clientFailure);
+      }
+      if (owner !== 'client') {
+        failed.mockImplementation(() => {
+          throw callbackFailure;
+        });
+      }
+      f.actor.send({ type: 'kernelAllocated', client: f.client, cleanups: [failed, successful] });
+      try {
+        f.actor.send({ type: 'closeRuntime' });
+        await waitFor(f.actor, (state) => state.matches('runtimeCloseFailed'));
+        const error = f.actor.getSnapshot().context.runtimeCloseError;
+        if (owner === 'both') {
+          expect(error).toBeInstanceOf(AggregateError);
+          if (!(error instanceof AggregateError)) {
+            throw new Error('Expected both failures');
+          }
+          expect(error.errors).toEqual([clientFailure, callbackFailure]);
+        } else {
+          expect(error).toBe(owner === 'client' ? clientFailure : callbackFailure);
+        }
+        expect(successful).toHaveBeenCalledOnce();
+        expect(f.actor.getSnapshot().context.eventCleanups).toEqual(owner === 'client' ? [] : [failed]);
+        vi.mocked(f.client.shutdown).mockResolvedValue(undefined);
+        failed.mockImplementation(() => undefined);
+        f.actor.send({ type: 'closeRuntime' });
+        await waitFor(f.actor, (state) => state.matches('runtimeClosed'));
+        expect(successful).toHaveBeenCalledOnce();
+        expect(f.client.shutdown).toHaveBeenCalledTimes(owner === 'subscription' ? 1 : 2);
+        expect(failed).toHaveBeenCalledTimes(owner === 'client' ? 1 : 2);
+      } finally {
+        f.actor.stop();
+      }
+    },
+  );
 });

@@ -1,5 +1,6 @@
 import * as React from 'react';
 import { clamp } from '#utils/number.utils.js';
+import { capturePointer, releasePointer } from '#utils/pointer-capture.utils.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 const dragThresholdPx = 3;
@@ -49,21 +50,6 @@ export type SliderInputProperties = Omit<
   readonly onInputEscape?: () => void;
   readonly onStep?: (direction: -1 | 1, modifiers: { shift: boolean }) => void;
   readonly onFocusChange?: (isFocused: boolean) => void;
-};
-
-const capturePointer = (element: Element, pointerId: number): void => {
-  if ('setPointerCapture' in element) {
-    element.setPointerCapture(pointerId);
-  }
-};
-
-const releasePointer = (element: Element, pointerId: number): void => {
-  if ('hasPointerCapture' in element && !element.hasPointerCapture(pointerId)) {
-    return;
-  }
-  if ('releasePointerCapture' in element) {
-    element.releasePointerCapture(pointerId);
-  }
 };
 
 const getDecimalCount = (value: number): number => {

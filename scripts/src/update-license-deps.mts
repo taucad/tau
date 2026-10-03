@@ -20,7 +20,7 @@ const rootDirectory = join(__dirname, '../..');
 const runtimeDirectory = join(rootDirectory, 'packages/runtime');
 const outputFile = join(rootDirectory, 'license-deps');
 
-type PackageInfo = {
+export type PackageInfo = {
   name: string;
   version: string;
   license: string;
@@ -29,9 +29,9 @@ type PackageInfo = {
 };
 
 /** A resolved package plus the real directory it was resolved from. */
-type ScannedPackage = PackageInfo & { directory: string };
+export type ScannedPackage = PackageInfo & { directory: string };
 
-type PackageJsonRaw = {
+export type PackageJsonRaw = {
   name?: string;
   version?: string;
   license?: string | { type?: string };
@@ -41,6 +41,8 @@ type PackageJsonRaw = {
   dependencies?: Record<string, string>;
   optionalDependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  os?: string[];
+  cpu?: string[];
 };
 
 type LicenseGroup = {
@@ -84,7 +86,7 @@ function normalizeGithubUrl(url: string): string {
 /**
  * Read and parse package.json from a directory.
  */
-async function readManifest(packagePath: string): Promise<PackageJsonRaw | undefined> {
+export async function readManifest(packagePath: string): Promise<PackageJsonRaw | undefined> {
   try {
     return JSON.parse(await readFile(join(packagePath, 'package.json'), 'utf8')) as PackageJsonRaw;
   } catch {
@@ -95,7 +97,7 @@ async function readManifest(packagePath: string): Promise<PackageJsonRaw | undef
 /**
  * Extract the attribution fields Tau publishes for one package.
  */
-function toPackageInfo(packageJson: PackageJsonRaw): PackageInfo | undefined {
+export function toPackageInfo(packageJson: PackageJsonRaw): PackageInfo | undefined {
   const {
     name,
     version,
@@ -163,7 +165,7 @@ async function isDirectory(path: string): Promise<boolean> {
  * in the node_modules beside its real path, so resolving from the real path of
  * each dependent walks the true closure rather than the hoisted root.
  */
-async function resolvePackageDirectory(name: string, fromDirectory: string): Promise<string | undefined> {
+export async function resolvePackageDirectory(name: string, fromDirectory: string): Promise<string | undefined> {
   let directory = fromDirectory;
 
   for (;;) {

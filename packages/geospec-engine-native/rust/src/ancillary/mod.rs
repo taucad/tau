@@ -125,7 +125,7 @@ impl PreparedQuery {
         match self {
             Self::MinimumDistance(value) => value.resolve(subject, budget),
             Self::Inspection(value) => {
-                let index = subject.selector_index().map_err(backend_refusal)?;
+                let index = subject.selector_index(budget).map_err(backend_refusal)?;
                 value.resolve(index.as_deref(), regex, subject.brep.as_deref(), budget);
                 Ok(())
             }

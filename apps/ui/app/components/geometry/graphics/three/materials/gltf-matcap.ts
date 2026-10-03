@@ -1,3 +1,7 @@
+import {
+  qualifyGltfSurfaceMaterial,
+  gltfSurfacePresentationTag,
+} from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import type { Mesh, Material, Object3D, Texture, Color } from 'three';
 import { DoubleSide, MeshMatcapMaterial } from 'three';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
@@ -106,6 +110,12 @@ function applyMatcapMaterialToMesh({
     return current;
   }
   const meshMatcap = createMeshMatcapReplacement(backend, matcapTexture);
+  qualifyGltfSurfaceMaterial(meshMatcap);
+  const [source] = getSourceMaterials(mesh.material);
+  if (source) {
+    meshMatcap.name = source.name;
+    meshMatcap.userData = structuredClone(source.userData);
+  }
   const sourceRenderState = resolveSourceMaterialRenderState(mesh.material);
 
   // The section clip carries over to the replacement.
@@ -152,7 +162,7 @@ export const applyMatcap = async (
   gltf.scene.traverse((child) => {
     // Skip fat-line meshes (`LineSegments2`) — WebGL + WebGPU both use `.type === 'LineSegments2'`.
     // They extend Mesh but use fat-line materials; matcap breaks edge rendering.
-    if ('type' in child && child.type === 'LineSegments2') {
+    if (Boolean(child.userData[gltfSurfacePresentationTag]) || ('type' in child && child.type === 'LineSegments2')) {
       return;
     }
 

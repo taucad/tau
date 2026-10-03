@@ -41,6 +41,11 @@ const actionRecordSchema: z.ZodType<ComputeActionRecord> = z
       })
       .strict(),
     dependencies: z.array(actionDigestSchema).readonly(),
+    requiredContent: z
+      .array(contentDigestSchema)
+      .transform((values) => [...new Set(values)].sort())
+      .readonly()
+      .optional(),
   })
   .strict();
 const projectComputeIndexSchema = z
@@ -558,6 +563,9 @@ const markActionClosure = async (input: {
       throw new CacheCorruptionError('Project cache action record has the wrong identity during GC.');
     }
     input.reachable.content.add(record.output.digest);
+    for (const required of record.requiredContent ?? []) {
+      input.reachable.content.add(required);
+    }
     for (const dependency of record.dependencies) {
       if (!input.reachable.actions.has(dependency)) {
         input.reachable.actions.add(dependency);
@@ -832,6 +840,13 @@ export const createProjectComputeStores = (
       if (output.status === 'miss' || output.bytes.byteLength !== record.output.size) {
         throw new CacheCorruptionError('Project cache action record references missing or truncated content.');
       }
+      for (const required of record.requiredContent ?? []) {
+        // oxlint-disable-next-line no-await-in-loop -- validate every declared leaf before admitting the action.
+        const content = await contentStore.read({ digest: required, signal });
+        if (content.status === 'miss') {
+          throw new CacheCorruptionError('Project cache action record references missing required content.');
+        }
+      }
       actionCounters.hits += 1;
       return { status: 'hit', record };
     },
@@ -843,6 +858,13 @@ export const createProjectComputeStores = (
         const output = await contentStore.read({ digest: validated.output.digest, signal });
         if (output.status === 'miss' || output.bytes.byteLength !== validated.output.size) {
           throw new CacheCorruptionError('Cannot publish an action before its referenced content exists.');
+        }
+        for (const required of validated.requiredContent ?? []) {
+          // oxlint-disable-next-line no-await-in-loop -- all owned leaves must exist before immutable publication.
+          const content = await contentStore.read({ digest: required, signal });
+          if (content.status === 'miss') {
+            throw new CacheCorruptionError('Cannot publish an action before its required content exists.');
+          }
         }
         const bytes = utf8.encode(JSON.stringify(validated));
         if (bytes.byteLength > maxEntryBytes) {

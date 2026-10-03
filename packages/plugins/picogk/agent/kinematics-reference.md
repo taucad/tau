@@ -94,7 +94,7 @@ All joints have `parent`, `child`, `origin` and optional display `name`. A scala
 
 ## C# records, dictionaries and snapshots
 
-Anonymous objects with lowercase wire property names are the shortest authoring form. Ordinary public readable properties, string-key dictionaries (including `ExpandoObject`), arrays/sequences, JSON scalars, `JsonElement` and `JsonNode` are supported. Fields and user serializer attributes/converters do not define the payload; `[JsonPropertyName]` cannot rename a PascalCase property here. Use string discriminants such as `type = "revolute"`; CLR enums serialize numerically.
+Anonymous objects with lowercase wire property names are the shortest authoring form. Ordinary public readable properties, string-key dictionaries (including `ExpandoObject`), arrays/sequences, JSON scalars, `JsonElement` and `JsonNode` are supported. Known structural C# properties accept idiomatic PascalCase or canonical names. Dictionary keys and raw JSON remain exact. `[JsonPropertyName]` and `[JsonIgnore]` are honored; fields and custom serializer converters do not define the payload. Unhosted native viewers throw `NotSupportedException` for mechanism registration. Use string discriminants such as `type = "revolute"`; CLR enums serialize numerically.
 
 Use `Dictionary<string, object>` for dynamic link/joint names or names containing `/`. Use `Dictionary<string, double>` for coordinates such as `["spindle/angle"] = 45`. When an array mixes anonymous object shapes (different joint/clip/keyframe layouts), use `new object[] { ... }` rather than an implicitly typed `new[]` that C# cannot unify. Keep finite numbers and string keys throughout; no callbacks or live geometry handles belong in this data.
 

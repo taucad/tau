@@ -59,7 +59,9 @@ const topLevel = (corpus: ApiCorpus): readonly ApiEntry[] => corpus.entries;
 
 const entryWeight = (entry: ApiEntry): number => {
   const own = (entry.signatures ?? []).reduce((sum, signature) => sum + estimateTokens(signature.text), 0);
-  const docs = estimateTokens(entry.docs?.summary ?? '');
+  const docs = estimateTokens(
+    [entry.docs?.summary, entry.docs?.remarks, ...(entry.docs?.throws ?? []), entry.category].filter(Boolean).join(' '),
+  );
   const members = (entry.members ?? []).reduce((sum, member) => sum + entryWeight(member), 0);
   return own + docs + members + 8;
 };

@@ -1,33 +1,75 @@
 # @taucad/replicad authoring API index
 
-@taucad/replicad 0.1.0-beta.0 · 19 symbols · extracted by TypeScript 5.9.3.
+@taucad/replicad 0.1.0-beta.0 · 61 symbols · extracted by TypeScript 5.9.3.
 
 Every symbol appears here exactly once. The heading above each block names the file with its signature.
 
 ## Types — `tau-api-types.md`
 
-ShapeConfig (type) — A shape with optional display and material metadata for rendering
-Model (type) — Model-level textures and images shared by the returned BRep shapes
-Material (type) — Standard glTF 2.0 material properties, including the ratified physical material…
-Image (type) — An image encoded into a GLB's binary buffer
-Resources (type) — Shared image, texture and sampler resources referenced by standard glTF…
-FaceDeclaration (type) — Named face selector declaration resolved by the Tau Replicad kernel…
-AxisDeclaration (type) — Named cylindrical or conical axis selector declaration resolved from a…
-DatumDeclaration (type) — Named orthonormal datum frame declaration exported as an AP242 placement
-GroupDeclaration (type) — Named group of face and axis declarations
-InterfaceDeclaration (type) — Replicad interface annotation declaration accepted by Tau's STEP exporter
-InterfaceDeclarations (type) — Map of interface names to annotation declarations
+ShapeConfig (type) [10 members] — A shape with optional display and material metadata for rendering [id: typescript:ShapeConfig]
+  ShapeConfig.shape (property) [id: typescript:ShapeConfig.shape]
+  ShapeConfig.name (property) [id: typescript:ShapeConfig.name]
+  ShapeConfig.strokeType (property) [id: typescript:ShapeConfig.strokeType]
+  ShapeConfig.density (property) — Physical density in g/cm³ for STEP mass computation [id: typescript:ShapeConfig.density]
+  ShapeConfig.interfaces (property) [id: typescript:ShapeConfig.interfaces]
+  ShapeConfig.color (property) — CSS color, converted from sRGB to linear glTF base color [id: typescript:ShapeConfig.color]
+  ShapeConfig.opacity (property) [id: typescript:ShapeConfig.opacity]
+  ShapeConfig.metalness (property) [id: typescript:ShapeConfig.metalness]
+  ShapeConfig.roughness (property) [id: typescript:ShapeConfig.roughness]
+  ShapeConfig.material (property) [id: typescript:ShapeConfig.material]
+Model (type) [4 members] — Model-level textures and images shared by the returned BRep shapes [id: typescript:Model]
+  Model.textures (property) — An array of textures [id: typescript:Model.textures]
+  Model.samplers (property) — An array of samplers [id: typescript:Model.samplers]
+  Model.images (property) [id: typescript:Model.images]
+  Model.shapes (property) [id: typescript:Model.shapes]
+Material (type) [11 members] — Standard glTF 2.0 material properties, including the ratified physical material… [id: typescript:Material]
+  Material.pbrMetallicRoughness (property) — A set of parameter values that are used to define… [id: typescript:Material.pbrMetallicRoughness]
+  Material.normalTexture (property) — The normal map texture [id: typescript:Material.normalTexture]
+  Material.occlusionTexture (property) — The occlusion map texture [id: typescript:Material.occlusionTexture]
+  Material.emissiveTexture (property) — The emissive map texture [id: typescript:Material.emissiveTexture]
+  Material.emissiveFactor (property) — The RGB components of the emissive color of the material [id: typescript:Material.emissiveFactor]
+  Material.alphaMode (property) — The alpha rendering mode of the material [id: typescript:Material.alphaMode]
+  Material.alphaCutoff (property) — The alpha cutoff value of the material [id: typescript:Material.alphaCutoff]
+  Material.doubleSided (property) — Specifies whether the material is double sided [id: typescript:Material.doubleSided]
+  Material.name (property) — The user-defined name of this object [id: typescript:Material.name]
+  Material.extras (property) [id: typescript:Material.extras]
+  Material.extensions (property) [id: typescript:Material.extensions]
+Image (type) [3 members] — An image encoded into a GLB's binary buffer [id: typescript:Image]
+  Image.name (property) [id: typescript:Image.name]
+  Image.mimeType (property) [id: typescript:Image.mimeType]
+  Image.data (property) [id: typescript:Image.data]
+Resources (type) [3 members] — Shared image, texture and sampler resources referenced by standard glTF… [id: typescript:Resources]
+  Resources.textures (property) — An array of textures [id: typescript:Resources.textures]
+  Resources.samplers (property) — An array of samplers [id: typescript:Resources.samplers]
+  Resources.images (property) [id: typescript:Resources.images]
+FaceDeclaration (type) [2 members] — Named face selector declaration resolved by the Tau Replicad kernel… [id: typescript:FaceDeclaration]
+  FaceDeclaration.kind (property) [id: typescript:FaceDeclaration.kind]
+  FaceDeclaration.select (property) [id: typescript:FaceDeclaration.select]
+AxisDeclaration (type) [2 members] — Named cylindrical or conical axis selector declaration resolved from a… [id: typescript:AxisDeclaration]
+  AxisDeclaration.kind (property) [id: typescript:AxisDeclaration.kind]
+  AxisDeclaration.select (property) [id: typescript:AxisDeclaration.select]
+DatumDeclaration (type) [4 members] — Named orthonormal datum frame declaration exported as an AP242 placement [id: typescript:DatumDeclaration]
+  DatumDeclaration.kind (property) [id: typescript:DatumDeclaration.kind]
+  DatumDeclaration.origin (property) [id: typescript:DatumDeclaration.origin]
+  DatumDeclaration.xAxis (property) [id: typescript:DatumDeclaration.xAxis]
+  DatumDeclaration.zAxis (property) [id: typescript:DatumDeclaration.zAxis]
+GroupDeclaration (type) [2 members] — Named group of face and axis declarations [id: typescript:GroupDeclaration]
+  GroupDeclaration.kind (property) [id: typescript:GroupDeclaration.kind]
+  GroupDeclaration.members (property) [id: typescript:GroupDeclaration.members]
+InterfaceDeclaration (type) [1 members] — Replicad interface annotation declaration accepted by Tau's STEP exporter [id: typescript:InterfaceDeclaration]
+  InterfaceDeclaration.kind (property) [id: typescript:InterfaceDeclaration.kind]
+InterfaceDeclarations (type) — Map of interface names to annotation declarations [id: typescript:InterfaceDeclarations]
 
 ## Functions — `tau-api-functions.md`
 
-face (function) — Declare a named face selected from a Replicad `FaceFinder`
-axis (function) — Declare a named cylindrical or conical axis selected from a…
-frame (function) — Declare a named coordinate frame exported as AP242 supplemental geometry
-datum (function) — Declare a named coordinate frame exported as AP242 supplemental geometry
-group (function) — Declare a named group of face and axis annotations
-isValidInterfaceName (function) — Return whether a candidate interface path is valid for STEP…
-isValidAuthoringKey (function) — Return whether a candidate top-level authoring key can appear in…
+face (function) — Declare a named face selected from a Replicad `FaceFinder` [id: typescript:face]
+axis (function) — Declare a named cylindrical or conical axis selected from a… [id: typescript:axis]
+frame (function) — Declare a named coordinate frame exported as AP242 supplemental geometry [id: typescript:frame]
+datum (function) — Declare a named coordinate frame exported as AP242 supplemental geometry [id: typescript:datum]
+group (function) — Declare a named group of face and axis annotations [id: typescript:group]
+isValidInterfaceName (function) — Return whether a candidate interface path is valid for STEP… [id: typescript:isValidInterfaceName]
+isValidAuthoringKey (function) — Return whether a candidate top-level authoring key can appear in… [id: typescript:isValidAuthoringKey]
 
 ## Constants — `tau-api-constants.md`
 
-INTERFACE_NAME_REGEX (constant) — Supported GeoSpec interface name grammar
+INTERFACE_NAME_REGEX (constant) — Supported GeoSpec interface name grammar [id: typescript:INTERFACE_NAME_REGEX]

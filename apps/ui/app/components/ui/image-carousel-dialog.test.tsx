@@ -266,6 +266,28 @@ describe('ImageCarouselDialog', () => {
     }
   });
 
+  it('stays open when focus moves outside, as when a launching menu returns focus to its trigger', async () => {
+    const onOpenChange = vi.fn();
+    render(
+      <>
+        <button type='button'>Menu trigger</button>
+        <ImageCarouselDialog
+          items={[{ id: 'one', src: 'data:image/png;base64,AAAA', mediaType: 'image/png', alt: 'One' }]}
+          directory={undefined}
+          isOpen
+          initialIndex={0}
+          onOpenChange={onOpenChange}
+        />
+      </>,
+    );
+    await screen.findByRole('dialog', { name: 'Image preview carousel' });
+    act(() => {
+      screen.getByRole('button', { name: 'Menu trigger', hidden: true }).focus();
+    });
+    expect(onOpenChange).not.toHaveBeenCalledWith(false);
+    expect(screen.getByRole('dialog', { name: 'Image preview carousel' })).toBeInTheDocument();
+  });
+
   it('should eager-load full dialog images', () => {
     render(
       <ImageCarouselDialog

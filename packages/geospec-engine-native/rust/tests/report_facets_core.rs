@@ -373,7 +373,10 @@ fn the_selector_index_reads_facts_facets_without_the_report_mesh() {
     // occurrence-free document; a failing report mesh cannot refuse it.
     let (brep, calls) = brep(true, false);
     let subjects = [subject(brep)];
-    assert!(subjects[0].selector_index().unwrap().is_some());
+    assert!(subjects[0]
+        .selector_index(&Budget::new(8_000_000))
+        .unwrap()
+        .is_some());
     assert!(subjects[0].mesh_record().is_none());
     assert_eq!(
         [&calls.mesh, &calls.facts, &calls.faces].map(Cell::get),

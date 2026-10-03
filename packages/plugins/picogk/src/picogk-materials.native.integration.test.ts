@@ -21,7 +21,9 @@ import { PicogkSession } from '#picogk-session.js';
 import { picogkBuildSchema, picogkProtocolVersion } from '#picogk.protocol.js';
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
-const options = loadPicogkKernelOptions({ resourceRoot: resolve(workspaceRoot, 'apps/desktop/resources/picogk') });
+const options = loadPicogkKernelOptions({
+  resourceRoot: resolve(workspaceRoot, 'apps/desktop/resources/picogk'),
+});
 const runtime = defineRuntime({ kernels: [picogkKernel(options)] });
 const png = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAAC0lEQVR4nGP4DwQACfsD/fteaysAAAAASUVORK5CYII=';
 const fullMaterialSource = `using System.Numerics;
@@ -58,10 +60,16 @@ Library.Go(1f, () => {
 
 const parse = async (bytes: Uint8Array<ArrayBuffer>) => {
   const io = await createNodeIo();
-  return { ...(await io.binaryToJSON(bytes)), document: await io.readBinary(bytes) };
+  return {
+    ...(await io.binaryToJSON(bytes)),
+    document: await io.readBinary(bytes),
+  };
 };
 function assertSuccess<
-  Result extends { readonly success: boolean; readonly issues: ReadonlyArray<{ message: string }> },
+  Result extends {
+    readonly success: boolean;
+    readonly issues: ReadonlyArray<{ message: string }>;
+  },
 >(result: Result): asserts result is Extract<Result, { success: true }> {
   if (!result.success) {
     throw new Error(result.issues.map(({ message }) => message).join('; '));
@@ -104,12 +112,16 @@ Library.Go(1f, () => {
         signal: new AbortController().signal,
       });
       const bytes = Buffer.byteLength(
-        JSON.stringify({ protocolVersion: picogkProtocolVersion, requestId: '1:1', result }),
+        JSON.stringify({
+          protocolVersion: picogkProtocolVersion,
+          requestId: '1:1',
+          result,
+        }),
       );
       expect(bytes).toBeGreaterThan(1024 * 1024);
       expect(bytes).toBeLessThan(4 * 1024 * 1024);
-      expect(result.components).toHaveLength(2500);
-      expect(result.components[2499]).toMatchObject({
+      expect(result.occurrences).toHaveLength(2500);
+      expect(result.occurrences[2499]).toMatchObject({
         name: 'Machined fastener 2499',
         material: { name: 'Machined steel fasteners and fittings' },
       });
@@ -121,7 +133,10 @@ Library.Go(1f, () => {
   }, 60_000);
 
   it('preserves all factors, maps, shared resources, UV frames, exports and restored handles', async () => {
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': fullMaterialSource } });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': fullMaterialSource },
+    });
     try {
       const opened = client.open({ source: { path: 'main.cs' } });
       const rendered = await opened.view('model').rendering();
@@ -193,9 +208,17 @@ Library.Go(1f, () => {
             iridescenceThicknessMinimum: 100,
             iridescenceThicknessMaximum: 400,
           },
-          KHR_materials_sheen: { sheenColorFactor: rgb, sheenRoughnessFactor: expect.closeTo(0.2) },
-          KHR_materials_specular: { specularFactor: expect.closeTo(0.9), specularColorFactor: rgb },
-          KHR_materials_transmission: { transmissionFactor: expect.closeTo(0.3) },
+          KHR_materials_sheen: {
+            sheenColorFactor: rgb,
+            sheenRoughnessFactor: expect.closeTo(0.2),
+          },
+          KHR_materials_specular: {
+            specularFactor: expect.closeTo(0.9),
+            specularColorFactor: rgb,
+          },
+          KHR_materials_transmission: {
+            transmissionFactor: expect.closeTo(0.3),
+          },
           KHR_materials_volume: {
             thicknessFactor: expect.closeTo(0.002),
             attenuationDistance: 0.25,
@@ -261,11 +284,17 @@ Library.Go(1f, () => {
       const volume = millimeters.materials?.find((entry) => entry.name === material?.name)?.extensions?.[
         'KHR_materials_volume'
       ];
-      expect(volume).toMatchObject({ thicknessFactor: expect.closeTo(2), attenuationDistance: 250 });
+      expect(volume).toMatchObject({
+        thicknessFactor: expect.closeTo(2),
+        attenuationDistance: 250,
+      });
       const gltf = await opened.export('gltf');
       assertSuccess(gltf);
       const jsonExport: unknown = JSON.parse(new TextDecoder().decode(gltf.files[0].bytes));
-      expect(jsonExport).toMatchObject({ images: expect.any(Array), textures: [{ source: 0, sampler: 0 }] });
+      expect(jsonExport).toMatchObject({
+        images: expect.any(Array),
+        textures: [{ source: 0, sampler: 0 }],
+      });
       const io = await createNodeIo();
       const resolved = await io.readJSON({
         json: JSON.parse(new TextDecoder().decode(gltf.files[0].bytes)) as Awaited<
@@ -274,7 +303,9 @@ Library.Go(1f, () => {
         resources: Object.fromEntries(gltf.files.slice(1).map(({ name, bytes: resource }) => [name, resource])),
       });
       expect(resolved.getRoot().listMeshes()).toHaveLength(2);
-      expect(resolved.getRoot().listTextures()[0]?.getImage()).toEqual(new Uint8Array(Buffer.from(png, 'base64')));
+      expect(Uint8Array.from(resolved.getRoot().listTextures()[0]?.getImage() ?? [])).toEqual(
+        new Uint8Array(Buffer.from(png, 'base64')),
+      );
       const definition = await resolveRuntimePluginDefinition('kernel', picogkKernel(options));
       const serialize = definition.serializeHandle!;
       const serialized = serialize({ handle: { glb: bytes } }, createMockKernelRuntime(), mock());
@@ -318,7 +349,10 @@ Library.Go(1f, () => {
       serializeHandle: definition.serializeHandle!,
       deserializeHandle: restore,
     })(options);
-    const cachedRuntime = defineRuntime({ kernels: [plugin], middleware: [geometryCache()] });
+    const cachedRuntime = defineRuntime({
+      kernels: [plugin],
+      middleware: [geometryCache()],
+    });
     const source = fullMaterialSource.replace(
       `Convert.FromBase64String("${png}")`,
       'System.IO.File.ReadAllBytes("map.png")',
@@ -329,12 +363,18 @@ Library.Go(1f, () => {
         transport: inProcessTransport({
           runtime: cachedRuntime,
           fileSystem: fromMemoryFs(),
-          compute: { mode: 'durable', store: fromSqlite({ store, workspace: 'picogk-pbr-cache' }) },
+          compute: {
+            mode: 'durable',
+            store: fromSqlite({ store, workspace: 'picogk-pbr-cache' }),
+          },
         }),
       });
       try {
         const opened = client.open({
-          source: { entry: 'main.cs', files: { 'main.cs': source, 'map.png': image } },
+          source: {
+            entry: 'main.cs',
+            files: { 'main.cs': source, 'map.png': image },
+          },
         });
         const result = await opened.view('model').rendering();
         if (result.superseded) {
@@ -407,7 +447,10 @@ Library.Go(1f, () => { var viewer = Library.oViewer();
  viewer.SetObjectMatrix(transformed,Matrix4x4.CreateRotationX(.2f)*Matrix4x4.CreateTranslation(4,5,6));
  viewer.SetGroupMatrix(1,Matrix4x4.CreateScale(-1,2,3)*Matrix4x4.CreateRotationZ(.4f)*Matrix4x4.CreateTranslation(10,20,30));
 });`;
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': source } });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': source },
+    });
     try {
       const opened = client.open({ source: { path: 'main.cs' } });
       const result = await opened.view('model').rendering();
@@ -422,7 +465,7 @@ Library.Go(1f, () => { var viewer = Library.oViewer();
         document
           .getRoot()
           .listTextures()
-          .map((texture) => texture.getImage()),
+          .map((texture) => Uint8Array.from(texture.getImage() ?? [])),
       ).toEqual([jpeg, webp]);
       const primitives = document
         .getRoot()
@@ -487,7 +530,7 @@ Library.Go(1f, () => { var viewer = Library.oViewer();
         resolved
           .getRoot()
           .listTextures()
-          .map((texture) => texture.getImage()),
+          .map((texture) => Uint8Array.from(texture.getImage() ?? [])),
       ).toEqual([jpeg, webp]);
     } finally {
       await client.shutdown();
@@ -506,7 +549,10 @@ Library.Go(.5f, () => {
  viewer.Add(Voxels.voxSphere(new Vector3(28,0,0), 12), "Glass sphere", 3);
  viewer.SetGroupMaterial(3, new Material { Name = "Tinted glass", Roughness = .05f, Ior = 1.5f, Transmission = new() { Factor = 1 }, Volume = new() { Thickness = .024f, AttenuationDistance = .03f, AttenuationColor = new("70C0D0") }, Dispersion = .15f });
 });`;
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': source } });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': source },
+    });
     try {
       const opened = client.open({ source: { path: 'main.cs' } });
       const rendered = await opened.view('model').rendering();

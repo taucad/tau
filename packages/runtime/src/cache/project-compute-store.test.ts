@@ -276,29 +276,35 @@ describe('project compute store', () => {
   });
 
   it('preserves active leases and reclaims them after expiry', async () => {
-    const filesystem = createFilesystem();
-    const stores = createProjectComputeStores(filesystem);
-    const bytes = new Uint8Array([13]);
-    const now = Date.now();
-    const output = await digestContent({ bytes });
-    const action = actionDigest({ value: `sha256:${'7'.repeat(64)}` });
-    await stores.contentStore.write({ digest: output, bytes });
-    await stores.actionStore.publish({
-      record: createRecord({ digest: action, output: { digest: output, size: 1, mediaType: 'x' } }),
-    });
-    await stores.lifecycle.renewLease({
-      sessionId: 'worker-session',
-      actionDigests: [action],
-      contentDigests: [],
-      expiresAt: now + 200,
-    });
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(1000);
+      const filesystem = createFilesystem();
+      const stores = createProjectComputeStores(filesystem);
+      const bytes = new Uint8Array([13]);
+      const now = Date.now();
+      const output = await digestContent({ bytes });
+      const action = actionDigest({ value: `sha256:${'7'.repeat(64)}` });
+      await stores.contentStore.write({ digest: output, bytes });
+      await stores.actionStore.publish({
+        record: createRecord({ digest: action, output: { digest: output, size: 1, mediaType: 'x' } }),
+      });
+      await stores.lifecycle.renewLease({
+        sessionId: 'worker-session',
+        actionDigests: [action],
+        contentDigests: [],
+        expiresAt: now + 200,
+      });
 
-    await stores.lifecycle.collect({ gracePeriod: 0, now: now + 100 });
-    await expect(stores.actionStore.read({ digest: action })).resolves.toMatchObject({ status: 'hit' });
+      await stores.lifecycle.collect({ gracePeriod: 0, now: now + 100 });
+      await expect(stores.actionStore.read({ digest: action })).resolves.toMatchObject({ status: 'hit' });
 
-    await stores.lifecycle.collect({ gracePeriod: 0, now: now + 201 });
-    await expect(stores.actionStore.read({ digest: action })).resolves.toEqual({ status: 'miss' });
-    await expect(filesystem.exists('.tau/cache/compute/v1/leases')).resolves.toBe(false);
+      await stores.lifecycle.collect({ gracePeriod: 0, now: now + 201 });
+      await expect(stores.actionStore.read({ digest: action })).resolves.toEqual({ status: 'miss' });
+      await expect(filesystem.exists('.tau/cache/compute/v1/leases')).resolves.toBe(false);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it('treats compute discovery indexes as durable refs', async () => {
@@ -389,4 +395,33 @@ describe('project compute store', () => {
     await expect(stores.lifecycle.clear({})).resolves.toEqual({ status: 'cleared' });
     await expect(filesystem.exists('.tau/cache/compute/v1')).resolves.toBe(false);
   });
+});
+
+it('should preserve and validate declared byte leaves across restart and garbage collection', async () => {
+  const filesystem = createFilesystem();
+  const stores = createProjectComputeStores(filesystem);
+  const root = new Uint8Array([1]);
+  const leaf = new Uint8Array([2, 3]);
+  const rootDigest = await digestContent({ bytes: root });
+  const leafDigest = await digestContent({ bytes: leaf });
+  const key = actionDigest({ value: `sha256:${'9'.repeat(64)}` });
+  const record: ComputeActionRecord = {
+    ...createRecord({
+      digest: key,
+      output: { digest: rootDigest, size: root.byteLength, mediaType: 'application/json' },
+    }),
+    requiredContent: [leafDigest],
+  };
+  await stores.contentStore.write({ digest: rootDigest, bytes: root });
+  await expect(stores.actionStore.publish({ record })).rejects.toThrow('required content exists');
+  await stores.contentStore.write({ digest: leafDigest, bytes: leaf });
+  await stores.actionStore.publish({ record });
+  await stores.lifecycle.writeRef({ scope: 'job', name: 'root', actionDigests: [key], contentDigests: [] });
+  const restarted = createProjectComputeStores(filesystem);
+  await restarted.lifecycle.collect({ now: Date.now() + 1000, gracePeriod: 0 });
+  expect(await restarted.actionStore.read({ digest: key })).toEqual({ status: 'hit', record });
+  expect(await restarted.contentStore.read({ digest: leafDigest })).toEqual({ status: 'hit', bytes: leaf });
+  const hex = leafDigest.slice('sha256:'.length);
+  await filesystem.unlink(`.tau/cache/compute/v1/blobs/sha256/${hex.slice(0, 2)}/${hex.slice(2)}`);
+  await expect(restarted.actionStore.read({ digest: key })).rejects.toThrow('missing required content');
 });

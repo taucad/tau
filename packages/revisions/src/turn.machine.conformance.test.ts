@@ -125,7 +125,8 @@ describe('turn.machine conforms to TurnProtocol.tla', () => {
     120_000,
   );
 
-  it('should walk every shortest implementation path through the spec graph without rejection', () => {
+  // This bounded graph traversal checks coverage and conformance, not wall-clock speed.
+  it('should walk and reach all 1,290 abstract states without rejection', () => {
     const paths = shortestPaths();
 
     expect(paths).toHaveLength(1290);
@@ -135,15 +136,12 @@ describe('turn.machine conforms to TurnProtocol.tla', () => {
         paths.map((path) => asWalk(path)),
       ),
     ).toEqual([]);
-  });
-
-  it('should reach all 1,290 abstract states', () => {
     const states = new Set(
-      shortestPaths().flatMap((path) => path.snapshots.map((snapshot) => JSON.stringify(abstractTurn(snapshot)))),
+      paths.flatMap((path) => path.snapshots.map((snapshot) => JSON.stringify(abstractTurn(snapshot)))),
     );
 
     expect(states.size).toBe(1290);
-  });
+  }, 30_000);
 
   it('should match the committed drift manifest', () => {
     expect(

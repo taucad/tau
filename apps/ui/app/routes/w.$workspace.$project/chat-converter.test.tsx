@@ -172,7 +172,7 @@ vi.mock('#hooks/use-project.js', () => ({
       getSnapshot: () => ({ context: { viewSettings: mockViewSettings, unitSettings: {} } }),
     },
     geometryUnits: mockGeometryUnits,
-    viewRecords: mockViewSettings,
+    viewRecords: new Map(Object.entries(mockViewSettings)),
     mainEntryPath: 'main.ts',
     parameterService: mockParameterService,
   }),

@@ -31,6 +31,7 @@ import type {
   RuntimeBackedModelFormat,
   RuntimeExportIntent,
 } from 'geospec/model';
+import { createDefaultRuntimeClient } from '#model/default-runtime-client.js';
 import { loadMeshObserved } from '#mesh/load-mesh.js';
 import type { GeometryDiagnostic, GeometrySubject, GeoSpecUnit, MeshFileFormat } from '#mesh/types.js';
 import { loadStepObserved } from '#step/load-step.js';
@@ -164,14 +165,6 @@ const loadDirectSource = async (
 
 const resolveAdapter = (options: RuntimeOptions): GeoSpecRuntimeSourceAdapter | undefined =>
   options.sourceAdapters?.find((adapter) => adapter.extensions.some((extension) => options.file.endsWith(extension)));
-
-const createDefaultRuntimeClient = async (projectPath: string | undefined): Promise<GeoSpecRuntimeClient> => {
-  const [{ createNodeClient }, { defaultRuntime }] = await Promise.all([
-    import('@taucad/runtime/node'),
-    import('#model/default-runtime.js'),
-  ]);
-  return createNodeClient({ runtime: defaultRuntime, projectPath });
-};
 
 /**
  * Obtain the runtime client for a runtime-branch load.

@@ -643,6 +643,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
     render(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
 
     const pane = screen.getByTestId('chat-viewer-layout');
+    expect(screen.getByRole('button', { name: 'Projection view: Model' })).toBeInTheDocument();
     const canvas = screen.getByRole('application', { name: 'CAD canvas' });
     canvas.focus();
     fireEvent.keyDown(canvas, { key: '2' });
@@ -695,6 +696,7 @@ describe('ChatViewer reopen-renderer overlay', () => {
       'view-1': { entryPath: helperEntryPath, graphicsSettings: defaultGraphicsSettings, selectedKernelView: 'pcb' },
     };
     pane.rerender(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} profile='shared' />);
+    expect(screen.queryByRole('button', { name: /Projection view:/ })).not.toBeInTheDocument();
     expect(runtime.viewSpy).toHaveBeenLastCalledWith('pcb', { options: {} });
     expect(mockCadViewerProps?.artifactHash).toBe('drawing-picture');
     act(() => {

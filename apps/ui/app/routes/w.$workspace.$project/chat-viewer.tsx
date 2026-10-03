@@ -39,6 +39,7 @@ import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
+import { ViewerProjectionPicker } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isEmptyGlb } from '#utils/inspect-glb.utils.js';
 import { ArButton } from '#components/cad/ar-button.js';
@@ -290,6 +291,7 @@ type ChatViewerProps = {
   /** Dockview panel API for updating title, etc. */
   readonly panelApi: IDockviewPanelHeaderProps['api'];
   readonly profile?: 'editor' | 'shared';
+  readonly onOpenProjectionBeside?: (kernelViewId: string) => void;
 };
 
 function MissingViewerFile({
@@ -330,6 +332,7 @@ export const ChatViewer = memo(function ({
   entryPath,
   panelApi,
   profile = 'editor',
+  onOpenProjectionBeside,
 }: ChatViewerProps): React.JSX.Element {
   const { projectRef, viewGraphics, viewRecords, entriesRecord, geometryUnits, mainEntryPath, setViewEntryPath } =
     useProject();
@@ -524,7 +527,12 @@ export const ChatViewer = memo(function ({
   return (
     <CadProvider cadRef={cadActor}>
       <GraphicsProvider graphicsRef={graphicsActor} seed={cameraSeed}>
-        <ViewerContent viewId={viewId} entryPath={entryPath} profile={profile} />
+        <ViewerContent
+          viewId={viewId}
+          entryPath={entryPath}
+          profile={profile}
+          onOpenProjectionBeside={onOpenProjectionBeside}
+        />
       </GraphicsProvider>
     </CadProvider>
   );
@@ -553,10 +561,12 @@ const ViewerContent = memo(function ({
   viewId,
   entryPath,
   profile,
+  onOpenProjectionBeside,
 }: {
   readonly viewId: string;
   readonly entryPath: string;
   readonly profile: 'editor' | 'shared';
+  readonly onOpenProjectionBeside?: (kernelViewId: string) => void;
 }): React.JSX.Element {
   const { projectRef, entriesRecord, viewRecords } = useProject();
   const viewCommands = useWorkbenchViewCommands();
@@ -1005,6 +1015,16 @@ const ViewerContent = memo(function ({
         }));
       }}
     >
+      {profile === 'editor' && cadRef ? (
+        <div className='absolute top-2 left-2 z-20 flex max-w-[calc(100%-1rem)] items-center'>
+          <ViewerProjectionPicker
+            viewId={viewId}
+            entryPath={entryPath}
+            cadActor={cadRef}
+            onOpenBeside={onOpenProjectionBeside}
+          />
+        </div>
+      ) : null}
       {/* Status overlays */}
       <div className='absolute top-[10%] right-2 left-2 z-10 mx-auto flex w-fit max-w-full flex-col gap-2'>
         <ChatViewerStatus />

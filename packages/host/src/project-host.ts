@@ -20,6 +20,7 @@ import type { ParameterManifest } from '@taucad/parameters';
 import { createParameterSetActor } from '@taucad/parameters/set-machine';
 import type { ParameterSetActor } from '@taucad/parameters/set-machine';
 import type { Description } from '@taucad/runtime/client';
+import type { RuntimeFileSystemBase } from '@taucad/runtime/types';
 import { Actor, createActor, waitFor } from 'xstate';
 import type { ActorOptions, AnyActorLogic } from 'xstate';
 
@@ -35,6 +36,27 @@ import type { HostMcpEndpoint } from '#mcp-server.js';
 import { hostRevisionActor } from '#revision-actor.js';
 import { createProjectRevisions } from '#revisions.js';
 import type { HostRevisionEvent, ProjectRevisions, ProjectRevisionsOptions, TurnCheckout } from '#revisions.js';
+
+/**
+ * Admit a checkout's filesystem as the host tools' filesystem. Revision hosts type checkout filesystems loosely, so the
+ * capabilities the host tools need are checked once, where an attempt's tools are opened: a filesystem without them
+ * refuses the turn by name instead of every print tool failing later (blueprint x1c-start-confirmation F8).
+ *
+ * @param filesystem - The checkout's filesystem, as the revision host opened it.
+ * @returns The same filesystem, typed for the host tools.
+ * @throws When it cannot stream reads or write with a precondition.
+ */
+const asHostToolFileSystem = (filesystem: Omit<RuntimeFileSystemBase, 'watch'>): HostToolFileSystem => {
+  if (typeof filesystem.readFileStream !== 'function' || typeof filesystem.writeFileChecked !== 'function') {
+    throw Object.assign(
+      new Error(
+        "This checkout's filesystem cannot stream reads or write with a precondition, so Tau's tools cannot run on it.",
+      ),
+      { code: 'HOST_TOOL_FILESYSTEM_INCOMPLETE' },
+    );
+  }
+  return filesystem as HostToolFileSystem;
+};
 
 /**
  * The process's filesystem authority as one project host uses it. The caller owns its lifetime.
@@ -359,7 +381,10 @@ export const openProjectHost = (options: ProjectHostOptions, admitting?: () => b
   /* The host process is the placement session (TS-R6 holds trivially); no Node host runs an attempt unplaced (D13). */
   const turnPlacement = (
     options.turnPlacement ??
-    ((input) => input.revisions.placement(({ root, filesystem }) => input.toolRegistryFor(root, filesystem)))
+    ((input) =>
+      input.revisions.placement(({ root, filesystem }) =>
+        input.toolRegistryFor(root, asHostToolFileSystem(filesystem)),
+      ))
   )({ revisions, toolRegistryFor });
 
   const externalAgents =

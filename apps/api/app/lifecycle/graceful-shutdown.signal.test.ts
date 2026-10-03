@@ -78,6 +78,9 @@ describe('closeGracefullyOnSignal', () => {
     child = started.child;
     // Long enough that the drain cannot finish before the second signal, however loaded the machine.
     const response = fetch(`${started.url}/slow?ms=20000`);
+    // Attach the expectation now: the request fails the moment the child dies, before `exited`
+    // settles, and a rejection with no handler yet is reported as an unhandled error.
+    const responseRejects = expect(response).rejects.toThrow();
     await vi.waitFor(() => {
       expect(child!.lines).toContain('request entered');
     });
@@ -90,6 +93,6 @@ describe('closeGracefullyOnSignal', () => {
 
     await expect(child.exited).resolves.toEqual({ code: undefined, signal: 'SIGTERM' });
     expect(child.lines).not.toContain('database closed');
-    await expect(response).rejects.toThrow();
+    await responseRejects;
   }, 60_000);
 });

@@ -32,7 +32,16 @@ export const bindingBusyStates: ReadonlySet<PrintRequest['state']> = new Set([
   'awaiting-approval',
   'uploading',
   'starting',
+  'confirming',
 ]);
+
+/**
+ * How long a sent start may go unproven before a person is asked to look. Milliseconds. The X1C proves a start only
+ * through its status reports, 15–41 s after `project_file` on the 2026-10-03 send (blueprint x1c-start-confirmation,
+ * F1–F2).
+ * @internal
+ */
+export const startConfirmationWindow = 180_000;
 
 const requestFailure = (error: unknown): NonNullable<PrintRequest['failure']> => {
   const cause = error instanceof Error ? error.cause : undefined;
@@ -64,10 +73,11 @@ export const advancePrintRequest = (
   record: PrintRequest,
   effects: ReadonlyMap<string, NodeMachineEffectState>,
 ): PrintRequest | undefined => {
+  const isUnsettledStart = record.state === 'confirming' || record.state === 'unknown';
   const phase =
     record.state === 'uploading' || (record.state === 'unknown' && record.transferId === undefined)
       ? 'upload'
-      : record.state === 'starting' || record.state === 'unknown'
+      : record.state === 'starting' || isUnsettledStart
         ? 'start'
         : undefined;
   if (!phase) {
@@ -75,7 +85,7 @@ export const advancePrintRequest = (
   }
   const operationId = phase === 'upload' ? record.uploadOperationId : record.startOperationId;
   const receipt = operationId === undefined ? undefined : effects.get(operationId)?.receipt;
-  if (!receipt || (record.state === 'unknown' && receipt.status === 'unknown' && phase === 'start')) {
+  if (!receipt || (isUnsettledStart && receipt.status === 'unknown' && phase === 'start')) {
     return undefined;
   }
   if (receipt.status === 'rejected') {
@@ -99,11 +109,34 @@ export const advancePrintRequest = (
     };
   }
   if (receipt.status === 'unknown') {
-    return { ...record, state: 'unknown', receipt };
+    // The printer may still prove the start in its reports; the host keeps checking (`settleUnknownEffects`).
+    return { ...record, state: 'confirming', receipt };
   }
   return receipt.kind === 'upload'
     ? { ...record, state: 'starting', transferId: receipt.evidence.transferId, receipt }
     : { ...record, state: 'started', receipt };
+};
+
+/**
+ * Escalate a start that has gone unproven for the whole confirmation window.
+ * @internal
+ * @param record - Any request.
+ * @param effects - Every recorded effect, by operation id.
+ * @param now - The host clock's current time.
+ * @returns The request as `unknown`, or `undefined` while it is not a lapsed `confirming` one.
+ */
+export const escalateUnconfirmedStart = (
+  record: PrintRequest,
+  effects: ReadonlyMap<string, NodeMachineEffectState>,
+  now: string,
+): PrintRequest | undefined => {
+  const receipt = record.startOperationId === undefined ? undefined : effects.get(record.startOperationId)?.receipt;
+  if (record.state !== 'confirming' || receipt?.status !== 'unknown') {
+    return undefined;
+  }
+  return Date.parse(now) - Date.parse(receipt.observedAt) >= startConfirmationWindow
+    ? { ...record, state: 'unknown', receipt }
+    : undefined;
 };
 
 /** The host's own device operations, which a request prepares, uploads and starts through. @internal */

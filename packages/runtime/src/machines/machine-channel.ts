@@ -292,6 +292,7 @@ const printRequestSchema = z.strictObject({
     'approved',
     'uploading',
     'starting',
+    'confirming',
     'started',
     'denied',
     'withdrawn',

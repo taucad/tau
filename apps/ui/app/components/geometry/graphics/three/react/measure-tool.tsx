@@ -303,6 +303,7 @@ export function MeasureTool(): React.JSX.Element {
   const catalogVersionRef = useRef(0);
   const catalogScanRef = useRef<
     | {
+        filter: typeof measureFilter | 'point';
         meshes: Array<THREE.Object3D & { geometry: THREE.BufferGeometry }>;
         meshIndex: number;
         graph?: MeshFeatureGraph;
@@ -349,14 +350,12 @@ export function MeasureTool(): React.JSX.Element {
     graphClientRef.current ??= createMeasurementFeatureWorkerClient();
     return graphClientRef.current;
   }, []);
-  useEffect(
-    () => () => {
-      graphClientRef.current?.dispose();
-      graphClientRef.current = undefined;
-      pointerGraphPendingRef.current = new WeakSet();
-    },
-    [geometryKey, isMeasureActive, modelDisplayRevision, pickableMeshesVersion],
-  );
+  const retireGraphClient = useCallback(() => {
+    graphClientRef.current?.dispose();
+    graphClientRef.current = undefined;
+    pointerGraphPendingRef.current = new WeakSet();
+  }, []);
+  useEffect(() => retireGraphClient, [retireGraphClient]);
   // Where the pointer last moved, so a cut change can raycast its snaps again from there.
   const lastPointerRef = useRef<MeasurePointerCoordinates | undefined>(undefined);
   const wasCameraMovingRef = useRef(cameraMoving);
@@ -1088,6 +1087,16 @@ export function MeasureTool(): React.JSX.Element {
     };
     catalogVersionRef.current++;
     catalogScanRef.current = undefined;
+    // Feature graphs belong to one measuring session over one geometry, display and pickable-mesh set.
+    if (
+      previous &&
+      (previous.geometryKey !== geometryKey ||
+        previous.isMeasureActive !== isMeasureActive ||
+        previous.modelDisplayRevision !== modelDisplayRevision ||
+        previous.pickableMeshesVersion !== pickableMeshesVersion)
+    ) {
+      retireGraphClient();
+    }
     if (!isMeasureActive) {
       return;
     }
@@ -1119,10 +1128,9 @@ export function MeasureTool(): React.JSX.Element {
     graphicsActor,
     isMeasureActive,
     modelDisplayRevision,
-    measureFilter,
-    measureMode,
     pickableMeshesVersion,
     poseRevision,
+    retireGraphClient,
   ]);
 
   useEffect(() => {
@@ -1131,8 +1139,11 @@ export function MeasureTool(): React.JSX.Element {
     }
     handledCatalogRequestRef.current = measureCatalogRequest;
     const append = graphicsActor.getSnapshot().context.measureCatalogAppend;
-    if (!append || !catalogScanRef.current) {
+    const filter = measureMode === 'point' ? 'point' : measureFilter;
+    // A page is appended only to a scan of the same filter; a new filter or mode starts the catalog over.
+    if (!append || catalogScanRef.current?.filter !== filter) {
       catalogScanRef.current = {
+        filter,
         meshes: [...getCachedMeshes(), ...getCachedLines()],
         meshIndex: 0,
         featureIndex: 0,
@@ -1227,7 +1238,7 @@ export function MeasureTool(): React.JSX.Element {
               mesh,
               camera,
               canvas: gl.domElement,
-              filter: measureMode === 'point' ? 'point' : measureFilter,
+              filter: scan.filter,
               isKept: isKept ?? undefined,
             },
           );

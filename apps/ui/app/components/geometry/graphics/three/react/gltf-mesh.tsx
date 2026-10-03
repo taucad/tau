@@ -971,6 +971,8 @@ function seedSceneMaterialAppearances(scene: Group): void {
 
 export type ApplyModelComponentVisualStateToSceneOptions = Readonly<{
   scene: Group;
+  /** Material mode the scene currently wears; a change re-applies appearance over the swapped materials. */
+  materialSignature?: string;
   /** Stable inventory supplied only by the presentation owner. Other callers collect current membership. */
   inventory?: readonly Object3D[];
   componentManifest: GeometryComponentManifest;
@@ -1035,6 +1037,7 @@ export function applyModelComponentVisualStateToScene({
   enableSurfaces,
   enableLines,
   inventory,
+  materialSignature,
 }: ApplyModelComponentVisualStateToSceneOptions): ModelEmphasisSet {
   const previous = appliedAppearance.get(scene);
   const applyAppearance =
@@ -1043,11 +1046,19 @@ export function applyModelComponentVisualStateToScene({
     previous.componentManifest !== componentManifest ||
     previous.enableSurfaces !== enableSurfaces ||
     previous.enableLines !== enableLines ||
+    previous.materialSignature !== materialSignature ||
     previous.modelVisualState.hiddenComponentIds !== modelVisualState.hiddenComponentIds ||
     previous.modelVisualState.isolatedComponentIds !== modelVisualState.isolatedComponentIds ||
     previous.modelVisualState.focusedComponentId !== modelVisualState.focusedComponentId ||
     previous.modelVisualState.opacityByComponentId !== modelVisualState.opacityByComponentId;
-  appliedAppearance.set(scene, { scene, componentManifest, modelVisualState, enableSurfaces, enableLines });
+  appliedAppearance.set(scene, {
+    scene,
+    componentManifest,
+    modelVisualState,
+    enableSurfaces,
+    enableLines,
+    ...(materialSignature === undefined ? {} : { materialSignature }),
+  });
   const hidden = new Set(modelVisualState.hiddenComponentIds);
   const isolated = new Set(modelVisualState.isolatedComponentIds);
   const emphasisComponents = {
@@ -1183,7 +1194,7 @@ export function GltfMesh({
   const retiredPresentationsRef = useRef<PreparedGltfPresentation[]>([]);
   const frameProbeRef = useRef<{ revision: number; modelEmptyFrames: number } | undefined>(undefined);
   const [topologyScheduler] = useState(createSectionTopologyScheduler);
-  const { size, invalidate, gl, scene: rootScene } = useThree();
+  const { size, invalidate, scene: rootScene } = useThree();
   const { theme } = useTheme();
   const activeEdgeColor = theme === Theme.DARK ? gltfEdgeColorDarkMode : gltfEdgeColorLightMode;
   const matcapTint = theme === Theme.DARK ? darkModeIntensityScale : 1;
@@ -1334,7 +1345,7 @@ export function GltfMesh({
         },
       });
     },
-    [gltfFile.byteLength, graphicsActor, graphicsBackendThree, topologyScheduler],
+    [graphicsActor, graphicsBackendThree, topologyScheduler],
   );
 
   const ensureSectionAnalysis = useCallback(
@@ -1770,13 +1781,10 @@ export function GltfMesh({
     gltfFile,
     graphicsBackendThree,
     invalidate,
-    gl,
     graphicsActor,
     sourceFile,
     geometryHash,
     requestedUnitId,
-    rootScene,
-    cameraRig,
     presentationRevision,
     ensureSectionAnalysis,
     emitTelemetry,
@@ -1951,10 +1959,12 @@ export function GltfMesh({
     retargetMaterialDistances,
   ]);
 
+  // An in-place update keeps the scene but replaces the presentation, so emphasis is re-applied to it.
   useLayoutEffect(() => {
-    if (!scene || !componentManifest) {
+    if (!presentation) {
       return;
     }
+    const { scene, manifest: componentManifest } = presentation;
     if (enableLines && !expandedEdgeScenes.has(scene)) {
       const bundle = committedPresentationRef.current;
       applyFatLineSegments(
@@ -1983,12 +1993,11 @@ export function GltfMesh({
       modelVisualState,
       enableSurfaces,
       enableLines,
+      materialSignature: `${enableMatcap}:${matcapTint}`,
     });
     setModelEmphasisSet(rootScene, emphasised);
     invalidate();
   }, [
-    scene,
-    componentManifest,
     modelVisualState,
     enableSurfaces,
     enableLines,
@@ -2002,13 +2011,16 @@ export function GltfMesh({
     rootScene,
   ]);
 
-  useEffect(
-    () => () => {
+  // Retiring a presented scene clears the emphasis it contributed to the root scene.
+  useEffect(() => {
+    if (!scene) {
+      return undefined;
+    }
+    return () => {
       setModelEmphasisSet(rootScene, emptyModelEmphasisSet);
       invalidateSceneTransparency(rootScene);
-    },
-    [rootScene, scene],
-  );
+    };
+  }, [rootScene, scene]);
 
   useEffect(() => {
     lastHoveredComponentIdRef.current = modelVisualState.isViewerHoverSuppressed

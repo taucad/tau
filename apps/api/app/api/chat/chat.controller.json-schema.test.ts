@@ -555,15 +555,15 @@ describe('chatTurnRequestSchema JSON Schema contract (R13)', () => {
                             "minimum": -9007199254740991,
                             "type": "integer",
                           },
+                          "operationTimeout": {
+                            "maximum": 9007199254740991,
+                            "minimum": -9007199254740991,
+                            "type": "integer",
+                          },
                           "path": {
                             "maxLength": 1024,
                             "minLength": 1,
                             "type": "string",
-                          },
-                          "renderTimeout": {
-                            "maximum": 9007199254740991,
-                            "minimum": -9007199254740991,
-                            "type": "integer",
                           },
                         },
                         "required": [

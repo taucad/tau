@@ -13,6 +13,7 @@ import { z } from 'zod';
 import type { CheckedFileWriteResult } from '@taucad/types';
 import { assertRootedPath } from '@taucad/utils/path';
 import type { FileMode, FileStat, HeadFileStat } from '#types.js';
+import { streamChunkSize } from '#backend/stream-utils.js';
 
 /** Wire version. Version 4 requires both checked deletion and head listing. @public */
 export const nodeFsProtocolVersion = 4;
@@ -126,6 +127,14 @@ const checkedDeleteRequestSchema = z
 
 export const nodeFsRequestSchema = z.discriminatedUnion('op', [
   z.object({ ...rooted, op: z.literal('readFile'), path: z.string() }),
+  /* One bounded chunk of a streamed read: the client pulls `readFileStream` a chunk at a time. */
+  z.object({
+    ...rooted,
+    op: z.literal('readFileRange'),
+    path: z.string(),
+    position: z.number().int().nonnegative().max(Number.MAX_SAFE_INTEGER),
+    length: z.number().int().positive().max(streamChunkSize),
+  }),
   z.object({ ...rooted, op: z.literal('writeFile'), path: z.string(), data: dataSchema }),
   checkedWriteRequestSchema,
   checkedDeleteRequestSchema,
@@ -200,6 +209,7 @@ export type NodeFsResponse = z.infer<typeof nodeFsResponseSchema>;
 /** Per-operation result validators, so a drifting host cannot poison the tree. */
 export const nodeFsResultSchemas = {
   readFile: bytesSchema,
+  readFileRange: bytesSchema,
   writeFile: z.undefined(),
   writeFileChecked: checkedWriteResultSchema,
   deleteFileChecked: checkedWriteResultSchema,

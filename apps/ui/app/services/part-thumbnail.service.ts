@@ -41,6 +41,11 @@ const maxSourceBytes = 64 * 1024 * 1024;
 const maxRequestedParts = 128;
 const maxPreviewBytes = 8 * 1024 * 1024;
 const batchSize = 4;
+// One rendition serves the 80 px frames and the gallery: the agreed 1536 px long side on the parts' square frame.
+const previewSize = 1536;
+const previewQuality = 0.95;
+// Edges are output pixels; 6 px at 1536 keeps the reviewed line weight of 2 px at 512.
+const previewLineWidth = 6;
 
 type Work = Readonly<{
   generation: number;
@@ -322,7 +327,7 @@ export class PartThumbnailService {
   }
 
   private identity(hash: string, part: PartThumbnailRequest): string {
-    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-256-v1`;
+    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-${previewSize}-q${previewQuality}-v2`;
   }
 
   private validateRequest(source: PartThumbnailSource, parts: readonly PartThumbnailRequest[]): Set<string> {
@@ -404,7 +409,14 @@ export class PartThumbnailService {
             geometryHash: work.source.geometryHash,
             content,
             format: 'webp',
-            exportOptions: { mode: 'batch', width: 256, height: 256, quality: 0.9, views },
+            exportOptions: {
+              mode: 'batch',
+              width: previewSize,
+              height: previewSize,
+              quality: previewQuality,
+              lineWidth: previewLineWidth,
+              views,
+            },
           });
           // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- A caller may dispose during the await.
           if (this.disposed || this.generation !== work.generation) {

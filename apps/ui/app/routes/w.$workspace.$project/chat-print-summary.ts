@@ -167,6 +167,16 @@ export const formatQuantity = (quantity: PrintQuantity): string => {
 };
 
 /**
+ * A stage phrase to show; a bare number, as a snapshot saved before stages were phrases may hold, is not one.
+ *
+ * @param stage - The run's stage as observed.
+ * @returns The phrase, or nothing.
+ * @public
+ */
+export const readableStage = (stage: string | undefined): string | undefined =>
+  stage === undefined || /^\d+$/u.test(stage) ? undefined : stage;
+
+/**
  * How long ago a timestamp was, against a supplied clock: "12 s ago", "3 min ago", "2 h ago".
  *
  * @param timestamp - An ISO timestamp.

@@ -5,36 +5,11 @@
 import { createActor, waitFor } from 'xstate';
 import type { ContentBlock, SessionConfigOption } from '@agentclientprotocol/sdk';
 
-import type { ExternalAgentTurn } from '@taucad/agent-host/launcher';
-
 import { provideAcpSession } from '#acp/acp-session-logic.js';
 import { failureError, failureOfError } from '#acp/acp-session.machine.js';
 import type { AcpFailure, AcpTurnResult } from '#acp/acp-session.machine.js';
 import { confirmedConfiguration, modelChoice } from '#acp/session.js';
-import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 import type { AcpPromptTurn, AcpSession, AcpTurnOutcome, OpenAcpSessionOptions } from '#acp/session.js';
-import type { AcpWireFrame } from '#acp/spawn.js';
-
-/** A lent turn's seams: the prompt seams, and the record writer when the turn has one. */
-export type AcpLentSeams = AcpPromptTurn & {
-  readonly remember?: ExternalAgentTurn['remember'] | undefined;
-  /** Where this turn's chat records questions, so form elicitations reach the person (agent questions blueprint D6). */
-  readonly questions?: { readonly chatId: string; readonly fileSystem: QuestionRecordFileSystem } | undefined;
-};
-
-/** What {@link provideAcpSession} needs from its owner. */
-export type AcpSessionEffects = {
-  readonly createId: () => string;
-  readonly onFrame?: ((frame: AcpWireFrame) => void) | undefined;
-  /** The seams of the turn lent under this request id. */
-  readonly seams: (requestId: string) => AcpLentSeams | undefined;
-  /** Activate the MCP binding for this turn; the returned function releases it (EA-R6). */
-  readonly bind?:
-    | ((requestId: string, token: string | undefined) => (() => void | Promise<void>) | undefined)
-    | undefined;
-  /** The skill publication's directories, named on every session open (D-040). */
-  readonly publishSkills: (signal: AbortSignal) => Promise<readonly string[]>;
-};
 
 const sessionClosed: AcpFailure = { code: 'EXTERNAL_AGENT_FAILED', message: 'The ACP session is closed.' };
 

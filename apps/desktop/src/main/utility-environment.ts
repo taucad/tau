@@ -23,6 +23,14 @@ const pathSentinel = '__TAU_PATH__';
 const shellBookkeepingNames = new Set(['SHLVL', 'PWD', 'OLDPWD', '_', 'TERM', 'PATH']);
 
 /**
+ * Prefixes never imported from rc files: Tau's own endpoint, path and test
+ * switches, Electron's runtime switches (`ELECTRON_RUN_AS_NODE`,
+ * `ELECTRON_RENDERER_URL`) and Node's (`NODE_OPTIONS`). A line planted in
+ * `.zshrc` must not redirect the signed app or change what it runs.
+ */
+const shellDeniedPrefixes = ['TAU_', 'ELECTRON_', 'NODE_'] as const;
+
+/**
  * The environment a GUI launch never gets.
  *
  * launchd starts a macOS app with `/usr/bin:/bin:/usr/sbin:/sbin` and none of
@@ -34,7 +42,8 @@ const shellBookkeepingNames = new Set(['SHLVL', 'PWD', 'OLDPWD', '_', 'TERM', 'P
  * `XDG_*`, which live in the same rc files (10-review D). So ask the login
  * shell once and import all of it, as VS Code and Zed do (operator decision
  * Q13): PATH merges ahead of the launcher's, every other variable applies only
- * where the launcher set none, and shell bookkeeping is dropped.
+ * where the launcher set none, and shell bookkeeping and `TAU_`/`ELECTRON_`/`NODE_`
+ * names are dropped.
  *
  * Values from rc files can be secrets; log the names and counts, never a value.
  *
@@ -101,7 +110,11 @@ export const loginShellEnvironment = async (
     const name = entry.slice(0, equals);
     if (name === 'PATH') {
       login = entry.slice(equals + 1);
-    } else if (!shellBookkeepingNames.has(name) && target[name] === undefined) {
+    } else if (
+      !shellBookkeepingNames.has(name) &&
+      !shellDeniedPrefixes.some((prefix) => name.startsWith(prefix)) &&
+      target[name] === undefined
+    ) {
       /* Launcher-set precedence: what started the app already decided. */
       target[name] = entry.slice(equals + 1);
       applied += 1;
@@ -192,6 +205,13 @@ export const compileCacheEnvironment = (userDataPath: string): Readonly<{ TAU_CO
   TAU_COMPILE_CACHE_DIR: join(userDataPath, 'compile-cache'),
 });
 
+/** The esbuild platform executable each packaged target stages outside the ASAR (`runtime-stage.mts`). */
+const stagedEsbuildExecutables: Readonly<Record<string, string>> = {
+  'darwin-arm64': '@esbuild/darwin-arm64/bin/esbuild',
+  'linux-x64': '@esbuild/linux-x64/bin/esbuild',
+  'win32-x64': '@esbuild/win32-x64/esbuild.exe',
+};
+
 /**
  * Locate esbuild's staged executable for packaged utility processes.
  *
@@ -211,13 +231,9 @@ export const packagedEsbuildEnvironment = (
   target?: Readonly<{ architecture: string; platform: NodeJS.Platform }>,
 ): Readonly<Record<string, string>> => {
   const packagedTarget = target ?? { architecture: process.arch, platform: process.platform };
-  return packaged && packagedTarget.platform === 'darwin' && packagedTarget.architecture === 'arm64'
-    ? {
-        [esbuildBinaryPathVariable]: join(
-          resourcesPath,
-          'app.asar.unpacked/node_modules/@esbuild/darwin-arm64/bin/esbuild',
-        ),
-      }
+  const staged = stagedEsbuildExecutables[`${packagedTarget.platform}-${packagedTarget.architecture}`];
+  return packaged && staged !== undefined
+    ? { [esbuildBinaryPathVariable]: join(resourcesPath, 'app.asar.unpacked/node_modules', staged) }
     : {};
 };
 

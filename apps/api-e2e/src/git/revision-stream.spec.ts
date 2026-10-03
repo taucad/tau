@@ -119,6 +119,8 @@ describe('the revision stream (D13)', () => {
     await writeFile(join(tree, 'model.scad'), 'cube([1, 1, 1]);\n', 'utf8');
     await expectGit(['add', '.'], tree);
     await expectGit(['commit', '-qm', 'owner revision'], tree);
+    const revParse = await runGit(['rev-parse', 'HEAD'], tree);
+    const head = revParse.stdout.trim();
     const pushed = await push({ base: gitE2EApiUrl, projectId, token: owner.token }, tree);
     expect(pushed.code, pushed.stderr).toBe(0);
     const acknowledged = Date.now();
@@ -128,7 +130,10 @@ describe('the revision stream (D13)', () => {
     expect(woken.status).toBe(200);
     const page = (await woken.json()) as StreamPage;
     expect(page.events).toEqual([
-      expect.objectContaining({ sequence: 1, payload: { generation: 1, refs: ['refs/heads/main'] } }),
+      expect.objectContaining({
+        sequence: 1,
+        payload: { generation: 1, refs: ['refs/heads/main'], heads: { 'refs/heads/main': head } },
+      }),
     ]);
     expect(latency, 'B6: the second device hears of the push within 5 s').toBeLessThan(5000);
 

@@ -10,9 +10,10 @@ import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 
 import { authInstanceKey } from '#constants/auth.constant.js';
-import { asBuffer } from '#api/hosts/host-frame-relay.js';
+import { asBuffer, hostFrameMaxPayload } from '#api/hosts/host-frame-relay.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import { DevWebSocketService } from '#api/websocket/dev-websocket.service.js';
+import { absorbSocketErrors } from '#api/websocket/socket-error.js';
 import { ShutdownService } from '#lifecycle/shutdown.service.js';
 import { UpgradeRouter } from '#lifecycle/upgrade-router.js';
 
@@ -45,7 +46,7 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       await this.devWebSocketService.ensureStarted();
       return;
     }
-    const socketServer = new WebSocketServer({ noServer: true });
+    const socketServer = new WebSocketServer({ noServer: true, maxPayload: hostFrameMaxPayload });
     this.socketServer = socketServer;
     const fastify = this.httpAdapterHost.httpAdapter.getInstance<FastifyInstance>();
     this.upgradeRouter.route(
@@ -53,6 +54,7 @@ export class HostsGateway implements OnModuleInit, OnModuleDestroy {
       (pathname) => pathname === controlPath || pathname.startsWith(sessionPathPrefix),
       (request, socket, head) => {
         socketServer.handleUpgrade(request, socket, head, (accepted) => {
+          absorbSocketErrors(accepted);
           socketServer.emit('connection', accepted, request);
           void this.closeOnHandleFailure(accepted, request);
         });

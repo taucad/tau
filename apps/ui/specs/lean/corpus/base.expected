@@ -1,0 +1,1800 @@
+T c0
+R acp 2
+Q ready
+T c1
+R acp 2
+Q not-offered
+T c2
+R tau 0 1 3
+Q ready
+T c3
+R tau 2 - 0
+Q not-offered
+T c4
+R acp 2
+Q not-offered
+T c5
+R acp 0
+Q ready
+T c6
+R acp 2
+Q not-offered
+T c7
+R tau 2 - 2
+Q ready
+T c8
+R tau 5 - 0
+Q not-offered
+T c9
+R acp 1
+Q not-offered
+T c10
+R acp 2
+Q checking
+T c11
+R acp 0
+Q catalog-unavailable
+T c12
+R tau 0 - -
+Q catalog-unavailable
+T c13
+R tau 3 - 3
+Q not-offered
+T c14
+R acp 3
+Q catalog-unavailable
+T c15
+R acp 1
+Q not-offered
+T c16
+R acp 1
+Q not-offered
+T c17
+R tau 3 - -
+Q not-offered
+T c18
+R acp 0
+Q checking
+T c19
+R acp 1
+Q ready
+T c20
+R acp 0
+Q ready
+T c21
+R tau 3 2 0
+Q catalog-unavailable
+T c22
+R tau 1 0 0
+Q catalog-unavailable
+T c23
+R tau 5 0 0
+Q ready
+T c24
+R acp 1
+Q not-offered
+T c25
+R tau 0 - -
+Q not-offered
+T c26
+R tau 3 1 -
+Q not-offered
+T c27
+R tau 3 0 -
+Q not-offered
+T c28
+R tau 4 2 1
+Q not-offered
+T c29
+R tau 2 - -
+Q catalog-unavailable
+T c30
+R acp 0
+Q catalog-unavailable
+T c31
+R tau 0 - -
+Q ready
+T c32
+R tau 4 - -
+Q not-offered
+T c33
+R tau 3 2 -
+Q catalog-unavailable
+T c34
+R tau 1 - 0
+Q ready
+T c35
+R acp 0
+Q ready
+T c36
+R tau 2 1 -
+Q not-offered
+T c37
+R tau 0 1 2
+Q catalog-unavailable
+T c38
+R tau 0 - -
+Q catalog-unavailable
+T c39
+R tau 5 1 4
+Q not-offered
+T c40
+R tau 1 1 2
+Q not-offered
+T c41
+R tau 5 0 3
+Q ready
+T c42
+R tau 2 1 0
+Q not-offered
+T c43
+R acp 2
+Q ready
+T c44
+R tau 0 0 1
+Q not-offered
+T c45
+R tau 5 0 0
+Q not-offered
+T c46
+R tau 5 0 3
+Q catalog-unavailable
+T c47
+R tau 4 0 2
+Q catalog-unavailable
+T c48
+R tau 1 1 2
+Q ready
+T c49
+R tau 0 1 2
+Q checking
+T c50
+R acp 1
+Q checking
+T c51
+R acp 2
+Q catalog-unavailable
+T c52
+R tau 0 - 0
+Q not-offered
+T c53
+R tau 1 - 2
+Q not-offered
+T c54
+R tau 4 - -
+Q catalog-unavailable
+T c55
+R acp 3
+Q ready
+T c56
+R tau 2 - 2
+Q catalog-unavailable
+T c57
+R acp 2
+Q catalog-unavailable
+T c58
+R tau 0 1 1
+Q catalog-unavailable
+T c59
+R tau 1 1 3
+Q not-offered
+T c60
+R tau 4 2 4
+Q not-offered
+T c61
+R tau 1 - 1
+Q catalog-unavailable
+T c62
+R acp 1
+Q ready
+T c63
+R tau 3 2 4
+Q not-offered
+T c64
+R acp 1
+Q catalog-unavailable
+T c65
+R tau 0 1 -
+Q checking
+T c66
+R tau 4 0 -
+Q catalog-unavailable
+T c67
+R tau 2 - 1
+Q catalog-unavailable
+T c68
+R tau 5 0 -
+Q catalog-unavailable
+T c69
+R acp 3
+Q ready
+T c70
+R tau 1 2 -
+Q catalog-unavailable
+T c71
+R acp 2
+Q not-offered
+T c72
+R tau 5 1 1
+Q not-offered
+T c73
+R acp 2
+Q not-offered
+T c74
+R tau 3 0 -
+Q catalog-unavailable
+T c75
+R tau 5 - -
+Q not-offered
+T c76
+R tau 2 0 -
+Q catalog-unavailable
+T c77
+R tau 0 - 1
+Q not-offered
+T c78
+R tau 2 2 -
+Q ready
+T c79
+R acp 0
+Q not-offered
+T c80
+R acp 2
+Q checking
+T c81
+R acp 1
+Q checking
+T c82
+R tau 0 1 2
+Q not-offered
+T c83
+R acp 3
+Q ready
+T c84
+R tau 3 - -
+Q catalog-unavailable
+T c85
+R tau 5 - -
+Q catalog-unavailable
+T c86
+R tau 1 1 1
+Q checking
+T c87
+R tau 3 0 3
+Q not-offered
+T c88
+R tau 3 2 2
+Q not-offered
+T c89
+R tau 4 - -
+Q not-offered
+T c90
+R tau 5 0 -
+Q not-offered
+T c91
+R tau 0 - 1
+Q catalog-unavailable
+T c92
+R acp 2
+Q ready
+T c93
+R acp 0
+Q catalog-unavailable
+T c94
+R tau 5 2 1
+Q not-offered
+T c95
+R tau 5 1 0
+Q catalog-unavailable
+T c96
+R tau 1 - 1
+Q catalog-unavailable
+T c97
+R tau 2 2 -
+Q ready
+T c98
+R tau 2 0 0
+Q not-offered
+T c99
+R tau 2 1 4
+Q checking
+T c100
+R tau 2 - 3
+Q not-offered
+T c101
+R tau 1 0 1
+Q not-offered
+T c102
+R acp 2
+Q catalog-unavailable
+T c103
+R acp 1
+Q ready
+T c104
+R tau 1 - 3
+Q not-offered
+T c105
+R tau 0 2 4
+Q ready
+T c106
+R tau 5 2 -
+Q catalog-unavailable
+T c107
+R tau 4 - 2
+Q ready
+T c108
+R acp 1
+Q checking
+T c109
+R tau 5 - 0
+Q not-offered
+T c110
+R tau 4 2 -
+Q ready
+T c111
+R acp 2
+Q not-offered
+T c112
+R tau 4 - 0
+Q catalog-unavailable
+T c113
+R acp 0
+Q ready
+T c114
+R tau 2 - 2
+Q catalog-unavailable
+T c115
+R tau 1 0 -
+Q ready
+T c116
+R tau 1 0 3
+Q ready
+T c117
+R acp 2
+Q checking
+T c118
+R tau 3 1 -
+Q catalog-unavailable
+T c119
+R tau 1 1 2
+Q not-offered
+T c120
+R tau 2 - 4
+Q not-offered
+T c121
+R tau 2 2 0
+Q catalog-unavailable
+T c122
+R tau 2 0 1
+Q not-offered
+T c123
+R tau 1 - 1
+Q ready
+T c124
+R acp 2
+Q checking
+T c125
+R tau 1 - 0
+Q not-offered
+T c126
+R tau 5 1 -
+Q not-offered
+T c127
+R tau 5 0 4
+Q ready
+T c128
+R tau 0 0 4
+Q catalog-unavailable
+T c129
+R tau 5 0 0
+Q catalog-unavailable
+T c130
+R acp 1
+Q catalog-unavailable
+T c131
+R acp 3
+Q ready
+T c132
+R tau 4 1 4
+Q not-offered
+T c133
+R tau 2 1 3
+Q not-offered
+T c134
+R tau 0 0 -
+Q checking
+T c135
+R tau 0 - 0
+Q checking
+T c136
+R tau 4 - 1
+Q catalog-unavailable
+T c137
+R tau 5 2 0
+Q catalog-unavailable
+T c138
+R tau 2 - 0
+Q not-offered
+T c139
+R tau 2 - 0
+Q not-offered
+T c140
+R tau 2 - -
+Q not-offered
+T c141
+R acp 1
+Q ready
+T c142
+R acp 2
+Q checking
+T c143
+R acp 0
+Q checking
+T c144
+R tau 3 - 2
+Q not-offered
+T c145
+R tau 4 1 -
+Q not-offered
+T c146
+R tau 3 - -
+Q ready
+T c147
+R tau 5 1 3
+Q catalog-unavailable
+T c148
+R tau 0 - -
+Q catalog-unavailable
+T c149
+R tau 0 - -
+Q ready
+T c150
+R tau 0 - -
+Q not-offered
+T c151
+R acp 3
+Q not-offered
+T c152
+R tau 3 1 -
+Q catalog-unavailable
+T c153
+R tau 4 2 2
+Q not-offered
+T c154
+R acp 1
+Q not-offered
+T c155
+R tau 0 0 -
+Q ready
+T c156
+R tau 1 - 0
+Q checking
+T c157
+R acp 2
+Q not-offered
+T c158
+R acp 0
+Q checking
+T c159
+R acp 0
+Q checking
+T c160
+R acp 3
+Q not-offered
+T c161
+R tau 2 0 -
+Q catalog-unavailable
+T c162
+R tau 3 - 4
+Q catalog-unavailable
+T c163
+R tau 4 1 0
+Q not-offered
+T c164
+R tau 2 1 2
+Q ready
+T c165
+R acp 1
+Q not-offered
+T c166
+R tau 0 - 0
+Q not-offered
+T c167
+R tau 5 2 -
+Q catalog-unavailable
+T c168
+R tau 4 - -
+Q catalog-unavailable
+T c169
+R acp 3
+Q not-offered
+T c170
+R acp 1
+Q not-offered
+T c171
+R acp 3
+Q not-offered
+T c172
+R tau 3 0 2
+Q checking
+T c173
+R tau 4 2 3
+Q checking
+T c174
+R tau 1 0 1
+Q catalog-unavailable
+T c175
+R tau 5 0 -
+Q ready
+T c176
+R acp 3
+Q not-offered
+T c177
+R tau 3 1 4
+Q ready
+T c178
+R acp 1
+Q checking
+T c179
+R tau 5 - -
+Q not-offered
+T c180
+R tau 0 - 1
+Q checking
+T c181
+R tau 2 2 3
+Q ready
+T c182
+R tau 5 - 3
+Q checking
+T c183
+R tau 0 2 -
+Q catalog-unavailable
+T c184
+R acp 0
+Q checking
+T c185
+R acp 1
+Q not-offered
+T c186
+R tau 4 2 1
+Q not-offered
+T c187
+R acp 1
+Q catalog-unavailable
+T c188
+R tau 1 - 4
+Q not-offered
+T c189
+R tau 2 2 -
+Q not-offered
+T c190
+R tau 4 1 4
+Q not-offered
+T c191
+R tau 1 - 2
+Q catalog-unavailable
+T c192
+R acp 2
+Q catalog-unavailable
+T c193
+R acp 2
+Q not-offered
+T c194
+R acp 3
+Q ready
+T c195
+R tau 0 1 3
+Q catalog-unavailable
+T c196
+R tau 3 1 1
+Q catalog-unavailable
+T c197
+R tau 3 - 3
+Q not-offered
+T c198
+R tau 5 - 4
+Q checking
+T c199
+R tau 5 - 2
+Q checking
+T c200
+R acp 3
+Q catalog-unavailable
+T c201
+R acp 1
+Q ready
+T c202
+R tau 2 - -
+Q not-offered
+T c203
+R tau 1 2 -
+Q catalog-unavailable
+T c204
+R tau 3 - 1
+Q catalog-unavailable
+T c205
+R acp 1
+Q catalog-unavailable
+T c206
+R tau 1 - -
+Q not-offered
+T c207
+R tau 4 - 4
+Q catalog-unavailable
+T c208
+R acp 0
+Q catalog-unavailable
+T c209
+R acp 3
+Q not-offered
+T c210
+R acp 0
+Q not-offered
+T c211
+R tau 1 1 -
+Q catalog-unavailable
+T c212
+R tau 5 - 4
+Q not-offered
+T c213
+R tau 0 - -
+Q catalog-unavailable
+T c214
+R tau 3 - -
+Q ready
+T c215
+R tau 1 - 1
+Q ready
+T c216
+R tau 2 2 -
+Q ready
+T c217
+R tau 3 0 -
+Q not-offered
+T c218
+R tau 4 1 0
+Q checking
+T c219
+R acp 0
+Q not-offered
+T c220
+R tau 2 - -
+Q not-offered
+T c221
+R acp 2
+Q ready
+T c222
+R tau 0 - 0
+Q not-offered
+T c223
+R tau 3 1 4
+Q not-offered
+T c224
+R acp 2
+Q ready
+T c225
+R tau 1 - -
+Q not-offered
+T c226
+R tau 4 - -
+Q not-offered
+T c227
+R tau 2 1 1
+Q not-offered
+T c228
+R tau 4 2 0
+Q catalog-unavailable
+T c229
+R acp 2
+Q checking
+T c230
+R tau 2 1 0
+Q ready
+T c231
+R tau 1 0 4
+Q catalog-unavailable
+T c232
+R acp 2
+Q ready
+T c233
+R acp 1
+Q catalog-unavailable
+T c234
+R acp 2
+Q checking
+T c235
+R acp 1
+Q checking
+T c236
+R tau 4 - -
+Q not-offered
+T c237
+R tau 5 0 3
+Q checking
+T c238
+R tau 0 - -
+Q not-offered
+T c239
+R tau 5 - 4
+Q catalog-unavailable
+T c240
+R tau 0 - 2
+Q catalog-unavailable
+T c241
+R tau 5 - 4
+Q ready
+T c242
+R tau 0 - -
+Q catalog-unavailable
+T c243
+R tau 2 2 2
+Q not-offered
+T c244
+R tau 5 - 4
+Q catalog-unavailable
+T c245
+R tau 5 - -
+Q ready
+T c246
+R acp 0
+Q ready
+T c247
+R tau 4 - 1
+Q checking
+T c248
+R tau 5 - 1
+Q catalog-unavailable
+T c249
+R acp 0
+Q checking
+T c250
+R tau 1 2 3
+Q not-offered
+T c251
+R acp 3
+Q not-offered
+T c252
+R acp 2
+Q checking
+T c253
+R tau 1 2 4
+Q catalog-unavailable
+T c254
+R tau 1 - -
+Q not-offered
+T c255
+R tau 4 - -
+Q not-offered
+T c256
+R acp 3
+Q not-offered
+T c257
+R tau 4 1 4
+Q ready
+T c258
+R tau 1 2 -
+Q not-offered
+T c259
+R tau 1 2 -
+Q not-offered
+T c260
+R tau 4 2 -
+Q checking
+T c261
+R tau 4 - 3
+Q not-offered
+T c262
+R acp 0
+Q checking
+T c263
+R tau 4 1 0
+Q checking
+T c264
+R tau 2 2 -
+Q catalog-unavailable
+T c265
+R acp 0
+Q checking
+T c266
+R tau 5 - -
+Q ready
+T c267
+R acp 0
+Q checking
+T c268
+R acp 3
+Q catalog-unavailable
+T c269
+R acp 1
+Q checking
+T c270
+R tau 2 - 3
+Q ready
+T c271
+R tau 2 - 1
+Q ready
+T c272
+R tau 0 - 4
+Q checking
+T c273
+R tau 0 - -
+Q not-offered
+T c274
+R tau 5 0 0
+Q not-offered
+T c275
+R tau 1 - -
+Q catalog-unavailable
+T c276
+R tau 0 - 1
+Q catalog-unavailable
+T c277
+R tau 0 1 -
+Q not-offered
+T c278
+R tau 0 - 4
+Q checking
+T c279
+R tau 0 1 -
+Q not-offered
+T c280
+R acp 0
+Q catalog-unavailable
+T c281
+R tau 1 0 3
+Q catalog-unavailable
+T c282
+R acp 2
+Q checking
+T c283
+R acp 3
+Q not-offered
+T c284
+R tau 2 2 1
+Q catalog-unavailable
+T c285
+R tau 2 2 -
+Q catalog-unavailable
+T c286
+R tau 1 1 -
+Q not-offered
+T c287
+R tau 1 0 3
+Q catalog-unavailable
+T c288
+R acp 3
+Q catalog-unavailable
+T c289
+R acp 2
+Q not-offered
+T c290
+R tau 2 2 -
+Q checking
+T c291
+R tau 0 - -
+Q ready
+T c292
+R tau 4 - -
+Q ready
+T c293
+R acp 2
+Q not-offered
+T c294
+R tau 4 1 1
+Q not-offered
+T c295
+R tau 1 1 -
+Q catalog-unavailable
+T c296
+R tau 3 - -
+Q ready
+T c297
+R tau 3 - -
+Q catalog-unavailable
+T c298
+R tau 4 0 -
+Q checking
+T c299
+R acp 3
+Q checking
+T c300
+R tau 2 - 0
+Q catalog-unavailable
+T c301
+R tau 1 - -
+Q not-offered
+T c302
+R tau 3 2 -
+Q not-offered
+T c303
+R tau 3 - -
+Q catalog-unavailable
+T c304
+R acp 3
+Q ready
+T c305
+R acp 0
+Q ready
+T c306
+R tau 1 - -
+Q not-offered
+T c307
+R tau 5 1 3
+Q not-offered
+T c308
+R tau 2 - -
+Q ready
+T c309
+R tau 1 - 2
+Q ready
+T c310
+R tau 1 - 4
+Q not-offered
+T c311
+R acp 3
+Q not-offered
+T c312
+R acp 2
+Q checking
+T c313
+R tau 4 0 0
+Q not-offered
+T c314
+R tau 0 2 1
+Q ready
+T c315
+R acp 1
+Q not-offered
+T c316
+R acp 1
+Q catalog-unavailable
+T c317
+R tau 5 1 -
+Q ready
+T c318
+R acp 0
+Q checking
+T c319
+R tau 0 - -
+Q not-offered
+T c320
+R acp 1
+Q checking
+T c321
+R tau 2 1 -
+Q not-offered
+T c322
+R tau 4 1 4
+Q catalog-unavailable
+T c323
+R tau 4 0 4
+Q not-offered
+T c324
+R tau 1 1 0
+Q catalog-unavailable
+T c325
+R acp 1
+Q catalog-unavailable
+T c326
+R tau 3 - -
+Q checking
+T c327
+R tau 5 - 1
+Q catalog-unavailable
+T c328
+R tau 1 - -
+Q catalog-unavailable
+T c329
+R acp 3
+Q not-offered
+T c330
+R tau 2 - -
+Q not-offered
+T c331
+R tau 3 0 0
+Q not-offered
+T c332
+R tau 5 - 4
+Q ready
+T c333
+R tau 4 0 0
+Q not-offered
+T c334
+R acp 3
+Q catalog-unavailable
+T c335
+R tau 5 - 1
+Q checking
+T c336
+R tau 4 1 -
+Q not-offered
+T c337
+R tau 0 2 -
+Q checking
+T c338
+R tau 4 2 3
+Q ready
+T c339
+R tau 0 - 0
+Q ready
+T c340
+R acp 0
+Q checking
+T c341
+R tau 2 2 -
+Q checking
+T c342
+R tau 2 - -
+Q not-offered
+T c343
+R tau 1 0 1
+Q not-offered
+T c344
+R tau 5 1 -
+Q ready
+T c345
+R tau 4 1 0
+Q not-offered
+T c346
+R tau 1 0 0
+Q ready
+T c347
+R tau 0 1 4
+Q not-offered
+T c348
+R tau 1 0 4
+Q not-offered
+T c349
+R tau 4 - -
+Q ready
+T c350
+R tau 1 - 2
+Q catalog-unavailable
+T c351
+R acp 0
+Q catalog-unavailable
+T c352
+R tau 5 - 1
+Q checking
+T c353
+R acp 2
+Q not-offered
+T c354
+R tau 0 0 3
+Q ready
+T c355
+R acp 2
+Q catalog-unavailable
+T c356
+R acp 3
+Q catalog-unavailable
+T c357
+R tau 1 0 -
+Q not-offered
+T c358
+R tau 0 0 -
+Q not-offered
+T c359
+R tau 3 2 1
+Q catalog-unavailable
+T c360
+R tau 1 - 2
+Q catalog-unavailable
+T c361
+R acp 3
+Q ready
+T c362
+R acp 1
+Q not-offered
+T c363
+R tau 5 1 2
+Q catalog-unavailable
+T c364
+R tau 2 0 0
+Q not-offered
+T c365
+R tau 2 2 -
+Q checking
+T c366
+R acp 1
+Q not-offered
+T c367
+R tau 0 0 -
+Q not-offered
+T c368
+R tau 2 2 1
+Q ready
+T c369
+R acp 3
+Q not-offered
+T c370
+R acp 3
+Q catalog-unavailable
+T c371
+R acp 1
+Q catalog-unavailable
+T c372
+R tau 5 0 -
+Q catalog-unavailable
+T c373
+R acp 3
+Q ready
+T c374
+R acp 2
+Q not-offered
+T c375
+R tau 2 0 0
+Q not-offered
+T c376
+R tau 5 - 2
+Q catalog-unavailable
+T c377
+R acp 1
+Q not-offered
+T c378
+R tau 5 1 -
+Q catalog-unavailable
+T c379
+R tau 5 - 2
+Q catalog-unavailable
+T c380
+R tau 3 - -
+Q not-offered
+T c381
+R tau 1 - 2
+Q not-offered
+T c382
+R tau 2 1 -
+Q catalog-unavailable
+T c383
+R tau 5 1 -
+Q catalog-unavailable
+T c384
+R tau 1 2 -
+Q catalog-unavailable
+T c385
+R acp 0
+Q catalog-unavailable
+T c386
+R tau 3 - -
+Q not-offered
+T c387
+R tau 3 - 4
+Q not-offered
+T c388
+R acp 2
+Q not-offered
+T c389
+R tau 5 - 0
+Q catalog-unavailable
+T c390
+R acp 3
+Q not-offered
+T c391
+R tau 3 - 2
+Q catalog-unavailable
+T c392
+R tau 5 0 2
+Q not-offered
+T c393
+R acp 3
+Q not-offered
+T c394
+R acp 0
+Q ready
+T c395
+R acp 0
+Q checking
+T c396
+R tau 4 - 0
+Q catalog-unavailable
+T c397
+R tau 3 0 -
+Q ready
+T c398
+R acp 0
+Q catalog-unavailable
+T c399
+R tau 5 - 3
+Q not-offered
+T c400
+R tau 0 0 2
+Q not-offered
+T c401
+R tau 2 1 3
+Q not-offered
+T c402
+R tau 4 0 -
+Q not-offered
+T c403
+R tau 5 0 -
+Q ready
+T c404
+R tau 0 1 -
+Q ready
+T c405
+R tau 3 - -
+Q not-offered
+T c406
+R acp 2
+Q not-offered
+T c407
+R tau 3 2 0
+Q catalog-unavailable
+T c408
+R tau 2 - 1
+Q not-offered
+T c409
+R acp 2
+Q not-offered
+T c410
+R acp 3
+Q ready
+T c411
+R acp 3
+Q ready
+T c412
+R tau 1 2 1
+Q ready
+T c413
+R tau 0 1 2
+Q not-offered
+T c414
+R tau 0 - -
+Q ready
+T c415
+R tau 3 2 2
+Q not-offered
+T c416
+R tau 5 1 0
+Q not-offered
+T c417
+R acp 1
+Q ready
+T c418
+R acp 0
+Q catalog-unavailable
+T c419
+R tau 0 - 0
+Q catalog-unavailable
+T c420
+R acp 0
+Q not-offered
+T c421
+R acp 2
+Q ready
+T c422
+R acp 1
+Q checking
+T c423
+R tau 0 - 4
+Q checking
+T c424
+R acp 3
+Q not-offered
+T c425
+R tau 2 - 3
+Q catalog-unavailable
+T c426
+R tau 3 - 3
+Q ready
+T c427
+R tau 1 1 -
+Q ready
+T c428
+R tau 2 2 1
+Q ready
+T c429
+R acp 0
+Q ready
+T c430
+R tau 2 2 1
+Q checking
+T c431
+R tau 3 - 1
+Q not-offered
+T c432
+R tau 2 0 2
+Q not-offered
+T c433
+R tau 2 - -
+Q not-offered
+T c434
+R tau 0 - -
+Q ready
+T c435
+R tau 5 1 4
+Q catalog-unavailable
+T c436
+R acp 0
+Q catalog-unavailable
+T c437
+R acp 2
+Q checking
+T c438
+R tau 4 2 4
+Q ready
+T c439
+R tau 1 0 2
+Q catalog-unavailable
+T c440
+R tau 5 0 2
+Q checking
+T c441
+R tau 5 - 1
+Q ready
+T c442
+R tau 3 - -
+Q catalog-unavailable
+T c443
+R tau 0 - 1
+Q not-offered
+T c444
+R tau 5 2 4
+Q not-offered
+T c445
+R tau 1 - -
+Q catalog-unavailable
+T c446
+R tau 4 - -
+Q ready
+T c447
+R acp 1
+Q ready
+T c448
+R tau 3 2 3
+Q not-offered
+T c449
+R tau 1 0 -
+Q ready
+T c450
+R tau 2 0 1
+Q catalog-unavailable
+T c451
+R tau 4 2 4
+Q not-offered
+T c452
+R tau 4 1 -
+Q ready
+T c453
+R tau 3 - 1
+Q not-offered
+T c454
+R acp 0
+Q not-offered
+T c455
+R tau 5 1 -
+Q ready
+T c456
+R acp 1
+Q not-offered
+T c457
+R acp 0
+Q ready
+T c458
+R tau 3 0 -
+Q not-offered
+T c459
+R tau 0 2 2
+Q catalog-unavailable
+T c460
+R tau 1 - -
+Q not-offered
+T c461
+R acp 1
+Q checking
+T c462
+R tau 3 2 -
+Q ready
+T c463
+R acp 0
+Q not-offered
+T c464
+R tau 2 - -
+Q catalog-unavailable
+T c465
+R tau 3 1 4
+Q catalog-unavailable
+T c466
+R tau 0 - -
+Q ready
+T c467
+R acp 0
+Q not-offered
+T c468
+R tau 0 - 4
+Q ready
+T c469
+R tau 2 - -
+Q catalog-unavailable
+T c470
+R tau 4 - 2
+Q ready
+T c471
+R tau 3 0 4
+Q not-offered
+T c472
+R tau 5 1 2
+Q catalog-unavailable
+T c473
+R tau 5 2 1
+Q not-offered
+T c474
+R tau 5 - -
+Q catalog-unavailable
+T c475
+R acp 3
+Q catalog-unavailable
+T c476
+R acp 0
+Q checking
+T c477
+R tau 3 1 3
+Q catalog-unavailable
+T c478
+R acp 0
+Q not-offered
+T c479
+R tau 2 - 0
+Q ready
+T c480
+R tau 3 1 4
+Q not-offered
+T c481
+R tau 5 2 -
+Q catalog-unavailable
+T c482
+R tau 3 0 3
+Q not-offered
+T c483
+R acp 3
+Q ready
+T c484
+R tau 2 2 -
+Q not-offered
+T c485
+R tau 5 2 -
+Q checking
+T c486
+R tau 4 0 2
+Q checking
+T c487
+R acp 2
+Q catalog-unavailable
+T c488
+R tau 4 2 -
+Q catalog-unavailable
+T c489
+R tau 4 - -
+Q checking
+T c490
+R acp 1
+Q not-offered
+T c491
+R tau 3 - -
+Q not-offered
+T c492
+R tau 0 2 -
+Q not-offered
+T c493
+R tau 5 - 4
+Q not-offered
+T c494
+R acp 0
+Q ready
+T c495
+R tau 1 - 4
+Q not-offered
+T c496
+R tau 2 - 2
+Q not-offered
+T c497
+R tau 2 - 1
+Q checking
+T c498
+R acp 1
+Q catalog-unavailable
+T c499
+R tau 2 - 3
+Q catalog-unavailable
+T c500
+R tau 2 1 -
+Q checking
+T c501
+R acp 1
+Q catalog-unavailable
+T c502
+R tau 2 1 2
+Q catalog-unavailable
+T c503
+R acp 1
+Q catalog-unavailable
+T c504
+R acp 2
+Q checking
+T c505
+R acp 0
+Q catalog-unavailable
+T c506
+R tau 3 - 1
+Q ready
+T c507
+R tau 3 - -
+Q not-offered
+T c508
+R tau 1 0 0
+Q checking
+T c509
+R tau 4 0 4
+Q checking
+T c510
+R tau 0 - 3
+Q not-offered
+T c511
+R acp 2
+Q not-offered
+T c512
+R acp 1
+Q catalog-unavailable
+T c513
+R tau 0 2 1
+Q not-offered
+T c514
+R acp 0
+Q not-offered
+T c515
+R tau 5 0 -
+Q not-offered
+T c516
+R acp 0
+Q not-offered
+T c517
+R tau 5 - -
+Q catalog-unavailable
+T c518
+R tau 2 0 4
+Q checking
+T c519
+R tau 0 - -
+Q ready
+T c520
+R tau 2 - 1
+Q checking
+T c521
+R tau 4 - -
+Q catalog-unavailable
+T c522
+R tau 0 2 -
+Q not-offered
+T c523
+R tau 5 2 3
+Q ready
+T c524
+R tau 5 2 3
+Q catalog-unavailable
+T c525
+R tau 0 2 1
+Q not-offered
+T c526
+R tau 3 2 -
+Q checking
+T c527
+R tau 5 - -
+Q not-offered
+T c528
+R tau 1 - -
+Q ready
+T c529
+R tau 0 0 -
+Q catalog-unavailable
+T c530
+R tau 4 2 -
+Q ready
+T c531
+R acp 0
+Q not-offered
+T c532
+R acp 0
+Q catalog-unavailable
+T c533
+R acp 0
+Q checking
+T c534
+R acp 0
+Q not-offered
+T c535
+R tau 4 1 1
+Q catalog-unavailable
+T c536
+R tau 3 - -
+Q catalog-unavailable
+T c537
+R tau 4 0 4
+Q catalog-unavailable
+T c538
+R tau 5 1 -
+Q not-offered
+T c539
+R tau 3 0 3
+Q checking
+T c540
+R tau 2 2 -
+Q ready
+T c541
+R acp 2
+Q catalog-unavailable
+T c542
+R acp 2
+Q not-offered
+T c543
+R tau 0 1 3
+Q not-offered
+T c544
+R tau 2 0 0
+Q catalog-unavailable
+T c545
+R tau 0 - 2
+Q not-offered
+T c546
+R tau 4 - 1
+Q checking
+T c547
+R tau 1 - 2
+Q ready
+T c548
+R tau 0 0 -
+Q not-offered
+T c549
+R tau 2 1 2
+Q catalog-unavailable
+T c550
+R tau 2 2 -
+Q not-offered
+T c551
+R tau 1 1 0
+Q ready
+T c552
+R tau 1 1 0
+Q not-offered
+T c553
+R tau 0 2 -
+Q not-offered
+T c554
+R tau 3 2 2
+Q not-offered
+T c555
+R tau 3 2 1
+Q not-offered
+T c556
+R tau 0 0 4
+Q not-offered
+T c557
+R tau 3 - -
+Q not-offered
+T c558
+R tau 3 0 0
+Q checking
+T c559
+R tau 5 - -
+Q catalog-unavailable
+T c560
+R tau 0 2 1
+Q ready
+T c561
+R tau 1 0 0
+Q not-offered
+T c562
+R tau 1 - -
+Q ready
+T c563
+R tau 3 2 4
+Q ready
+T c564
+R acp 0
+Q checking
+T c565
+R tau 2 0 0
+Q ready
+T c566
+R tau 1 - 0
+Q catalog-unavailable
+T c567
+R acp 0
+Q ready
+T c568
+R acp 3
+Q not-offered
+T c569
+R tau 2 2 0
+Q catalog-unavailable
+T c570
+R tau 1 - -
+Q not-offered
+T c571
+R tau 3 - -
+Q not-offered
+T c572
+R tau 2 1 3
+Q not-offered
+T c573
+R tau 1 - 2
+Q catalog-unavailable
+T c574
+R acp 3
+Q checking
+T c575
+R tau 5 - 3
+Q catalog-unavailable
+T c576
+R tau 5 - 2
+Q not-offered
+T c577
+R acp 3
+Q catalog-unavailable
+T c578
+R tau 5 - 4
+Q catalog-unavailable
+T c579
+R tau 0 - -
+Q checking
+T c580
+R tau 2 2 0
+Q not-offered
+T c581
+R tau 1 - 4
+Q not-offered
+T c582
+R tau 2 0 2
+Q not-offered
+T c583
+R tau 0 2 -
+Q not-offered
+T c584
+R tau 4 0 3
+Q checking
+T c585
+R tau 4 2 -
+Q ready
+T c586
+R acp 2
+Q ready
+T c587
+R acp 0
+Q catalog-unavailable
+T c588
+R tau 4 - -
+Q ready
+T c589
+R tau 1 - 1
+Q ready
+T c590
+R tau 5 1 2
+Q ready
+T c591
+R acp 2
+Q not-offered
+T c592
+R acp 3
+Q catalog-unavailable
+T c593
+R tau 3 1 4
+Q not-offered
+T c594
+R tau 3 - -
+Q checking
+T c595
+R tau 0 1 -
+Q ready
+T c596
+R tau 4 - 4
+Q ready
+T c597
+R tau 4 1 -
+Q not-offered
+T c598
+R acp 0
+Q ready
+T c599
+R tau 2 - 1
+Q catalog-unavailable

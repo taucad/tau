@@ -1,0 +1,97 @@
+name: 'GeoSpec artifact from main'
+description: >-
+  Takes the GeoSpec engine products for a commit from the `ci.yml` push run on
+  `main`, after that run has passed, and verifies them against the checkout: the
+  run's `geospec-ci-<sha>-<attempt>` artifact when its producer ran, otherwise the
+  products cache entry it restored under the same product-closure key. Release
+  builds and production UI deploys run on Linux and Windows, where the macOS-only
+  producer cannot run.
+
+inputs:
+  sha:
+    description: 'Commit whose main CI run supplies the artifact; defaults to the checked-out commit'
+    required: false
+    default: ''
+  wait-minutes:
+    description: 'How long to wait for that CI run to finish; 0 requires it to be finished already'
+    required: false
+    default: '0'
+  github-token:
+    description: 'Token with actions: read'
+    required: true
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Find the main CI run and its GeoSpec products
+      id: find
+      shell: bash
+      env:
+        GH_TOKEN: ${{ inputs.github-token }}
+        SHA: ${{ inputs.sha }}
+        WAIT_MINUTES: ${{ inputs.wait-minutes }}
+      run: |
+        set -euo pipefail
+        SHA=${SHA:-$(git rev-parse HEAD)}
+        echo "sha=$SHA" >> "$GITHUB_OUTPUT"
+        deadline=$(( $(date +%s) + WAIT_MINUTES * 60 ))
+        while :; do
+          run=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?head_sha=$SHA&event=push&branch=main&per_page=1" \
+            --jq '.workflow_runs[0] | select(.) | "\(.id) \(.status) \(.conclusion)"')
+          if [ -n "$run" ]; then
+            read -r run_id status conclusion <<< "$run"
+            if [ "$status" = completed ]; then break; fi
+          fi
+          if [ "$(date +%s)" -ge "$deadline" ]; then
+            echo "::error::The ci.yml push run on main for $SHA has not finished (${run:-no run found})."
+            exit 1
+          fi
+          echo "Waiting for the ci.yml push run on main for $SHA (${run:-not started})"
+          sleep 60
+        done
+        if [ "$conclusion" != success ]; then
+          echo "::error::The ci.yml push run on main for $SHA concluded $conclusion; fix main before releasing or deploying it."
+          exit 1
+        fi
+        name=$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/artifacts?per_page=100" \
+          --jq "[.artifacts[] | select(.expired == false and (.name | startswith(\"geospec-ci-$SHA-\")))] | sort_by(.name) | last | .name // empty")
+        if [ -z "$name" ]; then
+          # A run whose product closure matched an earlier build skipped the producer and
+          # restored its products from the cache, so it uploaded no artifact; an artifact
+          # also expires after seven days. Either way the cache entry under the closure's
+          # key holds the same products, and `main`'s entries are readable from any ref.
+          key="geospec-transport-v1-$(node packages/geospec-engine-native/scripts/ci-artifacts.mjs product-key)"
+          echo "CI run $run_id holds no unexpired GeoSpec artifact for $SHA; restoring $key instead."
+          echo "source=cache" >> "$GITHUB_OUTPUT"
+          echo "key=$key" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        echo "source=artifact" >> "$GITHUB_OUTPUT"
+        echo "run_id=$run_id" >> "$GITHUB_OUTPUT"
+        echo "name=$name" >> "$GITHUB_OUTPUT"
+
+    - name: Download the GeoSpec artifact
+      if: steps.find.outputs.source == 'artifact'
+      uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+      with:
+        name: ${{ steps.find.outputs.name }}
+        run-id: ${{ steps.find.outputs.run_id }}
+        github-token: ${{ inputs.github-token }}
+        path: .
+
+    - name: Verify the GeoSpec artifact against this checkout
+      if: steps.find.outputs.source == 'artifact'
+      shell: bash
+      run: pnpm nx run-many -t require-geospec-delivery --parallel=1
+
+    - name: Restore the GeoSpec products the main run used
+      if: steps.find.outputs.source == 'cache'
+      uses: ./.github/actions/geospec-transport
+      with:
+        key: ${{ steps.find.outputs.key }}
+        mode: restore
+
+    - name: Verify the restored GeoSpec products against this checkout
+      if: steps.find.outputs.source == 'cache'
+      shell: bash
+      run: pnpm nx run-many -t require-geospec-artifacts --parallel=1

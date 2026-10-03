@@ -437,6 +437,25 @@ describe('createTurnPlacementPort (TS-S3)', () => {
     expect(await turnCuts(project.port, key)).toEqual(['base']);
   });
 
+  it("should hand the admitted tools a file's bytes as a stream, as the checkout's filesystem does", async () => {
+    const project = await createProject();
+    await project.filesystem.writeFile('intent.json', '{"plate":"high-temperature"}');
+    const { placement } = project.open();
+    const admitted = await placement.admit({ requestId: 'admit:run-1:1', key });
+    if (admitted.status === 'refused') {
+      throw new Error(admitted.message);
+    }
+    const { tools } = admitted.placement;
+
+    /* A stream is returned, not a promise of one: bounded readers (the print intent) call it synchronously. */
+    const stream = tools.readFileStream?.('intent.json');
+    expect(stream).toBeInstanceOf(ReadableStream);
+    expect(await new Response(stream).text()).toBe('{"plate":"high-temperature"}');
+
+    await placement.abandon({ requestId: 'abandon:run-1:1', key });
+    expect(() => tools.readFileStream?.('intent.json')).toThrow(expect.objectContaining({ code: 'TOOL_PORT_REVOKED' }));
+  });
+
   it('should refuse a tool write after abandon is answered', async () => {
     const project = await createProject();
     const { placement } = project.open();

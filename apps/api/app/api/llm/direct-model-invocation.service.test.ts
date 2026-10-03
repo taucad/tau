@@ -169,6 +169,30 @@ describe('DirectModelInvocationService', () => {
     );
   });
 
+  it('should redact a credential the provider quotes back before it reaches the client', async () => {
+    const quotedKey = 'sk-proj-abcdefghijklmnop1234';
+    vi.spyOn(globalThis, 'fetch').mockResolvedValue(
+      new Response(
+        JSON.stringify({
+          error: { type: 'invalid_request_error', message: `Incorrect API key provided: ${quotedKey}.` },
+        }),
+        {
+          status: 400,
+          headers: { 'content-type': 'application/json' },
+        },
+      ),
+    );
+    const service = new DirectModelInvocationService(keyedConfig, {} as unknown as ModelService);
+
+    try {
+      await service.invoke(gatewayIntent());
+      expect.fail('The refused relay should throw');
+    } catch (error) {
+      expect(errorDetails(error).message).toContain('Incorrect API key provided: [redacted].');
+      expect(errorDetails(error).message).not.toContain(quotedKey);
+    }
+  });
+
   it('should log the refused upstream body, bounded and redacted, without forwarding it', async () => {
     const warn = vi.spyOn(Logger.prototype, 'warn').mockImplementation(() => {
       // Test-local logger sink.

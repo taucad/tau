@@ -56,7 +56,10 @@ describe('OpenInDesktop', () => {
     expect(
       screen.getByText('Tau Desktop may not be installed on this computer, or the browser did not offer to open it.'),
     ).toBeInTheDocument();
-    expect(screen.getByRole('link', { name: 'Get Tau Desktop' })).toHaveAttribute('href', 'https://docs.tau.new');
+    expect(screen.getByRole('link', { name: 'Get Tau Desktop' })).toHaveAttribute(
+      'href',
+      'https://github.com/taucad/tau/releases/latest',
+    );
   });
 
   it('opens the same link again on Try again', async () => {

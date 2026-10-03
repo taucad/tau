@@ -24,6 +24,7 @@ import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js'
 import { tauPathPolicy } from '#path-registry.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { NodeFsProvider } from '#backend/node/provider.js';
+import { streamChunkSize } from '#backend/stream-utils.js';
 import type { NodeFsPort } from '#backend/node/port.js';
 import { nodeFsProtocolVersion, nodeFsResultSchemas } from '#backend/node/protocol.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
@@ -127,6 +128,33 @@ const aliasesEntry = (root: string, probe: string, alias: string): boolean => {
 };
 
 describe('node filesystem client/host round trip', () => {
+  it('streams bounded chunks and exact ranges through the authority client, as the local provider does', async () => {
+    const { root, provider } = connect();
+    const bytes = new Uint8Array(streamChunkSize * 2 + 17).map((_, index) => index % 251);
+    writeFileSync(join(root, 'large.bin'), bytes);
+    const read = async (options?: { position?: number; length?: number }): Promise<Array<Uint8Array<ArrayBuffer>>> => {
+      const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+      for await (const chunk of provider.readFileStream('large.bin', options)) {
+        chunks.push(chunk);
+      }
+      return chunks;
+    };
+
+    const whole = await read();
+    expect(whole.map((chunk) => chunk.byteLength)).toEqual([streamChunkSize, streamChunkSize, 17]);
+    expect(new Uint8Array(Buffer.concat(whole))).toEqual(bytes);
+    const range = await read({ position: 11, length: streamChunkSize + 5 });
+    expect(new Uint8Array(Buffer.concat(range))).toEqual(bytes.slice(11, 11 + streamChunkSize + 5));
+    expect(await read({ length: 0 })).toEqual([]);
+    expect(await read({ position: bytes.byteLength + 20 })).toEqual([]);
+    await expect(read({ position: -1 })).rejects.toThrow();
+    // A cancelled stream asks for nothing more.
+    const reader = provider.readFileStream('large.bin').getReader();
+    await reader.read();
+    await reader.cancel();
+    await expect(provider.readFile('large.bin')).resolves.toEqual(bytes);
+  });
+
   it('keeps exact and head wire validators distinct', () => {
     const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' }];
     expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(false);

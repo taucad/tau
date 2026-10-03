@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
-import { ChevronRight, CircleAlert } from 'lucide-react';
+import { ChevronDown, ChevronRight, CircleAlert } from 'lucide-react';
+import type { LucideIcon } from 'lucide-react';
 import type { PrintRequester } from '@taucad/runtime/machine';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { cn } from '@taucad/ui/utils/cn';
+import { disclosureMotion } from '#components/revisions/revision-actions.js';
 
 /** Who the pane acts as when it creates or resolves a request. @public */
 export const operator: PrintRequester = { kind: 'user', id: 'operator', label: 'You' };
@@ -26,68 +28,137 @@ export const useNow = (): number => {
   return now;
 };
 
+/** Arrow keys move between stage headers, as in an accordion; Home and End go to the first and last. */
+const stageKeys: Readonly<Record<string, (index: number, count: number) => number>> = {
+  ArrowDown: (index, count) => (index + 1) % count,
+  ArrowUp: (index, count) => (index - 1 + count) % count,
+  Home: () => 0,
+  End: (_index, count) => count - 1,
+};
+
 /**
- * One flat section of the Print pane: a heading row and its content, separated
- * from its peers by a rule rather than a nested card (DESIGN, composition).
+ * The pane's stages in one frame: adjoined rows split by rules, as the revision pane's file list is
+ * (DESIGN, frame peers once). Each child is a {@link PrintStage}.
  *
- * @param properties - Heading, optional trailing content and the body.
- * @returns The section.
+ * @param properties - The stages.
+ * @returns The frame.
  */
-export function PrintSection({
-  title,
-  aside,
-  children,
-  className,
-  ref,
-  ...properties
-}: React.ComponentProps<'section'> & {
-  readonly title: string;
-  readonly aside?: React.ReactNode;
-}): React.JSX.Element {
+export function PrintStages({ children }: { readonly children: React.ReactNode }): React.JSX.Element {
   return (
-    <section
-      ref={ref}
-      aria-label={title}
-      className={cn('flex min-w-0 flex-col gap-2 border-t border-border/70 pt-3', className)}
-      {...properties}
+    <div
+      data-slot='print-stages'
+      className='flex min-w-0 flex-col divide-y divide-border/70 overflow-hidden rounded-lg border border-border/70 bg-background'
+      onKeyDown={(event) => {
+        const move = stageKeys[event.key];
+        if (move === undefined || !(event.target instanceof HTMLElement) || !event.target.dataset['printStage']) {
+          return;
+        }
+        const triggers = [...event.currentTarget.querySelectorAll<HTMLElement>('[data-print-stage]')];
+        event.preventDefault();
+        triggers[move(triggers.indexOf(event.target), triggers.length)]?.focus();
+      }}
     >
-      <div className='flex min-w-0 items-center gap-2'>
-        <h3 className='min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground'>{title}</h3>
-        {aside}
-      </div>
       {children}
-    </section>
+    </div>
+  );
+}
+
+/**
+ * One stage of the pane: a header row that opens it, saying what is inside while it is closed.
+ * It opens by default as its owner says; once a person toggles it, their choice stays.
+ *
+ * @param properties - The stage's glyph, title, summary, an optional control beside the trigger,
+ * whether it starts open and the body.
+ * @returns The stage.
+ */
+export function PrintStage({
+  icon: Icon,
+  title,
+  summary,
+  aside,
+  isDefaultOpen = false,
+  children,
+}: {
+  readonly icon: LucideIcon;
+  readonly title: string;
+  /** What the closed stage would show, in a few words; hidden while it is open. */
+  readonly summary?: React.ReactNode;
+  /** Beside the trigger, never inside it: a reset is a button of its own. */
+  readonly aside?: React.ReactNode;
+  readonly isDefaultOpen?: boolean;
+  readonly children: React.ReactNode;
+}): React.JSX.Element {
+  const [toggled, setToggled] = useState<boolean>();
+  return (
+    <Collapsible asChild open={toggled ?? isDefaultOpen} onOpenChange={setToggled}>
+      <section aria-label={title} className='group/stage flex min-w-0 flex-col'>
+        <div className='flex min-w-0 items-center gap-1 transition-colors hover:bg-accent/50 motion-reduce:transition-none'>
+          <CollapsibleTrigger
+            data-print-stage={title}
+            className='flex min-h-9 min-w-0 flex-1 cursor-action items-center gap-2 px-2.5 text-left text-xs focus-visible:focus-outline'
+          >
+            <Icon aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
+            {/* The title keeps its width; a long summary truncates instead. */}
+            <span className='shrink-0 font-medium'>{title}</span>
+            <span className='min-w-0 flex-1 truncate text-right text-muted-foreground tabular-nums group-data-[state=open]/stage:invisible'>
+              {summary}
+            </span>
+            <ChevronDown
+              aria-hidden
+              className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/stage:rotate-180 motion-reduce:transition-none'
+            />
+          </CollapsibleTrigger>
+          {aside === undefined ? null : <div className='flex shrink-0 items-center pr-1.5'>{aside}</div>}
+        </div>
+        <CollapsibleContent className={disclosureMotion}>
+          {/* Padding sits inside the animated content, so the height animation starts without a jump. */}
+          <div className='flex min-w-0 flex-col gap-3 border-t border-border/70 px-2.5 pt-2.5 pb-3'>{children}</div>
+        </CollapsibleContent>
+      </section>
+    </Collapsible>
   );
 }
 
 /**
  * A section that starts folded: engineering detail on request.
  *
- * @param properties - Heading, optional summary beside it, initial state and the body.
+ * @param properties - Heading, optional summary beside it, an optional control after the trigger,
+ * initial state and the body.
  * @returns The disclosure.
  */
 export function PrintDisclosure({
   title,
   summary,
+  aside,
   isDefaultOpen = false,
   children,
 }: {
   readonly title: string;
   readonly summary?: string;
+  /** Beside the trigger, never inside it: a reset is a button of its own. */
+  readonly aside?: React.ReactNode;
   readonly isDefaultOpen?: boolean;
   readonly children: React.ReactNode;
 }): React.JSX.Element {
   return (
-    <Collapsible defaultOpen={isDefaultOpen} className='border-t border-border/70 pt-1'>
-      <CollapsibleTrigger className='group/disclosure flex min-h-8 w-full items-center gap-2 rounded-md px-1 text-left hover:bg-accent/50'>
-        <ChevronRight
-          aria-hidden
-          className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/disclosure:rotate-90 motion-reduce:transition-none'
-        />
-        <span className='min-w-0 flex-1 truncate text-xs font-medium text-muted-foreground'>{title}</span>
-        {summary ? <span className='shrink-0 text-xs text-muted-foreground'>{summary}</span> : null}
-      </CollapsibleTrigger>
-      <CollapsibleContent className='flex flex-col gap-2 pt-2 pb-1'>{children}</CollapsibleContent>
+    // The 32 px trigger overhangs its text by 8 px; pt-1 and -mb-2 keep the rule rhythm at 12 px.
+    <Collapsible
+      defaultOpen={isDefaultOpen}
+      className='-mb-2 border-t border-border/70 pt-1 first:border-t-0 first:pt-0'
+    >
+      <div className='flex min-w-0 items-center gap-1'>
+        <CollapsibleTrigger className='group/disclosure flex min-h-8 min-w-0 flex-1 items-center gap-2 rounded-md px-1 text-left hover:bg-accent/50'>
+          <ChevronRight
+            aria-hidden
+            className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/disclosure:rotate-90 motion-reduce:transition-none'
+          />
+          {/* The title keeps its width; a long summary truncates instead. */}
+          <span className='shrink-0 text-xs font-medium text-muted-foreground'>{title}</span>
+          <span className='min-w-0 flex-1 truncate text-right text-xs text-muted-foreground'>{summary}</span>
+        </CollapsibleTrigger>
+        {aside}
+      </div>
+      <CollapsibleContent className='flex flex-col gap-2 pb-2'>{children}</CollapsibleContent>
     </Collapsible>
   );
 }

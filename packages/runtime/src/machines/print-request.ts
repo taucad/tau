@@ -86,13 +86,20 @@ export type MachineOperationSnapshot = Readonly<{
   receipt?: MachineOperationReceipt;
 }>;
 
-/** Every state a print request can be observed in. @public */
+/**
+ * Every state a print request can be observed in.
+ *
+ * `confirming` means the start was sent but the printer has not yet proven it took it; the host settles it from the
+ * printer's own reports. `unknown` means no proof arrived within the confirmation window, so a person should look.
+ * @public
+ */
 export type PrintRequestState =
   | 'preparing'
   | 'awaiting-approval'
   | 'approved'
   | 'uploading'
   | 'starting'
+  | 'confirming'
   | 'started'
   | 'denied'
   | 'withdrawn'

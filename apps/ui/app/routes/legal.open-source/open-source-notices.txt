@@ -30,7 +30,7 @@ it builds and links OCCT, is at [github.com/taucad/tau](https://github.com/tauca
 
 ## Third-Party Packages
 
-The web and desktop apps include the following 648 packages, with the license each declares.
+The web and desktop apps include the following 678 packages, with the license each declares.
 Their copyright notices and full license texts ship inside each package and are available from its source.
 
 | Package | Version | License |
@@ -76,15 +76,16 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@base-ui/utils](https://github.com/mui/base-ui) | 0.3.1 | MIT |
 | [@better-auth-ui/core](https://github.com/better-auth-ui/better-auth-ui) | 1.6.15 | Not declared |
 | [@better-auth-ui/react](https://github.com/better-auth-ui/better-auth-ui) | 1.6.15 | Not declared |
-| [@better-auth/api-key](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
-| [@better-auth/core](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
-| [@better-auth/drizzle-adapter](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
-| [@better-auth/kysely-adapter](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
-| [@better-auth/memory-adapter](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
-| [@better-auth/mongo-adapter](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
-| [@better-auth/prisma-adapter](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
-| [@better-auth/telemetry](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
+| [@better-auth/api-key](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [@better-auth/core](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [@better-auth/drizzle-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [@better-auth/kysely-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [@better-auth/memory-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [@better-auth/mongo-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [@better-auth/prisma-adapter](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [@better-auth/telemetry](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
 | [@better-auth/utils](https://github.com/better-auth/utils) | 0.4.2 | MIT |
+| [@better-auth/utils](https://github.com/better-auth/utils) | 0.5.0 | MIT |
 | [@better-fetch/fetch](https://github.com/better-auth/better-fetch) | 1.3.1 | MIT |
 | [@cfworker/json-schema](https://github.com/cfworker/cfworker) | 4.1.1 | MIT |
 | [@cspotcode/source-map-support](https://github.com/cspotcode/node-source-map-support) | 0.8.1 | MIT |
@@ -97,14 +98,14 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@floating-ui/dom](https://github.com/floating-ui/floating-ui) | 1.7.6 | MIT |
 | [@floating-ui/react-dom](https://github.com/floating-ui/floating-ui) | 2.1.8 | MIT |
 | [@floating-ui/utils](https://github.com/floating-ui/floating-ui) | 0.2.12 | MIT |
-| [@gltf-transform/core](https://github.com/donmccurdy/glTF-Transform) | 4.4.1 | MIT |
-| [@gltf-transform/extensions](https://github.com/donmccurdy/glTF-Transform) | 4.4.1 | MIT |
-| [@gltf-transform/functions](https://github.com/donmccurdy/glTF-Transform) | 4.4.1 | MIT |
+| [@gltf-transform/core](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
+| [@gltf-transform/extensions](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
+| [@gltf-transform/functions](https://github.com/donmccurdy/glTF-Transform) | 4.5.1 | MIT |
 | [@google/genai](https://github.com/googleapis/js-genai) | 1.52.0 | Apache-2.0 |
 | [@hono/node-server](https://github.com/honojs/node-server) | 2.1.1 | MIT |
 | [@img/colour](https://github.com/lovell/colour) | 1.1.0 | MIT |
-| [@img/sharp-{platform}](https://github.com/lovell/sharp) | 0.34.5 | Apache-2.0 |
-| [@img/sharp-libvips-{platform}](https://github.com/lovell/sharp-libvips) | 1.2.4 | LGPL-3.0-or-later |
+| [@img/sharp-{platform}](https://github.com/lovell/sharp) | 0.35.3 | Apache-2.0 |
+| [@img/sharp-libvips-{platform}](https://github.com/lovell/sharp-libvips) | 1.3.2 | LGPL-3.0-or-later |
 | [@jridgewell/resolve-uri](https://github.com/jridgewell/resolve-uri) | 3.1.2 | MIT |
 | [@jridgewell/sourcemap-codec](https://github.com/jridgewell/sourcemaps) | 1.5.5 | MIT |
 | [@jridgewell/trace-mapping](https://github.com/jridgewell/sourcemaps) | 0.3.31 | MIT |
@@ -118,13 +119,20 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@modelcontextprotocol/sdk](https://github.com/modelcontextprotocol/typescript-sdk) | 1.30.0 | MIT |
 | [@msgpack/msgpack](https://github.com/msgpack/msgpack-javascript) | 3.1.3 | ISC |
 | [@noble/ciphers](https://github.com/paulmillr/noble-ciphers) | 2.2.0 | MIT |
-| [@noble/hashes](https://github.com/paulmillr/noble-hashes) | 2.2.0 | MIT |
 | [@noble/hashes](https://github.com/paulmillr/noble-hashes) | 2.3.0 | MIT |
 | [@nodable/entities](https://github.com/nodable/val-parsers) | 2.2.0 | MIT |
 | [@nx/devkit](https://github.com/nrwl/nx) | 22.7.1 | MIT |
 | [@openai/codex](https://github.com/openai/codex) | 0.148.0 | Apache-2.0 |
 | [@opentelemetry/api](https://github.com/open-telemetry/opentelemetry-js) | 1.9.1 | Apache-2.0 |
+| [@opentelemetry/api-logs](https://github.com/open-telemetry/opentelemetry-js) | 0.220.0 | Apache-2.0 |
+| [@opentelemetry/core](https://github.com/open-telemetry/opentelemetry-js) | 2.11.0 | Apache-2.0 |
+| [@opentelemetry/instrumentation](https://github.com/open-telemetry/opentelemetry-js) | 0.220.0 | Apache-2.0 |
+| [@opentelemetry/resources](https://github.com/open-telemetry/opentelemetry-js) | 2.11.0 | Apache-2.0 |
+| [@opentelemetry/sdk-trace](https://github.com/open-telemetry/opentelemetry-js) | 2.11.0 | Apache-2.0 |
+| [@opentelemetry/sdk-trace-base](https://github.com/open-telemetry/opentelemetry-js) | 2.11.0 | Apache-2.0 |
 | [@opentelemetry/semantic-conventions](https://github.com/open-telemetry/opentelemetry-js) | 1.43.0 | Apache-2.0 |
+| [@parcel/watcher](https://github.com/parcel-bundler/watcher) | 2.6.0 | MIT |
+| [@parcel/watcher-{platform}](https://github.com/parcel-bundler/watcher) | 2.6.0 | MIT |
 | [@pondwader/socks5-server](https://github.com/PondWader/node-socks5-server) | 1.0.10 | MIT |
 | [@protobufjs/aspromise](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
 | [@protobufjs/base64](https://github.com/dcodeIO/protobuf.js) | 1.1.2 | BSD-3-Clause |
@@ -195,10 +203,23 @@ Their copyright notices and full license texts ship inside each package and are 
 | [@radix-ui/react-use-size](https://github.com/radix-ui/primitives) | 1.1.2 | MIT |
 | [@radix-ui/react-visually-hidden](https://github.com/radix-ui/primitives) | 1.2.6 | MIT |
 | [@radix-ui/rect](https://github.com/radix-ui/primitives) | 1.1.2 | MIT |
-| [@react-router/express](https://github.com/remix-run/react-router) | 7.14.2 | MIT |
-| [@react-router/node](https://github.com/remix-run/react-router) | 7.14.2 | MIT |
+| [@react-router/express](https://github.com/remix-run/react-router) | 7.18.2 | MIT |
+| [@react-router/node](https://github.com/remix-run/react-router) | 7.18.2 | MIT |
 | [@reduxjs/toolkit](https://github.com/reduxjs/redux-toolkit) | 2.12.0 | MIT |
 | [@resvg/resvg-wasm](https://github.com/yisibl/resvg-js) | 2.6.2 | MPL-2.0 |
+| [@sentry/browser](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/browser-utils](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/conventions](https://github.com/getsentry/sentry-conventions) | 0.16.0 | MIT |
+| [@sentry/core](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/electron](https://github.com/getsentry/sentry-electron) | 7.20.0 | MIT |
+| [@sentry/feedback](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/node](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/node-core](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/opentelemetry](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/react](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/replay](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/replay-canvas](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
+| [@sentry/server-utils](https://github.com/getsentry/sentry-javascript) | 10.75.0 | MIT |
 | [@shikijs/core](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
 | [@shikijs/engine-javascript](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
 | [@shikijs/engine-oniguruma](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
@@ -262,6 +283,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [abort-controller](https://github.com/mysticatea/abort-controller) | 3.0.0 | MIT |
 | [accepts](https://github.com/jshttp/accepts) | 2.0.0 | MIT |
 | [acorn](https://github.com/acornjs/acorn) | 8.18.0 | MIT |
+| [acorn-import-attributes](https://github.com/xtuc/acorn-import-attributes) | 1.9.5 | MIT |
 | [acorn-walk](https://github.com/acornjs/acorn) | 8.3.5 | MIT |
 | [agent-base](https://github.com/TooTallNate/proxy-agents) | 7.1.4 | MIT |
 | [ai](https://github.com/vercel/ai) | 6.0.208 | Apache-2.0 |
@@ -278,8 +300,8 @@ Their copyright notices and full license texts ship inside each package and are 
 | [balanced-match](https://github.com/juliangruber/balanced-match) | 4.0.4 | MIT |
 | [base64-js](https://github.com/beatgammit/base64-js) | 1.5.1 | MIT |
 | [basic-ftp](https://github.com/patrickjuchli/basic-ftp) | 6.2.1 | MIT |
-| [better-auth](https://github.com/better-auth/better-auth) | 1.6.19 | MIT |
-| [better-call](https://github.com/better-auth/better-call) | 1.3.6 | MIT |
+| [better-auth](https://github.com/better-auth/better-auth) | 1.6.33 | MIT |
+| [better-call](https://github.com/better-auth/better-call) | 1.4.0 | MIT |
 | [bignumber.js](https://github.com/MikeMcl/bignumber.js) | 9.3.1 | MIT |
 | [bl](https://github.com/rvagg/bl) | 6.1.6 | MIT |
 | [body-parser](https://github.com/expressjs/body-parser) | 2.3.0 | MIT |
@@ -299,6 +321,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [cdn-resolve](https://github.com/luxass/cdn-resolve) | 2.1.2 | MIT |
 | [character-entities-html4](https://github.com/wooorm/character-entities-html4) | 2.1.0 | MIT |
 | [character-entities-legacy](https://github.com/wooorm/character-entities-legacy) | 3.0.0 | MIT |
+| [cjs-module-lexer](https://github.com/nodejs/cjs-module-lexer) | 2.2.1 | MIT |
 | [class-variance-authority](https://github.com/joe-bell/cva) | 0.7.1 | Apache-2.0 |
 | [clean-git-ref](https://github.com/TheSavior/clean-git-ref) | 2.0.1 | Apache-2.0 |
 | [clsx](https://github.com/lukeed/clsx) | 2.1.1 | MIT |
@@ -433,6 +456,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [immediate](https://github.com/calvinmetcalf/immediate) | 3.0.6 | MIT |
 | [immer](https://github.com/immerjs/immer) | 10.2.0 | MIT |
 | [immer](https://github.com/immerjs/immer) | 11.1.8 | MIT |
+| [import-in-the-middle](https://github.com/nodejs/import-in-the-middle) | 3.1.0 | Apache-2.0 |
 | [inherits](https://github.com/isaacs/inherits) | 2.0.4 | ISC |
 | [internmap](https://github.com/mbostock/internmap) | 2.0.3 | ISC |
 | [iota-array](https://github.com/mikolalysenko/iota-array) | 1.0.0 | MIT |
@@ -441,7 +465,9 @@ Their copyright notices and full license texts ship inside each package and are 
 | [is-buffer](https://github.com/feross/is-buffer) | 1.1.6 | MIT |
 | [is-callable](https://github.com/inspect-js/is-callable) | 1.2.7 | MIT |
 | [is-docker](https://github.com/sindresorhus/is-docker) | 3.0.0 | MIT |
+| [is-extglob](https://github.com/jonschlinkert/is-extglob) | 2.1.1 | MIT |
 | [is-finite](https://github.com/sindresorhus/is-finite) | 1.1.0 | MIT |
+| [is-glob](https://github.com/micromatch/is-glob) | 4.0.3 | MIT |
 | [is-in-ssh](https://github.com/sindresorhus/is-in-ssh) | 1.0.0 | MIT |
 | [is-inside-container](https://github.com/sindresorhus/is-inside-container) | 1.0.0 | MIT |
 | [is-integer](https://github.com/parshap/js-is-integer) | 1.0.7 | WTFPL OR ISC |
@@ -498,6 +524,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [minimatch](https://github.com/isaacs/minimatch) | 10.2.6 | BlueOak-1.0.0 |
 | [minimist](https://github.com/minimistjs/minimist) | 1.2.8 | MIT |
 | [minimisted](https://github.com/kt3k/minimisted) | 2.0.1 | MIT |
+| [module-details-from-path](https://github.com/watson/module-details-from-path) | 1.0.4 | MIT |
 | [monaco-editor](https://github.com/microsoft/monaco-editor) | 0.55.1 | MIT |
 | [mqtt](https://github.com/mqttjs/MQTT.js) | 5.15.2 | MIT |
 | [mqtt-packet](https://github.com/mqttjs/mqtt-packet) | 9.0.2 | MIT |
@@ -509,9 +536,10 @@ Their copyright notices and full license texts ship inside each package and are 
 | [ndarray](https://github.com/mikolalysenko/ndarray) | 1.0.19 | MIT |
 | [ndarray-lanczos](https://github.com/donmccurdy/ndarray-lanczos) | 0.3.0 | MIT |
 | [ndarray-ops](https://github.com/mikolalysenko/ndarray-ops) | 1.2.2 | MIT |
-| [ndarray-pixels](https://github.com/donmccurdy/ndarray-pixels) | 5.0.1 | MIT |
+| [ndarray-pixels](https://github.com/donmccurdy/ndarray-pixels) | 5.2.0 | MIT |
 | [negotiator](https://github.com/jshttp/negotiator) | 1.0.0 | MIT |
 | [next-themes](https://github.com/pacocoursey/next-themes) | 0.4.6 | MIT |
+| [node-addon-api](https://github.com/nodejs/node-addon-api) | 7.1.1 | MIT |
 | [node-domexception](https://github.com/jimmywarting/node-domexception) | 1.0.0 | MIT |
 | [node-fetch](https://github.com/node-fetch/node-fetch) | 3.3.2 | MIT |
 | [node-forge](https://github.com/digitalbazaar/forge) | 1.4.0 | (BSD-3-Clause OR GPL-2.0) |
@@ -535,6 +563,7 @@ Their copyright notices and full license texts ship inside each package and are 
 | [path-expression-matcher](https://github.com/NaturalIntelligence/path-expression-matcher) | 1.6.2 | MIT |
 | [path-key](https://github.com/sindresorhus/path-key) | 3.1.1 | MIT |
 | [path-to-regexp](https://github.com/pillarjs/path-to-regexp) | 8.4.2 | MIT |
+| [picomatch](https://github.com/micromatch/picomatch) | 4.0.7 | MIT |
 | [picovoxel](https://github.com/taucad/picovoxel) | 0.1.0 | Apache-2.0 |
 | [pify](https://github.com/sindresorhus/pify) | 4.0.1 | MIT |
 | [pino-abstract-transport](https://github.com/pinojs/pino-abstract-transport) | 3.0.0 | MIT |
@@ -573,12 +602,13 @@ Their copyright notices and full license texts ship inside each package and are 
 | [regex-utilities](https://github.com/slevithan/regex-utilities) | 2.3.0 | MIT |
 | [regexp-tree](https://github.com/DmitrySoshnikov/regexp-tree) | 0.1.27 | MIT |
 | [require-from-string](https://github.com/floatdrop/require-from-string) | 2.0.2 | MIT |
+| [require-in-the-middle](https://github.com/nodejs/require-in-the-middle) | 8.0.1 | MIT |
 | [reselect](https://github.com/reduxjs/reselect) | 5.1.1 | MIT |
 | [reselect](https://github.com/reduxjs/reselect) | 5.2.0 | MIT |
 | [retry](https://github.com/tim-kos/node-retry) | 0.13.1 | MIT |
 | [rfdc](https://github.com/davidmarkclements/rfdc) | 1.4.1 | MIT |
 | [rhino3dm](https://github.com/mcneel/rhino3dm) | 8.17.0 | MIT |
-| [rou3](https://github.com/h3js/rou3) | 0.7.12 | MIT |
+| [rou3](https://github.com/h3js/rou3) | 0.9.2 | MIT |
 | [router](https://github.com/pillarjs/router) | 2.2.0 | MIT |
 | [run-applescript](https://github.com/sindresorhus/run-applescript) | 7.1.0 | MIT |
 | [safe-buffer](https://github.com/feross/safe-buffer) | 5.1.2 | MIT |
@@ -591,12 +621,12 @@ Their copyright notices and full license texts ship inside each package and are 
 | [semver](https://github.com/npm/node-semver) | 7.8.5 | ISC |
 | [send](https://github.com/pillarjs/send) | 1.2.1 | MIT |
 | [serve-static](https://github.com/expressjs/serve-static) | 2.2.1 | MIT |
-| [set-cookie-parser](https://github.com/nfriedly/set-cookie-parser) | 3.1.1 | MIT |
+| [set-cookie-parser](https://github.com/nfriedly/set-cookie-parser) | 3.1.2 | MIT |
 | [set-function-length](https://github.com/ljharb/set-function-length) | 1.2.2 | MIT |
 | [setimmediate](https://github.com/YuzuJS/setImmediate) | 1.0.5 | MIT |
 | [setprototypeof](https://github.com/wesleytodd/setprototypeof) | 1.2.0 | ISC |
 | [sha.js](https://github.com/crypto-browserify/sha.js) | 2.4.12 | (MIT AND BSD-3-Clause) |
-| [sharp](https://github.com/lovell/sharp) | 0.34.5 | Apache-2.0 |
+| [sharp](https://github.com/lovell/sharp) | 0.35.3 | Apache-2.0 |
 | [shebang-command](https://github.com/kevva/shebang-command) | 2.0.0 | MIT |
 | [shebang-regex](https://github.com/sindresorhus/shebang-regex) | 3.0.0 | MIT |
 | [shiki](https://github.com/shikijs/shiki) | 3.23.0 | MIT |
@@ -710,16 +740,16 @@ The circuit kernel bundles the following components. Their full license texts ac
 | @tscircuit/infer-cable-insertion-point | 0.0.4 | MIT |
 | @tscircuit/infgrid-ijump-astar | 0.0.35 | no SPDX field, license text pending |
 | @tscircuit/matchpack | 0.0.91 | MIT |
-| @tscircuit/math-utils | 0.0.38 | MIT |
 | @tscircuit/math-utils | 0.0.9 | MIT |
+| @tscircuit/math-utils | 0.0.38 | MIT |
 | @tscircuit/miniflex | 0.0.4 | MIT |
 | @tscircuit/mm | 0.0.8 | MIT |
 | @tscircuit/mm | 0.0.9 | MIT |
 | @tscircuit/modelprinter | 0.0.2 | MIT |
 | @tscircuit/props | 0.0.646 | MIT |
 | @tscircuit/schematic-trace-solver | 0.0.184 | MIT |
-| @tscircuit/solver-utils | 0.0.21 | MIT |
 | @tscircuit/solver-utils | 0.0.19 | MIT |
+| @tscircuit/solver-utils | 0.0.21 | MIT |
 | @tscircuit/soup-util | 0.0.41 | MIT |
 | base64-js | 1.5.1 | MIT |
 | boolbase | 1.0.0 | ISC |
@@ -766,7 +796,7 @@ The circuit kernel bundles the following components. Their full license texts ac
 | jscad-to-gltf | 0.0.5 | MIT |
 | minicssgrid | 0.0.9 | MIT |
 | ms | 2.1.3 | MIT |
-| nanoid | 5.1.14 | MIT |
+| nanoid | 3.3.16 | MIT |
 | nth-check | 2.1.1 | BSD-2-Clause |
 | object-hash | 3.0.0 | MIT |
 | papaparse | 5.5.4 | MIT |
@@ -783,8 +813,8 @@ The circuit kernel bundles the following components. Their full license texts ac
 | svg-path-commander | 2.3.3 | MIT |
 | svgson | 5.3.1 | MIT |
 | three | 0.184.0 | MIT |
-| transformation-matrix | 3.1.0 | MIT |
 | transformation-matrix | 2.16.1 | MIT |
+| transformation-matrix | 3.1.0 | MIT |
 
 ## GNU Lesser General Public License version 2.1
 

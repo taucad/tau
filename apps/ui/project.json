@@ -3,8 +3,9 @@
   "$schema": "../../node_modules/nx/schemas/project-schema.json",
   "sourceRoot": "apps/ui",
   "projectType": "application",
-  "tags": ["scope:ui", "type:app", "layer:feature"],
+  "tags": ["scope:ui", "type:app", "layer:feature", "release:app"],
   "targets": {
+    "formal:lean": {},
     "render-calibration": {
       "executor": "nx:run-commands",
       "continuous": true,

@@ -90,7 +90,8 @@ describe('systemSkillsCatalog', () => {
 
     expect(catalog).toEqual(configured);
     expect(createModelRows).toEqual(configured);
-    expect(progressiveDisclosureSkillNames).toHaveLength(11);
+    // Every configured kernel's cad-* skill plus create-model and geospec-authoring.
+    expect(progressiveDisclosureSkillNames).toHaveLength(configured.length + 2);
   });
 
   it('preserves JSCAD multi-shape output as one flat array of named geometries', () => {
@@ -100,7 +101,7 @@ describe('systemSkillsCatalog', () => {
 
   it.each([
     ['cad-openscad', 10],
-    ['geospec-authoring', 5],
+    ['geospec-authoring', 13],
   ] as const)('returns actionable paths and every supporting file for %s', async (slug, supportingCount) => {
     const resolver = createSkillResolver({
       readFile: async () => {

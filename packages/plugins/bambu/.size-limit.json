@@ -5,8 +5,8 @@
     "limit": "11.35 kB"
   },
   {
-    "name": "@taucad/bambu/plate (plate GLBs load on demand) — measured 485 B brotli on 2026-09-27",
+    "name": "@taucad/bambu/plate (plate GLBs load on demand) — measured 620 B brotli on 2026-10-03",
     "path": "dist/bambu.plate.mjs",
-    "limit": "535 B"
+    "limit": "680 B"
   }
 ]

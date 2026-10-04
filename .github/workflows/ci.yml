@@ -205,8 +205,14 @@ jobs:
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
         env:
           GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
+        # Products restored from an earlier run carry the bindings but not the native
+        # package's tsdown output, and `ensure-delivery` only verifies them, so build the
+        # Darwin-hosted packages here (the native `build` is uncached because tsdown copies
+        # those bindings into dist). The consumer target itself never builds the native
+        # package: its .check.ts keeps native production separately assembled.
         run: |
           pnpm nx run-many -t require-geospec-delivery --parallel=1
+          pnpm nx run-many -t build --projects tag:host:darwin-arm64 --parallel=1
           pnpm nx run scripts:prepare-geospec-test-consumer
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
 
@@ -255,6 +261,10 @@ jobs:
     # going for its full length and held the next run in the concurrency queue.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    # A hung task otherwise holds the job and the concurrency slot for the 6 h default.
+    # A change near the root of the graph runs about 58 min of serial lint, typecheck,
+    # size and pkgcheck before `test` starts, so 60 cut a healthy run short.
+    timeout-minutes: 90
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
@@ -346,10 +356,13 @@ jobs:
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
       # its VM ("The runner has received a shutdown signal"). At Nx's default of three
       # this happened a few minutes in; at two it still happened once both overlapped.
+      #
+      # `--output-style=stream`: the default groups each task's output and prints it only
+      # when the task ends, so a task killed by the timeout left no trace of what hung.
       - name: Run affected tasks
         run: |
-          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1
-          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64
+          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1 --output-style=stream
+          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64 --output-style=stream
 
       - name: Select affected Python checks
         id: benchmark-statistics
@@ -449,6 +462,7 @@ jobs:
   e2e:
     name: Browser end-to-end
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
@@ -496,10 +510,10 @@ jobs:
       # A step-level bound: a hung suite otherwise holds the job for the 6 h default
       # with no logs, while this still runs the always() diagnostics below.
       - name: Run affected end-to-end suites
-        timeout-minutes: 120
+        timeout-minutes: 80
         env:
           TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1
+        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1 --output-style=stream
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
@@ -536,7 +550,10 @@ jobs:
     name: WebGPU hardware qualification
     runs-on: [self-hosted, tau-webgpu]
     needs: [plan, geospec-producer]
+    # Like the benchmark lane: without a registered `tau-webgpu` runner the job sits
+    # queued until the run is cancelled, so it runs only when the variable says one exists.
     if: >-
+      vars.TAU_WEBGPU_RUNNER_ENABLED == 'true' &&
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
@@ -582,6 +599,7 @@ jobs:
   size-report:
     name: Bundle size report
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
@@ -677,6 +695,7 @@ jobs:
   api-docker-smoke:
     name: API Docker smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [plan]
     if: github.event_name == 'pull_request' && needs.plan.outputs.api == 'true'
     # A production API refuses to boot without Redis, a reachable database and a schema at
@@ -789,6 +808,7 @@ jobs:
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&

@@ -48,7 +48,7 @@ import { githubProjectBinding } from '#lib/github-project-binding.js';
 import { formatStorageLimit } from '@taucad/billing';
 import { ENV } from '#environment.config.js';
 import { Spinner } from '#components/ui/spinner.js';
-import { Switch } from '@taucad/ui/components/switch';
+import { SwitchRow } from '@taucad/ui/components/switch';
 import { RevisionCollaborators } from '#routes/w.$workspace.$project/revision-collaborators.js';
 import { ActionButton, DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
 import { RevisionRegion } from '#components/revisions/revision-region.js';
@@ -1009,14 +1009,14 @@ export function RevisionSyncRegion({
       ) : null}
 
       {changingBackup && choice === 'tau' ? (
-        <div className='flex items-center gap-2 rounded-md border bg-card p-2'>
-          <Switch aria-label='Sync chats' id='sync-chats' checked={syncChats} onCheckedChange={onSyncChatsChange} />
-          <Label htmlFor='sync-chats' className='flex-1 font-normal'>
-            <span className='block text-sm'>Sync chats</span>
-            <span className='block text-xs text-muted-foreground'>
-              Included by default; turn off before connecting to keep chats on this device.
-            </span>
-          </Label>
+        <div className='rounded-md border bg-card p-1'>
+          <SwitchRow
+            description='Included by default; turn off before connecting to keep chats on this device.'
+            isChecked={syncChats}
+            onIsCheckedChange={onSyncChatsChange}
+          >
+            Sync chats
+          </SwitchRow>
         </div>
       ) : null}
 

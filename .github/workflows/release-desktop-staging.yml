@@ -1,7 +1,9 @@
 # Staging desktop releases: a signed desktop build for taucad.dev, on demand.
 #
 # Dispatch this from `main` (GitHub or the Command Center). It creates a
-# `desktop-staging@<version>-staging.<n>` tag at main's head and a GitHub
+# `desktop-staging@<version>-staging.<n>` tag at the newest `main` commit whose
+# CI push run succeeded (Release build refuses any other, and main's head is
+# often still running or superseded), and a GitHub
 # prerelease for it with the tau-release-bot token, and that release starts
 # `release-build.yml`, which builds the desktop app exactly as it builds a
 # production release, packaged for the staging channel:
@@ -17,7 +19,7 @@
 # workflow's run number, so every dispatch makes a new prerelease. Nothing here
 # touches a `desktop@*` release, the production update feed or production.
 name: Release desktop to staging
-run-name: Release desktop to staging from ${{ github.sha }}
+run-name: Release desktop to staging
 
 on:
   workflow_dispatch:
@@ -34,10 +36,36 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-24.04
     timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
     environment:
       name: release-pr
       deployment: false
     steps:
+      - name: Find the newest main commit with green CI
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          STAGING_SUPPORT_SHA: cd8f118318e7720aeace25d6871c6b478f352673
+        run: |
+          set -euo pipefail
+          sha=$(gh run list --workflow ci.yml --branch main --event push --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
+          if [ -z "$sha" ]; then
+            echo "::error::No ci.yml push run on main has succeeded yet."
+            exit 1
+          fi
+          # Release build runs from the tag's own commit, so it must already
+          # build staging releases: the first such main commit is #331.
+          status=$(gh api "repos/${GH_REPO}/compare/${STAGING_SUPPORT_SHA}...${sha}" --jq .status)
+          if [ "$status" != ahead ] && [ "$status" != identical ]; then
+            echo "::error::The newest main commit with green CI, $sha, predates staging release support ($STAGING_SUPPORT_SHA). Run this again once main CI is green on a newer commit."
+            exit 1
+          fi
+          echo "Releasing $sha, the newest main commit with green CI."
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
       - name: Mint tau-release-bot token
         id: bot
         uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
@@ -51,7 +79,7 @@ jobs:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ github.sha }}
+          ref: ${{ steps.target.outputs.sha }}
           persist-credentials: false
 
       - name: Create the tag and prerelease
@@ -59,7 +87,7 @@ jobs:
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
           GH_REPO: ${{ github.repository }}
-          TARGET: ${{ github.sha }}
+          TARGET: ${{ steps.target.outputs.sha }}
           RUN_NUMBER: ${{ github.run_number }}
         run: |
           set -euo pipefail

@@ -253,8 +253,9 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
         candidate !== null && typeof candidate === 'object' ? Reflect.get(candidate, key) : undefined;
       return (optional && value === undefined) || (value !== null && typeof value === 'object' && 'schema' in value);
     };
-    const manifest: unknown =
-      candidate !== null && typeof candidate === 'object' ? Reflect.get(candidate, 'manifest') : undefined;
+    const fields: Readonly<Record<string, unknown>> =
+      candidate !== null && typeof candidate === 'object' ? (candidate as Readonly<Record<string, unknown>>) : {};
+    const manifest: unknown = Reflect.get(fields, 'manifest');
     if (
       !hasSchema('bindingConfiguration') ||
       !hasSchema('submissionConfiguration') ||
@@ -263,8 +264,8 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
       typeof manifest !== 'object' ||
       !Array.isArray(Reflect.get(manifest, 'actions')) ||
       !Array.isArray(Reflect.get(manifest, 'holds')) ||
-      typeof Reflect.get(candidate as object, 'discover') !== 'function' ||
-      typeof Reflect.get(candidate as object, 'connect') !== 'function'
+      typeof Reflect.get(fields, 'discover') !== 'function' ||
+      typeof Reflect.get(fields, 'connect') !== 'function'
     ) {
       throw new Error('MACHINE_PROVIDER_DEFINITION_INVALID');
     }
@@ -533,19 +534,25 @@ export const createNodeMachineHost = async (input: CreateNodeMachineHostInput): 
     commitJob,
   };
   // The journal tells the ledger about every transfer and start result; the ledger is built after the journal.
-  let jobLedger: ReturnType<typeof createNodeMachineJobs> | undefined;
+  const built: { ledger?: ReturnType<typeof createNodeMachineJobs> } = {};
   const journal: NodeMachineOperations = createNodeMachineOperations(context, async (operation) =>
-    jobLedger?.sync(operation),
+    built.ledger?.sync(operation),
   );
-  jobLedger = createNodeMachineJobs(context, journal);
-  const ledger = jobLedger;
-  for (const machineId of machines.keys()) {
-    await journal.publish(machineId);
-  }
+  const ledger = createNodeMachineJobs(context, journal);
+  built.ledger = ledger;
+  await Promise.all([...machines.keys()].map(async (machineId) => journal.publish(machineId)));
   // Every report may show a job's run; observations already settle operations through the same topic.
   let observing = Promise.resolve();
   const stopObservingRuns = commits.subscribe(() => {
-    observing = observing.then(async () => ledger.observe()).catch(report);
+    const previous = observing;
+    observing = (async (): Promise<void> => {
+      await previous;
+      try {
+        await ledger.observe();
+      } catch (error) {
+        report(error);
+      }
+    })();
   });
   const supervision = createNodeMachineSupervision(context);
   const bindings = createNodeMachineBindings(context, supervision.supervise);

@@ -359,9 +359,9 @@ export const createNodeMachineJobs = (
     if (current.state !== 'starting' || current.startOperationId === undefined) {
       return current;
     }
-    const startOperationId = current.startOperationId;
-    const transferId = current.transferId;
-    const facts = (await currentEntry(current.machineId))?.descriptor.capabilities.jobs;
+    const { startOperationId, transferId } = current;
+    const startEntry = await currentEntry(current.machineId);
+    const facts = startEntry?.descriptor.capabilities.jobs;
     // Journaled with the start, so whoever settles it later knows an at-machine start waits for the person.
     const start = facts?.type === 'supported' ? facts.start : 'remote';
     const receipt = await journal.run({

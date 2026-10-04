@@ -71,7 +71,7 @@ export const createNodeMachineSerial = (
       ports
         .filter((port) => typeof port.path === 'string' && port.path.length > 0 && port.path.length <= 512)
         .slice(0, 64)
-        .map(portOf),
+        .map((port) => portOf(port)),
     );
   },
   async openSerial(input: MachineSerialRequest): Promise<MachineNetworkStream> {
@@ -93,7 +93,7 @@ export const createNodeMachineSerial = (
       abort();
     }
     const readable = (async function* (): AsyncGenerator<Uint8Array<ArrayBuffer>> {
-      for await (const raw of port as AsyncIterable<Uint8Array>) {
+      for await (const raw of port as AsyncIterable<Uint8Array<ArrayBuffer>>) {
         const chunk = Uint8Array.from(raw);
         readBytes += chunk.byteLength;
         if (readBytes > input.maximumReadBytes) {

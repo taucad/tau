@@ -268,11 +268,15 @@ export const operationReceipt = (
   }
   const evidence =
     planned.kind === 'action'
-      ? { ...(reply.activityId === undefined ? {} : { activityId: reply.activityId }) }
+      ? reply.activityId === undefined
+        ? {}
+        : { activityId: reply.activityId }
       : planned.kind === 'transfer'
         ? { transferId: reply.transferId }
         : planned.kind === 'start'
-          ? { ...(reply.runId === undefined ? {} : { runId: reply.runId }) }
+          ? reply.runId === undefined
+            ? {}
+            : { runId: reply.runId }
           : {};
   return parseMachineOperationReceipt({ ...base, status: 'accepted', ...evidence, observedAt: reply.observedAt });
 };

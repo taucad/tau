@@ -38,6 +38,7 @@ import type { NodeMachineOperationPlanned, NodeMachineOperationState } from '#ho
 import type { AdmittedHostOperation } from '#host/host-admission.js';
 import { parseMachineOperationReceipt } from '#machines/machine-channel.js';
 import type { MachineChannelHostOperations } from '#machines/machine-channel.js';
+import type { MachineApplyActionInput } from '#machines/machine-client.js';
 import type { MachineDirectoryEntry } from '#machines/machine-directory.js';
 import type {
   MachineOperation,
@@ -54,10 +55,10 @@ type Admitted = Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal 
 export type NodeMachineAdmission =
   | Readonly<{ refusal: MachineFailure }>
   | Readonly<{
-      send(): Promise<MachineCommandReceipt>;
       /** `confirming`: accepted only once the machine's reports show it. `open`: the result comes later (a hold). */
       onAccepted?: 'accepted' | 'confirming' | 'open';
       action?: NodeMachineOperationPlanned['action'];
+      send(): Promise<MachineCommandReceipt>;
     }>;
 
 /** One operation to run once. @internal */
@@ -99,6 +100,9 @@ const caller = (admitted: AdmittedHostOperation, requestedBy: MachineRequester):
 /**
  * The floor the host admits a descriptor under: never below its standard family's, except where the host's own
  * low-risk list lets an agent act.
+ * @param componentKind - The kind of the component the descriptor targets.
+ * @param descriptor - The installed action or hold.
+ * @returns The safety the host admits it under.
  */
 const effectiveSafety = (
   componentKind: string,
@@ -166,16 +170,19 @@ export const createNodeMachineOperations = (
       .filter(({ planned }) => planned.machineId === machineId)
       .toSorted((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .slice(0, maximumRecent)
-      .map(operationRecord);
+      .map((operation) => operationRecord(operation));
     await directory.update({ machineId, operations: recent });
   };
 
   const record = async (
     operation: NodeMachineOperationState,
-    state: 'accepted' | 'rejected' | 'confirming' | 'attention',
-    receipt: MachineOperationReceipt,
-    source: 'attempt' | 'confirmation' | 'reconciliation' | 'escalation',
+    result: Readonly<{
+      state: 'accepted' | 'rejected' | 'confirming' | 'attention';
+      receipt: MachineOperationReceipt;
+      source: 'attempt' | 'confirmation' | 'reconciliation' | 'escalation';
+    }>,
   ): Promise<void> => {
+    const { state, receipt, source } = result;
     const { log } = context.usableMachine(operation.planned.machineId, 'MACHINE_UNAVAILABLE');
     const event = parseJournalEvent({
       type: 'machine-operation-result',
@@ -291,16 +298,16 @@ export const createNodeMachineOperations = (
       if (receipt.status === 'accepted' && admission.onAccepted === 'open') {
         return receipt;
       }
-      await record(
-        operation,
-        receipt.status === 'rejected'
-          ? 'rejected'
-          : receipt.status === 'unknown' || admission.onAccepted === 'confirming'
-            ? 'confirming'
-            : 'accepted',
+      await record(operation, {
+        state:
+          receipt.status === 'rejected'
+            ? 'rejected'
+            : receipt.status === 'unknown' || admission.onAccepted === 'confirming'
+              ? 'confirming'
+              : 'accepted',
         receipt,
-        'attempt',
-      );
+        source: 'attempt',
+      });
       return receipt;
     });
   };
@@ -320,14 +327,13 @@ export const createNodeMachineOperations = (
           componentId: planned.action.componentId,
           action: planned.action.id,
           version: Number(intent['version']),
-          expectedRunId: (intent['expectedRunId'] as string | null | undefined) ?? null,
+          expectedRunId: typeof intent['expectedRunId'] === 'string' ? intent['expectedRunId'] : null,
           parameters: intent['parameters'],
         });
         if (answer.status === 'confirmed') {
-          await record(
-            operation,
-            'accepted',
-            parseMachineOperationReceipt({
+          await record(operation, {
+            state: 'accepted',
+            receipt: parseMachineOperationReceipt({
               operationId: planned.operationId,
               machineId: planned.machineId,
               kind: 'action',
@@ -339,12 +345,16 @@ export const createNodeMachineOperations = (
                 : {}),
               observedAt: now(),
             }),
-            'confirmation',
-          );
+            source: 'confirmation',
+          });
           return;
         }
         if (answer.status === 'refuted') {
-          await record(operation, 'rejected', refusedReceipt(planned, providerFailure(answer)), 'confirmation');
+          await record(operation, {
+            state: 'rejected',
+            receipt: refusedReceipt(planned, providerFailure(answer)),
+            source: 'confirmation',
+          });
           return;
         }
       }
@@ -368,7 +378,11 @@ export const createNodeMachineOperations = (
           receipt = undefined;
         }
         if (receipt) {
-          await record(operation, receipt.status === 'rejected' ? 'rejected' : 'accepted', receipt, 'reconciliation');
+          await record(operation, {
+            state: receipt.status === 'rejected' ? 'rejected' : 'accepted',
+            receipt,
+            source: 'reconciliation',
+          });
           return;
         }
       }
@@ -379,7 +393,7 @@ export const createNodeMachineOperations = (
       operation.confirmingSince !== undefined &&
       Date.parse(now()) - Date.parse(operation.confirmingSince) >= confirmationWindow
     ) {
-      await record(operation, 'attention', operation.receipt, 'escalation');
+      await record(operation, { state: 'attention', receipt: operation.receipt, source: 'escalation' });
     }
   };
 
@@ -421,7 +435,7 @@ export const createNodeMachineOperations = (
   const stopSettling = context.commits.subscribe(settleAll);
   // A silent machine still escalates: reports drive settling, and this clock drives the 180-second escalation.
   const escalation = setInterval(settleAll, 5000);
-  escalation.unref?.();
+  escalation.unref();
 
   // ───────────── Holds ─────────────
 
@@ -432,13 +446,7 @@ export const createNodeMachineOperations = (
     timer?: ReturnType<typeof setTimeout>;
   };
   const holds = new Map<string, ActiveHold>();
-  const endHold = async (holdId: string): Promise<MachineOperationReceipt | undefined> => {
-    const hold = holds.get(holdId);
-    if (!hold) {
-      return undefined;
-    }
-    holds.delete(holdId);
-    clearTimeout(hold.timer);
+  const release = async (holdId: string, hold: ActiveHold): Promise<MachineOperationReceipt> => {
     let receipt: MachineOperationReceipt;
     try {
       receipt = operationReceipt(hold.operation.planned, await hold.provider.release());
@@ -454,17 +462,39 @@ export const createNodeMachineOperations = (
     }
     try {
       await effectQueue.queueFor(`operation:${holdId}`, async () =>
-        record(
-          hold.operation,
-          receipt.status === 'rejected' ? 'rejected' : receipt.status === 'unknown' ? 'confirming' : 'accepted',
+        record(hold.operation, {
+          state: receipt.status === 'rejected' ? 'rejected' : receipt.status === 'unknown' ? 'confirming' : 'accepted',
           receipt,
-          'attempt',
-        ),
+          source: 'attempt',
+        }),
       );
     } catch (error) {
       report(error);
     }
     return receipt;
+  };
+  /** Holds being released, so a caller who ends one already ending gets the same receipt. */
+  const endings = new Map<string, Promise<MachineOperationReceipt>>();
+  const endHold = async (holdId: string): Promise<MachineOperationReceipt | undefined> => {
+    const ending = endings.get(holdId);
+    if (ending) {
+      return ending;
+    }
+    const hold = holds.get(holdId);
+    if (!hold) {
+      return undefined;
+    }
+    holds.delete(holdId);
+    clearTimeout(hold.timer);
+    const released = (async (): Promise<MachineOperationReceipt> => {
+      try {
+        return await release(holdId, hold);
+      } finally {
+        endings.delete(holdId);
+      }
+    })();
+    endings.set(holdId, released);
+    return released;
   };
   const arm = (holdId: string, hold: ActiveHold): void => {
     clearTimeout(hold.timer);
@@ -490,7 +520,7 @@ export const createNodeMachineOperations = (
     operationId: string;
     id: string;
     version: number;
-    expectedRunId: string | null;
+    expectedRunId: MachineApplyActionInput['expectedRunId'];
     parameters: unknown;
     requestedBy: MachineRequester;
     attended?: boolean;
@@ -616,7 +646,7 @@ export const createNodeMachineOperations = (
         if (!context.runtime) {
           throw unavailable();
         }
-        const asked = { ...input, id: input.action, kind: 'action' as const };
+        const asked: Asked = { ...input, id: input.action, kind: 'action' };
         const who = caller(input.admitted, input.requestedBy);
         return run({
           machineId: input.machineId,

@@ -515,7 +515,13 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
     },
     listJobs: {
       args: jobScopeSchema,
-      result: validator((value) => z.array(z.unknown()).max(1024).parse(value).map(parseMachineJob)),
+      result: validator((value) =>
+        z
+          .array(z.unknown())
+          .max(1024)
+          .parse(value)
+          .map((job) => parseMachineJob(job)),
+      ),
     },
     resolveJob: {
       args: z.strictObject({
@@ -724,12 +730,16 @@ export const exposeMachineChannel = (input: {
           return entry;
         }
         // SAFETY: `name` is one of the host calls, and the channel validated `args` for it.
+        // oxlint-disable-next-line typescript/no-unnecessary-type-assertion -- tsc cannot index the operations by the generic name.
         const operation = input.operations[name as keyof HostCalls] as (operationInput: unknown) => Promise<unknown>;
         const result = await abortable(operation({ ...args, admitted, signal: combined }), combined);
         combined.throwIfAborted();
         admitted.assertCurrent();
         // SAFETY: the protocol's own result validator for `name` proves the value.
-        return parseResult(protocolSchemas.calls[name].result, result) as never;
+        return parseResult(
+          protocolSchemas.calls[name].result,
+          result,
+        ) as unknown as MachineChannelProtocol['calls'][typeof name]['result'];
       },
       // oxlint-disable-next-line eslint/max-params -- Typed ChannelServer listen signature is fixed.
       async *listen(_context, name, args, signal) {

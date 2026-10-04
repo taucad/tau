@@ -1,13 +1,14 @@
 import type { Topic } from '@taucad/events';
 import { ResourceQueue } from '@taucad/filesystem';
 import { canonicalizeCacheValue } from '@taucad/cache-core';
-import { convert, quantityKinds } from '@taucad/units/quantity';
-import type { Quantity } from '@taucad/units/quantity';
 import { randomUuid } from '@taucad/utils/id';
 import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
-import type { MachineDescriptor, MachineSession, MachineSnapshot } from '#machines/machine.js';
+import type { MachineDescriptor, MachineSession } from '#machines/machine.js';
+import { machineManifestSchema } from '#machines/machine-manifest.js';
+import { machineReportSchema } from '#machines/machine-observation.js';
+import type { MachineSnapshot } from '#machines/machine-observation.js';
 
 const identity = z
   .string()
@@ -15,174 +16,43 @@ const identity = z
   .max(256)
   .refine((value) => value.isWellFormed());
 const count = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-const names = z.array(identity).max(128);
-const envelope = z.strictObject({
-  width: z.number().positive(),
-  depth: z.number().positive(),
-  height: z.number().positive(),
-  unit: z.literal('m'),
-});
-const nozzleDiameter = z.unknown().transform((value, context) => {
-  const candidate = value as Quantity;
-  const converted = convert({ quantity: candidate, to: 'm' });
-  if (
-    converted.status !== 'success' ||
-    candidate.kind !== quantityKinds.diameter ||
-    candidate.space !== 'linear' ||
-    typeof converted.value.value !== 'number' ||
-    converted.value.value <= 0
-  ) {
-    context.addIssue({
-      code: 'custom',
-      message: 'Nozzle diameter must be a positive executable diameter quantity.',
-    });
-    return z.NEVER;
-  }
-  return candidate;
-});
-const temperaturePoint = z.unknown().transform((value, context) => {
-  const candidate = value as Quantity;
-  const converted = convert({ quantity: candidate, to: 'Cel' });
-  if (
-    converted.status !== 'success' ||
-    candidate.kind !== quantityKinds.temperature ||
-    candidate.space !== 'point' ||
-    typeof converted.value.value !== 'number'
-  ) {
-    context.addIssue({
-      code: 'custom',
-      message: 'Temperature must be an executable affine point quantity.',
-    });
-    return z.NEVER;
-  }
-  return candidate;
-});
-const percentage = z.number().min(0).max(100);
-const material = z.strictObject({
-  slot: count.max(255),
-  state: z.enum(['empty', 'loaded', 'unknown']),
-  materialId: identity.optional(),
-  profileId: identity.optional(),
-  brand: identity.optional(),
-  color: z
-    .string()
-    .regex(/^#[0-9A-F]{6}$/u)
-    .optional(),
-  remainingPercent: percentage.optional(),
-});
+const capabilitiesSchema = machineManifestSchema
+  .pick({
+    connection: true,
+    axes: true,
+    components: true,
+    processes: true,
+    actions: true,
+    holds: true,
+    jobs: true,
+    stop: true,
+  })
+  .extend({ revision: identity, incarnation: identity });
 const descriptorSchema = z.strictObject({
   id: identity,
   name: identity,
   vendor: identity,
   model: identity,
-  technology: identity,
   firmware: identity,
-  accepts: z
-    .array(
-      z.strictObject({
-        contract: z.strictObject({ id: identity, version: count.min(1) }),
-        mediaType: identity,
-        requiredMembers: z.array(z.string().min(1).max(512)).max(128),
-        payloadSelection: z.enum(['single', 'plate']),
-        technology: identity,
-      }),
-    )
-    .max(128),
-  operations: names,
-  ratedEnvelope: envelope,
-  printableEnvelope: envelope,
-  tools: z
-    .array(
-      z.strictObject({
-        id: identity,
-        kind: identity,
-        nozzleDiameter: nozzleDiameter.optional(),
-      }),
-    )
-    .max(128),
-  materialSystem: z.strictObject({ kind: identity, slotCount: count.max(128) }),
-  bedTypes: names,
+  capabilities: capabilitiesSchema,
 });
-const snapshotSchema = z.strictObject({
-  connection: z.enum(['connected', 'disconnected', 'unreachable']),
-  readiness: z.enum(['busy', 'idle', 'not-ready', 'unknown']),
-  activeRunId: identity.optional(),
-  observedAt: z.iso.datetime({ offset: true }),
-  setup: z.strictObject({
-    toolId: identity.optional(),
-    bedType: identity.optional(),
-    materials: z.array(material).max(128),
-  }),
-  run: z
-    .strictObject({
-      state: z.enum(['failed', 'finishing', 'idle', 'paused', 'preparing', 'printing', 'succeeded', 'unknown']),
-      progress: z.number().min(0).max(100).optional(),
-      remainingSeconds: count.optional(),
-      name: identity.optional(),
-      file: identity.optional(),
-      currentLayer: count.optional(),
-      totalLayers: count.optional(),
-      stage: identity.optional(),
-      printType: identity.optional(),
-      speedProfile: z.enum(['silent', 'standard', 'sport', 'ludicrous', 'unknown']).optional(),
-      speedPercent: z.number().min(0).max(1000).optional(),
-    })
-    .optional(),
-  temperatures: z
-    .strictObject({
-      nozzle: temperaturePoint.optional(),
-      nozzleTarget: temperaturePoint.optional(),
-      bed: temperaturePoint.optional(),
-      bedTarget: temperaturePoint.optional(),
-      chamber: temperaturePoint.optional(),
-    })
-    .optional(),
-  fans: z
-    .strictObject({
-      part: percentage.optional(),
-      auxiliary: percentage.optional(),
-      chamber: percentage.optional(),
-    })
-    .optional(),
-  materialSystem: z
-    .strictObject({
-      currentSlot: count.max(255).optional(),
-      targetSlot: count.max(255).optional(),
-      units: z
-        .array(
-          z.strictObject({
-            unit: count.max(31),
-            humidityIndex: count.max(100).optional(),
-            temperature: temperaturePoint.optional(),
-          }),
-        )
-        .max(32),
-    })
-    .optional(),
-  network: z.strictObject({ wifiSignalDbm: z.number().min(-150).max(0).optional() }).optional(),
-  lights: z.strictObject({ chamber: z.enum(['off', 'on', 'unknown']).optional() }).optional(),
-  removableStorage: z.enum(['absent', 'present']).optional(),
-  alerts: z
-    .array(
-      z.strictObject({
-        code: identity,
-        severity: z.enum(['fatal', 'serious', 'warning', 'info']).optional(),
-        message: z
-          .string()
-          .min(1)
-          .max(512)
-          .refine((value) => value.isWellFormed())
-          .optional(),
-        // A public help page: https to a named host, never a device address or another scheme.
-        reference: z
-          .url({ protocol: /^https$/u, hostname: z.regexes.domain })
-          .max(2048)
-          .optional(),
-      }),
-    )
-    .max(128)
+const requesterSchema = z.strictObject({ kind: z.enum(['user', 'agent']), id: identity, label: identity });
+const operationSchema = z.strictObject({
+  operationId: identity,
+  machineId: identity,
+  kind: z.enum(['action', 'stop', 'hold', 'transfer', 'start']),
+  inputDigest: identity,
+  state: z.enum(['planned', 'sending', 'accepted', 'rejected', 'confirming', 'attention']),
+  updatedAt: z.iso.datetime({ offset: true }),
+  receipt: z.record(z.string(), z.unknown()).optional(),
+  confirmingSince: z.iso.datetime({ offset: true }).optional(),
+  requestedBy: requesterSchema.optional(),
+  attended: z.boolean().optional(),
+  action: z
+    .strictObject({ componentId: identity, id: identity, label: identity, activityId: identity.optional() })
     .optional(),
 });
+const snapshotSchema = machineReportSchema.extend({ operations: z.array(operationSchema).max(64) });
 const entrySchema = z.strictObject({
   machineId: identity,
   name: identity,
@@ -190,6 +60,7 @@ const entrySchema = z.strictObject({
   descriptor: descriptorSchema,
   snapshot: snapshotSchema,
   freshness: z.enum(['current', 'stale']),
+  testing: z.boolean().optional(),
 });
 const scope = {
   hostId: identity,
@@ -216,9 +87,9 @@ const cursorSchema = z.strictObject({
 });
 const limits = {
   code: 'MACHINE_DIRECTORY',
-  maximumDepth: 12,
-  maximumNodes: 16_384,
-  maximumCharacters: 131_072,
+  maximumDepth: 48,
+  maximumNodes: 524_288,
+  maximumCharacters: 8_388_608,
 };
 // Ponytail: watchers resume from the last 256 live changes (256 retained entries); a watcher further behind gets
 // one lag resync snapshot instead. Raise it only if lag resyncs show up on real hosts.
@@ -252,6 +123,8 @@ export type MachineDirectoryEntry = Readonly<{
   descriptor: MachineDescriptor;
   snapshot: MachineSnapshot;
   freshness: 'current' | 'stale';
+  /** A person let controls not yet qualified on this machine be tried, to qualify them. */
+  testing?: boolean;
 }>;
 /** A read-through position distinct from projection revision, valid only for the directory `generation` that issued it. @public */
 export type MachineDirectoryCursor = Readonly<z.infer<typeof cursorSchema>>;
@@ -339,7 +212,8 @@ export const parseMachineDirectoryCursor = (value: unknown): MachineDirectoryCur
  * @public
  */
 export const parseMachineDirectoryEntry = (value: unknown): MachineDirectoryEntry =>
-  freeze(entrySchema.parse(cloneBoundedJson(value, limits)));
+  // SAFETY: the strict schema is the runtime proof of the entry's shape.
+  freeze(entrySchema.parse(cloneBoundedJson(value, limits)) as unknown as MachineDirectoryEntry);
 
 /** Parse one bounded public directory snapshot.
  * @param value - Untrusted snapshot value.
@@ -354,7 +228,8 @@ export const parseMachineDirectorySnapshot = (value: unknown): MachineDirectoryS
       entries: z.array(entrySchema).max(maximumEntries),
     })
     .parse(candidate);
-  return freeze(parsed);
+  // SAFETY: the strict schema is the runtime proof of the snapshot's shape.
+  return freeze(parsed as unknown as MachineDirectorySnapshot);
 };
 
 /** Parse one bounded public directory stream frame.
@@ -383,7 +258,8 @@ export const parseMachineDirectoryFrame = (value: unknown): MachineDirectoryFram
           snapshot,
         }),
       ])
-      .parse(candidate),
+      // SAFETY: the strict schema is the runtime proof of the frame's shape.
+      .parse(candidate) as unknown as MachineDirectoryFrame,
   );
 };
 

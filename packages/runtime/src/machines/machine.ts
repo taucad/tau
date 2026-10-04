@@ -1,7 +1,6 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
 import type { SettingsSchema, SettingsDefinition } from '#machines/settings.js';
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
-import type { Quantity } from '@taucad/units/quantity';
 import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
@@ -10,6 +9,10 @@ import type { ConfigurationDefinition, ConfigurationManifestV1, JsonSchema } fro
 import { admitJsonSchema } from '@taucad/parameters/schema';
 import { machineManifestSchema, parseMachineManifest } from '#machines/machine-manifest.js';
 import type { MachineManifest } from '#machines/machine-manifest.js';
+import { machineActionDescriptorOf } from '#machines/machine-actions.js';
+import type { MachineActionDefinition, MachineFailure, MachineHoldDefinition } from '#machines/machine-actions.js';
+import type { MachineProgramSummary } from '#machines/machine-jobs.js';
+import type { MachineCheck, MachineObservation, MachineReport } from '#machines/machine-observation.js';
 import {
   attachRuntimePluginDefinition,
   attachRuntimePluginFactoryOptions,
@@ -36,14 +39,11 @@ export type MachineProvider<Id extends string = string, QueryName extends string
   id: Id;
   name: string;
   version: string;
-  protocolVersion: 1;
+  protocolVersion: 2;
   vendor: string;
-  technologies: readonly string[];
-  accepts: readonly MachineAcceptedContainer[];
-  /** Frozen model facts that drive scenes, settings, actions and freshness budgets. */
+  /** Frozen model facts: hardware, processes, declared actions, jobs, stop and freshness budgets. */
   manifest: MachineManifest;
   bindingConfiguration: ConfigurationManifestV1;
-  submissionConfiguration: ConfigurationManifestV1;
   /** Optional sparse preferences; observations and approvals never belong here. */
   settingsConfiguration?: ConfigurationManifestV1;
   queries: Readonly<Record<QueryName, MachineQueryManifest>>;
@@ -110,14 +110,6 @@ export type MachineDatagram = Readonly<{
   peer: Readonly<{ address: string; interface: string; port: number }>;
 }>;
 
-/** Explicit native-unit declaration carried by a physical preparation profile. @public */
-export type MachineQuantityDeclaration = Readonly<{
-  value: number;
-  unit: string;
-  kind: string;
-  space: 'difference' | 'linear' | 'point';
-}>;
-
 /**
  * A project artifact a print request names. The host finds the project by `projectId`, reads `path` from it and
  * re-verifies `length` and `digest` on every use, so the reference is never a copy of the bytes.
@@ -142,10 +134,31 @@ export type MachineArtifactReadInput = Readonly<{
   signal: AbortSignal;
 }>;
 
+/** One serial port the host can see. @public */
+export type MachineSerialPort = Readonly<{
+  path: string;
+  /** USB vendor and product ids, as four lower-case hex digits each, when the port reports them. */
+  vendorId?: string;
+  productId?: string;
+  manufacturer?: string;
+  serialNumber?: string;
+}>;
+
+/** Host-opened serial stream request. Opening a port may reset the controller behind it. @public */
+export type MachineSerialRequest = Readonly<{
+  path: string;
+  baudRate: number;
+  maximumReadBytes: number;
+  maximumWriteBytes: number;
+  signal: AbortSignal;
+}>;
+
 /** Least-privilege services available during discovery. @public */
 export type MachineDiscoveryRuntime = Readonly<{
   clock: MachineClock;
   listenDatagrams(input: MachineDatagramListenInput): AsyncIterable<MachineDatagram>;
+  /** The serial ports the host can see; absent on a host without serial access. */
+  listSerialPorts?(input: Readonly<{ signal: AbortSignal }>): Promise<readonly MachineSerialPort[]>;
 }>;
 
 /** Host-owned services available only while establishing a trusted connection. @public */
@@ -153,6 +166,8 @@ export type MachineConnectionRuntime = Readonly<{
   clock: MachineClock;
   log(entry: MachineLogEntry): Promise<void>;
   connectStream(input: MachineNetworkRequest): Promise<MachineNetworkStream>;
+  /** Open a serial port; absent on a host without serial access. */
+  openSerial?(input: MachineSerialRequest): Promise<MachineNetworkStream>;
   readArtifact(input: MachineArtifactReadInput): AsyncIterable<Uint8Array<ArrayBuffer>>;
   resolveSecret(input: Readonly<{ reference: string; signal: AbortSignal }>): Promise<string>;
   captureNetworkStill?(input: MachineNetworkStillInput): Promise<MachineStill>;
@@ -228,154 +243,32 @@ export type MachineConnectInput<Configuration> = Readonly<{
   signal: AbortSignal;
 }>;
 
-/** Stable authenticated machine descriptor. @public */
+/** What is installed on this machine now, as the provider reports it after connecting. @public */
+export type MachineInstalledCapabilities = Pick<
+  MachineManifest,
+  'connection' | 'axes' | 'components' | 'processes' | 'actions' | 'holds' | 'jobs' | 'stop'
+>;
+
+/**
+ * What is installed on this machine now, as the host serves it. A changed `revision` invalidates every form shown
+ * before it; `incarnation` changes with every connection.
+ * @public
+ */
+export type MachineCapabilities = MachineInstalledCapabilities & Readonly<{ revision: string; incarnation: string }>;
+
+/** A connected machine's identity and what it can do. @public */
 export type MachineDescriptor = Readonly<{
   id: string;
   name: string;
   vendor: string;
   model: string;
-  technology: string;
   firmware: string;
-  accepts: readonly MachineAcceptedContainer[];
-  operations: readonly string[];
-  ratedEnvelope: MachineEnvelope;
-  printableEnvelope: MachineEnvelope;
-  tools: readonly MachineToolCapability[];
-  materialSystem: MachineMaterialSystem;
-  bedTypes: readonly string[];
+  capabilities: MachineCapabilities;
 }>;
 
-/** Axis-aligned machine envelope in canonical metres. @public */
-export type MachineEnvelope = Readonly<{
-  width: number;
-  depth: number;
-  height: number;
-  unit: 'm';
-}>;
-
-/** Tool fact needed for machine/profile compatibility. Nozzle diameter is a positive executable length quantity. @public */
-export type MachineToolCapability = Readonly<{
-  id: string;
-  kind: string;
-  nozzleDiameter?: Quantity;
-}>;
-
-/** Stable material-system capacity. @public */
-export type MachineMaterialSystem = Readonly<{
-  kind: string;
-  slotCount: number;
-}>;
-
-/** One observed material slot with explicit occupancy. @public */
-export type MachineObservedMaterial = Readonly<{
-  slot: number;
-  state: 'empty' | 'loaded' | 'unknown';
-  materialId?: string;
-  /** The vendor's filament profile id for the loaded spool; Bambu `tray_info_idx`, e.g. `GFG00`. */
-  profileId?: string;
-  brand?: string;
-  color?: string;
-  remainingPercent?: number;
-}>;
-
-/** Currently observed tool/material/bed setup. @public */
-export type MachineObservedSetup = Readonly<{
-  toolId?: string;
-  bedType?: string;
-  materials: readonly MachineObservedMaterial[];
-}>;
-
-/** Normalized active-run facts; provider values outside this set map to `unknown`. @public */
-export type MachineRunSnapshot = Readonly<{
-  state: 'failed' | 'finishing' | 'idle' | 'paused' | 'preparing' | 'printing' | 'succeeded' | 'unknown';
-  progress?: number;
-  remainingSeconds?: number;
-  name?: string;
-  file?: string;
-  currentLayer?: number;
-  totalLayers?: number;
-  /** A readable phrase for what the machine is doing now, or absent; never a bare vendor stage number. */
-  stage?: string;
-  printType?: string;
-  speedProfile?: 'silent' | 'standard' | 'sport' | 'ludicrous' | 'unknown';
-  speedPercent?: number;
-}>;
-
-/** Native affine temperature points observed from the machine. @public */
-export type MachineTemperatureSnapshot = Readonly<{
-  nozzle?: Quantity;
-  nozzleTarget?: Quantity;
-  bed?: Quantity;
-  bedTarget?: Quantity;
-  chamber?: Quantity;
-}>;
-
-/** Normalized fan speeds as percentages of their provider-declared full scale. @public */
-export type MachineFanSnapshot = Readonly<{
-  part?: number;
-  auxiliary?: number;
-  chamber?: number;
-}>;
-
-/** One observed material-system unit. @public */
-export type MachineMaterialUnitSnapshot = Readonly<{
-  unit: number;
-  humidityIndex?: number;
-  temperature?: Quantity;
-}>;
-
-/** Live material-system routing and environment facts. @public */
-export type MachineMaterialSystemSnapshot = Readonly<{
-  currentSlot?: number;
-  targetSlot?: number;
-  units: readonly MachineMaterialUnitSnapshot[];
-}>;
-
-/** Live network quality facts that contain no endpoint or credential material. @public */
-export type MachineNetworkSnapshot = Readonly<{ wifiSignalDbm?: number }>;
-
-/** Live machine light state. @public */
-export type MachineLightSnapshot = Readonly<{
-  chamber?: 'off' | 'on' | 'unknown';
-}>;
-
-/**
- * One active diagnostic, readable by a person and an agent without the vendor's payload.
- * @public
- */
-export type MachineAlertSnapshot = Readonly<{
-  /** The code in the vendor's canonical display form, as the vendor's own screens and help pages print it. */
-  code: string;
-  /** How urgently the person must act: `fatal` stops the machine, `serious` needs attention before it continues. */
-  severity?: 'fatal' | 'serious' | 'warning' | 'info';
-  /** One readable sentence the provider wrote for this code, saying what happened. */
-  message?: string;
-  /** The vendor's public help page for this code: an `https:` URL. */
-  reference?: string;
-}>;
-
-/** Current connection and readiness snapshot. @public */
-export type MachineSnapshot = Readonly<{
-  connection: 'connected' | 'disconnected' | 'unreachable';
-  readiness: 'busy' | 'idle' | 'not-ready' | 'unknown';
-  activeRunId?: string;
-  observedAt: string;
-  setup: MachineObservedSetup;
-  run?: MachineRunSnapshot;
-  temperatures?: MachineTemperatureSnapshot;
-  fans?: MachineFanSnapshot;
-  materialSystem?: MachineMaterialSystemSnapshot;
-  network?: MachineNetworkSnapshot;
-  lights?: MachineLightSnapshot;
-  removableStorage?: 'absent' | 'present';
-  alerts?: readonly MachineAlertSnapshot[];
-}>;
-
-/** Pull-stream observation emitted by one live session. @public */
-export type MachineObservation = Readonly<{
-  type: 'snapshot';
-  snapshot: MachineSnapshot;
-}>;
+/** The descriptor a provider session reports; the host adds the capability revision and incarnation. @public */
+export type MachineProviderDescriptor = Omit<MachineDescriptor, 'capabilities'> &
+  Readonly<{ capabilities: MachineInstalledCapabilities }>;
 
 /** Named descriptor operation input. @public */
 export type MachineGetDescriptorInput = Readonly<{ signal: AbortSignal }>;
@@ -386,120 +279,144 @@ export type MachineGetSnapshotInput = Readonly<{ signal: AbortSignal }>;
 /** Named observation operation input. @public */
 export type MachineObserveInput = Readonly<{ signal: AbortSignal }>;
 
-/** Named physical start input for one exact, already transferred artifact. @public */
-export type MachineSubmitInput<Configuration> = Readonly<{
-  operationId: string;
-  expectedMachineId: string;
-  artifact: MachineArtifactReference;
-  remoteName: string;
-  /** Provider transfer evidence returned by the accepted upload. */
-  transferId: string;
-  providerData: CacheValue;
-  configuration: Configuration;
-  signal: AbortSignal;
-}>;
-
-/** Provider-local lookup for a late semantic command reply. @public */
-export type MachineReconcileInput = Readonly<{
-  operationId: string;
-  command: 'cancel' | 'pause' | 'project_file' | 'resume' | 'stop' | 'upload';
-  /** For a start, the transfer it sent, which a provider may name the run after. */
-  transferId?: string;
-  signal: AbortSignal;
-}>;
-
-/** Provider-host read-only preflight input; it validates the artifact and setup and never transfers or starts. @public */
-export type MachineProviderPreparePrintInput<Configuration> = Readonly<{
-  operationId: string;
-  expectedMachineId: string;
-  artifact: MachineArtifactReference;
-  configuration: Configuration;
-  signal: AbortSignal;
-}>;
-
-/** Provider proof that an immutable artifact and the observed setup are ready for one transfer. @public */
-export type MachinePreparationReceipt =
+/**
+ * Provider result for one physical command. `accepted` means the machine took it, not that the physical result has
+ * happened; `unknown` is never retried.
+ * @public
+ */
+export type MachineCommandReceipt =
   | Readonly<{
-      status: 'ready';
+      status: 'accepted';
+      observedAt: string;
+      /** The run a start created. */
+      runId?: string;
+      /** The activity an action started, when the machine reports one. */
+      activityId?: string;
+      /** The transfer a stored delivery made. */
+      transferId?: string;
+    }>
+  | Readonly<{ status: 'rejected'; code: string; message: string; observedAt: string }>
+  | Readonly<{ status: 'unknown'; reason: string; runId?: string; observedAt: string }>;
+
+/** One admitted intent as the provider receives it: parameters already validated by the host. @public */
+export type MachineProviderActionInput = Readonly<{
+  operationId: string;
+  componentId: string;
+  action: string;
+  version: number;
+  /** The run the caller saw, or null for an idle action. */
+  expectedRunId: string | null;
+  parameters: unknown;
+  signal: AbortSignal;
+}>;
+
+/** Whether the machine's own reports now show an action's effect. @public */
+export type MachineActionConfirmation =
+  | Readonly<{ status: 'confirmed' }>
+  | Readonly<{ status: 'pending' }>
+  | Readonly<{ status: 'refuted'; code: string; message: string }>;
+
+/** Required facet: apply declared actions. @public */
+export type MachineActionCapability =
+  | Readonly<{ type: 'unsupported' }>
+  | Readonly<{
+      type: 'supported';
+      /** Send once; check run, prompt and interlocks again at the moment of sending. */
+      apply(input: MachineProviderActionInput): Promise<MachineCommandReceipt>;
+      /**
+       * For an action whose descriptor confirms by `observation`: whether the latest report shows the effect. Reads
+       * only; never sends. The host asks after every observation until the answer is no longer `pending`.
+       */
+      confirm(input: Omit<MachineProviderActionInput, 'signal'>): MachineActionConfirmation;
+    }>;
+
+/** A hold as the provider runs it. @public */
+export type MachineProviderHold = Readonly<{
+  /** Send at most one segment that ends by itself within the declared bound. Called while the lease is fresh. */
+  extend(): Promise<void>;
+  /** Stop now and discard what is queued. */
+  release(): Promise<MachineCommandReceipt>;
+}>;
+
+/** One admitted hold as the provider receives it. @public */
+export type MachineProviderHoldInput = Readonly<{
+  operationId: string;
+  componentId: string;
+  hold: string;
+  parameters: unknown;
+  signal: AbortSignal;
+}>;
+
+/** Required facet: held controls. @public */
+export type MachineHoldCapability =
+  | Readonly<{ type: 'unsupported' }>
+  | Readonly<{
+      type: 'supported';
+      begin(input: MachineProviderHoldInput): Promise<MachineProviderHold | MachineFailure>;
+    }>;
+
+/** What a provider's read-only preflight returns. @public */
+export type MachinePreparation =
+  | Readonly<{
+      status: 'ready' | 'blocked';
+      program: MachineProgramSummary;
+      checks: readonly MachineCheck[];
+      /** The facts of the setup this job relies on; the host fences the start with their digest. */
+      setup: CacheValue;
+      /** The name the program will have on the machine, for a stored delivery. */
       remoteName: string;
-      digest: ContentDigest;
-      length: number;
       parser: Readonly<{ id: string; version: string }>;
       providerData: CacheValue;
       observedAt: string;
     }>
-  | Readonly<{
-      status: 'rejected';
-      code: string;
-      message: string;
-      observedAt: string;
-    }>;
+  | Readonly<{ status: 'refused'; code: string; message: string; observedAt: string }>;
 
-/** Provider-host transfer input for one exact prepared artifact; it never starts a run. @public */
-export type MachineProviderUploadInput<Configuration> = Readonly<{
+/** One job step as the provider receives it. @public */
+export type MachineProviderJobInput<Configuration> = Readonly<{
   operationId: string;
   expectedMachineId: string;
   artifact: MachineArtifactReference;
-  remoteName: string;
-  providerData: CacheValue;
   configuration: Configuration;
   signal: AbortSignal;
 }>;
 
-/** Provider result for one physical transfer attempt. @public */
-export type MachineTransferReceipt =
-  | Readonly<{
-      status: 'transferred';
-      transferId: string;
-      digest: ContentDigest;
-      length: number;
-      observedAt: string;
-    }>
-  | Readonly<{
-      status: 'rejected';
-      code: string;
-      message: string;
-      observedAt: string;
-    }>
-  | Readonly<{
-      status: 'unknown';
-      reason: string;
-      observedAt: string;
-    }>;
+/**
+ * Required facet: run programs. A stored machine receives the file and then one start command; a streamed machine
+ * has no transfer, and `start` returns once the controller has taken the first block while the session keeps
+ * feeding the rest. An `at-machine` start loads the program and returns `accepted` once the machine waits for its
+ * own start button.
+ * @public
+ */
+export type MachineJobCapability<Configuration> =
+  | Readonly<{ type: 'unsupported' }>
+  | (Readonly<{
+      type: 'supported';
+      /** Read-only: parse the program and check it against the setup. */
+      prepare(input: MachineProviderJobInput<Configuration>): Promise<MachinePreparation>;
+      start(
+        input: MachineProviderJobInput<Configuration> &
+          Readonly<{ remoteName: string; providerData: CacheValue; transferId?: string }>,
+      ): Promise<MachineCommandReceipt>;
+    }> &
+      (
+        | Readonly<{ delivery: 'streamed' }>
+        | Readonly<{
+            delivery: 'stored';
+            transfer(
+              input: MachineProviderJobInput<Configuration> &
+                Readonly<{ remoteName: string; providerData: CacheValue }>,
+            ): Promise<MachineCommandReceipt>;
+          }>
+      ));
 
-/** Named run-control input with stale-run preconditions. @public */
-export type MachineControlInput =
-  | Readonly<{
-      command: 'cancel' | 'pause' | 'resume';
-      operationId: string;
-      expectedProviderRunId: string;
-      signal: AbortSignal;
-    }>
-  | Readonly<{
-      command: 'urgent-stop';
-      operationId: string;
-      expectedProviderRunId?: string;
-      signal: AbortSignal;
-    }>;
-
-/** Provider result for one physical submission attempt. @public */
-export type MachineSubmissionReceipt =
-  | Readonly<{ status: 'accepted'; providerRunId?: string; observedAt: string }>
-  | Readonly<{
-      status: 'rejected';
-      code: string;
-      message: string;
-      observedAt: string;
-    }>
-  | Readonly<{
-      status: 'unknown';
-      reason: string;
-      providerRunId?: string;
-      observedAt: string;
-    }>;
-
-/** Provider result for one run-control attempt. @public */
-export type MachineCommandReceipt = MachineSubmissionReceipt;
+/** Provider-local lookup for a late reply to a stop, a transfer or a start; never sends. @public */
+export type MachineReconcileInput = Readonly<{
+  operationId: string;
+  kind: 'stop' | 'transfer' | 'start' | 'action';
+  /** For a start, the transfer it sent, which a provider may name the run after. */
+  transferId?: string;
+  signal: AbortSignal;
+}>;
 
 /** Named still-capture operation input. @public */
 export type MachineCaptureStillInput = Readonly<{ signal: AbortSignal }>;
@@ -520,16 +437,18 @@ export type MachineStillCaptureCapability =
       capture(input: MachineCaptureStillInput): Promise<MachineStill>;
     }>;
 
-/** One connected provider session and its explicit cleanup ownership. @public */
+/** One connected provider session (ABI version 2). `stop` is not a facet: every provider has it. @public */
 export type MachineSession<SubmissionConfiguration = unknown> = Readonly<{
-  stillCapture: MachineStillCaptureCapability;
-  getDescriptor(input: MachineGetDescriptorInput): Promise<MachineDescriptor>;
-  getSnapshot(input: MachineGetSnapshotInput): Promise<MachineSnapshot>;
+  getDescriptor(input: MachineGetDescriptorInput): Promise<MachineProviderDescriptor>;
+  getSnapshot(input: MachineGetSnapshotInput): Promise<MachineReport>;
   observe(input: MachineObserveInput): AsyncIterable<MachineObservation>;
-  preparePrint(input: MachineProviderPreparePrintInput<SubmissionConfiguration>): Promise<MachinePreparationReceipt>;
-  uploadPrint(input: MachineProviderUploadInput<SubmissionConfiguration>): Promise<MachineTransferReceipt>;
-  submit(input: MachineSubmitInput<SubmissionConfiguration>): Promise<MachineSubmissionReceipt>;
-  control(input: MachineControlInput): Promise<MachineCommandReceipt>;
+  /** Stop now, ahead of anything queued. */
+  stop(input: Readonly<{ operationId: string; signal: AbortSignal }>): Promise<MachineCommandReceipt>;
+  actions: MachineActionCapability;
+  holds: MachineHoldCapability;
+  jobs: MachineJobCapability<SubmissionConfiguration>;
+  stillCapture: MachineStillCaptureCapability;
+  /** Read proof of a stop, a transfer or a start; never sends. */
   reconcile(input: MachineReconcileInput): Promise<MachineCommandReceipt>;
   close(): Promise<void>;
   dispose(): Promise<void>;
@@ -577,6 +496,20 @@ type MachineQueryDefinitions<Queries extends QueryMap> = Readonly<{
   [Name in keyof Queries]: MachineQueryDefinitionFor<Queries[Name]>;
 }>;
 
+/**
+ * The manifest a provider authors: actions and holds carry their trusted schemas, and the jobs facts take their
+ * start form from the definition's `submissionConfiguration`.
+ * @public
+ */
+export type MachineManifestDefinition = Omit<MachineManifest, 'actions' | 'holds' | 'jobs'> &
+  Readonly<{
+    actions: readonly MachineActionDefinition[];
+    holds: readonly MachineHoldDefinition[];
+    jobs:
+      | Readonly<{ type: 'unsupported' }>
+      | Omit<Extract<MachineManifest['jobs'], { type: 'supported' }>, 'submission'>;
+  }>;
+
 /** Trusted machine definition retained behind the shared runtime ABI loader. @public */
 export type MachineProviderDefinition<
   Id extends string,
@@ -588,11 +521,9 @@ export type MachineProviderDefinition<
   id: Id;
   name: string;
   version: string;
-  protocolVersion: 1;
+  protocolVersion: 2;
   vendor: string;
-  technologies: readonly string[];
-  accepts: readonly MachineAcceptedContainer[];
-  manifest: MachineManifest;
+  manifest: MachineManifestDefinition;
   bindingConfiguration: ConfigurationDefinition<BindingSchema>;
   submissionConfiguration: ConfigurationDefinition<SubmissionSchema>;
   settingsConfiguration?: SettingsDefinition<Settings>;
@@ -665,15 +596,36 @@ const isCanonicalArchiveMember = (member: string): boolean =>
       }),
   );
 
-// oxlint-disable-next-line eslint/complexity -- One bounded pass validates the closed provider descriptor.
+const assertAccepted = (accepts: readonly MachineAcceptedContainer[]): void => {
+  if (accepts.length === 0 || accepts.length > 32) {
+    throw new TypeError('defineMachine: a job-capable machine accepts at least one container.');
+  }
+  const contracts = new Set<string>();
+  for (const accepted of accepts) {
+    assertIdentity(accepted.contract.id, 'accepts.contract.id');
+    assertIdentity(accepted.mediaType, 'accepts.mediaType');
+    if (
+      !Number.isSafeInteger(accepted.contract.version) ||
+      accepted.contract.version < 1 ||
+      accepted.requiredMembers.some((member) => !isCanonicalArchiveMember(member)) ||
+      new Set(accepted.requiredMembers).size !== accepted.requiredMembers.length
+    ) {
+      throw new TypeError('defineMachine: accepted container is invalid.');
+    }
+    const identity = `${accepted.contract.id}@${accepted.contract.version}`;
+    if (contracts.has(identity)) {
+      throw new TypeError(`defineMachine: duplicate accepted contract ${identity}.`);
+    }
+    contracts.add(identity);
+  }
+};
+
 const assertDefinition = (definition: {
   readonly id: string;
   readonly name: string;
   readonly version: string;
   readonly vendor: string;
   readonly protocolVersion: number;
-  readonly technologies: readonly string[];
-  readonly accepts: readonly MachineAcceptedContainer[];
   readonly queries?: Readonly<Record<string, unknown>>;
 }): void => {
   for (const [field, value] of [
@@ -684,45 +636,8 @@ const assertDefinition = (definition: {
   ] as const) {
     assertIdentity(value, field);
   }
-  if (definition.protocolVersion !== 1) {
-    throw new TypeError('defineMachine: protocolVersion must be 1.');
-  }
-  if (
-    definition.technologies.length === 0 ||
-    definition.technologies.length > 64 ||
-    new Set(definition.technologies).size !== definition.technologies.length
-  ) {
-    throw new TypeError('defineMachine: technologies must be non-empty and unique.');
-  }
-  for (const technology of definition.technologies) {
-    assertIdentity(technology, 'technology');
-  }
-  if (definition.accepts.length === 0 || definition.accepts.length > 128) {
-    throw new TypeError('defineMachine: accepts must be non-empty and bounded.');
-  }
-  const contracts = new Set<string>();
-  for (const accepted of definition.accepts) {
-    assertIdentity(accepted.contract.id, 'accepts.contract.id');
-    assertIdentity(accepted.mediaType, 'accepts.mediaType');
-    if (
-      !Number.isSafeInteger(accepted.contract.version) ||
-      accepted.contract.version < 1 ||
-      accepted.requiredMembers.length > 128 ||
-      accepted.requiredMembers.some((member) => !isCanonicalArchiveMember(member)) ||
-      new Set(accepted.requiredMembers).size !== accepted.requiredMembers.length
-    ) {
-      throw new TypeError('defineMachine: accepted container is invalid.');
-    }
-    // oxlint-disable-next-line typescript/no-unnecessary-condition -- unchecked authoring values cross this runtime guard.
-    if (accepted.payloadSelection !== 'plate' && accepted.payloadSelection !== 'single') {
-      throw new TypeError('defineMachine: accepted payload selection is invalid.');
-    }
-    assertIdentity(accepted.technology, 'accepts.technology');
-    const identity = `${accepted.contract.id}@${accepted.contract.version}`;
-    if (contracts.has(identity)) {
-      throw new TypeError(`defineMachine: duplicate accepted contract ${identity}.`);
-    }
-    contracts.add(identity);
+  if (definition.protocolVersion !== 2) {
+    throw new TypeError('defineMachine: protocolVersion must be 2.');
   }
   const queryNames = Object.keys(definition.queries ?? {});
   if (queryNames.length > 128 || queryNames.some((name) => name.length === 0 || name.length > 256)) {
@@ -746,27 +661,14 @@ const configurationManifestSchema = z.unknown().transform((value, context) => {
     return z.NEVER;
   }
 });
-const acceptedContainerSchema = z.strictObject({
-  contract: z.strictObject({
-    id: providerIdentitySchema,
-    version: z.number().int().min(1),
-  }),
-  mediaType: providerIdentitySchema,
-  requiredMembers: z.array(z.string().min(1).max(512)).max(128),
-  payloadSelection: z.enum(['plate', 'single']),
-  technology: providerIdentitySchema,
-});
 const machineProviderSchema = z.strictObject({
   id: providerIdentitySchema,
   name: providerIdentitySchema,
   version: providerIdentitySchema,
-  protocolVersion: z.literal(1),
+  protocolVersion: z.literal(2),
   vendor: providerIdentitySchema,
-  technologies: z.array(providerIdentitySchema).min(1).max(64),
-  accepts: z.array(acceptedContainerSchema).min(1).max(128),
   manifest: machineManifestSchema,
   bindingConfiguration: configurationManifestSchema,
-  submissionConfiguration: configurationManifestSchema,
   settingsConfiguration: configurationManifestSchema.optional(),
   queries: z.record(providerIdentitySchema, z.strictObject({ inputSchema: z.unknown(), resultSchema: z.unknown() })),
 });
@@ -777,14 +679,18 @@ const providerKeys = [
   'version',
   'protocolVersion',
   'vendor',
-  'technologies',
-  'accepts',
   'manifest',
   'bindingConfiguration',
-  'submissionConfiguration',
   'settingsConfiguration',
   'queries',
 ] as const;
+
+const providerLimits = {
+  code: 'MACHINE_PROVIDER_DESCRIPTOR',
+  maximumDepth: 48,
+  maximumNodes: 262_144,
+  maximumCharacters: 4_194_304,
+};
 
 const providerWireValue = (value: unknown): Readonly<Record<string, unknown>> => {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) {
@@ -816,15 +722,9 @@ const providerWireValue = (value: unknown): Readonly<Record<string, unknown>> =>
  * @public
  */
 export const parseMachineProvider = (value: unknown): MachineProvider => {
-  const candidate = machineProviderSchema.parse(
-    cloneBoundedJson(providerWireValue(value), {
-      code: 'MACHINE_PROVIDER_DESCRIPTOR',
-      maximumDepth: 32,
-      maximumNodes: 16_384,
-      maximumCharacters: 524_288,
-    }),
-  );
+  const candidate = machineProviderSchema.parse(cloneBoundedJson(providerWireValue(value), providerLimits));
   assertDefinition(candidate);
+  parseMachineManifest(candidate.manifest);
   for (const query of Object.values(candidate.queries)) {
     // SAFETY: admitJsonSchema is the runtime proof for these unknown wire values.
     admitJsonSchema(query.inputSchema as JsonSchema);
@@ -833,6 +733,39 @@ export const parseMachineProvider = (value: unknown): MachineProvider => {
   }
   return freezeJson(candidate) as MachineProvider;
 };
+
+/**
+ * The serializable manifest of a definition: descriptors without their schemas, and the start form filled in.
+ * @param manifest - The authored manifest.
+ * @param submission - The definition's start form.
+ * @returns The manifest every surface reads.
+ * @public
+ */
+export const machineManifestOf = (
+  manifest: MachineManifestDefinition,
+  submission: ConfigurationManifestV1,
+): MachineManifest =>
+  parseMachineManifest({
+    ...manifest,
+    actions: manifest.actions.map((action) => machineActionDescriptorOf(action)),
+    holds: manifest.holds.map((hold) => machineActionDescriptorOf(hold)),
+    jobs: manifest.jobs.type === 'unsupported' ? manifest.jobs : { ...manifest.jobs, submission },
+  });
+
+/**
+ * The trusted schema of one installed action or hold, for host-side validation.
+ * @param manifest - The authored manifest.
+ * @param input - The component, the action or hold id and which kind.
+ * @returns The definition, or undefined when the provider does not declare it.
+ * @public
+ */
+export const machineActionDefinitionOf = (
+  manifest: MachineManifestDefinition,
+  input: Readonly<{ componentId: string; id: string; kind: 'action' | 'hold' }>,
+): MachineActionDefinition | MachineHoldDefinition | undefined =>
+  (input.kind === 'action' ? manifest.actions : manifest.holds).find(
+    (definition) => definition.componentId === input.componentId && definition.id === input.id,
+  );
 
 /**
  * Define one lazy schema-bearing physical-machine provider.
@@ -850,6 +783,9 @@ export const defineMachine = <
   definition: MachineProviderDefinition<Id, BindingSchema, SubmissionSchema, Queries, Settings>,
 ): MachineProviderFactory<Id, Extract<keyof Queries, string>, typeof definition> => {
   assertDefinition(definition);
+  if (definition.manifest.jobs.type === 'supported') {
+    assertAccepted(definition.manifest.jobs.accepts);
+  }
   const queries = Object.fromEntries(
     Object.entries(definition.queries ?? {}).map(([name, query]) => [name, queryManifest(query)]),
   ) as Record<Extract<keyof Queries, string>, MachineQueryManifest>;
@@ -857,22 +793,14 @@ export const defineMachine = <
     id: definition.id,
     name: definition.name,
     version: definition.version,
-    protocolVersion: 1,
+    protocolVersion: 2,
     vendor: definition.vendor,
-    technologies: definition.technologies,
-    accepts: definition.accepts,
-    manifest: parseMachineManifest(definition.manifest),
+    manifest: machineManifestOf(definition.manifest, definition.submissionConfiguration.manifest),
     bindingConfiguration: definition.bindingConfiguration.manifest,
-    submissionConfiguration: definition.submissionConfiguration.manifest,
     ...(definition.settingsConfiguration ? { settingsConfiguration: definition.settingsConfiguration.manifest } : {}),
     queries,
   };
-  const owned = cloneBoundedJson(descriptor, {
-    code: 'MACHINE_PROVIDER_DESCRIPTOR',
-    maximumDepth: 32,
-    maximumNodes: 16_384,
-    maximumCharacters: 524_288,
-  }) as MachineProvider<Id, Extract<keyof Queries, string>>;
+  const owned = cloneBoundedJson(descriptor, providerLimits) as MachineProvider<Id, Extract<keyof Queries, string>>;
   const factory = () => freezeJson(attachRuntimePluginDefinition(structuredClone(owned), () => definition));
   return attachRuntimePluginFactoryOptions(factory, false);
 };

@@ -401,6 +401,20 @@ describe('Bambu printer diagnostics', () => {
     ]);
   });
 
+  it.each([0x05_00_40_2f, String(0x05_00_40_2f)])(
+    'should explain the reported microSD sector failure (%s)',
+    (value) => {
+      // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
+      expect(report({ print_error: value }).alerts).toEqual([
+        {
+          code: '0500-402F',
+          message:
+            'The microSD card has damaged sector data. Back up readable files, then repair or format the card. Replace it if the printer still cannot read it.',
+        },
+      ]);
+    },
+  );
+
   it('should accept the integers as decimal strings', () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
     expect(report({ print_error: '50348044', hms: [{ attr: '201327360', code: '196619' }] }).alerts).toMatchObject([

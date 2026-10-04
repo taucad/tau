@@ -337,7 +337,11 @@ const printErrorAlert = (value: unknown): MachineAlertSnapshot | undefined => {
     ? undefined
     : Object.freeze({
         code: displayCode([Math.floor(printError / word), printError % word], '-'),
-        message: diagnosticMessage(printError, 'reported a print error'),
+        // Independently worded from BambuStudio hms_en_26A.json, 0500402F (66e4054776).
+        message:
+          printError === 0x05_00_40_2f
+            ? 'The microSD card has damaged sector data. Back up readable files, then repair or format the card. Replace it if the printer still cannot read it.'
+            : diagnosticMessage(printError, 'reported a print error'),
       });
 };
 

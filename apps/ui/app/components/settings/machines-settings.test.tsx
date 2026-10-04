@@ -145,13 +145,28 @@ describe('MachinesSettings', () => {
     expect(facet.list).toHaveBeenCalledTimes(2);
   });
 
+  it('should offer every simulator the host serves, and none it does not', async () => {
+    const facet = facetWith([]);
+    facet.listProviders.mockResolvedValue([
+      simulatorProvider,
+      { ...simulatorProvider, id: 'grbl-simulator', name: 'Grbl simulator' },
+      { ...simulatorProvider, id: 'makera-carvera-simulator', name: 'Carvera simulator' },
+    ]);
+    state.facet = facet;
+    renderSettings();
+    expect(await screen.findByRole('button', { name: 'Simulated LongMill' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Simulated Carvera' })).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Simulated X1C' })).toBeInTheDocument();
+    expect(screen.queryByRole('button', { name: 'Simulated A1 mini' })).not.toBeInTheDocument();
+  });
+
   it("should offer the simulator's demo speed from its binding declaration and bind with the chosen speed", async () => {
     const facet = facetWith([]);
     state.facet = facet;
     renderSettings();
-    fireEvent.click(screen.getByRole('button', { name: 'Simulated X1C' }));
+    fireEvent.click(await screen.findByRole('button', { name: 'Simulated X1C' }));
     const simulator = screen.getByRole('region', { name: 'Simulated X1C' });
-    expect(simulator).toHaveTextContent('Its settings only change the simulation; they are not printer settings.');
+    expect(simulator).toHaveTextContent('Its settings only change the simulation; they are not machine settings.');
     const speed = await within(simulator).findByRole('spinbutton', { name: 'Input for Demo Speed' });
     expect(speed).toHaveValue('1');
     expect(within(simulator).getByLabelText('Parameter: Demo Speed')).toHaveTextContent('Demo Speed');

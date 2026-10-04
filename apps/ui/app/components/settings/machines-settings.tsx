@@ -37,11 +37,15 @@ import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { printersInUseElsewhere, useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
 
-const simulatorProviderId = 'bambu-simulator';
 const bambuProviderId = 'bambu';
 const miniProviderId = 'bambu-a1-mini';
-/* The display name; the host slugs it to the id `simulated-x1c` (blueprint D3), which names its folder. */
-const simulatorName = 'Simulated X1C';
+/* Display names by simulator provider; the host slugs each to its id (`simulated-x1c`, blueprint D3), which names its folder. */
+const simulatorNames: ReadonlyMap<string, string> = new Map([
+  ['bambu-simulator', 'Simulated X1C'],
+  ['bambu-a1-mini-simulator', 'Simulated A1 mini'],
+  ['grbl-simulator', 'Simulated LongMill'],
+  ['makera-carvera-simulator', 'Simulated Carvera'],
+]);
 
 type BindInput = {
   readonly providerId: string;
@@ -414,7 +418,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
   const [finding, setFinding] = useState(false);
   /* The host holds a code for the picked printer and the person has not chosen to type another; never the code. */
   const [isCodeSaved, setIsCodeSaved] = useState(false);
-  const [simulatorFields, setSimulatorFields] = useState<Record<string, unknown>>({});
+  const [simulatorFields, setSimulatorFields] = useState<Readonly<Record<string, Record<string, unknown>>>>({});
   const [selectedProviderId, setSelectedProviderId] = useState(bambuProviderId);
   const [isBinding, setIsBinding] = useState(false);
   const [bindFields, setBindFields] = useState<Record<string, unknown>>({});
@@ -426,7 +430,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
     () => new Map(directory.providers.map((provider) => [provider.id, provider])),
     [directory.providers],
   );
-  const simulator = providers.get(simulatorProviderId);
+  const simulators = directory.providers.filter(({ id }) => simulatorNames.has(id));
   const bambu = providers.get(selectedProviderId);
   const physicalProviders = directory.providers.filter(({ id }) => id === bambuProviderId || id === miniProviderId);
 
@@ -747,44 +751,49 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
           </div>
         </form>
       ) : null}
-      <Collapsible>
-        <section aria-labelledby='machines-simulator-title' className='flex flex-col gap-2 border-t pt-4'>
-          <h3 id='machines-simulator-title' className='text-sm font-medium'>
-            <CollapsibleTrigger className='flex min-h-8 w-full items-center justify-between text-left'>
-              Simulated X1C
-              <ChevronDown aria-hidden className='size-4' />
-            </CollapsibleTrigger>
-          </h3>
-          <CollapsibleContent className='flex flex-col gap-2'>
-            <p className='text-xs text-muted-foreground'>
-              A dry-run printer with no hardware, address or code. Its settings only change the simulation; they are not
-              printer settings.
-            </p>
-            {simulator === undefined ? null : (
-              <ConfigurationFields
-                providerId={simulator.id}
-                name='binding'
-                configuration={simulator.bindingConfiguration}
-                values={simulatorFields}
-                omit={flowFilledFields}
-                onChange={setSimulatorFields}
-              />
-            )}
-            <div>
-              <Button
-                size='sm'
-                variant='outline'
-                disabled={busy || simulator === undefined}
-                onClick={async () =>
-                  run(simulatorName, { providerId: simulatorProviderId, name: simulatorName, fields: simulatorFields })
-                }
-              >
-                Add simulated X1C
-              </Button>
-            </div>
-          </CollapsibleContent>
-        </section>
-      </Collapsible>
+      {simulators.map((simulator) => {
+        const name = simulatorNames.get(simulator.id) ?? simulator.name;
+        const titleId = `machines-simulator-title-${simulator.id}`;
+        const fields = simulatorFields[simulator.id] ?? {};
+        return (
+          <Collapsible key={simulator.id}>
+            <section aria-labelledby={titleId} className='flex flex-col gap-2 border-t pt-4'>
+              <h3 id={titleId} className='text-sm font-medium'>
+                <CollapsibleTrigger className='flex min-h-8 w-full items-center justify-between text-left'>
+                  {name}
+                  <ChevronDown aria-hidden className='size-4' />
+                </CollapsibleTrigger>
+              </h3>
+              <CollapsibleContent className='flex flex-col gap-2'>
+                <p className='text-xs text-muted-foreground'>
+                  A dry-run machine with no hardware, address or code. Its settings only change the simulation; they are
+                  not machine settings.
+                </p>
+                <ConfigurationFields
+                  providerId={simulator.id}
+                  name='binding'
+                  configuration={simulator.bindingConfiguration}
+                  values={fields}
+                  omit={flowFilledFields}
+                  onChange={(values) => {
+                    setSimulatorFields((current) => ({ ...current, [simulator.id]: values }));
+                  }}
+                />
+                <div>
+                  <Button
+                    size='sm'
+                    variant='outline'
+                    disabled={busy}
+                    onClick={async () => run(name, { providerId: simulator.id, name, fields })}
+                  >
+                    Add {name.charAt(0).toLowerCase() + name.slice(1)}
+                  </Button>
+                </div>
+              </CollapsibleContent>
+            </section>
+          </Collapsible>
+        );
+      })}
 
       <p role='status' aria-live='polite' className='text-xs text-muted-foreground'>
         {status}

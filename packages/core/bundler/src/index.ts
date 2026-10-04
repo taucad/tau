@@ -13,3 +13,15 @@ export type {
 } from '#bundler-source-host.js';
 export { PackageArtifactCache } from '#package-artifact-cache.js';
 export type { BundlerFileSystem, PackageArtifactIdentity } from '#package-artifact-cache.js';
+
+export { updatePackageManifest } from '#package-manifest.js';
+export type {
+  LockedPackage,
+  PackageManifestLock,
+  PackageManifestCommit,
+  UpdatePackageManifestInput,
+} from '#package-manifest.js';
+export type { PackageRegistryResolution } from '#package-registry.js';
+
+export { createPackageManifestCommit } from '#package-manifest-commit.js';
+export type { PackageManifestAuthority } from '#package-manifest-commit.js';

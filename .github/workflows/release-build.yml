@@ -142,7 +142,8 @@ jobs:
           VERSION: ${{ needs.resolve.outputs.version }}
         run: |
           set -euo pipefail
-          pnpm nx show project "$PROJECT" --json > "$RUNNER_TEMP/project.json"
+          # pnpm can print warnings ahead of the JSON, which is always the last line.
+          pnpm nx show project "$PROJECT" --json | tail -1 > "$RUNNER_TEMP/project.json"
           jq -e '.tags | index("release:app")' "$RUNNER_TEMP/project.json" > /dev/null \
             || { echo "::error::$PROJECT is not tagged release:app"; exit 1; }
           root=$(jq -r .root "$RUNNER_TEMP/project.json")

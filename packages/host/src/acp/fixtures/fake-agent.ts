@@ -26,6 +26,7 @@
  * | `switch` | pushes `config_option_update` mid-turn, moving the session to the other model |
  * | `updates` | emits the presentation-only updates: thought, plan, plan_update, plan_removed, available_commands_update, current_mode_update, session_info_update |
  * | `login` | drives the URL (device-code) elicitation when the client advertised `elicitation.url`, then completes it |
+ * | `ask-form` | asks a Claude-shaped `AskUserQuestion` form elicitation when the client advertised `elicitation.form`, then reports the answer |
  * | `unsafe` | with `login`, offers a `javascript:` url instead of a web page |
  * | `late-auth` | drives the same elicitation *after* the prompt response, i.e. between turns |
  * | `abandon` | asks for permission and exits without answering it, leaving the request outstanding on the host |
@@ -132,6 +133,8 @@ const asRecord = (value: unknown): Record<string, unknown> | undefined =>
 
 /** Whether the client advertised `elicitation.url`, read at `initialize`. */
 let urlElicitation = false;
+/** Whether the client advertised `elicitation.form`, read at `initialize`. */
+let formElicitation = false;
 
 /** Whether the client advertised the AIR `sessionFailure` extension, read at `initialize`. */
 let airSessionFailures = false;
@@ -659,6 +662,47 @@ const driveUrlLogin = async (sessionId: string, url = 'https://example.invalid/d
 };
 
 /**
+ * The question Claude's `AskUserQuestion` bridge sends, answered by the person on Tau's card.
+ *
+ * @param sessionId - Session asking.
+ */
+const askForm = async (sessionId: string): Promise<void> => {
+  if (!formElicitation) {
+    await textChunk(sessionId, 'ask-form: this client cannot present a form elicitation');
+    return;
+  }
+  const answer = await request('elicitation/create', {
+    sessionId,
+    toolCallId: 'ask-1',
+    mode: 'form',
+    message: 'Print the enclosure in PETG or PLA?',
+    requestedSchema: {
+      type: 'object',
+      properties: {
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- claude-agent-acp's wire field name
+        question_0: {
+          type: 'string',
+          title: 'Material',
+          oneOf: [
+            { const: 'PETG (Recommended)', title: 'PETG (Recommended)', description: 'Tougher; slower.' },
+            { const: 'PLA', title: 'PLA', description: 'Faster; softens near 60 °C.' },
+          ],
+        },
+        // eslint-disable-next-line @typescript-eslint/naming-convention -- claude-agent-acp's wire field name
+        question_0_custom: {
+          type: 'string',
+          title: 'Other',
+          _meta: { _askUserQuestionCustomAnswer: { questionId: 'question_0', isCustomAnswer: true } },
+        },
+      },
+    },
+  });
+  // oxlint-disable-next-line @typescript-eslint/consistent-type-assertions -- the elicitation response shape is fixed by ACP.
+  const result = answer.result as { action?: string; content?: unknown } | undefined;
+  await textChunk(sessionId, `ask-form: ${result?.action ?? 'none'} ${JSON.stringify(result?.content ?? null)}`);
+};
+
+/**
  * The permission-gated write every turn ends with.
  *
  * @param sessionId - Session performing the write.
@@ -762,6 +806,9 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
     await pause(250);
     return 'end_turn';
   }
+  if (text.includes('ask-form')) {
+    await askForm(sessionId);
+  }
   if (text.includes('login')) {
     /* `unsafe` makes the agent name a scheme no browser should follow, which is
      * the one thing the client has to drop before any surface renders it. */
@@ -801,7 +848,8 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
     await request('fs/write_text_file', { sessionId, path: 'main.scad', content: 'cube(10);\n' });
     await callTauMcp(sessionId, session.mcpServers, 'screenshot', { targetFile: 'main.scad', mode: 'single' }, 'mcp-2');
   }
-  if (text.includes('mcp-arrange-conflict')) {
+  if (text.includes('mcp-arrange-conflict') || text.includes('mcp-arrange-workbench')) {
+    await request('fs/write_text_file', { sessionId, path: 'main.scad', content: 'cube(10);\n' });
     await callTauMcp(
       sessionId,
       session.mcpServers,
@@ -811,16 +859,18 @@ const runPrompt = async (sessionId: string, blocks: readonly unknown[]): Promise
       },
       'mcp-arrange-1',
     );
-    await callTauMcp(
-      sessionId,
-      session.mcpServers,
-      'arrange_workbench',
-      {
-        basedOn: 'missing',
-        open: [{ kind: 'pane', pane: 'parameters' }],
-      },
-      'mcp-arrange-conflict-2',
-    );
+    if (text.includes('mcp-arrange-conflict')) {
+      await callTauMcp(
+        sessionId,
+        session.mcpServers,
+        'arrange_workbench',
+        {
+          basedOn: 'missing',
+          open: [{ kind: 'pane', pane: 'parameters' }],
+        },
+        'mcp-arrange-conflict-2',
+      );
+    }
     return cancelled.has(sessionId) ? 'cancelled' : 'end_turn';
   }
   if (text.includes('mcp')) {
@@ -969,6 +1019,7 @@ const handle = async (message: JsonRpcMessage): Promise<void> => {
   switch (message.method) {
     case 'initialize': {
       urlElicitation = advertisesUrlElicitation(params);
+      formElicitation = asRecord(asRecord(params['clientCapabilities'])?.['elicitation'])?.['form'] !== undefined;
       airSessionFailures = advertisesAirSessionFailures(params);
       if (inMode('silent')) {
         /* The adapter that never answers: the client's own timeout is the only

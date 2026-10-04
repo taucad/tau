@@ -680,6 +680,9 @@ fn clearance_finish_reservation(
 }
 
 pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
+    if context.subject().brep.is_none() {
+        return evaluate_mesh(prepared, context);
+    }
     // F3: the BRep unit and the source; no report facet.
     if let Err(evaluation) = context.brep_gate() {
         return evaluation;
@@ -918,6 +921,223 @@ pub(crate) fn evaluate(prepared: &Prepared, context: &mut EvaluationContext<'_>)
                     .collect(),
             ),
             Json::object([("relationships", Json::Array(rows))]),
+        ),
+        negated_diagnostic: None,
+    }
+}
+
+fn evaluate_mesh(prepared: &Prepared, context: &mut EvaluationContext<'_>) -> Evaluation {
+    use crate::analysis::continuous::exact;
+    use num_traits::Zero;
+    let owner = Rc::clone(&context.subjects[0]);
+    let regions = match owner.material_regions(context.budget) {
+        Ok(value) => value,
+        Err(error) => return backend_refusal(error),
+    };
+    let mut rows = Vec::new();
+    let mut diagnostics = Vec::new();
+    let mut positive = true;
+    let mut retained_output_bytes = 0u64;
+    for (index, relationship) in prepared.relationships.iter().enumerate() {
+        let Some((subject, target)) = &relationship.resolved else {
+            return phase_two_refusal();
+        };
+        if subject.status != SelectionStatus::Resolved || target.status != SelectionStatus::Resolved
+        {
+            append_selection_diagnostics(&mut diagnostics, index, relationship, subject, target);
+            return Evaluation::Refused { diagnostics };
+        }
+        if let Err(error) = context.check_continuous_output(
+            retained_output_bytes.saturating_add(
+                (subject.entities.len().saturating_add(target.entities.len()) as u64)
+                    .saturating_mul(std::mem::size_of::<usize>() as u64),
+            ),
+        ) {
+            return error;
+        }
+        let select = |selection: &Selection| -> Option<Vec<&crate::analysis::mesh::material::MaterialRegion>> {
+            selection.entities.iter().map(|entity| {
+                let key = entity.facts.material_region?;
+                regions.iter().find(|region| (region.primitive, region.root) == key)
+            }).collect()
+        };
+        let (Some(left), Some(right)) = (select(subject), select(target)) else {
+            return relationship_unsupported("Selected mesh endpoints lack genuine material-region evidence.", "Select qualified mesh Bodies; analytic faces and occurrences require their original evidence.");
+        };
+        if !matches!(
+            relationship.kind,
+            Kind::Contact | Kind::Clearance | Kind::Containment | Kind::Interference
+        ) {
+            return relationship_unsupported(
+                "This relationship requires analytic evidence absent from a mesh Body.",
+                "Preserve the claim and provide the required analytic source evidence.",
+            );
+        }
+        if matches!(relationship.kind, Kind::Contact | Kind::Clearance)
+            && (left.len() != 1 || right.len() != 1)
+        {
+            return relationship_unsupported(
+                "Mesh contact and clearance require one Body at each endpoint.",
+                "Select one actual material root per endpoint.",
+            );
+        }
+        let pair_count = left.len().saturating_mul(right.len()) as u64;
+        retained_output_bytes = retained_output_bytes
+            .saturating_add(pair_count.saturating_add(1).saturating_mul(64 * 1024))
+            .saturating_add(super::json_owned_bytes(&relationship.raw).saturating_mul(3));
+        let pending_bytes = retained_output_bytes.saturating_add(
+            (left.capacity().saturating_add(right.capacity()) as u64)
+                .saturating_mul(std::mem::size_of::<usize>() as u64),
+        );
+        if let Err(error) = context.check_continuous_output(pending_bytes) {
+            return error;
+        }
+        let mut pairs = Vec::new();
+        let mut relationship_positive = relationship.kind != Kind::Containment;
+        for b in &right {
+            let mut all_inside = true;
+            for a in &left {
+                if let Err(error) = charge(context, 8) {
+                    return match error {
+                        ProofError::Budget(value) | ProofError::Refused(value) => value,
+                        ProofError::Backend(value) => backend_refusal(value),
+                    };
+                }
+                let overlap = match owner.region_overlap(a, b, context.budget, pending_bytes) {
+                    Ok(value) => value,
+                    Err(error) => return backend_refusal(error),
+                };
+                let mut fields = vec![
+                    (
+                        "subject".into(),
+                        Json::String(format!("body:mesh:{}:{}", a.primitive, a.root)),
+                    ),
+                    (
+                        "target".into(),
+                        Json::String(format!("body:mesh:{}:{}", b.primitive, b.root)),
+                    ),
+                    (
+                        "intersectionNumerator".into(),
+                        Json::String(overlap.numer().to_string()),
+                    ),
+                    (
+                        "intersectionDenominator".into(),
+                        Json::String(overlap.denom().to_string()),
+                    ),
+                ];
+                let decision: Result<bool, BackendError> = (|| {
+                    let arithmetic_error = |error: continuous::ContinuousError| BackendError {
+                        kind: if error.kind == continuous::ContinuousErrorKind::InvalidInput {
+                            BackendErrorKind::InvalidInput
+                        } else {
+                            BackendErrorKind::Unsupported
+                        },
+                        message: error.message,
+                    };
+                    let scalar = |value| exact::rational(value).map_err(arithmetic_error);
+                    match relationship.kind {
+                        Kind::Containment => {
+                            let volume = owner.region_overlap(a, a, context.budget, pending_bytes)?;
+                            Ok(volume == overlap)
+                        }
+                        Kind::Interference => Ok(overlap
+                            >= scalar(relationship.min_volume.unwrap_or(0.0))?
+                            && overlap <= scalar(relationship.max_volume.unwrap_or(0.0))?),
+                        Kind::Contact | Kind::Clearance => {
+                            let (distance, witness) =
+                                owner.region_boundary_distance(a, b, context.budget, pending_bytes)?;
+                            fields.push((
+                                "distanceSquaredNumerator".into(),
+                                Json::String(distance.numer().to_string()),
+                            ));
+                            fields.push((
+                                "distanceSquaredDenominator".into(),
+                                Json::String(distance.denom().to_string()),
+                            ));
+                            if let Some(point) = witness {
+                                fields.push(("boundaryWitness".into(), point_json(point)));
+                            }
+                            let tolerance = scalar(relationship.tolerance.unwrap_or(
+                                if relationship.kind == Kind::Contact {
+                                    DEFAULT_LINEAR_TOLERANCE
+                                } else {
+                                    0.0
+                                },
+                            ))?;
+                            let lower = if relationship.kind == Kind::Contact {
+                                num_rational::BigRational::zero()
+                            } else {
+                                exact::subtract(
+                                    &scalar(relationship.min.unwrap_or(0.0))?,
+                                    &tolerance,
+                                )
+                                .map_err(arithmetic_error)?
+                                .max(num_rational::BigRational::zero())
+                            };
+                            let lower_squared =
+                                exact::multiply(&lower, &lower).map_err(arithmetic_error)?;
+                            let upper = if relationship.kind == Kind::Contact {
+                                Some(tolerance)
+                            } else {
+                                relationship
+                                    .max
+                                    .map(|maximum| {
+                                        exact::add(&scalar(maximum)?, &tolerance)
+                                            .map_err(arithmetic_error)
+                                    })
+                                    .transpose()?
+                            };
+                            let upper_ok = match upper {
+                                Some(value) => {
+                                    distance
+                                        <= exact::multiply(&value, &value)
+                                            .map_err(arithmetic_error)?
+                                }
+                                None => true,
+                            };
+                            Ok(overlap.is_zero() && distance >= lower_squared && upper_ok)
+                        }
+                        _ => unreachable!("supported mesh kinds checked"),
+                    }
+                })();
+                let accepted = match decision {
+                    Ok(value) => value,
+                    Err(error) => return backend_refusal(error),
+                };
+                all_inside &= accepted;
+                if relationship.kind != Kind::Containment {
+                    relationship_positive &= accepted;
+                }
+                fields.push(("satisfied".into(), Json::Bool(accepted)));
+                pairs.push(Json::Object(fields));
+            }
+            if relationship.kind == Kind::Containment {
+                relationship_positive |= all_inside;
+            }
+        }
+        positive &= relationship_positive;
+        if !relationship_positive {
+            diagnostics.push(mismatch(format!("{} violates qualified mesh material facts.",relationship_label(index,relationship)),"Repair the source geometry while preserving the authored parameters and tolerance.",None));
+        }
+        rows.push(Json::object([
+            ("relationship", relationship.raw.clone()),
+            ("pairs", Json::Array(pairs)),
+        ]));
+    }
+    Evaluation::Geometric {
+        positive_satisfied: positive,
+        diagnostics,
+        evidence: crate::result::family_evidence(
+            &owner.content_hash,
+            prepared.normalized_expected(),
+            Json::Array(rows),
+            Json::object([
+                (
+                    "representation",
+                    Json::string("qualified-retained-mesh-material-regions"),
+                ),
+                ("sourceUncertainty", Json::string("unknown")),
+            ]),
         ),
         negated_diagnostic: None,
     }

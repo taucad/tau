@@ -1,5 +1,5 @@
-import type { ReactNode } from 'react';
-import { Fragment, useCallback, useEffect, useId, useMemo, useRef } from 'react';
+import type { ReactNode, RefCallback } from 'react';
+import { Fragment, useCallback, useId, useMemo } from 'react';
 import { ChevronRight, Lock } from 'lucide-react';
 import { Badge } from '@taucad/ui/components/badge';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
@@ -23,10 +23,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
   const provenance = entry?.provenance;
   const label = fileProvenanceLabel(provenance, filePath);
   const descriptionId = useId();
-  const scrollerRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    const scroller = scrollerRef.current;
+  const attachScroller = useCallback<RefCallback<HTMLDivElement>>((scroller) => {
     if (!scroller) {
       return;
     }
@@ -39,7 +36,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
     return () => {
       observer.disconnect();
     };
-  }, [filePath]);
+  }, []);
 
   // Derive breadcrumb data from the panel's own file path
   const activeFile = useMemo(
@@ -83,7 +80,8 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
           className='flex min-w-0 flex-1 items-center gap-1 @max-lg:w-full @max-lg:flex-none'
         >
           <OmniScroller
-            ref={scrollerRef}
+            key={filePath}
+            ref={attachScroller}
             className='flex min-w-0 [scrollbar-width:none] flex-row items-center gap-0 overscroll-x-none [&::-webkit-scrollbar]:hidden'
           >
             {breadcrumbs.length > 0 ? (

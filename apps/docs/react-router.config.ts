@@ -10,7 +10,6 @@ export default {
       const { listStaticPrerenderPaths } = await import('./app/lib/static-paths');
       return listStaticPrerenderPaths();
     },
-    // eslint-disable-next-line @typescript-eslint/naming-convention -- upstream React Router config field.
-    unstable_concurrency: prerenderConcurrency,
+    concurrency: prerenderConcurrency,
   },
 } satisfies Config;

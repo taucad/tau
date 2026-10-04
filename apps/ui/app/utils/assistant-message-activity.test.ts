@@ -59,6 +59,16 @@ describe('assistant message activity', () => {
     expect(findLastMeaningfulPartIndex(parts)).toBe(4);
   });
 
+  it('never folds a question into routine activity, native, through Tau MCP or an agent tool', () => {
+    const external = {
+      ...dynamic({ toolName: 'AskUserQuestion' }),
+      toolMetadata: { tau: { nativeName: 'AskUserQuestion' } },
+    } as unknown as Part;
+    const parts = [tool('tool-ask_questions'), dynamic({ nativeName: 'ask_questions' }), external];
+
+    expect(parts.map((part) => classifyActivityPart(part))).toEqual(['data', 'data', 'data']);
+  });
+
   it('keeps reasoning beside tool calls inside one activity group without deduplicating equal text', () => {
     const first = reasoning('Check the result');
     const second = reasoning('Check the result');

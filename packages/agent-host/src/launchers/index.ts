@@ -20,4 +20,4 @@ export type {
   ExternalAgentTurn,
   ExternalSessionState,
   ExternalTurnOutcome,
-} from '#host/tau-agent-host.js';
+} from '#host/external-agent.js';

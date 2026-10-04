@@ -164,7 +164,22 @@ describe.runIf(gitToolchainOnPath)('P38 — publishing a name again carries its 
 
     /* Somebody else, in the remote, between this host's last fetch and its
      * push: a third tag object the client has never seen. */
-    await runGit('git', ['--git-dir', bare, 'tag', '-a', '-m', 'Theirs', '--no-sign', 'scratch', before]);
+    /* An annotated tag needs a committer; CI runners have no global git identity. */
+    await runGit('git', [
+      '-c',
+      'user.name=ada',
+      '-c',
+      'user.email=ada@tau.invalid',
+      '--git-dir',
+      bare,
+      'tag',
+      '-a',
+      '-m',
+      'Theirs',
+      '--no-sign',
+      'scratch',
+      before,
+    ]);
     const { stdout } = await runGit('git', ['--git-dir', bare, 'rev-parse', 'refs/tags/scratch']);
     const theirs = stdout.trim();
     await runGit('git', ['--git-dir', bare, 'update-ref', 'refs/tags/v1', theirs]);

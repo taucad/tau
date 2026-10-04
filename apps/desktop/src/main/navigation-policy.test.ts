@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest';
 import { appOrigin } from '#main/app-protocol.js';
 import {
   contentSecurityPolicy,
+  isMicrophonePermissionGranted,
   isPermissionGranted,
   isRendererUrl,
   isTrustedSender,
@@ -141,6 +142,35 @@ describe('isPermissionGranted', () => {
       'keyboardLock',
     ]) {
       expect([permission, isPermissionGranted(permission)]).toEqual([permission, false]);
+    }
+  });
+});
+
+describe('isMicrophonePermissionGranted', () => {
+  const dictation = {
+    permission: 'media',
+    frame: { url: 'app://tau/index.html' },
+    requester: 'app://tau/index.html',
+    mainFrame: true,
+    mediaTypes: ['audio'],
+    origins: production,
+  };
+
+  it('should grant audio-only capture to the trusted top-level renderer for dictation', () => {
+    expect(isMicrophonePermissionGranted(dictation)).toBe(true);
+  });
+
+  it('should refuse foreign, framed, camera, mixed and unattributed media requests', () => {
+    for (const request of [
+      { ...dictation, requester: 'https://foreign.example' },
+      { ...dictation, mainFrame: false },
+      { ...dictation, frame: { url: 'https://foreign.example' } },
+      { ...dictation, mediaTypes: ['video'] },
+      { ...dictation, mediaTypes: ['audio', 'video'] },
+      { ...dictation, requester: undefined },
+      { ...dictation, permission: 'geolocation' },
+    ]) {
+      expect(isMicrophonePermissionGranted(request)).toBe(false);
     }
   });
 });

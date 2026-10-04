@@ -20,7 +20,9 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { toPiToolContent } from '@taucad/agent-host';
 import type { JsonValue } from '@taucad/agent-host';
-import { NodeFsProvider } from '@taucad/filesystem/backend/node';
+import { NodeFsChannel, NodeFsProviderClient } from '@taucad/filesystem/backend';
+import { NodeFsProvider, serveNodeFsProvider } from '@taucad/filesystem/backend/node';
+import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import workbenchBundles from '@taucad/workbench/agent/resources.js';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
 import type { MachineClient, MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
@@ -221,6 +223,91 @@ const waitForFileEvent = async (
       setTimeout(resolve, 25);
     });
   }
+};
+
+/** A bound X1C, its provider, and a runtime whose slice is a fixed container: the print path minus a printer. */
+const printFixture = () => {
+  const timestamp = '2026-09-24T00:00:00.000Z';
+  /* Not a real container: the planner's summary is advisory and covered in its own tests. */
+  const sliced = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
+  const slice = vi.fn<RuntimeDocument['export']>(async () => ({
+    success: true,
+    exportId: 'gcode.3mf',
+    evaluationId: 'evaluation',
+    files: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
+    issues: [],
+  }));
+  const runtimeClient = async () => fakeRuntime({ open: vi.fn(() => fakeDocument({ export: slice })) });
+  const projectId = 'proj_000000000000000000001';
+  const entry = {
+    machineId: 'machine-1',
+    providerId: 'bambu',
+    descriptor: {
+      id: 'physical-1',
+      name: 'Workshop X1C',
+      model: 'X1C',
+      accepts: [
+        {
+          contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
+          mediaType: 'application/vnd.bambulab.gcode-3mf',
+          requiredMembers: ['Metadata/plate_1.gcode'],
+          payloadSelection: 'plate',
+          technology: 'additive.fff',
+        },
+      ],
+    },
+    snapshot: {
+      connection: 'connected',
+      readiness: 'idle',
+      observedAt: timestamp,
+      setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
+    },
+    freshness: 'current',
+  } as unknown as MachineDirectoryEntry;
+  const provider = {
+    id: 'bambu',
+    name: 'Bambu Lab',
+    manifest: {
+      schemaVersion: 2,
+      identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'X1C' },
+      toolhead: {
+        filamentDiameter: { value: 1.75, unit: 'mm' },
+        nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
+      },
+      bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
+      slicing: {
+        recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
+      },
+    },
+  } as unknown as MachineProvider;
+  const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
+    requestId: input.requestId,
+    machineId: input.machineId,
+    artifact: input.artifact,
+    configuration: input.configuration,
+    requestedBy: input.requestedBy,
+    summary: input.summary ?? { fileName: 'main.gcode.3mf' },
+    state: 'awaiting-approval',
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  }));
+  const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>();
+  const machines = {
+    available: true,
+    list: async () => ({
+      cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
+      entries: [entry],
+    }),
+    listProviders: async () => [provider],
+    requestPrint,
+    listPrintRequests: async () =>
+      Promise.all(
+        requestPrint.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestPrint']>),
+      ),
+    withdrawPrintRequest,
+  } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
+
+  return { timestamp, sliced, slice, runtimeClient, projectId, requestPrint, withdrawPrintRequest, machines };
 };
 
 describe('createHostToolRegistry', () => {
@@ -547,86 +634,7 @@ describe('createHostToolRegistry', () => {
 
   it('offers request_print only with a runtime, a project id and a machine, and slices at the requested quality through its own export route', async () => {
     const workspaceRoot = await makeWorkspace();
-    const timestamp = '2026-09-24T00:00:00.000Z';
-    /* Not a real container: the planner's summary is advisory and covered in its own tests. */
-    const sliced = Uint8Array.from([0x50, 0x4b, 0x03, 0x04, 0x00, 0x00]);
-    const slice = vi.fn<RuntimeDocument['export']>(async () => ({
-      success: true,
-      exportId: 'gcode.3mf',
-      evaluationId: 'evaluation',
-      files: [{ name: 'main.gcode.3mf', mimeType: 'application/vnd.bambulab.gcode-3mf', bytes: sliced }],
-      issues: [],
-    }));
-    const runtimeClient = async () => fakeRuntime({ open: vi.fn(() => fakeDocument({ export: slice })) });
-    const projectId = 'proj_000000000000000000001';
-    const entry = {
-      machineId: 'machine-1',
-      providerId: 'bambu',
-      descriptor: {
-        id: 'physical-1',
-        name: 'Workshop X1C',
-        model: 'X1C',
-        accepts: [
-          {
-            contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-            mediaType: 'application/vnd.bambulab.gcode-3mf',
-            requiredMembers: ['Metadata/plate_1.gcode'],
-            payloadSelection: 'plate',
-            technology: 'additive.fff',
-          },
-        ],
-      },
-      snapshot: {
-        connection: 'connected',
-        readiness: 'idle',
-        observedAt: timestamp,
-        setup: { bedType: 'textured-pei', materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
-      },
-      freshness: 'current',
-    } as unknown as MachineDirectoryEntry;
-    const provider = {
-      id: 'bambu',
-      name: 'Bambu Lab',
-      manifest: {
-        schemaVersion: 2,
-        identity: { typeId: 'bambu.x1c', vendor: 'Bambu Lab', model: 'X1C' },
-        toolhead: {
-          filamentDiameter: { value: 1.75, unit: 'mm' },
-          nozzles: [{ diameter: { value: 0.4, unit: 'mm' } }],
-        },
-        bed: { plates: [{ id: 'cool-plate', label: 'Cool Plate' }] },
-        slicing: {
-          recommended: { nozzleTemperature: { value: 220, unit: 'Cel' }, bedTemperature: { value: 55, unit: 'Cel' } },
-        },
-      },
-    } as unknown as MachineProvider;
-    const requestPrint = vi.fn<MachineClient['requestPrint']>(async (input) => ({
-      requestId: input.requestId,
-      machineId: input.machineId,
-      artifact: input.artifact,
-      configuration: input.configuration,
-      requestedBy: input.requestedBy,
-      summary: input.summary ?? { fileName: 'main.gcode.3mf' },
-      state: 'awaiting-approval',
-      createdAt: timestamp,
-      updatedAt: timestamp,
-    }));
-    const withdrawPrintRequest = vi.fn<MachineClient['withdrawPrintRequest']>();
-    const machines = {
-      available: true,
-      list: async () => ({
-        cursor: { hostId: 'host-1', authorityId: 'authority-1', generation: 'generation-1', position: 1, revision: 1 },
-        entries: [entry],
-      }),
-      listProviders: async () => [provider],
-      requestPrint,
-      listPrintRequests: async () =>
-        Promise.all(
-          requestPrint.mock.results.map(async (result) => result.value as ReturnType<MachineClient['requestPrint']>),
-        ),
-      withdrawPrintRequest,
-    } as unknown as NonNullable<HostToolRegistryOptions['machines']>;
-
+    const { sliced, slice, runtimeClient, projectId, requestPrint, withdrawPrintRequest, machines } = printFixture();
     const names = (options: Partial<HostToolRegistryOptions>) =>
       createHostToolRegistry({ workspaceRoot, ...options })
         .list()
@@ -696,6 +704,53 @@ describe('createHostToolRegistry', () => {
       resolution: { interruptId: 'interrupt-1', outcome: 'cancelled' },
     });
     expect(withdrawPrintRequest).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ requestId: 'call-1' }));
+  });
+
+  it("reads the project's print intent through the filesystem authority a project host opens its roots with", async () => {
+    const workspaceRoot = await makeWorkspace();
+    /* The double's own intent (2026-10-03): the high-temperature plate and the external spool. */
+    await mkdir(join(workspaceRoot, '.tau', 'machines', 'settings'), { recursive: true });
+    await writeFile(
+      join(workspaceRoot, '.tau', 'machines', 'settings', 'bambu.x1c.json'),
+      JSON.stringify({
+        version: 1,
+        typeId: 'bambu.x1c',
+        activeProfile: 'default',
+        profiles: {
+          default: {
+            name: 'Default',
+            configurations: {
+              'bambu.machine.settings': { version: '1.0.0', values: { plate: 'high-temperature' } },
+            },
+          },
+        },
+      }),
+    );
+    /* The desktop and `tau serve` hand the host the authority's client, not a local provider (services-host.impl.ts). */
+    const { port1, port2 } = new MessageChannel();
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (root) => root === workspaceRoot });
+    const channel = new NodeFsChannel(port1);
+    try {
+      const { runtimeClient, projectId, requestPrint, machines } = printFixture();
+      const registry = createHostToolRegistry({
+        workspaceRoot,
+        runtimeClient,
+        projectId,
+        machines,
+        filesystem: (root) => new NodeFsProviderClient(channel, root),
+      });
+
+      const result = await invoke(registry, 'request_print', { targetFile: 'main.ts' });
+
+      expect(result).toMatchObject({ isError: false, content: { request: { state: 'awaiting-approval' } } });
+      /* The project's saved choices, not the printer's defaults, prepared the request. */
+      expect(requestPrint.mock.calls[0]![0].summary).toMatchObject({
+        preferences: { scope: 'project', typeId: 'bambu.x1c', profileId: 'default' },
+      });
+    } finally {
+      channel.close();
+      await stop();
+    }
   });
 
   it('offers both parameter tools only with a native parameter actor and preserves its outcome', async () => {
@@ -835,8 +890,12 @@ describe('createHostToolRegistry', () => {
 
     const alphaEvents: Array<{ readonly type: string; readonly path?: string }> = [];
     const betaEvents: Array<{ readonly type: string; readonly path?: string }> = [];
-    const stopAlpha = new NodeFsProvider(alphaRoot).watch({ paths: ['main.ts'] }, (event) => alphaEvents.push(event));
-    const stopBeta = new NodeFsProvider(betaRoot).watch({ paths: ['main.ts'] }, (event) => betaEvents.push(event));
+    const stopAlpha = await new NodeFsProvider(alphaRoot).watch({ paths: ['main.ts'] }, (event) =>
+      alphaEvents.push(event),
+    );
+    const stopBeta = await new NodeFsProvider(betaRoot).watch({ paths: ['main.ts'] }, (event) =>
+      betaEvents.push(event),
+    );
     const opened = new Map<string, RuntimeDocument[]>();
     const runtimeFor = (root: string, label: string): HostRuntimeClient =>
       fakeRuntime({

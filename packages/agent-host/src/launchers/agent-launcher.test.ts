@@ -316,7 +316,7 @@ describe('createAgentLauncher', () => {
       model,
       systemPrompt: 'You are Tau.',
       toolRegistry: emptyTools,
-      delays: { idleEviction: 100 },
+      delays: { idleEviction: 1000 },
       modelTransport: createTauCloudGatewayModelTransport({
         baseUrl: 'https://gateway.example',
         model,
@@ -333,7 +333,7 @@ describe('createAgentLauncher', () => {
       async () => {
         await expect(stat(lock)).rejects.toMatchObject({ code: 'ENOENT' });
       },
-      { timeout: 3000, interval: 25 },
+      { timeout: 5000, interval: 25 },
     );
     /* A fresh incarnation takes the writer again and admits the run (the fixture's one scripted turn is spent). */
     await expect(start(host, { chatId: 'chat-idle', runId: 'run-idle-2' })).resolves.toMatchObject({

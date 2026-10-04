@@ -4,17 +4,18 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { isDeepStrictEqual } from 'node:util';
 // oxlint-disable-next-line no-restricted-imports -- Package-owned conformance fixtures share one pinned input join.
-import { joinCurrentCorpus, selectCorpusRecords } from '../../conformance/current-profile.mjs';
+import { joinCurrentCorpus, loadMaterialCorpus, selectCorpusRecords } from '../../conformance/current-profile.mjs';
 
 /** @typedef {{ id: string, operation: 'canonicalize' | 'ingestMesh' | 'processRequest' | 'canonicalPlan' | 'evaluatePlan', inputUtf8?: string, inputHex?: string, ingest: string[], meshHex?: string, expectedUtf8?: string, expectedCode?: string, expectedMessage?: string }} CorpusRecord */
-/** @typedef {{ close?: () => void, ingestMesh: (request: Uint8Array, mesh: Uint8Array) => Uint8Array, processRequest: (request: Uint8Array) => Uint8Array, canonicalPlan: (request: Uint8Array) => Uint8Array, evaluatePlan: (plan: Uint8Array) => Uint8Array }} BindingEngine */
+/** @typedef {{ close?: () => void, ingestMesh: (request: Uint8Array, mesh: Uint8Array) => Uint8Array, ingestSubject: (request: Uint8Array, primary: Uint8Array, resources: Uint8Array[]) => Uint8Array, processRequest: (request: Uint8Array) => Uint8Array, canonicalPlan: (request: Uint8Array) => Uint8Array, evaluatePlan: (plan: Uint8Array) => Uint8Array }} BindingEngine */
 /** @typedef {{ Engine: new () => BindingEngine, canonicalize: (input: Uint8Array) => Uint8Array }} Binding */
 /** @typedef {{ passed: boolean, [key: string]: unknown }} CorpusResult */
 /** @typedef {{ passed: number, failed: number, results: CorpusResult[], mismatches: CorpusResult[] }} CorpusReport */
 
 const corpusUrl = new URL('../../conformance/early-corpus.json', import.meta.url);
+const materialCorpusUrl = new URL('../../conformance/material-v6.json', import.meta.url);
 const profileUrl = new URL('../../rust/tests/fixtures/current-profile-01/plan-corpus.json', import.meta.url);
-const successorUrl = new URL('../../rust/tests/fixtures/current-profile-v5/numeric-profile.txt', import.meta.url);
+const successorUrl = new URL('../../rust/tests/fixtures/current-profile-v6/numeric-profile.txt', import.meta.url);
 
 /** @type {(record: CorpusRecord) => Buffer} */
 const bytes = (record) => {
@@ -88,14 +89,17 @@ const compareBytes = (actual, expectedUtf8) => {
   };
 };
 
-/** @type {(options: { binding: Binding, host: string, artifacts?: string[], output?: string, recordIds?: string[] }) => Promise<CorpusReport>} */
-export const runEarlyCorpus = async ({ binding, host, artifacts = [], output, recordIds }) => {
-  const corpus = await joinCurrentCorpus(
-    await readFile(corpusUrl),
-    await readFile(profileUrl),
-    'full-backend',
-    await readFile(successorUrl),
-  );
+/** @type {(options: { binding: Binding, host: string, artifacts?: string[], output?: string, recordIds?: string[], suite?: 'early' | 'material' }) => Promise<CorpusReport>} */
+export const runEarlyCorpus = async ({ binding, host, artifacts = [], output, recordIds, suite = 'early' }) => {
+  const corpus =
+    suite === 'material'
+      ? await loadMaterialCorpus(await readFile(materialCorpusUrl))
+      : await joinCurrentCorpus(
+          await readFile(corpusUrl),
+          await readFile(profileUrl),
+          'full-backend',
+          await readFile(successorUrl),
+        );
   const selected = selectCorpusRecords(corpus, recordIds);
   const meshes = new Map(corpus.meshes.map((mesh) => [mesh.id, mesh]));
   /** @type {CorpusResult[]} */
@@ -113,10 +117,15 @@ export const runEarlyCorpus = async ({ binding, host, artifacts = [], output, re
           break;
         }
         try {
-          const comparison = compareBytes(
-            engine.ingestMesh(Buffer.from(mesh.requestUtf8), Buffer.from(mesh.meshHex, 'hex')),
-            mesh.expectedUtf8,
-          );
+          const actual =
+            mesh.admission === 'subject'
+              ? engine.ingestSubject(
+                  Buffer.from(mesh.requestUtf8),
+                  Buffer.from(mesh.primaryHex, 'hex'),
+                  mesh.resources.map((resource) => Buffer.from(resource.hex, 'hex')),
+                )
+              : engine.ingestMesh(Buffer.from(mesh.requestUtf8), Buffer.from(mesh.meshHex, 'hex'));
+          const comparison = compareBytes(actual, mesh.expectedUtf8);
           admissions.push({ meshId, ...comparison });
           admissionFailure = comparison.bytesEqual && comparison.decodedEqual ? undefined : { meshId, ...comparison };
         } catch (error) {
@@ -187,17 +196,26 @@ export const runEarlyCorpus = async ({ binding, host, artifacts = [], output, re
     schemaVersion: 1,
     host,
     runtime: process.version,
-    corpus: {
-      path: fileURLToPath(corpusUrl),
-      sha256: corpus.originalSha256,
-      currentProfilePath: fileURLToPath(profileUrl),
-      currentProfileSha256: corpus.profileSha256,
-      successorPath: fileURLToPath(successorUrl),
-      successorSha256: corpus.successorSha256,
-      bindingProfile: corpus.bindingProfile,
-      records: corpus.records.length,
-      selectedRecords: selected.length,
-    },
+    corpus:
+      'materialSha256' in corpus
+        ? {
+            path: fileURLToPath(materialCorpusUrl),
+            sha256: corpus.materialSha256,
+            numericProfile: 'geospec-demand-v6',
+            records: corpus.records.length,
+            selectedRecords: selected.length,
+          }
+        : {
+            path: fileURLToPath(corpusUrl),
+            sha256: corpus.originalSha256,
+            currentProfilePath: fileURLToPath(profileUrl),
+            currentProfileSha256: corpus.profileSha256,
+            successorPath: fileURLToPath(successorUrl),
+            successorSha256: corpus.successorSha256,
+            bindingProfile: corpus.bindingProfile,
+            records: corpus.records.length,
+            selectedRecords: selected.length,
+          },
     artifacts: artifactHashes,
     passed: results.length - mismatches.length,
     failed: mismatches.length,
@@ -225,6 +243,10 @@ const parseArguments = () => {
 
 if (import.meta.main) {
   const argumentsByName = parseArguments();
+  const suite = argumentsByName.get('--suite') ?? 'early';
+  if (suite !== 'early' && suite !== 'material') {
+    throw new Error(`Unknown engine conformance suite: ${suite}`);
+  }
   const modulePath = resolve(
     argumentsByName.get('--module') ?? fileURLToPath(new URL('generated/index.js', import.meta.url)),
   );
@@ -239,6 +261,7 @@ if (import.meta.main) {
     artifacts: [modulePath, binaryPath],
     output: argumentsByName.get('--output'),
     recordIds: argumentsByName.get('--ids')?.split(','),
+    suite,
   });
   process.stdout.write(`${JSON.stringify({ passed: report.passed, failed: report.failed })}\n`);
   if (report.failed > 0) {

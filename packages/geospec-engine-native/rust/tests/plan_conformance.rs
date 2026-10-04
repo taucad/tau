@@ -6,7 +6,45 @@ const CORPUS_SHA256: &str = "3d43750d055dceec2b7d57c92d4a953c4f7dcd40c2abb1452a8
 const CURRENT: &str = include_str!("fixtures/current-profile-01/plan-corpus.json");
 const CURRENT_SHA256: &str = "eb8b42f1591fd2bd695228cdaa3abc4108b411717c468a9e97b724654616221d";
 const CURRENT_NUMERIC_PROFILE: &str =
-    include_str!("fixtures/current-profile-v5/numeric-profile.txt");
+    include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
+fn project_material_repair(id: &str, text: &str) -> String {
+    let ids = [
+        "a2/raw/all-axis-failure-order",
+        "plan/a2/all-axis-failure-order/evaluate",
+        "a2/raw/tolerance-outside",
+        "plan/a2/tolerance-outside/evaluate",
+        "a2/raw/default-tolerance-outside",
+        "plan/a2/default-tolerance-outside/evaluate",
+        "a2/raw/zero-tolerance",
+        "plan/a2/zero-tolerance/evaluate",
+    ];
+    if !ids.contains(&id) {
+        return text.into();
+    }
+    let old = "Correct the model dimensions, or widen the declared bounding-box tolerance.";
+    let approved = "Correct the model dimensions to match the declared bounds; preserve the authored tolerance.";
+    let parsed: Value = serde_json::from_str(text).unwrap();
+    let results = if id.starts_with("plan/") {
+        &parsed["results"]
+    } else {
+        &parsed["result"]["results"]
+    };
+    let matches = results
+        .as_array()
+        .unwrap()
+        .iter()
+        .flat_map(|row| row["diagnostics"].as_array().unwrap())
+        .filter(|row| row["code"] == "GEOSPEC_BOUNDING_BOX_MISMATCH" && row["suggestion"] == old)
+        .count();
+    let old_literal = serde_json::to_string(old).unwrap();
+    assert_eq!(matches, 1, "{id}: exact diagnostic");
+    assert_eq!(
+        text.matches(&old_literal).count(),
+        1,
+        "{id}: unique raw literal"
+    );
+    text.replace(&old_literal, &serde_json::to_string(approved).unwrap())
+}
 
 fn string<'a>(value: &'a Value, field: &str) -> &'a str {
     value[field].as_str().expect(field)
@@ -36,7 +74,8 @@ fn compare(actual: Result<Vec<u8>, ProtocolError>, expected: &Value, id: &str) -
         Ok(actual) => {
             let decoded = serde_json::from_slice::<Value>(&actual).ok();
             let expected_bytes = expected["expectedUtf8"].as_str().map(|s| {
-                let current = s.replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE);
+                let current = project_material_repair(id, s)
+                    .replace("geospec-st-logical-requests-v3", CURRENT_NUMERIC_PROFILE);
                 if id != "a1/raw/initialize" {
                     return current;
                 }
@@ -165,7 +204,11 @@ fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindi
             assert_eq!(sha256_hex(&data), mesh["contentHash"]);
             let request = string(bound, "effectiveRequestUtf8").as_bytes();
             assert_eq!(sha256_hex(request), bound["effectiveRequestSha256"]);
-            let admission = compare(engine.ingest_mesh(request, &data), bound, id);
+            let admission = compare(
+                engine.ingest_mesh(request, &data),
+                bound,
+                mesh_id.as_str().unwrap(),
+            );
             if admission["passed"] != true {
                 failures.push(format!("{id}: admission {mesh_id}: {admission}"));
             }
@@ -182,7 +225,11 @@ fn matches_every_frozen_early_host_record_through_explicit_current_profile_bindi
             let bound = &mesh_bindings[0];
             let data = bytes(string(mesh, "meshHex"));
             let request = string(bound, "effectiveRequestUtf8").as_bytes();
-            let admission = compare(engine.ingest_mesh(request, &data), bound, id);
+            let admission = compare(
+                engine.ingest_mesh(request, &data),
+                bound,
+                string(mesh, "id"),
+            );
             assert_eq!(
                 admission["passed"], true,
                 "fresh explicit current-profile admission"

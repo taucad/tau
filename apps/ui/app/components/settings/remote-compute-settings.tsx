@@ -12,14 +12,15 @@ import {
   selectRemoteComputeDevice,
   useRemoteComputePlacement,
 } from '#lib/remote-compute-placement.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 const placementCopy = {
-  local: 'Rendering in this browser',
+  local: isDesktopTarget() ? 'Rendering on this computer' : 'Rendering in this browser',
   connecting: 'Connecting to remote compute…',
   remote: 'Rendering on the selected remote device',
   'device-offline': 'The selected remote device is offline or revoked',
   busy: 'The selected remote device is at capacity',
-  'version-mismatch': 'The browser and remote runtime versions do not match',
+  'version-mismatch': 'This Tau and the remote runtime versions do not match',
   disconnected: 'The remote runtime disconnected',
 } as const;
 

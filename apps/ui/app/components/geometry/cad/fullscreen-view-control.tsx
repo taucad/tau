@@ -30,7 +30,7 @@ export function FullscreenViewControl(): React.JSX.Element {
     }
     setError(undefined);
     if (!viewer || !document.fullscreenEnabled) {
-      setError('Fullscreen is unavailable in this browser.');
+      setError('Fullscreen is unavailable here.');
       return;
     }
 

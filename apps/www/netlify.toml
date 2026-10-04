@@ -8,10 +8,12 @@ publish = "apps/www/dist"
 
 [build.environment]
 NODE_VERSION = "24"
-WWW_LAUNCH = "false"
+WWW_LAUNCH = "true"
+# Canonical, social and sitemap URLs name tau.new, where the UI site proxies these pages.
+WWW_ORIGIN = "https://tau.new"
 PNPM_FLAGS = "--filter @taucad/www... --frozen-lockfile --ignore-scripts"
 
-# Security, cache and preview noindex headers are emitted in dist/_headers.
+# Security and cache headers are emitted in dist/_headers; WWW_LAUNCH drops the preview noindex.
 # No app proxy or production domain is enabled in this preview configuration.
 
 # No functions, app build, Nx Cloud token or private runtime environment is used.

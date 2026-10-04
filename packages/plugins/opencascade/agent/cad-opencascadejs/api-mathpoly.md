@@ -4,7 +4,8 @@
 
 MathPoly_GeneralPolyResult: declare class MathPoly_GeneralPolyResult
 
-  constructor
+  // MathPoly_GeneralPolyResult.constructor (constructor)
+  constructor();
 
   Status: MathUtils_Status
 
@@ -16,8 +17,11 @@ MathPoly_GeneralPolyResult: declare class MathPoly_GeneralPolyResult
 
   NbComplexRoots: number
 
+  // MathPoly_GeneralPolyResult.IsDone (method)
   IsDone(): boolean;
 
+  // MathPoly_GeneralPolyResult.delete (method)
   delete(): void;
 
+  // MathPoly_GeneralPolyResult.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

@@ -56,8 +56,12 @@ export type BambuStudioService = Readonly<{
   settings(input: unknown): Promise<BambuStudioIpcResult<BambuStudioSettings>>;
 }>;
 
-const notInstalled =
-  'Bambu Studio was not found. Install it, or set TAU_BAMBU_STUDIO_PATH to its app or executable and restart Tau.';
+/* A release ignores `TAU_BAMBU_STUDIO_PATH` (security assessment F-2), so only a
+ * build that honours it names it. */
+const notInstalled = (pathOverride: boolean): string =>
+  pathOverride
+    ? 'Bambu Studio was not found at its default install location. Install it, or set TAU_BAMBU_STUDIO_PATH to its app or executable, and restart Tau.'
+    : 'Bambu Studio was not found at its default install location. Install it and restart Tau.';
 
 /* Bounds sized well above real use: Bambu Studio has about 600 settings, an
  * AMS system at most a few dozen slots, and the longest values are G-code templates. */
@@ -156,11 +160,12 @@ const presetsStamp = async (dataDirectory: string | undefined): Promise<string> 
  * itself is a few file checks; the engine caches the version probe.
  *
  * @param options - `env` is main's resolved environment (it carries `TAU_BAMBU_STUDIO_PATH`);
+ *   `pathOverride` says whether this build honours that variable (false in a release);
  *   `engine` replaces the real one in tests.
  * @returns The four calls.
  */
 export const createBambuStudioService = (
-  options: Readonly<{ env: NodeJS.ProcessEnv; engine?: BambuStudioEngine }>,
+  options: Readonly<{ env: NodeJS.ProcessEnv; pathOverride: boolean; engine?: BambuStudioEngine }>,
 ): BambuStudioService => {
   const engine = options.engine ?? {
     findBambuStudio,
@@ -173,7 +178,7 @@ export const createBambuStudioService = (
   const installation = async (): Promise<BambuStudioInstallation> => {
     const install = await engine.findBambuStudio({ env: options.env });
     if (install === undefined) {
-      throw new BambuStudioError('BAMBU_STUDIO_UNAVAILABLE', notInstalled);
+      throw new BambuStudioError('BAMBU_STUDIO_UNAVAILABLE', notInstalled(options.pathOverride));
     }
     return install;
   };
@@ -227,7 +232,7 @@ export const createBambuStudioService = (
     status: async () => {
       const install = await engine.findBambuStudio({ env: options.env });
       return install === undefined
-        ? { available: false, reason: notInstalled }
+        ? { available: false, reason: notInstalled(options.pathOverride) }
         : { available: true, version: install.version, executable: install.executable };
     },
     catalog: async (input) => {

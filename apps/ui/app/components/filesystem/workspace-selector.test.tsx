@@ -101,6 +101,22 @@ describe('WorkspaceSelector', () => {
     expect(tooltipCopy[0]).toBeVisible();
   });
 
+  it('explains Home as a folder on your computer in the desktop app', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    try {
+      const user = userEvent.setup();
+      renderPicker(readyState());
+      await user.hover(screen.getByRole('button', { name: 'Create in Home' }));
+
+      const tooltipCopy = await screen.findAllByText(
+        'Home keeps projects in a folder on your computer. Select to change location.',
+      );
+      expect(tooltipCopy[0]).toBeVisible();
+    } finally {
+      vi.unstubAllEnvs();
+    }
+  });
+
   it('explains direct disk storage without repeating the trigger label', async () => {
     const user = userEvent.setup();
     const base = readyState();

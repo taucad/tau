@@ -241,7 +241,7 @@ describe('handleArrangeWorkbench', () => {
   it('replaces component lists while preserving other entry settings and writes entries before layout', async () => {
     const oldEntries = workbenchRecords.entries.serialize({
       version: 1,
-      entries: { 'main.ts': { operationTimeout: 5000, components: { hidden: ['a'], isolated: ['b'], opacity: [] } } },
+      entries: { 'main.ts': { renderTimeout: 5000, components: { hidden: ['a'], isolated: ['b'], opacity: [] } } },
     });
     const state = harness({ 'main.ts': 'model', [workbenchPaths.entries]: oldEntries });
     const result = await handleArrangeWorkbench(
@@ -255,7 +255,7 @@ describe('handleArrangeWorkbench', () => {
     ]);
     expect(workbenchRecords.entries.read(bytes(state.files.get(workbenchPaths.entries)!))).toMatchObject({
       status: 'current',
-      record: { entries: { 'main.ts': { operationTimeout: 5000, components: { hidden: ['c'], isolated: ['b'] } } } },
+      record: { entries: { 'main.ts': { renderTimeout: 5000, components: { hidden: ['c'], isolated: ['b'] } } } },
     });
   });
 
@@ -390,11 +390,7 @@ describe('handleArrangeWorkbench', () => {
   it('preflights missing files, non-model entry paths and unknown views with no writes', async () => {
     const state = harness({ 'notes.md': 'notes' });
     expect(
-      await handleArrangeWorkbench(
-        { entries: [{ path: 'absent.ts', operationTimeout: 20 }] },
-        state.fs,
-        state.workbench,
-      ),
+      await handleArrangeWorkbench({ entries: [{ path: 'absent.ts', renderTimeout: 20 }] }, state.fs, state.workbench),
     ).toMatchObject({ success: false, errorCode: 'FILE_NOT_FOUND', message: '`absent.ts` does not exist.' });
     expect(
       await handleArrangeWorkbench({ views: [{ id: 'lost', entryPath: 'absent.ts' }] }, state.fs, state.workbench),
@@ -430,7 +426,7 @@ describe('handleArrangeWorkbench', () => {
         'views[0].entryPath: `main.ts` is a directory; choose an existing model file accepted by the current runtime. Nothing was written.',
     });
     expect(state.workbench.isModelFile).not.toHaveBeenCalled();
-    expect(await handleArrangeWorkbench({ entries: [{ path: 'main.ts', operationTimeout: 1000 }] }, state.fs)).toEqual({
+    expect(await handleArrangeWorkbench({ entries: [{ path: 'main.ts', renderTimeout: 1000 }] }, state.fs)).toEqual({
       success: false,
       errorCode: 'VALIDATION_ERROR',
       message: 'entries[0].path: `main.ts` is a directory; choose an existing file. Nothing was written.',
@@ -483,7 +479,8 @@ describe('handleArrangeWorkbench', () => {
     expect(await handleArrangeWorkbench({ lanes: { chat: false } }, invalidState.fs)).toEqual({
       success: false,
       errorCode: 'INVALID_RECORD',
-      message: '`.tau/workbench/layout.json` is not valid; the person has been offered Reset.',
+      message:
+        "`.tau/workbench/layout.json` is not valid. The person can review it from the project's Settings not applied action; do not rewrite it to work around this. Nothing was written.",
     });
     expect(invalidState.writes).toEqual([]);
     const state = harness();
@@ -520,9 +517,100 @@ describe('handleArrangeWorkbench', () => {
     expect(result).toEqual({
       success: false,
       errorCode: 'INVALID_RECORD',
-      message: '`.tau/workbench/layout.json` is not valid; the person has been offered Reset.',
+      message:
+        "`.tau/workbench/layout.json` is not valid. The person can review it from the project's Settings not applied action; do not rewrite it to work around this. Nothing was written.",
     });
     expect(state.writes).toEqual([]);
+  });
+
+  describe('entries record admission', () => {
+    /* A short-lived Tau wrote `operationTimeout`; the strict codec now refuses it. */
+    const staleEntries = '{"version":1,"entries":{"main.ts":{"operationTimeout":5000}}}';
+    const newerEntries = '{"version":2}';
+    const entriesWrites = (state: ReturnType<typeof harness>) =>
+      state.fs.writeFileChecked.mock.calls.filter(([write]) => write.path === workbenchPaths.entries);
+
+    it.each([
+      ['invalid', staleEntries],
+      ['newer', newerEntries],
+    ])('should open a pane and change lanes without touching %s entries', async (_label, entriesText) => {
+      const state = harness({ 'docs/review.md': '# Review', [workbenchPaths.entries]: entriesText });
+      const result = await handleArrangeWorkbench(
+        {
+          open: [
+            { kind: 'pane', pane: 'kinematics' },
+            { kind: 'file', path: 'docs/review.md' },
+          ],
+          lanes: { chat: false },
+        },
+        state.fs,
+      );
+
+      expect(result).toMatchObject({
+        success: true,
+        status: 'written',
+        visible: [{ kind: 'file', path: 'docs/review.md' }],
+      });
+      expect(state.writes).toEqual([workbenchPaths.layout]);
+      expect(entriesWrites(state)).toEqual([]);
+      expect(state.files.get(workbenchPaths.entries)).toBe(entriesText);
+    });
+
+    it('should refuse an entries patch over an invalid record and write nothing from the same request', async () => {
+      const state = harness({
+        'main.ts': 'model',
+        [workbenchPaths.entries]: staleEntries,
+        [workbenchPaths.layout]: layout(),
+      });
+      const result = await handleArrangeWorkbench(
+        {
+          entries: [{ path: 'main.ts', renderTimeout: 30_000 }],
+          views: [{ id: 'front', entryPath: 'main.ts' }],
+          open: [{ kind: 'pane', pane: 'kinematics' }],
+        },
+        state.fs,
+        state.workbench,
+      );
+
+      expect(result).toEqual({
+        success: false,
+        errorCode: 'INVALID_RECORD',
+        message:
+          "`.tau/workbench/entries.json` is not valid. The person can review it from the project's Settings not applied action; do not rewrite it to work around this. Nothing was written.",
+      });
+      expect(state.writes).toEqual([]);
+      expect(state.files.get(workbenchPaths.entries)).toBe(staleEntries);
+      expect(state.files.get(workbenchPaths.layout)).toBe(layout());
+    });
+
+    it('should refuse an entries patch over a newer-format record without writing', async () => {
+      const state = harness({ 'main.ts': 'model', [workbenchPaths.entries]: newerEntries });
+      const result = await handleArrangeWorkbench(
+        { entries: [{ path: 'main.ts', renderTimeout: 30_000 }], open: [{ kind: 'pane', pane: 'kinematics' }] },
+        state.fs,
+      );
+
+      expect(result).toEqual({
+        success: false,
+        errorCode: 'INVALID_RECORD',
+        message: 'The entries record was written by a newer Tau. Update Tau to use it.',
+      });
+      expect(state.writes).toEqual([]);
+      expect(state.files.get(workbenchPaths.entries)).toBe(newerEntries);
+    });
+
+    it('should create the entries record when an entries patch finds none', async () => {
+      const state = harness({ 'main.ts': 'model' });
+      const result = await handleArrangeWorkbench({ entries: [{ path: 'main.ts', renderTimeout: 30_000 }] }, state.fs);
+
+      expect(result).toMatchObject({ success: true, status: 'written' });
+      expect(state.writes).toEqual([workbenchPaths.entries, workbenchPaths.layout]);
+      expect(entriesWrites(state)[0]?.[0].preconditions).toEqual([{ path: workbenchPaths.entries, expected: null }]);
+      expect(workbenchRecords.entries.read(bytes(state.files.get(workbenchPaths.entries)!))).toEqual({
+        status: 'current',
+        record: { version: 1, entries: { 'main.ts': { renderTimeout: 30_000 } } },
+      });
+    });
   });
 
   it('re-reads on an unbased checked conflict, but does not retry a based call', async () => {

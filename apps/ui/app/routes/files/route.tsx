@@ -39,6 +39,7 @@ import { getFileTreeDownloadErrorMessage } from '#routes/w.$workspace.$project/f
 import { useWorkspaceTelemetry } from '#utils/workspace-telemetry.utils.js';
 import type { FileTreeNode, WorkspaceScope } from '@taucad/filesystem';
 import type { WorkspaceConnectionState } from '#hooks/workspace-connection.machine.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 export const meta: MetaFunction = () => [{ title: 'Files · Tau' }];
 
@@ -54,7 +55,7 @@ type HomeColumnMeta = {
 const homeColumn: HomeColumnMeta = {
   label: 'Home',
   icon: House,
-  description: 'In this browser',
+  description: isDesktopTarget() ? 'On your computer' : 'In this browser',
 };
 
 type ItemAction = {
@@ -372,7 +373,7 @@ function ColumnShell({
 
       {isDisabled ? (
         <div className='flex flex-1 items-center justify-center rounded-md border border-dashed p-6 text-sm text-muted-foreground'>
-          {unsupportedHint ?? 'Not supported in this browser'}
+          {unsupportedHint ?? 'Not supported here'}
         </div>
       ) : (
         <div className='min-h-0 flex-1 overflow-auto rounded-md border'>

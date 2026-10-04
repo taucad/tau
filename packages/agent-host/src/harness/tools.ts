@@ -59,6 +59,7 @@ export const tauToolKinds = new Map<string, string>([
   ['revisions', 'read'],
   ['use_skill', 'other'],
   ['update_todos', 'edit'],
+  ['ask_questions', 'other'],
   ['get_machine', 'read'],
   ['request_print', 'other'],
   ['get_print_request', 'read'],

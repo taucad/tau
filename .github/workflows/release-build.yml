@@ -1,0 +1,506 @@
+# Build and verify what a GitHub Release ships.
+#
+# `release.yml` creates one GitHub Release per application version
+# (`<project>@<version>`) with the tau-release-bot token, which is what lets
+# its `published` event start this workflow. A release is therefore the trigger
+# for the full build of the application it names:
+#
+#   - `ui@*` and `api@*`: lint, typecheck, test and build that application (and
+#     its dependency closure) at the tagged commit. A green run is what
+#     `deploy-production.yml` requires before it promotes the release.
+#   - `desktop@*`: package the desktop app for macOS (Developer ID signed and
+#     notarized), Linux and Windows (unsigned), attach the archives to the
+#     release, then publish the update feeds and mark the release "latest", so
+#     installed apps only see a release whose every asset is in place.
+#   - `ui@*` and `desktop@*` also get the GeoSpec engine's complete source and
+#     relink kit and the OCCT licence texts as release assets (`source-kit`),
+#     because both ship OCCT compiled into the engine.
+#
+# Nothing here publishes an npm package or deploys anything.
+#
+# The macOS job reads its signing material from the `desktop` environment,
+# which only `desktop@*` tags may use and a release manager approves per run.
+# It records a deployment so each desktop release shows under `desktop` in the
+# repository's Deployments sidebar. Secrets: MACOS_CERTIFICATE_P12_BASE64,
+# MACOS_CERTIFICATE_PASSWORD, APPLE_API_KEY_P8_BASE64, APPLE_API_KEY_ID and
+# APPLE_API_ISSUER_ID, and the APPLE_TEAM_ID variable.
+name: Release build
+run-name: ${{ github.event.release.tag_name || inputs.tag }}
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Release tag to rebuild, e.g. desktop@0.2.0'
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-build-${{ github.event.release.tag_name || inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  pnpm_config_verify_deps_before_run: warn
+  NX_NO_CLOUD: 'true'
+
+jobs:
+  resolve:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+      project: ${{ steps.tag.outputs.project }}
+      version: ${{ steps.tag.outputs.version }}
+      kind: ${{ steps.tag.outputs.kind }}
+    steps:
+      - name: Resolve the release tag
+        id: tag
+        env:
+          TAG: ${{ github.event.release.tag_name || inputs.tag }}
+          EVENT: ${{ github.event_name }}
+          AUTHOR: ${{ github.event.release.author.login }}
+          RELEASE_BOT_LOGIN: ${{ vars.RELEASE_BOT_LOGIN || 'tau-release-bot[bot]' }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          if ! [[ "$TAG" =~ ^([a-z0-9-]+)@([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            echo "::notice::$TAG is not an application release; nothing to build."
+            echo "kind=none" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          project=${BASH_REMATCH[1]}
+          version=${BASH_REMATCH[2]}
+          kind=app
+          if [ "$project" = desktop ]; then kind=desktop; fi
+
+          # Only build what release.yml released: a release the bot published,
+          # whose tag names a commit already on main. Anyone with write access
+          # can publish a release, and a desktop build signs and ships it.
+          if [ "$EVENT" = release ] && [ "$AUTHOR" != "$RELEASE_BOT_LOGIN" ]; then
+            echo "::error::$TAG was published by $AUTHOR, not $RELEASE_BOT_LOGIN; refusing to build it."
+            exit 1
+          fi
+          status=$(gh api "repos/$GITHUB_REPOSITORY/compare/main...$TAG" --jq .status)
+          if [ "$status" != behind ] && [ "$status" != identical ]; then
+            echo "::error::$TAG is not on main (compare status: $status); refusing to build it."
+            exit 1
+          fi
+          {
+            echo "tag=$TAG"
+            echo "project=$project"
+            echo "version=$version"
+            echo "kind=$kind"
+          } >> "$GITHUB_OUTPUT"
+
+  verify-app:
+    needs: resolve
+    if: needs.resolve.outputs.kind == 'app' || needs.resolve.outputs.kind == 'desktop'
+    name: Verify ${{ needs.resolve.outputs.tag }}
+    runs-on: ubuntu-24.04
+    # Includes waiting for the release commit's main CI run, which starts with
+    # the same merge and whose macOS GeoSpec producer takes over an hour.
+    timeout-minutes: 300
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout the release
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Require a release application at the released version
+        env:
+          PROJECT: ${{ needs.resolve.outputs.project }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          pnpm nx show project "$PROJECT" --json > "$RUNNER_TEMP/project.json"
+          jq -e '.tags | index("release:app")' "$RUNNER_TEMP/project.json" > /dev/null \
+            || { echo "::error::$PROJECT is not tagged release:app"; exit 1; }
+          root=$(jq -r .root "$RUNNER_TEMP/project.json")
+          actual=$(jq -r .version "$root/package.json")
+          test "$actual" = "$VERSION" \
+            || { echo "::error::$root/package.json is $actual, the tag says $VERSION"; exit 1; }
+
+      # The UI, desktop and API builds need the GeoSpec engine products, which
+      # only main CI's macOS producer makes. Waiting for that run also means a
+      # release is built only once main is green on its commit.
+      - name: Take the GeoSpec artifact from the release commit's main CI run
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          wait-minutes: '180'
+          github-token: ${{ github.token }}
+
+      - name: Lint, typecheck, test and build the release
+        env:
+          PROJECT: ${{ needs.resolve.outputs.project }}
+        run: pnpm nx run-many -t lint typecheck test build --projects="$PROJECT" --parallel=2
+
+  # OCCT (LGPL-2.1 with the Open CASCADE exception) is compiled into the GeoSpec
+  # engine that the UI serves as Wasm and the desktop app bundles, so each UI
+  # and desktop release carries the complete source and relink kit, the OCCT
+  # licence and exception, and the GeoSpec notices as release assets. The kit
+  # comes from the release commit's main CI run and must match the receipt in
+  # packages/geospec-engine-native/licenses/SOURCE-RELINK.json.
+  source-kit:
+    needs: [resolve, verify-app]
+    if: needs.resolve.outputs.project == 'ui' || needs.resolve.outputs.project == 'desktop'
+    name: Attach the GeoSpec source and relink kit
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Checkout the release
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Take the GeoSpec artifact from the release commit's main CI run
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          github-token: ${{ github.token }}
+
+      - name: Check the kit against its receipt
+        run: |
+          set -euo pipefail
+          receipt=packages/geospec-engine-native/licenses/SOURCE-RELINK.json
+          name=$(jq -r .artifact.fileName "$receipt")
+          kit="out/artifacts/geospec-native-engine/ci/assembly/tarballs/$name"
+          expected=$(jq -r .artifact.sha256 "$receipt")
+          actual=$(sha256sum "$kit" | cut -d' ' -f1)
+          if [ "$actual" != "$expected" ]; then
+            echo "::error::$name is $actual; SOURCE-RELINK.json records $expected."
+            exit 1
+          fi
+          mkdir -p "$RUNNER_TEMP/source-kit"
+          licenses=packages/geospec-engine-native/licenses
+          cp "$kit" "$RUNNER_TEMP/source-kit/"
+          cp "$licenses/OCCT-LGPL-2.1.txt" "$licenses/OCCT-LGPL-exception.txt" "$RUNNER_TEMP/source-kit/"
+          cp "$licenses/NOTICE.txt" "$RUNNER_TEMP/source-kit/GeoSpec-NOTICE.txt"
+          cp "$licenses/THIRD-PARTY-NOTICES.txt" "$RUNNER_TEMP/source-kit/GeoSpec-THIRD-PARTY-NOTICES.txt"
+          cp "$licenses/SOURCE-RELINK.md" "$RUNNER_TEMP/source-kit/GeoSpec-SOURCE-RELINK.md"
+
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Attach the kit and notices
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        working-directory: ${{ runner.temp }}/source-kit
+        run: gh release upload "$TAG" ./* --clobber
+
+  desktop-macos:
+    needs: [resolve, verify-app]
+    if: needs.resolve.outputs.kind == 'desktop'
+    name: Package macOS (signed)
+    runs-on: macos-15
+    timeout-minutes: 240
+    environment:
+      name: desktop
+    env:
+      GEOSPEC_WORKERS: 1
+      TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos
+    steps:
+      - name: Checkout the release
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+        with:
+          node-version: '24.10.0'
+
+      # The GeoSpec native payload is produced on this host, as publish.yml does.
+      - name: Setup producer Python
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.12.14'
+
+      - name: Setup selected CPython 3.13 tooling
+        id: python313
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.13.14'
+          update-environment: false
+
+      - name: Setup selected CPython 3.14 tooling
+        id: python314
+        uses: actions/setup-python@ece7cb06caefa5fff74198d8649806c4678c61a1 # v6
+        with:
+          python-version: '3.14.7'
+          update-environment: false
+
+      - name: Check host, capacity and installed tools
+        run: |
+          test "$(uname -s)" = Darwin
+          test "$(uname -m)" = arm64
+          node --input-type=module -e 'import {statfsSync} from "node:fs"; const s=statfsSync("."); const available=s.bavail*s.bsize; const required=19*1024**3; console.log({available,required}); if(available<required) throw new Error("Desktop packaging capacity unavailable");'
+          cmake --version
+          ninja --version
+          xcrun --find clang++
+
+      - name: Provision pinned Python wrapper tooling
+        env:
+          GEOSPEC_PYTHON313: ${{ steps.python313.outputs.python-path }}
+          GEOSPEC_PYTHON314: ${{ steps.python314.outputs.python-path }}
+        run: |
+          python3 - <<'PYTHON'
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tomllib
+
+          project = Path('packages/geospec-engine-native/bindings/python/pyproject.toml')
+          requirements = tomllib.loads(project.read_text())['build-system']['requires']
+          assert len(requirements) == 1 and re.fullmatch(r'maturin==[0-9]+\.[0-9]+\.[0-9]+', requirements[0])
+          for selector, name in [('GEOSPEC_PYTHON313', 'python-venv'), ('GEOSPEC_PYTHON314', 'python314-venv')]:
+              environment = Path('node_modules/.cache/geospec-engine-native') / name
+              subprocess.run([os.environ[selector], '-m', 'venv', str(environment)], check=True)
+              subprocess.run([str(environment / 'bin/python'), '-m', 'pip', 'install',
+                              '--disable-pip-version-check', '--only-binary=:all:', '--no-deps', requirements[0]], check=True)
+          PYTHON
+
+      - name: Install the selected native Rust toolchain
+        run: |
+          rustup toolchain install 1.88 --profile minimal
+          rustup run 1.88 rustc --version
+
+      # A throwaway keychain holds the Developer ID identity and the notary
+      # profile for this job only; it is deleted in the last step.
+      - name: Import the Developer ID identity and notary credentials
+        env:
+          MACOS_CERTIFICATE_P12_BASE64: ${{ secrets.MACOS_CERTIFICATE_P12_BASE64 }}
+          MACOS_CERTIFICATE_PASSWORD: ${{ secrets.MACOS_CERTIFICATE_PASSWORD }}
+          APPLE_API_KEY_P8_BASE64: ${{ secrets.APPLE_API_KEY_P8_BASE64 }}
+          APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
+          APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
+          APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+        run: |
+          set -euo pipefail
+          for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_API_KEY_P8_BASE64 \
+            APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_TEAM_ID; do
+            if [ -z "${!name}" ]; then
+              echo "::error::$name is not set on the desktop environment"
+              exit 1
+            fi
+          done
+          keychain="$RUNNER_TEMP/tau-signing.keychain-db"
+          keychain_password=$(openssl rand -hex 24)
+          certificate="$RUNNER_TEMP/developer-id.p12"
+          api_key="$RUNNER_TEMP/AuthKey.p8"
+          printf '%s' "$MACOS_CERTIFICATE_P12_BASE64" | base64 --decode > "$certificate"
+          printf '%s' "$APPLE_API_KEY_P8_BASE64" | base64 --decode > "$api_key"
+          security create-keychain -p "$keychain_password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$keychain_password" "$keychain"
+          security import "$certificate" -k "$keychain" -P "$MACOS_CERTIFICATE_PASSWORD" \
+            -T /usr/bin/codesign -T /usr/bin/security
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$keychain_password" "$keychain" > /dev/null
+          search_list=("$keychain")
+          while IFS= read -r entry; do
+            entry=${entry//\"/}
+            search_list+=("${entry#"${entry%%[![:space:]]*}"}")
+          done < <(security list-keychains -d user)
+          security list-keychains -d user -s "${search_list[@]}"
+          security default-keychain -d user -s "$keychain"
+          rm -f "$certificate"
+          identity=$(security find-identity -v -p codesigning "$keychain" \
+            | sed -nE "s/.*\"(Developer ID Application: .*\($APPLE_TEAM_ID\))\".*/\1/p" | head -1)
+          if [ -z "$identity" ]; then
+            echo "::error::No Developer ID Application identity for team $APPLE_TEAM_ID in the imported certificate"
+            exit 1
+          fi
+          # package-macos.mts notarizes through this keychain profile.
+          xcrun notarytool store-credentials tau-notary --key "$api_key" --key-id "$APPLE_API_KEY_ID" \
+            --issuer "$APPLE_API_ISSUER_ID" --keychain "$keychain"
+          rm -f "$api_key"
+          {
+            echo "TAU_CODESIGN_IDENTITY=$identity"
+            echo "TAU_NOTARYTOOL_PROFILE=tau-notary"
+            echo "TAU_SIGNING_KEYCHAIN=$keychain"
+          } >> "$GITHUB_ENV"
+
+      - name: Package, sign and notarize
+        run: pnpm nx run desktop:package-macos-release --parallel=1
+
+      - name: Verify the signed package
+        run: pnpm nx run desktop:verify-macos-release
+
+      - name: Upload the macOS archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-darwin-arm64
+          path: ${{ env.TAU_MACOS_PACKAGE_OUTPUT_ROOT }}/Tau-macos-arm64.zip
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Delete the signing keychain
+        if: always()
+        run: |
+          if [ -n "${TAU_SIGNING_KEYCHAIN:-}" ]; then
+            security delete-keychain "$TAU_SIGNING_KEYCHAIN" || true
+          fi
+
+  desktop-portable:
+    needs: [resolve, verify-app]
+    if: needs.resolve.outputs.kind == 'desktop'
+    name: Package ${{ matrix.platform }} (unsigned)
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - platform: linux-x64
+            runner: ubuntu-24.04
+            target: package-linux
+            archive: Tau-linux-x64.tar.gz
+          - platform: win32-x64
+            runner: windows-2025
+            target: package-windows
+            archive: Tau-win32-x64.zip
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 120
+    permissions:
+      contents: read
+      actions: read
+    env:
+      TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
+    steps:
+      - name: Checkout the release
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: refs/tags/${{ needs.resolve.outputs.tag }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      - name: Take the GeoSpec artifact from the release commit's main CI run
+        uses: ./.github/actions/geospec-artifact-from-main
+        with:
+          github-token: ${{ github.token }}
+
+      # prepare-build123d-python resolves its wheels with uv on both hosts;
+      # prepare-git builds git on Linux against libcurl and zlib.
+      - name: Install packaging tools
+        shell: bash
+        run: |
+          set -euo pipefail
+          pipx install uv
+          uv --version
+          if [ "$RUNNER_OS" = Linux ]; then
+            sudo apt-get update -qq
+            sudo apt-get install -y -qq libcurl4-openssl-dev zlib1g-dev
+          fi
+
+      # On Windows the archive and the Python payload use the inbox bsdtar,
+      # which must come before Git Bash's GNU tar on PATH.
+      - name: Package
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [ "$RUNNER_OS" = Windows ]; then
+            export PATH="/c/Windows/System32:$PATH"
+          fi
+          pnpm nx run "desktop:${{ matrix.target }}" --parallel=1
+
+      - name: Upload the archive
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: desktop-${{ matrix.platform }}
+          path: ${{ env.TAU_DESKTOP_PACKAGE_OUTPUT_ROOT }}/${{ matrix.archive }}
+          if-no-files-found: error
+          retention-days: 7
+
+  desktop-publish:
+    needs: [resolve, desktop-macos, desktop-portable, source-kit]
+    if: needs.resolve.outputs.kind == 'desktop'
+    name: Attach assets and publish the update feeds
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Download the archives
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          pattern: desktop-*
+          path: assets
+          merge-multiple: true
+
+      - name: Attach the archives and update feeds
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+          VERSION: ${{ needs.resolve.outputs.version }}
+        run: |
+          set -euo pipefail
+          cd assets
+          sha256sum Tau-* > SHA256SUMS.txt
+          published=$(gh release view "$TAG" --json publishedAt --jq .publishedAt)
+          notes=$(gh release view "$TAG" --json body --jq .body)
+          encoded_tag=$(jq -rn --arg tag "$TAG" '$tag | @uri')
+          base="https://github.com/${GH_REPO}/releases/download/${encoded_tag}"
+          # One feed per platform, in the Squirrel.Mac JSON shape the desktop
+          # updater reads from the latest release (apps/desktop/src/main/updater.ts).
+          for pair in darwin-arm64:Tau-macos-arm64.zip linux-x64:Tau-linux-x64.tar.gz win32-x64:Tau-win32-x64.zip; do
+            platform=${pair%%:*}
+            archive=${pair#*:}
+            jq -n --arg version "$VERSION" --arg date "$published" --arg notes "$notes" \
+              --arg url "$base/$archive" --arg name "$TAG" \
+              '{currentRelease: $version, releases: [{version: $version,
+                updateTo: {version: $version, pub_date: $date, notes: $notes, name: $name, url: $url}}]}' \
+              > "desktop-update-${platform}.json"
+          done
+          gh release upload "$TAG" Tau-* SHA256SUMS.txt desktop-update-*.json --clobber
+
+      # Installed apps poll /releases/latest/download/desktop-update-<platform>.json,
+      # so marking this release latest is the moment the update goes out.
+      - name: Mark the release latest
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        run: gh release edit "$TAG" --latest

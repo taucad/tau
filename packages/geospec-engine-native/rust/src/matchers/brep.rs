@@ -1512,7 +1512,7 @@ fn evaluate_topology(
                 "Exact topology counts do not match: {}.",
                 failures.join("; ")
             ),
-            "Correct the model, or widen the declared topology-count expectation.",
+            "Correct the model or export to match the declared topology-count expectation.",
             Json::object([
                 ("failures", strings_json(&failures)),
                 ("counts", measured.clone()),
@@ -1956,7 +1956,7 @@ fn expected_planar(expected: &PlanarExpectation) -> FeatureDecision {
                 number(expected.offset),
                 number(expected.tolerance)
             ),
-            "Check the declared normal/offset against the exported frame, or widen the tolerance.",
+            "Correct the model or exported frame to match the declared normal and offset; preserve the authored tolerance.",
             "planarFaces",
             Json::Array(features.planar.iter().map(planar_json).collect()),
             matches,
@@ -1985,7 +1985,7 @@ fn expected_cylinder(expected: &CylindricalExpectation) -> FeatureDecision {
                 expected.axis.as_str(),
                 number(expected.tolerance)
             ),
-            "Check the declared radius/axis against the export, or widen the tolerance.",
+            "Correct the model or export to match the declared radius and axis; preserve the authored tolerance.",
             "cylindricalFaces",
             Json::Array(features.cylinders.iter().map(cylinder_json).collect()),
             matches,
@@ -2018,7 +2018,7 @@ fn expected_hole(expected: &HoleExpectation) -> FeatureDecision {
                 "No circular hole matches diameter {} within {} mm.",
                 number(expected.diameter), number(expected.tolerance)
             ),
-            "Check the declared diameter/axis/through-ness against the export, or widen the tolerance.",
+            "Correct the model or export to match the declared diameter, axis, and through-ness; preserve the authored tolerance.",
             "circularHoles",
             Json::Array(features.holes.iter().map(hole_json).collect()),
             matches,
@@ -2052,7 +2052,7 @@ fn expected_pattern(expected: &PatternExpectation) -> FeatureDecision {
                 "No circular-hole pattern has {} holes of diameter {} within {} mm.",
                 expected.count, number(expected.hole_diameter), number(expected.tolerance)
             ),
-            "Check the declared count/diameter/bolt circle against the export, or widen the tolerance — a pattern splits when consecutive holes sit further apart than the pad separation gap.",
+            "Correct the model or export to match the declared count, diameter, and bolt circle; preserve the authored tolerance — a pattern splits when consecutive holes sit further apart than the pad separation gap.",
             "circularHolePatterns",
             Json::Array(features.patterns.iter().map(pattern_json).collect()),
             matches,
@@ -2140,7 +2140,7 @@ fn evaluate_edge_treatment(prepared: &Prepared, context: &mut EvaluationContext<
                     number(expected.tolerance)
                 )
             },
-            "Check the source-owned selection and nominal metric against the export, or widen the tolerance.",
+            "Correct the model or export to match the source-owned selection and declared nominal metric; preserve the authored tolerance.",
             Json::object([
                 ("expected", expected.to_json(key)),
                 ("mismatchKind", Json::string(mismatch_kind)),

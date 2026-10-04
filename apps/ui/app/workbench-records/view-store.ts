@@ -6,6 +6,8 @@
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
 import type { WorkbenchView } from '@taucad/workbench';
 import type { CheckedFileWriteResult } from '@taucad/types';
+import { createRecordHealth, isPotentiallyApplied } from '#workbench-records/record-health.js';
+import type { RecordHealth } from '#workbench-records/record-health.js';
 
 type Files = Readonly<{
   exists: (path: string) => Promise<boolean>;
@@ -102,17 +104,22 @@ export function createWorkbenchViewStore(
     files: Files;
     onChange: (state: ViewRecordState, source: 'read' | 'write', locallyAuthored: ViewRecordPatch | undefined) => void;
     onError: (error: unknown) => void;
+    onHealth?: (health: RecordHealth) => void;
     /** Milliseconds. */
     editDebounce?: number;
   }>,
 ): Readonly<{
   read: (notify?: boolean) => Promise<boolean>;
+  /** *Try again* after reads stopped: a fresh set of attempts. */
+  retryRead: () => Promise<boolean>;
   edit: (next: WorkbenchView) => Promise<boolean>;
   ensure: (seed: WorkbenchView, eligible: () => boolean) => Promise<boolean>;
-  reset: (next: WorkbenchView) => Promise<boolean>;
+  /** Replace a refused record; `reviewed` is the exact refused bytes the person saw, and a newer file refuses the reset. */
+  reset: (next: WorkbenchView, reviewed?: Uint8Array<ArrayBuffer> | null) => Promise<boolean>;
   flush: () => Promise<boolean>;
   dispose: () => void;
   snapshot: () => ViewRecordState;
+  health: () => RecordHealth;
   ready: () => boolean;
 }> {
   const path = `${input.root}/${workbenchPaths.view(input.viewId)}`;
@@ -150,6 +157,14 @@ export function createWorkbenchViewStore(
     bytes: Uint8Array<ArrayBuffer>;
     patch: ViewRecordPatch | undefined;
   }>();
+  /** A write whose reply was lost: it may be on disk, so the next write reads first and keeps it for attribution. */
+  let unresolved: { bytes: Uint8Array<ArrayBuffer>; patch: ViewRecordPatch | undefined } | undefined;
+  const health = createRecordHealth({
+    onHealth: input.onHealth,
+    readAgain: () => {
+      void read();
+    },
+  });
   let queuedEdit:
     | {
         next: WorkbenchView;
@@ -212,7 +227,7 @@ export function createWorkbenchViewStore(
     }
     observed = true;
     if (bytes === null) {
-      state = { ...state, bytes: null, refusal: undefined };
+      state = { record: undefined, bytes: null, refusal: undefined };
     } else {
       const result = workbenchRecords.view.read(bytes);
       state =
@@ -225,7 +240,7 @@ export function createWorkbenchViewStore(
             };
     }
     input.onChange(state, source, locallyAuthored);
-    if (source === 'read' && state.record && editSequence === settledSequence && !deferred) {
+    if (source === 'read' && !state.refusal && editSequence === settledSequence && !deferred) {
       intended = state.record;
     }
   };
@@ -239,14 +254,20 @@ export function createWorkbenchViewStore(
       if (current === generation && !closed()) {
         const recovered = readError;
         readError = false;
-        const ownWrite = bytes && [...inFlightWriteBytes].find((written) => sameBytes(written.bytes, bytes));
+        const ownWrite =
+          bytes &&
+          [...inFlightWriteBytes, ...(unresolved ? [unresolved] : [])].find((written) =>
+            sameBytes(written.bytes, bytes),
+          );
         publish(bytes, ownWrite ? 'write' : 'read', notify || recovered, ownWrite?.patch);
+        health.readSucceeded();
       }
       return observed;
     } catch (error) {
       if (current === generation && !closed()) {
         readError = true;
         input.onError(error);
+        health.readFailed(error);
       }
       return false;
     }
@@ -328,9 +349,10 @@ export function createWorkbenchViewStore(
     if (closed()) {
       return 'blocked';
     }
-    if (!observed && !(await read())) {
+    if ((!observed || unresolved) && !(await read())) {
       return 'retry';
     }
+    unresolved = undefined;
     const reset = resetBytes !== undefined;
     if (state.refusal && (!reset || state.refusal.code === 'NEWER_RECORD')) {
       return 'blocked';
@@ -371,6 +393,14 @@ export function createWorkbenchViewStore(
               entryPath: editPatch.entryPath === undefined ? (state.record?.entryPath ?? null) : editPatch.entryPath,
               camera: editPatch.camera ?? state.record?.camera ?? next.camera,
             };
+      if (
+        !reset &&
+        !ensure &&
+        state.record &&
+        workbenchRecords.view.serialize(merged) === workbenchRecords.view.serialize(state.record)
+      ) {
+        return 'saved';
+      }
       const expected = reset ? (resetBytes ?? null) : state.bytes;
       const generationAtWrite = generation;
       try {
@@ -391,9 +421,16 @@ export function createWorkbenchViewStore(
         writes.add(operation);
         activeWrites.set(path, writes);
         let result: CheckedFileWriteResult;
+        health.writeStarted();
         try {
           result = await operation;
+        } catch (error) {
+          if (isPotentiallyApplied(error)) {
+            unresolved = attempted;
+          }
+          throw error;
         } finally {
+          health.writeSettled();
           inFlightWriteBytes.delete(attempted);
           writes.delete(operation);
           if (writes.size === 0) {
@@ -431,11 +468,19 @@ export function createWorkbenchViewStore(
         }
       } catch (error) {
         input.onError(error);
+        health.writeFailed(error);
         return 'retry';
       }
     }
-    input.onError(new Error(`The view ${input.viewId} changed while it was being saved. Try again.`));
+    const conflicted = new Error(`The view ${input.viewId} changed while it was being saved. Try again.`);
+    input.onError(conflicted);
+    health.writeFailed(conflicted);
     return 'retry';
+  };
+  const settleIntent = (): void => {
+    if (!deferred && !queuedEdit) {
+      health.intentSettled();
+    }
   };
   const retry = (): void => {
     if (closed() || !deferred || retryTimer) {
@@ -452,6 +497,7 @@ export function createWorkbenchViewStore(
           if (status === 'saved') {
             deferred = undefined;
             retryDelay = 250;
+            settleIntent();
           } else if (status === 'retry') {
             retryDelay = Math.min(retryDelay * 2, 8000);
             retry();
@@ -469,6 +515,7 @@ export function createWorkbenchViewStore(
         if (saved) {
           deferred = undefined;
           retryDelay = 250;
+          settleIntent();
         } else {
           const remaining = combine(deferred, patch);
           deferred = status === 'retry' || Object.keys(remaining).length > 0 ? remaining : undefined;
@@ -536,11 +583,11 @@ export function createWorkbenchViewStore(
       pending = result;
       return result;
     },
-    reset: async (next) => {
+    reset: async (next, reviewedBytes) => {
       if (closed() || state.refusal?.code !== 'INVALID_RECORD') {
         return false;
       }
-      const reviewed = state.bytes;
+      const reviewed = reviewedBytes === undefined ? state.bytes : reviewedBytes;
       await drainEdit();
       const sequence = ++editSequence;
       const result = pending
@@ -551,6 +598,7 @@ export function createWorkbenchViewStore(
           }
           deferred = undefined;
           settledSequence = sequence;
+          settleIntent();
           if (sequence === editSequence) {
             intended = state.record;
           }
@@ -567,12 +615,18 @@ export function createWorkbenchViewStore(
       }
       await pending;
       if (!deferred) {
+        if (unresolved && !(await read())) {
+          return false;
+        }
+        unresolved = undefined;
+        settleIntent();
         return true;
       }
       const status = await write(intended ?? state.record!, deferred);
       if (status === 'saved') {
         deferred = undefined;
         retryDelay = 250;
+        settleIntent();
         return true;
       }
       if (status === 'retry') {
@@ -586,6 +640,7 @@ export function createWorkbenchViewStore(
       }
       disposed = true;
       generation++;
+      health.dispose();
       if (registered) {
         const remaining = (lifetimeOwners.get(viewEpoch) ?? 1) - 1;
         if (remaining === 0 && viewLifetimes.get(path) === viewEpoch) {
@@ -603,6 +658,11 @@ export function createWorkbenchViewStore(
       }
     },
     snapshot: () => state,
+    health: () => health.health(),
+    retryRead: async () => {
+      health.restartReads();
+      return read(true);
+    },
     ready: () => observed,
   };
 }

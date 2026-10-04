@@ -1,4 +1,3 @@
-diff --git a/API/PicoGK.h b/API/PicoGK.h
 --- a/API/PicoGK.h
 +++ b/API/PicoGK.h
 @@ -747,6 +747,97 @@
@@ -101,7 +100,6 @@ diff --git a/API/PicoGK.h b/API/PicoGK.h
 +#undef TAU_NOEXCEPT
 +
 +#endif
-diff --git a/API/PicoGKApiTypes.h b/API/PicoGKApiTypes.h
 --- a/API/PicoGKApiTypes.h
 +++ b/API/PicoGKApiTypes.h
 @@ -54,65 +54,70 @@
@@ -206,63 +204,20 @@ diff --git a/API/PicoGKApiTypes.h b/API/PicoGKApiTypes.h
 +} TauSliceInfo;
 +
  #endif
-diff --git a/CMakeLists.txt b/CMakeLists.txt
---- a/CMakeLists.txt
-+++ b/CMakeLists.txt
-@@ -234,14 +234,13 @@
-     COMMENT "Copying library files to Dist folder"
- )
+--- a/API/PicoGKBuild.h
++++ b/API/PicoGKBuild.h
+@@ -1,7 +1,7 @@
+ #ifndef PICOGK_BUILD_H
+ #define PICOGK_BUILD_H
  
--add_custom_command(
--    TARGET ${LIB_NAME} PRE_BUILD
--    COMMAND ${CMAKE_COMMAND} -E echo "Creating build headers..."
--    COMMAND ${CMAKE_COMMAND} 	-DAPIDIR=${CMAKE_CURRENT_SOURCE_DIR}/API 
--    							-DLIB_VERSION=${LIB_VERSION}
--    							-DLIB_NAME=${LIB_NAME}
--    							-P ${CMAKE_CURRENT_SOURCE_DIR}/CMake_Utils/PicoGKBuildHeader.cmake
--    COMMENT "Create build headers"
-+# Generate before compilation; PRE_BUILD runs too late with Ninja/Make.
-+execute_process(
-+    COMMAND ${CMAKE_COMMAND} -DAPIDIR=${CMAKE_CURRENT_SOURCE_DIR}/API
-+                            -DLIB_VERSION=${LIB_VERSION}
-+                            -DLIB_NAME=${LIB_NAME}
-+                            -P ${CMAKE_CURRENT_SOURCE_DIR}/CMake_Utils/PicoGKBuildHeader.cmake
-+    COMMAND_ERROR_IS_FATAL ANY
- )
+-#define PICOGK_BUILD       "2026-06-05 21:31:47"
++#define PICOGK_BUILD       "2026-06-05 13:43:03"
+ #define PICOGK_LIB_VERSION "26.2.0"
+ #define PICOGK_LIB_NAME    "picogk"
  
- 
-diff --git a/CMake_Utils/PicoGKBuildHeader.cmake b/CMake_Utils/PicoGKBuildHeader.cmake
---- a/CMake_Utils/PicoGKBuildHeader.cmake
-+++ b/CMake_Utils/PicoGKBuildHeader.cmake
-@@ -4,7 +4,7 @@
- # Function to generate the PicoGKBuild.h file
- function(generate_build_header)
-     # Get the current date and time
--    string(TIMESTAMP BUILD_DATE_TIME "%Y-%m-%d %H:%M:%S")
-+    string(TIMESTAMP BUILD_DATE_TIME "%Y-%m-%d %H:%M:%S" UTC)
- 
-     # Create the content of the PicoGKBuild.h file
-     set(    BUILD_HEADER_CONTENT
-@@ -15,7 +15,13 @@
- #endif // PICOGK_BUILD_H\n"
-         )
- 
--    file(WRITE "${APIDIR}/PicoGKBuild.h" "${BUILD_HEADER_CONTENT}")
-+    set(BUILD_HEADER_PATH "${APIDIR}/PicoGKBuild.h")
-+    if(EXISTS "${BUILD_HEADER_PATH}")
-+        file(READ "${BUILD_HEADER_PATH}" PREVIOUS_BUILD_HEADER_CONTENT)
-+    endif()
-+    if(NOT PREVIOUS_BUILD_HEADER_CONTENT STREQUAL BUILD_HEADER_CONTENT)
-+        file(WRITE "${BUILD_HEADER_PATH}" "${BUILD_HEADER_CONTENT}")
-+    endif()
- endfunction()
- 
- generate_build_header()
-diff --git a/Source/PicoGKCapture.h b/Source/PicoGKCapture.h
-new file mode 100644
 --- /dev/null
 +++ b/Source/PicoGKCapture.h
-@@ -0,0 +1,19 @@
+@@ -0,0 +1,27 @@
 +// SPDX-License-Identifier: Apache-2.0
 +#ifndef PICOGK_CAPTURE_H
 +#define PICOGK_CAPTURE_H
@@ -275,15 +230,21 @@ new file mode 100644
 +    uint64_t generation = 0;
 +    int32_t kind = -1;
 +    uint64_t identity = 0;
++    uint64_t metadataIdentity = 0;
++    int32_t computeKind = -1;
++    int32_t narrowBand = -1;
++    openvdb::GridBase::Ptr computeGrid;
++    std::vector<char> computeBytes;
++    mutable std::recursive_mutex computeGate;
 +    void TauAccountMemory(TauOwnedMemory& memory) const {
 +        memory.Add(sizeof(TauCapturedGeometry)); memory.Object(mesh); memory.Object(line);
++        std::lock_guard<std::recursive_mutex> hold(computeGate);
++        memory.Grid(computeGrid); memory.Array(computeBytes.capacity(), sizeof(char));
 +    }
 +    int64_t nMemUsage() const { TauOwnedMemory memory; TauAccountMemory(memory); return memory.Bytes(); }
 +};
 +}
 +#endif
-diff --git a/Source/PicoGKCaptureIdentity.h b/Source/PicoGKCaptureIdentity.h
-new file mode 100644
 --- /dev/null
 +++ b/Source/PicoGKCaptureIdentity.h
 @@ -0,0 +1,20 @@
@@ -307,7 +268,6 @@ new file mode 100644
 +}
 +}
 +#endif
-diff --git a/Source/PicoGKGLObjects.h b/Source/PicoGKGLObjects.h
 --- a/Source/PicoGKGLObjects.h
 +++ b/Source/PicoGKGLObjects.h
 @@ -37,6 +37,7 @@
@@ -404,7 +364,6 @@ diff --git a/Source/PicoGKGLObjects.h b/Source/PicoGKGLObjects.h
      GLsizei nVertexCount() const
      {
          return m_oVertexBuffer.nVertexCount();
-diff --git a/Source/PicoGKGLShader.cpp b/Source/PicoGKGLShader.cpp
 --- a/Source/PicoGKGLShader.cpp
 +++ b/Source/PicoGKGLShader.cpp
 @@ -54,39 +54,28 @@
@@ -469,7 +428,6 @@ diff --git a/Source/PicoGKGLShader.cpp b/Source/PicoGKGLShader.cpp
      }
  }
      
-diff --git a/Source/PicoGKGLTexture.cpp b/Source/PicoGKGLTexture.cpp
 --- a/Source/PicoGKGLTexture.cpp
 +++ b/Source/PicoGKGLTexture.cpp
 @@ -40,6 +40,7 @@
@@ -615,7 +573,6 @@ diff --git a/Source/PicoGKGLTexture.cpp b/Source/PicoGKGLTexture.cpp
      
      return bLoadDdsTexture(oBuffer.data(), (int32_t) nSize, eTarget);
  }
-diff --git a/Source/PicoGKGLViewer.cpp b/Source/PicoGKGLViewer.cpp
 --- a/Source/PicoGKGLViewer.cpp
 +++ b/Source/PicoGKGLViewer.cpp
 @@ -121,13 +121,23 @@
@@ -1012,7 +969,6 @@ diff --git a/Source/PicoGKGLViewer.cpp b/Source/PicoGKGLViewer.cpp
  }
  
  uint64_t Viewer::hCreateSideBar(    bool                bLeft,
-diff --git a/Source/PicoGKGLViewer.h b/Source/PicoGKGLViewer.h
 --- a/Source/PicoGKGLViewer.h
 +++ b/Source/PicoGKGLViewer.h
 @@ -36,12 +36,15 @@
@@ -1354,7 +1310,6 @@ diff --git a/Source/PicoGKGLViewer.h b/Source/PicoGKGLViewer.h
          std::map<std::pair<int64_t, int64_t>, std::unique_ptr<ViewPolyLine>>    m_oViewPolyLines;
      };
      
-diff --git a/Source/PicoGKGLViewerManager.cpp b/Source/PicoGKGLViewerManager.cpp
 --- a/Source/PicoGKGLViewerManager.cpp
 +++ b/Source/PicoGKGLViewerManager.cpp
 @@ -38,13 +38,15 @@
@@ -1697,7 +1652,6 @@ diff --git a/Source/PicoGKGLViewerManager.cpp b/Source/PicoGKGLViewerManager.cpp
  }
  
  } // namespace PicoGK
-diff --git a/Source/PicoGKGLViewerManager.h b/Source/PicoGKGLViewerManager.h
 --- a/Source/PicoGKGLViewerManager.h
 +++ b/Source/PicoGKGLViewerManager.h
 @@ -40,11 +40,15 @@
@@ -1765,7 +1719,6 @@ diff --git a/Source/PicoGKGLViewerManager.h b/Source/PicoGKGLViewerManager.h
  };
  
  } // namespace PicoGK
-diff --git a/Source/PicoGKGLViewerObjects.cpp b/Source/PicoGKGLViewerObjects.cpp
 --- a/Source/PicoGKGLViewerObjects.cpp
 +++ b/Source/PicoGKGLViewerObjects.cpp
 @@ -40,14 +40,6 @@
@@ -1968,7 +1921,6 @@ diff --git a/Source/PicoGKGLViewerObjects.cpp b/Source/PicoGKGLViewerObjects.cpp
  }
  
  //
-diff --git a/Source/PicoGKGLViewerShaders.cpp b/Source/PicoGKGLViewerShaders.cpp
 --- a/Source/PicoGKGLViewerShaders.cpp
 +++ b/Source/PicoGKGLViewerShaders.cpp
 @@ -61,8 +61,14 @@
@@ -2062,7 +2014,6 @@ diff --git a/Source/PicoGKGLViewerShaders.cpp b/Source/PicoGKGLViewerShaders.cpp
      gl_Position = mat4VP * vec4(vec3World, 1);
  }
  
-diff --git a/Source/PicoGKGLViewerShaders.h b/Source/PicoGKGLViewerShaders.h
 --- a/Source/PicoGKGLViewerShaders.h
 +++ b/Source/PicoGKGLViewerShaders.h
 @@ -48,6 +48,7 @@
@@ -2090,11 +2041,9 @@ diff --git a/Source/PicoGKGLViewerShaders.h b/Source/PicoGKGLViewerShaders.h
      GLint m_nUmat4VP                    =-1;
      GLint m_nUmat4OtoW                  =-1;
      GLint m_nUvec3Eye                   =-1;
-diff --git a/Source/PicoGKGridState.h b/Source/PicoGKGridState.h
-new file mode 100644
 --- /dev/null
 +++ b/Source/PicoGKGridState.h
-@@ -0,0 +1,310 @@
+@@ -0,0 +1,311 @@
 +// SPDX-License-Identifier: Apache-2.0
 +#ifndef PICOGK_GRID_STATE_H
 +#define PICOGK_GRID_STATE_H
@@ -2171,6 +2120,7 @@ new file mode 100644
 +    std::recursive_mutex gate;
 +    std::shared_ptr<TauSurfaceGeneration> generation = std::make_shared<TauSurfaceGeneration>();
 +    std::unique_ptr<TauRayAcceleration> ray;
++    uint64_t metadataIdentity = TauNextGeneration();
 +    bool cacheable = true;
 +    std::shared_ptr<TauCaptureCounters> counters;
 +    explicit TauGridState(const openvdb::GridBase* value) : key(value) {}
@@ -2405,7 +2355,6 @@ new file mode 100644
 +
 +}
 +#endif
-diff --git a/Source/PicoGKHandleManager.h b/Source/PicoGKHandleManager.h
 --- a/Source/PicoGKHandleManager.h
 +++ b/Source/PicoGKHandleManager.h
 @@ -37,6 +37,7 @@
@@ -2461,14 +2410,14 @@ diff --git a/Source/PicoGKHandleManager.h b/Source/PicoGKHandleManager.h
      }
  
  protected:
-diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
 --- a/Source/PicoGKLattice.h
 +++ b/Source/PicoGKLattice.h
-@@ -37,9 +37,12 @@
+@@ -37,9 +37,13 @@
  #define PICOGKLATTICE_H_
  
  #include "PicoGKTypes.h"
 +#include "PicoGKOwnedMemory.h"
++#include "PicoGKCaptureIdentity.h"
 +#include <mutex>
  #include <memory>
  #include <algorithm>
@@ -2477,7 +2426,7 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
  
  namespace PicoGK
  {
-@@ -53,12 +56,21 @@
+@@ -53,12 +57,21 @@
                      float fRadius)
      : m_vecC(vecCenter)
      {
@@ -2499,7 +2448,16 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
      inline float fSdValue(const Vector3& vecSample) const
      {
          return (vecSample - m_vecC).fLength() - m_fRad;
-@@ -94,11 +106,34 @@
+@@ -71,7 +84,7 @@
+     inline const BBox3& oBBox() const       {return m_oBBox;}
+     
+ protected:
+-    
++    friend class Lattice;
+     Vector3 m_vecC;
+     float   m_fRad;
+     BBox3   m_oBBox;
+@@ -94,11 +107,34 @@
          m_fRadE(fRadiusB),
          m_bRoundCap(bRoundCap)
      {
@@ -2536,7 +2494,7 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
      inline float fSdValue(const Vector3& vecSample) const
      {
          if (m_bRoundCap)
-@@ -114,7 +149,8 @@
+@@ -114,7 +150,8 @@
      inline const BBox3& oBBox() const       {return m_oBBox;}
      
  protected:
@@ -2546,7 +2504,7 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
      float fSdvRoundCone(const Vector3& p) const
      {
          Vector3 b = m_vecE;
-@@ -127,6 +163,10 @@
+@@ -127,6 +164,10 @@
          float l2 = ba.fDot(ba);
          float rr = r1 - r2;
          float a2 = l2 - rr * rr;
@@ -2557,7 +2515,7 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
          float il2 = 1.0f / l2;
          
          // sampling dependant computations
-@@ -183,6 +223,7 @@
+@@ -183,6 +224,7 @@
      float   m_fRadS;
      float   m_fRadE;
      bool    m_bRoundCap;
@@ -2565,21 +2523,36 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
      BBox3   m_oBBox;
  };
  
-@@ -191,17 +232,40 @@
+@@ -191,17 +233,56 @@
  public:
      PKSHAREDPTR(Lattice);
      
 +    Lattice() = default;
-+    Lattice(const Lattice& source) {
++    Lattice(const Lattice& source) : m_tauGeneration(0) {
 +        std::lock_guard<std::recursive_mutex> owner(source.m_tauGate);
-+        m_oBeams = source.m_oBeams; m_oSpheres = source.m_oSpheres; m_oBBox = source.m_oBBox;
++        m_oBeams = source.m_oBeams; m_oSpheres = source.m_oSpheres; m_oBBox = source.m_oBBox; m_tauGeneration=source.m_tauGeneration;
 +    }
 +    Lattice& operator=(const Lattice& source) {
 +        if (this != &source) {
 +            std::scoped_lock owner(m_tauGate, source.m_tauGate);
-+            m_oBeams = source.m_oBeams; m_oSpheres = source.m_oSpheres; m_oBBox = source.m_oBBox;
++            auto beams=source.m_oBeams;auto spheres=source.m_oSpheres;
++            m_oBeams.swap(beams);m_oSpheres.swap(spheres);m_oBBox=source.m_oBBox;m_tauGeneration=source.m_tauGeneration;
 +        }
 +        return *this;
++    }
++    uint64_t TauGeneration()const{std::lock_guard<std::recursive_mutex> owner(m_tauGate);return m_tauGeneration;}
++    std::vector<char> TauComputeContent(uint64_t expected,size_t maximum,size_t working)const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
++        if(expected!=m_tauGeneration)return {};
++        if(m_oSpheres.size()>UINT32_MAX||m_oBeams.size()>UINT32_MAX)throw std::length_error("compute lattice counts");
++        const uint64_t size=16+uint64_t(m_oSpheres.size())*16+uint64_t(m_oBeams.size())*33;
++        if(size>maximum||size>working)throw std::length_error("compute lattice content budget");
++        std::vector<char> bytes(size);size_t at=0;
++        const auto put=[&](const auto& value){std::memcpy(bytes.data()+at,&value,sizeof(value));at+=sizeof(value);};
++        const uint64_t magic=0x313054414c4b5054ULL;put(magic);put(uint32_t(m_oSpheres.size()));put(uint32_t(m_oBeams.size()));
++        for(const auto& sphere:m_oSpheres){put(sphere->m_vecC);put(sphere->m_fRad);}
++        for(const auto& beam:m_oBeams){put(beam->m_vecS);put(beam->m_vecE);put(beam->m_fRadS);put(beam->m_fRadE);put(uint8_t(beam->m_bRoundCap));}
++        return bytes;
 +    }
 +    void TauAccountMemory(TauOwnedMemory& memory) const {
 +        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
@@ -2602,13 +2575,14 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
      {
 +        std::lock_guard<std::recursive_mutex> owner(m_tauGate);
          LatticeSphere::Ptr roSphere = std::make_shared<LatticeSphere>(vecCenter, fRadius);
-+        m_oSpheres.push_back(roSphere);
-         m_oBBox.Include(roSphere->oBBox());
--        m_oSpheres.push_back(roSphere);
+-        m_oBBox.Include(roSphere->oBBox());
++        const auto generation=TauNextGeneration();
+         m_oSpheres.push_back(roSphere);
++        m_oBBox.Include(roSphere->oBBox());m_tauGeneration=generation;
      }
   
      void AddBeam(   Vector3 vecS,
-@@ -210,20 +274,22 @@
+@@ -210,20 +291,23 @@
                      float fRadE,
                      bool bRoundCap)
      {
@@ -2636,23 +2610,24 @@ diff --git a/Source/PicoGKLattice.h b/Source/PicoGKLattice.h
 -                                                                    fRadS,
 -                                                                    fRadE,
 -                                                                    bRoundCap);
+-        m_oBBox.Include(roBeam->oBBox());
 +        auto roBeam = std::make_shared<LatticeBeam>(beam);
-+        m_oBeams.push_back(roBeam);
-         m_oBBox.Include(roBeam->oBBox());
--        m_oBeams.push_back(roBeam);
++        const auto generation=TauNextGeneration();
+         m_oBeams.push_back(roBeam);
++        m_oBBox.Include(roBeam->oBBox());m_tauGeneration=generation;
      }
      
      inline const BBox3& oBBox() const
-@@ -242,6 +308,8 @@
+@@ -242,6 +326,9 @@
      }
      
  protected:
 +    friend class Voxels;
 +    mutable std::recursive_mutex m_tauGate;
++    uint64_t m_tauGeneration=TauNextGeneration();
      std::vector<LatticeBeam::Ptr>   m_oBeams;
      std::vector<LatticeSphere::Ptr> m_oSpheres;
      BBox3                           m_oBBox;
-diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 --- a/Source/PicoGKLibrary.cpp
 +++ b/Source/PicoGKLibrary.cpp
 @@ -35,6 +35,8 @@
@@ -4003,7 +3978,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
  }
  
  PICOGK_API PKGUI Viewer_SideBar_hCreate(    PKVIEWER        hThis,
-@@ -1773,26 +1775,687 @@
+@@ -1773,26 +1775,688 @@
                                              PKColorFloat    clrBackground,
                                              PKColorFloat    clrBackgroundHv)
  {
@@ -4698,7 +4673,7 @@ diff --git a/Source/PicoGKLibrary.cpp b/Source/PicoGKLibrary.cpp
 +        source->RemoveValue(*position);
 +    });
 +}
-diff --git a/Source/PicoGKLibraryMgr.h b/Source/PicoGKLibraryMgr.h
++#include "TauComputeBridge.inc"
 --- a/Source/PicoGKLibraryMgr.h
 +++ b/Source/PicoGKLibraryMgr.h
 @@ -48,6 +48,7 @@
@@ -4753,7 +4728,6 @@ diff --git a/Source/PicoGKLibraryMgr.h b/Source/PicoGKLibraryMgr.h
              HandleManager<PicoGK::Mesh>         m_oMeshes       {"Meshes"};
              HandleManager<PicoGK::Lattice>      m_oLattices     {"Lattices"};
              HandleManager<PicoGK::PolyLine>     m_oPolyLines    {"PolyLines"};
-diff --git a/Source/PicoGKMesh.h b/Source/PicoGKMesh.h
 --- a/Source/PicoGKMesh.h
 +++ b/Source/PicoGKMesh.h
 @@ -37,7 +37,14 @@
@@ -4780,7 +4754,7 @@ diff --git a/Source/PicoGKMesh.h b/Source/PicoGKMesh.h
 -    
 -    Mesh& operator=(const Mesh&) = default;
 -    
-+    Mesh(const Mesh& source) {
++    Mesh(const Mesh& source) : m_tauData(nullptr) {
 +        std::lock_guard<std::recursive_mutex> lock(source.m_tauGate);
 +        m_tauData = source.m_tauData;
 +    }
@@ -5036,7 +5010,7 @@ diff --git a/Source/PicoGKMesh.h b/Source/PicoGKMesh.h
          Vector3 vec1(0,0,0);
          Vector3 vec2(0,0,0);
          Vector3 vec3(0,0,0);
-@@ -153,27 +316,60 @@
+@@ -153,27 +316,61 @@
      
      inline BBox3 oBBox() const
      {
@@ -5065,6 +5039,7 @@ diff --git a/Source/PicoGKMesh.h b/Source/PicoGKMesh.h
 -    std::vector<Triangle>   m_oTriangles;
 -    int64_t                 m_nMemUsage = 0;
 -    
++    friend class Voxels;
 +    struct Data {
 +        BBox3 bounds;
 +        std::vector<Vector3> vertices;
@@ -5105,8 +5080,6 @@ diff --git a/Source/PicoGKMesh.h b/Source/PicoGKMesh.h
      bool bIsPointInTriangle(    const Vector3& vecSurfacePoint,
                                  const Vector3& vecVertex1,
                                  const Vector3& vecVertex2,
-diff --git a/Source/PicoGKOwnedMemory.h b/Source/PicoGKOwnedMemory.h
-new file mode 100644
 --- /dev/null
 +++ b/Source/PicoGKOwnedMemory.h
 @@ -0,0 +1,114 @@
@@ -5224,7 +5197,6 @@ new file mode 100644
 +};
 +}
 +#endif
-diff --git a/Source/PicoGKPolyLine.h b/Source/PicoGKPolyLine.h
 --- a/Source/PicoGKPolyLine.h
 +++ b/Source/PicoGKPolyLine.h
 @@ -37,7 +37,11 @@
@@ -5353,7 +5325,6 @@ diff --git a/Source/PicoGKPolyLine.h b/Source/PicoGKPolyLine.h
  };
  }
  
-diff --git a/Source/PicoGKTypes.h b/Source/PicoGKTypes.h
 --- a/Source/PicoGKTypes.h
 +++ b/Source/PicoGKTypes.h
 @@ -91,7 +91,7 @@
@@ -5374,7 +5345,6 @@ diff --git a/Source/PicoGKTypes.h b/Source/PicoGKTypes.h
      {
      }
  
-diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
 --- a/Source/PicoGKVdbField.h
 +++ b/Source/PicoGKVdbField.h
 @@ -38,6 +38,11 @@
@@ -5861,7 +5831,6 @@ diff --git a/Source/PicoGKVdbField.h b/Source/PicoGKVdbField.h
      }
  };
  
-diff --git a/Source/PicoGKVdbFile.h b/Source/PicoGKVdbFile.h
 --- a/Source/PicoGKVdbFile.h
 +++ b/Source/PicoGKVdbFile.h
 @@ -38,6 +38,8 @@
@@ -5882,7 +5851,7 @@ diff --git a/Source/PicoGKVdbFile.h b/Source/PicoGKVdbFile.h
          }
          
          catch (const openvdb::IoError& e)
-@@ -76,55 +78,110 @@
+@@ -76,55 +78,131 @@
          m_roGrids = std::make_shared<openvdb::GridPtrVec>();
      }
      
@@ -5893,6 +5862,27 @@ diff --git a/Source/PicoGKVdbFile.h b/Source/PicoGKVdbFile.h
 -    }
 -    
 +        for (const auto& grid : *m_roGrids) m_tauStates.push_back(TauStateFor(grid, trusted));
++        // File instances retain distinct headers with a shared mutable tree. Grid-local
++        // revisions cannot invalidate sibling headers; keep ordinary alias semantics
++        // and bypass retained geometry/action caches for every shared-tree group.
++        std::unordered_map<const openvdb::tree::TreeBase*, size_t> trees;
++        for (size_t i = 0; i < m_roGrids->size(); ++i) {
++            const auto [entry, first] = trees.emplace((*m_roGrids)[i]->constBaseTreePtr().get(), i);
++            if (!first) {
++                TauStateFor((*m_roGrids)[entry->second], false);
++                TauStateFor((*m_roGrids)[i], false);
++            }
++        }
++    }
++
++    template<class Encode> auto TauEncodeOwned(Encode encode) const {
++        std::lock_guard<std::recursive_mutex> owner(m_tauOwner);
++        auto states=m_tauStates;
++        std::sort(states.begin(),states.end(),[](const auto& a,const auto& b){return std::less<TauGridState*>{}(a.get(),b.get());});
++        states.erase(std::unique(states.begin(),states.end()),states.end());
++        std::vector<std::unique_lock<std::recursive_mutex>> locks;
++        locks.reserve(states.size());for(const auto& state:states)locks.emplace_back(state->gate);
++        return encode(*m_roGrids);
 +    }
 +
 +    void TauAccountMemory(TauOwnedMemory& memory) const {
@@ -6002,7 +5992,7 @@ diff --git a/Source/PicoGKVdbFile.h b/Source/PicoGKVdbFile.h
          
          if (roGrid->isType<openvdb::FloatGrid>())
          {
-@@ -152,6 +209,12 @@
+@@ -152,6 +230,12 @@
      
      bool bSaveToFile(std::string strFileName)
      {
@@ -6015,7 +6005,7 @@ diff --git a/Source/PicoGKVdbFile.h b/Source/PicoGKVdbFile.h
          std::vector<openvdb::GridBase::Ptr> oGrids;
          for (const auto& roGrid : *m_roGrids)
          {
-@@ -179,8 +242,10 @@
+@@ -179,8 +263,10 @@
      }
  
  protected:
@@ -6026,7 +6016,6 @@ diff --git a/Source/PicoGKVdbFile.h b/Source/PicoGKVdbFile.h
  };
  }
  #endif
-diff --git a/Source/PicoGKVdbMeta.h b/Source/PicoGKVdbMeta.h
 --- a/Source/PicoGKVdbMeta.h
 +++ b/Source/PicoGKVdbMeta.h
 @@ -55,26 +55,31 @@
@@ -6098,11 +6087,13 @@ diff --git a/Source/PicoGKVdbMeta.h b/Source/PicoGKVdbMeta.h
          openvdb::Metadata::Ptr roMeta = (*m_roMetaMap)[strValueName];
          
          if (roMeta == nullptr)
-@@ -157,12 +166,18 @@
+@@ -157,12 +166,22 @@
      
      void RemoveAt(const std::string& strValueName)
      {
 +        auto metadata = TauReadLock();
++        // Full-metadata reuse has a separate revision from geometry-only captures.
++        if (m_tauState) m_tauState->metadataIdentity = TauNextGeneration();
 +        std::unique_ptr<TauGridMutation> mutation;
 +        if (m_tauState && strValueName == "class") mutation = std::make_unique<TauGridMutation>(m_tauState);
          m_roMetaMap->removeMeta(strValueName);
@@ -6112,32 +6103,38 @@ diff --git a/Source/PicoGKVdbMeta.h b/Source/PicoGKVdbMeta.h
                      const std::string& strValue)
      {
 +        auto metadata = TauReadLock();
++        // Full-metadata reuse has a separate revision from geometry-only captures.
++        if (m_tauState) m_tauState->metadataIdentity = TauNextGeneration();
 +        std::unique_ptr<TauGridMutation> mutation;
 +        if (m_tauState && strValueName == "class") mutation = std::make_unique<TauGridMutation>(m_tauState);
          
          m_roMetaMap->insertMeta(    strValueName,
                                      openvdb::StringMetadata(strValue));
-@@ -171,6 +186,9 @@
+@@ -171,6 +190,11 @@
      void SetValue(  const std::string&  strValueName,
                      float               fValue)
      {
 +        auto metadata = TauReadLock();
++        // Full-metadata reuse has a separate revision from geometry-only captures.
++        if (m_tauState) m_tauState->metadataIdentity = TauNextGeneration();
 +        std::unique_ptr<TauGridMutation> mutation;
 +        if (m_tauState && strValueName == "class") mutation = std::make_unique<TauGridMutation>(m_tauState);
          
          m_roMetaMap->insertMeta(    strValueName,
                                      openvdb::FloatMetadata(fValue));
-@@ -179,6 +197,9 @@
+@@ -179,6 +203,11 @@
      void SetValue(  const std::string&  strValueName,
                      Vector3             vecValue)
      {
 +        auto metadata = TauReadLock();
++        // Full-metadata reuse has a separate revision from geometry-only captures.
++        if (m_tauState) m_tauState->metadataIdentity = TauNextGeneration();
 +        std::unique_ptr<TauGridMutation> mutation;
 +        if (m_tauState && strValueName == "class") mutation = std::make_unique<TauGridMutation>(m_tauState);
          m_roMetaMap->insertMeta(    strValueName,
                                      openvdb::Vec3SMetadata(
                                          openvdb::Vec3s( vecValue.X,
-@@ -186,7 +207,14 @@
+@@ -186,7 +215,14 @@
                                                          vecValue.Z)));
      }
      
@@ -6152,7 +6149,6 @@ diff --git a/Source/PicoGKVdbMeta.h b/Source/PicoGKVdbMeta.h
  };
  
  }
-diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 --- a/Source/PicoGKVdbVoxels.h
 +++ b/Source/PicoGKVdbVoxels.h
 @@ -36,7 +36,10 @@
@@ -6174,7 +6170,16 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
  #include "PicoGKTrace.h"
  
  using namespace openvdb;
-@@ -72,23 +76,33 @@
+@@ -58,6 +62,8 @@
+ 
+ namespace PicoGK
+ {
++
++struct TauComputeVoxelAccess;
+ 
+ class Voxels
+ {
+@@ -72,23 +78,33 @@
          m_roGrid            = FloatGrid::create(oVoxelSize.fToMM(nNarrowBand));
          m_roGrid->setGridClass(GRID_LEVEL_SET);
          m_roGrid->setTransform(openvdb::math::Transform::createLinearTransform(oVoxelSize));
@@ -6213,7 +6218,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_CopyConstructor);
          
          m_roGrid = deepCopyTypedGrid<FloatGrid>(oSource.m_roGrid);
-@@ -96,6 +110,8 @@
+@@ -96,6 +112,8 @@
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -6222,7 +6227,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      };
      
      Voxels( VoxelSize oVoxSize,
-@@ -116,6 +132,7 @@
+@@ -116,6 +134,7 @@
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -6230,7 +6235,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      }
      
      Voxels( VoxelSize oVoxSize,
-@@ -142,6 +159,7 @@
+@@ -142,6 +161,7 @@
          
          assert(m_roGrid->getGridClass() == GRID_LEVEL_SET);
          assert(bHasValidPicoGKTransform(m_roGrid));
@@ -6238,7 +6243,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      }
      
      Voxels( VoxelSize oVoxSize,
-@@ -149,133 +167,250 @@
+@@ -149,133 +169,250 @@
              const Mesh& oMesh,
              float fRadius)
      {
@@ -6588,7 +6593,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_Offset);
          
          // Create a clean level set with the extended size narrow band
-@@ -292,6 +427,8 @@
+@@ -292,6 +429,8 @@
      void DoubleOffset(  float fSize1,
                          float fSize2)
      {
@@ -6597,7 +6602,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_DoubleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -309,6 +446,8 @@
+@@ -309,6 +448,8 @@
      
      void TripleOffset(float fSize)
      {
@@ -6606,7 +6611,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          PKTRACE(Voxels_TripleOffset);
          
          // Create a clean level set with the extended size narrow band
-@@ -331,38 +470,63 @@
+@@ -331,38 +472,63 @@
  
      void RenderMesh(const Mesh& oMesh)
      {
@@ -6685,7 +6690,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          Coord xyzMin = oVoxelSize().xyzToVoxels(oBBox.vecMin);
          Coord xyzMax = oVoxelSize().xyzToVoxels(oBBox.vecMax);
-@@ -374,8 +538,17 @@
+@@ -374,8 +540,17 @@
              Vector3 vecSample = oVoxelSize().vecToMM(Coord(x,y,z));
              openvdb::Coord xyz(x,y,z);
              
@@ -6705,7 +6710,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
              
              SetSdValue(&oAccess, xyz, fBackgroundMM(), fValue);
          }
-@@ -387,18 +560,37 @@
+@@ -387,18 +562,37 @@
      {
          PKTRACE(Voxels_IntersectImplicit);
          
@@ -6753,7 +6758,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          oVox.RenderImplicit(oBBoxMM, pfn);
          
-@@ -406,16 +598,105 @@
+@@ -406,16 +600,159 @@
          // implict grid, and use our grid just as the mask
          // Not sure if this is really necessary, but the
          // implicit grid is "perfect"
@@ -6815,7 +6820,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +                {
 +                    Voxels corrected(VoxelSize(libraryVoxelSize), PICOGK_VOXEL_DEFAULTNARROWBAND);
 +                    corrected.TauBindCounters(m_tauState->counters);
-+                    corrected.TauRenderCapturedMesh(*surface);
++                    corrected.TauRenderCapturedMesh(*surface, m_roGrid.get());
 +                    observedVolume = corrected.fCalculateVolume();
 +                }
 +                if (m_tauState->cacheable) {
@@ -6833,6 +6838,60 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
 +        m_tauState->counters = std::move(counters);
 +    }
++    // Private host-only recipe guard. All expected input revisions and the result
++    // receipt are observed under the same existing object/shared-state gates.
++    bool TauComputeMutate(Voxels* source,int32_t operation,float first,float second,
++        const uint64_t* expected,uint64_t* result) {
++        std::unique_lock<std::recursive_mutex> targetObject(m_tauObjectGate,std::defer_lock);
++        std::unique_lock<std::recursive_mutex> sourceObject;
++        if(source&&source!=this){sourceObject=std::unique_lock<std::recursive_mutex>(source->m_tauObjectGate,std::defer_lock);std::lock(targetObject,sourceObject);}else targetObject.lock();
++        std::unique_lock<std::recursive_mutex> targetState(m_tauState->gate,std::defer_lock),sourceState;
++        if(source&&source->m_tauState!=m_tauState){sourceState=std::unique_lock<std::recursive_mutex>(source->m_tauState->gate,std::defer_lock);std::lock(targetState,sourceState);}else targetState.lock();
++        if(!m_tauState->cacheable||m_tauState->generation->identity!=expected[0]||m_tauState->metadataIdentity!=expected[1]||
++            (source&&(!source->m_tauState->cacheable||source->m_tauState->generation->identity!=expected[2]||source->m_tauState->metadataIdentity!=expected[3])))return false;
++        if(operation<3){if(!source)throw std::invalid_argument("compute binary operand required");TauMutateCsg(*source,operation);}
++        else if(operation==3)Offset(first);
++        else if(operation==4)DoubleOffset(first,second);
++        else if(operation==5)TripleOffset(first);
++        else if(operation==6)ProjectZSlice(first,second);
++        else throw std::invalid_argument("compute mutation operation");
++        result[0]=m_tauState->generation->identity;result[1]=m_tauState->metadataIdentity;return true;
++    }
++    bool TauComputeApplyTree(const FloatGrid::Ptr& prototype,int32_t band,Voxels* source,
++        const uint64_t* expected,uint64_t maximumTemporary,uint64_t* result) {
++        std::unique_lock<std::recursive_mutex> targetObject(m_tauObjectGate,std::defer_lock),sourceObject;
++        if(source&&source!=this){sourceObject=std::unique_lock<std::recursive_mutex>(source->m_tauObjectGate,std::defer_lock);std::lock(targetObject,sourceObject);}else targetObject.lock();
++        std::unique_lock<std::recursive_mutex> targetState(m_tauState->gate,std::defer_lock),sourceState;
++        if(source&&source->m_tauState!=m_tauState){sourceState=std::unique_lock<std::recursive_mutex>(source->m_tauState->gate,std::defer_lock);std::lock(targetState,sourceState);}else targetState.lock();
++        if(!m_tauState->cacheable||m_tauState->generation->identity!=expected[0]||m_tauState->metadataIdentity!=expected[1]||
++            (source&&(!source->m_tauState->cacheable||source->m_tauState->generation->identity!=expected[2]||source->m_tauState->metadataIdentity!=expected[3])))return false;
++        if(prototype==m_roGrid)throw std::invalid_argument("compute apply aliases target");
++        if(m_roGrid->transform()!=prototype->transform()||m_nSdfNarrowBand!=band)throw std::invalid_argument("compute apply transform/band mismatch");
++        if(uint64_t(prototype->tree().memUsage())>maximumTemporary)return false;
++        auto prepared=openvdb::StaticPtrCast<FloatGrid::TreeType>(prototype->tree().copy());
++        if(uint64_t(prepared->memUsage())>maximumTemporary)return false;
++        TauAdvanceGridGeneration(*m_tauState);m_roGrid->TauSwapTree(prepared);result[0]=m_tauState->generation->identity;result[1]=m_tauState->metadataIdentity;return true;
++    }
++    template<class TPrimitive,class TOperation>
++    bool TauComputePrimitive(TPrimitive& source,const uint64_t* expected,uint64_t* result,TOperation operation) {
++        std::scoped_lock owners(m_tauObjectGate,source.m_tauGate);
++        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
++        if(!m_tauState->cacheable||m_tauState->generation->identity!=expected[0]||m_tauState->metadataIdentity!=expected[1]||source.TauGeneration()!=expected[2]||expected[3]!=0)return false;
++        if(!operation())return false;
++        result[0]=m_tauState->generation->identity;result[1]=m_tauState->metadataIdentity;return true;
++    }
++    bool TauComputeRenderMesh(Mesh& source,const uint64_t* expected,uint64_t* result) {
++        return TauComputePrimitive(source,expected,result,[&]{RenderMesh(source);return true;});
++    }
++    bool TauComputeRenderLattice(Lattice& source,const uint64_t* expected,uint64_t* result) {
++        return TauComputePrimitive(source,expected,result,[&]{RenderLattice(source);return true;});
++    }
++    template<class TPrimitive>
++    bool TauComputeApplyPrimitive(const FloatGrid::Ptr& prototype,int32_t band,TPrimitive& source,
++        const uint64_t* expected,uint64_t maximumTemporary,uint64_t* result) {
++        return TauComputePrimitive(source,expected,result,[&]{return TauComputeApplyTree(prototype,band,nullptr,expected,maximumTemporary,result);});
++    }
++    int32_t TauNarrowBand() const { std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate); return m_nSdfNarrowBand; }
 +    struct TauGridRead {
 +        std::unique_lock<std::recursive_mutex> owner;
 +        FloatGrid::Ptr grid;
@@ -6866,7 +6925,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
      	std::vector< openvdb::Vec3s > oPoints;
      	std::vector< openvdb::Vec3I > oTriangles;
-@@ -429,143 +710,187 @@
+@@ -429,143 +766,202 @@
                                                           0.0,
                                                           false);
  
@@ -6944,6 +7003,21 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +            if (a > static_cast<uint32_t>(INT32_MAX) || b > static_cast<uint32_t>(INT32_MAX) ||
 +                c > static_cast<uint32_t>(INT32_MAX))
 +                throw std::overflow_error("surface mesh index exceeds native range");
++            if (a >= vertices.size() || b >= vertices.size() || c >= vertices.size())
++                throw std::out_of_range("surface mesh index exceeds vertex range");
++            // Drop only exactly zero-area triangles emitted by the native mesher.
++            // Use double arithmetic without a tolerance or changing nonzero mesher order.
++            const auto& first = vertices[a];
++            const auto& second = vertices[b];
++            const auto& third = vertices[c];
++            const double ux = double(second.X) - double(first.X);
++            const double uy = double(second.Y) - double(first.Y);
++            const double uz = double(second.Z) - double(first.Z);
++            const double vx = double(third.X) - double(first.X);
++            const double vy = double(third.Y) - double(first.Y);
++            const double vz = double(third.Z) - double(first.Z);
++            if (uy * vz - uz * vy == 0 && uz * vx - ux * vz == 0 && ux * vy - uy * vx == 0)
++                return;
 +            triangles.emplace_back(static_cast<int32_t>(a), static_cast<int32_t>(b), static_cast<int32_t>(c));
 +        };
 +        for (const auto& triangle : oTriangles) add(triangle[2], triangle[1], triangle[0]);
@@ -7172,7 +7246,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          return (oAccess.getValue(xyz) <= 0.0f);
      }
-@@ -573,8 +898,10 @@
+@@ -573,8 +969,10 @@
      inline void GetSurfaceNormal(   Vector3 vecPt,
                                      Vector3* pvecNormal)
      {
@@ -7184,7 +7258,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      
          oStencil.moveTo(    openvdb::Coord( xyz.X,
                                              xyz.Y,
-@@ -591,20 +918,28 @@
+@@ -591,20 +989,28 @@
      inline bool bFindClosestPointOnSurface( Vector3 vecSearch,
                                              Vector3* pvecSurfacePoint)
      {
@@ -7221,7 +7295,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          bool bStartInside = oAccess.getValue(   
                                  openvdb::Coord( xyzSearch.X,
                                                  xyzSearch.Y,
-@@ -638,31 +973,53 @@
+@@ -638,31 +1044,53 @@
                                      const Vector3& vecDirection,
                                      Vector3* pvecSurfacePoint)
      {
@@ -7300,7 +7374,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      void GetVoxelDimensions(    int32_t* pnXMin,
                                  int32_t* pnYMin,
                                  int32_t* pnZMin,
-@@ -670,7 +1027,9 @@
+@@ -670,7 +1098,9 @@
                                  int32_t* pnYSize,
                                  int32_t* pnZSize) const
      {
@@ -7311,7 +7385,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          *pnXMin     = oBBox.min().x();
          *pnYMin     = oBBox.min().y();
-@@ -683,7 +1042,9 @@
+@@ -683,7 +1113,9 @@
      void GetZSlice( int32_t nZSlice,
                      float* pfBuffer)
      {
@@ -7322,7 +7396,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(0, 0, nZSlice + oBBox.min().z());
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -700,7 +1061,9 @@
+@@ -700,7 +1132,9 @@
      void GetXSlice( int32_t nXSlice,
                      float* pfBuffer)
      {
@@ -7333,7 +7407,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(nXSlice + oBBox.min().x(), 0, 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -717,7 +1080,9 @@
+@@ -717,7 +1151,9 @@
      void GetYSlice( int32_t nYSlice,
                      float* pfBuffer)
      {
@@ -7344,7 +7418,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          openvdb::Coord xyz(0, nYSlice + oBBox.min().y(), 0);
          
          auto oAccess = m_roGrid->getConstAccessor();
-@@ -734,7 +1099,9 @@
+@@ -734,7 +1170,9 @@
      void GetInterpolatedZSlice( float fZSlice,
                                  float* pfBuffer)
      {
@@ -7355,7 +7429,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          
          auto oAccess = m_roGrid->getConstAccessor();
          
-@@ -750,18 +1117,39 @@
+@@ -750,18 +1188,53 @@
          }
      }
      
@@ -7392,6 +7466,20 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          return VoxelSize(m_roGrid->voxelSize().x());
      }
      
++private:
++    friend struct TauComputeVoxelAccess;
++    struct TauComputeOwnedTag {};
++    // Private restored-owner adoption preserves the decoded header. The ordinary
++    // grid constructor above retains its level-set normalization semantics.
++    Voxels(FloatGrid::Ptr grid, int band, std::shared_ptr<TauGridState> state, TauComputeOwnedTag)
++        : m_roGrid(std::move(grid)), m_tauState(std::move(state)), m_nSdfNarrowBand(band) {
++        if (!m_roGrid || !m_tauState || m_tauState->key != m_roGrid.get())
++            throw std::invalid_argument("restored voxel owner does not match grid");
++        std::lock_guard<std::recursive_mutex> guard(m_tauState->gate);
++        if (!m_tauState->cacheable || !bHasValidPicoGKTransform(m_roGrid) || band <= 0)
++            throw std::invalid_argument("restored voxel profile is unsupported");
++    }
++
  protected:
      FloatGrid::Ptr      m_roGrid;
 +    std::shared_ptr<TauGridState> m_tauState;
@@ -7399,7 +7487,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      int32_t             m_nSdfNarrowBand;
      
      bool bLevelSetNeedsRebuild() const
-@@ -826,40 +1214,76 @@
+@@ -826,40 +1299,96 @@
          }
      }
      
@@ -7437,7 +7525,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 -                                                                    nHalfWidth);
 -    }
 -    
-+    void TauRenderCapturedMesh(const Mesh& input)
++    void TauRenderCapturedMesh(const Mesh& input, const FloatGrid* signSource = nullptr)
 +    {
 +        std::lock_guard<std::recursive_mutex> owner(m_tauObjectGate);
 +        std::lock_guard<std::recursive_mutex> state(m_tauState->gate);
@@ -7445,7 +7533,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +        if (!TauHasSupportedGridTransform(*m_roGrid))
 +            throw std::invalid_argument("mesh target has an unsupported transformation");
 +        // Admission and conversion complete before invalidating the target revision.
-+        auto converted = roFloatGridFromMesh(input, m_roGrid->transform(), oVoxelSize(), m_nSdfNarrowBand);
++        auto converted = roFloatGridFromMesh(input, m_roGrid->transform(), oVoxelSize(), m_nSdfNarrowBand, signSource);
 +        TauGridMutation mutation(m_tauState);
 +        openvdb::tools::csgUnion(*m_roGrid, *converted);
 +    }
@@ -7464,7 +7552,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +            throw std::invalid_argument("mesh conversion coordinate exceeds native range");
 +    }
 +
-+    static FloatGrid::Ptr roFloatGridFromMesh(const Mesh& input, const openvdb::math::Transform& transform, VoxelSize size, int32_t halfWidth)
++    static FloatGrid::Ptr roFloatGridFromMesh(const Mesh& input, const openvdb::math::Transform& transform, VoxelSize size, int32_t halfWidth, const FloatGrid* signSource)
 +    {
 +        TauValidateMeshConversion(input, size, halfWidth);
 +        const auto& vertices = input.vVertices();
@@ -7503,6 +7591,26 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
 +                output[2] = double(point[2]);
 +            }
 +        } adapter{points.get(), vertices.size(), triangles};
++        if (signSource) {
++            // Property correction keeps the captured source's interior while rebuilding
++            // distances from its generated mesh. Imported meshes retain the default signer.
++            auto interior = [&](const openvdb::Coord& coordinate) {
++                const auto world = transform.indexToWorld(coordinate.asVec3d());
++                const auto sourceIndex = signSource->transform().worldToIndex(world);
++                // BoxSampler floors to int32 coordinates and reads each +1 neighbor.
++                for (int axis = 0; axis < 3; ++axis) {
++                    const double value = sourceIndex[axis];
++                    if (!std::isfinite(value) || value < double(INT32_MIN) || value >= double(INT32_MAX))
++                        throw std::invalid_argument("property sign-source coordinate exceeds native range");
++                }
++                return openvdb::tools::BoxSampler::sample(signSource->tree(), sourceIndex) < 0;
++            };
++            // The installed convenience overload discards its interior-test argument.
++            openvdb::util::NullInterrupter interrupter;
++            return openvdb::tools::meshToVolume<FloatGrid>(interrupter, adapter, transform,
++                static_cast<float>(halfWidth), static_cast<float>(halfWidth), 0, nullptr,
++                interior, openvdb::tools::EVAL_EVERY_TILE);
++        }
 +        return openvdb::tools::meshToVolume<FloatGrid>(adapter, transform,
 +            static_cast<float>(halfWidth), static_cast<float>(halfWidth), 0);
 +    }
@@ -7510,7 +7618,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      template <class TAccessor>
      inline bool bBresenhamSphereHitTest(    bool bReferenceInside,
                                              Coord xyzCenter,
-@@ -870,47 +1294,83 @@
+@@ -870,47 +1399,83 @@
                                              bool* pbOutsideActiveBounds)
      {
          *pbOutsideActiveBounds = true;
@@ -7624,7 +7732,7 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
          poAccess->setValue(xyz, std::clamp( fValue,
                                              -fBackground,
                                              fBackground));
-@@ -921,16 +1381,7 @@
+@@ -921,20 +1486,17 @@
      
      static bool bHasValidPicoGKTransform(const FloatGrid::Ptr roGrid)
      {
@@ -7642,6 +7750,890 @@ diff --git a/Source/PicoGKVdbVoxels.h b/Source/PicoGKVdbVoxels.h
      }
      
  };
+ 
++struct TauComputeVoxelAccess {
++    static Voxels::Ptr Adopt(FloatGrid::Ptr grid, int band, std::shared_ptr<TauGridState> state) {
++        return Voxels::Ptr(new Voxels(std::move(grid), band, std::move(state), Voxels::TauComputeOwnedTag{}));
++    }
++};
++
+ } // PicoGK namespace
+ 
+ #endif // PICOGKVDBVOXELS_H_
+--- /dev/null
++++ b/Source/TauComputeCodec.h
+@@ -0,0 +1,212 @@
++#pragma once
++#include <openvdb/openvdb.h>
++#include <openvdb/io/Stream.h>
++#include "TauComputePreflight.h"
++#include <sstream>
++#include <limits>
++#include <vector>
++
++namespace PicoGK {
++// Stream writes once into a bounded buffer. No length-query/second serialization.
++class TauBoundedStream final : public std::streambuf {
++    std::vector<char> bytes;
++    size_t limit,workingLimit;
++protected:
++    std::streamsize xsputn(const char* source, std::streamsize count) override {
++        if (count < 0 || static_cast<uint64_t>(count) > limit - bytes.size())
++            throw std::length_error("PicoGK compute encoded budget exceeded");
++        const auto needed = bytes.size() + size_t(count);
++        if(needed>bytes.capacity()) {
++            const auto capacity=std::min(limit,std::max(needed,bytes.capacity()?bytes.capacity()*2:size_t(256)));
++            if(bytes.capacity()>workingLimit||capacity>workingLimit-bytes.capacity())
++                throw std::length_error("compute encoded growth overlap budget");
++            bytes.reserve(capacity);
++        }
++        bytes.insert(bytes.end(), source, source + count);
++        return count;
++    }
++    int_type overflow(int_type value) override {
++        if (traits_type::eq_int_type(value, traits_type::eof())) return traits_type::not_eof(value);
++        char byte = traits_type::to_char_type(value); xsputn(&byte, 1); return value;
++    }
++public:
++    explicit TauBoundedStream(size_t maximum,size_t working=SIZE_MAX) : limit(maximum),workingLimit(working) {}
++    size_t Size() const { return bytes.size(); }
++    void Patch32(size_t offset, uint32_t value) {
++        if (offset + 4 > bytes.size()) throw std::logic_error("compute envelope offset");
++        for(size_t i=0;i<4;++i) bytes[offset+i] = char(value >> (i*8));
++    }
++    void NormalizeArchiveId(size_t start) {
++        // Pinned Archive::writeHeader: int64 magic, three uint32 versions, one
++        // seekable flag, then fixed ASCII UUID. Owned streams never mmap files.
++        if(start > bytes.size() || bytes.size()-start < 57) throw std::invalid_argument("compute archive header");
++        int64_t magic=0;uint32_t version=0;
++        std::memcpy(&magic,bytes.data()+start,8);std::memcpy(&version,bytes.data()+start+8,4);
++        if(magic != openvdb::OPENVDB_MAGIC || version != openvdb::OPENVDB_FILE_VERSION || version < 222 || bytes[start+20] != 0)
++            throw std::invalid_argument("compute archive format identity");
++        constexpr char id[]="00000000-0000-0000-0000-000000000000";
++        std::memcpy(bytes.data()+start+21,id,36);
++    }
++    std::vector<char> Take() { return std::move(bytes); }
++};
++
++inline uint64_t TauGridEncodeScratch(const openvdb::GridBase::Ptr& grid,size_t maximumWorking) {
++    uint64_t metadata=0;
++    for(auto entry=grid->beginMeta();entry!=grid->endMeta();++entry) {
++        const auto type=entry->second->typeName();
++        if(!TauRegisteredMetadataProfile(type))throw std::invalid_argument("compute unsupported registered metadata");
++        const uint64_t nameBytes=entry->first.size(),typeBytes=type.size(),valueBytes=entry->second->size();
++        if(nameBytes>maximumWorking||typeBytes>maximumWorking-nameBytes||valueBytes>maximumWorking-nameBytes-typeBytes||maximumWorking-nameBytes-typeBytes-valueBytes<2048||nameBytes+typeBytes+valueBytes+2048>maximumWorking/8)
++            throw std::length_error("compute encode metadata component budget");
++        const uint64_t part=8*(nameBytes+typeBytes+valueBytes+2048);
++        if(part>maximumWorking||metadata>maximumWorking-part)throw std::length_error("compute encode metadata budget");metadata+=part;
++    }
++    const uint64_t width=grid->isType<openvdb::Vec3SGrid>()?12:4;
++    const uint64_t leaves=grid->constBaseTreePtr()->leafCount();
++    // A shallow header shares the input tree. Writing can materialize its delayed
++    // leaf buffers; include a conservative full-leaf allowance before that work.
++    const uint64_t perLeaf=72+512*width,fixed=32*32768*width+65536;
++    if(metadata>maximumWorking||fixed>maximumWorking-metadata||leaves>(maximumWorking-metadata-fixed)/perLeaf)
++        throw std::length_error("compute encode materialization/working budget");
++    return metadata+leaves*perLeaf+fixed;
++}
++
++inline std::vector<char> TauEncodeGrid(const openvdb::GridBase::Ptr& grid, size_t maximum, int32_t kind = -1, int32_t narrowBand = -1,size_t maximumWorking=SIZE_MAX) {
++    if (!grid) throw std::invalid_argument("null compute grid");
++    // Exact fixed-depth writer profile: one value buffer <=32768 values plus
++    // compression/mask workspaces, copied metadata headers and delayed leaf arrays.
++    // Charge conservative overlap before any owned header/stream allocation.
++    const uint64_t scratch=TauGridEncodeScratch(grid,maximumWorking);
++    // Caller owns the shared native state gate and trusted generation. Header copy only;
++    // tree/transform stay read-only and no PicoGK metadata is synthesized or rewritten.
++    auto header = grid->copyGrid();
++    header->setSaveFloatAsHalf(false);
++    TauBoundedStream buffer(maximum,maximumWorking-size_t(scratch));
++    std::ostream output(&buffer); output.exceptions(std::ios::badbit | std::ios::failbit);
++    const char envelope[20] = {'P','K','V','D','B','0','0','1',0,0,0,0,0,0,0,0,0,0,0,0};
++    output.write(envelope,20);
++    if(kind < 0) kind = grid->isType<openvdb::Vec3SGrid>() ? 2 : 1;
++    buffer.Patch32(12,uint32_t(kind)); buffer.Patch32(16,uint32_t(narrowBand));
++    grid->writeMeta(output);
++    auto metadataBytes = buffer.Size()-20;
++    if(metadataBytes > std::numeric_limits<uint32_t>::max()) throw std::length_error("compute metadata length");
++    buffer.Patch32(8,uint32_t(metadataBytes));
++    const auto archiveStart=buffer.Size();
++    openvdb::io::Stream archive(output);
++    archive.setGridStatsMetadataEnabled(false);
++    archive.write(openvdb::GridCPtrVec{header});
++    buffer.NormalizeArchiveId(archiveStart);
++    return buffer.Take();
++}
++
++struct TauComputeGridEnvelope {uint32_t metadataSize,kind,band;uint64_t peak;};
++inline TauComputeGridEnvelope TauPreflightEnvelope(const char* data,size_t size,size_t maximumEncoded,size_t maximumLoaded) {
++    if (!data || size < 24 || size > maximumEncoded || size > size_t(std::numeric_limits<std::streamsize>::max()))
++        throw std::invalid_argument("invalid compute VDB length");
++    if(std::string_view(data,8) != "PKVDB001") throw std::invalid_argument("compute VDB codec version");
++    uint32_t metadataSize=0;for(size_t i=0;i<4;++i) metadataSize |= uint32_t(uint8_t(data[8+i])) << (i*8);
++    uint32_t kind=0,band=0;for(size_t i=0;i<4;++i) {kind |= uint32_t(uint8_t(data[12+i])) << (i*8);band |= uint32_t(uint8_t(data[16+i])) << (i*8);}
++    if(kind > 2 || (kind == 0 && band > uint32_t(INT32_MAX))) throw std::invalid_argument("compute grid kind/band");
++    if(metadataSize > size-20 || metadataSize > maximumLoaded) throw std::length_error("compute metadata budget");
++    TauComputeBound metadataBound(maximumLoaded);
++    TauComputeCursor metadataCursor(data+20,metadataSize);TauMetadata(metadataCursor,metadataBound);metadataCursor.End();
++    const auto peak=TauPreflightGrid(data+20+metadataSize,size-20-metadataSize,maximumLoaded,int32_t(kind));
++    if(metadataBound.retained+metadataBound.scratch>maximumLoaded-peak)throw std::length_error("compute metadata and VDB combined allocation budget");
++    return {metadataSize,kind,band,peak+metadataBound.retained+metadataBound.scratch};
++}
++// Owner is current per-Go Library; no mapped file, stream, input buffer or path survives.
++inline openvdb::GridBase::Ptr TauDecodeGrid(const char* data,size_t size,size_t maximumEncoded,
++    size_t maximumLoaded,int32_t* outputKind=nullptr,int32_t* outputBand=nullptr) {
++    const auto checked=TauPreflightEnvelope(data,size,maximumEncoded,maximumLoaded);
++    const auto metadataSize=checked.metadataSize,kind=checked.kind,band=checked.band;
++    // std::string is an owned transient copy charged alongside the input by the caller.
++    std::istringstream metadataInput(std::string(data+20, metadataSize),std::ios::binary);
++    metadataInput.exceptions(std::ios::badbit | std::ios::failbit);
++    openvdb::MetaMap originalMetadata; originalMetadata.readMeta(metadataInput);
++    if(size_t(metadataInput.tellg()) != metadataSize) throw std::invalid_argument("compute metadata trailing data");
++    std::istringstream input(std::string(data+20+metadataSize, size-20-metadataSize), std::ios::binary);
++    input.exceptions(std::ios::badbit | std::ios::failbit);
++    openvdb::GridBase::Ptr grid;
++    {
++        openvdb::io::Stream archive(input, false);
++        auto grids = archive.getGrids();
++        if (!grids || grids->size() != 1) throw std::invalid_argument("compute VDB must contain one grid");
++        grid = grids->at(0);
++        if (!grid || (kind == 2 ? !grid->isType<openvdb::Vec3SGrid>() : !grid->isType<openvdb::FloatGrid>()))
++            throw std::invalid_argument("unsupported compute VDB grid");
++        grid->readNonresidentBuffers();
++    }
++    grid->clearMetadata(); grid->insertMeta(originalMetadata);
++    if (grid->memUsage() > maximumLoaded) throw std::length_error("PicoGK compute native budget exceeded");
++    if(outputKind) *outputKind=int32_t(kind);if(outputBand) *outputBand=int32_t(band);
++    return grid;
++}
++// Private whole-file record preserves ordered headers and OpenVDB tree instance groups.
++inline std::vector<char> TauEncodeFile(const openvdb::GridPtrVec& grids,size_t maximum,size_t maximumWorking) {
++    if(grids.size()>4096)throw std::invalid_argument("compute VDB file grid count");
++    uint64_t scratch=65536;
++    for(const auto& grid:grids) {
++        if(!grid||(!grid->isType<openvdb::FloatGrid>()&&!grid->isType<openvdb::Vec3SGrid>()))
++            throw std::invalid_argument("compute unsupported file grid");
++        const auto charge=TauGridEncodeScratch(grid,maximumWorking);
++        if(charge>maximumWorking||scratch>maximumWorking-charge)throw std::length_error("compute file encode working budget");scratch+=charge;
++    }
++    if(scratch>maximumWorking)throw std::length_error("compute file fixed working budget");
++    TauBoundedStream buffer(maximum,maximumWorking-size_t(scratch));
++    std::ostream output(&buffer);output.exceptions(std::ios::badbit|std::ios::failbit);
++    output.write("PKVDF001",8);const auto count=uint32_t(grids.size());output.write(reinterpret_cast<const char*>(&count),4);
++    openvdb::GridCPtrVec headers;headers.reserve(grids.size());
++    for(const auto& grid:grids) {
++        const auto offset=buffer.Size();const uint32_t zero=0;output.write(reinterpret_cast<const char*>(&zero),4);
++        grid->writeMeta(output);const auto length=buffer.Size()-offset-4;
++        if(length>UINT32_MAX)throw std::length_error("compute file metadata length");buffer.Patch32(offset,uint32_t(length));
++        auto header=grid->copyGrid();header->setSaveFloatAsHalf(false);headers.push_back(header);
++    }
++    const auto archiveStart=buffer.Size();openvdb::io::Stream archive(output);
++    archive.setGridStatsMetadataEnabled(false);archive.write(headers);buffer.NormalizeArchiveId(archiveStart);return buffer.Take();
++}
++struct TauComputeFileEnvelope {uint32_t count;size_t archiveOffset;uint64_t peak;};
++inline TauComputeFileEnvelope TauPreflightFile(const char* data,size_t size,size_t maximumEncoded,size_t maximumLoaded) {
++    if(!data||size<12||size>maximumEncoded||size>size_t(std::numeric_limits<std::streamsize>::max()))throw std::invalid_argument("compute file length");
++    TauComputeCursor input(data,size);if(std::string_view(input.Take(8),8)!="PKVDF001")throw std::invalid_argument("compute file codec version");
++    const auto count=input.Read<uint32_t>();if(count>4096)throw std::invalid_argument("compute file grid count");
++    TauComputeBound metadataBound(maximumLoaded);metadataBound.Add(uint64_t(count)*4096);
++    for(uint32_t i=0;i<count;++i){const auto length=input.Read<uint32_t>();TauComputeCursor metadata(input.Take(length),length);TauMetadata(metadata,metadataBound);metadata.End();}
++    const auto offset=size-input.Remaining();
++    const auto peak=TauPreflightArchive(data+offset,size-offset,maximumLoaded,-1,int32_t(count));
++    if(metadataBound.retained+metadataBound.scratch>maximumLoaded-peak)throw std::length_error("compute file combined allocation budget");
++    return {count,offset,peak+metadataBound.retained+metadataBound.scratch};
++}
++inline openvdb::GridPtrVecPtr TauDecodeFile(const char* data,size_t size,size_t maximumEncoded,size_t maximumLoaded) {
++    const auto checked=TauPreflightFile(data,size,maximumEncoded,maximumLoaded);
++    std::istringstream input(std::string(data+checked.archiveOffset,size-checked.archiveOffset),std::ios::binary);
++    input.exceptions(std::ios::badbit|std::ios::failbit);openvdb::io::Stream archive(input,false);auto grids=archive.getGrids();
++    if(!grids||grids->size()!=checked.count)throw std::invalid_argument("compute decoded file grid count");
++    TauComputeCursor metadata(data+12,checked.archiveOffset-12);
++    for(auto& grid:*grids){const auto length=metadata.Read<uint32_t>();
++        std::istringstream header(std::string(metadata.Take(length),length),std::ios::binary);header.exceptions(std::ios::badbit|std::ios::failbit);
++        openvdb::MetaMap original;original.readMeta(header);grid->readNonresidentBuffers();grid->clearMetadata();grid->insertMeta(original);
++    }
++    metadata.End();return grids;
++}
++
++inline openvdb::GridPtrVecPtr TauDecodeAsset(const char* data,size_t size,size_t maximumEncoded,size_t maximumLoaded) {
++    if(!data||size>maximumEncoded||size>size_t(std::numeric_limits<std::streamsize>::max()))throw std::invalid_argument("compute asset length");
++    std::vector<std::string_view> names;
++    TauPreflightArchive(data,size,maximumLoaded,-1,-1,true,&names);
++    std::istringstream input(std::string(data,size),std::ios::binary);input.exceptions(std::ios::badbit|std::ios::failbit);
++    openvdb::io::Stream archive(input,false);auto grids=archive.getGrids();
++    if(!grids||grids->size()!=names.size())throw std::invalid_argument("compute asset decoded count");
++    for(auto& grid:*grids)grid->readNonresidentBuffers();
++    // File::getGrids uses a multimap keyed by descriptor gridName for seekable files;
++    // Stream uses serialized order. Match the actual File route, including suffixes.
++    if(uint8_t(data[20])==1) {
++        std::vector<size_t> order;order.reserve(names.size());for(size_t i=0;i<names.size();++i)order.push_back(i);
++        std::stable_sort(order.begin(),order.end(),[&](size_t a,size_t b){
++            return openvdb::io::GridDescriptor::stripSuffix(std::string(names[a]))<openvdb::io::GridDescriptor::stripSuffix(std::string(names[b]));});
++        auto sorted=std::make_shared<openvdb::GridPtrVec>();sorted->reserve(order.size());for(const auto index:order)sorted->push_back((*grids)[index]);grids=sorted;
++    }
++    return grids;
++}
++
++}
+--- /dev/null
++++ b/Source/TauComputeMeshCodec.h
+@@ -0,0 +1,44 @@
++// SPDX-License-Identifier: Apache-2.0
++#ifndef TAU_COMPUTE_MESH_CODEC_H
++#define TAU_COMPUTE_MESH_CODEC_H
++#include "PicoGKMesh.h"
++namespace PicoGK {
++// PKP1 carries the existing immutable actual/prototype arrays and placement fields.
++// It is not a lazy transform or another scene geometry representation.
++struct TauComputeMeshBody {
++    uint32_t vertices,indices,placed;
++    size_t indexOffset;
++    uint64_t allowance;
++};
++inline TauComputeMeshBody TauPreflightMeshBody(const char* bytes,size_t size,uint64_t maximumNative) {
++    if(!bytes||size<84)throw std::invalid_argument("truncated compute mesh body");
++    const auto word=[&](size_t at){uint32_t value;std::memcpy(&value,bytes+at,4);return value;};
++    if(word(0)!=0x31504b50||word(4)!=1)throw std::invalid_argument("compute mesh body version");
++    const auto vertices=word(8),indices=word(12),placed=word(16);
++    if(vertices>uint32_t(INT32_MAX/3)||indices>uint32_t(INT32_MAX)||indices%3||placed>1)throw std::invalid_argument("compute mesh body counts");
++    const uint64_t indexOffset=84+uint64_t(vertices)*12*(placed?2:1),length=indexOffset+uint64_t(indices)*4;
++    if(length!=size||length>(UINT64_MAX-8192)/4)throw std::invalid_argument("compute mesh body length");
++    const auto allowance=length*4+8192;
++    if(allowance>maximumNative)throw std::length_error("compute mesh import allocation budget");
++    for(size_t at=20;at<indexOffset;at+=4){float value;std::memcpy(&value,bytes+at,4);if(!std::isfinite(value))throw std::invalid_argument("nonfinite compute mesh value");}
++    for(size_t axis=0;axis<16;++axis){float value;std::memcpy(&value,bytes+20+axis*4,4);
++        if((axis==3||axis==7||axis==11)&&value!=0)throw std::invalid_argument("compute mesh affine matrix");
++        if(axis==15&&value!=1)throw std::invalid_argument("compute mesh affine matrix");
++        if(!placed&&word(20+axis*4)!=std::bit_cast<uint32_t>(axis%5==0?1.f:0.f))throw std::invalid_argument("unplaced compute mesh matrix");}
++    for(size_t at=indexOffset;at<length;at+=4)if(word(at)>=vertices)throw std::invalid_argument("compute mesh index range");
++    return {vertices,indices,placed,size_t(indexOffset),allowance};
++}
++inline Mesh::Ptr TauDecodeMeshBody(const char* bytes,size_t size,uint64_t maximumNative) {
++    const auto body=TauPreflightMeshBody(bytes,size,maximumNative);
++    const auto positions=[&](size_t offset){std::vector<Vector3> values;values.reserve(body.vertices);
++        for(size_t i=0;i<body.vertices;++i){float components[3];std::memcpy(components,bytes+offset+i*12,12);values.emplace_back(components[0],components[1],components[2]);}return values;};
++    const auto triangles=[&](){std::vector<Triangle> values;values.reserve(body.indices/3);
++        for(size_t i=0;i<body.indices;i+=3){uint32_t components[3];std::memcpy(components,bytes+body.indexOffset+i*4,12);values.emplace_back(int32_t(components[0]),int32_t(components[1]),int32_t(components[2]));}return values;};
++    auto mesh=Mesh::TauCreateOwned(positions(84),triangles(),TauNextGeneration());
++    if(body.placed){auto prototype=Mesh::TauCreateOwned(positions(84+size_t(body.vertices)*12),triangles(),TauNextGeneration());
++        float matrix[16];std::memcpy(matrix,bytes+20,64);mesh->TauSetPlacement(*prototype,matrix);}
++    if(uint64_t(mesh->nMemUsage())>maximumNative)throw std::length_error("compute mesh retained budget");
++    return mesh;
++}
++}
++#endif
+--- /dev/null
++++ b/Source/TauComputePreflight.h
+@@ -0,0 +1,203 @@
++#pragma once
++#include <openvdb/openvdb.h>
++#include <openvdb/io/Compression.h>
++#include <openvdb/io/DelayedLoadMetadata.h>
++#include <blosc.h>
++#include <bit>
++#include <array>
++#include <algorithm>
++#include <vector>
++#include <string_view>
++#include <limits>
++
++namespace PicoGK {
++// Exact pinned seekless single Float/Vec3S VDB profile, not an author VDB reader.
++// No trees, metadata objects or decompressed values are allocated here. Root-key
++// duplicate detection uses explicitly charged, count-bounded scratch.
++class TauComputeCursor {
++    const char* current;
++    size_t remaining;
++public:
++    TauComputeCursor(const char* data,size_t size):current(data),remaining(size){}
++    size_t Remaining()const{return remaining;}
++    const char* Take(size_t size){if(size>remaining)throw std::invalid_argument("compute truncated VDB");auto result=current;current+=size;remaining-=size;return result;}
++    template<class T>T Read(){T value;std::memcpy(&value,Take(sizeof(T)),sizeof(T));return value;}
++    std::string_view String(){const auto size=Read<uint32_t>();return {Take(size),size};}
++    void End(){if(remaining)throw std::invalid_argument("compute VDB trailing data");}
++};
++struct TauComputeBound {
++    uint64_t retained=65536,scratch=0,maximum;
++    explicit TauComputeBound(size_t limit):maximum(limit){Check();}
++    void Check()const{if(retained>maximum||scratch>maximum-retained)throw std::length_error("compute VDB preflight allocation budget");}
++    void Add(uint64_t value){if(value>maximum||retained>maximum-value)throw std::length_error("compute VDB preflight allocation overflow");retained+=value;Check();}
++    void Scratch(uint64_t value){scratch=std::max(scratch,value);Check();}
++};
++inline size_t TauBloscBlock(const char* data,size_t encoded,size_t expected,TauComputeBound& bound,bool delayedMetadata=false) {
++    if(encoded<BLOSC_MIN_HEADER_LENGTH)throw std::invalid_argument("compute Blosc header length");
++    size_t raw=0,compressed=0,block=0;blosc_cbuffer_sizes(data,&raw,&compressed,&block);
++    const bool padded=delayedMetadata&&expected>48&&expected<128&&raw==128;
++    if(compressed!=encoded||(raw!=expected&&!padded)||(raw&&block>raw)||block==0)throw std::invalid_argument("compute Blosc size identity");
++    size_t validated=0;
++    if(blosc_cbuffer_validate(data,encoded,&validated)!=0||validated!=raw)throw std::invalid_argument("compute Blosc invalid buffer");
++    // blosc.c:1748/1920 uses three block workspaces plus <=4*typesize.
++    // Both VDB readers call decompress_ctx with one thread; block<=raw above.
++    bound.Scratch(encoded+8*raw+2*BLOSC_MAX_OVERHEAD+65536);return raw;
++}
++inline void TauDelayedMetadata(TauComputeCursor value,TauComputeBound& bound) {
++    if(!value.Remaining())return;
++    const auto count=value.Read<uint32_t>();
++    const auto array=[&](size_t width,bool optional){
++        const auto encoded=value.Read<uint32_t>();
++        if(optional&&encoded==UINT32_MAX)return;
++        if(count>bound.maximum/width)throw std::length_error("compute delayed metadata count");
++        const size_t expected=size_t(count)*width;
++        if(encoded) {
++            const auto raw=TauBloscBlock(value.Take(encoded),encoded,expected,bound,true);
++            // DelayedLoadMetadata.cc padMask/padCompressedSize round through float;
++            // charge the actual pinned reservation and all bounded header/meta copies.
++            const auto capacity=size_t(std::ceil(float(raw+BLOSC_MAX_OVERHEAD+1)/float(width)))*width;
++            if(capacity<raw+BLOSC_MAX_OVERHEAD)throw std::invalid_argument("compute delayed metadata padding");
++            bound.Add(8*(std::max(expected,capacity)+256));
++        } else {bound.Add(8*(expected+256));value.Take(expected);}
++    };
++    array(1,false);array(8,true);value.End();
++}
++constexpr std::pair<std::string_view,size_t> TauFixedMetadata[]={
++    {"bool",1},{"half",2},{"ptidx32",4},{"ptidx64",8},{"int32",4},{"int64",8},{"float",4},{"double",8},
++    {"vec2i",8},{"vec2s",8},{"vec2d",16},{"vec3i",12},{"vec3s",12},{"vec3d",24},
++    {"vec4i",16},{"vec4s",16},{"vec4d",32},{"mat4s",64},{"mat4d",128}};
++inline bool TauRegisteredMetadataProfile(std::string_view type) {
++    if(type=="string"||type==openvdb::io::DelayedLoadMetadata::staticTypeName())return true;
++    for(auto entry:TauFixedMetadata)if(type==entry.first)return true;
++    return !openvdb::Metadata::isRegisteredType(std::string(type));
++}
++inline void TauMetadata(TauComputeCursor& input,TauComputeBound& bound) {
++    const auto count=input.Read<uint32_t>();
++    if(count>input.Remaining()/12)throw std::invalid_argument("compute metadata count");
++    for(uint32_t i=0;i<count;++i) {
++        const auto name=input.String(),type=input.String();const auto size=input.Read<uint32_t>();
++        const auto data=input.Take(size);
++        if(name.empty())throw std::invalid_argument("compute empty metadata name");
++        // MetaMap copies authored metadata into stream headers and back into the grid.
++        bound.Add(8*(uint64_t(name.size())+type.size()+size)+2048);
++        if(type=="string")continue;
++        if(type==openvdb::io::DelayedLoadMetadata::staticTypeName()) {TauDelayedMetadata({data,size},bound);continue;}
++        bool recognized=false;
++        for(auto entry:TauFixedMetadata)if(type==entry.first){recognized=true;if(type=="bool"&&size==1&&uint8_t(data[0])>1)throw std::invalid_argument("compute bool metadata value");if(size!=entry.second)throw std::invalid_argument("compute fixed metadata size");break;}
++        if(!recognized && openvdb::Metadata::isRegisteredType(std::string(type)))
++            throw std::invalid_argument("compute unsupported registered metadata allocation profile");
++        // Unregistered types use UnknownMetadata's bounded raw-byte reader.
++    }
++}
++inline uint32_t TauMaskCount(const char* data,size_t bits) {
++    uint32_t count=0;
++    for(size_t i=0;i<bits/64;++i){uint64_t word;std::memcpy(&word,data+i*8,8);count+=std::popcount(word);}return count;
++}
++inline uint32_t TauMask(TauComputeCursor& input,size_t bits){return TauMaskCount(input.Take(bits/8),bits);}
++inline void TauValues(TauComputeCursor& input,size_t count,uint32_t active,size_t width,uint32_t compression,TauComputeBound& bound) {
++    const auto flag=input.Read<uint8_t>();if(flag>6)throw std::invalid_argument("compute value mask flag");
++    if(flag==2||flag==4||flag==5)input.Take(width);
++    if(flag==5)input.Take(width);
++    if(flag==3||flag==4||flag==5)input.Take(count/8);
++    const auto saved=((compression&openvdb::io::COMPRESS_ACTIVE_MASK)&&flag!=6)?active:count;
++    const size_t expected=size_t(saved)*width;
++    bound.Scratch(2*count*width+65536);
++    if(compression&(openvdb::io::COMPRESS_BLOSC|openvdb::io::COMPRESS_ZIP)) {
++        const auto encoded=input.Read<int64_t>();
++        if(encoded==INT64_MIN)throw std::invalid_argument("compute compressed length overflow");
++        if(encoded<=0){if(uint64_t(-encoded)!=expected)throw std::invalid_argument("compute raw value size");input.Take(expected);}
++        else {
++            auto data=input.Take(size_t(encoded));bound.Scratch(uint64_t(encoded)+2*count*width+65536);
++            if(compression&openvdb::io::COMPRESS_BLOSC)TauBloscBlock(data,size_t(encoded),expected,bound);
++            // ZIP allocates only its exact bounded input and caller's fixed-size output.
++        }
++    }else input.Take(expected);
++}
++template<class Node> void TauTopology(TauComputeCursor& input,size_t width,uint32_t compression,TauComputeBound& bound,size_t& leaves) {
++    bound.Add(sizeof(Node)+512);
++    if constexpr(Node::LEVEL==0){TauMask(input,512);++leaves;bound.Add(512*width);}
++    else {
++        constexpr size_t values=Node::NUM_VALUES;
++        const auto childBits=input.Take(values/8),activeBits=input.Take(values/8);
++        const auto children=TauMaskCount(childBits,values),active=TauMaskCount(activeBits,values);
++        for(size_t byte=0;byte<values/8;++byte)if(uint8_t(childBits[byte])&uint8_t(activeBits[byte]))throw std::invalid_argument("compute child/value mask overlap");
++        TauValues(input,values,active,width,compression,bound);
++        for(uint32_t i=0;i<children;++i)TauTopology<typename Node::ChildNodeType>(input,width,compression,bound,leaves);
++    }
++}
++template<class Grid> void TauTreePreflight(TauComputeCursor& input,uint32_t compression,TauComputeBound& bound) {
++    using Root=typename Grid::TreeType::RootNodeType;
++    constexpr size_t width=sizeof(typename Grid::ValueType);
++    if(input.Read<int32_t>()!=1)throw std::invalid_argument("compute tree buffer count");
++    input.Take(width);const auto tiles=input.Read<uint32_t>(),children=input.Read<uint32_t>();
++    if(tiles>input.Remaining()/(12+width+1)||children>input.Remaining()/12)throw std::invalid_argument("compute root count");
++    bound.Add(sizeof(Root)+uint64_t(tiles+uint64_t(children))*128);
++    // Root keys can collide in malformed files; the native map would otherwise
++    // discard a subtree while stream buffers still describe it. The bounded key
++    // scratch is reserved only after widened count/budget preflight succeeds.
++    const size_t rootKeys=size_t(tiles)+children;bound.Add(uint64_t(rootKeys)*sizeof(std::array<int32_t,3>));
++    std::vector<std::array<int32_t,3>> keys;keys.reserve(rootKeys);
++    const auto key=[&]{std::array<int32_t,3> value;std::memcpy(value.data(),input.Take(12),12);keys.push_back(value);};
++    for(uint32_t i=0;i<tiles;++i){key();input.Take(width);if(input.Read<uint8_t>()>1)throw std::invalid_argument("compute active tile flag");}size_t leaves=0;
++    for(uint32_t i=0;i<children;++i){key();TauTopology<typename Root::ChildNodeType>(input,width,compression,bound,leaves);}
++    std::sort(keys.begin(),keys.end());if(std::adjacent_find(keys.begin(),keys.end())!=keys.end())throw std::invalid_argument("compute duplicate root coordinate");
++    for(size_t i=0;i<leaves;++i){const auto active=TauMask(input,512);TauValues(input,512,active,width,compression,bound);}
++}
++inline void TauPreflightGridHeader(TauComputeCursor& input, TauComputeBound& bound) {
++    const auto compression=input.Read<uint32_t>();
++    if(compression&~7U||(compression&5U)==5U)throw std::invalid_argument("compute compression profile");
++    TauMetadata(input,bound);const auto map=input.String();size_t mapBytes=0;
++    if(map=="AffineMap"||map=="UnitaryMap")mapBytes=128;
++    else if(map=="ScaleMap"||map=="UniformScaleMap")mapBytes=120;
++    else if(map=="ScaleTranslateMap"||map=="UniformScaleTranslateMap")mapBytes=144;
++    else if(map=="TranslationMap")mapBytes=24;
++    else throw std::invalid_argument("compute affine transform profile");
++    input.Take(mapBytes);
++}
++inline uint64_t TauPreflightArchive(const char* data,size_t size,size_t maximumLoaded,int32_t kind,int32_t expectedCount=1,bool asset=false,std::vector<std::string_view>* names=nullptr) {
++    TauComputeBound bound(maximumLoaded);TauComputeCursor input(data,size);
++    bound.Add(uint64_t(size)*2);
++    if(input.Read<int64_t>()!=openvdb::OPENVDB_MAGIC||input.Read<uint32_t>()!=openvdb::OPENVDB_FILE_VERSION||
++       input.Read<uint32_t>()!=OPENVDB_LIBRARY_MAJOR_VERSION_NUMBER||input.Read<uint32_t>()!=OPENVDB_LIBRARY_MINOR_VERSION_NUMBER)
++        throw std::invalid_argument("compute pinned VDB header");
++    const auto seekable=input.Read<uint8_t>();
++    if(seekable>1||(!asset&&seekable))throw std::invalid_argument("compute VDB seekable profile");
++    input.Take(36);TauMetadata(input,bound);
++    const auto count=input.Read<int32_t>();
++    if((expectedCount>=0&&count!=expectedCount)||count<0||count>4096)throw std::invalid_argument("compute VDB grid count");
++    struct Descriptor {std::string_view name,type;};
++    bound.Add(uint64_t(count)*(sizeof(Descriptor)+4096));
++    std::vector<Descriptor> descriptors;descriptors.reserve(count);
++    for(int32_t i=0;i<count;++i) {
++        const auto name=input.String(),type=input.String(),parent=input.String();
++        const bool vector=type==openvdb::Vec3SGrid::gridType();
++        if((!vector&&type!=openvdb::FloatGrid::gridType())||(kind>=0&&vector!=(kind==2)))
++            throw std::invalid_argument("compute exact grid descriptor");
++        // ponytail: bounded 4096-grid scan; use a charged index if measured file counts justify it.
++        if(std::any_of(descriptors.begin(),descriptors.end(),[&](const auto& value){return value.name==name;}))
++            throw std::invalid_argument("compute duplicate grid descriptor");
++        if(!parent.empty()) {
++            const auto source=std::find_if(descriptors.begin(),descriptors.end(),[&](const auto& value){return value.name==parent;});
++            if(source==descriptors.end()||source->type!=type)throw std::invalid_argument("compute instance reference");
++        }
++        bound.Add(8*(uint64_t(name.size())+type.size()+parent.size()));
++        const auto gridPos=input.Read<int64_t>(),blockPos=input.Read<int64_t>(),endPos=input.Read<int64_t>();
++        if(seekable&&(gridPos!=int64_t(size-input.Remaining())||(parent.empty()?(blockPos<gridPos||endPos<blockPos):blockPos!=0)||uint64_t(endPos)>size))
++            throw std::invalid_argument("compute asset grid offsets");
++        // Compression applies to this grid tree and must be captured before header parse.
++        const auto compressionCursor=input;const auto compression=TauComputeCursor(compressionCursor).Read<uint32_t>();
++        TauPreflightGridHeader(input,bound);
++        if(parent.empty()) {
++            if(vector)TauTreePreflight<openvdb::Vec3SGrid>(input,compression,bound);
++            else TauTreePreflight<openvdb::FloatGrid>(input,compression,bound);
++        }
++        if(seekable&&endPos!=int64_t(size-input.Remaining()))throw std::invalid_argument("compute asset grid end offset");
++        descriptors.push_back({name,type});
++        if(names)names->push_back(name);
++    }
++    input.End();bound.Check();return bound.retained+bound.scratch;
++}
++inline uint64_t TauPreflightGrid(const char* data,size_t size,size_t maximumLoaded,int32_t kind) {
++    return TauPreflightArchive(data,size,maximumLoaded,kind);
++}
++}
+--- a/openvdb/openvdb/openvdb/Grid.h
++++ b/openvdb/openvdb/openvdb/Grid.h
+@@ -918,6 +918,9 @@
+     /// constBaseTree(), tree() or constTree().
+     void setTree(TreeBase::Ptr) override;
+ 
++    // Private Tau cache apply: all allocation/type admission precedes this noexcept tree publication.
++    void TauSwapTree(TreePtrType& prepared) noexcept { mTree.swap(prepared); }
++
+     /// @brief Associate a new, empty tree with this grid, in place of its existing tree.
+     /// @note The new tree has the same background value as the existing tree.
+     void newTree() override;
+--- a/openvdb/openvdb/openvdb/tree/RootNode.h
++++ b/openvdb/openvdb/openvdb/tree/RootNode.h
+@@ -2415,9 +2415,11 @@
+     for (Index n = 0; n < numChildren; ++n) {
+         is.read(reinterpret_cast<char*>(vec), 3 * sizeof(Int32));
+         Coord origin(vec);
+-        ChildT* child = new ChildT(PartialCreate(), origin, mBackground);
++        // Retain ownership until topology parsing and table publication succeed.
++        std::unique_ptr<ChildT> child(new ChildT(PartialCreate(), origin, mBackground));
+         child->readTopology(is, fromHalf);
+-        mTable.emplace(Coord(vec), *child);
++        const auto inserted=mTable.emplace(Coord(vec), *child);
++        if(inserted.second) child.release();
+     }
+ 
+     return true; // not empty
+--- a/openvdb/openvdb/openvdb/tree/Tree.h
++++ b/openvdb/openvdb/openvdb/tree/Tree.h
+@@ -282,7 +282,7 @@
+     /// Empty tree constructor
+     Tree(const ValueType& background): mRoot(background) {}
+ 
+-    ~Tree() override { this->clear(); releaseAllAccessors(); }
++    ~Tree() override { releaseAllAccessors(); mRoot.clear(); }
+ 
+     /// Return a pointer to a deep copy of this tree
+     TreeBase::Ptr copy() const override { return TreeBase::Ptr(new Tree(*this)); }
+--- /dev/null
++++ b/Source/TauComputeBridge.inc
+@@ -0,0 +1,312 @@
++// Included at the end of PicoGKLibrary.cpp, after TauCheckedInvoke and TauAddVoxels.
++#include "TauComputeCodec.h"
++#include "TauComputeMeshCodec.h"
++
++struct TauComputeSource {
++    openvdb::GridBase::Ptr grid;
++    std::shared_ptr<TauGridState> state;
++    Voxels::Ptr voxel;
++    std::unique_lock<std::recursive_mutex> objectLock;
++    int32_t band = -1;
++};
++static TauComputeSource TauReadComputeSource(const Library::Instance::Ptr& owner, int32_t kind, uint64_t object) {
++    if(kind == 0) {
++        auto source=owner->m_oVoxels.roGet(object);auto pin=source->TauPinGrid();
++        return {pin.grid,pin.state,source,std::move(pin.owner),source->TauNarrowBand()};
++    }
++    if(kind == 1) {auto source=owner->m_oScalarFields.roGet(object);return {source->TauGrid(),source->TauState(),{},{},-1};}
++    if(kind == 2) {auto source=owner->m_oVectorFields.roGet(object);return {source->TauGrid(),source->TauState(),{},{},-1};}
++    throw std::invalid_argument("compute source kind");
++}
++
++PICOGK_API int32_t TauCompute_GridIdentity(PKINSTANCE library,int32_t kind,uint64_t object,
++    uint64_t* geometry,uint64_t* metadata,int32_t* trusted) noexcept {
++    if(geometry) *geometry=0;if(metadata) *metadata=0;if(trusted) *trusted=0;
++    if(!geometry||!metadata||!trusted||geometry==metadata) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner=Library::oLib().roGetInstance(library);auto source=TauReadComputeSource(owner,kind,object);
++        std::lock_guard<std::recursive_mutex> state(source.state->gate);
++        *geometry=source.state->generation->identity;*metadata=source.state->metadataIdentity;
++        *trusted=source.state->cacheable ? 1 : 0;
++    });
++}
++
++// Once-per-input revision content identity. Serialize under the shared state gate;
++// no deep snapshot and no caller/native pointer survives this checked synchronous call.
++PICOGK_API int32_t TauCompute_CaptureContent(PKINSTANCE library,int32_t kind,uint64_t object,
++    uint64_t geometry,uint64_t metadata,uint64_t maximumEncoded,uint64_t maximumNative,
++    uint64_t* snapshot,uint64_t* nativeBytes) noexcept {
++    if(snapshot)*snapshot=0;if(nativeBytes)*nativeBytes=0;
++    if(!snapshot||!nativeBytes||snapshot==nativeBytes||maximumEncoded>uint64_t(INT64_MAX)||maximumNative>uint64_t(INT64_MAX))return -1;
++    bool bypass=false;
++    const auto status=TauCheckedInvoke([&] {
++        auto owner=Library::oLib().roGetInstance(library);auto source=TauReadComputeSource(owner,kind,object);
++        std::lock_guard<std::recursive_mutex> state(source.state->gate);
++        if(!source.state->cacheable||source.state->generation->identity!=geometry||source.state->metadataIdentity!=metadata){bypass=true;return;}
++        auto value=std::make_shared<TauCapturedGeometry>();value->generation=geometry;value->metadataIdentity=metadata;
++        value->computeKind=kind;value->narrowBand=source.band;
++        if(maximumNative<=sizeof(TauCapturedGeometry)){bypass=true;return;}
++        const auto limit=std::min(maximumEncoded,maximumNative-sizeof(TauCapturedGeometry));
++        value->computeBytes=TauEncodeGrid(source.grid,size_t(limit),kind,source.band,size_t(maximumNative-sizeof(TauCapturedGeometry)));
++        const auto bytes=value->nMemUsage();if(uint64_t(bytes)>maximumNative){bypass=true;return;}
++        const auto handle=owner->m_tauCaptures.hAddWithIdentity(value,TauNextGeneration());
++        *snapshot=handle;*nativeBytes=uint64_t(bytes);
++    });
++    return status?status:bypass?1:0;
++}
++
++// Admission only: one immutable cold grid snapshot. Warm-hit prototypes never call this.
++PICOGK_API int32_t TauCompute_CaptureGrid(PKINSTANCE library,int32_t kind,uint64_t object,
++    uint64_t geometry,uint64_t metadata,uint64_t maximumNative,uint64_t* snapshot,uint64_t* nativeBytes) noexcept {
++    if(snapshot) *snapshot=0;if(nativeBytes) *nativeBytes=0;
++    if(!snapshot||!nativeBytes||snapshot==nativeBytes||maximumNative>uint64_t(INT64_MAX)) return -1;
++    bool bypass=false;
++    const auto status=TauCheckedInvoke([&] {
++        auto owner=Library::oLib().roGetInstance(library);auto source=TauReadComputeSource(owner,kind,object);
++        std::lock_guard<std::recursive_mutex> state(source.state->gate);
++        if(!source.state->cacheable||source.state->generation->identity!=geometry||source.state->metadataIdentity!=metadata) {bypass=true;return;}
++        TauOwnedMemory estimate;estimate.Add(sizeof(TauCapturedGeometry));estimate.Grid(source.grid);
++        if(uint64_t(estimate.Bytes())>maximumNative) {bypass=true;return;}
++        auto value=std::make_shared<TauCapturedGeometry>();value->generation=geometry;value->metadataIdentity=metadata;
++        value->computeKind=kind;value->narrowBand=source.band;
++        value->computeGrid=source.grid->deepCopyGrid();
++        const auto bytes=value->nMemUsage();
++        if(uint64_t(bytes)>maximumNative) {bypass=true;return;}
++        const auto handle=owner->m_tauCaptures.hAddWithIdentity(value,TauNextGeneration());
++        *snapshot=handle;*nativeBytes=uint64_t(bytes);
++    });
++    return status ? status : bypass ? 1 : 0;
++}
++
++// Serialize the immutable admitted hold once while this Go Library still lives.
++PICOGK_API int32_t TauCompute_EncodeGrid(PKINSTANCE library,uint64_t snapshot,uint64_t maximumEncoded,uint64_t maximumNative,
++    uint64_t* encodedBytes,uint64_t* nativeBytes) noexcept {
++    if(encodedBytes) *encodedBytes=0;if(nativeBytes) *nativeBytes=0;
++    if(!encodedBytes||!nativeBytes||encodedBytes==nativeBytes||maximumEncoded>uint64_t(INT64_MAX)||maximumNative>uint64_t(INT64_MAX)) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner=Library::oLib().roGetInstance(library);auto value=owner->m_tauCaptures.roGet(snapshot);
++        std::lock_guard<std::recursive_mutex> hold(value->computeGate);
++        if(value->computeKind<0) throw std::invalid_argument("not a compute capture");
++        if(value->computeBytes.empty()) {
++            if(!value->computeGrid) throw std::invalid_argument("empty compute capture");
++            if(maximumNative<=sizeof(TauCapturedGeometry))throw std::length_error("compute export native budget");
++            const auto held=uint64_t(value->nMemUsage());
++            if(held>=maximumNative)throw std::length_error("compute export overlap budget");
++            const auto limit=std::min(maximumEncoded,maximumNative-held);
++            auto bytes=TauEncodeGrid(value->computeGrid,size_t(limit),value->computeKind,value->narrowBand,size_t(maximumNative-held));
++            value->computeBytes=std::move(bytes);value->computeGrid.reset();
++        }
++        if(uint64_t(value->nMemUsage())>maximumNative)throw std::length_error("compute export retained native budget");
++        if(value->computeBytes.size()>maximumEncoded) throw std::length_error("compute encoded budget");
++        *encodedBytes=value->computeBytes.size();*nativeBytes=uint64_t(value->nMemUsage());
++    });
++}
++
++PICOGK_API int32_t TauCompute_CopyBytes(PKINSTANCE library,uint64_t snapshot,char* output,uint64_t capacity) noexcept {
++    if(!output||capacity>uint64_t(INT64_MAX)) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner=Library::oLib().roGetInstance(library);auto value=owner->m_tauCaptures.roGet(snapshot);
++        std::lock_guard<std::recursive_mutex> hold(value->computeGate);
++        if(value->computeKind<0||value->computeBytes.empty()||capacity!=value->computeBytes.size()) throw std::invalid_argument("compute byte buffer length");
++        std::memcpy(output,value->computeBytes.data(),size_t(capacity));
++    });
++}
++
++PICOGK_API int32_t TauCompute_CloneCapture(PKINSTANCE library,uint64_t snapshot,uint64_t maximumNative,
++    uint64_t* output,PKMETADATA* metadata,uint64_t* nativeBytes) noexcept {
++    if(output)*output=0;if(metadata)*metadata=0;if(nativeBytes)*nativeBytes=0;
++    if(!output||!metadata||!nativeBytes||output==metadata||output==nativeBytes||metadata==nativeBytes||maximumNative>uint64_t(INT64_MAX))return -1;
++    return TauCheckedInvoke([&] {
++        auto owner=Library::oLib().roGetInstance(library);auto hold=owner->m_tauCaptures.roGet(snapshot);
++        std::lock_guard<std::recursive_mutex> lock(hold->computeGate);
++        if(hold->computeKind!=0||!hold->computeGrid)throw std::invalid_argument("compute capture cannot clone voxels");
++        TauOwnedMemory estimate;estimate.Grid(hold->computeGrid);if(uint64_t(estimate.Bytes())>maximumNative)throw std::length_error("compute clone budget");
++        auto grid=gridPtrCast<FloatGrid>(hold->computeGrid->deepCopyGrid());auto state=TauStateFor(grid);
++        auto value=TauComputeVoxelAccess::Adopt(grid,hold->narrowBand,state);value->TauBindCounters(owner->m_tauCounters);
++        auto meta=std::make_shared<VdbMeta>(grid,state);TauOwnedMemory actual;actual.Object(value);actual.Object(meta);
++        if(uint64_t(actual.Bytes())>maximumNative)throw std::length_error("compute clone retained budget");
++        const auto handle=owner->m_oVoxels.hAdd(value);
++        try{const auto metaHandle=owner->m_oVdbMetas.hAdd(meta);*output=handle;*metadata=metaHandle;*nativeBytes=actual.Bytes();}
++        catch(...){owner->m_oVoxels.bDestroy(handle);throw;}
++    });
++}
++
++// Hash/producer checks precede this call in the managed/session owner. No live handles cross Go.
++PICOGK_API int32_t TauCompute_ImportGrid(PKINSTANCE library,const char* input,uint64_t size,
++    uint64_t maximumEncoded,uint64_t maximumNative,int32_t expectedKind,
++    uint64_t* output,PKMETADATA* metadata,uint64_t* nativeBytes) noexcept {
++    if(output) *output=0;if(metadata) *metadata=0;if(nativeBytes) *nativeBytes=0;
++    if(!output||!metadata||!nativeBytes||output==metadata||output==nativeBytes||metadata==nativeBytes||
++        !input||size>uint64_t(INT64_MAX)||maximumEncoded>uint64_t(INT64_MAX)||maximumNative>uint64_t(INT64_MAX)) return -1;
++    return TauCheckedInvoke([&] {
++        auto owner=Library::oLib().roGetInstance(library);
++        int32_t kind=-1,band=-1;
++        auto grid=TauDecodeGrid(input,size_t(size),size_t(maximumEncoded),size_t(maximumNative),&kind,&band);
++        if(kind!=expectedKind||!TauHasSupportedGridTransform(*grid)) throw std::invalid_argument("compute field profile mismatch");
++        auto state=TauStateFor(grid);
++        auto meta=std::make_shared<VdbMeta>(grid,state);
++        const auto publish=[&](auto field,auto& handles) {
++            TauOwnedMemory memory;memory.Object(field);memory.Object(meta);
++            const auto bytes=memory.Bytes();
++            if(uint64_t(bytes)>maximumNative) throw std::length_error("compute retained native budget");
++            const auto handle=handles.hAdd(std::move(field));
++            try {auto metaHandle=owner->m_oVdbMetas.hAdd(meta);*output=handle;*metadata=metaHandle;*nativeBytes=uint64_t(bytes);}
++            catch(...) {handles.bDestroy(handle);throw;}
++        };
++        if(kind==0) {
++            auto value=TauComputeVoxelAccess::Adopt(gridPtrCast<FloatGrid>(grid),band,state);
++            value->TauBindCounters(owner->m_tauCounters);publish(std::move(value),owner->m_oVoxels);
++        } else if(kind==1) publish(std::make_shared<ScalarField>(gridPtrCast<FloatGrid>(grid),state),owner->m_oScalarFields);
++        else publish(std::make_shared<VectorField>(gridPtrCast<Vec3SGrid>(grid),state),owner->m_oVectorFields);
++    });
++}
++
++// Actual miss receipt, not a managed-reference gate. A stale key leaves inputs untouched.
++PICOGK_API int32_t TauCompute_MutateVoxels(PKINSTANCE library,uint64_t target,uint64_t operand,
++    int32_t operation,float first,float second,const uint64_t* expected,int32_t expectedCount,uint64_t* result) noexcept {
++    if(result){result[0]=0;result[1]=0;}
++    if(!expected||!result||expected==result||operation<0||operation>6||
++        expectedCount!=(operation<3?4:2)||!std::isfinite(first)||!std::isfinite(second))return -1;
++    bool bypass=false;
++    const auto status=TauCheckedInvoke([&]{
++        auto owner=Library::oLib().roGetInstance(library);auto output=owner->m_oVoxels.roGet(target);
++        auto source=operation<3?owner->m_oVoxels.roGet(operand):Voxels::Ptr{};
++        bypass=!output->TauComputeMutate(source.get(),operation,first,second,expected,result);
++    });
++    return status?status:bypass?1:0;
++}
++
++// Qualified in-place families preserve the target header (metadata/transform) exactly.
++PICOGK_API int32_t TauCompute_ApplyVoxelTree(PKINSTANCE library,uint64_t target,int32_t prototypeKind,uint64_t prototype,
++    uint64_t operand,const uint64_t* expected,int32_t expectedCount,uint64_t maximumTemporary,uint64_t* result) noexcept {
++    if(result){result[0]=0;result[1]=0;}
++    if(!expected||!result||expected==result||(expectedCount!=2&&expectedCount!=4)||(prototypeKind!=0&&prototypeKind!=1)||
++       (prototypeKind==0&&target==prototype)||maximumTemporary>uint64_t(INT64_MAX))return -1;
++    bool bypass=false;
++    const auto status=TauCheckedInvoke([&]{
++        auto owner=Library::oLib().roGetInstance(library);auto output=owner->m_oVoxels.roGet(target);
++        auto source=expectedCount==4?owner->m_oVoxels.roGet(operand):Voxels::Ptr{};
++        if(prototypeKind==1){auto hold=owner->m_tauCaptures.roGet(prototype);std::lock_guard<std::recursive_mutex> lock(hold->computeGate);
++            if(hold->computeKind!=0||!hold->computeGrid)throw std::invalid_argument("cache capture cannot apply voxels");
++            bypass=!output->TauComputeApplyTree(gridPtrCast<FloatGrid>(hold->computeGrid),hold->narrowBand,source.get(),expected,maximumTemporary,result);
++        }else{auto resident=owner->m_oVoxels.roGet(prototype);auto pin=resident->TauPinGrid();std::lock_guard<std::recursive_mutex> lock(pin.state->gate);
++            if(!pin.state->cacheable){bypass=true;return;}
++            bypass=!output->TauComputeApplyTree(pin.grid,resident->TauNarrowBand(),source.get(),expected,maximumTemporary,result);
++        }
++    });
++    return status?status:bypass?1:0;
++}
++
++PICOGK_API int32_t TauCompute_ClonePrototype(PKINSTANCE library,uint64_t prototype,uint64_t maximumNative,
++    uint64_t* output,PKMETADATA* metadata,uint64_t* nativeBytes) noexcept {
++    if(output)*output=0;if(metadata)*metadata=0;if(nativeBytes)*nativeBytes=0;
++    if(!output||!metadata||!nativeBytes||output==metadata||output==nativeBytes||metadata==nativeBytes||maximumNative>uint64_t(INT64_MAX))return -1;
++    return TauCheckedInvoke([&]{
++        auto owner=Library::oLib().roGetInstance(library);auto source=owner->m_oVoxels.roGet(prototype);auto pin=source->TauPinGrid();
++        std::lock_guard<std::recursive_mutex> state(pin.state->gate);
++        TauOwnedMemory estimate;estimate.Object(source);estimate.Add(sizeof(VdbMeta));
++        if(uint64_t(estimate.Bytes())>maximumNative)throw std::length_error("compute warm clone budget");
++        auto grid=deepCopyTypedGrid<FloatGrid>(pin.grid);auto ownedState=TauStateFor(grid);
++        auto value=TauComputeVoxelAccess::Adopt(grid,source->TauNarrowBand(),ownedState);value->TauBindCounters(owner->m_tauCounters);
++        auto meta=std::make_shared<VdbMeta>(value->TauGrid(),value->TauState());TauOwnedMemory actual;actual.Object(value);actual.Object(meta);
++        if(uint64_t(actual.Bytes())>maximumNative)throw std::length_error("compute warm clone retained budget");
++        const auto handle=owner->m_oVoxels.hAdd(value);
++        try{const auto metaHandle=owner->m_oVdbMetas.hAdd(meta);*output=handle;*metadata=metaHandle;*nativeBytes=actual.Bytes();}
++        catch(...){owner->m_oVoxels.bDestroy(handle);throw;}
++    });
++}
++
++PICOGK_API int32_t TauCompute_PrimitiveIdentity(PKINSTANCE library,int32_t kind,uint64_t source,uint64_t* generation)noexcept {
++    if(generation)*generation=0;if(!generation||(kind!=3&&kind!=4))return -1;
++    return TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);
++        *generation=kind==3?owner->m_oMeshes.roGet(source)->TauGeneration():owner->m_oLattices.roGet(source)->TauGeneration();});
++}
++PICOGK_API int32_t TauCompute_CaptureOwnedBytes(PKINSTANCE library,uint64_t snapshot,uint64_t* bytes)noexcept {
++    if(bytes)*bytes=0;if(!bytes)return -1;
++    return TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);auto hold=owner->m_tauCaptures.roGet(snapshot);*bytes=uint64_t(hold->nMemUsage());});
++}
++PICOGK_API int32_t TauCompute_CaptureLatticeContent(PKINSTANCE library,uint64_t source,uint64_t generation,uint64_t maximumEncoded,uint64_t maximumNative,
++    uint64_t* snapshot,uint64_t* nativeBytes)noexcept {
++    if(snapshot)*snapshot=0;if(nativeBytes)*nativeBytes=0;
++    if(!snapshot||!nativeBytes||snapshot==nativeBytes||maximumEncoded>uint64_t(INT64_MAX)||maximumNative>uint64_t(INT64_MAX))return -1;
++    bool bypass=false;const auto status=TauCheckedInvoke([&]{
++        auto owner=Library::oLib().roGetInstance(library);auto lattice=owner->m_oLattices.roGet(source);
++        if(maximumNative<=sizeof(TauCapturedGeometry)){bypass=true;return;}
++        auto bytes=lattice->TauComputeContent(generation,maximumEncoded,maximumNative-sizeof(TauCapturedGeometry));
++        if(bytes.empty()){bypass=true;return;}
++        auto hold=std::make_shared<TauCapturedGeometry>();hold->computeKind=4;hold->generation=generation;hold->computeBytes=std::move(bytes);
++        const auto charge=uint64_t(hold->nMemUsage());if(charge>maximumNative){bypass=true;return;}
++        const auto handle=owner->m_tauCaptures.hAddWithIdentity(hold,TauNextGeneration());*snapshot=handle;*nativeBytes=charge;
++    });return status?status:bypass?1:0;
++}
++
++PICOGK_API int32_t TauCompute_GridDecodeAllowance(PKINSTANCE library,uint64_t snapshot,uint64_t maximumNative,uint64_t* allowance)noexcept {
++    if(allowance)*allowance=0;if(!allowance||maximumNative>uint64_t(INT64_MAX)||maximumNative<4096)return -1;
++    return TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);auto hold=owner->m_tauCaptures.roGet(snapshot);
++        std::lock_guard<std::recursive_mutex> lock(hold->computeGate);
++        if(hold->computeKind<0||hold->computeKind>2||hold->computeBytes.empty())throw std::invalid_argument("compute VDB stored body required");
++        *allowance=TauPreflightEnvelope(hold->computeBytes.data(),hold->computeBytes.size(),hold->computeBytes.size(),maximumNative-4096).peak+4096;
++    });
++}
++
++PICOGK_API int32_t TauCompute_ImportMesh(PKINSTANCE library,const char* bytes,uint64_t size,uint64_t maximumNative,uint64_t* output,uint64_t* nativeBytes)noexcept {
++    if(output)*output=0;if(nativeBytes)*nativeBytes=0;
++    if(!output||!nativeBytes||output==nativeBytes||size>uint64_t(INT64_MAX)||maximumNative>uint64_t(INT64_MAX))return -1;
++    return TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);auto mesh=TauDecodeMeshBody(bytes,size_t(size),maximumNative);
++        const auto charge=uint64_t(mesh->nMemUsage());const auto handle=owner->m_oMeshes.hAdd(mesh);*output=handle;*nativeBytes=charge;});
++}
++PICOGK_API int32_t TauCompute_CloneMeshCapture(PKINSTANCE library,uint64_t snapshot,uint64_t maximumNative,uint64_t* output)noexcept {
++    if(output)*output=0;if(!output||maximumNative>uint64_t(INT64_MAX))return -1;
++    return TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);auto hold=owner->m_tauCaptures.roGet(snapshot);
++        if(!hold->mesh)throw std::invalid_argument("compute mesh capture required");
++        if(uint64_t(hold->mesh->nMemUsage())+sizeof(Mesh)>maximumNative)throw std::length_error("compute mesh clone budget");
++        auto clone=std::make_shared<Mesh>(*hold->mesh);*output=owner->m_oMeshes.hAdd(clone);});
++}
++
++PICOGK_API int32_t TauCompute_RenderPrimitive(PKINSTANCE library,uint64_t target,int32_t sourceKind,uint64_t source,const uint64_t* expected,int32_t expectedCount,uint64_t* result)noexcept {
++    if(result){result[0]=0;result[1]=0;}if(!expected||!result||expected==result||expectedCount!=4||(sourceKind!=3&&sourceKind!=4))return -1;
++    bool bypass=false;const auto status=TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);auto output=owner->m_oVoxels.roGet(target);
++        if(sourceKind==3)bypass=!output->TauComputeRenderMesh(*owner->m_oMeshes.roGet(source),expected,result);
++        else bypass=!output->TauComputeRenderLattice(*owner->m_oLattices.roGet(source),expected,result);});return status?status:bypass?1:0;
++}
++PICOGK_API int32_t TauCompute_ApplyPrimitiveTree(PKINSTANCE library,uint64_t target,int32_t prototypeKind,uint64_t prototype,
++    int32_t sourceKind,uint64_t source,const uint64_t* expected,int32_t expectedCount,uint64_t maximumTemporary,uint64_t* result)noexcept {
++    if(result){result[0]=0;result[1]=0;}if(!expected||!result||expected==result||expectedCount!=4||(sourceKind!=3&&sourceKind!=4)||(prototypeKind!=0&&prototypeKind!=1)||(prototypeKind==0&&target==prototype)||maximumTemporary>uint64_t(INT64_MAX))return -1;
++    bool bypass=false;const auto status=TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);auto output=owner->m_oVoxels.roGet(target);
++        const auto apply=[&](FloatGrid::Ptr grid,int band){if(sourceKind==3)bypass=!output->TauComputeApplyPrimitive(grid,band,*owner->m_oMeshes.roGet(source),expected,maximumTemporary,result);
++            else bypass=!output->TauComputeApplyPrimitive(grid,band,*owner->m_oLattices.roGet(source),expected,maximumTemporary,result);};
++        if(prototypeKind==1){auto hold=owner->m_tauCaptures.roGet(prototype);std::lock_guard<std::recursive_mutex> lock(hold->computeGate);
++            if(hold->computeKind!=0||!hold->computeGrid)throw std::invalid_argument("compute primitive apply voxel capture");apply(gridPtrCast<FloatGrid>(hold->computeGrid),hold->narrowBand);
++        }else{auto resident=owner->m_oVoxels.roGet(prototype);auto pin=resident->TauPinGrid();std::lock_guard<std::recursive_mutex> lock(pin.state->gate);
++            if(!pin.state->cacheable){bypass=true;return;}apply(pin.grid,resident->TauNarrowBand());}});return status?status:bypass?1:0;
++}
++
++PICOGK_API int32_t TauCompute_ImportFile(PKINSTANCE library,const char* bytes,uint64_t size,uint64_t maximumEncoded,
++    uint64_t maximumNative,int32_t asset,uint64_t* output,uint64_t* nativeBytes) noexcept {
++    if(output)*output=0;if(nativeBytes)*nativeBytes=0;
++    if(!output||!nativeBytes||output==nativeBytes||size>SIZE_MAX||maximumEncoded>SIZE_MAX||maximumNative>uint64_t(INT64_MAX)||(asset!=0&&asset!=1))return -1;
++    return TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);
++        auto grids=asset?TauDecodeAsset(bytes,size,maximumEncoded,maximumNative):TauDecodeFile(bytes,size,maximumEncoded,maximumNative);
++        auto file=std::make_shared<VdbFile>(grids,true);TauOwnedMemory actual;actual.Object(file);
++        if(uint64_t(actual.Bytes())>maximumNative)throw std::length_error("compute file retained budget");
++        *output=owner->m_oVdbFiles.hAdd(file);*nativeBytes=uint64_t(actual.Bytes());
++    });
++}
++PICOGK_API int32_t TauCompute_CaptureFile(PKINSTANCE library,uint64_t file,uint64_t maximumEncoded,uint64_t maximumNative,
++    uint64_t* snapshot,uint64_t* nativeBytes,uint64_t* allowance) noexcept {
++    if(snapshot)*snapshot=0;if(nativeBytes)*nativeBytes=0;if(allowance)*allowance=0;
++    if(!snapshot||!nativeBytes||!allowance||snapshot==nativeBytes||snapshot==allowance||nativeBytes==allowance||maximumEncoded>SIZE_MAX||maximumNative>uint64_t(INT64_MAX))return -1;
++    return TauCheckedInvoke([&]{auto owner=Library::oLib().roGetInstance(library);auto source=owner->m_oVdbFiles.roGet(file);
++        if(maximumNative<=sizeof(TauCapturedGeometry))throw std::length_error("compute file capture budget");
++        auto value=std::make_shared<TauCapturedGeometry>();value->computeKind=5;
++        value->computeBytes=source->TauEncodeOwned([&](const auto& grids){return TauEncodeFile(grids,maximumEncoded,maximumNative-sizeof(TauCapturedGeometry));});
++        const auto checked=TauPreflightFile(value->computeBytes.data(),value->computeBytes.size(),maximumEncoded,maximumNative);
++        const auto bytes=uint64_t(value->nMemUsage());if(bytes>maximumNative)throw std::length_error("compute file capture retained budget");
++        *snapshot=owner->m_tauCaptures.hAddWithIdentity(value,TauNextGeneration());*nativeBytes=bytes;*allowance=checked.peak;
++    });
++}
++
++PICOGK_API int32_t TauCompute_FileDecodeAllowance(const char* bytes,uint64_t size,uint64_t maximumNative,uint64_t* allowance) noexcept {
++    if(allowance)*allowance=0;if(!allowance||size>SIZE_MAX||maximumNative>uint64_t(INT64_MAX))return -1;
++    return TauCheckedInvoke([&]{*allowance=TauPreflightFile(bytes,size,size,maximumNative).peak;});
++}
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -234,14 +234,13 @@
+     COMMENT "Copying library files to Dist folder"
+ )
+ 
+-add_custom_command(
+-    TARGET ${LIB_NAME} PRE_BUILD
+-    COMMAND ${CMAKE_COMMAND} -E echo "Creating build headers..."
+-    COMMAND ${CMAKE_COMMAND} 	-DAPIDIR=${CMAKE_CURRENT_SOURCE_DIR}/API 
+-    							-DLIB_VERSION=${LIB_VERSION}
+-    							-DLIB_NAME=${LIB_NAME}
+-    							-P ${CMAKE_CURRENT_SOURCE_DIR}/CMake_Utils/PicoGKBuildHeader.cmake
+-    COMMENT "Create build headers"
++# Generate before compilation; PRE_BUILD runs too late with Ninja/Make.
++execute_process(
++    COMMAND ${CMAKE_COMMAND} -DAPIDIR=${CMAKE_CURRENT_SOURCE_DIR}/API
++                            -DLIB_VERSION=${LIB_VERSION}
++                            -DLIB_NAME=${LIB_NAME}
++                            -P ${CMAKE_CURRENT_SOURCE_DIR}/CMake_Utils/PicoGKBuildHeader.cmake
++    COMMAND_ERROR_IS_FATAL ANY
+ )
+ 
+ 
+diff --git a/CMake_Utils/PicoGKBuildHeader.cmake b/CMake_Utils/PicoGKBuildHeader.cmake
+--- a/CMake_Utils/PicoGKBuildHeader.cmake
++++ b/CMake_Utils/PicoGKBuildHeader.cmake
+@@ -4,7 +4,7 @@
+ # Function to generate the PicoGKBuild.h file
+ function(generate_build_header)
+     # Get the current date and time
+-    string(TIMESTAMP BUILD_DATE_TIME "%Y-%m-%d %H:%M:%S")
++    string(TIMESTAMP BUILD_DATE_TIME "%Y-%m-%d %H:%M:%S" UTC)
+ 
+     # Create the content of the PicoGKBuild.h file
+     set(    BUILD_HEADER_CONTENT
+@@ -15,7 +15,13 @@
+ #endif // PICOGK_BUILD_H\n"
+         )
+ 
+-    file(WRITE "${APIDIR}/PicoGKBuild.h" "${BUILD_HEADER_CONTENT}")
++    set(BUILD_HEADER_PATH "${APIDIR}/PicoGKBuild.h")
++    if(EXISTS "${BUILD_HEADER_PATH}")
++        file(READ "${BUILD_HEADER_PATH}" PREVIOUS_BUILD_HEADER_CONTENT)
++    endif()
++    if(NOT PREVIOUS_BUILD_HEADER_CONTENT STREQUAL BUILD_HEADER_CONTENT)
++        file(WRITE "${BUILD_HEADER_PATH}" "${BUILD_HEADER_CONTENT}")
++    endif()
+ endfunction()
+ 
+ generate_build_header()
 diff --git a/openvdb/openvdb/openvdb/io/Archive.cc b/openvdb/openvdb/openvdb/io/Archive.cc
 --- a/openvdb/openvdb/openvdb/io/Archive.cc
 +++ b/openvdb/openvdb/openvdb/io/Archive.cc
@@ -7693,15 +8685,3 @@ diff --git a/openvdb/openvdb/openvdb/io/Archive.cc b/openvdb/openvdb/openvdb/io/
      mImpl->mNotifier = notifier;
  }
  
-diff --git a/openvdb/openvdb/openvdb/tree/Tree.h b/openvdb/openvdb/openvdb/tree/Tree.h
---- a/openvdb/openvdb/openvdb/tree/Tree.h
-+++ b/openvdb/openvdb/openvdb/tree/Tree.h
-@@ -282,7 +282,7 @@
-     /// Empty tree constructor
-     Tree(const ValueType& background): mRoot(background) {}
- 
--    ~Tree() override { this->clear(); releaseAllAccessors(); }
-+    ~Tree() override { releaseAllAccessors(); mRoot.clear(); }
- 
-     /// Return a pointer to a deep copy of this tree
-     TreeBase::Ptr copy() const override { return TreeBase::Ptr(new Tree(*this)); }

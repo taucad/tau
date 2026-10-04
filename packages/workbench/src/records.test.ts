@@ -17,6 +17,7 @@ import {
   viewDisplaySchema,
   viewGridSchema,
   workbenchLayoutSchema,
+  workbenchEntriesSchema,
   workbenchPaths,
   workbenchRecords,
   workbenchViewSchema,
@@ -101,7 +102,7 @@ describe('approved record grammar', () => {
           version: 1,
           entries: {
             'bracket.ts': {
-              operationTimeout: 300_000,
+              renderTimeout: 300_000,
               components: { hidden: ['lid'], opacity: [{ id: 'housing', opacity: 0.4 }] },
             },
           },
@@ -158,7 +159,7 @@ describe('approved record grammar', () => {
     ).toBe(true);
     expect(
       entrySettingsSchema.safeParse({
-        operationTimeout: 300_000,
+        renderTimeout: 300_000,
         components: { hidden: ['lid'], opacity: [{ id: 'housing', opacity: 0.4 }] },
       }).success,
     ).toBe(true);
@@ -173,7 +174,7 @@ describe('approved record grammar', () => {
         version: 1,
         entries: {
           'bracket.ts': {
-            operationTimeout: 300_000,
+            renderTimeout: 300_000,
             components: { hidden: ['lid'], opacity: [{ id: 'housing', opacity: 0.4 }] },
           },
         },
@@ -248,16 +249,19 @@ describe('approved record grammar', () => {
     ).toBe(false);
   });
 
-  it('reads legacy renderTimeout but writes only canonical operationTimeout', () => {
-    const legacy = bytes(JSON.stringify({ version: 1, entries: { 'main.ts': { renderTimeout: 15_000 } } }));
-    const read = workbenchRecords.entries.read(legacy);
+  it('should keep renderTimeout canonical in workbench entry bytes', () => {
+    const canonical = bytes(JSON.stringify({ version: 1, entries: { 'main.ts': { renderTimeout: 15_000 } } }));
+    const read = workbenchRecords.entries.read(canonical);
     expect(read.status).toBe('current');
     if (read.status === 'current') {
-      expect(read.record.entries['main.ts']).toEqual({ operationTimeout: 15_000 });
+      expect(read.record.entries['main.ts']).toEqual({ renderTimeout: 15_000 });
       const written = workbenchRecords.entries.serialize(read.record);
-      expect(written).toContain('"operationTimeout": 15000');
-      expect(written).not.toContain('renderTimeout');
+      expect(written).toContain('"renderTimeout": 15000');
+      expect(written).not.toContain('operationTimeout');
     }
+    expect(
+      workbenchEntriesSchema.safeParse({ version: 1, entries: { 'main.ts': { operationTimeout: 15_000 } } }).success,
+    ).toBe(false);
   });
 
   it('refuses unsafe paths, unknown pane, wrong lane, duplicate tabs and zero look', () => {
@@ -308,7 +312,7 @@ describe('approved record grammar', () => {
     };
     roundTrip(workbenchRecords.layout, layout);
     roundTrip(workbenchRecords.view, view);
-    roundTrip(workbenchRecords.entries, { version: 1, entries: { 'bracket.ts': { operationTimeout: 0 } } });
+    roundTrip(workbenchRecords.entries, { version: 1, entries: { 'bracket.ts': { renderTimeout: 0 } } });
     roundTrip(workbenchRecords.namedLayout, { version: 1, views: [] });
     roundTrip(workbenchRecords.device, {
       version: 1,
@@ -380,7 +384,7 @@ describe('approved record grammar', () => {
     ).toThrow(RangeError);
     const canonical = workbenchRecords.entries.serialize({
       version: 1,
-      entries: { 'z.ts': { components: { hidden: ['b', 'a'] } }, 'a.ts': { operationTimeout: 1 } },
+      entries: { 'z.ts': { components: { hidden: ['b', 'a'] } }, 'a.ts': { renderTimeout: 1 } },
     });
     expect(canonical.indexOf('"a.ts"')).toBeLessThan(canonical.indexOf('"z.ts"'));
     expect(canonical.indexOf('"components"')).toBeLessThan(canonical.indexOf('"version"'));

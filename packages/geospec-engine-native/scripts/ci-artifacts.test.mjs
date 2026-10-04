@@ -13,7 +13,7 @@ import fs, {
   writeFileSync,
 } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
-import { dirname, isAbsolute, join, resolve } from 'node:path';
+import { basename, dirname, isAbsolute, join, resolve } from 'node:path';
 import { test } from 'node:test';
 import process from 'node:process';
 /* oxlint-disable no-restricted-imports -- Standalone Node host check consumes its co-located CLI without a public package export. */
@@ -24,6 +24,7 @@ import {
   prepareArtifacts,
   recoverExitedProducer,
   snapshotDelivery,
+  productKey,
   verifyArtifacts,
   verifyDelivery,
   withProducerMarker,
@@ -38,6 +39,19 @@ void test('malformed process listings cannot prove a producer group exited', (co
   assert.throws(() => darwinGroupAlive(123), /Malformed process listing/);
   listing.mock.mockImplementation(() => ({ status: 0, stdout: undefined }));
   assert.throws(() => darwinGroupAlive(123), /Could not prove GeoSpec producer group exit/);
+});
+
+void test('should report only live members of the owned producer group', (context) => {
+  const listing = context.mock.method(childProcess, 'spawnSync', () => ({
+    status: 0,
+    stdout: ' 123 Z+\n 456 S\n',
+  }));
+  assert.equal(darwinGroupAlive(123), false);
+  assert.equal(darwinGroupAlive(456), true);
+  listing.mock.mockImplementation(() => ({ status: 0, stdout: '123 Z\n123 S+\n456 R\n' }));
+  assert.equal(darwinGroupAlive(123), true);
+  listing.mock.mockImplementation(() => ({ status: 0, stdout: '\n' }));
+  assert.equal(darwinGroupAlive(123), false);
 });
 
 void test('cache key follows source and selected toolchain without generated outputs', (context) => {
@@ -146,7 +160,7 @@ void test('cached preparation target uses verified ensure-delivery on source cha
   /** @type {unknown} */
   const rawProject = JSON.parse(readFileSync(resolve(import.meta.dirname, '../project.json'), 'utf8'));
   const project =
-    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], options?: {command?: string}} >}} */ (
+    /** @type {{targets: Record<string, {cache?: boolean, inputs?: unknown[], outputs?: string[], options?: {command?: string}} >}} */ (
       rawProject
     );
   const target = project.targets['prepare-geospec-ci-artifacts'];
@@ -155,7 +169,102 @@ void test('cached preparation target uses verified ensure-delivery on source cha
   assert.deepEqual(target.inputs, [
     { runtime: 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs cache-key' },
   ]);
+  assert.deepEqual(target.outputs, [
+    '{projectRoot}/bindings/node/generated',
+    '{projectRoot}/bindings/emscripten/generated',
+    '{projectRoot}/dist',
+    '{workspaceRoot}/out/artifacts/geospec-native-engine/ci',
+  ]);
   assert.equal(target.options?.command, 'node packages/geospec-engine-native/scripts/ci-artifacts.mjs ensure-delivery');
+});
+
+void test('product key follows the native closure and the locked napi CLI, not workspace edits', (context) => {
+  const scratch = resolve(import.meta.dirname, '../../../out/tests/geospec-ci-artifacts');
+  mkdirSync(scratch, { recursive: true });
+  const root = mkdtempSync(join(scratch, 'product-key-'));
+  context.after(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+  const packagePath = 'packages/geospec-engine-native';
+  const lockfile = (napi = '3.8.6', integrity = 'sha512-napi', vite = '8.0.10') =>
+    [
+      'importers:',
+      '',
+      `  ${packagePath}:`,
+      '    devDependencies:',
+      "      '@napi-rs/cli':",
+      "        specifier: 'catalog:'",
+      `        version: ${napi}(@types/node@26.3.0)`,
+      '      vite:',
+      "        specifier: 'catalog:'",
+      `        version: ${vite}(@types/node@26.3.0)`,
+      '',
+      '  packages/host:',
+      '    dependencies: {}',
+      '',
+      'packages:',
+      '',
+      `  '@napi-rs/cli@${napi}':`,
+      `    resolution: {integrity: ${integrity}}`,
+      '',
+    ].join('\n');
+  const product = [
+    `${packagePath}/rust/src/lib.rs`,
+    `${packagePath}/native/occt/source-manifest.json`,
+    `${packagePath}/project.json`,
+    `${packagePath}/package.json`,
+    'rust-toolchain.toml',
+  ];
+  const nonProduct = [
+    `${packagePath}/src/index.ts`,
+    `${packagePath}/bench/run.ts`,
+    `${packagePath}/conformance/case.json`,
+    `${packagePath}/trust/run.mjs`,
+    `${packagePath}/README.md`,
+    `${packagePath}/tsconfig.lib.json`,
+    `${packagePath}/scripts/build-mixed-wasm.test.mjs`,
+    `${packagePath}/scripts/test_native_proof.py`,
+    'tools/tsdown.plugin.ts',
+    'nx.json',
+    'tsconfig.base.json',
+    'package.json',
+  ];
+  for (const path of [...product, ...nonProduct, `${packagePath}/scripts/ci-artifacts.mjs`]) {
+    mkdirSync(dirname(join(root, path)), { recursive: true });
+    writeFileSync(join(root, path), `fixture ${path}`);
+  }
+  mkdirSync(join(root, `${packagePath}/scripts`), { recursive: true });
+  for (const name of ['collect-native-proof.py', 'test_native_proof.py']) {
+    writeFileSync(join(root, packagePath, 'scripts', name), name);
+  }
+  writeFileSync(join(root, 'pnpm-lock.yaml'), lockfile());
+  context.mock.method(
+    childProcess,
+    'execFileSync',
+    /** @type {(executable: string, args: string[]) => string} */ (_executable, args) =>
+      args[0] === 'rev-parse' ? `${'a'.repeat(40)}\n` : `${[...product, ...nonProduct, 'pnpm-lock.yaml'].join('\0')}\0`,
+  );
+  const base = productKey(root);
+  for (const path of nonProduct) {
+    writeFileSync(join(root, path), `edited ${path}`);
+    assert.equal(productKey(root), base, `${path} is outside the product closure`);
+  }
+  writeFileSync(join(root, 'pnpm-lock.yaml'), lockfile('3.8.6', 'sha512-napi', '8.1.0'));
+  assert.equal(productKey(root), base, 'an unrelated locked release keeps the products');
+  for (const path of product) {
+    const original = readFileSync(join(root, path));
+    writeFileSync(join(root, path), `edited ${path}`);
+    assert.notEqual(productKey(root), base, `${path} selects the products`);
+    writeFileSync(join(root, path), original);
+  }
+  assert.equal(productKey(root), base);
+  writeFileSync(join(root, 'pnpm-lock.yaml'), lockfile('3.8.7', 'sha512-next'));
+  assert.notEqual(productKey(root), base, 'a new napi CLI release changes the generated loader');
+  writeFileSync(
+    join(root, 'pnpm-lock.yaml'),
+    lockfile('3.8.7', 'sha512-next').replace("  '@napi-rs/cli@3.8.7':", '  other:'),
+  );
+  assert.throws(() => productKey(root), /lacks the @napi-rs\/cli@3.8.7 integrity/);
 });
 
 void test('explicit delivery cache remains the exact selected path', (context) => {
@@ -253,6 +362,10 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
     `${packagePath}/bench/performance-lab-runner.test.ts`,
     `${packagePath}/bench/performance-lab.test.ts`,
     `${packagePath}/vitest.config.ts`,
+    // Outside the product closure: a facade, workspace tooling and Nx configuration edit.
+    `${packagePath}/src/index.ts`,
+    'tools/tsdown.plugin.ts',
+    'nx.json',
   ];
   const sourceOnlyPaths = [...sourceKitPaths, ...sourceOnlyOutsideArchive];
   const toolchainPath = 'rust-toolchain.toml';
@@ -325,6 +438,8 @@ const checkTransport = (context, reusePrefixes, sourceOnly = false) => {
       join(kit, 'manifest.json'),
       JSON.stringify({
         schema: 'geospec-native-source-relink-v2',
+        // A real assembly renews every archive; name the attempt so two fixture assemblies in one second differ.
+        assembly: basename(assembly),
         sourceTree: { files: entries.length, sha256: sourceTreeSha256, entries },
       }),
     );

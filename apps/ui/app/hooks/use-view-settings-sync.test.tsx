@@ -107,10 +107,9 @@ const editor = () =>
   mock<ActorRefFrom<typeof editorMachine>>({
     send: vi.fn(),
     getSnapshot: () =>
-      // oxlint-disable-next-line typescript/consistent-type-assertions -- Only the selected context field is used by this actor fixture.
-      ({ context: { graphicsBackendPreferences: {} } }) as ReturnType<
-        ActorRefFrom<typeof editorMachine>['getSnapshot']
-      >,
+      mock<ReturnType<ActorRefFrom<typeof editorMachine>['getSnapshot']>>({
+        context: { graphicsBackendPreferences: {} },
+      }),
   });
 
 describe('view record owner synchronization', () => {

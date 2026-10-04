@@ -30,10 +30,11 @@ import { desktopDeepLink } from '#lib/desktop-deep-link.js';
  * Where "Get Tau Desktop" goes.
  *
  * The same destination the in-app `Get Tau Desktop` action already opens
- * (`routes/w.$workspace.$project/project-route-notices.tsx`). There is no
- * dedicated download route yet; when one lands, both sites point at it.
+ * (`routes/w.$workspace.$project/project-route-notices.tsx`). The release
+ * workflow marks only a desktop release "latest", and only once its archives
+ * are attached, so this page always offers a complete download.
  */
-export const tauDesktopDownloadUrl = 'https://docs.tau.new';
+export const tauDesktopDownloadUrl = 'https://github.com/taucad/tau/releases/latest';
 
 /**
  * The browser's own preference, per the Figma pattern the canvas copies.

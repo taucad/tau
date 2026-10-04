@@ -4,9 +4,13 @@
  * Every case here fails on the pre-change tree; the captured red run is
  * `execution/lanes/CR-W1-a1/red-run.log`.
  */
-import { describe, expect, it, vi } from 'vitest';
-import { contentDigest, digestAction } from '@taucad/cache-core';
+import { describe, expect, it, onTestFinished, vi } from 'vitest';
+import { mkdtemp, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { contentDigest, digestAction, digestContent } from '@taucad/cache-core';
 import type { ActionDigest, CacheCodec, CacheRetention, ComputeAction } from '@taucad/cache-core';
+import { createSqliteComputeEngine } from '#cache/sqlite-compute-engine.js';
 import { createMemoryComputeEngine } from '#cache/memory-compute-engine.js';
 import {
   createComputeCapabilityHost,
@@ -740,5 +744,289 @@ describe('compute capability contract', () => {
       physicalBytes: { status: 'unsupported' },
       generation: 1 as ComputeGeneration,
     });
+  });
+});
+
+describe('opaque shared content closure', () => {
+  const partsCodec: CacheCodec<Uint8Array<ArrayBuffer>> = {
+    id: 'test.brep',
+    version: '1',
+    mediaType: 'application/json',
+    encode: async ({ value }) => ({
+      bytes: new TextEncoder().encode(await digestContent({ bytes: value })),
+      content: [value, value],
+    }),
+    decode: async ({ bytes, readContent }) => {
+      const digest = contentDigest({ value: new TextDecoder().decode(bytes) });
+      const value = await readContent?.({ digest });
+      if (!value) {
+        throw new Error('Missing leaf.');
+      }
+      return value;
+    },
+  };
+
+  it('should store two metadata actions with one actual byte leaf and restores both after host restart', async () => {
+    const memory = createMemoryComputeEngine();
+    const control = memory.control({ workspace: 'parts' });
+    const leafReadBudgets: number[] = [];
+    const engine: ComputeStoreEngine = {
+      open: async (input) => {
+        const session = await memory.engine.open(input);
+        return {
+          ...session,
+          get: async (request) => {
+            const result = await session.get(request);
+            if (
+              result.status === 'ok' &&
+              result.entries.some((entry) => entry.action.namespace === 'tau.compute.content')
+            ) {
+              leafReadBudgets.push(request.maxBytes);
+            }
+            return result;
+          },
+        };
+      },
+    };
+    const store = _registerComputeStore({
+      spec: Object.freeze({}) as ComputeStore,
+      engine,
+      workspace: 'parts',
+      control,
+    });
+    const value = new Uint8Array(1024).fill(42);
+    const host = createComputeCapabilityHost({ binding: { mode: 'durable', store }, workspace: 'parts' });
+    onTestFinished(async () => host.dispose());
+    const capability = onCapability(host.capability(signal));
+    for (const id of [81, 82]) {
+      // oxlint-disable-next-line no-await-in-loop -- prove separate ordered actions share the same immutable content entry.
+      await capability.evaluate({
+        action: action(id),
+        codec: partsCodec,
+        policy: 'best-effort',
+        compute: async () => value,
+      });
+    }
+    const metadata = new TextEncoder().encode(await digestContent({ bytes: value }));
+    expect(await control.inspect({})).toMatchObject({
+      entries: 3,
+      logicalBytes: value.byteLength + 2 * metadata.byteLength,
+    });
+    await host.dispose();
+    const restarted = createComputeCapabilityHost({ binding: { mode: 'durable', store }, workspace: 'parts' });
+    onTestFinished(async () => restarted.dispose());
+    const compute = vi.fn(async () => new Uint8Array([99]));
+    for (const id of [81, 82]) {
+      // oxlint-disable-next-line no-await-in-loop -- cold host hydration must recover both roots through the same leaf action.
+      const result = await onCapability(restarted.capability(signal)).evaluate({
+        action: action(id),
+        codec: partsCodec,
+        policy: 'best-effort',
+        compute,
+      });
+      expect(result).toMatchObject({ source: 'cache', value });
+      result.value[0] = 0;
+    }
+    expect(compute).not.toHaveBeenCalled();
+    expect(value[0]).toBe(42);
+    expect(leafReadBudgets).toEqual([64 * 1024 * 1024 - metadata.byteLength]);
+  });
+
+  it.each(['missing', 'corrupt', 'identity', 'generation', 'over-budget'] as const)(
+    'should recompute instead of admitting a %s leaf closure',
+    async (fault) => {
+      const memory = createMemoryComputeEngine();
+      const control = memory.control({ workspace: 'parts-fault' });
+      let inject = false;
+      const hash = vi.spyOn(crypto.subtle, 'digest');
+      onTestFinished(() => {
+        hash.mockRestore();
+      });
+      const engine: ComputeStoreEngine = {
+        open: async (input) => {
+          const session = await memory.engine.open(input);
+          return {
+            ...session,
+            get: async (request) => {
+              const result = await session.get(request);
+              if (
+                inject &&
+                result.status === 'ok' &&
+                result.entries.some((entry) => entry.action.namespace === 'tau.compute.content')
+              ) {
+                if (fault === 'generation') {
+                  await control.clear({});
+                }
+                if (fault === 'missing') {
+                  return { status: 'ok', entries: [], omitted: [] };
+                }
+                if (fault === 'identity') {
+                  return {
+                    ...result,
+                    entries: result.entries.map((entry) => ({
+                      ...entry,
+                      action: { ...entry.action, operation: 'wrong' },
+                    })),
+                  };
+                }
+                if (fault === 'corrupt') {
+                  return {
+                    ...result,
+                    entries: result.entries.map((entry) => ({ ...entry, bytes: new Uint8Array([0]) })),
+                  };
+                }
+                if (fault === 'over-budget') {
+                  return {
+                    ...result,
+                    entries: result.entries.map((entry) => ({
+                      ...entry,
+                      bytes: new Uint8Array(request.maxBytes + 1),
+                    })),
+                  };
+                }
+              }
+              return result;
+            },
+          };
+        },
+      };
+      const store = _registerComputeStore({
+        spec: Object.freeze({}) as ComputeStore,
+        engine,
+        workspace: 'parts-fault',
+        control,
+      });
+      const first = createComputeCapabilityHost({ binding: { mode: 'durable', store }, workspace: 'parts-fault' });
+      await onCapability(first.capability(signal)).evaluate({
+        action: action(83),
+        codec: partsCodec,
+        policy: 'best-effort',
+        compute: async () => new Uint8Array([42]),
+      });
+      await first.dispose();
+      inject = true;
+      const restarted = createComputeCapabilityHost({ binding: { mode: 'durable', store }, workspace: 'parts-fault' });
+      onTestFinished(async () => restarted.dispose());
+      const compute = vi.fn(async () => new Uint8Array([99]));
+      expect(
+        await onCapability(restarted.capability(signal)).evaluate({
+          action: action(83),
+          codec: partsCodec,
+          policy: 'best-effort',
+          compute,
+        }),
+      ).toMatchObject({ source: 'computed', value: new Uint8Array([99]) });
+      expect(compute).toHaveBeenCalledOnce();
+      if (fault === 'over-budget') {
+        expect(hash.mock.calls.every(([, bytes]) => bytes.byteLength < 64 * 1024 * 1024 - 128)).toBe(true);
+      }
+    },
+  );
+
+  it('should refuse publication of a computation captured before clear', async () => {
+    const memory = createMemoryComputeEngine();
+    const control = memory.control({ workspace: 'parts-clear' });
+    const store = _registerComputeStore({
+      spec: Object.freeze({}) as ComputeStore,
+      engine: memory.engine,
+      workspace: 'parts-clear',
+      control,
+    });
+    const host = createComputeCapabilityHost({ binding: { mode: 'durable', store }, workspace: 'parts-clear' });
+    onTestFinished(async () => host.dispose());
+    const started = Promise.withResolvers<void>();
+    const finish = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+    const running = onCapability(host.capability(signal)).evaluate({
+      action: action(84),
+      codec: partsCodec,
+      policy: 'best-effort',
+      compute: async () => {
+        started.resolve();
+        return finish.promise;
+      },
+    });
+    await started.promise;
+    await control.clear({});
+    finish.resolve(new Uint8Array([42]));
+    expect(await running).toMatchObject({ source: 'computed', publication: { status: 'skipped' } });
+    expect(await control.inspect({})).toMatchObject({ entries: 0, logicalBytes: 0 });
+  });
+
+  it('should recompute when clear occurs during asynchronous decoding', async () => {
+    const host = createComputeCapabilityHost({ binding: { mode: 'memory' }, workspace: 'parts-decode' });
+    onTestFinished(async () => host.dispose());
+    const capability = onCapability(host.capability(signal));
+    await capability.evaluate({
+      action: action(85),
+      codec: partsCodec,
+      policy: 'best-effort',
+      compute: async () => new Uint8Array([42]),
+    });
+    const codec: CacheCodec<Uint8Array<ArrayBuffer>> = {
+      ...partsCodec,
+      decode: async (input) => {
+        const value = await partsCodec.decode(input);
+        await host.control?.clear({});
+        return value;
+      },
+    };
+    const compute = vi.fn(async () => new Uint8Array([99]));
+    expect(await capability.evaluate({ action: action(85), codec, policy: 'best-effort', compute })).toMatchObject({
+      source: 'computed',
+      value: new Uint8Array([99]),
+    });
+    expect(compute).toHaveBeenCalledOnce();
+  });
+
+  it('should promote the complete shared closure and restore it from a restarted SQLite engine', async () => {
+    const directory = await mkdtemp(join(tmpdir(), 'tau-runtime-parts-'));
+    onTestFinished(async () => rm(directory, { recursive: true, force: true }));
+    const value = new Uint8Array(1024).fill(42);
+    const retention = _mintComputeRetention({ name: 'shared-parts-job' });
+    const openHost = async () => {
+      const sqlite = createSqliteComputeEngine({ directory });
+      const control = await sqlite.control({ workspace: 'parts-durable' });
+      const store = _registerComputeStore({
+        spec: Object.freeze({}) as ComputeStore,
+        engine: sqlite.engine,
+        workspace: 'parts-durable',
+        control,
+      });
+      const host = createComputeCapabilityHost({ binding: { mode: 'durable', store }, workspace: 'parts-durable' });
+      return { sqlite, host, control };
+    };
+    const first = await openHost();
+    try {
+      const result = await onCapability(first.host.capability(signal)).evaluate({
+        action: action(86),
+        codec: partsCodec,
+        policy: 'required',
+        retention,
+        compute: async () => value,
+      });
+      expect(result).toMatchObject({ source: 'computed', publication: { status: 'stored', retention } });
+      expect(await first.control.inspect({})).toMatchObject({ entries: 2, pinnedBytes: 1024 + 71 });
+    } finally {
+      await first.host.dispose();
+      await first.sqlite.dispose();
+    }
+    const restarted = await openHost();
+    try {
+      const compute = vi.fn(async () => new Uint8Array([99]));
+      expect(
+        await onCapability(restarted.host.capability(signal)).evaluate({
+          action: action(86),
+          codec: partsCodec,
+          policy: 'required',
+          retention,
+          compute,
+        }),
+      ).toMatchObject({ source: 'cache', value, retention });
+      expect(compute).not.toHaveBeenCalled();
+    } finally {
+      await restarted.host.dispose();
+      await restarted.sqlite.dispose();
+      await rm(directory, { recursive: true, force: true });
+    }
   });
 });

@@ -46,6 +46,6 @@ Prefer Build123d features, sketches, joints, and assemblies over primitive-butti
 
 All 3018 symbols are listed in `api-index.md`. Grep it for a name, then read only the file its heading names.
 
-- 94 reference files, named in `api-index.md`
+- 104 reference files, named in `api-index.md`
 
 Read ranges, not whole files. Never copy a reference into a source file.

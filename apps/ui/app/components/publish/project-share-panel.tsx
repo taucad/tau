@@ -34,6 +34,7 @@ import {
 } from '#lib/share-providers.js';
 import type { GithubGistConnectionStatus } from '#lib/share-providers.js';
 import { SvgIcon } from '#components/icons/svg-icon.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 export type ProjectSharePanelProps = {
   readonly projectId: string;
@@ -535,7 +536,11 @@ function PortableShareBody({
             <SvgIcon id='github' className='mt-0.5 size-5' aria-hidden />
           )}
           <div className='min-w-0 text-sm'>
-            <p className='font-medium'>{encrypted ? 'Password-encrypted in your browser' : 'No upload through Tau'}</p>
+            <p className='font-medium'>
+              {encrypted
+                ? `Password-encrypted ${isDesktopTarget() ? 'on your computer' : 'in your browser'}`
+                : 'No upload through Tau'}
+            </p>
             <p className='mt-1 text-muted-foreground'>
               {encrypted
                 ? 'The password can travel in the link or be shared separately. Files remain in memory until download or remix.'

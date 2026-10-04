@@ -162,6 +162,9 @@ const toolPortRevoked = (): Error =>
     code: 'TOOL_PORT_REVOKED',
   });
 
+/** Filesystem members that answer synchronously; every other member returns a promise. */
+const synchronousMembers: ReadonlySet<PropertyKey> = new Set<keyof RevisionFileSystem>(['readFileStream', 'dispose']);
+
 const revocable = (
   filesystem: RevisionFileSystem,
   versioned: (path: string) => boolean,
@@ -175,6 +178,16 @@ const revocable = (
       const value: unknown = Reflect.get(target, property, receiver);
       if (typeof value !== 'function') {
         return value;
+      }
+      if (synchronousMembers.has(property)) {
+        // A stream or a disposal is answered at once; wrapping it in a promise breaks every bounded reader.
+        return (...args: unknown[]): unknown => {
+          if (revoked) {
+            throw toolPortRevoked();
+          }
+          // oxlint-disable-next-line @typescript-eslint/no-unsafe-type-assertion -- a filesystem member, called as itself.
+          return (value as (...parameters: unknown[]) => unknown).apply(target, args);
+        };
       }
       return async (...args: unknown[]): Promise<unknown> => {
         if (revoked) {

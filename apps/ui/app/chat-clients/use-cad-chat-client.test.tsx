@@ -31,6 +31,7 @@ const browserHostHarness = vi.hoisted(() => ({
   resumable: false,
   /** The run the host last named for this chat when no stream of this page publishes one (a daemon-placed chat). */
   hostRunId: undefined as string | undefined,
+  projectedFailure: undefined as { code: string; message: string } | undefined,
   runKind: 'tau' as 'tau' | 'external',
   createClient: vi.fn((_options: AgentHostClientOptions): AgentHostClient => {
     const client = Object.create(null) as AgentHostClient;
@@ -93,6 +94,7 @@ vi.mock('#hooks/use-chat.js', () => ({
 vi.mock('#hooks/active-chat-provider.js', () => ({
   useActiveChatSession: vi.fn(),
   useChatComposer: () => ({
+    execution: { setActiveExecution: () => undefined },
     model: {
       model: {
         id: 'openai-gpt-5.5',
@@ -112,6 +114,7 @@ vi.mock('#hooks/chat-session-store-provider.js', () => ({
 }));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
+    ensureModelCatalog: async () => ({ status: 'loaded', models: [] }),
     defaultExecution: { kind: 'tau', model: 'openai-gpt-5.5' },
     resolveModel: (id: string) => {
       /* What the real hook answers while the catalog cannot load: no row, so no provider. */
@@ -336,7 +339,9 @@ const installSessionStore = (partial: Partial<ChatSessionStore>): void => {
           position: { cursor: 1 },
           currentRunId: runId,
           runs: {
-            [runId]: { lifecycle: browserHostHarness.run?.state ?? 'paused' },
+            [runId]: browserHostHarness.projectedFailure
+              ? { lifecycle: 'failed', failure: browserHostHarness.projectedFailure }
+              : { lifecycle: browserHostHarness.run?.state ?? 'paused' },
           },
         },
         endCursor: 1,
@@ -388,6 +393,7 @@ beforeEach(() => {
   browserHostHarness.placed = false;
   browserHostHarness.resumable = false;
   browserHostHarness.hostRunId = undefined;
+  browserHostHarness.projectedFailure = undefined;
   browserHostHarness.runKind = 'tau';
   availabilityHarness.gate = undefined;
   revisionRoot.connected = true;
@@ -1067,7 +1073,7 @@ describe('useCadChatClient', () => {
   });
 
   /* Resume never changes kind into a replay after its gesture was taken. */
-  it('refuses Resume without a projected paused run and resumes that run once observed', async () => {
+  it('refuses Resume for a projected paused run and resumes its failed run once observed', async () => {
     const chat = mock<Chat<MyUIMessage>>();
     /* One user message, because a continuation leases it: a transcript with
      * none has no turn to continue and `turnIntentOf` refuses it (W10-B). */
@@ -1078,10 +1084,10 @@ describe('useCadChatClient', () => {
 
     browserHostHarness.placed = true;
     browserHostHarness.resumable = false;
+    browserHostHarness.run = { runId: 'run_live', state: 'paused' };
     await expect(composeTurn({ kind: 'continue' })).rejects.toThrow('This turn cannot be resumed.');
 
-    browserHostHarness.resumable = true;
-    browserHostHarness.run = { runId: 'run_live' };
+    browserHostHarness.projectedFailure = { code: 'RUN_ABANDONED', message: 'The host closed.' };
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
       runId: 'run_live',
       request: { kind: 'continue' },
@@ -1089,7 +1095,6 @@ describe('useCadChatClient', () => {
 
     // A placement with no browser host answers its own resume over the wire.
     browserHostHarness.placed = false;
-    browserHostHarness.resumable = false;
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({ request: { kind: 'continue' } });
   });
 
@@ -1111,8 +1116,8 @@ describe('useCadChatClient', () => {
     renderClient();
 
     browserHostHarness.placed = true;
-    browserHostHarness.resumable = true;
     browserHostHarness.run = { runId: 'run_live' };
+    browserHostHarness.projectedFailure = { code: 'RUN_ABANDONED', message: 'The host closed.' };
 
     await expect(composeTurn({ kind: 'continue' })).resolves.toMatchObject({
       runId: 'run_live',

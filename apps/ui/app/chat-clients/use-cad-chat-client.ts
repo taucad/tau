@@ -66,6 +66,12 @@ export type CadChatClient = {
     approved: boolean,
     decision?: { readonly reason?: string | undefined; readonly optionId?: string | undefined },
   ) => Promise<void>;
+  /**
+   * Hand the running Tau turn a message it reads before its next step; otherwise send it as a new message.
+   *
+   * A send during an external agent's live turn queues behind that turn.
+   */
+  steerOrSubmit: (text: string) => Promise<void>;
   /** Live message list from the bound `Chat` instance. */
   messages: readonly MyUIMessage[];
   /** Live status from the bound `Chat` instance. */
@@ -199,11 +205,21 @@ export const useCadChatClient = (): CadChatClient => {
     [activeChatId, store],
   );
 
+  const steerOrSubmit = useCallback(
+    async (text: string): Promise<void> => {
+      if (!(await store.steerProjectedRun(activeChatId, text))) {
+        await submit({ text });
+      }
+    },
+    [activeChatId, store, submit],
+  );
+
   return {
     submit,
     edit,
     stop,
     respondToToolApproval,
+    steerOrSubmit,
     messages,
     status,
     error: chat.error,

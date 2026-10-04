@@ -36,6 +36,7 @@ import { materializeOnSignIn, useMaterializeOnSignInLocation } from '#hooks/use-
 import { useCommercialFeatures } from '#cloud/commercial-features.js';
 import type { ProjectCreationLocation } from '#types/project-creation-location.types.js';
 import { homeProjectCreationLocation } from '#types/project-creation-location.types.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 type WorkspaceRow = {
   workspace: Workspace;
@@ -303,9 +304,7 @@ export function FileSystemSettings(): React.JSX.Element {
                     <div className='truncate text-sm font-medium'>
                       {pendingWorkspaceName ?? 'Choose a workspace folder'}
                     </div>
-                    <div className='text-xs text-muted-foreground'>
-                      {connectionLabel ?? 'Browser folder picker is open'}
-                    </div>
+                    <div className='text-xs text-muted-foreground'>{connectionLabel ?? 'Folder picker is open'}</div>
                   </div>
                   {workspaceConnection.phase === 'failed' ? (
                     <Button
@@ -371,7 +370,8 @@ export function FileSystemSettings(): React.JSX.Element {
         </SettingsItem>
       ) : undefined}
 
-      {storageUsage ? (
+      {/* Desktop's Home is a folder on disk, so the origin's storage quota says nothing about it. */}
+      {storageUsage && !isDesktopTarget() ? (
         <SettingsItem settingId='browser-storage'>
           <SettingsSectionCard>
             <CardHeader>

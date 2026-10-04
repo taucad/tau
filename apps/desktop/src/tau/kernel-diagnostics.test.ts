@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { mkdtempSync, readFileSync, rmSync, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
@@ -8,6 +8,10 @@ import { createDesktopRuntime, desktopAssimpBackend, desktopOpenrscadKernel } fr
 import { resolveRuntimeDefinition } from '@taucad/runtime/worker';
 
 import { kernelEngineEvent, kernelEngineRecord } from '#tau/kernel-diagnostics.js';
+
+// The prepared Python and .NET payloads are build outputs; middleware composition does not read them.
+vi.mock('#tau/build123d-resources.js', () => ({ build123dKernelOptions: () => ({}) }));
+vi.mock('#tau/picogk-resources.js', () => ({ picogkKernelOptions: () => ({}) }));
 
 describe('kernelEngineRecord', () => {
   it('selects native Assimp only for the supported Apple Silicon slice', () => {
@@ -61,8 +65,6 @@ describe('kernelEngineRecord', () => {
 
 describe('the identity the record reports', () => {
   it('enables one unit-inference middleware after the parameter file resolver', async () => {
-    process.env['TAU_BUILD123D_RESOURCE_ROOT'] = resolve(import.meta.dirname, '../../resources/python');
-    process.env['TAU_PICOGK_RESOURCE_ROOT'] = resolve(import.meta.dirname, '../../resources/picogk');
     const resolved = await resolveRuntimeDefinition(createDesktopRuntime(), {
       tauApiUrl: 'http://localhost:4000',
       tauWebSocketUrl: 'ws://localhost:4001',

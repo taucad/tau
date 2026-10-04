@@ -558,6 +558,25 @@ describe('ChatMessage source part rendering', () => {
     expect(link).toHaveAttribute('href', 'https://example.com/source');
   });
 
+  it.each([
+    // oxlint-disable-next-line no-script-url -- the hostile URL under test.
+    'javascript:alert(1)',
+    'data:text/html,<p>hi</p>',
+    'not a url',
+  ])('should render a %s source-url as text, not a link', (url) => {
+    const message: MyUIMessage = {
+      id: 'msg-unsafe-source-url',
+      role: 'assistant',
+      parts: [{ type: 'source-url', sourceId: 'source-1', url, title: 'Unsafe reference' }],
+    };
+    setMessages([message]);
+
+    render(<ChatMessage messageId='msg-unsafe-source-url' />);
+
+    expect(screen.getByText('Unsafe reference')).toBeInTheDocument();
+    expect(screen.queryByRole('link', { name: 'Unsafe reference' })).not.toBeInTheDocument();
+  });
+
   it('should render source-document parts without throwing', () => {
     const message: MyUIMessage = {
       id: 'msg-source-document',

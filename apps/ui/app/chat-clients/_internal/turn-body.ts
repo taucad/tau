@@ -89,7 +89,7 @@ type TauAgentConfigInput = CadAgentConfigInput & {
 
 const requireTauExecution: (agent: CadAgentConfigInput) => asserts agent is TauAgentConfigInput = (agent) => {
   if (agent.execution.kind !== 'tau') {
-    throw new TypeError('Browser agent host requires Tau execution.');
+    throw new TypeError('The Tau agent host requires Tau execution.');
   }
 };
 
@@ -189,7 +189,7 @@ export const agentHostConfig = (input: {
   const { model } = resolvedModel;
   const hostedModel = hostModel(agent, model);
   if (hostedModel === undefined) {
-    throw new Error('Browser agent host requires resolved model provider metadata.');
+    throw new Error('The Tau agent host requires resolved model provider metadata.');
   }
   const snapshotContext = agent.snapshot ? buildBrowserAgentHostSnapshotContext(agent.snapshot) : undefined;
   return {

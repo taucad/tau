@@ -9,10 +9,14 @@ import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Raycaster, Vector3 } from 'three';
 import type { BufferAttribute, Intersection, Mesh, Object3D } from 'three';
 import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import * as surfaceBatchOwners from '#components/geometry/graphics/three/utils/gltf-surface-batches.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
+import { getModelEmphasisSet } from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
+import { getModelComponentOwner } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 
 const mocks = vi.hoisted(() => {
   const sceneBounds = { min: [-20, -10, -5], max: [20, 10, 5] };
+  const selectedComponentIds: string[] = [];
   return {
     noHoveredComponentIds: [] as readonly string[],
     camera: { name: 'perspective' },
@@ -45,7 +49,7 @@ const mocks = vi.hoisted(() => {
       isolatedComponentIds: [],
       manifest: undefined,
       opacityByComponentId: {},
-      selectedComponentIds: [],
+      selectedComponentIds,
     },
     renderFrame: {
       anchorFrameId: 'tau:root',
@@ -122,28 +126,27 @@ const surfaceMaterial: GlbMaterial = {
   pbrMetallicRoughness: { baseColorFactor: [0.5, 0.5, 0.5, 1], metallicFactor: 0.1, roughnessFactor: 0.8 },
 };
 
-function buildGlb({ lift = 0, indices = [0, 1, 2] } = {}): Uint8Array<ArrayBuffer> {
+function buildGlb({ lift = 0, indices = [0, 1, 2], occurrences = 1 } = {}): Uint8Array<ArrayBuffer> {
+  const primitives = [
+    {
+      mode: 4,
+      positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
+      normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
+      indices: Uint32Array.from(indices),
+      material: surfaceMaterial,
+    },
+    {
+      mode: 1,
+      positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
+      indices: Uint32Array.from([0, 1, 1, 2]),
+      material: surfaceMaterial,
+    },
+  ];
   return writeGlb({
-    nodes: [
-      {
-        name: 'Part',
-        primitives: [
-          {
-            mode: 4,
-            positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
-            normals: Float32Array.from([0, 0, 1, 0, 0, 1, 0, 0, 1]),
-            indices: Uint32Array.from(indices),
-            material: surfaceMaterial,
-          },
-          {
-            mode: 1,
-            positions: Float32Array.from([0, 0, 0, 1, 0, 0, 0, 1, lift]),
-            indices: Uint32Array.from([0, 1, 1, 2]),
-            material: surfaceMaterial,
-          },
-        ],
-      },
-    ],
+    nodes: Array.from({ length: occurrences }, (_, index) => ({
+      name: occurrences === 1 ? 'Part' : `Part${index}`,
+      primitives,
+    })),
   });
 }
 
@@ -175,6 +178,7 @@ describe('GltfMesh in-place updates', () => {
     mocks.invalidate.mockClear();
     mocks.frameCallback = undefined;
     mocks.sectionView = { isActive: false };
+    mocks.modelUnit = { ...mocks.modelUnit, selectedComponentIds: [] };
   });
 
   it('should present a same-topology result without reparsing it', async () => {
@@ -274,6 +278,50 @@ describe('GltfMesh in-place updates', () => {
     expect(disposeMaterial).toHaveBeenCalledTimes(1);
   });
 
+  it('should dispose the current batches after an in-place edit and late edge expansion', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const createBatches = vi.spyOn(surfaceBatchOwners, 'createGltfSurfaceBatches');
+    const first = buildGlb({ occurrences: 2 });
+    const second = buildGlb({ occurrences: 2, lift: 2 });
+    const view = render(
+      <GltfMesh gltfFile={first} geometryHash='a' presentationRevision={1} enableMatcap={false} enableLines={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const initial = createBatches.mock.results[0]!.value as surfaceBatchOwners.GltfSurfaceBatches;
+    const disposeInitial = vi.spyOn(initial, 'dispose');
+    view.rerender(
+      <GltfMesh gltfFile={second} geometryHash='b' presentationRevision={2} enableMatcap={false} enableLines={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1, 2]);
+    });
+    expect(parseAsync).toHaveBeenCalledTimes(1);
+    view.rerender(
+      <GltfMesh gltfFile={second} geometryHash='b' presentationRevision={2} enableMatcap={false} enableLines />,
+    );
+    await waitFor(() => {
+      expect(createBatches).toHaveBeenCalledTimes(2);
+    });
+    const current = createBatches.mock.results[1]!.value as surfaceBatchOwners.GltfSurfaceBatches;
+    const disposeCurrent = vi.spyOn(current, 'dispose');
+    expect(disposeInitial).toHaveBeenCalledTimes(1);
+    expect(initial.group.parent).toBeNull();
+    expect(current.group.parent).not.toBeNull();
+    view.rerender(
+      <GltfMesh gltfFile={second} geometryHash='b' presentationRevision={2} enableMatcap={false} enableLines={false} />,
+    );
+    view.rerender(
+      <GltfMesh gltfFile={second} geometryHash='b' presentationRevision={2} enableMatcap={false} enableLines />,
+    );
+    expect(createBatches).toHaveBeenCalledTimes(2);
+    view.unmount();
+    expect(disposeCurrent).toHaveBeenCalledTimes(1);
+    expect(disposeInitial).toHaveBeenCalledTimes(1);
+    expect(current.group.parent).toBeNull();
+  });
+
   it('should retain every live buffer when replacement metadata is malformed', async () => {
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
     const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
@@ -303,6 +351,49 @@ describe('GltfMesh in-place updates', () => {
     expect([...position.array]).toEqual(before);
     expect((position as BufferAttribute).version).toBe(version);
     expect(committedRevisions()).toEqual([1]);
+  });
+
+  it('should keep selected emphasis after a material change and a full scene replacement', async () => {
+    const parseAsync = vi.spyOn(GLTFLoader.prototype, 'parseAsync');
+    const firstGlb = buildGlb();
+    const view = render(
+      <GltfMesh gltfFile={firstGlb} geometryHash='a' presentationRevision={1} enableMatcap={false} />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1]);
+    });
+    const first = (await parseAsync.mock.results[0]?.value) as GLTF;
+    const firstSurface = findSurface(first.scene);
+    const componentId = getModelComponentOwner(firstSurface)?.componentId;
+    if (!componentId) {
+      throw new Error('Expected the presented surface to belong to a component.');
+    }
+    mocks.modelUnit = { ...mocks.modelUnit, selectedComponentIds: [componentId] };
+    view.rerender(<GltfMesh gltfFile={firstGlb} geometryHash='a' presentationRevision={1} enableMatcap={false} />);
+    await waitFor(() => {
+      expect(getModelEmphasisSet(mocks.rootScene as unknown as Object3D).selected).toEqual([firstSurface]);
+    });
+
+    const originalMaterial = firstSurface.material;
+    view.rerender(<GltfMesh gltfFile={firstGlb} geometryHash='a' presentationRevision={1} enableMatcap />);
+    await waitFor(() => {
+      expect(firstSurface.material).not.toBe(originalMaterial);
+    });
+    expect(parseAsync).toHaveBeenCalledTimes(1);
+    expect(getModelEmphasisSet(mocks.rootScene as unknown as Object3D).selected).toEqual([firstSurface]);
+
+    view.rerender(
+      <GltfMesh gltfFile={buildGlb({ indices: [0, 2, 1] })} geometryHash='b' presentationRevision={2} enableMatcap />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toEqual([1, 2]);
+    });
+    expect(parseAsync).toHaveBeenCalledTimes(2);
+    const second = (await parseAsync.mock.results[1]?.value) as GLTF;
+    const secondSurface = findSurface(second.scene);
+    expect(secondSurface).not.toBe(firstSurface);
+    expect(getModelComponentOwner(secondSurface)?.componentId).toBe(componentId);
+    expect(getModelEmphasisSet(mocks.rootScene as unknown as Object3D).selected).toEqual([secondSurface]);
   });
 
   it('should fall back to a full presentation when the topology changes', async () => {

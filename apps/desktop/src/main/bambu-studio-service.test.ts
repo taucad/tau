@@ -48,8 +48,8 @@ const fakeEngine = (installation: BambuStudioInstallation | false = install) => 
   describeBambuStudioSettings: vi.fn<BambuStudioEngine['describeBambuStudioSettings']>(async () => settings),
 });
 
-const serviceWith = (engine: ReturnType<typeof fakeEngine>, env: NodeJS.ProcessEnv = {}) =>
-  createBambuStudioService({ env, engine });
+const serviceWith = (engine: ReturnType<typeof fakeEngine>, env: NodeJS.ProcessEnv = {}, pathOverride = true) =>
+  createBambuStudioService({ env, pathOverride, engine });
 
 /** A Bambu Studio data directory holding one user process preset. */
 const dataDirectoryWithUserPreset = async (): Promise<{ dataDirectory: string; preset: string }> => {
@@ -77,6 +77,13 @@ describe('createBambuStudioService', () => {
 
       expect(status).toHaveProperty('available', false);
       expect(status).toHaveProperty('reason', expect.stringContaining('TAU_BAMBU_STUDIO_PATH'));
+    });
+
+    it('should not tell a release build to set a path override it ignores', async () => {
+      const status = await serviceWith(fakeEngine(false), {}, false).status();
+
+      expect(status).toHaveProperty('reason', expect.stringContaining('default install location'));
+      expect(status).toHaveProperty('reason', expect.not.stringContaining('TAU_BAMBU_STUDIO_PATH'));
     });
 
     it('should look Bambu Studio up in the environment main resolved', async () => {

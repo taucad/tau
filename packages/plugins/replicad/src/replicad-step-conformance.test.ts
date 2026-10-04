@@ -96,7 +96,7 @@ const exportModel = async (format: 'step' | 'glb', source: string): Promise<Uint
   const client = createTestRuntimeClient({ runtime, files: { 'main.ts': source } });
   try {
     const exportResult = await client.open({ source: { path: 'main.ts' } }).export(format);
-    expect(exportResult.success, `conformance ${format} export`).toBe(true);
+    /* Throw the export issues so rejection cases can match the message. */
     if (!exportResult.success) {
       throw new Error(exportResult.issues.map((issue) => issue.message).join('\n'));
     }

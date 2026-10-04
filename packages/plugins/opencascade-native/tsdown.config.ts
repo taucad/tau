@@ -7,6 +7,7 @@ const baseConfig: UserConfig = {
   clean: true,
   dts: true,
   minify: true,
+  copy: ({ outDir }) => [{ from: 'src/native/opencascade-native.node', to: `${outDir}/native` }],
   tsconfig: 'tsconfig.build.json',
   unbundle: true,
 };

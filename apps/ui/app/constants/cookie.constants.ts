@@ -36,9 +36,11 @@ export const cookieName = {
   /* Chat */
   // Whether to enable web search in the chat.
   chatWebSearch: 'chat-web-search',
-  // The last selected model.
+  // The last execution used — any agent, with its model, level and config — carried onto new chats.
+  chatExecution: 'chat-execution',
+  // The last chosen Tau model.
   chatModel: 'chat-model',
-  // The last chosen reasoning level, carried onto new chats.
+  // The last chosen Tau reasoning level.
   chatEffort: 'chat-effort',
   // Per-user model availability overrides (sparse; values differ from model.recommended).
   chatModelOverrides: 'chat-model-overrides',

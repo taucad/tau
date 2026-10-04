@@ -1131,9 +1131,18 @@ describe('geospec-runner.worker', () => {
     expect(nativeMocks.engine).toHaveBeenCalledOnce();
     expect(nativeMocks.createNativeGeoSpecRunner).toHaveBeenCalledOnce();
     // The product reads verdicts and localized failures, not complete success witnesses.
-    expect(nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0]).toMatchObject({
-      nativeAssertions: { evidenceProfile: 'bounded' },
-    });
+    const runnerOptions = nativeMocks.createNativeGeoSpecRunner.mock.calls[0]?.[0] as {
+      readonly nativeAssertions: {
+        readonly engine: Readonly<Record<string, unknown>>;
+        readonly evidenceProfile: string;
+      };
+    };
+    expect(runnerOptions.nativeAssertions.evidenceProfile).toBe('bounded');
+    for (const method of ['ingestSubject', 'subjectHandle', 'releaseSubject', 'processRequest', 'evaluateClaim']) {
+      expect(typeof runnerOptions.nativeAssertions.engine[method]).toBe('function');
+    }
+    expect(runnerOptions.nativeAssertions.engine).not.toHaveProperty('close');
+    expect(nativeMocks.close).not.toHaveBeenCalled();
   });
 
   it('should dispose runner runtime and filesystem state on close', async () => {
@@ -1181,6 +1190,7 @@ describe('geospec-runner.worker', () => {
     expect(workerMocks.runner.close).toHaveBeenCalledTimes(1);
     expect(workerMocks.runtimeClient.terminate).toHaveBeenCalledTimes(1);
     expect(workerMocks.fsProxy.dispose).toHaveBeenCalledTimes(1);
+    expect(nativeMocks.close).toHaveBeenCalledTimes(1);
     expect(close).toHaveBeenCalledTimes(1);
   });
 

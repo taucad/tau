@@ -10,6 +10,7 @@ import { useProject } from '#hooks/use-project.js';
 import { isBrowserAgentHostProviderKind } from '#services/agent-host-client.js';
 import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { useModels } from '#hooks/use-models.js';
+import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
 import { randomUuid } from '@taucad/utils/id';
 
 /**
@@ -46,7 +47,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
   const { activeChatId } = useActiveChatSession();
   const store = useChatSessionStore();
   const { projectId } = useProject();
-  const { resolveModel } = useModels();
+  const { resolveModel, ensureModelCatalog } = useModels();
   const creditPreflight = useCreditPreflight();
   const admitExecution = useCallback(
     async (turnExecution: CadAgentExecution = liveExecution): Promise<ChatExecutionTarget> => {
@@ -75,20 +76,27 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
        * subscription, so there is no row to resolve and no gateway wire to
        * refuse. */
       if (turnExecution.kind === 'tau') {
-        // Catalog lookup is advisory here: M1 refuses an unknown model, while
-        // the picker refreshes from its own subscription. Admission never polls.
+        /* A Tau turn's wire is its catalog row: without one there is nothing to
+         * run. Wait for the catalog's in-flight answer — a seeded first turn
+         * fires at chat load, ahead of it — and refuse here, with the reason,
+         * rather than compose a body the host cannot accept. */
+        const catalog = await ensureModelCatalog();
         const resolved = resolveModel(turnExecution.model);
+        if (!resolved.isResolved) {
+          const { model } = turnExecution;
+          const reason =
+            tauModelRefusal(model, tauModelReadiness(model, catalog)) ?? tauModelRefusal(model, 'not-offered');
+          throw Object.assign(new Error(reason), { code: 'CHAT_PLACEMENT_UNAVAILABLE' });
+        }
         // The availability above is per project; the model's wire is per
         // turn. A resolved catalog row the browser host cannot speak (the
         // `tau` replay row, for one) must refuse here, before a body is
         // composed: its admission fails the host schema, and the transport
         // must never hand a Tau turn to the API, which executes
         // external-agent turns only.
-        if (resolved.isResolved && !isBrowserAgentHostProviderKind(resolved.provider.id)) {
+        if (!isBrowserAgentHostProviderKind(resolved.provider.id)) {
           throw Object.assign(
-            new Error(
-              `Tau cannot run the ${resolved.provider.id} provider wire in your browser. Pick a different model.`,
-            ),
+            new Error(`Tau cannot run the ${resolved.provider.id} provider wire. Pick a different model.`),
             { code: 'CHAT_PLACEMENT_UNAVAILABLE' },
           );
         }
@@ -103,7 +111,7 @@ export const useTurnAdmission = (liveExecution: CadAgentExecution): TurnAdmissio
        * worker's revision root (W8 TS-S5). */
       return { hostId: daemonHostId ?? browserHostId };
     },
-    [creditPreflight, liveExecution, projectId, resolveModel],
+    [creditPreflight, ensureModelCatalog, liveExecution, projectId, resolveModel],
   );
 
   const surfaceDispatchFailure = useCallback(

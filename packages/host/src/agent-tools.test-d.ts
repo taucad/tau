@@ -1,6 +1,7 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import { defineRuntime } from '@taucad/runtime';
 import type { KernelPlugin, RuntimeClient } from '@taucad/runtime';
+import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { z } from 'zod';
 
 import type { HostRuntimeClient } from '#agent-tools.js';
@@ -25,6 +26,14 @@ const transformedRuntime = defineRuntime({ kernels: [transformedKernel] });
 const requiredRuntime = defineRuntime({ kernels: [requiredKernel] });
 
 describe('host runtime client admission', () => {
+  it('should preserve the complete prior host runtime surface in both directions', () => {
+    type PreviousHostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | 'connect' | 'capabilities'> &
+      Pick<RuntimeAgentClient, 'open'>;
+    expectTypeOf<HostRuntimeClient>().toExtend<PreviousHostRuntimeClient>();
+    expectTypeOf<PreviousHostRuntimeClient>().toExtend<HostRuntimeClient>();
+    expectTypeOf<HostRuntimeClient['open']>().toEqualTypeOf<RuntimeAgentClient['open']>();
+  });
+
   it('accepts finite defaultable evaluation and rejects required evaluation options', () => {
     expectTypeOf<RuntimeClient<typeof optionalRuntime>>().toExtend<HostRuntimeClient>();
     expectTypeOf<RuntimeClient<typeof defaultRuntime>>().toExtend<HostRuntimeClient>();

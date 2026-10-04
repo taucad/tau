@@ -45,7 +45,6 @@ import {
 import type { ReadSkillResource } from '@taucad/agent-tools/registry';
 import { createSkillResolver } from '@taucad/agent-tools/skills';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
-import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
 import { runGeoSpecTests } from '@taucad/agent-tools/geospec';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
 import type { GeoSpecRunner } from 'geospec/runner/worker';
@@ -57,7 +56,7 @@ import { assertRootedPath } from '@taucad/utils/path';
  * and re-exports the same declaration by name, so the emitted `.d.mts` keeps it
  * as an external import. */
 import type { ExportFile, RuntimeFileSystemBase } from '@taucad/runtime/types';
-import type { RuntimeClient } from '@taucad/runtime/client';
+import type { RuntimeClient, WideViewRequest } from '@taucad/runtime/client';
 import type { MachineClient } from '@taucad/runtime/machine';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import type { ActorRefFrom } from 'xstate';
@@ -94,15 +93,31 @@ export type HostExportFile = ExportFile;
  *
  * Projected from the public runtime contract so published declarations never
  * expose the private agent adapter. `tau serve` passes its loopback client;
- * tests may supply a structural fake of these three operations.
+ * tests may supply a structural fake. Documents expose evaluation, export and
+ * close; views expose rendering and close without requiring plugin options.
  *
  * @public
  */
-export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | 'connect' | 'capabilities'> &
-  Pick<RuntimeAgentClient, 'open'>;
+export type HostRuntimeClient = Pick<RuntimeClient, 'describe' | 'transcode' | 'connect' | 'capabilities'> & {
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'signal'>) => Pick<
+    ReturnType<RuntimeClient['open']>,
+    'evaluation' | 'export' | 'close'
+  > & {
+    view: (
+      id?: string,
+      request?: Pick<WideViewRequest, 'instance' | 'options'>,
+    ) => Pick<ReturnType<ReturnType<RuntimeClient['open']>['view']>, 'rendering' | 'close'>;
+  };
+};
 
-/** Filesystem capability the host tool registry consumes. @public */
-export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'>;
+/**
+ * Filesystem capability the host tool registry consumes. The project's print intent is read in bounded chunks and
+ * written with a precondition, so both are required: a filesystem without them is refused when the host is composed,
+ * rather than every print tool failing at the agent (blueprint x1c-start-confirmation F8).
+ * @public
+ */
+export type HostToolFileSystem = Omit<RuntimeFileSystemBase, 'watch'> &
+  Required<Pick<RuntimeFileSystemBase, 'readFileStream' | 'writeFileChecked'>>;
 
 /** One package-owned skill bundle accepted by the host. @public */
 export type HostSystemSkillBundle = {
@@ -449,13 +464,8 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
       },
     );
     const recordView = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
-    const settingsOwner =
-      view.readFileStream && view.writeFileChecked
-        ? new MachineSettingsOwner({ filesystem: view, definitions: [] })
-        : undefined;
-    if (settingsOwner) {
-      settingsOwners.set(workspaceRoot, settingsOwner);
-    }
+    const settingsOwner = new MachineSettingsOwner({ filesystem: view, definitions: [] });
+    settingsOwners.set(workspaceRoot, settingsOwner);
     const mutations = workspaceRoot === options.workspaceRoot ? liveMutations : new ResourceQueue();
     const { runtimeClient } = options;
 
@@ -585,13 +595,9 @@ export const createHostToolRegistry = (options: HostToolRegistryOptions): ToolRe
      * finds through the same project id. */
     const { revisions, machines, projectId } = options;
     return createChatToolRegistry({
-      ...(settingsOwner
-        ? {
-            machineSettings: {
-              readMachineSettings: async (typeId: MachineTypeId) => settingsOwner.read({ typeId }),
-            },
-          }
-        : {}),
+      machineSettings: {
+        readMachineSettings: async (typeId: MachineTypeId) => settingsOwner.read({ typeId }),
+      },
       fileSystemFor: (signal) => createProviderRpcFileSystem({ provider: view, mutations, signal }),
       recordFileSystemFor: (signal) => createProviderRpcFileSystem({ provider: recordView, mutations, signal }),
       workbenchFileSystemFor: (signal) =>

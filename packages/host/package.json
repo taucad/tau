@@ -64,7 +64,9 @@
   },
   "dependencies": {
     "@agentclientprotocol/sdk": "catalog:",
+    "@parcel/watcher": "catalog:",
     "@taucad/agent-host": "workspace:*",
+    "@taucad/bambu": "workspace:*",
     "@taucad/filesystem": "workspace:*",
     "@taucad/jobs": "workspace:*",
     "@taucad/mcp": "workspace:*",
@@ -78,6 +80,7 @@
     "fflate": "catalog:",
     "js-yaml": "catalog:",
     "minimatch": "^10.2.5",
+    "nanoid": "catalog:",
     "safe-regex": "^2.1.1",
     "ws": "catalog:"
   },

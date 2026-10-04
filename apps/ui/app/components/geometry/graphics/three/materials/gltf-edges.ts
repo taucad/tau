@@ -1,4 +1,3 @@
-import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import type { Group, LineSegments, Object3D, Vector2 } from 'three';
 import { InterleavedBufferAttribute } from 'three';
 import { LineSegments2, LineSegmentsGeometry, LineMaterial } from 'three/addons';
@@ -276,20 +275,35 @@ export function setGltfFatLineMaterialColor(material: GltfFatLineMaterial, edgeC
 function wrapAsFatLineSegments(
   lineSegments: LineSegments,
   material: GltfFatLineMaterial,
-  backend: ResolvedGraphicsBackend,
+  options: Readonly<{
+    backend: ResolvedGraphicsBackend;
+    prototypes: Map<LineSegments['geometry'], LineSegmentsGeometry>;
+  }>,
 ): Object3D | undefined {
-  const positions = extractPositions(lineSegments);
+  const { backend, prototypes } = options;
+  const reused = prototypes.get(lineSegments.geometry);
+  const positions = reused ? undefined : extractPositions(lineSegments);
 
-  if (!positions || positions.length === 0) {
+  if (!reused && (!positions || positions.length === 0)) {
     console.warn('[FatLines] Failed to extract positions from LineSegments');
     return undefined;
   }
 
-  const fatLine = createGltfFatLineSegmentsFromPositions({ backend, positions, material });
+  const fatLine = reused
+    ? backend === 'webgpu'
+      ? new WebGpuFatLineSegments2(reused, material as Line2NodeMaterial)
+      : new LineSegments2(reused, material as LineMaterial)
+    : createGltfFatLineSegmentsFromPositions({
+        backend,
+        positions: positions!,
+        material,
+      });
   if (!fatLine) {
     return undefined;
   }
 
+  prototypes.set(lineSegments.geometry, fatLine.geometry);
+  fatLine.raycast = disableRaycast;
   fatLine.position.copy(lineSegments.position);
   fatLine.rotation.copy(lineSegments.rotation);
   fatLine.scale.copy(lineSegments.scale);
@@ -338,8 +352,17 @@ export function getFatLineSourceIndices(object: Object3D): Uint32Array | Uint16A
 
 /** The shared theme-coloured material each fat line wears when its component is not emphasised. */
 const fatLineBaseMaterials = new WeakMap<Object3D, GltfFatLineMaterial>();
+const fatLinePrototypeSources = new WeakMap<Object3D, LineSegments['geometry']>();
 
-type EdgeEmphasisMaterials = Readonly<{ hover: GltfFatLineMaterial; selected: GltfFatLineMaterial }>;
+/** Canonical loader prototype identity retained without hashing or flattening occurrences. */
+export function getFatLinePrototypeSource(object: Object3D): LineSegments['geometry'] | undefined {
+  return fatLinePrototypeSources.get(object);
+}
+
+type EdgeEmphasisMaterials = Readonly<{
+  hover: GltfFatLineMaterial;
+  selected: GltfFatLineMaterial;
+}>;
 
 /**
  * Per-base-material hover/selected variants, built lazily on first emphasis so an idle
@@ -409,8 +432,11 @@ export function collectGltfFatLineMaterials(object: Object3D): GltfFatLineMateri
 }
 
 export function applyFatLineSegments(
-  gltf: Pick<GLTF, 'scene'> & {
-    readonly parser?: { readonly associations: Pick<ReadonlyMap<Object3D, unknown>, 'get'> };
+  gltf: {
+    readonly scene: Object3D;
+    readonly parser?: {
+      readonly associations: Pick<ReadonlyMap<Object3D, unknown>, 'get'>;
+    };
   },
   options: ApplyFatLineSegmentsOptions,
 ): void {
@@ -434,10 +460,18 @@ export function applyFatLineSegments(
   }
 
   // Single material instance shared across every wrapped fat line — the R1 perf win.
-  const sharedMaterial = createGltfFatLineMaterial({ backend, resolution, edgeColor });
+  const sharedMaterial = createGltfFatLineMaterial({
+    backend,
+    resolution,
+    edgeColor,
+  });
 
+  const prototypes = new Map<LineSegments['geometry'], LineSegmentsGeometry>();
   for (const { parent, lineSegments } of sources) {
-    const fatLine = wrapAsFatLineSegments(lineSegments, sharedMaterial, backend);
+    const fatLine = wrapAsFatLineSegments(lineSegments, sharedMaterial, {
+      backend,
+      prototypes,
+    });
     if (!fatLine) {
       continue;
     }
@@ -462,6 +496,7 @@ export function applyFatLineSegments(
       parent.add(fatLine);
     }
     fatLineBaseMaterials.set(fatLine, sharedMaterial);
+    fatLinePrototypeSources.set(fatLine, lineSegments.geometry);
 
     const sourceIndices = lineSegments.geometry.index?.array;
     if (sourceIndices instanceof Uint32Array || sourceIndices instanceof Uint16Array) {

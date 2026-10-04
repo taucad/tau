@@ -10,9 +10,6 @@ type SetCookieExpectation = {
   secure: boolean;
 };
 
-const unstableUrlKey = 'unstable_url';
-const unstablePatternKey = 'unstable_pattern';
-
 async function callSetThemeAction({ requestUrl, theme }: { requestUrl: string; theme: unknown }) {
   const request = new Request(requestUrl, {
     method: 'POST',
@@ -24,8 +21,8 @@ async function callSetThemeAction({ requestUrl, theme }: { requestUrl: string; t
 
   const response = await action({
     request,
-    [unstableUrlKey]: new URL(request.url),
-    [unstablePatternKey]: '/action/set-theme',
+    url: new URL(request.url),
+    pattern: '/action/set-theme',
     params: {},
     context: {},
   });

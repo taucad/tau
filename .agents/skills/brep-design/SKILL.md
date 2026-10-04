@@ -405,14 +405,16 @@ If you are about to do X, do Y instead:
 
 ## Verification Boundary
 
-Manufacture-ready designs are proven with GeoSpec assertions (see
+Manufacture-ready designs require qualified evidence (see
 `packages/geospec/README.md`): contact/clearance/interference with declared
 allowances, coaxiality through hole stacks, containment/insertion for
 retention, wall-thickness and fillet/chamfer presence. This skill governs
-DESIGN; write geometry whose intent those assertions can state directly —
-coincident faces assert as contact, modeled interference asserts as a
-declared press fit, connected voids assert as passages. Do not bend nominal
-geometry to make evidence easy.
+DESIGN; write geometry whose intent those requirements state directly.
+Use GeoSpec only where the admitted evidence supports the full requirement;
+unavailable wall, passage, contact or other evidence remains explicitly
+unqualified. Bounds, watertightness and playback are not substitutes.
+Preserve intended contact, press fits and passages; do not bend nominal
+geometry or weaken requirements to make evidence easy.
 
 Out of scope for this skill: injection-molding and PCB/electronics DFM.
 Additive manufacturing IS in scope via [additive-dfm.md](additive-dfm.md).

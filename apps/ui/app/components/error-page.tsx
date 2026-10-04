@@ -4,6 +4,7 @@ import { isRouteErrorResponse, useNavigate, useRouteError } from 'react-router';
 import { Button } from '@taucad/ui/components/button';
 import { useAnalytics } from '#hooks/use-analytics.js';
 import { PageNotFound } from '#components/page-not-found.js';
+import { reportUiError } from '#lib/error-reporting.js';
 
 const CollapsibleCodeBlock = lazy(async () => {
   const m = await import('#components/ui/collapsible-code-block.js');
@@ -25,8 +26,12 @@ export function ErrorPage(): React.JSX.Element {
       const routeError = new Error(`${error.status} ${error.statusText}`);
       routeError.name = 'route_error';
       analytics.captureException(routeError, { context: { component: 'ErrorPage' } });
+      if (error.status >= 500) {
+        void reportUiError(routeError);
+      }
     } else if (error instanceof Error) {
       analytics.captureException(error, { context: { component: 'ErrorPage' } });
+      void reportUiError(error);
     }
   }, [error, analytics]);
 

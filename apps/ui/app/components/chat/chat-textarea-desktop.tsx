@@ -1,6 +1,9 @@
 import { memo, useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef } from 'react';
+import type { Editor } from '@tiptap/core';
 import type { AttachmentDirectories } from '#hooks/use-attachment-source.js';
 import { AtSign, Paperclip, Plus } from 'lucide-react';
+import { useDictation } from '#components/chat/use-dictation.js';
+import { ChatDictationButton, ChatDictationRecording } from '#components/chat/chat-dictation-controls.js';
 import type { AcpSessionData } from '@taucad/chat';
 import type { ChatRecord } from '@taucad/chat/schemas';
 import type { FileEntry } from '@taucad/types';
@@ -87,7 +90,7 @@ type ChatTextareaDesktopProperties = {
   readonly addContextReferencesRef: React.RefObject<((references: ChatContextReference[]) => void) | undefined>;
 
   // Handlers (all must be stable references to prevent tooltip re-render loops)
-  readonly handleSubmit: () => Promise<void>;
+  readonly handleSubmit: (finalizedText?: string) => Promise<void>;
   readonly handleCancelClick: () => void;
   readonly handleDragOver: (event: React.DragEvent) => void;
   readonly handleDragLeave: () => void;
@@ -237,9 +240,51 @@ export const ChatTextareaDesktop = memo(function ({
     [setDraftText],
   );
 
+  // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- Tiptap initializes after the composer hooks.
+  const editorRef = useRef<Editor | null>(null);
+  const insertTranscript = useCallback((text: string): void => {
+    const currentEditor = editorRef.current;
+    if (!currentEditor || currentEditor.isDestroyed) {
+      return;
+    }
+    const precedingText = extractContent(currentEditor).text;
+    const separator = precedingText === '' || /\s$/u.test(precedingText) ? '' : ' ';
+    currentEditor
+      .chain()
+      .focus('end')
+      .insertContent({ type: 'text', text: separator + text })
+      .run();
+  }, []);
+  const { draftActorRef } = useChatComposer();
+  const latestDraftOwner = useRef(draftActorRef);
+  useLayoutEffect(() => {
+    latestDraftOwner.current = draftActorRef;
+  }, [draftActorRef]);
+  const dictation = useDictation(insertTranscript, draftActorRef);
+  const submitWithDictation = useCallback(async (): Promise<void> => {
+    if (dictation.phase !== 'idle') {
+      if (dictation.phase !== 'recording' || !(await dictation.stop())) {
+        return;
+      }
+      const currentEditor = editorRef.current;
+      if (currentEditor && !currentEditor.isDestroyed && latestDraftOwner.current === draftActorRef) {
+        await handleSubmit(extractContent(currentEditor).text);
+      }
+      return;
+    }
+    await handleSubmit();
+  }, [dictation.phase, dictation.stop, draftActorRef, handleSubmit]);
+  const escapeWithDictation = useCallback((): void => {
+    if (dictation.phase === 'idle') {
+      onEscapePressed?.();
+    } else {
+      dictation.cancel();
+    }
+  }, [dictation.cancel, dictation.phase, onEscapePressed]);
+
   const chatEditor = useChatEditor({
-    onSubmit: handleSubmit,
-    onEscape: onEscapePressed,
+    onSubmit: submitWithDictation,
+    onEscape: escapeWithDictation,
     onUpdate: handleEditorUpdate,
     treeService,
     chats,
@@ -258,7 +303,6 @@ export const ChatTextareaDesktop = memo(function ({
   // Store editor in a ref so callbacks below remain stable (empty dep arrays).
   // This breaks the re-render cascade: editor changes (null→Editor) won't
   // recreate focusEditor/handleAtButtonClick, so Tooltip children stay memo'd.
-  const editorRef = useRef(editor);
   useEffect(() => {
     editorRef.current = editor;
   }, [editor]);
@@ -389,13 +433,36 @@ export const ChatTextareaDesktop = memo(function ({
     }
   }, []);
 
-  const sendRefusal = sendRefusalOf({
-    sendBlockReason,
-    isSubmitting,
-    isAttaching,
-    isSubmitDisabled,
-    isEmpty: !canResume && inputText.trim().length === 0 && attachments.length === 0,
-  });
+  const dictationActive = dictation.phase !== 'idle';
+  const dictationPending = dictationActive && dictation.phase !== 'recording';
+  const sendRefusal = dictationPending
+    ? 'Wait for dictation to finish'
+    : sendRefusalOf({
+        sendBlockReason,
+        isSubmitting,
+        isAttaching,
+        isSubmitDisabled,
+        isEmpty: !dictationActive && !canResume && inputText.trim().length === 0 && attachments.length === 0,
+      });
+  const dictationButton = useMemo(
+    () =>
+      dictation.available === true ? (
+        <ChatDictationButton
+          phase={dictation.phase}
+          disabled={isSubmitting || status === 'streaming' || status === 'submitted'}
+          onStart={dictation.start}
+          onStop={dictation.stop}
+        />
+      ) : undefined,
+    [dictation.available, dictation.phase, dictation.start, dictation.stop, isSubmitting, status],
+  );
+  const dictationRecording = useMemo(
+    () =>
+      dictationActive ? (
+        <ChatDictationRecording phase={dictation.phase} levels={dictation.levels} onCancel={dictation.cancel} />
+      ) : undefined,
+    [dictation.cancel, dictation.levels, dictation.phase, dictationActive],
+  );
   const blockReasonId = useId();
   /* F19: the beam follows the box's corners. */
   const radius = mode === 'edit' ? 'rounded-lg' : 'rounded-2xl';
@@ -461,7 +528,19 @@ export const ChatTextareaDesktop = memo(function ({
           </div>
         ) : null}
 
+        {dictation.transcript === '' ? null : (
+          <p data-slot='dictation-transcript' className='px-3 py-1 text-sm text-muted-foreground'>
+            {dictation.transcript}
+          </p>
+        )}
+        {dictation.error === undefined ? null : (
+          <p role='alert' aria-label='Dictation error' className='px-3 py-1 text-xs text-muted-foreground'>
+            {dictation.error}
+          </p>
+        )}
         <ChatTextareaBar
+          dictationButton={dictationButton}
+          dictationRecording={dictationRecording}
           composerMode={mode}
           containerReference={containerReference}
           enableContextActions={enableContextActions}
@@ -481,7 +560,7 @@ export const ChatTextareaDesktop = memo(function ({
           sendRefusal={sendRefusal}
           describedBy={sendBlockReason === undefined ? undefined : blockReasonId}
           formattedCancelKeyCombination={formattedCancelKeyCombination}
-          handleSubmit={handleSubmit}
+          handleSubmit={submitWithDictation}
           handleCancelClick={handleCancelClick}
         />
       </div>
@@ -549,6 +628,8 @@ function useBarCollapse(barRef: React.RefObject<HTMLDivElement | null>): void {
  * @internal
  */
 export const ChatTextareaBar = memo(function ({
+  dictationButton,
+  dictationRecording,
   composerMode,
   containerReference,
   enableContextActions,
@@ -571,6 +652,8 @@ export const ChatTextareaBar = memo(function ({
   handleSubmit,
   handleCancelClick,
 }: {
+  readonly dictationButton?: React.ReactNode;
+  readonly dictationRecording?: React.ReactNode;
   readonly composerMode: 'main' | 'edit';
   // oxlint-disable-next-line @typescript-eslint/no-restricted-types -- React ref object
   readonly containerReference: React.RefObject<HTMLDivElement | null>;
@@ -623,34 +706,45 @@ export const ChatTextareaBar = memo(function ({
 
   return (
     <div ref={barRef} data-slot='composer-bar' className='group/bar flex items-center justify-between gap-2 px-2'>
-      <div data-slot='composer-left' className='flex shrink-0 flex-row items-center gap-0.5'>
-        <ChatAddMenu
-          enableContextActions={enableContextActions}
-          isAttachmentSupported={attachmentInputSupported}
-          handleAtButtonClick={handleAtButtonClick}
-          handleFileSelect={handleFileSelect}
-          focusEditor={focusEditor}
-        />
-        <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
-        {creationLocationControl}
-        {enableKernelSelector ? <ChatTextareaKernelControl focusEditor={focusEditor} /> : null}
-        <input
-          ref={fileInputReference}
-          multiple
-          type='file'
-          accept={attachmentAccept}
-          className='hidden'
-          onChange={handleFileChange}
-        />
-      </div>
+      {dictationRecording === undefined ? (
+        <div data-slot='composer-left' className='flex shrink-0 flex-row items-center gap-0.5'>
+          <ChatAddMenu
+            enableContextActions={enableContextActions}
+            isAttachmentSupported={attachmentInputSupported}
+            handleAtButtonClick={handleAtButtonClick}
+            handleFileSelect={handleFileSelect}
+            focusEditor={focusEditor}
+          />
+          <ChatAgentModeControl agentConfig={agentConfig} focusEditor={focusEditor} enableShortcut={ownsShortcuts} />
+          {creationLocationControl}
+          {enableKernelSelector ? <ChatTextareaKernelControl focusEditor={focusEditor} /> : null}
+          <input
+            ref={fileInputReference}
+            multiple
+            type='file'
+            accept={attachmentAccept}
+            className='hidden'
+            onChange={handleFileChange}
+          />
+        </div>
+      ) : (
+        <div data-slot='composer-left' className='flex min-w-0 flex-1 flex-row items-center gap-2'>
+          {dictationRecording}
+        </div>
+      )}
       <div data-slot='composer-right' className='flex min-w-0 flex-row items-center gap-1'>
-        <ChatContextIndicator />
-        <ChatAgentSheet
-          agentConfig={agentConfig}
-          placements={placements}
-          focusEditor={focusEditor}
-          enableShortcut={ownsShortcuts}
-        />
+        {dictationRecording === undefined ? (
+          <>
+            <ChatContextIndicator />
+            <ChatAgentSheet
+              agentConfig={agentConfig}
+              placements={placements}
+              focusEditor={focusEditor}
+              enableShortcut={ownsShortcuts}
+            />
+          </>
+        ) : null}
+        {dictationButton}
         <ChatTextareaSubmitButton
           status={status}
           isSubmitting={isSubmitting}

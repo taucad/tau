@@ -2,7 +2,7 @@ use geospec_engine_native_runtime::{create_engine, EngineConfig};
 use serde_json::{json, Value};
 
 const CURRENT_PROFILE: &str =
-    include_str!("../../../rust/tests/fixtures/current-profile-v5/numeric-profile.txt");
+    include_str!("../../../rust/tests/fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
 
 fn current(value: &str) -> String {
     value

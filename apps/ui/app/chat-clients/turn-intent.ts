@@ -165,7 +165,7 @@ type JsonValue = Extract<AgentLogEvent, { readonly type: 'message.appended' }>['
 export const userProviderMessageOf = <Message extends UIMessage>(messages: readonly Message[]): UserProviderMessage => {
   const message = messages.findLast((candidate) => candidate.role === 'user');
   if (!message) {
-    throw new TypeError('Browser agent host admission requires a user message.');
+    throw new TypeError('Agent host admission requires a user message.');
   }
   const content: JsonValue[] = [];
   for (const part of message.parts) {
@@ -187,7 +187,7 @@ export const userProviderMessageOf = <Message extends UIMessage>(messages: reado
       }
       const match = /^data:(image\/[^;,]+);base64,(.*)$/u.exec(part.url);
       if (!match) {
-        throw new TypeError(`Browser agent host cannot record file part URL "${part.url}".`);
+        throw new TypeError(`The agent host cannot record file part URL "${part.url}".`);
       }
       content.push({ type: 'image', mimeType: match[1]!, data: match[2]! });
     }

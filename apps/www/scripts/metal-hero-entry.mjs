@@ -22,8 +22,8 @@ import {
   metalMorphDirectionAttributeName,
 } from '../../ui/app/components/geometry/loader/metal-morph-material.node.ts';
 import { createMetalMorphEnvironment } from '../../ui/app/components/geometry/loader/metal-morph-environment.ts';
-// oxlint-enable eslint/no-restricted-imports
-/* eslint-enable @nx/enforce-module-boundaries */
+// oxlint-enable eslint/no-restricted-imports -- End of the offline app-source imports.
+/* eslint-enable @nx/enforce-module-boundaries -- End of the offline app-source imports. */
 const data = getMetalMorphGeometryData(6);
 const geometry = new BufferGeometry();
 geometry.setAttribute('position', new BufferAttribute(data.directions, 3));

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+// oxlint-disable-next-line eslint/no-restricted-imports -- Netlify edge functions sit outside the app alias root.
 import { config, resolveMarketingUrl, rewriteLocation } from './marketing.js';
 
 const origin = 'https://marketing.example.netlify.app';

@@ -11,6 +11,8 @@ import {
 import type { MachineDirectory, MachineDirectoryCursor, MachineDirectoryEntry } from '#machines/machine-directory.js';
 import type { MachineProviderDescriptor, MachineSession } from '#machines/machine.js';
 import type { MachineObservation, MachineReport } from '#machines/machine-observation.js';
+import type { ContentDigest } from '@taucad/cache-core';
+import type { MachineOperation } from '#machines/machine-jobs.js';
 import { fixtureDescriptor, fixtureObservation, fixtureReport } from '#machines/machine-session.fixture.js';
 
 const descriptor: MachineProviderDescriptor = { ...fixtureDescriptor('provider-claimed-id'), firmware: '1' };
@@ -258,7 +260,10 @@ describe('host-owned machine directory', () => {
       type: 'changed',
       observedAt: '2026-09-06T00:03:00Z',
       components: [
-        fixtureObservation('chamber-light', 'accessories', { kind: 'switch', on: true }, '2026-09-06T00:03:00Z'),
+        {
+          ...fixtureObservation('chamber-light', 'accessories', { kind: 'switch', on: true }),
+          receivedAt: '2026-09-06T00:03:00Z',
+        },
       ],
     });
     await vi.waitFor(() => {
@@ -286,7 +291,8 @@ describe('host-owned machine directory', () => {
       observations: [{ group: 'position', label: 'Position', staleAfter: 1000, delivery: 'latest' }],
       session: device.session,
     });
-    const [entry] = (await directory.snapshot()).entries;
+    const { entries } = await directory.snapshot();
+    const [entry] = entries;
     const motion = entry?.snapshot.components.find(({ group }) => group === 'position');
     const light = entry?.snapshot.components.find(({ group }) => group === 'accessories');
     expect(motion?.validUntil).toBe('2026-09-14T00:00:01.000Z');
@@ -295,40 +301,48 @@ describe('host-owned machine directory', () => {
 
   it('should derive a stable capability revision and a new incarnation for every connection', async () => {
     const { directory, attach } = fixture();
+    const capabilities = async () => {
+      const { entries } = await directory.snapshot();
+      return entries[0]?.descriptor.capabilities;
+    };
     await attach('one');
-    const first = (await directory.snapshot()).entries[0]?.descriptor.capabilities;
+    const first = await capabilities();
     await attach('one');
-    const second = (await directory.snapshot()).entries[0]?.descriptor.capabilities;
+    const second = await capabilities();
     expect(first?.revision).toMatch(/^sha256:[0-9a-f]{64}$/u);
     expect(second?.revision).toBe(first?.revision);
     expect(second?.incarnation).not.toBe(first?.incarnation);
     await attach('one', undefined, { ...descriptor, capabilities: { ...descriptor.capabilities, holds: [] } });
-    const third = (await directory.snapshot()).entries[0]?.descriptor.capabilities;
+    const third = await capabilities();
     expect(third?.revision).not.toBe(first?.revision);
   });
 
   it("should serve the host's operations and testing flag beside every report, across sessions", async () => {
     const { directory, attach } = fixture();
     const device = await attach('one');
-    const operation = {
+    const operation: MachineOperation = {
       operationId: 'operation-1',
       machineId: 'one',
       kind: 'stop',
-      inputDigest: `sha256:${'0'.repeat(64)}`,
+      inputDigest: `sha256:${'0'.repeat(64)}` as ContentDigest,
       state: 'accepted',
       updatedAt: '2026-09-06T00:00:00Z',
-    } as const;
+    };
     await directory.update({ machineId: 'one', operations: [operation], testing: true });
     device.push({ ...observation, ...busy });
     await vi.waitFor(() => {
       expect(device.consumed).toHaveBeenCalledOnce();
     });
-    expect((await directory.snapshot()).entries[0]).toMatchObject({
+    const first = async () => {
+      const { entries } = await directory.snapshot();
+      return entries[0];
+    };
+    await expect(first()).resolves.toMatchObject({
       testing: true,
       snapshot: { state: { status: 'active' }, operations: [operation] },
     });
     await attach('one');
-    expect((await directory.snapshot()).entries[0]).toMatchObject({
+    await expect(first()).resolves.toMatchObject({
       testing: true,
       snapshot: { operations: [operation] },
     });
@@ -660,7 +674,7 @@ describe('host-owned machine directory', () => {
   it('should join an initializing session on host close and refuse its late snapshot', async () => {
     const { directory, store } = fixture();
     const device = sessionFixture();
-    const snapshot = Promise.withResolvers<MachineSnapshot>();
+    const snapshot = Promise.withResolvers<MachineReport>();
     const started = Promise.withResolvers<void>();
     vi.mocked(device.session.getSnapshot).mockImplementation(async () => {
       started.resolve();

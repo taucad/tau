@@ -39,7 +39,7 @@ const querySchema = standardSchema<Readonly<{ vendor: string }>>({
   properties: { vendor: { type: 'string' } },
 });
 
-const jobs = machineManifestDefinitionFixture.jobs;
+const { jobs } = machineManifestDefinitionFixture;
 if (jobs.type !== 'supported') {
   throw new Error('The fixture runs jobs.');
 }

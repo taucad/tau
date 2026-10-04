@@ -1,40 +1,43 @@
-import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, realpath, rm, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { MessageChannel } from 'node:worker_threads';
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { z } from 'zod';
 
 import type { CacheValue, ContentDigest } from '@taucad/cache-core';
 import { cloneBoundedJson } from '@taucad/parameters/json';
 
-import { defineConfiguration } from '#configuration/index.js';
-import { createHostAdmissionAuthority } from '#host/host-admission.js';
-import type { HostRouteGrant } from '#host/host-admission.js';
+import { createHostAdmissionAuthority, hostAdmissionOperations } from '#host/host-admission.js';
+import type { HostActor, HostRouteGrant } from '#host/host-admission.js';
 import { createNodeMachineEventLog } from '#host/node-machine-event-log.js';
 import { createNodeMachineHost } from '#host/node.js';
 import type { NodeMachineHost, NodeMachineRuntime } from '#host/node.js';
 import { connectMachineChannel } from '#machines/machine-channel.js';
 import type { MachineChannelClient, MachineChannelHostOperations } from '#machines/machine-channel.js';
 import { machineCredentialReference } from '#machines/machine-credential.js';
-import { defineMachine } from '#machines/machine.js';
-import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
+import type { MachineApplyActionInput } from '#machines/machine-client.js';
+import type { MachineObservation, MachineRun } from '#machines/machine-observation.js';
+import {
+  fixtureDescriptor,
+  fixtureProvider,
+  fixtureReport,
+  fixtureSession,
+} from '#machines/machine-session.fixture.js';
+import type { FixtureSessionBehavior } from '#machines/machine-session.fixture.js';
 import type {
   MachineArtifactReference,
   MachineCandidate,
-  MachineConnectionRuntime,
   MachineCommandReceipt,
-  MachinePreparationReceipt,
+  MachineJobCapability,
+  MachinePreparation,
+  MachineProviderDescriptor,
+  MachineProviderHold,
   MachineSession,
-  MachineSnapshot,
   MachineStill,
-  MachineSubmissionReceipt,
-  MachineTransferReceipt,
 } from '#machines/machine.js';
-import type { PrintRequest } from '#machines/print-request.js';
 
-/** Machine directories whose operations log refuses every append, as a full log or a failing disk would. */
+/** Machine directories whose journal refuses every append, as a full log or a failing disk would. */
 const { refusedAppends } = vi.hoisted(() => ({ refusedAppends: new Set<string>() }));
 vi.mock('#host/node-machine-event-log.js', async (importOriginal) => {
   const actual = await importOriginal<Readonly<{ createNodeMachineEventLog: typeof createNodeMachineEventLog }>>();
@@ -98,13 +101,11 @@ const storeBytes = async (root: string): Promise<number> => {
   return total;
 };
 
-/** A legacy journal writer, as an older host left one; the fixture owns no lock. */
-const legacyJournal = async (root: string) => {
-  const directory = join(root, 'authority');
-  await mkdir(directory, { recursive: true, mode: 0o700 });
-  return createNodeMachineEventLog({
+/** A journal writer as a host left one; the fixture owns no lock. */
+const journalAt = async (directory: string, fileName = 'journal.jsonl') =>
+  createNodeMachineEventLog({
     directory,
-    fileName: 'machine-events.jsonl',
+    fileName,
     owner: {
       assertCurrent() {
         /* No host owns the store while the fixture writes. */
@@ -112,40 +113,7 @@ const legacyJournal = async (root: string) => {
     },
     parse: plainJson,
   });
-};
 
-const configuration = defineConfiguration({
-  id: 'fixture.configuration',
-  version: '1',
-  schema: z.strictObject({}),
-  ui: { version: 1, rjsf: {} },
-});
-const provider = defineMachine({
-  id: 'fixture-provider',
-  name: 'Fixture provider',
-  version: '1',
-  protocolVersion: 1,
-  vendor: 'fixture',
-  technologies: ['additive.fff'],
-  accepts: [
-    {
-      contract: { id: 'fixture.gcode', version: 1 },
-      mediaType: 'text/x.gcode',
-      requiredMembers: [],
-      payloadSelection: 'single',
-      technology: 'additive.fff',
-    },
-  ],
-  manifest: machineManifestFixture,
-  bindingConfiguration: configuration,
-  submissionConfiguration: configuration,
-  async *discover() {
-    yield* [];
-  },
-  async connect(): Promise<MachineSession> {
-    throw new Error('Node host must not autoconnect');
-  },
-})();
 const unavailable = async (): Promise<never> => {
   throw new Error('MACHINE_OPERATION_UNAVAILABLE');
 };
@@ -157,222 +125,268 @@ const operations: MachineChannelHostOperations = {
     return { status: 'operator-action-required', ceremonyId: 'fixture' };
   },
   removeBinding: unavailable,
-  preparePrint: unavailable,
-  uploadPrint: unavailable,
-  startPrint: unavailable,
-  reconcileOperation: unavailable,
-  controlRun: unavailable,
-  captureStill: unavailable,
-  requestPrint: unavailable,
-  listPrintRequests: unavailable,
-  async *watchPrintRequests() {
+  checkJob: unavailable,
+  requestJob: unavailable,
+  listJobs: unavailable,
+  async *watchJobs() {
     yield await unavailable();
   },
-  resolvePrintRequest: unavailable,
-  withdrawPrintRequest: unavailable,
+  resolveJob: unavailable,
+  withdrawJob: unavailable,
+  applyAction: unavailable,
+  stop: unavailable,
+  beginHold: unavailable,
+  renewHold: unavailable,
+  endHold: unavailable,
+  reconcileOperation: unavailable,
+  setTesting: unavailable,
+  captureStill: unavailable,
 };
 const observedAt = '2026-09-14T00:00:00.000Z';
 const expiresAt = '2026-09-14T00:01:00.000Z';
-const bindingCandidates: readonly MachineCandidate[] = [
-  {
-    id: 'candidate-a',
-    name: 'Printer A',
-    endpoint: { address: 'printer-a.local', interface: 'manual' },
-    claimedIdentity: { serial: 'physical-1', model: 'X1C' },
-    observedAt,
-    expiresAt,
-  },
-  {
-    id: 'candidate-b',
-    name: 'Printer B',
-    endpoint: { address: 'printer-b.local', interface: 'manual' },
-    claimedIdentity: { serial: 'physical-1', model: 'X1C' },
-    observedAt,
-    expiresAt,
-  },
-];
-type SessionBehavior = Partial<
-  Pick<
-    MachineSession,
-    'getSnapshot' | 'observe' | 'preparePrint' | 'uploadPrint' | 'submit' | 'control' | 'reconcile' | 'stillCapture'
-  >
->;
-const readyPreparation = (input: Parameters<MachineSession['preparePrint']>[0]): MachinePreparationReceipt => ({
+const machineId = 'workshop-x1c';
+const agent = { kind: 'agent', id: 'agent-1', label: 'Tau agent' } as const;
+const operator = { kind: 'user', id: 'operator', label: 'Operator' } as const;
+const agentActor: HostActor = { kind: 'agent', id: 'agent-1' };
+const allGrants: readonly HostRouteGrant[] = hostAdmissionOperations
+  .filter((operation) => operation.startsWith('machines.'))
+  .map((operation) => ({ route: 'machines', operation }));
+
+const candidateFor = (id: string, serial?: string): MachineCandidate => ({
+  id,
+  name: `Printer ${id}`,
+  endpoint: { address: `${id}.local`, interface: 'manual' },
+  claimedIdentity: serial === undefined ? { model: 'X1C' } : { serial, model: 'X1C' },
+  observedAt,
+  expiresAt,
+});
+const candidateA = candidateFor('candidate-a', 'physical-1');
+const candidateB = candidateFor('candidate-b', 'physical-1');
+
+const artifact: MachineArtifactReference = {
+  projectId: 'proj_0123456789abcdefghijK',
+  path: '.tau/artifacts/3333/part.gcode',
+  digest: `sha256:${'3'.repeat(64)}` as ContentDigest,
+  length: 128,
+  mediaType: 'text/x.gcode',
+  contract: { id: 'fixture.gcode', version: 1 },
+  selectedMember: 'part.gcode',
+};
+
+/** The light the fixture's agent may switch unattended. */
+const lightOn = (
+  capabilityRevision: string,
+  operationId: string,
+  overrides: Partial<MachineApplyActionInput> = {},
+): MachineApplyActionInput => ({
+  machineId,
+  componentId: 'chamber-light',
+  capabilityRevision,
+  operationId,
+  action: 'switch.set',
+  version: 1,
+  expectedRunId: null,
+  parameters: { on: true },
+  requestedBy: agent,
+  ...overrides,
+});
+
+/** Reports a test pushes to every session that observes; each session idles until its signal aborts. */
+const reportFeed = () => {
+  const queue: MachineObservation[] = [];
+  let wake = Promise.withResolvers<void>();
+  return {
+    push(...observations: MachineObservation[]): void {
+      queue.push(...observations);
+      wake.resolve();
+    },
+    async *observe({ signal }: Readonly<{ signal: AbortSignal }>): AsyncGenerator<MachineObservation> {
+      const onAbort = (): void => {
+        wake.resolve();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+      try {
+        while (!signal.aborted) {
+          const next = queue.shift();
+          if (next) {
+            yield next;
+            continue;
+          }
+          // oxlint-disable-next-line eslint/no-await-in-loop -- the feed waits for each next report.
+          await wake.promise;
+          wake = Promise.withResolvers();
+        }
+      } finally {
+        signal.removeEventListener('abort', onAbort);
+      }
+    },
+  };
+};
+
+const readyPreparation = (input: Readonly<{ operationId: string }>, setup: CacheValue): MachinePreparation => ({
   status: 'ready',
-  remoteName: `tau-${input.operationId}.gcode.3mf`,
-  digest: input.artifact.digest,
-  length: input.artifact.length,
+  program: { name: 'part.gcode', facts: { process: 'fff', layers: 120 } },
+  checks: [{ id: 'plate', label: 'Plate', state: 'passed', source: 'observed' }],
+  setup,
+  remoteName: `tau-${input.operationId}.gcode`,
   parser: { id: 'fixture-parser', version: '1' },
   providerData: { memberMd5: 'fixture' },
   observedAt,
 });
 
-const session = (closed: () => Promise<void>, behavior: SessionBehavior = {}): MachineSession => ({
-  stillCapture: behavior.stillCapture ?? { type: 'unsupported' },
-  async getDescriptor() {
-    return {
-      id: 'physical-1',
-      name: 'Fixture X1C',
-      vendor: 'fixture',
-      model: 'X1C',
-      technology: 'additive.fff',
-      firmware: '01.08.02.00',
-      accepts: [
-        {
-          contract: {
-            id: 'manufacturing.toolpath.bambu-gcode-3mf',
-            version: 1,
-          },
-          mediaType: 'application/vnd.bambulab.gcode-3mf',
-          requiredMembers: ['Metadata/plate_1.gcode'],
-          payloadSelection: 'plate',
-          technology: 'additive.fff',
-        },
-      ],
-      operations: ['observe', ...(behavior.stillCapture?.type === 'supported' ? ['still'] : [])],
-      ratedEnvelope: { width: 0.256, depth: 0.256, height: 0.256, unit: 'm' },
-      printableEnvelope: {
-        width: 0.256,
-        depth: 0.256,
-        height: 0.256,
-        unit: 'm',
-      },
-      tools: [],
-      materialSystem: { kind: 'ams', slotCount: 16 },
-      bedTypes: ['textured-plate'],
-    };
-  },
-  async getSnapshot(input) {
-    if (behavior.getSnapshot) {
-      return behavior.getSnapshot(input);
-    }
-    return {
-      connection: 'connected',
-      readiness: 'idle',
-      observedAt,
-      setup: { materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
-      run: { state: 'idle' },
-    };
-  },
-  async *observe(input) {
-    if (behavior.observe) {
-      yield* behavior.observe(input);
-      return;
-    }
-    await new Promise<void>((resolve) => {
-      if (input.signal.aborted) {
-        resolve();
-      } else {
-        input.signal.addEventListener(
-          'abort',
-          () => {
-            resolve();
-          },
-          { once: true },
-        );
-      }
-    });
-    yield* [];
-  },
-  async preparePrint(input) {
-    if (behavior.preparePrint) {
-      return behavior.preparePrint(input);
-    }
-    return readyPreparation(input);
-  },
-  async uploadPrint(input) {
-    if (behavior.uploadPrint) {
-      return behavior.uploadPrint(input);
-    }
-    return {
-      status: 'transferred',
+/** A stored-delivery jobs facet whose calls a test counts. */
+const storedJobs = () => {
+  const prepare = vi.fn(async (input: Readonly<{ operationId: string }>) =>
+    readyPreparation(input, { plate: 'smooth' }),
+  );
+  const transfer = vi.fn(
+    async (input: Readonly<{ operationId: string }>): Promise<MachineCommandReceipt> => ({
+      status: 'accepted',
       transferId: `transfer-${input.operationId}`,
-      digest: input.artifact.digest,
-      length: input.artifact.length,
       observedAt,
-    };
-  },
-  async submit(input) {
-    if (behavior.submit) {
-      return behavior.submit(input);
-    }
-    throw new Error('fixture is read-only');
-  },
-  async control(input) {
-    if (behavior.control) {
-      return behavior.control(input);
-    }
-    throw new Error('fixture is read-only');
-  },
-  async reconcile(input) {
-    if (behavior.reconcile) {
-      return behavior.reconcile(input);
-    }
-    return { status: 'unknown', reason: 'fixture-has-no-ledger', observedAt };
-  },
-  close: closed,
-  dispose: closed,
-});
-const bindingProvider = (connections: (runtime: MachineConnectionRuntime) => void, behavior: SessionBehavior = {}) =>
-  defineMachine({
-    id: 'binding-provider',
-    name: 'Binding provider',
-    version: '1',
-    protocolVersion: 1,
-    vendor: 'fixture',
-    technologies: ['additive.fff'],
-    accepts: [
-      {
-        contract: { id: 'fixture.gcode', version: 1 },
-        mediaType: 'text/x.gcode',
-        requiredMembers: [],
-        payloadSelection: 'single',
-        technology: 'additive.fff',
-      },
-    ],
-    manifest: machineManifestFixture,
-    bindingConfiguration: configuration,
-    submissionConfiguration: configuration,
-    async *discover() {
-      for (const candidate of bindingCandidates) {
-        yield { type: 'found', candidate };
-      }
-    },
-    async connect(_input, runtime) {
-      connections(runtime);
-      return session(
-        vi.fn(async () => undefined),
-        behavior,
-      );
-    },
-  })();
+    }),
+  );
+  const start = vi.fn(
+    async (input: Readonly<{ operationId: string }>): Promise<MachineCommandReceipt> => ({
+      status: 'accepted',
+      runId: `run-${input.operationId}`,
+      observedAt,
+    }),
+  );
+  const facet: MachineJobCapability<unknown> = { type: 'supported', delivery: 'stored', prepare, transfer, start };
+  return { facet, prepare, transfer, start };
+};
 
-const openHost = async (root: string) => {
+const runtimeAt = (clock: () => string, extra: Partial<NodeMachineRuntime> = {}): NodeMachineRuntime => ({
+  discovery: {
+    clock: { now: clock },
+    async *listenDatagrams() {
+      yield* [];
+    },
+  },
+  connection: () => ({
+    clock: { now: clock },
+    log: async () => undefined,
+    connectStream: async () => {
+      throw new Error('fixture does not open sockets');
+    },
+    async *readArtifact() {
+      yield* [];
+    },
+    resolveSecret: async () => 'credential-must-not-be-serialized',
+  }),
+  ...extra,
+});
+
+/** A fixture provider whose printers answer with `session`; `connects` sees each connect. */
+const bindingProvider = (
+  session: (candidate: MachineCandidate, signal: AbortSignal) => Promise<MachineSession> | MachineSession,
+  candidates: readonly MachineCandidate[] = [candidateA, candidateB],
+) =>
+  fixtureProvider({
+    id: 'binding-provider',
+    candidates,
+    async connect({ candidate, signal }) {
+      return session(candidate, signal);
+    },
+  });
+
+type Provider = ReturnType<typeof bindingProvider>;
+
+/** A host on `root` with one operator channel and, on request, more channels for other actors. */
+const openServedHost = async (root: string, provider: Provider, runtime: NodeMachineRuntime) => {
   const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
+  const onError = vi.fn();
   const host = await createNodeMachineHost({
     storeRoot: root,
     hostId: 'host-1',
     authorityId: 'authority-1',
     admission,
     providers: [provider],
-    operations,
-    onError: vi.fn(),
+    runtime,
+    onError,
   });
   hosts.push(host);
-  return { admission, host };
+  const clients: Array<() => void> = [];
+  const serveAs = async (actor: HostActor, grants: readonly HostRouteGrant[] = allGrants) => {
+    const ports = new MessageChannel();
+    const server = host.serve({ port: ports.port1, session: host.issueSession({ actor, grants }) });
+    const client = connectMachineChannel(ports.port2);
+    clients.push(() => {
+      client.close();
+      server.dispose();
+    });
+    await client.ready;
+    return client;
+  };
+  const client = await serveAs({ kind: 'user', id: 'operator' });
+  const close = async (): Promise<void> => {
+    for (const closeClient of clients.splice(0)) {
+      closeClient();
+    }
+    await host.close();
+    hosts.splice(hosts.indexOf(host), 1);
+  };
+  return { admission, host, client, onError, serveAs, close };
 };
 
-const printArtifact: MachineArtifactReference = {
-  projectId: 'proj_0123456789abcdefghijK',
-  path: '.tau/artifacts/3333/pyramid.gcode.3mf',
-  digest: `sha256:${'3'.repeat(64)}` as ContentDigest,
-  length: 128,
-  mediaType: 'application/vnd.bambulab.gcode-3mf',
-  contract: { id: 'manufacturing.toolpath.bambu-gcode-3mf', version: 1 },
-  selectedMember: 'Metadata/plate_1.gcode',
+type Served = Awaited<ReturnType<typeof openServedHost>>;
+
+const discoverAll = async (client: MachineChannelClient): Promise<Map<string, MachineCandidate>> => {
+  const found = new Map<string, MachineCandidate>();
+  for await (const event of client.discover({ providerId: 'binding-provider', configuration: {} })) {
+    if (event.type !== 'lost') {
+      found.set(event.candidate.id, event.candidate);
+    }
+  }
+  return found;
+};
+const beginCeremony = async (client: MachineChannelClient, candidateId: string, name: string): Promise<string> => {
+  const found = await discoverAll(client);
+  const ceremony = await client.beginBinding({ candidate: found.get(candidateId)!, name });
+  if (ceremony.status !== 'operator-action-required') {
+    throw new Error('expected binding ceremony');
+  }
+  return ceremony.ceremonyId;
+};
+const bindAs = async (
+  fixture: Pick<Served, 'client' | 'host'>,
+  binding: Readonly<{ candidateId: string; name: string; secretRef: string }>,
+): Promise<string> => {
+  const ceremonyId = await beginCeremony(fixture.client, binding.candidateId, binding.name);
+  const outcome = await fixture.host.completeBinding({ ceremonyId, secretRef: binding.secretRef, serviceTrust: {} });
+  if (outcome.status !== 'bound') {
+    throw new Error('expected a bound machine');
+  }
+  await vi.waitFor(async () => {
+    await expect(fixture.client.get({ machineId: outcome.machineId })).resolves.toMatchObject({
+      name: binding.name,
+      freshness: 'current',
+    });
+  });
+  return outcome.machineId;
+};
+const revisionOf = async (client: MachineChannelClient, id = machineId): Promise<string> => {
+  const entry = await client.get({ machineId: id });
+  return entry.descriptor.capabilities.revision;
 };
 
 describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('createNodeMachineHost', () => {
+  const openHost = async (root: string) => {
+    const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
+    const host = await createNodeMachineHost({
+      storeRoot: root,
+      hostId: 'host-1',
+      authorityId: 'authority-1',
+      admission,
+      providers: [fixtureProvider()],
+      operations,
+      onError: vi.fn(),
+    });
+    hosts.push(host);
+    return { admission, host };
+  };
+
   it('serves an admitted channel, closes it on revocation, and lets one host own the store at a time', async () => {
     const root = await storeRoot();
     const first = await openHost(root);
@@ -421,7 +435,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
     const root = await storeRoot();
     let currentTime = Date.parse(observedAt);
     const currentTimestamp = (): string => new Date(currentTime).toISOString();
-    const connections = vi.fn((_runtime: MachineConnectionRuntime): void => undefined);
+    const connects = vi.fn();
     const captureStill = vi.fn(
       async (): Promise<MachineStill> => ({
         bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
@@ -430,179 +444,52 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
         expiresAt: new Date(currentTime + 15_000).toISOString(),
       }),
     );
-    const submit = vi.fn(
-      async (input: Parameters<MachineSession['submit']>[0]): Promise<MachineSubmissionReceipt> =>
-        input.operationId === 'start-accepted'
-          ? {
-              status: 'accepted',
-              providerRunId: 'run-1',
-              observedAt,
-            }
-          : {
-              status: 'unknown',
-              reason: 'reply-lost-after-possible-acceptance',
-              observedAt,
-            },
-    );
-    const reconcile = vi.fn(
-      async (): Promise<MachineSubmissionReceipt> => ({
-        status: 'accepted',
-        providerRunId: 'run-late',
-        observedAt,
-      }),
-    );
-    const control = vi.fn(
-      async (): Promise<MachineCommandReceipt> => ({
-        status: 'accepted',
-        observedAt,
-      }),
-    );
-    const manualRun = Promise.withResolvers<void>();
-    const provider_ = bindingProvider(connections, {
-      submit,
-      reconcile,
-      control,
-      stillCapture: { type: 'supported', capture: captureStill },
-      async *observe(input) {
-        await Promise.race([
-          manualRun.promise,
-          new Promise<void>((resolve) => {
-            input.signal.addEventListener(
-              'abort',
-              () => {
-                resolve();
-              },
-              { once: true },
-            );
-          }),
-        ]);
-        if (input.signal.aborted) {
-          return;
-        }
-        yield {
-          type: 'snapshot',
-          snapshot: {
-            connection: 'connected',
-            readiness: 'busy',
-            activeRunId: 'manual-run',
-            observedAt,
-            setup: {
-              materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }],
-            },
-            run: { state: 'printing' },
-          } satisfies MachineSnapshot,
-        };
-        await new Promise<void>((resolve) => {
-          input.signal.addEventListener(
-            'abort',
-            () => {
-              resolve();
-            },
-            { once: true },
-          );
-        });
-      },
+    const provider = bindingProvider(() => {
+      connects();
+      return fixtureSession({ stillCapture: { type: 'supported', capture: captureStill } });
     });
-    const connection: MachineConnectionRuntime = {
-      clock: { now: currentTimestamp },
-      log: vi.fn(async () => undefined),
-      connectStream: vi.fn(async () => {
-        throw new Error('fixture does not open sockets');
-      }),
-      async *readArtifact() {
-        yield* [];
-      },
-      resolveSecret: vi.fn(async () => 'credential-must-not-be-serialized'),
-    };
-    const runtime: NodeMachineRuntime = {
-      discovery: {
-        clock: { now: currentTimestamp },
-        async *listenDatagrams() {
-          yield* [];
-        },
-      },
-      connection: () => connection,
-    };
-    const openBoundHost = async () => {
-      const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
-      const host = await createNodeMachineHost({
-        storeRoot: root,
-        hostId: 'host-1',
-        authorityId: 'authority-1',
-        admission,
-        providers: [provider_],
-        runtime,
-        onError: vi.fn(),
-      });
-      hosts.push(host);
-      return { admission, host };
-    };
-    const first = await openBoundHost();
-    const admitted = first.host.issueSession({
-      actor: { kind: 'user', id: 'operator' },
-      grants: [
-        { route: 'machines', operation: 'machines.discover' },
-        { route: 'machines', operation: 'machines.beginBinding' },
-        { route: 'machines', operation: 'machines.list' },
-        { route: 'machines', operation: 'machines.preparePrint' },
-        { route: 'machines', operation: 'machines.uploadPrint' },
-        { route: 'machines', operation: 'machines.startPrint' },
-        { route: 'machines', operation: 'machines.reconcileOperation' },
-        { route: 'machines', operation: 'machines.controlRun' },
-        { route: 'machines', operation: 'machines.captureStill' },
-      ],
-    });
-    const ports = new MessageChannel();
-    const server = first.host.serve({ port: ports.port1, session: admitted });
-    const client = connectMachineChannel(ports.port2);
-    await client.ready;
-    const discovered: MachineCandidate[] = [];
-    for await (const event of client.discover({
-      providerId: 'binding-provider',
-      configuration: {},
-    })) {
-      if (event.type !== 'lost') {
-        discovered.push(event.candidate);
-      }
-    }
-    const firstCeremony = await client.beginBinding({
-      candidate: discovered[0]!,
-      name: 'Workshop X1C',
-    });
-    expect(firstCeremony.status).toBe('operator-action-required');
-    if (firstCeremony.status !== 'operator-action-required') {
-      throw new Error('expected binding ceremony');
-    }
+    const runtime = runtimeAt(currentTimestamp);
+    const first = await openServedHost(root, provider, runtime);
     const pinned = `sha256:${'1'.repeat(64)}` as ContentDigest;
+    const ceremonyId = await beginCeremony(first.client, 'candidate-a', 'Workshop X1C');
     await expect(
       first.host.completeBinding({
-        ceremonyId: firstCeremony.ceremonyId,
+        ceremonyId,
         secretRef: 'vault:bambu-x1c',
-        serviceTrust: {
-          mqtt: { type: 'pinned', digest: pinned },
-          camera: { type: 'pinned', digest: pinned },
-        },
+        serviceTrust: { mqtt: { type: 'pinned', digest: pinned }, camera: { type: 'pinned', digest: pinned } },
       }),
-    ).resolves.toEqual({ status: 'bound', machineId: 'workshop-x1c' });
-    await expect(client.list({})).resolves.toMatchObject({
-      entries: [
-        {
-          machineId: 'workshop-x1c',
-          name: 'Workshop X1C',
-          descriptor: { id: 'physical-1', firmware: '01.08.02.00' },
-        },
-      ],
+    ).resolves.toEqual({ status: 'bound', machineId });
+    await vi.waitFor(async () => {
+      await expect(first.client.list({})).resolves.toMatchObject({
+        entries: [
+          {
+            machineId,
+            name: 'Workshop X1C',
+            freshness: 'current',
+            descriptor: { id: 'physical-1', firmware: '01.00.00.00' },
+            snapshot: { connection: 'connected', state: { status: 'ready' }, operations: [] },
+          },
+        ],
+      });
     });
-    const beforeStill = await client.list({});
-    await expect(client.captureStill({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
+    const {
+      entries: [entry],
+    } = await first.client.list({});
+    // The host derives the revision from what is installed and gives each session its own incarnation.
+    expect(entry?.descriptor.capabilities.revision).toMatch(/^sha256:[0-9a-f]{64}$/u);
+    expect(entry?.snapshot.components.find(({ group }) => group === 'accessories')).toMatchObject({
+      validUntil: new Date(Date.parse(observedAt) + 15_000).toISOString(),
+    });
+    const beforeStill = await first.client.list({});
+    await expect(first.client.captureStill({ machineId })).resolves.toMatchObject({
       mediaType: 'image/jpeg',
       capturedAt: observedAt,
     });
-    await expect(client.captureStill({ machineId: 'workshop-x1c' })).rejects.toThrow('MACHINE_STILL_RATE_LIMITED');
+    await expect(first.client.captureStill({ machineId })).rejects.toThrow('MACHINE_STILL_RATE_LIMITED');
     expect(captureStill).toHaveBeenCalledOnce();
     currentTime += 5000;
     captureStill.mockRejectedValueOnce(new Error('BAMBU_CAMERA_UNAVAILABLE'));
-    await expect(client.captureStill({ machineId: 'workshop-x1c' })).rejects.toThrow('BAMBU_CAMERA_UNAVAILABLE');
+    await expect(first.client.captureStill({ machineId })).rejects.toThrow('BAMBU_CAMERA_UNAVAILABLE');
     currentTime += 5000;
     captureStill.mockResolvedValueOnce({
       bytes: Uint8Array.from([0xff, 0xd8, 0xff, 0xd9]),
@@ -610,574 +497,670 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('c
       capturedAt: currentTimestamp(),
       expiresAt: currentTimestamp(),
     });
-    await expect(client.captureStill({ machineId: 'workshop-x1c' })).rejects.toThrow('MACHINE_STILL_INVALID');
-    expect(await client.list({})).toEqual(beforeStill);
-    const artifact: MachineArtifactReference = { ...printArtifact, path: 'parts/part.gcode.3mf' };
-    const prepared = await client.preparePrint({
-      machineId: 'workshop-x1c',
-      artifact,
-      configuration: {},
-    });
-    expect(prepared).toMatchObject({
-      machineId: 'workshop-x1c',
-      physicalMachineId: 'physical-1',
-      artifact,
-    });
-    await expect(
-      client.startPrint({
-        machineId: 'workshop-x1c',
-        preparedId: prepared.preparedId,
-        preparedDigest: prepared.preparedDigest,
-        transferId: 'never-transferred',
-        expectedSetupDigest: prepared.setupDigest,
-        operationId: 'start-without-upload',
-      }),
-    ).rejects.toThrow('MACHINE_TRANSFER_MISMATCH');
-    expect(submit).not.toHaveBeenCalled();
-    const uploadInput = {
-      machineId: 'workshop-x1c',
-      preparedId: prepared.preparedId,
-      preparedDigest: prepared.preparedDigest,
-      operationId: 'upload-1',
-    } as const;
-    const uploaded = await client.uploadPrint(uploadInput);
-    expect(uploaded).toEqual({
-      operationId: 'upload-1',
-      machineId: 'workshop-x1c',
-      kind: 'upload',
-      status: 'accepted',
-      evidence: { transferId: 'transfer-upload-1' },
-      observedAt,
-    });
-    await expect(client.uploadPrint(uploadInput)).resolves.toEqual(uploaded);
-    const acceptedInput = {
-      machineId: 'workshop-x1c',
-      preparedId: prepared.preparedId,
-      preparedDigest: prepared.preparedDigest,
-      transferId: 'transfer-upload-1',
-      expectedSetupDigest: prepared.setupDigest,
-      operationId: 'start-accepted',
-    } as const;
-    const accepted = await client.startPrint(acceptedInput);
-    expect(accepted).toMatchObject({
-      status: 'accepted',
-      providerRunId: 'run-1',
-    });
-    await expect(client.startPrint(acceptedInput)).resolves.toEqual(accepted);
-    expect(submit).toHaveBeenCalledOnce();
+    await expect(first.client.captureStill({ machineId })).rejects.toThrow('MACHINE_STILL_INVALID');
+    expect(await first.client.list({})).toEqual(beforeStill);
+    currentTime = Date.parse(observedAt);
 
-    const secondPrepared = await client.preparePrint({
-      machineId: 'workshop-x1c',
-      artifact,
-      configuration: {},
-    });
-    await client.uploadPrint({
-      machineId: 'workshop-x1c',
-      preparedId: secondPrepared.preparedId,
-      preparedDigest: secondPrepared.preparedDigest,
-      operationId: 'upload-2',
-    });
-    await expect(
-      client.startPrint({
-        ...acceptedInput,
-        preparedId: secondPrepared.preparedId,
-        preparedDigest: secondPrepared.preparedDigest,
-        transferId: 'transfer-upload-2',
-      }),
-    ).rejects.toThrow('MACHINE_OPERATION_ID_CONFLICT');
-    const lateInput = {
-      ...acceptedInput,
-      preparedId: secondPrepared.preparedId,
-      preparedDigest: secondPrepared.preparedDigest,
-      transferId: 'transfer-upload-2',
-      operationId: 'start-late',
-    };
-    await expect(client.startPrint(lateInput)).resolves.toMatchObject({
-      status: 'unknown',
-    });
-    await expect(
-      client.reconcileOperation({
-        machineId: 'workshop-x1c',
-        operationId: 'start-late',
-      }),
-    ).resolves.toMatchObject({
-      status: 'accepted',
-      receipt: { providerRunId: 'run-late' },
-    });
-    const restartInput = { ...lateInput, operationId: 'start-restart' };
-    await expect(client.startPrint(restartInput)).resolves.toMatchObject({
-      status: 'unknown',
-    });
-    expect(submit).toHaveBeenCalledTimes(3);
-    manualRun.resolve();
-    await vi.waitFor(async () => {
-      await expect(client.list({})).resolves.toMatchObject({
-        entries: [{ snapshot: { activeRunId: 'manual-run', readiness: 'busy' } }],
-      });
-    });
-    await expect(
-      client.startPrint({
-        ...lateInput,
-        operationId: 'start-during-manual-run',
-      }),
-    ).rejects.toThrow('MACHINE_START_STALE_OR_BUSY');
-    await expect(
-      client.controlRun({
-        machineId: 'workshop-x1c',
-        operationId: 'pause-stale',
-        command: 'pause',
-        expectedProviderRunId: 'run-1',
-      }),
-    ).rejects.toThrow('MACHINE_CONTROL_STALE_RUN');
-    expect(control).not.toHaveBeenCalled();
-    const paused = await client.controlRun({
-      machineId: 'workshop-x1c',
-      operationId: 'pause-manual',
-      command: 'pause',
-      expectedProviderRunId: 'manual-run',
-    });
-    // The provider's reply names no run; the receipt names the one the preflight matched.
-    expect(paused).toMatchObject({ status: 'accepted', kind: 'pause', providerRunId: 'manual-run' });
-    await expect(
-      client.controlRun({
-        machineId: 'workshop-x1c',
-        operationId: 'pause-manual',
-        command: 'pause',
-        expectedProviderRunId: 'manual-run',
-      }),
-    ).resolves.toEqual(paused);
-    expect(control).toHaveBeenCalledOnce();
-
-    const secondCeremony = await client.beginBinding({
-      candidate: discovered[1]!,
-      name: 'duplicate-x1c',
-    });
-    if (secondCeremony.status !== 'operator-action-required') {
-      throw new Error('expected second binding ceremony');
-    }
+    const secondCeremony = await beginCeremony(first.client, 'candidate-b', 'duplicate-x1c');
     await expect(
       first.host.completeBinding({
-        ceremonyId: secondCeremony.ceremonyId,
+        ceremonyId: secondCeremony,
         secretRef: 'vault:bambu-x1c',
         serviceTrust: { mqtt: { type: 'pinned', digest: pinned } },
       }),
     ).rejects.toThrow('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CONFLICT');
-    client.close();
-    server.dispose();
-    await first.host.close();
-    hosts.splice(hosts.indexOf(first.host), 1);
+    await first.close();
 
     // The refused binding left nothing behind; the bound printer is one directory of plain files.
-    expect(await sortedEntries(root)).toEqual(['authority', 'store.json', 'workshop-x1c']);
-    const machine = join(root, 'workshop-x1c');
-    const operationsPath = join(machine, 'operations.jsonl');
-    const operationsLog = await readFile(operationsPath, 'utf8');
-    const { mode } = await stat(operationsPath);
+    expect(await sortedEntries(root)).toEqual(['authority', 'store.json', machineId]);
+    const machine = join(root, machineId);
+    const { mode } = await stat(join(machine, 'journal.jsonl'));
     // oxlint-disable-next-line eslint/no-bitwise -- POSIX permission bits are a bit mask.
     expect(mode & 0o777).toBe(0o600);
     expect(JSON.parse(await readFile(join(machine, 'machine.json'), 'utf8'))).toMatchObject({
       version: 1,
-      id: 'workshop-x1c',
+      id: machineId,
       name: 'Workshop X1C',
       providerId: 'binding-provider',
       physicalId: 'physical-1',
       connection: { secretRef: 'vault:bambu-x1c', serviceTrust: { mqtt: { type: 'pinned', digest: pinned } } },
       last: { descriptor: { id: 'physical-1' } },
     });
-    expect(await readdir(join(machine, 'preparations'))).toHaveLength(2);
-    expect(operationsLog.indexOf('machine-effect-intent')).toBeLessThan(
-      operationsLog.indexOf('machine-effect-sending'),
-    );
-    expect(operationsLog.indexOf('machine-effect-sending')).toBeLessThan(
-      operationsLog.indexOf('machine-effect-result'),
-    );
     for (const file of await storeFiles(root)) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- each store file is checked on its own.
       expect(await readFile(file, 'utf8'), file).not.toContain('credential-must-not-be-serialized');
     }
 
-    const second = await openBoundHost();
-    expect(connections).toHaveBeenCalledTimes(3);
-    const restartSession = second.host.issueSession({
-      actor: { kind: 'user', id: 'operator' },
-      grants: [
-        { route: 'machines', operation: 'machines.list' },
-        { route: 'machines', operation: 'machines.startPrint' },
-        { route: 'machines', operation: 'machines.uploadPrint' },
-      ],
-    });
-    const restartPorts = new MessageChannel();
-    const restartServer = second.host.serve({ port: restartPorts.port1, session: restartSession });
-    const restartClient = connectMachineChannel(restartPorts.port2);
-    await expect(restartClient.list({})).resolves.toMatchObject({
-      entries: [{ machineId: 'workshop-x1c', name: 'Workshop X1C', freshness: 'current' }],
-    });
-    // The restart left the start unknown; the reconnected printer's report proved it before this call (blueprint
-    // x1c-start-confirmation R1), so the stored receipt answers and nothing is sent.
+    connects.mockClear();
+    const second = await openServedHost(root, provider, runtime);
+    expect(connects).toHaveBeenCalledOnce();
     await vi.waitFor(async () => {
-      await expect(restartClient.startPrint(restartInput)).resolves.toMatchObject({
-        status: 'accepted',
-        providerRunId: 'run-late',
+      await expect(second.client.list({})).resolves.toMatchObject({
+        entries: [{ machineId, name: 'Workshop X1C', freshness: 'current' }],
       });
     });
-    expect(submit).toHaveBeenCalledTimes(3);
-    await expect(
-      restartClient.uploadPrint({
-        machineId: 'workshop-x1c',
-        preparedId: secondPrepared.preparedId,
-        preparedDigest: secondPrepared.preparedDigest,
-        operationId: 'upload-2',
-      }),
-    ).resolves.toMatchObject({ status: 'accepted', evidence: { transferId: 'transfer-upload-2' } });
-    restartClient.close();
-    restartServer.dispose();
+    // Same installation, same revision; a new session, a new incarnation.
+    const {
+      entries: [reconnected],
+    } = await second.client.list({});
+    expect(reconnected?.descriptor.capabilities.revision).toBe(entry?.descriptor.capabilities.revision);
+    expect(reconnected?.descriptor.capabilities.incarnation).not.toBe(entry?.descriptor.capabilities.incarnation);
+    await second.close();
   });
 });
 
-const printRequestGrants: readonly HostRouteGrant[] = (
-  [
-    'discover',
-    'beginBinding',
-    'list',
-    'get',
-    'requestPrint',
-    'listPrintRequests',
-    'watchPrintRequests',
-    'resolvePrintRequest',
-    'withdrawPrintRequest',
-    'reconcileOperation',
-  ] as const
-).map((operation) => ({ route: 'machines', operation: `machines.${operation}` }));
-const agent = { kind: 'agent', id: 'agent-1', label: 'Tau agent' } as const;
-const operator = { kind: 'user', id: 'operator', label: 'Operator' } as const;
-/** Remove a log's last frame, as a crash between that append and the one before it leaves the file. */
-const dropLastFrame = async (path: string): Promise<void> => {
-  const text = await readFile(path, 'utf8');
-  const frames = text.split('\n').filter((line) => line.length > 0);
-  await writeFile(
-    path,
-    frames
-      .slice(0, -1)
-      .map((line) => `${line}\n`)
-      .join(''),
-  );
-};
+describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('actions, holds and stop', () => {
+  const currentTime = { value: Date.parse(observedAt) };
+  const currentTimestamp = (): string => new Date(currentTime.value).toISOString();
 
-describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('print request ledger', () => {
-  let currentTime = Date.parse(observedAt);
-  const currentTimestamp = (): string => new Date(currentTime).toISOString();
-  /** Runs as each device call begins, before the device answers. */
-  let beforeDevice = async (_call: 'prepare' | 'start' | 'upload'): Promise<void> => undefined;
-  const preparePrint = vi.fn(
-    async (input: Parameters<MachineSession['preparePrint']>[0]): Promise<MachinePreparationReceipt> => {
-      await beforeDevice('prepare');
-      return readyPreparation(input);
-    },
-  );
-  const uploadPrint = vi.fn(
-    async (input: Parameters<MachineSession['uploadPrint']>[0]): Promise<MachineTransferReceipt> => {
-      await beforeDevice('upload');
-      return {
-        status: 'transferred',
-        transferId: `transfer-${input.operationId}`,
-        digest: input.artifact.digest,
-        length: input.artifact.length,
-        observedAt: currentTimestamp(),
-      };
-    },
-  );
-  const submit = vi.fn(async (input: Parameters<MachineSession['submit']>[0]): Promise<MachineSubmissionReceipt> => {
-    await beforeDevice('start');
-    return input.operationId.startsWith('start-unknown')
-      ? { status: 'unknown', reason: 'reply-lost-after-possible-acceptance', observedAt: currentTimestamp() }
-      : { status: 'accepted', providerRunId: `run-${input.operationId}`, observedAt: currentTimestamp() };
+  afterEach(() => {
+    currentTime.value = Date.parse(observedAt);
   });
-  const reconcileLate = async (input: Parameters<MachineSession['reconcile']>[0]): Promise<MachineCommandReceipt> =>
-    input.command === 'project_file'
-      ? { status: 'accepted', providerRunId: 'run-late', observedAt: currentTimestamp() }
-      : { status: 'unknown', reason: 'no-correlated-provider-reply', observedAt: currentTimestamp() };
-  const reconcile = vi.fn(reconcileLate);
-  /** Reports every bound session streams once resolved; each session idles until its signal aborts. */
-  let telemetry = Promise.withResolvers<Iterable<MachineSnapshot>>();
-  const provider_ = bindingProvider(() => undefined, {
-    preparePrint,
-    uploadPrint,
-    submit,
-    reconcile,
-    async *observe({ signal }) {
-      if (signal.aborted) {
-        return;
-      }
-      const stopped = Promise.withResolvers<Iterable<MachineSnapshot>>();
-      signal.addEventListener(
-        'abort',
-        () => {
-          stopped.resolve([]);
-        },
-        { once: true },
-      );
-      for (const snapshot of await Promise.race([telemetry.promise, stopped.promise])) {
-        yield { type: 'snapshot', snapshot };
-      }
-      await stopped.promise;
-    },
-  });
-  const runtime: NodeMachineRuntime = {
-    discovery: {
-      clock: { now: currentTimestamp },
-      async *listenDatagrams() {
-        yield* [];
-      },
-    },
-    connection: () => ({
-      clock: { now: currentTimestamp },
-      log: async () => undefined,
-      connectStream: async () => {
-        throw new Error('fixture does not open sockets');
-      },
-      async *readArtifact() {
-        yield* [];
-      },
-      resolveSecret: async () => 'credential-must-not-be-serialized',
-    }),
+
+  /** Bind one printer whose session behaves as `behavior` says. */
+  const boundPrinter = async (behavior: FixtureSessionBehavior = {}, root?: string) => {
+    const directory = root ?? (await storeRoot());
+    const provider = bindingProvider(() => fixtureSession(behavior));
+    const fixture = await openServedHost(directory, provider, runtimeAt(currentTimestamp));
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    return { ...fixture, root: directory, provider, revision: await revisionOf(fixture.client) };
   };
-  const openLedgerHost = async (root: string) => {
-    const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
-    const onError = vi.fn();
-    const host = await createNodeMachineHost({
-      storeRoot: root,
-      hostId: 'host-1',
-      authorityId: 'authority-1',
-      admission,
-      providers: [provider_],
-      runtime,
-      onError,
+
+  it("should let an agent switch the light unattended, once per operation id, and settle it from the printer's reports", async () => {
+    let isOn = false;
+    const apply = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({
+      actions: {
+        type: 'supported',
+        apply,
+        confirm: () => (isOn ? { status: 'confirmed' } : { status: 'pending' }),
+      },
     });
-    hosts.push(host);
-    const session = host.issueSession({ actor: { kind: 'user', id: 'operator' }, grants: printRequestGrants });
-    const ports = new MessageChannel();
-    const server = host.serve({ port: ports.port1, session });
-    const client = connectMachineChannel(ports.port2);
-    await client.ready;
-    const close = async (): Promise<void> => {
-      client.close();
-      server.dispose();
-      await host.close();
-      hosts.splice(hosts.indexOf(host), 1);
-    };
-    return { client, host, onError, close };
-  };
-  const bind = async (host: NodeMachineHost, client: MachineChannelClient): Promise<void> => {
-    let candidate: MachineCandidate | undefined;
-    for await (const event of client.discover({ providerId: 'binding-provider', configuration: {} })) {
-      if (event.type !== 'lost' && event.candidate.id === 'candidate-a') {
-        candidate = event.candidate;
-      }
-    }
-    const ceremony = await client.beginBinding({ candidate: candidate!, name: 'workshop-x1c' });
-    if (ceremony.status !== 'operator-action-required') {
-      throw new Error('expected binding ceremony');
-    }
-    await host.completeBinding({ ceremonyId: ceremony.ceremonyId, secretRef: 'vault:bambu-x1c', serviceTrust: {} });
+    const agentClient = await fixture.serveAs(agentActor);
+    const receipt = await agentClient.applyAction(lightOn(fixture.revision, 'light-1'));
+    expect(receipt).toMatchObject({ operationId: 'light-1', machineId, kind: 'action', status: 'accepted' });
+    expect(apply).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ operationId: 'light-1', componentId: 'chamber-light', parameters: { on: true } }),
+    );
+    // Accepted by the printer, not yet shown by it: the operation waits for the printer's own report.
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'light-1' })).resolves.toMatchObject({
+      state: 'confirming',
+      kind: 'action',
+    });
+    await expect(agentClient.applyAction(lightOn(fixture.revision, 'light-1'))).resolves.toEqual(receipt);
+    await expect(
+      agentClient.applyAction(lightOn(fixture.revision, 'light-1', { parameters: { on: false } })),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_OPERATION_ID_CONFLICT' });
+    expect(apply).toHaveBeenCalledOnce();
+
+    isOn = true;
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'light-1' })).resolves.toMatchObject({
+      state: 'accepted',
+      requestedBy: agent,
+      action: { componentId: 'chamber-light', id: 'switch.set', label: 'Chamber light' },
+    });
+    await expect(fixture.client.get({ machineId })).resolves.toMatchObject({
+      snapshot: { operations: [{ operationId: 'light-1', state: 'accepted', kind: 'action' }] },
+    });
+    await fixture.close();
+    const journal = await readFile(join(fixture.root, machineId, 'journal.jsonl'), 'utf8');
+    expect(journal.indexOf('machine-operation-planned')).toBeLessThan(journal.indexOf('machine-operation-sending'));
+    expect(journal.indexOf('machine-operation-sending')).toBeLessThan(journal.indexOf('machine-operation-result'));
+    expect(journal.match(/"source":"confirmation"/gu)).toHaveLength(1);
+  });
+
+  it('should refuse a changed revision, an unknown version, invalid values and an agent at the machine, sending nothing', async () => {
+    const apply = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({
+      actions: { type: 'supported', apply, confirm: () => ({ status: 'confirmed' }) },
+    });
+    const agentClient = await fixture.serveAs(agentActor);
+    await expect(agentClient.applyAction(lightOn('sha256:stale', 'light-1'))).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_CAPABILITIES_CHANGED',
+    });
+    await expect(agentClient.applyAction(lightOn(fixture.revision, 'light-2', { version: 2 }))).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_VERSION_UNSUPPORTED',
+    });
+    await expect(
+      agentClient.applyAction(lightOn(fixture.revision, 'light-3', { parameters: { on: 'yes' } })),
+    ).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_PARAMETERS_INVALID',
+      issues: [{ path: 'on' }],
+    });
+    await expect(
+      agentClient.applyAction(lightOn(fixture.revision, 'light-4', { attended: true })),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_PERSON_REQUIRED' });
+    await expect(
+      agentClient.applyAction(lightOn(fixture.revision, 'light-5', { componentId: 'laser' })),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_UNDECLARED' });
+    expect(apply).not.toHaveBeenCalled();
+    // A refusal is an answer, not an operation: nothing was journaled under its id.
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'light-1' })).rejects.toThrow(
+      'MACHINE_OPERATION_UNKNOWN',
+    );
+    await fixture.close();
+  });
+
+  it('should let only a person at the machine try a control in testing, and keep testing with the binding', async () => {
+    const apply = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({
+      actions: { type: 'supported', apply, confirm: () => ({ status: 'confirmed' }) },
+    });
+    const agentClient = await fixture.serveAs(agentActor);
+    const home = (operationId: string, overrides: Partial<MachineApplyActionInput> = {}): MachineApplyActionInput => ({
+      ...lightOn(fixture.revision, operationId),
+      componentId: 'motion',
+      action: 'motion.home',
+      parameters: {},
+      requestedBy: operator,
+      ...overrides,
+    });
+    await expect(fixture.client.applyAction(home('home-1', { attended: true }))).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_UNQUALIFIED',
+    });
+    await expect(agentClient.setTesting({ machineId, enabled: true, requestedBy: agent })).rejects.toThrow(
+      'Only a person can let untested controls be tried.',
+    );
+    await expect(fixture.client.setTesting({ machineId, enabled: true, requestedBy: operator })).resolves.toMatchObject(
+      { machineId, testing: true },
+    );
+    expect(JSON.parse(await readFile(join(fixture.root, machineId, 'machine.json'), 'utf8'))).toMatchObject({
+      testing: true,
+    });
+    await expect(fixture.client.applyAction(home('home-2'))).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_ATTENDANCE_REQUIRED',
+    });
+    // Testing is the person's: an agent still sees the control as unqualified.
+    await expect(agentClient.applyAction(home('home-3', { requestedBy: agent }))).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_UNQUALIFIED',
+    });
+    await expect(fixture.client.applyAction(home('home-4', { attended: true }))).resolves.toMatchObject({
+      status: 'accepted',
+    });
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'home-4' })).resolves.toMatchObject({
+      state: 'accepted',
+      attended: true,
+    });
+    expect(apply).toHaveBeenCalledOnce();
+    await fixture.close();
+
+    const restarted = await openServedHost(fixture.root, fixture.provider, runtimeAt(currentTimestamp));
     await vi.waitFor(async () => {
-      await expect(client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({ freshness: 'current' });
+      await expect(restarted.client.get({ machineId })).resolves.toMatchObject({ freshness: 'current', testing: true });
     });
-  };
-  const request = async (
-    client: MachineChannelClient,
-    requestId: string,
-    {
-      configuration = {},
-      artifact = printArtifact,
-    }: Readonly<{ configuration?: CacheValue; artifact?: MachineArtifactReference }> = {},
-  ) => {
-    currentTime += 1000;
-    return client.requestPrint({
-      requestId,
-      machineId: 'workshop-x1c',
-      artifact,
-      configuration,
+    await restarted.client.setTesting({ machineId, enabled: false, requestedBy: operator });
+    await expect(restarted.client.get({ machineId })).resolves.not.toHaveProperty('testing');
+    await restarted.close();
+  });
+
+  it("should send an agent's request that needs approval only with a person's approval of that exact operation", async () => {
+    const run: MachineRun = {
+      runId: 'run-1',
+      origin: 'tau',
+      delivery: 'stored',
+      state: 'running',
+      progress: { basis: 'executed', counters: [] },
+    };
+    const apply = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({
+      getSnapshot: async () => fixtureReport({ state: { status: 'active' }, run }),
+      actions: { type: 'supported', apply, confirm: () => ({ status: 'confirmed' }) },
+    });
+    const agentClient = await fixture.serveAs(agentActor);
+    const cancel = (
+      operationId: string,
+      overrides: Partial<MachineApplyActionInput> = {},
+    ): MachineApplyActionInput => ({
+      ...lightOn(fixture.revision, operationId),
+      componentId: 'controller',
+      action: 'run.cancel',
+      expectedRunId: 'run-1',
+      parameters: {},
+      ...overrides,
+    });
+    await expect(agentClient.applyAction(cancel('cancel-1'))).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_APPROVAL_REQUIRED',
+    });
+    // An agent's own session cannot carry an approval; nor can an approval of another operation.
+    await expect(
+      agentClient.applyAction(cancel('cancel-1', { approval: { approvedBy: operator, operationId: 'cancel-1' } })),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_APPROVAL_REQUIRED' });
+    await expect(
+      fixture.client.applyAction(cancel('cancel-1', { approval: { approvedBy: operator, operationId: 'cancel-0' } })),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_APPROVAL_REQUIRED' });
+    await expect(
+      fixture.client.applyAction(
+        cancel('cancel-2', { expectedRunId: 'run-0', approval: { approvedBy: operator, operationId: 'cancel-2' } }),
+      ),
+    ).resolves.toMatchObject({ status: 'rejected', code: 'MACHINE_ACTION_STALE_RUN' });
+    expect(apply).not.toHaveBeenCalled();
+    await expect(
+      fixture.client.applyAction(cancel('cancel-1', { approval: { approvedBy: operator, operationId: 'cancel-1' } })),
+    ).resolves.toMatchObject({ status: 'accepted' });
+    // Confirmed by acknowledgement: accepted when the printer accepts.
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'cancel-1' })).resolves.toMatchObject({
+      state: 'accepted',
       requestedBy: agent,
     });
-  };
+    expect(apply).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
 
-  it('gates upload and start behind approval, dedupes ids and reconciles an unknown start without resending', async () => {
-    uploadPrint.mockClear();
-    submit.mockClear();
+  it('should keep an unproven reply confirming, ask for attention after 180 s and settle on later proof without resending', async () => {
+    let isProven = false;
+    const apply = vi.fn(
+      async (): Promise<MachineCommandReceipt> => ({ status: 'unknown', reason: 'reply lost', observedAt }),
+    );
+    const fixture = await boundPrinter({
+      actions: {
+        type: 'supported',
+        apply,
+        confirm: () => (isProven ? { status: 'confirmed' } : { status: 'pending' }),
+      },
+    });
+    await expect(
+      fixture.client.applyAction(lightOn(fixture.revision, 'light-1', { requestedBy: operator })),
+    ).resolves.toMatchObject({ status: 'unknown' });
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'light-1' })).resolves.toMatchObject({
+      state: 'confirming',
+      confirmingSince: observedAt,
+    });
+    currentTime.value += 179_000;
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'light-1' })).resolves.toMatchObject({
+      state: 'confirming',
+    });
+    currentTime.value += 1000;
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'light-1' })).resolves.toMatchObject({
+      state: 'attention',
+    });
+    isProven = true;
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'light-1' })).resolves.toMatchObject({
+      state: 'accepted',
+      receipt: { status: 'accepted' },
+    });
+    await expect(
+      fixture.client.applyAction(lightOn(fixture.revision, 'light-1', { requestedBy: operator })),
+    ).resolves.toMatchObject({ status: 'accepted' });
+    expect(apply).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
+
+  it('should stop for anyone, ahead of the queue, and end every hold', async () => {
+    const stop = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const fixture = await boundPrinter({
+      stop,
+      holds: {
+        type: 'supported',
+        begin: async (): Promise<MachineProviderHold> => ({ extend: async () => undefined, release }),
+      },
+    });
+    const agentClient = await fixture.serveAs(agentActor);
+    await expect(
+      fixture.client.beginHold({
+        machineId,
+        componentId: 'motion',
+        capabilityRevision: fixture.revision,
+        operationId: 'jog-1',
+        hold: 'motion.jog',
+        version: 1,
+        parameters: { axis: 'x', direction: 1, feed: 600 },
+        requestedBy: operator,
+        attended: true,
+      }),
+    ).resolves.toEqual({ status: 'held', holdId: 'jog-1', lease: 200 });
+    await expect(agentClient.stop({ machineId, operationId: 'stop-1', requestedBy: agent })).resolves.toMatchObject({
+      operationId: 'stop-1',
+      kind: 'stop',
+      status: 'accepted',
+    });
+    expect(stop).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ operationId: 'stop-1' }));
+    expect(release).toHaveBeenCalledOnce();
+    await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'ended' });
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'stop-1' })).resolves.toMatchObject({
+      state: 'accepted',
+      kind: 'stop',
+    });
+    // A machine that is not bound here is told nothing, and the answer says so.
+    await expect(fixture.client.stop({ machineId: 'elsewhere', requestedBy: operator })).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_UNAVAILABLE',
+    });
+    await fixture.close();
+  });
+
+  it('should end a hold whose lease lapses and refuse a hold from an agent', async () => {
+    const extend = vi.fn(async () => undefined);
+    const release = vi.fn(async (): Promise<MachineCommandReceipt> => ({ status: 'accepted', observedAt }));
+    const begin = vi.fn(async (): Promise<MachineProviderHold> => ({ extend, release }));
+    const fixture = await boundPrinter({ holds: { type: 'supported', begin } });
+    const agentClient = await fixture.serveAs(agentActor);
+    const jog = {
+      machineId,
+      componentId: 'motion',
+      capabilityRevision: fixture.revision,
+      operationId: 'jog-1',
+      hold: 'motion.jog',
+      version: 1,
+      parameters: { axis: 'x', direction: 1, feed: 600 },
+      requestedBy: operator,
+      attended: true,
+    } as const;
+    await expect(agentClient.beginHold({ ...jog, operationId: 'jog-agent', requestedBy: agent })).resolves.toEqual({
+      status: 'rejected',
+      code: 'MACHINE_ACTION_PERSON_REQUIRED',
+      message: 'Only a person at the machine can hold a control.',
+    });
+    await expect(fixture.client.beginHold(jog)).resolves.toEqual({ status: 'held', holdId: 'jog-1', lease: 200 });
+    await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'held' });
+    expect(extend).toHaveBeenCalledOnce();
+    // No renewal within the lease: the host tells the printer to release.
+    await vi.waitFor(() => {
+      expect(release).toHaveBeenCalledOnce();
+    });
+    await expect(fixture.client.renewHold({ holdId: 'jog-1' })).resolves.toEqual({ status: 'ended' });
+    await expect(fixture.client.endHold({ holdId: 'jog-1' })).resolves.toMatchObject({
+      operationId: 'jog-1',
+      kind: 'hold',
+      status: 'accepted',
+    });
+    expect(begin).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
+
+  it('should recover an operation a crash left in flight as confirming and never send it again', async () => {
     const root = await storeRoot();
-    const { client, host, close } = await openLedgerHost(root);
-    await bind(host, client);
+    const crash = join(await storeRoot(), 'store');
+    const apply = vi.fn(async (): Promise<MachineCommandReceipt> => {
+      // What a crash while the command is out leaves on disk.
+      await cp(root, crash, { recursive: true });
+      return { status: 'accepted', observedAt };
+    });
+    const behavior: FixtureSessionBehavior = {
+      actions: { type: 'supported', apply, confirm: () => ({ status: 'pending' }) },
+    };
+    const fixture = await boundPrinter(behavior, root);
+    await fixture.client.applyAction(lightOn(fixture.revision, 'light-1', { requestedBy: operator }));
+    await fixture.close();
+    apply.mockClear();
 
-    const first = await request(client, 'request-1');
+    const recovered = await openServedHost(crash, fixture.provider, runtimeAt(currentTimestamp));
+    await expect(recovered.client.reconcileOperation({ machineId, operationId: 'light-1' })).resolves.toMatchObject({
+      state: 'confirming',
+      receipt: { status: 'unknown' },
+    });
+    await vi.waitFor(async () => {
+      await expect(recovered.client.get({ machineId })).resolves.toMatchObject({ freshness: 'current' });
+    });
+    const revision = await revisionOf(recovered.client);
+    await expect(
+      recovered.client.applyAction(lightOn(revision, 'light-1', { requestedBy: operator })),
+    ).resolves.toMatchObject({ status: 'unknown' });
+    expect(apply).not.toHaveBeenCalled();
+    await recovered.close();
+    // The restart recorded that `unknown` durably, once: a second restart replays it and appends nothing.
+    const journalPath = join(crash, machineId, 'journal.jsonl');
+    const recorded = await readFile(journalPath, 'utf8');
+    expect(recorded.match(/"source":"recovery"/gu)).toHaveLength(1);
+    const again = await openServedHost(crash, fixture.provider, runtimeAt(currentTimestamp));
+    await again.close();
+    expect(await readFile(journalPath, 'utf8')).toBe(recorded);
+  });
+});
+
+describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('jobs', () => {
+  const currentTime = { value: Date.parse(observedAt) };
+  const currentTimestamp = (): string => new Date(currentTime.value).toISOString();
+
+  afterEach(() => {
+    currentTime.value = Date.parse(observedAt);
+  });
+
+  const boundPrinter = async (
+    jobs: MachineJobCapability<unknown>,
+    behavior: FixtureSessionBehavior = {},
+    root?: string,
+  ) => {
+    const directory = root ?? (await storeRoot());
+    const provider = bindingProvider(() => fixtureSession({ jobs, ...behavior }));
+    const fixture = await openServedHost(directory, provider, runtimeAt(currentTimestamp));
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:x1c' });
+    return { ...fixture, root: directory, provider };
+  };
+  const request = async (client: MachineChannelClient, jobId: string, configuration: CacheValue = {}) => {
+    currentTime.value += 1000;
+    return client.requestJob({ jobId, machineId, artifact, configuration, requestedBy: agent });
+  };
+  const approve = async (client: MachineChannelClient, jobId: string, suffix = jobId) =>
+    client.resolveJob({
+      jobId,
+      decision: 'approve',
+      resolvedBy: operator,
+      attestations: ['plate-clear'],
+      transferOperationId: `transfer-${suffix}`,
+      startOperationId: `start-${suffix}`,
+    });
+
+  it('should prepare a job, ask a person to clear the plate, then transfer and start it once', async () => {
+    const jobs = storedJobs();
+    const feed = reportFeed();
+    const fixture = await boundPrinter(jobs.facet, { observe: feed.observe });
+    const agentClient = await fixture.serveAs(agentActor);
+
+    const first = await request(agentClient, 'job-1');
     expect(first).toMatchObject({
-      requestId: 'request-1',
-      machineId: 'workshop-x1c',
+      version: 1,
+      jobId: 'job-1',
+      machineId,
       state: 'awaiting-approval',
       requestedBy: agent,
-      summary: { fileName: 'pyramid.gcode.3mf' },
-      prepared: { machineId: 'workshop-x1c', physicalMachineId: 'physical-1', artifact: printArtifact },
+      program: { name: 'part.gcode', facts: { process: 'fff', layers: 120 } },
+      checks: [{ id: 'plate', state: 'passed' }],
+      prepared: { machineId, physicalMachineId: 'physical-1', artifact },
     });
-    expect(uploadPrint).not.toHaveBeenCalled();
-    expect(submit).not.toHaveBeenCalled();
-    await expect(request(client, 'request-1')).resolves.toEqual(first);
-    await expect(request(client, 'request-1', { configuration: { changed: true } })).rejects.toThrow(
-      'MACHINE_PRINT_REQUEST_ID_CONFLICT',
+    await expect(request(agentClient, 'job-1')).resolves.toEqual(first);
+    await expect(request(agentClient, 'job-1', { changed: true })).rejects.toThrow(
+      'This job id was already used for another program.',
     );
-    // A request lives in its machine's directory, so one for an unbound machine is refused and never written.
     await expect(
-      client.requestPrint({
-        requestId: 'request-elsewhere',
-        machineId: 'unbound-x1c',
-        artifact: printArtifact,
+      agentClient.requestJob({
+        jobId: 'job-elsewhere',
+        machineId: 'elsewhere',
+        artifact,
         configuration: {},
         requestedBy: agent,
       }),
-    ).rejects.toThrow('MACHINE_PREPARATION_UNAVAILABLE');
-    const watched = client.watchPrintRequests({ machineId: 'workshop-x1c' })[Symbol.asyncIterator]();
-    await expect(watched.next()).resolves.toEqual({ done: false, value: first });
+    ).rejects.toThrow('MACHINE_UNAVAILABLE');
+    await expect(
+      agentClient.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: agent, attestations: ['plate-clear'] }),
+    ).rejects.toThrow('A person must approve this job in Tau.');
+    await expect(
+      fixture.client.resolveJob({ jobId: 'job-1', decision: 'approve', resolvedBy: operator }),
+    ).rejects.toThrow('Confirm first: The plate is clear.');
+    expect(jobs.transfer).not.toHaveBeenCalled();
+    expect(jobs.start).not.toHaveBeenCalled();
 
-    const denied = await request(client, 'request-2');
-    await expect(
-      client.resolvePrintRequest({ requestId: 'request-2', decision: 'deny', resolvedBy: operator }),
-    ).resolves.toMatchObject({ state: 'denied', resolvedBy: operator, updatedAt: currentTimestamp() });
-    await expect(client.withdrawPrintRequest({ requestId: 'request-2', resolvedBy: agent })).rejects.toThrow(
-      'MACHINE_PRINT_REQUEST_NOT_AWAITING',
-    );
-    await request(client, 'request-3');
-    await expect(client.withdrawPrintRequest({ requestId: 'request-3', resolvedBy: agent })).resolves.toMatchObject({
-      state: 'withdrawn',
-      resolvedBy: agent,
-    });
-    await expect(
-      client.resolvePrintRequest({ requestId: 'request-3', decision: 'approve', resolvedBy: operator }),
-    ).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
-    await expect(
-      client.resolvePrintRequest({ requestId: 'missing', decision: 'approve', resolvedBy: operator }),
-    ).rejects.toThrow('MACHINE_PRINT_REQUEST_UNKNOWN');
-    expect(uploadPrint).not.toHaveBeenCalled();
-    expect(submit).not.toHaveBeenCalled();
-
-    const started = await client.resolvePrintRequest({
-      requestId: 'request-1',
-      decision: 'approve',
-      resolvedBy: operator,
-      uploadOperationId: 'upload-1',
-      startOperationId: 'start-1',
-    });
+    const started = await approve(fixture.client, 'job-1');
     expect(started).toMatchObject({
       state: 'started',
       resolvedBy: operator,
-      uploadOperationId: 'upload-1',
-      startOperationId: 'start-1',
-      transferId: 'transfer-upload-1',
-      receipt: { operationId: 'start-1', kind: 'start', status: 'accepted', providerRunId: 'run-start-1' },
+      attended: false,
+      attestations: [{ id: 'plate-clear', by: operator }],
+      transferOperationId: 'transfer-job-1',
+      startOperationId: 'start-job-1',
+      transferId: 'transfer-transfer-job-1',
+      receipt: { operationId: 'start-job-1', kind: 'start', status: 'accepted', runId: 'run-start-job-1' },
+      run: { runId: 'run-start-job-1', outcome: 'running' },
     });
-    expect(uploadPrint).toHaveBeenCalledOnce();
-    expect(uploadPrint).toHaveBeenCalledWith(
-      expect.objectContaining({ operationId: 'upload-1', remoteName: first.prepared?.remoteName }),
+    expect(jobs.transfer).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ operationId: 'transfer-job-1', remoteName: first.prepared?.remoteName }),
     );
-    expect(submit).toHaveBeenCalledOnce();
-    expect(submit).toHaveBeenCalledWith(
-      expect.objectContaining({ operationId: 'start-1', transferId: 'transfer-upload-1' }),
+    expect(jobs.start).toHaveBeenCalledExactlyOnceWith(
+      expect.objectContaining({ operationId: 'start-job-1', transferId: 'transfer-transfer-job-1' }),
     );
-    const seen: string[] = [];
-    for (;;) {
-      // oxlint-disable-next-line eslint/no-await-in-loop -- the watch yields one recorded transition at a time.
-      const frame = await watched.next();
-      if (frame.done) {
-        throw new Error('watch ended early');
-      }
-      seen.push(`${frame.value.requestId}:${frame.value.state}`);
-      if (frame.value.requestId === 'request-1' && frame.value.state === 'started') {
-        expect(frame.value).toEqual(started);
-        break;
-      }
-    }
-    expect(seen).toContain('request-2:denied');
-    expect(seen).toContain('request-3:withdrawn');
-    expect(seen.filter((entry) => entry.startsWith('request-1:'))).toEqual(
-      expect.arrayContaining(['request-1:started']),
-    );
-    await expect(
-      client.resolvePrintRequest({ requestId: 'request-1', decision: 'approve', resolvedBy: operator }),
-    ).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'started' });
+    expect(jobs.start).toHaveBeenCalledOnce();
 
-    await request(client, 'request-4');
+    await request(agentClient, 'job-2');
     await expect(
-      client.resolvePrintRequest({
-        requestId: 'request-4',
-        decision: 'approve',
-        resolvedBy: operator,
-        uploadOperationId: 'upload-1',
-        startOperationId: 'start-4',
+      fixture.client.resolveJob({ jobId: 'job-2', decision: 'deny', resolvedBy: operator }),
+    ).resolves.toMatchObject({ state: 'denied', resolvedBy: operator });
+    await expect(agentClient.withdrawJob({ jobId: 'job-2', resolvedBy: agent })).rejects.toThrow(
+      'MACHINE_JOB_NOT_AWAITING',
+    );
+    await request(agentClient, 'job-3');
+    await expect(agentClient.withdrawJob({ jobId: 'job-3', resolvedBy: agent })).resolves.toMatchObject({
+      state: 'withdrawn',
+    });
+    await expect(
+      fixture.client.resolveJob({ jobId: 'missing', decision: 'approve', resolvedBy: operator }),
+    ).rejects.toThrow('MACHINE_JOB_UNKNOWN');
+
+    // The job keeps what became of its run after the printer reports it ended.
+    feed.push({
+      type: 'snapshot',
+      snapshot: fixtureReport({
+        run: {
+          runId: 'run-start-job-1',
+          jobId: 'job-1',
+          origin: 'tau',
+          delivery: 'stored',
+          state: 'completed',
+          endedAt: observedAt,
+          progress: { basis: 'executed', fraction: 1, counters: [] },
+        },
       }),
-    ).resolves.toMatchObject({ state: 'failed', failure: { code: 'MACHINE_OPERATION_ID_CONFLICT' } });
-    expect(uploadPrint).toHaveBeenCalledOnce();
-
-    await request(client, 'request-5');
-    const unknown = await client.resolvePrintRequest({
-      requestId: 'request-5',
-      decision: 'approve',
-      resolvedBy: operator,
-      uploadOperationId: 'upload-5',
-      startOperationId: 'start-unknown-5',
     });
-    expect(unknown).toMatchObject({
-      state: 'confirming',
-      transferId: 'transfer-upload-5',
-      receipt: { operationId: 'start-unknown-5', kind: 'start', status: 'unknown' },
+    await vi.waitFor(async () => {
+      const listed = await fixture.client.listJobs({});
+      const latest = listed.at(-1);
+      expect(latest).toMatchObject({ jobId: 'job-1', run: { runId: 'run-start-job-1', outcome: 'completed' } });
     });
-    expect(submit).toHaveBeenCalledTimes(2);
-    await expect(
-      client.resolvePrintRequest({ requestId: 'request-5', decision: 'approve', resolvedBy: operator }),
-    ).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
-    await expect(
-      client.reconcileOperation({ machineId: 'workshop-x1c', operationId: 'start-unknown-5' }),
-    ).resolves.toMatchObject({ status: 'accepted', receipt: { providerRunId: 'run-late' } });
-    expect(submit).toHaveBeenCalledTimes(2);
-    expect(uploadPrint).toHaveBeenCalledTimes(2);
-    const listed = await client.listPrintRequests({});
-    expect(listed.map(({ requestId, state }) => `${requestId}:${state}`)).toEqual([
-      'request-5:started',
-      'request-4:failed',
-      'request-3:withdrawn',
-      'request-2:denied',
-      'request-1:started',
+    const listed = await fixture.client.listJobs({});
+    expect(listed.map(({ jobId, state }) => `${jobId}:${state}`)).toEqual([
+      'job-3:withdrawn',
+      'job-2:denied',
+      'job-1:started',
     ]);
-    expect(listed[0]).toMatchObject({ receipt: { providerRunId: 'run-late' } });
-    expect(denied.requestId).toBe('request-2');
-    // Each request is one whole record in its machine's directory.
-    expect(await sortedEntries(join(root, 'workshop-x1c', 'requests'))).toEqual([
-      'request-1.json',
-      'request-2.json',
-      'request-3.json',
-      'request-4.json',
-      'request-5.json',
+    // Each job is one whole record in its machine's directory.
+    expect(await sortedEntries(join(fixture.root, machineId, 'jobs'))).toEqual([
+      'job-1.json',
+      'job-2.json',
+      'job-3.json',
     ]);
-    expect(JSON.parse(await readFile(join(root, 'workshop-x1c', 'requests', 'request-5.json'), 'utf8'))).toEqual({
-      version: 1,
-      request: listed[0],
-    });
-    await watched.return?.();
-    await close();
+    expect(JSON.parse(await readFile(join(fixture.root, machineId, 'jobs', 'job-3.json'), 'utf8'))).toEqual(listed[0]);
+    await fixture.close();
   });
 
-  it('should list and watch print requests by project', async () => {
-    const root = await storeRoot();
-    const { client, host, close } = await openLedgerHost(root);
-    await bind(host, client);
-    const otherProject = 'proj_ZYXWVUTSRQPONMLKJIHGF';
-    const watched = client.watchPrintRequests({ projectId: otherProject })[Symbol.asyncIterator]();
-    await request(client, 'request-1');
-    await request(client, 'request-2', { artifact: { ...printArtifact, projectId: otherProject } });
-    const ids = async (projectId?: string): Promise<string[]> => {
-      const listed = await client.listPrintRequests(projectId === undefined ? {} : { projectId });
-      return listed.map(({ requestId }) => requestId);
+  it('should refuse a start whose setup changed since approval and follow an unknown start to its proof', async () => {
+    const jobs = storedJobs();
+    let setup: CacheValue = { plate: 'smooth' };
+    jobs.prepare.mockImplementation(async (input) => readyPreparation(input, setup));
+    let isProven = false;
+    const fixture = await boundPrinter(jobs.facet, {
+      reconcile: async (input) =>
+        input.kind === 'start' && isProven
+          ? { status: 'accepted', runId: 'run-late', observedAt }
+          : { status: 'unknown', reason: 'no proof yet', observedAt },
+    });
+    await request(fixture.client, 'job-1');
+    setup = { plate: 'textured' };
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({
+      state: 'failed',
+      failure: { code: 'MACHINE_JOB_SETUP_CHANGED' },
+    });
+    expect(jobs.start).not.toHaveBeenCalled();
+
+    setup = { plate: 'smooth' };
+    jobs.start.mockResolvedValueOnce({ status: 'unknown', reason: 'reply lost', observedAt });
+    await request(fixture.client, 'job-2');
+    await expect(approve(fixture.client, 'job-2')).resolves.toMatchObject({
+      state: 'confirming',
+      receipt: { operationId: 'start-job-2', status: 'unknown' },
+    });
+    await expect(approve(fixture.client, 'job-2')).rejects.toThrow('MACHINE_JOB_NOT_AWAITING');
+    isProven = true;
+    await expect(fixture.client.reconcileOperation({ machineId, operationId: 'start-job-2' })).resolves.toMatchObject({
+      state: 'accepted',
+      receipt: { runId: 'run-late' },
+    });
+    const [latest] = await fixture.client.listJobs({});
+    expect(latest).toMatchObject({
+      jobId: 'job-2',
+      state: 'started',
+      run: { runId: 'run-late', outcome: 'running' },
+    });
+    expect(jobs.start).toHaveBeenCalledOnce();
+    await fixture.close();
+  });
+
+  it('should wait for the start button of a printer that starts at the machine', async () => {
+    const jobs = storedJobs();
+    const feed = reportFeed();
+    const reported = fixtureDescriptor();
+    const descriptor: MachineProviderDescriptor = {
+      ...reported,
+      capabilities: {
+        ...reported.capabilities,
+        jobs:
+          reported.capabilities.jobs.type === 'supported'
+            ? { ...reported.capabilities.jobs, start: 'at-machine' }
+            : reported.capabilities.jobs,
+      },
     };
-    await expect(ids()).resolves.toEqual(['request-2', 'request-1']);
-    await expect(ids(printArtifact.projectId)).resolves.toEqual(['request-1']);
-    await expect(ids(otherProject)).resolves.toEqual(['request-2']);
-    await expect(ids('proj_000000000000000000000')).resolves.toEqual([]);
+    const fixture = await boundPrinter(jobs.facet, { descriptor, observe: feed.observe });
+    await request(fixture.client, 'job-1');
+    jobs.start.mockResolvedValueOnce({ status: 'accepted', observedAt });
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'awaiting-start' });
+    // Until a person presses start the binding is free to change; then the run names the job.
+    feed.push({
+      type: 'snapshot',
+      snapshot: fixtureReport({
+        state: { status: 'active' },
+        run: {
+          runId: 'run-9',
+          jobId: 'job-1',
+          origin: 'tau',
+          delivery: 'stored',
+          state: 'running',
+          progress: { basis: 'executed', counters: [] },
+        },
+      }),
+    });
+    await vi.waitFor(async () => {
+      const [latest] = await fixture.client.listJobs({});
+      expect(latest).toMatchObject({ state: 'started', run: { runId: 'run-9', outcome: 'running' } });
+    });
+    await fixture.close();
+  });
+
+  it('should list and watch jobs by project', async () => {
+    const fixture = await boundPrinter(storedJobs().facet);
+    const otherProject = 'proj_ZYXWVUTSRQPONMLKJIHGF';
+    const watched = fixture.client.watchJobs({ projectId: otherProject })[Symbol.asyncIterator]();
+    await request(fixture.client, 'job-1');
+    currentTime.value += 1000;
+    await fixture.client.requestJob({
+      jobId: 'job-2',
+      machineId,
+      artifact: { ...artifact, projectId: otherProject },
+      configuration: {},
+      requestedBy: agent,
+    });
+    const ids = async (projectId?: string): Promise<string[]> => {
+      const listed = await fixture.client.listJobs(projectId === undefined ? {} : { projectId });
+      return listed.map(({ jobId }) => jobId);
+    };
+    await expect(ids()).resolves.toEqual(['job-2', 'job-1']);
+    await expect(ids(artifact.projectId)).resolves.toEqual(['job-1']);
+    await expect(ids(otherProject)).resolves.toEqual(['job-2']);
     const seen: string[] = [];
     for (;;) {
       // oxlint-disable-next-line eslint/no-await-in-loop -- the watch yields one recorded transition at a time.
@@ -1185,481 +1168,168 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('p
       if (frame.done) {
         throw new Error('watch ended early');
       }
-      seen.push(frame.value.requestId);
+      seen.push(frame.value.jobId);
       if (frame.value.state === 'awaiting-approval') {
         break;
       }
     }
-    expect(new Set(seen)).toEqual(new Set(['request-2']));
+    expect(new Set(seen)).toEqual(new Set(['job-2']));
     await watched.return?.();
-    await close();
+    await fixture.close();
   });
 
-  it('recovers the exact request state from every crash point and never re-sends', async () => {
-    uploadPrint.mockClear();
-    submit.mockClear();
+  it('should recover each job a crash interrupted to a state that sends nothing twice', async () => {
+    const jobs = storedJobs();
     const root = await storeRoot();
-    const first = await openLedgerHost(root);
-    await bind(first.host, first.client);
-    // Copy the store while each device call is out: each copy is what a crash at that point leaves on disk.
     const crashes = new Map<string, string>();
     const crashCopy = async (name: string): Promise<void> => {
       const copy = join(await storeRoot(), 'store');
       await cp(root, copy, { recursive: true });
       crashes.set(name, copy);
     };
-    beforeDevice = async (call) => crashCopy(`${call}-sending`);
-    try {
-      await request(first.client, 'request-1');
-      await crashCopy('awaiting-approval');
-      await expect(
-        first.client.resolvePrintRequest({
-          requestId: 'request-1',
-          decision: 'approve',
-          resolvedBy: operator,
-          uploadOperationId: 'upload-1',
-          startOperationId: 'start-1',
-        }),
-      ).resolves.toMatchObject({ state: 'started' });
-    } finally {
-      beforeDevice = async () => undefined;
-    }
-    await first.close();
-    await crashCopy('complete');
-    // The crash after the upload's intent but before its send was recorded.
-    await crashCopy('upload-planned');
-    const uploadSending = crashes.get('upload-sending');
-    const uploadPlanned = crashes.get('upload-planned');
-    if (!uploadSending || !uploadPlanned) {
-      throw new Error('crash copies missing');
-    }
-    await cp(uploadSending, uploadPlanned, { recursive: true, force: true });
-    await dropLastFrame(join(uploadPlanned, 'workshop-x1c', 'operations.jsonl'));
-    const at = (name: string): string => {
-      const copy = crashes.get(name);
-      if (!copy) {
-        throw new Error(`no crash copy ${name}`);
-      }
-      return copy;
-    };
-    const approve = async (client: MachineChannelClient) =>
-      client.resolvePrintRequest({ requestId: 'request-1', decision: 'approve', resolvedBy: operator });
-    const state = async (client: MachineChannelClient): Promise<PrintRequest> => {
-      const [record] = await client.listPrintRequests({ machineId: 'workshop-x1c' });
-      if (!record) {
-        throw new Error('request missing after restart');
-      }
-      return record;
-    };
-    const restart = async (name: string) => {
-      uploadPrint.mockClear();
-      submit.mockClear();
-      const fixture = await openLedgerHost(at(name));
-      await vi.waitFor(async () => {
-        await expect(fixture.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
-          freshness: 'current',
-        });
-      });
-      return fixture;
-    };
-
-    const preparing = await restart('prepare-sending');
-    expect(await state(preparing.client)).toMatchObject({
-      state: 'failed',
-      failure: { code: 'HOST_RESTARTED', message: 'The host restarted before preparation completed.' },
+    const transfer = jobs.transfer.getMockImplementation()!;
+    const start = jobs.start.getMockImplementation()!;
+    jobs.transfer.mockImplementation(async (input) => {
+      await crashCopy('transfer-sending');
+      return transfer(input);
     });
-    await expect(approve(preparing.client)).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
-    await preparing.close();
+    jobs.start.mockImplementation(async (input) => {
+      await crashCopy('start-sending');
+      return start(input);
+    });
+    const fixture = await boundPrinter(jobs.facet, {}, root);
+    await request(fixture.client, 'job-1');
+    await crashCopy('awaiting-approval');
+    await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'started' });
+    await fixture.close();
+    jobs.transfer.mockImplementation(transfer);
+    jobs.start.mockImplementation(start);
+
+    const restart = async (name: string) => {
+      jobs.transfer.mockClear();
+      jobs.start.mockClear();
+      const restarted = await openServedHost(crashes.get(name)!, fixture.provider, runtimeAt(currentTimestamp));
+      await vi.waitFor(async () => {
+        await expect(restarted.client.get({ machineId })).resolves.toMatchObject({ freshness: 'current' });
+      });
+      const [job] = await restarted.client.listJobs({});
+      return { ...restarted, job: job! };
+    };
 
     const awaiting = await restart('awaiting-approval');
-    const recoveredAwaiting = await state(awaiting.client);
-    expect(recoveredAwaiting.state).toBe('awaiting-approval');
-    expect(recoveredAwaiting).not.toHaveProperty('uploadOperationId');
-    expect(uploadPrint).not.toHaveBeenCalled();
-    await expect(approve(awaiting.client)).resolves.toMatchObject({ state: 'started' });
-    expect(uploadPrint).toHaveBeenCalledOnce();
-    expect(submit).toHaveBeenCalledOnce();
+    expect(awaiting.job.state).toBe('awaiting-approval');
+    await expect(approve(awaiting.client, 'job-1')).resolves.toMatchObject({ state: 'started' });
+    expect(jobs.transfer).toHaveBeenCalledOnce();
     await awaiting.close();
 
-    const planned = await restart('upload-planned');
-    expect(await state(planned.client)).toMatchObject({ state: 'uploading', uploadOperationId: 'upload-1' });
-    await expect(
-      planned.client.reconcileOperation({ machineId: 'workshop-x1c', operationId: 'upload-1' }),
-    ).resolves.toMatchObject({ kind: 'upload', status: 'planned' });
-    expect(uploadPrint).not.toHaveBeenCalled();
-    await expect(approve(planned.client)).resolves.toMatchObject({
-      state: 'started',
-      transferId: 'transfer-upload-1',
-      receipt: { operationId: 'start-1', status: 'accepted' },
-    });
-    expect(uploadPrint).toHaveBeenCalledOnce();
-    expect(submit).toHaveBeenCalledOnce();
-    await planned.close();
-
-    const sent = await restart('upload-sending');
-    const recoveredSent = await state(sent.client);
-    // A start is planned only after a transferred upload, so an unconfirmed upload settles as nothing started.
-    expect(recoveredSent).toMatchObject({
+    // A start follows only a proven transfer, so an unproven one started nothing and the job can be sent again.
+    const transferring = await restart('transfer-sending');
+    expect(transferring.job).toMatchObject({
       state: 'failed',
-      failure: { code: 'MACHINE_UPLOAD_UNCONFIRMED' },
-      receipt: {
-        operationId: 'upload-1',
-        kind: 'upload',
-        status: 'unknown',
-        reason: 'host-restarted-after-possible-send',
-      },
+      failure: { code: 'MACHINE_TRANSFER_UNCONFIRMED' },
+      receipt: { operationId: 'transfer-job-1', kind: 'transfer', status: 'unknown' },
     });
-    expect(recoveredSent).not.toHaveProperty('transferId');
-    await expect(approve(sent.client)).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
-    await expect(
-      sent.client.reconcileOperation({ machineId: 'workshop-x1c', operationId: 'upload-1' }),
-    ).resolves.toMatchObject({ kind: 'upload', status: 'unknown' });
-    expect(uploadPrint).not.toHaveBeenCalled();
-    expect(submit).not.toHaveBeenCalled();
-    await sent.close();
-    // The restart recorded that `unknown` durably, once: a second restart replays it and appends nothing.
-    const sentLog = join(at('upload-sending'), 'workshop-x1c', 'operations.jsonl');
-    const recorded = await readFile(sentLog, 'utf8');
-    expect(recorded.match(/"source":"recovery"/gu)).toHaveLength(1);
-    const again = await restart('upload-sending');
-    await again.close();
-    expect(await readFile(sentLog, 'utf8')).toBe(recorded);
+    expect(jobs.transfer).not.toHaveBeenCalled();
+    await transferring.close();
 
     const starting = await restart('start-sending');
-    expect(await state(starting.client)).toMatchObject({
+    expect(starting.job).toMatchObject({
       state: 'confirming',
-      transferId: 'transfer-upload-1',
-      receipt: { operationId: 'start-1', kind: 'start', status: 'unknown' },
+      transferId: 'transfer-transfer-job-1',
+      receipt: { operationId: 'start-job-1', kind: 'start', status: 'unknown' },
     });
-    await expect(approve(starting.client)).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
-    await expect(
-      starting.client.reconcileOperation({ machineId: 'workshop-x1c', operationId: 'start-1' }),
-    ).resolves.toMatchObject({ status: 'accepted', receipt: { providerRunId: 'run-late' } });
-    expect(await state(starting.client)).toMatchObject({
-      state: 'started',
-      receipt: { operationId: 'start-1', status: 'accepted', providerRunId: 'run-late' },
-    });
-    expect(uploadPrint).not.toHaveBeenCalled();
-    expect(submit).not.toHaveBeenCalled();
+    await expect(approve(starting.client, 'job-1')).rejects.toThrow('MACHINE_JOB_NOT_AWAITING');
+    expect(jobs.start).not.toHaveBeenCalled();
     await starting.close();
-
-    const complete = await restart('complete');
-    expect(await state(complete.client)).toMatchObject({
-      state: 'started',
-      receipt: { operationId: 'start-1', status: 'accepted', providerRunId: 'run-start-1' },
-    });
-    await expect(approve(complete.client)).rejects.toThrow('MACHINE_PRINT_REQUEST_NOT_AWAITING');
-    expect(uploadPrint).not.toHaveBeenCalled();
-    expect(submit).not.toHaveBeenCalled();
-    await complete.close();
-  });
-
-  it('should settle a confirming start from printer reports alone, escalating it while unproven', async () => {
-    uploadPrint.mockClear();
-    submit.mockClear();
-    telemetry = Promise.withResolvers();
-    let isProven = false;
-    // This test moves the shared clock 410 s; later tests bind candidates that expire on it.
-    const clockBefore = currentTime;
-    reconcile.mockImplementation(async (input) =>
-      input.command === 'project_file' && isProven
-        ? { status: 'accepted', providerRunId: 'run-late', observedAt: currentTimestamp() }
-        : { status: 'unknown', reason: 'no-correlated-provider-reply', observedAt: currentTimestamp() },
-    );
-    try {
-      const root = await storeRoot();
-      const { client, host, close } = await openLedgerHost(root);
-      await bind(host, client);
-      await request(client, 'request-1');
-      await expect(
-        client.resolvePrintRequest({
-          requestId: 'request-1',
-          decision: 'approve',
-          resolvedBy: operator,
-          uploadOperationId: 'upload-1',
-          startOperationId: 'start-unknown-1',
-        }),
-      ).resolves.toMatchObject({ state: 'confirming', receipt: { status: 'unknown' } });
-      const seen: string[] = [];
-      const watching = new AbortController();
-      const watched = (async (): Promise<void> => {
-        try {
-          for await (const update of client.watchPrintRequests({ signal: watching.signal })) {
-            if (seen.at(-1) !== update.state) {
-              seen.push(update.state);
-            }
-          }
-        } catch {
-          // The watch ends when the test aborts it.
-        }
-      })();
-      const startedAt = currentTime;
-      // One report a second: 400 s without proof outlast the 180 s window, then the run shows up.
-      const reports = function* (): Generator<MachineSnapshot> {
-        for (let second = 1; second <= 410; second += 1) {
-          currentTime = startedAt + second * 1000;
-          isProven = second > 400;
-          yield {
-            connection: 'connected',
-            readiness: isProven ? 'busy' : 'idle',
-            ...(isProven ? { activeRunId: 'run-late' } : {}),
-            observedAt: currentTimestamp(),
-            setup: { materials: [] },
-            run: { state: isProven ? 'printing' : 'idle' },
-          };
-        }
-      };
-      telemetry.resolve(reports());
-      await vi.waitFor(async () => {
-        const [settled] = await client.listPrintRequests({});
-        expect(settled).toMatchObject({ state: 'started', receipt: { providerRunId: 'run-late' } });
-      });
-      expect(seen).toContain('unknown');
-      expect(seen.at(-1)).toBe('started');
-      // Settling only read what the printer reported: one upload, one start, never a resend.
-      expect(uploadPrint).toHaveBeenCalledOnce();
-      expect(submit).toHaveBeenCalledOnce();
-      const journal = await readFile(join(root, 'workshop-x1c', 'operations.jsonl'), 'utf8');
-      expect(journal.match(/"source":"reconciliation"/gu)).toHaveLength(1);
-      watching.abort();
-      await watched;
-      await close();
-    } finally {
-      reconcile.mockImplementation(reconcileLate);
-      currentTime = clockBefore;
-    }
   });
 
   it(
-    'should store no telemetry from four hours of 1 Hz reports and recover bindings, operations and requests',
+    'should store no telemetry from four hours of 1 Hz reports and recover bindings, operations and jobs',
     { timeout: 120_000 },
     async () => {
-      uploadPrint.mockClear();
-      submit.mockClear();
-      telemetry = Promise.withResolvers();
-      const root = await storeRoot();
-      const first = await openLedgerHost(root);
-      await bind(first.host, first.client);
-      await request(first.client, 'request-1');
-      await expect(
-        first.client.resolvePrintRequest({
-          requestId: 'request-1',
-          decision: 'approve',
-          resolvedBy: operator,
-          uploadOperationId: 'upload-1',
-          startOperationId: 'start-1',
-        }),
-      ).resolves.toMatchObject({ state: 'started' });
-      await request(first.client, 'request-2');
-      const ledgerBytes = await storeBytes(root);
+      const jobs = storedJobs();
+      const feed = reportFeed();
+      const fixture = await boundPrinter(jobs.facet, { observe: feed.observe });
+      await request(fixture.client, 'job-1');
+      await expect(approve(fixture.client, 'job-1')).resolves.toMatchObject({ state: 'started' });
+      await request(fixture.client, 'job-2');
+      const ledgerBytes = await storeBytes(fixture.root);
       const seconds = 4 * 60 * 60;
-      const startedAt = currentTime;
+      const startedAt = currentTime.value;
       const reportedAt = (second: number): string => new Date(startedAt + second * 1000).toISOString();
-      const delivered = Promise.withResolvers<void>();
-      const reports = function* (): Generator<MachineSnapshot> {
-        for (let second = 1; second <= seconds; second += 1) {
-          yield {
-            connection: 'connected',
-            readiness: 'busy',
-            activeRunId: 'run-start-1',
-            observedAt: reportedAt(second),
-            setup: { materials: [{ slot: 0, state: 'loaded', materialId: 'PLA' }] },
-            run: {
-              state: 'printing',
-              progress: Math.floor(second / 144),
-              remainingSeconds: seconds - second,
-              currentLayer: 1 + Math.floor(second / 60),
-              totalLayers: 241,
-            },
-            fans: { part: 60 + (second % 5) },
-            network: { wifiSignalDbm: -47 - (second % 3) },
-          };
-        }
-        delivered.resolve();
-      };
-      telemetry.resolve(reports());
-      await delivered.promise;
-      await expect(first.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
-        freshness: 'current',
-        snapshot: { observedAt: reportedAt(seconds), run: { state: 'printing', progress: 100, remainingSeconds: 0 } },
-      });
-      // Every report differs, yet the store holds only the binding, operations and print requests.
-      expect(await storeBytes(root)).toBe(ledgerBytes);
+      feed.push(
+        ...Array.from(
+          { length: seconds },
+          (_, index): MachineObservation => ({
+            type: 'snapshot',
+            snapshot: fixtureReport({
+              observedAt: reportedAt(index + 1),
+              state: { status: 'active' },
+              run: {
+                runId: 'run-start-job-1',
+                jobId: 'job-1',
+                origin: 'tau',
+                delivery: 'stored',
+                state: 'running',
+                progress: { basis: 'executed', fraction: (index + 1) / seconds, counters: [] },
+              },
+            }),
+          }),
+        ),
+      );
+      await vi.waitFor(
+        async () => {
+          await expect(fixture.client.get({ machineId })).resolves.toMatchObject({
+            snapshot: { observedAt: reportedAt(seconds), run: { progress: { fraction: 1 } } },
+          });
+        },
+        { timeout: 60_000 },
+      );
+      // Every report differs, yet the store holds only the binding, operations and jobs.
+      expect(await storeBytes(fixture.root)).toBe(ledgerBytes);
       expect(ledgerBytes).toBeLessThan(1024 * 1024);
-      await first.close();
+      await fixture.close();
 
-      const restarted = await openLedgerHost(root);
-      await expect(restarted.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
-        freshness: 'current',
-      });
-      const recovered = await restarted.client.listPrintRequests({});
-      expect(recovered.map(({ requestId, state }) => `${requestId}:${state}`)).toEqual([
-        'request-2:awaiting-approval',
-        'request-1:started',
+      const restarted = await openServedHost(fixture.root, fixture.provider, runtimeAt(currentTimestamp));
+      const recovered = await restarted.client.listJobs({});
+      expect(recovered.map(({ jobId, state }) => `${jobId}:${state}`)).toEqual([
+        'job-2:awaiting-approval',
+        'job-1:started',
       ]);
       await expect(
-        restarted.client.reconcileOperation({ machineId: 'workshop-x1c', operationId: 'start-1' }),
-      ).resolves.toMatchObject({ status: 'accepted', receipt: { providerRunId: 'run-start-1' } });
-      expect(uploadPrint).toHaveBeenCalledOnce();
-      expect(submit).toHaveBeenCalledOnce();
-      expect(await storeBytes(root)).toBe(ledgerBytes);
+        restarted.client.reconcileOperation({ machineId, operationId: 'start-job-1' }),
+      ).resolves.toMatchObject({ state: 'accepted', receipt: { runId: 'run-start-job-1' } });
+      expect(jobs.start).toHaveBeenCalledOnce();
       await restarted.close();
     },
   );
 });
 
 describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('binding credentials and removal', () => {
-  const candidateFor = (id: string, serial?: string): MachineCandidate => ({
-    id,
-    name: `Printer ${id}`,
-    endpoint: { address: `${id}.local`, interface: 'manual' },
-    claimedIdentity: serial === undefined ? { model: 'X1C' } : { serial, model: 'X1C' },
-    observedAt,
-    expiresAt,
-  });
   const printerA = candidateFor('candidate-a', 'physical-a');
   const printerB = candidateFor('candidate-b', 'physical-b');
   const unclaimed = candidateFor('candidate-c');
   const connects = vi.fn((_candidateId: string): void => undefined);
   const closes = vi.fn(async (): Promise<void> => undefined);
-  const provider_ = defineMachine({
-    id: 'binding-provider',
-    name: 'Binding provider',
-    version: '1',
-    protocolVersion: 1,
-    vendor: 'fixture',
-    technologies: ['additive.fff'],
-    accepts: [
-      {
-        contract: { id: 'fixture.gcode', version: 1 },
-        mediaType: 'text/x.gcode',
-        requiredMembers: [],
-        payloadSelection: 'single',
-        technology: 'additive.fff',
-      },
-    ],
-    manifest: machineManifestFixture,
-    bindingConfiguration: configuration,
-    submissionConfiguration: configuration,
-    async *discover() {
-      for (const candidate of [printerA, printerB, unclaimed]) {
-        yield { type: 'found', candidate };
-      }
-    },
-    async connect({ candidate }) {
+  const provider = bindingProvider(
+    (candidate) => {
       connects(candidate.id);
-      const base = session(closes);
-      return {
-        ...base,
-        // Each fixture printer reports the physical identity its candidate claims.
-        async getDescriptor(descriptorInput) {
-          return {
-            ...(await base.getDescriptor(descriptorInput)),
-            id: candidate.claimedIdentity.serial ?? 'physical-unclaimed',
-          };
-        },
-      };
+      // Each fixture printer reports the physical identity its candidate claims.
+      return fixtureSession({
+        descriptor: fixtureDescriptor(candidate.claimedIdentity.serial ?? 'physical-unclaimed'),
+        jobs: storedJobs().facet,
+        close: closes,
+      });
     },
-  })();
+    [printerA, printerB, unclaimed],
+  );
   const saved = new Set<string>();
   const has = vi.fn(async (reference: string): Promise<boolean> => saved.has(reference));
   const forget = vi.fn(async (reference: string): Promise<void> => {
     saved.delete(reference);
   });
-  const runtime: NodeMachineRuntime = {
-    discovery: {
-      clock: { now: () => observedAt },
-      async *listenDatagrams() {
-        yield* [];
-      },
-    },
-    connection: () => ({
-      clock: { now: () => observedAt },
-      log: async () => undefined,
-      connectStream: async () => {
-        throw new Error('fixture does not open sockets');
-      },
-      async *readArtifact() {
-        yield* [];
-      },
-      resolveSecret: async () => 'credential-must-not-be-serialized',
-    }),
-    credentials: { has, forget },
-  };
-  const removalGrants: readonly HostRouteGrant[] = (
-    [
-      'discover',
-      'beginBinding',
-      'removeBinding',
-      'list',
-      'get',
-      'preparePrint',
-      'controlRun',
-      'reconcileOperation',
-      'requestPrint',
-      'withdrawPrintRequest',
-    ] as const
-  ).map((operation) => ({ route: 'machines', operation: `machines.${operation}` }));
-  const openCredentialHost = async (root: string) => {
-    const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
-    const onError = vi.fn();
-    const host = await createNodeMachineHost({
-      storeRoot: root,
-      hostId: 'host-1',
-      authorityId: 'authority-1',
-      admission,
-      providers: [provider_],
-      runtime,
-      onError,
-    });
-    hosts.push(host);
-    const operatorSession = host.issueSession({ actor: { kind: 'user', id: 'operator' }, grants: removalGrants });
-    const ports = new MessageChannel();
-    const server = host.serve({ port: ports.port1, session: operatorSession });
-    const client = connectMachineChannel(ports.port2);
-    await client.ready;
-    const close = async (): Promise<void> => {
-      client.close();
-      server.dispose();
-      await host.close();
-      hosts.splice(hosts.indexOf(host), 1);
-    };
-    return { client, host, onError, close };
-  };
-  const discoverAll = async (client: MachineChannelClient): Promise<Map<string, MachineCandidate>> => {
-    const found = new Map<string, MachineCandidate>();
-    for await (const event of client.discover({ providerId: 'binding-provider', configuration: {} })) {
-      if (event.type !== 'lost') {
-        found.set(event.candidate.id, event.candidate);
-      }
-    }
-    return found;
-  };
-  const beginCeremony = async (client: MachineChannelClient, candidateId: string, name: string): Promise<string> => {
-    const found = await discoverAll(client);
-    const ceremony = await client.beginBinding({ candidate: found.get(candidateId)!, name });
-    if (ceremony.status !== 'operator-action-required') {
-      throw new Error('expected binding ceremony');
-    }
-    return ceremony.ceremonyId;
-  };
-  const bindAs = async (
-    fixture: Readonly<{ client: MachineChannelClient; host: NodeMachineHost }>,
-    binding: Readonly<{ candidateId: string; name: string; secretRef: string }>,
-  ): Promise<string> => {
-    const ceremonyId = await beginCeremony(fixture.client, binding.candidateId, binding.name);
-    const outcome = await fixture.host.completeBinding({ ceremonyId, secretRef: binding.secretRef, serviceTrust: {} });
-    if (outcome.status !== 'bound') {
-      throw new Error('expected a bound machine');
-    }
-    await vi.waitFor(async () => {
-      await expect(fixture.client.get({ machineId: outcome.machineId })).resolves.toMatchObject({
-        name: binding.name,
-        freshness: 'current',
-      });
-    });
-    return outcome.machineId;
-  };
+  const runtime = runtimeAt(() => observedAt, { credentials: { has, forget } });
+  const openCredentialHost = async (root: string) => openServedHost(root, provider, runtime);
 
   it('should flag a candidate whose claimed identity has a saved credential without persisting the flag', async () => {
     saved.clear();
@@ -1681,7 +1351,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     expect(fixture.onError).toHaveBeenCalledWith(expect.objectContaining({ message: 'SECRET_VAULT_UNAVAILABLE' }));
 
     // The flag is a projection: the ceremony, its description and the store keep the provider's own candidate.
-    const ceremony = await fixture.client.beginBinding({ candidate: found.get('candidate-a')!, name: 'workshop-x1c' });
+    const ceremony = await fixture.client.beginBinding({ candidate: found.get('candidate-a')!, name: machineId });
     if (ceremony.status !== 'operator-action-required') {
       throw new Error('expected binding ceremony');
     }
@@ -1729,10 +1399,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     // A candidate that is already bound answers with its machine, whatever name is asked for.
     const found = await discoverAll(fixture.client);
     await expect(fixture.client.beginBinding({ candidate: found.get('candidate-a')!, name: 'Other' })).resolves.toEqual(
-      {
-        status: 'bound',
-        machineId: 'workshop-x1c',
-      },
+      { status: 'bound', machineId: 'workshop-x1c' },
     );
     await fixture.close();
   });
@@ -1745,24 +1412,19 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     const reference = machineCredentialReference('binding-provider', 'physical-a');
     saved.add(reference);
     const first = await openCredentialHost(root);
-    await bindAs(first, { candidateId: 'candidate-a', name: 'workshop-x1c', secretRef: reference });
+    await bindAs(first, { candidateId: 'candidate-a', name: machineId, secretRef: reference });
     expect(closes).not.toHaveBeenCalled();
-    await expect(first.client.removeBinding({ machineId: 'workshop-x1c' })).resolves.toEqual({
-      status: 'removed',
-      machineId: 'workshop-x1c',
-    });
+    await expect(first.client.removeBinding({ machineId })).resolves.toEqual({ status: 'removed', machineId });
     expect(closes).toHaveBeenCalledOnce();
     expect(forget).toHaveBeenCalledExactlyOnceWith(reference);
     expect(saved.has(reference)).toBe(false);
     await expect(first.client.list({})).resolves.toMatchObject({ entries: [] });
-    await expect(first.client.removeBinding({ machineId: 'workshop-x1c' })).rejects.toThrow(
-      'MACHINE_DIRECTORY_UNKNOWN_MACHINE',
-    );
+    await expect(first.client.removeBinding({ machineId })).rejects.toThrow('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
     await first.close();
-    const history = `workshop-x1c.removed-${Date.parse(observedAt)}`;
+    const history = `${machineId}.removed-${Date.parse(observedAt)}`;
     expect(await sortedEntries(root)).toEqual(['authority', 'store.json', history]);
     expect(JSON.parse(await readFile(join(root, history, 'machine.json'), 'utf8'))).toMatchObject({
-      id: 'workshop-x1c',
+      id: machineId,
       connection: { secretRef: reference },
     });
 
@@ -1778,27 +1440,18 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     await second.close();
   });
 
-  it('should refuse removal while a print request still needs the binding', async () => {
+  it('should refuse removal while a job still needs the binding', async () => {
     forget.mockClear();
     const fixture = await openCredentialHost(await storeRoot());
-    await bindAs(fixture, { candidateId: 'candidate-a', name: 'workshop-x1c', secretRef: 'vault:busy' });
+    await bindAs(fixture, { candidateId: 'candidate-a', name: machineId, secretRef: 'vault:busy' });
     await expect(
-      fixture.client.requestPrint({
-        requestId: 'request-1',
-        machineId: 'workshop-x1c',
-        artifact: printArtifact,
-        configuration: {},
-        requestedBy: agent,
-      }),
+      fixture.client.requestJob({ jobId: 'job-1', machineId, artifact, configuration: {}, requestedBy: agent }),
     ).resolves.toMatchObject({ state: 'awaiting-approval' });
-    await expect(fixture.client.removeBinding({ machineId: 'workshop-x1c' })).rejects.toThrow('MACHINE_BINDING_BUSY');
+    await expect(fixture.client.removeBinding({ machineId })).rejects.toThrow('MACHINE_BINDING_BUSY');
     expect(forget).not.toHaveBeenCalled();
-    await expect(fixture.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({ freshness: 'current' });
-    await fixture.client.withdrawPrintRequest({ requestId: 'request-1', resolvedBy: agent });
-    await expect(fixture.client.removeBinding({ machineId: 'workshop-x1c' })).resolves.toEqual({
-      status: 'removed',
-      machineId: 'workshop-x1c',
-    });
+    await expect(fixture.client.get({ machineId })).resolves.toMatchObject({ freshness: 'current' });
+    await fixture.client.withdrawJob({ jobId: 'job-1', resolvedBy: agent });
+    await expect(fixture.client.removeBinding({ machineId })).resolves.toEqual({ status: 'removed', machineId });
     expect(forget).toHaveBeenCalledExactlyOnceWith('vault:busy');
     await fixture.close();
   });
@@ -1832,26 +1485,17 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     await fixture.close();
   });
 
-  it("should keep every other printer working when one printer's operations log is unreadable", async () => {
+  it("should keep every other printer working when one printer's journal is unreadable", async () => {
     const root = await storeRoot();
     const first = await openCredentialHost(root);
     await bindAs(first, { candidateId: 'candidate-a', name: 'printer-a', secretRef: 'vault:a' });
     await bindAs(first, { candidateId: 'candidate-b', name: 'printer-b', secretRef: 'vault:b' });
     await first.close();
-    // A well-formed frame that breaks the replay rules: a send for an effect that was never planned.
-    const log = await createNodeMachineEventLog({
-      directory: join(root, 'printer-a'),
-      fileName: 'operations.jsonl',
-      owner: {
-        assertCurrent() {
-          /* No host owns the store while the fixture writes. */
-        },
-      },
-      parse: plainJson,
-    });
-    await log.append({ type: 'machine-effect-sending', operationId: 'orphan', observedAt });
+    // A well-formed frame that breaks the replay rules: a send for an operation that was never planned.
+    const log = await journalAt(join(root, 'printer-a'));
+    await log.append({ type: 'machine-operation-sending', operationId: 'orphan', observedAt });
     await log.close();
-    const damaged = await readFile(join(root, 'printer-a', 'operations.jsonl'));
+    const damaged = await readFile(join(root, 'printer-a', 'journal.jsonl'));
 
     connects.mockClear();
     const second = await openCredentialHost(root);
@@ -1859,7 +1503,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     expect(second.onError).toHaveBeenCalledOnce();
     expect(second.onError.mock.calls[0]?.[0]).toMatchObject({
       message: 'MACHINE_OPERATIONS_LOG_CORRUPT',
-      cause: { message: 'NODE_MACHINE_EFFECT_ORPHAN_TRANSITION' },
+      cause: { message: 'NODE_MACHINE_OPERATION_ORPHAN' },
     });
     await vi.waitFor(async () => {
       await expect(second.client.list({})).resolves.toMatchObject({
@@ -1870,47 +1514,42 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
       });
     });
     await expect(
-      second.client.preparePrint({ machineId: 'printer-a', artifact: printArtifact, configuration: {} }),
+      second.client.requestJob({
+        jobId: 'job-a',
+        machineId: 'printer-a',
+        artifact,
+        configuration: {},
+        requestedBy: agent,
+      }),
     ).rejects.toThrow('MACHINE_OPERATIONS_LOG_CORRUPT');
     await expect(
-      second.client.controlRun({
-        machineId: 'printer-a',
-        operationId: 'pause-1',
-        command: 'pause',
-        expectedProviderRunId: 'run-1',
-      }),
+      second.client.applyAction({ ...lightOn('sha256:any', 'light-a'), machineId: 'printer-a' }),
     ).rejects.toThrow('MACHINE_OPERATIONS_LOG_CORRUPT');
     await expect(second.client.reconcileOperation({ machineId: 'printer-a', operationId: 'orphan' })).rejects.toThrow(
       'MACHINE_OPERATIONS_LOG_CORRUPT',
     );
+    // Stop is never gated on the journal; this printer is simply not connected.
+    await expect(second.client.stop({ machineId: 'printer-a', requestedBy: operator })).resolves.toMatchObject({
+      status: 'rejected',
+      code: 'MACHINE_UNAVAILABLE',
+    });
     await expect(
-      second.client.requestPrint({
-        requestId: 'request-a',
-        machineId: 'printer-a',
-        artifact: printArtifact,
-        configuration: {},
-        requestedBy: agent,
-      }),
-    ).rejects.toThrow('MACHINE_OPERATIONS_LOG_CORRUPT');
-    await expect(
-      second.client.requestPrint({
-        requestId: 'request-b',
+      second.client.requestJob({
+        jobId: 'job-b',
         machineId: 'printer-b',
-        artifact: printArtifact,
+        artifact,
         configuration: {},
         requestedBy: agent,
       }),
     ).resolves.toMatchObject({ state: 'awaiting-approval' });
-    expect(await readdir(join(root, 'printer-a'))).not.toContain('requests');
-    // The unreadable printer can still be removed; its log goes with its history, byte for byte.
+    expect(await readdir(join(root, 'printer-a'))).not.toContain('jobs');
+    // The unreadable printer can still be removed; its journal goes with its history, byte for byte.
     await expect(second.client.removeBinding({ machineId: 'printer-a' })).resolves.toEqual({
       status: 'removed',
       machineId: 'printer-a',
     });
     await second.close();
-    expect(await readFile(join(root, `printer-a.removed-${Date.parse(observedAt)}`, 'operations.jsonl'))).toEqual(
-      damaged,
-    );
+    expect(await readFile(join(root, `printer-a.removed-${Date.parse(observedAt)}`, 'journal.jsonl'))).toEqual(damaged);
   });
 
   it('should keep every other printer working when one printer cannot record its possible send at restart', async () => {
@@ -1919,30 +1558,22 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     await bindAs(first, { candidateId: 'candidate-a', name: 'printer-a', secretRef: 'vault:a' });
     await bindAs(first, { candidateId: 'candidate-b', name: 'printer-b', secretRef: 'vault:b' });
     await first.close();
-    // A pause that may have left when the host stopped: recovery owes it a durable `unknown` before anything reconnects.
-    const log = await createNodeMachineEventLog({
-      directory: join(root, 'printer-a'),
-      fileName: 'operations.jsonl',
-      owner: {
-        assertCurrent() {
-          /* No host owns the store while the fixture writes. */
-        },
-      },
-      parse: plainJson,
-    });
+    // A light that may have left when the host stopped: recovery owes it a durable `unknown` before anything reconnects.
+    const log = await journalAt(join(root, 'printer-a'));
     await log.append({
-      type: 'machine-effect-intent',
+      type: 'machine-operation-planned',
       machineId: 'printer-a',
       providerId: 'binding-provider',
       physicalMachineId: 'physical-a',
-      operationId: 'pause-1',
+      operationId: 'light-1',
+      kind: 'action',
       inputDigest: `sha256:${'0'.repeat(64)}`,
-      intent: { kind: 'pause', expectedProviderRunId: 'run-1' },
+      intent: { componentId: 'chamber-light', action: 'switch.set', version: 1, expectedRunId: null, parameters: {} },
       plannedAt: observedAt,
     });
-    await log.append({ type: 'machine-effect-sending', operationId: 'pause-1', observedAt });
+    await log.append({ type: 'machine-operation-sending', operationId: 'light-1', observedAt });
     await log.close();
-    const pending = await readFile(join(root, 'printer-a', 'operations.jsonl'));
+    const pending = await readFile(join(root, 'printer-a', 'journal.jsonl'));
 
     connects.mockClear();
     refusedAppends.add(join(await realpath(root), 'printer-a'));
@@ -1964,19 +1595,20 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
       });
       // The possible send is neither settled nor sent again.
       await expect(
-        second.client.reconcileOperation({ machineId: 'printer-a', operationId: 'pause-1' }),
+        second.client.reconcileOperation({ machineId: 'printer-a', operationId: 'light-1' }),
       ).rejects.toThrow('MACHINE_OPERATIONS_LOG_CORRUPT');
       await second.close();
     } finally {
       refusedAppends.clear();
     }
-    expect(await readFile(join(root, 'printer-a', 'operations.jsonl'))).toEqual(pending);
+    expect(await readFile(join(root, 'printer-a', 'journal.jsonl'))).toEqual(pending);
   });
 
   it('should import a legacy binding once and reconnect it as an ordinary printer', async () => {
     connects.mockClear();
     const root = await storeRoot();
-    const legacy = await legacyJournal(root);
+    await mkdir(join(root, 'authority'), { mode: 0o700 });
+    const legacy = await journalAt(join(root, 'authority'), 'machine-events.jsonl');
     await legacy.append({
       type: 'host-authority-initialized',
       hostId: 'host-1',
@@ -1997,7 +1629,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('b
     const fixture = await openCredentialHost(root);
     expect(connects.mock.calls).toEqual([['candidate-a']]);
     await vi.waitFor(async () => {
-      await expect(fixture.client.get({ machineId: 'workshop-x1c' })).resolves.toMatchObject({
+      await expect(fixture.client.get({ machineId })).resolves.toMatchObject({
         name: 'Workshop X1C',
         freshness: 'current',
         descriptor: { id: 'physical-a' },
@@ -2021,9 +1653,9 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
   const connects = vi.fn((_signal: AbortSignal): void => undefined);
   const observed = vi.fn();
   const connections: Connection[] = [];
-  const submit = vi.fn<MachineSession['submit']>();
+  const apply = vi.fn<(input: unknown) => Promise<MachineCommandReceipt>>();
   /** Idle until the test loses the session: report it disconnected, end the observation, or fail it. */
-  const lossyObserve = (loss: Promise<Loss>, observing: () => void): NonNullable<SessionBehavior['observe']> =>
+  const lossyObserve = (loss: Promise<Loss>, observing: () => void): NonNullable<FixtureSessionBehavior['observe']> =>
     async function* ({ signal }) {
       observing();
       if (signal.aborted) {
@@ -2045,34 +1677,13 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
       if (lost === 'disconnected') {
         yield {
           type: 'snapshot',
-          snapshot: { connection: 'disconnected', readiness: 'unknown', observedAt, setup: { materials: [] } },
+          snapshot: fixtureReport({ connection: 'disconnected', state: { status: 'unknown' } }),
         };
         await aborted;
       }
     };
-  const provider_ = defineMachine({
-    id: 'binding-provider',
-    name: 'Binding provider',
-    version: '1',
-    protocolVersion: 1,
-    vendor: 'fixture',
-    technologies: ['additive.fff'],
-    accepts: [
-      {
-        contract: { id: 'fixture.gcode', version: 1 },
-        mediaType: 'text/x.gcode',
-        requiredMembers: [],
-        payloadSelection: 'single',
-        technology: 'additive.fff',
-      },
-    ],
-    manifest: machineManifestFixture,
-    bindingConfiguration: configuration,
-    submissionConfiguration: configuration,
-    async *discover() {
-      yield { type: 'found', candidate: bindingCandidates[0]! };
-    },
-    async connect({ signal }) {
+  const provider = bindingProvider(
+    async (_candidate, signal) => {
       connects(signal);
       const outcome = outcomes.shift();
       if (outcome instanceof Error) {
@@ -2092,45 +1703,20 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
       const loss = Promise.withResolvers<Loss>();
       const observing = Promise.withResolvers<void>();
       const close = vi.fn(async () => undefined);
-      const base = session(close, {
-        submit,
+      connections.push({ close, observing: observing.promise, lose: loss.resolve });
+      return fixtureSession({
+        close,
+        descriptor: fixtureDescriptor(outcome === 'another-printer' ? 'physical-2' : 'physical-1'),
+        actions: { type: 'supported', apply, confirm: () => ({ status: 'pending' }) },
         observe: lossyObserve(loss.promise, () => {
           observed();
           observing.resolve();
         }),
       });
-      connections.push({ close, observing: observing.promise, lose: loss.resolve });
-      return {
-        ...base,
-        async getDescriptor(descriptorInput) {
-          const descriptor = await base.getDescriptor(descriptorInput);
-          return outcome === 'another-printer' ? { ...descriptor, id: 'physical-2' } : descriptor;
-        },
-      };
     },
-  })();
-  const runtime: NodeMachineRuntime = {
-    discovery: {
-      clock: { now: () => observedAt },
-      async *listenDatagrams() {
-        yield* [];
-      },
-    },
-    connection: () => ({
-      clock: { now: () => observedAt },
-      log: async () => undefined,
-      connectStream: async () => {
-        throw new Error('fixture does not open sockets');
-      },
-      async *readArtifact() {
-        yield* [];
-      },
-      resolveSecret: async () => 'credential-must-not-be-serialized',
-    }),
-  };
-  const grants: readonly HostRouteGrant[] = (
-    ['discover', 'beginBinding', 'get', 'preparePrint', 'uploadPrint', 'startPrint', 'reconcileOperation'] as const
-  ).map((operation) => ({ route: 'machines', operation: `machines.${operation}` }));
+    [candidateA],
+  );
+  const runtime = runtimeAt(() => observedAt);
   const openSupervised = async (root: string) => {
     const admission = createHostAdmissionAuthority({ hostId: 'host-1' });
     const onError = vi.fn();
@@ -2139,7 +1725,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
       hostId: 'host-1',
       authorityId: 'authority-1',
       admission,
-      providers: [provider_],
+      providers: [provider],
       runtime,
       onError,
     });
@@ -2150,36 +1736,11 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     };
     return { admission, host, onError, close };
   };
-  const openServed = async (root: string) => {
-    const fixture = await openSupervised(root);
-    const ports = new MessageChannel();
-    const server = fixture.host.serve({
-      port: ports.port1,
-      session: fixture.host.issueSession({ actor: { kind: 'user', id: 'operator' }, grants }),
-    });
-    const client = connectMachineChannel(ports.port2);
-    await client.ready;
-    const close = async (): Promise<void> => {
-      client.close();
-      server.dispose();
-      await fixture.close();
-    };
-    return { ...fixture, client, close };
-  };
   /** Bind the printer through a first host and close it, so the next host recovers the binding at start. */
   const bindOnce = async (root: string): Promise<void> => {
-    const fixture = await openServed(root);
-    let candidate: MachineCandidate | undefined;
-    for await (const event of fixture.client.discover({ providerId: 'binding-provider', configuration: {} })) {
-      if (event.type !== 'lost') {
-        candidate = event.candidate;
-      }
-    }
-    const ceremony = await fixture.client.beginBinding({ candidate: candidate!, name: 'workshop-x1c' });
-    if (ceremony.status !== 'operator-action-required') {
-      throw new Error('expected binding ceremony');
-    }
-    await fixture.host.completeBinding({ ceremonyId: ceremony.ceremonyId, secretRef: 'vault:x1c', serviceTrust: {} });
+    const fixture = await openServedHost(root, provider, runtime);
+    const ceremonyId = await beginCeremony(fixture.client, 'candidate-a', machineId);
+    await fixture.host.completeBinding({ ceremonyId, secretRef: 'vault:x1c', serviceTrust: {} });
     await fixture.close();
     connects.mockClear();
     observed.mockClear();
@@ -2203,9 +1764,9 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     await until(() => connects.mock.calls.length === before + 1);
   };
   const useFakeTimers = (): void => {
-    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'setInterval', 'clearInterval'] });
   };
-  const machine = { machineId: 'workshop-x1c' } as const;
+  const machine = { machineId } as const;
 
   afterEach(() => {
     outcomes.length = 0;
@@ -2217,7 +1778,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     await bindOnce(root);
     outcomes.push(...Array.from({ length: 6 }, () => new Error('FIXTURE_OFFLINE')));
     useFakeTimers();
-    const fixture = await openServed(root);
+    const fixture = await openServedHost(root, provider, runtime);
     expect(connects).toHaveBeenCalledOnce();
     await expect(fixture.client.get(machine)).resolves.toMatchObject({ freshness: 'stale' });
     for (const retryDelay of [2000, 5000, 10_000, 30_000, 60_000, 60_000]) {
@@ -2232,8 +1793,8 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     expect(fixture.onError.mock.calls.map(([error]: unknown[]) => (error as Error).message)).toEqual(
       Array.from({ length: 6 }, () => 'FIXTURE_OFFLINE'),
     );
-    // Nothing is scheduled while the session is live.
-    expect(vi.getTimerCount()).toBe(0);
+    // Nothing is scheduled while the session is live but the settlement clock.
+    expect(vi.getTimerCount()).toBe(1);
     vi.useRealTimers();
     await fixture.close();
   });
@@ -2244,7 +1805,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
       const root = await storeRoot();
       await bindOnce(root);
       useFakeTimers();
-      const fixture = await openServed(root);
+      const fixture = await openServedHost(root, provider, runtime);
       const [first] = connections;
       await first!.observing;
       first!.lose(loss);
@@ -2280,14 +1841,14 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     const root = await storeRoot();
     await bindOnce(root);
     useFakeTimers();
-    const fixture = await openServed(root);
+    const fixture = await openServedHost(root, provider, runtime);
     await connections[0]!.observing;
     connections[0]!.lose('end');
     outcomes.push(refusal);
     await expectAttemptAfter(2000);
     await until(() => fixture.onError.mock.calls.length === 1);
     expect(fixture.onError).toHaveBeenCalledWith(expect.objectContaining({ message: code }));
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(connects).toHaveBeenCalledTimes(2);
     await expect(fixture.client.get(machine)).resolves.toMatchObject({ freshness: 'stale' });
@@ -2299,7 +1860,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     useFakeTimers();
     const restarted = await openSupervised(root);
     expect(restarted.onError).toHaveBeenCalledExactlyOnceWith(expect.objectContaining({ message: code }));
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
     await restarted.close();
   });
 
@@ -2309,7 +1870,7 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     outcomes.push(new Error('FIXTURE_OFFLINE'));
     useFakeTimers();
     const pending = await openSupervised(root);
-    expect(vi.getTimerCount()).toBe(1);
+    expect(vi.getTimerCount()).toBe(2);
     await pending.close();
     expect(vi.getTimerCount()).toBe(0);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
@@ -2334,68 +1895,52 @@ describe.runIf(process.platform === 'darwin' || process.platform === 'linux')('r
     const fixture = await openSupervised(root);
     await expectAttemptAfter(2000);
     const [signal] = connects.mock.lastCall!;
-    await expect(fixture.host.removeBinding(machine)).resolves.toEqual({
-      status: 'removed',
-      ...machine,
-    });
+    await expect(fixture.host.removeBinding(machine)).resolves.toEqual({ status: 'removed', ...machine });
     expect(signal.aborted).toBe(true);
-    expect(vi.getTimerCount()).toBe(0);
+    expect(vi.getTimerCount()).toBe(1);
     await vi.advanceTimersByTimeAsync(10 * 60_000);
     expect(connects).toHaveBeenCalledTimes(2);
     await fixture.close();
   });
 
-  it('should never re-send a start whose reply was lost with the dropped session', async () => {
-    submit.mockReset();
+  it('should never re-send an action whose reply was lost with the dropped session', async () => {
+    apply.mockReset();
     const root = await storeRoot();
     await bindOnce(root);
     useFakeTimers();
-    const fixture = await openServed(root);
+    const fixture = await openServedHost(root, provider, runtime);
     const [first] = connections;
     await first!.observing;
-    const prepared = await fixture.client.preparePrint({ ...machine, artifact: printArtifact, configuration: {} });
-    await expect(
-      fixture.client.uploadPrint({
-        ...machine,
-        preparedId: prepared.preparedId,
-        preparedDigest: prepared.preparedDigest,
-        operationId: 'upload-1',
-      }),
-    ).resolves.toMatchObject({ status: 'accepted', evidence: { transferId: 'transfer-upload-1' } });
-    const reply = Promise.withResolvers<MachineSubmissionReceipt>();
-    submit.mockImplementationOnce(async () => reply.promise);
-    const starting = fixture.client.startPrint({
-      ...machine,
-      preparedId: prepared.preparedId,
-      preparedDigest: prepared.preparedDigest,
-      transferId: 'transfer-upload-1',
-      expectedSetupDigest: prepared.setupDigest,
-      operationId: 'start-1',
-    });
-    await until(() => submit.mock.calls.length === 1);
-    // The connection drops while the start is out; the new session waits until the start settles.
+    const revision = await revisionOf(fixture.client);
+    const reply = Promise.withResolvers<MachineCommandReceipt>();
+    apply.mockImplementationOnce(async () => reply.promise);
+    const applying = fixture.client.applyAction(lightOn(revision, 'light-1', { requestedBy: operator }));
+    await until(() => apply.mock.calls.length === 1);
+    // The connection drops while the command is out; the new session waits until the command settles.
     first!.lose('disconnected');
     await expectAttemptAfter(2000);
     await vi.advanceTimersByTimeAsync(0);
     expect(observed).toHaveBeenCalledOnce();
     reply.resolve({ status: 'unknown', reason: 'reply-lost-after-possible-acceptance', observedAt });
-    await expect(starting).resolves.toMatchObject({ operationId: 'start-1', status: 'unknown' });
+    await expect(applying).resolves.toMatchObject({ operationId: 'light-1', status: 'unknown' });
     await connections[1]!.observing;
     await expect(fixture.client.get(machine)).resolves.toMatchObject({
       freshness: 'current',
       snapshot: { connection: 'connected' },
     });
-    // The outcome stays unknown until the printer can say; nothing is sent again.
-    await expect(fixture.client.reconcileOperation({ ...machine, operationId: 'start-1' })).resolves.toMatchObject({
-      status: 'unknown',
+    // The outcome stays unproven until the printer can say; nothing is sent again.
+    await expect(fixture.client.reconcileOperation({ ...machine, operationId: 'light-1' })).resolves.toMatchObject({
+      state: 'confirming',
     });
-    expect(submit).toHaveBeenCalledOnce();
+    expect(apply).toHaveBeenCalledOnce();
     vi.useRealTimers();
     await fixture.close();
-    const operationsLog = await readFile(join(root, 'workshop-x1c', 'operations.jsonl'), 'utf8');
-    const sendings = operationsLog
+    const journal = await readFile(join(root, machineId, 'journal.jsonl'), 'utf8');
+    const sendings = journal
       .split('\n')
-      .filter((line) => line.includes('"type":"machine-effect-sending"') && line.includes('"operationId":"start-1"'));
+      .filter(
+        (line) => line.includes('"type":"machine-operation-sending"') && line.includes('"operationId":"light-1"'),
+      );
     expect(sendings).toHaveLength(1);
   });
 });

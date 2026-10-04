@@ -292,7 +292,7 @@ describe('machine channel', () => {
           operationId: 'jog-1',
           hold: 'motion.jog',
           version: 1,
-          parameters: { axis: 'x', direction: 1, feed: { value: 600, unit: 'mm/min' } } as never,
+          parameters: { axis: 'x', direction: 1, feed: 600 },
           requestedBy: requester,
           attended: true,
         }),
@@ -443,9 +443,10 @@ describe('machine channel', () => {
   });
 
   it('should refuse an action whose host reply is not a receipt', async () => {
+    const malformed: unknown = { status: 'accepted' };
     const fixture = open({
       operations: {
-        applyAction: vi.fn(async () => ({ status: 'accepted' }) as never),
+        applyAction: vi.fn(async () => malformed) as unknown as MachineChannelHostOperations['applyAction'],
       },
     });
     try {

@@ -3,9 +3,13 @@ import { z } from 'zod';
 import { defineConfiguration } from '#configuration/configuration.js';
 import { machineManifestDefinitionFixture, machineSubmissionFixture } from '#machines/machine-manifest.fixture.js';
 import { defineMachine } from '#machines/machine.js';
+import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-definition.js';
 import type {
+  MachineCandidate,
+  MachineProvider,
   MachineCommandReceipt,
   MachineConnectInput,
+  MachineConnectionRuntime,
   MachineManifestDefinition,
   MachineProviderDescriptor,
   MachineSession,
@@ -52,18 +56,21 @@ export const fixtureDescriptor = (id = 'physical-1'): MachineProviderDescriptor 
 /**
  * One component observation, known.
  * @internal
+ * @param componentId - The component it describes.
+ * @param group - The observation group it arrives in.
+ * @param value - What is known, received at the fixture instant.
+ * @returns The observation.
  */
 export const fixtureObservation = (
   componentId: string,
   group: string,
   value: Extract<ComponentObservation, { knowledge: 'known' }>['value'],
-  receivedAt = fixtureObservedAt,
-): ComponentObservation => ({ componentId, group, receivedAt, knowledge: 'known', value });
+): ComponentObservation => ({ componentId, group, receivedAt: fixtureObservedAt, knowledge: 'known', value });
 
 /**
  * A ready, homed fixture printer with its light off.
  * @internal
- * @param overrides - Fields to replace.
+ * @param overrides - The report fields this test changes.
  * @returns The report.
  */
 export const fixtureReport = (overrides: Partial<MachineReport> = {}): MachineReport => ({
@@ -101,7 +108,7 @@ const accepted = (): MachineCommandReceipt => ({ status: 'accepted', observedAt:
 /**
  * A provider session (ABI v2) over the fixture printer.
  * @internal
- * @param behavior - The facets a test drives.
+ * @param behavior - The facets a test drives; the rest accept quietly.
  * @returns The session.
  */
 export const fixtureSession = (behavior: FixtureSessionBehavior = {}): MachineSession => ({
@@ -121,6 +128,7 @@ export const fixtureSession = (behavior: FixtureSessionBehavior = {}): MachineSe
           { once: true },
         );
       });
+      yield* [];
     },
   stop: behavior.stop ?? (async () => accepted()),
   reconcile:
@@ -140,17 +148,18 @@ export const fixtureSession = (behavior: FixtureSessionBehavior = {}): MachineSe
 /**
  * The fixture provider: the shared manifest, no discovery, and `connect` as the test supplies it.
  * @internal
- * @param input - The provider id, a manifest override and the connection a test drives.
+ * @param input - The provider id, a manifest override, the candidates it finds and the connection a test drives.
  * @returns The registration, carrying its executable definition.
  */
 export const fixtureProvider = (
   input: Readonly<{
     id?: string;
     manifest?: MachineManifestDefinition;
-    connect?: (connection: MachineConnectInput<unknown>) => Promise<MachineSession>;
-    discover?: () => AsyncIterable<never>;
+    connect?: (connection: MachineConnectInput<unknown>, runtime: MachineConnectionRuntime) => Promise<MachineSession>;
+    /** The candidates discovery finds, in order. */
+    candidates?: readonly MachineCandidate[];
   }> = {},
-) =>
+): MachineProvider & RuntimePluginDefinitionCarrier<unknown> =>
   defineMachine({
     id: input.id ?? 'fixture-provider',
     name: 'Fixture provider',
@@ -161,12 +170,14 @@ export const fixtureProvider = (
     bindingConfiguration,
     submissionConfiguration: machineSubmissionFixture,
     async *discover() {
-      yield* [];
+      for (const candidate of input.candidates ?? []) {
+        yield { type: 'found', candidate };
+      }
     },
-    async connect(connection) {
+    async connect(connection, runtime) {
       if (!input.connect) {
         throw new Error('The fixture provider does not connect.');
       }
-      return input.connect(connection);
+      return input.connect(connection, runtime);
     },
   })();

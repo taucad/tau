@@ -192,22 +192,23 @@ describe('Bambu protocol admission', () => {
         materialId: 'PETG',
         brand: 'Basic',
         profileId: 'GFG00',
-        color: '#FFFFFF',
+        color: '#FFFFFFFF',
         remainingPercent: 91,
       },
       {
         slot: 1,
         state: 'loaded',
         materialId: 'PETG',
-        color: '#000000',
+        color: '#000000FF',
         remainingPercent: 72,
       },
-      { slot: 2, state: 'empty' },
+      // `tray_exist_bits` says a spool sits there; nobody has set what it is.
+      { slot: 2, state: 'loaded' },
       {
         slot: 3,
         state: 'loaded',
         materialId: 'PETG',
-        color: '#00AE42',
+        color: '#00AE42FF',
         remainingPercent: 44,
       },
     ]);
@@ -256,27 +257,34 @@ describe('Bambu protocol admission', () => {
       state: 'loaded',
       materialId: 'PETG',
       profileId: 'GFG99',
-      color: '#FFFFFF',
+      color: '#FFFFFFFF',
     });
     expect(status.materials?.map(({ slot }) => slot)).toEqual([0, 1, 2, 3]);
     expect(status).toMatchObject({ currentMaterialSlot: 254, targetMaterialSlot: 254 });
   });
 
-  it('should read an unset external holder as empty and the P2S vir_slot list as the external spool', () => {
+  it('should read an unset external holder as unknown and the P2S vir_slot list as the external spool', () => {
+    // The holder has no sensor: an unset holder may still carry a spool.
     expect(report({ vt_tray: { id: '254', tray_type: '', tray_color: '00000000' } }).externalMaterial).toEqual({
       slot: 254,
-      state: 'empty',
+      state: 'unknown',
     });
     expect(
       report({ vir_slot: [{ id: '254', tray_type: 'PETG', tray_color: 'FFFFFFFF' }] }).externalMaterial,
-    ).toMatchObject({ slot: 254, state: 'loaded', materialId: 'PETG', color: '#FFFFFF' });
+    ).toMatchObject({ slot: 254, state: 'loaded', materialId: 'PETG', color: '#FFFFFFFF' });
     expect(report({ nozzle_temper: 20 }).externalMaterial).toBeUndefined();
   });
 
   it('should read tray 255 as nothing feeding and drop tray ids no printer reports', () => {
-    expect(report({ ams: { tray_now: '255', tray_tar: 255 } })).not.toHaveProperty('currentMaterialSlot');
-    expect(report({ ams: { tray_now: '255', tray_tar: 255 } })).not.toHaveProperty('targetMaterialSlot');
-    expect(report({ ams: { tray_now: '16' } })).not.toHaveProperty('currentMaterialSlot');
+    expect(report({ ams: { tray_now: '255', tray_tar: 255 } }).currentMaterialSlot).toBeUndefined();
+    expect(report({ ams: { tray_now: '255', tray_tar: 255 } }).targetMaterialSlot).toBeUndefined();
+    // An unload reports 255: the merge must clear the slot that was loaded.
+    const unloaded = mergeBambuStatus(report({ ams: { tray_now: '3' } }), report({ ams: { tray_now: '255' } }));
+    expect(unloaded.currentMaterialSlot).toBeUndefined();
+    expect(mergeBambuStatus(report({ ams: { tray_now: '3' } }), report({ nozzle_temper: 20 }))).toMatchObject({
+      currentMaterialSlot: 3,
+    });
+    expect(report({ ams: { tray_now: '16' } }).currentMaterialSlot).toBeUndefined();
     expect(report({ ams: { tray_now: '15' } })).toMatchObject({ currentMaterialSlot: 15 });
   });
 
@@ -350,6 +358,7 @@ describe('Bambu printer diagnostics', () => {
       {
         code: '0C00-0300-0003-000B',
         severity: 'warning',
+        blocks: 'nothing',
         message: "The printer's camera and AI inspection raised a warning.",
         reference: `${helpPage}0C00_0300_0003_000B`,
       },
@@ -362,10 +371,23 @@ describe('Bambu printer diagnostics', () => {
     [3, 'warning', 'raised a warning'],
     [4, 'info', 'sent a notice'],
   ] as const)('should read severity level %i as %s', (level, severity, outcome) => {
+    const blocking = level === 1 ? 'everything' : level === 2 ? 'run' : 'nothing';
     expect(report({ hms: [{ attr: 0x08_00_01_00, code: level * 2 ** 16 + 1 }] }).alerts).toEqual([
       {
         code: `0800-0100-000${level}-0001`,
         severity,
+        blocks: blocking,
+        ...(level <= 2
+          ? {
+              remedies: [
+                {
+                  type: 'person',
+                  instruction:
+                    'Read the message on the printer’s screen or its help page, and clear it at the printer.',
+                },
+              ],
+            }
+          : {}),
         message: `The printer's toolhead ${outcome}.`,
         reference: `${helpPage}0800_0100_000${level}_0001`,
       },
@@ -376,6 +398,7 @@ describe('Bambu printer diagnostics', () => {
     expect(report({ hms: [{ attr: 0x10_00_01_00, code: 0x00_05_00_01 }] }).alerts).toEqual([
       {
         code: '1000-0100-0005-0001',
+        blocks: 'nothing',
         message: 'The printer reported a problem.',
         reference: `${helpPage}1000_0100_0005_0001`,
       },
@@ -388,6 +411,13 @@ describe('Bambu printer diagnostics', () => {
       {
         code: '0703-2300-0002-0001',
         severity: 'serious',
+        blocks: 'run',
+        remedies: [
+          {
+            type: 'person',
+            instruction: 'Read the message on the printer’s screen or its help page, and clear it at the printer.',
+          },
+        ],
         message: "The printer's AMS reported a serious error.",
         reference: `${helpPage}0700_2000_0002_0001`,
       },
@@ -397,7 +427,7 @@ describe('Bambu printer diagnostics', () => {
   it('should decode a print error into its two-word code without inventing a severity or a help page', () => {
     // eslint-disable-next-line @typescript-eslint/naming-convention -- Bambu wire field name.
     expect(report({ print_error: 50_348_044 }).alerts).toEqual([
-      { code: '0300-400C', message: "The printer's motion controller reported a print error." },
+      { code: '0300-400C', blocks: 'nothing', message: "The printer's motion controller reported a print error." },
     ]);
   });
 

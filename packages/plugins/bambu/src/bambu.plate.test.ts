@@ -1,4 +1,6 @@
 import { readFile } from 'node:fs/promises';
+
+import { fffProcessOf } from '@taucad/runtime/machine';
 import { describe, expect, it } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- The staleness check shares the render script's own source hash.
 import { hashRenderInputs, renderHashPath } from '../scripts/render-plates.mjs';
@@ -80,7 +82,9 @@ const toSrgbHex = (linear: number): string => {
 
 describe('bambuX1cPlates', () => {
   it('should describe exactly the plates the X1C manifest advertises', () => {
-    expect(bambuX1cPlates.map((plate) => plate.id)).toEqual(bambuX1cManifest.bed.plates.map((plate) => plate.id));
+    expect(bambuX1cPlates.map((plate) => plate.id)).toEqual(
+      fffProcessOf(bambuX1cManifest)?.bed.plates.map((plate) => plate.id),
+    );
   });
 
   it.each([
@@ -146,7 +150,9 @@ describe('pre-rendered models', () => {
 
 describe('A1 mini plate catalogue', () => {
   it('should match the Mini manifest and keep the physical thin-sheet bounds', () => {
-    expect(bambuA1MiniPlates.map(({ id }) => id)).toEqual(bambuA1MiniManifest.bed.plates.map(({ id }) => id));
+    expect(bambuA1MiniPlates.map(({ id }) => id)).toEqual(
+      fffProcessOf(bambuA1MiniManifest)?.bed.plates.map(({ id }) => id),
+    );
     expect(bambuA1MiniPlates[1]?.bounds).toEqual({ min: [-2, -9.132, -0.55], max: [182, 187.999, 0.04] });
     expect(bambuA1MiniPlates.every(({ printer }) => printer === 'a1-mini')).toBe(true);
   });

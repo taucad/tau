@@ -32,6 +32,36 @@ describe('isResumableRun', () => {
       { lifecycle: 'failed', failure: { message: 'no', code: 'FATAL_TEST' }, committed: true, kind: 'tau' },
       false,
     ],
+    [
+      'an external run whose host is gone',
+      { lifecycle: 'failed', failure: { message: 'gone', code: 'RUN_ABANDONED' }, committed: true, kind: 'external' },
+      true,
+    ],
+    [
+      'a gateway failure on an external run, which ACP never continues',
+      { lifecycle: 'failed', failure: { message: 'net', code: 'NETWORK_ERROR' }, committed: true, kind: 'external' },
+      false,
+    ],
+    [
+      "an external agent's stop that says retry",
+      {
+        lifecycle: 'failed',
+        failure: { message: 'busy', code: 'EXTERNAL_AGENT_FAILED', details: { failure: { actions: ['retry'] } } },
+        committed: true,
+        kind: 'external',
+      },
+      true,
+    ],
+    [
+      "an agent stop's code on a Tau run",
+      {
+        lifecycle: 'failed',
+        failure: { message: 'busy', code: 'EXTERNAL_AGENT_FAILED', details: { failure: { actions: ['retry'] } } },
+        committed: true,
+        kind: 'tau',
+      },
+      false,
+    ],
     ['a paused run', { lifecycle: 'paused', committed: true, kind: 'tau' }, false],
     ['no run', undefined, false],
   ] as const)('should rule %s', (_name, run, expected) => {

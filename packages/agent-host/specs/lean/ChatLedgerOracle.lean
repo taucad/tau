@@ -58,7 +58,8 @@ def codeName : Code → String
 
 def lifeName : Life → String
   | .admitted => "admitted" | .running => "running" | .paused => "paused" | .completed => "completed"
-  | .failed true => "failed:r" | .failed false => "failed:f" | .cancelled true => "cancelled:u"
+  | .failed .fatal => "failed:f" | .failed .gateway => "failed:g" | .failed .abandoned => "failed:a"
+  | .failed .agentStop => "failed:s" | .cancelled true => "cancelled:u"
   | .cancelled false => "cancelled"
 
 def outcomeName : Life → String
@@ -91,7 +92,8 @@ def ledgerLines (L : Ledger) (prefix_ : String := "") : List String :=
     let settlements := en.settlements.map fun s => s!"{s.attempt}@{keyText (some s.row)}"
     let pending := (isort (fun a b => decLt a b) (en.pending.map Prod.fst)).map fun i => s!"i{i}"
     let inv := match en.openInv with | some a => s!"a{a}" | none => "-"
-    s!"R {r} {life} {en.attempt} {aName en.append} {bit en.committed} {bit en.unreadable} {listText settlements} {listText pending} {inv} {replayedName (replayedStart L r)}"
+    let kind := if en.external then (if en.prompted then "xp" else "x") else "t"
+    s!"R {r} {life} {kind} {en.attempt} {aName en.append} {bit en.committed} {bit en.unreadable} {listText settlements} {listText pending} {inv} {replayedName (replayedStart L r)}"
   let invs := L.invs.map fun (a, i) =>
     let outcome := match i.settled with | some o => settledName o | none => "-"
     s!"I a{a} {i.run} {i.attempt} {if i.generation then "g" else "c"} {bit i.shown} {outcome}"

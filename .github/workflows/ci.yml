@@ -320,6 +320,11 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
           sudo sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          # build123d:test depends on desktop:prepare-build123d-python, which resolves
+          # its wheels with uv (as release-build.yml installs it). A cache hit never
+          # needs it; a full-graph miss does.
+          command -v uv || pipx install uv
+          uv --version
 
       # The PR gate documented in docs/policy/release-policy.md: under version plans,
       # a touched release project with no plan is an unreleased change. Base and head

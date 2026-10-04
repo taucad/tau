@@ -259,7 +259,8 @@ export const menuSearchWrapperClass = 'relative flex items-center p-1';
 /**
  * Layout for a menu row whose trailing control is a switch. `DropdownMenuSwitchItem` and
  * `SwitchRow` share it, so a switch row reads the same in every menu, popover and picker.
- * A row with a description grows to two lines.
+ * A row with a description grows to two lines. An unchecked track is the same grey as the
+ * row's hover fill, so the row outlines it; a standalone `Switch` keeps no outline.
  *
  * @public
  *
@@ -270,7 +271,7 @@ export const menuSearchWrapperClass = 'relative flex items-center p-1';
  * export const className = menuSwitchRowVariants({ described: true });
  * ```
  */
-export const menuSwitchRowVariants = cva('justify-between', {
+export const menuSwitchRowVariants = cva('justify-between [&_[data-slot=switch][data-state=unchecked]]:border-muted-foreground/30', {
   variants: {
     described: {
       true: 'min-h-10',

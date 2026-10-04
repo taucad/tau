@@ -255,6 +255,8 @@ jobs:
     # going for its full length and held the next run in the concurrency queue.
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
+    # A hung task otherwise holds the job and the concurrency slot for the 6 h default.
+    timeout-minutes: 60
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
@@ -449,6 +451,7 @@ jobs:
   e2e:
     name: Browser end-to-end
     runs-on: ubuntu-latest
+    timeout-minutes: 90
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
@@ -496,7 +499,7 @@ jobs:
       # A step-level bound: a hung suite otherwise holds the job for the 6 h default
       # with no logs, while this still runs the always() diagnostics below.
       - name: Run affected end-to-end suites
-        timeout-minutes: 120
+        timeout-minutes: 80
         env:
           TAU_E2E_WEBGPU_PROFILE: software
         run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1
@@ -536,7 +539,10 @@ jobs:
     name: WebGPU hardware qualification
     runs-on: [self-hosted, tau-webgpu]
     needs: [plan, geospec-producer]
+    # Like the benchmark lane: without a registered `tau-webgpu` runner the job sits
+    # queued until the run is cancelled, so it runs only when the variable says one exists.
     if: >-
+      vars.TAU_WEBGPU_RUNNER_ENABLED == 'true' &&
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
       (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) &&
@@ -582,6 +588,7 @@ jobs:
   size-report:
     name: Bundle size report
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
@@ -677,6 +684,7 @@ jobs:
   api-docker-smoke:
     name: API Docker smoke test
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [plan]
     if: github.event_name == 'pull_request' && needs.plan.outputs.api == 'true'
     # A production API refuses to boot without Redis, a reachable database and a schema at
@@ -789,6 +797,7 @@ jobs:
   api:
     name: API tests (Postgres + MinIO)
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&

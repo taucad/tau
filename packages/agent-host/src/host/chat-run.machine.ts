@@ -24,7 +24,7 @@ import { setup, types } from 'xstate';
 import { chatRunState, executionRefusal, reopens } from '#log/chat-ledger.js';
 import type { ChatLedger, LogRowBody, RunEntry } from '#log/chat-ledger.js';
 import type { JsonValue, RunFailureDetail, TurnPlacement } from '#log/event-types.js';
-import { isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+import { isResumableRun } from '#log/resumable.js';
 import { chatRunCommandSchemas } from '#host/chat-run-events.js';
 import type {
   ApprovalRequest,
@@ -563,7 +563,7 @@ const resumable = (entry: RunEntry | undefined): boolean => {
   if (entry.lifecycle === 'paused') {
     return entry.kind === 'tau' && Object.keys(entry.pendingInterrupts).length === 0;
   }
-  if (!isUserStoppedRun(entry) && (entry.lifecycle !== 'failed' || !isResumableRunFailure(entry.failure))) {
+  if (!isResumableRun(entry)) {
     return false;
   }
   return entry.appendState !== 'settled' || reopens(entry, { state: 'running' });

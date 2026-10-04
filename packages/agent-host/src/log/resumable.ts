@@ -78,3 +78,19 @@ export const isUserStoppedRun = (
   run.failure?.code === 'USER_STOPPED' &&
   run.committed &&
   (run.kind === 'tau' || run.externalPrompted === true);
+
+/**
+ * Whether `continue` resumes this run rather than replaying it: a deliberate Stop that kept its committed turn, or a
+ * resumable failure.
+ *
+ * The one rule every surface asks — the host's resume gate, the ledger's reopen predicate, the turn host's admission,
+ * the composer's Resume and the error card — so no surface offers a Resume another refuses. `ChatLedger.lean`'s
+ * `rests` models it (`t4_user_stop_reopens`).
+ *
+ * @param run - The durable run ledger entry.
+ * @returns `true` when the run's last attempt ended in a state `resume` continues.
+ * @public
+ */
+export const isResumableRun = (
+  run: (Parameters<typeof isUserStoppedRun>[0] & Readonly<{ failure?: RunFailureDetail }>) | undefined,
+): boolean => isUserStoppedRun(run) || (run?.lifecycle === 'failed' && isResumableRunFailure(run.failure));

@@ -5,22 +5,24 @@
  * The trigger reads as the configuration — the model's glyph (an external
  * agent's own), the model, the level a step lighter, Fast mode, a 12 px
  * chevron. It opens a settings sheet: the agent as a row when there is a
- * choice (Q18), the chosen model as a row, then Reasoning, the agent's
- * switches and where it runs. The agent row drills into the agents, grouped
- * by host; the model row into that agent's models, in the same card. Choosing
- * a model returns to the sheet with that model's settings, so a level is only
- * ever set on the model in use.
+ * choice (Q18) and the chosen model as a row, then Reasoning, a notice when
+ * something would stop the next turn, and one Settings disclosure holding the
+ * agent's own switches and choices and where Tau runs. The agent row drills
+ * into the agents, grouped by host; the model row into that agent's models,
+ * in the same card. Choosing a model returns to the sheet with that model's
+ * settings, so a level is only ever set on the model in use.
  *
  * Tau's level is `TauAgentExecution.effort`; an external agent's is its own
  * `thought_level` option, written verbatim and never translated (VI3).
  */
 
-import { useCallback, useEffect, useId, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Copy, Plus, Server, Zap } from 'lucide-react';
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import { Bot, Check, ChevronDown, ChevronLeft, ChevronRight, CircleAlert, Copy, Plus, Settings2, Zap } from 'lucide-react';
 import type { AcpAgentExecution, TauAgentHostId } from '@taucad/chat';
 import type { ReasoningLevel } from '@taucad/chat/constants';
 import type { ExternalAgentDescriptor } from '@taucad/agent-host/wire';
 import { Button } from '@taucad/ui/components/button';
+import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import {
   Command,
   CommandEmpty,
@@ -32,7 +34,7 @@ import {
 import { Drawer, DrawerContent, DrawerDescription, DrawerTitle, DrawerTrigger } from '@taucad/ui/components/drawer';
 import { menuItemVariants } from '@taucad/ui/components/menu.variants';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
-import { Switch } from '@taucad/ui/components/switch';
+import { SwitchRow } from '@taucad/ui/components/switch';
 import { Tabs, TabsList, TabsTrigger } from '@taucad/ui/components/tabs';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
@@ -46,6 +48,8 @@ import { configOptionOf, configValues } from '#components/chat/use-agent-config.
 import type { AgentConfig, AgentConfigOption } from '#components/chat/use-agent-config.js';
 import { useChatComposer } from '#hooks/active-chat-provider.js';
 import { useBrowserAgentHostProjectAvailability } from '#hooks/use-cad-agent-config.js';
+import { cookieName } from '#constants/cookie.constants.js';
+import { useCookie } from '#hooks/use-cookie.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useModels } from '#hooks/use-models.js';
 import type { Model } from '#hooks/use-models.js';
@@ -361,22 +365,107 @@ type SelectOption = Extract<AgentConfigOption, { readonly type: 'select' }>;
 type SheetModel = {
   readonly glyph: React.ReactNode;
   readonly name: string;
-  /** One line under the name: its provider, or the id the agent sent. The agent row names the agent. */
-  readonly facts: string;
   readonly levels: readonly Option[];
   readonly level: Option | undefined;
   /** An agent's own "Default" effort means the agent decides, so the trigger does not print it. */
   readonly isLevelShown: boolean;
   readonly note: string | undefined;
   readonly setLevel: (id: string) => void;
-  readonly switches: ReadonlyArray<Extract<AgentConfigOption, { readonly type: 'boolean' }>>;
-  readonly selects: readonly SelectOption[];
+  /** The agent's own switches and choices, one list, drawn under Settings. */
+  readonly settings: readonly Setting[];
   readonly isFast: boolean;
 };
+
+/**
+ * One of the agent's options as the Settings disclosure draws it. An
+ * Off/On select is a switch: Codex sends Fast mode that way to a client
+ * that has not advertised boolean options, and it is a switch in meaning.
+ */
+type Setting =
+  | {
+      readonly kind: 'switch';
+      readonly id: string;
+      readonly name: string;
+      readonly description: string | undefined;
+      readonly isOn: boolean;
+      readonly isFast: boolean;
+      readonly setOn: (isOn: boolean) => void;
+    }
+  | {
+      readonly kind: 'select';
+      readonly id: string;
+      readonly name: string;
+      readonly options: readonly Option[];
+      readonly value: string;
+      /** The chosen value's own description, as Reasoning prints its level's. */
+      readonly note: string | undefined;
+      readonly setValue: (id: string) => void;
+    };
 
 const isFastOption = (option: AgentConfigOption): boolean => /fast/i.test(`${option.id} ${option.name}`);
 
 const isDefaultValue = (option: Option): boolean => option.id === 'default' || /^default\b/i.test(option.name);
+
+/** A select of exactly Off and On, by value. */
+const onOffOf = (option: SelectOption): { readonly on: string; readonly off: string } | undefined => {
+  const values = configValues(option).map((value) => value.value);
+  const on = values.find((value) => /^on$/i.test(value));
+  const off = values.find((value) => /^off$/i.test(value));
+  return values.length === 2 && on !== undefined && off !== undefined ? { on, off } : undefined;
+};
+
+const settingsOf = (agentConfig: AgentConfig): readonly Setting[] =>
+  agentConfig.options.flatMap((option): Setting[] => {
+    if (option.type === 'boolean') {
+      return [
+        {
+          kind: 'switch',
+          id: option.id,
+          name: option.name,
+          description: option.description ?? undefined,
+          isOn: agentConfig.valueOf(option) === true,
+          isFast: isFastOption(option),
+          setOn: (isOn) => {
+            agentConfig.select(option.id, isOn);
+          },
+        },
+      ];
+    }
+    if (option.category === 'mode' || option.category === 'thought_level') {
+      return [];
+    }
+    const value = String(agentConfig.valueOf(option));
+    const onOff = onOffOf(option);
+    if (onOff) {
+      return [
+        {
+          kind: 'switch',
+          id: option.id,
+          name: option.name,
+          description: option.description ?? undefined,
+          isOn: value === onOff.on,
+          isFast: isFastOption(option),
+          setOn: (isOn) => {
+            agentConfig.select(option.id, isOn ? onOff.on : onOff.off);
+          },
+        },
+      ];
+    }
+    const values = configValues(option);
+    return [
+      {
+        kind: 'select',
+        id: option.id,
+        name: option.name,
+        options: values.map((entry) => ({ id: entry.value, name: entry.name })),
+        value,
+        note: values.find((entry) => entry.value === value)?.description,
+        setValue: (next) => {
+          agentConfig.select(option.id, next);
+        },
+      },
+    ];
+  });
 
 /**
  * The trigger's and the sheet's reading of the chat's model, from one place so
@@ -396,7 +485,6 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
     return {
       glyph: <SvgIcon id={model.family} className={glyphClass} aria-hidden='true' />,
       name: model.name,
-      facts: model.provider.name,
       levels,
       level,
       isLevelShown: level !== undefined,
@@ -409,8 +497,7 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
       setLevel: (id) => {
         setActiveEffort(id as ReasoningLevel);
       },
-      switches: [],
-      selects: [],
+      settings: [],
       isFast: false,
     };
   }
@@ -420,13 +507,11 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
   const levels = thought ? configValues(thought).map((value) => ({ id: value.value, name: value.name })) : [];
   const thoughtValue = thought ? agentConfig.valueOf(thought) : undefined;
   const level = levels.find((entry) => entry.id === thoughtValue);
-  const switches = agentConfig.options.filter(
-    (option): option is Extract<AgentConfigOption, { readonly type: 'boolean' }> => option.type === 'boolean',
-  );
+  const settings = settingsOf(agentConfig);
+  const name = current.models.find((entry) => entry.id === modelId)?.name ?? modelId ?? 'Default';
   return {
     glyph: <AgentGlyph agentId={current.agentId} className={glyphClass} />,
-    name: current.models.find((entry) => entry.id === modelId)?.name ?? modelId ?? 'Default',
-    facts: modelId ?? '',
+    name,
     levels,
     level,
     isLevelShown: level !== undefined && !isDefaultValue(level),
@@ -438,12 +523,8 @@ const useSheetModel = (current: SheetAgent, agentConfig: AgentConfig): SheetMode
         agentConfig.select(thought.id, id);
       }
     },
-    switches,
-    selects: agentConfig.options.filter(
-      (option): option is SelectOption =>
-        option.type === 'select' && option.category !== 'mode' && option.category !== 'thought_level',
-    ),
-    isFast: switches.some((option) => isFastOption(option) && agentConfig.valueOf(option) === true),
+    settings,
+    isFast: settings.some((setting) => setting.kind === 'switch' && setting.isFast && setting.isOn),
   };
 };
 
@@ -486,72 +567,116 @@ function ReasoningSection({ label, model }: { readonly label: string; readonly m
   );
 }
 
-/** One of the agent's own switches — Fast mode among them — drawn as the shipped Switch. */
-function AgentSwitch({
-  option,
-  agentConfig,
-}: {
-  readonly option: Extract<AgentConfigOption, { readonly type: 'boolean' }>;
-  readonly agentConfig: AgentConfig;
-}): React.JSX.Element {
-  const id = useId();
-  return (
-    <section data-slot='agent-switch' className='border-t px-4 py-3'>
-      <div className='flex items-center justify-between gap-3'>
-        <label htmlFor={id} className='flex items-center gap-1.5 text-xs font-medium'>
-          {isFastOption(option) ? <Zap aria-hidden='true' className='size-3.5 text-muted-foreground' /> : null}
-          {option.name}
-        </label>
-        <Switch
-          id={id}
-          checked={agentConfig.valueOf(option) === true}
-          {...(option.description ? { 'aria-describedby': `${id}-description` } : {})}
-          onCheckedChange={(checked) => {
-            agentConfig.select(option.id, checked);
-          }}
-        />
+/** The sheet's rows: the menu row's geometry, highlighted on hover as well as focus. */
+const sheetRowClass = cn(menuItemVariants({ highlight: 'focus' }), 'w-[calc(100%-0.5rem)] hover:bg-menu-highlight');
+
+/** One row under Settings — the name at the left, its control at the right, its note under the name. */
+function SettingRow({ setting }: { readonly setting: Setting }): React.JSX.Element {
+  if (setting.kind === 'switch') {
+    /* The shared switch row — the whole row toggles, as in the viewer settings. */
+    return (
+      <div data-slot='agent-switch' className='px-1'>
+        <SwitchRow
+          icon={setting.isFast ? <Zap aria-hidden='true' /> : undefined}
+          description={setting.description}
+          isChecked={setting.isOn}
+          onIsCheckedChange={setting.setOn}
+        >
+          {setting.name}
+        </SwitchRow>
       </div>
-      {option.description ? (
-        <p id={`${id}-description`} className='mt-1 text-xs text-muted-foreground'>
-          {option.description}
-        </p>
-      ) : null}
-    </section>
+    );
+  }
+  const control = (
+    <SegmentedControl label={setting.name} value={setting.value} options={setting.options} onChange={setting.setValue} />
   );
-}
-
-/** Any other choice the agent offers: a short list shows as segments, a long one as rows. */
-function AgentSelect({
-  option,
-  agentConfig,
-}: {
-  readonly option: SelectOption;
-  readonly agentConfig: AgentConfig;
-}): React.JSX.Element {
-  const values = configValues(option).map((value) => ({ id: value.value, name: value.name }));
+  const note = setting.note ? (
+    <p className='truncate text-xs text-muted-foreground' title={setting.note}>
+      {setting.note}
+    </p>
+  ) : null;
+  /* Two values fit beside the name; more take the row's width. The note always takes the full width. */
+  if (setting.options.length <= 2) {
+    return (
+      <section aria-label={setting.name} className='px-4 py-2'>
+        <span className='flex items-center justify-between gap-3'>
+          <span className='min-w-0 truncate text-xs font-medium'>{setting.name}</span>
+          <span className='w-32 shrink-0'>{control}</span>
+        </span>
+        {note}
+      </section>
+    );
+  }
   return (
-    <section aria-label={option.name} className='space-y-2 border-t px-4 pt-3 pb-3.5'>
-      <h5 className='text-xs font-medium text-muted-foreground'>{option.name}</h5>
-      <SegmentedControl
-        label={option.name}
-        value={String(agentConfig.valueOf(option))}
-        options={values}
-        onChange={(value) => {
-          agentConfig.select(option.id, value);
-        }}
-      />
+    <section aria-label={setting.name} className='space-y-1.5 px-4 py-2'>
+      <span className='block text-xs font-medium'>{setting.name}</span>
+      {control}
+      {note}
     </section>
   );
 }
 
-/** Where a Tau turn runs: this browser or a Tau Host. A choice only when there is one. */
-function RunsOn({
-  current,
-  placements,
+/** What the closed row names — every setting not at its default, so a hidden Plan or Fast mode still shows. */
+const changedSettings = (settings: readonly Setting[]): string =>
+  settings
+    .flatMap((setting) => {
+      if (setting.kind === 'switch') {
+        return setting.isOn ? [setting.name] : [];
+      }
+      const option = setting.options.find((entry) => entry.id === setting.value);
+      return option === undefined || option.id === setting.options[0]?.id || isDefaultValue(option)
+        ? []
+        : [option.name];
+    })
+    .join(' · ');
+
+/**
+ * The agent's switches and choices behind one thin row at the foot of the
+ * sheet. Its open state is a remembered preference. The sheet draws no row
+ * when there are no settings.
+ */
+function SettingsDisclosure({
+  settings,
+  isOpen,
+  onOpenChange,
 }: {
-  readonly current: SheetAgent;
-  readonly placements: readonly AgentHostPlacementTarget[];
+  readonly settings: readonly Setting[];
+  readonly isOpen: boolean;
+  readonly onOpenChange: (isOpen: boolean) => void;
 }): React.JSX.Element {
+  const summary = isOpen ? '' : changedSettings(settings);
+  return (
+    <Collapsible open={isOpen} data-slot='settings-disclosure' className='border-t' onOpenChange={onOpenChange}>
+      <CollapsibleTrigger className={cn(sheetRowClass, 'group/settings m-1 h-6 gap-2 px-2')}>
+        <Settings2 aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
+        <span className='shrink-0 text-xs text-muted-foreground'>Settings</span>
+        <span data-slot='sheet-settings-summary' className='ml-auto min-w-0 truncate text-xs'>
+          {summary}
+        </span>
+        <ChevronDown
+          aria-hidden='true'
+          className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]/settings:rotate-180 motion-reduce:transition-none'
+        />
+      </CollapsibleTrigger>
+      <CollapsibleContent className='pb-1.5'>
+        {settings.map((setting) => (
+          <SettingRow key={setting.id} setting={setting} />
+        ))}
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+/**
+ * Where a Tau turn runs — a Settings choice when there is one — and a
+ * notice only when something is wrong. "Runs in this browser" and an external
+ * agent's "Runs with your local … login" told the person what they already
+ * knew; a refusal, an offline host and a browser caveat still show.
+ */
+const useRunsOn = (
+  current: SheetAgent,
+  placements: readonly AgentHostPlacementTarget[],
+): { readonly setting: Setting | undefined; readonly notice: string | undefined } => {
   const {
     execution: { execution, setActiveExecution },
     model: { model },
@@ -560,12 +685,7 @@ function RunsOn({
   const browserHost = useBrowserAgentHostProjectAvailability(model.provider.id);
   const { catalog } = useModels();
   if (current.kind === 'acp') {
-    return (
-      <p data-slot='runs-on' className='flex items-start gap-2 border-t px-4 py-3 text-xs text-muted-foreground'>
-        <Server aria-hidden='true' className='mt-px size-3.5 shrink-0' />
-        Runs with your local {current.name} login on {current.where}, in this project&apos;s tree.
-      </p>
-    );
+    return { setting: undefined, notice: undefined };
   }
   const options: readonly Option[] = [
     /* D18: the desktop build never constructs the browser worker, so it never offers the browser. */
@@ -580,55 +700,50 @@ function RunsOn({
   ];
   /* Where the turn is actually placed: on desktop an unpinned Tau execution runs on this computer (D18). */
   const hostId = execution.kind === 'tau' ? daemonPlacementOf(execution) : undefined;
-  const value = hostId ?? 'browser';
   const placement = placements.find((entry) => entry.hostId === hostId);
-  const modelRefusal = tauModelRefusal(model.id, tauModelReadiness(model.id, catalog));
-  const note =
-    modelRefusal ??
+  const notice =
+    tauModelRefusal(model.id, tauModelReadiness(model.id, catalog)) ??
     (hostId === undefined
       ? browserHost.status === 'unavailable'
         ? browserHost.reason
         : browserHost.status === 'available'
-          ? (browserHost.caveat ?? 'Runs in this browser')
-          : 'Runs in this browser'
+          ? browserHost.caveat
+          : undefined
       : placement?.online === false
         ? `${placement.label} is offline`
-        : placement?.workspaceRoot
-          ? `In ${placement.workspaceRoot}`
-          : `Runs on ${placement === undefined ? hostId : hostWhere(placement)}`);
-  if (options.length < 2) {
-    return (
-      <p data-slot='runs-on' className='flex items-start gap-2 border-t px-4 py-3 text-xs text-muted-foreground'>
-        <Server aria-hidden='true' className='mt-px size-3.5 shrink-0' />
-        {note}
-      </p>
-    );
-  }
+        : undefined);
+  const setting: Setting | undefined =
+    options.length < 2
+      ? undefined
+      : {
+          kind: 'select',
+          id: 'runs-on',
+          name: 'Runs on',
+          options,
+          value: hostId ?? 'browser',
+          note: placement?.workspaceRoot ? `In ${placement.workspaceRoot}` : undefined,
+          setValue: (next) => {
+            if (execution.kind !== 'tau') {
+              return;
+            }
+            /* Dropping `hostId` is what returns a chat to this browser's own host. */
+            const { hostId: _hostId, ...browser } = execution;
+            setActiveExecution(next === 'browser' ? browser : { ...browser, hostId: next });
+          },
+        };
+  return { setting, notice };
+};
+
+/** What would stop the next turn, on the sheet itself rather than behind Settings. */
+function Notice({ text }: { readonly text: string }): React.JSX.Element {
   return (
-    <section data-slot='runs-on' aria-label='Runs on' className='space-y-2 border-t px-4 pt-3 pb-3.5'>
-      <h5 className='flex items-center gap-1.5 text-xs font-medium text-muted-foreground'>
-        <Server aria-hidden='true' className='size-3.5' />
-        Runs on
-      </h5>
-      <SegmentedControl
-        label='Where Tau runs'
-        value={value}
-        options={options}
-        onChange={(next) => {
-          if (execution.kind !== 'tau') {
-            return;
-          }
-          /* Dropping `hostId` is what returns a chat to this browser's own host. */
-          const { hostId: _hostId, ...browser } = execution;
-          setActiveExecution(next === 'browser' ? browser : { ...browser, hostId: next });
-        }}
-      />
-      <p className='h-4 truncate text-xs text-muted-foreground' title={note}>
-        {note}
-      </p>
-    </section>
+    <p data-slot='sheet-notice' className='flex items-start gap-2 border-t px-4 py-2.5 text-xs text-muted-foreground'>
+      <CircleAlert aria-hidden='true' className='mt-px size-3.5 shrink-0' />
+      {text}
+    </p>
   );
 }
+
 
 /** An agent the host lists but cannot start: the reason in the host's words, the fix, and the code support needs (F8). */
 function Unavailable({ agent }: { readonly agent: AcpSheetAgent & { readonly refusal: Refusal } }): React.JSX.Element {
@@ -761,21 +876,49 @@ function ModelList({
   } = useChatComposer();
   const { open: openSettings } = useSettingsDialog();
   const [query, setQuery] = useState('');
+  /* The list's height when a search starts, so filtering never shrinks the card under the pointer. */
+  const listRef = useRef<HTMLDivElement>(null);
+  const [searchFloor, setSearchFloor] = useState<number | undefined>(undefined);
+  const search = (next: string): void => {
+    if (query === '' && next !== '') {
+      setSearchFloor(listRef.current?.offsetHeight);
+    } else if (next === '') {
+      setSearchFloor(undefined);
+    }
+    setQuery(next);
+  };
   const tauGroups = useTauModelGroups(modelId);
   const selectedAcpModel = execution.kind === 'acp' ? execution.model : undefined;
+  const inUseValue =
+    current.key === agent.key
+      ? agent.kind === 'tau'
+        ? modelId
+        : agent.models.length === 0
+          ? 'default'
+          : (selectedAcpModel ?? agent.defaultModel)
+      : undefined;
 
   if (agent.kind === 'acp' && agent.refusal !== undefined) {
     return <Unavailable agent={{ ...agent, refusal: agent.refusal }} />;
   }
   return (
-    <Command className='min-h-0 flex-1 bg-transparent' onKeyDown={backOnEmpty(query, onBack)}>
+    <Command
+      className='min-h-0 flex-1 bg-transparent'
+      /* Open on the model in use, as the agent list opens on the agent in use. */
+      defaultValue={inUseValue}
+      onKeyDown={backOnEmpty(query, onBack)}
+    >
       <CommandInput
         autoFocus
         placeholder={agent.kind === 'tau' ? 'Search models…' : `Search ${agent.displayName} models…`}
         value={query}
-        onValueChange={setQuery}
+        onValueChange={search}
       />
-      <CommandList className='max-h-none min-h-0 flex-1'>
+      <CommandList
+        ref={listRef}
+        className='max-h-none min-h-0 flex-1'
+        style={searchFloor === undefined ? undefined : { minHeight: searchFloor }}
+      >
         <CommandEmpty className='mx-2'>No models match “{query}”.</CommandEmpty>
         {agent.kind === 'tau' ? (
           tauGroups.map((group) => (
@@ -804,7 +947,8 @@ function ModelList({
           ))
         ) : agent.models.length === 0 ? (
           /* A failed model probe never drops the agent (EQ1 fallback B): it still runs, on its own default. */
-          <CommandGroup heading={agent.name}>
+          /* The search field already names the agent; a heading is kept only to name a second host. */
+          <CommandGroup heading={agent.name === agent.displayName ? undefined : agent.name}>
             <CommandItem
               value='default'
               keywords={[agent.name]}
@@ -821,7 +965,8 @@ function ModelList({
             </CommandItem>
           </CommandGroup>
         ) : (
-          <CommandGroup heading={agent.name}>
+          /* The search field already names the agent; a heading is kept only to name a second host. */
+          <CommandGroup heading={agent.name === agent.displayName ? undefined : agent.name}>
             {agent.models.map((entry) => {
               const isInUse = current.key === agent.key && entry.id === (selectedAcpModel ?? agent.defaultModel);
               return (
@@ -966,6 +1111,8 @@ function Sheet({
   placements,
   agentConfig,
   backRef,
+  isSettingsOpen,
+  onSettingsOpenChange,
 }: {
   readonly agents: readonly SheetAgent[];
   readonly current: SheetAgent;
@@ -974,6 +1121,9 @@ function Sheet({
   readonly agentConfig: AgentConfig;
   /** Set while a sub-view is open, so Escape steps back instead of closing the sheet. */
   readonly backRef: React.RefObject<(() => void) | undefined>;
+  /** Held by the trigger as a preference, so the disclosure stays as the person left it. */
+  readonly isSettingsOpen: boolean;
+  readonly onSettingsOpenChange: (isOpen: boolean) => void;
 }): React.JSX.Element {
   const {
     model: { setActiveModel },
@@ -981,6 +1131,8 @@ function Sheet({
   } = useChatComposer();
   const { lastTauExecution } = useModels();
   const [view, setView] = useState<SheetView>('settings');
+  const runsOn = useRunsOn(current, placements);
+  const settings = runsOn.setting ? [...sheetModel.settings, runsOn.setting] : sheetModel.settings;
   /* The agent whose models the list shows: the chat's own, or one browsed from the agents. */
   const [browseKey, setBrowseKey] = useState(current.key);
   const [isFromAgents, setIsFromAgents] = useState(false);
@@ -1053,7 +1205,7 @@ function Sheet({
   };
 
   const reasoningLabel = `Reasoning for ${current.kind === 'acp' ? `${current.name} ` : ''}${sheetModel.name}`;
-  const rowClass = cn(menuItemVariants({ highlight: 'focus' }), 'w-[calc(100%-0.5rem)] hover:bg-menu-highlight');
+  const rowClass = sheetRowClass;
   return (
     <div ref={surfaceRef} data-slot='agent-sheet' className='w-full overflow-hidden'>
       {view === 'settings' ? (
@@ -1065,13 +1217,15 @@ function Sheet({
             hasNavigated && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
           )}
         >
+          {/* The Agent and Model rows are 24 px rows, label left and value right, with even 4 px padding. */}
+          <div className='flex flex-col gap-0.5 p-1'>
           {hasChoice ? (
             <button
               ref={agentRowRef}
               type='button'
               data-slot='sheet-agent'
               aria-label={`Agent: ${current.name}. Change`}
-              className={cn(rowClass, 'mx-1 mt-1 h-8 gap-2 px-2.5')}
+              className={cn(rowClass, 'h-6 w-full gap-2 px-2')}
               onClick={() => {
                 returnTo.current = 'agent';
                 go('agents');
@@ -1082,7 +1236,7 @@ function Sheet({
                 <SheetAgentGlyph agent={current} className='size-3.5 shrink-0' />
                 <span className='truncate'>{current.name}</span>
               </span>
-              <ChevronRight aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
+              <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
             </button>
           ) : null}
           <button
@@ -1090,7 +1244,7 @@ function Sheet({
             type='button'
             data-slot='sheet-model'
             aria-label={`Model: ${current.kind === 'acp' ? `${current.name}, ` : ''}${sheetModel.name}. Change`}
-            className={cn(rowClass, 'm-1 h-auto gap-2.5 px-2.5 py-2')}
+            className={cn(rowClass, 'h-6 w-full gap-2 px-2')}
             onClick={() => {
               returnTo.current = 'model';
               setBrowseKey(current.key);
@@ -1098,41 +1252,35 @@ function Sheet({
               go('models');
             }}
           >
-            <span className='[&>svg]:size-5 [&>svg]:grayscale-0'>{sheetModel.glyph}</span>
-            <span className='flex min-w-0 flex-1 flex-col items-start text-left'>
-              <span className='w-full truncate text-sm font-medium'>{sheetModel.name}</span>
-              {sheetModel.facts ? (
-                <span className='w-full truncate text-xs text-muted-foreground'>{sheetModel.facts}</span>
-              ) : null}
+            <span className='shrink-0 text-xs text-muted-foreground'>Model</span>
+            <span className='ml-auto flex min-w-0 items-center gap-1.5 text-xs'>
+              <span className='[&>svg]:size-3.5 [&>svg]:grayscale-0'>{sheetModel.glyph}</span>
+              <span className='truncate'>{sheetModel.name}</span>
             </span>
-            <ChevronRight aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
+            <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
           </button>
+          </div>
           {sheetModel.levels.length > 1 ? <ReasoningSection label={reasoningLabel} model={sheetModel} /> : null}
-          {sheetModel.switches.map((option) => (
-            <AgentSwitch key={option.id} option={option} agentConfig={agentConfig} />
-          ))}
-          {sheetModel.selects.map((option) => (
-            <AgentSelect key={option.id} option={option} agentConfig={agentConfig} />
-          ))}
-          <RunsOn current={current} placements={placements} />
+          {runsOn.notice ? <Notice text={runsOn.notice} /> : null}
+          {settings.length > 0 ? (
+            <SettingsDisclosure settings={settings} isOpen={isSettingsOpen} onOpenChange={onSettingsOpenChange} />
+          ) : null}
         </div>
       ) : (
         <div
           data-slot={view === 'agents' ? 'sheet-agents' : 'sheet-models'}
-          /* The agents are as tall as they are; a model list keeps its fixed height. */
-          className={cn(
-            'flex flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2',
-            view === 'agents' ? 'max-h-[min(25rem,70vh)]' : 'h-[25rem] max-h-[70vh]',
-          )}
+          /* Both lists are as tall as their rows, up to the cap, then scroll. */
+          className='flex max-h-[min(25rem,70vh)] flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2'
         >
-          <div className='shrink-0 border-b p-1'>
+          {/* A compact full-width back row in the Agent row's type, with even padding around it. */}
+          <div className='flex shrink-0 border-b p-1'>
             <button
               type='button'
               aria-label={view === 'models' && isFromAgents ? 'Back to agents' : 'Back to settings'}
-              className={cn(rowClass, 'h-8 w-full gap-1.5 px-2')}
+              className={cn(rowClass, 'h-6 w-full gap-1 pr-2 pl-1 text-xs text-muted-foreground')}
               onClick={back}
             >
-              <ChevronLeft aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
+              <ChevronLeft aria-hidden='true' className='size-3.5 shrink-0' />
               <span className='truncate'>{view === 'models' && isFromAgents ? 'Agents' : sheetModel.name}</span>
             </button>
           </div>
@@ -1184,6 +1332,8 @@ export function ChatAgentSheet({
   readonly enableShortcut?: boolean | (() => boolean);
 }): React.JSX.Element {
   const [isOpen, setIsOpen] = useState(false);
+  /* Open or closed, Settings is a preference: it survives closing the sheet and reloading the page. */
+  const [isSettingsOpen, setIsSettingsOpen] = useCookie(cookieName.chatOpAgentSettings, false);
   const isMobile = useIsMobile();
   const { agents, current } = useSheetAgents(placements);
   const sheetModel = useSheetModel(current, agentConfig);
@@ -1230,6 +1380,8 @@ export function ChatAgentSheet({
       placements={placements}
       agentConfig={agentConfig}
       backRef={backRef}
+      isSettingsOpen={isSettingsOpen}
+      onSettingsOpenChange={setIsSettingsOpen}
     />
   );
   const onEscapeKeyDown = (event: KeyboardEvent): void => {

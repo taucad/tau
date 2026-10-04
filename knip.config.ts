@@ -239,6 +239,8 @@ const config: KnipConfig = {
         'app/types/**/*.d.ts',
         'vite-environment.d.ts',
         'app/offline/offline-shell-env.d.ts',
+        // Netlify bundles every edge function in this directory; `config` names its paths.
+        'netlify/edge-functions/*.ts',
         // `apps/ui/project.json` runs every calibration script with a workspace-root path.
         'scripts/render-calibration/*.mts',
         // Module declaration for `svg-sprite`, used by scripts/generate-svg-sprite.mts.

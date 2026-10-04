@@ -1,4 +1,5 @@
-import type { MachineManifest } from '@taucad/runtime/machine';
+import type { MachineFffProcess, MachineManifest } from '@taucad/runtime/machine';
+import { trayLabel } from '#components/print/machine-facts.js';
 import type { Quantity } from '@taucad/units/quantity';
 import type { SliceBounds } from '#components/printer/printer-summary.js';
 
@@ -19,7 +20,7 @@ export type BuildVolumeFit =
  */
 export const fitsBuildVolume = (
   bounds: SliceBounds,
-  buildVolume: MachineManifest['geometry']['buildVolume'],
+  buildVolume: MachineFffProcess['geometry']['buildVolume'],
 ): BuildVolumeFit => {
   const limits = [buildVolume.x, buildVolume.y, buildVolume.z] as const;
   for (const [index, axis] of axes.entries()) {
@@ -56,7 +57,7 @@ export type PlateFit = BuildVolumeFit & Readonly<{ message: string }>;
  */
 export const fitsPlate = (
   summary: Readonly<{ bounds: SliceBounds; partBounds: SliceBounds | undefined }>,
-  buildVolume: MachineManifest['geometry']['buildVolume'],
+  buildVolume: MachineFffProcess['geometry']['buildVolume'],
 ): PlateFit => {
   // ponytail: skirts and brims are not part extrusions, so a brim past the plate edge passes; add their kinds if a
   // slicer ever places one there.
@@ -209,36 +210,12 @@ export const shortDigest = (digest: string): string => {
 };
 
 /**
- * The material slot as the printer labels it: unit letter plus slot number ("A1"), or "Ext" for the external spool.
+ * The material slot as the printer labels it: "A1", or "Ext" for the external spool.
  *
- * @param slot - The zero-based protocol slot.
- * @param manifest - The machine's material system, when known.
- * @returns "A1" for a multi-unit system, "Ext" for its external spool, "Slot 1" otherwise.
+ * @param slot - The Bambu tray index a submission names.
+ * @param manifest - The machine's manifest or capabilities, when known.
+ * @returns The slot's declared label, "Slot n" otherwise.
  * @public
  */
-export const materialSlotLabel = (slot: number, manifest: MachineManifest | undefined): string => {
-  if (slot === manifest?.materialSystem.externalSpoolSlot) {
-    return 'Ext';
-  }
-  const slotsPerUnit = manifest?.materialSystem.slotsPerUnit ?? 0;
-  if (slotsPerUnit <= 0) {
-    return `Slot ${String(slot + 1)}`;
-  }
-  const unit = Math.floor(slot / slotsPerUnit);
-  return `${String.fromCodePoint(65 + unit)}${String((slot % slotsPerUnit) + 1)}`;
-};
-
-/**
- * Where a material sits, for a sentence: "in A2 and A1", or "on the external spool".
- *
- * @param slots - The protocol slots, in the order the print names them.
- * @param manifest - The machine's material system, when known.
- * @returns The phrase that follows "PLA is loaded".
- * @public
- */
-export const materialSlotPlace = (slots: readonly number[], manifest: MachineManifest | undefined): string =>
-  slots.length === 1 && slots[0] === manifest?.materialSystem.externalSpoolSlot
-    ? 'on the external spool'
-    : `in ${new Intl.ListFormat('en', { type: 'conjunction' }).format(
-        slots.map((slot) => materialSlotLabel(slot, manifest)),
-      )}`;
+export const materialSlotLabel = (slot: number, manifest: Pick<MachineManifest, 'components'> | undefined): string =>
+  trayLabel(manifest, slot);

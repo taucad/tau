@@ -11,10 +11,10 @@ import type {
   MachineDirectoryEntry,
   MachineDirectorySnapshot,
 } from '@taucad/runtime/machine';
-import { bambuA1MiniMachine } from '@taucad/bambu';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   boundEntry,
+  miniProvider,
   simulatedEntry,
   simulatorProvider,
   workshopEntry,
@@ -307,7 +307,7 @@ describe('MachinesSettings', () => {
 
   it('should bind Mini through its provider without a later scan replacing its identity or typed code', async () => {
     const facet = facetWith([]);
-    facet.listProviders.mockResolvedValue([x1cProvider, bambuA1MiniMachine(), simulatorProvider]);
+    facet.listProviders.mockResolvedValue([x1cProvider, miniProvider, simulatorProvider]);
     const mini: MachineCandidate = {
       ...savedCandidate,
       id: 'bambu-a1-mini:0300EA652800550',
@@ -382,15 +382,69 @@ describe('MachinesSettings', () => {
     expect(row).toHaveAttribute('aria-expanded', 'true');
     const identity = screen.getByRole('button', { name: 'Identity and firmware Firmware simulator-1' });
     fireEvent.click(identity);
-    expect(screen.getByText('Simulated, no printer attached')).toBeInTheDocument();
-    expect(
-      screen.getByRole('button', { name: 'Actions 6 qualified · 8 designed · 2 unsupported' }),
-    ).toBeInTheDocument();
+    expect(screen.getByText('Simulated, no machine attached')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: 'Controls 3 qualified · 14 designed' })).toBeInTheDocument();
 
     fireEvent.click(row);
 
     expect(row).toHaveAttribute('aria-expanded', 'false');
     expect(screen.queryByRole('button', { name: /^Identity and firmware/u })).not.toBeInTheDocument();
+  });
+
+  it('should let a person turn Testing on for one machine, showing it pending until the host answers', async () => {
+    const facet = facetWith([workshopEntry]);
+    let answer: (entry: MachineDirectoryEntry) => void = () => undefined;
+    facet.setTesting.mockImplementation(
+      async () =>
+        new Promise<MachineDirectoryEntry>((resolve) => {
+          answer = resolve;
+        }),
+    );
+    state.facet = facet;
+    renderSettings();
+    fireEvent.click(await screen.findByRole('button', { name: 'Workshop X1C Bambu Lab X1C' }));
+    const testing = screen.getByRole('switch', { name: 'Testing for Workshop X1C' });
+    expect(testing).not.toBeChecked();
+    expect(testing).toHaveAccessibleDescription(
+      'Lets you try controls designed for this machine but not yet qualified on it, so they can be qualified. Agents never get them.',
+    );
+
+    fireEvent.click(testing);
+
+    expect(facet.setTesting).toHaveBeenCalledExactlyOnceWith({
+      machineId: 'workshop-x1c',
+      enabled: true,
+      requestedBy: { kind: 'user', id: 'operator', label: 'You' },
+    });
+    expect(testing).toBeChecked();
+    expect(testing).toBeDisabled();
+    expect(screen.getByLabelText('Saving')).toBeInTheDocument();
+
+    answer({ ...workshopEntry, testing: true });
+
+    await waitFor(() => {
+      expect(testing).toBeEnabled();
+    });
+    expect(testing).toBeChecked();
+    expect(screen.queryByLabelText('Saving')).not.toBeInTheDocument();
+  });
+
+  it('should reflect Testing as the directory reports it and say when the host refuses a change', async () => {
+    const facet = facetWith([{ ...workshopEntry, testing: true }]);
+    facet.setTesting.mockRejectedValue(new Error('The machine is printing.'));
+    state.facet = facet;
+    renderSettings();
+    fireEvent.click(await screen.findByRole('button', { name: 'Workshop X1C Bambu Lab X1C' }));
+    const testing = screen.getByRole('switch', { name: 'Testing for Workshop X1C' });
+    expect(testing).toBeChecked();
+
+    fireEvent.click(testing);
+
+    expect(await screen.findByRole('alert')).toHaveTextContent(
+      'Testing could not be changed: The machine is printing.',
+    );
+    expect(testing).toBeChecked();
+    expect(testing).toBeEnabled();
   });
 
   it('should explain a bound machine whose provider the host no longer offers', async () => {
@@ -588,7 +642,7 @@ describe('MachinesSettings', () => {
       expect(screen.queryByRole('list', { name: 'Bound machines' })).not.toBeInTheDocument();
     });
 
-    it('should keep a printer with pending requests and say what to resolve first', async () => {
+    it('should keep a printer with open jobs and say what to resolve first', async () => {
       const { facet, remove } = await renderWith([workshopEntry]);
       facet.removeBinding.mockRejectedValue(new Error('MACHINE_BINDING_BUSY'));
       facet.list.mockResolvedValue(snapshotOf([workshopEntry]));
@@ -598,7 +652,7 @@ describe('MachinesSettings', () => {
       fireEvent.click(within(confirmation).getByRole('button', { name: 'Remove' }));
 
       expect(await within(confirmation).findByRole('alert')).toHaveTextContent(
-        "Resolve this printer's pending print requests first.",
+        "Resolve this printer's open jobs first.",
       );
       expect(within(confirmation).getByRole('button', { name: 'Remove' })).toBeEnabled();
       expect(screen.getByRole('list', { name: 'Bound machines' })).toBeInTheDocument();

@@ -21,6 +21,7 @@ import type {
   BambuStudioSettings,
 } from '@taucad/slicer/bambu-studio';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
+import { observedTrays, toolheadOf } from '#components/print/machine-facts.js';
 
 /** Providers whose printers slice with Bambu Studio when it is installed. */
 const bambuProviderIds: ReadonlySet<string> = new Set(['bambu', 'bambu-simulator']);
@@ -229,14 +230,14 @@ const machineHints = ({
   if (entry === undefined) {
     return undefined;
   }
-  const nozzleDiameter = manifest?.toolhead.nozzles[0]?.diameter.value;
+  const nozzleDiameter = manifest === undefined ? undefined : toolheadOf(manifest)?.nozzles[0]?.diameter.value;
   return {
     model: entry.descriptor.model,
     ...(nozzleDiameter === undefined ? {} : { nozzleDiameter }),
     ...(preset === undefined ? {} : { preset }),
     ...(plate === undefined ? {} : { plate }),
     materials: slots.map((slot) => {
-      const tray = entry.snapshot.setup.materials.find((material) => material.slot === slot);
+      const tray = observedTrays(entry).find((candidate) => candidate.slot === slot);
       return {
         slot,
         ...(tray?.materialId === undefined ? {} : { materialId: tray.materialId }),
@@ -327,7 +328,7 @@ export const useBambuStudio = ({
   const chosen: BambuStudioChosen = intent ?? noChoices;
 
   const model = entry?.descriptor.model;
-  const nozzleDiameter = manifest?.toolhead.nozzles[0]?.diameter.value;
+  const nozzleDiameter = manifest === undefined ? undefined : toolheadOf(manifest)?.nozzles[0]?.diameter.value;
   const bambuPlate = toBambuPlate(plate);
   /* Presets are Bambu Studio's per tray, ascending, as it resolves them; `mapping` orders them per filament. */
   const slots = useMemo(

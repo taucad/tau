@@ -650,10 +650,10 @@ describe('useCadChatClient', () => {
         role: 'assistant',
         parts: [
           {
-            type: 'tool-request_print',
+            type: 'tool-request_job',
             toolCallId: 'call-print',
             state: 'approval-requested',
-            input: {},
+            input: { targetFile: 'main.scad' },
             approval: { id: 'interrupt-1' },
           },
         ],

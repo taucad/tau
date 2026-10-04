@@ -647,9 +647,9 @@ function SettingsDisclosure({
   const summary = isOpen ? '' : changedSettings(settings);
   return (
     <Collapsible open={isOpen} data-slot='settings-disclosure' className='border-t' onOpenChange={onOpenChange}>
-      <CollapsibleTrigger className={cn(sheetRowClass, 'group/settings m-1 h-6 gap-2 px-2')}>
-        <Settings2 aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
-        <span className='shrink-0 text-xs text-muted-foreground'>Settings</span>
+      <CollapsibleTrigger className={cn(sheetRowClass, 'group/settings m-1 gap-2')}>
+        <Settings2 aria-hidden='true' className='size-4 shrink-0 text-muted-foreground' />
+        <span className='shrink-0 text-muted-foreground'>Settings</span>
         <span data-slot='sheet-settings-summary' className='ml-auto min-w-0 truncate text-xs'>
           {summary}
         </span>
@@ -658,7 +658,7 @@ function SettingsDisclosure({
           className='size-4 shrink-0 text-muted-foreground transition-transform duration-150 group-data-[state=open]/settings:rotate-180 motion-reduce:transition-none'
         />
       </CollapsibleTrigger>
-      <CollapsibleContent className='pb-1.5'>
+      <CollapsibleContent className='pb-1'>
         {settings.map((setting) => (
           <SettingRow key={setting.id} setting={setting} />
         ))}
@@ -1217,7 +1217,7 @@ function Sheet({
             hasNavigated && 'motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-left-2',
           )}
         >
-          {/* The Agent and Model rows are 24 px rows, label left and value right, with even 4 px padding. */}
+          {/* The Agent and Model rows are as tall as a list row: label left, value right. */}
           <div className='flex flex-col gap-0.5 p-1'>
           {hasChoice ? (
             <button
@@ -1225,15 +1225,15 @@ function Sheet({
               type='button'
               data-slot='sheet-agent'
               aria-label={`Agent: ${current.name}. Change`}
-              className={cn(rowClass, 'h-6 w-full gap-2 px-2')}
+              className={cn(rowClass, 'w-full gap-2')}
               onClick={() => {
                 returnTo.current = 'agent';
                 go('agents');
               }}
             >
-              <span className='shrink-0 text-xs text-muted-foreground'>Agent</span>
-              <span className='ml-auto flex min-w-0 items-center gap-1.5 text-xs'>
-                <SheetAgentGlyph agent={current} className='size-3.5 shrink-0' />
+              <span className='shrink-0 text-muted-foreground'>Agent</span>
+              <span className='ml-auto flex min-w-0 items-center gap-2'>
+                <SheetAgentGlyph agent={current} className='size-4 shrink-0' />
                 <span className='truncate'>{current.name}</span>
               </span>
               <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
@@ -1244,7 +1244,7 @@ function Sheet({
             type='button'
             data-slot='sheet-model'
             aria-label={`Model: ${current.kind === 'acp' ? `${current.name}, ` : ''}${sheetModel.name}. Change`}
-            className={cn(rowClass, 'h-6 w-full gap-2 px-2')}
+            className={cn(rowClass, 'w-full gap-2')}
             onClick={() => {
               returnTo.current = 'model';
               setBrowseKey(current.key);
@@ -1252,9 +1252,9 @@ function Sheet({
               go('models');
             }}
           >
-            <span className='shrink-0 text-xs text-muted-foreground'>Model</span>
-            <span className='ml-auto flex min-w-0 items-center gap-1.5 text-xs'>
-              <span className='[&>svg]:size-3.5 [&>svg]:grayscale-0'>{sheetModel.glyph}</span>
+            <span className='shrink-0 text-muted-foreground'>Model</span>
+            <span className='ml-auto flex min-w-0 items-center gap-2'>
+              <span className='[&>svg]:size-4 [&>svg]:grayscale-0'>{sheetModel.glyph}</span>
               <span className='truncate'>{sheetModel.name}</span>
             </span>
             <ChevronRight aria-hidden='true' className='size-3.5 shrink-0 text-muted-foreground' />
@@ -1272,15 +1272,15 @@ function Sheet({
           /* Both lists are as tall as their rows, up to the cap, then scroll. */
           className='flex max-h-[min(25rem,70vh)] flex-col motion-safe:animate-in motion-safe:fade-in-0 motion-safe:slide-in-from-right-2'
         >
-          {/* A compact full-width back row in the Agent row's type, with even padding around it. */}
+          {/* A full-width back row as tall as the list rows below it. */}
           <div className='flex shrink-0 border-b p-1'>
             <button
               type='button'
               aria-label={view === 'models' && isFromAgents ? 'Back to agents' : 'Back to settings'}
-              className={cn(rowClass, 'h-6 w-full gap-1 pr-2 pl-1 text-xs text-muted-foreground')}
+              className={cn(rowClass, 'w-full gap-2 text-muted-foreground')}
               onClick={back}
             >
-              <ChevronLeft aria-hidden='true' className='size-3.5 shrink-0' />
+              <ChevronLeft aria-hidden='true' className='size-4 shrink-0' />
               <span className='truncate'>{view === 'models' && isFromAgents ? 'Agents' : sheetModel.name}</span>
             </button>
           </div>

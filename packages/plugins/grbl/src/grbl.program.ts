@@ -319,9 +319,11 @@ export const grblProgramChecks = (
     workOffset: string;
     /** Machine coordinates of the work zero; undefined while the machine position is not trusted. */
     origin: Readonly<Record<Axis, number>> | undefined;
+    /** Whether the machine can home; without homing switches an untrusted position stays unknown. */
+    canHome?: boolean;
   }>,
 ): MachineCheck[] => {
-  const { program, toolChange, workOffset, origin } = input;
+  const { program, toolChange, workOffset, origin, canHome = true } = input;
   const checks: MachineCheck[] = [];
   const [refusal] = program.refused;
   checks.push({
@@ -350,8 +352,12 @@ export const grblProgramChecks = (
       label: 'The program stays within the machine travel',
       state: 'unknown',
       source: 'computed',
-      detail: 'Home the machine so Tau can check the program against its travel.',
-      remedy: { type: 'action', componentId: 'motion', action: 'motion.home' },
+      ...(canHome
+        ? {
+            detail: 'Home the machine so Tau can check the program against its travel.',
+            remedy: { type: 'action', componentId: 'motion', action: 'motion.home' } as const,
+          }
+        : { detail: 'Without homing switches Tau cannot check the program against the travel.' }),
     });
   } else {
     const outside: string[] = [];

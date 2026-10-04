@@ -114,7 +114,8 @@ describe('grblMachine', () => {
     });
     expect(opened).toEqual([{ path: '/dev/tty.usbmodem1101', baudRate: 115_200 }]);
     const report = await session.getSnapshot({ signal: new AbortController().signal });
-    expect(report.state.status).toBe('alarm');
+    // A stock LongMill has no homing switches, so it powers up unlocked.
+    expect(report.state.status).toBe('ready');
     await session.close();
   });
 });

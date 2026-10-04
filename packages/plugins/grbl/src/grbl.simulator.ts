@@ -10,10 +10,12 @@
  * @module
  */
 
+import { defineConfiguration } from '@taucad/runtime/configuration';
 import { defineMachine, machineManifestOf } from '@taucad/runtime/machine';
 import type { MachineNetworkStream } from '@taucad/runtime/machine';
+import { z } from 'zod';
 
-import { grblBindingConfiguration, grblSubmissionConfiguration } from '#grbl.machine.js';
+import { grblSubmissionConfiguration } from '#grbl.machine.js';
 import {
   grblSimulatorLid,
   grblSimulationProfile,
@@ -57,6 +59,8 @@ export type VirtualGrblOptions = Readonly<{
   /** Physical Z of the stock top under the plate; the plate's top is this plus the plate thickness. */
   stockTop?: number;
   plateThickness?: number;
+  /** Homing and limit switches fitted (`$21=1`, `$22=1`): the controller powers up locked until homed. A stock LongMill has none. */
+  homingSwitches?: boolean;
 }>;
 
 const homingRate = 1500;
@@ -64,7 +68,7 @@ const rapidRate = 4000;
 const plannerBlocks = 15;
 const rxBytes = 128;
 
-const settingsOf = (statusMask: number): Map<number, number> =>
+const settingsOf = (statusMask: number, switches: number): Map<number, number> =>
   new Map([
     [0, 10],
     [1, 255],
@@ -78,8 +82,8 @@ const settingsOf = (statusMask: number): Map<number, number> =>
     [12, 0.002],
     [13, 0],
     [20, 0],
-    [21, 1],
-    [22, 1],
+    [21, switches],
+    [22, switches],
     [23, 3],
     [24, 50],
     [25, homingRate],
@@ -152,7 +156,7 @@ export class VirtualGrbl {
   public constructor(options: VirtualGrblOptions = {}) {
     this.speed = options.speed ?? 1;
     this.tickInterval = options.tick ?? 10;
-    this.settings = settingsOf(options.statusMask ?? 1);
+    this.settings = settingsOf(options.statusMask ?? 1, options.homingSwitches === true ? 1 : 0);
     this.drift = { x: 400, y: 420, z: -30, ...options.physical };
     this.stockTop = options.stockTop ?? -40;
     this.plateThickness = options.plateThickness ?? 15;
@@ -768,11 +772,12 @@ export class VirtualGrbl {
         }
       }
       if (isProbe) {
-        if (this.isTouching) {
-          this.alarm(4, false);
-          return 'ok';
-        }
+        // Grbl empties the planner before a probe cycle, then checks the pin.
         return this.whenEmpty(() => {
+          if (this.isTouching) {
+            this.alarm(4, false);
+            return;
+          }
           this.planner.push({ target, feed: this.feed, kind: 'probe' });
           this.state = 'Run';
           this.pending = { kind: 'probe' };
@@ -992,6 +997,20 @@ export const createVirtualGrblStream = (controller: VirtualGrbl): MachineNetwork
   };
 };
 
+/** The simulator's binding: which LongMill to simulate. */
+const bindingConfiguration = defineConfiguration({
+  id: 'grbl-simulator.machine.binding',
+  version: '1.0.0',
+  schema: z.object({
+    logicalId: z.string().min(1).max(64),
+    homingSwitches: z.boolean().default(false).meta({
+      title: 'Homing switches',
+      description: 'Simulate the optional homing kit. A stock LongMill has none and works from the work zero.',
+    }),
+  }),
+  ui: { version: 1, rjsf: {} },
+});
+
 const qualification = { status: 'qualified', profileId: grblSimulationProfile.id } as const;
 const manifest = longMillManifest(qualification, [grblSimulatorLid(qualification)]);
 
@@ -1045,7 +1064,7 @@ export const grblSimulatorMachine = defineMachine({
   protocolVersion: 2,
   vendor: 'Sienci Labs',
   manifest,
-  bindingConfiguration: grblBindingConfiguration,
+  bindingConfiguration,
   submissionConfiguration: grblSubmissionConfiguration,
   async *discover(_input, runtime) {
     const observedAt = runtime.clock.now();
@@ -1062,7 +1081,11 @@ export const grblSimulatorMachine = defineMachine({
     };
   },
   async connect(input, runtime) {
-    const controller = new VirtualGrbl({ speed: grblSimulatorDefaults.speed, tick: grblSimulatorDefaults.tick });
+    const controller = new VirtualGrbl({
+      speed: grblSimulatorDefaults.speed,
+      tick: grblSimulatorDefaults.tick,
+      homingSwitches: input.configuration.homingSwitches,
+    });
     return openGrblSession({
       stream: createVirtualGrblStream(controller),
       runtime,

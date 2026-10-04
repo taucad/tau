@@ -242,14 +242,14 @@ const alerts = (controller: GrblController): MachineAlert[] => {
       reference: grblReference,
       blocks: 'motion',
       remedies:
-        alarm.position === 'lost'
+        alarm.position === 'lost' && controller.isHomingEnabled
           ? [
               { type: 'action', componentId: 'motion', action: 'motion.home' },
               { type: 'action', componentId: 'controller', action: 'controller.unlock' },
             ]
           : [{ type: 'action', componentId: 'controller', action: 'controller.unlock' }],
     });
-  } else if (controller.isHomingRequired && controller.status?.state === 'Alarm') {
+  } else if (controller.isHomingEnabled && controller.isHomingRequired && controller.status?.state === 'Alarm') {
     alerts.push({
       code: 'homing-required',
       severity: 'warning',
@@ -284,19 +284,26 @@ const alerts = (controller: GrblController): MachineAlert[] => {
  */
 export const grblChecks = (controller: GrblController): MachineCheck[] => {
   const isTrusted = controller.trust === 'homed' || controller.trust === 'kept';
+  const position: MachineCheck = isTrusted
+    ? { id: 'position', label: 'The machine knows where it is', state: 'passed', source: 'observed' }
+    : controller.isHomingEnabled
+      ? {
+          id: 'position',
+          label: 'The machine knows where it is',
+          state: 'blocked',
+          source: 'observed',
+          detail: 'Home the machine first.',
+          remedy: { type: 'action', componentId: 'motion', action: 'motion.home' },
+        }
+      : {
+          id: 'position',
+          label: 'The machine knows where it is',
+          state: 'unknown',
+          source: 'observed',
+          detail: 'Without homing switches the job runs from the work zero you set.',
+        };
   return [
-    {
-      id: 'position',
-      label: 'The machine knows where it is',
-      state: isTrusted ? 'passed' : 'blocked',
-      source: 'observed',
-      ...(isTrusted
-        ? {}
-        : {
-            detail: 'Home the machine first.',
-            remedy: { type: 'action', componentId: 'motion', action: 'motion.home' } as const,
-          }),
-    },
+    position,
     {
       id: 'alarm',
       label: 'No alarm',
@@ -319,7 +326,7 @@ const availability = (controller: GrblController): MachineAvailability[] => {
     ? `Finish ${controller.activity?.view.label.toLowerCase() ?? 'the procedure'} first.`
     : undefined;
   const isTouching = controller.status?.pins?.includes('P') === true;
-  const declared = [...controller.options.manifest.actions, ...controller.options.manifest.holds];
+  const declared = [...controller.actions, ...controller.options.manifest.holds];
   return declared.map((descriptor): MachineAvailability => {
     const key = { componentId: descriptor.componentId, id: descriptor.id };
     const unavailable = (code: MachineFailureCode, message: string, remedy?: MachineRemedy): MachineAvailability => ({

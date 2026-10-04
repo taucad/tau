@@ -20,7 +20,17 @@ export default defineConfig({
       enabled: true,
       headless: true,
       screenshotDirectory: '../../out/test-results/gltf-batches-browser',
-      provider: playwright({ launchOptions: { args: ['--enable-unsafe-webgpu'] } }),
+      // Full Chromium, not the headless shell, so WebGPU has an adapter. CI's GPU-less
+      // lane selects SwiftShader as `apps/ui-e2e` and the agent-host suites do.
+      provider: playwright({
+        launchOptions: {
+          channel: 'chromium',
+          args: [
+            '--enable-unsafe-webgpu',
+            ...(process.env['TAU_E2E_WEBGPU_PROFILE'] === 'software' ? ['--use-webgpu-adapter=swiftshader'] : []),
+          ],
+        },
+      }),
       instances: [{ browser: 'chromium' }],
     },
   },

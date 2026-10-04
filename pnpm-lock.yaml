@@ -2108,7 +2108,13 @@ importers:
       '@taucad/utils':
         specifier: workspace:*
         version: link:../../../libs/utils
+      xstate:
+        specifier: 'catalog:'
+        version: 6.0.0-alpha.59
     devDependencies:
+      '@taucad/xstate-testing':
+        specifier: workspace:*
+        version: link:../../../libs/xstate-testing
       '@testing-library/react':
         specifier: 'catalog:'
         version: 16.2.0(@testing-library/dom@10.4.1)(@types/react-dom@19.0.4(@types/react@19.0.12))(@types/react@19.0.12)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
@@ -26872,6 +26878,7 @@ packages:
 
   xstate@6.0.0-alpha.59:
     resolution: {integrity: sha512-IDBLFTCkMgRzoxecswgXKnZin6aca237WhogmMeuebGnYn+NeQUq9IcAeWKuf/Y0TDYZFwupnx5tP23GMSl1Ww==}
+    hasBin: true
 
   xtend@4.0.2:
     resolution: {integrity: sha512-LKYU1iAXJXUgAXn9URjiu+MWhyUXHsvfp7mcuYm9dSUKK0/CjtrUwFAxD82/mCWbtLsGjFIad0wIsod4zrTAEQ==}

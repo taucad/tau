@@ -12,16 +12,25 @@
 #     notarized), Linux and Windows (unsigned), attach the archives to the
 #     release, then publish the update feeds and mark the release "latest", so
 #     installed apps only see a release whose every asset is in place.
+#   - `desktop-staging@<version>-staging.<n>`: the same desktop build, packaged
+#     for the staging channel (taucad.dev endpoints, no update checks) as a
+#     prerelease. `release-desktop-staging.yml` creates these. It signs from the
+#     `desktop-staging` environment, attaches the archives without update feeds
+#     and never marks the release latest, so installed production apps never
+#     see it.
 #   - `ui@*` and `desktop@*` also get the GeoSpec engine's complete source and
 #     relink kit and the OCCT licence texts as release assets (`source-kit`),
-#     because both ship OCCT compiled into the engine.
+#     because both ship OCCT compiled into the engine; so does a staging desktop
+#     prerelease.
 #
 # Nothing here publishes an npm package or deploys anything.
 #
 # The macOS job reads its signing material from the `desktop` environment,
-# which only `desktop@*` tags may use and a release manager approves per run.
-# It records a deployment so each desktop release shows under `desktop` in the
-# repository's Deployments sidebar. Secrets: MACOS_CERTIFICATE_P12_BASE64,
+# which only `desktop@*` tags may use and a release manager approves per run,
+# or for a staging prerelease from `desktop-staging`, which only
+# `desktop-staging@*` tags may use. It records a deployment so each desktop
+# release shows under its environment in the repository's Deployments sidebar.
+# Both environments hold the same values. Secrets: MACOS_CERTIFICATE_P12_BASE64,
 # MACOS_CERTIFICATE_PASSWORD, APPLE_API_KEY_P8_BASE64, APPLE_API_KEY_ID and
 # APPLE_API_ISSUER_ID, and the APPLE_TEAM_ID variable.
 name: Release build
@@ -33,7 +42,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release tag to rebuild, e.g. desktop@0.2.0'
+        description: 'Release tag to rebuild, e.g. desktop@0.2.0 or desktop-staging@0.2.0-staging.3'
         required: true
         type: string
 
@@ -57,6 +66,7 @@ jobs:
       project: ${{ steps.tag.outputs.project }}
       version: ${{ steps.tag.outputs.version }}
       kind: ${{ steps.tag.outputs.kind }}
+      channel: ${{ steps.tag.outputs.channel }}
     steps:
       - name: Resolve the release tag
         id: tag
@@ -68,13 +78,20 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
-          if ! [[ "$TAG" =~ ^([a-z0-9-]+)@([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+          channel=production
+          if [[ "$TAG" =~ ^desktop-staging@([0-9]+\.[0-9]+\.[0-9]+)-staging\.[0-9]+$ ]]; then
+            # A staging desktop prerelease builds the desktop app at its manifest version.
+            project=desktop
+            version=${BASH_REMATCH[1]}
+            channel=staging
+          elif [[ "$TAG" =~ ^([a-z0-9-]+)@([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
+            project=${BASH_REMATCH[1]}
+            version=${BASH_REMATCH[2]}
+          else
             echo "::notice::$TAG is not an application release; nothing to build."
             echo "kind=none" >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          project=${BASH_REMATCH[1]}
-          version=${BASH_REMATCH[2]}
           kind=app
           if [ "$project" = desktop ]; then kind=desktop; fi
 
@@ -95,6 +112,7 @@ jobs:
             echo "project=$project"
             echo "version=$version"
             echo "kind=$kind"
+            echo "channel=$channel"
           } >> "$GITHUB_OUTPUT"
 
   verify-app:
@@ -224,9 +242,10 @@ jobs:
     runs-on: macos-15
     timeout-minutes: 240
     environment:
-      name: desktop
+      name: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
     env:
       GEOSPEC_WORKERS: 1
+      TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_MACOS_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/macos
     steps:
       - name: Checkout the release
@@ -306,12 +325,13 @@ jobs:
           APPLE_API_KEY_ID: ${{ secrets.APPLE_API_KEY_ID }}
           APPLE_API_ISSUER_ID: ${{ secrets.APPLE_API_ISSUER_ID }}
           APPLE_TEAM_ID: ${{ vars.APPLE_TEAM_ID }}
+          ENVIRONMENT: ${{ needs.resolve.outputs.channel == 'staging' && 'desktop-staging' || 'desktop' }}
         run: |
           set -euo pipefail
           for name in MACOS_CERTIFICATE_P12_BASE64 MACOS_CERTIFICATE_PASSWORD APPLE_API_KEY_P8_BASE64 \
             APPLE_API_KEY_ID APPLE_API_ISSUER_ID APPLE_TEAM_ID; do
             if [ -z "${!name}" ]; then
-              echo "::error::$name is not set on the desktop environment"
+              echo "::error::$name is not set on the $ENVIRONMENT environment"
               exit 1
             fi
           done
@@ -394,6 +414,7 @@ jobs:
       contents: read
       actions: read
     env:
+      TAU_DESKTOP_CHANNEL: ${{ needs.resolve.outputs.channel }}
       TAU_DESKTOP_PACKAGE_OUTPUT_ROOT: ${{ github.workspace }}/out/desktop/${{ matrix.platform }}
     steps:
       - name: Checkout the release
@@ -469,7 +490,22 @@ jobs:
           path: assets
           merge-multiple: true
 
+      # A staging prerelease carries the archives only: staging apps never
+      # check for updates, and no feed should name a staging build.
+      - name: Attach the staging archives
+        if: needs.resolve.outputs.channel == 'staging'
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ needs.resolve.outputs.tag }}
+        working-directory: assets
+        run: |
+          set -euo pipefail
+          sha256sum Tau-* > SHA256SUMS.txt
+          gh release upload "$TAG" Tau-* SHA256SUMS.txt --clobber
+
       - name: Attach the archives and update feeds
+        if: needs.resolve.outputs.channel != 'staging'
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
           GH_REPO: ${{ github.repository }}
@@ -499,6 +535,7 @@ jobs:
       # Installed apps poll /releases/latest/download/desktop-update-<platform>.json,
       # so marking this release latest is the moment the update goes out.
       - name: Mark the release latest
+        if: needs.resolve.outputs.channel != 'staging'
         env:
           GH_TOKEN: ${{ steps.bot.outputs.token }}
           GH_REPO: ${{ github.repository }}

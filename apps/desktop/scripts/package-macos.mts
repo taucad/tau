@@ -6,7 +6,7 @@
  * Environment: macOS, Xcode tools, built desktop/UI/native artifacts;
  * optional TAU_GEOSPEC_NATIVE_ASSEMBLY_ROOT selects a qualified assemble-package.sh output;
  * otherwise a verified current-source CI delivery snapshot is used;
- * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT;
+ * optional TAU_MACOS_PACKAGE_OUTPUT_ROOT; optional TAU_DESKTOP_CHANNEL (production, the default, or staging);
  * Apple credentials only for --release; --unsigned skips all package signing.
  * Usage: node --import @oxc-node/core/register scripts/package-macos.mts [--release | --unsigned] [--zip]
  * Output: <output root>/Tau-darwin-arm64/Tau.app, copied as APFS clones of its inputs; the distribution archive
@@ -31,7 +31,13 @@ import { packager } from '@electron/packager';
 import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 /* oxlint-disable no-restricted-imports -- Operational scripts are outside the app's # source alias. */
 import { copyGeoSpecNativeAssembly, copyGeoSpecSourceRelink, copyTree } from './runtime-closure.mjs';
-import { excludesBuildDiagnostics, resolveRuntimePackages, stageRuntimePackages } from './runtime-stage.mjs';
+import {
+  desktopManifestFields,
+  desktopPackageChannel,
+  excludesBuildDiagnostics,
+  resolveRuntimePackages,
+  stageRuntimePackages,
+} from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 type PackageMetadata = {
@@ -278,8 +284,12 @@ try {
     stagedDependencies: geospecNativeDependencies,
     /* Ad-hoc and unsigned packages back the packaged e2e lane, which points
      * the app at local services; a release ignores those overrides
-     * (`packagedOverridesEnabled` in src/main/environment.ts). */
-    manifestFields: release ? {} : { tauDesktop: { environmentOverrides: true } },
+     * (`packagedOverridesEnabled` in src/main/environment.ts). A staging
+     * package defaults to taucad.dev and never checks for updates. */
+    manifestFields: desktopManifestFields({
+      environmentOverrides: !release,
+      channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
+    }),
   });
 
   const packagePaths = await packager({

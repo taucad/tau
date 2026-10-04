@@ -17,6 +17,37 @@ import { randomUuid } from '@taucad/utils/id';
 
 let provider: FileSystemProvider | undefined;
 
+/** The fixture's settlement feed, exposed so its cancellation boundaries can be checked without a worker. */
+export async function* placementFacts(
+  facts: readonly TurnPlacementFact[],
+  wakes: Topic<void>,
+  signal: AbortSignal,
+): AsyncGenerator<TurnPlacementFact> {
+  let next = 0;
+  while (!signal.aborted) {
+    while (next < facts.length) {
+      yield facts[next++]!;
+    }
+    // oxlint-disable-next-line typescript/no-unnecessary-condition -- The signal can abort while the generator is suspended at yield.
+    if (signal.aborted) {
+      return;
+    }
+    // oxlint-disable-next-line no-await-in-loop -- a listen waits for its next fact.
+    await new Promise<void>((resolve) => {
+      const unsubscribe = wakes.subscribe(() => {
+        signal.removeEventListener('abort', onAbort);
+        unsubscribe();
+        resolve();
+      });
+      const onAbort = (): void => {
+        unsubscribe();
+        resolve();
+      };
+      signal.addEventListener('abort', onAbort, { once: true });
+    });
+  }
+}
+
 /** The provider the last {@link opfsProject} opened, until {@link disposeOpfsProject}. */
 export const opfsProvider = (): FileSystemProvider => {
   if (provider === undefined) {
@@ -79,27 +110,7 @@ export const livePlacementPort = (
       abandon: async ({ requestId }) => ({ requestId, status: 'applied' }),
       acknowledge: async ({ requestId }) => ({ requestId, status: 'applied' }),
       reconcile: async ({ requestId }) => ({ requestId, status: 'applied', held: [] }),
-      async *settlements({ signal }) {
-        let next = 0;
-        while (!signal.aborted) {
-          while (next < facts.length) {
-            yield facts[next++]!;
-          }
-          // oxlint-disable-next-line no-await-in-loop -- a listen waits for its next fact.
-          await new Promise<void>((resolve) => {
-            const abort = (): void => {
-              unsubscribe();
-              resolve();
-            };
-            const unsubscribe = wakes.subscribe(() => {
-              signal.removeEventListener('abort', abort);
-              unsubscribe();
-              resolve();
-            });
-            signal.addEventListener('abort', abort, { once: true });
-          });
-        }
-      },
+      settlements: ({ signal }) => placementFacts(facts, wakes, signal),
     },
   });
   return port1;

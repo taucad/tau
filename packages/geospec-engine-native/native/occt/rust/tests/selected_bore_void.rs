@@ -13,7 +13,7 @@ use support::current_profile::{bind_claim, bind_ingest};
 
 const QUALIFIED: &str = include_str!("fixtures/current-profile-01/qualified-results.json");
 const CURRENT_NUMERIC_PROFILE: &str =
-    include_str!("../../../../rust/tests/fixtures/current-profile-v5/numeric-profile.txt");
+    include_str!("../../../../rust/tests/fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
 
 fn qualified_record(index: usize) -> Value {
     let fixture: Value = serde_json::from_str(QUALIFIED).unwrap();

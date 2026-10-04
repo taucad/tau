@@ -225,9 +225,14 @@ export const createCanvasConfig = (
       {
         name: 'tau-canvas-styles',
         enforce: 'pre',
-        resolveId: (source, importer) => {
+        async resolveId(source, importer) {
           if (source === 'package.json' && importer?.startsWith(`${appRoot}${sep}`)) {
             return resolve(appRoot, '../package.json');
+          }
+          // A canvas in a linked Brain sits outside a worktree checkout; its workspace imports
+          // resolve as the app's do, or a worktree canvas renders the main checkout's libraries.
+          if (source.startsWith('@taucad/') && importer !== undefined && !importer.startsWith(`${repoRoot}${sep}`)) {
+            return this.resolve(source, resolve(appRoot, 'root.tsx'), { skipSelf: true });
           }
           if (!source.startsWith('#') || !importer) {
             return undefined;

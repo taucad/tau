@@ -7,6 +7,7 @@ import type { HttpAdapterHost } from '@nestjs/core';
 import { WebSocket, WebSocketServer } from 'ws';
 import type { RawData } from 'ws';
 
+import { hostFrameMaxPayload } from '#api/hosts/host-frame-relay.js';
 import { HostsGateway } from '#api/hosts/hosts.gateway.js';
 import { HostsService } from '#api/hosts/hosts.service.js';
 import type { DevWebSocketService, WebSocketConnectionHandler } from '#api/websocket/dev-websocket.service.js';
@@ -522,4 +523,49 @@ describe('HostsGateway in production', () => {
     }
     // Well under `ws`'s 30 s close timeout: the close handshake completes, so the socket cannot hold a drain.
   }, 5000);
+
+  it('closes a socket 1009 when one frame exceeds the host frame bound', async () => {
+    vi.stubEnv('DEV', false);
+    const server = createServer();
+    await new Promise<void>((resolve) => {
+      server.listen(0, '127.0.0.1', resolve);
+    });
+    const shutdown = new ShutdownService();
+    // Admission completes, so the socket is listening and resumed when the frame arrives.
+    const hostsService = {
+      authenticateDevice: vi.fn(async () => ({ id: 'agent_oversize' })),
+      registerControl: vi.fn(async () => undefined),
+    } as unknown as HostsService;
+    const gateway = new HostsGateway(
+      hostsService,
+      {} as DevWebSocketService,
+      {} as Auth,
+      { httpAdapter: { getInstance: () => ({ server }) } } as unknown as HttpAdapterHost,
+      new UpgradeRouter(shutdown),
+      shutdown,
+    );
+    try {
+      await gateway.onModuleInit();
+      const { port } = server.address() as AddressInfo;
+      const client = new WebSocket(`ws://127.0.0.1:${port}/v1/agents/control`);
+      await new Promise((resolve) => {
+        client.once('open', resolve);
+      });
+      const closed = new Promise<number>((resolve) => {
+        client.once('close', resolve);
+      });
+
+      await vi.waitFor(() => {
+        expect(hostsService.registerControl).toHaveBeenCalledOnce();
+      });
+      client.send(new Uint8Array(hostFrameMaxPayload + 1));
+
+      // `ws` refuses the frame with 1009 and emits 'error'; the gateway absorbs it rather than ending the process.
+      await expect(closed).resolves.toBe(1009);
+    } finally {
+      await gateway.onModuleDestroy();
+      server.closeAllConnections();
+      server.close();
+    }
+  }, 10_000);
 });

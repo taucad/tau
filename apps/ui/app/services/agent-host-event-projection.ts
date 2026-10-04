@@ -94,7 +94,7 @@ const errorText = (value: unknown, fallback: string): string => {
  * @returns The failure's text.
  * @public
  */
-export const runFailureText = (detail: unknown): string => errorText(detail, 'Browser agent host failed.');
+export const runFailureText = (detail: unknown): string => errorText(detail, 'The agent host failed.');
 
 const blockKey = (runId: string, messageId: string, contentIndex: number): string =>
   JSON.stringify([runId, messageId, contentIndex]);

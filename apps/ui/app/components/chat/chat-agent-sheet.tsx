@@ -51,11 +51,13 @@ import { useModels } from '#hooks/use-models.js';
 import type { Model } from '#hooks/use-models.js';
 import { useSettingsDialog } from '#hooks/use-settings-dialog.js';
 import type { AgentHostPlacementTarget } from '#lib/agent-host-placement.js';
+import { daemonPlacementOf } from '#lib/agent-host-placement.js';
 import { isDesktopTarget } from '#lib/build-target.js';
 import { externalAgentFixCommand, externalAgentRefusalReasons } from '#lib/external-agent.js';
 import { ariaKeyShortcuts, formatKeyCombination } from '#utils/keys.utils.js';
 import type { KeyCombination } from '#utils/keys.utils.js';
 import { groupModelsByTier } from '#utils/model-tier.js';
+import { tauModelReadiness, tauModelRefusal } from '#utils/new-chat-execution.js';
 import { modelReasoning, offeredReasoningLevels } from '#utils/model-reasoning.js';
 
 /** How a level reads, everywhere a person sees one. @public */
@@ -556,6 +558,7 @@ function RunsOn({
     canSelectExecution,
   } = useChatComposer();
   const browserHost = useBrowserAgentHostProjectAvailability(model.provider.id);
+  const { catalog } = useModels();
   if (current.kind === 'acp') {
     return (
       <p data-slot='runs-on' className='flex items-start gap-2 border-t px-4 py-3 text-xs text-muted-foreground'>
@@ -575,11 +578,14 @@ function RunsOn({
         }))
       : []),
   ];
-  const hostId = execution.kind === 'tau' ? execution.hostId : undefined;
+  /* Where the turn is actually placed: on desktop an unpinned Tau execution runs on this computer (D18). */
+  const hostId = execution.kind === 'tau' ? daemonPlacementOf(execution) : undefined;
   const value = hostId ?? 'browser';
   const placement = placements.find((entry) => entry.hostId === hostId);
+  const modelRefusal = tauModelRefusal(model.id, tauModelReadiness(model.id, catalog));
   const note =
-    hostId === undefined
+    modelRefusal ??
+    (hostId === undefined
       ? browserHost.status === 'unavailable'
         ? browserHost.reason
         : browserHost.status === 'available'
@@ -589,7 +595,7 @@ function RunsOn({
         ? `${placement.label} is offline`
         : placement?.workspaceRoot
           ? `In ${placement.workspaceRoot}`
-          : `Runs on ${placement === undefined ? hostId : hostWhere(placement)}`;
+          : `Runs on ${placement === undefined ? hostId : hostWhere(placement)}`);
   if (options.length < 2) {
     return (
       <p data-slot='runs-on' className='flex items-start gap-2 border-t px-4 py-3 text-xs text-muted-foreground'>
@@ -973,7 +979,7 @@ function Sheet({
     model: { setActiveModel },
     execution: { execution, setActiveExecution },
   } = useChatComposer();
-  const { defaultExecution } = useModels();
+  const { lastTauExecution } = useModels();
   const [view, setView] = useState<SheetView>('settings');
   /* The agent whose models the list shows: the chat's own, or one browsed from the agents. */
   const [browseKey, setBrowseKey] = useState(current.key);
@@ -1021,9 +1027,9 @@ function Sheet({
         /* Keeps the host and the chosen level; the level is clamped where it is read. */
         setActiveModel(modelId);
       } else {
-        /* Back from an external agent: the remembered level, on this device's own Tau. */
+        /* Back from an external agent: the last Tau level, on this device's own Tau. */
         setActiveExecution({
-          ...defaultExecution,
+          ...lastTauExecution,
           model: modelId,
           ...(isDesktopTarget() ? { hostId: 'desktop' } : {}),
         });

@@ -1,915 +1,1121 @@
 # libcascade — NCollection (17)
 
-19 top-level symbols. Signatures are verbatim typescript.
+18 top-level symbols. Signatures are verbatim typescript.
 
-NCollection_DynamicArray_BOPDS_InterfFZ: declare class NCollection_DynamicArray_BOPDS_InterfFZ
+NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient: declare class NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.Bind (method)
+  Bind(theKey: Standard_Transient, theItem: Standard_Transient): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfFZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfFZ;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.Bound (method)
+  Bound(theKey: Standard_Transient, theItem: Standard_Transient): Standard_Transient;
 
-  Append(theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.TryBind (method)
+  TryBind(theKey: Standard_Transient, theItem: Standard_Transient): boolean;
 
-  InsertAfter(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.TryBound (method)
+  TryBound(theKey: Standard_Transient, theItem: Standard_Transient): Standard_Transient;
 
-  InsertBefore(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.IsBound (method)
+  IsBound(theKey: Standard_Transient): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.UnBind (method)
+  UnBind(theKey: Standard_Transient): boolean;
 
-  Appended(): BOPDS_InterfFZ;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.Seek (method)
+  Seek(theKey: Standard_Transient): Standard_Transient;
 
-  Value(theIndex: number): BOPDS_InterfFZ;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.ChangeSeek (method)
+  ChangeSeek(theKey: Standard_Transient): Standard_Transient;
 
-  First(): BOPDS_InterfFZ;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.ChangeFind (method)
+  ChangeFind(theKey: Standard_Transient): Standard_Transient;
 
-  ChangeFirst(): BOPDS_InterfFZ;
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): BOPDS_InterfFZ;
-
-  ChangeLast(): BOPDS_InterfFZ;
-
-  ChangeValue(theIndex: number): BOPDS_InterfFZ;
-
-  SetValue(theIndex: number, theValue: BOPDS_InterfFZ): BOPDS_InterfFZ;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_handle_Standard_Transient_handle_Standard_Transient.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_BOPDS_InterfVE: declare class NCollection_DynamicArray_BOPDS_InterfVE
+NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape: declare class NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.Bind (method)
+  Bind(theKey: StepRepr_RepresentationItem, theItem: TopoDS_Shape): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVE, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVE;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.Bound (method)
+  Bound(theKey: StepRepr_RepresentationItem, theItem: TopoDS_Shape): TopoDS_Shape;
 
-  Append(theValue: BOPDS_InterfVE): BOPDS_InterfVE;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.TryBind (method)
+  TryBind(theKey: StepRepr_RepresentationItem, theItem: TopoDS_Shape): boolean;
 
-  InsertAfter(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.TryBound (method)
+  TryBound(theKey: StepRepr_RepresentationItem, theItem: TopoDS_Shape): TopoDS_Shape;
 
-  InsertBefore(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.IsBound (method)
+  IsBound(theKey: StepRepr_RepresentationItem): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.UnBind (method)
+  UnBind(theKey: StepRepr_RepresentationItem): boolean;
 
-  Appended(): BOPDS_InterfVE;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.Seek (method)
+  Seek(theKey: StepRepr_RepresentationItem): TopoDS_Shape;
 
-  Value(theIndex: number): BOPDS_InterfVE;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.ChangeSeek (method)
+  ChangeSeek(theKey: StepRepr_RepresentationItem): TopoDS_Shape;
 
-  First(): BOPDS_InterfVE;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.ChangeFind (method)
+  ChangeFind(theKey: StepRepr_RepresentationItem): TopoDS_Shape;
 
-  ChangeFirst(): BOPDS_InterfVE;
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): BOPDS_InterfVE;
-
-  ChangeLast(): BOPDS_InterfVE;
-
-  ChangeValue(theIndex: number): BOPDS_InterfVE;
-
-  SetValue(theIndex: number, theValue: BOPDS_InterfVE): BOPDS_InterfVE;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_handle_StepRepr_RepresentationItem_TopoDS_Shape.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_BOPDS_InterfVF: declare class NCollection_DynamicArray_BOPDS_InterfVF
+NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape: declare class NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.Bind (method)
+  Bind(theKey: StepShape_TopologicalRepresentationItem, theItem: TopoDS_Shape): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVF, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVF;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.Bound (method)
+  Bound(theKey: StepShape_TopologicalRepresentationItem, theItem: TopoDS_Shape): TopoDS_Shape;
 
-  Append(theValue: BOPDS_InterfVF): BOPDS_InterfVF;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.TryBind (method)
+  TryBind(theKey: StepShape_TopologicalRepresentationItem, theItem: TopoDS_Shape): boolean;
 
-  InsertAfter(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.TryBound (method)
+  TryBound(theKey: StepShape_TopologicalRepresentationItem, theItem: TopoDS_Shape): TopoDS_Shape;
 
-  InsertBefore(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.IsBound (method)
+  IsBound(theKey: StepShape_TopologicalRepresentationItem): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.UnBind (method)
+  UnBind(theKey: StepShape_TopologicalRepresentationItem): boolean;
 
-  Appended(): BOPDS_InterfVF;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.Seek (method)
+  Seek(theKey: StepShape_TopologicalRepresentationItem): TopoDS_Shape;
 
-  Value(theIndex: number): BOPDS_InterfVF;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.ChangeSeek (method)
+  ChangeSeek(theKey: StepShape_TopologicalRepresentationItem): TopoDS_Shape;
 
-  First(): BOPDS_InterfVF;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.ChangeFind (method)
+  ChangeFind(theKey: StepShape_TopologicalRepresentationItem): TopoDS_Shape;
 
-  ChangeFirst(): BOPDS_InterfVF;
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): BOPDS_InterfVF;
-
-  ChangeLast(): BOPDS_InterfVF;
-
-  ChangeValue(theIndex: number): BOPDS_InterfVF;
-
-  SetValue(theIndex: number, theValue: BOPDS_InterfVF): BOPDS_InterfVF;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_handle_StepShape_TopologicalRepresentationItem_TopoDS_Shape.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_BOPDS_InterfVV: declare class NCollection_DynamicArray_BOPDS_InterfVV
+NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute: declare class NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.Bind (method)
+  Bind(theKey: TDF_Attribute, theItem: TDF_Attribute): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVV, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVV;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.Bound (method)
+  Bound(theKey: TDF_Attribute, theItem: TDF_Attribute): TDF_Attribute;
 
-  Append(theValue: BOPDS_InterfVV): BOPDS_InterfVV;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.TryBind (method)
+  TryBind(theKey: TDF_Attribute, theItem: TDF_Attribute): boolean;
 
-  InsertAfter(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.TryBound (method)
+  TryBound(theKey: TDF_Attribute, theItem: TDF_Attribute): TDF_Attribute;
 
-  InsertBefore(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.IsBound (method)
+  IsBound(theKey: TDF_Attribute): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.UnBind (method)
+  UnBind(theKey: TDF_Attribute): boolean;
 
-  Appended(): BOPDS_InterfVV;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.Seek (method)
+  Seek(theKey: TDF_Attribute): TDF_Attribute;
 
-  Value(theIndex: number): BOPDS_InterfVV;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.ChangeSeek (method)
+  ChangeSeek(theKey: TDF_Attribute): TDF_Attribute;
 
-  First(): BOPDS_InterfVV;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.ChangeFind (method)
+  ChangeFind(theKey: TDF_Attribute): TDF_Attribute;
 
-  ChangeFirst(): BOPDS_InterfVV;
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): BOPDS_InterfVV;
-
-  ChangeLast(): BOPDS_InterfVV;
-
-  ChangeValue(theIndex: number): BOPDS_InterfVV;
-
-  SetValue(theIndex: number, theValue: BOPDS_InterfVV): BOPDS_InterfVV;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_handle_TDF_Attribute_handle_TDF_Attribute.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_BOPDS_InterfVZ: declare class NCollection_DynamicArray_BOPDS_InterfVZ
+NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject: declare class NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.Bind (method)
+  Bind(theKey: XCAFDimTolObjects_GeomToleranceObject, theItem: XCAFDimTolObjects_DatumObject): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfVZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfVZ;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.Bound (method)
+  Bound(theKey: XCAFDimTolObjects_GeomToleranceObject, theItem: XCAFDimTolObjects_DatumObject): XCAFDimTolObjects_DatumObject;
 
-  Append(theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.TryBind (method)
+  TryBind(theKey: XCAFDimTolObjects_GeomToleranceObject, theItem: XCAFDimTolObjects_DatumObject): boolean;
 
-  InsertAfter(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.TryBound (method)
+  TryBound(theKey: XCAFDimTolObjects_GeomToleranceObject, theItem: XCAFDimTolObjects_DatumObject): XCAFDimTolObjects_DatumObject;
 
-  InsertBefore(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.IsBound (method)
+  IsBound(theKey: XCAFDimTolObjects_GeomToleranceObject): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.UnBind (method)
+  UnBind(theKey: XCAFDimTolObjects_GeomToleranceObject): boolean;
 
-  Appended(): BOPDS_InterfVZ;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.Seek (method)
+  Seek(theKey: XCAFDimTolObjects_GeomToleranceObject): XCAFDimTolObjects_DatumObject;
 
-  Value(theIndex: number): BOPDS_InterfVZ;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.ChangeSeek (method)
+  ChangeSeek(theKey: XCAFDimTolObjects_GeomToleranceObject): XCAFDimTolObjects_DatumObject;
 
-  First(): BOPDS_InterfVZ;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.ChangeFind (method)
+  ChangeFind(theKey: XCAFDimTolObjects_GeomToleranceObject): XCAFDimTolObjects_DatumObject;
 
-  ChangeFirst(): BOPDS_InterfVZ;
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): BOPDS_InterfVZ;
-
-  ChangeLast(): BOPDS_InterfVZ;
-
-  ChangeValue(theIndex: number): BOPDS_InterfVZ;
-
-  SetValue(theIndex: number, theValue: BOPDS_InterfVZ): BOPDS_InterfVZ;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_handle_XCAFDimTolObjects_GeomToleranceObject_handle_XCAFDimTolObjects_DatumObject.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_BOPDS_InterfZZ: declare class NCollection_DynamicArray_BOPDS_InterfZZ
+NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial: declare class NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.Bind (method)
+  Bind(theKey: XCAFDoc_VisMaterial, theItem: XCAFDoc_VisMaterial): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfZZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfZZ;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.Bound (method)
+  Bound(theKey: XCAFDoc_VisMaterial, theItem: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
 
-  Append(theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.TryBind (method)
+  TryBind(theKey: XCAFDoc_VisMaterial, theItem: XCAFDoc_VisMaterial): boolean;
 
-  InsertAfter(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.TryBound (method)
+  TryBound(theKey: XCAFDoc_VisMaterial, theItem: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
 
-  InsertBefore(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.IsBound (method)
+  IsBound(theKey: XCAFDoc_VisMaterial): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.UnBind (method)
+  UnBind(theKey: XCAFDoc_VisMaterial): boolean;
 
-  Appended(): BOPDS_InterfZZ;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.Seek (method)
+  Seek(theKey: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
 
-  Value(theIndex: number): BOPDS_InterfZZ;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.ChangeSeek (method)
+  ChangeSeek(theKey: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
 
-  First(): BOPDS_InterfZZ;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.ChangeFind (method)
+  ChangeFind(theKey: XCAFDoc_VisMaterial): XCAFDoc_VisMaterial;
 
-  ChangeFirst(): BOPDS_InterfZZ;
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): BOPDS_InterfZZ;
-
-  ChangeLast(): BOPDS_InterfZZ;
-
-  ChangeValue(theIndex: number): BOPDS_InterfZZ;
-
-  SetValue(theIndex: number, theValue: BOPDS_InterfZZ): BOPDS_InterfZZ;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_handle_XCAFDoc_VisMaterial_handle_XCAFDoc_VisMaterial.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_BOPDS_Point: declare class NCollection_DynamicArray_BOPDS_Point
+NCollection_DataMap_int_NCollection_List_TopoDS_Shape: declare class NCollection_DataMap_int_NCollection_List_TopoDS_Shape extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.Bind (method)
+  Bind(theKey: number, theItem: NCollection_List_TopoDS_Shape): boolean;
 
-  Assign(theOther: unknown, theOwnAllocator: boolean): unknown;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.Bound (method)
+  Bound(theKey: number, theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-  Append(theValue: BOPDS_Point): BOPDS_Point;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.TryBind (method)
+  TryBind(theKey: number, theItem: NCollection_List_TopoDS_Shape): boolean;
 
-  InsertAfter(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.TryBound (method)
+  TryBound(theKey: number, theItem: NCollection_List_TopoDS_Shape): NCollection_List_TopoDS_Shape;
 
-  InsertBefore(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.IsBound (method)
+  IsBound(theKey: number): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.UnBind (method)
+  UnBind(theKey: number): boolean;
 
-  Appended(): BOPDS_Point;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.Seek (method)
+  Seek(theKey: number): NCollection_List_TopoDS_Shape;
 
-  Value(theIndex: number): BOPDS_Point;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.ChangeSeek (method)
+  ChangeSeek(theKey: number): NCollection_List_TopoDS_Shape;
 
-  First(): BOPDS_Point;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.ChangeFind (method)
+  ChangeFind(theKey: number): NCollection_List_TopoDS_Shape;
 
-  ChangeFirst(): BOPDS_Point;
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): BOPDS_Point;
-
-  ChangeLast(): BOPDS_Point;
-
-  ChangeValue(theIndex: number): BOPDS_Point;
-
-  SetValue(theIndex: number, theValue: BOPDS_Point): BOPDS_Point;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_int_NCollection_List_TopoDS_Shape.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_ExtremaPC_ExtremumResult: declare class NCollection_DynamicArray_ExtremaPC_ExtremumResult
+NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int: declare class NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.constructor (constructor)
+  constructor();
+  constructor(theOther: NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.Exchange (method)
+  Exchange(theOther: NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int): void;
 
-  Length(): number;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.Assign (method)
+  Assign(theOther: NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int): NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int;
 
-  Upper(): number;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.Bind (method)
+  Bind(theKey: number, theItem: TColStd_PackedMapOfInteger): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_ExtremaPC_ExtremumResult, theOwnAllocator: boolean): NCollection_DynamicArray_ExtremaPC_ExtremumResult;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.Bound (method)
+  Bound(theKey: number, theItem: TColStd_PackedMapOfInteger): TColStd_PackedMapOfInteger;
 
-  Append(theValue: unknown): unknown;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.TryBind (method)
+  TryBind(theKey: number, theItem: TColStd_PackedMapOfInteger): boolean;
 
-  InsertAfter(theIndex: number, theValue: unknown): unknown;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.TryBound (method)
+  TryBound(theKey: number, theItem: TColStd_PackedMapOfInteger): TColStd_PackedMapOfInteger;
 
-  InsertBefore(theIndex: number, theValue: unknown): unknown;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.IsBound (method)
+  IsBound(theKey: number): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.UnBind (method)
+  UnBind(theKey: number): boolean;
 
-  Appended(): unknown;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.Seek (method)
+  Seek(theKey: number): TColStd_PackedMapOfInteger;
 
-  Value(theIndex: number): unknown;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.ChangeSeek (method)
+  ChangeSeek(theKey: number): TColStd_PackedMapOfInteger;
 
-  First(): unknown;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.ChangeFind (method)
+  ChangeFind(theKey: number): TColStd_PackedMapOfInteger;
 
-  ChangeFirst(): unknown;
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): unknown;
-
-  ChangeLast(): unknown;
-
-  ChangeValue(theIndex: number): unknown;
-
-  SetValue(theIndex: number, theValue: unknown): unknown;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_int_NCollection_PackedMap_int_NCollection_DefaultHasher_int.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_MathRoot_NullInterval: declare class NCollection_DynamicArray_MathRoot_NullInterval
+NCollection_DataMap_int_TopoDS_Shape: declare class NCollection_DataMap_int_TopoDS_Shape extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_int_TopoDS_Shape.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_int_TopoDS_Shape.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_int_TopoDS_Shape.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_int_TopoDS_Shape.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_int_TopoDS_Shape.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_int_TopoDS_Shape.Bind (method)
+  Bind(theKey: number, theItem: TopoDS_Shape): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_MathRoot_NullInterval, theOwnAllocator: boolean): NCollection_DynamicArray_MathRoot_NullInterval;
+  // NCollection_DataMap_int_TopoDS_Shape.Bound (method)
+  Bound(theKey: number, theItem: TopoDS_Shape): TopoDS_Shape;
 
-  Append(theValue: unknown): unknown;
+  // NCollection_DataMap_int_TopoDS_Shape.TryBind (method)
+  TryBind(theKey: number, theItem: TopoDS_Shape): boolean;
 
-  InsertAfter(theIndex: number, theValue: unknown): unknown;
+  // NCollection_DataMap_int_TopoDS_Shape.TryBound (method)
+  TryBound(theKey: number, theItem: TopoDS_Shape): TopoDS_Shape;
 
-  InsertBefore(theIndex: number, theValue: unknown): unknown;
+  // NCollection_DataMap_int_TopoDS_Shape.IsBound (method)
+  IsBound(theKey: number): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_int_TopoDS_Shape.UnBind (method)
+  UnBind(theKey: number): boolean;
 
-  Appended(): unknown;
+  // NCollection_DataMap_int_TopoDS_Shape.Seek (method)
+  Seek(theKey: number): TopoDS_Shape;
 
-  Value(theIndex: number): unknown;
+  // NCollection_DataMap_int_TopoDS_Shape.ChangeSeek (method)
+  ChangeSeek(theKey: number): TopoDS_Shape;
 
-  First(): unknown;
+  // NCollection_DataMap_int_TopoDS_Shape.ChangeFind (method)
+  ChangeFind(theKey: number): TopoDS_Shape;
 
-  ChangeFirst(): unknown;
+  // NCollection_DataMap_int_TopoDS_Shape.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): unknown;
-
-  ChangeLast(): unknown;
-
-  ChangeValue(theIndex: number): unknown;
-
-  SetValue(theIndex: number, theValue: unknown): unknown;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_int_TopoDS_Shape.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_int_TopoDS_Shape.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock: declare class NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock
+NCollection_DataMap_int_handle_MAT_BasicElt: declare class NCollection_DataMap_int_handle_MAT_BasicElt extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_int_handle_MAT_BasicElt.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.Bind (method)
+  Bind(theKey: number, theItem: MAT_BasicElt): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock, theOwnAllocator: boolean): NCollection_DynamicArray_NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.Bound (method)
+  Bound(theKey: number, theItem: MAT_BasicElt): MAT_BasicElt;
 
-  Append(theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.TryBind (method)
+  TryBind(theKey: number, theItem: MAT_BasicElt): boolean;
 
-  InsertAfter(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.TryBound (method)
+  TryBound(theKey: number, theItem: MAT_BasicElt): MAT_BasicElt;
 
-  InsertBefore(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.IsBound (method)
+  IsBound(theKey: number): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.UnBind (method)
+  UnBind(theKey: number): boolean;
 
-  Appended(): NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.Seek (method)
+  Seek(theKey: number): MAT_BasicElt;
 
-  Value(theIndex: number): NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.ChangeSeek (method)
+  ChangeSeek(theKey: number): MAT_BasicElt;
 
-  First(): NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.ChangeFind (method)
+  ChangeFind(theKey: number): MAT_BasicElt;
 
-  ChangeFirst(): NCollection_List_handle_BOPDS_PaveBlock;
+  // NCollection_DataMap_int_handle_MAT_BasicElt.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): NCollection_List_handle_BOPDS_PaveBlock;
-
-  ChangeLast(): NCollection_List_handle_BOPDS_PaveBlock;
-
-  ChangeValue(theIndex: number): NCollection_List_handle_BOPDS_PaveBlock;
-
-  SetValue(theIndex: number, theValue: NCollection_List_handle_BOPDS_PaveBlock): NCollection_List_handle_BOPDS_PaveBlock;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_int_handle_MAT_BasicElt.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_int_handle_MAT_BasicElt.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_TopoDS_Face: declare class NCollection_DynamicArray_TopoDS_Face
+NCollection_DataMap_int_int: declare class NCollection_DataMap_int_int extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DataMap_int_int.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
+  constructor(theHasher: unknown, theNbBuckets?: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DataMap_int_int.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DataMap_int_int.GetHasher (method)
+  GetHasher(): unknown;
 
-  Lower(): number;
+  // NCollection_DataMap_int_int.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Upper(): number;
+  // NCollection_DataMap_int_int.ReSize (method)
+  ReSize(N: number): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DataMap_int_int.Bind (method)
+  Bind(theKey: number, theItem: number): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_TopoDS_Face, theOwnAllocator: boolean): NCollection_DynamicArray_TopoDS_Face;
+  // NCollection_DataMap_int_int.Bound (method)
+  Bound(theKey: number, theItem: number): number;
 
-  Append(theValue: TopoDS_Face): TopoDS_Face;
+  // NCollection_DataMap_int_int.TryBind (method)
+  TryBind(theKey: number, theItem: number): boolean;
 
-  InsertAfter(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
+  // NCollection_DataMap_int_int.TryBound (method)
+  TryBound(theKey: number, theItem: number): number;
 
-  InsertBefore(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
+  // NCollection_DataMap_int_int.IsBound (method)
+  IsBound(theKey: number): boolean;
 
-  EraseLast(): void;
+  // NCollection_DataMap_int_int.UnBind (method)
+  UnBind(theKey: number): boolean;
 
-  Appended(): TopoDS_Face;
+  // NCollection_DataMap_int_int.Seek (method)
+  Seek(theKey: number): number;
 
-  Value(theIndex: number): TopoDS_Face;
+  // NCollection_DataMap_int_int.ChangeSeek (method)
+  ChangeSeek(theKey: number): number;
 
-  First(): TopoDS_Face;
+  // NCollection_DataMap_int_int.ChangeFind (method)
+  ChangeFind(theKey: number): number;
 
-  ChangeFirst(): TopoDS_Face;
+  // NCollection_DataMap_int_int.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  Last(): TopoDS_Face;
-
-  ChangeLast(): TopoDS_Face;
-
-  ChangeValue(theIndex: number): TopoDS_Face;
-
-  SetValue(theIndex: number, theValue: TopoDS_Face): TopoDS_Face;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DataMap_int_int.delete (method)
   delete(): void;
 
+  // NCollection_DataMap_int_int.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_TopoDS_Shape: declare class NCollection_DynamicArray_TopoDS_Shape
+NCollection_DoubleMap_int_TDF_Label: declare class NCollection_DoubleMap_int_TDF_Label extends NCollection_BaseMap
 
-  constructor
+  // NCollection_DoubleMap_int_TDF_Label.constructor (constructor)
+  constructor();
+  constructor(theOther: unknown);
+  constructor(theNbBuckets: number, theAllocator?: NCollection_BaseAllocator);
 
-  Size(): number;
+  // NCollection_DoubleMap_int_TDF_Label.Exchange (method)
+  Exchange(theOther: unknown): void;
 
-  Length(): number;
+  // NCollection_DoubleMap_int_TDF_Label.Assign (method)
+  Assign(theOther: unknown): unknown;
 
-  Lower(): number;
+  // NCollection_DoubleMap_int_TDF_Label.ReSize (method)
+  ReSize(N: number): void;
 
-  Upper(): number;
+  // NCollection_DoubleMap_int_TDF_Label.Bind (method)
+  Bind(theKey1: number, theKey2: TDF_Label): void;
 
-  IsEmpty(): boolean;
+  // NCollection_DoubleMap_int_TDF_Label.TryBind (method)
+  TryBind(theKey1: number, theKey2: TDF_Label): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_TopoDS_Shape, theOwnAllocator: boolean): NCollection_DynamicArray_TopoDS_Shape;
+  // NCollection_DoubleMap_int_TDF_Label.AreBound (method)
+  AreBound(theKey1: number, theKey2: TDF_Label): boolean;
 
-  Append(theValue: TopoDS_Shape): TopoDS_Shape;
+  // NCollection_DoubleMap_int_TDF_Label.IsBound1 (method)
+  IsBound1(theKey1: number): boolean;
 
-  InsertAfter(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
+  // NCollection_DoubleMap_int_TDF_Label.IsBound2 (method)
+  IsBound2(theKey2: TDF_Label): boolean;
 
-  InsertBefore(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
+  // NCollection_DoubleMap_int_TDF_Label.UnBind1 (method)
+  UnBind1(theKey1: number): boolean;
 
-  EraseLast(): void;
+  // NCollection_DoubleMap_int_TDF_Label.UnBind2 (method)
+  UnBind2(theKey2: TDF_Label): boolean;
 
-  Appended(): TopoDS_Shape;
+  // NCollection_DoubleMap_int_TDF_Label.Seek1 (method)
+  Seek1(theKey1: number): TDF_Label;
 
-  Value(theIndex: number): TopoDS_Shape;
+  // NCollection_DoubleMap_int_TDF_Label.Seek2 (method)
+  Seek2(theKey2: TDF_Label): number;
 
-  First(): TopoDS_Shape;
+  // NCollection_DoubleMap_int_TDF_Label.Clear (method)
+  Clear(doReleaseMemory: boolean): void;
+  Clear(theAllocator: NCollection_BaseAllocator): void;
 
-  ChangeFirst(): TopoDS_Shape;
-
-  Last(): TopoDS_Shape;
-
-  ChangeLast(): TopoDS_Shape;
-
-  ChangeValue(theIndex: number): TopoDS_Shape;
-
-  SetValue(theIndex: number, theValue: TopoDS_Shape): TopoDS_Shape;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
+  // NCollection_DoubleMap_int_TDF_Label.delete (method)
   delete(): void;
 
+  // NCollection_DoubleMap_int_TDF_Label.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_double: declare class NCollection_DynamicArray_double
+NCollection_DynamicArray_BOPDS_Curve: declare class NCollection_DynamicArray_BOPDS_Curve
 
-  constructor
+  // NCollection_DynamicArray_BOPDS_Curve.constructor (constructor)
+  constructor(theIncrement?: number);
+  constructor(theOther: NCollection_DynamicArray_BOPDS_Curve);
+  constructor(theIncrement: number, theAllocator: NCollection_BaseAllocator);
 
+  // NCollection_DynamicArray_BOPDS_Curve.Size (method)
   Size(): number;
 
+  // NCollection_DynamicArray_BOPDS_Curve.Length (method)
   Length(): number;
 
+  // NCollection_DynamicArray_BOPDS_Curve.Lower (method)
   Lower(): number;
 
+  // NCollection_DynamicArray_BOPDS_Curve.Upper (method)
   Upper(): number;
 
+  // NCollection_DynamicArray_BOPDS_Curve.IsEmpty (method)
   IsEmpty(): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_double, theOwnAllocator: boolean): NCollection_DynamicArray_double;
+  // NCollection_DynamicArray_BOPDS_Curve.Assign (method)
+  Assign(theOther: NCollection_DynamicArray_BOPDS_Curve, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_Curve;
 
-  Append(theValue: number): number;
+  // NCollection_DynamicArray_BOPDS_Curve.Append (method)
+  Append(theValue: BOPDS_Curve): BOPDS_Curve;
 
-  InsertAfter(theIndex: number, theValue: number): number;
+  // NCollection_DynamicArray_BOPDS_Curve.InsertAfter (method)
+  InsertAfter(theIndex: number, theValue: BOPDS_Curve): BOPDS_Curve;
 
-  InsertBefore(theIndex: number, theValue: number): number;
+  // NCollection_DynamicArray_BOPDS_Curve.InsertBefore (method)
+  InsertBefore(theIndex: number, theValue: BOPDS_Curve): BOPDS_Curve;
 
+  // NCollection_DynamicArray_BOPDS_Curve.EraseLast (method)
   EraseLast(): void;
 
-  Appended(): number;
+  // NCollection_DynamicArray_BOPDS_Curve.Appended (method)
+  Appended(): BOPDS_Curve;
 
-  Value(theIndex: number): number;
+  // NCollection_DynamicArray_BOPDS_Curve.Value (method)
+  Value(theIndex: number): BOPDS_Curve;
 
-  First(): number;
+  // NCollection_DynamicArray_BOPDS_Curve.First (method)
+  First(): BOPDS_Curve;
 
-  ChangeFirst(): number;
+  // NCollection_DynamicArray_BOPDS_Curve.ChangeFirst (method)
+  ChangeFirst(): BOPDS_Curve;
 
-  Last(): number;
+  // NCollection_DynamicArray_BOPDS_Curve.Last (method)
+  Last(): BOPDS_Curve;
 
-  ChangeLast(): number;
+  // NCollection_DynamicArray_BOPDS_Curve.ChangeLast (method)
+  ChangeLast(): BOPDS_Curve;
 
-  ChangeValue(theIndex: number): number;
+  // NCollection_DynamicArray_BOPDS_Curve.ChangeValue (method)
+  ChangeValue(theIndex: number): BOPDS_Curve;
 
-  SetValue(theIndex: number, theValue: number): number;
+  // NCollection_DynamicArray_BOPDS_Curve.SetValue (method)
+  SetValue(theIndex: number, theValue: BOPDS_Curve): BOPDS_Curve;
 
+  // NCollection_DynamicArray_BOPDS_Curve.Clear (method)
   Clear(theReleaseMemory?: boolean): void;
 
+  // NCollection_DynamicArray_BOPDS_Curve.SetIncrement (method)
   SetIncrement(theIncrement: number): void;
 
+  // NCollection_DynamicArray_BOPDS_Curve.delete (method)
   delete(): void;
 
+  // NCollection_DynamicArray_BOPDS_Curve.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_gp_Pnt2d: declare class NCollection_DynamicArray_gp_Pnt2d
+NCollection_DynamicArray_BOPDS_FaceInfo: declare class NCollection_DynamicArray_BOPDS_FaceInfo
 
-  constructor
+  // NCollection_DynamicArray_BOPDS_FaceInfo.constructor (constructor)
+  constructor(theIncrement?: number);
+  constructor(theOther: NCollection_DynamicArray_BOPDS_FaceInfo);
+  constructor(theIncrement: number, theAllocator: NCollection_BaseAllocator);
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Size (method)
   Size(): number;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Length (method)
   Length(): number;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Lower (method)
   Lower(): number;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Upper (method)
   Upper(): number;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.IsEmpty (method)
   IsEmpty(): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_gp_Pnt2d, theOwnAllocator: boolean): NCollection_DynamicArray_gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Assign (method)
+  Assign(theOther: NCollection_DynamicArray_BOPDS_FaceInfo, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_FaceInfo;
 
-  Append(theValue: gp_Pnt2d): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Append (method)
+  Append(theValue: BOPDS_FaceInfo): BOPDS_FaceInfo;
 
-  InsertAfter(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.InsertAfter (method)
+  InsertAfter(theIndex: number, theValue: BOPDS_FaceInfo): BOPDS_FaceInfo;
 
-  InsertBefore(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.InsertBefore (method)
+  InsertBefore(theIndex: number, theValue: BOPDS_FaceInfo): BOPDS_FaceInfo;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.EraseLast (method)
   EraseLast(): void;
 
-  Appended(): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Appended (method)
+  Appended(): BOPDS_FaceInfo;
 
-  Value(theIndex: number): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Value (method)
+  Value(theIndex: number): BOPDS_FaceInfo;
 
-  First(): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.First (method)
+  First(): BOPDS_FaceInfo;
 
-  ChangeFirst(): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.ChangeFirst (method)
+  ChangeFirst(): BOPDS_FaceInfo;
 
-  Last(): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Last (method)
+  Last(): BOPDS_FaceInfo;
 
-  ChangeLast(): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.ChangeLast (method)
+  ChangeLast(): BOPDS_FaceInfo;
 
-  ChangeValue(theIndex: number): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.ChangeValue (method)
+  ChangeValue(theIndex: number): BOPDS_FaceInfo;
 
-  SetValue(theIndex: number, theValue: gp_Pnt2d): gp_Pnt2d;
+  // NCollection_DynamicArray_BOPDS_FaceInfo.SetValue (method)
+  SetValue(theIndex: number, theValue: BOPDS_FaceInfo): BOPDS_FaceInfo;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.Clear (method)
   Clear(theReleaseMemory?: boolean): void;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.SetIncrement (method)
   SetIncrement(theIncrement: number): void;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.delete (method)
   delete(): void;
 
+  // NCollection_DynamicArray_BOPDS_FaceInfo.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_gp_XYZ: declare class NCollection_DynamicArray_gp_XYZ
+NCollection_DynamicArray_BOPDS_InterfEE: declare class NCollection_DynamicArray_BOPDS_InterfEE
 
-  constructor
+  // NCollection_DynamicArray_BOPDS_InterfEE.constructor (constructor)
+  constructor(theIncrement?: number);
+  constructor(theOther: NCollection_DynamicArray_BOPDS_InterfEE);
+  constructor(theIncrement: number, theAllocator: NCollection_BaseAllocator);
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.Size (method)
   Size(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.Length (method)
   Length(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.Lower (method)
   Lower(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.Upper (method)
   Upper(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.IsEmpty (method)
   IsEmpty(): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_gp_XYZ, theOwnAllocator: boolean): NCollection_DynamicArray_gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.Assign (method)
+  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfEE, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfEE;
 
-  Append(theValue: gp_XYZ): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.Append (method)
+  Append(theValue: BOPDS_InterfEE): BOPDS_InterfEE;
 
-  InsertAfter(theIndex: number, theValue: gp_XYZ): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.InsertAfter (method)
+  InsertAfter(theIndex: number, theValue: BOPDS_InterfEE): BOPDS_InterfEE;
 
-  InsertBefore(theIndex: number, theValue: gp_XYZ): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.InsertBefore (method)
+  InsertBefore(theIndex: number, theValue: BOPDS_InterfEE): BOPDS_InterfEE;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.EraseLast (method)
   EraseLast(): void;
 
-  Appended(): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.Appended (method)
+  Appended(): BOPDS_InterfEE;
 
-  Value(theIndex: number): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.Value (method)
+  Value(theIndex: number): BOPDS_InterfEE;
 
-  First(): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.First (method)
+  First(): BOPDS_InterfEE;
 
-  ChangeFirst(): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.ChangeFirst (method)
+  ChangeFirst(): BOPDS_InterfEE;
 
-  Last(): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.Last (method)
+  Last(): BOPDS_InterfEE;
 
-  ChangeLast(): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.ChangeLast (method)
+  ChangeLast(): BOPDS_InterfEE;
 
-  ChangeValue(theIndex: number): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.ChangeValue (method)
+  ChangeValue(theIndex: number): BOPDS_InterfEE;
 
-  SetValue(theIndex: number, theValue: gp_XYZ): gp_XYZ;
+  // NCollection_DynamicArray_BOPDS_InterfEE.SetValue (method)
+  SetValue(theIndex: number, theValue: BOPDS_InterfEE): BOPDS_InterfEE;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.Clear (method)
   Clear(theReleaseMemory?: boolean): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.SetIncrement (method)
   SetIncrement(theIncrement: number): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.delete (method)
   delete(): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEE.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_handle_Adaptor3d_Surface: declare class NCollection_DynamicArray_handle_Adaptor3d_Surface
+NCollection_DynamicArray_BOPDS_InterfEF: declare class NCollection_DynamicArray_BOPDS_InterfEF
 
-  constructor
+  // NCollection_DynamicArray_BOPDS_InterfEF.constructor (constructor)
+  constructor(theIncrement?: number);
+  constructor(theOther: NCollection_DynamicArray_BOPDS_InterfEF);
+  constructor(theIncrement: number, theAllocator: NCollection_BaseAllocator);
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.Size (method)
   Size(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.Length (method)
   Length(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.Lower (method)
   Lower(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.Upper (method)
   Upper(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.IsEmpty (method)
   IsEmpty(): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_handle_Adaptor3d_Surface, theOwnAllocator: boolean): NCollection_DynamicArray_handle_Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.Assign (method)
+  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfEF, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfEF;
 
-  Append(theValue: Adaptor3d_Surface): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.Append (method)
+  Append(theValue: BOPDS_InterfEF): BOPDS_InterfEF;
 
-  InsertAfter(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.InsertAfter (method)
+  InsertAfter(theIndex: number, theValue: BOPDS_InterfEF): BOPDS_InterfEF;
 
-  InsertBefore(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.InsertBefore (method)
+  InsertBefore(theIndex: number, theValue: BOPDS_InterfEF): BOPDS_InterfEF;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.EraseLast (method)
   EraseLast(): void;
 
-  Appended(): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.Appended (method)
+  Appended(): BOPDS_InterfEF;
 
-  Value(theIndex: number): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.Value (method)
+  Value(theIndex: number): BOPDS_InterfEF;
 
-  First(): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.First (method)
+  First(): BOPDS_InterfEF;
 
-  ChangeFirst(): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.ChangeFirst (method)
+  ChangeFirst(): BOPDS_InterfEF;
 
-  Last(): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.Last (method)
+  Last(): BOPDS_InterfEF;
 
-  ChangeLast(): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.ChangeLast (method)
+  ChangeLast(): BOPDS_InterfEF;
 
-  ChangeValue(theIndex: number): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.ChangeValue (method)
+  ChangeValue(theIndex: number): BOPDS_InterfEF;
 
-  SetValue(theIndex: number, theValue: Adaptor3d_Surface): Adaptor3d_Surface;
+  // NCollection_DynamicArray_BOPDS_InterfEF.SetValue (method)
+  SetValue(theIndex: number, theValue: BOPDS_InterfEF): BOPDS_InterfEF;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.Clear (method)
   Clear(theReleaseMemory?: boolean): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.SetIncrement (method)
   SetIncrement(theIncrement: number): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.delete (method)
   delete(): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEF.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_handle_NCollection_HSequence_int: declare class NCollection_DynamicArray_handle_NCollection_HSequence_int
+NCollection_DynamicArray_BOPDS_InterfEZ: declare class NCollection_DynamicArray_BOPDS_InterfEZ
 
-  constructor
+  // NCollection_DynamicArray_BOPDS_InterfEZ.constructor (constructor)
+  constructor(theIncrement?: number);
+  constructor(theOther: NCollection_DynamicArray_BOPDS_InterfEZ);
+  constructor(theIncrement: number, theAllocator: NCollection_BaseAllocator);
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Size (method)
   Size(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Length (method)
   Length(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Lower (method)
   Lower(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Upper (method)
   Upper(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.IsEmpty (method)
   IsEmpty(): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_handle_NCollection_HSequence_int, theOwnAllocator: boolean): NCollection_DynamicArray_handle_NCollection_HSequence_int;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Assign (method)
+  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfEZ, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfEZ;
 
-  Append(theValue: unknown): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Append (method)
+  Append(theValue: BOPDS_InterfEZ): BOPDS_InterfEZ;
 
-  InsertAfter(theIndex: number, theValue: unknown): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.InsertAfter (method)
+  InsertAfter(theIndex: number, theValue: BOPDS_InterfEZ): BOPDS_InterfEZ;
 
-  InsertBefore(theIndex: number, theValue: unknown): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.InsertBefore (method)
+  InsertBefore(theIndex: number, theValue: BOPDS_InterfEZ): BOPDS_InterfEZ;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.EraseLast (method)
   EraseLast(): void;
 
-  Appended(): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Appended (method)
+  Appended(): BOPDS_InterfEZ;
 
-  Value(theIndex: number): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Value (method)
+  Value(theIndex: number): BOPDS_InterfEZ;
 
-  First(): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.First (method)
+  First(): BOPDS_InterfEZ;
 
-  ChangeFirst(): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.ChangeFirst (method)
+  ChangeFirst(): BOPDS_InterfEZ;
 
-  Last(): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Last (method)
+  Last(): BOPDS_InterfEZ;
 
-  ChangeLast(): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.ChangeLast (method)
+  ChangeLast(): BOPDS_InterfEZ;
 
-  ChangeValue(theIndex: number): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.ChangeValue (method)
+  ChangeValue(theIndex: number): BOPDS_InterfEZ;
 
-  SetValue(theIndex: number, theValue: unknown): unknown;
+  // NCollection_DynamicArray_BOPDS_InterfEZ.SetValue (method)
+  SetValue(theIndex: number, theValue: BOPDS_InterfEZ): BOPDS_InterfEZ;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.Clear (method)
   Clear(theReleaseMemory?: boolean): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.SetIncrement (method)
   SetIncrement(theIncrement: number): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.delete (method)
   delete(): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfEZ.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
-NCollection_DynamicArray_handle_Standard_Transient: declare class NCollection_DynamicArray_handle_Standard_Transient
+NCollection_DynamicArray_BOPDS_InterfFF: declare class NCollection_DynamicArray_BOPDS_InterfFF
 
-  constructor
+  // NCollection_DynamicArray_BOPDS_InterfFF.constructor (constructor)
+  constructor(theIncrement?: number);
+  constructor(theOther: NCollection_DynamicArray_BOPDS_InterfFF);
+  constructor(theIncrement: number, theAllocator: NCollection_BaseAllocator);
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.Size (method)
   Size(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.Length (method)
   Length(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.Lower (method)
   Lower(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.Upper (method)
   Upper(): number;
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.IsEmpty (method)
   IsEmpty(): boolean;
 
-  Assign(theOther: NCollection_DynamicArray_handle_Standard_Transient, theOwnAllocator: boolean): NCollection_DynamicArray_handle_Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.Assign (method)
+  Assign(theOther: NCollection_DynamicArray_BOPDS_InterfFF, theOwnAllocator: boolean): NCollection_DynamicArray_BOPDS_InterfFF;
 
-  Append(theValue: Standard_Transient): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.Append (method)
+  Append(theValue: BOPDS_InterfFF): BOPDS_InterfFF;
 
-  InsertAfter(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.InsertAfter (method)
+  InsertAfter(theIndex: number, theValue: BOPDS_InterfFF): BOPDS_InterfFF;
 
-  InsertBefore(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.InsertBefore (method)
+  InsertBefore(theIndex: number, theValue: BOPDS_InterfFF): BOPDS_InterfFF;
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.EraseLast (method)
   EraseLast(): void;
 
-  Appended(): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.Appended (method)
+  Appended(): BOPDS_InterfFF;
 
-  Value(theIndex: number): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.Value (method)
+  Value(theIndex: number): BOPDS_InterfFF;
 
-  First(): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.First (method)
+  First(): BOPDS_InterfFF;
 
-  ChangeFirst(): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.ChangeFirst (method)
+  ChangeFirst(): BOPDS_InterfFF;
 
-  Last(): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.Last (method)
+  Last(): BOPDS_InterfFF;
 
-  ChangeLast(): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.ChangeLast (method)
+  ChangeLast(): BOPDS_InterfFF;
 
-  ChangeValue(theIndex: number): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.ChangeValue (method)
+  ChangeValue(theIndex: number): BOPDS_InterfFF;
 
-  SetValue(theIndex: number, theValue: Standard_Transient): Standard_Transient;
+  // NCollection_DynamicArray_BOPDS_InterfFF.SetValue (method)
+  SetValue(theIndex: number, theValue: BOPDS_InterfFF): BOPDS_InterfFF;
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.Clear (method)
   Clear(theReleaseMemory?: boolean): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.SetIncrement (method)
   SetIncrement(theIncrement: number): void;
 
+  // NCollection_DynamicArray_BOPDS_InterfFF.delete (method)
   delete(): void;
 
-  [Symbol.dispose](): void;
-
-NCollection_DynamicArray_int: declare class NCollection_DynamicArray_int
-
-  constructor
-
-  Size(): number;
-
-  Length(): number;
-
-  Lower(): number;
-
-  Upper(): number;
-
-  IsEmpty(): boolean;
-
-  Assign(theOther: NCollection_DynamicArray_int, theOwnAllocator: boolean): NCollection_DynamicArray_int;
-
-  Append(theValue: number): number;
-
-  InsertAfter(theIndex: number, theValue: number): number;
-
-  InsertBefore(theIndex: number, theValue: number): number;
-
-  EraseLast(): void;
-
-  Appended(): number;
-
-  Value(theIndex: number): number;
-
-  First(): number;
-
-  ChangeFirst(): number;
-
-  Last(): number;
-
-  ChangeLast(): number;
-
-  ChangeValue(theIndex: number): number;
-
-  SetValue(theIndex: number, theValue: number): number;
-
-  Clear(theReleaseMemory?: boolean): void;
-
-  SetIncrement(theIncrement: number): void;
-
-  delete(): void;
-
+  // NCollection_DynamicArray_BOPDS_InterfFF.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

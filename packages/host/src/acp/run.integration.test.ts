@@ -22,12 +22,13 @@ import { afterEach, describe, expect, it, onTestFinished, vi } from 'vitest';
 import { captureChatLogs, chatLogDestination } from '@taucad/formal/capture';
 
 import { ClientSideConnection } from '@agentclientprotocol/sdk';
-import type { Client, SessionConfigOption, SessionUpdate, StopReason } from '@agentclientprotocol/sdk';
+import type { Agent, Client, SessionConfigOption, SessionUpdate, StopReason } from '@agentclientprotocol/sdk';
 
 import type { AgentLauncher } from '@taucad/agent-host/launcher';
 import type { AgentChannelAdmissionConfig } from '@taucad/agent-host/wire';
 import type { AgentLogEvent, ExternalAgentTurn, JsonValue, ProviderMessage, ToolRegistry } from '@taucad/agent-host';
 import { reduceEventLog } from '@taucad/agent-host';
+import { parseQuestionsFile, serializeAnswersFile } from '@taucad/chat';
 
 import { createIsomorphicGitRevisionPort } from '@taucad/revisions';
 import { NodeFsProvider } from '@taucad/filesystem/backend/node';
@@ -160,10 +161,9 @@ const startHarness = async (
   roots.push(workspaceRoot);
   await writeFile(join(workspaceRoot, 'main.scad'), 'cube(10);\n', 'utf8');
   const api = await startStubApi();
-  const toolRegistry = options.mcpRegistry ?? registry;
   const mcp = createHostMcpEndpoint({
     secret: randomBytes(32).toString('base64url'),
-    registry: toolRegistry,
+    registry: options.mcpRegistry ?? registry,
     workspaceRoot,
     ...(options.mcpNow === undefined ? {} : { now: options.mcpNow }),
   });
@@ -206,8 +206,8 @@ const startHarness = async (
     gatewayBaseUrl: `http://127.0.0.1:${String(api.port)}/`,
     model: { id: 'unused-by-external-runs', contextWindow: 1000 },
     systemPrompt: 'unused by external runs',
-    toolRegistry,
-    ...(revisions === undefined ? {} : { turnPlacement: revisions.placement(() => toolRegistry) }),
+    toolRegistry: registry,
+    ...(revisions === undefined ? {} : { turnPlacement: revisions.placement(() => registry) }),
     externalAgents: createAcpExternalAgentPort({
       agents: options.agents ?? [fakeAgent, otherFakeAgent],
       workspaceRoot,
@@ -1545,10 +1545,7 @@ describe('the external agent run kind', () => {
   }, 30_000);
 });
 
-/* oxlint-disable-next-line typescript/no-deprecated -- the same long-lived
- * connection shape `runAcpSession` uses; the replacement scopes a connection to
- * one callback, which cannot outlive the multi-prompt cases below. */
-type FixtureConnection = ClientSideConnection;
+type FixtureConnection = Required<Agent>;
 
 /**
  * A fixture agent driven directly over ACP, with no launcher in between.
@@ -1845,12 +1842,12 @@ describe('the fixture agent', () => {
     const { connection } = await openFixture({ mode: 'silent' });
 
     const answered = await Promise.race([
-      connection
-        .initialize({
+      Promise.resolve(
+        connection.initialize({
           protocolVersion: 1,
           clientCapabilities: { fs: { readTextFile: false, writeTextFile: false }, terminal: false },
-        })
-        .then(() => 'answered'),
+        }),
+      ).then(() => 'answered'),
       new Promise<string>((resolve) => {
         setTimeout(() => {
           resolve('silent');
@@ -2351,8 +2348,24 @@ describe('one ACP session per chat', () => {
     expect(
       arrangementInputs.map((message) => (message.role === 'tool-input' ? message.call?.toolCallId : undefined)),
     ).toEqual(['mcp-arrange-1', 'mcp-arrange-conflict-2']);
-    expect(arrangementOutputs).toHaveLength(2);
-    expect(JSON.stringify(arrangementOutputs.at(-1)?.content)).toContain('RECORD_CONFLICT');
+    expect(arrangementOutputs).toMatchObject([
+      {
+        call: { toolCallId: 'mcp-arrange-1' },
+        isError: false,
+        content: {
+          status: 'written',
+          revisions: [
+            { path: '.tau/workbench/layout.json', digest: `sha256:${'a'.repeat(64)}`, previousDigest: 'missing' },
+          ],
+          visible: [{ kind: 'view', view: 'front' }],
+        },
+      },
+      {
+        call: { toolCallId: 'mcp-arrange-conflict-2' },
+        isError: true,
+        content: { errorCode: 'RECORD_CONFLICT', message: 'The workbench arrangement changed.' },
+      },
+    ]);
   }, 90_000);
 
   it('gives a second agent in the same chat its own session', async () => {
@@ -2578,6 +2591,53 @@ describe('authentication, initialize and prompt content', () => {
     expect(sent(harness.frames, 'session/prompt')).toBe(0);
   }, 30_000);
 
+  it('asks a form elicitation through the chat question record and answers with the person’s choice', async () => {
+    const harness = await startHarness();
+    const chatDirectory = join(harness.workspaceRoot, '.tau', 'chats', 'chat-ask');
+    /* The person's client: answer the ask as soon as it is recorded. */
+    const answerWhenAsked = async (): Promise<void> => {
+      for (let attempt = 0; attempt < 200; attempt += 1) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+        const text = await readFile(join(chatDirectory, 'questions.yaml'), 'utf8').catch(() => undefined);
+        const [recorded] = parseQuestionsFile(text).asks;
+        if (recorded !== undefined) {
+          // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+          await writeFile(
+            join(chatDirectory, 'answers.yaml'),
+            serializeAnswersFile({
+              version: 1,
+              answers: {
+                // eslint-disable-next-line @typescript-eslint/naming-convention -- claude-agent-acp's wire field name
+                [recorded.id]: { questions: { question_0: { choice: 'PLA', at: new Date().toISOString() } } },
+              },
+            }),
+          );
+          return;
+        }
+        // oxlint-disable-next-line eslint/no-await-in-loop -- polling is sequential by design
+        await new Promise((resolve) => {
+          setTimeout(resolve, 50);
+        });
+      }
+    };
+    await Promise.all([
+      runTurn(harness, { chatId: 'chat-ask', runId: 'run-ask', text: 'ask-form noask' }),
+      answerWhenAsked(),
+    ]);
+
+    const [ask] = parseQuestionsFile(await readFile(join(chatDirectory, 'questions.yaml'), 'utf8')).asks;
+    expect(ask).toMatchObject({
+      callId: 'ask-1',
+      source: 'acp',
+      agentId: 'codex',
+      questions: [{ id: 'question_0', header: 'Material', recommended: 0, allowsText: true }],
+      resolution: { outcome: 'answered' },
+    });
+    const events = await readLog(harness.workspaceRoot, 'chat-ask');
+    expect(JSON.stringify(events)).toContain(String.raw`ask-form: accept {\"question_0\":\"PLA\"}`);
+    expect(lifecycleOf(events).at(-1)).toBe('completed');
+  }, 30_000);
+
   it('records a url elicitation as a durable login, resolves it, and finishes the turn', async () => {
     const harness = await startHarness();
 
@@ -2596,7 +2656,7 @@ describe('authentication, initialize and prompt content', () => {
     /* The agent was told Tau can present one; that is why it offered the flow. */
     expect(
       harness.frames.some(
-        (frame) => frame.direction === 'client->agent' && frame.frame.includes('"elicitation":{"url":{}}'),
+        (frame) => frame.direction === 'client->agent' && frame.frame.includes('"elicitation":{"url":{},"form":{}}'),
       ),
     ).toBe(true);
   }, 30_000);

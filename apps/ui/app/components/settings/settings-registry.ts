@@ -305,9 +305,14 @@ const cloudSections: readonly SettingsSectionDefinition[] = tauCloudEnabled
           : section,
       );
 /* Machines are hosted by the desktop services utility; the web build has no
- * host to add one to, so the section is hidden rather than shown empty. */
+ * host to add one to, so the section is hidden rather than shown empty. Desktop's
+ * Home is a folder on disk, so it has no browser storage to show. */
 export const settingsSections: readonly SettingsSectionDefinition[] = isDesktopTarget()
-  ? cloudSections
+  ? cloudSections.map((section) =>
+      section.id === 'filesystem'
+        ? { ...section, entries: section.entries.filter((entry) => entry.id !== 'browser-storage') }
+        : section,
+    )
   : cloudSections.filter((section) => section.id !== 'machines');
 
 function normalizeSearch(value: string): string {

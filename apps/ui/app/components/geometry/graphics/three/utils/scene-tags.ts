@@ -9,6 +9,8 @@ import type { Object3D } from 'three';
 export const sceneTag = {
   /** Section-view controls, contour fills, and diagnostic outlines excluded from model processing. */
   sectionViewHelper: 'isSectionViewHelper',
+  /** Batched draw objects excluded from canonical model processing and interaction. */
+  gltfSurfacePresentation: 'isGltfSurfacePresentation',
   /** Measurement UI meshes excluded from model raycasting. */
   measurementUi: 'isMeasurementUi',
 } as const;

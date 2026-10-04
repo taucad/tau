@@ -1,7 +1,7 @@
 [
   {
-    "name": "total (ESM JS) — includes first-class parameter-unit inference",
+    "name": "total (ESM JS) — parameter-unit inference and shared content codecs",
     "path": "dist/**/*.mjs",
-    "limit": "7 kB"
+    "limit": "7.5 kB"
   }
 ]

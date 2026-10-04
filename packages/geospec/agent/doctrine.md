@@ -21,7 +21,7 @@ describe('main geometry', () => {
 });
 ```
 
-Python/pytest use `load_model` / `expect_geo` from `geospec`. A `GeoSpecEngine` context or pytest's `geospec_engine_factory` supplies the rooted host; code models require its export capability.
+Python: `load_model` / `expect_geo` from `geospec`. Below needs pytest's plugin scope; `geospec_engine_factory` configures its host. Standalone needs a `GeoSpecEngine` context; code models need export capability. Desktop `test_model` discovers TS/JS only.
 
 ```python
 from geospec import expect_geo, load_model
@@ -36,8 +36,8 @@ def test_envelope():
 Bounds and physical properties are insufficient. Cover major components, named features, variants, dimensions/positions, disjoint counts, closure, interference and supported exact features. Explicitly report unsupported requirements; proxies cannot fulfill them.
 
 - `toHaveBoundingBox`: size/position.
-- `toHaveConnectedComponents`: disjoint chunks; adjust tolerance only for physically touching parts.
-- `toBeWatertight`: each geometry unit is a closed manifold. Closed surfaces alone do not prove a Boolean fuse or one material-connected solid; neither does an AABB cluster count. State that qualification as unsupported when the necessary evidence is unavailable.
+- `toHaveConnectedComponents`: qualified material connectivity; visual touching cannot justify tolerance changes.
+- `toBeWatertight`: closed edge incidence, not manifold validity, fusion or material connectivity. Bounds prove none of these. Missing evidence is unsupported.
 - `toHaveSurfaceArea`, `toHaveVolume`, `toHaveCenterOfMass`, `toHaveMass`: physical measurements.
 - `toHaveNoComponentInterference`: overlap; allow deliberate press fits.
 - `loadModel({ file, format: 'step' })`: use BRep evidence for supported topology and feature assertions. Missing occurrence, interference, clearance, containment, lumen, wall, section or motion evidence is unsupported, not a pass or an envelope substitute.
@@ -45,3 +45,5 @@ Bounds and physical properties are insufficient. Cover major components, named f
 Test assemblies and independent units; preserve sibling coverage when adding files. Non-top-level geometry needs kernel export/invocation, not test removal.
 
 Fix geometry at its root; never weaken tolerances, delete assertions, or reduce detail to pass.
+
+Host/framework API: `public-api-index.md`; ordinary authoring: `api-index.md`.

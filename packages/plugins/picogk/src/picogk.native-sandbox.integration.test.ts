@@ -22,7 +22,11 @@ import { picogk } from '#index.js';
 type ResourceManifest = {
   readonly workerPath: string;
   readonly workerSha256: string;
-  readonly resourceFiles: ReadonlyArray<{ readonly path: string; readonly sha256: string; readonly label: string }>;
+  readonly resourceFiles: ReadonlyArray<{
+    readonly path: string;
+    readonly sha256: string;
+    readonly label: string;
+  }>;
 };
 
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
@@ -121,7 +125,10 @@ describe('PicoGK native sandbox', () => {
     };
     writeFileSync(paths.homeCanary, 'secret');
     writeFileSync(paths.tempCanary, 'secret');
-    const client = createTestRuntimeClient({ runtime, files: { 'main.cs': hostileSource(paths) } });
+    const client = createTestRuntimeClient({
+      runtime,
+      files: { 'main.cs': hostileSource(paths) },
+    });
     const document = client.open({ source: { path: 'main.cs' }, watch: false });
     try {
       const rendered = await document.evaluation();
@@ -136,7 +143,10 @@ describe('PicoGK native sandbox', () => {
       const report = rendered.evaluation.issues.map(({ message }) => message).join('\n');
       const probe = /TAU_SANDBOX_PROBE (?<json>\{.*\})/u.exec(report)?.groups?.['json'];
       expect(probe, report).toBeDefined();
-      const outcomes = JSON.parse(probe!) as { readonly import: Outcomes; readonly main: Outcomes };
+      const outcomes = JSON.parse(probe!) as {
+        readonly import: Outcomes;
+        readonly main: Outcomes;
+      };
       for (const phase of ['import', 'main'] as const) {
         const outcome = outcomes[phase];
         expect(denied, `${phase} home_read ${outcome.home_read}`).toContain(outcome.home_read);

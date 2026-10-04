@@ -38,7 +38,7 @@ const prepareMacBundle = (): string => {
   const targetBundle = join(overrideRoot, 'Electron.app');
   const icon = resolve(desktopRoot, 'resources/icon.icns');
   const stampPath = join(overrideRoot, '.tau-brand');
-  const stamp = `${electronExecutable}\n${statSync(icon).size}:${statSync(icon).mtimeMs}\n`;
+  const stamp = `${electronExecutable}\n${statSync(icon).size}:${statSync(icon).mtimeMs}\nmicrophone-dictation\n`;
 
   if (existsSync(targetBundle) && existsSync(stampPath) && readFileSync(stampPath, 'utf8') === stamp) {
     return join(targetBundle, 'Contents/MacOS/Electron');
@@ -53,6 +53,13 @@ const prepareMacBundle = (): string => {
   run('/usr/bin/plutil', ['-replace', 'CFBundleName', '-string', 'Tau', plist]);
   run('/usr/bin/plutil', ['-replace', 'CFBundleIdentifier', '-string', 'com.taucad.tau.dev', plist]);
   run('/usr/bin/plutil', ['-replace', 'CFBundleIconFile', '-string', 'tau.icns', plist]);
+  run('/usr/bin/plutil', [
+    '-replace',
+    'NSMicrophoneUsageDescription',
+    '-string',
+    'Tau uses your microphone to dictate messages when you start dictation.',
+    plist,
+  ]);
   copyFileSync(icon, join(targetBundle, 'Contents/Resources/tau.icns'));
   run('/usr/bin/codesign', ['--force', '--deep', '--sign', '-', targetBundle]);
   writeFileSync(stampPath, stamp);

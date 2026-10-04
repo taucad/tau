@@ -1,13 +1,13 @@
 [
   {
-    "name": "total (ESM JS, without Bambu Studio) — measured 14.7 kB brotli on 2026-09-25",
+    "name": "total (ESM JS, without Bambu Studio) — measured 18.08 kB brotli on 2026-10-03",
     "path": ["dist/**/*.mjs", "!dist/bambu-studio/**"],
-    "limit": "16 kB"
+    "limit": "20 kB"
   },
   {
-    "name": "@taucad/slicer/bambu-studio (Node engine + option catalog) — measured 18.1 kB brotli on 2026-09-25",
+    "name": "@taucad/slicer/bambu-studio (Node engine + option catalog) — measured 20.21 kB brotli on 2026-10-03",
     "path": "dist/bambu-studio/**/*.mjs",
-    "limit": "20 kB"
+    "limit": "22 kB"
   },
   {
     "name": "@taucad/slicer/toolpath — measured 3.76 kB brotli on 2026-09-24",

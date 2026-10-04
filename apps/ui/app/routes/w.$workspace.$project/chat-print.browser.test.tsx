@@ -1,11 +1,10 @@
 import '#styles/global.css';
-import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { page } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import {
   agentRequest,
-  bambuStudioVersion,
   createBambuStudio,
   createBridge,
   createFixture,
@@ -94,22 +93,32 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     </TooltipProvider>,
   );
   if (scenario === 'studio') {
-    // The real printer with Bambu Studio: presets, then the Quality settings open with one change.
-    await screen.findByText(`Slicing with Bambu Studio ${bambuStudioVersion}`);
+    // The real printer with Bambu Studio: presets, then Advanced settings with its overrides and one change.
     await screen.findByRole('group', { name: 'Bambu Studio presets' });
-    await page.getByRole('button', { name: 'More settings' }).click();
+    await page.getByRole('button', { name: /^Advanced settings/u }).click();
+    await screen.findByRole('group', { name: 'Bambu Studio overrides' });
     await page.getByRole('button', { name: 'Group: Quality' }).click();
     await page.getByRole('spinbutton', { name: 'Input for Layer Height' }).fill('0.16');
     fireEvent.blur(screen.getByRole('spinbutton', { name: 'Input for Layer Height' }));
     await screen.findByRole('button', { name: 'Reset Layer Height' });
+    // Headless Chromium draws few frames between actions, so the stages' open animations would still
+    // be running when measured; finish them (time-based only: scroll shadows follow the scroller).
+    for (const animation of document.getAnimations()) {
+      if (animation.timeline === document.timeline && animation.effect?.getComputedTiming().endTime !== Infinity) {
+        animation.finish();
+      }
+    }
   } else if (scenario === 'prepare') {
-    await screen.findByRole('article', { name: 'Workshop X1C, Ready' });
-    await page.getByRole('region', { name: 'Prepare' }).getByRole('button', { name: 'Slice and preview' }).click();
-    await screen.findByLabelText('Slice result');
+    // The Machine select names the printer and its status; slicing is the pane's action bar.
+    await waitFor(() => {
+      expect(screen.getByRole('combobox', { name: 'Machine' })).toHaveTextContent('Workshop X1CReady');
+    });
+    await page.getByRole('button', { name: 'Slice and preview' }).click();
+    await screen.findByRole('group', { name: 'Slice result' });
   } else {
     const name = 'Print request awaiting you: pyramid.gcode.3mf';
     const region = await screen.findByRole('region', { name });
-    expect(within(region).getByRole('button', { name: 'Open printer preview' })).toBeEnabled();
+    expect(within(region).getByRole('button', { name: 'Preview' })).toBeEnabled();
     await page.getByRole('region', { name }).getByRole('button', { name: 'Accept' }).click();
     const confirmation = await within(region).findByRole('group', { name: 'Confirm before starting' });
     if (scenario === 'busy') {
@@ -166,6 +175,20 @@ describe('Print pane screenshots', () => {
       expect(screen.getByRole('combobox', { name: label }).getBoundingClientRect().toJSON()).toEqual(before.toJSON());
     },
   );
+
+  it('should space the Prepare setup rows evenly', async () => {
+    await page.viewport(800, 1200);
+    await mount('studio', 720);
+    // The filament presets are overrides under Advanced settings, not Prepare setup rows.
+    const rows = ['Profile', 'Plate', 'Material', 'Process'].map((label) =>
+      screen
+        .getByRole('combobox', { name: label })
+        .closest(String.raw`.group\/field`)!
+        .getBoundingClientRect(),
+    );
+    const gaps = rows.slice(1).map((row, index) => row.top - rows[index]!.bottom);
+    expect(gaps).toEqual(gaps.map(() => gaps[0]));
+  });
 
   for (const scenario of ['prepare', 'approval', 'busy', 'studio'] as const) {
     for (const [size, width] of Object.entries(widths)) {

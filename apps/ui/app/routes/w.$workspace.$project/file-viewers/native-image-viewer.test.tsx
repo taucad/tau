@@ -205,10 +205,12 @@ describe('NativeImageViewer', () => {
       await userEvent.click(screen.getByRole('button', { name: 'Zoom in' }));
       expect(screen.getByText('125%')).toBeInTheDocument();
       const firstOutcome = service.peekOutcome('preview.png');
+      // The viewer's raw bytes come from the classified content the service already cached.
+      expect(proxy.readFile).toHaveBeenCalledOnce();
 
       emitFileChanged({ type: 'fileWritten', path: 'preview.png', backend: 'indexeddb' });
       await waitFor(() => {
-        expect(proxy.readFile).toHaveBeenCalledTimes(3);
+        expect(proxy.readFile).toHaveBeenCalledTimes(2);
         expect(digest).toHaveBeenCalledTimes(2);
       });
       await act(async () => {
@@ -229,6 +231,8 @@ describe('NativeImageViewer', () => {
       await waitFor(() => {
         expect(screen.getByRole('img', { name: 'preview.png' })).toHaveAttribute('src', 'blob:second');
       });
+      expect(proxy.readFile).toHaveBeenCalledTimes(3);
+      expect(digest).toHaveBeenCalledTimes(3);
       expect(service.peekOutcome('preview.png')).not.toBe(firstOutcome);
       expect(URL.revokeObjectURL).toHaveBeenCalledWith('blob:first');
     } finally {

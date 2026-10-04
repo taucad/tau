@@ -31,10 +31,12 @@ import {
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
 
+import { FuseState, FuseV1Options, getCurrentFuseWire } from '@electron/fuses';
+
 import quickLookManifest from '#macos/quick-look-formats.json' with { type: 'json' };
 
 // oxlint-disable-next-line no-restricted-imports -- Operational scripts are outside the app's # source alias.
-import { parseMacosPackageMode } from './macos-package-mode.mjs';
+import { macosPackageFuses, parseMacosPackageMode } from './macos-package-mode.mjs';
 
 const desktopRoot = resolve(import.meta.dirname, '..');
 const workspaceRoot = resolve(desktopRoot, '../..');
@@ -494,6 +496,19 @@ for (const path of filesUnder(appPath)) {
   arm64MachObjectCount += 1;
 }
 
+/* A package with Electron's default fuses is a general-purpose Node runtime that
+ * honours NODE_OPTIONS and loads an unchecked ASAR (security assessment F-3). */
+const fuseWire = await getCurrentFuseWire(appPath);
+for (const [fuse, enabled] of Object.entries(macosPackageFuses({ release }))) {
+  const option = Number(fuse) as FuseV1Options;
+  const expected = enabled ? FuseState.ENABLE : FuseState.DISABLE;
+  if (fuseWire[option] !== expected) {
+    throw new Error(
+      `Electron fuse ${FuseV1Options[option]} is ${String(fuseWire[option])}, expected ${String(expected)}.`,
+    );
+  }
+}
+
 verifyPythonResource('arm64');
 const picoGkWorker = verifyPicoGkResource();
 if (!unsigned) {
@@ -590,7 +605,8 @@ const picoGkResult = picoGkBuild?.['result'] as
       readonly artifactPath?: unknown;
       readonly byteLength?: unknown;
       readonly sha256?: unknown;
-      readonly components?: unknown;
+      readonly prototypes?: unknown;
+      readonly occurrences?: unknown;
     }
   | undefined;
 const picoGkArtifact = typeof picoGkResult?.artifactPath === 'string' ? resolve(picoGkResult.artifactPath) : '';
@@ -600,8 +616,10 @@ if (
   typeof picoGkResult?.byteLength !== 'number' ||
   picoGkResult.byteLength <= 0 ||
   typeof picoGkResult.sha256 !== 'string' ||
-  !Array.isArray(picoGkResult.components) ||
-  picoGkResult.components.length !== 1 ||
+  !Array.isArray(picoGkResult.prototypes) ||
+  picoGkResult.prototypes.length !== 1 ||
+  !Array.isArray(picoGkResult.occurrences) ||
+  picoGkResult.occurrences.length !== 1 ||
   !existsSync(picoGkArtifact) ||
   readFileSync(picoGkArtifact).byteLength !== picoGkResult.byteLength ||
   sha256(picoGkArtifact) !== picoGkResult.sha256

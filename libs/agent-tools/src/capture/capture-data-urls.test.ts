@@ -24,6 +24,6 @@ describe('captureFilesToDataUrls', () => {
     const [dataUrl] = captureFilesToDataUrls([{ mimeType: 'image/webp', bytes }]);
 
     expect(dataUrl?.startsWith(base64Prefix)).toBe(true);
-    expect(new Uint8Array(Buffer.from(dataUrl!.slice(base64Prefix.length), 'base64'))).toStrictEqual(bytes);
+    expect(Buffer.from(dataUrl!.slice(base64Prefix.length), 'base64').equals(Buffer.from(bytes))).toBe(true);
   });
 });

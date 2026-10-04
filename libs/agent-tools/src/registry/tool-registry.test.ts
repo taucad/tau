@@ -91,6 +91,7 @@ const fileTools = [
   'grep',
   'glob_search',
   'update_todos',
+  'ask_questions',
 ];
 
 describe('createChatToolRegistry listing', () => {
@@ -182,6 +183,7 @@ describe('createChatToolRegistry listing', () => {
     expect(names.toSorted()).toStrictEqual(
       [
         'arrange_workbench',
+        'ask_questions',
         'create_file',
         'delete_file',
         'edit_file',
@@ -201,7 +203,7 @@ describe('createChatToolRegistry listing', () => {
 
   /* EQ6 (W7 RA-S9): a call that writes more than one path, or outside the
    * workspace, runs its batch in call order; every other tool stays parallel. */
-  it('should declare sequential execution only where one call spans more than one path', () => {
+  it('should declare sequential execution only where one call spans more than one path or waits on the person', () => {
     const registry = build({
       graphics: { exportModel: vi.fn() },
       parameters: { getParameters: vi.fn(), applyParameterOperation: vi.fn() },
@@ -212,7 +214,7 @@ describe('createChatToolRegistry listing', () => {
       .filter((tool) => tool.executionMode === 'sequential')
       .map((tool) => tool.name);
 
-    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'export_model']);
+    expect(sequential.toSorted()).toStrictEqual(['apply_parameter_operation', 'ask_questions', 'export_model']);
   });
 
   /* Review a1 R15: the read-only history tool is listed exactly where a client
@@ -370,8 +372,8 @@ describe('arrange_workbench routing', () => {
       label: 'duplicate entry',
       input: {
         entries: [
-          { path: 'main.ts', operationTimeout: 100 },
-          { path: 'main.ts', operationTimeout: 200 },
+          { path: 'main.ts', renderTimeout: 100 },
+          { path: 'main.ts', renderTimeout: 200 },
         ],
       },
       field: 'entries[1].path',

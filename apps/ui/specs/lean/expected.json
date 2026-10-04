@@ -1,0 +1,7 @@
+{
+  "lean": {
+    "modules": ["NewChatExecution"],
+    "axioms": ["propext", "Quot.sound", "Classical.choice"],
+    "oracle": "NewChatExecutionOracle.lean"
+  }
+}

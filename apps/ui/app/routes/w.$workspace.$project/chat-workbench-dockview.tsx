@@ -124,6 +124,7 @@ import {
 } from '@taucad/ui/components/dropdown-menu';
 import { Separator } from '@taucad/ui/components/separator';
 import { formatKeyCombination } from '#utils/keys.utils.js';
+import { capturePointer, releasePointer } from '#utils/pointer-capture.utils.js';
 import type {
   FileViewerPaneContent,
   FileViewerPresentation,
@@ -1573,7 +1574,7 @@ function FilePaneFilesSidecar({
         className='absolute top-0 -left-1 z-10 h-full w-2 cursor-col-resize outline-none focus-visible:focus-outline'
         onPointerDown={(event) => {
           drag.current = { x: event.clientX, width, currentWidth: width };
-          event.currentTarget.setPointerCapture(event.pointerId);
+          capturePointer(event.currentTarget, event.pointerId);
         }}
         onPointerMove={(event) => {
           if (!drag.current) {
@@ -1589,7 +1590,7 @@ function FilePaneFilesSidecar({
           }
           const { currentWidth } = drag.current;
           drag.current = undefined;
-          event.currentTarget.releasePointerCapture(event.pointerId);
+          releasePointer(event.currentTarget, event.pointerId);
           onWidthCommit(currentWidth);
         }}
         onKeyDown={(event) => {
@@ -1650,8 +1651,11 @@ export function WorkbenchRightHeaderActions(properties: IDockviewHeaderActionsPr
  */
 export const WorkbenchDockview = memo(function ({
   profile = 'editor',
+  onApiChange,
 }: {
   readonly profile?: WorkbenchProfile;
+  /** Reports the Dockview once ready, and `undefined` on unmount, for the workspace's Workbench toggle. */
+  readonly onApiChange?: (api: DockviewApi | undefined) => void;
 } = {}): React.JSX.Element {
   const { editorRef } = useProject();
   const { connectWorkbench, setWorkbenchOpen, layoutController } = useProjectWorkspace();
@@ -1660,6 +1664,13 @@ export const WorkbenchDockview = memo(function ({
   const monaco = useConfiguredMonaco();
   const [api, setApi] = useState<DockviewApi>();
   const isRestoringLayout = useRef(false);
+
+  useEffect(() => {
+    onApiChange?.(api);
+    return () => {
+      onApiChange?.(undefined);
+    };
+  }, [api, onApiChange]);
   const adoptedProjectionRef = useRef<string | undefined>(undefined);
   const pendingUserFilePathRef = useRef<string | undefined>(undefined);
   const pendingFilePlacementRef = useRef(new Map<string, PendingFilePlacement>());

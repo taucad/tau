@@ -12,7 +12,12 @@ import {
   recognizeProviderAccountRefusal,
 } from '#api/llm/provider-account-refusal.js';
 import type { ProviderAccountRefusal } from '#api/llm/provider-account-refusal.js';
-import { classifyUpstreamRefusal, readUpstreamRefusal, upstreamRetryAfterSeconds } from '#api/llm/upstream-refusal.js';
+import {
+  classifyUpstreamRefusal,
+  readUpstreamRefusal,
+  redactCredentials,
+  upstreamRetryAfterSeconds,
+} from '#api/llm/upstream-refusal.js';
 import { createProviderAccountFrameFilter } from '#api/llm/provider-account-stream.js';
 import type { ProviderTerminalFailure } from '#api/llm/provider-account-stream.js';
 import type {
@@ -119,7 +124,9 @@ export class DirectModelInvocationService implements ModelInvocationService {
       });
       // The operator owns this key, so the provider's own reason stays in the message.
       // Clamped: the provider's sentence is persisted into the chat's error row.
-      const reason = response.status >= 500 ? undefined : providerErrorMessage(body)?.slice(0, 500);
+      // Redacted first, as the logged copy is: a provider may quote a key or token back.
+      const providerReason = response.status >= 500 ? undefined : providerErrorMessage(body);
+      const reason = providerReason === undefined ? undefined : redactCredentials(providerReason).slice(0, 500);
       throw new LlmGatewayError(
         classification.status,
         classification.type,

@@ -12,6 +12,7 @@ function listPublicStaticPaths(): string[] {
     '/legal/cookies',
     '/legal/subprocessors',
     '/legal/acceptable-use',
+    '/legal/open-source',
   ];
 }
 

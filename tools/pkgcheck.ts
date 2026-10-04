@@ -37,12 +37,16 @@ import {
   emittedSpecifiers,
   hostTargetIssues,
   internalImportsIssues,
+  isJsonTypesDeclaration,
+  knownDeclarationDefects,
   libDependencyIssues,
   packageMetadataIssues,
+  partitionConsumerDiagnostics,
   peerRules,
   peerDependencyIssues,
   pluginRuntimePeerDependencyIssues,
   probedSpecifiers,
+  publishedRawWasmAssets,
   publishableManifestIssues,
   strictConsumerCompilerOptions,
   vendoredAssetIssues,
@@ -241,7 +245,7 @@ function validateEsmOnlyPackageMetadata(): CheckResult {
   const publishPackage = applyPublishConfig(packageJson);
   const issues: string[] = [];
 
-  function visit(value: unknown, path: string): void {
+  function visit(value: unknown, path: string, jsonTypes = false): void {
     if (Array.isArray(value)) {
       for (const [index, item] of value.entries()) {
         visit(item, `${path}[${String(index)}]`);
@@ -258,7 +262,7 @@ function validateEsmOnlyPackageMetadata(): CheckResult {
         if (path === '$' && key === 'module') {
           issues.push(`${nextPath}: legacy package.json module field is not allowed`);
         }
-        visit(child, nextPath);
+        visit(child, nextPath, key === 'types' && path.startsWith('$.exports.') && isJsonTypesDeclaration(value));
       }
       return;
     }
@@ -273,7 +277,7 @@ function validateEsmOnlyPackageMetadata(): CheckResult {
     if (value.includes('.cjs')) {
       issues.push(`${path}: .cjs output is not allowed (${value})`);
     }
-    if (value.includes('.d.cts')) {
+    if (value.includes('.d.cts') && !jsonTypes) {
       issues.push(`${path}: .d.cts declarations are not allowed (${value})`);
     }
   }
@@ -480,6 +484,8 @@ const internalImportsExceptions: Readonly<Record<string, Readonly<Record<string,
   '@taucad/geospec-engine': {
     '#cache/node-evidence-store.js':
       'browser/default platform swap for the evidence store, pinned by src/browser-import-graph.test.ts',
+    '#model/default-runtime-client.js':
+      'browser/default platform swap for the private model runtime fallback, pinned by src/browser-import-graph.test.ts',
     // The canonical map reaches `src/` only, and `.oxlintrc.json` ("no-restricted-imports",
     // regex `^\.`) bans the relative import that would replace these workspace-wide — so a
     // directory outside `src/` can only be reached through a key of its own.
@@ -673,7 +679,7 @@ function validateVendoredAssets(): CheckResult {
     input: `${destinations.join('\n')}\n`,
     maxBuffer: 64 * 1024 * 1024,
   });
-  if (ignored.error || (ignored.status !== 0 && ignored.status !== 1)) {
+  if (ignored.error ?? (ignored.status !== 0 && ignored.status !== 1)) {
     throw ignored.error ?? new Error(`git check-ignore failed: ${ignored.stderr}`);
   }
   const ignoredPaths = ignored.stdout.split('\n').filter((path) => path.length > 0);
@@ -1011,7 +1017,16 @@ function validateStrictConsumerTypes(): CheckResult {
         });
       } catch (error) {
         const execError = error as { stdout?: string; stderr?: string };
-        failures.push(`${resolution}:\n${`${execError.stdout ?? ''}${execError.stderr ?? ''}`.trim()}`);
+        const { remaining, explained } = partitionConsumerDiagnostics(
+          `${execError.stdout ?? ''}${execError.stderr ?? ''}`,
+          knownDeclarationDefects,
+        );
+        if (explained.length > 0) {
+          notes.push(`${resolution}: ${String(explained.length)} line(s) from a known third-party declaration defect`);
+        }
+        if (remaining.length > 0 || explained.length === 0) {
+          failures.push(`${resolution}:\n${remaining.join('\n')}`);
+        }
       }
     }
   } finally {
@@ -1064,9 +1079,20 @@ async function runAttw(): Promise<CheckResult> {
       cpSync(attwConfigSource, join(stagingDirectory, '.attw.json'));
     }
 
+    const rawWasmEntrypoints = publishedRawWasmAssets(publishPackage.exports).map(({ subpath }) =>
+      subpath === '.' ? '.' : subpath.slice(2),
+    );
     const output = execFileSync(
       resolve('node_modules/.bin/attw'),
-      ['--pack', '.', '--format', 'table', '--profile', 'esm-only'],
+      [
+        '--pack',
+        '.',
+        '--format',
+        'table',
+        '--profile',
+        'esm-only',
+        ...(rawWasmEntrypoints.length === 0 ? [] : ['--exclude-entrypoints', ...rawWasmEntrypoints]),
+      ],
       {
         cwd: stagingDirectory,
         encoding: 'utf8',
@@ -1110,6 +1136,7 @@ async function runMadge(): Promise<CheckResult> {
     const result = await madge(join(absoluteRoot, 'src'), {
       fileExtensions: ['ts', 'tsx', 'js', 'jsx'],
       tsConfig: tsconfigPath,
+      detectiveOptions: { ts: { skipTypeImports: true } },
       excludeRegExp: [/\.test\./, /\.spec\./, /\/testing\//],
     });
 
@@ -1139,7 +1166,7 @@ async function runMadge(): Promise<CheckResult> {
 }
 
 async function runSizeLimit(): Promise<CheckResult> {
-  const hasSizeLimitConfig = packageJson['size-limit'] || existsSync(join(absoluteRoot, '.size-limit.json'));
+  const hasSizeLimitConfig = Boolean(packageJson['size-limit']) || existsSync(join(absoluteRoot, '.size-limit.json'));
   if (!hasSizeLimitConfig) {
     // A publishable without a budget is an unbudgeted tarball, not an exemption
     // (npm-policy Rule 7 lists size-limit at error severity).
@@ -1273,7 +1300,7 @@ type ExportRow = {
 
 function buildExportRows(): ExportRow[] {
   const publishPackage = applyPublishConfig(packageJson);
-  const exports = publishPackage['exports'] as ExportsMap | undefined;
+  const exports = publishPackage.exports as ExportsMap | undefined;
   if (!exports) {
     return [];
   }

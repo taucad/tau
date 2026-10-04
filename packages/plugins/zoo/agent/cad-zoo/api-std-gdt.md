@@ -2,8 +2,10 @@
 
 3 top-level symbols. Signatures are verbatim kcl.
 
+// Category: std.gdt
 // GD&T datum feature
 // EXPERIMENTAL
+// std.gdt.gdt::datum (function)
 gdt::datum(
   face: TaggedFace,
   name: string,
@@ -19,8 +21,10 @@ gdt::datum(
 //   fontPointSize: The font point size to use for the annotation text rendering
 //   fontScale: Scale to use for the annotation text after rendering with the point size
 
+// Category: std.gdt
 // GD&T annotation specifying how flat faces should be
 // EXPERIMENTAL
+// std.gdt.gdt::flatness (function)
 gdt::flatness(
   faces: [TaggedFace; 1+],
   tolerance: number(Length),
@@ -38,5 +42,6 @@ gdt::flatness(
 //   fontPointSize: The font point size to use for the annotation text rendering
 //   fontScale: Scale to use for the annotation text after rendering with the point size
 
+// Category: std.gdt
 // Functions for working with geometric dimensioning and tolerancing (GD&T)
 gdt

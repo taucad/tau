@@ -18,6 +18,8 @@
     "@anthropic-ai/sandbox-runtime": "catalog:",
     "@gltf-transform/core": "catalog:",
     "@gltf-transform/functions": "catalog:",
+    "@parcel/watcher": "catalog:",
+    "@sentry/electron": "catalog:",
     "@taucad/agent-host": "workspace:*",
     "@taucad/agent-tools": "workspace:*",
     "@taucad/assimp": "workspace:*",
@@ -60,6 +62,7 @@
   },
   "devDependencies": {
     "@electron/asar": "4.3.0",
+    "@electron/fuses": "catalog:",
     "@electron/notarize": "^3.1.1",
     "@electron/osx-sign": "^2.7.0",
     "@electron/packager": "^20.3.0",

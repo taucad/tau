@@ -4,8 +4,14 @@
 
 LDOMString: declare class LDOMString extends LDOMBasicString
 
-  constructor
+  // LDOMString.constructor (constructor)
+  constructor();
+  constructor(anOther: LDOMString);
+  constructor(aValue: number);
+  constructor(aValue: string);
 
+  // LDOMString.delete (method)
   delete(): void;
 
+  // LDOMString.[Symbol.dispose] (method)
   [Symbol.dispose](): void;

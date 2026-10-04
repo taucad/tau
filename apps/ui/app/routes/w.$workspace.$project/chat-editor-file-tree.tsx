@@ -332,7 +332,7 @@ function surfaceDropIngestionResult(result: Exclude<DropIngestionResult, { type:
     case 'unsupported': {
       toast.error(
         result.reason === 'recursive-folder-drop-unavailable'
-          ? 'This browser cannot read dropped folders here.'
+          ? 'Dropped folders cannot be read here.'
           : 'Dropped items could not be read.',
       );
       return;
@@ -451,7 +451,6 @@ export const ChatEditorFileTree = memo(function ({
   const {
     overrideUnit,
     contentService,
-    readFile,
     whenServicesReady,
     writeFile,
     renameFile,
@@ -479,8 +478,11 @@ export const ChatEditorFileTree = memo(function ({
     // Note: Editor file navigation no longer drives the viewport.
     // The viewport has its own independent FileSelector (Step 7).
     const fileOpenedSub = editorRef.on('fileOpened', (event) => {
-      // Read file content for the editor display
-      void readFile(event.path);
+      // Warm the editor's typed content outcome. `resolve` publishes a missing,
+      // binary or unreadable file as its outcome instead of rejecting, so a file
+      // opened before it is written (or after it is removed) is not reported as
+      // an unhandled rejection.
+      void contentService?.resolve(event.path);
     });
 
     // Mount file-operation participants. This is the single funnel
@@ -503,7 +505,7 @@ export const ChatEditorFileTree = memo(function ({
       fileOpenedSub.unsubscribe();
       participantDispose?.();
     };
-  }, [projectRef, editorRef, contentService, readFile, readOnly, parameterService, onWorkbenchPathChange]);
+  }, [projectRef, editorRef, contentService, readOnly, parameterService, onWorkbenchPathChange]);
 
   const requestOpenFile = useCallback(
     (path: string, fileReadOnly?: boolean) => {

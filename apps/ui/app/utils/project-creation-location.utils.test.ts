@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   parseProjectCreationLocation,
   projectCreationLocationAccessibleName,
@@ -9,6 +9,16 @@ import {
 } from '#utils/project-creation-location.utils.js';
 
 describe('project creation location utilities', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
+  it('places Home on your computer in the desktop app, where it is a folder on disk', () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+
+    expect(projectLocationFullLabel(projectLocationDescriptor({ kind: 'home' }))).toBe('Home on your computer');
+  });
+
   it('parses Home and exact workspace locations but rejects malformed metadata', () => {
     expect(parseProjectCreationLocation({ kind: 'home' })).toEqual({ kind: 'home' });
     expect(parseProjectCreationLocation({ kind: 'workspace', workspaceId: 'wsp_alpha' })).toEqual({

@@ -211,7 +211,9 @@ describe('DockviewTabOverflowPicker', () => {
     });
 
     render(<>{comboBox.renderLabel(viewer, viewer)}</>);
-    expect(screen.getByText('models/assembly.step')).toBeInTheDocument();
+    // Rows show the title only; the path stays searchable through the value above.
+    expect(screen.getByText('assembly.step')).toBeInTheDocument();
+    expect(screen.queryByText('models/assembly.step')).not.toBeInTheDocument();
     expect(screen.getByLabelText('Active tab')).toBeInTheDocument();
   });
 

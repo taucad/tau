@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/naming-convention -- package export maps use literal subpath keys */
 /* oxlint-disable no-restricted-imports, import/extensions -- Standalone tool tests import their adjacent helper. */
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import madge from 'madge';
 import { describe, expect, it } from 'vitest';
 import {
   bundledArtifactIssues,
@@ -7,12 +11,16 @@ import {
   bundleDeclarationClosure,
   bundleWitnessIssues,
   copyTargetPaths,
+  declaredPublishAssets,
   doubledPathSegments,
   emittedSpecifiers,
   hostTargetIssues,
   internalImportsIssues,
+  isJsonTypesDeclaration,
+  knownDeclarationDefects,
   libDependencyIssues,
   packageMetadataIssues,
+  partitionConsumerDiagnostics,
   peerRules,
   peerDependencyIssues,
   pluginRuntimePeerDependencyIssues,
@@ -24,12 +32,68 @@ import {
   workspaceRangeIssues,
 } from './pkgcheck-metadata.js';
 
+describe('pkgcheck cycles', () => {
+  it('ignores erased type imports but rejects runtime import cycles', async () => {
+    const directory = mkdtempSync(join(tmpdir(), 'pkgcheck-cycles-'));
+    try {
+      const first = join(directory, 'first.ts');
+      writeFileSync(
+        first,
+        "import type { Second } from './second.js';\nexport type First = Second;\nexport const value = 1;\n",
+      );
+      writeFileSync(
+        join(directory, 'second.ts'),
+        "import { value } from './first.js';\nexport type Second = number;\nexport const reverse = value;\n",
+      );
+
+      const options = { fileExtensions: ['ts'], detectiveOptions: { ts: { skipTypeImports: true } } };
+      const typeOnlyGraph = await madge(directory, options);
+      expect(typeOnlyGraph.circular()).toEqual([]);
+
+      writeFileSync(first, "import { reverse } from './second.js';\nexport const value = reverse;\n");
+      const runtimeGraph = await madge(directory, options);
+      expect(runtimeGraph.circular()).toHaveLength(1);
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+});
+
 describe('pkgcheck metadata', () => {
+  it('recognizes only an exact JSON default with its CommonJS-shaped declaration', () => {
+    expect(isJsonTypesDeclaration({ types: './agent/skills.d.cts', default: './agent/skills.json' })).toBe(true);
+    expect(isJsonTypesDeclaration({ types: './dist/index.d.cts', default: './dist/index.mjs' })).toBe(false);
+    expect(isJsonTypesDeclaration({ types: './agent/skills.d.cts', default: './agent/other.json' })).toBe(false);
+    expect(
+      isJsonTypesDeclaration({
+        types: './agent/skills.d.cts',
+        default: './agent/skills.json',
+        require: './dist/index.cjs',
+      }),
+    ).toBe(false);
+  });
+
+  it('stages only declared safe package assets outside dist', () => {
+    expect(
+      declaredPublishAssets([
+        'dist',
+        '!dist/**/*.node',
+        'agent',
+        'trust/index.d.mts',
+        'README.md',
+        'LICENSE',
+        'CHANGELOG.md',
+      ]),
+    ).toEqual(['agent', 'trust/index.d.mts', 'README.md', 'LICENSE', 'CHANGELOG.md']);
+    expect(() => declaredPublishAssets(['agent', '../source'])).toThrow('unsafe package files entry');
+    expect(() => declaredPublishAssets(['agent', 'node_modules'])).toThrow('unsafe package files entry');
+  });
+
   it('reports development/publish export drift and missing packed files', () => {
     const issues = packageMetadataIssues(
       {
         exports: { '.': './src/index.ts', './node': './src/node.ts' },
-        files: ['dist', 'README.md'],
+        files: ['dist', 'README.md', '!dist/**/*.node'],
         publishConfig: { exports: { '.': './dist/index.mjs' } },
       },
       (path) => path === 'dist',
@@ -39,6 +103,17 @@ describe('pkgcheck metadata', () => {
       'publishConfig.exports is missing development export: ./node',
       'files entry does not exist: README.md',
     ]);
+  });
+
+  it('requires a literal published Wasm asset to exist in the build output', () => {
+    const manifest = {
+      exports: { './raw-wasm': './src/raw.wasm' },
+      publishConfig: { exports: { './raw-wasm': './dist/raw.wasm' } },
+    };
+    expect(packageMetadataIssues(manifest, () => false)).toEqual([
+      'published raw Wasm asset is missing: ./raw-wasm -> ./dist/raw.wasm',
+    ]);
+    expect(packageMetadataIssues(manifest, (path) => path === './dist/raw.wasm')).toEqual([]);
   });
 
   it('requires the common publishable manifest fields and packs an existing changelog', () => {
@@ -192,6 +267,24 @@ describe('pkgcheck metadata', () => {
         { './nextjs': 'next ships declaration errors of its own' },
       ),
     ).toEqual({ specifiers: ['@taucad/runtime', '@taucad/runtime/node'], issues: [] });
+  });
+
+  it('treats only a concrete raw Wasm export as an asset rather than a code entrypoint', () => {
+    expect(
+      probedSpecifiers(
+        '@taucad/example',
+        {
+          '.': './dist/index.mjs',
+          './raw-wasm': './dist/raw.wasm',
+          './mixed': { types: './dist/mixed.d.mts', import: './dist/mixed.mjs', default: './dist/mixed.wasm' },
+          './conditional': { browser: './dist/browser.wasm', default: './dist/node.mjs' },
+        },
+        {},
+      ),
+    ).toEqual({
+      specifiers: ['@taucad/example', '@taucad/example/conditional', '@taucad/example/mixed'],
+      issues: [],
+    });
   });
 
   it('reports a recorded reason for a subpath the package no longer publishes', () => {
@@ -379,6 +472,17 @@ describe('peerDependencyIssues', () => {
         manifest: { dependencies: { zod: 'catalog:', '@taucad/runtime': 'workspace:*' } },
         emitted: [{ path: 'dist/index.mjs', specifier: '@taucad/runtime' }],
         rules: zodRules,
+      }),
+    ).toEqual([]);
+  });
+
+  it('lets a named leaf satisfy zod with a dependency even when its own emit imports zod', () => {
+    expect(
+      peerDependencyIssues({
+        packageName: 'geospec',
+        manifest: { dependencies: { zod: 'catalog:' } },
+        emitted: [{ path: 'dist/mesh/analysis-result.mjs', specifier: 'zod' }],
+        rules: peerRules,
       }),
     ).toEqual([]);
   });
@@ -738,5 +842,23 @@ describe('hostTargetIssues', () => {
         hasPayloadGuardTest: false,
       }),
     ).toEqual([]);
+  });
+});
+
+describe('partitionConsumerDiagnostics', () => {
+  it('explains only the known SDK undici fallbacks and keeps every other diagnostic', () => {
+    const sdk = 'node_modules/@anthropic-ai/sdk/internal/types.d.mts';
+    const output = [
+      `${sdk}(48,181): error TS2307: Cannot find module '../../../node_modules/undici-types/index.d.ts' or its corresponding type declarations.`,
+      `${sdk}(49,170): error TS2307: Cannot find module '../../../../node_modules/undici/index.d.ts' or its corresponding type declarations.`,
+      `node_modules/@taucad/agent-host/dist/index.d.mts(3,1): error TS2322: Type 'string' is not assignable to type 'number'.`,
+      '  The expected type comes from property "count".',
+      `${sdk}(52,10): error TS2307: Cannot find module 'missing-thing' or its corresponding type declarations.`,
+    ].join('\n');
+
+    expect(partitionConsumerDiagnostics(output, knownDeclarationDefects)).toEqual({
+      explained: output.split('\n').slice(0, 2),
+      remaining: output.split('\n').slice(2),
+    });
   });
 });

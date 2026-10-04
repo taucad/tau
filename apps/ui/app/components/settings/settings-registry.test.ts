@@ -94,6 +94,17 @@ describe('searchSettings', () => {
     }
   });
 
+  it('should offer no browser storage setting in the desktop app, where Home is a folder on disk', async () => {
+    vi.stubEnv('TAU_TARGET', 'desktop');
+    vi.resetModules();
+    const desktop = await import('#components/settings/settings-registry.js');
+
+    expect(desktop.settingsSections.flatMap(({ entries }) => entries.map(({ id }) => id))).not.toContain(
+      'browser-storage',
+    );
+    expect(settingsSections.flatMap(({ entries }) => entries.map(({ id }) => id))).toContain('browser-storage');
+  });
+
   it('should keep API keys out of navigation and search', () => {
     expect(settingsSections.map(({ id }) => String(id))).not.toContain('api-keys');
     expect(searchSettings('API keys')).toEqual([]);

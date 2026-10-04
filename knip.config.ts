@@ -166,6 +166,10 @@ const config: KnipConfig = {
         'app/testing/{billable-invocation-child,billing-payments-process-worker}.ts',
         'app/lifecycle/graceful-shutdown.signal-fixture.ts',
       ],
+      ignoreDependencies: [
+        // `logger/logger-factory.ts` names it as a pino transport target, which knip cannot see.
+        'pino-pretty',
+      ],
     },
     'apps/desktop': {
       // Electron's main/preload and utility-process bundles are separate entry points.

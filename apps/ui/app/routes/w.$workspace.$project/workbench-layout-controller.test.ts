@@ -878,3 +878,53 @@ describe('workbench layout checked store', () => {
     }
   });
 });
+
+describe('workbench layout record health', () => {
+  it('retries reads, reconciles a potentially-applied write, and resets only reviewed bytes', async () => {
+    vi.useFakeTimers();
+    const data = memoryFiles();
+    const readFile = vi.fn(async (): Promise<Uint8Array<ArrayBuffer>> => {
+      throw new Error('disk busy');
+    });
+    const writeFileChecked = vi.fn(async (input: Parameters<typeof data.writes>[0]) => {
+      if (writeFileChecked.mock.calls.length === 1) {
+        await data.writes(input);
+        throw Object.assign(new Error('reply lost'), { applicationState: 'potentially-applied' });
+      }
+      return data.writes(input);
+    });
+    const store = createWorkbenchLayoutStore({
+      root: '/root',
+      files: { ...data.files, readFile, writeFileChecked },
+      onChange: () => undefined,
+      onError: () => undefined,
+    });
+    try {
+      await store.read();
+      await vi.runAllTimersAsync();
+      expect(store.health().read).toBe('unavailable');
+      readFile.mockImplementation(async () => data.get()!);
+      await store.retryRead();
+      await vi.runAllTimersAsync();
+      expect(store.health().read).toBe('ok');
+      expect(await store.edit({ ...layout(), lanes: { chat: false, workbench: true } })).toBe(false);
+      expect(store.health().unconfirmed).toBe(true);
+      expect(await store.flush()).toBe(true);
+      expect(writeFileChecked).toHaveBeenCalledTimes(1);
+      expect(store.health().unconfirmed).toBe(false);
+
+      const reviewed = encoder.encode('{broken');
+      data.setBytes(reviewed);
+      await store.read();
+      const newer = encoder.encode('{still broken');
+      data.setBytes(newer);
+      await store.read();
+      expect(await store.reset(layout(), reviewed)).toBe(false);
+      expect(data.get()).toEqual(newer);
+      expect(await store.reset(layout(), newer)).toBe(true);
+    } finally {
+      store.dispose();
+      vi.useRealTimers();
+    }
+  });
+});

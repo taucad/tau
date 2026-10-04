@@ -1,0 +1,109 @@
+// Parametric Teapot
+// Comprehensive KCL example demonstrating the full Resilient Modeling Strategy
+//
+// Features demonstrated:
+// - Reference: Parameters with real-world dimensions, @settings for units
+// - Core: startSketchOn + startProfile for 2D sketches, revolve for body
+// - Surface: tangentialArc for organic curves, sweep for spout/handle
+// - Detail: subtract2d for hollow profiles, subtract for cutouts
+// - Modify: Boolean operations via subtract
+// - Quarantine: appearance for materials/colors
+
+// === REFERENCE: Unit settings and parameters ===
+@settings(defaultLengthUnit = mm)
+
+// Body parameters (real-world teapot dimensions)
+teapotHeight = 130          // mm - standard teapot height
+beltlineDiameter = 160      // mm - widest point diameter
+wallThickness = 6           // mm - ceramic-like wall thickness
+
+// Spout parameters
+outletHeight = 26           // mm - spout outlet position from base
+spoutDiameter = 12          // mm - spout opening diameter
+
+// Handle parameters
+handleWidth = 20            // mm - handle cross-section width
+
+// === SURFACE FEATURES: Spout path with tangentialArc ===
+// Sketch the curved path for the spout sweep
+spoutPath = startSketchOn(XZ)
+  |> startProfile(at = [-beltlineDiameter / 2.5, outletHeight])
+  |> xLine(length = -15.05)
+  |> tangentialArc(angle = -110deg, radius = 30, tag = $seg01)
+  |> angledLine(angle = tangentToEnd(seg01), length = 16.84)
+  |> tangentialArc(angle = 100deg, radius = 30)
+
+// === DETAIL FEATURES: Hollow spout cross-section ===
+// Create hollow spout using subtract2d for wall thickness
+spout = startSketchOn(offsetPlane(YZ, offset = -beltlineDiameter / 2.5))
+  |> circle(center = [0, outletHeight], diameter = spoutDiameter)
+  |> subtract2d(tool = circle(center = [0, outletHeight], diameter = spoutDiameter * 0.8))
+  |> sweep(path = spoutPath)
+
+// === CORE FEATURES: Body profile for trimming ===
+// Model the perimeter of the teapot body for handle trimming
+tools = startSketchOn(YZ)
+  |> startProfile(at = [0, 0])
+  |> xLine(length = beltlineDiameter / 5)
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 2.1, teapotHeight / 2.5])
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 3, teapotHeight / 1.1])
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 4, teapotHeight])
+  |> xLine(endAbsolute = profileStartX(%))
+  |> line(endAbsolute = profileStart(%))
+  |> close()
+  |> revolve(axis = Y)
+
+// === SURFACE FEATURES: Handle path with multiple tangentialArcs ===
+// Sketch the curved path for the handle sweep
+handlePath = startSketchOn(XZ)
+  |> startProfile(at = [0, outletHeight])
+  |> xLine(endAbsolute = 76)
+  |> tangentialArc(end = [12.98, 6.64])
+  |> tangentialArc(end = [28.39, 63.11])
+  |> tangentialArc(end = [-10.27, 14.8])
+  |> tangentialArc(end = [-48.01, 1.81], tag = $seg02)
+  |> angledLine(angle = tangentToEnd(seg02), endAbsoluteX = 0)
+
+// === SURFACE + MODIFY: Handle with boolean trim ===
+// Sweep the handle profile and subtract body to trim ends
+handle = startSketchOn(YZ)
+  |> startProfile(at = [-10, outletHeight + 3.5])
+  |> arc(interiorAbsolute = [0, outletHeight + 5], endAbsolute = [10, profileStartY(%)])
+  |> tangentialArc(end = [0, -7])
+  |> tangentialArc(end = [-20, 0])
+  |> tangentialArc(endAbsolute = profileStart())
+  |> close()
+  |> sweep(path = handlePath)
+  |> subtract(tools)
+
+// === DETAIL FEATURES: Spout outlet cutout ===
+// Create a cutout in the body for the spout connection
+spoutHole = startSketchOn(YZ)
+  |> circle(center = [0, outletHeight], diameter = spoutDiameter)
+  |> extrude(length = -beltlineDiameter / 2)
+
+// === CORE FEATURES: Main body with hollow interior ===
+// Create the body using revolve with wall thickness profile
+body = startSketchOn(YZ)
+  |> startProfile(at = [0, 0])
+  // Outer profile
+  |> xLine(length = beltlineDiameter / 5)
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 2.1, teapotHeight / 2.5])
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 3, teapotHeight / 1.1])
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 4, teapotHeight])
+  // Rim and inner profile (wall thickness offset)
+  |> tangentialArc(angle = 190deg, diameter = wallThickness)
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 3 - wallThickness, teapotHeight / 1.1])
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 2.1 - wallThickness, teapotHeight / 2.5])
+  |> tangentialArc(endAbsolute = [beltlineDiameter / 5, profileStartY() + wallThickness])
+  |> xLine(endAbsolute = profileStartX(%))
+  |> line(endAbsolute = profileStart(%))
+  |> close()
+  |> revolve(axis = Y)
+  |> subtract(tools = [spoutHole])
+
+// === QUARANTINE FEATURES: Appearance/material ===
+// Join components and apply visual appearance
+[body, handle, spout]
+  |> appearance(color = "#1f9896", metalness = 40, roughness = 30)
+

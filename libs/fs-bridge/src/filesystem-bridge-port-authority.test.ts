@@ -28,6 +28,7 @@ import {
   fileSystemBridgeProtocolVersion,
   fileSystemBridgeSchemas,
 } from '#filesystem-bridge-protocol.js';
+import { slowFileSystemBridgeCallThreshold, slowFileSystemBridgeCalls } from '#filesystem-bridge-slow-calls.js';
 
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
@@ -251,21 +252,128 @@ describe('filesystem bridge authority over a Port pair (dialler = client, dialee
     }
   });
 
-  it('classifies a checked-write acknowledgement timeout as potentially applied without retrying', async () => {
+  it.each([
+    ['writeFileChecked', { path: 'target.txt', data: 'new', preconditions: [] }],
+    ['deleteFileChecked', { path: 'target.txt', preconditions: [] }],
+  ] as const)(
+    'should keep a checked %s pending past the default call timeout and resolve with the authority result',
+    async (method, input) => {
+      const channel = new MessageChannel();
+      let releaseReply!: () => void;
+      const replyGate = new Promise<void>((resolve) => {
+        releaseReply = resolve;
+      });
+      const handler = vi.fn(async (): Promise<CheckedFileWriteResult> => {
+        await replyGate;
+        return { status: 'applied', content: encoder.encode('new') };
+      });
+      const server = createBridgeServer(
+        { [method]: handler },
+        messagePort(channel.port1, 'fs-bridge-checked-deadline-server'),
+        {
+          hello: createFileSystemBridgeHello({
+            state: 'ready',
+            capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
+            watchable: false,
+          }),
+          protocolSchemas: fileSystemBridgeSchemas,
+        },
+      );
+      const proxy = createFileSystemBridgeProxy({
+        port: messagePort(channel.port2, 'fs-bridge-checked-deadline-client'),
+        dispose: () => {
+          channel.port2.close();
+        },
+      });
+
+      try {
+        await proxy.ready;
+        vi.useFakeTimers();
+        let outcome: 'pending' | 'resolved' | 'rejected' = 'pending';
+        const pending = method === 'writeFileChecked' ? proxy.writeFileChecked(input) : proxy.deleteFileChecked(input);
+        const observe = async (): Promise<void> => {
+          try {
+            await pending;
+            outcome = 'resolved';
+          } catch {
+            outcome = 'rejected';
+          }
+        };
+        void observe();
+        await vi.advanceTimersByTimeAsync(30_000);
+        expect(outcome).toBe('pending');
+        await vi.advanceTimersByTimeAsync(120_000);
+        expect(outcome).toBe('pending');
+        expect(handler).toHaveBeenCalledOnce();
+
+        releaseReply();
+        await expect(pending).resolves.toEqual({ status: 'applied', content: encoder.encode('new') });
+        expect(handler).toHaveBeenCalledOnce();
+      } finally {
+        releaseReply();
+        proxy.dispose();
+        server.dispose();
+        vi.useRealTimers();
+      }
+    },
+  );
+
+  it('should still reject an ordinary call with BRIDGE_CALL_TIMEOUT at the default deadline', async () => {
     const channel = new MessageChannel();
-    let releaseReply!: () => void;
-    const replyGate = new Promise<void>((resolve) => {
-      releaseReply = resolve;
+    const exists = vi.fn(
+      async () =>
+        new Promise<boolean>(() => {
+          void 0;
+        }),
+    );
+    const server = createBridgeServer({ exists }, messagePort(channel.port1, 'fs-bridge-ordinary-deadline-server'), {
+      hello: createFileSystemBridgeHello({
+        state: 'ready',
+        capabilities: { persistent: false, writable: true, quotaBased: false, durability: 'ephemeral' },
+        watchable: false,
+      }),
+      protocolSchemas: fileSystemBridgeSchemas,
     });
-    let applied = false;
-    const writeFileChecked = vi.fn(async (): Promise<CheckedFileWriteResult> => {
-      applied = true;
-      await replyGate;
-      return { status: 'applied', content: encoder.encode('new') };
+    const proxy = createFileSystemBridgeProxy({
+      port: messagePort(channel.port2, 'fs-bridge-ordinary-deadline-client'),
+      dispose: () => {
+        channel.port2.close();
+      },
+    });
+
+    try {
+      await proxy.ready;
+      vi.useFakeTimers();
+      const pending = proxy.exists('target.txt');
+      const rejection = expect(pending).rejects.toMatchObject({
+        code: 'BRIDGE_CALL_TIMEOUT',
+        message: "Bridge call 'exists' timed out after 30000ms",
+      });
+      await vi.advanceTimersByTimeAsync(30_000);
+      await rejection;
+      expect(exists).toHaveBeenCalledOnce();
+    } finally {
+      proxy.dispose();
+      server.dispose();
+      vi.useRealTimers();
+    }
+  });
+
+  it('should record a slow call with its method and outcome and leave fast calls unrecorded', async () => {
+    const channel = new MessageChannel();
+    let releaseRead!: () => void;
+    const readGate = new Promise<void>((resolve) => {
+      releaseRead = resolve;
     });
     const server = createBridgeServer(
-      { writeFileChecked },
-      messagePort(channel.port1, 'fs-bridge-checked-timeout-server'),
+      {
+        exists: async () => true,
+        readFile: async () => {
+          await readGate;
+          return 'slow';
+        },
+      },
+      messagePort(channel.port1, 'fs-bridge-slow-call-server'),
       {
         hello: createFileSystemBridgeHello({
           state: 'ready',
@@ -276,29 +384,34 @@ describe('filesystem bridge authority over a Port pair (dialler = client, dialee
       },
     );
     const proxy = createFileSystemBridgeProxy({
-      port: messagePort(channel.port2, 'fs-bridge-checked-timeout-client'),
+      port: messagePort(channel.port2, 'fs-bridge-slow-call-client'),
       dispose: () => {
         channel.port2.close();
       },
     });
+    const firstNewCallId = (slowFileSystemBridgeCalls().at(-1)?.callId ?? -1) + 1;
 
     try {
       await proxy.ready;
-      vi.useFakeTimers();
-      const pending = proxy.writeFileChecked({ path: 'target.txt', data: 'new', preconditions: [] });
-      const rejection = expect(pending).rejects.toMatchObject({
-        applicationState: 'potentially-applied',
-        metadata: { applicationState: 'potentially-applied' },
+      await expect(proxy.exists('target.txt')).resolves.toBe(true);
+      vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date', 'performance'] });
+      const startedAt = Date.now();
+      const slowRead = proxy.readFile('target.txt', 'utf8');
+      await vi.advanceTimersByTimeAsync(slowFileSystemBridgeCallThreshold);
+      releaseRead();
+      await expect(slowRead).resolves.toBe('slow');
+
+      const recorded = slowFileSystemBridgeCalls().filter((entry) => entry.callId >= firstNewCallId);
+      expect(recorded).toHaveLength(1);
+      expect(recorded[0]).toMatchObject({
+        callId: firstNewCallId,
+        method: 'readFile',
+        startedAt,
+        duration: slowFileSystemBridgeCallThreshold,
+        outcome: 'resolved',
       });
-      await vi.advanceTimersByTimeAsync(30_000);
-      await rejection;
-      expect(applied).toBe(true);
-      expect(writeFileChecked).toHaveBeenCalledOnce();
-      releaseReply();
-      await vi.advanceTimersByTimeAsync(0);
-      expect(writeFileChecked).toHaveBeenCalledOnce();
     } finally {
-      releaseReply();
+      releaseRead();
       proxy.dispose();
       server.dispose();
       vi.useRealTimers();

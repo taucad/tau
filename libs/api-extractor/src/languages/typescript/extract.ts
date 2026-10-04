@@ -141,9 +141,30 @@ const collectDocs = (symbol: ts.Symbol, checker: ts.TypeChecker): ApiDocs | unde
   );
 
   const examples = tags.filter((tag) => tag.name === 'example').map((tag) => parseExample(tagText(tag)));
-  const throws = tags
-    .filter((tag) => tag.name === 'throws')
-    .map((tag) => tagText(tag))
+  const throws = (symbol.getDeclarations() ?? [])
+    .flatMap((declaration) => {
+      const declarationTags = ts.getJSDocTags(declaration);
+      return declarationTags.flatMap((tag, index) => {
+        if (!ts.isJSDocThrowsTag(tag)) {
+          return [];
+        }
+        const source = tag.getSourceFile();
+        let { end } = tag;
+        // TypeScript can parse a link inside throws braces as a separate inline tag.
+        for (const following of declarationTags.slice(index + 1)) {
+          if (source.text[following.pos - 1] !== '{') {
+            break;
+          }
+          end = following.end;
+        }
+        return [
+          source.text
+            .slice(tag.tagName.end, end)
+            .replaceAll(/\r?\n[\t ]*\*[\t ]?/gu, '\n')
+            .trim(),
+        ];
+      });
+    })
     .filter((part) => part !== '');
   const seeAlso = tags
     .filter((tag) => tag.name === 'see')
@@ -235,9 +256,12 @@ const signatureOf = (signature: ts.Signature, checker: ts.TypeChecker): ApiSigna
 };
 
 const signaturesOf = (node: ts.Node, checker: ts.TypeChecker): ApiSignature[] => {
-  const type = checker.getTypeAtLocation(node);
-  return type
-    .getCallSignatures()
+  const constructor =
+    ts.isConstructorDeclaration(node) || ts.isConstructSignatureDeclaration(node)
+      ? checker.getSignatureFromDeclaration(node)
+      : undefined;
+  const signatures = constructor === undefined ? checker.getTypeAtLocation(node).getCallSignatures() : [constructor];
+  return signatures
     .map((signature) => signatureOf(signature, checker))
     .filter((signature): signature is ApiSignature => signature !== undefined);
 };
@@ -272,14 +296,14 @@ const memberName = (node: ts.ClassElement | ts.TypeElement): string => {
 };
 
 const memberEntries = (
-  container: ts.ClassDeclaration | ts.InterfaceDeclaration,
+  nodes: ReadonlyArray<ts.ClassElement | ts.TypeElement>,
   path: string,
   context: Context,
 ): ApiEntryDraft[] => {
   const { checker, groupBy, rootDirectory } = context;
   const byName = new Map<string, { kind: ApiEntryKind; draft: ApiEntryDraft; signatures: ApiSignature[] }>();
 
-  for (const node of container.members) {
+  for (const node of nodes) {
     const kind = memberKind(node);
     const name = memberName(node);
     if (kind === undefined || name === '' || isHidden(node, name)) {
@@ -317,9 +341,10 @@ const memberEntries = (
     byName.set(name, { kind, draft, signatures });
   }
 
-  return [...byName.values()].map(({ draft, signatures }) =>
-    signatures.length === 0 ? draft : { ...draft, signatures },
-  );
+  return [...byName.values()].map(({ draft, signatures }) => {
+    const unique = [...new Map(signatures.map((signature) => [signature.text, signature])).values()];
+    return unique.length === 0 ? draft : { ...draft, signatures: unique };
+  });
 };
 
 const enumMembers = (container: ts.EnumDeclaration, path: string, context: Context): ApiEntryDraft[] =>
@@ -373,7 +398,7 @@ const headerText = (declaration: ts.ClassDeclaration | ts.InterfaceDeclaration):
 
 const isModuleSymbol = (symbol: ts.Symbol): boolean =>
   (symbol.flags & (ts.SymbolFlags.Module | ts.SymbolFlags.ValueModule | ts.SymbolFlags.NamespaceModule)) !== 0 &&
-  (symbol.flags & ts.SymbolFlags.Class) === 0;
+  (symbol.flags & (ts.SymbolFlags.Class | ts.SymbolFlags.Function)) === 0;
 
 const resolveAlias = (symbol: ts.Symbol, checker: ts.TypeChecker): ts.Symbol => {
   if ((symbol.flags & ts.SymbolFlags.Alias) === 0) {
@@ -421,9 +446,28 @@ const entryOf = (
     if (ts.isClassDeclaration(primary) || ts.isInterfaceDeclaration(primary)) {
       return declarations
         .filter((declaration) => ts.isClassDeclaration(declaration) || ts.isInterfaceDeclaration(declaration))
-        .flatMap((declaration) => memberEntries(declaration, memberPath, context));
+        .flatMap((declaration) => memberEntries(declaration.members, memberPath, context));
     }
-    return ts.isEnumDeclaration(primary) ? enumMembers(primary, memberPath, context) : [];
+    if (ts.isEnumDeclaration(primary)) {
+      return enumMembers(primary, memberPath, context);
+    }
+    if (ts.isFunctionDeclaration(primary) && declarations.some((declaration) => ts.isModuleDeclaration(declaration))) {
+      return moduleEntries(symbol, memberPath, context);
+    }
+    if (ts.isTypeAliasDeclaration(primary) || ts.isVariableDeclaration(primary)) {
+      const nodes = checker
+        .getTypeAtLocation(primary)
+        .getProperties()
+        .flatMap((property) =>
+          (property.getDeclarations() ?? []).filter(
+            (declaration): declaration is ts.TypeElement =>
+              !program.isSourceFileDefaultLibrary(declaration.getSourceFile()) &&
+              (ts.isMethodSignature(declaration) || ts.isPropertySignature(declaration)),
+          ),
+        );
+      return memberEntries(nodes, memberPath, context);
+    }
+    return [];
   })();
 
   const declaredType = ((): ApiTypeRef | undefined => {
@@ -473,6 +517,7 @@ const moduleEntries = (moduleSymbol: ts.Symbol, path: string | undefined, contex
   try {
     exportSymbols = checker.getExportsOfModule(moduleSymbol);
   } catch {
+    context.seenModules.delete(moduleSymbol);
     return [];
   }
 
@@ -506,6 +551,8 @@ const moduleEntries = (moduleSymbol: ts.Symbol, path: string | undefined, contex
     }
   }
 
+  // A cycle guard is local to this traversal path; another export alias still owns its members.
+  context.seenModules.delete(moduleSymbol);
   return drafts;
 };
 

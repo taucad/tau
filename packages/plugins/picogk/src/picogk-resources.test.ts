@@ -82,7 +82,10 @@ describe('PicoGK prepared resources', () => {
     const { resourceRoot } = fixture();
     writeFileSync(
       join(resourceRoot, hostTarget, 'tau-runtime-manifest.json'),
-      JSON.stringify({ ...manifest(), protocolVersion: picogkProtocolVersion - 1 }),
+      JSON.stringify({
+        ...manifest(),
+        protocolVersion: picogkProtocolVersion - 1,
+      }),
     );
 
     expect(() => loadPicogkKernelOptions({ resourceRoot })).toThrow(
@@ -95,10 +98,28 @@ describe('PicoGK prepared resources', () => {
   it('pins protocol versions, digests, and confined relative resource paths', () => {
     expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), schemaVersion: 1 }).success).toBe(false);
     expect(
-      picogkRuntimeManifestSchema.safeParse({ ...manifest(), protocolVersion: picogkProtocolVersion - 1 }).success,
+      picogkRuntimeManifestSchema.safeParse({
+        ...manifest(),
+        protocolVersion: picogkProtocolVersion - 1,
+      }).success,
     ).toBe(false);
-    expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), workerSha256: 'invalid' }).success).toBe(false);
-    expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), workerPath: '/worker' }).success).toBe(false);
-    expect(picogkRuntimeManifestSchema.safeParse({ ...manifest(), workerPath: '../worker' }).success).toBe(false);
+    expect(
+      picogkRuntimeManifestSchema.safeParse({
+        ...manifest(),
+        workerSha256: 'invalid',
+      }).success,
+    ).toBe(false);
+    expect(
+      picogkRuntimeManifestSchema.safeParse({
+        ...manifest(),
+        workerPath: '/worker',
+      }).success,
+    ).toBe(false);
+    expect(
+      picogkRuntimeManifestSchema.safeParse({
+        ...manifest(),
+        workerPath: '../worker',
+      }).success,
+    ).toBe(false);
   });
 });

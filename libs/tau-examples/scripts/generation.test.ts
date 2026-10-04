@@ -184,7 +184,7 @@ describe('generated example artifacts', () => {
         'utf8',
       );
       const second = await document.export('glb');
-      expect(second.success).toBe(true);
+      expect(second.success, JSON.stringify(second.issues)).toBe(true);
       if (!second.success) {
         throw new Error('Expected the pinned GeoSpec model export');
       }

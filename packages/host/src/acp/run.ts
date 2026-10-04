@@ -20,7 +20,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 
@@ -42,13 +42,15 @@ import { createNodeAttachmentReader } from '@taucad/agent-host/node';
 import { createSkillBundleRegistry } from '@taucad/agent-tools/registry';
 import { tauMcpInstructions } from '@taucad/mcp';
 import { isRecord } from '@taucad/utils/schema';
+import type { QuestionRecordFileSystem } from '@taucad/chat/rpc';
 
 import { failureError } from '#acp/acp-session.machine.js';
 import type { AcpFailure, AcpTurnResult } from '#acp/acp-session.machine.js';
-import { provideAcpSession } from '#acp/acp-session.js';
+import { provideAcpSession } from '#acp/acp-session-logic.js';
 import { acpSessionsMachine } from '#acp/acp-sessions.machine.js';
 import type { AcpAcquire } from '#acp/acp-sessions.machine.js';
 import { createAcpMediaStore } from '#acp/media.js';
+import type { AcpLentSeams } from '#acp/acp-session-logic.js';
 import type { AcpLimitReset } from '#acp/session.js';
 import type { AcpWireFrame } from '#acp/spawn.js';
 import type { AcpAdapter } from '#acp/registry.js';
@@ -365,6 +367,34 @@ const promptBlocksOf = (turn: ExternalAgentTurn, first: boolean): readonly Conte
 };
 
 /**
+ * The chat directory of the live project, where questions are recorded (agent questions blueprint D3).
+ *
+ * The record lives beside the chat's log in the workspace root the person's
+ * client watches, never in a candidate checkout.
+ *
+ * @param workspaceRoot - Absolute project root.
+ * @returns Read and write access for project-relative record paths.
+ */
+const questionRecordFileSystem = (workspaceRoot: string): QuestionRecordFileSystem => ({
+  exists: async (path) => {
+    try {
+      await access(join(workspaceRoot, path));
+      return true;
+    } catch {
+      return false;
+    }
+  },
+  readFile: async (path) => readFile(join(workspaceRoot, path), 'utf8'),
+  writeFile: async (path, content) => {
+    const target = join(workspaceRoot, path);
+    await mkdir(dirname(target), { recursive: true });
+    const temporary = `${target}.${randomUUID()}.tmp`;
+    await writeFile(temporary, content);
+    await rename(temporary, target);
+  },
+});
+
+/**
  * A document as ACP carries it (D23): a link to the file *and* its bytes.
  *
  * Two carriers, because the adapters have no document item. A `resource` blob
@@ -539,7 +569,7 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
   const attachments = createNodeAttachmentReader(options.workspaceRoot);
   const warnedAbsent = new Set<string>();
   /* The seams of every lent turn, by request id: the machines hold only the id (MC-R5). */
-  const turns = new Map<string, ExternalAgentTurn>();
+  const turns = new Map<string, AcpLentSeams & ExternalAgentTurn>();
   const settlements = new Map<string, (outcome: AcpTurnResult) => void>();
   const closes = new Map<string, (refusal: AcpFailure | undefined) => void>();
 
@@ -769,7 +799,11 @@ export const createAcpExternalAgentPort = (options: AcpExternalAgentPortOptions)
       /* Every durable row of the turn names agent media by attachment rather
        * than carrying it inline (see `createAcpMediaStore`). */
       const moveMedia = createAcpMediaStore(options.workspaceRoot, turn.chatId);
-      turns.set(requestId, { ...turn, append: async (events) => turn.append(await moveMedia(events)) });
+      turns.set(requestId, {
+        ...turn,
+        append: async (events) => turn.append(await moveMedia(events)),
+        questions: { chatId: turn.chatId, fileSystem: questionRecordFileSystem(options.workspaceRoot) },
+      });
       turn.signal.addEventListener('abort', onAbort, { once: true });
       try {
         sessions().send({ type: 'acquire', acquire });

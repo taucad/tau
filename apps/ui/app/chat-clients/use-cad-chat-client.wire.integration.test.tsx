@@ -29,6 +29,7 @@ vi.mock('#hooks/use-chat-snapshot.js', () => ({ useChatSnapshot: vi.fn() }));
 vi.mock('#hooks/use-context-payload.js', () => ({ useContextPayload: vi.fn() }));
 vi.mock('#hooks/use-models.js', () => ({
   useModels: () => ({
+    ensureModelCatalog: async () => ({ status: 'loaded', models: [] }),
     resolveModel: () => ({
       id: 'openai-gpt-5.5',
       isResolved: true,

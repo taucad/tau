@@ -9,6 +9,7 @@ import type { imageRuntime } from '#runtime/image-runtime.definition.js';
 import type { runtime } from '#runtime/ui-runtime.definition.js';
 import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
 import { headlessImageBackend } from '#services/headless-image-backend.js';
+import { isDesktopTarget } from '#lib/build-target.js';
 
 type GlbTranscodeInput = Parameters<RuntimeClient<typeof imageRuntime>['transcode']>[0];
 type SvgTranscodeInput = Extract<Parameters<RuntimeClient<typeof runtime>['transcode']>[0], { readonly from: 'svg' }>;
@@ -525,7 +526,9 @@ export class HeadlessImageService {
     if (this.backend.isGpuAvailable && !(await this.backend.isGpuAvailable())) {
       throw new HeadlessImageError(
         'adapter-unavailable',
-        'WebGPU is unavailable; update your browser or use the Tau CLI for image exports.',
+        isDesktopTarget()
+          ? 'WebGPU is unavailable on this computer; use the Tau CLI for image exports.'
+          : 'WebGPU is unavailable; update your browser or use the Tau CLI for image exports.',
       );
     }
     const { generation } = this;

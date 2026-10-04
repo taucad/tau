@@ -24,9 +24,11 @@ import { NodeFsAuthorityHost, serveNodeFsProvider } from '#backend/node/host.js'
 import { tauPathPolicy } from '#path-registry.js';
 import { acquireNodeAuthorityWriter } from '#backend/node/authority-writer-lock.js';
 import { NodeFsProvider } from '#backend/node/provider.js';
+import { streamChunkSize } from '#backend/stream-utils.js';
 import type { NodeFsPort } from '#backend/node/port.js';
 import { nodeFsProtocolVersion, nodeFsResultSchemas } from '#backend/node/protocol.js';
 import type { NodeFsWatchEvent } from '#backend/node/protocol.js';
+import parcelWatcher from '@parcel/watcher';
 
 const cleanups: Array<() => void | Promise<void>> = [];
 
@@ -63,15 +65,11 @@ const connect = (): Connected => {
 };
 
 /**
- * Arm a watch and hold it until the host proves it is live.
- *
- * Arming resolves as soon as the host has called `fs.watch`, but macOS FSEvents
- * needs a moment more before it delivers. A probe file is written in a loop
- * until its own event arrives, so a test's real mutation cannot be missed.
+ * Arm a watch after the host's native admission completes.
  */
 const armLiveWatch = async (
   provider: NodeFsProviderClient,
-  root: string,
+  _root: string,
   request: { recursive?: boolean; excludes?: string[] } = {},
 ): Promise<{ readonly events: NodeFsWatchEvent[] }> => {
   const events: NodeFsWatchEvent[] = [];
@@ -82,20 +80,6 @@ const armLiveWatch = async (
     },
   );
   cleanups.push(unsubscribe);
-  const probe = join(root, '.watch-probe');
-  const deadline = Date.now() + 10_000;
-  while (!events.some((event) => event.type !== 'reset' && event.path === '.watch-probe')) {
-    if (Date.now() > deadline) {
-      throw new Error('The host watcher never went live.');
-    }
-    writeFileSync(probe, String(Date.now()));
-    // oxlint-disable-next-line no-await-in-loop -- Liveness is polled by design.
-    await new Promise((resolve) => {
-      setTimeout(resolve, 100);
-    });
-  }
-  unlinkSync(probe);
-  events.length = 0;
   return { events };
 };
 
@@ -144,6 +128,33 @@ const aliasesEntry = (root: string, probe: string, alias: string): boolean => {
 };
 
 describe('node filesystem client/host round trip', () => {
+  it('streams bounded chunks and exact ranges through the authority client, as the local provider does', async () => {
+    const { root, provider } = connect();
+    const bytes = new Uint8Array(streamChunkSize * 2 + 17).map((_, index) => index % 251);
+    writeFileSync(join(root, 'large.bin'), bytes);
+    const read = async (options?: { position?: number; length?: number }): Promise<Array<Uint8Array<ArrayBuffer>>> => {
+      const chunks: Array<Uint8Array<ArrayBuffer>> = [];
+      for await (const chunk of provider.readFileStream('large.bin', options)) {
+        chunks.push(chunk);
+      }
+      return chunks;
+    };
+
+    const whole = await read();
+    expect(whole.map((chunk) => chunk.byteLength)).toEqual([streamChunkSize, streamChunkSize, 17]);
+    expect(new Uint8Array(Buffer.concat(whole))).toEqual(bytes);
+    const range = await read({ position: 11, length: streamChunkSize + 5 });
+    expect(new Uint8Array(Buffer.concat(range))).toEqual(bytes.slice(11, 11 + streamChunkSize + 5));
+    expect(await read({ length: 0 })).toEqual([]);
+    expect(await read({ position: bytes.byteLength + 20 })).toEqual([]);
+    await expect(read({ position: -1 })).rejects.toThrow();
+    // A cancelled stream asks for nothing more.
+    const reader = provider.readFileStream('large.bin').getReader();
+    await reader.read();
+    await reader.cancel();
+    await expect(provider.readFile('large.bin')).resolves.toEqual(bytes);
+  });
+
   it('keeps exact and head wire validators distinct', () => {
     const row = [{ name: 'file.txt', type: 'file', size: 1, mtimeMs: 0, contentKind: 'text' }];
     expect(nodeFsResultSchemas.readdirWithStats.safeParse(row).success).toBe(false);
@@ -644,7 +655,7 @@ describe('node filesystem client/host round trip', () => {
       });
       port1.postMessage({ v: nodeFsProtocolVersion, id: 41, op: 'unwatch' });
       await vi.waitFor(() => {
-        expect(frames).toContainEqual({ v: nodeFsProtocolVersion, id: 41, type: 'result', value: undefined });
+        expect(frames).toContainEqual(expect.objectContaining({ id: 41, type: 'error' }));
       });
 
       writeFileSync(join(root, 'after-unwatch.txt'), 'must not be observed');
@@ -659,6 +670,110 @@ describe('node filesystem client/host round trip', () => {
       ).toEqual([]);
     } finally {
       await stop();
+      port1.close();
+      port2.close();
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+  });
+
+  it('does not acknowledge a watch before native admission settles', async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), 'tau-node-watch-admission-'));
+    const root = join(sandbox, 'root');
+    mkdirSync(root);
+    const { port1, port2 } = new MessageChannel();
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+    const frames: unknown[] = [];
+    port1.addEventListener('message', ({ data }) => frames.push(data));
+    port1.start();
+    const admission = Promise.withResolvers<() => void>();
+    const watch = vi.spyOn(NodeFsProvider.prototype, 'watch').mockReturnValue(admission.promise);
+    let prematureAck = false;
+    let cleanupError: unknown;
+    try {
+      port1.postMessage({
+        v: nodeFsProtocolVersion,
+        id: 43,
+        op: 'watch',
+        root,
+        request: { paths: [''], recursive: true },
+      });
+      await vi.waitFor(() => {
+        expect(watch).toHaveBeenCalledOnce();
+      });
+      await rawRequest(port1, { id: 44, op: 'stat', root, path: '' });
+      prematureAck = frames.some(
+        (frame) =>
+          (frame as { id?: unknown; type?: unknown }).id === 43 && (frame as { type?: unknown }).type === 'result',
+      );
+      admission.resolve(() => undefined);
+      await vi.waitFor(() => {
+        expect(frames).toContainEqual({ v: nodeFsProtocolVersion, id: 43, type: 'result', value: undefined });
+      });
+    } finally {
+      admission.resolve(() => undefined);
+      watch.mockRestore();
+      try {
+        await stop();
+      } catch (error) {
+        cleanupError = error;
+      }
+      port1.close();
+      port2.close();
+      rmSync(sandbox, { recursive: true, force: true });
+    }
+    // The old host stores a pending Promise as a disposer; judge its early ack
+    // before surfacing any secondary teardown failure.
+    expect(prematureAck).toBe(false);
+    if (cleanupError !== undefined) {
+      if (cleanupError instanceof Error) {
+        throw cleanupError;
+      }
+      throw new Error('Node watch cleanup failed.', { cause: cleanupError });
+    }
+  });
+
+  it('awaits a late replacement native start before host stop completes', async () => {
+    const sandbox = mkdtempSync(join(tmpdir(), 'tau-node-watch-rearm-stop-'));
+    const root = join(sandbox, 'root');
+    mkdirSync(root);
+    const { port1, port2 } = new MessageChannel();
+    const stop = serveNodeFsProvider(port2, { policy: tauPathPolicy, allowRoot: (candidate) => candidate === root });
+    const replacement = Promise.withResolvers<{ unsubscribe(): Promise<void> }>();
+    const lateClose = vi.fn(async () => undefined);
+    let onEvents: Parameters<typeof parcelWatcher.subscribe>[1] | undefined;
+    const subscribe = vi.spyOn(parcelWatcher, 'subscribe').mockImplementation(async (_directory, callback) => {
+      onEvents = callback;
+      return subscribe.mock.calls.length === 1 ? { unsubscribe: async () => undefined } : replacement.promise;
+    });
+    try {
+      const frame = await rawRequest(port1, {
+        id: 45,
+        op: 'watch',
+        root,
+        request: { paths: ['absent/deep.txt'], recursive: false },
+      });
+      expect(frame).toMatchObject({ id: 45, type: 'result' });
+      mkdirSync(join(root, 'absent'));
+      onEvents?.(null, [{ path: join(root, 'absent'), type: 'create' }]);
+      await vi.waitFor(() => {
+        expect(subscribe).toHaveBeenCalledTimes(2);
+      });
+      let stopped = false;
+      const stopping = (async () => {
+        await stop();
+        stopped = true;
+      })();
+      await new Promise<void>((resolve) => {
+        setImmediate(resolve);
+      });
+      expect(stopped).toBe(false);
+      replacement.resolve({ unsubscribe: lateClose });
+      await stopping;
+      expect(lateClose).toHaveBeenCalledOnce();
+    } finally {
+      replacement.resolve({ unsubscribe: lateClose });
+      await stop();
+      subscribe.mockRestore();
       port1.close();
       port2.close();
       rmSync(sandbox, { recursive: true, force: true });
@@ -696,13 +811,10 @@ describe('node filesystem client/host round trip', () => {
       port1.postMessage(request);
       port1.postMessage(request);
       await vi.waitFor(() => {
-        expect(
-          frames.filter(
-            (frame) =>
-              (frame as { id?: unknown; type?: unknown }).id === 42 && (frame as { type?: unknown }).type === 'result',
-          ),
-        ).toHaveLength(2);
+        expect(frames.filter((frame) => (frame as { id?: unknown }).id === 42)).toHaveLength(2);
       });
+      expect(frames).toContainEqual(expect.objectContaining({ id: 42, type: 'error' }));
+      expect(frames).toContainEqual({ v: nodeFsProtocolVersion, id: 42, type: 'result', value: undefined });
       port1.postMessage({ v: nodeFsProtocolVersion, id: 42, op: 'unwatch' });
       await new Promise((resolve) => {
         setTimeout(resolve, 50);
@@ -879,6 +991,29 @@ describe('node filesystem client/host round trip', () => {
     await expect(
       waitForEvent(events, (event) => event.type === 'change' && event.path === 'watched.txt'),
     ).resolves.toEqual({ type: 'change', path: 'watched.txt', kind: 'file' });
+  }, 30_000);
+
+  it('keeps provider atomic staging names out of the watch stream', async () => {
+    const { root, provider } = connect();
+    const { events } = await armLiveWatch(provider, root);
+    const temporaryName = `.main.ts.${String(process.pid)}.1b4e28ba-2fa1-4d3b-9c6e-0f3a2b1c4d5e.tmp`;
+    writeFileSync(join(root, temporaryName), 'staged');
+    writeFileSync(join(root, 'main.ts'), 'committed');
+    await waitForEvent(events, (event) => event.type === 'change' && event.path === 'main.ts');
+    expect(events.some((event) => event.type !== 'reset' && event.path === temporaryName)).toBe(false);
+  }, 30_000);
+
+  it('delivers legal sibling names beginning with two dots', async () => {
+    const { root, provider } = connect();
+    const { events } = await armLiveWatch(provider, root);
+    writeFileSync(join(root, '..notes'), 'visible');
+    await expect(waitForEvent(events, (event) => event.type === 'change' && event.path === '..notes')).resolves.toEqual(
+      {
+        type: 'change',
+        path: '..notes',
+        kind: 'file',
+      },
+    );
   }, 30_000);
 
   it('classifies a removal as a delete rather than trusting the OS event type', async () => {
@@ -1124,7 +1259,7 @@ describe('node filesystem host hardening', () => {
     });
     const watchFailure = new Error('watch cleanup failed');
     const providerFailure = new Error('provider cleanup failed');
-    const watch = vi.spyOn(NodeFsProvider.prototype, 'watch').mockReturnValue(() => {
+    const watch = vi.spyOn(NodeFsProvider.prototype, 'watch').mockResolvedValue(() => {
       throw watchFailure;
     });
     const dispose = vi.spyOn(NodeFsProvider.prototype, 'dispose').mockImplementation(() => {

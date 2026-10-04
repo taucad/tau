@@ -90,6 +90,8 @@ const runningRow: SidebarStatusModule.ProjectSidebarRow = {
   closing: false,
   attention: 0,
   conflicted: false,
+  settings: 0,
+  settingsLabel: undefined,
   failed: 0,
   running: 2,
   unread: 0,

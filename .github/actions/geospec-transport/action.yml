@@ -1,0 +1,63 @@
+name: 'GeoSpec engine products cache'
+description: 'Look up, restore or save the GeoSpec engine products under their product-closure key (any runner)'
+
+# The products (generated bindings, the Darwin addon, the WASM build and the transport
+# inventory) depend only on the native source closure that `ci-artifacts.mjs product-key`
+# digests, so one build serves every later run whose closure matches. A run can restore
+# entries saved by runs on its own ref, its pull request's base branch and `main`.
+# This file owns the cached path list: a different list is a different cache version.
+
+inputs:
+  key:
+    description: 'The `geospec-transport-v1-<product key>` cache key'
+    required: true
+  mode:
+    description: '`lookup` (report a hit without downloading), `restore` (fail on a miss) or `save`'
+    required: true
+
+outputs:
+  cache-hit:
+    description: '`true` when lookup or restore found the exact key'
+    value: ${{ steps.restore.outputs.cache-hit }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Check the selected mode
+      shell: bash
+      env:
+        MODE: ${{ inputs.mode }}
+      run: |
+        case "$MODE" in
+          lookup | restore | save) ;;
+          *) echo "Unsupported GeoSpec products cache mode: $MODE" >&2; exit 1 ;;
+        esac
+
+    - name: Find or restore GeoSpec engine products
+      id: restore
+      if: inputs.mode != 'save'
+      uses: actions/cache/restore@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        key: ${{ inputs.key }}
+        lookup-only: ${{ inputs.mode == 'lookup' }}
+        fail-on-cache-miss: ${{ inputs.mode == 'restore' }}
+        path: |
+          packages/geospec-engine-native/bindings/node/generated/index.d.ts
+          packages/geospec-engine-native/bindings/node/generated/index.js
+          packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node
+          packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.mjs
+          packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm
+          out/artifacts/geospec-native-engine/ci
+
+    - name: Save GeoSpec engine products
+      if: inputs.mode == 'save'
+      uses: actions/cache/save@27d5ce7f107fe9357f9df03efb73ab90386fccae # v5.0.5
+      with:
+        key: ${{ inputs.key }}
+        path: |
+          packages/geospec-engine-native/bindings/node/generated/index.d.ts
+          packages/geospec-engine-native/bindings/node/generated/index.js
+          packages/geospec-engine-native/bindings/node/generated/geospec-engine-native.darwin-arm64.node
+          packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.mjs
+          packages/geospec-engine-native/bindings/emscripten/generated/geospec_engine_native.wasm
+          out/artifacts/geospec-native-engine/ci

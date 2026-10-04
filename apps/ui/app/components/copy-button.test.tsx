@@ -10,7 +10,7 @@
  * `getText` that throws.
  */
 
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { CopyButton } from '#components/copy-button.js';
@@ -43,6 +43,20 @@ afterEach(() => {
 });
 
 describe('CopyButton', () => {
+  it.each(['icon', 'icon-xs', 'icon-sm', 'icon-lg'] as const)(
+    'should keep %s icon-only with an accessible name',
+    (size) => {
+      render(
+        <TooltipProvider>
+          <CopyButton size={size} getText={() => 'value'} tooltip='Copy value' />
+        </TooltipProvider>,
+      );
+
+      const button = screen.getByRole('button', { name: 'Copy value' });
+      expect(within(button).queryByText('Copy')).not.toBeInTheDocument();
+    },
+  );
+
   it('should write the text and report the copy when the clipboard accepts it', async () => {
     stubClipboard(async () => undefined);
     renderButton(async () => 'https://tau.new/invitations/tok_abcdef');

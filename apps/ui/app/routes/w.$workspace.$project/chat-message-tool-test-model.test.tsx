@@ -1,9 +1,21 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { cleanup, render, screen, within } from '@testing-library/react';
+import { cleanup, fireEvent, render, screen, within } from '@testing-library/react';
 import type { ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
 import { ChatMessageToolTestModel } from '#routes/w.$workspace.$project/chat-message-tool-test-model.js';
+
+const enabledFeatures = vi.hoisted(() => new Set<string>());
+
+vi.mock('#flags/use-feature.js', () => ({
+  useFeature: (key: string) => enabledFeatures.has(key),
+}));
+
+vi.mock('#routes/w.$workspace.$project/chat-message-media.js', () => ({
+  ChatMessageMedia({ media }: { readonly media: { readonly filename?: string } }): React.JSX.Element {
+    return <span data-testid='report-card'>{media.filename}</span>;
+  },
+}));
 
 vi.mock('#hooks/use-chat.js', () => ({
   useChatSelector<T>(selector: (state: { status: 'streaming' | 'idle' }) => T): T {
@@ -90,6 +102,39 @@ const buildPart = (output: TestModelOutputAvailable['output']): TestModelOutputA
 
 afterEach(() => {
   cleanup();
+  enabledFeatures.clear();
+});
+
+describe('ChatMessageToolTestModel — full report', () => {
+  const part = buildPart({
+    passed: 1,
+    total: 2,
+    passes: [],
+    failures: [],
+    fullResult: {
+      path: `attachments/${'a'.repeat(64)}.json`,
+      mimeType: 'application/json',
+      byteLength: 2048,
+      sha256: 'b'.repeat(64),
+    },
+  });
+
+  it('should hide the report outside Tau Debug', () => {
+    render(<ChatMessageToolTestModel part={part} />);
+
+    expect(screen.queryByText('Report')).toBeNull();
+  });
+
+  it('should reveal the report card with its summary and size when opened in Tau Debug', () => {
+    enabledFeatures.add('tauDebug');
+    render(<ChatMessageToolTestModel part={part} />);
+
+    expect(screen.queryByTestId('report-card')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Report' }));
+
+    expect(screen.getByTestId('report-card').textContent).toBe('geospec-report.json');
+    expect(screen.getByText(/All 2 requirements \(1 passed, 1 failed\).*2\.0 KB/)).toBeTruthy();
+  });
 });
 
 describe('ChatMessageToolTestModel — multi-line failure reasons', () => {

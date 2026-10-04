@@ -1,550 +1,528 @@
 # libcascade — HLRBRep (2)
 
-25 top-level symbols. Signatures are verbatim typescript.
-
-HLRBRep_LineTool: declare class HLRBRep_LineTool
-
-  constructor
-
-  static FirstParameter(C: gp_Lin): number;
-
-  static LastParameter(C: gp_Lin): number;
-
-  static Continuity(C: gp_Lin): GeomAbs_Shape;
-
-  static NbIntervals(C: gp_Lin, S: GeomAbs_Shape): number;
-
-  static Intervals(C: gp_Lin, T: NCollection_Array1_double, Sh: GeomAbs_Shape): void;
-
-  static IntervalFirst(C: gp_Lin): number;
-
-  static IntervalLast(C: gp_Lin): number;
-
-  static IntervalContinuity(C: gp_Lin): GeomAbs_Shape;
-
-  static IsClosed(C: gp_Lin): boolean;
-
-  static IsPeriodic(C: gp_Lin): boolean;
-
-  static Period(C: gp_Lin): number;
-
-  static Value(C: gp_Lin, U: number): gp_Pnt;
-
-  static D0(C: gp_Lin, U: number, P: gp_Pnt): void;
-
-  static D1(C: gp_Lin, U: number, P: gp_Pnt, V: gp_Vec): void;
-
-  static D2(C: gp_Lin, U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec): void;
-
-  static D3(C: gp_Lin, U: number, P: gp_Pnt, V1: gp_Vec, V2: gp_Vec, V3: gp_Vec): void;
-
-  static DN(C: gp_Lin, U: number, N: number): gp_Vec;
-
-  static Resolution(C: gp_Lin, R3d: number): number;
-
-  static GetType(C: gp_Lin): GeomAbs_CurveType;
-
-  static Line(C: gp_Lin): gp_Lin;
-
-  static Circle(C: gp_Lin): gp_Circ;
-
-  static Ellipse(C: gp_Lin): gp_Elips;
-
-  static Hyperbola(C: gp_Lin): gp_Hypr;
-
-  static Parabola(C: gp_Lin): gp_Parab;
-
-  static Bezier(C: gp_Lin): Geom_BezierCurve;
-
-  static BSpline(C: gp_Lin): Geom_BSplineCurve;
-
-  static Degree(C: gp_Lin): number;
-
-  static NbPoles(C: gp_Lin): number;
-
-  static Poles(C: gp_Lin, TP: NCollection_Array1_gp_Pnt): void;
-
-  static IsRational(C: gp_Lin): boolean;
-
-  static PolesAndWeights(C: gp_Lin, TP: NCollection_Array1_gp_Pnt, TW: NCollection_Array1_double): void;
-
-  static NbKnots(C: gp_Lin): number;
-
-  static KnotsAndMultiplicities(C: gp_Lin, TK: NCollection_Array1_double, TM: NCollection_Array1_int): void;
-
-  static NbSamples(C: gp_Lin, U0: number, U1: number): number;
-
-  static SamplePars(C: gp_Lin, U0: number, U1: number, Defl: number, NbMin: number): NCollection_HArray1_double;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-HLRBRep_MyImpParToolOfTheIntersectorOfTheIntConicCurveOfCInter: declare class HLRBRep_MyImpParToolOfTheIntersectorOfTheIntConicCurveOfCInter extends math_FunctionWithDerivative
-
-  Value(X: number, F: number): { returnValue: boolean; F: number };
-
-  Derivative(X: number, D: number): { returnValue: boolean; D: number };
-
-  Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
-
-HLRBRep_PolyAlgo: declare class HLRBRep_PolyAlgo extends Standard_Transient
-
-  constructor
-
-  NbShapes(): number;
-
-  Shape(I: number): TopoDS_Shape;
-
-  Remove(I: number): void;
-
-  Index(S: TopoDS_Shape): number;
-
-  Load(theShape: TopoDS_Shape): void;
-
-  Algo(): HLRAlgo_PolyAlgo;
-
-  Projector(): HLRAlgo_Projector;
-  Projector(theProj: HLRAlgo_Projector): void;
-  Projector(): HLRAlgo_Projector;
-  Projector(theProj: HLRAlgo_Projector): void;
-
-  TolAngular(): number;
-  TolAngular(theTol: number): void;
-  TolAngular(): number;
-  TolAngular(theTol: number): void;
-
-  TolCoef(): number;
-  TolCoef(theTol: number): void;
-  TolCoef(): number;
-  TolCoef(theTol: number): void;
-
-  Update(): void;
-
-  InitHide(): void;
-
-  MoreHide(): boolean;
-
-  NextHide(): void;
-
-  Hide(status: HLRAlgo_EdgeStatus, S: TopoDS_Shape, reg1?: boolean, regn?: boolean, outl?: boolean, intl?: boolean): { returnValue: HLRAlgo_BiPoint_PointsT; reg1: boolean; regn: boolean; outl: boolean; intl: boolean; [Symbol.dispose](): void };
-
-  InitShow(): void;
-
-  MoreShow(): boolean;
-
-  NextShow(): void;
-
-  Show(S: TopoDS_Shape, reg1?: boolean, regn?: boolean, outl?: boolean, intl?: boolean): { returnValue: HLRAlgo_BiPoint_PointsT; reg1: boolean; regn: boolean; outl: boolean; intl: boolean; [Symbol.dispose](): void };
-
-  OutLinedShape(S: TopoDS_Shape): TopoDS_Shape;
-
-  Debug(): boolean;
-  Debug(theDebug: boolean): void;
-  Debug(): boolean;
-  Debug(theDebug: boolean): void;
-
-  static get_type_name(): string;
-
-  static get_type_descriptor(): Standard_Type;
-
-  DynamicType(): Standard_Type;
-
-  delete(): void;
-
-  [Symbol.dispose](): void;
+22 top-level symbols. Signatures are verbatim typescript.
 
 HLRBRep_PolyHLRToShape: declare class HLRBRep_PolyHLRToShape
 
-  constructor
+  // HLRBRep_PolyHLRToShape.constructor (constructor)
+  constructor();
 
+  // HLRBRep_PolyHLRToShape.Update (method)
   Update(A: HLRBRep_PolyAlgo): void;
 
+  // HLRBRep_PolyHLRToShape.Show (method)
   Show(): void;
 
+  // HLRBRep_PolyHLRToShape.Hide (method)
   Hide(): void;
 
-  VCompound(): TopoDS_Shape;
-  VCompound(S: TopoDS_Shape): TopoDS_Shape;
+  // HLRBRep_PolyHLRToShape.VCompound (method)
   VCompound(): TopoDS_Shape;
   VCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-  Rg1LineVCompound(): TopoDS_Shape;
-  Rg1LineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  // HLRBRep_PolyHLRToShape.Rg1LineVCompound (method)
   Rg1LineVCompound(): TopoDS_Shape;
   Rg1LineVCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-  RgNLineVCompound(): TopoDS_Shape;
-  RgNLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  // HLRBRep_PolyHLRToShape.RgNLineVCompound (method)
   RgNLineVCompound(): TopoDS_Shape;
   RgNLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-  OutLineVCompound(): TopoDS_Shape;
-  OutLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
+  // HLRBRep_PolyHLRToShape.OutLineVCompound (method)
   OutLineVCompound(): TopoDS_Shape;
   OutLineVCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-  HCompound(): TopoDS_Shape;
-  HCompound(S: TopoDS_Shape): TopoDS_Shape;
+  // HLRBRep_PolyHLRToShape.HCompound (method)
   HCompound(): TopoDS_Shape;
   HCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-  Rg1LineHCompound(): TopoDS_Shape;
-  Rg1LineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  // HLRBRep_PolyHLRToShape.Rg1LineHCompound (method)
   Rg1LineHCompound(): TopoDS_Shape;
   Rg1LineHCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-  RgNLineHCompound(): TopoDS_Shape;
-  RgNLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  // HLRBRep_PolyHLRToShape.RgNLineHCompound (method)
   RgNLineHCompound(): TopoDS_Shape;
   RgNLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
 
-  OutLineHCompound(): TopoDS_Shape;
-  OutLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
+  // HLRBRep_PolyHLRToShape.OutLineHCompound (method)
   OutLineHCompound(): TopoDS_Shape;
   OutLineHCompound(S: TopoDS_Shape): TopoDS_Shape;
 
+  // HLRBRep_PolyHLRToShape.delete (method)
   delete(): void;
 
+  // HLRBRep_PolyHLRToShape.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_SLProps: declare class HLRBRep_SLProps
 
-  constructor
+  // HLRBRep_SLProps.constructor (constructor)
+  constructor(N: number, Resolution: number);
+  constructor(S: unknown, N: number, Resolution: number);
+  constructor(S: unknown, U: number, V: number, N: number, Resolution: number);
 
+  // HLRBRep_SLProps.SetSurface (method)
   SetSurface(S: unknown): void;
 
+  // HLRBRep_SLProps.SetParameters (method)
   SetParameters(U: number, V: number): void;
 
+  // HLRBRep_SLProps.Value (method)
   Value(): gp_Pnt;
 
+  // HLRBRep_SLProps.D1U (method)
   D1U(): gp_Vec;
 
+  // HLRBRep_SLProps.D1V (method)
   D1V(): gp_Vec;
 
+  // HLRBRep_SLProps.D2U (method)
   D2U(): gp_Vec;
 
+  // HLRBRep_SLProps.D2V (method)
   D2V(): gp_Vec;
 
+  // HLRBRep_SLProps.DUV (method)
   DUV(): gp_Vec;
 
+  // HLRBRep_SLProps.IsTangentUDefined (method)
   IsTangentUDefined(): boolean;
 
+  // HLRBRep_SLProps.TangentU (method)
   TangentU(D: gp_Dir): void;
 
+  // HLRBRep_SLProps.IsTangentVDefined (method)
   IsTangentVDefined(): boolean;
 
+  // HLRBRep_SLProps.TangentV (method)
   TangentV(D: gp_Dir): void;
 
+  // HLRBRep_SLProps.IsNormalDefined (method)
   IsNormalDefined(): boolean;
 
+  // HLRBRep_SLProps.Normal (method)
   Normal(): gp_Dir;
 
+  // HLRBRep_SLProps.IsCurvatureDefined (method)
   IsCurvatureDefined(): boolean;
 
+  // HLRBRep_SLProps.IsUmbilic (method)
   IsUmbilic(): boolean;
 
+  // HLRBRep_SLProps.MaxCurvature (method)
   MaxCurvature(): number;
 
+  // HLRBRep_SLProps.MinCurvature (method)
   MinCurvature(): number;
 
+  // HLRBRep_SLProps.CurvatureDirections (method)
   CurvatureDirections(MaxD: gp_Dir, MinD: gp_Dir): void;
 
+  // HLRBRep_SLProps.MeanCurvature (method)
   MeanCurvature(): number;
 
+  // HLRBRep_SLProps.GaussianCurvature (method)
   GaussianCurvature(): number;
 
+  // HLRBRep_SLProps.delete (method)
   delete(): void;
 
+  // HLRBRep_SLProps.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_SLPropsATool: declare class HLRBRep_SLPropsATool
 
-  constructor
+  // HLRBRep_SLPropsATool.constructor (constructor)
+  constructor();
 
+  // HLRBRep_SLPropsATool.delete (method)
   delete(): void;
 
+  // HLRBRep_SLPropsATool.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_ShapeBounds: declare class HLRBRep_ShapeBounds
 
-  constructor
+  // HLRBRep_ShapeBounds.constructor (constructor)
+  constructor();
+  constructor(S: HLRTopoBRep_OutLiner, nbIso: number, V1: number, V2: number, E1: number, E2: number, F1: number, F2: number);
+  constructor(S: HLRTopoBRep_OutLiner, SData: Standard_Transient, nbIso: number, V1: number, V2: number, E1: number, E2: number, F1: number, F2: number);
 
+  // HLRBRep_ShapeBounds.Translate (method)
   Translate(NV: number, NE: number, NF: number): void;
 
-  Shape(S: HLRTopoBRep_OutLiner): void;
-  Shape(): HLRTopoBRep_OutLiner;
+  // HLRBRep_ShapeBounds.Shape (method)
   Shape(S: HLRTopoBRep_OutLiner): void;
   Shape(): HLRTopoBRep_OutLiner;
 
-  ShapeData(SD: Standard_Transient): void;
-  ShapeData(): Standard_Transient;
+  // HLRBRep_ShapeBounds.ShapeData (method)
   ShapeData(SD: Standard_Transient): void;
   ShapeData(): Standard_Transient;
 
-  NbOfIso(nbIso: number): void;
-  NbOfIso(): number;
+  // HLRBRep_ShapeBounds.NbOfIso (method)
   NbOfIso(nbIso: number): void;
   NbOfIso(): number;
 
+  // HLRBRep_ShapeBounds.Sizes (method)
   Sizes(NV?: number, NE?: number, NF?: number): { NV: number; NE: number; NF: number };
 
+  // HLRBRep_ShapeBounds.Bounds (method)
   Bounds(V1?: number, V2?: number, E1?: number, E2?: number, F1?: number, F2?: number): { V1: number; V2: number; E1: number; E2: number; F1: number; F2: number };
 
+  // HLRBRep_ShapeBounds.UpdateMinMax (method)
   UpdateMinMax(theTotMinMax: HLRAlgo_EdgesBlock_MinMaxIndices): void;
 
+  // HLRBRep_ShapeBounds.MinMax (method)
   MinMax(): HLRAlgo_EdgesBlock_MinMaxIndices;
 
+  // HLRBRep_ShapeBounds.delete (method)
   delete(): void;
 
+  // HLRBRep_ShapeBounds.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_ShapeToHLR: declare class HLRBRep_ShapeToHLR
 
-  constructor
+  // HLRBRep_ShapeToHLR.constructor (constructor)
+  constructor();
 
+  // HLRBRep_ShapeToHLR.delete (method)
   delete(): void;
 
+  // HLRBRep_ShapeToHLR.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_SurfaceTool: declare class HLRBRep_SurfaceTool
 
-  constructor
+  // HLRBRep_SurfaceTool.constructor (constructor)
+  constructor();
 
+  // HLRBRep_SurfaceTool.delete (method)
   delete(): void;
 
+  // HLRBRep_SurfaceTool.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter: declare class HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter extends math_FunctionSetWithDerivatives
 
+  // HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter.NbVariables (method)
   NbVariables(): number;
 
+  // HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter.NbEquations (method)
   NbEquations(): number;
 
+  // HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter.Value (method)
   Value(X: math_VectorBase_double, F: math_VectorBase_double): boolean;
 
+  // HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter.Derivatives (method)
   Derivatives(X: math_VectorBase_double, D: math_Matrix): boolean;
 
+  // HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter.Values (method)
   Values(X: math_VectorBase_double, F: math_VectorBase_double, D: math_Matrix): boolean;
 
+  // HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter.delete (method)
   delete(): void;
 
+  // HLRBRep_TheDistBetweenPCurvesOfTheIntPCurvePCurveOfCInter.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheExactInterCSurf: declare class HLRBRep_TheExactInterCSurf
 
+  // HLRBRep_TheExactInterCSurf.Perform (method)
   Perform(U: number, V: number, W: number, Rsnld: math_FunctionSetRoot, u0: number, v0: number, u1: number, v1: number, w0: number, w1: number): void;
 
+  // HLRBRep_TheExactInterCSurf.IsDone (method)
   IsDone(): boolean;
 
+  // HLRBRep_TheExactInterCSurf.IsEmpty (method)
   IsEmpty(): boolean;
 
+  // HLRBRep_TheExactInterCSurf.Point (method)
   Point(): gp_Pnt;
 
+  // HLRBRep_TheExactInterCSurf.ParameterOnCurve (method)
   ParameterOnCurve(): number;
 
+  // HLRBRep_TheExactInterCSurf.ParameterOnSurface (method)
   ParameterOnSurface(U?: number, V?: number): { U: number; V: number };
 
+  // HLRBRep_TheExactInterCSurf.delete (method)
   delete(): void;
 
+  // HLRBRep_TheExactInterCSurf.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheIntConicCurveOfCInter: declare class HLRBRep_TheIntConicCurveOfCInter extends IntRes2d_Intersection
 
-  constructor
+  // HLRBRep_TheIntConicCurveOfCInter.constructor (constructor)
+  constructor();
 
+  // HLRBRep_TheIntConicCurveOfCInter.delete (method)
   delete(): void;
 
+  // HLRBRep_TheIntConicCurveOfCInter.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheIntPCurvePCurveOfCInter: declare class HLRBRep_TheIntPCurvePCurveOfCInter extends IntRes2d_Intersection
 
-  constructor
+  // HLRBRep_TheIntPCurvePCurveOfCInter.constructor (constructor)
+  constructor();
 
+  // HLRBRep_TheIntPCurvePCurveOfCInter.SetMinNbSamples (method)
   SetMinNbSamples(theMinNbSamples: number): void;
 
+  // HLRBRep_TheIntPCurvePCurveOfCInter.GetMinNbSamples (method)
   GetMinNbSamples(): number;
 
+  // HLRBRep_TheIntPCurvePCurveOfCInter.delete (method)
   delete(): void;
 
+  // HLRBRep_TheIntPCurvePCurveOfCInter.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheInterferenceOfInterCSurf: declare class HLRBRep_TheInterferenceOfInterCSurf extends Intf_Interference
 
-  constructor
+  // HLRBRep_TheInterferenceOfInterCSurf.constructor (constructor)
+  constructor();
 
+  // HLRBRep_TheInterferenceOfInterCSurf.delete (method)
   delete(): void;
 
+  // HLRBRep_TheInterferenceOfInterCSurf.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheIntersectorOfTheIntConicCurveOfCInter: declare class HLRBRep_TheIntersectorOfTheIntConicCurveOfCInter extends IntRes2d_Intersection
 
-  constructor
+  // HLRBRep_TheIntersectorOfTheIntConicCurveOfCInter.constructor (constructor)
+  constructor();
 
+  // HLRBRep_TheIntersectorOfTheIntConicCurveOfCInter.delete (method)
   delete(): void;
 
+  // HLRBRep_TheIntersectorOfTheIntConicCurveOfCInter.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter: declare class HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter extends Intf_Polygon2d
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.DeflectionOverEstimation (method)
   DeflectionOverEstimation(): number;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.SetDeflectionOverEstimation (method)
   SetDeflectionOverEstimation(x: number): void;
 
-  Closed(clos: boolean): void;
-  Closed(): boolean;
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.Closed (method)
   Closed(clos: boolean): void;
   Closed(): boolean;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.NbSegments (method)
   NbSegments(): number;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.Segment (method)
   Segment(theIndex: number, theBegin: gp_Pnt2d, theEnd: gp_Pnt2d): void;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.InfParameter (method)
   InfParameter(): number;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.SupParameter (method)
   SupParameter(): number;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.AutoIntersectionIsPossible (method)
   AutoIntersectionIsPossible(): boolean;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.ApproxParamOnCurve (method)
   ApproxParamOnCurve(Index: number, ParamOnLine: number): number;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.CalculRegion (method)
   CalculRegion(x: number, y: number, x1: number, x2: number, y1: number, y2: number): number;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.Dump (method)
   Dump(): void;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.delete (method)
   delete(): void;
 
+  // HLRBRep_ThePolygon2dOfTheIntPCurvePCurveOfCInter.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_ThePolygonOfInterCSurf: declare class HLRBRep_ThePolygonOfInterCSurf
 
-  constructor
+  // HLRBRep_ThePolygonOfInterCSurf.constructor (constructor)
+  constructor(Curve: gp_Lin, NbPnt: number);
+  constructor(Curve: gp_Lin, Upars: NCollection_Array1_double);
+  constructor(Curve: gp_Lin, U1: number, U2: number, NbPnt: number);
 
+  // HLRBRep_ThePolygonOfInterCSurf.Bounding (method)
   Bounding(): Bnd_Box;
 
+  // HLRBRep_ThePolygonOfInterCSurf.DeflectionOverEstimation (method)
   DeflectionOverEstimation(): number;
 
+  // HLRBRep_ThePolygonOfInterCSurf.SetDeflectionOverEstimation (method)
   SetDeflectionOverEstimation(x: number): void;
 
-  Closed(flag: boolean): void;
-  Closed(): boolean;
+  // HLRBRep_ThePolygonOfInterCSurf.Closed (method)
   Closed(flag: boolean): void;
   Closed(): boolean;
 
+  // HLRBRep_ThePolygonOfInterCSurf.NbSegments (method)
   NbSegments(): number;
 
+  // HLRBRep_ThePolygonOfInterCSurf.BeginOfSeg (method)
   BeginOfSeg(theIndex: number): gp_Pnt;
 
+  // HLRBRep_ThePolygonOfInterCSurf.EndOfSeg (method)
   EndOfSeg(theIndex: number): gp_Pnt;
 
+  // HLRBRep_ThePolygonOfInterCSurf.InfParameter (method)
   InfParameter(): number;
 
+  // HLRBRep_ThePolygonOfInterCSurf.SupParameter (method)
   SupParameter(): number;
 
+  // HLRBRep_ThePolygonOfInterCSurf.ApproxParamOnCurve (method)
   ApproxParamOnCurve(Index: number, ParamOnLine: number): number;
 
+  // HLRBRep_ThePolygonOfInterCSurf.Dump (method)
   Dump(): void;
 
+  // HLRBRep_ThePolygonOfInterCSurf.delete (method)
   delete(): void;
 
+  // HLRBRep_ThePolygonOfInterCSurf.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_ThePolygonToolOfInterCSurf: declare class HLRBRep_ThePolygonToolOfInterCSurf
 
-  constructor
+  // HLRBRep_ThePolygonToolOfInterCSurf.constructor (constructor)
+  constructor();
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.Bounding (method)
   static Bounding(thePolygon: HLRBRep_ThePolygonOfInterCSurf): Bnd_Box;
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.DeflectionOverEstimation (method)
   static DeflectionOverEstimation(thePolygon: HLRBRep_ThePolygonOfInterCSurf): number;
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.Closed (method)
   static Closed(thePolygon: HLRBRep_ThePolygonOfInterCSurf): boolean;
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.NbSegments (method)
   static NbSegments(thePolygon: HLRBRep_ThePolygonOfInterCSurf): number;
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.BeginOfSeg (method)
   static BeginOfSeg(thePolygon: HLRBRep_ThePolygonOfInterCSurf, Index: number): gp_Pnt;
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.EndOfSeg (method)
   static EndOfSeg(thePolygon: HLRBRep_ThePolygonOfInterCSurf, Index: number): gp_Pnt;
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.Dump (method)
   static Dump(thePolygon: HLRBRep_ThePolygonOfInterCSurf): void;
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.delete (method)
   delete(): void;
 
+  // HLRBRep_ThePolygonToolOfInterCSurf.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_ThePolyhedronToolOfInterCSurf: declare class HLRBRep_ThePolyhedronToolOfInterCSurf
 
-  constructor
+  // HLRBRep_ThePolyhedronToolOfInterCSurf.constructor (constructor)
+  constructor();
 
+  // HLRBRep_ThePolyhedronToolOfInterCSurf.delete (method)
   delete(): void;
 
+  // HLRBRep_ThePolyhedronToolOfInterCSurf.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheProjPCurOfCInter: declare class HLRBRep_TheProjPCurOfCInter
 
-  constructor
+  // HLRBRep_TheProjPCurOfCInter.constructor (constructor)
+  constructor();
 
+  // HLRBRep_TheProjPCurOfCInter.delete (method)
   delete(): void;
 
+  // HLRBRep_TheProjPCurOfCInter.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheQuadCurvExactInterCSurf: declare class HLRBRep_TheQuadCurvExactInterCSurf
 
+  // HLRBRep_TheQuadCurvExactInterCSurf.IsDone (method)
   IsDone(): boolean;
 
+  // HLRBRep_TheQuadCurvExactInterCSurf.NbRoots (method)
   NbRoots(): number;
 
+  // HLRBRep_TheQuadCurvExactInterCSurf.Root (method)
   Root(Index: number): number;
 
+  // HLRBRep_TheQuadCurvExactInterCSurf.NbIntervals (method)
   NbIntervals(): number;
 
+  // HLRBRep_TheQuadCurvExactInterCSurf.Intervals (method)
   Intervals(Index: number, U1?: number, U2?: number): { U1: number; U2: number };
 
+  // HLRBRep_TheQuadCurvExactInterCSurf.delete (method)
   delete(): void;
 
+  // HLRBRep_TheQuadCurvExactInterCSurf.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf: declare class HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf extends math_FunctionWithDerivative
 
-  constructor
+  // HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf.constructor (constructor)
+  constructor(Q: IntSurf_Quadric, C: gp_Lin);
 
+  // HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf.Value (method)
   Value(X: number, F: number): { returnValue: boolean; F: number };
 
+  // HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf.Derivative (method)
   Derivative(X: number, D: number): { returnValue: boolean; D: number };
 
+  // HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf.Values (method)
   Values(X: number, F: number, D: number): { returnValue: boolean; F: number; D: number };
 
+  // HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf.delete (method)
   delete(): void;
 
+  // HLRBRep_TheQuadCurvFuncOfTheQuadCurvExactInterCSurf.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_TypeOfResultingEdge: typeof HLRBRep_TypeOfResultingEdge[keyof typeof HLRBRep_TypeOfResultingEdge]
 
 HLRBRep_VertexList: declare class HLRBRep_VertexList
 
+  // HLRBRep_VertexList.IsPeriodic (method)
   IsPeriodic(): boolean;
 
+  // HLRBRep_VertexList.More (method)
   More(): boolean;
 
+  // HLRBRep_VertexList.Next (method)
   Next(): void;
 
+  // HLRBRep_VertexList.Current (method)
   Current(): HLRAlgo_Intersection;
 
+  // HLRBRep_VertexList.IsBoundary (method)
   IsBoundary(): boolean;
 
+  // HLRBRep_VertexList.IsInterference (method)
   IsInterference(): boolean;
 
+  // HLRBRep_VertexList.Orientation (method)
   Orientation(): TopAbs_Orientation;
 
+  // HLRBRep_VertexList.Transition (method)
   Transition(): TopAbs_Orientation;
 
+  // HLRBRep_VertexList.BoundaryTransition (method)
   BoundaryTransition(): TopAbs_Orientation;
 
+  // HLRBRep_VertexList.delete (method)
   delete(): void;
 
+  // HLRBRep_VertexList.[Symbol.dispose] (method)
   [Symbol.dispose](): void;
 
 HLRBRep_SeqOfShapeBounds: NCollection_Sequence_HLRBRep_ShapeBounds

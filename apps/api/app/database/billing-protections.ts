@@ -7,6 +7,8 @@ export async function installBillingProtections(client: postgres.Sql): Promise<v
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tau_billing_runtime') THEN CREATE ROLE tau_billing_runtime NOLOGIN; END IF;
       IF NOT EXISTS (SELECT FROM pg_roles WHERE rolname = 'tau_billing_policy_publisher') THEN CREATE ROLE tau_billing_policy_publisher NOLOGIN; END IF;
     END $$`;
+    // Lets the migration login SET ROLE into the billing roles without inheriting their privileges.
+    await transaction`GRANT tau_billing_runtime, tau_billing_policy_publisher TO CURRENT_USER WITH INHERIT FALSE, SET TRUE`;
     await transaction`DO $$ BEGIN
       IF to_regprocedure('billing.observe_policy(text)') IS NULL AND EXISTS (
         SELECT FROM billing.billing_policy_head h WHERE h.observed_activation_id IS NULL

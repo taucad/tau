@@ -8,8 +8,9 @@ use std::{fs, path::Path};
 
 const CORPUS_SHA256: &str = "c46c089b0d5097e862e606ed2866dea53dd25a6df207c044c3172d6dc9e100c4";
 const VERIFIER_SOURCE_HASH: &str =
-    include_str!("fixtures/current-profile-v5/verifier-source-hash.txt");
-const NUMERIC_PROFILE: &str = include_str!("fixtures/current-profile-v5/numeric-profile.txt");
+    include_str!("fixtures/current-profile-v6/verifier-source-hash.txt").trim_ascii_end();
+const NUMERIC_PROFILE: &str =
+    include_str!("fixtures/current-profile-v6/numeric-profile.txt").trim_ascii_end();
 
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]

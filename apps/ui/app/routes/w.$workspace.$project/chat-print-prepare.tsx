@@ -520,14 +520,20 @@ export const usePrintPrepare = ({
     const { material, plate: _plate, ...flags } = preferences ?? {};
     const fallback =
       entry && provider ? mappingOf(submissionDefaults(provider, entry, { manifest, filamentColors })) : [];
+    /* Saved slots are the machine type's; one this printer has not loaded (another X1C's A4 on the simulator)
+     * gives way to the default rather than selecting nothing. */
+    const isLoaded = (slot: number | undefined): slot is number =>
+      slot !== undefined &&
+      entry?.snapshot.setup.materials.some((tray) => tray.slot === slot && tray.state === 'loaded') === true;
+    const saved = filamentColors.map((color) => material?.slotsByColor?.[color.toLowerCase()]);
     const mapping =
       filamentColors.length > 1
-        ? material?.slotsByColor
-          ? filamentColors.map((color, index) => material.slotsByColor?.[color.toLowerCase()] ?? fallback[index] ?? -1)
+        ? saved.some((slot) => isLoaded(slot))
+          ? saved.map((slot, index) => (isLoaded(slot) ? slot : (fallback[index] ?? -1)))
           : undefined
-        : material?.defaultSlot === undefined
-          ? undefined
-          : [material.defaultSlot];
+        : isLoaded(material?.defaultSlot)
+          ? [material.defaultSlot]
+          : undefined;
     return {
       ...flags,
       ...(mapping

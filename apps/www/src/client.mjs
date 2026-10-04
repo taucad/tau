@@ -1,6 +1,11 @@
 import { readStoryProgress } from '#www/story-progress.js';
 import { randomUuid } from '@taucad/utils/id';
 import { sanitizeEvent, campaignCodes } from '#www/analytics.js';
+import { environmentHref } from '#www/environment.js';
+
+for (const link of document.querySelectorAll('a[href^="https://"]')) {
+  link.setAttribute('href', environmentHref(link.getAttribute('href') ?? '', location.hostname));
+}
 
 const mobileMenu = document.querySelector('.mobile-menu');
 document.addEventListener('keydown', (event) => {

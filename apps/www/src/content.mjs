@@ -1,6 +1,4 @@
 /** Public copy only. Commercial and capability provenance lives in README.md. */
-export const appOrigin = 'https://tau.new';
-export const docsOrigin = 'https://docs.tau.new';
 export const sourceUrl = 'https://github.com/taucad/tau';
 export const exampleUrl = `${sourceUrl}/tree/199c8079d5ee42f8c5771fc2cb02bf2791cc3bdf/libs/tau-examples/src/kernels/replicad/planetary-gear-system`;
 export const discordUrl = 'https://discord.gg/6pfSAN3t7A';

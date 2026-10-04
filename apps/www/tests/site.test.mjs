@@ -6,6 +6,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { sanitizeEvent } from '#www/analytics.js';
+import { environmentHref } from '#www/environment.js';
 import { pages, renderPage } from '#www/templates.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const eventId = '83efb3b9-a92c-444f-99ef-c67f8c9573d7';
@@ -155,4 +156,14 @@ await test('a reviewed article builds an escaped detail page and journal entry w
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }
+});
+await test('staging keeps app and docs links on staging and leaves production untouched', () => {
+  assert.equal(environmentHref('https://tau.new/projects/new', 'taucad.dev'), 'https://taucad.dev/projects/new');
+  assert.equal(environmentHref('https://docs.tau.new/', 'taucad.dev'), 'https://docs.taucad.dev/');
+  assert.equal(
+    environmentHref('https://github.com/taucad/tau/releases', 'taucad.dev'),
+    'https://github.com/taucad/tau/releases',
+  );
+  assert.equal(environmentHref('https://tau.newer.example/', 'taucad.dev'), 'https://tau.newer.example/');
+  assert.equal(environmentHref('https://tau.new/projects', 'tau.new'), 'https://tau.new/projects');
 });

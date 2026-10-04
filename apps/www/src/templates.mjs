@@ -1,8 +1,7 @@
 import { readFileSync } from 'node:fs';
+import { appOrigin, docsOrigin } from '#www/environment.js';
 import {
-  appOrigin,
   discordUrl,
-  docsOrigin,
   ecosystem,
   exampleUrl,
   navigation,

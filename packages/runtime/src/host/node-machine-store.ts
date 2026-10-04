@@ -7,10 +7,11 @@
  *   authority/authority.writer.lock the one writer's lock
  *   authority/machine-events.jsonl  the legacy journal: read once to migrate, never written
  *   <machineId>/                    0700, one directory per printer; the id is a slug of its name
- *     machine.json                  0600, atomic replace: binding, name, trust, last-known identity
- *     operations.jsonl              0600, append-only write-ahead device-effect log
+ *     machine.json                  0600, atomic replace: binding, name, trust, testing, last-known identity
+ *     journal.jsonl                 0600, append-only write-ahead operation journal
  *     preparations/<id>.json        0600, one preparation, deleted once it expires
- *     requests/<id>.json            0600, atomic replace: one whole print request
+ *     jobs/<id>.json                0600, atomic replace: one whole job
+ *     operations.jsonl, requests/   an older host's effect log and print requests, never read again
  *   <machineId>.removed-<epochMs>/  a removed printer's files, never read again
  * ```
  *
@@ -33,17 +34,17 @@ import { z } from 'zod';
 import { cloneBoundedJson } from '@taucad/parameters/json';
 import { createNodeMachineEventLog, readMachineEventLogPrefix } from '#host/node-machine-event-log.js';
 import type { MachineEventLog, MachineEventLogOwner } from '#host/node-machine-event-log.js';
-import { parseMachinePreparedPrint, parsePrintRequest } from '#machines/machine-channel.js';
-import type { MachinePreparedPrint } from '#machines/machine-client.js';
+import { parseMachineJob, parseMachinePreparedJob } from '#machines/machine-channel.js';
 import { parseMachineDirectoryEntry } from '#machines/machine-directory.js';
-import type { MachineCandidate, MachineDescriptor, MachineSnapshot, MachineTransportTrust } from '#machines/machine.js';
-import type { PrintRequest } from '#machines/print-request.js';
+import type { MachineJob, MachinePreparedJob } from '#machines/machine-jobs.js';
+import type { MachineSnapshot } from '#machines/machine-observation.js';
+import type { MachineCandidate, MachineDescriptor, MachineTransportTrust } from '#machines/machine.js';
 
 const storeFileName = 'store.json';
 const machineFileName = 'machine.json';
-const operationsFileName = 'operations.jsonl';
+const operationsFileName = 'journal.jsonl';
 const preparationsDirectoryName = 'preparations';
-const requestsDirectoryName = 'requests';
+const jobsDirectoryName = 'jobs';
 const authorityDirectoryName = 'authority';
 const legacyJournalName = 'machine-events.jsonl';
 const maximumRecordBytes = 1024 * 1024;
@@ -104,6 +105,7 @@ const machineRecordSchema = z.strictObject({
   configuration: bindingConfiguration,
   connection: connectionSchema,
   boundAt: timestamp,
+  testing: z.boolean().optional(),
   last: z.strictObject({ descriptor: z.unknown(), snapshot: z.unknown(), observedAt: timestamp }).optional(),
 });
 const storeRecordSchema = z.strictObject({
@@ -120,14 +122,10 @@ const storeRecordSchema = z.strictObject({
 });
 const preparationRecordSchema = z.strictObject({
   version: z.literal(1),
-  prepared: z.unknown().transform((value) => parseMachinePreparedPrint(value)),
+  prepared: z.unknown().transform((value) => parseMachinePreparedJob(value)),
   providerId: identity,
   configuration: boundedJson('NODE_MACHINE_PREPARATION_CONFIGURATION', 20, 2048),
   providerData: boundedJson('NODE_MACHINE_PROVIDER_PREPARATION', 12, 1024),
-});
-const requestRecordSchema = z.strictObject({
-  version: z.literal(1),
-  request: z.unknown().transform((value) => parsePrintRequest(value)),
 });
 // The legacy journal's records, read only to migrate them; fields a migration ignores may be anything.
 const legacyBindingSchema = z.object({
@@ -188,6 +186,8 @@ export type MachineBindingRecord = Readonly<{
   /** A credential reference and the approved per-service trust, never a secret. */
   connection: Readonly<{ secretRef: string; serviceTrust: Readonly<Record<string, MachineTransportTrust>> }>;
   boundAt: string;
+  /** A person let controls not yet qualified on this machine be tried. */
+  testing?: boolean;
   last?: MachineLastKnown;
 }>;
 
@@ -197,7 +197,7 @@ export type NewMachineBindingRecord = Omit<MachineBindingRecord, 'version' | 'id
 /** One preparation's provider data, kept until it expires for the upload and start it allows. @internal */
 export type MachinePreparationRecord = Readonly<{
   version: 1;
-  prepared: MachinePreparedPrint;
+  prepared: MachinePreparedJob;
   providerId: string;
   configuration: CacheValue;
   providerData: CacheValue;
@@ -212,7 +212,7 @@ export type MachineOperationsState<Event> =
 export type LoadedMachine<Event> = Readonly<{
   record: MachineBindingRecord;
   preparations: readonly MachinePreparationRecord[];
-  requests: readonly PrintRequest[];
+  jobs: readonly MachineJob[];
   operations: MachineOperationsState<Event>;
 }>;
 
@@ -243,7 +243,7 @@ export type NodeMachineStore<Event> = Readonly<{
   /** Move one machine's directory aside as `<id>.removed-<epochMs>`; its files are kept and never read again. */
   removeMachine(id: string): Promise<void>;
   writePreparation(record: MachinePreparationRecord): Promise<MachinePreparationRecord>;
-  writeRequest(request: PrintRequest): Promise<PrintRequest>;
+  writeJob(job: MachineJob): Promise<MachineJob>;
   /** Close every operations log and release the lock. */
   close(): Promise<void>;
 }>;
@@ -336,14 +336,20 @@ export const parseMachineBindingRecord = (value: unknown): MachineBindingRecord 
   if (last === undefined) {
     return freeze(record);
   }
-  const entry = parseMachineDirectoryEntry({
-    machineId: record.id,
-    name: record.name,
-    providerId: record.providerId,
-    descriptor: last.descriptor,
-    snapshot: last.snapshot,
-    freshness: 'stale',
-  });
+  let entry;
+  try {
+    entry = parseMachineDirectoryEntry({
+      machineId: record.id,
+      name: record.name,
+      providerId: record.providerId,
+      descriptor: last.descriptor,
+      snapshot: last.snapshot,
+      freshness: 'stale',
+    });
+  } catch {
+    // A last-known identity an older host wrote in another shape is a cache: dropped, never the binding.
+    return freeze(record);
+  }
   return freeze({
     ...record,
     last: { descriptor: entry.descriptor, snapshot: entry.snapshot, observedAt: last.observedAt },
@@ -819,7 +825,7 @@ export const openNodeMachineStore = async <Event extends CacheValue>(
       });
       await replaceJsonFile(owner, join(root, storeFileName), { version: 1, ...(migrated ? { migrated } : {}) });
     }
-    const requestIds = new Set<string>();
+    const jobIds = new Set<string>();
     const openedAt = Date.parse(input.now());
     const rootEntries = await readdir(root, { withFileTypes: true });
     const directories = rootEntries
@@ -875,17 +881,13 @@ export const openNodeMachineStore = async <Event extends CacheValue>(
         await syncDirectory(join(directory, preparationsDirectoryName));
       }
       // oxlint-disable-next-line eslint/no-await-in-loop -- machines load in id order.
-      const requests = await readRecords(id, requestsDirectoryName, (value, name) => {
-        const { request } = requestRecordSchema.parse(value);
-        if (
-          machineStoreFileName(request.requestId) !== name ||
-          request.machineId !== id ||
-          requestIds.has(request.requestId)
-        ) {
+      const jobs = await readRecords(id, jobsDirectoryName, (value, name) => {
+        const job = parseMachineJob(value);
+        if (machineStoreFileName(job.jobId) !== name || job.machineId !== id || jobIds.has(job.jobId)) {
           throw new Error('MACHINE_STORE_ID_MISMATCH');
         }
-        requestIds.add(request.requestId);
-        return request;
+        jobIds.add(job.jobId);
+        return job;
       });
       live.add(id);
       // oxlint-disable-next-line eslint/no-await-in-loop -- machines load in id order.
@@ -894,7 +896,7 @@ export const openNodeMachineStore = async <Event extends CacheValue>(
         Object.freeze({
           record,
           preparations: Object.freeze(preparations),
-          requests: Object.freeze(requests.map(({ record: request }) => request)),
+          jobs: Object.freeze(jobs.map(({ record: job }) => job)),
           operations,
         }),
       );
@@ -1017,13 +1019,13 @@ export const openNodeMachineStore = async <Event extends CacheValue>(
       });
       return checked;
     },
-    async writeRequest(request) {
-      const checked = parsePrintRequest(request);
+    async writeJob(job) {
+      const checked = parseMachineJob(job);
       await writeRecord({
         id: checked.machineId,
-        folderName: requestsDirectoryName,
-        fileName: machineStoreFileName(checked.requestId),
-        value: { version: 1, request: checked },
+        folderName: jobsDirectoryName,
+        fileName: machineStoreFileName(checked.jobId),
+        value: checked,
       });
       return checked;
     },

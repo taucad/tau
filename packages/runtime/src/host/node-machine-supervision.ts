@@ -73,7 +73,7 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
   const { connectedSessions, definitionOf, directory, effectQueue, machines, providerSources, report, supervisors } =
     context;
   // Connect a bound machine, check that the same printer answers, and swap the session into the directory on the
-  // machine's queue, so the session never changes under an in-flight upload, start or control. `lost` settles once
+  // machine's queue, so the session never changes under an in-flight transfer, start or action. `lost` settles once
   // the new session stops being live.
   const connectBinding = async (
     record: MachineBindingRecord,
@@ -100,6 +100,7 @@ export const createNodeMachineSupervision = (context: NodeMachineHostContext): N
           machineId: record.id,
           name: record.name,
           providerId: record.providerId,
+          observations: providerSources.get(record.providerId)?.manifest.observations ?? [],
           session,
           onLost() {
             lost.resolve();

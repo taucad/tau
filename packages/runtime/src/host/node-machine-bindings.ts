@@ -17,7 +17,7 @@ import type {
   NodeMachineHostContext,
   RemoveNodeMachineBindingInput,
 } from '#host/node-machine-context.js';
-import { bindingBusyStates } from '#host/node-machine-print-requests.js';
+import { bindingBusyStates } from '#host/node-machine-jobs.js';
 import { machineDisplayName } from '#host/node-machine-store.js';
 import type { MachineBindingRecord } from '#host/node-machine-store.js';
 import type { NodeMachineSupervision } from '#host/node-machine-supervision.js';
@@ -92,13 +92,13 @@ export const createNodeMachineBindings = (
     definitionOf,
     directory,
     effectQueue,
-    effects,
+    jobs,
     machines,
     now,
+    operations,
     preparations,
     providerSources,
     report,
-    requests,
     stillCaptureTimes,
     store,
     supervisors,
@@ -160,7 +160,6 @@ export const createNodeMachineBindings = (
       if (pending.candidate.claimedIdentity.serial && pending.candidate.claimedIdentity.serial !== descriptor.id) {
         throw new Error('NODE_MACHINE_HOST_PHYSICAL_IDENTITY_CHANGED');
       }
-      const snapshot = await session.getSnapshot({ signal: abort.signal });
       // `machine.json` is written before the session attaches: a crash after this leaves a whole binding that
       // reconnects at the next start, never a live session the store does not know.
       bound = await effectQueue.queueFor('bindings', async () => {
@@ -182,8 +181,8 @@ export const createNodeMachineBindings = (
           candidate: pending.candidate,
           configuration: pending.configuration,
           connection,
+          // The first report writes the last-known identity, with the revision the host derives.
           boundAt: now(),
-          last: { descriptor, snapshot, observedAt: now() },
         });
         machines.set(created.record.id, {
           record: created.record,
@@ -196,6 +195,7 @@ export const createNodeMachineBindings = (
           machineId: bound.id,
           name: bound.name,
           providerId: bound.providerId,
+          observations: providerSources.get(bound.providerId)?.manifest.observations ?? [],
           session,
           onLost() {
             lost.resolve();
@@ -234,12 +234,10 @@ export const createNodeMachineBindings = (
       if (!machine) {
         throw new Error('MACHINE_DIRECTORY_UNKNOWN_MACHINE');
       }
-      // A machine whose log is unreadable can never settle its requests, so they do not hold it.
+      // A machine whose journal is unreadable can never settle its jobs, so they do not hold it.
       if (
         machine.operations.status === 'open' &&
-        [...requests.values()].some(
-          (request) => request.machineId === machineId && bindingBusyStates.has(request.state),
-        )
+        [...jobs.values()].some((job) => job.machineId === machineId && bindingBusyStates.has(job.state))
       ) {
         throw new Error('MACHINE_BINDING_BUSY');
       }
@@ -255,9 +253,9 @@ export const createNodeMachineBindings = (
       await store.removeMachine(machineId);
       machines.delete(machineId);
       stillCaptureTimes.delete(machineId);
-      for (const [operationId, state] of effects) {
-        if (state.intent.machineId === machineId) {
-          effects.delete(operationId);
+      for (const [operationId, operation] of operations) {
+        if (operation.planned.machineId === machineId) {
+          operations.delete(operationId);
         }
       }
       for (const [preparedId, preparation] of preparations) {
@@ -265,9 +263,9 @@ export const createNodeMachineBindings = (
           preparations.delete(preparedId);
         }
       }
-      for (const [requestId, request] of requests) {
-        if (request.machineId === machineId) {
-          requests.delete(requestId);
+      for (const [jobId, job] of jobs) {
+        if (job.machineId === machineId) {
+          jobs.delete(jobId);
         }
       }
       const { secretRef } = machine.record.connection;

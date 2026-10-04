@@ -1,14 +1,21 @@
 import type { Topic } from '@taucad/events';
 import { ResourceQueue } from '@taucad/filesystem';
-import { canonicalizeCacheValue } from '@taucad/cache-core';
+import { canonicalizeCacheValue, digestContent } from '@taucad/cache-core';
+import type { CacheValue } from '@taucad/cache-core';
 import { randomUuid } from '@taucad/utils/id';
 import { z } from 'zod';
 
 import { cloneBoundedJson } from '@taucad/parameters/json';
+import type { MachineOperation } from '#machines/machine-jobs.js';
 import type { MachineDescriptor, MachineSession } from '#machines/machine.js';
 import { machineManifestSchema } from '#machines/machine-manifest.js';
-import { machineReportSchema } from '#machines/machine-observation.js';
-import type { MachineSnapshot } from '#machines/machine-observation.js';
+import type { MachineManifest } from '#machines/machine-manifest.js';
+import {
+  componentObservationsSchema,
+  machineReportSchema,
+  mergeComponentObservations,
+} from '#machines/machine-observation.js';
+import type { ComponentObservation, MachineReport, MachineSnapshot } from '#machines/machine-observation.js';
 
 const identity = z
   .string()
@@ -28,14 +35,20 @@ const capabilitiesSchema = machineManifestSchema
     stop: true,
   })
   .extend({ revision: identity, incarnation: identity });
-const descriptorSchema = z.strictObject({
-  id: identity,
-  name: identity,
-  vendor: identity,
-  model: identity,
-  firmware: identity,
-  capabilities: capabilitiesSchema,
+const descriptorShape = { id: identity, name: identity, vendor: identity, model: identity, firmware: identity };
+const descriptorSchema = z.strictObject({ ...descriptorShape, capabilities: capabilitiesSchema });
+const providerDescriptorSchema = z.strictObject({
+  ...descriptorShape,
+  capabilities: capabilitiesSchema.omit({ revision: true, incarnation: true }),
 });
+const observationSchema = z.discriminatedUnion('type', [
+  z.strictObject({ type: z.literal('snapshot'), snapshot: machineReportSchema }),
+  z.strictObject({
+    type: z.literal('changed'),
+    observedAt: z.iso.datetime({ offset: true }),
+    components: componentObservationsSchema,
+  }),
+]);
 const requesterSchema = z.strictObject({ kind: z.enum(['user', 'agent']), id: identity, label: identity });
 const operationSchema = z.strictObject({
   operationId: identity,
@@ -95,6 +108,8 @@ const limits = {
 // one lag resync snapshot instead. Raise it only if lag resyncs show up on real hosts.
 const maximumLag = 256;
 const maximumEntries = 256;
+/** Operations a snapshot shows, newest first. */
+const maximumOperations = 64;
 const queueKey = 'machine-directory';
 
 /** One served directory change. Changes live in memory only; the store keeps each machine's last-known identity. @internal */
@@ -152,6 +167,8 @@ export type AttachMachineDirectorySessionInput = Readonly<{
   name: string;
   providerId: string;
   session: Pick<MachineSession, 'getDescriptor' | 'getSnapshot' | 'observe' | 'close'>;
+  /** The provider's freshness budgets; each observation is valid for its group's `staleAfter`. */
+  observations?: MachineManifest['observations'];
   /**
    * Called at most once when this session stops being live while it is still the machine's session: it reports a
    * connection other than `connected`, or its observation ends or fails. Never called for a replaced or removed
@@ -170,7 +187,18 @@ export type MachineDirectory = Readonly<{
   remove(input: Readonly<{ machineId: string }>): Promise<void>;
   snapshot(): Promise<MachineDirectorySnapshot>;
   watch(input: MachineDirectoryWatchInput): AsyncIterable<MachineDirectoryFrame>;
+  /**
+   * Replace what the host adds to a machine's entry: its recent operations and its testing flag. Kept across sessions,
+   * served at once when the machine is listed.
+   */
+  update(input: MachineDirectoryUpdate): Promise<void>;
   close(): Promise<void>;
+}>;
+/** The host's own part of one machine's entry. @internal */
+export type MachineDirectoryUpdate = Readonly<{
+  machineId: string;
+  operations?: readonly MachineOperation[];
+  testing?: boolean;
 }>;
 /** The authority owns storage and the commit topic. @internal */
 export type CreateMachineDirectoryInput = Readonly<{
@@ -263,16 +291,49 @@ export const parseMachineDirectoryFrame = (value: unknown): MachineDirectoryFram
   );
 };
 
-// A machine reaches the store only when this identity is new or changes.
+const canonical = (value: unknown): string =>
+  // SAFETY: every value canonicalized here is strictly parsed, bounded JSON.
+  canonicalizeCacheValue({ value: value as CacheValue });
+const encoder = new TextEncoder();
+
+/**
+ * The capability revision the host serves: the digest of what is installed, so the same installation keeps the same
+ * revision across reconnects and any change invalidates every form shown before it.
+ * @internal
+ * @param capabilities - What the provider reports installed.
+ * @returns A `sha256:` digest.
+ */
+export const machineCapabilityRevision = async (capabilities: unknown): Promise<string> =>
+  digestContent({ bytes: encoder.encode(canonical(capabilities)) });
+
+// A machine reaches the store only when this identity is new or changes; a reconnect alone (a new incarnation) does not.
 const machineIdentity = (entry: MachineDirectoryEntry): string =>
-  canonicalizeCacheValue({ value: { providerId: entry.providerId, descriptor: entry.descriptor } });
+  canonical({
+    providerId: entry.providerId,
+    descriptor: { ...entry.descriptor, capabilities: { ...entry.descriptor.capabilities, incarnation: '' } },
+  });
+
+// Each observation is valid for its group's declared budget from when it was received; an undeclared group keeps
+// whatever the provider said.
+const withValidity = (
+  components: readonly ComponentObservation[],
+  budgets: ReadonlyMap<string, number>,
+): readonly ComponentObservation[] =>
+  components.map((observation) => {
+    const budget = budgets.get(observation.group);
+    return budget === undefined
+      ? observation
+      : { ...observation, validUntil: new Date(Date.parse(observation.receivedAt) + budget).toISOString() };
+  });
 
 type DirectoryChange =
   | Readonly<{ type: 'machine-directory-upserted'; entry: MachineDirectoryEntry }>
   | Readonly<{ type: 'machine-directory-removed'; machineId: string }>;
 type ServedChange = Readonly<{ sequence: number; event: MachineDirectoryEvent }>;
+type HostPart = Readonly<{ operations: readonly MachineOperation[]; testing: boolean }>;
 type OwnedSession = {
   input: AttachMachineDirectorySessionInput;
+  budgets: ReadonlyMap<string, number>;
   abort: AbortController;
   observer?: Promise<void>;
   ready: PromiseWithResolvers<void>;
@@ -298,6 +359,8 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
   /** The last `maximumLag` served changes, for watchers resuming inside this generation. */
   const recent: ServedChange[] = [];
   const sessions = new Map<string, OwnedSession>();
+  /** What the host adds to each machine's entry, kept across its sessions. */
+  const hostParts = new Map<string, HostPart>();
   const queue = new ResourceQueue();
   let position = 0;
   let revision = 0;
@@ -319,7 +382,18 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
     }
     entries.set(entry.machineId, entry);
     persisted.set(entry.machineId, machineIdentity(entry));
+    hostParts.set(entry.machineId, { operations: entry.snapshot.operations, testing: entry.testing === true });
   }
+  // The entry with the host's current part: its recent operations and its testing flag.
+  const decorate = (entry: MachineDirectoryEntry): MachineDirectoryEntry => {
+    const part = hostParts.get(entry.machineId);
+    const { testing: _testing, ...rest } = entry;
+    return {
+      ...rest,
+      snapshot: { ...entry.snapshot, operations: (part?.operations ?? []).slice(0, maximumOperations) },
+      ...(part?.testing === true ? { testing: true } : {}),
+    };
+  };
 
   const assertOpen = (): void => {
     if (closed) {
@@ -383,14 +457,15 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
       report(error);
     }
   };
-  const publish = async (owned: OwnedSession, entry: MachineDirectoryEntry): Promise<void> =>
+  const publish = async (owned: OwnedSession, observed: MachineDirectoryEntry): Promise<void> =>
     queue.queueFor(queueKey, async () => {
       assertOpen();
       if (!isCurrent(owned)) {
         return;
       }
+      const entry = decorate(observed);
       const previous = entries.get(entry.machineId);
-      if (previous && canonicalizeCacheValue({ value: previous }) === canonicalizeCacheValue({ value: entry })) {
+      if (previous && canonical(previous) === canonical(entry)) {
         return;
       }
       // Ponytail: only machine identity (a new machine, provider or descriptor) reaches the store; observations,
@@ -405,7 +480,21 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
       }
       apply({ type: 'machine-directory-upserted', entry });
     });
-  const observe = async (owned: OwnedSession, entry: MachineDirectoryEntry): Promise<void> => {
+  // The entry one report gives, before the host's part is added.
+  const observedEntry = (
+    owned: OwnedSession,
+    descriptor: MachineDescriptor,
+    report: MachineReport,
+  ): MachineDirectoryEntry => ({
+    machineId: owned.input.machineId,
+    name: owned.input.name,
+    providerId: owned.input.providerId,
+    descriptor,
+    snapshot: { ...report, components: withValidity(report.components, owned.budgets), operations: [] },
+    freshness: 'current',
+  });
+  const observe = async (owned: OwnedSession, descriptor: MachineDescriptor, initial: MachineReport): Promise<void> => {
+    let latest = initial;
     try {
       for await (const event of owned.input.session.observe({
         signal: owned.abort.signal,
@@ -413,18 +502,21 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
         if (!isCurrent(owned)) {
           break;
         }
-        const parsed = z
-          .strictObject({
-            type: z.literal('snapshot'),
-            snapshot: snapshotSchema,
-          })
-          .parse(cloneBoundedJson(event, limits));
-        await publish(owned, {
-          ...entry,
-          snapshot: parsed.snapshot,
-          freshness: 'current',
-        });
-        if (parsed.snapshot.connection !== 'connected') {
+        const parsed = observationSchema.parse(cloneBoundedJson(event, limits));
+        // SAFETY: the strict report schema is the runtime proof of the report's shape.
+        latest =
+          parsed.type === 'snapshot'
+            ? (parsed.snapshot as unknown as MachineReport)
+            : {
+                ...latest,
+                observedAt: parsed.observedAt,
+                components: mergeComponentObservations(
+                  latest.components,
+                  parsed.components as unknown as readonly ComponentObservation[],
+                ),
+              };
+        await publish(owned, observedEntry(owned, descriptor, latest));
+        if (latest.connection !== 'connected') {
           lose(owned);
         }
       }
@@ -481,6 +573,7 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
       }
       const owned: OwnedSession = {
         input: { ...attachment, machineId, name, providerId },
+        budgets: new Map((attachment.observations ?? []).map(({ group, staleAfter }) => [group, staleAfter])),
         abort: new AbortController(),
         ready: Promise.withResolvers<void>(),
         lost: false,
@@ -501,7 +594,7 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
             await previous.observer;
           }
         }
-        const descriptor = descriptorSchema.parse(
+        const provided = providerDescriptorSchema.parse(
           cloneBoundedJson(
             await attachment.session.getDescriptor({
               signal: owned.abort.signal,
@@ -509,31 +602,34 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
             limits,
           ),
         );
+        // SAFETY: the strict descriptor schema is the runtime proof of the descriptor's shape.
+        const descriptor = {
+          ...provided,
+          capabilities: {
+            ...provided.capabilities,
+            revision: await machineCapabilityRevision(provided.capabilities),
+            // Every connection is a new incarnation.
+            incarnation: randomUuid(),
+          },
+        } as unknown as MachineDescriptor;
         if (!isCurrent(owned)) {
           return;
         }
-        const current = snapshotSchema.parse(
+        // SAFETY: the strict report schema is the runtime proof of the report's shape.
+        const current = machineReportSchema.parse(
           cloneBoundedJson(
             await attachment.session.getSnapshot({
               signal: owned.abort.signal,
             }),
             limits,
           ),
-        );
+        ) as unknown as MachineReport;
         if (!isCurrent(owned)) {
           return;
         }
-        const entry: MachineDirectoryEntry = {
-          machineId,
-          name,
-          providerId,
-          descriptor,
-          snapshot: current,
-          freshness: 'current',
-        };
-        await publish(owned, entry);
+        await publish(owned, observedEntry(owned, descriptor, current));
         if (isCurrent(owned)) {
-          owned.observer = observe(owned, entry);
+          owned.observer = observe(owned, descriptor, current);
           if (current.connection !== 'connected') {
             lose(owned);
           }
@@ -568,6 +664,7 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
           }
           apply({ type: 'machine-directory-removed', machineId });
           persisted.delete(machineId);
+          hostParts.delete(machineId);
         });
       } finally {
         if (owned) {
@@ -583,6 +680,21 @@ export const createMachineDirectory = (input: CreateMachineDirectoryInput): Mach
     async snapshot() {
       assertOpen();
       return snapshot();
+    },
+    async update({ machineId, operations, testing }) {
+      await queue.queueFor(queueKey, async () => {
+        assertOpen();
+        const part = hostParts.get(machineId);
+        hostParts.set(machineId, {
+          operations: operations ?? part?.operations ?? [],
+          testing: testing ?? part?.testing ?? false,
+        });
+        const entry = entries.get(machineId);
+        const next = entry && decorate(entry);
+        if (entry && next && canonical(next) !== canonical(entry)) {
+          apply({ type: 'machine-directory-upserted', entry: next });
+        }
+      });
     },
     async *watch(watchInput) {
       const signal = AbortSignal.any([watchInput.signal, shutdown.signal]);

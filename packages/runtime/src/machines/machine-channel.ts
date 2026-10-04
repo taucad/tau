@@ -21,22 +21,22 @@ import type {
   HostAdmissionOperation,
   HostSessionHandle,
 } from '#host/host-admission.js';
+import { machineFailureCodes } from '#machines/machine-actions.js';
+import type { MachineFailure } from '#machines/machine-actions.js';
 import type {
+  MachineApplyActionInput,
   MachineBeginBindingInput,
+  MachineBeginHoldInput,
   MachineBindingRemoval,
   MachineCaptureStillClientInput,
   MachineClient,
   MachineDiscoverInput,
   MachineDiscoveryFrame,
-  MachineControlRunInput,
-  MachineOperationReceipt,
-  MachineOperationSnapshot,
-  MachinePreparePrintInput,
-  MachinePreparedPrint,
+  MachineHold,
   MachineReconcileOperationInput,
   MachineRemoveBindingInput,
-  MachineStartPrintInput,
-  MachineUploadPrintInput,
+  MachineSetTestingInput,
+  MachineStopInput,
 } from '#machines/machine-client.js';
 import {
   parseMachineDirectoryCursor,
@@ -51,85 +51,93 @@ import type {
   MachineDirectoryFrame,
   MachineDirectorySnapshot,
 } from '#machines/machine-directory.js';
+import type {
+  MachineCheckJobInput,
+  MachineJob,
+  MachineJobCheck,
+  MachineListJobsInput,
+  MachineOperation,
+  MachineOperationReceipt,
+  MachinePreparedJob,
+  MachineProgramSummary,
+  MachineReceipt,
+  MachineRequestJobInput,
+  MachineResolveJobInput,
+  MachineWithdrawJobInput,
+} from '#machines/machine-jobs.js';
+import { machineCheckSchema } from '#machines/machine-observation.js';
 import { parseMachineProvider } from '#machines/machine.js';
 import type { MachineBindingOutcome, MachineProvider, MachineStill } from '#machines/machine.js';
-import type {
-  MachineListPrintRequestsInput,
-  MachineRequestPrintInput,
-  MachineResolvePrintRequestInput,
-  MachineWatchPrintRequestsInput,
-  MachineWithdrawPrintRequestInput,
-  PrintRequest,
-} from '#machines/print-request.js';
 
 type EmptyInput = Readonly<Record<string, never>>;
-type DiscoverInput = Omit<MachineDiscoverInput, 'signal'>;
-type BeginBindingInput = Omit<MachineBeginBindingInput, 'signal'>;
-type RemoveBindingInput = Omit<MachineRemoveBindingInput, 'signal'>;
-type PreparePrintInput = Omit<MachinePreparePrintInput, 'signal'>;
-type UploadPrintInput = Omit<MachineUploadPrintInput, 'signal'>;
-type StartPrintInput = Omit<MachineStartPrintInput, 'signal'>;
-type ReconcileOperationInput = Omit<MachineReconcileOperationInput, 'signal'>;
-type ControlRunInput = Omit<MachineControlRunInput, 'signal'>;
-type CaptureStillInput = Omit<MachineCaptureStillClientInput, 'signal'>;
-type RequestPrintInput = Omit<MachineRequestPrintInput, 'signal'>;
-type ListPrintRequestsInput = Omit<MachineListPrintRequestsInput, 'signal'>;
-type WatchPrintRequestsInput = Omit<MachineWatchPrintRequestsInput, 'signal'>;
-type ResolvePrintRequestInput = Omit<MachineResolvePrintRequestInput, 'signal'>;
-type WithdrawPrintRequestInput = Omit<MachineWithdrawPrintRequestInput, 'signal'>;
+type Args<Input> = Omit<Input, 'signal'>;
+type DiscoverInput = Args<MachineDiscoverInput>;
+type BeginBindingInput = Args<MachineBeginBindingInput>;
+type RemoveBindingInput = Args<MachineRemoveBindingInput>;
+type CaptureStillInput = Args<MachineCaptureStillClientInput>;
+type CheckJobInput = Args<MachineCheckJobInput>;
+type RequestJobInput = Args<MachineRequestJobInput>;
+type ListJobsInput = Args<MachineListJobsInput>;
+type ResolveJobInput = Args<MachineResolveJobInput>;
+type WithdrawJobInput = Args<MachineWithdrawJobInput>;
+type ApplyActionInput = Args<MachineApplyActionInput>;
+type StopInput = Args<MachineStopInput>;
+type BeginHoldInput = Args<MachineBeginHoldInput>;
+type HoldInput = Readonly<{ holdId: string }>;
+type ReconcileOperationInput = Args<MachineReconcileOperationInput>;
+type SetTestingInput = Args<MachineSetTestingInput>;
 type GetInput = Readonly<{ machineId: string }>;
 type WatchInput = Readonly<{ cursor?: MachineDirectoryCursor }>;
+type HoldBegun = MachineHold | (Readonly<{ status: 'rejected' }> & MachineFailure);
+type HoldRenewed = Readonly<{ status: 'held' | 'ended' }>;
 
 type MachineChannelProtocol = {
-  readonly hello: Readonly<{ server: 'machines'; protocolVersion: 1 }>;
+  readonly hello: Readonly<{ server: 'machines'; protocolVersion: 2 }>;
   readonly calls: {
     readonly listProviders: { readonly args: EmptyInput; readonly result: readonly MachineProvider[] };
     readonly beginBinding: { readonly args: BeginBindingInput; readonly result: MachineBindingOutcome };
     readonly removeBinding: { readonly args: RemoveBindingInput; readonly result: MachineBindingRemoval };
-    readonly preparePrint: { readonly args: PreparePrintInput; readonly result: MachinePreparedPrint };
-    readonly uploadPrint: { readonly args: UploadPrintInput; readonly result: MachineOperationReceipt };
-    readonly startPrint: { readonly args: StartPrintInput; readonly result: MachineOperationReceipt };
-    readonly reconcileOperation: { readonly args: ReconcileOperationInput; readonly result: MachineOperationSnapshot };
-    readonly controlRun: { readonly args: ControlRunInput; readonly result: MachineOperationReceipt };
     readonly captureStill: { readonly args: CaptureStillInput; readonly result: MachineStill };
-    readonly requestPrint: { readonly args: RequestPrintInput; readonly result: PrintRequest };
-    readonly listPrintRequests: { readonly args: ListPrintRequestsInput; readonly result: readonly PrintRequest[] };
-    readonly resolvePrintRequest: { readonly args: ResolvePrintRequestInput; readonly result: PrintRequest };
-    readonly withdrawPrintRequest: { readonly args: WithdrawPrintRequestInput; readonly result: PrintRequest };
     readonly list: { readonly args: EmptyInput; readonly result: MachineDirectorySnapshot };
     readonly get: { readonly args: GetInput; readonly result: MachineDirectoryEntry };
+    readonly checkJob: { readonly args: CheckJobInput; readonly result: MachineJobCheck };
+    readonly requestJob: { readonly args: RequestJobInput; readonly result: MachineJob };
+    readonly listJobs: { readonly args: ListJobsInput; readonly result: readonly MachineJob[] };
+    readonly resolveJob: { readonly args: ResolveJobInput; readonly result: MachineJob };
+    readonly withdrawJob: { readonly args: WithdrawJobInput; readonly result: MachineJob };
+    readonly applyAction: { readonly args: ApplyActionInput; readonly result: MachineReceipt<'action'> };
+    readonly stop: { readonly args: StopInput; readonly result: MachineReceipt<'stop'> };
+    readonly beginHold: { readonly args: BeginHoldInput; readonly result: HoldBegun };
+    readonly renewHold: { readonly args: HoldInput; readonly result: HoldRenewed };
+    readonly endHold: { readonly args: HoldInput; readonly result: MachineReceipt<'hold'> };
+    readonly reconcileOperation: { readonly args: ReconcileOperationInput; readonly result: MachineOperation };
+    readonly setTesting: { readonly args: SetTestingInput; readonly result: MachineDirectoryEntry };
   };
   readonly notifies: Readonly<Record<never, never>>;
   readonly listens: {
     readonly discover: { readonly args: DiscoverInput; readonly event: MachineDiscoveryFrame };
     readonly watch: { readonly args: WatchInput; readonly event: MachineDirectoryFrame };
-    readonly watchPrintRequests: { readonly args: WatchPrintRequestsInput; readonly event: PrintRequest };
+    readonly watchJobs: { readonly args: ListJobsInput; readonly event: MachineJob };
   };
 };
 
 type Admitted = Readonly<{ admitted: AdmittedHostOperation; signal: AbortSignal }>;
+type HostCalls = Omit<MachineChannelProtocol['calls'], 'listProviders' | 'list' | 'get'>;
 
 /**
- * Host-owned machine work invoked only after route admission. Every operation is
- * required; a host that cannot serve one throws `MACHINE_OPERATION_UNAVAILABLE`.
+ * Host-owned machine work invoked only after route admission. Every operation is required; a host that cannot serve
+ * one throws `MACHINE_OPERATION_UNAVAILABLE`. `admitted.actor` is who the session belongs to: an agent session is an
+ * agent whatever its request says.
  * @public
  */
-export type MachineChannelHostOperations = Readonly<{
-  discover(input: DiscoverInput & Admitted): AsyncIterable<MachineDiscoveryFrame>;
-  beginBinding(input: BeginBindingInput & Admitted): Promise<MachineBindingOutcome>;
-  removeBinding(input: RemoveBindingInput & Admitted): Promise<MachineBindingRemoval>;
-  preparePrint(input: PreparePrintInput & Admitted): Promise<MachinePreparedPrint>;
-  uploadPrint(input: UploadPrintInput & Admitted): Promise<MachineOperationReceipt>;
-  startPrint(input: StartPrintInput & Admitted): Promise<MachineOperationReceipt>;
-  reconcileOperation(input: ReconcileOperationInput & Admitted): Promise<MachineOperationSnapshot>;
-  controlRun(input: ControlRunInput & Admitted): Promise<MachineOperationReceipt>;
-  captureStill(input: CaptureStillInput & Admitted): Promise<MachineStill>;
-  requestPrint(input: RequestPrintInput & Admitted): Promise<PrintRequest>;
-  listPrintRequests(input: ListPrintRequestsInput & Admitted): Promise<readonly PrintRequest[]>;
-  watchPrintRequests(input: WatchPrintRequestsInput & Admitted): AsyncIterable<PrintRequest>;
-  resolvePrintRequest(input: ResolvePrintRequestInput & Admitted): Promise<PrintRequest>;
-  withdrawPrintRequest(input: WithdrawPrintRequestInput & Admitted): Promise<PrintRequest>;
-}>;
+export type MachineChannelHostOperations = Readonly<
+  {
+    [Name in keyof HostCalls]: (input: HostCalls[Name]['args'] & Admitted) => Promise<HostCalls[Name]['result']>;
+  } & {
+    discover(input: DiscoverInput & Admitted): AsyncIterable<MachineDiscoveryFrame>;
+    watchJobs(input: ListJobsInput & Admitted): AsyncIterable<MachineJob>;
+  }
+>;
 
 /** Direct machines channel plus its explicit wire lifecycle. @public */
 export type MachineChannelClient = MachineClient & Readonly<{ ready: Promise<void>; close(): void }>;
@@ -137,8 +145,8 @@ export type MachineChannelClient = MachineClient & Readonly<{ ready: Promise<voi
 /** Supported structured and byte-framed transports for one machine channel. @public */
 export type MachineChannelEndpoint = Port<unknown> | MessagePortLike | WebSocketLike;
 
-const sessionKey = 'machines-v1';
-const streamFlowControl = { initialCredits: 1, maxFrameBytes: 1_048_576, maxOwnedBytes: 1_048_576 } as const;
+const sessionKey = 'machines-v2';
+const streamFlowControl = { initialCredits: 1, maxFrameBytes: 4_194_304, maxOwnedBytes: 4_194_304 } as const;
 const limits = { code: 'MACHINE_CHANNEL', maximumDepth: 32, maximumNodes: 16_384, maximumCharacters: 524_288 };
 const emptySchema = z.strictObject({});
 const identitySchema = z
@@ -194,7 +202,7 @@ const artifactSchema = z.strictObject({
   contract: z.strictObject({ id: identitySchema, version: z.number().int().positive() }),
   selectedMember: identitySchema,
 });
-const preparedPrintSchema = z.strictObject({
+const preparedJobSchema = z.strictObject({
   preparedId: identitySchema,
   preparedDigest: digestSchema,
   configurationDigest: digestSchema,
@@ -208,50 +216,165 @@ const preparedPrintSchema = z.strictObject({
   preparedAt: timestampSchema,
   expiresAt: timestampSchema,
 });
-const runOperationKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop']);
-const operationKindSchema = z.enum(['cancel', 'pause', 'resume', 'start', 'urgent-stop', 'upload']);
-const operationBaseSchema = {
-  operationId: identitySchema,
-  machineId: identitySchema,
-  observedAt: timestampSchema,
+const failureShape = {
+  code: z.enum(machineFailureCodes),
+  message: textSchema,
+  issues: z
+    .array(z.strictObject({ path: z.string().max(256), message: textSchema }))
+    .max(32)
+    .optional(),
 };
-const operationReceiptSchema = z.union([
+const operationKindSchema = z.enum(['action', 'stop', 'hold', 'transfer', 'start']);
+const receiptBase = { operationId: identitySchema, machineId: identitySchema, observedAt: timestampSchema };
+const receiptSchema = z.union([
   z.strictObject({
-    ...operationBaseSchema,
-    kind: z.literal('upload'),
+    ...receiptBase,
+    kind: z.literal('action'),
     status: z.literal('accepted'),
-    evidence: z.strictObject({ transferId: identitySchema }),
+    activityId: identitySchema.optional(),
   }),
+  z.strictObject({ ...receiptBase, kind: z.enum(['stop', 'hold']), status: z.literal('accepted') }),
   z.strictObject({
-    ...operationBaseSchema,
-    kind: runOperationKindSchema,
+    ...receiptBase,
+    kind: z.literal('transfer'),
     status: z.literal('accepted'),
-    providerRunId: identitySchema.optional(),
+    transferId: identitySchema,
   }),
   z.strictObject({
-    ...operationBaseSchema,
-    kind: operationKindSchema,
-    status: z.literal('rejected'),
-    code: identitySchema,
-    message: textSchema,
+    ...receiptBase,
+    kind: z.literal('start'),
+    status: z.literal('accepted'),
+    runId: identitySchema.optional(),
   }),
-  z.strictObject({
-    ...operationBaseSchema,
-    kind: operationKindSchema,
-    status: z.literal('unknown'),
-    reason: identitySchema,
-    providerRunId: identitySchema.optional(),
-  }),
+  z.strictObject({ ...receiptBase, kind: operationKindSchema, status: z.literal('rejected'), ...failureShape }),
+  z.strictObject({ ...receiptBase, kind: operationKindSchema, status: z.literal('unknown'), reason: textSchema }),
 ]);
-const operationSnapshotSchema = z.strictObject({
+const requesterSchema = z.strictObject({ kind: z.enum(['user', 'agent']), id: identitySchema, label: identitySchema });
+const operationSchema = z.strictObject({
   operationId: identitySchema,
   machineId: identitySchema,
   kind: operationKindSchema,
   inputDigest: digestSchema,
-  status: z.enum(['accepted', 'planned', 'rejected', 'sending', 'unknown']),
+  state: z.enum(['planned', 'sending', 'accepted', 'rejected', 'confirming', 'attention']),
   updatedAt: timestampSchema,
-  receipt: operationReceiptSchema.optional(),
+  receipt: receiptSchema.optional(),
+  confirmingSince: timestampSchema.optional(),
+  requestedBy: requesterSchema.optional(),
+  attended: z.boolean().optional(),
+  action: z
+    .strictObject({
+      componentId: identitySchema,
+      id: identitySchema,
+      label: identitySchema,
+      activityId: identitySchema.optional(),
+    })
+    .optional(),
 });
+const range = z.strictObject({ min: z.number(), max: z.number() });
+const programSchema = z.strictObject({
+  name: identitySchema,
+  estimatedDuration: z.number().nonnegative().optional(),
+  producer: z.strictObject({ name: identitySchema, version: identitySchema.optional() }).optional(),
+  preferences: machineSettingsProvenanceSchema.optional(),
+  facts: z.discriminatedUnion('process', [
+    z.strictObject({
+      process: z.literal('fff'),
+      layers: z.number().int().nonnegative().optional(),
+      filamentLength: z.number().nonnegative().optional(),
+    }),
+    z.strictObject({
+      process: z.literal('milling'),
+      lines: z.number().int().nonnegative(),
+      extents: z.record(z.string().max(8), range),
+      tools: z
+        .array(
+          z.strictObject({
+            number: z.number().int().nonnegative(),
+            description: z.string().max(256).optional(),
+            diameter: z.number().positive().optional(),
+          }),
+        )
+        .max(256),
+      spindleSpeed: range.optional(),
+      maximumFeed: z.number().nonnegative().optional(),
+      workOffsets: z.array(z.string().min(1).max(16)).max(32),
+      uses: z.array(z.enum(['tool-change', 'coolant', 'probing', 'program-stop', 'inverse-time-feed'])).max(8),
+    }),
+    z.strictObject({ process: z.literal('other') }),
+  ]),
+});
+const progressSchema = z.strictObject({
+  basis: z.enum(['executed', 'queued', 'estimated']),
+  fraction: z.number().min(0).max(1).optional(),
+  elapsed: z.number().min(0).optional(),
+  remaining: z.number().min(0).optional(),
+  counters: z
+    .array(
+      z.strictObject({
+        id: identitySchema,
+        label: textSchema,
+        current: z.number().min(0),
+        total: z.number().min(0).optional(),
+      }),
+    )
+    .max(8),
+});
+const configurationSchema = z.unknown().transform((value) => cloneBoundedJson(value, limits));
+const jobSchema = z.strictObject({
+  version: z.literal(1),
+  jobId: identitySchema,
+  machineId: identitySchema,
+  artifact: artifactSchema,
+  configuration: configurationSchema,
+  requestedBy: requesterSchema,
+  state: z.enum([
+    'preparing',
+    'awaiting-approval',
+    'approved',
+    'transferring',
+    'starting',
+    'awaiting-start',
+    'confirming',
+    'started',
+    'denied',
+    'withdrawn',
+    'rejected',
+    'unknown',
+    'failed',
+  ]),
+  createdAt: timestampSchema,
+  updatedAt: timestampSchema,
+  program: programSchema,
+  checks: z.array(machineCheckSchema).max(64),
+  prepared: preparedJobSchema.optional(),
+  attestations: z
+    .array(z.strictObject({ id: identitySchema, by: requesterSchema, at: timestampSchema }))
+    .max(16)
+    .optional(),
+  attended: z.boolean().optional(),
+  transferOperationId: identitySchema.optional(),
+  startOperationId: identitySchema.optional(),
+  transferId: identitySchema.optional(),
+  receipt: receiptSchema.optional(),
+  failure: z.strictObject({ code: identitySchema, message: textSchema }).optional(),
+  resolvedBy: requesterSchema.optional(),
+  run: z
+    .strictObject({
+      runId: identitySchema,
+      outcome: z.enum(['running', 'completed', 'cancelled', 'failed', 'interrupted', 'unknown']),
+      endedAt: timestampSchema.optional(),
+      progress: progressSchema.optional(),
+    })
+    .optional(),
+});
+const jobCheckSchema = z.union([
+  z.strictObject({
+    status: z.enum(['ready', 'blocked']),
+    program: programSchema,
+    checks: z.array(machineCheckSchema).max(64),
+  }),
+  z.strictObject({ status: z.literal('refused'), code: identitySchema, message: textSchema }),
+]);
 const stillSchema = z.strictObject({
   bytes: z
     .instanceof(Uint8Array)
@@ -269,54 +392,17 @@ const stillSchema = z.strictObject({
   capturedAt: timestampSchema,
   expiresAt: timestampSchema,
 });
-const configurationSchema = z.unknown().transform((value) => cloneBoundedJson(value, limits));
-const requesterSchema = z.strictObject({ kind: z.enum(['user', 'agent']), id: identitySchema, label: identitySchema });
-const requestSummarySchema = z.strictObject({
-  fileName: identitySchema,
-  preferences: machineSettingsProvenanceSchema.optional(),
-  layers: z.number().int().nonnegative().optional(),
-  estimatedDuration: z.number().nonnegative().optional(),
-  filamentLength: z.number().nonnegative().optional(),
-  producer: z.strictObject({ name: identitySchema, version: identitySchema.optional() }).optional(),
-});
-const printRequestSchema = z.strictObject({
-  requestId: identitySchema,
-  machineId: identitySchema,
-  artifact: artifactSchema,
-  configuration: configurationSchema,
-  requestedBy: requesterSchema,
-  summary: requestSummarySchema,
-  state: z.enum([
-    'preparing',
-    'awaiting-approval',
-    'approved',
-    'uploading',
-    'starting',
-    'confirming',
-    'started',
-    'denied',
-    'withdrawn',
-    'rejected',
-    'unknown',
-    'failed',
-  ]),
-  createdAt: timestampSchema,
-  updatedAt: timestampSchema,
-  prepared: preparedPrintSchema.optional(),
-  uploadOperationId: identitySchema.optional(),
-  startOperationId: identitySchema.optional(),
-  transferId: identitySchema.optional(),
-  receipt: operationReceiptSchema.optional(),
-  failure: z.strictObject({ code: identitySchema, message: textSchema }).optional(),
-  resolvedBy: requesterSchema.optional(),
-});
-const requestScopeSchema = z.strictObject({
+const jobScopeSchema = z.strictObject({
   machineId: identitySchema.optional(),
   projectId: projectIdSchema.optional(),
 });
+const holdBegunSchema = z.union([
+  z.strictObject({ status: z.literal('held'), holdId: identitySchema, lease: z.number().int().positive() }),
+  z.strictObject({ status: z.literal('rejected'), ...failureShape }),
+]);
 
 /**
- * The one admission scope every machines session is issued and admitted under. Printers belong to the store, not to
+ * The one admission scope every machines session is issued and admitted under. Machines belong to the store, not to
  * a workspace or project, so no machine API names it.
  * @internal
  */
@@ -332,18 +418,43 @@ const freeze = <Value>(value: Value): Value => {
   return value;
 };
 
-/** Admit one bounded print request record for the wire or the machine store. @internal
+/** Admit one bounded job record for the wire or the machine store. @internal
  * @param value - Untrusted record value.
  * @returns Detached, frozen record.
  */
-export const parsePrintRequest = (value: unknown): PrintRequest => freeze(printRequestSchema.parse(value));
+// SAFETY: the strict schema is the runtime proof of the job's shape.
+export const parseMachineJob = (value: unknown): MachineJob => freeze(jobSchema.parse(value) as unknown as MachineJob);
 
-/** Admit one bounded prepared-print record for the wire or the machine store. @internal
+/** Admit one bounded prepared-job record for the wire or the machine store. @internal
  * @param value - Untrusted record value.
  * @returns Detached, frozen record.
  */
-export const parseMachinePreparedPrint = (value: unknown): MachinePreparedPrint =>
-  freeze(preparedPrintSchema.parse(value));
+export const parseMachinePreparedJob = (value: unknown): MachinePreparedJob => freeze(preparedJobSchema.parse(value));
+
+/** Admit one operation receipt. @internal
+ * @param value - Untrusted receipt.
+ * @returns Detached, frozen receipt.
+ */
+// SAFETY: the strict schema is the runtime proof of the receipt's shape.
+export const parseMachineOperationReceipt = (value: unknown): MachineOperationReceipt =>
+  freeze(receiptSchema.parse(value) as MachineOperationReceipt);
+
+/** Admit one operation record. @internal
+ * @param value - Untrusted operation.
+ * @returns Detached, frozen operation.
+ */
+// SAFETY: the strict schema is the runtime proof of the operation's shape.
+export const parseMachineOperation = (value: unknown): MachineOperation =>
+  freeze(operationSchema.parse(value) as unknown as MachineOperation);
+
+/** Admit one program summary, whole or partial. @internal
+ * @param value - Untrusted summary.
+ * @returns Detached, frozen summary.
+ */
+export const parseMachineProgramSummary = (value: unknown): MachineProgramSummary => freeze(programSchema.parse(value));
+
+/** Admit one requester. @internal */
+export const machineRequesterSchema = requesterSchema;
 
 const validator = <Value>(parse: (value: unknown) => Value): WireValidator<Value> => ({
   safeParse(value) {
@@ -357,6 +468,9 @@ const validator = <Value>(parse: (value: unknown) => Value): WireValidator<Value
     }
   },
 });
+// SAFETY: each schema below is the runtime proof of the protocol type it is cast to.
+const typed = <Value>(schema: z.ZodType): WireValidator<Value> =>
+  validator((value) => freeze(schema.parse(value) as Value));
 
 const providerListSchema = z
   .array(z.unknown())
@@ -371,90 +485,105 @@ const cursorSchema = z.unknown().transform((value, context) => {
   }
 });
 const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
-  hello: z.strictObject({ server: z.literal('machines'), protocolVersion: z.literal(1) }),
+  hello: z.strictObject({ server: z.literal('machines'), protocolVersion: z.literal(2) }),
   calls: {
     listProviders: { args: emptySchema, result: providerListSchema },
     beginBinding: {
       args: z.strictObject({ candidate: candidateSchema, name: identitySchema }),
       result: bindingOutcomeSchema,
     },
-    removeBinding: {
-      args: z.strictObject({ machineId: identitySchema }),
-      result: bindingRemovalSchema,
-    },
-    preparePrint: {
+    removeBinding: { args: z.strictObject({ machineId: identitySchema }), result: bindingRemovalSchema },
+    captureStill: { args: z.strictObject({ machineId: identitySchema }), result: stillSchema },
+    list: { args: emptySchema, result: validator(parseMachineDirectorySnapshot) },
+    get: { args: z.strictObject({ machineId: identitySchema }), result: validator(parseMachineDirectoryEntry) },
+    checkJob: {
       args: z.strictObject({ machineId: identitySchema, artifact: artifactSchema, configuration: configurationSchema }),
-      result: preparedPrintSchema,
+      result: typed(jobCheckSchema),
     },
-    uploadPrint: {
+    requestJob: {
+      args: typed(
+        z.strictObject({
+          jobId: identitySchema,
+          machineId: identitySchema,
+          artifact: artifactSchema,
+          configuration: configurationSchema,
+          requestedBy: requesterSchema,
+          program: programSchema.partial().optional(),
+        }),
+      ),
+      result: validator(parseMachineJob),
+    },
+    listJobs: {
+      args: jobScopeSchema,
+      result: validator((value) => z.array(z.unknown()).max(1024).parse(value).map(parseMachineJob)),
+    },
+    resolveJob: {
       args: z.strictObject({
-        machineId: identitySchema,
-        preparedId: identitySchema,
-        preparedDigest: digestSchema,
-        operationId: identitySchema,
-      }),
-      result: operationReceiptSchema,
-    },
-    startPrint: {
-      args: z.strictObject({
-        machineId: identitySchema,
-        preparedId: identitySchema,
-        preparedDigest: digestSchema,
-        transferId: identitySchema,
-        expectedSetupDigest: digestSchema,
-        operationId: identitySchema,
-      }),
-      result: operationReceiptSchema,
-    },
-    reconcileOperation: {
-      args: z.strictObject({ machineId: identitySchema, operationId: identitySchema }),
-      result: operationSnapshotSchema,
-    },
-    controlRun: {
-      args: z.strictObject({
-        machineId: identitySchema,
-        operationId: identitySchema,
-        command: z.enum(['cancel', 'pause', 'resume', 'urgent-stop']),
-        expectedProviderRunId: identitySchema,
-      }),
-      result: operationReceiptSchema,
-    },
-    captureStill: {
-      args: z.strictObject({ machineId: identitySchema }),
-      result: stillSchema,
-    },
-    requestPrint: {
-      args: z.strictObject({
-        requestId: identitySchema,
-        machineId: identitySchema,
-        artifact: artifactSchema,
-        configuration: configurationSchema,
-        requestedBy: requesterSchema,
-        summary: requestSummarySchema.optional(),
-      }),
-      result: printRequestSchema,
-    },
-    listPrintRequests: {
-      args: requestScopeSchema,
-      result: z.array(printRequestSchema).max(1024),
-    },
-    resolvePrintRequest: {
-      args: z.strictObject({
-        requestId: identitySchema,
+        jobId: identitySchema,
         decision: z.enum(['approve', 'deny']),
         resolvedBy: requesterSchema,
-        uploadOperationId: identitySchema.optional(),
+        attestations: z.array(identitySchema).max(16).optional(),
+        attended: z.boolean().optional(),
+        transferOperationId: identitySchema.optional(),
         startOperationId: identitySchema.optional(),
       }),
-      result: printRequestSchema,
+      result: validator(parseMachineJob),
     },
-    withdrawPrintRequest: {
-      args: z.strictObject({ requestId: identitySchema, resolvedBy: requesterSchema }),
-      result: printRequestSchema,
+    withdrawJob: {
+      args: z.strictObject({ jobId: identitySchema, resolvedBy: requesterSchema }),
+      result: validator(parseMachineJob),
     },
-    list: { args: emptySchema, result: validator(parseMachineDirectorySnapshot) },
-    get: {
-      args: z.strictObject({ machineId: identitySchema }),
+    applyAction: {
+      args: z.strictObject({
+        machineId: identitySchema,
+        componentId: identitySchema,
+        capabilityRevision: identitySchema,
+        operationId: identitySchema,
+        action: identitySchema,
+        version: z.number().int().min(1).max(1000),
+        expectedRunId: identitySchema.nullable(),
+        parameters: configurationSchema,
+        requestedBy: requesterSchema,
+        attended: z.boolean().optional(),
+        approval: z.strictObject({ approvedBy: requesterSchema, operationId: identitySchema }).optional(),
+      }),
+      result: typed(receiptSchema),
+    },
+    stop: {
+      args: z.strictObject({
+        machineId: identitySchema,
+        operationId: identitySchema.optional(),
+        requestedBy: requesterSchema,
+      }),
+      result: typed(receiptSchema),
+    },
+    beginHold: {
+      args: typed(
+        z.strictObject({
+          machineId: identitySchema,
+          componentId: identitySchema,
+          capabilityRevision: identitySchema,
+          operationId: identitySchema,
+          hold: z.literal('motion.jog'),
+          version: z.literal(1),
+          parameters: configurationSchema,
+          requestedBy: requesterSchema,
+          attended: z.literal(true),
+        }),
+      ),
+      result: typed(holdBegunSchema),
+    },
+    renewHold: {
+      args: z.strictObject({ holdId: identitySchema }),
+      result: z.strictObject({ status: z.enum(['held', 'ended']) }),
+    },
+    endHold: { args: z.strictObject({ holdId: identitySchema }), result: typed(receiptSchema) },
+    reconcileOperation: {
+      args: z.strictObject({ machineId: identitySchema, operationId: identitySchema }),
+      result: validator(parseMachineOperation),
+    },
+    setTesting: {
+      args: z.strictObject({ machineId: identitySchema, enabled: z.boolean(), requestedBy: requesterSchema }),
       result: validator(parseMachineDirectoryEntry),
     },
   },
@@ -464,14 +593,8 @@ const protocolSchemas: WireProtocolSchemas<MachineChannelProtocol> = {
       args: z.strictObject({ providerId: identitySchema, configuration: configurationSchema }),
       event: discoveryFrameSchema.transform(freeze),
     },
-    watch: {
-      args: z.strictObject({ cursor: cursorSchema.optional() }),
-      event: validator(parseMachineDirectoryFrame),
-    },
-    watchPrintRequests: {
-      args: requestScopeSchema,
-      event: printRequestSchema.transform(freeze),
-    },
+    watch: { args: z.strictObject({ cursor: cursorSchema.optional() }), event: validator(parseMachineDirectoryFrame) },
+    watchJobs: { args: jobScopeSchema, event: validator(parseMachineJob) },
   },
 };
 
@@ -529,6 +652,14 @@ const relay = async function* <Value>(
   }
 };
 
+const parseResult = <Value>(schema: WireValidator<Value>, value: unknown): Value => {
+  const result = schema.safeParse(value);
+  if (!result.success) {
+    throw new Error('MACHINE_CHANNEL_INVALID_RESULT');
+  }
+  return result.data;
+};
+
 /** Serve one trusted session's typed machines route.
  * @param input - Trusted channel, admission, authority, directory, providers and host operations.
  * @returns The channel lifecycle handle; disposal never closes host-owned services.
@@ -565,7 +696,7 @@ export const exposeMachineChannel = (input: {
   const server = createChannelServer<MachineChannelProtocol>({
     port: asPort(input.port),
     sessionKey,
-    hello: { server: 'machines', protocolVersion: 1 },
+    hello: { server: 'machines', protocolVersion: 2 },
     protocolSchemas,
     streamFlowControl,
     impl: {
@@ -592,76 +723,13 @@ export const exposeMachineChannel = (input: {
           }
           return entry;
         }
-        const scope: Admitted = { admitted, signal: combined };
-        const settle = async <Value>(pending: Promise<Value>, parse: (value: Value) => Value): Promise<Value> => {
-          const result = await abortable(pending, combined);
-          combined.throwIfAborted();
-          admitted.assertCurrent();
-          return parse(result);
-        };
-        const { operations } = input;
-        switch (name) {
-          case 'beginBinding': {
-            return settle(operations.beginBinding({ ...(args as BeginBindingInput), ...scope }), (value) =>
-              bindingOutcomeSchema.parse(value),
-            );
-          }
-          case 'removeBinding': {
-            return settle(operations.removeBinding({ ...(args as RemoveBindingInput), ...scope }), (value) =>
-              bindingRemovalSchema.parse(value),
-            );
-          }
-          case 'preparePrint': {
-            return settle(operations.preparePrint({ ...(args as PreparePrintInput), ...scope }), (value) =>
-              preparedPrintSchema.parse(value),
-            );
-          }
-          case 'uploadPrint': {
-            return settle(operations.uploadPrint({ ...(args as UploadPrintInput), ...scope }), (value) =>
-              operationReceiptSchema.parse(value),
-            );
-          }
-          case 'startPrint': {
-            return settle(operations.startPrint({ ...(args as StartPrintInput), ...scope }), (value) =>
-              operationReceiptSchema.parse(value),
-            );
-          }
-          case 'reconcileOperation': {
-            return settle(operations.reconcileOperation({ ...(args as ReconcileOperationInput), ...scope }), (value) =>
-              operationSnapshotSchema.parse(value),
-            );
-          }
-          case 'controlRun': {
-            return settle(operations.controlRun({ ...(args as ControlRunInput), ...scope }), (value) =>
-              operationReceiptSchema.parse(value),
-            );
-          }
-          case 'captureStill': {
-            return settle(operations.captureStill({ ...(args as CaptureStillInput), ...scope }), (value) =>
-              stillSchema.parse(value),
-            );
-          }
-          case 'requestPrint': {
-            return settle(operations.requestPrint({ ...(args as RequestPrintInput), ...scope }), parsePrintRequest);
-          }
-          case 'listPrintRequests': {
-            return settle(operations.listPrintRequests({ ...(args as ListPrintRequestsInput), ...scope }), (value) =>
-              value.map((request) => parsePrintRequest(request)),
-            );
-          }
-          case 'resolvePrintRequest': {
-            return settle(
-              operations.resolvePrintRequest({ ...(args as ResolvePrintRequestInput), ...scope }),
-              parsePrintRequest,
-            );
-          }
-          default: {
-            return settle(
-              operations.withdrawPrintRequest({ ...(args as WithdrawPrintRequestInput), ...scope }),
-              parsePrintRequest,
-            );
-          }
-        }
+        // SAFETY: `name` is one of the host calls, and the channel validated `args` for it.
+        const operation = input.operations[name as keyof HostCalls] as (operationInput: unknown) => Promise<unknown>;
+        const result = await abortable(operation({ ...args, admitted, signal: combined }), combined);
+        combined.throwIfAborted();
+        admitted.assertCurrent();
+        // SAFETY: the protocol's own result validator for `name` proves the value.
+        return parseResult(protocolSchemas.calls[name].result, result) as never;
       },
       // oxlint-disable-next-line eslint/max-params -- Typed ChannelServer listen signature is fixed.
       async *listen(_context, name, args, signal) {
@@ -675,19 +743,16 @@ export const exposeMachineChannel = (input: {
           );
           return;
         }
-        if (name === 'watchPrintRequests') {
+        if (name === 'watchJobs') {
           yield* relay(
-            input.operations.watchPrintRequests({ ...(args as WatchPrintRequestsInput), admitted, signal: combined }),
+            input.operations.watchJobs({ ...(args as ListJobsInput), admitted, signal: combined }),
             admitted,
             combined,
           );
           return;
         }
         yield* relay(
-          input.directory.watch({
-            cursor: (args as WatchInput).cursor,
-            signal: combined,
-          }),
+          input.directory.watch({ cursor: (args as WatchInput).cursor, signal: combined }),
           admitted,
           combined,
         );
@@ -718,20 +783,23 @@ export const connectMachineChannel = (port: MachineChannelEndpoint): MachineChan
     discover: ({ signal, ...input }) => channel.listen('discover', input, signal),
     beginBinding: async ({ signal, ...input }) => channel.call('beginBinding', input, signal),
     removeBinding: async ({ signal, ...input }) => channel.call('removeBinding', input, signal),
-    preparePrint: async ({ signal, ...input }) => channel.call('preparePrint', input, signal),
-    uploadPrint: async ({ signal, ...input }) => channel.call('uploadPrint', input, signal),
-    startPrint: async ({ signal, ...input }) => channel.call('startPrint', input, signal),
-    reconcileOperation: async ({ signal, ...input }) => channel.call('reconcileOperation', input, signal),
-    controlRun: async ({ signal, ...input }) => channel.call('controlRun', input, signal),
-    captureStill: async ({ signal, ...input }) => channel.call('captureStill', input, signal),
-    requestPrint: async ({ signal, ...input }) => channel.call('requestPrint', input, signal),
-    listPrintRequests: async ({ signal, ...input }) => channel.call('listPrintRequests', input, signal),
-    watchPrintRequests: ({ signal, ...input }) => channel.listen('watchPrintRequests', input, signal),
-    resolvePrintRequest: async ({ signal, ...input }) => channel.call('resolvePrintRequest', input, signal),
-    withdrawPrintRequest: async ({ signal, ...input }) => channel.call('withdrawPrintRequest', input, signal),
     list: async ({ signal }) => channel.call('list', {}, signal),
     get: async ({ signal, machineId }) => channel.call('get', { machineId }, signal),
     watch: ({ signal, cursor }) => channel.listen('watch', cursor ? { cursor } : {}, signal),
+    captureStill: async ({ signal, ...input }) => channel.call('captureStill', input, signal),
+    checkJob: async ({ signal, ...input }) => channel.call('checkJob', input, signal),
+    requestJob: async ({ signal, ...input }) => channel.call('requestJob', input, signal),
+    listJobs: async ({ signal, ...input }) => channel.call('listJobs', input, signal),
+    watchJobs: ({ signal, ...input }) => channel.listen('watchJobs', input, signal),
+    resolveJob: async ({ signal, ...input }) => channel.call('resolveJob', input, signal),
+    withdrawJob: async ({ signal, ...input }) => channel.call('withdrawJob', input, signal),
+    applyAction: async ({ signal, ...input }) => channel.call('applyAction', input, signal),
+    stop: async ({ signal, ...input }) => channel.call('stop', input, signal),
+    beginHold: async ({ signal, ...input }) => channel.call('beginHold', input, signal),
+    renewHold: async (input) => channel.call('renewHold', input),
+    endHold: async (input) => channel.call('endHold', input),
+    reconcileOperation: async ({ signal, ...input }) => channel.call('reconcileOperation', input, signal),
+    setTesting: async ({ signal, ...input }) => channel.call('setTesting', input, signal),
     close: () => {
       channel.close();
     },

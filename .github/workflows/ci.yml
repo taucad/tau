@@ -324,11 +324,15 @@ jobs:
         if: github.event_name == 'pull_request'
         run: pnpm nx release plan:check
 
-      # This enables task distribution via Nx Cloud
-      # Run this command as early as possible, before dependencies are installed
-      # Learn more at https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
-      # Connect your workspace by running "nx connect" and uncomment this
-      # - run: npx nx-cloud start-ci-run --distribute-on="3 linux-medium-js" --stop-agents-after="build"
+      # Nx Agents (distributed task execution). Off unless the repository variable
+      # NX_AGENTS_ENABLED is 'true', so merging this changes nothing by itself. When on,
+      # the `nx affected` commands below hand their tasks to agents launched from
+      # .nx/workflows/agents.yaml, and this runner only coordinates. Agents never see
+      # the GeoSpec products restored above, so tasks that need them must stay here.
+      # https://nx.dev/ci/reference/nx-cloud-cli#npx-nxcloud-startcirun
+      - name: Start distributed task execution
+        if: vars.NX_AGENTS_ENABLED == 'true'
+        run: npx nx-cloud start-ci-run --distribute-on="${{ vars.NX_AGENTS_DISTRIBUTE_ON || '4 linux-large-js' }}" --stop-agents-after="test"
 
       # Nx Affected runs only tasks affected by the changes in this PR/commit.
       # Browser-backed targets are not in this list — they run in the `e2e` lane,
@@ -350,6 +354,10 @@ jobs:
         run: |
           pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1
           pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64
+
+      - name: Stop distributed task execution
+        if: ${{ always() && vars.NX_AGENTS_ENABLED == 'true' }}
+        run: npx nx-cloud complete-ci-run
 
       - name: Select affected Python checks
         id: benchmark-statistics

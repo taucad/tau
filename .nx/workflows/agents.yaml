@@ -1,0 +1,27 @@
+# Nx Agents launch template for the `affected` lane of .github/workflows/ci.yml.
+# Used only when the repository variable NX_AGENTS_ENABLED is 'true'.
+# Step and image names follow https://nx.dev/ci/reference/launch-templates; check them
+# against the current reference before the first distributed run.
+launch-templates:
+  linux-large-js:
+    resource-class: 'docker_linux_amd64/large'
+    image: 'ubuntu22.04-node20.11-v10'
+    init-steps:
+      - name: Checkout
+        uses: 'nrwl/nx-cloud-workflows/v5/workflow-steps/checkout/main.yaml'
+      - name: Install Node 24
+        uses: 'nrwl/nx-cloud-workflows/v5/workflow-steps/install-node/main.yaml'
+        inputs:
+          node_version: '24'
+      - name: Restore node_modules
+        uses: 'nrwl/nx-cloud-workflows/v5/workflow-steps/cache/main.yaml'
+        inputs:
+          key: 'pnpm-lock.yaml'
+          paths: 'node_modules'
+          base_branch: 'main'
+      - name: Install dependencies
+        uses: 'nrwl/nx-cloud-workflows/v5/workflow-steps/install-node-modules/main.yaml'
+      # Native kernel tests run inside Bubblewrap, as on the GitHub-hosted lane.
+      - name: Install Linux sandbox prerequisites
+        script: |
+          sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep

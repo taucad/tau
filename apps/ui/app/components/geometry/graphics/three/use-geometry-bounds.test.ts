@@ -43,12 +43,14 @@ const mocks = vi.hoisted(() => ({
   geometryKey: 'geometry-key',
 }));
 
+const getCanvasState = () => ({ size: { width: 800, height: 600 } });
+
 vi.mock('@react-three/fiber', () => ({
   useFrame: (callback: () => void) => {
     mocks.frame = callback;
   },
-  useThree: <T>(selector?: (state: { invalidate: () => void }) => T) =>
-    selector ? selector({ invalidate: mocks.invalidate }) : { size: { width: 800, height: 600 } },
+  useThree: <T>(selector?: (state: { invalidate: () => void; get: typeof getCanvasState }) => T) =>
+    selector ? selector({ invalidate: mocks.invalidate, get: getCanvasState }) : getCanvasState(),
 }));
 
 vi.mock('#hooks/use-graphics.js', () => ({

@@ -41,6 +41,7 @@ import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { compileExportConfigurationManifest } from '#routes/w.$workspace.$project/chat-converter.js';
+import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { selectCadFailureIssues } from '#machines/cad.machine.js';
@@ -913,11 +914,18 @@ export const usePrintPrepare = ({
     submission,
   ]);
 
+  const fileReturn = useFileReturn();
   const openPreview = useCallback((): void => {
-    if (slice) {
+    if (!slice) {
+      return;
+    }
+    // The preview's tab offers one way back here; outside a project workspace it opens as any file does.
+    if (fileReturn) {
+      fileReturn.openFileFrom(slice.path, 'print');
+    } else {
       editorRef.send({ type: 'openFile', path: slice.path, source: 'user' });
     }
-  }, [editorRef, slice]);
+  }, [editorRef, fileReturn, slice]);
 
   const sendConfiguration = slice ? { ...effectiveSubmission, ...slice.materialConfiguration } : effectiveSubmission;
 

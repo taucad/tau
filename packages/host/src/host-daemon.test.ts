@@ -92,72 +92,59 @@ const fixtureMachine = defineMachine({
   id: 'fixture-printer',
   name: 'Fixture printer',
   version: '1',
-  protocolVersion: 1,
+  protocolVersion: 2,
   vendor: 'fixture',
-  technologies: ['additive.fff'],
-  accepts: [
-    {
-      contract: { id: 'fixture.gcode', version: 1 },
-      mediaType: 'text/x.gcode',
-      requiredMembers: [],
-      payloadSelection: 'single',
-      technology: 'additive.fff',
-    },
-  ],
   manifest: {
-    version: 2,
+    version: 3,
     identity: {
       typeId: 'fixture.printer',
       vendor: 'fixture',
       model: 'fixture-printer',
       displayName: 'Fixture printer',
-      qualifiedFirmware: [],
     },
-    technology: 'additive.fff',
-    geometry: {
-      unit: 'mm',
-      buildVolume: { x: 200, y: 200, z: 200 },
-      enclosure: { outer: { x: 300, y: 300, z: 400 }, enclosed: false, doors: [] },
-      kinematics: 'cartesian-bedslinger',
-      bedMotion: 'y',
-      origin: 'front-left',
-      toolheadHome: { x: 1, y: 1, z: 200 },
-      materialSystemMount: 'none',
-    },
-    toolhead: {
-      filamentDiameter: { value: 1.75, unit: 'mm' },
-      nozzles: [
-        {
-          id: 'nozzle-0.4',
-          diameter: { value: 0.4, unit: 'mm' },
-          maximumTemperature: { value: 260, unit: 'Cel' },
-          material: 'stainless',
+    connection: { transport: 'network', exclusive: false, opening: 'nothing', identity: 'authenticated' },
+    axes: [],
+    components: [{ id: 'controller', label: 'Controller', kind: 'controller' }],
+    processes: [
+      {
+        type: 'fff',
+        version: 1,
+        geometry: {
+          unit: 'mm',
+          buildVolume: { x: 200, y: 200, z: 200 },
+          enclosure: { outer: { x: 300, y: 300, z: 400 }, enclosed: false, doors: [] },
+          kinematics: 'cartesian-bedslinger',
+          bedMotion: 'y',
+          origin: 'front-left',
+          toolheadHome: { x: 1, y: 1, z: 200 },
+          materialSystemMount: 'none',
         },
-      ],
-    },
-    bed: { maximumTemperature: { value: 100, unit: 'Cel' }, plates: [{ id: 'smooth', label: 'Smooth plate' }] },
-    chamber: { enclosed: false, heated: false, light: false, fans: [] },
-    materialSystem: { units: 0, slotsPerUnit: 0, externalSpool: true, drying: false },
-    camera: { stills: false },
-    storage: { removable: false },
-    network: { lanMode: true, cloud: false },
-    speedProfiles: [],
-    actions: [],
-    observations: [],
-    slicing: {
-      recommended: {
-        layerHeight: { value: 0.2, unit: 'mm' },
-        walls: 2,
-        infillPercent: 15,
-        nozzleTemperature: { value: 210, unit: 'Cel' },
-        bedTemperature: { value: 60, unit: 'Cel' },
+        filamentDiameter: { value: 1.75, unit: 'mm' },
+        bed: { maximumTemperature: { value: 100, unit: 'Cel' }, plates: [{ id: 'smooth', label: 'Smooth plate' }] },
+        chamber: { enclosed: false, heated: false },
+        speedProfiles: [],
+        slicing: {
+          recommended: {
+            layerHeight: { value: 0.2, unit: 'mm' },
+            walls: 2,
+            infillPercent: 15,
+            nozzleTemperature: { value: 210, unit: 'Cel' },
+            bedTemperature: { value: 60, unit: 'Cel' },
+          },
+          presets: [
+            { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
+            { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
+            { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
+          ],
+        },
       },
-      presets: [
-        { id: 'fast', label: 'Fast', layerHeight: { value: 0.28, unit: 'mm' } },
-        { id: 'standard', label: 'Standard', layerHeight: { value: 0.2, unit: 'mm' } },
-        { id: 'fine', label: 'Fine', layerHeight: { value: 0.12, unit: 'mm' } },
-      ],
-    },
+    ],
+    actions: [],
+    holds: [],
+    jobs: { type: 'unsupported' },
+    stop: { motion: 'halts', spindle: 'none', heaters: 'off', position: 'may-be-lost', recovery: [] },
+    observations: [],
+    qualifications: [],
   },
   bindingConfiguration: fixtureConfiguration,
   submissionConfiguration: fixtureConfiguration,
@@ -789,7 +776,7 @@ describe('startHostDaemon', () => {
 
     /* `tau serve --machines`: the probe answers, the socket upgrades, the host
      * lists what the flag admitted — and the tool registry was offered the
-     * same facet, with the served project's id for `request_print`. */
+     * same facet, with the served project's id for `request_job`. */
     const probe = await fetch(new URL('/machines', origin), { headers: { authorization: `Bearer ${agentToken}` } });
     expect(probe.status).toBe(204);
     const socket = new WebSocket(new URL('/machines', origin).href.replace('http:', 'ws:'), {

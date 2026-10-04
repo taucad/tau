@@ -668,7 +668,7 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
    * serves without machines instead of exiting.
    *
    * @param providers - The providers `--machines` admitted.
-   * @param readArtifact - Finds a print request's file in the served project.
+   * @param readArtifact - Finds a job's file in the served project.
    * @returns What the agent server needs to answer the machines route, or `undefined` while the store is owned elsewhere.
    */
   const openMachineHost = async (
@@ -759,19 +759,19 @@ export const startHostDaemon = (options: HostDaemonOptions): HostDaemonHandle =>
       ? await discoverAcpAgents({ resolveFrom: agent.externalAgents.resolveFrom })
       : { agents: [], refused: [] };
     /* Named here rather than left to the revision port's default, because a
-     * print request's slice can sit in one of these checkouts: the machine
+     * job's slice can sit in one of these checkouts: the machine
      * host's artifact reader looks in the same directory the port writes. */
     const checkoutsDirectory = join(defaultConfigDirectory(), 'checkouts', basename(agent.workspaceRoot));
-    /* The served root is the project, and its `tau.json` id is what a print
-     * request names. A root without one prints nothing: no `request_print` is
+    /* The served root is the project, and its `tau.json` id is what a job
+     * names. A root without one prints nothing: no `request_job` is
      * offered, and every artifact is refused. */
     const projectId = await readProjectId(providerForAgentRoot(agent.workspaceRoot));
     /**
-     * Find a print request's file: only this project's, in the served root and
+     * Find a job's file: only this project's, in the served root and
      * then its checkouts, where a candidate turn's slice lands. The digest
      * decides; a checkout is admitted only for the read.
      *
-     * @param artifact - The request's reference.
+     * @param artifact - The job's reference.
      * @returns The first candidate's bytes whose digest matches.
      */
     const readArtifact: CreateNodeMachineRuntimeOptions['readArtifact'] = async (artifact) => {

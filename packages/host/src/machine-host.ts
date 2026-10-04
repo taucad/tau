@@ -159,7 +159,7 @@ export const openMachineHostIdentity = async (directory: string): Promise<Machin
 
 /**
  * The `tau.json` id of the project a directory holds, read the way a machine
- * host names a print request's project: a bounded read of that one field, so
+ * host names a job's project: a bounded read of that one field, so
  * a manifest another rule would refuse still names its project.
  *
  * @param project - The project directory's files, e.g. a `NodeFsProviderClient` rooted at it.

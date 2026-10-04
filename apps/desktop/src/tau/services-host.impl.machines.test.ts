@@ -212,7 +212,7 @@ describe('createServicesHost — machines', () => {
     }
   }, 30_000);
 
-  it("should read a request's file from the project its id names, refusing another project's file at that path", async () => {
+  it("should read a job's file from the project its id names, refusing another project's file at that path", async () => {
     const machines = await machinesHarness();
     try {
       const client = machines.connect();
@@ -221,26 +221,38 @@ describe('createServicesHost — machines', () => {
       const archive = Uint8Array.from(zipSync({ 'Metadata/plate_1.gcode': encoder.encode(plateGcode) }));
       await writeFile(join(machines.beta, 'plate.gcode.3mf'), archive);
       await writeFile(join(machines.alpha, 'plate.gcode.3mf'), 'not the sliced plate');
-      const request = async (requestId: string, projectId: string) => {
-        await client.requestPrint({
-          requestId,
+      /* Ask for a job and, once it is prepared, approve it with every attestation the printer asks for. */
+      const job = async (jobId: string, projectId: string) => {
+        const requested = await client.requestJob({
+          jobId,
           machineId,
           artifact: artifactFor(projectId, archive),
           configuration,
           requestedBy: operator,
         });
-        return client.resolvePrintRequest({ requestId, decision: 'approve', resolvedBy: operator });
+        if (requested.state !== 'awaiting-approval') {
+          return requested;
+        }
+        const { descriptor } = await client.get({ machineId });
+        const { jobs } = descriptor.capabilities;
+        return client.resolveJob({
+          jobId,
+          decision: 'approve',
+          resolvedBy: operator,
+          attended: true,
+          attestations: jobs.type === 'supported' ? jobs.attestations.map(({ id }) => id) : [],
+        });
       };
 
       /* Alpha's file at that path is not the one the digest names, and beta's is not alpha's. */
-      await expect(request('alpha', alphaId)).resolves.toMatchObject({
+      await expect(job('alpha', alphaId)).resolves.toMatchObject({
         state: 'failed',
         failure: { code: 'ARTIFACT_INVALID' },
       });
-      await expect(request('beta', betaId)).resolves.toMatchObject({ state: 'started' });
-      /* Request history is the store's: every connection sees both. */
-      const history = await machines.connect().listPrintRequests({});
-      expect(history.map((entry) => entry.requestId).sort()).toEqual(['alpha', 'beta']);
+      await expect(job('beta', betaId)).resolves.toMatchObject({ state: 'started' });
+      /* Job history is the store's: every connection sees both. */
+      const history = await machines.connect().listJobs({});
+      expect(history.map((entry) => entry.jobId).sort()).toEqual(['alpha', 'beta']);
     } finally {
       await machines.cleanup();
     }

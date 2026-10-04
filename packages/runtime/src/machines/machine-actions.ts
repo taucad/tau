@@ -455,6 +455,8 @@ export const standardMachineAction = (
   input: Readonly<{
     id: StandardMachineActionId;
     componentId: string;
+    /** The target component's kind. A family on the host's low-risk list for this kind starts at `agent`. */
+    componentKind?: string;
     label: string;
     description?: string;
     when: readonly MachineStatus[];
@@ -470,7 +472,8 @@ export const standardMachineAction = (
   }>,
 ): MachineActionDefinition => {
   const base = standardMachineActions[input.id];
-  const authority = raise(base.authority, input.safety?.authority);
+  const floor = unattended.has(`${input.componentKind}:${input.id}`) ? 'agent' : base.authority;
+  const authority = raise(floor, input.safety?.authority);
   return defineMachineAction(
     {
       componentId: input.componentId,

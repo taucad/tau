@@ -97,6 +97,20 @@
         "{workspaceRoot}/packages/core/*/src/index.ts"
       ]
     },
+    "test:e2e": {
+      "executor": "nx:run-commands",
+      "metadata": {
+        "description": "Suites that launch Playwright Chromium or run Pandoc (canvas Vite config, HTML reference capture). Named test:e2e so `nx affected -t test:e2e` selects them on the CI lane that installs Chromium and Pandoc."
+      },
+      "inputs": ["default", "^production"],
+      "options": {
+        "cwd": "{projectRoot}",
+        "command": "../node_modules/.bin/vitest run",
+        "env": {
+          "TAU_SCRIPTS_BROWSER_TESTS": "true"
+        }
+      }
+    },
     "validate-license-deps": {
       "executor": "nx:run-commands",
       "options": {

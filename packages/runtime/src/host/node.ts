@@ -27,6 +27,11 @@ import type { MachineEventLog } from '#host/node-machine-event-log.js';
 import { advanceJob, createNodeMachineJobs, terminalJobStates } from '#host/node-machine-jobs.js';
 import { applyOperationResult, parseJournalEvent, replayJournal } from '#host/node-machine-operations.js';
 import type { NodeMachineJournalEvent, NodeMachineOperationState } from '#host/node-machine-operations.js';
+import { createNodeMachineSerial as createSerial } from '#host/node-machine-serial.js';
+import type {
+  NodeMachineSerialDriver as SerialDriver,
+  NodeMachineSerialPortInfo as SerialPortInfo,
+} from '#host/node-machine-serial.js';
 import { openNodeMachineStore } from '#host/node-machine-store.js';
 import type { MachineBindingRecord, MachinePreparationRecord } from '#host/node-machine-store.js';
 import { createNodeMachineSupervision } from '#host/node-machine-supervision.js';
@@ -53,6 +58,16 @@ import type { RuntimePluginDefinitionCarrier } from '#plugins/plugin-runtime-def
 
 /** Host-owned network and secret capabilities used by generated machine providers. @public */
 export type NodeMachineRuntime = ContextMachineRuntime;
+/** The native serial driver a host application supplies. @public */
+export type NodeMachineSerialDriver = SerialDriver;
+/** One serial port as a driver lists it. @public */
+export type NodeMachineSerialPortInfo = SerialPortInfo;
+/**
+ * Serial access for providers over a host-supplied native driver: `listSerialPorts` for discovery and `openSerial`
+ * for connections. @public
+ */
+// oxlint-disable-next-line unicorn-js/prefer-export-from -- The host/node entry keeps one value path; a barrel export is forbidden.
+export const createNodeMachineSerial = createSerial;
 /** Trusted native completion of a browser-initiated, non-secret binding ceremony. @public */
 export type CompleteNodeMachineBindingInput = ContextCompleteBindingInput;
 /** Trusted native removal of one committed binding, e.g. to roll back a binding whose credential could not be saved. @public */

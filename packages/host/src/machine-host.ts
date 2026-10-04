@@ -40,7 +40,8 @@ import type {
   MachineTransportTrust,
 } from '@taucad/runtime/machine';
 import type { HostRouteGrant } from '@taucad/runtime/host';
-import type { NodeMachineRuntime } from '@taucad/runtime/host/node';
+import { createNodeMachineSerial } from '@taucad/runtime/host/node';
+import type { NodeMachineRuntime, NodeMachineSerialDriver } from '@taucad/runtime/host/node';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { projectManifestMaxBytes } from '@taucad/types';
 import { z } from 'zod';
@@ -570,6 +571,11 @@ const uploadFile = async (
 /** Options for {@link createNodeMachineRuntime}. @public */
 export type CreateNodeMachineRuntimeOptions = Readonly<{
   secrets: MachineSecretStore;
+  /**
+   * The native serial driver for USB and serial controllers (Grbl, Carvera over USB). Absent, providers see no serial
+   * access and serial machines cannot be found or connected.
+   */
+  serial?: NodeMachineSerialDriver;
   /** Told every entry a provider logs. */
   log?: (entry: MachineLogEntry) => void;
   /**
@@ -605,12 +611,17 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
 export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOptions): NodeMachineRuntime => {
   const clock = Object.freeze({ now: () => new Date().toISOString() });
   const { secrets } = options;
+  const serial = options.serial === undefined ? undefined : createNodeMachineSerial(options.serial);
   return Object.freeze({
     credentials: Object.freeze({
       has: async (reference: string) => secrets.has(reference),
       forget: async (reference: string) => secrets.forget(reference),
     }),
-    discovery: Object.freeze({ clock, listenDatagrams }),
+    discovery: Object.freeze({
+      clock,
+      listenDatagrams,
+      ...(serial === undefined ? {} : { listSerialPorts: serial.listSerialPorts }),
+    }),
     connection: (): MachineConnectionRuntime =>
       Object.freeze({
         clock,
@@ -618,6 +629,7 @@ export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOption
           options.log?.(entry);
         },
         connectStream,
+        ...(serial === undefined ? {} : { openSerial: serial.openSerial }),
         async *readArtifact(input) {
           if (input.artifact.length > input.maximumBytes) {
             throw new Error('MACHINE_ARTIFACT_TOO_LARGE');

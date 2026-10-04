@@ -125,7 +125,6 @@
             "esbuild",
             "geospec",
             "geospec-engine",
-            "geospec-engine-native",
             "camera",
             "spatial",
             "geometry-core",

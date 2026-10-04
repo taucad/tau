@@ -1,3 +1,4 @@
+import { Profiler } from 'react';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import type { DockviewApi, DockviewPanelApi, IDockviewPanel } from 'dockview-react';
 import { mock } from 'vitest-mock-extended';
@@ -86,6 +87,24 @@ afterEach(() => {
 });
 
 describe('WorkbenchToggle', () => {
+  it('should ignore layout notifications when the tab list is unchanged', () => {
+    const panels = [createPanel('one')];
+    const workbench = createApi(panels);
+    const commit = vi.fn();
+    render(
+      <TooltipProvider>
+        <Profiler id='toggle' onRender={commit}>
+          <WorkbenchToggle isOpen={false} onOpenChange={vi.fn()} api={workbench.api} />
+        </Profiler>
+      </TooltipProvider>,
+    );
+    commit.mockClear();
+    workbench.setPanels(panels);
+    expect(commit).not.toHaveBeenCalled();
+    workbench.setPanels([...panels, createPanel('two')]);
+    expect(screen.getByRole('button', { name: 'Toggle Workbench lane' })).toHaveTextContent('2');
+  });
+
   it('should count workbench tabs while closed and follow panel changes', () => {
     const workbench = createApi(Array.from({ length: 12 }, (_, index) => createPanel(`tab-${index}`)));
     const { trigger } = renderToggle({ api: workbench.api });

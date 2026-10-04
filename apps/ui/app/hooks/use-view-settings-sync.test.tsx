@@ -20,8 +20,11 @@ import { getViewCameraSession } from '#services/graphics-camera-registry.js';
 import { useCameraFraming } from '#components/geometry/graphics/three/use-camera-framing.js';
 import { Box3, Vector3 } from 'three';
 
+const getCanvasState = () => ({ size: { width: 800, height: 600 } });
+
 vi.mock('@react-three/fiber', () => ({
-  useThree: () => ({ size: { width: 800, height: 600 } }),
+  useThree: <T,>(selector?: (state: { get: typeof getCanvasState }) => T) =>
+    selector ? selector({ get: getCanvasState }) : getCanvasState(),
 }));
 
 const initial = (): WorkbenchView =>

@@ -534,7 +534,8 @@ describe('geospec-runner.worker JSCAD integration', () => {
     // One source revision per model load, and each requirement loads the model once.
     expect(resultMessage.result.sourceRevisions).toHaveLength(resultMessage.result.passes.length);
     expect(resultMessage.result.sourceRevisions?.every((revision) => revision.entry === 'main.ts')).toBe(true);
-    expect(exportCalls).toHaveLength(2);
+    // Every requirement calls loadModel, so each load runs its own runtime export.
+    expect(exportCalls).toHaveLength(resultMessage.result.passes.length);
     const [defaultExport, parameterizedExport] = exportCalls;
     if (!defaultExport || !parameterizedExport) {
       throw new Error('Expected default and parameterized runtime exports.');

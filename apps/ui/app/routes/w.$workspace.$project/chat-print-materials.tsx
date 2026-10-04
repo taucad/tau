@@ -287,11 +287,9 @@ const slotPlan = ({
   };
 };
 
-/** A profile id by the preset name the printer declares for it, else as reported. */
+/** A profile id by the preset name the printer declares for it; a bare vendor id ("GFG99") means nothing to a person. */
 const profileName = (profileId: string | undefined, manifest: MachineManifest | undefined): string | undefined =>
-  profileId === undefined
-    ? undefined
-    : (materialPresets(manifest).find((preset) => preset.const === profileId)?.title ?? profileId);
+  materialPresets(manifest).find((preset) => preset.const === profileId)?.title;
 
 /**
  * What the slot holds and where: the swatch, the material, the place, then its remaining, colour, profile, nozzle

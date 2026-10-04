@@ -336,8 +336,9 @@ export const useCompiledConfigurationManifest = (
         if (!cancelled) {
           setCompiled({ resolved, manifest });
         }
-      } catch {
+      } catch (error) {
         /* The form stays in its preparing state; the slice still runs on the values entered so far. */
+        console.error(`[print] Could not compile the ${configuration} form for ${provider}.`, error);
       }
     };
     // async-iife: bootstrap -- the manifest is derived from the schema; a newer schema simply supersedes this compile.
@@ -1835,7 +1836,8 @@ const prepareSummary = (prepare: PrintPrepare, deferred: string | undefined): st
       .filter((part) => part !== undefined)
       .join(' · ');
   }
-  return deferred ?? (slice ? 'Changed since the slice' : entryPath === '' ? undefined : modelName(entryPath));
+  // The model as its row names it ("main.cs"); "main" alone reads as a branch.
+  return deferred ?? (slice ? 'Changed since the slice' : entryPath === '' ? undefined : entryPath.split('/').pop());
 };
 
 /**

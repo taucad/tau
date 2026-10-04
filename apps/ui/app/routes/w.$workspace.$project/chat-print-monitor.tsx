@@ -205,6 +205,12 @@ function RunGroup({
   );
 }
 
+type Temperature = NonNullable<NonNullable<MachineDirectoryEntry['snapshot']['temperatures']>['nozzle']>;
+
+/** A heater in whole degrees, as the printer's own screen shows it: "24 °C", not "24.34 °C". */
+const formatTemperature = (temperature: Temperature): string =>
+  formatQuantity({ ...temperature, value: Math.round(temperature.value) });
+
 /**
  * The heaters as three columns a person reads at a glance: where each one is, and where it is heading.
  *
@@ -236,10 +242,11 @@ function TemperatureGroup({
           <div key={label} className='flex min-w-0 flex-col'>
             <dt className='truncate text-xs text-muted-foreground'>{label}</dt>
             <dd className='truncate text-sm font-medium tabular-nums'>
-              {current === undefined ? '–' : formatQuantity(current)}
+              {current === undefined ? '–' : formatTemperature(current)}
             </dd>
-            {target === undefined ? null : (
-              <dd className='truncate text-xs text-muted-foreground tabular-nums'>to {formatQuantity(target)}</dd>
+            {/* A target of 0 is a heater that is off, not one heating to 0 °C. */}
+            {target === undefined || target.value === 0 ? null : (
+              <dd className='truncate text-xs text-muted-foreground tabular-nums'>to {formatTemperature(target)}</dd>
             )}
           </div>
         ))}
@@ -349,8 +356,8 @@ export const monitorSummary = (entry: MachineDirectoryEntry, manifest: MachineMa
   const { temperatures } = entry.snapshot;
   return [
     materialInUse(entry, manifest),
-    temperatures?.nozzle === undefined ? undefined : `nozzle ${formatQuantity(temperatures.nozzle)}`,
-    temperatures?.bed === undefined ? undefined : `bed ${formatQuantity(temperatures.bed)}`,
+    temperatures?.nozzle === undefined ? undefined : `nozzle ${formatTemperature(temperatures.nozzle)}`,
+    temperatures?.bed === undefined ? undefined : `bed ${formatTemperature(temperatures.bed)}`,
   ]
     .filter((part) => part !== undefined)
     .join(' · ');

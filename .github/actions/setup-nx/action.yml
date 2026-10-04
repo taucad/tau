@@ -7,6 +7,11 @@ inputs:
     required: false
     default: '24'
 
+outputs:
+  no-previous-build:
+    description: "'true' when nrwl/nx-set-shas found no earlier successful run and fell back to HEAD~1"
+    value: ${{ steps.shas.outputs.noPreviousBuild }}
+
 runs:
   using: 'composite'
   steps:
@@ -52,4 +57,5 @@ runs:
       shell: bash
 
     - name: Set NX SHAs
+      id: shas
       uses: nrwl/nx-set-shas@afb73a62d26e41464e9254689e1fd6122ee683c1 # v5.0.1

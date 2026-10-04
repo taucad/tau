@@ -16,7 +16,9 @@ import { GraphicsProvider, useCameraRig } from '#hooks/use-graphics.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { ThreeCanvasInstance } from '#components/geometry/graphics/three/three-canvas-instance.js';
 
-vi.mock('#hooks/use-color.js', () => ({ useColor: () => ({ serialized: { hex: '#16aaa4' } }) }));
+vi.mock('#hooks/use-color.js', () => ({
+  useColor: () => ({ serialized: { hex: '#16aaa4' } }),
+}));
 vi.mock('#flags/use-feature.js', () => ({ useFeature: () => false }));
 vi.mock('#hooks/use-theme.js', () => ({
   // eslint-disable-next-line @typescript-eslint/naming-convention -- Matches the production Theme constants.
@@ -53,7 +55,11 @@ describe('rendered viewer resize', () => {
       await page.viewport(1280, 800);
       const actor = createActor(
         graphicsMachine.provide({
-          actors: { probeWebGpu: createAsyncLogic({ run: async () => backend === 'webgpu' }) },
+          actors: {
+            probeWebGpu: createAsyncLogic({
+              run: async () => backend === 'webgpu',
+            }),
+          },
         }),
         { input: {} },
       ).start();
@@ -61,6 +67,7 @@ describe('rendered viewer resize', () => {
       let state: RootState | undefined;
       let renderedWidth = 0;
       let renders = 0;
+      let renderedAspect = 0;
       let rig: ReturnType<typeof useCameraRig> | undefined;
       const Probe = (): undefined => {
         const get = useThree((value) => value.get);
@@ -71,6 +78,7 @@ describe('rendered viewer resize', () => {
         }, [get, cameraRig]);
         useFrame((value) => {
           renderedWidth = value.size.width;
+          renderedAspect = value.camera.projectionMatrix.elements[5] / value.camera.projectionMatrix.elements[0];
           renders += 1;
         }, 4);
         return undefined;
@@ -102,6 +110,7 @@ describe('rendered viewer resize', () => {
       const cameraBefore = rig!.actorRef.getSnapshot().context.view;
       const samples: Array<{
         expected: number;
+        aspect: number;
         rendered: number;
         buffer: number;
         sizeCalls: number;
@@ -118,6 +127,7 @@ describe('rendered viewer resize', () => {
         await frame();
         samples.push({
           expected: width,
+          aspect: renderedAspect,
           rendered: renderedWidth,
           buffer: renderer.domElement.width / renderer.getPixelRatio(),
           sizeCalls: sizeSpy.mock.calls.length - beforeSizes,
@@ -128,11 +138,23 @@ describe('rendered viewer resize', () => {
       /* oxlint-enable eslint/no-await-in-loop */
       await commands.recordViewerResize(
         backend,
-        JSON.stringify({ backend, userAgent: navigator.userAgent, dpr: renderer.getPixelRatio(), samples }, null, 2),
+        JSON.stringify(
+          {
+            backend,
+            userAgent: navigator.userAgent,
+            dpr: renderer.getPixelRatio(),
+            samples,
+          },
+          null,
+          2,
+        ),
       );
       expect(samples.filter((sample) => sample.rendered !== sample.expected)).toEqual([]);
       expect(samples.filter((sample) => sample.buffer !== sample.expected)).toEqual([]);
       expect(samples.every((sample) => sample.sizeCalls <= 1)).toBe(true);
+      for (const sample of samples) {
+        expect(sample.aspect).toBeCloseTo(sample.expected / 550, 6);
+      }
       const cameraAfter = rig!.actorRef.getSnapshot().context.view;
       expect(cameraAfter.target).toEqual(cameraBefore.target);
       expect(cameraAfter.verticalSpan).toBe(cameraBefore.verticalSpan);
@@ -145,7 +167,9 @@ describe('rendered viewer resize', () => {
       await frame();
       expect(renderedWidth).toBe(700);
       expect(view.container.querySelector('canvas')).toBe(renderer.domElement);
-      await page.screenshot({ path: `../../../../../../../out/test-results/viewer-resize/${backend}-resized.png` });
+      await page.screenshot({
+        path: `../../../../../../../out/test-results/vitest-browser/viewer-resize/${backend}-resized.png`,
+      });
       sizeSpy.mockRestore();
     },
   );
@@ -155,7 +179,11 @@ describe('rendered viewer resize', () => {
       await page.viewport(1280, 800);
       const actor = createActor(
         graphicsMachine.provide({
-          actors: { probeWebGpu: createAsyncLogic({ run: async () => backend === 'webgpu' }) },
+          actors: {
+            probeWebGpu: createAsyncLogic({
+              run: async () => backend === 'webgpu',
+            }),
+          },
         }),
         { input: {} },
       ).start();
@@ -205,7 +233,11 @@ describe('rendered viewer resize', () => {
                   <Dockview
                     components={components}
                     onReady={({ api }) => {
-                      api.addPanel({ id: 'model', component: 'viewer', title: 'Resize regression model' });
+                      api.addPanel({
+                        id: 'model',
+                        component: 'viewer',
+                        title: 'Resize regression model',
+                      });
                     }}
                   />
                 </Allotment.Pane>
@@ -259,14 +291,19 @@ describe('rendered viewer resize', () => {
         const before = renderedWidth;
         await userEvent.dragAndDrop(sash, root, {
           sourcePosition: { x: rectangle.width / 2, y: 120 },
-          targetPosition: { x: rectangle.left - root.getBoundingClientRect().left - 60, y: 120 },
+          targetPosition: {
+            x: rectangle.left - root.getBoundingClientRect().left - 60,
+            y: 120,
+          },
         });
         await frame();
         check();
         expect(renderedWidth).not.toBe(before);
       }
       /* oxlint-enable eslint/no-await-in-loop */
-      await page.screenshot({ path: `../../../../../../../out/test-results/viewer-resize/${backend}-panes.png` });
+      await page.screenshot({
+        path: `../../../../../../../out/test-results/vitest-browser/viewer-resize/${backend}-panes.png`,
+      });
     },
   );
 });

@@ -23,7 +23,12 @@ export default defineConfig({
       'three/webgpu',
     ],
   },
-  server: { host: '127.0.0.1', fs: { allow: [fileURLToPath(new URL('../../../../../../..', import.meta.url))] } },
+  server: {
+    host: '127.0.0.1',
+    fs: {
+      allow: [fileURLToPath(new URL('../../../../../../..', import.meta.url))],
+    },
+  },
   test: {
     include: [
       'app/components/geometry/graphics/three/viewer-resize.browser.test.tsx',
@@ -44,13 +49,16 @@ export default defineConfig({
         },
       }),
       instances: [{ browser: 'chromium' }],
-      screenshotDirectory: '../../out/test-results/viewer-resize',
+      screenshotDirectory: '../../out/test-results/vitest-browser/viewer-resize',
       commands: {
         async recordViewerResize(_context, backend: string, evidence: string) {
           if (backend !== 'webgl' && backend !== 'webgpu') {
             throw new Error('Unknown backend');
           }
-          const directory = new URL('../../../../../../../out/test-results/viewer-resize/', import.meta.url);
+          const directory = new URL(
+            '../../../../../../../out/test-results/vitest-browser/viewer-resize/',
+            import.meta.url,
+          );
           await mkdir(directory, { recursive: true });
           await writeFile(new URL(`${backend}.json`, directory), evidence);
         },

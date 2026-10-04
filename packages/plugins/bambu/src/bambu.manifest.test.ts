@@ -1,89 +1,130 @@
-import { parseMachineManifest } from '@taucad/runtime/machine';
+import { fffProcessOf, isUnattendedAction, parseMachineManifest } from '@taucad/runtime/machine';
 import { describe, expect, it } from 'vitest';
 
-import { bambuX1cManifest } from '#bambu.manifest.js';
-import { bambuMachine } from '#bambu.machine.js';
-import { bambuSimulatorMachine } from '#bambu.simulator.js';
+import { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
+import { bambuA1MiniManifest, bambuX1cHardwareProfile, bambuX1cManifest } from '#bambu.manifest.js';
+import { bambuA1MiniSimulatorMachine, bambuSimulatorMachine } from '#bambu.simulator.js';
+
+const actionIds = (manifest: typeof bambuX1cManifest): string[] =>
+  manifest.actions.map(({ componentId, id }) => `${componentId}:${id}`);
 
 describe('bambuX1cManifest', () => {
-  it('round-trips through a structured clone and carries the X1C geometry', () => {
+  it('should parse after a structured clone and carry the X1C FFF process', () => {
     expect(parseMachineManifest(structuredClone(bambuX1cManifest))).toEqual(bambuX1cManifest);
-    expect(bambuX1cManifest.geometry).toMatchObject({
-      buildVolume: { x: 256, y: 256, z: 256 },
-      enclosure: { outer: { x: 389, y: 389, z: 457 }, enclosed: true, doors: ['front', 'top'] },
-      kinematics: 'corexy',
-      bedMotion: 'z',
-      origin: 'front-left',
-      materialSystemMount: 'top',
-    });
-    expect(bambuX1cManifest.bed.plates.map(({ id }) => id)).toEqual([
-      'cool',
-      'engineering',
-      'high-temperature',
-      'textured-pei',
-    ]);
-    expect(bambuX1cManifest.speedProfiles.map(({ id, percent }) => `${id}:${percent}`)).toEqual([
+    const fff = fffProcessOf(bambuX1cManifest);
+    expect(fff?.geometry).toMatchObject({ buildVolume: { x: 256, y: 256, z: 256 }, bedMotion: 'z' });
+    expect(fff?.bed.plates.map(({ id }) => id)).toEqual(['cool', 'engineering', 'high-temperature', 'textured-pei']);
+    expect(fff?.speedProfiles.map(({ id, percent }) => `${id}:${String(percent)}`)).toEqual([
       'silent:50',
       'standard:100',
       'sport:124',
       'ludicrous:166',
     ]);
-    expect(bambuX1cManifest.observations.map(({ group }) => group)).toEqual([
-      'thermal',
-      'run',
-      'material',
-      'fans',
-      'light',
-      'network',
-      'storage',
-    ]);
-  });
-
-  it('declares an effect and a qualification for every action, with only the exercised ones qualified', () => {
-    const ids = bambuX1cManifest.actions.map(({ id }) => id);
-    expect(new Set(ids).size).toBe(ids.length);
-    for (const action of bambuX1cManifest.actions) {
-      expect(action.effect, action.id).toMatch(/^(none|observe|thermal|motion|material|print|storage)$/u);
-      expect(action.qualification, action.id).toMatch(/^(qualified|designed|unsupported)$/u);
-    }
-    expect(
-      ids.filter((id) => bambuX1cManifest.actions.find((action) => action.id === id)?.qualification === 'qualified'),
-    ).toEqual(['print.start', 'run.pause', 'run.resume', 'run.cancel', 'run.urgent-stop', 'camera.still']);
-    expect(
-      bambuX1cManifest.actions.filter(({ qualification }) => qualification === 'unsupported').map(({ id }) => id),
-    ).toEqual(['calibration.run', 'storage.format']);
-  });
-
-  it('should declare still capture and no live stream', () => {
-    expect(bambuX1cManifest.camera).toEqual({ stills: true });
-  });
-
-  it('offers exactly the three slicing presets and the recommended PETG profile', () => {
-    expect(bambuX1cManifest.slicing.presets).toHaveLength(3);
-    expect(bambuX1cManifest.slicing.presets.map(({ id, layerHeight }) => [id, layerHeight.value])).toEqual([
+    expect(fff?.slicing.presets.map(({ id, layerHeight }) => [id, layerHeight.value])).toEqual([
       ['fast', 0.28],
       ['standard', 0.2],
       ['fine', 0.12],
     ]);
-    expect(bambuX1cManifest.slicing.recommended).toEqual({
-      layerHeight: { value: 0.2, unit: 'mm' },
-      walls: 2,
-      infillPercent: 15,
-      nozzleTemperature: { value: 250, unit: 'Cel' },
-      bedTemperature: { value: 70, unit: 'Cel' },
-    });
   });
 
-  it('is carried by both provider registrations, relabeled on the simulator', () => {
-    const real = bambuMachine();
-    const simulated = bambuSimulatorMachine();
-    expect(real.manifest).toEqual(bambuX1cManifest);
-    expect(simulated.id).toBe('bambu-simulator');
-    expect(simulated.name).toBe('Simulated X1C');
-    expect(simulated.manifest).toEqual({
-      ...bambuX1cManifest,
-      identity: { ...bambuX1cManifest.identity, displayName: 'Simulated X1C' },
+  it('should declare every action once, with the run actions hardware-qualified and the rest designed', () => {
+    const ids = actionIds(bambuX1cManifest);
+    expect(new Set(ids).size).toBe(ids.length);
+    expect(ids).toEqual([
+      'chamber-light:switch.set',
+      'speed:option.set',
+      'controller:run.pause',
+      'controller:run.resume',
+      'controller:run.cancel',
+      'part-fan:level.set',
+      'aux-fan:level.set',
+      'chamber-fan:level.set',
+      'filament:material.load',
+      'filament:material.unload',
+      'filament:material.set',
+      'filament:material.clear',
+      'filament:material.calibration.select',
+      'filament:material.calibration.save',
+      'filament:material.calibration.delete',
+      'filament:material.calibration.run',
+      'filament:interaction.respond',
+      'filament:bambu.ams.read-tag',
+      'filament:bambu.filament.abort',
+      'motion:motion.home',
+      'motion:motion.jog',
+      'controller:bambu.printer.calibrate',
+    ]);
+    const qualified = bambuX1cManifest.actions
+      .filter(({ qualification }) => qualification.status === 'qualified')
+      .map(({ id }) => id);
+    expect(qualified).toEqual(['run.pause', 'run.resume', 'run.cancel']);
+    for (const action of bambuX1cManifest.actions.filter(({ qualification }) => qualification.status === 'qualified')) {
+      expect(action.qualification).toEqual({ status: 'qualified', profileId: bambuX1cHardwareProfile });
+    }
+    expect(bambuX1cManifest.qualifications.map(({ id }) => id)).toEqual([bambuX1cHardwareProfile]);
+  });
+
+  it('should let an agent switch the light, change the speed and pause, and nothing that moves material', () => {
+    const kindOf = (componentId: string): string =>
+      bambuX1cManifest.components.find(({ id }) => id === componentId)?.kind ?? 'unknown';
+    const unattended = bambuX1cManifest.actions
+      .filter((action) => isUnattendedAction(kindOf(action.componentId), action))
+      .map(({ id }) => id);
+    expect(unattended).toContain('switch.set');
+    expect(unattended).toContain('option.set');
+    expect(unattended).toContain('run.pause');
+    expect(unattended).not.toContain('material.load');
+    expect(unattended).not.toContain('motion.jog');
+  });
+
+  it('should take stored jobs started remotely after the plate is attested clear', () => {
+    expect(bambuX1cManifest.jobs).toMatchObject({
+      type: 'supported',
+      delivery: 'stored',
+      start: 'remote',
+      attestations: [{ id: 'work-area-clear' }],
     });
-    expect(() => structuredClone(simulated)).not.toThrow();
+    expect(bambuX1cManifest.observations.map(({ group }) => group)).toEqual([
+      'state',
+      'temperature',
+      'accessories',
+      'material',
+      'position',
+    ]);
+  });
+});
+
+describe('bambuA1MiniManifest', () => {
+  it('should leave out what the A1 mini lacks and narrow its calibration to pressure advance', () => {
+    expect(parseMachineManifest(structuredClone(bambuA1MiniManifest))).toEqual(bambuA1MiniManifest);
+    const ids = actionIds(bambuA1MiniManifest);
+    expect(ids).not.toContain('chamber-light:switch.set');
+    expect(ids).not.toContain('aux-fan:level.set');
+    expect(bambuA1MiniManifest.components.map(({ id }) => id)).not.toContain('chamber');
+    expect(bambuA1MiniManifest.actions.every(({ qualification }) => qualification.status !== 'qualified')).toBe(true);
+    expect(fffProcessOf(bambuA1MiniManifest)?.geometry.bedMotion).toBe('y');
+  });
+});
+
+describe('provider registrations', () => {
+  it('should carry the manifests, and the simulators qualify every action by simulation', () => {
+    expect(bambuMachine().manifest).toEqual(bambuX1cManifest);
+    expect(bambuA1MiniMachine().manifest).toEqual(bambuA1MiniManifest);
+    for (const [factory, manifest, name] of [
+      [bambuSimulatorMachine, bambuX1cManifest, 'Simulated X1C'],
+      [bambuA1MiniSimulatorMachine, bambuA1MiniManifest, 'Simulated A1 mini'],
+    ] as const) {
+      const simulated = factory();
+      expect(simulated.name).toBe(name);
+      expect(simulated.manifest.identity.displayName).toBe(name);
+      expect(actionIds(simulated.manifest)).toEqual(actionIds(manifest));
+      expect(
+        simulated.manifest.actions.every(
+          ({ qualification }) => qualification.status === 'qualified' && qualification.profileId === 'simulation',
+        ),
+      ).toBe(true);
+      expect(simulated.manifest.qualifications).toMatchObject([{ id: 'simulation', environment: 'simulation' }]);
+      expect(() => structuredClone(simulated)).not.toThrow();
+    }
   });
 });

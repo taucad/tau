@@ -1,0 +1,2054 @@
+/**
+ * One Bambu printer session (provider ABI v2) over any MQTT-shaped link: the LAN host's pinned MQTTS connection or
+ * the simulator's in-memory printer. It reads the printer's pushes into a component report, sends exactly one
+ * command per action, and decides every action's effect from later reports: a reply is a hint, never proof.
+ *
+ * @module
+ */
+
+import { createHash } from 'node:crypto';
+import { on } from 'node:events';
+
+import type {
+  ComponentObservation,
+  MachineActionConfirmation,
+  MachineActivity,
+  MachineAvailability,
+  MachineCheck,
+  MachineClock,
+  MachineCommandReceipt,
+  MachineComponentValue,
+  MachineLogEntry,
+  MachineManifest,
+  MachineObservation,
+  MachinePreparation,
+  MachineProviderActionInput,
+  MachinePrompt,
+  MachineProviderDescriptor,
+  MachineReport,
+  MachineRun,
+  MachineSession,
+  MachineStillCaptureCapability,
+  MaterialSlotSnapshot,
+} from '@taucad/runtime/machine';
+import { checkOperation, createQuantity, quantityKinds } from '@taucad/units/quantity';
+import type { Quantity } from '@taucad/units/quantity';
+
+import type { BambuPreparedArtifact } from '#bambu.archive.js';
+import {
+  bambuAddressOf,
+  bambuAmsControl,
+  bambuCalibrationDelete,
+  bambuCalibrationResultRequest,
+  bambuCalibrationRun,
+  bambuCalibrationSave,
+  bambuCalibrationSelect,
+  bambuCalibrationTableRequest,
+  bambuChamberLight,
+  bambuChangeTemperature,
+  bambuFanLevel,
+  bambuGenericPresets,
+  bambuGetVersion,
+  bambuHome,
+  bambuJog,
+  bambuLoad,
+  bambuMaterialClear,
+  bambuMaterialSetting,
+  bambuPrintSpeed,
+  bambuPrinterCalibration,
+  bambuPushAll,
+  bambuReadTag,
+  bambuRunCommand,
+  bambuSlotLabel,
+  bambuSlotOf,
+  bambuUnload,
+} from '#bambu.commands.js';
+import type {
+  BambuCalibrationFilament,
+  BambuRequest,
+  BambuSlotAddress,
+  BambuWireForm,
+  bambuFanIndexes,
+  bambuPrinterRoutines,
+  bambuSpeedProfiles,
+} from '#bambu.commands.js';
+import { bambuAmsUnit, bambuExternalUnit, bambuNozzle } from '#bambu.manifest.js';
+import { bambuPlateForBedType } from '#bambu.plate.js';
+import type {
+  BambuCalibrationResult,
+  BambuCalibrationRow,
+  BambuMaterial,
+  BambuModel,
+  BambuReply,
+  BambuStatus,
+} from '#bambu.protocol.js';
+import {
+  bambuBit,
+  bambuCalibrationResults,
+  bambuCalibrationTable,
+  bambuCommandVerificationAlert,
+  bambuExternalSpoolSlot,
+  bambuQuantity,
+  bambuRemoteName,
+  bambuStage,
+  definedFields,
+  developerModeRemedy,
+  mergeBambuStatus,
+  parseBambuReply,
+  parseBambuStatusPayload,
+  parseBambuVersionPayload,
+} from '#bambu.protocol.js';
+
+/** One MQTT-shaped conversation with one printer: requests out, reports in. @internal */
+export type BambuLink = Readonly<{
+  /** Publish one request; resolves once the bytes are handed to the transport. */
+  publish(payload: string): Promise<void>;
+  /** The one listener for report payloads. */
+  subscribe(listener: (bytes: Uint8Array<ArrayBuffer>) => void): void;
+  onClose(listener: () => void): void;
+  connected(): boolean;
+  close(): Promise<void>;
+}>;
+
+/** The admitted submission form. @internal */
+export type BambuSubmission = Readonly<{
+  amsMapping: readonly number[];
+  bedLeveling: boolean;
+  expectedBedType: string;
+  expectedFilamentDiameter: number;
+  expectedMaterials: ReadonlyArray<Readonly<{ slot: number; materialId: string }>>;
+  expectedModel: BambuModel;
+  expectedNozzleDiameter: number;
+  operatorConfirmedBedType?: string;
+  flowCalibration: boolean;
+  timelapse: boolean;
+}>;
+
+/** What a session needs from its host. @internal */
+export type BambuSessionInput = Readonly<{
+  model: BambuModel;
+  /** The physical serial: the descriptor id, and what `get_version` must report. */
+  serial: string;
+  name: string;
+  link: BambuLink;
+  clock: MachineClock;
+  signal: AbortSignal;
+  /** The serializable manifest the session reports actions and capabilities from. */
+  manifest: MachineManifest;
+  /** Which variant of the commands the clients disagree on to send. */
+  form: BambuWireForm;
+  /** Real printers run only Bambu Studio output; the simulator runs anything. */
+  requireBambuStudio: boolean;
+  stillCapture: MachineStillCaptureCapability;
+  /** Milliseconds to wait for a correlated reply before answering without one. */
+  replyWindow?: number;
+  /** Milliseconds to wait for the printer's first status and firmware. */
+  openWindow?: number;
+  log(entry: MachineLogEntry): Promise<void>;
+  readArtifact(
+    artifact: Parameters<MachineJobs['prepare']>[0]['artifact'],
+    signal: AbortSignal,
+  ): Promise<BambuPreparedArtifact>;
+  upload(
+    input: Readonly<{ remoteName: string; artifact: BambuPreparedArtifact; signal: AbortSignal }>,
+  ): Promise<number>;
+}>;
+
+type MachineJobs = Extract<MachineSession<BambuSubmission>['jobs'], { type: 'supported' }>;
+
+const actionKey = (componentId: string, action: string): string => `${componentId}:${action}`;
+
+/** The id Tau sends as `subtask_id`/`project_id` for a start, derived from its operation so a reply after a reconnect still names it. */
+const bambuWireId = (operationId: string): string =>
+  String(
+    Number(BigInt(`0x${createHash('sha256').update(operationId).digest('hex').slice(0, 8)}`) % 2_147_483_646n) + 1,
+  );
+/**
+ * The `sequence_id` an operation's command carries: 30000–89999, outside Bambu Studio's own 20000–29999 (whose
+ * failures it shows as dialogs) and outside the session's reads.
+ */
+const bambuWireSequenceId = (operationId: string): string =>
+  String(30_000 + (Number(bambuWireId(operationId)) % 60_000));
+
+const remoteNamePattern = /^tau-[A-Za-z0-9_-]{1,64}\.gcode\.3mf$/u;
+const memberMd5Pattern = /^[0-9a-f]{32}$/u;
+const isRecord = (value: unknown): value is Readonly<Record<string, unknown>> =>
+  value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/** `print_error` 0500-400E: "Printing was cancelled." */
+const cancelledCode = '0500-400E';
+
+/** `ams_status` main states (bits 8–15; DevDefs.h:41-52). */
+const amsMain = { idle: 0, filamentChange: 1, readingTag: 2 } as const;
+const mainOf = (status: BambuStatus | undefined): number => Math.floor((status?.amsStatus ?? 0) / 256);
+const stepOf = (status: BambuStatus | undefined): number => (status?.amsStatus ?? 0) % 256;
+
+const liveStates: ReadonlySet<string> = new Set(['RUNNING', 'PREPARE', 'SLICING', 'PAUSE', 'INIT']);
+const isLive = (status: BambuStatus | undefined): boolean => liveStates.has(status?.gcodeState ?? '');
+
+/** Which calibration a system print is, from its G-code file name (DeviceManager.cpp:738-770, 1033-1070). */
+const calibrationKindOf = (
+  status: BambuStatus | undefined,
+): 'pressure-advance' | 'flow-ratio' | 'printer' | undefined => {
+  const file = status?.runFile ?? '';
+  if (file.includes('extrusion_cali')) {
+    return 'pressure-advance';
+  }
+  if (file.includes('flowrate')) {
+    return 'flow-ratio';
+  }
+  return file.includes('auto_cali_for_user') ? 'printer' : undefined;
+};
+
+/** The run id a status names: the printer's `subtask_id`, else the run's name for a print started at the printer. */
+const runIdOf = (status: BambuStatus | undefined): string =>
+  status?.providerRunId !== undefined && status.providerRunId !== '0'
+    ? status.providerRunId
+    : (status?.runName ?? 'printer-run');
+
+/** `flag3` bit 3: a slot may be edited during a print (BS/AMSMaterialsSetting.cpp:530-578). */
+const editsDuringRun = (status: BambuStatus | undefined): boolean => bambuBit(status?.flag3 ?? 0, 3);
+/** `flag3` bit 9: the new AMS protocol (`ams_get_rfid`; DeviceManager.cpp:3108-3115). */
+const newAmsProtocol = (status: BambuStatus | undefined): boolean => bambuBit(status?.flag3 ?? 0, 9);
+
+const millimetres = (quantity: Quantity | undefined): number | undefined =>
+  quantity === undefined ? undefined : Number(quantity.value);
+
+const sameDiameter = (observed: Quantity | undefined, declared: number): boolean => {
+  if (!observed) {
+    return false;
+  }
+  const expected = createQuantity({
+    value: declared,
+    unit: 'mm',
+    kind: quantityKinds.diameter,
+    space: 'linear',
+    semanticMode: 'declared-only',
+  });
+  if (expected.status !== 'success') {
+    return false;
+  }
+  const compared = checkOperation({ operator: 'compare', left: observed, right: expected.value });
+  return compared.status === 'success' && compared.value.value === 0;
+};
+
+const celsius = (value: number): Quantity =>
+  bambuQuantity({ value, unit: 'Cel', kind: quantityKinds.temperature, space: 'point' });
+
+const refusal = (code: string, message: string) => ({ refused: { code, message } }) as const;
+
+/** The filament-change steps Bambu Studio shows (FilamentLoad.cpp:154-200), with the `ams_status` step that is each. */
+type StepPlan = ReadonlyArray<readonly [label: string, actor: 'machine' | 'person', steps: readonly number[]]>;
+const heat = ['Heat the nozzle', 'machine', [0x02]] as const;
+const cut = ['Cut the filament', 'machine', [0x03]] as const;
+const pull = ['Pull back the current filament', 'machine', [0x04]] as const;
+const push = ['Push the new filament into the extruder', 'machine', [0x05, 0x06]] as const;
+const purge = ['Purge the old filament', 'machine', [0x07]] as const;
+const check = ['Check the filament location', 'machine', [0x08, 0x0b]] as const;
+const stepPlans = {
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- keyed by the model name.
+  X1C: {
+    load: [heat, cut, pull, push, purge],
+    loadEmpty: [heat, push, purge],
+    // External spool: the person pushes the filament in and confirms it comes out (StatusPanel.cpp:6048-6057).
+    external: [
+      heat,
+      ['Push the filament into the extruder', 'person', [0x05]],
+      ['Confirm the filament comes out of the nozzle', 'person', [0x06]],
+      purge,
+    ],
+    unload: [heat, cut, pull],
+  },
+  'A1 mini': {
+    load: [heat, check, cut, pull, push, purge],
+    loadEmpty: [heat, check, cut, pull, push, purge],
+    external: [
+      heat,
+      check,
+      cut,
+      pull,
+      ['Push the filament into the extruder', 'person', [0x05]],
+      ['Confirm the filament comes out of the nozzle', 'person', [0x06]],
+      purge,
+    ],
+    unload: [heat, check, cut, pull],
+  },
+} as const satisfies Readonly<Record<BambuModel, Readonly<Record<string, StepPlan>>>>;
+
+/** What one sent operation is, and what the session has seen of it since. */
+type LedgerEntry = {
+  readonly kind: 'action' | 'stop' | 'transfer' | 'start';
+  readonly key: string;
+  readonly sequence: string;
+  readonly command: string;
+  receipt?: MachineCommandReceipt;
+  /** The printer showed the activity the command starts. */
+  sawActivity: boolean;
+  /** The calibration-table version when the command was sent. */
+  readonly tableVersion?: number;
+};
+
+/** A filament change the printer is running, as the session followed it. */
+type FilamentChange = {
+  readonly activityId: string;
+  readonly kind: 'material-load' | 'material-unload';
+  readonly target?: number;
+  readonly plan: StepPlan;
+  readonly operationId?: string;
+  promptStep?: number;
+  promptCount: number;
+};
+
+/** A calibration the printer ran or is running, and what it measured. */
+type Calibration = {
+  readonly activityId: string;
+  readonly method: 'pressure-advance' | 'flow-ratio' | 'printer';
+  operationId?: string;
+  results?: readonly BambuCalibrationResult[];
+  requested: boolean;
+  ended: boolean;
+};
+
+/** Milliseconds without a report before the session asks for the whole state again. */
+const quietInterval = 20_000;
+const ledgerCapacity = 512;
+
+/**
+ * Open one session: ask for the whole state and the firmware, wait for both, and check the printer is the one bound.
+ *
+ * @param input - The link, the printer's identity and the host services.
+ * @returns The session.
+ * @internal
+ */
+// oxlint-disable-next-line eslint/complexity, eslint/max-statements -- one session closure owns the whole printer conversation.
+export const openBambuSession = async (input: BambuSessionInput): Promise<MachineSession<BambuSubmission>> => {
+  const { model, serial, link, clock, manifest } = input;
+  const replyWindow = input.replyWindow ?? 5000;
+  const updates = new EventTarget();
+  const replies = new Map<string, BambuReply>();
+  const ledger = new Map<string, LedgerEntry>();
+  const startRunNames = new Map<string, string>();
+  const answeredPrompts = new Set<string>();
+  let status: BambuStatus | undefined;
+  let statusAt: string | undefined;
+  let lastReportAt = Date.now();
+  let firmware: string | undefined;
+  let versionSerial: string | undefined;
+  let versionModel: string | undefined;
+  /** Developer Mode off, learnt from a refusal; cleared when the printer reports it on. */
+  let refusedForDeveloperMode = false;
+  let table: { version?: number; rows: readonly BambuCalibrationRow[] } | undefined;
+  let tableRequestedFor: number | undefined;
+  let change: FilamentChange | undefined;
+  let changes = 0;
+  let calibration: Calibration | undefined;
+  /** The calibration this session last asked for, so a system print without a known file name is still named. */
+  let requestedCalibration: { method: Calibration['method']; operationId: string } | undefined;
+  let readSequence = 90_000;
+  let lastEmitted: MachineReport | undefined;
+  let closed = false;
+
+  const now = (): string => clock.now();
+  const nextReadSequence = (): string => {
+    readSequence = readSequence >= 99_999 ? 90_000 : readSequence + 1;
+    return String(readSequence);
+  };
+  const send = async (request: BambuRequest | string): Promise<void> => {
+    await link.publish(typeof request === 'string' ? request : JSON.stringify(request.payload));
+  };
+  /** Send without waiting: a read or a keep-fresh push is a hint, so a failure is only a missed hint. */
+  const sendQuietly = async (request: BambuRequest | string): Promise<void> => {
+    try {
+      await send(request);
+    } catch {
+      // The next report or keep-fresh push tries again.
+    }
+  };
+  const read = (request: BambuRequest): void => {
+    void sendQuietly(request);
+  };
+  const nozzleDiameter = (): number => millimetres(status?.nozzleDiameter) ?? 0.4;
+  const developerMode = (): 'on' | 'off' | undefined =>
+    status?.developerMode ?? (refusedForDeveloperMode ? 'off' : undefined);
+  const trays = (): readonly BambuMaterial[] => [
+    ...(status?.materials ?? []),
+    ...(status?.externalMaterial ? [status.externalMaterial] : []),
+  ];
+  const trayOf = (slot: number): BambuMaterial | undefined => trays().find((tray) => tray.slot === slot);
+
+  // ───────────── What the printer says ─────────────
+
+  /** Follow the printer's filament changes, tag reads and calibrations, and fetch what the session needs to read. */
+  const follow = (): void => {
+    const main = mainOf(status);
+    if (main === amsMain.filamentChange) {
+      const target = status?.targetMaterialSlot;
+      const unload = target === undefined;
+      if (change === undefined || change.target !== target) {
+        changes += 1;
+        const plans = stepPlans[model];
+        const operationId = [...ledger.entries()].findLast(
+          ([, entry]) =>
+            entry.kind === 'action' &&
+            entry.key === actionKey('filament', unload ? 'material.unload' : 'material.load') &&
+            !entry.sawActivity,
+        )?.[0];
+        change = {
+          activityId: `filament-change-${String(changes)}`,
+          kind: unload ? 'material-unload' : 'material-load',
+          ...(target === undefined ? {} : { target }),
+          plan: unload
+            ? plans.unload
+            : target === bambuExternalSpoolSlot
+              ? plans.external
+              : status?.currentMaterialSlot === undefined
+                ? plans.loadEmpty
+                : plans.load,
+          ...(operationId === undefined ? {} : { operationId }),
+          promptCount: 0,
+        };
+      }
+      const person = change.plan.findIndex(([, actor, steps]) => actor === 'person' && steps.includes(stepOf(status)));
+      if (person !== -1 && change.promptStep !== stepOf(status)) {
+        change.promptCount += 1;
+      }
+      change.promptStep = person === -1 ? undefined : stepOf(status);
+    } else {
+      change = undefined;
+    }
+    for (const entry of ledger.values()) {
+      if (
+        (main === amsMain.filamentChange &&
+          (entry.key === actionKey('filament', 'material.load') ||
+            entry.key === actionKey('filament', 'material.unload'))) ||
+        (main === amsMain.readingTag && entry.key === actionKey('filament', 'bambu.ams.read-tag'))
+      ) {
+        entry.sawActivity = true;
+      }
+    }
+    const kind =
+      calibrationKindOf(status) ??
+      (status?.printType === 'system' && isLive(status) ? requestedCalibration?.method : undefined);
+    if (kind !== undefined) {
+      const activityId = `calibration-${String(status?.startTime ?? 'current')}`;
+      // The printer may report the run before the session records that Tau asked for it.
+      if (
+        calibration?.activityId === activityId &&
+        calibration.operationId === undefined &&
+        requestedCalibration?.method === kind
+      ) {
+        calibration.operationId = requestedCalibration.operationId;
+      }
+      if (calibration?.activityId !== activityId) {
+        calibration = {
+          activityId,
+          method: kind,
+          ...(requestedCalibration?.method === kind ? { operationId: requestedCalibration.operationId } : {}),
+          requested: false,
+          ended: false,
+        };
+      }
+      calibration.ended = !isLive(status);
+      if (calibration.ended && !calibration.requested && calibration.method !== 'printer') {
+        calibration.requested = true;
+        read(bambuCalibrationResultRequest(nextReadSequence(), calibration.method, nozzleDiameter()));
+      }
+    }
+    const version = status?.calibrationVersion;
+    if (version !== undefined && tableRequestedFor !== version) {
+      tableRequestedFor = version;
+      read(bambuCalibrationTableRequest(nextReadSequence(), nozzleDiameter()));
+      // The first table request after connecting often goes unanswered (bambuddy notes): ask once more.
+      setTimeout(() => {
+        if (!closed && table?.version !== version && tableRequestedFor === version) {
+          read(bambuCalibrationTableRequest(nextReadSequence(), nozzleDiameter()));
+        }
+      }, 6000).unref();
+    }
+  };
+
+  const handleReply = (reply: BambuReply): void => {
+    if (reply.unauthorized) {
+      refusedForDeveloperMode = true;
+    }
+    if (reply.sequence !== undefined) {
+      replies.set(reply.sequence, reply);
+      if (replies.size > 256) {
+        replies.delete(replies.keys().next().value!);
+      }
+      updates.dispatchEvent(new Event(`reply:${reply.sequence}`));
+    }
+    // Every client sees every reply; a whole table or a result set is adopted whoever asked for it.
+    const rows = bambuCalibrationTable(reply);
+    if (rows !== undefined) {
+      table = { ...definedFields({ version: status?.calibrationVersion }), rows };
+    }
+    const results = bambuCalibrationResults(reply);
+    if (results !== undefined && calibration !== undefined && calibration.method !== 'printer') {
+      calibration.results = results;
+    }
+    if (rows !== undefined || results !== undefined) {
+      emit();
+    }
+  };
+
+  link.subscribe((bytes) => {
+    try {
+      const version = parseBambuVersionPayload(bytes);
+      firmware = version.firmware;
+      versionSerial = version.serial;
+      versionModel = version.model;
+      updates.dispatchEvent(new Event('facts'));
+      return;
+    } catch {
+      // A status push or a command reply.
+    }
+    const reply = parseBambuReply(bytes);
+    if (reply !== undefined) {
+      handleReply(reply);
+      return;
+    }
+    try {
+      status = mergeBambuStatus(status, parseBambuStatusPayload(bytes));
+    } catch {
+      // Untrusted payloads are discarded without retaining bytes or error detail.
+      return;
+    }
+    statusAt = now();
+    lastReportAt = Date.now();
+    if (status.developerMode === 'on' || (status.developerMode === undefined && !hasVerificationAlert())) {
+      refusedForDeveloperMode = false;
+    }
+    if (hasVerificationAlert()) {
+      refusedForDeveloperMode = true;
+    }
+    follow();
+    updates.dispatchEvent(new Event('facts'));
+    emit();
+  });
+  link.onClose(() => {
+    emit();
+  });
+  const hasVerificationAlert = (): boolean =>
+    status?.alerts?.some((alert) => alert.code === bambuCommandVerificationAlert) === true;
+
+  // ───────────── The report ─────────────
+
+  const machineStatus = (): MachineReport['state'] => {
+    const native = status?.gcodeState;
+    const words = native === undefined ? {} : { native };
+    const busy = mainOf(status) !== amsMain.idle;
+    switch (native) {
+      case 'IDLE':
+      case 'FINISH':
+      case 'FAILED': {
+        return { status: busy ? 'active' : 'ready', ...words };
+      }
+      case 'RUNNING':
+      case 'PREPARE':
+      case 'SLICING':
+      case 'INIT': {
+        return { status: 'active', ...words };
+      }
+      case 'PAUSE': {
+        const reason = bambuStage(status?.stageId);
+        return { status: 'held', ...words, ...(reason === undefined ? {} : { reason }) };
+      }
+      default: {
+        return { status: 'unknown', ...words };
+      }
+    }
+  };
+
+  const runOf = (): MachineRun | undefined => {
+    if (status === undefined || status.gcodeState === undefined || status.gcodeState === 'IDLE') {
+      return undefined;
+    }
+    if (calibrationKindOf(status) !== undefined || status.printType === 'system') {
+      return undefined;
+    }
+    const state: MachineRun['state'] = (() => {
+      switch (status.gcodeState) {
+        case 'PREPARE':
+        case 'SLICING':
+        case 'INIT': {
+          return 'starting';
+        }
+        case 'RUNNING': {
+          return 'running';
+        }
+        case 'PAUSE': {
+          return 'paused';
+        }
+        case 'FINISH': {
+          return 'completed';
+        }
+        case 'FAILED': {
+          return status.alerts?.some((alert) => alert.code === cancelledCode) ? 'cancelled' : 'failed';
+        }
+        default: {
+          return 'unknown';
+        }
+      }
+    })();
+    const stage = isLive(status) ? bambuStage(status.stageId) : undefined;
+    const { stageId } = status;
+    const pausedBy =
+      stageId === 5 || stageId === 30
+        ? 'program'
+        : stageId === 16 || stageId === undefined || stageId <= 0
+          ? 'person'
+          : 'machine';
+    return {
+      runId: runIdOf(status),
+      origin: status.runName?.startsWith('tau-') === true ? 'tau' : 'external',
+      delivery: 'stored',
+      state,
+      ...(state === 'paused' ? { paused: { by: pausedBy, ...(stage === undefined ? {} : { reason: stage }) } } : {}),
+      ...(status.runName === undefined ? {} : { program: { name: status.runName } }),
+      ...(status.startTime === undefined ? {} : { startedAt: new Date(status.startTime * 1000).toISOString() }),
+      progress: {
+        basis: 'executed',
+        ...definedFields({
+          fraction: status.progress === undefined ? undefined : status.progress / 100,
+          remaining: status.remainingSeconds === undefined ? undefined : status.remainingSeconds * 1000,
+        }),
+        counters:
+          status.currentLayer === undefined
+            ? []
+            : [
+                {
+                  id: 'layer',
+                  label: 'Layer',
+                  current: status.currentLayer,
+                  ...(status.totalLayers === undefined ? {} : { total: status.totalLayers }),
+                },
+              ],
+      },
+      ...(stage === undefined ? {} : { stage }),
+    };
+  };
+
+  const editing = (tray: BambuMaterial): MaterialSlotSnapshot['editing'] => {
+    const duringRun = editsDuringRun(status);
+    if (developerMode() === 'off') {
+      return { allowed: false, duringRun, reason: 'The printer ignores Tau until Developer Mode is on.' };
+    }
+    if (tray.tagged === true) {
+      return {
+        allowed: false,
+        duringRun,
+        reason: 'A Bambu spool’s tag identifies this slot, so its material is read-only.',
+      };
+    }
+    if (runOf() !== undefined && isLive(status) && !duringRun) {
+      return { allowed: false, duringRun, reason: 'This printer does not allow editing a slot during a print.' };
+    }
+    return { allowed: true, duringRun };
+  };
+
+  const slotSnapshot = (slot: number): MaterialSlotSnapshot => {
+    const tray = trayOf(slot);
+    if (tray === undefined) {
+      return {
+        slot: bambuAddressOf(slot),
+        state: 'unknown',
+        identifiedBy: 'unknown',
+        editing: {
+          allowed: false,
+          duringRun: editsDuringRun(status),
+          reason: 'The printer has not reported this slot.',
+        },
+      };
+    }
+    const identifiedBy = tray.materialId === undefined ? 'unset' : tray.tagged === true ? 'tag' : 'person';
+    return {
+      slot: bambuAddressOf(slot),
+      state: tray.state,
+      identifiedBy,
+      ...(tray.materialId === undefined
+        ? {}
+        : {
+            material: {
+              materialType: tray.materialId,
+              color: tray.color ?? '#00000000',
+              preset: { profileId: tray.profileId ?? tray.materialId, settingId: tray.settingId ?? '' },
+              ...(tray.nozzleMinimum === undefined || tray.nozzleMaximum === undefined
+                ? {}
+                : { nozzleTemperature: { min: celsius(tray.nozzleMinimum), max: celsius(tray.nozzleMaximum) } }),
+              ...(tray.brand === undefined ? {} : { brand: tray.brand }),
+              calibration:
+                tray.calibrationIndex === undefined || tray.calibrationIndex < 0
+                  ? { type: 'default' }
+                  : { type: 'profile', profileId: String(tray.calibrationIndex) },
+            },
+          }),
+      ...(tray.remainingPercent === undefined ? {} : { remainingPercent: tray.remainingPercent }),
+      editing: editing(tray),
+    };
+  };
+
+  /** AMS indexes the printer reports, else the one the manifest declares. */
+  const amsUnits = (): readonly number[] => {
+    const reported = status?.materialUnits?.map(({ unit }) => unit);
+    return reported === undefined || reported.length === 0 ? [0] : reported;
+  };
+
+  const materialValue = (): MachineComponentValue => ({
+    kind: 'material-system',
+    slots: [...amsUnits().flatMap((unit) => [0, 1, 2, 3].map((tray) => unit * 4 + tray)), bambuExternalSpoolSlot].map(
+      (slot) => slotSnapshot(slot),
+    ),
+    ...(table === undefined || status?.calibrationVersion === undefined
+      ? {}
+      : {
+          calibrations: {
+            revision: String(status.calibrationVersion),
+            ...(model === 'A1 mini' ? { capacity: 16 } : {}),
+            rows: table.rows.map((row) => ({
+              profileId: String(row.index),
+              name: row.name,
+              preset: { profileId: row.filamentId, settingId: row.settingId },
+              nozzleId: `nozzle-${row.nozzleDiameter ?? String(nozzleDiameter())}`,
+              pressureAdvance: row.pressureAdvance,
+            })),
+          },
+        }),
+    routes: [
+      {
+        toolheadId: 'tool-0',
+        current: status?.currentMaterialSlot === undefined ? null : bambuAddressOf(status.currentMaterialSlot),
+        target: status?.targetMaterialSlot === undefined ? null : bambuAddressOf(status.targetMaterialSlot),
+      },
+    ],
+    ...(status?.materialUnits === undefined
+      ? {}
+      : {
+          units: status.materialUnits.map((unit) => ({
+            unitId: bambuAmsUnit(unit.unit).id,
+            ...definedFields({ humidityIndex: unit.humidityIndex, temperature: unit.temperature }),
+          })),
+        }),
+  });
+
+  const components = (): readonly ComponentObservation[] => {
+    if (status === undefined || statusAt === undefined) {
+      return [];
+    }
+    const receivedAt = statusAt;
+    const known = (componentId: string, group: string, value: MachineComponentValue): ComponentObservation => ({
+      componentId,
+      group,
+      receivedAt,
+      knowledge: 'known',
+      value,
+    });
+    const temperature = (
+      id: string,
+      label: string,
+      [value, target]: readonly [Quantity | undefined, Quantity | undefined],
+    ) => (value === undefined ? [] : [{ id, label, value, ...(target === undefined ? {} : { target }) }]);
+    const plateId = status.bedType === undefined ? undefined : bambuPlateForBedType(status.bedType)?.id;
+    const fans = [
+      ['part-fan', status.partFanPercent],
+      ...(model === 'X1C'
+        ? ([
+            ['aux-fan', status.auxiliaryFanPercent],
+            ['chamber-fan', status.chamberFanPercent],
+          ] as const)
+        : []),
+    ] as const;
+    return [
+      known('controller', 'state', {
+        kind: 'readings',
+        values: [
+          ...(status.wifiSignalDbm === undefined
+            ? []
+            : [{ id: 'wifi', label: 'Wi-Fi signal (dBm)', value: status.wifiSignalDbm }]),
+          ...(status.removableStorage === undefined
+            ? []
+            : [{ id: 'storage', label: 'Storage card', value: status.removableStorage === 'present' }]),
+        ],
+      }),
+      {
+        componentId: 'motion',
+        group: 'position',
+        receivedAt,
+        knowledge: 'unknown',
+        reason: 'The printer does not report axis positions.',
+      },
+      known('tool-0', 'temperature', {
+        kind: 'readings',
+        values: temperature('nozzle', 'Nozzle', [status.nozzleTemperature, status.nozzleTargetTemperature]),
+      }),
+      known('bed', 'temperature', {
+        kind: 'readings',
+        values: [
+          ...temperature('temperature', 'Bed', [status.bedTemperature, status.bedTargetTemperature]),
+          // The installed plate by its manifest id, when the printer reports one Tau knows.
+          ...(plateId === undefined ? [] : [{ id: 'plate', label: 'Build plate', value: plateId }]),
+        ],
+      }),
+      ...(model === 'X1C'
+        ? [
+            known('chamber', 'temperature', {
+              kind: 'readings',
+              values: temperature('temperature', 'Chamber', [status.chamberTemperature, undefined]),
+            }),
+          ]
+        : []),
+      ...(model === 'X1C' && (status.chamberLight === 'on' || status.chamberLight === 'off')
+        ? [known('chamber-light', 'accessories', { kind: 'switch', on: status.chamberLight === 'on' })]
+        : []),
+      ...(status.speedProfile === undefined || status.speedProfile === 'unknown'
+        ? []
+        : [known('speed', 'accessories', { kind: 'option', option: status.speedProfile })]),
+      ...fans.flatMap(([componentId, percent]) =>
+        percent === undefined ? [] : [known(componentId, 'accessories', { kind: 'level', ratio: percent / 100 })],
+      ),
+      known('filament', 'material', materialValue()),
+    ];
+  };
+
+  const stepState = (index: number, current: number): 'todo' | 'done' | 'active' =>
+    current === -1 || index > current ? 'todo' : index < current ? 'done' : 'active';
+
+  const prompt = (current: FilamentChange): MachinePrompt & Readonly<{ kind: 'confirmation' }> => {
+    const [label] = current.plan.find((entry) => entry[2].includes(current.promptStep ?? -1)) ?? ['Check the filament'];
+    return {
+      kind: 'confirmation',
+      promptId: `${current.activityId}:${String(current.promptCount)}`,
+      label: current.promptStep === 0x06 ? 'Has the filament come out of the nozzle?' : label,
+      answers:
+        current.promptStep === 0x06
+          ? [
+              { id: 'done', label: 'Done, it comes out', role: 'confirm' },
+              { id: 'retry', label: 'Not yet, try again', role: 'retry' },
+            ]
+          : [{ id: 'done', label: 'Done', role: 'confirm' }],
+      effects: ['material', 'motion', 'thermal'],
+      safety: { authority: 'person', attended: false, interlocks: [] },
+    };
+  };
+
+  const activities = (): readonly MachineActivity[] => {
+    const list: MachineActivity[] = [];
+    if (change !== undefined) {
+      const current = change.plan.findIndex((entry) => entry[2].includes(stepOf(status)));
+      const steps = change.plan.map(([label, actor], index) => ({
+        id: `step-${String(index + 1)}`,
+        label,
+        actor,
+        state: stepState(index, current),
+      }));
+      const target = change.target === undefined ? undefined : bambuSlotLabel(change.target);
+      list.push({
+        activityId: change.activityId,
+        componentId: 'filament',
+        kind: change.kind,
+        label: change.kind === 'material-unload' ? 'Unloading filament' : `Loading ${target ?? 'filament'}`,
+        ...(isLive(status) ? { runId: runIdOf(status) } : {}),
+        ...(change.operationId === undefined ? {} : { operationId: change.operationId }),
+        state: change.promptStep === undefined ? 'in-progress' : 'needs-person',
+        steps,
+        ...(current === -1 ? {} : { progress: current / change.plan.length }),
+        ...(change.promptStep === undefined ? {} : { awaiting: prompt(change) }),
+        cancel: { componentId: 'filament', action: 'bambu.filament.abort' },
+      });
+    }
+    if (mainOf(status) === amsMain.readingTag) {
+      list.push({
+        activityId: 'read-tag',
+        componentId: 'filament',
+        kind: 'bambu.read-tag',
+        label: 'Reading the spool tag',
+        state: 'in-progress',
+        steps: [{ id: 'step-1', label: 'Turn the spool past the reader', actor: 'machine', state: 'active' }],
+      });
+    }
+    if (calibration !== undefined) {
+      const labels = {
+        'pressure-advance': ['Calibrating pressure advance', 'Pressure advance measured'],
+        'flow-ratio': ['Calibrating flow ratio', 'Flow ratio measured'],
+        printer: ['Running the printer’s calibration', 'Printer calibration finished'],
+      } as const;
+      const { results } = calibration;
+      const measuring = calibration.method !== 'printer';
+      const steps = [
+        ['Heat and home', 'machine'],
+        [calibration.method === 'printer' ? 'Calibrate' : 'Print and measure test lines', 'machine'],
+        ...(measuring ? ([['Review the result', 'person']] as const) : []),
+      ] as const;
+      const done = calibration.ended ? (measuring ? 2 : steps.length) : status?.stageId === 13 ? 0 : 1;
+      list.push({
+        activityId: calibration.activityId,
+        componentId: calibration.method === 'printer' ? 'controller' : 'filament',
+        kind: 'calibration',
+        label: labels[calibration.method][calibration.ended ? 1 : 0],
+        ...(calibration.operationId === undefined ? {} : { operationId: calibration.operationId }),
+        state: calibration.ended
+          ? status?.gcodeState === 'FAILED'
+            ? 'failed'
+            : measuring
+              ? 'needs-person'
+              : 'succeeded'
+          : 'in-progress',
+        steps: steps.map(([label, actor], index) => ({
+          id: `step-${String(index + 1)}`,
+          label,
+          actor,
+          state: index < done ? 'done' : index === done ? 'active' : 'todo',
+        })),
+        ...(calibration.ended && measuring && status?.gcodeState !== 'FAILED'
+          ? { awaiting: { kind: 'instruction', label: 'Keep a result: save it as a profile, or leave it.' } }
+          : {}),
+        ...(results === undefined
+          ? {}
+          : {
+              results: results.map((result, index) => ({
+                id: `result-${String(index + 1)}`,
+                label: `${bambuSlotLabel(result.slot)} · ${result.filamentId}`,
+                confidence: result.confidence,
+                value: {
+                  ...bambuAddressOf(result.slot),
+                  profileId: result.filamentId,
+                  settingId: result.settingId,
+                  ...(result.pressureAdvance === undefined ? {} : { pressureAdvance: result.pressureAdvance }),
+                  ...(result.flowRatio === undefined ? {} : { flowRatio: result.flowRatio }),
+                },
+              })),
+            }),
+      });
+    }
+    return list;
+  };
+
+  const checks = (): readonly MachineCheck[] => [
+    {
+      id: 'developer-mode',
+      label: 'Developer Mode on',
+      state: developerMode() === 'off' ? 'blocked' : developerMode() === 'on' ? 'passed' : 'unknown',
+      source: 'observed',
+      ...(developerMode() === 'on'
+        ? {}
+        : { detail: 'Without it, firmware from 01.08.03.00 ignores every command from Tau.' }),
+      ...(developerMode() === 'off' ? { remedy: developerModeRemedy } : {}),
+    },
+    {
+      id: 'storage',
+      label: 'Storage card inserted',
+      state:
+        status?.removableStorage === 'absent'
+          ? 'blocked'
+          : status?.removableStorage === 'present'
+            ? 'passed'
+            : 'unknown',
+      source: 'observed',
+      ...(status?.removableStorage === 'absent'
+        ? { remedy: { type: 'person', instruction: 'Insert the printer’s storage card.' } as const }
+        : {}),
+    },
+  ];
+
+  /** Why an action cannot be used now, beyond what the descriptor's statuses already say. */
+  const unavailableBecause = (componentId: string, action: string): MachineAvailability | undefined => {
+    const unavailable = (
+      code: Extract<MachineAvailability, { state: 'unavailable' }>['code'],
+      message: string,
+      remedy?: Extract<MachineAvailability, { state: 'unavailable' }>['remedy'],
+    ): MachineAvailability => ({
+      componentId,
+      id: action,
+      state: 'unavailable',
+      code,
+      message,
+      ...(remedy ? { remedy } : {}),
+    });
+    if (developerMode() === 'off') {
+      return unavailable(
+        'MACHINE_ACTION_UNSUPPORTED',
+        'This printer ignores commands from Tau until Developer Mode is on.',
+        developerModeRemedy,
+      );
+    }
+    const main = mainOf(status);
+    switch (actionKey(componentId, action)) {
+      case 'filament:material.load':
+      case 'filament:material.unload':
+      case 'filament:bambu.ams.read-tag': {
+        return main === amsMain.idle
+          ? undefined
+          : unavailable('MACHINE_ACTION_BUSY', 'Wait for the filament system to finish.');
+      }
+      case 'filament:interaction.respond': {
+        return change?.promptStep === undefined
+          ? unavailable('MACHINE_ACTION_PROMPT_STALE', 'The printer is not asking anything.')
+          : undefined;
+      }
+      case 'filament:bambu.filament.abort': {
+        return main === amsMain.filamentChange
+          ? undefined
+          : unavailable('MACHINE_ACTION_PRECONDITION_FAILED', 'No filament change is in progress.');
+      }
+      case 'filament:material.calibration.select':
+      case 'filament:material.calibration.save':
+      case 'filament:material.calibration.delete': {
+        return status?.calibrationVersion === undefined
+          ? unavailable('MACHINE_ACTION_UNSUPPORTED', 'This printer’s firmware keeps no pressure-advance profiles.')
+          : undefined;
+      }
+      default: {
+        return undefined;
+      }
+    }
+  };
+
+  const availability = (): readonly MachineAvailability[] =>
+    manifest.actions.map(
+      ({ componentId, id }) => unavailableBecause(componentId, id) ?? { componentId, id, state: 'available' },
+    );
+
+  const report = (): MachineReport => ({
+    connection: link.connected() && !closed ? 'connected' : 'disconnected',
+    observedAt: statusAt ?? now(),
+    state: machineStatus(),
+    ...definedFields({ run: runOf() }),
+    components: components(),
+    activities: activities(),
+    checks: checks(),
+    availability: availability(),
+    alerts: status?.alerts ?? [],
+  });
+
+  /** Publish the report to observers: a `changed` delta when only component readings moved. */
+  const emit = (): void => {
+    const next = report();
+    const previous = lastEmitted;
+    lastEmitted = next;
+    const rest = ({ components: _components, observedAt: _observedAt, ...others }: MachineReport): string =>
+      JSON.stringify(others);
+    const observation: MachineObservation =
+      previous !== undefined && rest(previous) === rest(next)
+        ? { type: 'changed', observedAt: next.observedAt, components: next.components }
+        : { type: 'snapshot', snapshot: next };
+    updates.dispatchEvent(new CustomEvent('observation', { detail: observation }));
+  };
+
+  // ───────────── Opening ─────────────
+
+  try {
+    await send(bambuPushAll);
+    await send(bambuGetVersion);
+    if (!status || !firmware || !versionSerial) {
+      await new Promise<void>((resolve) => {
+        const openTimer = setTimeout(finish, input.openWindow ?? 15_000);
+        function finish(): void {
+          clearTimeout(openTimer);
+          updates.removeEventListener('facts', observed);
+          input.signal.removeEventListener('abort', finish);
+          resolve();
+        }
+        function observed(): void {
+          if (status && firmware && versionSerial) {
+            finish();
+          }
+        }
+        updates.addEventListener('facts', observed);
+        input.signal.addEventListener('abort', finish, { once: true });
+        observed();
+      });
+    }
+    input.signal.throwIfAborted();
+    if (
+      !status ||
+      !firmware ||
+      versionSerial !== serial ||
+      (versionModel !== undefined && versionModel !== model) ||
+      (status.model !== undefined && status.model !== model)
+    ) {
+      throw new Error('BAMBU_INITIAL_FACTS_INVALID');
+    }
+  } catch {
+    await link.close().catch(() => undefined);
+    throw new Error('BAMBU_MQTT_CONNECT_FAILED');
+  }
+  // A printer that pushes only what changes goes quiet while idle; ask for the whole state before it reads as stale.
+  const keepFresh = setInterval(() => {
+    if (Date.now() - lastReportAt >= quietInterval) {
+      void sendQuietly(bambuPushAll);
+    }
+  }, quietInterval / 2);
+  keepFresh.unref();
+
+  // ───────────── Sending ─────────────
+
+  const waitForReply = async (
+    sequence: string,
+    settled: () => boolean,
+    signal: AbortSignal,
+  ): Promise<BambuReply | undefined> => {
+    if (!replies.has(sequence) && !settled()) {
+      await new Promise<void>((resolve) => {
+        const eventName = `reply:${sequence}`;
+        const replyTimer = setTimeout(finish, replyWindow);
+        function finish(): void {
+          clearTimeout(replyTimer);
+          updates.removeEventListener(eventName, finish);
+          updates.removeEventListener('facts', observed);
+          signal.removeEventListener('abort', finish);
+          resolve();
+        }
+        function observed(): void {
+          if (settled()) {
+            finish();
+          }
+        }
+        updates.addEventListener(eventName, finish, { once: true });
+        updates.addEventListener('facts', observed);
+        signal.addEventListener('abort', finish, { once: true });
+      });
+    }
+    return replies.get(sequence);
+  };
+
+  const remember = (operationId: string, entry: LedgerEntry): void => {
+    ledger.set(operationId, entry);
+    if (ledger.size > ledgerCapacity) {
+      ledger.delete(ledger.keys().next().value!);
+    }
+  };
+
+  const rejected = (code: string, message: string): MachineCommandReceipt => ({
+    status: 'rejected',
+    code,
+    message,
+    observedAt: now(),
+  });
+
+  const unauthorizedReceipt = (): MachineCommandReceipt =>
+    rejected('MACHINE_ACTION_PROVIDER_REJECTED', 'The printer refused the command because Developer Mode is off.');
+
+  type Planned = Readonly<{ request: BambuRequest; after?: () => void }> | ReturnType<typeof refusal>;
+
+  /** Build the one command for an admitted action, re-checking what only the latest report can tell. */
+  // oxlint-disable-next-line eslint/complexity -- one dispatch over the declared actions.
+  const plan = (action: MachineProviderActionInput, sequence: string): Planned => {
+    const parameters: Readonly<Record<string, unknown>> = isRecord(action.parameters) ? action.parameters : {};
+    const slotParameter = (value: unknown): number | undefined =>
+      isRecord(value) && typeof value['unitId'] === 'string' && typeof value['slotId'] === 'string'
+        ? bambuSlotOf(value as BambuSlotAddress)
+        : undefined;
+    const invalid = refusal('MACHINE_ACTION_PARAMETERS_INVALID', 'This printer has no such slot.');
+    switch (actionKey(action.componentId, action.action)) {
+      case 'chamber-light:switch.set': {
+        return { request: bambuChamberLight(sequence, parameters['on'] === true) };
+      }
+      case 'speed:option.set': {
+        return { request: bambuPrintSpeed(sequence, parameters['option'] as (typeof bambuSpeedProfiles)[number]) };
+      }
+      case 'controller:run.pause':
+      case 'controller:run.resume':
+      case 'controller:run.cancel': {
+        if (!isLive(status) || action.expectedRunId !== runIdOf(status)) {
+          return refusal('MACHINE_ACTION_STALE_RUN', 'The run you saw has ended or changed.');
+        }
+        const command = action.action === 'run.pause' ? 'pause' : action.action === 'run.resume' ? 'resume' : 'stop';
+        return { request: bambuRunCommand(sequence, command) };
+      }
+      case 'part-fan:level.set':
+      case 'aux-fan:level.set':
+      case 'chamber-fan:level.set': {
+        return {
+          request: bambuFanLevel(
+            sequence,
+            action.componentId as keyof typeof bambuFanIndexes,
+            Number(parameters['ratio']),
+          ),
+        };
+      }
+      case 'filament:material.load': {
+        const slot = slotParameter(parameters['slot']);
+        if (slot === undefined || parameters['toolheadId'] !== 'tool-0') {
+          return invalid;
+        }
+        if (mainOf(status) !== amsMain.idle) {
+          return refusal('MACHINE_ACTION_BUSY', 'Wait for the filament system to finish.');
+        }
+        if (trayOf(slot)?.state === 'empty') {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'The selected slot is empty.');
+        }
+        if (status?.currentMaterialSlot === slot) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'That slot is already loaded.');
+        }
+        const current = status?.currentMaterialSlot === undefined ? undefined : trayOf(status.currentMaterialSlot);
+        return {
+          request: bambuLoad(sequence, {
+            slot,
+            form: input.form,
+            currentTemperature: bambuChangeTemperature(current),
+            targetTemperature: bambuChangeTemperature(trayOf(slot)),
+          }),
+        };
+      }
+      case 'filament:material.unload': {
+        const slot = slotParameter(parameters['slot']);
+        if (slot === undefined || parameters['toolheadId'] !== 'tool-0') {
+          return invalid;
+        }
+        if (mainOf(status) !== amsMain.idle) {
+          return refusal('MACHINE_ACTION_BUSY', 'Wait for the filament system to finish.');
+        }
+        if (status?.currentMaterialSlot !== slot) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'The selected slot is not loaded in the extruder.');
+        }
+        const temperature = Math.max(millimetres(status.nozzleTemperature) ?? 0, 0);
+        return {
+          request: bambuUnload(sequence, {
+            slot,
+            temperature: temperature >= 180 ? Math.round(temperature) : bambuChangeTemperature(trayOf(slot)),
+          }),
+        };
+      }
+      case 'filament:material.set':
+      case 'filament:material.clear': {
+        const slot = slotParameter(parameters['slot']);
+        if (slot === undefined) {
+          return invalid;
+        }
+        const tray = trayOf(slot);
+        const allowed = tray === undefined ? undefined : editing(tray);
+        if (tray?.tagged === true) {
+          return refusal(
+            'MACHINE_ACTION_MATERIAL_READ_ONLY',
+            'A Bambu spool’s tag identifies this slot, so its material is read-only.',
+          );
+        }
+        if (allowed?.allowed === false) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', allowed.reason ?? 'This slot cannot be edited now.');
+        }
+        if (action.action === 'material.clear') {
+          return { request: bambuMaterialClear(sequence, { slot, form: input.form }) };
+        }
+        const material = isRecord(parameters['material']) ? parameters['material'] : {};
+        const preset = isRecord(material['preset']) ? material['preset'] : {};
+        const range = isRecord(material['nozzleTemperature']) ? material['nozzleTemperature'] : {};
+        const color = typeof material['color'] === 'string' ? material['color'] : '';
+        const minimum = Number(range['min']);
+        const maximum = Number(range['max']);
+        if (!/^#[0-9A-Fa-f]{8}$/u.test(color) || !(minimum <= maximum) || typeof preset['profileId'] !== 'string') {
+          return refusal(
+            'MACHINE_ACTION_PARAMETERS_INVALID',
+            'The colour must be #RRGGBBAA and the minimum temperature at most the maximum.',
+          );
+        }
+        return {
+          request: bambuMaterialSetting(sequence, {
+            slot,
+            form: input.form,
+            material: {
+              materialType: String(material['materialType']),
+              color,
+              profileId: preset['profileId'],
+              settingId: typeof preset['settingId'] === 'string' ? preset['settingId'] : '',
+              nozzleMinimum: minimum,
+              nozzleMaximum: maximum,
+            },
+          }),
+        };
+      }
+      case 'filament:material.calibration.select': {
+        const slot = slotParameter(parameters['slot']);
+        if (slot === undefined) {
+          return invalid;
+        }
+        const filamentId = trayOf(slot)?.profileId;
+        if (filamentId === undefined) {
+          return refusal(
+            'MACHINE_ACTION_PRECONDITION_FAILED',
+            'Set the slot’s material first: a profile belongs to one filament.',
+          );
+        }
+        const profileId = String(parameters['profileId']);
+        const row = table?.rows.find(({ index }) => String(index) === profileId);
+        if (profileId !== 'default' && row === undefined) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'The printer holds no such profile.');
+        }
+        if (row !== undefined && row.filamentId !== filamentId) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'That profile is for another filament.');
+        }
+        return {
+          request: bambuCalibrationSelect(sequence, {
+            slot,
+            form: input.form,
+            index: row?.index ?? -1,
+            filamentId,
+            nozzleDiameter: nozzleDiameter(),
+          }),
+        };
+      }
+      case 'filament:material.calibration.save': {
+        const rows = table?.rows ?? [];
+        if (model === 'A1 mini' && rows.length >= 16) {
+          return refusal(
+            'MACHINE_ACTION_PRECONDITION_FAILED',
+            'This printer holds at most 16 profiles per nozzle. Delete one first.',
+          );
+        }
+        const name = typeof parameters['name'] === 'string' ? parameters['name'] : '';
+        if (parameters['source'] === 'manual') {
+          const preset = isRecord(parameters['preset']) ? parameters['preset'] : {};
+          if (parameters['nozzleId'] !== `nozzle-${String(nozzleDiameter())}`) {
+            return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'That nozzle is not the one installed.');
+          }
+          return {
+            request: bambuCalibrationSave(sequence, {
+              slot: 0,
+              filamentId: String(preset['profileId']),
+              settingId: typeof preset['settingId'] === 'string' ? preset['settingId'] : '',
+              name,
+              pressureAdvance: Number(parameters['pressureAdvance']),
+              coefficient: '0.0',
+              nozzleDiameter: nozzleDiameter(),
+            }),
+          };
+        }
+        if (
+          calibration === undefined ||
+          calibration.activityId !== parameters['activityId'] ||
+          calibration.results === undefined
+        ) {
+          return refusal(
+            'MACHINE_ACTION_PRECONDITION_FAILED',
+            'That calibration and its results are no longer on the printer.',
+          );
+        }
+        const result =
+          calibration.results[Number(/^result-(\d+)$/u.exec(String(parameters['resultId']))?.[1] ?? 0) - 1];
+        if (result === undefined) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'The calibration has no such result.');
+        }
+        if (result.pressureAdvance === undefined) {
+          return refusal(
+            'MACHINE_ACTION_PRECONDITION_FAILED',
+            'A flow-ratio result belongs in the slicer’s filament preset; the printer stores none.',
+          );
+        }
+        if (result.confidence === 'failed') {
+          return refusal(
+            'MACHINE_ACTION_PRECONDITION_FAILED',
+            'This result failed its measurement and cannot be kept.',
+          );
+        }
+        return {
+          request: bambuCalibrationSave(sequence, {
+            slot: result.slot,
+            filamentId: result.filamentId,
+            settingId: result.settingId,
+            name,
+            pressureAdvance: result.pressureAdvance,
+            coefficient: result.coefficient ?? '0.0',
+            nozzleDiameter: nozzleDiameter(),
+          }),
+        };
+      }
+      case 'filament:material.calibration.delete': {
+        const row = table?.rows.find(({ index }) => String(index) === String(parameters['profileId']));
+        if (row === undefined) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'The printer holds no such profile.');
+        }
+        return {
+          request: bambuCalibrationDelete(sequence, {
+            index: row.index,
+            filamentId: row.filamentId,
+            nozzleDiameter: nozzleDiameter(),
+          }),
+        };
+      }
+      case 'filament:material.calibration.run': {
+        const method = parameters['method'] === 'flow-ratio' ? 'flow-ratio' : 'pressure-advance';
+        if (method === 'flow-ratio' && model !== 'X1C') {
+          return refusal('MACHINE_ACTION_UNSUPPORTED', 'Only the X1 series measures flow ratio automatically.');
+        }
+        if (parameters['nozzleId'] !== `nozzle-${String(nozzleDiameter())}`) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'That nozzle is not the one installed.');
+        }
+        if (model === 'A1 mini' && nozzleDiameter() === 0.2) {
+          return refusal(
+            'MACHINE_ACTION_PRECONDITION_FAILED',
+            'Automatic calibration is unreliable with a 0.2 mm nozzle; calibrate by hand.',
+          );
+        }
+        const filaments: BambuCalibrationFilament[] = [];
+        for (const address of Array.isArray(parameters['slots']) ? parameters['slots'] : []) {
+          const slot = slotParameter(address);
+          const tray = slot === undefined ? undefined : trayOf(slot);
+          if (slot === undefined || tray?.materialId === undefined || tray.profileId === undefined) {
+            return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'Every slot to calibrate needs its material set.');
+          }
+          if (tray.profileId === 'GFU03' || tray.profileId === 'GFU04') {
+            return refusal(
+              'MACHINE_ACTION_PRECONDITION_FAILED',
+              'TPU 90A and TPU 85A are too soft to calibrate automatically.',
+            );
+          }
+          const [nozzle, bed, speed] = bambuGenericPresets[tray.materialId.toLowerCase().split('-')[0] ?? ''] ?? [
+            220, 60, 12,
+          ];
+          filaments.push({
+            slot,
+            filamentId: tray.profileId,
+            settingId: tray.settingId ?? '',
+            nozzleTemperature: Math.min(Math.max(nozzle, tray.nozzleMinimum ?? nozzle), tray.nozzleMaximum ?? nozzle),
+            bedTemperature: bed,
+            maximumVolumetricSpeed: speed,
+          });
+        }
+        return {
+          request: bambuCalibrationRun(sequence, { method, nozzleDiameter: nozzleDiameter(), filaments }),
+          after: () => {
+            requestedCalibration = { method, operationId: action.operationId };
+          },
+        };
+      }
+      case 'filament:interaction.respond': {
+        const promptId = String(parameters['promptId']);
+        if (change?.promptStep === undefined || change.activityId !== parameters['activityId']) {
+          return refusal('MACHINE_ACTION_PROMPT_STALE', 'The printer is no longer asking that.');
+        }
+        const asked = prompt(change);
+        if (asked.promptId !== promptId) {
+          return answeredPrompts.has(promptId)
+            ? refusal('MACHINE_ACTION_PROMPT_CONSUMED', 'That question has been answered.')
+            : refusal('MACHINE_ACTION_PROMPT_STALE', 'The printer is asking something else now.');
+        }
+        if (answeredPrompts.has(promptId)) {
+          return refusal('MACHINE_ACTION_PROMPT_CONSUMED', 'That question has been answered.');
+        }
+        const { answer } = parameters;
+        if (!asked.answers.some(({ id }) => id === answer)) {
+          return refusal('MACHINE_ACTION_PARAMETERS_INVALID', 'That is not one of the answers.');
+        }
+        return {
+          request: bambuAmsControl(sequence, answer === 'retry' ? 'resume' : 'done'),
+          after: () => {
+            answeredPrompts.add(promptId);
+          },
+        };
+      }
+      case 'filament:bambu.ams.read-tag': {
+        const slot = slotParameter(parameters);
+        if (slot === undefined) {
+          return invalid;
+        }
+        if (slot === bambuExternalSpoolSlot) {
+          return refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'The external spool has no tag reader.');
+        }
+        if (status?.currentMaterialSlot !== undefined) {
+          return refusal(
+            'MACHINE_ACTION_PRECONDITION_FAILED',
+            'Cannot read filament info: the filament is loaded to the toolhead. Unload it and try again.',
+          );
+        }
+        return { request: bambuReadTag(sequence, { slot, newProtocol: newAmsProtocol(status) }) };
+      }
+      case 'filament:bambu.filament.abort': {
+        return mainOf(status) === amsMain.filamentChange
+          ? { request: bambuAmsControl(sequence, 'abort') }
+          : refusal('MACHINE_ACTION_PRECONDITION_FAILED', 'No filament change is in progress.');
+      }
+      case 'motion:motion.home': {
+        return { request: bambuHome(sequence) };
+      }
+      case 'motion:motion.jog': {
+        return {
+          request: bambuJog(sequence, {
+            axis: parameters['axis'] as 'x' | 'y' | 'z',
+            distance: Number(parameters['distance']),
+            feed: Number(parameters['feed']),
+          }),
+        };
+      }
+      case 'controller:bambu.printer.calibrate': {
+        const routines = Array.isArray(parameters['routines']) ? parameters['routines'] : [];
+        return {
+          request: bambuPrinterCalibration(sequence, routines as Array<keyof typeof bambuPrinterRoutines>),
+          after: () => {
+            requestedCalibration = { method: 'printer', operationId: action.operationId };
+          },
+        };
+      }
+      default: {
+        return refusal('MACHINE_ACTION_UNDECLARED', 'This printer does not declare that action.');
+      }
+    }
+  };
+
+  const confirms = (componentId: string, action: string): MachineManifest['actions'][number]['confirms'] =>
+    manifest.actions.find((descriptor) => descriptor.componentId === componentId && descriptor.id === action)
+      ?.confirms ?? 'observation';
+
+  const apply = async (action: MachineProviderActionInput): Promise<MachineCommandReceipt> => {
+    const key = actionKey(action.componentId, action.action);
+    const existing = ledger.get(action.operationId);
+    if (existing !== undefined) {
+      return existing.key === key
+        ? (existing.receipt ?? { status: 'unknown', reason: 'sending', observedAt: now() })
+        : rejected('MACHINE_OPERATION_ID_CONFLICT', 'This operation id was used for another command.');
+    }
+    if (developerMode() === 'off') {
+      return rejected(
+        'MACHINE_ACTION_UNSUPPORTED',
+        'This printer ignores commands from Tau until Developer Mode is on.',
+      );
+    }
+    action.signal.throwIfAborted();
+    const sequence = bambuWireSequenceId(action.operationId);
+    const planned = plan(action, sequence);
+    if ('refused' in planned) {
+      return rejected(planned.refused.code, planned.refused.message);
+    }
+    const entry: LedgerEntry = {
+      kind: 'action',
+      key,
+      sequence,
+      command: planned.request.command,
+      sawActivity: false,
+      ...definedFields({ tableVersion: status?.calibrationVersion }),
+    };
+    remember(action.operationId, entry);
+    try {
+      await send(planned.request);
+    } catch {
+      entry.receipt = { status: 'unknown', reason: 'publish-result-unknown', observedAt: now() };
+      return entry.receipt;
+    }
+    planned.after?.();
+    emit();
+    const reply = await waitForReply(sequence, () => false, action.signal);
+    const acknowledged = confirms(action.componentId, action.action) === 'acknowledgement';
+    entry.receipt =
+      reply === undefined
+        ? { status: 'unknown', reason: 'no-reply', observedAt: now() }
+        : reply.unauthorized
+          ? unauthorizedReceipt()
+          : acknowledged && reply.result === 'fail'
+            ? rejected('MACHINE_ACTION_PROVIDER_REJECTED', reply.reason ?? 'The printer refused the command.')
+            : { status: 'accepted', observedAt: now() };
+    return entry.receipt;
+  };
+
+  // oxlint-disable-next-line eslint/complexity -- one dispatch over the declared actions.
+  const confirm = (action: Omit<MachineProviderActionInput, 'signal'>): MachineActionConfirmation => {
+    const entry = ledger.get(action.operationId);
+    if (entry?.receipt?.status === 'rejected') {
+      return { status: 'refuted', code: entry.receipt.code, message: entry.receipt.message };
+    }
+    const parameters: Readonly<Record<string, unknown>> = isRecord(action.parameters) ? action.parameters : {};
+    const slot = isRecord(parameters['slot']) ? bambuSlotOf(parameters['slot'] as BambuSlotAddress) : undefined;
+    const tray = slot === undefined ? undefined : trayOf(slot);
+    const confirmed = { status: 'confirmed' } as const;
+    const pending = { status: 'pending' } as const;
+    const when = (shown: boolean): MachineActionConfirmation => (shown ? confirmed : pending);
+    const main = mainOf(status);
+    const tableAfterSend = table?.version !== undefined && table.version !== entry?.tableVersion;
+    switch (actionKey(action.componentId, action.action)) {
+      case 'chamber-light:switch.set': {
+        return when(status?.chamberLight === (parameters['on'] === true ? 'on' : 'off'));
+      }
+      case 'speed:option.set': {
+        return when(status?.speedProfile === parameters['option']);
+      }
+      case 'controller:run.pause':
+      case 'controller:run.resume': {
+        if (!isLive(status) || runIdOf(status) !== action.expectedRunId) {
+          return {
+            status: 'refuted',
+            code: 'MACHINE_ACTION_STALE_RUN',
+            message: 'The run ended before the printer showed the change.',
+          };
+        }
+        return when(action.action === 'run.pause' ? status?.gcodeState === 'PAUSE' : status?.gcodeState !== 'PAUSE');
+      }
+      case 'controller:run.cancel': {
+        return when(!isLive(status) || runIdOf(status) !== action.expectedRunId);
+      }
+      case 'part-fan:level.set':
+      case 'aux-fan:level.set':
+      case 'chamber-fan:level.set': {
+        const percent = {
+          'part-fan': status?.partFanPercent,
+          'aux-fan': status?.auxiliaryFanPercent,
+          'chamber-fan': status?.chamberFanPercent,
+        }[action.componentId];
+        return when(percent !== undefined && Math.abs(percent / 100 - Number(parameters['ratio'])) <= 1 / 15 + 0.001);
+      }
+      case 'filament:material.load': {
+        if (main === amsMain.idle && status?.currentMaterialSlot === slot && slot !== undefined) {
+          return confirmed;
+        }
+        return entry?.sawActivity === true && main === amsMain.idle
+          ? {
+              status: 'refuted',
+              code: 'MACHINE_ACTION_ABORTED',
+              message: 'The load ended without the filament reaching the nozzle.',
+            }
+          : pending;
+      }
+      case 'filament:material.unload': {
+        if (main === amsMain.idle && status?.currentMaterialSlot === undefined) {
+          return confirmed;
+        }
+        return entry?.sawActivity === true && main === amsMain.idle
+          ? {
+              status: 'refuted',
+              code: 'MACHINE_ACTION_ABORTED',
+              message: 'The unload ended with filament still in the extruder.',
+            }
+          : pending;
+      }
+      case 'filament:material.set': {
+        const material = isRecord(parameters['material']) ? parameters['material'] : {};
+        const preset = isRecord(material['preset']) ? material['preset'] : {};
+        const range = isRecord(material['nozzleTemperature']) ? material['nozzleTemperature'] : {};
+        return when(
+          tray !== undefined &&
+            tray.materialId === material['materialType'] &&
+            tray.profileId === preset['profileId'] &&
+            tray.color === String(material['color']).toUpperCase() &&
+            (tray.nozzleMinimum === undefined || tray.nozzleMinimum === Math.round(Number(range['min']))) &&
+            (tray.nozzleMaximum === undefined || tray.nozzleMaximum === Math.round(Number(range['max']))) &&
+            (tray.settingId === undefined || tray.settingId === (preset['settingId'] ?? '')),
+        );
+      }
+      case 'filament:material.clear': {
+        return when(tray !== undefined && tray.materialId === undefined);
+      }
+      case 'filament:material.calibration.select': {
+        const profileId = String(parameters['profileId']);
+        return when(tray?.calibrationIndex === (profileId === 'default' ? -1 : Number(profileId)));
+      }
+      case 'filament:material.calibration.save': {
+        const name = String(parameters['name']);
+        return when(tableAfterSend && table?.rows.some((row) => row.name === name) === true);
+      }
+      case 'filament:material.calibration.delete': {
+        return when(
+          tableAfterSend && table?.rows.some((row) => String(row.index) === String(parameters['profileId'])) === false,
+        );
+      }
+      case 'filament:material.calibration.run':
+      case 'controller:bambu.printer.calibrate': {
+        return when(calibration?.operationId === action.operationId);
+      }
+      case 'filament:interaction.respond': {
+        return when(change?.promptStep === undefined || prompt(change).promptId !== parameters['promptId']);
+      }
+      case 'filament:bambu.ams.read-tag': {
+        return when(entry?.sawActivity === true && main !== amsMain.readingTag);
+      }
+      case 'filament:bambu.filament.abort': {
+        return when(main === amsMain.idle);
+      }
+      default: {
+        return pending;
+      }
+    }
+  };
+
+  // ───────────── Stop, jobs and reconciliation ─────────────
+
+  /** The run a start produced: its `subtask_id` is the operation's wire id, or a live run carries the name it sent. */
+  const startedRunId = (operationId: string, transferId?: string): string | undefined => {
+    const wireId = bambuWireId(operationId);
+    const runName =
+      startRunNames.get(operationId) ??
+      (transferId !== undefined && remoteNamePattern.test(transferId)
+        ? transferId.replace('.gcode.3mf', '')
+        : undefined);
+    const isOurs =
+      status?.providerRunId === wireId || (isLive(status) && runName !== undefined && status?.runName === runName);
+    return isOurs ? runIdOf(status) : undefined;
+  };
+
+  const stop: MachineSession<BambuSubmission>['stop'] = async (stopInput) => {
+    const existing = ledger.get(stopInput.operationId);
+    if (existing?.kind === 'stop' && existing.receipt !== undefined) {
+      return existing.receipt;
+    }
+    const sequence = bambuWireSequenceId(stopInput.operationId);
+    const entry: LedgerEntry = { kind: 'stop', key: 'stop', sequence, command: 'stop', sawActivity: false };
+    remember(stopInput.operationId, entry);
+    try {
+      await send(bambuRunCommand(sequence, 'stop'));
+    } catch {
+      entry.receipt = { status: 'unknown', reason: 'publish-result-unknown', observedAt: now() };
+      return entry.receipt;
+    }
+    const reply = await waitForReply(sequence, () => !isLive(status), stopInput.signal);
+    entry.receipt =
+      reply?.unauthorized === true
+        ? unauthorizedReceipt()
+        : reply?.result === 'success' || !isLive(status)
+          ? { status: 'accepted', observedAt: now() }
+          : reply?.result === 'fail'
+            ? rejected('MACHINE_ACTION_PROVIDER_REJECTED', reply.reason ?? 'The printer refused to stop.')
+            : { status: 'unknown', reason: 'reply-lost-after-possible-acceptance', observedAt: now() };
+    return entry.receipt;
+  };
+
+  /** A plate name from a file or the printer as its manifest id, so `hot_plate` and `high-temperature` agree. */
+  const plateIdOf = (name: string | undefined): string | undefined =>
+    name === undefined ? undefined : (bambuPlateForBedType(name)?.id ?? name);
+
+  const prepare: MachineJobs['prepare'] = async (jobInput): Promise<MachinePreparation> => {
+    const refused = (code: string, message: string): MachinePreparation => ({
+      status: 'refused',
+      code,
+      message,
+      observedAt: now(),
+    });
+    if (jobInput.expectedMachineId !== serial) {
+      return refused('IDENTITY_MISMATCH', 'The prepared machine identity changed.');
+    }
+    let artifact: BambuPreparedArtifact;
+    try {
+      artifact = await input.readArtifact(jobInput.artifact, jobInput.signal);
+    } catch {
+      return refused('ARTIFACT_INVALID', 'The artifact failed bounded verification.');
+    }
+    const { configuration } = jobInput;
+    const external = configuration.amsMapping.includes(bambuExternalSpoolSlot);
+    const bedType = status?.bedType ?? configuration.operatorConfirmedBedType;
+    const observedModel = status?.model ?? model;
+    const matched =
+      configuration.amsMapping.length === configuration.expectedMaterials.length &&
+      configuration.expectedMaterials.every(
+        (expected, index) =>
+          configuration.amsMapping[index] === expected.slot &&
+          trayOf(expected.slot)?.materialId?.toLowerCase() === expected.materialId.toLowerCase(),
+      );
+    const computed = (
+      id: string,
+      label: string,
+      { passed, detail, remedy }: Readonly<{ passed: boolean; detail: string; remedy?: MachineCheck['remedy'] }>,
+    ): MachineCheck => ({
+      id,
+      label,
+      state: passed ? 'passed' : 'blocked',
+      source: 'computed',
+      ...(passed ? {} : { detail, ...(remedy ? { remedy } : {}) }),
+    });
+    const printerChecks: MachineCheck[] = [
+      computed('model', 'Sliced for this printer', {
+        passed: observedModel === configuration.expectedModel,
+        detail: `This printer is a ${observedModel}.`,
+      }),
+      computed('nozzle', 'Nozzle matches the slice', {
+        passed:
+          sameDiameter(status?.nozzleDiameter, configuration.expectedNozzleDiameter) &&
+          configuration.expectedFilamentDiameter === 1.75,
+        detail: 'The installed nozzle differs from the one the file was sliced for.',
+      }),
+      computed('plate', 'Build plate matches the slice', {
+        passed: plateIdOf(bedType) === plateIdOf(configuration.expectedBedType),
+        detail: 'Put the plate the file was sliced for on the printer.',
+        remedy: { type: 'person', instruction: 'Put the plate the file was sliced for on the printer.' },
+      }),
+      computed('filament', 'Filament matches the plate', {
+        passed: matched && (!external || configuration.amsMapping.length === 1),
+        detail:
+          external && configuration.amsMapping.length > 1
+            ? 'The external spool can only feed a one-filament print. Map every filament to an AMS slot.'
+            : 'A mapped slot holds a different material.',
+        remedy: { type: 'action', componentId: 'filament', action: 'material.set' },
+      }),
+      ...(input.requireBambuStudio
+        ? [
+            computed('producer', 'Sliced by Bambu Studio', {
+              passed: artifact.producer?.name === 'Bambu Studio',
+              detail:
+                'Slice it with Bambu Studio in Tau (desktop app with Bambu Studio installed), then send it again.',
+            }),
+          ]
+        : []),
+      {
+        id: 'idle',
+        label: 'Printer idle',
+        state: machineStatus().status === 'ready' ? 'passed' : 'blocked',
+        source: 'observed',
+        ...(machineStatus().status === 'ready' ? {} : { detail: 'Wait until the printer is idle.' }),
+      },
+      ...checks(),
+    ];
+    const layers = /^; total layer number: (\d+)$/mu.exec(
+      new TextDecoder().decode(artifact.plate.subarray(0, 4096)),
+    )?.[1];
+    return {
+      status: printerChecks.some((item) => item.state === 'blocked') ? 'blocked' : 'ready',
+      program: {
+        name: jobInput.artifact.path.split('/').at(-1) ?? jobInput.artifact.path,
+        ...(artifact.producer === undefined
+          ? {}
+          : { producer: { name: artifact.producer.name, ...definedFields({ version: artifact.producer.version }) } }),
+        facts: { process: 'fff', ...(layers === undefined ? {} : { layers: Number(layers) }) },
+      },
+      checks: printerChecks,
+      setup: {
+        model: observedModel,
+        firmware: firmware ?? 'unknown',
+        nozzle: nozzleDiameter(),
+        bedType: bedType ?? 'unknown',
+        materials: configuration.amsMapping.map((slot) => ({
+          slot,
+          materialId: trayOf(slot)?.materialId ?? 'unknown',
+          profileId: trayOf(slot)?.profileId ?? 'unknown',
+        })),
+      },
+      remoteName: bambuRemoteName(jobInput.operationId),
+      parser: artifact.parser,
+      providerData: { memberMd5: artifact.memberMd5 },
+      observedAt: now(),
+    };
+  };
+
+  const transfer: Extract<MachineJobs, { delivery: 'stored' }>['transfer'] = async (jobInput) => {
+    const existing = ledger.get(jobInput.operationId);
+    if (existing?.kind === 'transfer' && existing.receipt !== undefined) {
+      return existing.receipt;
+    }
+    const providerRecord = isRecord(jobInput.providerData) ? jobInput.providerData : undefined;
+    if (jobInput.expectedMachineId !== serial || !remoteNamePattern.test(jobInput.remoteName)) {
+      return rejected('PREPARATION_INVALID', 'The prepared artifact identity is invalid.');
+    }
+    let artifact: BambuPreparedArtifact;
+    try {
+      artifact = await input.readArtifact(jobInput.artifact, jobInput.signal);
+    } catch {
+      return rejected('ARTIFACT_INVALID', 'The artifact failed bounded verification.');
+    }
+    if (providerRecord?.['memberMd5'] !== artifact.memberMd5) {
+      return rejected('PREPARATION_INVALID', 'The artifact changed since it was prepared.');
+    }
+    const entry: LedgerEntry = {
+      kind: 'transfer',
+      key: 'transfer',
+      sequence: '',
+      command: 'upload',
+      sawActivity: false,
+    };
+    remember(jobInput.operationId, entry);
+    let written: number;
+    try {
+      written = await input.upload({ remoteName: jobInput.remoteName, artifact, signal: jobInput.signal });
+    } catch (error) {
+      // The host's transport errors name the failure, never the access code.
+      const code = error instanceof Error ? error.message : '';
+      if (code === 'STORAGE_FULL' || code === 'TRANSFER_PARTIAL' || code === 'TRANSFER_UNAVAILABLE') {
+        entry.receipt = rejected(
+          code,
+          code === 'STORAGE_FULL' ? 'Printer storage is full.' : 'The transfer did not complete.',
+        );
+        return entry.receipt;
+      }
+      await input
+        .log({ level: 'warning', message: `FTPS upload of ${jobInput.remoteName} failed: ${code.slice(0, 200)}` })
+        .catch(() => undefined);
+      entry.receipt = { status: 'unknown', reason: 'transfer-result-unavailable', observedAt: now() };
+      return entry.receipt;
+    }
+    entry.receipt =
+      written === artifact.length
+        ? // The printer holds exactly one object per remote name, so the name is the transfer evidence.
+          { status: 'accepted', transferId: jobInput.remoteName, observedAt: now() }
+        : rejected('TRANSFER_PARTIAL', 'The transfer ended before the whole artifact was written.');
+    return entry.receipt;
+  };
+
+  const start: MachineJobs['start'] = async (jobInput) => {
+    const existing = ledger.get(jobInput.operationId);
+    if (existing?.kind === 'start' && existing.receipt !== undefined) {
+      return existing.receipt;
+    }
+    const providerRecord = isRecord(jobInput.providerData) ? jobInput.providerData : undefined;
+    const memberMd5 = providerRecord?.['memberMd5'];
+    if (
+      jobInput.expectedMachineId !== serial ||
+      !remoteNamePattern.test(jobInput.remoteName) ||
+      jobInput.transferId !== jobInput.remoteName ||
+      typeof memberMd5 !== 'string' ||
+      !memberMd5Pattern.test(memberMd5)
+    ) {
+      return rejected('PREPARATION_INVALID', 'The prepared artifact identity or provider data is invalid.');
+    }
+    if (developerMode() === 'off') {
+      return rejected(
+        'MACHINE_ACTION_UNSUPPORTED',
+        'This printer ignores commands from Tau until Developer Mode is on.',
+      );
+    }
+    const { configuration } = jobInput;
+    const wireId = bambuWireId(jobInput.operationId);
+    const sequence = bambuWireSequenceId(jobInput.operationId);
+    const runName = jobInput.remoteName.replace('.gcode.3mf', '');
+    startRunNames.set(jobInput.operationId, runName);
+    // The external spool prints with the AMS off: firmware takes -1 in `ams_mapping` and holder 255 in
+    // `ams_mapping2` for a single-nozzle printer; preparation keeps it to one-filament prints.
+    const external = configuration.amsMapping.includes(bambuExternalSpoolSlot);
+    const entry: LedgerEntry = { kind: 'start', key: 'start', sequence, command: 'project_file', sawActivity: false };
+    remember(jobInput.operationId, entry);
+    /* eslint-disable @typescript-eslint/naming-convention -- Bambu wire field names are fixed. */
+    const payload = {
+      print: {
+        command: 'project_file',
+        param: jobInput.artifact.selectedMember,
+        url: `ftp://${jobInput.remoteName}`,
+        file: jobInput.remoteName,
+        subtask_name: runName,
+        md5: memberMd5,
+        flow_cali: configuration.flowCalibration,
+        extrude_cali_flag: configuration.flowCalibration ? 1 : 0,
+        extrude_cali_manual_mode: 0,
+        timelapse: configuration.timelapse,
+        bed_leveling: configuration.bedLeveling,
+        auto_bed_leveling: configuration.bedLeveling ? 1 : 0,
+        vibration_cali: true,
+        layer_inspect: model === 'X1C',
+        nozzle_offset_cali: 0,
+        bed_type: 'auto',
+        use_ams: configuration.amsMapping.length > 0 && !external,
+        ams_mapping: external ? configuration.amsMapping.map(() => -1) : configuration.amsMapping,
+        ams_mapping2: configuration.amsMapping.map((slot) =>
+          external ? { ams_id: 255, slot_id: 0 } : { ams_id: Math.floor(slot / 4), slot_id: slot % 4 },
+        ),
+        cfg: '0',
+        profile_id: '0',
+        project_id: wireId,
+        sequence_id: sequence,
+        subtask_id: wireId,
+        task_id: wireId,
+      },
+    };
+    /* eslint-enable @typescript-eslint/naming-convention -- Bambu wire field section ends. */
+    const publishedAt = Date.now();
+    try {
+      await send(JSON.stringify(payload));
+    } catch {
+      entry.receipt = { status: 'unknown', reason: 'publish-result-unknown', observedAt: now() };
+      return entry.receipt;
+    }
+    const reply = await waitForReply(sequence, () => startedRunId(jobInput.operationId) !== undefined, jobInput.signal);
+    const runId = startedRunId(jobInput.operationId);
+    entry.receipt =
+      reply?.unauthorized === true
+        ? unauthorizedReceipt()
+        : reply?.result === 'fail' && runId === undefined
+          ? rejected('PROVIDER_REJECTED', reply.reason ?? 'provider-rejected')
+          : reply?.result === 'success' || runId !== undefined
+            ? {
+                status: 'accepted',
+                runId: runId ?? (typeof reply?.body['subtask_id'] === 'string' ? reply.body['subtask_id'] : wireId),
+                observedAt: now(),
+              }
+            : { status: 'unknown', reason: 'reply-lost-after-possible-acceptance', runId: wireId, observedAt: now() };
+    // Start diagnostics for the host log (blueprint x1c-start-confirmation R7): ids and timings only.
+    await input
+      .log({
+        level: 'info',
+        message: `Start ${wireId} ${entry.receipt.status} after ${String(Date.now() - publishedAt)} ms; printer ${status?.gcodeState ?? 'unreported'}, run id ${status?.providerRunId === wireId ? 'matches' : 'differs'}.`,
+      })
+      .catch(() => undefined);
+    return entry.receipt;
+  };
+
+  const reconcile: MachineSession<BambuSubmission>['reconcile'] = async (reconcileInput) => {
+    const entry = ledger.get(reconcileInput.operationId);
+    if (reconcileInput.kind === 'start') {
+      const runId = startedRunId(reconcileInput.operationId, reconcileInput.transferId);
+      if (runId !== undefined) {
+        return { status: 'accepted', runId, observedAt: statusAt ?? now() };
+      }
+    }
+    if (reconcileInput.kind === 'stop' && entry?.kind === 'stop' && !isLive(status)) {
+      return { status: 'accepted', observedAt: statusAt ?? now() };
+    }
+    const kinds: Readonly<Record<string, LedgerEntry['kind']>> = {
+      action: 'action',
+      stop: 'stop',
+      transfer: 'transfer',
+      start: 'start',
+    };
+    return entry !== undefined && entry.kind === kinds[reconcileInput.kind] && entry.receipt !== undefined
+      ? entry.receipt
+      : { status: 'unknown', reason: 'no-correlated-provider-reply', observedAt: now() };
+  };
+
+  // ───────────── The session ─────────────
+
+  const close = async (): Promise<void> => {
+    if (closed) {
+      return;
+    }
+    closed = true;
+    clearInterval(keepFresh);
+    await link.close().catch(() => undefined);
+    emit();
+  };
+
+  const capabilities = (): MachineProviderDescriptor['capabilities'] => {
+    const units = [...amsUnits().map((unit) => bambuAmsUnit(unit)), bambuExternalUnit];
+    const diameter = millimetres(status?.nozzleDiameter);
+    return {
+      connection: manifest.connection,
+      axes: manifest.axes,
+      components: manifest.components.map((component) => {
+        if (component.kind === 'material-system') {
+          return { ...component, units, routes: units.map(({ id }) => ({ unitId: id, toolheadIds: ['tool-0'] })) };
+        }
+        if (component.kind === 'toolhead' && diameter !== undefined) {
+          const hardened =
+            status?.nozzleType === undefined
+              ? component.nozzles[0]?.material === 'hardened'
+              : status.nozzleType.includes('hardened');
+          return { ...component, nozzles: [bambuNozzle(diameter, hardened)] };
+        }
+        return component;
+      }),
+      processes: manifest.processes,
+      actions: manifest.actions,
+      holds: manifest.holds,
+      jobs: manifest.jobs,
+      stop: manifest.stop,
+    };
+  };
+
+  return Object.freeze({
+    async getDescriptor(descriptorInput) {
+      descriptorInput.signal.throwIfAborted();
+      return {
+        id: serial,
+        name: input.name,
+        vendor: 'Bambu Lab',
+        model,
+        firmware: firmware ?? status?.firmware ?? 'unknown',
+        capabilities: capabilities(),
+      };
+    },
+    async getSnapshot(snapshotInput) {
+      snapshotInput.signal.throwIfAborted();
+      return report();
+    },
+    async *observe(observeInput) {
+      for await (const [event] of on(updates, 'observation', { signal: observeInput.signal })) {
+        yield (event as CustomEvent<MachineObservation>).detail;
+      }
+    },
+    stop,
+    actions: { type: 'supported', apply, confirm },
+    holds: { type: 'unsupported' },
+    jobs: { type: 'supported', delivery: 'stored', prepare, transfer, start },
+    stillCapture: input.stillCapture,
+    reconcile,
+    close,
+    dispose: close,
+  } satisfies MachineSession<BambuSubmission>);
+};

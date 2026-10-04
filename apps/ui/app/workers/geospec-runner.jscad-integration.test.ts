@@ -531,7 +531,9 @@ describe('geospec-runner.worker JSCAD integration', () => {
       'cube with cylinder cutout > should be one connected component',
     ]);
     expect(resultMessage.result.passes.every((pass) => pass.targetFile === 'main.geospec.ts')).toBe(true);
-    expect(resultMessage.result.sourceRevisions).toEqual([expect.objectContaining({ entry: 'main.ts' })]);
+    // One source revision per model load, and each requirement loads the model once.
+    expect(resultMessage.result.sourceRevisions).toHaveLength(resultMessage.result.passes.length);
+    expect(resultMessage.result.sourceRevisions?.every((revision) => revision.entry === 'main.ts')).toBe(true);
     expect(exportCalls).toHaveLength(2);
     const [defaultExport, parameterizedExport] = exportCalls;
     if (!defaultExport || !parameterizedExport) {

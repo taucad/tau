@@ -20,11 +20,13 @@
  * Exit codes: 0 on success; 1 on invalid input or a git/graph failure.
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
-import { createProjectGraphAsync, workspaceRoot } from '@nx/devkit';
+import { workspaceRoot } from '@nx/devkit';
+import type { ProjectGraph } from '@nx/devkit';
 
 /** The project tag that marks a deployable application. */
 export const releaseAppTag = 'release:app';
@@ -256,9 +258,31 @@ const manifestVersion = (root: string): string => {
   return manifest.version;
 };
 
+/**
+ * The workspace project graph, computed by the Nx CLI. Nx plugins load
+ * TypeScript configs (such as `apps/docs/react-router.config.ts`) whose
+ * transpiled helpers resolve only through the pnpm virtual store that the `nx`
+ * launcher puts on NODE_PATH, so an in-process `createProjectGraphAsync` under
+ * plain `node` fails on a cold cache. Nx's own output goes to stderr: stdout is
+ * this script's JSON, and the release workflow redirects it to a file.
+ */
+const projectGraph = (): ProjectGraph => {
+  const directory = mkdtempSync(join(tmpdir(), 'release-apps-'));
+  try {
+    const file = join(directory, 'graph.json');
+    execFileSync(join(workspaceRoot, 'node_modules/.bin/nx'), ['graph', `--file=${file}`], {
+      cwd: workspaceRoot,
+      stdio: ['ignore', 2, 2],
+    });
+    return (JSON.parse(readFileSync(file, 'utf8')) as { graph: ProjectGraph }).graph;
+  } finally {
+    rmSync(directory, { recursive: true, force: true });
+  }
+};
+
 /** Every `release:app` project with the roots of its workspace dependency closure. */
-export const releaseApps = async (): Promise<ReleaseApp[]> => {
-  const graph = await createProjectGraphAsync({ exitOnError: true });
+export const releaseApps = (): ReleaseApp[] => {
+  const graph = projectGraph();
   const closure = (name: string, seen = new Set<string>()): Set<string> => {
     if (seen.has(name) || graph.nodes[name] === undefined) {
       return seen;
@@ -290,8 +314,8 @@ export const releaseApps = async (): Promise<ReleaseApp[]> => {
   return apps;
 };
 
-export const planReleases = async (): Promise<AppRelease[]> => {
-  const apps = await releaseApps();
+export const planReleases = (): AppRelease[] => {
+  const apps = releaseApps();
   return apps.flatMap((app) => {
     const previousTag = latestTag(app.name);
     const commits = previousTag === undefined ? [] : commitsSince(previousTag, app.paths);
@@ -305,8 +329,8 @@ export const planReleases = async (): Promise<AppRelease[]> => {
 
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-const prepare = async (): Promise<void> => {
-  const releases = await planReleases();
+const prepare = (): void => {
+  const releases = planReleases();
   for (const release of releases) {
     const manifestPath = join(workspaceRoot, release.root, 'package.json');
     writeFileSync(manifestPath, setManifestVersion(readFileSync(manifestPath, 'utf8'), release.nextVersion));
@@ -336,8 +360,8 @@ export const changelogNotes = (changelog: string, version: string): string => {
 };
 
 /** Tags introduced by HEAD: each application whose manifest version HEAD changed and is not yet tagged. */
-const tags = async (): Promise<void> => {
-  const apps = await releaseApps();
+const tags = (): void => {
+  const apps = releaseApps();
   const introduced = apps.flatMap((app) => {
     const version = manifestVersion(app.root);
     const before = (() => {
@@ -359,18 +383,18 @@ const tags = async (): Promise<void> => {
   console.log(JSON.stringify(introduced, null, 2));
 };
 
-const main = async (command: string | undefined): Promise<void> => {
+const main = (command: string | undefined): void => {
   switch (command) {
     case 'plan': {
-      console.log(JSON.stringify(await planReleases(), null, 2));
+      console.log(JSON.stringify(planReleases(), null, 2));
       break;
     }
     case 'prepare': {
-      await prepare();
+      prepare();
       break;
     }
     case 'tags': {
-      await tags();
+      tags();
       break;
     }
     default: {
@@ -381,7 +405,7 @@ const main = async (command: string | undefined): Promise<void> => {
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
-    await main(process.argv[2]);
+    main(process.argv[2]);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

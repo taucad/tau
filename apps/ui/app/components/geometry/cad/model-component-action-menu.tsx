@@ -305,12 +305,8 @@ function ModelComponentMenuHeader({
   return (
     <>
       <Row
-        label={
-          <span className='flex min-w-0 flex-col'>
-            <span className='truncate'>{node.name}</span>
-            <span className='truncate text-xs font-normal text-muted-foreground'>{summaryLabel(node, facts)}</span>
-          </span>
-        }
+        label={<span className='font-medium'>{node.name}</span>}
+        description={summaryLabel(node, facts)}
         trailing={materials?.length ? <MaterialSwatch materials={materials} /> : undefined}
       >
         <ModelComponentMaterialSummary node={node} quantity={facts} Row={Row} />
@@ -334,7 +330,7 @@ export function ModelComponentMaterialSummary({
 
   return (
     <div role='group' aria-label={`Inspection for ${node.name}`}>
-      <dl className='space-y-1 pt-1 pr-3 pb-2 pl-8.5 text-xs text-foreground'>
+      <dl className='space-y-1 px-3 pt-1 pb-2 text-xs text-foreground'>
         <div className='flex justify-between gap-4'>
           <dt className='text-muted-foreground'>Appearance</dt>
           <dd className='max-w-48 text-right'>{appearanceLabel(node)}</dd>
@@ -355,13 +351,13 @@ export function ModelComponentMaterialSummary({
       <p
         role={status.kind === 'failed' ? 'alert' : 'status'}
         aria-label='Measurement status'
-        className='px-3 pb-2 pl-8.5 text-xs text-muted-foreground'
+        className='px-3 pb-2 text-xs text-muted-foreground'
       >
         {status.sentence}
       </p>
       {materials?.length ? (
-        <Row label='Rendering' className='pl-8.5'>
-          <dl className='space-y-1 pt-1 pr-3 pb-2 pl-8.5 text-xs text-foreground'>
+        <Row label='Rendering'>
+          <dl className='space-y-1 px-3 pt-1 pb-2 text-xs text-foreground'>
             <div className='flex justify-between gap-4'>
               <dt className='text-muted-foreground'>Base color</dt>
               <dd className='max-w-48 text-right font-mono wrap-break-word tabular-nums'>

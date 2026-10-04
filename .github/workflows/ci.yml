@@ -37,6 +37,7 @@ jobs:
       apps: ${{ steps.plan.outputs.apps }}
       api: ${{ steps.plan.outputs.api }}
       e2e: ${{ steps.plan.outputs.e2e }}
+      e2e-suites: ${{ steps.plan.outputs.e2e-suites }}
       size: ${{ steps.plan.outputs.size }}
       formal: ${{ steps.plan.outputs.formal }}
       geospec-required: ${{ steps.geospec.outputs.geospec-required }}
@@ -71,6 +72,19 @@ jobs:
             echo "$apps"
             echo "EOF"
           } >> "$GITHUB_OUTPUT"
+          # One Browser end-to-end job per affected project and suite target.
+          suites='[]'
+          add_suites() {
+            suites=$(jq -c --arg target "$1" --argjson projects "$2" \
+              '. + [$projects[] | {project: ., target: $target, slug: ("\(.)-\($target)" | gsub(":"; "-"))}]' <<< "$suites")
+          }
+          add_suites test:e2e "$(pnpm nx show projects --affected --with-target test:e2e --json | tail -1)"
+          add_suites test:e2e:development "$(pnpm nx show projects --affected --with-target test:e2e:development --json | tail -1)"
+          add_suites test:e2e:browser-host "$(pnpm nx show projects --affected --with-target test:e2e:browser-host --json | tail -1)"
+          add_suites test:e2e:daemon-host "$(pnpm nx show projects --affected --with-target test:e2e:daemon-host --json | tail -1)"
+          add_suites test:e2e:non-isolated "$(pnpm nx show projects --affected --with-target test:e2e:non-isolated --json | tail -1)"
+          echo "Affected end-to-end suites: $suites"
+          echo "e2e-suites=$suites" >> "$GITHUB_OUTPUT"
           for lane in "api=$api" "e2e=$e2e" "size=$size" "formal=$formal"; do
             if [ "${lane#*=}" = '[]' ]; then
               echo "${lane%%=*}=false" >> "$GITHUB_OUTPUT"
@@ -532,20 +546,26 @@ jobs:
   # development-server qualifications. `nx affected` picks the projects — their
   # `implicitDependencies` make the selection correct — and target existence
   # picks the suites, so a new e2e project joins by declaring the targets.
+  # Each affected project and suite target runs as its own job (the plan job's
+  # `e2e-suites`): in one job they ran one after another for over 105 min
+  # (run 37221169741, 2026-10-04).
   e2e:
-    name: Browser end-to-end
+    name: Browser end-to-end (${{ matrix.suite.project }} ${{ matrix.suite.target }})
     runs-on: ubuntu-latest
     needs: [plan, geospec-producer]
     if: >-
       !cancelled() && needs.plan.result == 'success' &&
       (needs.plan.outputs.geospec-required != 'true' || needs.plan.outputs.geospec-cached == 'true' || needs.geospec-producer.result == 'success') &&
-      (needs.plan.outputs.e2e == 'true')
+      (needs.plan.outputs.e2e == 'true' && needs.plan.outputs.e2e-suites != '[]')
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
       actions: 'read'
       pull-requests: 'read'
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: ${{ fromJSON(needs.plan.outputs.e2e-suites) }}
     steps:
-      # `nx affected` below diffs against the PR base, so the checkout needs its history.
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -581,11 +601,13 @@ jobs:
       # loses the runner ("The operation was canceled.") a few minutes in.
       # A step-level bound: a hung suite otherwise holds the job for the 6 h default
       # with no logs, while this still runs the always() diagnostics below.
-      - name: Run affected end-to-end suites
+      - name: Run the end-to-end suite
         timeout-minutes: 120
         env:
           TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1
+          PROJECT: ${{ matrix.suite.project }}
+          TARGET: ${{ matrix.suite.target }}
+        run: xvfb-run --auto-servernum pnpm nx run-many -t "$TARGET" --projects "$PROJECT" --parallel=1
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.
@@ -597,7 +619,9 @@ jobs:
 
       - name: Validate captured chat logs
         if: always()
-        run: pnpm nx affected -t formal:logs
+        env:
+          PROJECT: ${{ matrix.suite.project }}
+        run: pnpm nx run-many -t formal:logs --projects "$PROJECT"
 
       - name: Check workspace root hygiene
         if: always()
@@ -607,7 +631,7 @@ jobs:
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
         with:
-          name: vitest-browser-diagnostics
+          name: vitest-browser-diagnostics-${{ matrix.suite.slug }}
           path: |
             out/test-results/vitest-browser
             out/test-results/desktop-e2e
@@ -697,7 +721,11 @@ jobs:
         if: always()
         run: pnpm nx run scripts:validate-workspace-root
 
+      # The comparison rebuilds the base branch, which took 24 min on a full graph (run
+      # 37221169741, 2026-10-04), so it runs only on PRs labelled `size-compare`. A label
+      # alone does not start a run: push after adding it.
       - name: Compare bundle sizes with the base branch
+        if: contains(github.event.pull_request.labels.*.name, 'size-compare')
         continue-on-error: true
         uses: andresz1/size-limit-action@94bc357df29c36c8f8d50ea497c3e225c3c95d1d # v1.8.0
         with:

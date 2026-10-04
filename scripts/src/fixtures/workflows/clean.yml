@@ -48,3 +48,5 @@ jobs:
           pnpm nx run-many -t test --projects "$shard"
       - name: Run one matrix project
         run: pnpm nx run-many -t test --projects=${{ matrix.project }}
+      - name: Run one computed suite
+        run: pnpm nx run-many -t "$TARGET" --projects "$PROJECT"

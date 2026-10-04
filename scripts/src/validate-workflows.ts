@@ -8,8 +8,8 @@
  * selectors fail open, so the drift is silent.
  *
  * A shell or expression value (`"$SHARD"`, `${{ matrix.project }}`) is a
- * selector too: the plan job computes it from the graph at run time, so it
- * cannot drift the way a hand-written name does.
+ * selector too, for projects and targets alike: the plan job computes it from
+ * the graph at run time, so it cannot drift the way a hand-written name does.
  *
  * Two exemptions, both structural rather than convenient:
  * - `nx run <project>:<target>` is allowed when the project carries
@@ -75,9 +75,11 @@ const subcommands = new Set([
   'list',
 ]);
 
+/** A shell or expression value, computed at run time rather than written here. */
+const isComputed = (value: string): boolean => /^["']?\$/u.test(value);
+
 /** A value that resolves through the graph rather than naming a project. */
-const isSelector = (value: string): boolean =>
-  value.startsWith('tag:') || value.includes('*') || /^["']?\$/u.test(value);
+const isSelector = (value: string): boolean => value.startsWith('tag:') || value.includes('*') || isComputed(value);
 
 /**
  * Split a `run:` script into the shell commands it runs.
@@ -164,7 +166,7 @@ export const validateWorkflows = (
     }
 
     for (const value of referenced) {
-      if (!known.has(value)) {
+      if (!known.has(value) && !isComputed(value)) {
         violations.push(`${file} (job ${job}): target \`${value}\` exists on no project`);
       }
     }

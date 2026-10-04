@@ -5,6 +5,7 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import { admitUnit } from '@taucad/units/unit';
 import { quantityKinds, quantityReferences } from '@taucad/units/quantity';
 import { assertBoundedJson } from '#bounded-json.js';
+import { jsonSchemaBudget } from '#json-schema-budget.js';
 
 /** JSON Schema data (Draft-07 or 2020-12) admitted by the configuration and parameter boundaries. @public */
 export type JsonSchema = Readonly<Record<string, unknown>>;
@@ -450,12 +451,7 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
     fail('INVALID_SCHEMA', '', 'root schema must be an object');
   }
   const dialect = dialectOf(schema);
-  assertBoundedJson(schema, {
-    code: 'SCHEMA',
-    maximumDepth: 20,
-    maximumNodes: 2048,
-    maximumCharacters: 65_536,
-  });
+  assertBoundedJson(schema, { code: 'SCHEMA', ...jsonSchemaBudget });
   try {
     canonicalizeCacheValue({ value: schema as CacheValue });
   } catch (error) {
@@ -473,12 +469,12 @@ export const admitJsonSchema = (schema: JsonSchema): void => {
   while (stack.length > 0) {
     const item = stack.pop()!;
     nodes += 1;
-    if (nodes > 2048 || item.depth > 20) {
+    if (nodes > jsonSchemaBudget.maximumNodes || item.depth > jsonSchemaBudget.maximumDepth) {
       fail('SCHEMA_LIMIT', item.pointer, 'depth or node budget exceeded');
     }
     if (typeof item.value === 'string') {
       stringCharacters += item.value.length;
-      if (stringCharacters > 65_536) {
+      if (stringCharacters > jsonSchemaBudget.maximumCharacters) {
         fail('SCHEMA_STRING_LIMIT', item.pointer, 'string budget exceeded');
       }
     }

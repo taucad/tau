@@ -26,7 +26,7 @@ import {
   WebGLRenderer,
 } from 'three';
 import type { Material, Object3D } from 'three';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { clearRendererSpans, rendererSpans } from '#lib/renderer-telemetry.js';
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';

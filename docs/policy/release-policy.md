@@ -3,7 +3,7 @@ title: 'Release Policy'
 description: 'Versioning, building, and publishing strategy for @taucad/* npm packages: Nx Release, version plans, tsdown, OIDC.'
 status: active
 created: '2026-02-27'
-updated: '2026-10-02'
+updated: '2026-10-04'
 related:
   - docs/policy/version-policy.md
   - docs/policy/public-surface-policy.md
@@ -261,6 +261,7 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 - **Version source**: `scripts/src/release-apps.ts` bumps each application from the conventional commits that touched its workspace dependency closure since its last `<project>@<version>` tag (feature: minor; breaking: major, or minor below 1.0.0; anything else: patch). Tests and Markdown do not count. An application without a tag starts at `0.1.0`.
 - **Release PR**: `.github/workflows/release.yml` keeps one bot-owned pull request on `release/next` whose commit only changes `apps/*/package.json` versions and `apps/*/CHANGELOG.md`. Squash-merging it is the release act; its push creates one tag and one GitHub Release per application with the release GitHub App.
 - **Release CI**: a published GitHub Release starts `.github/workflows/release-build.yml`, which lints, typechecks, tests and builds the application at its tag. A desktop release also packages macOS (Developer ID signed and notarized), Linux and Windows (unsigned) archives, attaches them with `SHA256SUMS.txt` and the per-platform update feeds, and only then becomes the repository's latest release.
+- **Staging desktop**: dispatching `.github/workflows/release-desktop-staging.yml` from `main` creates a `desktop-staging@<version>-staging.<n>` prerelease with the release GitHub App. `release-build.yml` builds it exactly like a desktop release, packaged for the staging channel (taucad.dev endpoints, no update checks) and signed from the `desktop-staging` environment; it attaches the archives without update feeds and never marks the prerelease latest.
 - **Production**: nothing deploys to production on merge. A maintainer dispatches `.github/workflows/deploy-production.yml` with a `ui@` or `api@` release tag; it requires a green release build for every application release on that commit and moves `production` to it. Moving to an older release requires `rollback: true`.
 
 ## Security Considerations
@@ -287,3 +288,4 @@ The deployable applications (projects tagged `release:app`: `ui`, `api` and `des
 | 2026-08 | Supersede the batches with one `nx release publish`     | `nx-release-publish` already depends on `^nx-release-publish` (+ `pkgcheck` via `targetDefaults`), so Nx orders and fail-stops the fixed group natively   |
 | 2026-09 | Publish filesystem and RPC separately                   | Runtime and agent-host consume public dependency layers; six private libraries remain runtime bundle candidates                                           |
 | 2026-10 | Release applications from GitHub Releases               | One bot-owned release PR versions the UI, API and desktop from commits; a GitHub Release triggers the full build and production is an explicit dispatch   |
+| 2026-10 | Staging desktop prereleases                             | A signed staging build reaches taucad.dev testers without touching the production release, its update feed or its approval gate                           |

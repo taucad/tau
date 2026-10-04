@@ -1,0 +1,7 @@
+[
+  {
+    "name": "@taucad/grbl (.) with the session and the simulator — measured 22.2 kB brotli on 2026-10-05",
+    "path": "dist/*.mjs",
+    "limit": "24.5 kB"
+  }
+]

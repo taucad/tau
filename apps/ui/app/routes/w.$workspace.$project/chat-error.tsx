@@ -22,7 +22,7 @@ import { ChatErrorTool } from '#routes/w.$workspace.$project/chat-error-tool.js'
 import { ChatErrorAgentStop } from '#routes/w.$workspace.$project/chat-error-agent-stop.js';
 import { ChatErrorProviderAccount } from '#routes/w.$workspace.$project/chat-error-provider-account.js';
 import { useOpenNewChat } from '#routes/w.$workspace.$project/use-open-new-chat.js';
-import { isResumableRunFailure, isUserStoppedRun } from '@taucad/agent-host';
+import { isResumableRun } from '@taucad/agent-host';
 import { externalAgentStopCodes, externalAgentStopSchema } from '@taucad/agent-host/wire';
 import { selectCaughtUp, selectCurrentRun, selectRunFailure } from '#machines/chat-projection.logic.js';
 
@@ -355,11 +355,14 @@ function codedErrorCard({
 export const ChatError = memo(function ({ className }: { readonly className?: string }): React.ReactNode {
   // Derive parsed error inside selector - prefer runtime error, fallback to persisted
   const parsedError = useChatSelector(selectVisibleChatError);
-  const stopped = useChatSelector(
+  /* One decision, the turn host's own: a card may promise the turn and say Resume only where `continue` will be
+   * admitted, which reads the caught-up log's current run — never the error text, which can outlive the run it names
+   * or describe a refusal that left no run. Every other card keeps *Try again* and makes no promise. */
+  const resumable = useChatSelector(
     (state) =>
       state.projection !== undefined &&
       selectCaughtUp(state.projection) &&
-      isUserStoppedRun(selectCurrentRun(state.projection)),
+      isResumableRun(selectCurrentRun(state.projection)),
   );
   const { regenerate } = useChatActions();
   const { openNewChat, isReady: canOpenNewChat } = useOpenNewChat();
@@ -402,14 +405,6 @@ export const ChatError = memo(function ({ className }: { readonly className?: st
       </ChatErrorCard>
     );
   };
-
-  /* One decision, taken from the host's own rule rather than a second copy of
-   * its code list: a card may promise the turn and say Resume only where
-   * `continue` will actually resume the run, and every other card keeps *Try
-   * again* and makes no promise. The parsed error carries the same `message`,
-   * `code` and `details` the run's terminal record did, which is all the
-   * predicate reads. */
-  const resumable = parsedError.code === 'USER_STOPPED' ? stopped : isResumableRunFailure(parsedError);
 
   // An external agent's own stop carries its classification; it outranks the category.
   const agentStop = (externalAgentStopCodes as readonly string[]).includes(parsedError.code ?? '')

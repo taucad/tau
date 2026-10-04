@@ -309,7 +309,7 @@ const messagesOf = (events: readonly AgentLogEvent[]): readonly ProviderMessage[
 const lifecycleOf = (events: readonly AgentLogEvent[]): readonly string[] =>
   events.flatMap((event) => (event.type === 'run.lifecycle' ? [event.state] : []));
 
-/** Whether the runner refused a turn whose outcome ACP cannot prove. */
+/** Whether the runner refused a turn because it could not reopen the agent's session. */
 const recoveryUnknown = (events: readonly AgentLogEvent[]): boolean =>
   events.some((event) => event.type === 'run.lifecycle' && event.detail?.code === 'EXTERNAL_AGENT_RECOVERY_UNKNOWN');
 
@@ -1033,7 +1033,7 @@ describe('the external agent run kind', () => {
     expect(sent(frames, 'session/prompt')).toBe(0);
   }, 60_000);
 
-  it('fails an interrupted turn whose outcome ACP cannot prove after a daemon restart', async () => {
+  it('continues a turn its host abandoned mid-stream on the session it remembered', async () => {
     const { launcher, workspaceRoot, frames } = await startHarness();
     const chatId = 'chat-external-resume';
     const runId = 'run-external-resume';
@@ -1077,24 +1077,21 @@ describe('the external agent run kind', () => {
     expect(sent(frames, 'initialize')).toBe(0);
 
     await launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } });
-    await until(
-      async () => lifecycleOf(await readLog(workspaceRoot, chatId)).at(-1) === 'failed',
-      'the ambiguous resumed run to fail',
-      { dump: async () => readLog(workspaceRoot, chatId) },
-    );
-    /* The person's Resume re-enters the vendor session, not a new one, but ACP
-     * exposes no idempotency key or turn-status query that could prove this
-     * turn's result, so nothing is prompted. */
-    expect(sent(frames, 'session/resume')).toBe(1);
-    expect(sent(frames, 'session/prompt')).toBe(0);
-    expect(sent(frames, 'session/new')).toBe(0);
-    const resumedEvents = await readLog(workspaceRoot, chatId);
-    expect(lifecycleOf(resumedEvents).at(-1)).toBe('failed');
-    /* The attempt's settlement row follows its terminal row (W8 TS-S6). */
-    expect(resumedEvents.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
-      type: 'run.lifecycle',
-      detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
+    await until(async () => sent(frames, 'session/prompt') === 1, 'the continuation prompt', {
+      dump: async () => readLog(workspaceRoot, chatId),
     });
+    /* Resume everywhere: the adapter died with its host, so the vendor turn has
+     * ended; the person's Resume re-enters the same vendor session and asks the
+     * agent to carry on from its own transcript. */
+    expect(sent(frames, 'session/resume')).toBe(1);
+    expect(sent(frames, 'session/new')).toBe(0);
+    const prompt = frames.find(
+      ({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"session/prompt"'),
+    );
+    expect(prompt?.frame).toContain('Continue from where you stopped.');
+    expect(prompt?.frame).not.toContain('write the file');
+    expect(recoveryUnknown(await readLog(workspaceRoot, chatId))).toBe(false);
+    await launcher.execute({ type: 'cancel', commandId: 'cmd-cancel', payload: { chatId, runId } });
   }, 90_000);
 
   /*
@@ -1321,9 +1318,10 @@ describe('the external agent run kind', () => {
   /*
    * F3. A resume reuses the run id, so a run that stopped, resumed and was
    * *then* cut short by a restart still carries the first stop's `failed` row.
-   * Continuing on that stale row is exactly the turn ACP cannot prove finished.
+   * The state this attempt resumes from is the takeover's `RUN_ABANDONED`, not
+   * that stale stop, and it continues the same session (resume everywhere).
    */
-  it('should refuse a resume whose own attempt a restart cut short, stale stop and all', async () => {
+  it('should continue a resume whose own attempt a restart cut short, from the abandonment', async () => {
     const { launcher, workspaceRoot, frames } = await startHarness();
     const chatId = 'chat-external-stale-stop';
     const runId = 'run-external-stale-stop';
@@ -1372,24 +1370,18 @@ describe('the external agent run kind', () => {
       dump: async () => readLog(workspaceRoot, chatId),
     });
     await launcher.execute({ type: 'resume', commandId: 'cmd-resume', payload: { chatId, runId } });
-    await until(
-      async () => recoveryUnknown(await readLog(workspaceRoot, chatId)),
-      'the ambiguous resumed run to fail again',
-      { dump: async () => readLog(workspaceRoot, chatId) },
-    );
+    await until(async () => sent(frames, 'session/prompt') === 1, 'the continuation prompt', {
+      dump: async () => readLog(workspaceRoot, chatId),
+    });
 
-    /* Reattached to the remembered session, and then refused: no prompt was
-     * sent on a turn whose outcome ACP cannot report. */
     expect(sent(frames, 'session/resume')).toBe(1);
     expect(sent(frames, 'session/new')).toBe(0);
-    expect(sent(frames, 'session/prompt')).toBe(0);
-    const settled = await readLog(workspaceRoot, chatId);
-    /* The attempt's settlement row follows its terminal row (W8 TS-S6). */
-    expect(settled.findLast((event) => event.type === 'run.lifecycle')).toMatchObject({
-      type: 'run.lifecycle',
-      state: 'failed',
-      detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
-    });
+    const prompt = frames.find(
+      ({ direction, frame }) => direction === 'client->agent' && frame.includes('"method":"session/prompt"'),
+    );
+    expect(prompt?.frame).toContain('Continue from where you stopped.');
+    expect(recoveryUnknown(await readLog(workspaceRoot, chatId))).toBe(false);
+    await launcher.execute({ type: 'cancel', commandId: 'cmd-cancel', payload: { chatId, runId } });
   }, 90_000);
 
   it('should record the sentence inside a provider error body rather than its JSON', async () => {

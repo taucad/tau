@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
 import type { RJSFSchema } from '@rjsf/utils';
@@ -9,15 +9,10 @@ import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuRadioGroup,
   DropdownMenuRadioItem,
-  DropdownMenuSeparator,
   DropdownMenuShortcut,
-  DropdownMenuSub,
-  DropdownMenuSubContent,
-  DropdownMenuSubTrigger,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
 import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
@@ -35,6 +30,8 @@ import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { extractModifiedProperties } from '#utils/object.utils.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
+import { getLiveViewOptions, setLiveViewOptions, useLiveViewOptions } from '#workbench-records/live-view-options.js';
+import type { LiveViewOptions } from '#workbench-records/live-view-options.js';
 import { newViewRecord } from '#workbench-records/projection.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 
@@ -58,12 +55,10 @@ export function ViewerProjectionPicker({
   viewId,
   entryPath,
   cadActor,
-  onOpenBeside,
 }: {
   readonly viewId: string;
   readonly entryPath: string;
   readonly cadActor: ActorRefFrom<typeof cadMachine>;
-  readonly onOpenBeside?: (viewId: string) => void;
 }): React.JSX.Element | undefined {
   const evaluation = useSelector(cadActor, selectCadEvaluation);
   const { viewRecords } = useProject();
@@ -71,6 +66,7 @@ export function ViewerProjectionPicker({
   const record = viewRecords.get(viewId);
   const selected = record?.selectedKernelView;
   const localChoice = useLocalInstanceChoice(viewId);
+  const liveOptions = useLiveViewOptions(viewId);
   // The viewer frame bounds every menu and panel the bar opens.
   const [boundary, setBoundary] = useState<HTMLElement>();
   if (!evaluation?.success) {
@@ -91,22 +87,26 @@ export function ViewerProjectionPicker({
     setLocalInstanceChoice(viewId, undefined);
     chooseProjection({ viewCommands, viewId, entryPath, evaluation, nextId });
   };
-  const editViewState = (change: {
-    readonly options?: Record<string, unknown>;
-    readonly authoredInstance?: string | undefined;
-  }): void => {
-    if (!offered) {
-      return;
-    }
-    void viewCommands.edit(viewId, (current) => {
+  const editViewState = async (
+    kernelViewId: string,
+    change: { readonly options?: Record<string, unknown>; readonly authoredInstance?: string | undefined },
+  ): Promise<boolean> =>
+    viewCommands.edit(viewId, (current) => {
       const nextRecord = current ?? newViewRecord(entryPath);
       const states = nextRecord.kernelViews ?? [];
-      const prior = states.find((view) => view.id === offered.id) ?? { id: offered.id };
+      const prior = states.find((view) => view.id === kernelViewId) ?? { id: kernelViewId };
       return workbenchRecords.view.schema.parse({
         ...nextRecord,
-        kernelViews: [...states.filter((view) => view.id !== offered.id), { ...prior, ...change }],
+        kernelViews: [...states.filter((view) => view.id !== kernelViewId), { ...prior, ...change }],
       });
     });
+  /* The record is the durable copy; the live draft keeps the viewer on what the panel shows until the record
+   * has it, and leaves a newer draft in place. */
+  const saveOptions = async (draft: LiveViewOptions): Promise<void> => {
+    await editViewState(draft.viewId, { options: draft.options });
+    if (getLiveViewOptions(viewId) === draft) {
+      setLiveViewOptions(viewId, undefined);
+    }
   };
   const chooseInstance = (id: string): void => {
     if (!offered) {
@@ -116,7 +116,7 @@ export function ViewerProjectionPicker({
       setLocalInstanceChoice(viewId, { evaluationId: evaluation.id, viewId: offered.id, instanceId: id });
     } else {
       setLocalInstanceChoice(viewId, undefined);
-      editViewState({ authoredInstance: id === '' ? undefined : id });
+      void editViewState(offered.id, { authoredInstance: id === '' ? undefined : id });
     }
   };
   const title = offered?.title ?? `${selected} unavailable`;
@@ -131,14 +131,7 @@ export function ViewerProjectionPicker({
       className='pointer-events-auto flex h-9 max-w-full min-w-0 items-center gap-1 rounded-lg border bg-sidebar p-1 text-muted-foreground shadow-xs [&_button]:font-normal [&_button:focus-visible]:text-foreground [&_button:hover]:text-foreground [&_button[data-state=open]]:text-foreground'
     >
       {showSwitch ? (
-        <ViewMenu
-          views={evaluation.views}
-          selected={selected}
-          title={title}
-          boundary={boundary}
-          onChoose={choose}
-          onOpenBeside={onOpenBeside}
-        />
+        <ViewMenu views={evaluation.views} selected={selected} title={title} boundary={boundary} onChoose={choose} />
       ) : null}
       {offered && showInstances ? (
         <>
@@ -157,14 +150,13 @@ export function ViewerProjectionPicker({
         <>
           <Hairline />
           <ViewOptionsPanel
+            paneId={viewId}
             viewTitle={offered.title}
             viewKey={offered.id}
             options={offered.options}
-            values={state?.options ?? {}}
+            values={liveOptions?.viewId === offered.id ? liveOptions.options : (state?.options ?? {})}
             boundary={boundary}
-            onChange={(options) => {
-              editViewState({ options });
-            }}
+            onSave={saveOptions}
           />
         </>
       ) : null}
@@ -172,14 +164,13 @@ export function ViewerProjectionPicker({
   );
 }
 
-/** The view menu: each offered view once, with the viewer's 1–3 shortcuts, and Open beside. */
+/** The view menu: each offered view once, with the viewer's 1–3 shortcuts. */
 function ViewMenu({
   views,
   selected,
   title,
   boundary,
   onChoose,
-  onOpenBeside,
 }: {
   readonly views: readonly ViewOffer[];
   /** The pinned view id; undefined follows the first view. */
@@ -187,7 +178,6 @@ function ViewMenu({
   readonly title: string;
   readonly boundary: HTMLElement | undefined;
   readonly onChoose: (id: string) => void;
-  readonly onOpenBeside: ((viewId: string) => void) | undefined;
 }): React.JSX.Element {
   const isUnavailable = selected !== undefined && !views.some((view) => view.id === selected);
   return (
@@ -223,26 +213,6 @@ function ViewMenu({
             </DropdownMenuRadioItem>
           ))}
         </DropdownMenuRadioGroup>
-        {onOpenBeside && views.length > 1 ? (
-          <>
-            <DropdownMenuSeparator />
-            <DropdownMenuSub>
-              <DropdownMenuSubTrigger>Open beside</DropdownMenuSubTrigger>
-              <DropdownMenuSubContent>
-                {views.map((view) => (
-                  <DropdownMenuItem
-                    key={view.id}
-                    onSelect={() => {
-                      onOpenBeside(view.id);
-                    }}
-                  >
-                    {view.title}
-                  </DropdownMenuItem>
-                ))}
-              </DropdownMenuSubContent>
-            </DropdownMenuSub>
-          </>
-        ) : null}
       </DropdownMenuContent>
     </DropdownMenu>
   );
@@ -309,7 +279,11 @@ function InstanceMenu({
   );
 }
 
-const transientEdit: ParameterEdit = { kind: 'transient' };
+/** Option edits re-render the view as they happen, number drags included, before the record is saved. */
+const liveEdit: ParameterEdit = { kind: 'transient', isLive: true };
+
+/** How long option edits rest before the view record is written; closing the panel writes at once. */
+export const viewOptionsSaveDelay = 300;
 
 /** A view's compiled option form, or why it cannot be shown, for the schema it was compiled from. */
 type CompiledOptions = { readonly schema: RJSFSchema } & (
@@ -341,25 +315,56 @@ const compileViewOptionsManifest = async (
 
 /** The view's options toggle and its panel: the view's option schema in the shared Parameters form. */
 function ViewOptionsPanel({
+  paneId,
   viewTitle,
   viewKey,
   options,
   values,
   boundary,
-  onChange,
+  onSave,
 }: {
+  readonly paneId: string;
   readonly viewTitle: string;
   readonly viewKey: string;
   readonly options: ViewOptions;
   readonly values: Record<string, unknown>;
   readonly boundary: HTMLElement | undefined;
-  readonly onChange: (options: Record<string, unknown>) => void;
+  readonly onSave: (draft: LiveViewOptions) => Promise<void>;
 }): React.JSX.Element {
   const schema = options.schema as RJSFSchema;
+  /* Each edit reaches the viewer through the live draft at once; the record is written once edits rest, so a drag
+   * re-renders every frame without a file write per frame. */
+  const pendingSave = useRef<{
+    readonly draft: LiveViewOptions;
+    readonly save: (draft: LiveViewOptions) => Promise<void>;
+    readonly timer: ReturnType<typeof setTimeout>;
+  }>(undefined);
+  const flush = useCallback((): void => {
+    const pending = pendingSave.current;
+    if (!pending) {
+      return;
+    }
+    clearTimeout(pending.timer);
+    pendingSave.current = undefined;
+    void pending.save(pending.draft);
+  }, []);
+  useEffect(() => flush, [flush]);
+  const change = (next: Record<string, unknown>): void => {
+    const draft = { viewId: viewKey, options: next };
+    setLiveViewOptions(paneId, draft);
+    clearTimeout(pendingSave.current?.timer);
+    pendingSave.current = { draft, save: onSave, timer: setTimeout(flush, viewOptionsSaveDelay) };
+  };
   const isModified = Object.keys(extractModifiedProperties(values, options.defaults)).length > 0;
   const label = `${viewTitle} options`;
   return (
-    <Popover>
+    <Popover
+      onOpenChange={(isOpen) => {
+        if (!isOpen) {
+          flush();
+        }
+      }}
+    >
       <Tooltip>
         <TooltipTrigger asChild>
           <PopoverTrigger asChild>
@@ -395,7 +400,8 @@ function ViewOptionsPanel({
             disabled={!isModified}
             className='text-muted-foreground hover:text-foreground'
             onClick={() => {
-              onChange(options.defaults);
+              change(options.defaults);
+              flush();
             }}
           >
             <RefreshCcwDot aria-hidden='true' />
@@ -410,7 +416,7 @@ function ViewOptionsPanel({
             values={values}
             onChange={(modified) => {
               // Saved whole, so a kernel reads every declared value, not only the changed ones.
-              onChange(mergeFormDefaults(schema, options.defaults, modified));
+              change(mergeFormDefaults(schema, options.defaults, modified));
             }}
           />
         </div>
@@ -472,7 +478,7 @@ function ViewOptionsForm({
       jsonSchema={schema}
       units={{ length: { displaySymbol } }}
       parameterManifest={compiled.manifest}
-      parameterEdit={transientEdit}
+      parameterEdit={liveEdit}
       emptyMessage='No options'
       emptyDescription='This view declares no options.'
       onParametersChange={onChange}

@@ -1,11 +1,12 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { workbenchRecords } from '@taucad/workbench';
 import type { Evaluation } from '@taucad/runtime';
 import type { ActorRefFrom } from 'xstate';
 import type { cadMachine } from '#machines/cad.machine.js';
 import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
+import { getLiveViewOptions, setLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { viewTabTitle } from '#workbench-records/projection.js';
 import { mock } from 'vitest-mock-extended';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
@@ -28,7 +29,8 @@ vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: mockState.edit }),
 }));
 
-const { ViewerProjectionPicker } = await import('#routes/w.$workspace.$project/chat-viewer-projection-picker.js');
+const { ViewerProjectionPicker, viewOptionsSaveDelay } =
+  await import('#routes/w.$workspace.$project/chat-viewer-projection-picker.js');
 const { viewerPanelTitle } = await import('#routes/w.$workspace.$project/chat-viewer-dockview.js');
 const renderPicker = (ui: React.ReactElement): ReturnType<typeof render> => render(ui, { wrapper: TooltipProvider });
 const cadActor = mock<ActorRefFrom<typeof cadMachine>>();
@@ -41,6 +43,13 @@ const drawing = {
 } as const;
 
 describe('viewer pane projection picker', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    setLiveViewOptions('pane-1', undefined);
+    mockState.edit.mockReset();
+    mockState.edit.mockResolvedValue(true);
+  });
+
   it('adds an offered projection suffix only for duplicate-file multi-view panels', () => {
     const record = workbenchRecords.view.schema.parse({
       version: 1,
@@ -104,9 +113,8 @@ describe('viewer pane projection picker', () => {
     expect(saved.kernelViews).toEqual([{ id: 'drawing', options: { scale: 2 } }]);
   });
 
-  it('offers each build projection as a distinct pane action', () => {
+  it('offers no Open beside: split view opens another pane', () => {
     mockState.record = undefined;
-    mockState.edit.mockClear();
     mockState.evaluation = {
       id: 'e2',
       success: true,
@@ -115,16 +123,11 @@ describe('viewer pane projection picker', () => {
       exports: [],
       issues: [],
     };
-    const openBeside = vi.fn();
-    renderPicker(
-      <ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} onOpenBeside={openBeside} />,
-    );
+    renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
 
     fireEvent.keyDown(screen.getByRole('button', { name: /^View:/ }), { key: 'ArrowDown' });
-    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Open beside' }), { key: 'ArrowRight' });
-    fireEvent.click(screen.getByRole('menuitem', { name: 'Drawing' }));
-    expect(openBeside).toHaveBeenCalledExactlyOnceWith('drawing');
-    expect(mockState.edit).not.toHaveBeenCalled();
+    expect(screen.getByRole('menuitemradio', { name: 'Drawing' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitem', { name: /beside/i })).not.toBeInTheDocument();
   });
 
   it('shows an unavailable saved ID without retargeting it', () => {
@@ -170,11 +173,18 @@ describe('viewer pane projection picker', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Drawing options' }));
     const panel = await screen.findByRole('dialog', { name: 'Drawing options' });
     fireEvent.click(await within(panel).findByRole('switch'));
+    // The viewer has the change at once; the record is written when the panel closes.
+    expect(getLiveViewOptions('pane-1')).toEqual({ viewId: 'drawing', options: { pinNumbers: true } });
+    expect(mockState.edit).not.toHaveBeenCalled();
+    fireEvent.keyDown(panel, { key: 'Escape' });
     const optionsEdit = mockState.edit.mock.lastCall?.[1] as (
       record: ReturnType<typeof workbenchRecords.view.schema.parse>,
     ) => ReturnType<typeof workbenchRecords.view.schema.parse>;
     expect(optionsEdit(mockState.record).kernelViews).toEqual([{ id: 'drawing', options: { pinNumbers: true } }]);
-    fireEvent.keyDown(panel, { key: 'Escape' });
+    await vi.waitFor(() => {
+      expect(getLiveViewOptions('pane-1')).toBeUndefined();
+    });
+    mockState.edit.mockClear();
     fireEvent.keyDown(screen.getByRole('button', { name: 'Drawing instance: Whole view' }), { key: 'ArrowDown' });
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Power' }));
     const instanceEdit = mockState.edit.mock.lastCall?.[1] as (
@@ -263,6 +273,61 @@ describe('viewer pane projection picker', () => {
     expect(within(panel).getByRole('spinbutton', { name: 'Input for Angular Tolerance' })).toHaveValue('20');
     expect(within(panel).queryByRole('textbox', { name: /JSON/ })).not.toBeInTheDocument();
     expect(within(panel).getByRole('button', { name: 'Reset' })).toBeDisabled();
+  });
+
+  it('re-renders edits through the live draft and saves the record once they rest', async () => {
+    mockState.record = undefined;
+    mockState.evaluation = {
+      id: 'e7',
+      success: true,
+      transient: false,
+      exports: [],
+      issues: [],
+      views: [
+        {
+          ...model,
+          options: {
+            schema: {
+              type: 'object',
+              properties: { tessellation: { type: 'object', properties: { angularTolerance: { type: 'number' } } } },
+            },
+            defaults: { tessellation: { angularTolerance: 20 } },
+          },
+        },
+      ],
+    };
+    renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    fireEvent.click(screen.getByRole('button', { name: '3D Model options' }));
+    const panel = await screen.findByRole('dialog', { name: '3D Model options' });
+    const field = await within(panel).findByRole('spinbutton', { name: 'Input for Angular Tolerance' });
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] });
+
+    for (const value of ['40', '60']) {
+      fireEvent.change(field, { target: { value } });
+      fireEvent.keyDown(field, { key: 'Enter' });
+    }
+    // Each edit is live for the viewer at once; nothing is written yet.
+    expect(getLiveViewOptions('pane-1')).toEqual({
+      viewId: 'model',
+      options: { tessellation: { angularTolerance: 60 } },
+    });
+    expect(screen.getByRole('button', { name: '3D Model options (changed)' })).toBeInTheDocument();
+    vi.advanceTimersByTime(viewOptionsSaveDelay - 1);
+    expect(mockState.edit).not.toHaveBeenCalled();
+
+    // Once edits rest, one write carries the latest values, and the draft yields to the record.
+    vi.advanceTimersByTime(1);
+    expect(mockState.edit).toHaveBeenCalledOnce();
+    const update = mockState.edit.mock.lastCall?.[1] as (
+      record: undefined,
+    ) => ReturnType<typeof workbenchRecords.view.schema.parse>;
+    expect(update(undefined).kernelViews).toEqual([
+      { id: 'model', options: { tessellation: { angularTolerance: 60 } } },
+    ]);
+    vi.useRealTimers();
+    await vi.waitFor(() => {
+      expect(getLiveViewOptions('pane-1')).toBeUndefined();
+    });
   });
 
   it('keeps a local instance only for its evaluation and marks it expired after a rebuild', () => {

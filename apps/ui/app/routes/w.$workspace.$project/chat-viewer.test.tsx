@@ -3,6 +3,7 @@ import { describe, it, expect, vi, beforeEach, afterEach, onTestFinished } from 
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react';
 import { Profiler, useSyncExternalStore } from 'react';
 import type { RefObject } from 'react';
+import { setLiveViewOptions } from '#workbench-records/live-view-options.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { createActor, createAsyncLogic } from 'xstate';
 import type { ActorRefFrom } from 'xstate';
@@ -626,6 +627,58 @@ describe('ChatViewer reopen-renderer overlay', () => {
     viewer.unmount();
     expect(runtime.view.close).toHaveBeenCalledTimes(2);
     expect(runtime.document.close).not.toHaveBeenCalled();
+  });
+
+  it('re-renders the view from the options panel live draft before the record saves it', () => {
+    const runtime = createMockRuntimeDocument();
+    const evaluation: Evaluation = {
+      ...successfulEvaluation(runtime.evaluation),
+      views: [{ id: 'model', title: 'Model', mimeType: 'model/gltf-binary' }],
+    };
+    mockViewSettings = { 'view-1': { entryPath: helperEntryPath, graphicsSettings: defaultGraphicsSettings } };
+    mockGeometryUnits.set(helperEntryPath, createMockCadActor({ runtime, evaluation, rendering: undefined }));
+    const viewer = renderViewer(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    const coarse = { tessellation: { linearTolerance: 0.02, angularTolerance: 80 } };
+
+    // Each panel edit re-renders at once, with no record write in between.
+    act(() => {
+      setLiveViewOptions('view-1', { viewId: 'model', options: coarse });
+    });
+    expect(runtime.viewSpy).toHaveBeenLastCalledWith('model', { options: coarse });
+    act(() => {
+      setLiveViewOptions('view-1', {
+        viewId: 'model',
+        options: { tessellation: { ...coarse.tessellation, angularTolerance: 5 } },
+      });
+    });
+    expect(runtime.viewSpy).toHaveBeenLastCalledWith('model', {
+      options: { tessellation: { linearTolerance: 0.02, angularTolerance: 5 } },
+    });
+    const calls = runtime.viewSpy.mock.calls.length;
+
+    // The record catches up and the draft yields: the same options keep the same subscription.
+    mockViewSettings = {
+      'view-1': {
+        entryPath: helperEntryPath,
+        graphicsSettings: defaultGraphicsSettings,
+        kernelViews: [{ id: 'model', options: { tessellation: { linearTolerance: 0.02, angularTolerance: 5 } } }],
+      },
+    };
+    viewer.rerender(<ChatViewer viewId='view-1' entryPath={helperEntryPath} panelApi={mockPanelApi} />);
+    act(() => {
+      setLiveViewOptions('view-1', undefined);
+    });
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(calls);
+
+    // A draft for another kernel view leaves this one alone.
+    act(() => {
+      setLiveViewOptions('view-1', { viewId: 'drawing', options: { scale: 2 } });
+    });
+    expect(runtime.viewSpy).toHaveBeenCalledTimes(calls);
+    act(() => {
+      setLiveViewOptions('view-1', undefined);
+    });
+    viewer.unmount();
   });
 
   it('switches a focused pane with digit keys but ignores editing controls', () => {

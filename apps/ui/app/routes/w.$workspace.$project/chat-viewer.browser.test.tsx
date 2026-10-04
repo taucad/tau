@@ -85,7 +85,7 @@ const { ViewerRightActions, ViewerProjectionCommandItems } =
 const { ViewerProjectionPicker } = await import('#routes/w.$workspace.$project/chat-viewer-projection-picker.js');
 
 type Params = { viewId: string; entryPath: string };
-function BrowserViewerPane({ api, containerApi, params }: IDockviewPanelProps<Params>): React.JSX.Element {
+function BrowserViewerPane({ params }: IDockviewPanelProps<Params>): React.JSX.Element {
   return (
     <div
       data-testid={`viewer-pane-${params.viewId}`}
@@ -97,17 +97,6 @@ function BrowserViewerPane({ api, containerApi, params }: IDockviewPanelProps<Pa
           viewId={params.viewId}
           entryPath={params.entryPath}
           cadActor={actor as ActorRefFrom<typeof cadMachine>}
-          onOpenBeside={(kernelViewId) => {
-            const viewId = `pane-${String(containerApi.panels.length)}`;
-            containerApi.addPanel({
-              id: viewId,
-              component: 'viewer',
-              title: 'main.tsx',
-              params: { viewId, entryPath: params.entryPath },
-              position: { direction: 'right', referenceGroup: api.group },
-            });
-            state.edits(viewId, () => ({ ...newViewRecord(params.entryPath), selectedKernelView: kernelViewId }));
-          }}
         />
       </div>
       <div className='flex size-full items-center justify-center'>Viewer content</div>
@@ -153,7 +142,6 @@ function DockFixture({
           cadActor={actor as ActorRefFrom<typeof cadMachine>}
           viewId='pane-0'
           entryPath='main.tsx'
-          api={api}
         />
       ) : null}
       <output data-testid='panel-count'>{api?.panels.length ?? 0}</output>
@@ -200,22 +188,20 @@ describe('viewer pane projection picker in Chromium', () => {
     });
   });
 
-  it('keeps the command palette and pane-bound Open beside action', async () => {
+  it('keeps the command palette Show action and offers no Open beside', async () => {
     await page.viewport(760, 480);
     render(
       <TooltipProvider>
         <DockFixture width={720} />
       </TooltipProvider>,
     );
-    expect(state.paletteItems.map((item) => item.label)).toContain('Show PCB');
+    const labels = state.paletteItems.map((item) => item.label);
+    expect(labels).toContain('Show PCB');
+    expect(labels.filter((label) => label.includes('beside'))).toEqual([]);
     const first = await screen.findByTestId('viewer-pane-pane-0');
     await userEvent.click(first.querySelector('button[aria-label^="View:"]')!);
-    await userEvent.hover(await screen.findByRole('menuitem', { name: 'Open beside' }));
-    await userEvent.click(await screen.findByRole('menuitem', { name: 'Drawing' }));
-    expect(state.edits).toHaveBeenCalledWith('pane-1', expect.any(Function));
-    await vi.waitFor(() => {
-      expect(document.querySelectorAll('.dv-tab')).toHaveLength(2);
-    });
+    expect(await screen.findByRole('menuitemradio', { name: 'PCB' })).toBeVisible();
+    expect(screen.queryByRole('menuitem', { name: /beside/i })).toBeNull();
   });
 
   it('keeps instance and options reachable in a narrow pane without overflow', async () => {

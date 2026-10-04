@@ -223,6 +223,9 @@ export function ParametersWidget(
           fieldProjection={fieldProjection}
           sourceUnit={parameterGroup?.sourceUnits?.[instancePointer]}
           edit={formContext.parameterEdit}
+          enableContinualOnChange={
+            formContext.parameterEdit.kind === 'transient' && formContext.parameterEdit.isLive === true
+          }
           min={min}
           max={max}
           step={step}

@@ -63,6 +63,8 @@ import type {
   MachineNetworkStillInput,
   MachineNetworkStream,
   MachineOperationReceipt,
+  MachineReport,
+  MaterialSlotSnapshot,
   MachineSession,
   MachineStill,
   MachineTransportTrust,
@@ -1096,14 +1098,7 @@ const runLiveReadOnly = async (configuration: QualificationConfiguration): Promi
                 vendor: descriptor.vendor,
                 model: descriptor.model,
                 firmware: descriptor.firmware,
-                technology: descriptor.technology,
-                accepts: descriptor.accepts,
-                operations: descriptor.operations,
-                ratedEnvelope: descriptor.ratedEnvelope,
-                printableEnvelope: descriptor.printableEnvelope,
-                tools: descriptor.tools,
-                materialSystem: descriptor.materialSystem,
-                bedTypes: descriptor.bedTypes,
+                capabilities: descriptor.capabilities,
               },
               snapshot,
               camera: camera.status(),
@@ -1218,36 +1213,31 @@ const runReadOnly = async (configuration: QualificationConfiguration): Promise<v
           vendor: first.descriptor.vendor,
           model: first.descriptor.model,
           firmware: first.descriptor.firmware,
-          technology: first.descriptor.technology,
-          accepts: first.descriptor.accepts,
-          operations: first.descriptor.operations,
-          ratedEnvelope: first.descriptor.ratedEnvelope,
-          printableEnvelope: first.descriptor.printableEnvelope,
-          tools: first.descriptor.tools,
-          materialSystem: first.descriptor.materialSystem,
-          bedTypes: first.descriptor.bedTypes,
+          components: first.descriptor.capabilities.components,
+          actions: first.descriptor.capabilities.actions.map(({ componentId, id }) => `${componentId}:${id}`),
         },
         snapshot: {
           connection: first.snapshot.connection,
-          readiness: first.snapshot.readiness,
-          ...(first.snapshot.activeRunId
+          state: first.snapshot.state,
+          ...(first.snapshot.run
             ? {
-                activeRunIdentitySha256: digest(Uint8Array.from(Buffer.from(first.snapshot.activeRunId))),
+                run: {
+                  ...first.snapshot.run,
+                  runId: digest(Uint8Array.from(Buffer.from(first.snapshot.run.runId))),
+                },
               }
             : {}),
           observedAt: first.snapshot.observedAt,
-          setup: first.snapshot.setup,
-          run: first.snapshot.run,
-          temperatures: first.snapshot.temperatures,
+          components: first.snapshot.components,
+          availability: first.snapshot.availability,
+          alerts: first.snapshot.alerts,
         },
         still,
         reconnect: {
           connection: reconnected.snapshot.connection,
           firmware: reconnected.descriptor.firmware,
-          readiness: reconnected.snapshot.readiness,
-          setup: reconnected.snapshot.setup,
-          run: reconnected.snapshot.run,
-          temperatures: reconnected.snapshot.temperatures,
+          state: reconnected.snapshot.state,
+          components: reconnected.snapshot.components,
           observedAt: reconnected.snapshot.observedAt,
         },
       })}\n`,
@@ -1257,6 +1247,12 @@ const runReadOnly = async (configuration: QualificationConfiguration): Promise<v
     await closeSession(session);
   }
 };
+
+/** Every material slot the report knows, across its material systems. */
+const materialSlotsOf = (report: MachineReport): readonly MaterialSlotSnapshot[] =>
+  report.components.flatMap((component) =>
+    component.knowledge === 'known' && component.value.kind === 'material-system' ? component.value.slots : [],
+  );
 
 const waitForCurrentMachine = async (
   client: ReturnType<typeof connectMachineChannel>,
@@ -1342,9 +1338,8 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
       { route: 'machines', operation: 'machines.beginBinding' },
       { route: 'machines', operation: 'machines.list' },
       { route: 'machines', operation: 'machines.get' },
-      { route: 'machines', operation: 'machines.preparePrint' },
-      { route: 'machines', operation: 'machines.uploadPrint' },
-      { route: 'machines', operation: 'machines.startPrint' },
+      { route: 'machines', operation: 'machines.requestJob' },
+      { route: 'machines', operation: 'machines.resolveJob' },
       { route: 'machines', operation: 'machines.reconcileOperation' },
     ],
   });
@@ -1408,23 +1403,27 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
     }
     phase = 'SETUP';
     const entry = await waitForCurrentMachine(client, machineId, cancellation.signal);
-    const nozzle = entry.descriptor.tools[0]?.nozzleDiameter;
-    const material = entry.snapshot.setup.materials.find((row) => row.slot === 0);
+    const toolhead = entry.descriptor.capabilities.components.find((component) => component.kind === 'toolhead');
+    const nozzle = toolhead?.kind === 'toolhead' ? toolhead.nozzles[0]?.diameter : undefined;
+    const material = materialSlotsOf(entry.snapshot).find(
+      ({ slot }) => slot.unitId === 'ams-a' && slot.slotId === 'a1',
+    );
     if (
       entry.descriptor.model !== 'X1C' ||
       entry.descriptor.firmware !== '01.12.00.00' ||
-      entry.snapshot.readiness !== 'idle' ||
-      entry.snapshot.activeRunId !== undefined ||
+      entry.snapshot.state.status !== 'ready' ||
+      entry.snapshot.run !== undefined ||
       nozzle?.value !== 0.4 ||
-      nozzle.unit.code !== 'mm' ||
       material?.state !== 'loaded' ||
-      material.materialId?.toLowerCase() !== 'petg'
+      material.material?.materialType.toLowerCase() !== 'petg'
     ) {
       throw new QualificationError('X1C_PRINT_SETUP_UNQUALIFIED');
     }
     phase = 'UPLOAD';
-    const prepared = await client.preparePrint({
+    const operator = { kind: 'user', id: 'operator', label: 'Operator' } as const;
+    const requested = await client.requestJob({
       machineId,
+      jobId: `${printOperationId}-job`,
       artifact: artifact.artifact,
       configuration: {
         amsMapping: [0],
@@ -1438,32 +1437,29 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         flowCalibration: true,
         timelapse: false,
       },
+      requestedBy: operator,
       signal: cancellation.signal,
     });
-    const uploaded = await client.uploadPrint({
-      machineId,
-      preparedId: prepared.preparedId,
-      preparedDigest: prepared.preparedDigest,
-      operationId: `${printOperationId}-upload`,
-      signal: cancellation.signal,
-    });
-    if (uploaded.status !== 'accepted' || uploaded.kind !== 'upload') {
-      throw new QualificationError('X1C_UPLOAD_NOT_ACCEPTED');
+    if (requested.state !== 'awaiting-approval') {
+      throw new QualificationError(`X1C_JOB_${requested.state.toUpperCase().replaceAll('-', '_')}`);
     }
-    process.stdout.write(
-      `${JSON.stringify({ stage: 'print-cube', status: 'uploaded', artifactSha256: cubeArtifactDigest.slice(7), amsSlot: 0, bedType: 'hot_plate', nozzleDiameterMm: 0.4 })}\n`,
-    );
     phase = 'START';
-    let receipt: MachineOperationReceipt = await client.startPrint({
-      machineId,
-      preparedId: prepared.preparedId,
-      preparedDigest: prepared.preparedDigest,
-      transferId: uploaded.evidence.transferId,
-      expectedSetupDigest: prepared.setupDigest,
-      operationId: printOperationId,
+    // The operator stands at the printer for this stage: the consent variable is their attestation the plate is clear.
+    const job = await client.resolveJob({
+      jobId: requested.jobId,
+      decision: 'approve',
+      resolvedBy: operator,
+      attestations: ['work-area-clear'],
+      attended: true,
+      transferOperationId: `${printOperationId}-upload`,
+      startOperationId: printOperationId,
       signal: cancellation.signal,
     });
-    for (let attempt = 0; receipt.status === 'unknown' && attempt < 15; attempt += 1) {
+    process.stdout.write(
+      `${JSON.stringify({ stage: 'print-cube', status: job.state, artifactSha256: cubeArtifactDigest.slice(7), amsSlot: 0, bedType: 'hot_plate', nozzleDiameterMm: 0.4 })}\n`,
+    );
+    let receipt: MachineOperationReceipt | undefined = job.receipt;
+    for (let attempt = 0; (receipt === undefined || receipt.status === 'unknown') && attempt < 15; attempt += 1) {
       // oxlint-disable-next-line no-await-in-loop -- reconciliation observes one possible send and never retransmits it.
       await delay(1000, undefined, { signal: cancellation.signal });
       // oxlint-disable-next-line no-await-in-loop -- exact operation reconciliation is the only safe unknown-result path.
@@ -1473,11 +1469,14 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         signal: cancellation.signal,
       });
       if (reconciled.receipt) {
-        receipt = reconciled.receipt;
+        ({ receipt } = reconciled);
       }
     }
+    if (receipt === undefined || job.state === 'rejected') {
+      throw new QualificationError(`X1C_JOB_${(job.failure?.code ?? job.state).toUpperCase().replaceAll('-', '_')}`);
+    }
     if (receipt.status === 'rejected') {
-      if (receipt.message.toLowerCase().includes('verify failed')) {
+      if (receipt.message.toLowerCase().includes('verify failed') || receipt.code === 'MACHINE_ACTION_UNSUPPORTED') {
         throw new QualificationError('X1C_DEVELOPER_MODE_REQUIRED');
       }
       throw new QualificationError('X1C_START_REJECTED');
@@ -1492,27 +1491,29 @@ const runPrintCube = async (configuration: QualificationConfiguration): Promise<
         signal: cancellation.signal,
       });
       const { run } = current.snapshot;
-      const active = ['preparing', 'printing', 'paused', 'finishing'].includes(run?.state ?? '');
+      const active = ['starting', 'running', 'paused', 'finishing'].includes(run?.state ?? '');
       if (active) {
         observedActive = true;
       }
       if (receipt.status === 'unknown' && !observedActive) {
         throw new QualificationError('X1C_START_UNCONFIRMED');
       }
-      if (observedActive && run?.state === 'succeeded') {
+      const completed = current.snapshot.state.status === 'ready' && run === undefined;
+      if (observedActive && completed) {
         process.stdout.write(
-          `${JSON.stringify({ stage: 'print-cube', status: 'completed', progress: run.progress ?? 100, completedAt: new Date().toISOString() })}\n`,
+          `${JSON.stringify({ stage: 'print-cube', status: 'completed', completedAt: new Date().toISOString() })}\n`,
         );
         return;
       }
-      if (observedActive && run?.state === 'failed') {
+      if (observedActive && (run?.state === 'failed' || current.snapshot.state.status === 'alarm')) {
         throw new QualificationError('X1C_PRINT_FAILED');
       }
-      const progress = Math.floor(run?.progress ?? 0);
+      const progress = Math.floor((run?.progress.fraction ?? 0) * 100);
       if (observedActive && progress !== lastProgress) {
         lastProgress = progress;
+        const layer = run?.progress.counters.find(({ id }) => id === 'layer');
         process.stdout.write(
-          `${JSON.stringify({ stage: 'print-cube', status: run?.state, progress, currentLayer: run?.currentLayer, totalLayers: run?.totalLayers, remainingSeconds: run?.remainingSeconds })}\n`,
+          `${JSON.stringify({ stage: 'print-cube', status: run?.state, progress, currentLayer: layer?.current, totalLayers: layer?.total, remainingSeconds: run?.progress.remaining === undefined ? undefined : Math.round(run.progress.remaining / 1000) })}\n`,
         );
       }
       // oxlint-disable-next-line no-await-in-loop -- five-second reads are bounded by the ninety-minute supervised run.

@@ -1,0 +1,156 @@
+import { afterEach, describe, expect, it } from 'vitest';
+import { parseMachineProvider } from '@taucad/runtime/machine';
+import type {
+  MachineConnectionRuntime,
+  MachineDatagram,
+  MachineNetworkRequest,
+  MachineSession,
+} from '@taucad/runtime/machine';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
+
+import { carveraMachine } from '#carvera.machine.js';
+import type { CarveraSubmission } from '#carvera.manifest.js';
+import { createCarveraSimulator } from '#carvera.simulator.js';
+
+const clock = { now: () => new Date().toISOString() };
+const datagram = (text: string, address: string): MachineDatagram => ({
+  bytes: new TextEncoder().encode(text),
+  peer: { address, interface: 'en0', port: 3333 },
+});
+
+const sessions: Array<MachineSession<CarveraSubmission>> = [];
+const simulators: Array<ReturnType<typeof createCarveraSimulator>> = [];
+afterEach(async () => {
+  await Promise.all(sessions.splice(0).map(async (session) => session.close()));
+  for (const simulator of simulators.splice(0)) {
+    simulator.dispose();
+  }
+});
+
+describe('carveraMachine', () => {
+  it('should declare the C1 manifest with every Carvera action designed and stop as the realtime halt', () => {
+    const provider = parseMachineProvider(carveraMachine());
+    expect(provider.manifest.actions.map(({ componentId, id }) => `${componentId}:${id}`)).toEqual([
+      'controller:run.pause',
+      'controller:run.resume',
+      'controller:run.cancel',
+      'controller:controller.unlock',
+      'controller:controller.wake',
+      'motion:motion.home',
+      'motion:motion.jog',
+      'motion:motion.move',
+      'motion:work-offset.select',
+      'motion:work-offset.set',
+      'probe:probe.run',
+      'tools:tool.change',
+      'tool-setter:tool.measure',
+      'spindle:spindle.set',
+      'light:switch.set',
+      'vacuum:switch.set',
+      'air:switch.set',
+      'feed-override:level.set',
+      'spindle-override:level.set',
+      'controller:interaction.respond',
+      'motion:makera.levelling.clear',
+      'probe:makera.probe.pair',
+    ]);
+    expect(provider.manifest.actions.every(({ qualification }) => qualification.status === 'designed')).toBe(true);
+    expect(provider.manifest.holds.map(({ id, lease, bound }) => [id, lease, bound])).toEqual([
+      ['motion.jog', 100, 300],
+    ]);
+    expect(provider.manifest.stop).toMatchObject({ motion: 'halts', spindle: 'stops', position: 'may-be-lost' });
+    expect(provider.manifest.actions.find(({ componentId }) => componentId === 'light')?.safety.authority).toBe(
+      'agent',
+    );
+    const pause = provider.manifest.actions.find(({ id }) => id === 'run.pause');
+    expect(pause).toMatchObject({
+      safety: { authority: 'approved-agent' },
+      outcome: { motion: 'finishes-queued', spindle: 'keeps-turning' },
+    });
+    expect(provider.manifest.jobs).toMatchObject({
+      type: 'supported',
+      delivery: 'stored',
+      start: 'remote',
+      accepts: [
+        {
+          contract: { id: 'tau.toolpath.gcode', version: 1 },
+          mediaType: 'text/x-gcode',
+          technology: 'subtractive.milling',
+        },
+      ],
+      safety: { authority: 'person', attended: true, interlocks: ['cover', 'estop'] },
+    });
+  });
+
+  it('should find machines from their broadcasts, pinned to the sender, and skip what is not one', async () => {
+    const definition = await resolveRuntimePluginDefinition('machine', carveraMachine());
+    const listened: number[] = [];
+    const events = [];
+    for await (const event of definition.discover(
+      { configuration: {}, signal: new AbortController().signal },
+      {
+        clock,
+        async *listenDatagrams(input) {
+          listened.push(input.port);
+          yield datagram('Workshop Carvera,192.168.1.50,2222,0', '192.168.1.50');
+          yield datagram('garbage', '192.168.1.51');
+          yield datagram('Workshop Carvera,192.168.1.50,2222,1', '192.168.1.50');
+        },
+      },
+    )) {
+      events.push(event);
+    }
+    expect(listened).toEqual([3333]);
+    expect(
+      events.map((event) =>
+        event.type === 'lost' ? event.type : [event.type, event.candidate.id, event.candidate.name],
+      ),
+    ).toEqual([
+      ['found', 'carvera:192.168.1.50', 'Workshop Carvera'],
+      ['updated', 'carvera:192.168.1.50', 'Workshop Carvera'],
+    ]);
+  });
+
+  it('should connect over TCP 2222 to the bound address and identify the firmware', async () => {
+    const simulator = createCarveraSimulator({ speed: 25, tickInterval: 10 });
+    simulators.push(simulator);
+    const requests: MachineNetworkRequest[] = [];
+    const runtime: MachineConnectionRuntime = {
+      clock,
+      log: async () => undefined,
+      connectStream: async (request) => {
+        requests.push(request);
+        return simulator.open();
+      },
+      async *readArtifact() {
+        yield new Uint8Array();
+      },
+      resolveSecret: async () => '',
+    };
+    const definition = await resolveRuntimePluginDefinition('machine', carveraMachine());
+    const session = await definition.connect(
+      {
+        candidate: {
+          id: 'carvera:192.168.1.50',
+          name: 'Workshop Carvera',
+          endpoint: { address: '192.168.1.99', interface: 'en0' },
+          claimedIdentity: { model: 'Carvera' },
+          observedAt: clock.now(),
+          expiresAt: clock.now(),
+        },
+        configuration: { address: '192.168.1.50' },
+        connection: { secretRef: 'none', serviceTrust: {} },
+        signal: new AbortController().signal,
+      },
+      runtime,
+    );
+    sessions.push(session);
+    expect(requests).toMatchObject([
+      { endpoint: { address: '192.168.1.50', port: 2222 }, transport: 'tcp', idleTimeout: 10_000 },
+    ]);
+    const descriptor = await session.getDescriptor({ signal: new AbortController().signal });
+    expect(descriptor).toMatchObject({ vendor: 'Makera', model: 'Carvera C1', firmware: '1.0.7' });
+    const report = await session.getSnapshot({ signal: new AbortController().signal });
+    expect(report.connection).toBe('connected');
+  });
+});

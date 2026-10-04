@@ -289,7 +289,7 @@ const jobsSchema = z.discriminatedUnion('type', [
   z.strictObject({ type: z.literal('unsupported') }),
   z.strictObject({
     type: z.literal('supported'),
-    accepts: z.array(acceptedContainerSchema).min(1).max(32),
+    accepts: z.array(acceptedContainerSchema).min(1).max(32).readonly(),
     /** `streamed`: the host feeds the program for the whole run and must stay connected. */
     delivery: z.enum(['stored', 'streamed']),
     /** `at-machine`: a person presses the machine's own start after Tau has loaded the program. */

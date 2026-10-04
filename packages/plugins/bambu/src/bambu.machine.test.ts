@@ -13,7 +13,8 @@ vi.mock('#bambu.host.js', () => {
 });
 
 // Importing the provider module is not the behavior under test; keep it outside the per-test budget.
-const { bambuA1MiniMachine, bambuMachine, bambuSubmissionConfiguration } = await import('#bambu.machine.js');
+const { bambuA1MiniMachine, bambuMachine } = await import('#bambu.machine.js');
+const { bambuSubmissionConfiguration } = await import('#bambu.manifest.js');
 
 describe('bambuMachine', () => {
   it('declares diameters as positive millimetre quantities rather than editable metadata objects', async () => {
@@ -44,14 +45,21 @@ describe('bambuMachine', () => {
     const definition = await resolveRuntimePluginDefinition('machine', bambuA1MiniMachine());
     expect(definition.manifest).toMatchObject({
       identity: { model: 'a1-mini' },
-      geometry: {
-        buildVolume: { x: 180, y: 180, z: 180 },
-        kinematics: 'cartesian-bedslinger',
-        bedMotion: 'y',
-        enclosure: { enclosed: false },
-      },
-      bed: { maximumTemperature: { value: 80 } },
-      materialSystem: { slotsPerUnit: 4, drying: false },
+      processes: [
+        {
+          type: 'fff',
+          geometry: {
+            buildVolume: { x: 180, y: 180, z: 180 },
+            kinematics: 'cartesian-bedslinger',
+            bedMotion: 'y',
+            enclosure: { enclosed: false },
+          },
+          bed: { maximumTemperature: { value: 80 } },
+        },
+      ],
+    });
+    expect(definition.manifest.components.find(({ kind }) => kind === 'material-system')).toMatchObject({
+      units: [{ id: 'ams-a', slots: [{ id: 'a1' }, { id: 'a2' }, { id: 'a3' }, { id: 'a4' }] }, { id: 'external' }],
     });
     const schema = definition.submissionConfiguration.manifest.legacyProjection.inputSchema;
     expect(schema).toMatchObject({ properties: { expectedModel: { const: 'A1 mini' }, amsMapping: { maxItems: 4 } } });

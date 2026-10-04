@@ -4,13 +4,15 @@ import { rootedFilePathSchema } from '#schemas/rooted-path.schema.js';
 import { kernelIssueSchema } from '#schemas/tools/issue.schema.js';
 
 /*
- * The print tools a CAD agent is offered. The machine host owns their behavior
+ * The machine tools a CAD agent is offered. The machine host owns their behavior
  * (`@taucad/agent-tools` `createMachineToolRegistry`) and imports these inputs,
  * so the model, the registry and the transcript read one contract.
  */
 
-/** A machine, request or provider-run id, exactly as the machine host issued it. */
+/** A machine, component or job id, exactly as the machine host issued it. */
 const machineIdentitySchema = z.string().min(1).max(256);
+
+const machineChoiceSchema = machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.');
 
 /*
  * Slicer options stay a record of JSON values at runtime. The recursive JSON
@@ -59,7 +61,7 @@ const printProfilesSchema = z.strictObject({
 });
 
 /**
- * The slicer options `request_print` accepts: print quality only. Slicing runs
+ * The slicer options `request_job` and `check_job` accept: print quality only. Slicing runs
  * before anyone approves the print, so the slicer engine and its service
  * endpoint stay with the host, and so do the keys that describe the machine
  * (profile, plate, bed size, nozzle and filament diameters). The preset is not
@@ -68,7 +70,7 @@ const printProfilesSchema = z.strictObject({
  *
  * @public
  */
-export const requestPrintOptionKeys = [
+export const printOptionKeys = [
   'layerHeight',
   'walls',
   'infillPercent',
@@ -81,12 +83,34 @@ export const requestPrintOptionKeys = [
 ] as const;
 
 /** @public */
-export const getMachineInputSchema = z.strictObject({
-  machineId: machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.'),
+export const listMachinesInputSchema = z.strictObject({});
+
+/** @public */
+export const getMachineInputSchema = z.strictObject({ machineId: machineChoiceSchema });
+
+/*
+ * An action's parameters stay a JSON object at runtime; the typeless input side
+ * keeps the recursive JSON check off the wire (see the slicer options above).
+ * The machine's own schema, which get_machine summarizes, validates the values.
+ */
+const actionParametersSchema = z
+  .any()
+  .describe("The action's parameters as get_machine lists them; {} or omitted when it takes none.")
+  .pipe(z.record(z.string().min(1).max(64), z.json()));
+
+/** @public */
+export const machineActionInputSchema = z.strictObject({
+  machineId: machineChoiceSchema,
+  componentId: machineIdentitySchema.describe('The component the action belongs to, as get_machine lists it.'),
+  action: machineIdentitySchema.describe('The action id, such as switch.set or run.pause.'),
+  parameters: actionParametersSchema.optional(),
 });
 
 /** @public */
-export const requestPrintInputSchema = z.strictObject({
+export const stopMachineInputSchema = z.strictObject({ machineId: machineChoiceSchema });
+
+/** @public */
+export const requestJobInputSchema = z.strictObject({
   profileId: z
     .string()
     .min(1)
@@ -94,7 +118,7 @@ export const requestPrintInputSchema = z.strictObject({
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
     .optional()
     .describe('Saved preference profile for this request only; does not change the shared active profile.'),
-  machineId: machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.'),
+  machineId: machineChoiceSchema,
   targetFile: rootedFilePathSchema.max(512).describe('Project-relative CAD source file to slice and print.'),
   preset: z.enum(['fast', 'standard', 'fine']).optional(),
   plate: z
@@ -119,7 +143,7 @@ export const getPrintProfilesInputSchema = z.strictObject({
     .regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/u)
     .optional()
     .describe('Saved preference profile to inspect; omit to use the shared active profile.'),
-  machineId: machineIdentitySchema.optional().describe('Omit when exactly one machine is bound.'),
+  machineId: machineChoiceSchema,
   profiles: printProfilesSchema.optional(),
   keys: z
     .array(z.string().min(1).max(128))
@@ -128,36 +152,17 @@ export const getPrintProfilesInputSchema = z.strictObject({
     .describe('Setting keys to describe in full: title, description, type, unit, range and choices.'),
 });
 
-/** @public */
-export const getPrintRequestInputSchema = z.strictObject({
-  requestId: machineIdentitySchema,
-});
+/** `check_job` slices exactly as `request_job` would and asks the machine, recording nothing. @public */
+export const checkJobInputSchema = requestJobInputSchema;
 
-/** @public */
-export const listPrintRequestsInputSchema = z.strictObject({
-  machineId: machineIdentitySchema.optional().describe('Only requests for this machine.'),
-});
-
-/**
- * The fields `cancel_print` takes. Which combination is valid (a request alone,
- * or a machine with its observed provider run) is checked by the tool itself:
- * a refined object cannot be relaxed for a streaming tool part.
- *
- * @public
- */
-export const cancelPrintInputSchema = z.strictObject({
-  requestId: machineIdentitySchema.optional(),
-  machineId: machineIdentitySchema.optional(),
-  expectedProviderRunId: machineIdentitySchema.optional(),
-});
-
-/** Every state the machine host's print request ledger records. */
-const printRequestStateSchema = z.enum([
+/** Every state a job can be observed in: `MachineJobState`, `@taucad/runtime/machine`. */
+const jobStateSchema = z.enum([
   'preparing',
   'awaiting-approval',
   'approved',
-  'uploading',
+  'transferring',
   'starting',
+  'awaiting-start',
   'confirming',
   'started',
   'denied',
@@ -167,22 +172,34 @@ const printRequestStateSchema = z.enum([
   'failed',
 ]);
 
-/**
- * The print request fields a transcript reads. The ledger's record
- * (`PrintRequest`, `@taucad/runtime/machine`) carries more and passes through.
- */
-const printRequestRecordSchema = z.looseObject({
-  requestId: z.string(),
+/** One fact a start depends on, with what clears it in words. */
+const jobCheckSchema = z.looseObject({
+  id: z.string(),
+  label: z.string(),
+  state: z.enum(['passed', 'attention', 'blocked', 'unknown']),
+  detail: z.string().optional(),
+  remedy: z.string().optional(),
+});
+
+/** What the program is, as the machine host read it. */
+const programSchema = z.looseObject({
+  name: z.string(),
+  estimatedDuration: z.number().optional().describe('Milliseconds.'),
+  preferences: machineSettingsProvenanceSchema.optional(),
+  facts: z
+    .looseObject({ process: z.string(), layers: z.number().optional(), filamentLength: z.number().optional() })
+    .optional(),
+});
+
+/** The job fields a transcript reads. Checks list only those that have not passed. */
+const jobRecordSchema = z.looseObject({
+  jobId: z.string(),
   machineId: z.string(),
-  state: printRequestStateSchema,
-  summary: z.looseObject({
-    fileName: z.string(),
-    preferences: machineSettingsProvenanceSchema.optional(),
-    layers: z.number().optional(),
-    estimatedDuration: z.number().optional().describe('Seconds.'),
-    filamentLength: z.number().optional().describe('Millimetres of filament.'),
-  }),
+  state: jobStateSchema,
+  program: programSchema,
+  checks: z.array(jobCheckSchema).optional(),
   failure: z.looseObject({ code: z.string(), message: z.string() }).optional(),
+  run: z.looseObject({ outcome: z.string() }).optional(),
 });
 
 /** Exact saved profile used by a print call; call arguments take precedence. */
@@ -197,41 +214,61 @@ const machinePreferencesReportSchema = z
   })
   .optional();
 
-/** The host's advice on a request, as `request_print` and `get_print_request` both return it. */
-const nextStepSchema = z
+const sliceWarningsSchema = z
+  .array(kernelIssueSchema)
+  .optional()
+  .describe(
+    'What the slice could not honour although it was made, such as a multi-colour model sliced in one colour; tell the person.',
+  );
+
+/** @public */
+export const listMachinesOutputSchema = z.string().describe('Every bound machine, one line each.');
+
+/** @public */
+export const getMachineOutputSchema = z
   .string()
-  .optional()
-  .describe(
-    'What to tell the person and do next, such as whether to retry; absent while the host is still working on the request.',
-  );
+  .describe('The machine as last observed: state, run, components, activities, alerts, actions and recent jobs.');
 
-/** What became of a started request's run: `started` means the printer took the start, not that it still prints. */
-const startedRunSchema = z
-  .enum(['running', 'ended', 'not-yet-reported'])
-  .optional()
-  .describe(
-    "A started request's run: running while the printer reports it, ended once the printer reports anything else after the start (a finished print does not keep the machine busy), not-yet-reported until then.",
-  );
-
-/** @public */
-export const getMachineOutputSchema = z.looseObject({ machineId: z.string() });
+/** What became of an action or a stop. @public */
+export const machineActionOutputSchema = z.looseObject({
+  status: z
+    .enum(['done', 'confirming', 'refused', 'needs-approval', 'denied', 'rejected', 'unknown'])
+    .describe(
+      'done: the machine took it (and showed the change, when it reports one); confirming: sent, not yet shown; refused: nothing was sent; needs-approval: a person must do it in Tau; denied: the person declined; rejected: the machine refused; unknown: whether it happened is unknown.',
+    ),
+  message: z.string().describe('What to tell the person, with any remedy.'),
+  operationId: z.string().optional(),
+});
 
 /** @public */
-export const requestPrintOutputSchema = z.looseObject({
-  request: printRequestRecordSchema,
+export const stopMachineOutputSchema = machineActionOutputSchema;
+
+/** @public */
+export const requestJobOutputSchema = z.looseObject({
+  job: jobRecordSchema,
   machineName: z.string().optional().describe('Display name of the machine.'),
   approval: z
     .enum(['approved', 'denied', 'cancelled'])
     .optional()
     .describe('How the person answered, when the call waited for them.'),
-  nextStep: nextStepSchema,
-  machinePreferences: machinePreferencesReportSchema,
-  warnings: z
-    .array(kernelIssueSchema)
+  nextStep: z
+    .string()
     .optional()
     .describe(
-      'What the slice could not honour although it was made, such as a multi-colour model sliced in one colour; tell the person.',
+      'What to tell the person and do next, such as whether to retry; absent while the host is still working on the job.',
     ),
+  machinePreferences: machinePreferencesReportSchema,
+  warnings: sliceWarningsSchema,
+});
+
+/** @public */
+export const checkJobOutputSchema = z.looseObject({
+  status: z.enum(['ready', 'blocked', 'refused']),
+  program: programSchema.optional(),
+  checks: z.array(jobCheckSchema).optional(),
+  message: z.string().optional().describe('Why the machine refused the program.'),
+  machinePreferences: machinePreferencesReportSchema,
+  warnings: sliceWarningsSchema,
 });
 
 /** @public */
@@ -242,47 +279,35 @@ export const getPrintProfilesOutputSchema = z.looseObject({
   defaults: z
     .looseObject({ printer: z.string(), process: z.string(), filaments: z.array(z.string()) })
     .optional()
-    .describe('Presets request_print uses when profiles are omitted.'),
+    .describe('Presets request_job uses when profiles are omitted.'),
   machinePreferences: machinePreferencesReportSchema,
 });
 
 /** @public */
-export const getPrintRequestOutputSchema = z.looseObject({
-  request: printRequestRecordSchema,
-  run: startedRunSchema,
-  nextStep: nextStepSchema,
-});
-
+export type ListMachinesInput = z.infer<typeof listMachinesInputSchema>;
 /** @public */
-export const listPrintRequestsOutputSchema = z.looseObject({
-  requests: z.array(printRequestRecordSchema.extend({ run: startedRunSchema })),
-  total: z.number().int().nonnegative(),
-});
-
-/** A request it withdrew or cancelled, or the receipt of a run it cancelled directly. @public */
-export const cancelPrintOutputSchema = z.looseObject({ request: printRequestRecordSchema.optional() });
-
+export type ListMachinesOutput = z.infer<typeof listMachinesOutputSchema>;
 /** @public */
 export type GetMachineInput = z.infer<typeof getMachineInputSchema>;
 /** @public */
 export type GetMachineOutput = z.infer<typeof getMachineOutputSchema>;
 /** @public */
-export type RequestPrintInput = z.infer<typeof requestPrintInputSchema>;
+export type MachineActionInput = z.infer<typeof machineActionInputSchema>;
 /** @public */
-export type RequestPrintOutput = z.infer<typeof requestPrintOutputSchema>;
+export type MachineActionOutput = z.infer<typeof machineActionOutputSchema>;
+/** @public */
+export type StopMachineInput = z.infer<typeof stopMachineInputSchema>;
+/** @public */
+export type StopMachineOutput = z.infer<typeof stopMachineOutputSchema>;
+/** @public */
+export type RequestJobInput = z.infer<typeof requestJobInputSchema>;
+/** @public */
+export type RequestJobOutput = z.infer<typeof requestJobOutputSchema>;
+/** @public */
+export type CheckJobInput = z.infer<typeof checkJobInputSchema>;
+/** @public */
+export type CheckJobOutput = z.infer<typeof checkJobOutputSchema>;
 /** @public */
 export type GetPrintProfilesInput = z.infer<typeof getPrintProfilesInputSchema>;
 /** @public */
 export type GetPrintProfilesOutput = z.infer<typeof getPrintProfilesOutputSchema>;
-/** @public */
-export type GetPrintRequestInput = z.infer<typeof getPrintRequestInputSchema>;
-/** @public */
-export type GetPrintRequestOutput = z.infer<typeof getPrintRequestOutputSchema>;
-/** @public */
-export type ListPrintRequestsInput = z.infer<typeof listPrintRequestsInputSchema>;
-/** @public */
-export type ListPrintRequestsOutput = z.infer<typeof listPrintRequestsOutputSchema>;
-/** @public */
-export type CancelPrintInput = z.infer<typeof cancelPrintInputSchema>;
-/** @public */
-export type CancelPrintOutput = z.infer<typeof cancelPrintOutputSchema>;

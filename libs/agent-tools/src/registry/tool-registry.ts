@@ -294,10 +294,9 @@ export type ChatToolRegistryOptions = {
    * The host's part of printing: the `tau.json` id of the project the agent
    * works in, which names every print artifact, and a binary read of the
    * recorded slice. The registry slices through its own `export_model`
-   * route, so `request_print` is offered only with these, a `graphics` client
-   * and an available `machines` facet. A host that cannot name its project
-   * omits this, and neither `request_print` nor `prepare_machine_print` is
-   * offered.
+   * route, so `request_job` and `check_job` are offered only with these, a
+   * `graphics` client and an available `machines` facet. A host that cannot
+   * name its project omits this, and neither is offered.
    */
   readonly print?: Pick<MachinePrintPlannerDependencies, 'projectId' | 'readArtifact'> | undefined;
   readonly machineSettings?: Pick<MachineSettingsService, 'readMachineSettings'> | undefined;
@@ -596,7 +595,6 @@ export const createChatToolRegistry = (options: ChatToolRegistryOptions): ToolRe
   const { machines, print } = options;
   const machineRegistry = machines?.available
     ? createMachineToolRegistry(machines, {
-        projectId: print?.projectId,
         /* The agent's own view, the one its edits to the print intent go through. */
         machineSettings: options.machineSettings,
         planPrint:

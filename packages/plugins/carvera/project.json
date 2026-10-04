@@ -1,0 +1,7 @@
+{
+  "name": "carvera",
+  "$schema": "../../../node_modules/nx/schemas/project-schema.json",
+  "sourceRoot": "packages/plugins/carvera",
+  "projectType": "library",
+  "tags": ["scope:shared", "type:package"]
+}

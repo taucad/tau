@@ -22,7 +22,7 @@ export const projectLibraryUrl = '/projects';
 /** Stable, system-owned identity of the built-in workspace. */
 export const homeWorkspaceSlug = 'home';
 
-/** Canonical project URL. `projectSlug` is the literal directory basename. */
+/** Canonical project URL. `projectSlug` is the complete relative directory path. */
 export const projectUrl = ({ workspaceSlug, projectSlug }: ProjectSlugs): string =>
   `/w/${encodeURIComponent(workspaceSlug)}/${encodeURIComponent(projectSlug)}`;
 
@@ -69,8 +69,9 @@ export const projectUrlOr = (slugs: ProjectSlugs | undefined): string =>
 export const directorySlug = (relativeDirectory: string): string =>
   relativeDirectory.split('/').findLast(Boolean) ?? relativeDirectory;
 
-/** Physical directory basename of a discovered project. */
-export const projectSlugOf = (locator: ProjectLocator): string => directorySlug(locator.relativeDirectory);
+/** Relative directory path of a discovered project; a selected root uses its stable id. */
+export const projectSlugOf = (locator: ProjectLocator, projectId?: string): string =>
+  locator.relativeDirectory.replace(/^\/+/, '') || (projectId ?? '.');
 
 /**
  * Workspace slug owning a discovered project. Both browser engines are the
@@ -94,7 +95,11 @@ export const workspaceSlugOf = (locator: ProjectLocator, workspaces: readonly Wo
 };
 
 /** Canonical slugs for a discovered project, or `undefined` when its workspace is unknown. */
-export const projectSlugsOf = (locator: ProjectLocator, workspaces: readonly Workspace[]): ProjectSlugs | undefined => {
+export const projectSlugsOf = (
+  locator: ProjectLocator,
+  workspaces: readonly Workspace[],
+  projectId?: string,
+): ProjectSlugs | undefined => {
   const workspaceSlug = workspaceSlugOf(locator, workspaces);
-  return workspaceSlug === undefined ? undefined : { workspaceSlug, projectSlug: projectSlugOf(locator) };
+  return workspaceSlug === undefined ? undefined : { workspaceSlug, projectSlug: projectSlugOf(locator, projectId) };
 };

@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { matchRoutes } from 'react-router';
 import type { ProjectLocator } from '@taucad/filesystem';
 import type { Workspace } from '#filesystem/handle-store.js';
 import {
@@ -114,5 +115,26 @@ describe('project URL grammar', () => {
         [],
       ),
     ).toEqual({ workspaceSlug: 'home', projectSlug: 'cube' });
+  });
+});
+
+describe('nested project URL identity', () => {
+  it('keeps the entire directory path in the encoded project segment', () => {
+    const slugs = projectSlugsOf({ ...webaccessLocator, relativeDirectory: 'parts/gears/demo' }, [workspaceRow]);
+    expect(slugs?.projectSlug).toBe('parts/gears/demo');
+    expect(projectUrl(slugs!)).toBe('/w/tau-workspace/parts%2Fgears%2Fdemo');
+  });
+  it.each(['parts/gears/demo', 'research/50% complete/齒輪', 'parts/a#b?c'])(
+    'round-trips %s through the router',
+    (projectSlug) => {
+      const url = projectUrl({ workspaceSlug: 'workshop', projectSlug });
+      const matches = matchRoutes([{ path: '/w/:workspace/:project' }], url);
+      expect(matches?.[0]?.params).toEqual({ workspace: 'workshop', project: projectSlug });
+    },
+  );
+  it('uses the durable id for a project at the selected root', () => {
+    expect(
+      projectSlugsOf({ ...webaccessLocator, relativeDirectory: '' }, [workspaceRow], 'proj_root')?.projectSlug,
+    ).toBe('proj_root');
   });
 });

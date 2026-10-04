@@ -281,7 +281,7 @@ describe('WorkspaceFileService', () => {
       const provider = await providerRegistry.getProvider({ backend: 'indexeddb' });
       const readable = manifestProject('proj_rrrrrrrrrrrrrrrrrrrrr');
       await writeManifest(provider, 'b-readable', readable);
-      await provider.mkdir('a-unreadable');
+      await writeManifest(provider, 'a-unreadable', manifestProject('proj_uuuuuuuuuuuuuuuuuuuuu'));
       vi.spyOn(provider, 'readFile').mockRejectedValueOnce(new Error('storage unavailable'));
       await service.configureProjectRoots({ projects: [], roots: [{ backend: 'indexeddb' }] });
 
@@ -306,7 +306,7 @@ describe('WorkspaceFileService', () => {
 
       await expect(service.listProjectManifests()).resolves.toEqual({
         entries: [],
-        roots: [{ status: 'inaccessible', root: { backend: 'indexeddb' }, reason: 'root unavailable' }],
+        roots: [{ status: 'inaccessible', root: { backend: 'indexeddb' }, reason: '.: root unavailable' }],
       });
     });
 
@@ -328,11 +328,7 @@ describe('WorkspaceFileService', () => {
         ['alpha', 'valid'],
         ['beta', 'valid'],
       ]);
-      expect(readFile.mock.calls.map(([path]) => path)).toEqual([
-        'alpha/tau.json',
-        'beta/tau.json',
-        'no-manifest/tau.json',
-      ]);
+      expect(readFile.mock.calls.map(([path]) => path)).toEqual(['alpha/tau.json', 'beta/tau.json']);
       expect(stat).not.toHaveBeenCalled();
     });
 
@@ -557,7 +553,6 @@ describe('WorkspaceFileService', () => {
       { name: 'an invalid project id', projectId: '../invalid', providerBasePath: directory },
       { name: 'a slash-prefixed path', projectId, providerBasePath: '/readable-project' },
       { name: 'a non-canonical path', projectId, providerBasePath: 'readable-project/../readable-project' },
-      { name: 'a nested project path', projectId, providerBasePath: `${directory}/nested` },
       { name: 'a workspace-state directory', projectId, providerBasePath: '.tau' },
       { name: 'the workspace root itself', projectId, providerBasePath: '' },
     ])('rejects $name before provider access', async ({ projectId: inputProjectId, providerBasePath }) => {
@@ -680,8 +675,14 @@ describe('WorkspaceFileService', () => {
           scope,
         });
 
-        expect(withLocks).toHaveBeenCalledWith([`project:${projectId}`, physicalLock], expect.any(Function));
-        expect(queueForMany).toHaveBeenCalledWith([`project:${projectId}`, physicalLock], expect.any(Function));
+        expect(withLocks).toHaveBeenCalledWith(
+          [`project:${projectId}`, `${context.providerRegistry.resolveStorageRootKey(scope)}:`, physicalLock],
+          expect.any(Function),
+        );
+        expect(queueForMany).toHaveBeenCalledWith(
+          [`project:${projectId}`, `${context.providerRegistry.resolveStorageRootKey(scope)}:`, physicalLock],
+          expect.any(Function),
+        );
       } finally {
         context.service.dispose();
         coordinator.dispose();
@@ -914,8 +915,8 @@ describe('WorkspaceFileService', () => {
         input: { manifest: encoder.encode('{invalid') },
       },
       {
-        name: 'a nested target',
-        input: { providerBasePath: 'projects/pending-project' },
+        name: 'a dependency target',
+        input: { providerBasePath: 'node_modules/pending-project' },
       },
       {
         name: 'a workspace-state target',
@@ -1064,11 +1065,19 @@ describe('WorkspaceFileService', () => {
         });
 
         expect(withLocks).toHaveBeenCalledWith(
-          [`project:${projectId}`, `${context.providerRegistry.resolveStorageRootKey(scope)}:${directory}`],
+          [
+            `project:${projectId}`,
+            `${context.providerRegistry.resolveStorageRootKey(scope)}:`,
+            `${context.providerRegistry.resolveStorageRootKey(scope)}:${directory}`,
+          ],
           expect.any(Function),
         );
         expect(queueForMany).toHaveBeenCalledWith(
-          [`project:${projectId}`, `${context.providerRegistry.resolveStorageRootKey(scope)}:${directory}`],
+          [
+            `project:${projectId}`,
+            `${context.providerRegistry.resolveStorageRootKey(scope)}:`,
+            `${context.providerRegistry.resolveStorageRootKey(scope)}:${directory}`,
+          ],
           expect.any(Function),
         );
         expect(notifyDirectoryChange).toHaveBeenCalledOnce();

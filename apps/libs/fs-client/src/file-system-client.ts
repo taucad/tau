@@ -16,6 +16,7 @@ import type {
   WorkspaceScope,
   ProjectRootConfiguration,
   ProjectDiscoveryResult,
+  ListProjectPartsResult,
   CommitPendingProjectDirectoryInput,
   CommitPendingProjectDirectoryResult,
   PermanentDeleteProjectDirectoryInput,
@@ -80,6 +81,7 @@ export type WorkspaceAuthorityClient = Pick<
   | 'unmount'
   | 'configureProjectRoots'
   | 'listProjectManifests'
+  | 'listProjectParts'
   | 'commitPendingProjectDirectory'
   | 'adoptProjectDirectory'
   | 'permanentlyDeleteProjectDirectory'
@@ -201,6 +203,8 @@ export type FileSystemClient = {
   configureProjectRoots(configuration: ProjectRootConfiguration): Promise<void>;
   /** Discover content-addressed projects by scanning configured physical roots. */
   listProjectManifests(): Promise<ProjectDiscoveryResult>;
+  /** Reusable files declared by this project and its permitted ancestors. */
+  listProjectParts(input: { readonly project: ProjectLocator }): Promise<ListProjectPartsResult>;
   /** Commit one durable journal snapshot as an identity-safe manifest-last project directory. */
   commitPendingProjectDirectory(
     input: CommitPendingProjectDirectoryInput,

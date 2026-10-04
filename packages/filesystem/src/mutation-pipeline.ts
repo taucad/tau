@@ -122,16 +122,16 @@ const checkedWriteFailure = (
 };
 
 /**
- * A physical project directory is an immediate, non-dot-prefixed child of the
- * workspace root: `<root>/<slug>`. Dot-prefixed children (`.tau`, `.git`) hold
- * app state and are never projects.
+ * A project can be the selected root or any ordinary descendant directory.
  *
  * @param path - Canonical provider-relative path.
- * @returns Whether the path names a project directory.
+ * @returns Whether the path is eligible for project discovery.
  */
 function isProjectDirectoryPath(path: string): boolean {
-  const segments = path.split('/').filter(Boolean);
-  return segments.length === 1 && !segments[0]!.startsWith('.');
+  return (
+    path === '' ||
+    path.split('/').every((segment) => segment.length > 0 && !segment.startsWith('.') && segment !== 'node_modules')
+  );
 }
 
 /**
@@ -418,7 +418,7 @@ export class MutationPipeline {
               if (this.isCurrentResolution(path, resolution)) {
                 this._treeIndexes.addDirectory(path);
               }
-              this.emitChangeEvent({ type: 'directoryCreated', path, backend: resolution.backend }, context, {
+              this._emitMutationChange({ type: 'directoryCreated', path, backend: resolution.backend }, context, {
                 operations: [{ path, resolution }],
               });
             }
@@ -433,7 +433,7 @@ export class MutationPipeline {
             // oxlint-disable-next-line no-await-in-loop -- Preserve deterministic local write ordering.
             await this.writeFileUnlocked({ path, resolution, data: content, context });
           }
-          this.emitChangeEvent(
+          this._emitMutationChange(
             {
               type: 'directoryCopied',
               sourcePath: source,
@@ -451,7 +451,7 @@ export class MutationPipeline {
               this._filePool()?.clear();
               this._treeIndexes.evict(destination);
             }
-            this.emitChangeEvent({ type: 'backendChanged', backend: destinationResolution.backend }, context, {
+            this._emitMutationChange({ type: 'backendChanged', backend: destinationResolution.backend }, context, {
               operations: [{ path: destination, resolution: destinationResolution }],
               globallyVisible,
             });
@@ -532,7 +532,7 @@ export class MutationPipeline {
       }
       const operationsByBackend = Map.groupBy(operations, ({ resolution }) => resolution.backend);
       for (const [backend, operations] of operationsByBackend) {
-        this.emitChangeEvent({ type: 'backendChanged', backend }, context, {
+        this._emitMutationChange({ type: 'backendChanged', backend }, context, {
           operations,
           globallyVisible: operations.some(({ path, resolution }) => this.isCurrentResolution(path, resolution)),
         });
@@ -597,6 +597,44 @@ export class MutationPipeline {
       }
     }
     this._eventBus.emit(event);
+  }
+
+  /**
+   * Invalidate mounted projections after a physical project lifecycle operation.
+   *
+   * @param storageRootKey - Physical storage identity of the changed directory.
+   * @param directory - Canonical provider-relative directory whose contents changed.
+   * @param context - Optional writer identity preserved on projected notifications.
+   */
+  public publishPhysicalDirectoryChange(
+    storageRootKey: string,
+    directory: string,
+    context?: WorkspaceMutationContext,
+  ): void {
+    this._filePool()?.clear();
+    for (const entry of this._mountTable.listMounts()) {
+      if (entry.kind !== 'project' || entry.storageRootKey !== storageRootKey) {
+        continue;
+      }
+      const base = entry.providerBasePath;
+      const containsChange = base === '' || directory === base || directory.startsWith(`${base}/`);
+      const insideChange = directory === '' || base.startsWith(`${directory}/`);
+      if (!containsChange && !insideChange) {
+        continue;
+      }
+      this._treeIndexes.evict(entry.prefix);
+      const relative = containsChange ? (base === '' ? directory : directory.slice(base.length + 1)) : '';
+      const event: ChangeEvent = {
+        type: 'directoryChanged',
+        path: relative === '' ? entry.prefix : `${entry.prefix}/${relative}`,
+        backend: entry.backend,
+      };
+      if (context?.originClientId !== undefined) {
+        tagEventOrigin(event, context.originClientId);
+      }
+      tagEventAuthorities(event, [entry], true);
+      this._eventBus.emit(event);
+    }
   }
 
   public async writeFileResolved({
@@ -936,7 +974,7 @@ export class MutationPipeline {
             this._filePool()?.invalidate(path);
             this._treeIndexes.removeFile(path);
           }
-          this.emitChangeEvent({ type: 'fileDeleted', path, backend: resolution.backend }, context, { operations });
+          this._emitMutationChange({ type: 'fileDeleted', path, backend: resolution.backend }, context, { operations });
         }
         return result.status === 'conflict'
           ? {
@@ -1082,7 +1120,7 @@ export class MutationPipeline {
       }
 
       const resultingStat = await targetResolution.provider.stat(targetResolution.path);
-      this.emitChangeEvent(
+      this._emitMutationChange(
         sourceStat.type === 'dir'
           ? {
               type: 'directoryRenamed',
@@ -1125,7 +1163,7 @@ export class MutationPipeline {
           this._treeIndexes.evict(target);
         }
         for (const backend of new Set([sourceResolution.backend, targetResolution.backend])) {
-          this.emitChangeEvent({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
+          this._emitMutationChange({ type: 'backendChanged', backend }, context, { operations, globallyVisible });
         }
         this._notifyMoveParents({ source, target, sourceResolution, targetResolution });
       }
@@ -1165,7 +1203,7 @@ export class MutationPipeline {
         if (this.isCurrentResolution(path, resolution)) {
           this._treeIndexes.addDirectory(path);
         }
-        this.emitChangeEvent(
+        this._emitMutationChange(
           {
             type: 'directoryCreated',
             path,
@@ -1206,7 +1244,7 @@ export class MutationPipeline {
             this._filePool()?.invalidate(path);
             this._treeIndexes.removeFile(path);
           }
-          this.emitChangeEvent(
+          this._emitMutationChange(
             {
               type: 'fileDeleted',
               path,
@@ -1254,7 +1292,7 @@ export class MutationPipeline {
           if (this.isCurrentResolution(path, resolution)) {
             this._treeIndexes.removeDirectory(path);
           }
-          this.emitChangeEvent(
+          this._emitMutationChange(
             {
               type: 'directoryDeleted',
               path,
@@ -1302,13 +1340,12 @@ export class MutationPipeline {
     for (const { path, resolution } of operations) {
       const normalized = resolveAuthorityPath(path);
       addAuthorityHierarchy(normalized, resolution.entry?.prefix ?? normalized, (value) => value);
-      const projectId = this._projectLockOwner(normalized, resolution);
-      if (projectId !== undefined) {
+      for (const projectId of this._projectLockOwners(normalized, resolution)) {
         locks.add(`project:${projectId}`);
       }
       const { entry } = resolution;
       if (entry?.storageRootKey !== undefined) {
-        addRootedHierarchy(resolution.path, entry.providerBasePath, (value) => `${entry.storageRootKey}:${value}`);
+        addRootedHierarchy(resolution.path, '', (value) => `${entry.storageRootKey}:${value}`);
       }
     }
     return [...locks];
@@ -1464,6 +1501,115 @@ export class MutationPipeline {
     }
   }
 
+  /** Publish a local mutation through every project route exposing the changed bytes. */
+  private _emitMutationChange(
+    event: ChangeEvent,
+    context?: WorkspaceMutationContext,
+    attribution?: {
+      operations: ReadonlyArray<{ path: string; resolution: MountResolution }>;
+      globallyVisible?: boolean;
+    },
+  ): void {
+    if (attribution === undefined) {
+      this.emitChangeEvent(event, context);
+      return;
+    }
+    const unprojected = attribution.operations.filter(
+      ({ path, resolution }) => resolution.entry?.kind !== 'project' || !this.isCurrentResolution(path, resolution),
+    );
+    if (unprojected.length > 0) {
+      this.emitChangeEvent(event, context, { ...attribution, operations: unprojected });
+    }
+    for (const alias of this._mountTable.listMounts()) {
+      if (alias.kind !== 'project') {
+        continue;
+      }
+      const matchingOperations = attribution.operations.filter(
+        ({ resolution }) =>
+          resolution.provider === alias.provider && resolution.entry?.storageRootKey === alias.storageRootKey,
+      );
+      const translate = (logicalPath: string): string | undefined => {
+        const operation = matchingOperations.find(({ path }) => path === logicalPath);
+        if (operation === undefined) {
+          return undefined;
+        }
+        const physical = operation.resolution.path;
+        const base = alias.providerBasePath;
+        if (base !== '' && physical !== base && !physical.startsWith(`${base}/`)) {
+          return undefined;
+        }
+        const relative = base === '' ? physical : physical === base ? '' : physical.slice(base.length + 1);
+        return relative === '' ? alias.prefix : `${alias.prefix}/${relative}`;
+      };
+      const originalProjection = attribution.operations.every(({ resolution }) => resolution.entry === alias);
+      let projected: ChangeEvent | undefined;
+      if (originalProjection) {
+        projected = event;
+      } else if ('path' in event) {
+        const path = translate(event.path);
+        if (path !== undefined) {
+          projected = { ...event, path };
+        }
+      } else if ('oldPath' in event) {
+        const oldPath = translate(event.oldPath);
+        const newPath = translate(event.newPath);
+        if (oldPath !== undefined && newPath !== undefined) {
+          projected = { ...event, oldPath, newPath };
+        } else if (oldPath !== undefined) {
+          projected = {
+            type: event.type === 'fileRenamed' ? 'fileDeleted' : 'directoryDeleted',
+            path: oldPath,
+            backend: alias.backend,
+          };
+        } else if (newPath !== undefined) {
+          projected = {
+            type: event.type === 'fileRenamed' ? 'fileWritten' : 'directoryCreated',
+            path: newPath,
+            backend: alias.backend,
+          };
+        }
+      } else if ('targetPath' in event) {
+        const path = translate(event.targetPath);
+        if (path !== undefined) {
+          projected = {
+            type: event.type === 'fileCopied' ? 'fileWritten' : 'directoryCreated',
+            path,
+            backend: alias.backend,
+          };
+        }
+      }
+      if (
+        projected === undefined &&
+        matchingOperations.some(
+          ({ resolution }) =>
+            resolution.path === '' ||
+            alias.providerBasePath === resolution.path ||
+            alias.providerBasePath.startsWith(`${resolution.path}/`),
+        )
+      ) {
+        // A containing directory moved/disappeared, or a failed mutation lost
+        // precise information. Its captured project projection needs a resync.
+        projected = { type: 'directoryChanged', path: alias.prefix, backend: alias.backend };
+      }
+      if (projected === undefined) {
+        continue;
+      }
+      if (!originalProjection) {
+        this._treeIndexes.evict(alias.prefix);
+        if ('path' in projected && (projected.type === 'fileWritten' || projected.type === 'fileDeleted')) {
+          this._filePool()?.invalidate(projected.path);
+        } else {
+          this._filePool()?.clear();
+        }
+      }
+      if (context?.originClientId !== undefined) {
+        tagEventOrigin(projected, context.originClientId);
+      }
+      tagEventAuthorities(projected, [alias], true);
+      this._eventBus.emit(projected);
+    }
+  }
+
   private async _appendFileUnlocked({
     path,
     resolution,
@@ -1500,7 +1646,7 @@ export class MutationPipeline {
       this._treeIndexes.removeFile(path);
     }
     if (resolution.entry !== undefined) {
-      this.emitChangeEvent({ type: 'fileWritten', path, backend }, context, { operations: [{ path, resolution }] });
+      this._emitMutationChange({ type: 'fileWritten', path, backend }, context, { operations: [{ path, resolution }] });
     }
   }
 
@@ -1524,7 +1670,7 @@ export class MutationPipeline {
       });
     }
     if (resolution.entry !== undefined) {
-      this.emitChangeEvent(
+      this._emitMutationChange(
         {
           type: 'fileWritten',
           path,
@@ -1544,35 +1690,35 @@ export class MutationPipeline {
    *
    * @param logicalPath - Canonical logical mutation path.
    * @param resolution - Mount resolution carrying the physical target.
-   * @returns Owning project id, or `undefined` when no project owns the bytes.
+   * @returns Ids of all projects sharing the affected physical subtree.
    */
-  private _projectLockOwner(logicalPath: string, resolution: MountResolution): string | undefined {
+  private _projectLockOwners(logicalPath: string, resolution: MountResolution): string[] {
+    const owners = new Set<string>();
     const route = parseRoute(logicalPath);
     if (route.kind === 'project' && route.id !== undefined) {
-      return route.id;
+      owners.add(route.id);
     }
     const storageRootKey = resolution.entry?.storageRootKey;
     if (storageRootKey === undefined) {
-      return undefined;
+      return [...owners];
     }
     const physicalPath = assertRootedPath(resolution.path);
-    // oxlint-disable-next-line capitalized-comments -- Ponytail debt markers intentionally use the lowercase `ponytail:` tag.
-    // ponytail: linear over mounts, which is one entry per open project. Index
-    // by storage root if a workspace ever mounts projects by the hundred.
     for (const mount of this._mountTable.listMounts()) {
       const base = mount.providerBasePath;
       if (
-        mount.storageRootKey !== storageRootKey ||
-        !isProjectDirectoryPath(base) ||
-        (physicalPath !== base && !physicalPath.startsWith(`${base}/`))
+        mount.storageRootKey === storageRootKey &&
+        mount.kind === 'project' &&
+        mount.routeId !== undefined &&
+        (base === '' ||
+          physicalPath === '' ||
+          physicalPath === base ||
+          physicalPath.startsWith(`${base}/`) ||
+          base.startsWith(`${physicalPath}/`))
       ) {
-        continue;
-      }
-      if (mount.kind === 'project' && mount.routeId !== undefined) {
-        return mount.routeId;
+        owners.add(mount.routeId);
       }
     }
-    return undefined;
+    return [...owners];
   }
 
   private _assertNoDescendantMounts(path: string, operation: string): void {
@@ -1603,7 +1749,7 @@ export class MutationPipeline {
     const logicalRoot = resolution.entry?.prefix ?? path;
     const rootResolution =
       resolution.entry === undefined ? resolution : { ...resolution, path: resolution.entry.providerBasePath };
-    this.emitChangeEvent({ type: 'backendChanged', backend: resolution.backend }, context, {
+    this._emitMutationChange({ type: 'backendChanged', backend: resolution.backend }, context, {
       operations: [{ path: logicalRoot, resolution: rootResolution }],
     });
     if (resolution.entry !== undefined) {

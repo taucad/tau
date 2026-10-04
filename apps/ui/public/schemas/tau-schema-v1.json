@@ -48,6 +48,32 @@
       "required": ["main"],
       "additionalProperties": false
     },
+    "parts": {
+      "type": "object",
+      "properties": {
+        "include": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2048,
+            "pattern": "^(?!\\/)(?!.*[\\\\\\u0000!{}[\\]():])(?!.*(?:^|\\/)\\.)(?!.*(?:^|\\/)node_modules(?:\\/|$))[^/]+(?:\\/[^/]+)*$"
+          }
+        },
+        "exclude": {
+          "maxItems": 64,
+          "type": "array",
+          "items": {
+            "type": "string",
+            "maxLength": 2048,
+            "pattern": "^(?!\\/)(?!.*[\\\\\\u0000!{}[\\]():])(?!.*(?:^|\\/)\\.)(?!.*(?:^|\\/)node_modules(?:\\/|$))[^/]+(?:\\/[^/]+)*$"
+          }
+        }
+      },
+      "required": ["include"],
+      "additionalProperties": false,
+      "description": "Reusable files relative to this tau.json. Supports *, ** and ? wildcards. Hidden paths and dependencies are excluded."
+    },
     "syncChats": {
       "description": "Whether this project's chats sync with its remotes. Absent means on; false keeps the project files-only, and no refs/tau/chats/* is written for it.",
       "type": "boolean"

@@ -1100,13 +1100,19 @@ describe('mutationLockPaths', () => {
     expect(locks.filter((lock) => lock.startsWith('project:'))).toEqual([`project:${alpha}`]);
   });
 
-  it('should share no lock between paths in different projects', async () => {
+  it('should lock physical ancestors even when only the nested route is mounted', async () => {
+    const locks = await locksForWrite(`/projects/${alpha}/tau.json`, [flatProject(alpha, 'parent/child')]);
+    expect(locks).toContain('memory:0:parent');
+    expect(locks).toContain('memory:0:');
+  });
+
+  it('should serialize writes in projects sharing one physical storage root', async () => {
     const projects = [flatProject(alpha, 'cube-design'), flatProject(beta, 'gear-system')];
 
     const alphaLocks = await locksForWrite(`/projects/${alpha}/main.ts`, projects);
     const betaLocks = await locksForWrite(`/projects/${beta}/main.ts`, projects);
 
-    expect(alphaLocks.filter((lock) => betaLocks.includes(lock))).toEqual([]);
+    expect(alphaLocks.filter((lock) => betaLocks.includes(lock))).toEqual(['memory:0:']);
     expect(alphaLocks).not.toEqual([]);
   });
 });

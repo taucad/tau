@@ -482,6 +482,7 @@ export class ExternalChangeIngest {
     const { fact, physicalPath, oldPhysicalPath, mappings } = change;
     return (
       mappings.length === 0 ||
+      fact.entry === 'dir' ||
       this._isDiscoveryRelevantPhysicalPath(physicalPath) ||
       (fact.kind === 'moved' && oldPhysicalPath !== undefined && this._isDiscoveryRelevantPhysicalPath(oldPhysicalPath))
     );
@@ -774,8 +775,11 @@ export class ExternalChangeIngest {
     if (isWorkspaceStatePath(path)) {
       return false;
     }
-    const [, child, ...deeper] = path.split('/').filter(Boolean);
-    return child === undefined || (deeper.length === 0 && child === 'tau.json');
+    const segments = path.split('/').filter(Boolean);
+    return (
+      !segments.some((segment) => segment.startsWith('.') || segment === 'node_modules') &&
+      (segments.length <= 1 || segments.at(-1) === 'tau.json')
+    );
   }
 
   private async _createExternalSnapshot(state: ObservedExternalRoot, providerBasePath?: string): Promise<string> {
@@ -805,8 +809,13 @@ export class ExternalChangeIngest {
       const file = await handle.getFile();
       return [name, `${relative}\0file\0${file.size}\0${file.lastModified}`];
     };
-    const walk = async (handle: FileSystemDirectoryHandle, relative: string): Promise<void> => {
-      const entries = await admittedEntries(handle);
+    const walk = async (handle: FileSystemDirectoryHandle, relative: string, discoveryOnly = false): Promise<void> => {
+      const admitted = await admittedEntries(handle);
+      const entries = admitted.filter(
+        ([name, child]) =>
+          !discoveryOnly ||
+          (!name.startsWith('.') && name !== 'node_modules' && (child.kind === 'directory' || name === 'tau.json')),
+      );
       const childRelative = (name: string): string => (relative === '' ? name : `${relative}/${name}`);
       const fileRows = await resolveRows(
         entries.filter((entry): entry is [string, FileSystemFileHandle] => entry[1].kind === 'file'),
@@ -816,7 +825,7 @@ export class ExternalChangeIngest {
         if (child.kind === 'directory') {
           rows.push([childRelative(name), 'dir', 0, 0].join('\0'));
           // oxlint-disable-next-line no-await-in-loop -- Recursive fallback polling is intentionally sequential.
-          await walk(child, childRelative(name));
+          await walk(child, childRelative(name), discoveryOnly);
         } else {
           rows.push(fileRows.get(name)!);
         }
@@ -839,36 +848,7 @@ export class ExternalChangeIngest {
         await walk(handle, parts.join('/'));
         return rows.join('\n');
       }
-      // App state under a dot-prefixed root child never feeds discovery (F1).
-      const rootEntries = await admittedEntries(rootHandle);
-      const entries = rootEntries.filter(([name]) => !name.startsWith('.'));
-      const topLevelRows = await resolveRows(entries, async ([name, child]) => {
-        if (child.kind === 'file') {
-          return fileRow(name, name, child);
-        }
-        try {
-          // Project discovery only depends on the immediate directory and its manifest.
-          const manifestHandle = await child.getFileHandle('tau.json');
-          const manifest = await manifestHandle.getFile();
-          return [name, `${name}/tau.json\0file\0${manifest.size}\0${manifest.lastModified}`];
-        } catch (error) {
-          if (!isNotFoundError(error)) {
-            throw error;
-          }
-          return [name, undefined];
-        }
-      });
-      for (const [name, child] of entries) {
-        if (child.kind === 'file') {
-          rows.push(topLevelRows.get(name)!);
-          continue;
-        }
-        rows.push([name, 'dir', 0, 0].join('\0'));
-        const manifestRow = topLevelRows.get(name);
-        if (manifestRow !== undefined) {
-          rows.push(manifestRow);
-        }
-      }
+      await walk(rootHandle, '', true);
     } catch (error) {
       if (isNotFoundError(error)) {
         return missingExternalSnapshot;
@@ -887,7 +867,7 @@ export class ExternalChangeIngest {
       const mappings = this._logicalMappingsForPhysicalPath(state, this._physicalPath(fact.path));
       for (const { resolution } of mappings) {
         const providerBasePath = resolution.entry?.providerBasePath;
-        if (providerBasePath) {
+        if (providerBasePath !== undefined) {
           providerBasePaths.add(providerBasePath);
         }
       }

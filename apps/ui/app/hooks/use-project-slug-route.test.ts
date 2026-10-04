@@ -39,3 +39,17 @@ describe('resolveProjectRoute', () => {
     expect(resolveProjectRoute(projects, slug, 'proj_home')).toBeUndefined();
   });
 });
+
+it('refuses an ambiguous path instead of opening the first project', () => {
+  expect(resolveProjectRoute([projects[0]!, { ...projects[0]!, id: 'proj_other' }], 'home', 'gear')).toBeUndefined();
+});
+
+it('resolves nested paths even when a grouping folder starts with proj_', () => {
+  expect(
+    resolveProjectRoute(
+      [{ ...projects[0]!, slugs: { workspaceSlug: 'home', projectSlug: 'proj_libraries/gear' } }],
+      'home',
+      'proj_libraries/gear',
+    ),
+  ).toBe('proj_home');
+});

@@ -697,7 +697,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       return;
     }
     /**
-     * Discovery-relevant change paths under the flat layout: the synthetic
+     * Discovery-relevant file changes: the synthetic
      * root event, a root-level directory (a project directory appearing or
      * going away), and any `tau.json`. Dot-prefixed segments are workspace or
      * project app state (`.tau/**`) and must never trigger a rescan (F1).
@@ -707,7 +707,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       if (segments.length === 0) {
         return true;
       }
-      if (segments.some((segment) => segment.startsWith('.'))) {
+      if (segments.some((segment) => segment.startsWith('.') || segment === 'node_modules')) {
         return false;
       }
       return segments.length === 1 || segments.at(-1) === 'tau.json';
@@ -737,13 +737,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       },
     };
     const subscription = { interestedIn: isManifestPath, handler: scheduleProjectsListInvalidation };
+    const directorySubscription = {
+      interestedIn: (path: string) =>
+        !path.split('/').some((segment) => segment.startsWith('.') || segment === 'node_modules'),
+      handler: scheduleProjectsListInvalidation,
+    };
     const unsubscribers = [
       channel.onFileWritten(written),
       channel.onFileDeleted(subscription),
       channel.onFileRenamed(subscription),
-      channel.onDirectoryCreated(subscription),
-      channel.onDirectoryDeleted(subscription),
-      channel.onDirectoryRenamed(subscription),
+      channel.onDirectoryCreated(directorySubscription),
+      channel.onDirectoryDeleted(directorySubscription),
+      channel.onDirectoryRenamed(directorySubscription),
       channel.onDirectoryChanged(subscription),
     ];
     return () => {
@@ -1881,17 +1886,19 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       ]);
       const projects: ProjectLibraryEntry[] = validEntries.map((entry) => {
         const { locator } = entry;
-        const slugs = projectSlugsOf(locator, workspaces);
+        const slugs = projectSlugsOf(locator, workspaces, entry.manifest.id);
         const workspaceName =
-          locator.backend === 'webaccess'
-            ? workspaces.find((workspace) => workspace.workspaceId === locator.workspaceId)?.name
-            : undefined;
+          workspaces.find((workspace) =>
+            locator.backend === 'webaccess'
+              ? workspace.workspaceId === locator.workspaceId
+              : locator.backend === 'node' && workspace.path === locator.path,
+          )?.name ?? 'Home';
         return {
           manifest: entry.manifest,
           library: libraryStates.get(entry.manifest.id)!,
           locator,
           ...(slugs === undefined ? {} : { slugs }),
-          ...(workspaceName === undefined ? {} : { workspaceName }),
+          workspaceName,
           ...(entry.issue === undefined ? {} : { issue: entry.issue }),
         };
       });
@@ -2237,6 +2244,11 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       await ensureDiscoveryReady();
       const worker = await getReadiedWorker();
       const storage = await discoverPermanentDeleteStorage(projectId);
+      if (storage.providerBasePath === '') {
+        throw new Error(
+          'This project is the connected folder. Disconnect its workspace instead of permanently deleting it.',
+        );
+      }
       const operationId = await worker.beginPermanentDeleteProject(projectId, storage);
       const pendingOperations = await worker.getPendingProjectOperations();
       const operation = pendingOperations.find((candidate) => candidate.operationId === operationId);

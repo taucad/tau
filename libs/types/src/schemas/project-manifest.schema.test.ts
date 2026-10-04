@@ -331,3 +331,21 @@ describe('checkProjectManifestReplacement', () => {
     expect(checkProjectManifestReplacement(serializeProjectManifest(manifest), undefined)).toBeUndefined();
   });
 });
+
+describe('parts declaration recovery', () => {
+  it('retains valid declarations through degraded reads and explicit adoption', () => {
+    const parts = { include: ['parts/**/*.ts'], exclude: ['**/*.test.ts'] };
+    const degraded = readProjectManifestBytes(encode({ ...manifest, name: 42, parts }));
+    expect(degraded).toMatchObject({ success: true, data: { parts } });
+    const adopted = readProjectManifestBytes(encode({ ...manifest, id: undefined, parts }));
+    expect(adopted).toMatchObject({ success: false, adoptable: { parts } });
+  });
+  it('fails closed on invalid globs while preserving project identity', () => {
+    const degraded = readProjectManifestBytes(encode({ ...manifest, parts: { include: ['../secret.ts'] } }));
+    expect(degraded.success).toBe(true);
+    if (degraded.success) {
+      expect(degraded.data.parts).toBeUndefined();
+      expect(degraded.issue?.code).toBe('manifest-invalid');
+    }
+  });
+});

@@ -1168,6 +1168,7 @@ const workspaceWireMembers = {
   unmount: 'unmount',
   configureProjectRoots: 'configureProjectRoots',
   listProjectManifests: 'listProjectManifests',
+  listProjectParts: 'listProjectParts',
   commitPendingProjectDirectory: 'commitPendingProjectDirectory',
   adoptProjectDirectory: 'adoptProjectDirectory',
   permanentlyDeleteProjectDirectory: 'permanentlyDeleteProjectDirectory',

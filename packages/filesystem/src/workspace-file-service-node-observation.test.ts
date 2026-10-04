@@ -7,7 +7,8 @@
  */
 
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { mkdtempSync, rmSync, writeFileSync, unlinkSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, rmSync, writeFileSync, unlinkSync, mkdirSync, symlinkSync } from 'node:fs';
+import { projectToManifest, serializeProjectManifest } from '@taucad/types';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ChangeEventBus } from '#change-event-bus.js';
@@ -90,6 +91,31 @@ const createNodeService = async (options?: {
 };
 
 describe('WorkspaceFileService node root observation', () => {
+  it('discovers native nested and root projects without following a directory cycle', async () => {
+    const { service, root } = await createNodeService();
+    const declaration = (id: string) =>
+      serializeProjectManifest(
+        projectToManifest({
+          id,
+          name: 'Native project',
+          description: '',
+          tags: [],
+          assets: { main: { entryPath: 'main.ts' } },
+        }),
+      );
+    mkdirSync(join(root, 'group', 'deep', 'child'), { recursive: true });
+    writeFileSync(join(root, 'tau.json'), declaration('proj_rrrrrrrrrrrrrrrrrrrrr'));
+    writeFileSync(join(root, 'group', 'deep', 'child', 'tau.json'), declaration('proj_ccccccccccccccccccccc'));
+    symlinkSync(root, join(root, 'group', 'loop'), 'dir');
+    const result = await service.listProjectManifests();
+    expect(result.entries.map(({ locator }) => locator.relativeDirectory)).toEqual([
+      '',
+      physicalRoot,
+      'group/deep/child',
+    ]);
+    expect(result.roots[0]?.status).toBe('complete');
+  });
+
   it('waits for native admission before completing a snapshotless root configuration', async () => {
     const admission = Promise.withResolvers<() => void>();
     const watch = vi.spyOn(NodeFsProvider.prototype, 'watch').mockReturnValue(admission.promise);

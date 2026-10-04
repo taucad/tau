@@ -890,7 +890,9 @@ export function ProjectLibraryCard({
   const fullLocationLabel = projectLocationFullLabel(location);
   const slugPath = project.slugs
     ? `${project.slugs.workspaceSlug}/${project.slugs.projectSlug}`
-    : projectSlugOf(project.locator);
+    : project.locator.relativeDirectory === ''
+      ? 'Selected folder'
+      : projectSlugOf(project.locator);
 
   return (
     <ProjectCard

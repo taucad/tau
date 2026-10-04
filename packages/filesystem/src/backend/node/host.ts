@@ -402,6 +402,9 @@ const runOperation = async (
         throw error;
       }
     }
+    case 'readdirEntries': {
+      return provider.readdirEntries(request.path);
+    }
     case 'readdir': {
       return provider.readdir(request.path);
     }

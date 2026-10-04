@@ -91,3 +91,27 @@ describe('project manifest schema', () => {
     });
   });
 });
+
+describe('reusable parts declarations', () => {
+  it('round-trips include and exclude globs without adding runtime fields', () => {
+    const parts = { include: ['parts/**/*.ts', 'shared/*.step'], exclude: ['**/*.test.ts'] };
+    const value = projectToManifest({ ...manifest, parts });
+    expect(parseProjectManifestBytes(serializeProjectManifest(value))).toEqual({
+      success: true,
+      data: { ...manifest, parts },
+    });
+  });
+  it.each([
+    '../*.ts',
+    '/parts/*',
+    'a/../*.ts',
+    String.raw`parts\*.ts`,
+    '!secret/*',
+    '',
+    '**/{a,b}.ts',
+    '.tau/**',
+    'node_modules/**',
+  ])('rejects escaping or unsupported glob %j', (pattern) => {
+    expect(parseProjectManifestBytes(encode({ ...manifest, parts: { include: [pattern] } })).success).toBe(false);
+  });
+});

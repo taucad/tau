@@ -13,7 +13,7 @@ import { Loader } from '#components/ui/loader.js';
 import { InlineTextEditor } from '#components/inline-text-editor.js';
 import { useProjectThumbnail } from '#hooks/use-project-thumbnail.js';
 
-import { projectSlugOf, projectUrlOr } from '#utils/project-url.utils.js';
+import { projectUrlOr } from '#utils/project-url.utils.js';
 import type { CloudProject } from '#hooks/use-cloud-projects.js';
 import {
   CloudProjectNameCell,
@@ -56,7 +56,9 @@ function ProjectNameCell({
           {/* Two projects may share a display name; the directory slug is what
               tells them apart on disk and in the URL (blueprint F5). */}
           <div className='flex min-w-0 items-center gap-1.5 pl-2 text-xs text-muted-foreground'>
-            <span className='truncate font-mono'>{projectSlugOf(project.locator)}</span>
+            <span className='truncate font-mono'>
+              {project.workspaceName ?? 'Home'} / {project.locator.relativeDirectory || 'Selected folder'}
+            </span>
             {project.onCloud === true ? <OnTauCloudMark /> : undefined}
           </div>
         </div>

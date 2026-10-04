@@ -337,7 +337,7 @@ describe('useThumbnailGenerator integration', () => {
         sourceFormat: 'svg',
         format: 'webp',
         content: '<svg xmlns="http://www.w3.org/2000/svg"/>',
-        exportOptions: { width: 1536, height: 1152, quality: 0.9 },
+        exportOptions: { width: 1536, height: 1152, quality: 0.95 },
       }),
     );
     expect(writeFile).toHaveBeenCalledWith('thumbnail.webp', webpBytes(1), { source: 'machine' });

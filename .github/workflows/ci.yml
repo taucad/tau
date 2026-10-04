@@ -361,8 +361,29 @@ jobs:
       # a few minutes into `test` (tau#306 and tau#299, 2026-10-04).
       - name: Run affected tasks
         run: |
+          set -o pipefail
           pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1
-          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64 --parallel=1
+          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64 --parallel=1 --outputStyle=static 2>&1 | tee "$RUNNER_TEMP/affected-test.log"
+
+      # The full log of a full-graph run is far longer than the API's log tail, so a failed
+      # test phase repeats each failing suite's report (and the sandbox host facts the native
+      # suites depend on) as the job's last output.
+      - name: Summarize failed affected tests
+        if: failure()
+        run: |
+          echo '::group::Sandbox host'
+          sysctl kernel.apparmor_restrict_unprivileged_userns kernel.unprivileged_userns_clone user.max_user_namespaces 2>&1 || true
+          bwrap --unshare-user --cap-drop ALL --ro-bind / / --dev /dev --unshare-pid --proc /proc -- \
+            unshare --user --map-root-user --pid --fork --mount-proc true \
+            && echo 'nested user namespace: ok' || echo 'nested user namespace: blocked'
+          echo '::endgroup::'
+          if [ -f "$RUNNER_TEMP/affected-test.log" ]; then
+            awk '/Failed Tests [0-9]+|Failed Suites [0-9]+/ { keep = 1; n = 0 }
+                 keep && n < 300 { print; n++ }
+                 /Test Files / { keep = 0 }' "$RUNNER_TEMP/affected-test.log"
+            grep -nE 'exited \([0-9]+\)|apply-seccomp|bwrap:|uid_map|ERR_|Unhandled|out of memory|Test timed out' \
+              "$RUNNER_TEMP/affected-test.log" | head -100
+          fi
 
       - name: Select affected Python checks
         id: benchmark-statistics

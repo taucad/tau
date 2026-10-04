@@ -16,7 +16,6 @@ import { useCallback } from 'react';
 import { mock } from 'vitest-mock-extended';
 import { writeBambuContainer } from '@taucad/slicer/container';
 import { parseGcode } from '@taucad/slicer/toolpath';
-import { bambuA1MiniManifest } from '@taucad/bambu';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { FileContentService } from '@taucad/fs-client/file-content-service';
 import type { ComposedViewClient } from '@taucad/fs-client/composed-view-client';
@@ -27,6 +26,7 @@ import { probeWebGpuSupport } from '#components/geometry/graphics/graphics-backe
 import type { PrinterFileKind } from '#components/printer/printer-file.js';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { PrinterLiveState } from '#components/printer/use-printer-live.js';
+import { a1MiniManifest } from '#components/print/testing/machines.fixture.js';
 import { useFileContent } from '#hooks/use-file-content.js';
 import type { FileViewerPaneContent } from '#routes/w.$workspace.$project/file-viewers/file-viewer.types.js';
 
@@ -110,7 +110,7 @@ const loadedSpoolColor = '#E0523C';
 const idleLive: PrinterLiveState = {
   machineId: 'machine-1',
   machineName: 'Workshop X1C',
-  runState: 'idle',
+  runState: undefined,
   isActive: false,
   printsThisFile: false,
   position: {},
@@ -123,7 +123,7 @@ const idleLive: PrinterLiveState = {
 
 const printingLive: PrinterLiveState = {
   ...idleLive,
-  runState: 'printing',
+  runState: 'running',
   isActive: true,
   printsThisFile: true,
   position: { currentLayer: 70, totalLayers: 120, progress: 58 },
@@ -458,7 +458,7 @@ describe('Printer viewer framing', () => {
   });
 
   it('draws Mini’s own thin pierced sheet and restricts its plate menu', async () => {
-    mocks.live = { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest };
+    mocks.live = { ...idleLive, machineName: 'Mini', manifest: a1MiniManifest };
     const { frame, scene } = await mount('dark', [1280, 720]);
     await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
     await userEvent.click(within(frame).getByRole('button', { name: 'More' }));
@@ -477,7 +477,7 @@ describe('Printer viewer framing', () => {
   for (const theme of ['light', 'dark'] as const) {
     for (const mini of [false, true]) {
       it(`qualifies ${mini ? 'Mini' : 'X1C'} mechanical and part views in ${theme}`, async () => {
-        mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest } : idleLive;
+        mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: a1MiniManifest } : idleLive;
         const { frame, scene } = await mount(theme, [1280, 720]);
         await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
         const printer = mini ? 'mini' : 'x1c';
@@ -523,7 +523,7 @@ describe('Printer viewer framing', () => {
     it(`announces an unavailable ${mini ? 'Mini' : 'X1C'} ${plate} and preserves its pierced stand-in`, async () => {
       const failure = vi.spyOn(GLTFLoader.prototype, 'loadAsync').mockRejectedValue(new Error('Asset unavailable'));
       try {
-        mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest } : idleLive;
+        mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: a1MiniManifest } : idleLive;
         const { frame } = await mount('light', [1280, 720]);
         await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
         await chooseFromMore(frame, 'menuitemradio', plate);
@@ -541,7 +541,7 @@ describe('Printer viewer framing', () => {
     it(`renders ${mini ? 'Mini' : 'X1C'} grain and translucent hardware with WebGPU`, async () => {
       expect(await probeWebGpuSupport(), 'WebGPU qualification requires an actual adapter').toBe(true);
       mocks.backend = 'webgpu';
-      mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest } : idleLive;
+      mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: a1MiniManifest } : idleLive;
       const { frame, scene } = await mount('dark', [1280, 720]);
       await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
       expect(scene.querySelector('[data-graphics-backend="webgpu"]')).not.toBeNull();
@@ -556,7 +556,7 @@ describe('Printer viewer framing', () => {
   it('loads a fresh plate after switching Mini Smooth to Textured and back', async () => {
     const loads = vi.spyOn(GLTFLoader.prototype, 'loadAsync');
     try {
-      mocks.live = { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest };
+      mocks.live = { ...idleLive, machineName: 'Mini', manifest: a1MiniManifest };
       const { frame, scene } = await mount('dark', [1280, 720]);
       await pauseAt(frame, 0.55, /^6\d \/ 120$/u);
       await chooseFromMore(frame, 'menuitemradio', 'Smooth PEI Plate');
@@ -576,7 +576,7 @@ describe('Printer viewer framing', () => {
 
   for (const mini of [false, true]) {
     it(`captures ${mini ? 'Mini' : 'X1C'} mechanical travel limits and side views`, async () => {
-      mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: bambuA1MiniManifest } : idleLive;
+      mocks.live = mini ? { ...idleLive, machineName: 'Mini', manifest: a1MiniManifest } : idleLive;
       const extent = mini ? 180 : 256;
       // Diagnostic motion only; this deliberately sparse fixture is never sent to a printer.
       const gcode = [

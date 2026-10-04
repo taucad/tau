@@ -9,8 +9,8 @@
  * the OS keychain, and never into page state. A printer whose code is already saved binds without
  * one. The simulated X1C binds without an address or a code; it is the dry-run
  * device, and its demo settings come from its own binding declaration. Each
- * bound machine opens to its provider's manifest (`MachineDetails`); the row
- * itself stays one line, with its Remove action beside it.
+ * bound machine opens to its Testing switch and its provider's manifest
+ * (`MachineDetails`); the row itself stays one line, with its Remove action beside it.
  */
 
 import { memo, useCallback, useId, useMemo, useRef, useState } from 'react';
@@ -30,7 +30,9 @@ import { CardContent, CardHeader, CardTitle } from '@taucad/ui/components/card';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
 import { Label } from '@taucad/ui/components/label';
 import { PasswordInput } from '@taucad/ui/components/password-input';
-import { ConfigurationFields, MachineDetails, isSimulatedProvider } from '#components/settings/machine-details.js';
+import { Switch } from '@taucad/ui/components/switch';
+import { isSimulatedProvider } from '#components/print/machine-facts.js';
+import { ConfigurationFields, MachineDetails } from '#components/settings/machine-details.js';
 import { SettingsSectionCard } from '#components/settings/settings-item.js';
 import { desktopBridge } from '#filesystem/desktop-bridge.js';
 import { printersInUseElsewhere, useMachineDirectory, useMachinesFacet } from '#hooks/use-machines.js';
@@ -76,7 +78,7 @@ const refusals: ReadonlyMap<string, string | undefined> = new Map([
     'BAMBU_SERIAL_REQUIRED',
     'Open Printer details and enter the serial, or find the printer on the network to fill it automatically.',
   ],
-  ['MACHINE_BINDING_BUSY', "Resolve this printer's pending print requests first."],
+  ['MACHINE_BINDING_BUSY', "Resolve this printer's open jobs first."],
   ['MACHINE_CREDENTIAL_SAVE_FAILED', 'Tau could not save the access code to your Keychain.'],
   ['SECRET_VAULT_UNAVAILABLE', 'Tau could not reach your Keychain.'],
   /* The ceremony's second half goes through the desktop shell, not the facet that words these for every other call. */
@@ -208,16 +210,91 @@ const describeOutcome = (name: string, outcome: MachineBindingOutcome): string =
     ? `${name} is bound as ${outcome.machineId}.`
     : `${name} is waiting on the printer (ceremony ${outcome.ceremonyId}).`;
 
+/** Who turns Testing on or off from this card: the person at this computer. */
+const operator = { kind: 'user', id: 'operator', label: 'You' } as const;
+
+/**
+ * The per-machine Testing switch. While it is on, controls designed for this machine but not yet qualified on it
+ * work for a person, so they can be tried and qualified; an agent never gets them. The host's answer is shown until
+ * the directory reports the change, so the switch does not flick back in between.
+ */
+function TestingSwitch({
+  client,
+  entry,
+}: {
+  readonly client: MachineClient;
+  readonly entry: MachineDirectoryEntry;
+}): React.JSX.Element {
+  const [requested, setRequested] = useState<boolean>();
+  const [answer, setAnswer] = useState<Readonly<{ from: MachineDirectoryEntry; testing: boolean }>>();
+  const [error, setError] = useState<string>();
+  const descriptionId = useId();
+  const isPending = requested !== undefined;
+  const testing = requested ?? (answer?.from === entry ? answer.testing : (entry.testing ?? false));
+
+  const change = async (enabled: boolean): Promise<void> => {
+    setRequested(enabled);
+    setError(undefined);
+    try {
+      const updated = await client.setTesting({ machineId: entry.machineId, enabled, requestedBy: operator });
+      setAnswer({ from: entry, testing: updated.testing ?? false });
+    } catch (error_) {
+      setError(errorMessage(error_));
+    } finally {
+      setRequested(undefined);
+    }
+  };
+
+  return (
+    <div className='flex flex-col gap-1 border-b px-3 py-2'>
+      <div className='flex items-center justify-between gap-4'>
+        <div className='flex flex-col gap-0.5'>
+          <span className='text-sm font-medium'>Testing</span>
+          <span id={descriptionId} className='text-xs text-muted-foreground'>
+            Lets you try controls designed for this machine but not yet qualified on it, so they can be qualified.
+            Agents never get them.
+          </span>
+        </div>
+        <span className='flex shrink-0 items-center gap-2'>
+          {isPending ? (
+            <LoaderCircle
+              aria-label='Saving'
+              className='size-3.5 animate-spin text-muted-foreground motion-reduce:animate-none'
+            />
+          ) : null}
+          <Switch
+            aria-label={`Testing for ${entry.name}`}
+            aria-describedby={descriptionId}
+            checked={testing}
+            disabled={isPending}
+            onCheckedChange={(checked) => {
+              void change(checked);
+            }}
+          />
+        </span>
+      </div>
+      {error === undefined ? null : (
+        <p role='alert' className='flex items-start gap-1.5 text-xs'>
+          <CircleAlert aria-hidden className='mt-px size-3.5 shrink-0 text-feature' />
+          Testing could not be changed: {error}
+        </p>
+      )}
+    </div>
+  );
+}
+
 /**
  * One bound machine: its name and model at rest, every part of its manifest on request, and Remove beside it.
  * The details start folded so the list stays a one-line-per-machine summary. Removing asks first, in place:
  * the settings dialog does not stack a second dialog.
  */
 const BoundMachine = memo(function BoundMachine({
+  client,
   entry,
   provider,
   onRemove,
 }: {
+  readonly client: MachineClient;
   readonly entry: MachineDirectoryEntry;
   readonly provider: MachineProvider | undefined;
   /** Resolves with the refusal to show, or `undefined` once the printer is gone. */
@@ -314,6 +391,7 @@ const BoundMachine = memo(function BoundMachine({
           </div>
         ) : null}
         <CollapsibleContent className='border-t'>
+          <TestingSwitch client={client} entry={entry} />
           {provider ? (
             <MachineDetails provider={provider} machineId={entry.machineId} firmware={entry.descriptor.firmware} />
           ) : (
@@ -496,6 +574,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
           {entries.map((entry) => (
             <BoundMachine
               key={entry.machineId}
+              client={client}
               entry={entry}
               provider={providers.get(entry.providerId)}
               onRemove={remove}

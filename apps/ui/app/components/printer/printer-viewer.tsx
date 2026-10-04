@@ -305,7 +305,8 @@ function PrinterViewerContent({ name, kind, readAll, renderPane }: Omit<PrinterV
  * @returns The resolved manifest and the scene geometry derived from it.
  */
 const usePrinterGeometry = (live: PrinterLiveState | undefined) => {
-  const manifest = resolvePrinterManifest(live?.manifest);
+  const followed = live?.manifest;
+  const manifest = useMemo(() => resolvePrinterManifest(followed), [followed]);
   const geometry = useMemo(() => derivePrinterGeometry(manifest), [manifest]);
   return { manifest, geometry };
 };

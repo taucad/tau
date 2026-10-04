@@ -4,33 +4,38 @@
  * Reads this computer's machines facet, as the Print pane does, follows the
  * directory, and reduces it to the one entry the scene follows: an active run when there is
  * one, otherwise the project's selected machine for its light and filament. Live
- * mode follows the run only from the file it prints, which the print request
- * ledger names by digest.
+ * mode follows the run only from the file it prints, which the job ledger
+ * names by digest.
  *
  * @module
  */
 
 import { useEffect, useMemo, useState } from 'react';
+import { componentValue } from '@taucad/runtime/machine';
 import type {
+  ComponentObservation,
   MachineClient,
+  MachineComponent,
   MachineDirectoryEntry,
   MachineDirectorySnapshot,
+  MachineJob,
   MachineManifest,
-  PrintRequest,
+  MachineRun,
 } from '@taucad/runtime/machine';
 import { convert } from '@taucad/units/quantity';
 import type { Quantity } from '@taucad/units/quantity';
 import { projectMachineDirectoryFrame, useMachinesFacet } from '#hooks/use-machines.js';
 import { useMachinesSelection } from '#hooks/use-machines-selection.js';
 import { useProject } from '#hooks/use-project.js';
-import { startedRunIdOf, useMachinesPrintRequests } from '#hooks/use-machines-print-requests.js';
+import { startedRunIdOf, useMachinesJobs } from '#hooks/use-machines-jobs.js';
+import { materialSystemValue, toolheadOf } from '#components/print/machine-facts.js';
 import type { LiveRunPosition } from '#components/printer/printer-playback.js';
 
 /** What the viewer follows on a machine. */
 export type PrinterLiveState = Readonly<{
   machineId: string;
   machineName: string;
-  runState: NonNullable<MachineDirectoryEntry['snapshot']['run']>['state'] | undefined;
+  runState: MachineRun['state'] | undefined;
   /** A run is printing or paused. */
   isActive: boolean;
   /** The active run prints the viewer's file, byte for byte, so Live mode can follow it. */
@@ -47,15 +52,62 @@ export type PrinterLiveState = Readonly<{
   manifest: MachineManifest | undefined;
 }>;
 
-const activeRunStates = new Set(['printing', 'paused']);
+const activeRunStates: ReadonlySet<string> = new Set<MachineRun['state']>(['running', 'paused']);
 
-const celsius = (quantity: Quantity | undefined): number | undefined => {
-  if (!quantity) {
+const celsius = (quantity: Quantity | number | undefined): number | undefined => {
+  // A bare number carries no unit, so only a quantity is read as a temperature.
+  if (quantity === undefined || typeof quantity === 'number') {
     return undefined;
   }
   const result = convert({ quantity, to: 'Cel' });
   return result.status === 'success' && typeof result.value.value === 'number' ? result.value.value : undefined;
 };
+
+/** The commanded temperature a component reports, in degrees Celsius. */
+const targetOf = (
+  components: readonly ComponentObservation[],
+  component: MachineComponent | undefined,
+): number | undefined =>
+  component === undefined
+    ? undefined
+    : celsius(
+        componentValue(components, component.id, 'readings')?.values.find(({ target }) => target !== undefined)?.target,
+      );
+
+/** Where the run stands: the layer counter when the machine counts layers, and the fraction done as a percentage. */
+const positionOf = (run: MachineRun | undefined): LiveRunPosition => {
+  const layer = run?.progress.counters.find(({ id, label }) => id === 'layer' || label.includes('Layer'));
+  const fraction = run?.progress.fraction;
+  return {
+    currentLayer: layer?.current,
+    totalLayers: layer?.total,
+    progress: fraction === undefined ? undefined : fraction * 100,
+  };
+};
+
+/** The light and heater targets of a machine observed now. */
+const currentFacts = (
+  entry: MachineDirectoryEntry,
+): Pick<PrinterLiveState, 'chamberLight' | 'nozzleTarget' | 'bedTarget'> => {
+  const { components } = entry.snapshot;
+  const installed = entry.descriptor.capabilities.components;
+  const light = installed.find((component) => component.kind === 'light');
+  const lightValue = light === undefined ? undefined : componentValue(components, light.id, 'switch');
+  return {
+    chamberLight: lightValue === undefined ? 'unknown' : lightValue.on ? 'on' : 'off',
+    nozzleTarget: targetOf(components, toolheadOf({ components: installed })),
+    bedTarget: targetOf(
+      components,
+      installed.find((component) => component.kind === 'heater'),
+    ),
+  };
+};
+
+/** The `#RRGGBB` of the first loaded slot; the slot reports `#RRGGBBAA` and the scene paints opaque colours. */
+const loadedColor = (entry: MachineDirectoryEntry): string | undefined =>
+  materialSystemValue(entry)
+    ?.slots.find((slot) => slot.state === 'loaded' && slot.material)
+    ?.material?.color.slice(0, 7);
 
 const isFollowable = (entry: MachineDirectoryEntry): boolean =>
   entry.freshness === 'current' && entry.snapshot.connection === 'connected';
@@ -71,7 +123,7 @@ const isFollowable = (entry: MachineDirectoryEntry): boolean =>
 export const selectPrinterLive = (
   entries: readonly MachineDirectoryEntry[] | undefined,
   manifests?: ReadonlyMap<string, MachineManifest>,
-  selection?: Readonly<{ machineId?: string; file?: Readonly<{ digest: string; requests: readonly PrintRequest[] }> }>,
+  selection?: Readonly<{ machineId?: string; file?: Readonly<{ digest: string; jobs: readonly MachineJob[] }> }>,
 ): PrinterLiveState | undefined => {
   const { machineId, file } = selection ?? {};
   const candidates = entries?.filter((entry) => isFollowable(entry)) ?? [];
@@ -82,15 +134,13 @@ export const selectPrinterLive = (
   if (!entry) {
     return undefined;
   }
-  const { run, temperatures, lights, setup, activeRunId } = entry.snapshot;
+  const { run } = entry.snapshot;
   const isCurrent = isFollowable(entry);
   const isActive = isCurrent && activeRunStates.has(run?.state ?? '');
-  // The request whose start receipt names the active run says which bytes it prints.
+  // The job whose start names the active run says which bytes it prints.
   const printsThisFile =
-    isActive && activeRunId !== undefined && file !== undefined
-      ? file.requests.some(
-          (request) => request.artifact.digest === file.digest && startedRunIdOf(request) === activeRunId,
-        )
+    isActive && run !== undefined && file !== undefined
+      ? file.jobs.some((job) => job.artifact.digest === file.digest && startedRunIdOf(job) === run.runId)
       : false;
   return {
     machineId: entry.machineId,
@@ -98,11 +148,9 @@ export const selectPrinterLive = (
     runState: isCurrent ? run?.state : undefined,
     isActive,
     printsThisFile,
-    position: { currentLayer: run?.currentLayer, totalLayers: run?.totalLayers, progress: run?.progress },
-    chamberLight: isCurrent ? (lights?.chamber ?? 'unknown') : 'unknown',
-    nozzleTarget: isCurrent ? celsius(temperatures?.nozzleTarget) : undefined,
-    bedTarget: isCurrent ? celsius(temperatures?.bedTarget) : undefined,
-    filamentColor: setup.materials.find((material) => material.state === 'loaded' && material.color)?.color,
+    position: positionOf(run),
+    ...(isCurrent ? currentFacts(entry) : { chamberLight: 'unknown', nozzleTarget: undefined, bedTarget: undefined }),
+    filamentColor: loadedColor(entry),
     manifest: manifests?.get(entry.providerId),
   };
 };
@@ -195,12 +243,10 @@ export const usePrinterLive = (digest: string | undefined): PrinterLiveState | u
   const { selected } = useMachinesSelection(projectId, entries ?? []);
   const machineId = selected?.machineId;
   const followed = useMemo(() => selectPrinterLive(entries, manifests, { machineId }), [entries, manifests, machineId]);
-  const { requests } = useMachinesPrintRequests(client, followed?.isActive ? followed.machineId : undefined);
+  const { jobs } = useMachinesJobs(client, followed?.isActive ? followed.machineId : undefined);
   return useMemo(
     () =>
-      digest === undefined
-        ? followed
-        : selectPrinterLive(entries, manifests, { machineId, file: { digest, requests } }),
-    [digest, entries, followed, manifests, requests, machineId],
+      digest === undefined ? followed : selectPrinterLive(entries, manifests, { machineId, file: { digest, jobs } }),
+    [digest, entries, followed, manifests, jobs, machineId],
   );
 };

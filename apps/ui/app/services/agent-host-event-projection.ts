@@ -909,18 +909,23 @@ export type AgentHostApproval = {
   /**
    * The durable record this interrupt gates, when the tool named one.
    *
-   * `request_print` writes `{ requestId, machineId, fileName }` so the Print
-   * pane can resolve the same ledger record the banner shows; other tools may
-   * write nothing.
+   * A job request writes `{ jobId, machineId, fileName }` and a machine action
+   * `{ machineId, componentId, action, operationId, label }`, so the Print pane
+   * can answer the same interrupt the banner shows; other tools may write nothing.
    */
   readonly context?: AgentHostApprovalContext | undefined;
 };
 
 /** Ledger correlation a tool attaches to the interrupt it raises. @public */
 export type AgentHostApprovalContext = {
-  readonly requestId?: string | undefined;
+  readonly jobId?: string | undefined;
   readonly machineId?: string | undefined;
   readonly fileName?: string | undefined;
+  /** For a machine action: the component, the action id, the operation it will send and its label. */
+  readonly componentId?: string | undefined;
+  readonly action?: string | undefined;
+  readonly operationId?: string | undefined;
+  readonly label?: string | undefined;
 };
 
 /** One sign-in method an external agent offered. @public */
@@ -964,16 +969,25 @@ const interruptRequestSchema = z.looseObject({
       toolCall: z.looseObject({ title: z.string().optional() }).optional(),
       options: z.array(approvalOptionSchema).optional(),
       requestId: z.string().min(1).optional(),
+      jobId: z.string().min(1).optional(),
       machineId: z.string().min(1).optional(),
       fileName: z.string().min(1).optional(),
+      componentId: z.string().min(1).optional(),
+      action: z.string().min(1).optional(),
+      operationId: z.string().min(1).optional(),
+      label: z.string().min(1).optional(),
     })
     .optional(),
 });
 
 const agentHostApprovalContextSchema = z.object({
-  requestId: z.string().min(1).optional(),
+  jobId: z.string().min(1).optional(),
   machineId: z.string().min(1).optional(),
   fileName: z.string().min(1).optional(),
+  componentId: z.string().min(1).optional(),
+  action: z.string().min(1).optional(),
+  operationId: z.string().min(1).optional(),
+  label: z.string().min(1).optional(),
 });
 
 /**
@@ -983,16 +997,24 @@ const agentHostApprovalContextSchema = z.object({
  * @returns Only the correlation keys present, or `undefined` when none are.
  */
 const approvalContextOf = (
-  context: { requestId?: string; machineId?: string; fileName?: string } | undefined,
+  context: (AgentHostApprovalContext & { readonly requestId?: string | undefined }) | undefined,
 ): AgentHostApprovalContext | undefined => {
   if (!context) {
     return undefined;
   }
-  const picked: AgentHostApprovalContext = {
-    ...(context.requestId === undefined ? {} : { requestId: context.requestId }),
-    ...(context.machineId === undefined ? {} : { machineId: context.machineId }),
-    ...(context.fileName === undefined ? {} : { fileName: context.fileName }),
-  };
+  // ponytail: a host from before jobs names the job `requestId`; drop the alias once every host writes `jobId`.
+  const jobId = context.jobId ?? context.requestId;
+  const picked: AgentHostApprovalContext = Object.fromEntries(
+    Object.entries({
+      jobId,
+      machineId: context.machineId,
+      fileName: context.fileName,
+      componentId: context.componentId,
+      action: context.action,
+      operationId: context.operationId,
+      label: context.label,
+    }).filter(([, value]) => value !== undefined),
+  );
   return Object.keys(picked).length === 0 ? undefined : picked;
 };
 

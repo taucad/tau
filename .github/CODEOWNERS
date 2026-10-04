@@ -1,4 +1,4 @@
-# Maintained declaratively alongside `release-managers` in `tau-cloud` stack
-# `stacks/repo/tau` (github_repository_ruleset `main`: require_code_owner_review).
-.github/workflows/** @taucad/release-managers
-.github/CODEOWNERS @taucad/release-managers
+# All contributor changes require the repository owner’s approval.
+# Tau Cloud stacks/repo/tau keeps code-owner review mandatory and grants
+# rifont (the sole release-managers member) a PR-only review bypass.
+* @rifont

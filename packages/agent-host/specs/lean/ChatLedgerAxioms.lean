@@ -84,6 +84,9 @@ import ChatLedgerProofs
 #print axioms ChatLedger.t4_stamp_fold_agree
 #print axioms ChatLedger.t4_paused_continues
 #print axioms ChatLedger.t4_paused_reopens
+#print axioms ChatLedger.t4_user_stop_reopens
+#print axioms ChatLedger.t4_uncommitted_stop_ended
+#print axioms ChatLedger.t4_cancel_ended
 #print axioms ChatLedger.t5_refusal_resets
 #print axioms ChatLedger.t5_folded_aligned
 #print axioms ChatLedger.t5_clamp_detected

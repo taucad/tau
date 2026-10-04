@@ -95,7 +95,16 @@ type Row = {
 
 const base = Date.UTC(2026, 8, 1);
 const termId = (term: number) => `e${String(term).padStart(2, '0')}`;
-const lifeStates = ['admitted', 'running', 'paused', 'completed', 'failed', 'failed', 'cancelled'] as const;
+const lifeStates = [
+  'admitted',
+  'running',
+  'paused',
+  'completed',
+  'failed',
+  'failed',
+  'cancelled',
+  'cancelled',
+] as const;
 const settledOutcomes = ['settled', 'released', 'absorbed', 'voided'] as const;
 type Settlement = Extract<LogRowBody, { readonly type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed' }>;
 
@@ -124,6 +133,7 @@ const bodyOf = (row: Pick<Row, 'term' | 'seq' | 'kind' | 'argument'>): Record<st
         state: lifeStates[argument]!,
         ...(argument === 4 ? { detail: { message: 'fatal', code: 'FATAL_TEST' } } : {}),
         ...(argument === 5 ? { detail: { message: 'rate', code: 'RATE_LIMITED' } } : {}),
+        ...(argument === 7 ? { detail: { message: 'stopped', code: 'USER_STOPPED' } } : {}),
       };
     }
     case 'S': {
@@ -222,7 +232,9 @@ const ledgerLines = (ledger: ChatLedger, prefix = ''): string[] => {
     const life =
       entry.lifecycle === 'failed'
         ? `failed:${isResumableRunFailure(entry.failure) ? 'r' : 'f'}`
-        : (entry.lifecycle ?? '-');
+        : entry.lifecycle === 'cancelled' && entry.failure?.code === 'USER_STOPPED'
+          ? 'cancelled:u'
+          : (entry.lifecycle ?? '-');
     const settlements = entry.settlements.map((settlement) => `${settlement.attempt}@${keyText(settlement.row)}`);
     const pending = Object.keys(entry.pendingInterrupts).toSorted();
     return [
@@ -320,7 +332,7 @@ type Profile = {
   readonly queries: boolean;
 };
 
-const lifeArgs = [0, 1, 1, 1, 2, 3, 3, 4, 5, 6] as const;
+const lifeArgs = [0, 1, 1, 1, 2, 3, 3, 4, 5, 6, 7] as const;
 
 const logTrace = async (random: Random, name: string, profile: Profile): Promise<Trace> => {
   const text = [`T ${name}`];
@@ -379,7 +391,7 @@ const logTrace = async (random: Random, name: string, profile: Profile): Promise
     }
     if (draw < 0.91) {
       const prior = pick(random, committed);
-      return { ...prior, argument: prior.kind === 'L' ? (prior.argument + 1) % 7 : prior.argument + 1 };
+      return { ...prior, argument: prior.kind === 'L' ? (prior.argument + 1) % lifeStates.length : prior.argument + 1 };
     }
     if (draw < 0.96) {
       return { term, seq: nextSeq + 1 + below(random, 2), run, ...body(kinds), ms: clock, epoch: termEpoch };
@@ -523,7 +535,7 @@ const logTrace = async (random: Random, name: string, profile: Profile): Promise
     }
     for (let query = 0; query < 2; query++) {
       const run = 1 + below(random, 4);
-      const state = below(random, 7);
+      const state = below(random, lifeStates.length);
       text.push(`LIFE ${run} ${state}`);
       expected.push(
         `QL ${gateOne(ledger, run, bodyOf({ term: 99, seq: 0, kind: 'L', argument: state }) as LogRowBody)}`,

@@ -58,10 +58,12 @@ def codeName : Code → String
 
 def lifeName : Life → String
   | .admitted => "admitted" | .running => "running" | .paused => "paused" | .completed => "completed"
-  | .failed true => "failed:r" | .failed false => "failed:f" | .cancelled => "cancelled"
+  | .failed true => "failed:r" | .failed false => "failed:f" | .cancelled true => "cancelled:u"
+  | .cancelled false => "cancelled"
 
 def outcomeName : Life → String
   | .failed _ => "failed"
+  | .cancelled _ => "cancelled"
   | l => lifeName l
 
 def aName : AState → String

@@ -942,6 +942,33 @@ theorem t4_failed_cancel_refused (en : Entry) (r : Bool) (hf : en.life = some (.
   unfold condition
   cases r <;> simp [hf, hs, attemptEnded, Life.ended, reopenable, rests, reopenableCond, lifecycleTable]
 
+/-- **T4** (a deliberate Stop resumes; `isUserStoppedRun`): a `USER_STOPPED` cancel of a committed turn reopens on
+`running`, settled or not, and the table admits the row — the Resume a stopped turn's card offers is one the gate
+takes. -/
+theorem t4_user_stop_reopens (en : Entry) (hs : en.life = some (.cancelled true)) (hc : en.committed = true) :
+    lifecycleTable (condition en) .running = .ok ∧ reopens en .running 0 = true := by
+  have : reopens en .running 0 = true := by
+    rw [reopens_def]; simp [reopenable, attemptEnded, Life.ended, rests, hs, hc]
+  exact ⟨t4_reopens_legal en this, this⟩
+
+/-- **T4** (a Stop before the turn committed stays ended): with nothing durable to continue, a `USER_STOPPED` cancel
+does not reopen. -/
+theorem t4_uncommitted_stop_ended (en : Entry) (hs : en.life = some (.cancelled true)) (hc : en.committed = false) :
+    reopens en .running 0 = false := by
+  cases h : reopens en .running 0
+  · rfl
+  · rw [reopens_def] at h
+    have := h.2.2
+    simp [reopenable, rests, hs, hc] at this
+
+/-- **T4** (any other cancel stays ended): a cancel that is not a deliberate Stop never reopens. -/
+theorem t4_cancel_ended (en : Entry) (hs : en.life = some (.cancelled false)) : reopens en .running 0 = false := by
+  cases h : reopens en .running 0
+  · rfl
+  · rw [reopens_def] at h
+    have := h.2.2
+    simp [reopenable, rests, hs] at this
+
 /-! ## T5: a reader detects every clamp, refusal and stale batch (foldReadAnswer) -/
 
 /-- **T5** (refusals): a refused read is never folded; the reader resets. -/

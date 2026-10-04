@@ -340,12 +340,13 @@ def v1Read (view : List Row) (requested limit : Nat) : Answer :=
 
 /-! ## chat-ledger.ts -/
 
-/-- `RunLifecycleState`; `failed r`: `r` is `isResumableRunFailure(failure)`. -/
+/-- `RunLifecycleState`; `failed r`: `r` is `isResumableRunFailure(failure)`; `cancelled u`: `u` is a deliberate Stop,
+the row's `detail.code` is `USER_STOPPED`. -/
 inductive Life where
-  | admitted | running | paused | completed | failed (resumable : Bool) | cancelled
+  | admitted | running | paused | completed | failed (resumable : Bool) | cancelled (userStopped : Bool)
   deriving DecidableEq, Repr, Inhabited
 
-/-- The generator's `lifeStates[arg]` (4: `FATAL_TEST`, 5: `RATE_LIMITED`). -/
+/-- The generator's `lifeStates[arg]` (4: `FATAL_TEST`, 5: `RATE_LIMITED`, 7: `USER_STOPPED`). -/
 def lifeOf : Nat → Life
   | 0 => .admitted
   | 1 => .running
@@ -353,13 +354,14 @@ def lifeOf : Nat → Life
   | 3 => .completed
   | 4 => .failed false
   | 5 => .failed true
-  | _ => .cancelled
+  | 7 => .cancelled true
+  | _ => .cancelled false
 
 /-- `endedStates`. -/
 def Life.ended : Life → Bool
   | .completed => true
   | .failed _ => true
-  | .cancelled => true
+  | .cancelled _ => true
   | _ => false
 
 inductive AState where
@@ -427,10 +429,12 @@ def attemptEnded (en : Entry) : Bool :=
   | some l => l.ended
   | none => false
 
-/-- The lifecycle half of the reopen predicate: a resumable failure, or a pause with no pending request. -/
+/-- The lifecycle half of the reopen predicate: a resumable failure, a deliberate Stop that kept its committed turn
+(`isUserStoppedRun`; every run here is `kind: 'tau'`), or a pause with no pending request. -/
 def rests (en : Entry) : Bool :=
   match en.life with
   | some (.failed true) => true
+  | some (.cancelled true) => en.committed
   | some .paused => en.pending.isEmpty
   | _ => false
 
@@ -635,7 +639,7 @@ def Life.op : Life → LOp
   | .paused => .paused
   | .completed => .completed
   | .failed _ => .failed
-  | .cancelled => .cancelled
+  | .cancelled _ => .cancelled
 
 /-- `run-lifecycle.legality.json`. -/
 def lifecycleTable : Cond → LOp → Code

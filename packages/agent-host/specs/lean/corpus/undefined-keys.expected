@@ -159,8 +159,8 @@ A 7 appended
 A 8 appended
 A 9 appended
 R 1 running 1 settled 0 0 1@0:3 i2 - recover
-R 2 failed:r 1 terminal 0 0 - - - resume
-C 1 running 2:failed
+R 2 cancelled 1 terminal 0 0 - - - resume
+C 1 running 2:cancelled
 P 9 1:4 2 1
 N order@0:0
 U 2:1
@@ -172,9 +172,9 @@ A 14 appended
 A 15 appended
 A 16 appended
 R 1 running 1 settled 0 0 1@0:3 i2 - recover
-R 2 failed:r 1 settled 0 0 1@2:0 - - resume
+R 2 cancelled 1 settled 0 0 1@2:0 - - resume
 R 3 admitted 1 open 0 0 - - - recover
-C 3 admitted 2:failed
+C 3 admitted 2:cancelled
 P 16 3:2 4 1
 N order@0:0,order@1:5
 U -
@@ -184,9 +184,9 @@ A 19 appended
 A 20 appended
 A 21 EVENT_MUTATED
 R 1 running 1 settled 0 0 1@0:3 i2 - recover
-R 2 failed:r 1 settled 0 0 1@2:0 - - resume
+R 2 cancelled 1 settled 0 0 1@2:0 - - resume
 R 3 admitted 1 settled 0 0 1@3:3 - - recover
-C 3 admitted 2:failed
+C 3 admitted 2:cancelled
 P 19 3:5 4 1
 N order@0:0,order@1:5,conflict@3:4,conflict@3:5
 U -
@@ -200,9 +200,9 @@ A 27 appended
 A 28 appended
 A 29 appended
 R 1 running 1 settled 0 0 1@0:3 i2 - recover
-R 2 failed:r 1 settled 1 0 1@2:0 - - settled
+R 2 cancelled 1 settled 1 0 1@2:0 - - settled
 R 3 running 1 settled 0 0 1@3:3 i0 - recover
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 26 3:12 4 1
 N order@0:0,order@1:5,conflict@3:4,conflict@3:5,conflict@3:6,conflict@3:9,order@3:11
 U -
@@ -349,15 +349,15 @@ A 9 appended
 A 10 appended
 A 11 appended
 A 12 appended
-R 1 completed 1 settled 1 0 1@0:6 i2 - settled
+R 1 failed:f 1 settled 1 0 1@0:6 i2 - settled
 R 2 paused 1 settled 0 0 1@0:9 i1 - recover
 R 3 failed:f 1 settled 0 0 1@0:3 - - resume
-C 1 terminal 1:completed
+C 1 terminal 1:failed
 P 12 0:11 1 1
 N order@0:1,order@0:2,order@0:4,conflict@0:7,order@0:11
 U -
 A 13 appended
-R 1 cancelled 1 settled 1 0 1@0:6 i2 - settled
+R 1 cancelled:u 1 settled 1 0 1@0:6 i2 - settled
 R 2 paused 1 settled 0 0 1@0:9 i1 - recover
 R 3 failed:f 1 settled 0 0 1@0:3 - - resume
 C 1 terminal 1:cancelled
@@ -367,7 +367,7 @@ U -
 A 14 appended
 A 15 appended
 A 16 duplicate
-R 1 cancelled 1 settled 1 0 1@0:6 i2 - settled
+R 1 cancelled:u 1 settled 1 0 1@0:6 i2 - settled
 R 2 failed:r 1 settled 0 0 1@0:9 i1 - resume
 R 3 failed:f 1 settled 0 0 1@0:3 - - resume
 C 2 terminal 2:failed
@@ -401,23 +401,23 @@ A 8 EVENT_OUT_OF_ORDER
 A 9 appended
 A 10 appended
 R 3 - 1 unadmitted 0 0 1@0:7 i0 - admit
-R 2 running 1 settled 0 0 1@0:1 - - recover
-C 2 running 2:cancelled
+R 2 paused 1 settled 0 0 1@0:1 - - recover
+C 2 paused 2:cancelled
 P 9 0:8 1 1
 N conflict@0:6
 U -
 A 11 appended
 A 12 appended
 R 3 - 1 unadmitted 0 0 1@0:7 i0 - admit
-R 2 running 1 settled 0 0 1@0:1 - - recover
+R 2 paused 1 settled 0 0 1@0:1 - - recover
 R 1 - 1 unadmitted 1 0 - - - admit
-C 2 running 2:cancelled
+C 2 paused 2:cancelled
 P 11 0:10 1 1
 N conflict@0:6,conflict@0:10
 U -
 A 13 appended
 R 3 completed 1 settled 0 0 1@0:7 i0 - resume
-R 2 running 1 settled 0 0 1@0:1 - - recover
+R 2 paused 1 settled 0 0 1@0:1 - - recover
 R 1 - 1 unadmitted 1 0 - - - admit
 C 3 terminal 3:completed
 P 12 0:11 1 1
@@ -426,12 +426,12 @@ U -
 A 14 appended
 A 15 EVENT_OUT_OF_ORDER
 R 3 completed 1 settled 0 0 1@0:7 i0 - resume
-R 2 running 1 settled 0 0 1@0:1 - - recover
-R 1 running 1 open 1 0 - - - resume
-C 1 running 3:completed
+R 2 paused 1 settled 0 0 1@0:1 - - recover
+R 1 paused 1 terminal 1 0 - - - resume
+C 1 paused 3:completed
 P 13 0:12 1 1
 N conflict@0:6,conflict@0:10,order@0:11,order@0:12
-U -
+U 1:1
 A 16 duplicate
 A 17 appended
 A 18 appended
@@ -439,8 +439,8 @@ A 19 appended
 A 20 appended
 A 21 appended
 R 3 completed 1 settled 0 0 1@0:7 i0 - resume
-R 2 running 1 settled 0 0 1@0:1 - - recover
-R 1 cancelled 1 terminal 1 0 - - - settled
+R 2 paused 1 settled 0 0 1@0:1 - - recover
+R 1 cancelled:u 1 terminal 1 0 - - - settled
 C 1 terminal 1:cancelled
 P 18 0:17 1 1
 N conflict@0:6,conflict@0:10,order@0:11,order@0:12
@@ -451,8 +451,8 @@ A 23 appended
 A 24 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 25 appended
-R 3 completed 1 settled 0 0 1@0:7 i0 - resume
-R 2 running 1 settled 0 0 1@0:1 - - recover
+R 3 failed:f 1 settled 0 0 1@0:7 i0 - resume
+R 2 paused 1 settled 0 0 1@0:1 - - recover
 R 1 failed:f 1 settled 1 0 1@0:19 - - settled
 C 1 terminal 1:failed
 P 21 0:20 1 1
@@ -474,25 +474,25 @@ A 2 appended
 A 3 duplicate
 A 4 appended
 R 2 - 1 unadmitted 1 0 - i2 - admit
-R 3 failed:r 1 terminal 0 0 - - - resume
-C 3 terminal 3:failed
+R 3 cancelled 1 terminal 0 0 - - - resume
+C 3 terminal 3:cancelled
 P 3 1:0 2 1
 N order@1:0
 U 3:1
 A 5 duplicate
 A 6 EVENT_MUTATED
 R 2 - 1 unadmitted 1 0 - i2 - admit
-R 3 failed:r 1 terminal 0 0 - - - resume
-C 3 terminal 3:failed
+R 3 cancelled 1 terminal 0 0 - - - resume
+C 3 terminal 3:cancelled
 P 3 1:0 2 1
 N order@1:0
 U 3:1
 A 7 duplicate
 A 8 appended
 R 2 - 1 unadmitted 1 0 - i2 - admit
-R 3 failed:r 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
 R 1 - 1 unadmitted 0 0 1@1:1 - - admit
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 4 1:1 2 1
 N order@1:0
 U 3:1
@@ -500,9 +500,9 @@ A 9 appended
 A 10 EVENT_MUTATED
 A 11 appended
 R 2 - 1 unadmitted 1 0 - i2 - admit
-R 3 paused 1 settled 0 0 1@1:2 - - recover
+R 3 completed 1 settled 0 0 1@1:2 - - resume
 R 1 - 1 unadmitted 0 0 1@1:1 - - admit
-C 3 paused 3:failed
+C 3 terminal 3:completed
 P 6 1:3 2 1
 N order@1:0
 U -
@@ -512,7 +512,7 @@ O 0 0 0 0
 A 14 appended
 A 15 appended
 R 2 completed 1 terminal 1 0 - i2 - settled
-R 3 paused 1 settled 0 0 1@1:2 - - recover
+R 3 completed 1 settled 0 0 1@1:2 - - resume
 R 1 - 1 unadmitted 0 0 1@1:1 i2 - admit
 C 2 terminal 2:completed
 P 10 1:7 2 1
@@ -523,7 +523,7 @@ A 16 appended
 A 17 appended
 A 18 appended
 R 2 completed 1 settled 1 0 1@1:10 i0,i2 - settled
-R 3 paused 1 settled 0 0 1@1:2 - - recover
+R 3 completed 1 settled 0 0 1@1:2 - - resume
 R 1 - 1 unadmitted 0 0 1@1:1 i2 - admit
 C 2 terminal 2:completed
 P 13 1:10 2 1
@@ -543,8 +543,8 @@ A 0 appended
 A 1 appended
 A 2 appended
 R 2 running 1 open 0 0 - - - recover
-R 3 completed 1 terminal 0 0 - - - resume
-C 2 running 3:completed
+R 3 failed:f 1 terminal 0 0 - - - resume
+C 2 running 3:failed
 P 3 0:2 1 1
 N order@0:0,order@0:1
 U 3:1
@@ -552,7 +552,7 @@ A 3 appended
 O 0 0 0 0
 A 4 appended
 A 5 appended
-R 2 cancelled 1 terminal 0 0 - - - resume
+R 2 cancelled:u 1 terminal 0 0 - - - resume
 R 3 running 1 open 0 0 - - - recover
 R 1 - 1 unadmitted 0 0 1@0:3 - - admit
 C 3 running 2:cancelled
@@ -564,42 +564,42 @@ A 6 appended
 A 7 appended
 A 8 appended
 A 9 appended
-R 2 running 1 open 0 0 - i0 - recover
+R 2 paused 1 terminal 0 0 - i0 - recover
 R 3 completed 1 terminal 0 0 - i0 - resume
 R 1 - 1 unadmitted 0 0 1@0:3 - - admit
 C 3 terminal 3:completed
 P 10 1:4 2 1
 N order@0:0,order@0:1
-U 3:1
+U 2:1,3:1
 A 10 appended
 O 0 0 0 0
 A 11 appended
 A 12 EVENT_OUT_OF_ORDER
-R 2 running 1 open 0 0 - i0 - recover
+R 2 paused 1 terminal 0 0 - i0 - recover
 R 3 completed 1 terminal 0 0 - i0 - resume
 R 1 running 1 settled 0 0 1@0:3 - - recover
 C 1 running 3:completed
 P 12 1:6 2 1
 N order@0:0,order@0:1,conflict@1:5,order@1:6
-U 3:1
+U 2:1,3:1
 A 13 appended
-R 2 running 1 open 0 0 - i0 - recover
+R 2 paused 1 terminal 0 0 - i0 - recover
 R 3 completed 1 terminal 0 0 - i0 - resume
-R 1 cancelled 1 settled 0 0 1@0:3 - - resume
+R 1 cancelled:u 1 settled 0 0 1@0:3 - - resume
 C 1 terminal 1:cancelled
 P 13 1:7 2 1
 N order@0:0,order@0:1,conflict@1:5,order@1:6
-U 3:1
+U 2:1,3:1
 A 14 appended
 A 15 duplicate
 A 16 appended
-R 2 running 1 open 0 0 - i0 - recover
-R 3 failed:f 1 terminal 0 0 - i0 - resume
-R 1 cancelled 1 settled 0 0 1@0:3 - - resume
+R 2 paused 1 terminal 0 0 - i0 - recover
+R 3 failed:r 1 terminal 0 0 - i0 - resume
+R 1 cancelled:u 1 settled 0 0 1@0:3 - - resume
 C 3 terminal 3:failed
 P 15 1:9 2 1
 N order@0:0,order@0:1,conflict@1:5,order@1:6,conflict@1:9
-U 3:1
+U 2:1,3:1
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
 QS appended
@@ -643,10 +643,10 @@ A 22 appended
 O 0 0 0 0
 A 23 appended
 A 24 appended
-R 3 cancelled 1 settled 1 0 1@0:0 i2 - settled
-R 1 completed 1 settled 1 0 1@4:1 i0,i2 - settled
-R 2 cancelled 1 settled 0 0 1@1:3 i1 - resume
-C 1 terminal 1:completed
+R 3 cancelled:u 1 settled 1 0 1@0:0 i2 - settled
+R 1 failed:f 1 settled 1 0 1@4:1 i0,i2 - settled
+R 2 cancelled:u 1 settled 0 0 1@1:3 i1 - resume
+C 1 terminal 1:failed
 P 24 4:1 5 1
 N conflict@1:0,order@1:6,order@2:2,order@2:3,order@2:5
 U -
@@ -684,7 +684,7 @@ A 10 EVENT_MUTATED
 A 11 EVENT_MUTATED
 A 12 appended
 R 1 paused 1 terminal 1 0 - - - resume
-R 3 running 1 open 0 0 - - - recover
+R 3 running 2 open 0 0 - - - recover
 C 1 paused 3:failed
 P 6 0:5 1 1
 N order@0:1,order@0:2
@@ -725,7 +725,7 @@ O 0 0 0 0
 A 13 appended
 A 14 appended
 R 2 failed:r 1 settled 1 0 1@4:3 - - settled
-R 3 failed:f 1 settled 1 0 1@0:1 - - settled
+R 3 failed:r 1 settled 1 0 1@0:1 - - settled
 R 1 cancelled 1 settled 0 0 1@1:0 - - resume
 C 1 terminal 1:cancelled
 P 11 4:3 3 1
@@ -736,23 +736,23 @@ A 16 EVENT_MUTATED
 A 17 EVENT_MUTATED
 A 18 appended
 R 2 running 2 open 1 0 1@4:3 - - resume
-R 3 failed:f 1 settled 1 0 1@0:1 - - settled
-R 1 paused 1 settled 0 0 1@1:0 - - recover
-C 1 paused 1:cancelled
+R 3 failed:r 1 settled 1 0 1@0:1 - - settled
+R 1 completed 1 settled 0 0 1@1:0 - - resume
+C 1 terminal 1:completed
 P 13 5:1 4 1
 N order@0:2,conflict@1:1,order@1:2,order@4:1
 U -
 R 2 running 2 open 1 0 1@4:3 - - resume
-R 3 failed:f 1 settled 1 0 1@0:1 - - settled
-R 1 paused 1 settled 0 0 1@1:0 - - recover
-C 1 paused 1:cancelled
+R 3 failed:r 1 settled 1 0 1@0:1 - - settled
+R 1 completed 1 settled 0 0 1@1:0 - - resume
+C 1 terminal 1:completed
 P 13 5:1 4 1
 N order@0:2,conflict@1:1,order@1:2,order@4:1
 U -
 QS appended
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QL ok
+QL RUN_ID_TAKEN
 QL ok
 QB batch 2 7 13 0:2,1:0,1:1,1:2,1:3
 QB batch 3 4 13 1:0
@@ -775,10 +775,10 @@ O 0 0 0 0
 A 11 appended
 A 12 appended
 A 13 appended
-R 1 completed 1 terminal 0 0 - i1,i2 - resume
-R 2 cancelled 1 settled 0 0 1@1:1 - - resume
+R 1 failed:f 1 terminal 0 0 - i1,i2 - resume
+R 2 cancelled:u 1 settled 0 0 1@1:1 - - resume
 R 3 running 1 settled 0 0 1@1:2 - - recover
-C 1 terminal 1:completed
+C 1 terminal 1:failed
 P 14 3:6 4 1
 N order@1:0,conflict@1:3
 U 1:1
@@ -789,7 +789,7 @@ QL RUN_ID_TAKEN
 QL ok
 QB batch 13 14 14 3:6
 QB batch 13 14 14 3:6
-QB batch 0 4 14 0:0,1:0,1:1,1:2
+QB batch 0 3 14 0:0,1:0,1:1
 X
 T log-12
 A 0 EVENT_OUT_OF_ORDER
@@ -985,29 +985,29 @@ A 18 appended
 A 19 appended
 O 0 0 0 0
 A 20 duplicate
-R 2 cancelled 1 terminal 1 0 - - - settled
-R 3 completed 1 settled 1 0 1@0:2 - - settled
+R 2 cancelled:u 1 terminal 1 0 - - - settled
+R 3 failed:f 2 terminal 1 0 1@0:2 - - settled
 R 1 running 1 settled 1 0 1@1:8 - - resume
 C 1 running 1:completed
 P 17 2:1 3 1
 N order@0:3,order@1:0,order@1:4,order@1:7
-U 2:1
+U 2:1,3:2
 A 21 appended
 A 22 appended
 O 0 0 0 0
 A 23 appended
 A 24 appended
-R 2 cancelled 1 terminal 1 0 - - - settled
-R 3 completed 1 settled 1 0 1@0:2 - - settled
-R 1 failed:f 1 settled 1 0 1@1:8 - - settled
+R 2 cancelled:u 1 terminal 1 0 - - - settled
+R 3 failed:f 2 terminal 1 0 1@0:2 - - settled
+R 1 failed:r 1 settled 1 0 1@1:8 - - settled
 C 3 terminal 1:failed
 P 21 2:5 3 1
 N order@0:3,order@1:0,order@1:4,order@1:7,order@2:5
-U 2:1
-QS skipped
+U 2:1,3:2
+QS appended
 QS skipped
 QS appended
-QL RUN_ID_TAKEN
+QL ok
 QL ok
 QB batch 11 12 21 1:7
 QB batch 12 16 21 1:8,1:9,1:10,2:0
@@ -1019,9 +1019,9 @@ A 1 EVENT_OUT_OF_ORDER
 A 2 appended
 A 3 appended
 A 4 appended
-R 2 completed 1 settled 0 0 1@0:0 - - resume
+R 2 failed:f 1 settled 0 0 1@0:0 - - resume
 R 3 - 1 unadmitted 0 0 1@0:2 - - admit
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:1
 U -
@@ -1032,27 +1032,27 @@ A 7 appended
 A 8 appended
 A 9 appended
 A 10 appended
-R 2 completed 1 settled 0 0 1@0:0 - - resume
-R 3 completed 1 settled 0 0 1@0:2 - - resume
+R 2 failed:f 1 settled 0 0 1@0:0 - - resume
+R 3 failed:f 1 settled 0 0 1@0:2 - - resume
 R 1 paused 1 settled 0 0 1@0:5 - - recover
-C 1 paused 3:completed
+C 1 paused 3:failed
 P 9 1:1 2 1
 N order@0:1,order@0:4,conflict@0:6
 U -
 A 11 appended
 A 12 appended
-R 2 completed 1 settled 0 0 1@0:0 - - resume
-R 3 completed 1 settled 0 0 1@0:2 - - resume
+R 2 failed:f 1 settled 0 0 1@0:0 - - resume
+R 3 failed:f 1 settled 0 0 1@0:2 - - resume
 R 1 paused 1 settled 0 0 1@0:5 i2 - recover
-C 2 terminal 3:completed
+C 2 terminal 3:failed
 P 11 1:3 2 1
 N order@0:1,order@0:4,conflict@0:6,order@1:2
 U -
 A 13 duplicate
-R 2 completed 1 settled 0 0 1@0:0 - - resume
-R 3 completed 1 settled 0 0 1@0:2 - - resume
+R 2 failed:f 1 settled 0 0 1@0:0 - - resume
+R 3 failed:f 1 settled 0 0 1@0:2 - - resume
 R 1 paused 1 settled 0 0 1@0:5 i2 - recover
-C 2 terminal 3:completed
+C 2 terminal 3:failed
 P 11 1:3 2 1
 N order@0:1,order@0:4,conflict@0:6,order@1:2
 U -
@@ -1060,16 +1060,16 @@ A 14 appended
 A 15 appended
 A 16 appended
 R 2 running 1 settled 0 0 1@0:0 - - recover
-R 3 failed:f 1 settled 0 0 1@0:2 - - resume
-R 1 failed:f 1 settled 0 0 1@0:5 i2 - resume
+R 3 failed:r 1 settled 0 0 1@0:2 - - resume
+R 1 failed:r 1 settled 0 0 1@0:5 i2 - resume
 C 3 terminal 3:failed
 P 14 1:6 2 1
 N order@0:1,order@0:4,conflict@0:6,order@1:2
 U -
 A 17 appended
 R 2 running 1 settled 0 0 1@0:0 - - recover
-R 3 failed:f 1 settled 0 0 1@0:2 - - resume
-R 1 failed:f 1 settled 0 0 1@0:5 i2 - resume
+R 3 failed:r 1 settled 0 0 1@0:2 - - resume
+R 1 failed:r 1 settled 0 0 1@0:5 i2 - resume
 C 1 terminal 3:failed
 P 15 1:7 2 1
 N order@0:1,order@0:4,conflict@0:6,order@1:2,order@1:7
@@ -1085,15 +1085,15 @@ QB batch 0 5 15 0:0,0:1,0:2,0:3,0:4
 X
 T log-16
 A 0 appended
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 1 failed:f 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 1 0:0 1 1
 N order@0:0
 U 1:1
 O 0 0 0 0
 A 1 duplicate
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 1 failed:f 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 1 0:0 1 1
 N order@0:0
 U 1:1
@@ -1124,8 +1124,8 @@ A 16 appended
 A 17 appended
 A 18 EVENT_OUT_OF_ORDER
 R 1 running 1 settled 0 0 1@3:2 - - recover
-R 3 cancelled 1 settled 1 0 1@0:1 - - settled
-R 2 failed:f 1 settled 0 0 1@1:0 - - resume
+R 3 cancelled:u 1 settled 1 0 1@0:1 - - settled
+R 2 failed:r 1 settled 0 0 1@1:0 - - resume
 C 2 terminal 2:failed
 P 15 4:2 5 1
 N order@0:0,order@0:2,conflict@2:0,conflict@3:1,conflict@3:3,order@4:1
@@ -1151,7 +1151,7 @@ A 7 appended
 A 8 appended
 A 9 appended
 A 10 appended
-R 1 failed:f 1 terminal 1 0 - - - settled
+R 1 failed:r 1 terminal 1 0 - - - settled
 R 3 paused 1 settled 0 0 1@1:0 - - recover
 R 2 - 1 unadmitted 1 0 - - - admit
 C 3 paused 1:failed
@@ -1192,7 +1192,7 @@ A 19 appended
 A 20 appended
 A 21 appended
 A 22 appended
-R 1 completed 1 terminal 1 0 - - - settled
+R 1 failed:f 1 terminal 1 0 - - - settled
 R 3 cancelled 1 settled 1 0 1@1:0 - - settled
 R 2 - 1 unadmitted 1 0 - - - admit
 C 3 terminal 3:cancelled
@@ -1200,7 +1200,7 @@ P 22 2:8 3 1
 N order@0:0,order@1:1,conflict@1:2,order@1:6,order@1:10,conflict@2:0,conflict@2:1,conflict@2:3,conflict@2:7,order@2:8
 U 1:1
 A 23 appended
-R 1 completed 1 settled 1 0 1@2:9 - - settled
+R 1 failed:f 1 settled 1 0 1@2:9 - - settled
 R 3 cancelled 1 settled 1 0 1@1:0 - - settled
 R 2 - 1 unadmitted 1 0 - - - admit
 C 3 terminal 3:cancelled
@@ -1234,14 +1234,14 @@ A 0 appended
 A 1 appended
 A 2 appended
 R 1 paused 1 terminal 0 0 - i1 - recover
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 C 3 terminal 3:failed
 P 3 0:2 1 1
 N order@0:0,order@0:1
 U 1:1,3:1
 A 3 appended
 R 1 paused 1 settled 0 0 1@0:3 i1 - recover
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 C 3 terminal 3:failed
 P 4 0:3 1 1
 N order@0:0,order@0:1
@@ -1264,14 +1264,14 @@ A 4 appended
 A 5 EVENT_OUT_OF_ORDER
 R 3 - 1 unadmitted 0 0 1@0:0 - - admit
 R 2 paused 1 settled 0 0 1@1:3 - - recover
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 5 1:3 2 1
 N order@1:0,order@1:1,conflict@1:2
 U 1:1
 R 3 - 1 unadmitted 0 0 1@0:0 - - admit
 R 2 paused 1 settled 0 0 1@1:3 - - recover
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 5 1:3 2 1
 N order@1:0,order@1:1,conflict@1:2
@@ -1298,7 +1298,7 @@ A 3 appended
 A 4 appended
 A 5 appended
 A 6 appended
-R 1 failed:r 1 settled 0 0 1@1:0 - - resume
+R 1 cancelled 1 settled 0 0 1@1:0 - - resume
 R 2 failed:f 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 0 0 1@1:2 - - admit
 C 2 terminal 2:failed
@@ -1313,14 +1313,14 @@ A 9 EVENT_MUTATED
 A 10 appended
 A 11 appended
 A 12 appended
-R 1 failed:r 1 settled 0 0 1@1:0 - - resume
+R 1 cancelled 1 settled 0 0 1@1:0 - - resume
 R 2 failed:f 1 terminal 1 0 - i0,i2 - settled
 R 3 - 1 unadmitted 0 0 1@1:2 - - admit
 C 2 terminal 2:failed
 P 11 2:4 3 1
 N order@0:0,order@0:2,conflict@1:1,conflict@2:3
 U 2:1
-R 1 failed:r 1 settled 0 0 1@1:0 - - resume
+R 1 cancelled 1 settled 0 0 1@1:0 - - resume
 R 2 failed:f 1 terminal 1 0 - i0,i2 - settled
 R 3 - 1 unadmitted 0 0 1@1:2 - - admit
 C 2 terminal 2:failed
@@ -1342,28 +1342,28 @@ A 1 appended
 A 2 duplicate
 A 3 appended
 A 4 EVENT_OUT_OF_ORDER
-R 2 running 1 open 0 0 - - - recover
-R 1 failed:r 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 2 paused 1 terminal 0 0 - - - recover
+R 1 cancelled 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 3 0:2 1 1
 N order@0:0,order@0:2
-U 1:1
+U 2:1,1:1
 A 5 appended
-R 2 running 1 open 0 0 - - - recover
-R 1 failed:r 1 terminal 0 0 - - - resume
+R 2 paused 1 terminal 0 0 - - - recover
+R 1 cancelled 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 1 0 - - - admit
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 4 0:3 1 1
 N order@0:0,order@0:2
-U 1:1
+U 2:1,1:1
 A 6 appended
-R 2 running 1 open 1 0 - - - resume
-R 1 failed:r 1 terminal 0 0 - - - resume
+R 2 paused 1 terminal 1 0 - - - resume
+R 1 cancelled 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 1 0 - - - admit
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 5 0:4 1 1
 N order@0:0,order@0:2
-U 1:1
+U 2:1,1:1
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
@@ -1429,7 +1429,7 @@ O 0 0 0 0
 A 9 appended
 R 1 completed 1 terminal 1 0 - - - settled
 R 3 - 1 unadmitted 1 0 1@0:2 i0 - admit
-R 2 cancelled 1 terminal 0 0 - - - resume
+R 2 cancelled:u 1 terminal 0 0 - - - resume
 C 2 terminal 2:cancelled
 P 8 1:2 2 1
 N order@0:0,order@0:4,conflict@1:1
@@ -1440,7 +1440,7 @@ O 0 0 0 0
 A 12 appended
 R 1 completed 1 settled 1 0 1@1:5 i2 - settled
 R 3 - 1 unadmitted 1 0 1@0:2 i0 - admit
-R 2 cancelled 1 terminal 0 0 - - - resume
+R 2 cancelled:u 1 terminal 0 0 - - - resume
 C 2 terminal 2:cancelled
 P 11 1:5 2 1
 N order@0:0,order@0:4,conflict@1:1
@@ -1448,7 +1448,7 @@ U 2:1
 A 13 appended
 R 1 completed 1 settled 1 0 1@1:5 i2 - settled
 R 3 - 1 unadmitted 1 0 1@0:2 i0 - admit
-R 2 cancelled 1 terminal 0 0 - - - resume
+R 2 cancelled:u 1 terminal 0 0 - - - resume
 C 2 terminal 2:cancelled
 P 12 1:6 2 1
 N order@0:0,order@0:4,conflict@1:1,conflict@1:6
@@ -1456,7 +1456,7 @@ U 2:1
 A 14 appended
 R 1 completed 1 settled 1 0 1@1:5 i2 - settled
 R 3 - 1 unadmitted 1 0 1@0:2 i0 - admit
-R 2 cancelled 1 terminal 0 0 - - - resume
+R 2 cancelled:u 1 terminal 0 0 - - - resume
 C 1 terminal 1:completed
 P 13 1:7 2 1
 N order@0:0,order@0:4,conflict@1:1,conflict@1:6
@@ -1487,14 +1487,14 @@ A 22 appended
 A 23 duplicate
 A 24 appended
 A 25 appended
-R 1 failed:f 1 settled 1 0 1@1:5 i2 - settled
+R 1 failed:r 1 settled 1 0 1@1:5 i2 - settled
 R 3 - 1 unadmitted 1 0 1@0:2 i0 - admit
 R 2 completed 1 terminal 0 0 - i2 - resume
 C 2 terminal 2:completed
 P 23 2:8 3 1
 N order@0:0,order@0:4,conflict@1:1,conflict@1:6,conflict@2:2,conflict@2:3,conflict@2:4
 U 2:1
-R 1 failed:f 1 settled 1 0 1@1:5 i2 - settled
+R 1 failed:r 1 settled 1 0 1@1:5 i2 - settled
 R 3 - 1 unadmitted 1 0 1@0:2 i0 - admit
 R 2 completed 1 terminal 0 0 - i2 - resume
 C 2 terminal 2:completed
@@ -1521,27 +1521,27 @@ A 1 appended
 A 2 appended
 A 3 appended
 A 4 appended
-R 3 cancelled 2 terminal 0 0 1@0:0 - - resume
+R 3 cancelled:u 2 terminal 0 0 1@0:0 - - resume
 C 3 terminal 3:cancelled
 P 5 0:4 1 1
 N order@0:1,conflict@0:2
 U 3:2
 A 5 appended
-R 3 cancelled 2 terminal 0 0 1@0:0 - - resume
+R 3 cancelled:u 2 terminal 0 0 1@0:0 - - resume
 R 2 - 1 unadmitted 0 0 1@0:5 - - admit
 C 3 terminal 3:cancelled
 P 6 0:5 1 1
 N order@0:1,conflict@0:2
 U 3:2
 A 6 appended
-R 3 cancelled 2 terminal 0 0 1@0:0 - - resume
+R 3 cancelled:u 2 terminal 0 0 1@0:0 - - resume
 R 2 paused 1 settled 0 0 1@0:5 - - recover
 C 2 paused 3:cancelled
 P 7 0:6 1 1
 N order@0:1,conflict@0:2,order@0:6
 U 3:2
 A 7 appended
-R 3 cancelled 2 terminal 0 0 1@0:0 - - resume
+R 3 cancelled:u 2 terminal 0 0 1@0:0 - - resume
 R 2 paused 1 settled 0 0 1@0:5 - - recover
 C 2 paused 3:cancelled
 P 8 0:7 1 1
@@ -1582,15 +1582,15 @@ A 9 appended
 A 10 EVENT_MUTATED
 A 11 appended
 A 12 duplicate
-R 1 cancelled 1 terminal 1 0 - - - settled
-R 3 failed:f 1 terminal 1 0 - i1 - settled
+R 1 cancelled:u 1 terminal 1 0 - - - settled
+R 3 failed:r 1 terminal 1 0 - i1 - settled
 R 2 failed:f 1 terminal 0 0 - - - resume
 C 1 terminal 1:cancelled
 P 10 1:5 2 1
 N order@0:0,order@0:2,order@1:0,order@1:1
 U 1:1,3:1,2:1
-R 1 cancelled 1 terminal 1 0 - - - settled
-R 3 failed:f 1 terminal 1 0 - i1 - settled
+R 1 cancelled:u 1 terminal 1 0 - - - settled
+R 3 failed:r 1 terminal 1 0 - i1 - settled
 R 2 failed:f 1 terminal 0 0 - - - resume
 C 1 terminal 1:cancelled
 P 10 1:5 2 1
@@ -1655,8 +1655,8 @@ O 0 0 0 0
 A 11 appended
 R 3 - 1 unadmitted 0 0 1@0:0 i1 - admit
 R 1 completed 1 settled 0 0 1@0:1 - - resume
-R 2 running 1 settled 1 0 1@0:3 - - resume
-C 2 running 2:completed
+R 2 paused 1 settled 1 0 1@0:3 - - resume
+C 2 paused 2:completed
 P 10 2:0 3 1
 N conflict@0:4,order@1:0,order@1:1
 U -
@@ -1679,10 +1679,10 @@ A 19 appended
 A 20 appended
 A 21 appended
 A 22 appended
-R 3 paused 1 settled 0 0 1@0:0 i1 - recover
+R 3 completed 1 settled 0 0 1@0:0 i1 - resume
 R 1 completed 1 settled 1 0 1@0:1 - - settled
 R 2 paused 1 settled 1 0 1@0:3 - - resume
-C 3 paused 3:cancelled
+C 3 terminal 3:completed
 P 18 4:5 5 1
 N conflict@0:4,order@1:0,order@1:1,order@4:1,conflict@4:3
 U -
@@ -1709,9 +1709,9 @@ N order@0:0,order@1:0
 U 1:1,2:1
 A 4 appended
 A 5 appended
-R 1 paused 1 settled 1 0 1@1:3 - - resume
+R 1 completed 1 settled 1 0 1@1:3 - - settled
 R 2 paused 1 terminal 0 0 - - - recover
-C 1 paused -
+C 1 terminal 1:completed
 P 5 1:3 2 1
 N order@0:0,order@1:0
 U 2:1
@@ -1736,7 +1736,7 @@ P 3 1:0 2 1
 N order@0:0
 U 3:1
 A 3 appended
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 3 cancelled:u 1 terminal 0 0 - - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 0 0 1@1:0 - - admit
 C 3 terminal 3:cancelled
@@ -1744,7 +1744,7 @@ P 4 1:1 2 1
 N order@0:0
 U 3:1
 A 4 appended
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 3 cancelled:u 1 terminal 0 0 - - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 0 0 1@1:0 - - admit
 C 3 terminal 3:cancelled
@@ -1752,7 +1752,7 @@ P 5 1:2 2 1
 N order@0:0,order@1:2
 U 3:1
 A 5 appended
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 3 cancelled:u 1 terminal 0 0 - - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 0 0 1@1:0 - - admit
 C 3 terminal 3:cancelled
@@ -1761,7 +1761,7 @@ N order@0:0,order@1:2
 U 3:1
 A 6 appended
 A 7 appended
-R 3 cancelled 1 settled 0 0 1@1:4 - - resume
+R 3 cancelled:u 1 settled 0 0 1@1:4 - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 0 0 1@1:0 - - admit
 C 3 terminal 3:cancelled
@@ -1834,7 +1834,7 @@ A 3 appended
 A 4 duplicate
 A 5 appended
 R 2 failed:f 1 settled 0 0 1@0:0 - - resume
-R 1 cancelled 1 settled 0 0 1@0:1 - - resume
+R 1 cancelled:u 1 settled 0 0 1@0:1 - - resume
 C 1 terminal 1:cancelled
 P 5 0:4 1 1
 N order@0:2,order@0:3
@@ -1845,15 +1845,15 @@ A 8 appended
 A 9 appended
 A 10 duplicate
 R 2 running 1 settled 0 0 1@0:0 - - recover
-R 1 completed 1 settled 0 0 1@0:1 - - resume
-C 2 running 1:completed
+R 1 failed:f 1 settled 0 0 1@0:1 - - resume
+C 2 running 1:failed
 P 7 0:6 1 1
 N order@0:2,order@0:3
 U -
 A 11 appended
 R 2 running 1 settled 0 0 1@0:0 i2 - recover
-R 1 completed 1 settled 0 0 1@0:1 - - resume
-C 2 running 1:completed
+R 1 failed:f 1 settled 0 0 1@0:1 - - resume
+C 2 running 1:failed
 P 8 0:7 1 1
 N order@0:2,order@0:3
 U -
@@ -1861,20 +1861,20 @@ A 12 appended
 A 13 appended
 A 14 appended
 A 15 appended
-R 2 failed:r 1 settled 0 0 1@0:0 i2 - resume
-R 1 completed 1 settled 0 0 1@0:1 - - resume
+R 2 cancelled 1 settled 0 0 1@0:0 i2 - resume
+R 1 failed:f 1 settled 0 0 1@0:1 - - resume
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 12 1:1 2 1
 N order@0:2,order@0:3,conflict@0:9
 U -
 A 16 duplicate
 A 17 appended
 A 18 EVENT_OUT_OF_ORDER
-R 2 failed:r 1 settled 0 0 1@0:0 i2 - resume
-R 1 completed 1 settled 0 0 1@0:1 - - resume
+R 2 cancelled 1 settled 0 0 1@0:0 i2 - resume
+R 1 failed:f 1 settled 0 0 1@0:1 - - resume
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 13 1:2 2 1
 N order@0:2,order@0:3,conflict@0:9
 U -
@@ -1884,17 +1884,17 @@ A 21 appended
 A 22 appended
 A 23 appended
 A 24 appended
-R 2 failed:r 1 settled 0 0 1@0:0 i1,i2 - resume
-R 1 completed 1 settled 0 0 1@0:1 i0 - resume
-R 3 failed:f 1 settled 1 0 1@1:1 - - settled
+R 2 cancelled 1 settled 0 0 1@0:0 i1,i2 - resume
+R 1 failed:f 1 settled 0 0 1@0:1 i0 - resume
+R 3 failed:r 1 settled 1 0 1@1:1 - - settled
 C 3 terminal 3:failed
 P 19 2:4 3 1
 N order@0:2,order@0:3,conflict@0:9,order@2:2,conflict@2:3,order@2:4
 U -
 A 25 appended
-R 2 failed:r 1 settled 0 0 1@0:0 i1,i2 - resume
-R 1 completed 1 settled 0 0 1@0:1 i0 - resume
-R 3 failed:f 1 settled 1 0 1@1:1 - - settled
+R 2 cancelled 1 settled 0 0 1@0:0 i1,i2 - resume
+R 1 failed:f 1 settled 0 0 1@0:1 i0 - resume
+R 3 failed:r 1 settled 1 0 1@1:1 - - settled
 C 3 terminal 3:failed
 P 20 2:5 3 1
 N order@0:2,order@0:3,conflict@0:9,order@2:2,conflict@2:3,order@2:4
@@ -1902,7 +1902,7 @@ U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
-QL ok
+QL RUN_ID_TAKEN
 QL RUN_ID_TAKEN
 QB batch 9 11 20 0:9,1:0
 QB batch 7 9 20 0:7,0:8
@@ -1957,14 +1957,14 @@ A 20 appended
 A 21 appended
 R 1 running 2 settled 1 0 2@1:0 - - resume
 R 2 running 1 settled 0 0 1@0:1 - - recover
-R 3 cancelled 1 settled 0 0 1@1:3 - - resume
+R 3 cancelled:u 1 settled 0 0 1@1:3 - - resume
 C 3 terminal 3:cancelled
 P 15 2:3 3 1
 N order@0:0,order@0:3,order@1:2,order@1:4,conflict@2:0,order@2:1,conflict@2:2
 U -
 R 1 running 2 settled 1 0 2@1:0 - - resume
 R 2 running 1 settled 0 0 1@0:1 - - recover
-R 3 cancelled 1 settled 0 0 1@1:3 - - resume
+R 3 cancelled:u 1 settled 0 0 1@1:3 - - resume
 C 3 terminal 3:cancelled
 P 15 2:3 3 1
 N order@0:0,order@0:3,order@1:2,order@1:4,conflict@2:0,order@2:1,conflict@2:2
@@ -1987,7 +1987,7 @@ A 3 appended
 A 4 appended
 A 5 appended
 A 6 EVENT_OUT_OF_ORDER
-R 3 failed:f 1 settled 0 0 1@0:0 - - resume
+R 3 failed:r 1 settled 0 0 1@0:0 - - resume
 R 1 - 1 unadmitted 1 0 - - - admit
 C 3 terminal 3:failed
 P 5 1:0 2 1
@@ -2003,22 +2003,22 @@ A 13 appended
 A 14 appended
 A 15 EVENT_OUT_OF_ORDER
 A 16 appended
-R 3 failed:f 1 settled 0 0 1@0:0 i2 - resume
-R 1 cancelled 1 terminal 1 0 - - - settled
+R 3 failed:f 2 settled 0 0 1@0:0,2@1:3 i2 - resume
+R 1 cancelled:u 1 terminal 1 0 - - - settled
 R 2 running 1 open 0 0 - - - recover
 C 2 running 3:failed
 P 13 3:3 3 1
-N order@0:1,order@0:2,conflict@1:0,order@1:1,conflict@1:3,order@3:3
+N order@0:1,order@0:2,conflict@1:0,order@1:1,conflict@3:0,order@3:3
 U 1:1
 A 17 EVENT_OUT_OF_ORDER
 A 18 duplicate
 A 19 appended
-R 3 failed:f 1 settled 0 0 1@0:0 i0,i2 - resume
-R 1 cancelled 1 terminal 1 0 - - - settled
+R 3 failed:f 2 settled 0 0 1@0:0,2@1:3 i0,i2 - resume
+R 1 cancelled:u 1 terminal 1 0 - - - settled
 R 2 running 1 open 0 0 - - - recover
 C 2 running 3:failed
 P 14 3:4 3 1
-N order@0:1,order@0:2,conflict@1:0,order@1:1,conflict@1:3,order@3:3
+N order@0:1,order@0:2,conflict@1:0,order@1:1,conflict@3:0,order@3:3
 U 1:1
 A 20 appended
 A 21 appended
@@ -2028,12 +2028,12 @@ A 24 appended
 A 25 appended
 A 26 EVENT_MUTATED
 A 27 appended
-R 3 failed:f 1 settled 0 0 1@0:0 i0,i2 - resume
-R 1 running 2 settled 1 0 2@4:6 - - resume
+R 3 failed:f 2 settled 0 0 1@0:0,2@1:3 i0,i2 - resume
+R 1 paused 1 settled 1 0 1@4:6 - - resume
 R 2 running 1 open 0 0 - i2 - recover
-C 1 running 1:completed
+C 1 paused 1:failed
 P 21 4:6 4 1
-N order@0:1,order@0:2,conflict@1:0,order@1:1,conflict@1:3,order@3:3
+N order@0:1,order@0:2,conflict@1:0,order@1:1,conflict@3:0,order@3:3
 U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
@@ -2083,27 +2083,27 @@ A 16 appended
 A 17 appended
 A 18 appended
 A 19 appended
-R 1 cancelled 1 settled 1 0 1@0:0 - - settled
-R 2 failed:f 1 settled 0 0 1@0:5 - - resume
-R 3 failed:r 1 settled 0 0 1@1:1 - - resume
+R 1 cancelled:u 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 0 0 1@0:5 - - resume
+R 3 cancelled 1 settled 0 0 1@1:1 - - resume
 C 1 terminal 1:cancelled
 P 16 1:5 2 1
 N order@0:1,order@0:6,order@0:8,order@1:3,conflict@1:4
 U -
 A 20 appended
 A 21 appended
-R 1 cancelled 1 settled 1 0 1@0:0 - - settled
-R 2 failed:f 1 settled 0 0 1@0:5 - - resume
-R 3 failed:r 1 settled 0 0 1@1:1 - - resume
+R 1 cancelled:u 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 0 0 1@0:5 - - resume
+R 3 cancelled 1 settled 0 0 1@1:1 - - resume
 C 1 terminal 1:cancelled
 P 18 1:7 2 1
 N order@0:1,order@0:6,order@0:8,order@1:3,conflict@1:4,conflict@1:6,conflict@1:7
 U -
 O 0 0 0 0
 A 22 EVENT_MUTATED
-R 1 cancelled 1 settled 1 0 1@0:0 - - settled
-R 2 failed:f 1 settled 0 0 1@0:5 - - resume
-R 3 failed:r 1 settled 0 0 1@1:1 - - resume
+R 1 cancelled:u 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 0 0 1@0:5 - - resume
+R 3 cancelled 1 settled 0 0 1@1:1 - - resume
 C 1 terminal 1:cancelled
 P 18 1:7 2 1
 N order@0:1,order@0:6,order@0:8,order@1:3,conflict@1:4,conflict@1:6,conflict@1:7
@@ -2157,8 +2157,8 @@ A 4 appended
 A 5 appended
 A 6 appended
 R 2 admitted 1 settled 0 0 1@0:0 - - recover
-R 3 completed 1 terminal 1 0 - - - settled
-C 2 admitted 3:completed
+R 3 failed:f 1 terminal 1 0 - - - settled
+C 2 admitted 3:failed
 P 6 1:0 2 1
 N order@0:1,conflict@0:3
 U 3:1
@@ -2170,7 +2170,7 @@ A 11 duplicate
 A 12 appended
 O 0 0 0 0
 A 13 appended
-R 2 cancelled 1 settled 1 0 1@0:0 i0 - settled
+R 2 cancelled:u 1 settled 1 0 1@0:0 i0 - settled
 R 3 running 1 open 1 0 - - - resume
 R 1 - 1 unadmitted 0 0 1@2:2 - - admit
 C 2 terminal 2:cancelled
@@ -2181,7 +2181,7 @@ O 0 0 0 0
 A 14 appended
 A 15 appended
 A 16 EVENT_OUT_OF_ORDER
-R 2 cancelled 1 settled 1 0 1@0:0 i0 - settled
+R 2 cancelled:u 1 settled 1 0 1@0:0 i0 - settled
 R 3 running 1 open 1 0 - - - resume
 R 1 completed 1 settled 0 0 1@2:2 - - resume
 C 1 terminal 1:completed
@@ -2190,7 +2190,7 @@ N order@0:1,conflict@0:3,order@2:6
 U -
 A 17 EVENT_MUTATED
 A 18 appended
-R 2 cancelled 1 settled 1 0 1@0:0 i0 - settled
+R 2 cancelled:u 1 settled 1 0 1@0:0 i0 - settled
 R 3 running 1 open 1 0 - - - resume
 R 1 completed 1 settled 0 0 1@2:2 i1 - resume
 C 1 terminal 1:completed
@@ -2200,7 +2200,7 @@ U -
 O 0 0 0 0
 A 19 appended
 A 20 appended
-R 2 cancelled 1 settled 1 0 1@0:0 i0,i1 - settled
+R 2 cancelled:u 1 settled 1 0 1@0:0 i0,i1 - settled
 R 3 running 1 open 1 0 - - - resume
 R 1 completed 1 settled 0 0 1@2:2 i1 - resume
 C 1 terminal 1:completed
@@ -2211,7 +2211,7 @@ A 21 appended
 A 22 appended
 A 23 appended
 A 24 appended
-R 2 cancelled 1 settled 1 0 1@0:0 i0,i1,i2 - settled
+R 2 cancelled:u 1 settled 1 0 1@0:0 i0,i1,i2 - settled
 R 3 running 1 settled 1 0 1@2:11 i0 - resume
 R 1 completed 1 settled 0 0 1@2:2 i1 - resume
 C 1 terminal 1:completed
@@ -2220,7 +2220,7 @@ N order@0:1,conflict@0:3,order@2:6,conflict@2:10,conflict@2:12
 U -
 A 25 appended
 A 26 appended
-R 2 cancelled 1 settled 1 0 1@0:0 i0,i1,i2 - settled
+R 2 cancelled:u 1 settled 1 0 1@0:0 i0,i1,i2 - settled
 R 3 completed 1 settled 1 0 1@2:11 i0 - settled
 R 1 completed 1 settled 0 0 1@2:2 i1 - resume
 C 3 terminal 3:completed
@@ -2322,16 +2322,16 @@ O 0 0 0 0
 A 0 appended
 A 1 appended
 R 1 - 1 unadmitted 1 0 - - - admit
-R 2 completed 1 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 2 failed:f 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 1:0 2 1
 N order@1:0
 U 2:1
 A 2 appended
 R 1 - 1 unadmitted 1 0 - - - admit
-R 2 completed 1 terminal 0 0 - - - resume
+R 2 failed:f 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 3 1:1 2 1
 N order@1:0
 U 2:1
@@ -2341,7 +2341,7 @@ A 4 appended
 R 1 - 1 unadmitted 1 0 - - - admit
 R 2 paused 1 settled 0 0 1@2:0 - - recover
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 2 paused 2:completed
+C 2 paused 2:failed
 P 5 2:0 3 1
 N order@1:0
 U -
@@ -2350,7 +2350,7 @@ A 6 appended
 R 1 - 1 unadmitted 1 0 - - - admit
 R 2 paused 1 settled 0 0 1@2:0 i2 - recover
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 2 paused 2:completed
+C 2 paused 2:failed
 P 7 2:2 3 1
 N order@1:0,conflict@2:1
 U -
@@ -2362,7 +2362,7 @@ A 11 appended
 R 1 paused 1 settled 1 0 1@2:6 - - resume
 R 2 paused 1 settled 1 0 1@2:0 i2 - resume
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 1 paused 2:completed
+C 1 paused 2:failed
 P 12 2:7 3 1
 N order@1:0,conflict@2:1,order@2:7
 U -
@@ -2372,7 +2372,7 @@ A 14 appended
 R 1 paused 1 settled 1 0 1@2:6 - - resume
 R 2 paused 1 settled 1 0 1@2:0 i2 - resume
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 1 paused 2:completed
+C 1 paused 2:failed
 P 14 3:0 4 1
 N order@1:0,conflict@2:1,order@2:7,conflict@2:8,conflict@3:0
 U -
@@ -2380,7 +2380,7 @@ A 15 duplicate
 R 1 paused 1 settled 1 0 1@2:6 - - resume
 R 2 paused 1 settled 1 0 1@2:0 i2 - resume
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 1 paused 2:completed
+C 1 paused 2:failed
 P 14 3:0 4 1
 N order@1:0,conflict@2:1,order@2:7,conflict@2:8,conflict@3:0
 U -
@@ -2390,7 +2390,7 @@ A 18 appended
 R 1 paused 1 settled 1 0 1@2:6 - - resume
 R 2 paused 1 settled 1 0 1@2:0 i2 - resume
 R 3 - 1 unadmitted 0 0 1@1:1 i2 - admit
-C 1 paused 2:completed
+C 1 paused 2:failed
 P 16 3:2 4 1
 N order@1:0,conflict@2:1,order@2:7,conflict@2:8,conflict@3:0
 U -
@@ -2421,7 +2421,7 @@ U -
 A 3 appended
 A 4 appended
 R 1 - 1 unadmitted 0 0 1@0:3 i1 - admit
-R 2 cancelled 1 settled 0 0 1@0:1 - - resume
+R 2 cancelled:u 1 settled 0 0 1@0:1 - - resume
 C 2 terminal 2:cancelled
 P 4 0:3 1 1
 N order@0:2
@@ -2452,9 +2452,9 @@ A 12 appended
 A 13 appended
 A 14 appended
 R 1 completed 1 terminal 1 0 - - - settled
-R 2 running 1 settled 0 0 1@0:3 i0,i1 - recover
+R 2 paused 1 settled 0 0 1@0:3 i0,i1 - recover
 R 3 running 1 settled 1 0 1@1:0 - - resume
-C 2 running 1:completed
+C 2 paused 1:completed
 P 12 1:0 2 1
 N order@0:0,order@0:6,order@0:7
 U 1:1
@@ -2467,8 +2467,8 @@ A 20 appended
 A 21 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 22 appended
-R 1 failed:f 1 settled 1 0 1@1:3 i0 - settled
-R 2 running 1 settled 0 0 1@0:3 i0,i1 - recover
+R 1 failed:r 1 settled 1 0 1@1:3 i0 - settled
+R 2 paused 1 settled 0 0 1@0:3 i0,i1 - recover
 R 3 running 1 settled 1 0 1@1:0 - - resume
 C 1 terminal 1:failed
 P 18 3:1 4 1
@@ -2586,17 +2586,17 @@ A 4 appended
 A 5 appended
 O 0 0 0 0
 A 6 EVENT_OUT_OF_ORDER
-R 3 cancelled 1 settled 0 0 1@1:0 i2 - resume
-R 1 running 2 open 0 0 - - - recover
-C 1 running 1:failed
+R 3 cancelled:u 1 settled 0 0 1@1:0 i2 - resume
+R 1 running 1 open 0 0 - - - recover
+C 1 running 1:cancelled
 P 5 1:2 2 1
 N order@0:0,order@1:1
 U -
 A 7 appended
-R 3 cancelled 1 settled 0 0 1@1:0 i2 - resume
-R 1 running 2 open 0 0 - - - recover
+R 3 cancelled:u 1 settled 0 0 1@1:0 i2 - resume
+R 1 running 1 open 0 0 - - - recover
 R 2 - 1 unadmitted 0 0 1@1:3 - - admit
-C 1 running 1:failed
+C 1 running 1:cancelled
 P 6 1:3 2 1
 N order@0:0,order@1:1
 U -
@@ -2616,7 +2616,7 @@ A 2 appended
 A 3 appended
 A 4 EVENT_OUT_OF_ORDER
 R 2 - 1 unadmitted 0 0 1@1:1 i0 - admit
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 4 1:2 2 1
 N order@1:0,conflict@1:2
@@ -2625,7 +2625,7 @@ A 5 appended
 A 6 EVENT_OUT_OF_ORDER
 A 7 appended
 R 2 - 1 unadmitted 0 0 1@1:1 i0 - admit
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 6 1:4 2 1
 N order@1:0,conflict@1:2,conflict@1:3
@@ -2634,7 +2634,7 @@ A 8 appended
 A 9 appended
 A 10 duplicate
 R 2 - 1 unadmitted 0 0 1@1:1 i0,i1 - admit
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 R 3 admitted 1 open 0 0 - - - recover
 C 3 admitted 1:failed
 P 8 3:1 3 1
@@ -2646,7 +2646,7 @@ A 13 appended
 A 14 appended
 A 15 appended
 R 2 - 1 unadmitted 0 0 1@1:1 i0,i1 - admit
-R 1 failed:f 1 settled 0 0 1@3:2 - - resume
+R 1 failed:r 1 settled 0 0 1@3:2 - - resume
 R 3 admitted 1 settled 0 0 1@3:3 - - recover
 C 3 admitted 1:failed
 P 11 3:4 3 1
@@ -2655,7 +2655,7 @@ U -
 A 16 EVENT_OUT_OF_ORDER
 A 17 appended
 R 2 completed 1 settled 0 0 1@1:1 i0,i1 - resume
-R 1 failed:f 1 settled 0 0 1@3:2 - - resume
+R 1 failed:r 1 settled 0 0 1@3:2 - - resume
 R 3 admitted 1 settled 0 0 1@3:3 - - recover
 C 2 terminal 2:completed
 P 12 3:5 3 1
@@ -2705,9 +2705,9 @@ A 21 appended
 A 22 appended
 A 23 appended
 R 1 running 1 settled 1 0 1@0:0 i0,i2 - resume
-R 2 paused 1 settled 0 0 1@1:1 i0 - recover
+R 2 completed 1 settled 0 0 1@1:1 i0 - resume
 R 3 running 1 settled 1 0 1@1:3 i0 - resume
-C 2 paused 3:completed
+C 2 terminal 2:completed
 P 18 5:0 4 1
 N conflict@0:1,order@0:3,order@1:2,conflict@1:4,conflict@4:2,order@5:0
 U -
@@ -2715,9 +2715,9 @@ A 24 appended
 A 25 appended
 A 26 duplicate
 R 1 running 1 settled 1 0 1@0:0 i0,i2 - resume
-R 2 failed:r 1 settled 0 0 1@1:1 i0 - resume
+R 2 cancelled 1 settled 0 0 1@1:1 i0 - resume
 R 3 running 1 settled 1 0 1@1:3 i0 - resume
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 20 5:2 4 1
 N conflict@0:1,order@0:3,order@1:2,conflict@1:4,conflict@4:2,order@5:0
 U -
@@ -2726,9 +2726,9 @@ A 27 appended
 A 28 appended
 A 29 appended
 R 1 running 1 settled 1 0 1@0:0 i0,i2 - resume
-R 2 failed:r 1 settled 0 0 1@1:1 i0 - resume
+R 2 cancelled 1 settled 0 0 1@1:1 i0 - resume
 R 3 running 1 settled 1 0 1@1:3 i0 - resume
-C 1 running 2:failed
+C 1 running 2:cancelled
 P 23 5:5 4 1
 N conflict@0:1,order@0:3,order@1:2,conflict@1:4,conflict@4:2,order@5:0,conflict@5:3,conflict@5:5
 U -
@@ -2753,7 +2753,7 @@ A 7 appended
 A 8 appended
 A 9 appended
 R 3 - 1 unadmitted 0 0 - i0 - admit
-R 2 failed:f 1 settled 0 0 1@1:2 - - resume
+R 2 failed:r 1 settled 0 0 1@1:2 - - resume
 R 1 - 1 unadmitted 0 0 1@1:3 - - admit
 C 2 terminal 2:failed
 P 5 1:3 2 1
@@ -2764,7 +2764,7 @@ A 11 appended
 A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_MUTATED
 R 3 - 1 unadmitted 0 0 - i0 - admit
-R 2 failed:f 1 settled 0 0 1@1:2 i2 - resume
+R 2 failed:r 1 settled 0 0 1@1:2 i2 - resume
 R 1 - 1 unadmitted 0 0 1@1:3 - - admit
 C 2 terminal 2:failed
 P 7 3:0 4 1
@@ -2772,9 +2772,9 @@ N order@1:0
 U -
 A 14 appended
 R 3 - 1 unadmitted 0 0 - i0 - admit
-R 2 paused 1 settled 0 0 1@1:2 i2 - recover
+R 2 completed 1 settled 0 0 1@1:2 i2 - resume
 R 1 - 1 unadmitted 0 0 1@1:3 - - admit
-C 2 paused 2:failed
+C 2 terminal 2:completed
 P 8 3:1 4 1
 N order@1:0
 U -
@@ -2832,7 +2832,7 @@ A 1 appended
 A 2 appended
 A 3 appended
 R 3 - 1 unadmitted 1 0 - i0 - admit
-R 1 cancelled 1 terminal 1 0 - - - settled
+R 1 cancelled:u 1 terminal 1 0 - - - settled
 C 1 terminal 1:cancelled
 P 4 0:3 1 1
 N order@0:2
@@ -2842,18 +2842,18 @@ A 5 appended
 A 6 appended
 A 7 appended
 A 8 appended
-R 3 completed 1 terminal 1 0 - i0 - settled
-R 1 cancelled 1 terminal 1 0 - i1 - settled
+R 3 failed:f 1 terminal 1 0 - i0 - settled
+R 1 cancelled:u 1 terminal 1 0 - i1 - settled
 R 2 - 1 unadmitted 1 0 - i2 - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 9 0:8 1 1
 N order@0:2,order@0:4
 U 3:1,1:1
 A 9 appended
-R 3 completed 1 terminal 1 0 - i0 - settled
-R 1 cancelled 1 terminal 1 0 - i1 - settled
+R 3 failed:f 1 terminal 1 0 - i0 - settled
+R 1 cancelled:u 1 terminal 1 0 - i1 - settled
 R 2 - 1 unadmitted 1 0 1@0:9 i2 - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 10 0:9 1 1
 N order@0:2,order@0:4
 U 3:1,1:1
@@ -2861,10 +2861,10 @@ A 10 appended
 A 11 appended
 A 12 appended
 A 13 appended
-R 3 completed 1 terminal 1 0 - i0,i1 - settled
+R 3 failed:f 1 terminal 1 0 - i0,i1 - settled
 R 1 paused 1 terminal 1 0 - i1 - resume
 R 2 running 1 settled 1 0 1@0:9 i0,i2 - resume
-C 2 running 3:completed
+C 2 running 3:failed
 P 14 0:13 1 1
 N order@0:2,order@0:4,order@0:13
 U 3:1,1:1
@@ -2877,14 +2877,14 @@ A 19 EVENT_OUT_OF_ORDER
 A 20 duplicate
 R 3 running 1 settled 1 0 1@0:16 i0,i1 - resume
 R 1 paused 1 settled 1 0 1@0:14 i1 - resume
-R 2 cancelled 1 settled 1 0 1@0:9 i0,i2 - settled
+R 2 cancelled:u 1 settled 1 0 1@0:9 i0,i2 - settled
 C 3 running 2:cancelled
 P 19 0:18 1 1
 N order@0:2,order@0:4,order@0:13,conflict@0:17
 U -
 R 3 running 1 settled 1 0 1@0:16 i0,i1 - resume
 R 1 paused 1 settled 1 0 1@0:14 i1 - resume
-R 2 cancelled 1 settled 1 0 1@0:9 i0,i2 - settled
+R 2 cancelled:u 1 settled 1 0 1@0:9 i0,i2 - settled
 C 3 running 2:cancelled
 P 19 0:18 1 1
 N order@0:2,order@0:4,order@0:13,conflict@0:17
@@ -2903,8 +2903,8 @@ A 0 appended
 A 1 appended
 A 2 appended
 A 3 appended
-R 1 paused 1 terminal 0 0 - - - recover
-R 3 running 1 open 0 0 - - - recover
+R 1 completed 1 terminal 0 0 - - - resume
+R 3 running 2 open 0 0 - - - recover
 R 2 completed 1 terminal 0 0 - - - resume
 C 2 terminal 2:completed
 P 4 0:3 1 1
@@ -2916,7 +2916,7 @@ O 0 0 0 0
 A 5 appended
 A 6 appended
 R 1 paused 1 terminal 0 0 - - - recover
-R 3 running 1 open 0 0 - - - recover
+R 3 running 2 open 0 0 - - - recover
 R 2 running 1 open 0 0 - - - recover
 C 1 paused 2:completed
 P 6 1:0 2 1
@@ -2925,7 +2925,7 @@ U 1:1
 O 0 0 0 0
 A 7 appended
 R 1 paused 1 terminal 0 0 - - - recover
-R 3 running 1 open 0 0 - - - recover
+R 3 running 2 open 0 0 - - - recover
 R 2 running 1 open 0 0 - - - recover
 C 2 running 2:completed
 P 7 1:1 2 1
@@ -2934,21 +2934,21 @@ U 1:1
 A 8 appended
 A 9 appended
 R 1 paused 1 terminal 0 0 - - - recover
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 3 cancelled:u 2 terminal 0 0 - - - resume
 R 2 running 1 open 0 0 - - - recover
 C 3 terminal 3:cancelled
 P 9 2:0 3 1
 N order@0:0,order@0:1,order@0:3,order@1:2
-U 1:1,3:1
+U 1:1,3:2
 A 10 appended
 A 11 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 3 cancelled:u 2 terminal 0 0 - - - resume
 R 2 running 1 settled 0 0 1@3:1 - - recover
 C 1 terminal 1:completed
 P 11 3:1 4 1
 N order@0:0,order@0:1,order@0:3,order@1:2
-U 1:1,3:1
+U 1:1,3:2
 QS appended
 QS appended
 QS appended
@@ -2977,9 +2977,9 @@ A 3 EVENT_OUT_OF_ORDER
 A 4 appended
 A 5 appended
 R 2 completed 1 terminal 1 0 - - - settled
-R 3 failed:r 1 terminal 1 0 - - - settled
+R 3 cancelled 1 terminal 1 0 - - - settled
 R 1 completed 1 terminal 0 0 - - - resume
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 5 0:4 1 1
 N order@0:0,order@0:2,order@0:3
 U 2:1,3:1,1:1
@@ -2988,18 +2988,18 @@ A 7 appended
 A 8 EVENT_MUTATED
 A 9 appended
 R 2 completed 1 terminal 1 0 - - - settled
-R 3 running 2 open 1 0 - - - resume
+R 3 running 1 open 1 0 - - - resume
 R 1 running 1 settled 0 0 1@0:7 - - recover
-C 1 running 3:failed
+C 1 running 3:cancelled
 P 8 0:7 1 1
 N order@0:0,order@0:2,order@0:3
 U 2:1
 A 10 duplicate
 A 11 EVENT_OUT_OF_ORDER
 R 2 completed 1 terminal 1 0 - - - settled
-R 3 running 2 open 1 0 - - - resume
+R 3 running 1 open 1 0 - - - resume
 R 1 running 1 settled 0 0 1@0:7 - - recover
-C 1 running 3:failed
+C 1 running 3:cancelled
 P 8 0:7 1 1
 N order@0:0,order@0:2,order@0:3
 U 2:1
@@ -3008,7 +3008,7 @@ QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
 QL NO_RUN_ADMITTED
 QL ok
-QB batch 2 5 8 0:2,0:3,0:4
+QB batch 2 6 8 0:2,0:3,0:4,0:5
 QB refused identity-mismatch 8 0:6
 QB refused cursor-ahead 8 -
 X
@@ -3050,10 +3050,10 @@ A 18 appended
 A 19 duplicate
 A 20 duplicate
 A 21 appended
-R 3 paused 1 terminal 1 0 - i0 - resume
-R 2 completed 1 settled 0 0 1@0:1 - - resume
+R 3 completed 1 terminal 1 0 - i0 - settled
+R 2 failed:f 1 settled 0 0 1@0:1 - - resume
 R 1 paused 1 settled 0 0 1@0:5 i0 - recover
-C 3 paused 2:completed
+C 3 terminal 3:completed
 P 17 1:2 2 1
 N order@0:2,order@0:3,conflict@0:4,order@0:7,conflict@0:9
 U 3:1
@@ -3091,7 +3091,7 @@ U -
 A 7 appended
 A 8 appended
 R 3 admitted 1 open 1 0 - i2 - resume
-R 2 failed:f 1 settled 1 0 1@1:0 - - settled
+R 2 failed:r 1 settled 1 0 1@1:0 - - settled
 R 1 running 1 open 0 0 - - - recover
 C 1 running 2:failed
 P 8 2:2 3 1
@@ -3102,8 +3102,8 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 appended
 O 0 0 0 0
 A 12 appended
-R 3 cancelled 1 terminal 1 0 - i2 - settled
-R 2 failed:f 1 settled 1 0 1@1:0 - - settled
+R 3 cancelled:u 1 terminal 1 0 - i2 - settled
+R 2 failed:r 1 settled 1 0 1@1:0 - - settled
 R 1 running 1 settled 0 0 1@2:4 - - recover
 C 3 terminal 3:cancelled
 P 11 2:5 3 1
@@ -3210,7 +3210,7 @@ A 5 appended
 A 6 duplicate
 R 1 completed 1 terminal 0 0 - - - resume
 R 3 completed 1 terminal 0 0 - i1 - resume
-R 2 failed:r 1 terminal 0 0 - - - resume
+R 2 cancelled 1 terminal 0 0 - - - resume
 C 1 terminal 1:completed
 P 5 1:3 2 1
 N order@1:1,order@1:2
@@ -3269,9 +3269,9 @@ A 4 appended
 A 5 appended
 A 6 appended
 R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 3 completed 1 settled 1 0 1@1:4 - - settled
+R 3 failed:f 1 settled 1 0 1@1:4 - - settled
 R 2 - 1 unadmitted 1 0 - - - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 6 1:4 2 1
 N order@1:2
 U -
@@ -3284,14 +3284,14 @@ A 12 appended
 R 1 - 1 unadmitted 0 0 1@0:0 - - admit
 R 3 paused 1 settled 1 0 1@1:4 - - resume
 R 2 - 1 unadmitted 1 0 1@1:8 i2 - admit
-C 3 paused 3:completed
+C 3 paused 3:failed
 P 10 1:8 2 1
 N order@1:2
 U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
-QL RUN_ID_TAKEN
+QL ok
 QL NO_RUN_ADMITTED
 QB batch 0 2 10 0:0,1:0
 QB batch 5 10 10 1:4,1:5,1:6,1:7,1:8
@@ -3351,18 +3351,18 @@ A 16 appended
 A 17 appended
 A 18 duplicate
 A 19 appended
-R 3 completed 1 settled 0 0 1@0:1 i0 - resume
+R 3 failed:f 1 settled 0 0 1@0:1 i0 - resume
 R 2 paused 1 settled 1 0 1@0:9 i1 - resume
 R 1 running 1 open 0 0 - i0 - recover
-C 1 running 3:completed
+C 1 running 3:failed
 P 16 0:15 1 1
 N order@0:0,order@0:4,order@0:7,conflict@0:13,order@0:15
 U -
 A 20 appended
-R 3 completed 1 settled 0 0 1@0:1 i0 - resume
+R 3 failed:f 1 settled 0 0 1@0:1 i0 - resume
 R 2 paused 1 settled 1 0 1@0:9 i1 - resume
 R 1 running 1 settled 0 0 1@0:16 i0 - recover
-C 1 running 3:completed
+C 1 running 3:failed
 P 17 0:16 1 1
 N order@0:0,order@0:4,order@0:7,conflict@0:13,order@0:15
 U -
@@ -3371,10 +3371,10 @@ A 22 appended
 A 23 appended
 A 24 appended
 A 25 appended
-R 3 completed 1 settled 0 0 1@0:1 i0 - resume
+R 3 failed:f 1 settled 0 0 1@0:1 i0 - resume
 R 2 paused 1 settled 1 0 1@0:9 i1 - resume
-R 1 paused 1 settled 0 0 1@0:16 i0 - recover
-C 1 paused 1:cancelled
+R 1 completed 1 settled 0 0 1@0:16 i0 - resume
+C 1 terminal 1:completed
 P 22 0:21 1 1
 N order@0:0,order@0:4,order@0:7,conflict@0:13,order@0:15,conflict@0:20
 U -
@@ -3382,10 +3382,10 @@ A 26 appended
 A 27 appended
 A 28 appended
 A 29 appended
-R 3 completed 1 settled 0 0 1@0:1 i0 - resume
+R 3 failed:f 1 settled 0 0 1@0:1 i0 - resume
 R 2 paused 1 settled 1 0 1@0:9 i1 - resume
-R 1 paused 1 settled 0 0 1@0:16 i0 - recover
-C 3 terminal 3:completed
+R 1 completed 1 settled 0 0 1@0:16 i0 - resume
+C 3 terminal 3:failed
 P 26 2:1 2 1
 N order@0:0,order@0:4,order@0:7,conflict@0:13,order@0:15,conflict@0:20,conflict@2:1
 U -
@@ -3401,7 +3401,7 @@ X
 T log-55
 A 0 appended
 A 1 appended
-R 1 cancelled 1 terminal 0 0 - - - resume
+R 1 cancelled:u 1 terminal 0 0 - - - resume
 C 1 terminal 1:cancelled
 P 2 0:1 1 1
 N order@0:0
@@ -3419,7 +3419,7 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 duplicate
 A 12 appended
 A 13 appended
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 R 2 - 1 unadmitted 0 0 1@0:2 - - admit
 R 3 completed 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
@@ -3430,18 +3430,18 @@ A 14 appended
 A 15 appended
 A 16 appended
 A 17 duplicate
-R 1 failed:f 1 settled 0 0 1@1:7 - - resume
+R 1 failed:r 1 settled 0 0 1@1:7 - - resume
 R 2 - 1 unadmitted 0 0 1@0:2 - - admit
-R 3 paused 1 terminal 1 0 - - - resume
-C 3 paused 1:failed
+R 3 completed 1 terminal 1 0 - - - settled
+C 3 terminal 3:completed
 P 11 1:7 2 1
 N order@0:0,order@1:0
 U 3:1
 A 18 appended
-R 1 failed:f 1 settled 0 0 1@1:7 - - resume
+R 1 failed:r 1 settled 0 0 1@1:7 - - resume
 R 2 - 1 unadmitted 0 0 1@0:2 - - admit
-R 3 paused 1 terminal 1 0 - - - resume
-C 3 paused 1:failed
+R 3 completed 1 terminal 1 0 - - - settled
+C 3 terminal 3:completed
 P 12 1:8 2 1
 N order@0:0,order@1:0,conflict@1:8
 U 3:1
@@ -3451,7 +3451,7 @@ QS SETTLEMENT_CONFLICT
 QL NO_RUN_ADMITTED
 QL NO_RUN_ADMITTED
 QB refused cursor-ahead 12 -
-QB batch 5 7 12 1:2,1:3
+QB batch 5 8 12 1:2,1:3,1:4
 QB batch 3 5 12 1:0,1:1
 X
 T log-56
@@ -3531,7 +3531,7 @@ U -
 A 24 appended
 A 25 appended
 R 2 running 1 settled 1 0 1@0:1 - - resume
-R 3 failed:f 1 settled 1 0 1@1:0 - - settled
+R 3 failed:r 1 settled 1 0 1@1:0 - - settled
 R 1 completed 1 settled 0 0 1@3:1 i2 - resume
 C 3 terminal 3:failed
 P 20 3:12 4 1
@@ -3563,22 +3563,22 @@ O 0 0 0 0
 A 0 appended
 A 1 appended
 A 2 appended
-R 3 completed 1 terminal 0 0 - i2 - resume
+R 3 failed:f 1 terminal 0 0 - i2 - resume
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 3 0:2 1 1
 N order@0:1
 U 3:1
 A 3 appended
-R 3 completed 1 terminal 1 0 - i2 - settled
+R 3 failed:f 1 terminal 1 0 - i2 - settled
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 4 1:0 2 1
 N order@0:1
 U 3:1
-R 3 completed 1 terminal 1 0 - i2 - settled
+R 3 failed:f 1 terminal 1 0 - i2 - settled
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 4 1:0 2 1
 N order@0:1
 U 3:1
@@ -3603,10 +3603,10 @@ A 7 appended
 A 8 appended
 A 9 appended
 A 10 appended
-R 3 completed 1 settled 0 0 1@0:0 - - resume
+R 3 failed:f 1 settled 0 0 1@0:0 - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 1 0 1@1:4 - - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 9 1:6 2 1
 N conflict@1:0,conflict@1:1,conflict@1:5,order@1:6
 U -
@@ -3614,10 +3614,10 @@ A 11 appended
 O 0 0 0 0
 A 12 appended
 A 13 appended
-R 3 completed 1 settled 0 0 1@0:0 - - resume
+R 3 failed:f 1 settled 0 0 1@0:0 - - resume
 R 1 - 1 unadmitted 1 0 1@0:1 - - admit
 R 2 running 1 settled 1 0 1@1:4 - - resume
-C 2 running 3:completed
+C 2 running 3:failed
 P 12 1:9 2 1
 N conflict@1:0,conflict@1:1,conflict@1:5,order@1:6,order@1:9
 U -
@@ -3637,10 +3637,10 @@ A 19 appended
 O 0 0 0 0
 A 20 EVENT_OUT_OF_ORDER
 A 21 appended
-R 3 paused 1 settled 0 0 1@0:0 - - recover
+R 3 completed 1 settled 0 0 1@0:0 - - resume
 R 1 running 1 settled 1 0 1@0:1 - - resume
 R 2 running 1 settled 1 0 1@1:4 - - resume
-C 3 paused 3:cancelled
+C 3 terminal 3:completed
 P 18 3:1 4 1
 N conflict@1:0,conflict@1:1,conflict@1:5,order@1:6,order@1:9,order@2:1,conflict@3:0
 U -
@@ -3721,10 +3721,10 @@ A 9 appended
 O 0 0 0 0
 A 10 appended
 A 11 appended
-R 2 paused 1 settled 0 0 1@0:0 - - recover
+R 2 completed 1 settled 0 0 1@0:0 - - resume
 R 1 running 1 open 1 0 - i1 - resume
 R 3 completed 1 settled 0 0 1@0:3 - - resume
-C 1 running 3:completed
+C 1 running 2:completed
 P 12 1:0 2 1
 N order@0:1,conflict@0:4,order@0:5,order@0:7
 U -
@@ -3755,7 +3755,7 @@ U -
 A 22 appended
 A 23 appended
 A 24 appended
-R 2 cancelled 2 terminal 0 0 1@0:0 - - resume
+R 2 cancelled:u 2 terminal 0 0 1@0:0 - - resume
 R 1 running 1 settled 1 0 1@1:8 i1 - resume
 R 3 running 1 settled 0 0 1@0:3 - - recover
 C 2 terminal 2:cancelled
@@ -3764,14 +3764,14 @@ N order@0:1,conflict@0:4,order@0:5,order@0:7,conflict@1:1,order@1:4
 U 2:2
 A 25 appended
 A 26 appended
-R 2 cancelled 2 settled 0 0 1@0:0,2@1:11 - - resume
+R 2 cancelled:u 2 settled 0 0 1@0:0,2@1:11 - - resume
 R 1 running 1 settled 1 0 1@1:8 i1 - resume
 R 3 running 1 settled 1 0 1@0:3 - - resume
 C 2 terminal 2:cancelled
 P 24 1:12 2 1
 N order@0:1,conflict@0:4,order@0:5,order@0:7,conflict@1:1,order@1:4
 U -
-R 2 cancelled 2 settled 0 0 1@0:0,2@1:11 - - resume
+R 2 cancelled:u 2 settled 0 0 1@0:0,2@1:11 - - resume
 R 1 running 1 settled 1 0 1@1:8 i1 - resume
 R 3 running 1 settled 1 0 1@0:3 - - resume
 C 2 terminal 2:cancelled
@@ -3796,22 +3796,22 @@ A 4 EVENT_OUT_OF_ORDER
 A 5 appended
 A 6 duplicate
 A 7 EVENT_OUT_OF_ORDER
-R 1 cancelled 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:1 - - settled
 C 1 terminal 1:cancelled
 P 4 1:1 2 1
 N conflict@1:0,order@1:1
 U -
 A 8 appended
-R 1 cancelled 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:1 - - settled
 R 3 running 1 open 0 0 - - - recover
 C 3 running 1:cancelled
 P 5 1:2 2 1
 N conflict@1:0,order@1:1,order@1:2
 U -
 A 9 appended
-R 1 failed:r 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled 1 settled 1 0 1@0:1 - - settled
 R 3 running 1 open 0 0 - - - recover
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 6 1:3 2 1
 N conflict@1:0,order@1:1,order@1:2
 U -
@@ -3831,16 +3831,16 @@ A 22 appended
 A 23 EVENT_MUTATED
 A 24 appended
 R 1 completed 1 settled 1 0 1@0:1 - - settled
-R 3 failed:f 1 settled 0 0 1@1:7 - - resume
-R 2 cancelled 1 terminal 1 0 - - - settled
+R 3 failed:r 1 settled 0 0 1@1:7 - - resume
+R 2 cancelled:u 1 terminal 1 0 - - - settled
 C 3 terminal 3:failed
 P 19 4:8 3 1
 N conflict@1:0,order@1:1,order@1:2,order@1:4,conflict@4:6
 U 2:1
 A 25 appended
 R 1 completed 1 settled 1 0 1@0:1 - - settled
-R 3 failed:f 1 settled 0 0 1@1:7 - - resume
-R 2 cancelled 1 terminal 1 0 - - - settled
+R 3 failed:r 1 settled 0 0 1@1:7 - - resume
+R 2 cancelled:u 1 terminal 1 0 - - - settled
 C 3 terminal 3:failed
 P 20 4:9 3 1
 N conflict@1:0,order@1:1,order@1:2,order@1:4,conflict@4:6
@@ -3848,16 +3848,16 @@ U 2:1
 A 26 duplicate
 A 27 appended
 R 1 completed 1 settled 1 0 1@0:1 - - settled
-R 3 failed:f 1 settled 0 0 1@1:7 - - resume
-R 2 cancelled 1 terminal 1 0 - - - settled
+R 3 failed:r 1 settled 0 0 1@1:7 - - resume
+R 2 cancelled:u 1 terminal 1 0 - - - settled
 C 3 terminal 3:failed
 P 21 4:10 3 1
 N conflict@1:0,order@1:1,order@1:2,order@1:4,conflict@4:6
 U 2:1
 A 28 appended
 R 1 completed 1 settled 1 0 1@0:1 - - settled
-R 3 failed:f 1 settled 0 0 1@1:7 - - resume
-R 2 failed:f 1 terminal 1 0 - - - settled
+R 3 failed:r 1 settled 0 0 1@1:7 - - resume
+R 2 failed:r 1 terminal 1 0 - - - settled
 C 2 terminal 2:failed
 P 22 4:11 3 1
 N conflict@1:0,order@1:1,order@1:2,order@1:4,conflict@4:6
@@ -3884,9 +3884,9 @@ A 3 appended
 A 4 appended
 A 5 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 completed 1 terminal 0 0 - - - resume
-R 2 failed:r 1 terminal 0 0 - - - resume
-C 2 terminal 2:failed
+R 3 failed:f 1 terminal 0 0 - - - resume
+R 2 cancelled 1 terminal 0 0 - - - resume
+C 2 terminal 2:cancelled
 P 4 0:3 1 1
 N order@0:2,order@0:3
 U 1:1,3:1,2:1
@@ -3894,17 +3894,17 @@ A 6 appended
 A 7 appended
 A 8 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 completed 1 settled 0 0 1@2:2 - - resume
-R 2 failed:r 1 terminal 0 0 - i1 - resume
-C 2 terminal 2:failed
+R 3 failed:f 1 settled 0 0 1@2:2 - - resume
+R 2 cancelled 1 terminal 0 0 - i1 - resume
+C 2 terminal 2:cancelled
 P 7 2:2 2 1
 N order@0:2,order@0:3
 U 1:1,2:1
 A 9 appended
 A 10 appended
 R 1 completed 1 settled 0 0 1@2:4 - - resume
-R 3 completed 1 settled 0 0 1@2:2 - - resume
-R 2 failed:r 1 terminal 0 0 - i1 - resume
+R 3 failed:f 1 settled 0 0 1@2:2 - - resume
+R 2 cancelled 1 terminal 0 0 - i1 - resume
 C 1 terminal 1:completed
 P 9 2:4 2 1
 N order@0:2,order@0:3
@@ -3916,9 +3916,9 @@ A 13 appended
 A 14 appended
 A 15 appended
 A 16 appended
-R 1 cancelled 1 settled 1 0 1@2:4 - - settled
-R 3 completed 1 settled 0 0 1@2:2 - - resume
-R 2 failed:r 1 settled 0 0 1@3:3 i1 - resume
+R 1 cancelled:u 1 settled 1 0 1@2:4 - - settled
+R 3 failed:f 1 settled 0 0 1@2:2 - - resume
+R 2 cancelled 1 settled 0 0 1@3:3 i1 - resume
 C 1 terminal 1:cancelled
 P 15 3:4 3 1
 N order@0:2,order@0:3,conflict@2:5,conflict@3:1
@@ -3967,7 +3967,7 @@ A 16 appended
 A 17 duplicate
 A 18 appended
 A 19 appended
-R 2 failed:f 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 1 0 1@0:0 - - settled
 R 1 running 1 settled 1 0 1@0:2 - - resume
 R 3 running 1 settled 0 0 1@0:5 - - recover
 C 1 running 3:completed
@@ -3976,7 +3976,7 @@ N order@0:3,conflict@0:4,order@1:0,conflict@1:1,order@3:2,conflict@3:3
 U -
 A 20 appended
 A 21 appended
-R 2 failed:f 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 1 0 1@0:0 - - settled
 R 1 running 1 settled 1 0 1@0:2 i1 - resume
 R 3 paused 1 settled 0 0 1@0:5 - - recover
 C 3 paused 3:completed
@@ -3987,12 +3987,12 @@ A 22 appended
 A 23 appended
 O 0 0 0 0
 A 24 EVENT_OUT_OF_ORDER
-R 2 failed:f 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 1 0 1@0:0 - - settled
 R 1 running 1 settled 1 0 1@0:2 i1 - resume
-R 3 paused 1 settled 0 0 1@0:5 - - recover
-C 3 paused 3:completed
+R 3 running 2 open 0 0 1@0:5 - - recover
+C 3 running 3:completed
 P 19 4:3 4 1
-N order@0:3,conflict@0:4,order@1:0,conflict@1:1,order@3:2,conflict@3:3,order@4:3
+N order@0:3,conflict@0:4,order@1:0,conflict@1:1,order@3:2,conflict@3:3
 U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
@@ -4030,7 +4030,7 @@ A 8 appended
 A 9 appended
 R 3 - 1 unadmitted 0 0 1@1:2 i0 - admit
 R 2 completed 1 terminal 1 0 - - - settled
-R 1 cancelled 1 terminal 0 0 - - - resume
+R 1 cancelled:u 1 terminal 0 0 - - - resume
 C 1 terminal 1:cancelled
 P 8 3:0 3 1
 N order@1:0,conflict@1:4
@@ -4059,31 +4059,31 @@ X
 T log-65
 A 0 appended
 A 1 EVENT_OUT_OF_ORDER
-R 2 paused 1 terminal 0 0 - - - recover
-C 2 paused -
+R 2 completed 1 terminal 0 0 - - - resume
+C 2 terminal 2:completed
 P 1 0:0 1 1
 N order@0:0
 U 2:1
 O 0 0 0 0
 A 2 appended
 A 3 appended
-R 2 paused 1 settled 0 0 1@0:2 i0 - recover
-C 2 paused -
+R 2 completed 1 settled 0 0 1@0:2 i0 - resume
+C 2 terminal 2:completed
 P 3 0:2 1 1
 N order@0:0
 U -
 A 4 appended
 A 5 EVENT_OUT_OF_ORDER
-R 2 paused 1 settled 0 0 1@0:2 i0 - recover
+R 2 completed 1 settled 0 0 1@0:2 i0 - resume
 R 1 - 1 unadmitted 1 0 - - - admit
-C 2 paused -
+C 2 terminal 2:completed
 P 4 0:3 1 1
 N order@0:0
 U -
 A 6 appended
 R 2 paused 1 settled 0 0 1@0:2 i0 - recover
 R 1 - 1 unadmitted 1 0 - - - admit
-C 2 paused -
+C 2 paused 2:completed
 P 5 2:0 2 1
 N order@0:0
 U -
@@ -4124,8 +4124,8 @@ A 20 appended
 A 21 EVENT_MUTATED
 R 2 paused 1 settled 0 0 1@0:2 i0,i2 - recover
 R 1 completed 1 settled 1 0 1@2:2 - - settled
-R 3 paused 1 settled 0 0 1@3:4 i1 - recover
-C 3 paused 3:failed
+R 3 completed 1 settled 0 0 1@3:4 i1 - resume
+C 3 terminal 3:completed
 P 16 3:5 3 1
 N order@0:0,order@2:1,conflict@2:3,order@3:0
 U -
@@ -4135,7 +4135,7 @@ A 24 appended
 A 25 appended
 R 2 completed 1 settled 0 0 1@0:2 i0,i2 - resume
 R 1 completed 1 settled 1 0 1@2:2 - - settled
-R 3 paused 1 settled 0 0 1@3:4 i1 - recover
+R 3 completed 1 settled 0 0 1@3:4 i1 - resume
 C 2 terminal 2:completed
 P 19 3:8 3 1
 N order@0:0,order@2:1,conflict@2:3,order@3:0,conflict@3:6
@@ -4160,7 +4160,7 @@ A 6 appended
 A 7 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
 R 1 running 1 open 1 0 - - - resume
-R 3 cancelled 1 terminal 1 0 - - - settled
+R 3 cancelled:u 1 terminal 1 0 - - - settled
 C 3 terminal 3:cancelled
 P 8 0:7 1 1
 N order@0:1,order@0:2,conflict@0:5
@@ -4168,14 +4168,14 @@ U 3:1
 A 8 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
 R 1 running 1 open 1 0 - i0 - resume
-R 3 cancelled 1 terminal 1 0 - - - settled
+R 3 cancelled:u 1 terminal 1 0 - - - settled
 C 3 terminal 3:cancelled
 P 9 0:8 1 1
 N order@0:1,order@0:2,conflict@0:5
 U 3:1
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
 R 1 running 1 open 1 0 - i0 - resume
-R 3 cancelled 1 terminal 1 0 - - - settled
+R 3 cancelled:u 1 terminal 1 0 - - - settled
 C 3 terminal 3:cancelled
 P 9 0:8 1 1
 N order@0:1,order@0:2,conflict@0:5
@@ -4198,7 +4198,7 @@ A 4 appended
 A 5 appended
 A 6 EVENT_MUTATED
 A 7 appended
-R 1 cancelled 1 terminal 0 0 - - - resume
+R 1 cancelled:u 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 0 0 1@0:4 - - admit
 C 1 terminal 1:cancelled
@@ -4217,7 +4217,7 @@ A 14 EVENT_OUT_OF_ORDER
 A 15 EVENT_OUT_OF_ORDER
 A 16 appended
 A 17 appended
-R 1 cancelled 1 settled 1 0 1@0:8 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:8 - - settled
 R 3 completed 1 settled 0 0 1@0:1 - - resume
 R 2 running 1 settled 0 0 1@0:4 - - recover
 C 3 terminal 3:completed
@@ -4227,7 +4227,7 @@ U -
 A 18 appended
 O 0 0 0 0
 A 19 appended
-R 1 cancelled 1 settled 1 0 1@0:8 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:8 - - settled
 R 3 completed 1 settled 0 0 1@0:1 - - resume
 R 2 failed:f 1 settled 0 0 1@0:4 - - resume
 C 2 terminal 2:failed
@@ -4236,10 +4236,10 @@ N order@0:0,conflict@0:3,order@0:5,order@0:6
 U -
 A 20 appended
 A 21 appended
-R 1 cancelled 1 settled 1 0 1@0:8 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:8 - - settled
 R 3 completed 1 settled 0 0 1@0:1 - - resume
-R 2 running 1 settled 0 0 1@0:4 - - recover
-C 2 running 2:failed
+R 2 paused 1 settled 0 0 1@0:4 - - recover
+C 2 paused 2:failed
 P 15 4:2 4 1
 N order@0:0,conflict@0:3,order@0:5,order@0:6,conflict@4:2
 U -
@@ -4303,7 +4303,7 @@ A 18 appended
 A 19 appended
 A 20 appended
 R 3 completed 1 settled 0 0 1@1:0 i0 - resume
-R 2 cancelled 1 settled 0 0 1@1:1 - - resume
+R 2 cancelled:u 1 settled 0 0 1@1:1 - - resume
 R 1 - 1 unadmitted 0 0 1@1:9 - - admit
 C 2 terminal 2:cancelled
 P 15 1:13 2 1
@@ -4312,7 +4312,7 @@ U -
 A 21 appended
 A 22 appended
 R 3 completed 1 settled 0 0 1@1:0 i0 - resume
-R 2 cancelled 1 settled 0 0 1@1:1 - - resume
+R 2 cancelled:u 1 settled 0 0 1@1:1 - - resume
 R 1 - 1 unadmitted 0 0 1@1:9 - - admit
 C 3 terminal 3:completed
 P 17 2:0 3 1
@@ -4357,8 +4357,8 @@ A 13 appended
 A 14 appended
 A 15 appended
 A 16 appended
-R 3 failed:f 1 settled 1 0 1@0:0 - - settled
-R 2 failed:f 1 settled 0 0 1@0:3 i1 - resume
+R 3 failed:r 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 0 0 1@0:3 i1 - resume
 R 1 - 1 unadmitted 1 0 - i1,i2 - admit
 C 3 terminal 3:failed
 P 16 0:15 1 1
@@ -4366,16 +4366,16 @@ N conflict@0:1,conflict@0:2,conflict@0:6,order@0:7,order@0:10,conflict@0:12
 U -
 A 17 appended
 A 18 appended
-R 3 running 1 settled 1 0 1@0:0 - - resume
-R 2 failed:f 1 settled 0 0 1@0:3 i1 - resume
+R 3 running 2 open 1 0 1@0:0 - - resume
+R 2 failed:r 1 settled 0 0 1@0:3 i1 - resume
 R 1 running 1 open 1 0 - i1,i2 - resume
 C 3 running 3:failed
 P 18 0:17 1 1
 N conflict@0:1,conflict@0:2,conflict@0:6,order@0:7,order@0:10,conflict@0:12,order@0:16
 U -
-QS SETTLEMENT_CONFLICT
 QS appended
-QS SETTLEMENT_CONFLICT
+QS appended
+QS appended
 QL RUN_ID_TAKEN
 QL ok
 QB batch 14 16 18 0:14,0:15
@@ -4389,16 +4389,16 @@ A 1 appended
 A 2 appended
 A 3 appended
 A 4 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
-R 2 running 1 settled 0 0 1@0:2 - - recover
+R 3 cancelled 1 terminal 0 0 - - - resume
+R 2 paused 1 settled 0 0 1@0:2 - - recover
 R 1 - 1 unadmitted 1 0 - - - admit
-C 2 running 2:failed
+C 2 paused 2:failed
 P 5 1:1 2 1
 N order@0:0,order@0:1
 U 3:1
 A 5 appended
 A 6 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
 R 2 completed 1 settled 0 0 1@0:2 - - resume
 R 1 - 1 unadmitted 1 0 - - - admit
 C 2 terminal 2:completed
@@ -4408,7 +4408,7 @@ U 3:1
 A 7 appended
 A 8 appended
 A 9 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
 R 2 running 1 settled 0 0 1@0:2 i1 - recover
 R 1 - 1 unadmitted 1 0 - - - admit
 C 2 running 2:completed
@@ -4422,9 +4422,9 @@ A 13 appended
 A 14 appended
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
-R 3 failed:r 1 terminal 0 0 - i2 - resume
+R 3 cancelled 1 terminal 0 0 - i2 - resume
 R 2 running 1 settled 0 0 1@0:2 i1 - recover
-R 1 failed:f 1 settled 1 0 1@5:0 - - settled
+R 1 failed:r 1 settled 1 0 1@5:0 - - settled
 C 1 terminal 1:failed
 P 15 5:0 6 1
 N order@0:0,order@0:1,conflict@3:0,order@4:1
@@ -4432,9 +4432,9 @@ U 3:1
 A 17 appended
 A 18 appended
 A 19 appended
-R 3 failed:r 1 terminal 0 0 - i2 - resume
-R 2 failed:f 1 settled 0 0 1@0:2 i1 - resume
-R 1 failed:f 1 settled 1 0 1@5:0 - - settled
+R 3 cancelled 1 terminal 0 0 - i2 - resume
+R 2 failed:r 1 settled 0 0 1@0:2 i1 - resume
+R 1 failed:r 1 settled 1 0 1@5:0 - - settled
 C 2 terminal 2:failed
 P 18 5:3 6 1
 N order@0:0,order@0:1,conflict@3:0,order@4:1,conflict@5:2
@@ -4551,10 +4551,10 @@ A 15 appended
 A 16 appended
 O 0 0 0 0
 A 17 appended
-R 1 failed:r 2 settled 1 0 2@0:6 - - settled
+R 1 cancelled 2 settled 1 0 2@0:6 - - settled
 R 2 completed 1 settled 0 0 1@0:1 - - resume
-R 3 completed 1 settled 0 0 1@0:13 i1 - resume
-C 1 terminal 1:failed
+R 3 failed:f 1 settled 0 0 1@0:13 i1 - resume
+C 1 terminal 1:cancelled
 P 15 0:14 1 1
 N order@0:0,order@0:2,order@0:4,conflict@0:8,conflict@0:12,conflict@0:14
 U -
@@ -4587,7 +4587,7 @@ A 14 appended
 A 15 EVENT_MUTATED
 R 1 running 1 settled 0 0 1@0:0 i1 - recover
 R 2 running 1 settled 0 0 1@0:4 - - recover
-R 3 cancelled 1 settled 0 0 1@0:7 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:7 - - resume
 C 3 terminal 3:cancelled
 P 10 0:9 1 1
 N order@0:1,conflict@0:2,order@0:3,order@0:6
@@ -4604,55 +4604,55 @@ X
 T log-74
 A 0 appended
 A 1 appended
-R 2 running 1 open 0 0 - - - recover
+R 2 paused 1 terminal 0 0 - - - recover
 R 3 running 1 open 0 0 - - - recover
 C 3 running -
 P 2 1:0 2 1
 N order@0:0,order@1:0
-U -
+U 2:1
 A 2 appended
-R 2 running 1 open 0 0 - - - recover
+R 2 paused 1 terminal 0 0 - - - recover
 R 3 running 1 open 0 0 - - - recover
-R 1 paused 1 terminal 0 0 - - - recover
-C 1 paused -
+R 1 completed 1 terminal 0 0 - - - resume
+C 1 terminal 1:completed
 P 3 1:1 2 1
 N order@0:0,order@1:0,order@1:1
-U 1:1
+U 2:1,1:1
 A 3 appended
 A 4 appended
 A 5 appended
 A 6 EVENT_OUT_OF_ORDER
-R 2 running 1 open 0 0 - - - recover
+R 2 paused 1 terminal 0 0 - - - recover
 R 3 running 1 open 1 0 - - - resume
-R 1 paused 1 terminal 1 0 - - - resume
-C 3 running -
+R 1 completed 1 terminal 1 0 - - - settled
+C 3 running 1:completed
 P 6 1:4 2 1
 N order@0:0,order@1:0,order@1:1
-U 1:1
+U 2:1,1:1
 A 7 duplicate
-R 2 running 1 open 0 0 - - - recover
+R 2 paused 1 terminal 0 0 - - - recover
 R 3 running 1 open 1 0 - - - resume
-R 1 paused 1 terminal 1 0 - - - resume
-C 3 running -
+R 1 completed 1 terminal 1 0 - - - settled
+C 3 running 1:completed
 P 6 1:4 2 1
 N order@0:0,order@1:0,order@1:1
-U 1:1
+U 2:1,1:1
 A 8 appended
 A 9 appended
-R 2 running 1 open 0 0 - - - recover
+R 2 paused 1 terminal 0 0 - - - recover
 R 3 running 1 open 1 0 - - - resume
-R 1 paused 1 settled 1 0 1@3:1 - - resume
-C 3 running -
+R 1 completed 1 settled 1 0 1@3:1 - - settled
+C 3 running 1:completed
 P 8 3:1 3 1
 N order@0:0,order@1:0,order@1:1
-U -
-R 2 running 1 open 0 0 - - - recover
+U 2:1
+R 2 paused 1 terminal 0 0 - - - recover
 R 3 running 1 open 1 0 - - - resume
-R 1 paused 1 settled 1 0 1@3:1 - - resume
-C 3 running -
+R 1 completed 1 settled 1 0 1@3:1 - - settled
+C 3 running 1:completed
 P 8 3:1 3 1
 N order@0:0,order@1:0,order@1:1
-U -
+U 2:1
 QS appended
 QS appended
 QS SETTLEMENT_WITHOUT_RUN
@@ -4692,11 +4692,11 @@ A 14 EVENT_OUT_OF_ORDER
 A 15 appended
 A 16 appended
 R 3 running 1 settled 0 0 1@0:0 i0,i1 - recover
-R 1 admitted 1 settled 1 0 1@0:1 - - resume
+R 1 running 1 settled 1 0 1@0:1 - - resume
 R 2 completed 1 settled 1 0 1@0:5 - - settled
 C 2 terminal 2:completed
 P 13 0:12 1 1
-N order@0:3,conflict@0:8,order@0:9
+N order@0:3,order@0:6,conflict@0:8,order@0:9
 U -
 QS skipped
 QS skipped
@@ -4739,8 +4739,8 @@ A 13 appended
 O 0 0 0 0
 A 14 EVENT_MUTATED
 A 15 appended
-R 3 cancelled 1 settled 0 0 1@0:0 i0 - resume
-R 2 cancelled 1 settled 1 0 1@1:0 i2 - settled
+R 3 cancelled:u 1 settled 0 0 1@0:0 i0 - resume
+R 2 cancelled:u 1 settled 1 0 1@1:0 i2 - settled
 R 1 - 1 unadmitted 1 0 - - - admit
 C 3 terminal 3:cancelled
 P 13 4:5 5 1
@@ -4777,7 +4777,7 @@ A 5 appended
 A 6 appended
 A 7 EVENT_MUTATED
 R 1 completed 1 settled 0 0 1@0:4 - - resume
-R 3 failed:f 1 settled 0 0 1@0:3 i2 - resume
+R 3 failed:r 1 settled 0 0 1@0:3 i2 - resume
 R 2 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:failed
 P 7 0:6 1 1
@@ -4788,7 +4788,7 @@ A 9 appended
 O 0 0 0 0
 A 10 EVENT_MUTATED
 R 1 completed 1 settled 0 0 1@0:4 - - resume
-R 3 failed:f 1 settled 0 0 1@0:3 i0,i2 - resume
+R 3 failed:r 1 settled 0 0 1@0:3 i0,i2 - resume
 R 2 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:failed
 P 9 0:8 1 1
@@ -4925,8 +4925,8 @@ A 9 EVENT_MUTATED
 A 10 EVENT_OUT_OF_ORDER
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
 R 1 running 1 open 1 0 - - - resume
-R 3 completed 1 settled 0 0 1@1:3 i2 - resume
-C 3 terminal 3:completed
+R 3 failed:f 1 settled 0 0 1@1:3 i2 - resume
+C 3 terminal 3:failed
 P 6 1:3 2 1
 N order@1:0,order@1:2
 U -
@@ -4954,34 +4954,34 @@ P 13 2:5 3 1
 N order@1:0,order@1:2,order@1:4,conflict@2:2
 U -
 A 19 appended
-R 2 paused 1 settled 0 0 1@0:0 i1 - recover
+R 2 completed 1 settled 0 0 1@0:0 i1 - resume
 R 1 running 1 open 1 0 - - - resume
 R 3 paused 1 settled 1 0 1@1:3 i2 - resume
-C 2 paused 2:completed
+C 2 terminal 2:completed
 P 14 2:6 3 1
 N order@1:0,order@1:2,order@1:4,conflict@2:2
 U -
 A 20 EVENT_OUT_OF_ORDER
-R 2 paused 1 settled 0 0 1@0:0 i1 - recover
+R 2 completed 1 settled 0 0 1@0:0 i1 - resume
 R 1 running 1 open 1 0 - - - resume
 R 3 paused 1 settled 1 0 1@1:3 i2 - resume
-C 2 paused 2:completed
+C 2 terminal 2:completed
 P 14 2:6 3 1
 N order@1:0,order@1:2,order@1:4,conflict@2:2
 U -
 A 21 appended
 A 22 EVENT_OUT_OF_ORDER
-R 2 paused 1 settled 0 0 1@0:0 i1 - recover
-R 1 failed:r 1 terminal 1 0 - - - settled
+R 2 completed 1 settled 0 0 1@0:0 i1 - resume
+R 1 cancelled 1 terminal 1 0 - - - settled
 R 3 paused 1 settled 1 0 1@1:3 i2 - resume
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 15 2:7 3 1
 N order@1:0,order@1:2,order@1:4,conflict@2:2
 U 1:1
-R 2 paused 1 settled 0 0 1@0:0 i1 - recover
-R 1 failed:r 1 terminal 1 0 - - - settled
+R 2 completed 1 settled 0 0 1@0:0 i1 - resume
+R 1 cancelled 1 terminal 1 0 - - - settled
 R 3 paused 1 settled 1 0 1@1:3 i2 - resume
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 15 2:7 3 1
 N order@1:0,order@1:2,order@1:4,conflict@2:2
 U 1:1
@@ -5010,14 +5010,14 @@ A 4 duplicate
 A 5 appended
 A 6 appended
 R 2 paused 1 settled 0 0 1@1:0 - - recover
-R 3 completed 1 terminal 0 0 - i1,i2 - resume
-C 3 terminal 3:completed
+R 3 failed:f 1 terminal 0 0 - i1,i2 - resume
+C 3 terminal 3:failed
 P 6 1:4 2 1
 N order@0:0,order@1:2
 U 3:1
 R 2 paused 1 settled 0 0 1@1:0 - - recover
-R 3 completed 1 terminal 0 0 - i1,i2 - resume
-C 3 terminal 3:completed
+R 3 failed:f 1 terminal 0 0 - i1,i2 - resume
+C 3 terminal 3:failed
 P 6 1:4 2 1
 N order@0:0,order@1:2
 U 3:1
@@ -5032,14 +5032,14 @@ QB batch 3 4 6 1:2
 X
 T log-82
 A 0 appended
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 1 0:0 1 1
 N order@0:0
 U 1:1
 A 1 appended
 A 2 appended
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 1 0 - - - admit
 R 2 - 1 unadmitted 0 0 1@1:1 - - admit
 C 1 terminal 1:failed
@@ -5049,10 +5049,10 @@ U 1:1
 A 3 appended
 A 4 appended
 A 5 appended
-R 1 paused 1 settled 0 0 1@1:2 i0 - recover
+R 1 completed 1 settled 0 0 1@1:2 i0 - resume
 R 3 - 1 unadmitted 1 0 - - - admit
 R 2 - 1 unadmitted 0 0 1@1:1 - - admit
-C 1 paused 1:failed
+C 1 terminal 1:completed
 P 6 1:4 2 1
 N order@0:0
 U -
@@ -5118,15 +5118,15 @@ A 3 appended
 A 4 appended
 A 5 EVENT_MUTATED
 A 6 appended
-R 1 running 1 settled 1 0 1@0:0 - - resume
+R 1 running 2 open 1 0 1@0:0 - - resume
 C 1 running 1:failed
 P 5 1:1 2 1
 N order@0:2,conflict@1:0
 U -
 A 7 appended
 A 8 EVENT_OUT_OF_ORDER
-R 1 running 1 settled 1 0 1@0:0 - - resume
-R 2 failed:f 1 terminal 0 0 - - - resume
+R 1 running 2 open 1 0 1@0:0 - - resume
+R 2 failed:r 1 terminal 0 0 - - - resume
 C 2 terminal 2:failed
 P 6 1:2 2 1
 N order@0:2,conflict@1:0,order@1:2
@@ -5134,8 +5134,8 @@ U 2:1
 A 9 appended
 A 10 duplicate
 A 11 appended
-R 1 running 1 settled 1 0 1@0:0 i0 - resume
-R 2 failed:f 1 terminal 0 0 - - - resume
+R 1 running 2 open 1 0 1@0:0 i0 - resume
+R 2 failed:r 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 0 0 1@1:4 - - admit
 C 2 terminal 2:failed
 P 8 1:4 2 1
@@ -5153,27 +5153,27 @@ A 18 appended
 A 19 EVENT_MUTATED
 A 20 EVENT_OUT_OF_ORDER
 A 21 appended
-R 1 running 1 settled 1 0 1@0:0 i0 - resume
-R 2 failed:f 1 settled 0 0 1@1:9 i2 - resume
-R 3 failed:r 1 settled 0 0 1@1:4 - - resume
-C 3 terminal 3:failed
+R 1 running 2 settled 1 0 1@0:0,2@1:6 i0 - resume
+R 2 failed:r 1 settled 0 0 1@1:9 i2 - resume
+R 3 cancelled 1 settled 0 0 1@1:4 - - resume
+C 3 terminal 3:cancelled
 P 14 1:10 2 1
 N order@0:2,conflict@1:0,order@1:2,order@1:7,conflict@1:8
 U -
 A 22 appended
 A 23 appended
 A 24 appended
-R 1 paused 1 settled 1 0 1@0:0 i0 - resume
-R 2 failed:r 1 settled 0 0 1@1:9 i2 - resume
-R 3 failed:r 1 settled 0 0 1@1:4 - - resume
-C 1 paused 2:failed
+R 1 completed 2 settled 1 0 1@0:0,2@1:6 i0 - settled
+R 2 cancelled 1 settled 0 0 1@1:9 i2 - resume
+R 3 cancelled 1 settled 0 0 1@1:4 - - resume
+C 1 terminal 1:completed
 P 17 1:13 2 1
 N order@0:2,conflict@1:0,order@1:2,order@1:7,conflict@1:8,order@1:11
 U -
-R 1 paused 1 settled 1 0 1@0:0 i0 - resume
-R 2 failed:r 1 settled 0 0 1@1:9 i2 - resume
-R 3 failed:r 1 settled 0 0 1@1:4 - - resume
-C 1 paused 2:failed
+R 1 completed 2 settled 1 0 1@0:0,2@1:6 i0 - settled
+R 2 cancelled 1 settled 0 0 1@1:9 i2 - resume
+R 3 cancelled 1 settled 0 0 1@1:4 - - resume
+C 1 terminal 1:completed
 P 17 1:13 2 1
 N order@0:2,conflict@1:0,order@1:2,order@1:7,conflict@1:8,order@1:11
 U -
@@ -5192,8 +5192,8 @@ A 1 EVENT_OUT_OF_ORDER
 A 2 EVENT_OUT_OF_ORDER
 A 3 appended
 R 3 paused 1 terminal 0 0 - - - recover
-R 2 completed 1 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 2 failed:f 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:0,order@0:1
 U 3:1,2:1
@@ -5201,9 +5201,9 @@ A 4 duplicate
 O 0 0 0 0
 A 5 appended
 R 3 paused 1 terminal 0 0 - - - recover
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 2 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:f 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 3 0:2 1 1
 N order@0:0,order@0:1,order@0:2
 U 3:1,2:1,1:1
@@ -5229,10 +5229,10 @@ A 2 appended
 A 3 appended
 R 2 completed 1 terminal 0 0 - - - resume
 R 3 paused 1 terminal 1 0 - - - resume
-R 1 admitted 1 open 0 0 - - - recover
-C 1 admitted 2:completed
+R 1 running 1 open 0 0 - - - recover
+C 1 running 2:completed
 P 4 1:1 2 1
-N order@0:0,order@1:0
+N order@0:0,order@1:0,order@1:1
 U 2:1,3:1
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
@@ -5247,8 +5247,8 @@ T log-86
 A 0 appended
 A 1 appended
 R 3 admitted 1 open 0 0 - - - recover
-R 2 completed 1 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 2 failed:f 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:1
@@ -5256,26 +5256,26 @@ A 2 appended
 A 3 appended
 A 4 appended
 R 3 admitted 1 open 0 0 - - - recover
-R 2 completed 1 settled 0 0 1@0:3 - - resume
+R 2 failed:f 1 settled 0 0 1@0:3 - - resume
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 5 0:4 1 1
 N order@0:1,conflict@0:4
 U -
 A 5 EVENT_OUT_OF_ORDER
 R 3 admitted 1 open 0 0 - - - recover
-R 2 completed 1 settled 0 0 1@0:3 - - resume
+R 2 failed:f 1 settled 0 0 1@0:3 - - resume
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 5 0:4 1 1
 N order@0:1,conflict@0:4
 U -
 O 0 0 0 0
 A 6 appended
 R 3 running 1 open 0 0 - - - recover
-R 2 completed 1 settled 0 0 1@0:3 - - resume
+R 2 failed:f 1 settled 0 0 1@0:3 - - resume
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 3 running 2:completed
+C 3 running 2:failed
 P 6 0:5 1 1
 N order@0:1,conflict@0:4
 U -
@@ -5283,9 +5283,9 @@ A 7 appended
 A 8 EVENT_OUT_OF_ORDER
 A 9 appended
 R 3 running 1 settled 0 0 1@0:6 - - recover
-R 2 completed 1 settled 0 0 1@0:3 - - resume
+R 2 failed:f 1 settled 0 0 1@0:3 - - resume
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 3 running 2:completed
+C 3 running 2:failed
 P 8 2:0 2 1
 N order@0:1,conflict@0:4,conflict@2:0
 U -
@@ -5299,16 +5299,16 @@ A 16 EVENT_MUTATED
 A 17 EVENT_OUT_OF_ORDER
 A 18 appended
 R 3 running 1 settled 0 0 1@0:6 - - recover
-R 2 failed:r 1 settled 0 0 1@0:3 - - resume
+R 2 cancelled 1 settled 0 0 1@0:3 - - resume
 R 1 - 1 unadmitted 1 0 1@0:2 - - admit
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 14 3:4 3 1
 N order@0:1,conflict@0:4,conflict@2:0,conflict@2:1
 U -
 A 19 appended
 A 20 appended
-R 3 failed:f 1 settled 0 0 1@0:6 - - resume
-R 2 failed:r 1 settled 0 0 1@0:3 - - resume
+R 3 failed:r 1 settled 0 0 1@0:6 - - resume
+R 2 cancelled 1 settled 0 0 1@0:3 - - resume
 R 1 - 1 unadmitted 1 0 1@0:2 - - admit
 C 3 terminal 3:failed
 P 16 3:6 3 1
@@ -5319,7 +5319,7 @@ A 22 appended
 A 23 appended
 A 24 appended
 A 25 appended
-R 3 failed:f 1 settled 0 0 1@0:6 - - resume
+R 3 failed:r 1 settled 0 0 1@0:6 - - resume
 R 2 failed:f 1 settled 1 0 1@0:3 - - settled
 R 1 paused 1 settled 1 0 1@0:2 - - resume
 C 1 paused 2:failed
@@ -5330,7 +5330,7 @@ QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
 QS skipped
 QL RUN_ID_TAKEN
-QL ok
+QL RUN_ID_TAKEN
 QB batch 8 13 21 2:1,3:0,3:1,3:2,3:3
 QB batch 13 16 21 3:4,3:5,3:6
 QB refused identity-mismatch 21 3:9
@@ -5353,9 +5353,9 @@ A 7 appended
 A 8 appended
 A 9 appended
 R 3 - 1 unadmitted 1 0 1@0:1 - - admit
-R 1 completed 1 terminal 0 0 - i0 - resume
+R 1 failed:f 1 terminal 0 0 - i0 - resume
 R 2 admitted 1 settled 0 0 1@0:3 - - recover
-C 2 admitted 1:completed
+C 2 admitted 1:failed
 P 9 0:8 1 1
 N order@0:2,conflict@0:5
 U 1:1
@@ -5368,9 +5368,9 @@ A 15 appended
 A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_MUTATED
 R 3 - 1 unadmitted 1 0 1@0:1 - - admit
-R 1 completed 1 settled 1 0 1@2:5 i0 - settled
+R 1 failed:f 1 settled 1 0 1@2:5 i0 - settled
 R 2 paused 1 settled 0 0 1@0:3 i1 - recover
-C 2 paused 1:completed
+C 2 paused 1:failed
 P 15 2:5 2 1
 N order@0:2,conflict@0:5,conflict@2:1
 U -
@@ -5470,9 +5470,9 @@ O 0 0 0 0
 A 11 duplicate
 A 12 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 3 failed:r 1 settled 0 0 1@0:1 - - resume
-R 1 failed:r 1 settled 0 0 1@0:3 - - resume
-C 1 terminal 1:failed
+R 3 cancelled 1 settled 0 0 1@0:1 - - resume
+R 1 cancelled 1 settled 0 0 1@0:3 - - resume
+C 1 terminal 1:cancelled
 P 9 2:2 3 1
 N conflict@1:0,conflict@2:1,order@2:2
 U -
@@ -5499,7 +5499,7 @@ A 3 appended
 A 4 appended
 A 5 appended
 A 6 appended
-R 3 cancelled 1 settled 0 0 1@0:2 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:2 - - resume
 R 2 - 1 unadmitted 1 0 - - - admit
 R 1 - 1 unadmitted 0 0 1@0:4 - - admit
 C 3 terminal 3:cancelled
@@ -5509,7 +5509,7 @@ U -
 A 7 appended
 A 8 appended
 A 9 EVENT_MUTATED
-R 3 cancelled 1 settled 0 0 1@0:2 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:2 - - resume
 R 2 - 1 unadmitted 1 0 - - - admit
 R 1 - 1 unadmitted 0 0 1@0:4 i1 - admit
 C 3 terminal 3:cancelled
@@ -5517,7 +5517,7 @@ P 8 1:0 2 1
 N conflict@0:5,conflict@1:0
 U -
 A 10 appended
-R 3 cancelled 1 settled 0 0 1@0:2 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:2 - - resume
 R 2 - 1 unadmitted 1 0 - i1 - admit
 R 1 - 1 unadmitted 0 0 1@0:4 i1 - admit
 C 3 terminal 3:cancelled
@@ -5532,19 +5532,19 @@ A 14 appended
 A 15 appended
 A 16 appended
 A 17 EVENT_OUT_OF_ORDER
-R 3 cancelled 1 settled 0 0 1@0:2 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:2 - - resume
 R 2 - 1 unadmitted 1 0 1@3:1 i1 - admit
-R 1 failed:r 1 settled 0 0 1@0:4 i1 - resume
-C 1 terminal 1:failed
+R 1 cancelled 1 settled 0 0 1@0:4 i1 - resume
+C 1 terminal 1:cancelled
 P 14 3:3 3 1
 N conflict@0:5,conflict@1:0,order@1:2,conflict@3:2,conflict@3:3
 U -
 A 18 appended
 A 19 appended
-R 3 cancelled 1 settled 0 0 1@0:2 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:2 - - resume
 R 2 - 1 unadmitted 1 0 1@3:1 i1 - admit
-R 1 failed:r 1 settled 0 0 1@0:4 i1 - resume
-C 1 terminal 1:failed
+R 1 cancelled 1 settled 0 0 1@0:4 i1 - resume
+C 1 terminal 1:cancelled
 P 16 3:5 3 1
 N conflict@0:5,conflict@1:0,order@1:2,conflict@3:2,conflict@3:3
 U -
@@ -5554,7 +5554,7 @@ A 21 appended
 A 22 appended
 R 3 failed:f 1 settled 0 0 1@0:2 - - resume
 R 2 - 1 unadmitted 1 0 1@3:1 i1 - admit
-R 1 failed:r 1 settled 0 0 1@0:4 i1 - resume
+R 1 cancelled 1 settled 0 0 1@0:4 i1 - resume
 C 3 terminal 3:failed
 P 19 3:8 3 1
 N conflict@0:5,conflict@1:0,order@1:2,conflict@3:2,conflict@3:3
@@ -5563,8 +5563,8 @@ A 23 appended
 A 24 EVENT_OUT_OF_ORDER
 A 25 appended
 R 3 completed 1 settled 0 0 1@0:2 - - resume
-R 2 failed:f 1 settled 1 0 1@3:1 i1 - settled
-R 1 failed:r 1 settled 0 0 1@0:4 i1 - resume
+R 2 failed:r 1 settled 1 0 1@3:1 i1 - settled
+R 1 cancelled 1 settled 0 0 1@0:4 i1 - resume
 C 2 terminal 2:failed
 P 21 3:10 3 1
 N conflict@0:5,conflict@1:0,order@1:2,conflict@3:2,conflict@3:3,order@3:10
@@ -5599,9 +5599,9 @@ A 6 appended
 O 0 0 0 0
 A 7 appended
 R 1 - 1 unadmitted 0 0 1@0:1 i1,i2 - admit
-R 3 completed 1 terminal 0 0 - - - resume
+R 3 failed:f 1 terminal 0 0 - - - resume
 R 2 running 1 settled 0 0 1@1:0 - - recover
-C 2 running 3:completed
+C 2 running 3:failed
 P 8 1:3 2 1
 N order@0:3,conflict@1:1,order@1:3
 U 3:1
@@ -5651,10 +5651,10 @@ P 21 5:4 5 1
 N order@0:3,conflict@1:1,order@1:3,conflict@3:1,order@3:4,conflict@5:2,conflict@5:3
 U -
 A 24 appended
-R 1 paused 1 settled 1 0 1@0:1 i1,i2 - resume
+R 1 completed 1 settled 1 0 1@0:1 i1,i2 - settled
 R 3 running 2 open 1 0 1@5:0 - - resume
 R 2 completed 1 settled 1 0 1@1:0 - - settled
-C 1 paused 1:failed
+C 1 terminal 1:completed
 P 22 5:5 5 1
 N order@0:3,conflict@1:1,order@1:3,conflict@3:1,order@3:4,conflict@5:2,conflict@5:3
 U -
@@ -5676,7 +5676,7 @@ A 3 appended
 A 4 appended
 A 5 appended
 R 2 running 1 settled 1 0 1@0:0 - - resume
-R 1 failed:r 1 settled 0 0 1@0:2 - - resume
+R 1 cancelled 1 settled 0 0 1@0:2 - - resume
 R 3 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 6 1:0 2 1
@@ -5685,7 +5685,7 @@ U 3:1
 O 0 0 0 0
 A 6 EVENT_OUT_OF_ORDER
 R 2 running 1 settled 1 0 1@0:0 - - resume
-R 1 failed:r 1 settled 0 0 1@0:2 - - resume
+R 1 cancelled 1 settled 0 0 1@0:2 - - resume
 R 3 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 6 1:0 2 1
@@ -5693,7 +5693,7 @@ N order@0:3,order@0:4,order@1:0
 U 3:1
 A 7 appended
 R 2 running 1 settled 1 0 1@0:0 - - resume
-R 1 failed:r 1 settled 0 0 1@0:2 - - resume
+R 1 cancelled 1 settled 0 0 1@0:2 - - resume
 R 3 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 7 1:1 2 1
@@ -5704,7 +5704,7 @@ QS skipped
 QS appended
 QL ok
 QL ok
-QB batch 2 5 7 0:2,0:3,0:4
+QB batch 2 6 7 0:2,0:3,0:4,1:0
 QB batch 3 4 7 0:3
 QB batch 0 1 7 0:0
 X
@@ -5727,8 +5727,8 @@ A 12 appended
 A 13 appended
 R 3 paused 1 settled 1 0 1@2:0 - - resume
 R 2 paused 1 settled 1 0 1@2:5 i0 - resume
-R 1 completed 1 settled 1 0 1@2:3 i0 - settled
-C 1 terminal 1:completed
+R 1 failed:f 1 settled 1 0 1@2:3 i0 - settled
+C 1 terminal 1:failed
 P 11 2:6 3 1
 N order@0:0,order@0:1,order@2:4
 U -
@@ -5738,8 +5738,8 @@ A 15 appended
 A 16 appended
 R 3 paused 1 settled 1 0 1@2:0 - - resume
 R 2 paused 1 settled 1 0 1@2:5 i0,i1,i2 - resume
-R 1 completed 1 settled 1 0 1@2:3 i0 - settled
-C 1 terminal 1:completed
+R 1 failed:f 1 settled 1 0 1@2:3 i0 - settled
+C 1 terminal 1:failed
 P 14 2:9 3 1
 N order@0:0,order@0:1,order@2:4
 U -
@@ -5752,16 +5752,16 @@ A 21 appended
 A 22 appended
 A 23 duplicate
 R 3 paused 1 settled 1 0 1@2:0 - - resume
-R 2 failed:r 1 settled 1 0 1@2:5 i0,i1,i2 - settled
-R 1 failed:r 1 settled 1 0 1@2:3 i0,i1 - settled
-C 2 terminal 1:failed
+R 2 cancelled 1 settled 1 0 1@2:5 i0,i1,i2 - settled
+R 1 cancelled 1 settled 1 0 1@2:3 i0,i1 - settled
+C 2 terminal 1:cancelled
 P 20 2:15 3 1
 N order@0:0,order@0:1,order@2:4,order@2:15
 U -
 R 3 paused 1 settled 1 0 1@2:0 - - resume
-R 2 failed:r 1 settled 1 0 1@2:5 i0,i1,i2 - settled
-R 1 failed:r 1 settled 1 0 1@2:3 i0,i1 - settled
-C 2 terminal 1:failed
+R 2 cancelled 1 settled 1 0 1@2:5 i0,i1,i2 - settled
+R 1 cancelled 1 settled 1 0 1@2:3 i0,i1 - settled
+C 2 terminal 1:cancelled
 P 20 2:15 3 1
 N order@0:0,order@0:1,order@2:4,order@2:15
 U -
@@ -5769,7 +5769,7 @@ QS skipped
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
 QL RUN_ID_TAKEN
-QL ok
+QL RUN_ID_TAKEN
 QB batch 19 20 20 2:15
 QB batch 2 6 20 0:2,1:0,2:0,2:1
 QB batch 17 20 20 2:13,2:14,2:15
@@ -5779,9 +5779,9 @@ A 0 appended
 A 1 appended
 O 0 0 0 0
 A 2 duplicate
-R 3 paused 1 terminal 0 0 - - - recover
+R 3 completed 1 terminal 0 0 - - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
-C 3 paused -
+C 3 terminal 3:completed
 P 2 0:1 1 1
 N order@0:0
 U 3:1
@@ -5789,26 +5789,26 @@ A 3 EVENT_OUT_OF_ORDER
 A 4 appended
 A 5 EVENT_MUTATED
 A 6 appended
-R 3 paused 1 terminal 0 0 - i1 - recover
+R 3 completed 1 terminal 0 0 - i1 - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 0 0 1@1:0 - - admit
-C 3 paused -
+C 3 terminal 3:completed
 P 4 1:0 2 1
 N order@0:0
 U 3:1
 A 7 appended
 A 8 duplicate
-R 3 paused 1 terminal 0 0 - i1 - recover
+R 3 completed 1 terminal 0 0 - i1 - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 0 0 1@1:0 - - admit
-C 3 paused -
+C 3 terminal 3:completed
 P 5 1:1 2 1
 N order@0:0,order@1:1
 U 3:1
-R 3 paused 1 terminal 0 0 - i1 - recover
+R 3 completed 1 terminal 0 0 - i1 - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 R 2 - 1 unadmitted 0 0 1@1:0 - - admit
-C 3 paused -
+C 3 terminal 3:completed
 P 5 1:1 2 1
 N order@0:0,order@1:1
 U 3:1
@@ -5835,19 +5835,19 @@ A 4 duplicate
 A 5 appended
 A 6 EVENT_OUT_OF_ORDER
 R 3 - 1 unadmitted 0 0 1@0:0 - - admit
-R 2 failed:r 1 settled 0 0 1@0:3 - - resume
-R 1 admitted 1 open 0 0 - - - recover
-C 1 admitted 2:failed
+R 2 cancelled 1 settled 0 0 1@0:3 - - resume
+R 1 running 1 open 0 0 - - - recover
+C 1 running 2:cancelled
 P 4 0:3 1 1
-N order@0:1
+N order@0:1,order@0:2
 U -
 A 7 appended
 R 3 completed 1 settled 0 0 1@0:0 - - resume
-R 2 failed:r 1 settled 0 0 1@0:3 - - resume
-R 1 admitted 1 open 0 0 - - - recover
+R 2 cancelled 1 settled 0 0 1@0:3 - - resume
+R 1 running 1 open 0 0 - - - recover
 C 3 terminal 3:completed
 P 5 2:0 2 1
-N order@0:1,order@2:0
+N order@0:1,order@0:2,order@2:0
 U -
 A 8 appended
 A 9 appended
@@ -5856,19 +5856,19 @@ A 11 appended
 A 12 appended
 A 13 appended
 A 14 EVENT_OUT_OF_ORDER
-R 3 paused 1 settled 1 0 1@0:0 - - resume
-R 2 failed:f 1 settled 0 0 1@0:3 - - resume
+R 3 completed 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 0 0 1@0:3 - - resume
 R 1 running 1 open 0 0 - - - recover
 C 1 running 2:failed
 P 10 2:5 2 1
-N order@0:1,order@2:0
+N order@0:1,order@0:2,order@2:0
 U -
-R 3 paused 1 settled 1 0 1@0:0 - - resume
-R 2 failed:f 1 settled 0 0 1@0:3 - - resume
+R 3 completed 1 settled 1 0 1@0:0 - - settled
+R 2 failed:r 1 settled 0 0 1@0:3 - - resume
 R 1 running 1 open 0 0 - - - recover
 C 1 running 2:failed
 P 10 2:5 2 1
-N order@0:1,order@2:0
+N order@0:1,order@0:2,order@2:0
 U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
@@ -5897,7 +5897,7 @@ A 6 appended
 O 0 0 0 0
 A 7 appended
 A 8 appended
-R 1 cancelled 1 terminal 0 0 - - - resume
+R 1 cancelled:u 1 terminal 0 0 - - - resume
 R 3 running 1 settled 0 0 1@0:1 - - recover
 R 2 - 1 unadmitted 0 0 1@0:2 - - admit
 C 1 terminal 1:cancelled
@@ -5909,7 +5909,7 @@ A 10 appended
 A 11 appended
 A 12 appended
 A 13 appended
-R 1 cancelled 1 terminal 1 0 - - - settled
+R 1 cancelled:u 1 terminal 1 0 - - - settled
 R 3 running 1 settled 0 0 1@0:1 - - recover
 R 2 - 1 unadmitted 0 0 1@0:2 - - admit
 C 1 terminal 1:cancelled
@@ -5920,20 +5920,20 @@ A 14 appended
 A 15 appended
 A 16 appended
 A 17 appended
-R 1 cancelled 1 terminal 1 0 - - - settled
+R 1 cancelled:u 1 terminal 1 0 - - - settled
 R 3 running 1 settled 0 0 1@0:1 - - recover
-R 2 running 2 open 0 0 1@0:2 - - recover
-C 2 running 2:failed
+R 2 running 1 settled 0 0 1@0:2 - - recover
+C 2 running 2:cancelled
 P 16 2:8 3 1
 N order@0:0,order@1:0,conflict@2:1,conflict@2:2,conflict@2:4,conflict@2:6,order@2:7
 U 1:1
 A 18 appended
 A 19 appended
 A 20 appended
-R 1 running 1 open 1 0 - - - resume
+R 1 running 2 open 1 0 - - - resume
 R 3 paused 1 settled 0 0 1@0:1 - - recover
-R 2 running 2 open 0 0 1@0:2 - - recover
-C 3 paused 2:failed
+R 2 running 1 settled 0 0 1@0:2 - - recover
+C 3 paused 2:cancelled
 P 19 2:11 3 1
 N order@0:0,order@1:0,conflict@2:1,conflict@2:2,conflict@2:4,conflict@2:6,order@2:7,conflict@2:11
 U -
@@ -5941,24 +5941,24 @@ A 21 appended
 A 22 duplicate
 A 23 EVENT_OUT_OF_ORDER
 A 24 appended
-R 1 running 1 open 1 0 - - - resume
-R 3 completed 1 settled 0 0 1@0:1 - - resume
-R 2 cancelled 2 terminal 0 0 1@0:2 - - resume
-C 3 terminal 3:completed
+R 1 running 2 open 1 0 - - - resume
+R 3 failed:f 1 settled 0 0 1@0:1 - - resume
+R 2 cancelled:u 1 settled 0 0 1@0:2 - - resume
+C 3 terminal 3:failed
 P 21 2:13 3 1
 N order@0:0,order@1:0,conflict@2:1,conflict@2:2,conflict@2:4,conflict@2:6,order@2:7,conflict@2:11
-U 2:2
+U -
 A 25 duplicate
 A 26 appended
 A 27 appended
 A 28 appended
-R 1 running 1 settled 1 0 1@2:14 - - resume
-R 3 completed 1 settled 0 0 1@0:1 - - resume
-R 2 cancelled 2 terminal 0 0 1@0:2 i0 - resume
-C 3 terminal 3:completed
+R 1 running 2 settled 1 0 2@2:14 - - resume
+R 3 failed:f 1 settled 0 0 1@0:1 - - resume
+R 2 cancelled:u 1 settled 0 0 1@0:2 i0 - resume
+C 3 terminal 3:failed
 P 24 2:16 3 1
 N order@0:0,order@1:0,conflict@2:1,conflict@2:2,conflict@2:4,conflict@2:6,order@2:7,conflict@2:11
-U 2:2
+U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
@@ -5966,7 +5966,7 @@ QL RUN_ID_TAKEN
 QL RUN_ID_TAKEN
 QB batch 16 20 24 2:9,2:10,2:11,2:12
 QB refused identity-mismatch 24 -
-QB batch 13 14 24 2:6
+QB batch 13 15 24 2:6,2:7
 X
 T log-97
 A 0 appended
@@ -5992,7 +5992,7 @@ A 14 appended
 A 15 appended
 A 16 duplicate
 R 1 completed 1 settled 1 0 1@0:1 - - settled
-R 2 failed:f 1 terminal 0 0 - - - resume
+R 2 failed:r 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 0 0 1@0:6 - - admit
 C 2 terminal 2:failed
 P 12 1:4 2 1
@@ -6013,7 +6013,7 @@ A 27 appended
 A 28 appended
 R 1 completed 1 settled 1 0 1@0:1 - - settled
 R 2 running 1 settled 0 0 1@1:12 - - recover
-R 3 cancelled 1 settled 0 0 1@0:6 i1 - resume
+R 3 cancelled:u 1 settled 0 0 1@0:6 i1 - resume
 C 2 running 2:failed
 P 21 1:13 2 1
 N order@0:0,order@0:4,conflict@1:0,conflict@1:3,order@1:4,order@1:6
@@ -6021,7 +6021,7 @@ U -
 A 29 EVENT_OUT_OF_ORDER
 R 1 completed 1 settled 1 0 1@0:1 - - settled
 R 2 running 1 settled 0 0 1@1:12 - - recover
-R 3 cancelled 1 settled 0 0 1@0:6 i1 - resume
+R 3 cancelled:u 1 settled 0 0 1@0:6 i1 - resume
 C 2 running 2:failed
 P 21 1:13 2 1
 N order@0:0,order@0:4,conflict@1:0,conflict@1:3,order@1:4,order@1:6
@@ -6086,19 +6086,19 @@ A 17 appended
 A 18 appended
 A 19 appended
 A 20 appended
-R 3 failed:r 2 settled 0 0 1@1:4,2@3:3 - - resume
+R 3 cancelled 2 settled 0 0 1@1:4,2@3:3 - - resume
 R 1 admitted 1 settled 1 0 1@0:1 - - resume
 R 2 running 1 settled 1 0 1@1:2 - - resume
-C 2 running 3:failed
+C 2 running 3:cancelled
 P 20 3:3 4 1
 N order@0:0,order@0:2,conflict@1:5,conflict@1:7,conflict@1:9,conflict@2:1
 U -
 A 21 appended
 A 22 appended
-R 3 failed:r 2 settled 0 0 1@1:4,2@3:3 - - resume
+R 3 cancelled 2 settled 0 0 1@1:4,2@3:3 - - resume
 R 1 admitted 1 settled 1 0 1@0:1 - - resume
-R 2 failed:r 1 settled 1 0 1@1:2 - - settled
-C 2 terminal 2:failed
+R 2 cancelled 1 settled 1 0 1@1:2 - - settled
+C 2 terminal 2:cancelled
 P 22 3:5 4 1
 N order@0:0,order@0:2,conflict@1:5,conflict@1:7,conflict@1:9,conflict@2:1,order@3:4
 U -
@@ -6250,8 +6250,8 @@ A 4 appended
 A 5 appended
 R 3 paused 1 settled 0 0 1@0:3 - - recover
 R 2 - 1 unadmitted 0 0 - i0 - admit
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 1 failed:f 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 4 0:3 1 1
 N order@0:0,order@0:2
 U 1:1
@@ -6278,7 +6278,7 @@ A 18 appended
 A 19 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 20 appended
-R 3 cancelled 1 settled 0 0 1@0:3 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:3 - - resume
 R 2 failed:f 1 settled 1 0 1@0:4 i0 - settled
 R 1 paused 1 settled 0 0 1@0:5 - - recover
 C 3 terminal 3:cancelled
@@ -6288,14 +6288,14 @@ U -
 A 21 appended
 A 22 appended
 A 23 appended
-R 3 cancelled 1 settled 0 0 1@0:3 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:3 - - resume
 R 2 failed:f 1 settled 1 0 1@0:4 i0 - settled
 R 1 paused 1 settled 1 0 1@0:5 - - resume
 C 3 terminal 3:cancelled
 P 17 0:16 1 1
 N order@0:0,order@0:2,conflict@0:6,order@0:7,conflict@0:8,conflict@0:11,conflict@0:13,conflict@0:15,conflict@0:16
 U -
-R 3 cancelled 1 settled 0 0 1@0:3 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:3 - - resume
 R 2 failed:f 1 settled 1 0 1@0:4 i0 - settled
 R 1 paused 1 settled 1 0 1@0:5 - - resume
 C 3 terminal 3:cancelled
@@ -6326,7 +6326,7 @@ A 4 duplicate
 A 5 appended
 R 1 running 1 settled 0 0 1@0:0 - - recover
 R 3 running 1 open 0 0 - - - recover
-R 2 failed:f 1 terminal 0 0 - - - resume
+R 2 failed:r 1 terminal 0 0 - - - resume
 C 2 terminal 2:failed
 P 5 1:2 2 1
 N order@0:1,order@1:0,order@1:2
@@ -6337,7 +6337,7 @@ A 7 appended
 A 8 duplicate
 R 1 running 1 settled 1 0 1@0:0 - - resume
 R 3 running 1 open 0 0 - - - recover
-R 2 failed:f 1 terminal 0 0 - - - resume
+R 2 failed:r 1 terminal 0 0 - - - resume
 C 1 running 2:failed
 P 7 2:1 3 1
 N order@0:1,order@1:0,order@1:2
@@ -6351,25 +6351,25 @@ A 14 appended
 A 15 appended
 A 16 appended
 R 1 running 1 settled 1 0 1@0:0 - - resume
-R 3 completed 1 terminal 1 0 - - - settled
-R 2 failed:f 1 settled 0 0 1@2:2 - - resume
-C 3 terminal 3:completed
+R 3 failed:f 1 terminal 1 0 - - - settled
+R 2 failed:r 1 settled 0 0 1@2:2 - - resume
+C 3 terminal 3:failed
 P 13 2:7 3 1
 N order@0:1,order@1:0,order@1:2,conflict@2:7
 U 3:1
 A 17 appended
 R 1 running 1 settled 1 0 1@0:0 - - resume
 R 3 running 1 open 1 0 - - - resume
-R 2 failed:f 1 settled 0 0 1@2:2 - - resume
-C 3 running 3:completed
+R 2 failed:r 1 settled 0 0 1@2:2 - - resume
+C 3 running 3:failed
 P 14 2:8 3 1
 N order@0:1,order@1:0,order@1:2,conflict@2:7
 U -
 A 18 EVENT_OUT_OF_ORDER
 R 1 running 1 settled 1 0 1@0:0 - - resume
 R 3 running 1 open 1 0 - - - resume
-R 2 failed:f 1 settled 0 0 1@2:2 - - resume
-C 3 running 3:completed
+R 2 failed:r 1 settled 0 0 1@2:2 - - resume
+C 3 running 3:failed
 P 14 2:8 3 1
 N order@0:1,order@1:0,order@1:2,conflict@2:7
 U -
@@ -6437,8 +6437,8 @@ A 2 appended
 A 3 EVENT_OUT_OF_ORDER
 A 4 appended
 A 5 appended
-R 3 failed:r 1 terminal 1 0 - i0 - settled
-C 3 terminal 3:failed
+R 3 cancelled 1 terminal 1 0 - i0 - settled
+C 3 terminal 3:cancelled
 P 4 0:3 1 1
 N order@0:0
 U 3:1
@@ -6446,15 +6446,15 @@ A 6 EVENT_OUT_OF_ORDER
 A 7 appended
 A 8 appended
 A 9 appended
-R 3 failed:r 1 settled 1 0 1@0:4 i0 - settled
+R 3 cancelled 1 settled 1 0 1@0:4 i0 - settled
 R 1 running 1 open 0 0 - - - recover
-C 1 running 3:failed
+C 1 running 3:cancelled
 P 7 0:6 1 1
 N order@0:0,conflict@0:5,order@0:6
 U -
-R 3 failed:r 1 settled 1 0 1@0:4 i0 - settled
+R 3 cancelled 1 settled 1 0 1@0:4 i0 - settled
 R 1 running 1 open 0 0 - - - recover
-C 1 running 3:failed
+C 1 running 3:cancelled
 P 7 0:6 1 1
 N order@0:0,conflict@0:5,order@0:6
 U -
@@ -6518,10 +6518,10 @@ A 9 EVENT_OUT_OF_ORDER
 A 10 appended
 A 11 appended
 A 12 appended
-R 3 cancelled 1 settled 0 0 1@0:0 - - resume
-R 2 cancelled 1 terminal 0 0 - i0 - resume
-R 1 failed:r 1 terminal 1 0 - - - settled
-C 1 terminal 1:failed
+R 3 cancelled:u 1 settled 0 0 1@0:0 - - resume
+R 2 cancelled:u 1 terminal 0 0 - i0 - resume
+R 1 cancelled 1 terminal 1 0 - - - settled
+C 1 terminal 1:cancelled
 P 12 2:2 3 1
 N order@0:2,order@1:0,conflict@1:2,order@1:3,conflict@2:0
 U 2:1,1:1
@@ -6529,25 +6529,25 @@ A 13 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 14 appended
 A 15 appended
-R 3 cancelled 1 settled 0 0 1@0:0 - - resume
-R 2 cancelled 1 settled 0 0 1@3:0 i0 - resume
-R 1 failed:r 1 settled 1 0 1@3:1 - - settled
-C 1 terminal 1:failed
+R 3 cancelled:u 1 settled 0 0 1@0:0 - - resume
+R 2 cancelled:u 1 settled 0 0 1@3:0 i0 - resume
+R 1 cancelled 1 settled 1 0 1@3:1 - - settled
+C 1 terminal 1:cancelled
 P 14 3:1 4 1
 N order@0:2,order@1:0,conflict@1:2,order@1:3,conflict@2:0
 U -
 A 16 appended
-R 3 cancelled 1 settled 0 0 1@0:0 - - resume
-R 2 completed 1 settled 0 0 1@3:0 i0 - resume
-R 1 failed:r 1 settled 1 0 1@3:1 - - settled
-C 2 terminal 2:completed
+R 3 cancelled:u 1 settled 0 0 1@0:0 - - resume
+R 2 failed:f 1 settled 0 0 1@3:0 i0 - resume
+R 1 cancelled 1 settled 1 0 1@3:1 - - settled
+C 2 terminal 2:failed
 P 15 4:0 5 1
 N order@0:2,order@1:0,conflict@1:2,order@1:3,conflict@2:0
 U -
-R 3 cancelled 1 settled 0 0 1@0:0 - - resume
-R 2 completed 1 settled 0 0 1@3:0 i0 - resume
-R 1 failed:r 1 settled 1 0 1@3:1 - - settled
-C 2 terminal 2:completed
+R 3 cancelled:u 1 settled 0 0 1@0:0 - - resume
+R 2 failed:f 1 settled 0 0 1@3:0 i0 - resume
+R 1 cancelled 1 settled 1 0 1@3:1 - - settled
+C 2 terminal 2:failed
 P 15 4:0 5 1
 N order@0:2,order@1:0,conflict@1:2,order@1:3,conflict@2:0
 U -
@@ -6588,8 +6588,8 @@ A 12 appended
 A 13 appended
 R 2 failed:f 1 settled 0 0 1@0:0 i0 - resume
 R 1 completed 1 settled 0 0 1@0:10 i0,i2 - resume
-R 3 completed 1 terminal 0 0 - - - resume
-C 3 terminal 3:completed
+R 3 failed:f 1 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 12 0:11 1 1
 N order@0:2,order@0:7,order@0:11
 U 3:1
@@ -6611,8 +6611,8 @@ A 2 appended
 A 3 appended
 R 2 failed:r 1 settled 0 0 1@0:0 - - resume
 R 3 - 1 unadmitted 0 0 1@0:1 - - admit
-R 1 failed:r 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 1 cancelled 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 4 2:0 3 1
 N order@1:0,order@2:0
 U 1:1
@@ -6620,7 +6620,7 @@ A 4 appended
 A 5 appended
 R 2 failed:r 1 settled 0 0 1@0:0 - - resume
 R 3 - 1 unadmitted 0 0 1@0:1 - - admit
-R 1 failed:f 1 settled 0 0 1@2:2 - - resume
+R 1 failed:r 1 settled 0 0 1@2:2 - - resume
 C 1 terminal 1:failed
 P 6 2:2 3 1
 N order@1:0,order@2:0
@@ -6628,10 +6628,10 @@ U -
 A 6 appended
 A 7 appended
 A 8 appended
-R 2 running 2 open 0 0 1@0:0 - - recover
-R 3 completed 1 settled 0 0 1@0:1 - - resume
-R 1 failed:f 1 settled 0 0 1@2:2 - - resume
-C 3 terminal 3:completed
+R 2 paused 1 settled 0 0 1@0:0 - - recover
+R 3 failed:f 1 settled 0 0 1@0:1 - - resume
+R 1 failed:r 1 settled 0 0 1@2:2 - - resume
+C 3 terminal 3:failed
 P 9 2:5 3 1
 N order@1:0,order@2:0,conflict@2:4,order@2:5
 U -
@@ -6643,49 +6643,49 @@ O 0 0 0 0
 A 13 appended
 A 14 appended
 A 15 appended
-R 2 failed:f 2 settled 0 0 1@0:0,2@2:9 - - resume
+R 2 failed:r 1 settled 0 0 1@0:0 - - resume
 R 3 running 1 settled 0 0 1@0:1 - - recover
 R 1 paused 1 settled 0 0 1@2:2 - - recover
 C 3 running 2:failed
 P 16 2:12 3 1
-N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7
+N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:9
 U -
 A 16 appended
 A 17 appended
 A 18 appended
 A 19 appended
 A 20 appended
-R 2 cancelled 2 settled 0 0 1@0:0,2@2:9 i1 - resume
+R 2 cancelled:u 1 settled 0 0 1@0:0 i1 - resume
 R 3 running 1 settled 0 0 1@0:1 - - recover
 R 1 paused 1 settled 0 0 1@2:2 - - recover
 C 2 terminal 2:cancelled
 P 21 2:17 3 1
-N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:14,conflict@2:16
+N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:9,conflict@2:14,conflict@2:16
 U -
 A 21 appended
-R 2 cancelled 2 settled 0 0 1@0:0,2@2:9 i1 - resume
+R 2 cancelled:u 1 settled 0 0 1@0:0 i1 - resume
 R 3 running 1 settled 0 0 1@0:1 - - recover
 R 1 paused 1 settled 0 0 1@2:2 - - recover
 C 2 terminal 2:cancelled
 P 22 2:18 3 1
-N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:14,conflict@2:16,conflict@2:18
+N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:9,conflict@2:14,conflict@2:16,conflict@2:18
 U -
 A 22 appended
-R 2 cancelled 2 settled 0 0 1@0:0,2@2:9 i1 - resume
+R 2 cancelled:u 1 settled 0 0 1@0:0 i1 - resume
 R 3 running 1 settled 0 0 1@0:1 - - recover
 R 1 completed 1 settled 0 0 1@2:2 - - resume
 C 1 terminal 1:completed
 P 23 2:19 3 1
-N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:14,conflict@2:16,conflict@2:18
+N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:9,conflict@2:14,conflict@2:16,conflict@2:18
 U -
 A 23 appended
 A 24 appended
-R 2 cancelled 2 settled 0 0 1@0:0,2@2:9 i1 - resume
+R 2 cancelled:u 1 settled 0 0 1@0:0 i1 - resume
 R 3 running 1 settled 0 0 1@0:1 - - recover
 R 1 completed 1 settled 0 0 1@2:2 - - resume
 C 1 terminal 1:completed
 P 25 2:21 3 1
-N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:14,conflict@2:16,conflict@2:18,conflict@2:21
+N order@1:0,order@2:0,conflict@2:4,order@2:5,conflict@2:7,conflict@2:9,conflict@2:14,conflict@2:16,conflict@2:18,conflict@2:21
 U -
 QS SETTLEMENT_CONFLICT
 QS skipped
@@ -6751,17 +6751,17 @@ X
 T log-110
 A 0 appended
 A 1 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
-R 2 paused 1 terminal 0 0 - - - recover
-C 2 paused 3:failed
+R 3 cancelled 1 terminal 0 0 - - - resume
+R 2 completed 1 terminal 0 0 - - - resume
+C 2 terminal 2:completed
 P 2 0:1 1 1
 N order@0:0,order@0:1
 U 3:1,2:1
 A 2 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
-R 2 paused 1 terminal 0 0 - - - recover
+R 3 cancelled 1 terminal 0 0 - - - resume
+R 2 completed 1 terminal 0 0 - - - resume
 R 1 - 1 unadmitted 0 0 1@1:0 - - admit
-C 2 paused 3:failed
+C 2 terminal 2:completed
 P 3 1:0 2 1
 N order@0:0,order@0:1
 U 3:1,2:1
@@ -6773,7 +6773,7 @@ A 7 appended
 A 8 EVENT_OUT_OF_ORDER
 A 9 appended
 A 10 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
 R 2 completed 1 settled 0 0 1@1:3 - - resume
 R 1 running 1 settled 0 0 1@1:0 - - recover
 C 1 running 2:completed
@@ -6784,7 +6784,7 @@ A 11 appended
 A 12 appended
 A 13 EVENT_OUT_OF_ORDER
 A 14 appended
-R 3 running 2 open 0 0 - - - recover
+R 3 running 1 open 0 0 - - - recover
 R 2 completed 1 settled 0 0 1@1:3 - - resume
 R 1 running 1 settled 0 0 1@1:0 - - recover
 C 3 running 2:completed
@@ -6888,29 +6888,29 @@ A 14 appended
 A 15 appended
 A 16 appended
 A 17 appended
-R 2 running 1 settled 1 0 1@0:5 i2 - resume
-R 3 running 1 open 0 0 - i0 - recover
-R 1 failed:f 1 settled 0 0 1@0:4 - - resume
-C 3 running 1:failed
+R 2 paused 1 settled 1 0 1@0:5 i2 - resume
+R 3 paused 1 terminal 0 0 - i0 - recover
+R 1 failed:r 1 settled 0 0 1@0:4 - - resume
+C 3 paused 1:failed
 P 15 2:1 2 1
 N order@0:3,conflict@0:7,order@0:9,order@2:0
-U -
+U 3:1
 O 0 0 0 0
 A 18 appended
 A 19 duplicate
 A 20 duplicate
 A 21 appended
-R 2 running 1 settled 1 0 1@0:5 i2 - resume
-R 3 running 1 open 0 0 - i0 - recover
-R 1 running 1 settled 0 0 1@0:4 - - recover
+R 2 paused 1 settled 1 0 1@0:5 i2 - resume
+R 3 paused 1 terminal 0 0 - i0 - recover
+R 1 running 2 open 0 0 1@0:4 - - recover
 C 1 running 1:failed
 P 17 2:3 2 1
 N order@0:3,conflict@0:7,order@0:9,order@2:0,conflict@2:2
-U -
+U 3:1
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
-QS SETTLEMENT_CONFLICT
-QL ok
+QS appended
+QL RUN_ID_TAKEN
 QL CHAT_RUN_LIVE
 QB refused cursor-ahead 17 -
 QB refused identity-mismatch 17 0:3
@@ -6931,8 +6931,8 @@ P 2 0:1 1 1
 N order@0:0
 U -
 A 3 appended
-R 1 failed:r 1 settled 0 0 1@0:1 - - resume
-C 1 terminal 1:failed
+R 1 cancelled 1 settled 0 0 1@0:1 - - resume
+C 1 terminal 1:cancelled
 P 3 0:2 1 1
 N order@0:0
 U -
@@ -6952,8 +6952,8 @@ A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_OUT_OF_ORDER
 A 18 appended
 A 19 EVENT_OUT_OF_ORDER
-R 1 failed:f 1 settled 0 0 1@0:1 i1 - resume
-R 3 cancelled 1 settled 0 0 1@0:5 i0 - resume
+R 1 failed:r 1 settled 0 0 1@0:1 i1 - resume
+R 3 cancelled:u 1 settled 0 0 1@0:5 i0 - resume
 R 2 - 1 unadmitted 0 0 1@0:11 - - admit
 C 1 terminal 1:failed
 P 13 0:12 1 1
@@ -6964,8 +6964,8 @@ A 21 appended
 A 22 appended
 A 23 appended
 A 24 EVENT_OUT_OF_ORDER
-R 1 failed:f 1 settled 0 0 1@0:1 i1 - resume
-R 3 cancelled 1 settled 0 0 1@0:5 i0 - resume
+R 1 failed:r 1 settled 0 0 1@0:1 i1 - resume
+R 3 cancelled:u 1 settled 0 0 1@0:5 i0 - resume
 R 2 running 1 settled 0 0 1@0:11 i1 - recover
 C 1 terminal 1:failed
 P 17 0:16 1 1
@@ -7028,9 +7028,9 @@ P 5 1:3 2 1
 N order@1:0
 U -
 A 5 appended
-R 1 failed:r 1 terminal 0 0 - i2 - resume
+R 1 cancelled 1 terminal 0 0 - i2 - resume
 R 3 - 1 unadmitted 0 0 1@1:1 - - admit
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 6 1:4 2 1
 N order@1:0
 U 1:1
@@ -7046,10 +7046,10 @@ A 14 duplicate
 A 15 appended
 A 16 appended
 A 17 appended
-R 1 running 2 settled 0 0 2@2:0 i2 - recover
-R 3 cancelled 1 settled 1 0 1@1:1 - - settled
-R 2 failed:r 1 terminal 0 0 - - - resume
-C 2 terminal 2:failed
+R 1 running 1 settled 0 0 1@2:0 i2 - recover
+R 3 cancelled:u 1 settled 1 0 1@1:1 - - settled
+R 2 cancelled 1 terminal 0 0 - - - resume
+C 2 terminal 2:cancelled
 P 17 5:0 6 1
 N order@1:0,order@1:5,conflict@1:6,order@1:7,conflict@3:0,conflict@3:3
 U 2:1
@@ -7065,35 +7065,35 @@ A 24 appended
 A 25 appended
 A 26 appended
 A 27 EVENT_MUTATED
-R 1 failed:r 2 settled 0 0 2@2:0 i1,i2 - resume
-R 3 paused 1 settled 1 0 1@1:1 - - resume
-R 2 failed:r 2 terminal 1 0 1@5:2 - - settled
-C 3 paused 2:failed
+R 1 failed:r 1 settled 0 0 1@2:0 i1,i2 - resume
+R 3 paused 2 terminal 1 0 1@1:1 - - resume
+R 2 cancelled 1 settled 1 0 1@5:2 - - settled
+C 3 paused 2:cancelled
 P 26 6:2 7 1
 N order@1:0,order@1:5,conflict@1:6,order@1:7,conflict@3:0,conflict@3:3,order@5:6
-U 2:2
+U 3:2
 O 0 0 0 0
 A 28 appended
-R 1 failed:r 2 settled 0 0 2@2:0 i1,i2 - resume
-R 3 paused 1 settled 1 0 1@1:1 - - resume
-R 2 failed:r 2 terminal 1 0 1@5:2 i0 - settled
-C 3 paused 2:failed
+R 1 failed:r 1 settled 0 0 1@2:0 i1,i2 - resume
+R 3 paused 2 terminal 1 0 1@1:1 - - resume
+R 2 cancelled 1 settled 1 0 1@5:2 i0 - settled
+C 3 paused 2:cancelled
 P 27 6:3 7 1
 N order@1:0,order@1:5,conflict@1:6,order@1:7,conflict@3:0,conflict@3:3,order@5:6
-U 2:2
+U 3:2
 A 29 appended
-R 1 failed:r 2 settled 0 0 2@2:0 i1,i2 - resume
-R 3 paused 1 settled 1 0 1@1:1 - - resume
-R 2 failed:r 2 terminal 1 0 1@5:2 i0 - settled
-C 3 paused 2:failed
+R 1 failed:r 1 settled 0 0 1@2:0 i1,i2 - resume
+R 3 paused 2 settled 1 0 1@1:1,2@6:4 - - resume
+R 2 cancelled 1 settled 1 0 1@5:2 i0 - settled
+C 3 paused 2:cancelled
 P 28 6:4 7 1
-N order@1:0,order@1:5,conflict@1:6,order@1:7,conflict@3:0,conflict@3:3,order@5:6,conflict@6:4
-U 2:2
+N order@1:0,order@1:5,conflict@1:6,order@1:7,conflict@3:0,conflict@3:3,order@5:6
+U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QS appended
+QS SETTLEMENT_CONFLICT
 QL ok
-QL RUN_ID_TAKEN
+QL ok
 QB refused identity-mismatch 28 1:1
 QB batch 10 16 28 2:0,3:0,3:1,3:2,3:3,4:0
 QB refused identity-mismatch 28 2:0
@@ -7151,23 +7151,23 @@ A 20 EVENT_MUTATED
 A 21 appended
 R 3 - 1 unadmitted 1 0 1@0:3 i1 - admit
 R 1 paused 1 terminal 1 0 - i2 - resume
-R 2 paused 1 settled 0 0 1@0:2 - - recover
-C 2 paused 2:failed
+R 2 completed 1 settled 0 0 1@0:2 - - resume
+C 2 terminal 2:completed
 P 15 1:9 2 1
 N order@0:1,order@0:4,conflict@1:0,conflict@1:7
 U 1:1
 A 22 appended
 R 3 - 1 unadmitted 1 0 1@0:3 i1 - admit
-R 1 cancelled 1 terminal 1 0 - i2 - settled
-R 2 paused 1 settled 0 0 1@0:2 - - recover
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
+R 2 completed 1 settled 0 0 1@0:2 - - resume
 C 1 terminal 1:cancelled
 P 16 2:0 3 1
 N order@0:1,order@0:4,conflict@1:0,conflict@1:7
 U 1:1
 A 23 duplicate
 R 3 - 1 unadmitted 1 0 1@0:3 i1 - admit
-R 1 cancelled 1 terminal 1 0 - i2 - settled
-R 2 paused 1 settled 0 0 1@0:2 - - recover
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
+R 2 completed 1 settled 0 0 1@0:2 - - resume
 C 1 terminal 1:cancelled
 P 16 2:0 3 1
 N order@0:1,order@0:4,conflict@1:0,conflict@1:7
@@ -7176,25 +7176,25 @@ A 24 appended
 A 25 appended
 A 26 appended
 R 3 running 1 settled 1 0 1@0:3 i1 - resume
-R 1 cancelled 1 terminal 1 0 - i2 - settled
-R 2 paused 1 settled 0 0 1@0:2 i1 - recover
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
+R 2 completed 1 settled 0 0 1@0:2 i1 - resume
 C 3 running 1:cancelled
 P 19 3:1 4 1
 N order@0:1,order@0:4,conflict@1:0,conflict@1:7,conflict@2:1,order@3:0
 U 1:1
 A 27 appended
 A 28 appended
-R 3 paused 1 settled 1 0 1@0:3 i1 - resume
-R 1 cancelled 1 terminal 1 0 - i2 - settled
-R 2 paused 1 settled 0 0 1@0:2 i1 - recover
-C 1 terminal 1:cancelled
+R 3 completed 1 settled 1 0 1@0:3 i1 - settled
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
+R 2 completed 1 settled 0 0 1@0:2 i1 - resume
+C 1 terminal 3:completed
 P 21 3:3 4 1
 N order@0:1,order@0:4,conflict@1:0,conflict@1:7,conflict@2:1,order@3:0,order@3:3
 U 1:1
-R 3 paused 1 settled 1 0 1@0:3 i1 - resume
-R 1 cancelled 1 terminal 1 0 - i2 - settled
-R 2 paused 1 settled 0 0 1@0:2 i1 - recover
-C 1 terminal 1:cancelled
+R 3 completed 1 settled 1 0 1@0:3 i1 - settled
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
+R 2 completed 1 settled 0 0 1@0:2 i1 - resume
+C 1 terminal 3:completed
 P 21 3:3 4 1
 N order@0:1,order@0:4,conflict@1:0,conflict@1:7,conflict@2:1,order@3:0,order@3:3
 U 1:1
@@ -7219,25 +7219,25 @@ A 7 appended
 A 8 appended
 A 9 duplicate
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 3 paused 1 settled 1 0 1@0:1 - - resume
-R 1 failed:r 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 3 completed 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 7 0:6 1 1
 N conflict@0:3,order@0:4,order@0:6
 U 1:1
 A 10 appended
 A 11 appended
 A 12 appended
-R 2 failed:f 1 settled 0 0 1@0:0 - - resume
-R 3 paused 1 settled 1 0 1@0:1 - - resume
-R 1 cancelled 1 settled 0 0 1@0:9 - - resume
+R 2 failed:r 1 settled 0 0 1@0:0 - - resume
+R 3 completed 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 0 0 1@0:9 - - resume
 C 1 terminal 1:cancelled
 P 10 0:9 1 1
 N conflict@0:3,order@0:4,order@0:6,order@0:7
 U -
 A 13 appended
-R 2 failed:f 1 settled 0 0 1@0:0 - - resume
-R 3 paused 1 settled 1 0 1@0:1 - - resume
+R 2 failed:r 1 settled 0 0 1@0:0 - - resume
+R 3 completed 1 settled 1 0 1@0:1 - - settled
 R 1 paused 1 settled 0 0 1@0:9 - - recover
 C 1 paused 1:cancelled
 P 11 0:10 1 1
@@ -7246,8 +7246,8 @@ U -
 A 14 appended
 A 15 EVENT_OUT_OF_ORDER
 A 16 appended
-R 2 failed:f 1 settled 0 0 1@0:0 - - resume
-R 3 paused 1 settled 1 0 1@0:1 - - resume
+R 2 failed:r 1 settled 0 0 1@0:0 - - resume
+R 3 completed 1 settled 1 0 1@0:1 - - settled
 R 1 running 2 open 0 0 1@0:9 - - recover
 C 1 running 1:cancelled
 P 13 0:12 1 1
@@ -7258,7 +7258,7 @@ O 0 0 0 0
 A 18 EVENT_MUTATED
 A 19 appended
 R 2 failed:r 1 settled 0 0 1@0:0 - - resume
-R 3 paused 1 settled 1 0 1@0:1 - - resume
+R 3 completed 1 settled 1 0 1@0:1 - - settled
 R 1 running 2 open 0 0 1@0:9 - - recover
 C 2 terminal 2:failed
 P 14 0:13 1 1
@@ -7266,14 +7266,14 @@ N conflict@0:3,order@0:4,order@0:6,order@0:7,conflict@0:12
 U -
 A 20 duplicate
 R 2 failed:r 1 settled 0 0 1@0:0 - - resume
-R 3 paused 1 settled 1 0 1@0:1 - - resume
+R 3 completed 1 settled 1 0 1@0:1 - - settled
 R 1 running 2 open 0 0 1@0:9 - - recover
 C 2 terminal 2:failed
 P 14 0:13 1 1
 N conflict@0:3,order@0:4,order@0:6,order@0:7,conflict@0:12
 U -
 R 2 failed:r 1 settled 0 0 1@0:0 - - resume
-R 3 paused 1 settled 1 0 1@0:1 - - resume
+R 3 completed 1 settled 1 0 1@0:1 - - settled
 R 1 running 2 open 0 0 1@0:9 - - recover
 C 2 terminal 2:failed
 P 14 0:13 1 1
@@ -7314,27 +7314,27 @@ A 15 appended
 A 16 appended
 A 17 appended
 A 18 appended
-R 3 cancelled 1 settled 0 0 1@0:0 - - resume
-R 2 failed:r 1 settled 1 0 1@1:4 - - settled
-R 1 completed 1 settled 1 0 1@0:2 - - settled
-C 3 terminal 1:completed
+R 3 cancelled:u 1 settled 0 0 1@0:0 - - resume
+R 2 cancelled 1 settled 1 0 1@1:4 - - settled
+R 1 failed:f 1 settled 1 0 1@0:2 - - settled
+C 3 terminal 1:failed
 P 14 2:4 3 1
 N order@0:1,conflict@1:0,order@1:2,order@2:1,order@2:2,order@2:3,conflict@2:4
 U -
 A 19 appended
-R 3 cancelled 1 settled 0 0 1@0:0 - - resume
-R 2 completed 1 settled 1 0 1@1:4 - - settled
-R 1 completed 1 settled 1 0 1@0:2 - - settled
-C 2 terminal 2:completed
+R 3 cancelled:u 1 settled 0 0 1@0:0 - - resume
+R 2 failed:f 1 settled 1 0 1@1:4 - - settled
+R 1 failed:f 1 settled 1 0 1@0:2 - - settled
+C 2 terminal 2:failed
 P 15 2:5 3 1
 N order@0:1,conflict@1:0,order@1:2,order@2:1,order@2:2,order@2:3,conflict@2:4
 U -
 A 20 duplicate
 A 21 appended
-R 3 cancelled 1 settled 0 0 1@0:0 - - resume
-R 2 completed 1 settled 1 0 1@1:4 - - settled
+R 3 cancelled:u 1 settled 0 0 1@0:0 - - resume
+R 2 failed:f 1 settled 1 0 1@1:4 - - settled
 R 1 paused 1 settled 1 0 1@0:2 - - resume
-C 1 paused 2:completed
+C 1 paused 2:failed
 P 16 2:6 3 1
 N order@0:1,conflict@1:0,order@1:2,order@2:1,order@2:2,order@2:3,conflict@2:4
 U -
@@ -7354,9 +7354,9 @@ A 2 EVENT_OUT_OF_ORDER
 A 3 appended
 A 4 appended
 R 3 - 1 unadmitted 1 0 1@0:1 - - admit
-R 2 failed:r 1 terminal 0 0 - - - resume
-R 1 failed:r 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 2 cancelled 1 terminal 0 0 - - - resume
+R 1 cancelled 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 4 0:3 1 1
 N order@0:2,order@0:3
 U 2:1,1:1
@@ -7403,14 +7403,14 @@ A 27 appended
 O 0 0 0 0
 A 28 EVENT_MUTATED
 A 29 appended
-R 3 failed:f 1 settled 1 0 1@0:1 i0 - settled
+R 3 failed:r 1 settled 1 0 1@0:1 i0 - settled
 R 2 running 1 settled 1 0 1@0:7 i0 - resume
 R 1 completed 1 settled 1 0 1@0:13 i0 - settled
 C 3 terminal 3:failed
 P 24 0:23 1 1
 N order@0:2,order@0:3,conflict@0:11,conflict@0:14,conflict@0:16,conflict@0:21,order@0:22
 U -
-R 3 failed:f 1 settled 1 0 1@0:1 i0 - settled
+R 3 failed:r 1 settled 1 0 1@0:1 i0 - settled
 R 2 running 1 settled 1 0 1@0:7 i0 - resume
 R 1 completed 1 settled 1 0 1@0:13 i0 - settled
 C 3 terminal 3:failed
@@ -7437,7 +7437,7 @@ A 6 appended
 A 7 appended
 R 1 - 1 unadmitted 1 0 1@0:2 i0 - admit
 R 3 - 1 unadmitted 0 0 1@0:3 - - admit
-R 2 cancelled 1 settled 0 0 1@0:4 - - resume
+R 2 cancelled:u 1 settled 0 0 1@0:4 - - resume
 C 2 terminal 2:cancelled
 P 6 0:5 1 1
 N order@0:5
@@ -7454,8 +7454,8 @@ A 15 appended
 A 16 appended
 A 17 duplicate
 R 1 - 1 unadmitted 1 0 1@0:2 i0 - admit
-R 3 cancelled 1 settled 0 0 1@0:3 - - resume
-R 2 cancelled 1 settled 0 0 1@0:4 - - resume
+R 3 cancelled:u 1 settled 0 0 1@0:3 - - resume
+R 2 cancelled:u 1 settled 0 0 1@0:4 - - resume
 C 3 terminal 3:cancelled
 P 14 3:0 4 1
 N order@0:5,conflict@0:6,conflict@3:0
@@ -7471,7 +7471,7 @@ O 0 0 0 0
 A 25 duplicate
 A 26 appended
 R 1 completed 1 settled 1 0 1@0:2 i0 - settled
-R 3 failed:f 1 settled 0 0 1@0:3 - - resume
+R 3 failed:r 1 settled 0 0 1@0:3 - - resume
 R 2 paused 1 settled 0 0 1@0:4 - - recover
 C 1 terminal 1:completed
 P 21 3:7 4 1
@@ -7481,7 +7481,7 @@ QS skipped
 QS SETTLEMENT_CONFLICT
 QS skipped
 QL RUN_ID_TAKEN
-QL RUN_ID_TAKEN
+QL ok
 QB batch 7 8 21 1:0
 QB batch 15 18 21 3:2,3:3,3:4
 QB batch 21 21 21 -
@@ -7531,15 +7531,15 @@ A 18 appended
 A 19 appended
 A 20 appended
 A 21 appended
-R 3 failed:r 1 settled 1 0 1@0:0 i0 - settled
+R 3 cancelled 1 settled 1 0 1@0:0 i0 - settled
 R 1 completed 1 settled 0 0 1@1:0 - - resume
-R 2 running 2 settled 0 0 1@1:7,2@1:10 - - recover
+R 2 running 1 settled 0 0 1@1:7 - - recover
 C 1 terminal 1:completed
 P 16 3:0 3 1
-N order@1:1,conflict@1:4,order@1:9,order@1:12
+N order@1:1,conflict@1:4,order@1:9,conflict@1:10,order@1:12,conflict@3:0
 U -
 QS SETTLEMENT_CONFLICT
-QS SETTLEMENT_CONFLICT
+QS skipped
 QS SETTLEMENT_CONFLICT
 QL RUN_ID_TAKEN
 QL RUN_ID_TAKEN
@@ -7609,13 +7609,13 @@ A 18 appended
 A 19 EVENT_OUT_OF_ORDER
 A 20 appended
 A 21 EVENT_OUT_OF_ORDER
-R 1 running 1 open 0 0 - i0 - recover
-R 3 cancelled 1 settled 1 0 1@1:1 - - settled
+R 1 paused 1 terminal 0 0 - i0 - recover
+R 3 cancelled:u 1 settled 1 0 1@1:1 - - settled
 R 2 failed:f 1 settled 1 0 1@4:1 - - settled
 C 3 terminal 3:cancelled
 P 17 4:2 4 1
 N order@1:0,order@2:0
-U -
+U 1:1
 QS appended
 QS skipped
 QS appended
@@ -7630,7 +7630,7 @@ A 0 appended
 A 1 appended
 O 0 0 0 0
 A 2 appended
-R 2 cancelled 1 settled 0 0 1@0:0 - - resume
+R 2 cancelled:u 1 settled 0 0 1@0:0 - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
 C 2 terminal 2:cancelled
 P 3 0:2 1 1
@@ -7657,7 +7657,7 @@ A 0 appended
 A 1 appended
 A 2 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 3 0:2 1 1
 N order@0:1
@@ -7678,25 +7678,25 @@ A 15 appended
 A 16 appended
 A 17 appended
 A 18 appended
-R 2 failed:r 1 settled 0 0 1@0:0 - - resume
-R 1 failed:f 1 terminal 1 0 - - - settled
+R 2 cancelled 1 settled 0 0 1@0:0 - - resume
+R 1 failed:r 1 terminal 1 0 - - - settled
 R 3 running 1 settled 0 0 1@0:4 i2 - recover
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 17 0:16 1 1
 N order@0:1,order@0:6,order@0:7,conflict@0:14
 U 1:1
 O 0 0 0 0
 A 19 appended
 A 20 duplicate
-R 2 failed:r 1 settled 0 0 1@0:0 - - resume
-R 1 failed:f 1 terminal 1 0 - - - settled
+R 2 cancelled 1 settled 0 0 1@0:0 - - resume
+R 1 failed:r 1 terminal 1 0 - - - settled
 R 3 running 1 settled 0 0 1@0:4 i2 - recover
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 18 0:17 1 1
 N order@0:1,order@0:6,order@0:7,conflict@0:14
 U 1:1
 A 21 appended
-R 2 failed:r 1 settled 0 0 1@0:0 - - resume
+R 2 cancelled 1 settled 0 0 1@0:0 - - resume
 R 1 failed:f 1 terminal 1 0 - - - settled
 R 3 running 1 settled 0 0 1@0:4 i2 - recover
 C 1 terminal 1:failed
@@ -7712,14 +7712,14 @@ A 27 EVENT_MUTATED
 A 28 appended
 A 29 appended
 A 30 appended
-R 2 failed:r 1 settled 1 0 1@0:0 - - settled
+R 2 cancelled 1 settled 1 0 1@0:0 - - settled
 R 1 paused 1 terminal 1 0 - i1 - resume
 R 3 running 1 settled 0 0 1@0:4 i2 - recover
 C 1 paused 1:failed
 P 25 0:24 1 1
 N order@0:1,order@0:6,order@0:7,conflict@0:14,conflict@0:20,conflict@0:22
 U 1:1
-R 2 failed:r 1 settled 1 0 1@0:0 - - settled
+R 2 cancelled 1 settled 1 0 1@0:0 - - settled
 R 1 paused 1 terminal 1 0 - i1 - resume
 R 3 running 1 settled 0 0 1@0:4 i2 - recover
 C 1 paused 1:failed
@@ -7744,15 +7744,15 @@ A 4 EVENT_OUT_OF_ORDER
 A 5 duplicate
 O 0 0 0 0
 A 6 appended
-R 1 paused 1 terminal 1 0 - - - resume
+R 1 completed 1 terminal 1 0 - - - settled
 R 2 running 1 open 0 0 - - - recover
-C 1 paused 1:failed
+C 1 terminal 1:completed
 P 4 1:2 2 1
 N order@0:0,order@1:0
 U 1:1
-R 1 paused 1 terminal 1 0 - - - resume
+R 1 completed 1 terminal 1 0 - - - settled
 R 2 running 1 open 0 0 - - - recover
-C 1 paused 1:failed
+C 1 terminal 1:completed
 P 4 1:2 2 1
 N order@0:0,order@1:0
 U 1:1
@@ -7795,7 +7795,7 @@ A 18 EVENT_OUT_OF_ORDER
 A 19 EVENT_OUT_OF_ORDER
 A 20 appended
 R 2 failed:f 1 terminal 0 0 - i0,i2 - resume
-R 3 cancelled 1 settled 1 0 1@1:3 i1 - settled
+R 3 cancelled:u 1 settled 1 0 1@1:3 i1 - settled
 R 1 admitted 1 open 0 0 - - - recover
 C 3 terminal 3:cancelled
 P 10 4:2 4 1
@@ -7864,14 +7864,14 @@ N -
 U -
 A 2 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 3 0:2 1 1
 N order@0:2
 U 1:1
 A 3 appended
 A 4 appended
-R 2 paused 1 settled 0 0 1@0:0 - - recover
+R 2 completed 1 settled 0 0 1@0:0 - - resume
 R 1 completed 1 terminal 0 0 - - - resume
 C 1 terminal 1:completed
 P 5 0:4 1 1
@@ -7879,18 +7879,18 @@ N order@0:2,order@0:3
 U 1:1
 A 5 appended
 A 6 appended
-R 2 paused 1 settled 0 0 1@0:0 - - recover
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 2 completed 1 settled 0 0 1@0:0 - - resume
+R 1 failed:f 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 7 0:6 1 1
 N order@0:2,order@0:3,conflict@0:5
 U 1:1
 A 7 appended
 A 8 appended
-R 2 paused 1 settled 0 0 1@0:0 - - recover
-R 1 completed 1 terminal 0 0 - - - resume
+R 2 completed 1 settled 0 0 1@0:0 - - resume
+R 1 failed:f 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 0 0 1@0:7 - - admit
-C 1 terminal 1:completed
+C 1 terminal 1:failed
 P 9 0:8 1 1
 N order@0:2,order@0:3,conflict@0:5,conflict@0:8
 U 1:1
@@ -7903,10 +7903,10 @@ A 14 appended
 A 15 appended
 A 16 appended
 A 17 duplicate
-R 2 paused 1 settled 0 0 1@0:0 i1 - recover
-R 1 running 1 settled 0 0 1@0:10 - - recover
+R 2 completed 1 settled 0 0 1@0:0 i1 - resume
+R 1 paused 1 settled 0 0 1@0:10 - - recover
 R 3 - 1 unadmitted 0 0 1@0:7 - - admit
-C 1 running 1:cancelled
+C 1 paused 1:cancelled
 P 15 0:14 1 1
 N order@0:2,order@0:3,conflict@0:5,conflict@0:8,conflict@0:9,conflict@0:11
 U -
@@ -7916,10 +7916,10 @@ A 20 appended
 A 21 appended
 O 0 0 0 0
 A 22 EVENT_OUT_OF_ORDER
-R 2 paused 1 settled 0 0 1@0:0 i1 - recover
-R 1 running 1 settled 0 0 1@0:10 - - recover
-R 3 paused 1 settled 0 0 1@0:7 - - recover
-C 3 paused 1:cancelled
+R 2 completed 1 settled 0 0 1@0:0 i1 - resume
+R 1 paused 1 settled 0 0 1@0:10 - - recover
+R 3 completed 1 settled 0 0 1@0:7 - - resume
+C 3 terminal 3:completed
 P 17 0:16 1 1
 N order@0:2,order@0:3,conflict@0:5,conflict@0:8,conflict@0:9,conflict@0:11,order@0:16
 U -
@@ -7952,18 +7952,18 @@ A 3 duplicate
 A 4 appended
 R 1 - 1 unadmitted 1 0 1@0:0 - - admit
 R 2 - 1 unadmitted 1 0 - - - admit
-R 3 failed:r 1 terminal 0 0 - - - resume
-C 3 terminal 3:failed
+R 3 cancelled 1 terminal 0 0 - - - resume
+C 3 terminal 3:cancelled
 P 4 0:3 1 1
 N order@0:3
 U 3:1
 A 5 appended
 A 6 appended
 A 7 appended
-R 1 failed:r 1 settled 1 0 1@0:0 - - settled
+R 1 cancelled 1 settled 1 0 1@0:0 - - settled
 R 2 - 1 unadmitted 1 0 1@1:2 - - admit
-R 3 failed:r 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 3 cancelled 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 7 1:2 2 1
 N order@0:3,order@1:0,conflict@1:1
 U 3:1
@@ -7994,8 +7994,8 @@ A 6 appended
 A 7 appended
 R 1 - 1 unadmitted 0 0 1@0:0 - - admit
 R 2 running 1 open 0 0 - - - recover
-R 3 completed 1 settled 0 0 1@0:3 i0 - resume
-C 2 running 3:completed
+R 3 failed:f 1 settled 0 0 1@0:3 i0 - resume
+C 2 running 3:failed
 P 8 0:7 1 1
 N order@0:1,conflict@0:2,order@0:4
 U -
@@ -8007,9 +8007,9 @@ O 0 0 0 0
 A 12 appended
 A 13 appended
 R 1 admitted 1 settled 0 0 1@0:0 - - recover
-R 2 completed 1 terminal 0 0 - - - resume
-R 3 paused 1 settled 0 0 1@0:3 i0,i1 - recover
-C 2 terminal 2:completed
+R 2 failed:f 1 terminal 0 0 - - - resume
+R 3 completed 1 settled 0 0 1@0:3 i0,i1 - resume
+C 2 terminal 2:failed
 P 14 0:13 1 1
 N order@0:1,conflict@0:2,order@0:4,conflict@0:9
 U 2:1
@@ -8020,16 +8020,16 @@ A 16 appended
 A 17 appended
 A 18 EVENT_OUT_OF_ORDER
 R 1 admitted 1 settled 0 0 1@0:0 - - recover
-R 2 completed 1 terminal 0 0 - - - resume
-R 3 paused 1 settled 1 0 1@0:3 i0,i1 - resume
-C 2 terminal 2:completed
+R 2 failed:f 1 terminal 0 0 - - - resume
+R 3 completed 1 settled 1 0 1@0:3 i0,i1 - settled
+C 2 terminal 2:failed
 P 18 1:3 2 1
 N order@0:1,conflict@0:2,order@0:4,conflict@0:9,conflict@1:2,conflict@1:3
 U 2:1
 R 1 admitted 1 settled 0 0 1@0:0 - - recover
-R 2 completed 1 terminal 0 0 - - - resume
-R 3 paused 1 settled 1 0 1@0:3 i0,i1 - resume
-C 2 terminal 2:completed
+R 2 failed:f 1 terminal 0 0 - - - resume
+R 3 completed 1 settled 1 0 1@0:3 i0,i1 - settled
+C 2 terminal 2:failed
 P 18 1:3 2 1
 N order@0:1,conflict@0:2,order@0:4,conflict@0:9,conflict@1:2,conflict@1:3
 U 2:1
@@ -8104,7 +8104,7 @@ R 1 - 1 unadmitted 1 0 - - - admit
 R 2 completed 1 settled 0 0 1@1:0 - - resume
 C 2 terminal 2:completed
 P 9 3:2 4 1
-N conflict@0:2,order@2:0,order@3:1
+N conflict@0:2,order@2:0
 U -
 A 12 duplicate
 A 13 appended
@@ -8124,7 +8124,7 @@ R 1 running 1 settled 1 0 1@3:7 i2 - resume
 R 2 completed 1 settled 1 0 1@1:0 - - settled
 C 2 terminal 2:completed
 P 16 4:0 5 1
-N conflict@0:2,order@2:0,order@3:1,order@3:4,order@3:6
+N conflict@0:2,order@2:0,order@3:4,order@3:6
 U -
 A 25 appended
 R 3 - 1 unadmitted 0 0 1@0:0 i0 - admit
@@ -8132,7 +8132,7 @@ R 1 running 1 settled 1 0 1@3:7 i2 - resume
 R 2 completed 1 settled 1 0 1@1:0 - - settled
 C 2 terminal 2:completed
 P 17 5:0 6 1
-N conflict@0:2,order@2:0,order@3:1,order@3:4,order@3:6,conflict@5:0
+N conflict@0:2,order@2:0,order@3:4,order@3:6,conflict@5:0
 U -
 QS skipped
 QS SETTLEMENT_CONFLICT
@@ -8155,7 +8155,7 @@ A 6 appended
 A 7 appended
 O 0 0 0 0
 A 8 appended
-R 2 running 1 open 0 0 - - - recover
+R 2 running 2 open 0 0 - - - recover
 R 1 failed:r 1 settled 0 0 1@1:0 i2 - resume
 R 3 completed 1 terminal 1 0 - - - settled
 C 2 running 1:failed
@@ -8165,7 +8165,7 @@ U 3:1
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
 A 11 appended
-R 2 running 1 open 0 0 - - - recover
+R 2 running 2 open 0 0 - - - recover
 R 1 failed:r 1 settled 0 0 1@1:0 i2 - resume
 R 3 completed 1 terminal 1 0 - - - settled
 C 2 running 1:failed
@@ -8174,14 +8174,14 @@ N order@0:0,order@1:1,order@1:2,conflict@1:5
 U 3:1
 O 0 0 0 0
 A 12 appended
-R 2 running 1 open 0 0 - - - recover
+R 2 running 2 open 0 0 - - - recover
 R 1 failed:r 1 settled 0 0 1@1:0 i2 - resume
 R 3 completed 1 terminal 1 0 - - - settled
 C 2 running 1:failed
 P 10 2:0 3 1
 N order@0:0,order@1:1,order@1:2,conflict@1:5,conflict@2:0
 U 3:1
-R 2 running 1 open 0 0 - - - recover
+R 2 running 2 open 0 0 - - - recover
 R 1 failed:r 1 settled 0 0 1@1:0 i2 - resume
 R 3 completed 1 terminal 1 0 - - - settled
 C 2 running 1:failed
@@ -8203,7 +8203,7 @@ A 1 appended
 O 0 0 0 0
 A 2 appended
 A 3 appended
-R 2 cancelled 1 terminal 1 0 - - - settled
+R 2 cancelled:u 1 terminal 1 0 - - - settled
 R 1 - 1 unadmitted 0 0 1@0:3 - - admit
 C 2 terminal 2:cancelled
 P 4 0:3 1 1
@@ -8211,7 +8211,7 @@ N -
 U 2:1
 A 4 appended
 A 5 appended
-R 2 cancelled 1 terminal 1 0 - - - settled
+R 2 cancelled:u 1 terminal 1 0 - - - settled
 R 1 - 1 unadmitted 0 0 1@0:3 - - admit
 R 3 - 1 unadmitted 1 0 1@0:5 - - admit
 C 2 terminal 2:cancelled
@@ -8223,7 +8223,7 @@ A 7 appended
 A 8 EVENT_OUT_OF_ORDER
 A 9 duplicate
 A 10 EVENT_OUT_OF_ORDER
-R 2 failed:f 1 terminal 1 0 - - - settled
+R 2 failed:r 1 terminal 1 0 - - - settled
 R 1 - 1 unadmitted 0 0 1@0:3 i2 - admit
 R 3 - 1 unadmitted 1 0 1@0:5 - - admit
 C 2 terminal 2:failed
@@ -8231,7 +8231,7 @@ P 8 0:7 1 1
 N -
 U 2:1
 A 11 appended
-R 2 failed:f 1 terminal 1 0 - - - settled
+R 2 failed:r 1 terminal 1 0 - - - settled
 R 1 - 1 unadmitted 0 0 1@0:3 i2 - admit
 R 3 failed:f 1 settled 1 0 1@0:5 - - settled
 C 3 terminal 3:failed
@@ -8239,10 +8239,10 @@ P 9 0:8 1 1
 N order@0:8
 U 2:1
 A 12 appended
-R 2 failed:f 1 terminal 1 0 - - - settled
-R 1 completed 1 settled 0 0 1@0:3 i2 - resume
+R 2 failed:r 1 terminal 1 0 - - - settled
+R 1 failed:f 1 settled 0 0 1@0:3 i2 - resume
 R 3 failed:f 1 settled 1 0 1@0:5 - - settled
-C 1 terminal 1:completed
+C 1 terminal 1:failed
 P 10 2:0 2 1
 N order@0:8,order@2:0
 U 2:1
@@ -8257,9 +8257,9 @@ A 19 appended
 A 20 appended
 A 21 appended
 R 2 completed 1 terminal 1 0 - - - settled
-R 1 completed 1 settled 1 0 1@0:3 i2 - settled
-R 3 failed:r 1 settled 1 0 1@0:5 i2 - settled
-C 3 terminal 3:failed
+R 1 failed:f 1 settled 1 0 1@0:3 i2 - settled
+R 3 cancelled 1 settled 1 0 1@0:5 i2 - settled
+C 3 terminal 3:cancelled
 P 18 4:4 3 1
 N order@0:8,order@2:0,order@4:0,conflict@4:1
 U 2:1
@@ -8289,21 +8289,21 @@ A 4 appended
 A 5 appended
 A 6 duplicate
 R 3 - 1 unadmitted 0 0 1@0:1 i0 - admit
-R 2 running 1 settled 0 0 1@0:2 - - recover
-C 2 running -
+R 2 paused 1 settled 0 0 1@0:2 - - recover
+C 2 paused -
 P 5 0:4 1 1
 N order@0:3,conflict@0:4
 U -
 R 3 - 1 unadmitted 0 0 1@0:1 i0 - admit
-R 2 running 1 settled 0 0 1@0:2 - - recover
-C 2 running -
+R 2 paused 1 settled 0 0 1@0:2 - - recover
+C 2 paused -
 P 5 0:4 1 1
 N order@0:3,conflict@0:4
 U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
-QL CHAT_RUN_LIVE
+QL NO_RUN_ADMITTED
 QL NO_RUN_ADMITTED
 QB refused cursor-ahead 5 -
 QB refused cursor-ahead 5 -
@@ -8401,9 +8401,9 @@ N order@0:0,order@0:1
 U 1:1,2:1
 A 3 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 2 completed 1 terminal 0 0 - - - resume
+R 2 failed:f 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 0 0 1@0:2 - - admit
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:0,order@0:1
 U 1:1,2:1
@@ -8417,7 +8417,7 @@ A 9 appended
 A 10 appended
 A 11 appended
 A 12 appended
-R 1 cancelled 1 settled 1 0 1@0:4 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:4 - - settled
 R 2 running 1 settled 0 0 1@0:5 - - recover
 R 3 cancelled 1 settled 0 0 1@0:2 - - resume
 C 3 terminal 3:cancelled
@@ -8425,7 +8425,7 @@ P 11 4:1 3 1
 N order@0:0,order@0:1,order@4:1
 U -
 A 13 appended
-R 1 cancelled 1 settled 1 0 1@0:4 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:4 - - settled
 R 2 running 1 settled 0 0 1@0:5 - - recover
 R 3 cancelled 1 settled 0 0 1@0:2 - - resume
 C 3 terminal 3:cancelled
@@ -8435,8 +8435,8 @@ U -
 A 14 duplicate
 A 15 appended
 A 16 appended
-R 1 cancelled 1 settled 1 0 1@0:4 - - settled
-R 2 failed:f 1 settled 0 0 1@0:5 - - resume
+R 1 cancelled:u 1 settled 1 0 1@0:4 - - settled
+R 2 failed:r 1 settled 0 0 1@0:5 - - resume
 R 3 cancelled 1 settled 0 0 1@0:2 - - resume
 C 2 terminal 2:failed
 P 14 4:4 3 1
@@ -8536,7 +8536,7 @@ O 0 0 0 0
 A 7 appended
 A 8 appended
 A 9 appended
-R 1 cancelled 1 terminal 1 0 - i2 - settled
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
 R 3 - 1 unadmitted 0 0 1@0:2 - - admit
 R 2 completed 1 settled 0 0 1@0:3 - - resume
 C 2 terminal 2:completed
@@ -8544,7 +8544,7 @@ P 10 2:4 3 1
 N order@0:1,order@1:0,conflict@2:3
 U 1:1
 A 10 appended
-R 1 cancelled 1 terminal 1 0 - i2 - settled
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
 R 3 - 1 unadmitted 0 0 1@0:2 i0 - admit
 R 2 completed 1 settled 0 0 1@0:3 - - resume
 C 2 terminal 2:completed
@@ -8552,7 +8552,7 @@ P 11 2:5 3 1
 N order@0:1,order@1:0,conflict@2:3
 U 1:1
 A 11 EVENT_OUT_OF_ORDER
-R 1 cancelled 1 terminal 1 0 - i2 - settled
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
 R 3 - 1 unadmitted 0 0 1@0:2 i0 - admit
 R 2 completed 1 settled 0 0 1@0:3 - - resume
 C 2 terminal 2:completed
@@ -8562,7 +8562,7 @@ U 1:1
 A 12 appended
 A 13 appended
 A 14 appended
-R 1 cancelled 1 terminal 1 0 - i2 - settled
+R 1 cancelled:u 1 terminal 1 0 - i2 - settled
 R 3 admitted 1 settled 0 0 1@0:2 i0 - recover
 R 2 completed 1 settled 0 0 1@0:3 - - resume
 C 3 admitted 2:completed
@@ -8586,39 +8586,39 @@ A 2 appended
 O 0 0 0 0
 A 3 appended
 A 4 EVENT_MUTATED
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 R 2 completed 1 settled 0 0 1@0:2 - - resume
 C 2 terminal 2:completed
 P 3 0:2 1 1
 N order@0:0,order@0:1
 U 3:1
 A 5 appended
-R 3 failed:f 1 terminal 0 0 - - - resume
-R 2 failed:f 1 settled 0 0 1@0:2 - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
+R 2 failed:r 1 settled 0 0 1@0:2 - - resume
 C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:0,order@0:1
 U 3:1
 A 6 appended
-R 3 failed:f 1 settled 0 0 1@0:4 - - resume
-R 2 failed:f 1 settled 0 0 1@0:2 - - resume
+R 3 failed:r 1 settled 0 0 1@0:4 - - resume
+R 2 failed:r 1 settled 0 0 1@0:2 - - resume
 C 2 terminal 2:failed
 P 5 0:4 1 1
 N order@0:0,order@0:1
 U -
 A 7 appended
 A 8 appended
-R 3 failed:f 1 settled 0 0 1@0:4 - - resume
-R 2 completed 1 settled 0 0 1@0:2 - - resume
+R 3 failed:r 1 settled 0 0 1@0:4 - - resume
+R 2 failed:f 1 settled 0 0 1@0:2 - - resume
 R 1 - 1 unadmitted 0 0 - i0 - admit
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 7 0:6 1 1
 N order@0:0,order@0:1
 U -
-R 3 failed:f 1 settled 0 0 1@0:4 - - resume
-R 2 completed 1 settled 0 0 1@0:2 - - resume
+R 3 failed:r 1 settled 0 0 1@0:4 - - resume
+R 2 failed:f 1 settled 0 0 1@0:2 - - resume
 R 1 - 1 unadmitted 0 0 - i0 - admit
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 7 0:6 1 1
 N order@0:0,order@0:1
 U -
@@ -8657,7 +8657,7 @@ A 14 appended
 A 15 appended
 R 3 running 1 settled 0 0 1@0:6 i2 - recover
 R 2 completed 1 terminal 0 0 - - - resume
-R 1 cancelled 1 terminal 0 0 - - - resume
+R 1 cancelled:u 1 terminal 0 0 - - - resume
 C 3 running 1:cancelled
 P 13 3:0 3 1
 N order@0:0,order@0:1,order@0:3,order@0:5,conflict@2:0
@@ -8672,9 +8672,9 @@ A 20 EVENT_MUTATED
 A 21 duplicate
 A 22 appended
 R 3 running 1 settled 0 0 1@0:6 i0,i2 - recover
-R 2 completed 1 terminal 0 0 - - - resume
+R 2 failed:f 1 terminal 0 0 - - - resume
 R 1 completed 1 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 17 3:4 3 1
 N order@0:0,order@0:1,order@0:3,order@0:5,conflict@2:0
 U 2:1,1:1
@@ -8682,7 +8682,7 @@ A 23 appended
 R 3 running 1 settled 0 0 1@0:6 i0,i2 - recover
 R 2 running 1 open 0 0 - - - recover
 R 1 completed 1 terminal 0 0 - - - resume
-C 2 running 2:completed
+C 2 running 2:failed
 P 18 3:5 3 1
 N order@0:0,order@0:1,order@0:3,order@0:5,conflict@2:0
 U 1:1
@@ -8690,7 +8690,7 @@ A 24 appended
 R 3 running 1 settled 0 0 1@0:6 i0,i2 - recover
 R 2 running 1 open 0 0 - - - recover
 R 1 completed 1 settled 0 0 1@4:0 - - resume
-C 2 running 2:completed
+C 2 running 2:failed
 P 19 4:0 4 1
 N order@0:0,order@0:1,order@0:3,order@0:5,conflict@2:0
 U -
@@ -8701,9 +8701,9 @@ A 28 appended
 A 29 appended
 A 30 appended
 R 3 paused 1 settled 0 0 1@0:6 i0,i2 - recover
-R 2 running 1 settled 0 0 1@4:3 - - recover
-R 1 paused 1 settled 0 0 1@4:0 - - recover
-C 3 paused 2:completed
+R 2 paused 1 settled 0 0 1@4:3 - - recover
+R 1 completed 1 settled 0 0 1@4:0 - - resume
+C 3 paused 1:completed
 P 25 4:6 4 1
 N order@0:0,order@0:1,order@0:3,order@0:5,conflict@2:0,conflict@4:6
 U -
@@ -8746,7 +8746,7 @@ A 7 appended
 A 8 appended
 O 0 0 0 0
 A 9 appended
-R 3 cancelled 1 settled 0 0 1@0:0 i0 - resume
+R 3 cancelled:u 1 settled 0 0 1@0:0 i0 - resume
 R 1 - 1 unadmitted 1 0 1@0:3 i2 - admit
 C 3 terminal 3:cancelled
 P 7 2:2 2 1
@@ -8770,7 +8770,7 @@ A 4 appended
 A 5 appended
 A 6 appended
 A 7 appended
-R 2 failed:f 1 settled 0 0 1@1:3 i1 - resume
+R 2 failed:r 1 settled 0 0 1@1:3 i1 - resume
 R 1 - 1 unadmitted 0 0 1@1:2 - - admit
 C 2 terminal 2:failed
 P 6 1:4 2 1
@@ -8781,10 +8781,10 @@ A 9 appended
 O 0 0 0 0
 A 10 appended
 A 11 appended
-R 2 failed:f 1 settled 0 0 1@1:3 i1 - resume
-R 1 failed:r 1 settled 0 0 1@1:2 - - resume
+R 2 failed:r 1 settled 0 0 1@1:3 i1 - resume
+R 1 cancelled 1 settled 0 0 1@1:2 - - resume
 R 3 running 1 open 1 0 - - - resume
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 10 1:8 2 1
 N order@1:0,order@1:5,order@1:7
 U -
@@ -8795,23 +8795,23 @@ A 15 appended
 A 16 appended
 A 17 appended
 A 18 appended
-R 2 running 1 settled 0 0 1@1:3 i1 - recover
-R 1 running 2 open 1 0 1@1:2 - - resume
+R 2 running 2 open 0 0 1@1:3 i1 - recover
+R 1 running 1 settled 1 0 1@1:2 - - resume
 R 3 completed 1 settled 1 0 1@2:0 - - settled
 C 3 terminal 3:completed
 P 17 2:4 3 1
 N order@1:0,order@1:5,order@1:7
 U -
 A 19 appended
-R 2 running 1 settled 0 0 1@1:3 i1 - recover
-R 1 running 2 open 1 0 1@1:2 - - resume
+R 2 running 2 settled 0 0 1@1:3,2@2:5 i1 - recover
+R 1 running 1 settled 1 0 1@1:2 - - resume
 R 3 completed 1 settled 1 0 1@2:0 - - settled
 C 3 terminal 3:completed
 P 18 2:5 3 1
 N order@1:0,order@1:5,order@1:7
 U -
 QS SETTLEMENT_CONFLICT
-QS appended
+QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
 QL ok
 QL ok
@@ -8826,18 +8826,18 @@ A 2 appended
 O 0 0 0 0
 A 3 appended
 R 3 - 1 unadmitted 0 0 - i0 - admit
-R 1 running 1 open 0 0 - - - recover
+R 1 paused 1 terminal 0 0 - - - recover
 R 2 completed 1 terminal 0 0 - - - resume
 C 2 terminal 2:completed
 P 4 1:1 2 1
 N order@0:1,order@1:0,order@1:1
-U 2:1
+U 1:1,2:1
 A 4 EVENT_OUT_OF_ORDER
 A 5 appended
 R 3 - 1 unadmitted 0 0 - i0 - admit
-R 1 completed 1 terminal 0 0 - - - resume
+R 1 failed:f 1 terminal 0 0 - - - resume
 R 2 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+C 1 terminal 1:failed
 P 5 1:2 2 1
 N order@0:1,order@1:0,order@1:1
 U 1:1,2:1
@@ -8857,9 +8857,9 @@ A 2 appended
 A 3 appended
 A 4 duplicate
 A 5 appended
-R 2 completed 1 terminal 0 0 - - - resume
-R 3 failed:r 1 terminal 0 0 - - - resume
-C 3 terminal 3:failed
+R 2 failed:f 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
+C 3 terminal 3:cancelled
 P 4 1:2 2 1
 N order@1:0
 U 2:1,3:1
@@ -8867,19 +8867,19 @@ A 6 appended
 A 7 appended
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
-R 2 completed 1 terminal 0 0 - - - resume
-R 3 failed:r 1 terminal 0 0 - - - resume
+R 2 failed:f 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
 R 1 running 1 open 1 0 - - - resume
-C 1 running 3:failed
+C 1 running 3:cancelled
 P 6 1:4 2 1
 N order@1:0,order@1:3
 U 2:1,3:1
 A 10 appended
 A 11 appended
 R 2 running 1 open 0 0 - - - recover
-R 3 running 2 open 0 0 - - - recover
+R 3 running 1 open 0 0 - - - recover
 R 1 running 1 open 1 0 - - - resume
-C 2 running 3:failed
+C 2 running 3:cancelled
 P 8 1:6 2 1
 N order@1:0,order@1:3
 U -
@@ -8888,16 +8888,16 @@ A 13 appended
 A 14 appended
 A 15 appended
 R 2 running 1 open 0 0 - - - recover
-R 3 running 3 settled 0 0 3@1:9 - - recover
+R 3 paused 1 settled 0 0 1@1:9 - - recover
 R 1 running 1 open 1 0 - - - resume
-C 3 running 3:failed
+C 3 paused 3:cancelled
 P 12 1:10 2 1
 N order@1:0,order@1:3,order@1:10
 U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
 QS appended
-QL RUN_ID_TAKEN
+QL ok
 QL ok
 QB batch 2 3 12 1:1
 QB refused cursor-ahead 12 -
@@ -8927,7 +8927,7 @@ A 11 appended
 A 12 EVENT_MUTATED
 R 3 completed 1 settled 0 0 1@0:4 - - resume
 R 2 running 1 settled 0 0 1@0:3 i0 - recover
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 9 0:8 1 1
 N order@0:0,order@0:2,order@0:5,conflict@0:6
@@ -8935,7 +8935,7 @@ U 1:1
 A 13 appended
 R 3 completed 1 settled 0 0 1@0:4 - - resume
 R 2 running 1 settled 0 0 1@0:3 i0 - recover
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 10 0:9 1 1
 N order@0:0,order@0:2,order@0:5,conflict@0:6
@@ -8955,7 +8955,7 @@ A 1 appended
 A 2 EVENT_OUT_OF_ORDER
 A 3 appended
 R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 C 3 terminal 3:failed
 P 3 0:2 1 1
 N order@0:1,conflict@0:2
@@ -8964,7 +8964,7 @@ A 4 appended
 A 5 appended
 A 6 appended
 R 1 completed 1 settled 0 0 1@0:0 - - resume
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 R 2 - 1 unadmitted 0 0 - i0 - admit
 C 1 terminal 1:completed
 P 6 0:5 1 1
@@ -8977,7 +8977,7 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 appended
 A 12 appended
 R 1 completed 1 settled 0 0 1@0:0 i1,i2 - resume
-R 3 failed:f 1 terminal 0 0 - i0 - resume
+R 3 failed:r 1 terminal 0 0 - i0 - resume
 R 2 - 1 unadmitted 0 0 - i0 - admit
 C 1 terminal 1:completed
 P 11 0:10 1 1
@@ -8986,7 +8986,7 @@ U 3:1
 A 13 appended
 A 14 appended
 R 1 completed 1 settled 1 0 1@0:0 i1,i2 - settled
-R 3 failed:f 1 terminal 0 0 - i0 - resume
+R 3 failed:r 1 terminal 0 0 - i0 - resume
 R 2 - 1 unadmitted 0 0 1@0:11 i0 - admit
 C 1 terminal 1:completed
 P 13 0:12 1 1
@@ -9028,8 +9028,8 @@ A 6 appended
 A 7 EVENT_OUT_OF_ORDER
 R 3 running 1 open 1 0 - - - resume
 R 2 failed:r 1 terminal 1 0 - - - settled
-R 1 failed:r 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 1 cancelled 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 6 1:2 2 1
 N order@0:0,order@0:2,order@1:0
 U 2:1,1:1
@@ -9056,10 +9056,10 @@ A 19 appended
 A 20 EVENT_MUTATED
 A 21 appended
 A 22 appended
-R 3 failed:r 1 settled 1 0 1@1:9 - - settled
+R 3 cancelled 1 settled 1 0 1@1:9 - - settled
 R 2 running 1 settled 1 0 1@1:4 i1 - resume
 R 1 failed:f 1 terminal 0 0 - - - resume
-C 3 terminal 2:completed
+C 3 terminal 2:failed
 P 17 3:3 3 1
 N order@0:0,order@0:2,order@1:0,order@3:3
 U 1:1
@@ -9084,8 +9084,8 @@ A 2 appended
 A 3 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
 R 1 - 1 unadmitted 0 0 1@0:1 - - admit
-R 3 completed 1 settled 0 0 1@0:3 - - resume
-C 3 terminal 3:completed
+R 3 failed:f 1 settled 0 0 1@0:3 - - resume
+C 3 terminal 3:failed
 P 4 0:3 1 1
 N order@0:2
 U -
@@ -9108,7 +9108,7 @@ A 18 duplicate
 A 19 appended
 R 2 running 1 settled 0 0 1@0:0 - - recover
 R 1 cancelled 1 settled 0 0 1@0:1 i1 - resume
-R 3 failed:f 1 settled 0 0 1@0:3 i2 - resume
+R 3 failed:r 1 settled 0 0 1@0:3 i2 - resume
 C 1 terminal 1:cancelled
 P 15 0:14 1 1
 N order@0:2,order@0:5,order@0:7,conflict@0:9,conflict@0:11,conflict@0:12,conflict@0:14
@@ -9116,7 +9116,7 @@ U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
-QL RUN_ID_TAKEN
+QL ok
 QL ok
 QB refused identity-mismatch 15 0:7
 QB batch 7 13 15 0:7,0:8,0:9,0:10,0:11,0:12
@@ -9180,9 +9180,9 @@ N conflict@0:2
 U -
 A 5 appended
 A 6 appended
-R 1 completed 1 terminal 0 0 - i1 - resume
+R 1 failed:f 1 terminal 0 0 - i1 - resume
 R 2 - 1 unadmitted 0 0 1@0:1 i0 - admit
-C 1 terminal 1:completed
+C 1 terminal 1:failed
 P 6 0:5 1 1
 N conflict@0:2,order@0:5
 U 1:1
@@ -9205,9 +9205,9 @@ A 14 appended
 A 15 appended
 A 16 duplicate
 R 1 running 1 settled 1 0 1@0:11 i1 - resume
-R 2 cancelled 1 settled 0 0 1@0:1 i0,i1 - resume
-R 3 failed:r 1 settled 0 0 1@0:10 - - resume
-C 1 running 3:failed
+R 2 cancelled:u 1 settled 0 0 1@0:1 i0,i1 - resume
+R 3 cancelled 1 settled 0 0 1@0:10 - - resume
+C 1 running 3:cancelled
 P 15 0:14 1 1
 N conflict@0:2,order@0:5,conflict@0:7,order@0:12,order@0:13
 U -
@@ -9234,28 +9234,28 @@ A 3 appended
 A 4 appended
 A 5 appended
 A 6 appended
-R 1 paused 1 settled 0 0 1@0:0 - - recover
+R 1 completed 1 settled 0 0 1@0:0 - - resume
 R 2 admitted 1 settled 0 0 1@0:2 - - recover
 R 3 cancelled 1 settled 0 0 1@0:3 - - resume
-C 1 paused 3:cancelled
+C 1 terminal 1:completed
 P 7 1:2 2 1
 N order@1:0,order@1:1,conflict@1:2
 U -
 A 7 appended
-R 1 paused 1 settled 0 0 1@0:0 - - recover
+R 1 completed 1 settled 0 0 1@0:0 - - resume
 R 2 running 1 settled 0 0 1@0:2 - - recover
 R 3 cancelled 1 settled 0 0 1@0:3 - - resume
-C 2 running 3:cancelled
+C 2 running 1:completed
 P 8 1:3 2 1
 N order@1:0,order@1:1,conflict@1:2
 U -
 A 8 appended
 O 0 0 0 0
 A 9 appended
-R 1 paused 1 settled 0 0 1@0:0 i2 - recover
+R 1 completed 1 settled 0 0 1@0:0 i2 - resume
 R 2 running 1 settled 1 0 1@0:2 - - resume
 R 3 cancelled 1 settled 0 0 1@0:3 - - resume
-C 2 running 3:cancelled
+C 2 running 1:completed
 P 10 1:5 2 1
 N order@1:0,order@1:1,conflict@1:2
 U -
@@ -9266,7 +9266,7 @@ O 0 0 0 0
 A 13 EVENT_MUTATED
 A 14 appended
 A 15 appended
-R 1 paused 1 settled 0 0 1@0:0 i2 - recover
+R 1 completed 1 settled 0 0 1@0:0 i2 - resume
 R 2 running 1 settled 1 0 1@0:2 i0 - resume
 R 3 completed 1 settled 0 0 1@0:3 - - resume
 C 3 terminal 3:completed
@@ -9288,7 +9288,7 @@ U -
 A 20 appended
 R 1 running 1 settled 0 0 1@0:0 i0,i2 - recover
 R 2 running 1 settled 1 0 1@0:2 i0 - resume
-R 3 failed:f 1 settled 0 0 1@0:3 - - resume
+R 3 failed:r 1 settled 0 0 1@0:3 - - resume
 C 3 terminal 3:failed
 P 18 1:13 2 1
 N order@1:0,order@1:1,conflict@1:2,conflict@1:12
@@ -9297,16 +9297,16 @@ A 21 appended
 A 22 appended
 A 23 appended
 R 1 running 1 settled 0 0 1@0:0 i0,i2 - recover
-R 2 paused 1 settled 1 0 1@0:2 i0 - resume
-R 3 failed:f 1 settled 0 0 1@0:3 i1 - resume
-C 2 paused 3:failed
+R 2 completed 1 settled 1 0 1@0:2 i0 - settled
+R 3 failed:r 1 settled 0 0 1@0:3 i1 - resume
+C 2 terminal 2:completed
 P 21 1:16 2 1
 N order@1:0,order@1:1,conflict@1:2,conflict@1:12,conflict@1:14
 U -
 R 1 running 1 settled 0 0 1@0:0 i0,i2 - recover
-R 2 paused 1 settled 1 0 1@0:2 i0 - resume
-R 3 failed:f 1 settled 0 0 1@0:3 i1 - resume
-C 2 paused 3:failed
+R 2 completed 1 settled 1 0 1@0:2 i0 - settled
+R 3 failed:r 1 settled 0 0 1@0:3 i1 - resume
+C 2 terminal 2:completed
 P 21 1:16 2 1
 N order@1:0,order@1:1,conflict@1:2,conflict@1:12,conflict@1:14
 U -
@@ -9349,7 +9349,7 @@ O 0 0 0 0
 A 12 appended
 A 13 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 cancelled 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:1 - - settled
 R 3 running 1 open 0 0 - i1 - recover
 C 3 running 1:cancelled
 P 13 1:7 2 1
@@ -9364,7 +9364,7 @@ A 19 appended
 A 20 EVENT_MUTATED
 A 21 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 cancelled 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:1 - - settled
 R 3 running 1 settled 0 0 1@2:0 i1 - recover
 C 3 running 1:cancelled
 P 19 3:3 4 1
@@ -9373,7 +9373,7 @@ U -
 A 22 appended
 A 23 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 cancelled 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:1 - - settled
 R 3 running 1 settled 0 0 1@2:0 i1 - recover
 C 3 running 1:cancelled
 P 21 5:0 6 1
@@ -9382,7 +9382,7 @@ U -
 O 0 0 0 0
 A 24 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 cancelled 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:1 - - settled
 R 3 paused 1 settled 0 0 1@2:0 i1 - recover
 C 3 paused 1:cancelled
 P 22 5:1 6 1
@@ -9390,14 +9390,14 @@ N conflict@1:0,order@1:1,conflict@1:2,conflict@1:3,order@1:5,conflict@1:7,confli
 U -
 A 25 appended
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 cancelled 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:1 - - settled
 R 3 paused 1 settled 0 0 1@2:0 i1 - recover
 C 3 paused 1:cancelled
 P 23 5:2 6 1
 N conflict@1:0,order@1:1,conflict@1:2,conflict@1:3,order@1:5,conflict@1:7,conflict@1:8,conflict@3:0,conflict@3:1,conflict@3:3,conflict@4:0,conflict@5:0,conflict@5:2
 U -
 R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 cancelled 1 settled 1 0 1@0:1 - - settled
+R 1 cancelled:u 1 settled 1 0 1@0:1 - - settled
 R 3 paused 1 settled 0 0 1@2:0 i1 - recover
 C 3 paused 1:cancelled
 P 23 5:2 6 1
@@ -9475,9 +9475,9 @@ A 15 appended
 A 16 appended
 A 17 EVENT_MUTATED
 R 3 running 1 settled 0 0 1@0:0 - - recover
-R 2 paused 1 settled 0 0 1@2:1 - - recover
+R 2 completed 1 settled 0 0 1@2:1 - - resume
 R 1 completed 1 settled 0 0 1@2:4 i0 - resume
-C 2 paused 1:completed
+C 2 terminal 2:completed
 P 14 2:9 3 1
 N order@1:0,conflict@1:1,conflict@1:2,order@2:0,conflict@2:2,conflict@2:3,order@2:5,conflict@2:6
 U -
@@ -9486,10 +9486,10 @@ A 19 appended
 A 20 EVENT_OUT_OF_ORDER
 A 21 appended
 A 22 appended
-R 3 paused 1 settled 0 0 1@0:0 - - recover
-R 2 paused 1 settled 0 0 1@2:1 - - recover
+R 3 completed 1 settled 0 0 1@0:0 - - resume
+R 2 completed 1 settled 0 0 1@2:1 - - resume
 R 1 completed 1 settled 0 0 1@2:4 i0,i2 - resume
-C 3 paused 1:completed
+C 3 terminal 3:completed
 P 18 2:13 3 1
 N order@1:0,conflict@1:1,conflict@1:2,order@2:0,conflict@2:2,conflict@2:3,order@2:5,conflict@2:6,conflict@2:10
 U -
@@ -9555,29 +9555,29 @@ A 19 EVENT_OUT_OF_ORDER
 A 20 appended
 A 21 appended
 A 22 appended
-R 3 failed:r 1 settled 1 0 1@1:4 i1 - settled
+R 3 cancelled 1 settled 1 0 1@1:4 i1 - settled
 R 1 running 1 settled 0 0 1@1:5 - - recover
-R 2 failed:f 1 settled 0 0 1@1:2 i1 - resume
-C 3 terminal 3:failed
+R 2 failed:r 1 settled 0 0 1@1:2 i1 - resume
+C 3 terminal 3:cancelled
 P 17 4:1 4 1
 N order@1:1,order@1:3,conflict@2:0,conflict@4:0
 U -
 A 23 EVENT_MUTATED
 A 24 appended
 A 25 appended
-R 3 failed:r 1 settled 1 0 1@1:4 i1 - settled
+R 3 cancelled 1 settled 1 0 1@1:4 i1 - settled
 R 1 running 1 settled 1 0 1@1:5 - - resume
-R 2 failed:f 1 settled 0 0 1@1:2 i0,i1 - resume
-C 3 terminal 3:failed
+R 2 failed:r 1 settled 0 0 1@1:2 i0,i1 - resume
+C 3 terminal 3:cancelled
 P 19 4:3 4 1
 N order@1:1,order@1:3,conflict@2:0,conflict@4:0
 U -
 A 26 EVENT_MUTATED
 A 27 EVENT_MUTATED
-R 3 failed:r 1 settled 1 0 1@1:4 i1 - settled
+R 3 cancelled 1 settled 1 0 1@1:4 i1 - settled
 R 1 running 1 settled 1 0 1@1:5 - - resume
-R 2 failed:f 1 settled 0 0 1@1:2 i0,i1 - resume
-C 3 terminal 3:failed
+R 2 failed:r 1 settled 0 0 1@1:2 i0,i1 - resume
+C 3 terminal 3:cancelled
 P 19 4:3 4 1
 N order@1:1,order@1:3,conflict@2:0,conflict@4:0
 U -
@@ -9602,15 +9602,15 @@ U -
 A 2 appended
 A 3 appended
 R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 2 completed 1 settled 0 0 1@0:1 - - resume
-C 2 terminal 2:completed
+R 2 failed:f 1 settled 0 0 1@0:1 - - resume
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:2,order@0:3
 U -
 A 4 EVENT_OUT_OF_ORDER
 R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 2 completed 1 settled 0 0 1@0:1 - - resume
-C 2 terminal 2:completed
+R 2 failed:f 1 settled 0 0 1@0:1 - - resume
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:2,order@0:3
 U -
@@ -9624,12 +9624,12 @@ A 10 appended
 A 11 appended
 A 12 appended
 R 1 cancelled 1 settled 0 0 1@0:0 - - resume
-R 2 completed 1 settled 1 0 1@0:1 i0 - settled
-R 3 running 1 open 1 0 - - - resume
-C 3 running 3:completed
+R 2 failed:f 1 settled 1 0 1@0:1 i0 - settled
+R 3 paused 1 terminal 1 0 - - - resume
+C 3 paused 3:completed
 P 11 0:10 1 1
 N order@0:2,order@0:3,order@0:5,conflict@0:7,order@0:9
-U -
+U 3:1
 O 0 0 0 0
 A 13 appended
 A 14 appended
@@ -9642,7 +9642,7 @@ A 20 appended
 A 21 appended
 R 1 cancelled 1 settled 0 0 1@0:0 - - resume
 R 2 running 1 settled 1 0 1@0:1 i0 - resume
-R 3 completed 1 settled 1 0 1@0:11 - - settled
+R 3 failed:f 1 settled 1 0 1@0:11 - - settled
 C 1 terminal 1:cancelled
 P 19 4:2 3 1
 N order@0:2,order@0:3,order@0:5,conflict@0:7,order@0:9
@@ -9659,8 +9659,8 @@ O 0 0 0 0
 A 29 appended
 A 30 appended
 R 1 completed 1 settled 1 0 1@0:0 - - settled
-R 2 running 1 settled 1 0 1@0:1 i0 - resume
-R 3 completed 1 settled 1 0 1@0:11 - - settled
+R 2 running 2 open 1 0 1@0:1 i0 - resume
+R 3 failed:f 1 settled 1 0 1@0:11 - - settled
 C 1 terminal 1:completed
 P 26 6:0 4 1
 N order@0:2,order@0:3,order@0:5,conflict@0:7,order@0:9,conflict@4:3
@@ -9704,7 +9704,7 @@ A 14 appended
 A 15 appended
 A 16 appended
 R 2 cancelled 1 settled 1 0 1@0:5 - - settled
-R 1 failed:f 1 settled 1 0 1@1:0 i0,i2 - settled
+R 1 failed:r 1 settled 1 0 1@1:0 i0,i2 - settled
 R 3 - 1 unadmitted 1 0 1@0:4 - - admit
 C 1 terminal 1:failed
 P 12 1:4 2 1
@@ -9716,7 +9716,7 @@ A 18 appended
 A 19 EVENT_OUT_OF_ORDER
 A 20 appended
 R 2 cancelled 1 settled 1 0 1@0:5 - - settled
-R 1 failed:f 1 settled 1 0 1@1:0 i0,i2 - settled
+R 1 failed:r 1 settled 1 0 1@1:0 i0,i2 - settled
 R 3 admitted 1 settled 1 0 1@0:4 - - resume
 C 3 admitted 1:failed
 P 15 1:7 2 1
@@ -9724,7 +9724,7 @@ N order@0:1,order@0:6,conflict@1:1,conflict@1:5,conflict@1:6
 U -
 A 21 EVENT_OUT_OF_ORDER
 R 2 cancelled 1 settled 1 0 1@0:5 - - settled
-R 1 failed:f 1 settled 1 0 1@1:0 i0,i2 - settled
+R 1 failed:r 1 settled 1 0 1@1:0 i0,i2 - settled
 R 3 admitted 1 settled 1 0 1@0:4 - - resume
 C 3 admitted 1:failed
 P 15 1:7 2 1
@@ -9855,17 +9855,17 @@ A 8 appended
 O 0 0 0 0
 A 9 appended
 A 10 appended
-R 1 failed:r 1 settled 0 0 1@0:0 - - resume
+R 1 cancelled 1 settled 0 0 1@0:0 - - resume
 R 2 running 1 open 0 0 - - - recover
 R 3 paused 1 terminal 0 0 - - - recover
-C 2 running 1:failed
+C 2 running 1:cancelled
 P 8 0:7 1 1
 N order@0:1,order@0:2,order@0:3,order@0:4
 U 3:1
 A 11 appended
 A 12 duplicate
 A 13 appended
-R 1 failed:r 1 settled 1 0 1@0:0 - - settled
+R 1 cancelled 1 settled 1 0 1@0:0 - - settled
 R 2 running 1 open 0 0 - - - recover
 R 3 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
@@ -9917,34 +9917,34 @@ A 16 appended
 A 17 appended
 A 18 duplicate
 R 2 completed 1 settled 0 0 1@0:0 - - resume
-R 3 running 1 open 0 0 - i0,i1 - recover
-R 1 paused 1 terminal 1 0 - - - resume
-C 3 running 2:completed
+R 3 paused 1 terminal 0 0 - i0,i1 - recover
+R 1 completed 1 terminal 1 0 - - - settled
+C 3 paused 2:completed
 P 12 1:2 2 1
 N conflict@0:2,order@0:4,order@1:0
-U 1:1
+U 3:1,1:1
 A 19 appended
 A 20 appended
 A 21 appended
-R 2 failed:f 1 settled 0 0 1@0:0 - - resume
-R 3 failed:f 1 terminal 0 0 - i0,i1 - resume
-R 1 running 2 open 1 0 - - - resume
+R 2 failed:r 1 settled 0 0 1@0:0 - - resume
+R 3 failed:r 1 terminal 0 0 - i0,i1 - resume
+R 1 running 1 open 1 0 - - - resume
 C 2 terminal 2:failed
 P 15 2:1 3 1
 N conflict@0:2,order@0:4,order@1:0
 U 3:1
 A 22 appended
 A 23 appended
-R 2 failed:f 1 settled 0 0 1@0:0 - - resume
-R 3 failed:f 1 terminal 0 0 - i0,i1 - resume
-R 1 running 2 settled 1 0 2@2:2 - - resume
+R 2 failed:r 1 settled 0 0 1@0:0 - - resume
+R 3 failed:r 1 terminal 0 0 - i0,i1 - resume
+R 1 running 1 settled 1 0 1@2:2 - - resume
 C 2 terminal 2:failed
 P 17 2:3 3 1
 N conflict@0:2,order@0:4,order@1:0,conflict@2:3
 U 3:1
-R 2 failed:f 1 settled 0 0 1@0:0 - - resume
-R 3 failed:f 1 terminal 0 0 - i0,i1 - resume
-R 1 running 2 settled 1 0 2@2:2 - - resume
+R 2 failed:r 1 settled 0 0 1@0:0 - - resume
+R 3 failed:r 1 terminal 0 0 - i0,i1 - resume
+R 1 running 1 settled 1 0 1@2:2 - - resume
 C 2 terminal 2:failed
 P 17 2:3 3 1
 N conflict@0:2,order@0:4,order@1:0,conflict@2:3
@@ -10046,7 +10046,7 @@ A 13 duplicate
 A 14 appended
 R 2 running 2 open 0 0 1@0:0 - - recover
 R 3 failed:r 1 settled 1 0 1@0:1 i1 - settled
-R 1 paused 1 terminal 0 0 - - - recover
+R 1 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:failed
 P 12 1:5 2 1
 N conflict@0:3,order@0:4,order@0:5,conflict@1:2,order@1:5
@@ -10058,7 +10058,7 @@ A 17 appended
 A 18 appended
 R 2 running 2 open 0 0 1@0:0 - - recover
 R 3 paused 1 settled 1 0 1@0:1 i1 - resume
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 3 paused 1:failed
 P 15 1:8 2 1
 N conflict@0:3,order@0:4,order@0:5,conflict@1:2,order@1:5
@@ -10067,7 +10067,7 @@ A 19 EVENT_MUTATED
 A 20 appended
 R 2 running 2 open 0 0 1@0:0 - - recover
 R 3 paused 1 settled 1 0 1@0:1 i1 - resume
-R 1 failed:f 1 terminal 1 0 - - - settled
+R 1 failed:r 1 terminal 1 0 - - - settled
 C 3 paused 1:failed
 P 16 2:0 3 1
 N conflict@0:3,order@0:4,order@0:5,conflict@1:2,order@1:5
@@ -10079,7 +10079,7 @@ O 0 0 0 0
 A 24 appended
 R 2 running 2 open 0 0 1@0:0 - - recover
 R 3 paused 1 settled 1 0 1@0:1 i1 - resume
-R 1 failed:f 1 settled 1 0 1@2:1 - - settled
+R 1 failed:r 1 settled 1 0 1@2:1 - - settled
 C 3 paused 1:failed
 P 17 2:1 3 1
 N conflict@0:3,order@0:4,order@0:5,conflict@1:2,order@1:5
@@ -10090,14 +10090,14 @@ A 27 EVENT_OUT_OF_ORDER
 A 28 appended
 R 2 running 2 settled 1 0 1@0:0,2@2:3 - - resume
 R 3 paused 1 settled 1 0 1@0:1 i1 - resume
-R 1 failed:f 1 settled 1 0 1@2:1 - - settled
+R 1 failed:r 1 settled 1 0 1@2:1 - - settled
 C 3 paused 1:failed
 P 20 2:4 3 1
 N conflict@0:3,order@0:4,order@0:5,conflict@1:2,order@1:5
 U -
 R 2 running 2 settled 1 0 1@0:0,2@2:3 - - resume
 R 3 paused 1 settled 1 0 1@0:1 i1 - resume
-R 1 failed:f 1 settled 1 0 1@2:1 - - settled
+R 1 failed:r 1 settled 1 0 1@2:1 - - settled
 C 3 paused 1:failed
 P 20 2:4 3 1
 N conflict@0:3,order@0:4,order@0:5,conflict@1:2,order@1:5
@@ -10153,8 +10153,8 @@ A 1 appended
 A 2 EVENT_OUT_OF_ORDER
 A 3 appended
 R 3 running 1 open 0 0 - - - recover
-R 2 completed 1 settled 0 0 1@0:2 - - resume
-C 2 terminal 2:completed
+R 2 failed:f 1 settled 0 0 1@0:2 - - resume
+C 2 terminal 2:failed
 P 3 0:2 1 1
 N order@0:0,order@0:1
 U -
@@ -10163,17 +10163,17 @@ A 5 appended
 A 6 appended
 A 7 EVENT_OUT_OF_ORDER
 R 3 running 1 open 0 0 - - - recover
-R 2 completed 1 settled 0 0 1@0:2 - - resume
+R 2 failed:f 1 settled 0 0 1@0:2 - - resume
 R 1 running 1 open 0 0 - - - recover
-C 1 running 2:completed
+C 1 running 2:failed
 P 5 0:4 1 1
 N order@0:0,order@0:1,order@0:3,conflict@0:4
 U -
 A 8 EVENT_MUTATED
 R 3 running 1 open 0 0 - - - recover
-R 2 completed 1 settled 0 0 1@0:2 - - resume
+R 2 failed:f 1 settled 0 0 1@0:2 - - resume
 R 1 running 1 open 0 0 - - - recover
-C 1 running 2:completed
+C 1 running 2:failed
 P 5 0:4 1 1
 N order@0:0,order@0:1,order@0:3,conflict@0:4
 U -
@@ -10183,17 +10183,17 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 appended
 A 12 appended
 R 3 running 1 open 0 0 - - - recover
-R 2 completed 1 settled 0 0 1@0:2 i1 - resume
+R 2 failed:f 1 settled 0 0 1@0:2 i1 - resume
 R 1 running 1 settled 0 0 1@0:5 i1 - recover
-C 1 running 2:completed
+C 1 running 2:failed
 P 8 0:7 1 1
 N order@0:0,order@0:1,order@0:3,conflict@0:4
 U -
 A 13 appended
 R 3 running 1 open 0 0 - - - recover
-R 2 completed 1 settled 0 0 1@0:2 i1 - resume
+R 2 failed:f 1 settled 0 0 1@0:2 i1 - resume
 R 1 running 1 settled 0 0 1@0:5 i1 - recover
-C 1 running 2:completed
+C 1 running 2:failed
 P 9 0:8 1 1
 N order@0:0,order@0:1,order@0:3,conflict@0:4,conflict@0:8
 U -
@@ -10203,7 +10203,7 @@ A 16 appended
 R 3 running 1 open 0 0 - - - recover
 R 2 running 1 settled 0 0 1@0:2 i1 - recover
 R 1 running 1 settled 0 0 1@0:5 i1 - recover
-C 2 running 2:completed
+C 2 running 2:failed
 P 10 0:9 1 1
 N order@0:0,order@0:1,order@0:3,conflict@0:4,conflict@0:8
 U -
@@ -10211,8 +10211,8 @@ A 17 appended
 A 18 appended
 R 3 running 1 open 0 0 - - - recover
 R 2 running 1 settled 0 0 1@0:2 i1 - recover
-R 1 completed 1 settled 1 0 1@0:5 i1 - settled
-C 1 terminal 1:completed
+R 1 failed:f 1 settled 1 0 1@0:5 i1 - settled
+C 1 terminal 1:failed
 P 12 0:11 1 1
 N order@0:0,order@0:1,order@0:3,conflict@0:4,conflict@0:8
 U -
@@ -10225,8 +10225,8 @@ A 24 EVENT_OUT_OF_ORDER
 A 25 appended
 A 26 duplicate
 R 3 running 1 open 0 0 - - - recover
-R 2 cancelled 1 settled 0 0 1@0:2 i1,i2 - resume
-R 1 completed 1 settled 1 0 1@0:5 i0,i1 - settled
+R 2 cancelled:u 1 settled 0 0 1@0:2 i1,i2 - resume
+R 1 failed:f 1 settled 1 0 1@0:5 i0,i1 - settled
 C 2 terminal 2:cancelled
 P 16 0:15 1 1
 N order@0:0,order@0:1,order@0:3,conflict@0:4,conflict@0:8
@@ -10255,10 +10255,10 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 EVENT_MUTATED
 A 12 appended
 A 13 appended
-R 3 failed:r 1 settled 1 0 1@0:0 - - settled
+R 3 cancelled 1 settled 1 0 1@0:0 - - settled
 R 2 running 1 settled 1 0 1@0:7 - - resume
 R 1 - 1 unadmitted 0 0 1@0:5 - - admit
-C 2 running 3:failed
+C 2 running 3:cancelled
 P 10 0:9 1 1
 N order@0:2,order@0:3
 U -
@@ -10275,8 +10275,8 @@ A 21 EVENT_OUT_OF_ORDER
 A 22 appended
 A 23 appended
 A 24 appended
-R 3 failed:f 1 settled 1 0 1@0:0 - - settled
-R 2 completed 1 settled 1 0 1@0:7 - - settled
+R 3 failed:r 1 settled 1 0 1@0:0 - - settled
+R 2 failed:f 1 settled 1 0 1@0:7 - - settled
 R 1 - 1 unadmitted 0 0 1@0:5 - - admit
 C 3 terminal 3:failed
 P 17 2:6 2 1
@@ -10286,7 +10286,7 @@ QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
 QL NO_RUN_ADMITTED
-QL RUN_ID_TAKEN
+QL ok
 QB refused identity-mismatch 17 2:2
 QB batch 1 4 17 0:1,0:2,0:3
 QB batch 6 7 17 0:6
@@ -10294,7 +10294,7 @@ X
 T log-168
 A 0 appended
 A 1 appended
-R 1 paused 1 terminal 0 0 - - - recover
+R 1 completed 1 terminal 0 0 - - - resume
 R 3 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 2 0:1 1 1
@@ -10305,7 +10305,7 @@ A 3 EVENT_MUTATED
 O 0 0 0 0
 A 4 appended
 A 5 appended
-R 1 paused 1 settled 0 0 1@0:2 i1 - recover
+R 1 completed 1 settled 0 0 1@0:2 i1 - resume
 R 3 completed 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 4 2:0 2 1
@@ -10316,7 +10316,7 @@ A 7 appended
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
 A 10 appended
-R 1 paused 1 settled 0 0 1@0:2 i1 - recover
+R 1 completed 1 settled 0 0 1@0:2 i1 - resume
 R 3 completed 1 terminal 0 0 - i0 - resume
 R 2 - 1 unadmitted 0 0 1@2:1 i2 - admit
 C 3 terminal 3:completed
@@ -10334,7 +10334,7 @@ A 17 appended
 A 18 duplicate
 A 19 EVENT_OUT_OF_ORDER
 A 20 EVENT_OUT_OF_ORDER
-R 1 running 1 settled 0 0 1@0:2 i1 - recover
+R 1 paused 1 settled 0 0 1@0:2 i1 - recover
 R 3 cancelled 1 terminal 0 0 - i0 - resume
 R 2 paused 1 settled 0 0 1@2:1 i2 - recover
 C 3 terminal 3:cancelled
@@ -10352,13 +10352,13 @@ QB refused identity-mismatch 11 2:2
 X
 T log-169
 A 0 appended
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 C 3 terminal 3:failed
 P 1 0:0 1 1
 N order@0:0
 U 3:1
 A 1 appended
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 R 2 - 1 unadmitted 1 0 - - - admit
 C 3 terminal 3:failed
 P 2 0:1 1 1
@@ -10369,9 +10369,9 @@ A 3 appended
 O 0 0 0 0
 A 4 appended
 A 5 appended
-R 3 failed:f 1 settled 0 0 1@0:3 - - resume
+R 3 failed:r 1 settled 0 0 1@0:3 - - resume
 R 2 - 1 unadmitted 1 0 - i0 - admit
-R 1 failed:f 1 terminal 0 0 - - - resume
+R 1 failed:r 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 6 0:5 1 1
 N order@0:0,order@0:5
@@ -10436,30 +10436,30 @@ QB batch 11 15 15 1:5,1:6,1:7,1:8
 X
 T log-170
 A 0 appended
-R 3 completed 1 terminal 0 0 - - - resume
-C 3 terminal 3:completed
+R 3 failed:f 1 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 1 0:0 1 1
 N order@0:0
 U 3:1
 A 1 appended
-R 3 completed 1 terminal 0 0 - - - resume
+R 3 failed:f 1 terminal 0 0 - - - resume
 R 2 - 1 unadmitted 0 0 - i0 - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 2 0:1 1 1
 N order@0:0
 U 3:1
 A 2 EVENT_OUT_OF_ORDER
 A 3 EVENT_MUTATED
-R 3 completed 1 terminal 0 0 - - - resume
+R 3 failed:f 1 terminal 0 0 - - - resume
 R 2 - 1 unadmitted 0 0 - i0 - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 2 0:1 1 1
 N order@0:0
 U 3:1
 A 4 appended
-R 3 completed 1 terminal 0 0 - - - resume
+R 3 failed:f 1 terminal 0 0 - - - resume
 R 2 - 1 unadmitted 0 0 - i0,i2 - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 3 1:0 2 1
 N order@0:0
 U 3:1
@@ -10469,22 +10469,22 @@ A 7 appended
 A 8 appended
 R 3 paused 1 settled 0 0 1@1:1 - - recover
 R 2 - 1 unadmitted 0 0 - i0,i2 - admit
-R 1 failed:r 1 terminal 0 0 - i1 - resume
-C 1 terminal 1:failed
+R 1 cancelled 1 terminal 0 0 - i1 - resume
+C 1 terminal 1:cancelled
 P 7 1:4 2 1
 N order@0:0,order@1:4
 U 1:1
 R 3 paused 1 settled 0 0 1@1:1 - - recover
 R 2 - 1 unadmitted 0 0 - i0,i2 - admit
-R 1 failed:r 1 terminal 0 0 - i1 - resume
-C 1 terminal 1:failed
+R 1 cancelled 1 terminal 0 0 - i1 - resume
+C 1 terminal 1:cancelled
 P 7 1:4 2 1
 N order@0:0,order@1:4
 U 1:1
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QL RUN_ID_TAKEN
+QL ok
 QL ok
 QB refused cursor-ahead 7 -
 QB refused identity-mismatch 7 0:1
@@ -10507,16 +10507,16 @@ A 7 appended
 A 8 appended
 R 1 completed 1 terminal 0 0 - i0 - resume
 R 3 completed 1 terminal 0 0 - i1 - resume
-R 2 paused 1 terminal 0 0 - - - recover
-C 3 terminal 1:completed
+R 2 completed 1 terminal 0 0 - - - resume
+C 3 terminal 2:completed
 P 6 2:4 2 1
 N order@2:0,order@2:2,order@2:3,order@2:4
 U 1:1,3:1,2:1
 A 9 appended
 R 1 completed 1 terminal 0 0 - i0 - resume
 R 3 completed 1 terminal 0 0 - i1 - resume
-R 2 paused 1 terminal 0 0 - - - recover
-C 3 terminal 1:completed
+R 2 completed 1 terminal 0 0 - - - resume
+C 3 terminal 2:completed
 P 7 2:5 2 1
 N order@2:0,order@2:2,order@2:3,order@2:4
 U 1:1,3:1,2:1
@@ -10524,8 +10524,8 @@ A 10 appended
 A 11 appended
 R 1 completed 1 terminal 0 0 - i0 - resume
 R 3 completed 1 terminal 1 0 - i1 - settled
-R 2 paused 1 terminal 0 0 - - - recover
-C 2 paused 1:completed
+R 2 completed 1 terminal 0 0 - - - resume
+C 2 terminal 2:completed
 P 9 2:7 2 1
 N order@2:0,order@2:2,order@2:3,order@2:4,order@2:6
 U 1:1,3:1,2:1
@@ -10567,9 +10567,9 @@ U 1:1,3:1
 A 18 appended
 A 19 appended
 R 1 completed 1 terminal 0 0 - i0 - resume
-R 3 failed:r 1 terminal 1 0 - i1 - settled
+R 3 cancelled 1 terminal 1 0 - i1 - settled
 R 2 running 1 open 1 0 - i1,i2 - resume
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 16 4:4 3 1
 N order@2:0,order@2:2,order@2:3,order@2:4,order@2:6
 U 1:1,3:1
@@ -10590,7 +10590,7 @@ A 3 appended
 A 4 appended
 O 0 0 0 0
 A 5 appended
-R 3 failed:f 1 settled 0 0 1@0:4 - - resume
+R 3 failed:r 1 settled 0 0 1@0:4 - - resume
 R 2 failed:f 1 terminal 1 0 - - - settled
 R 1 running 1 open 0 0 - - - recover
 C 1 running 2:failed
@@ -10602,20 +10602,20 @@ A 7 appended
 A 8 appended
 O 0 0 0 0
 A 9 appended
-R 3 failed:f 1 settled 1 0 1@0:4 - - settled
+R 3 failed:r 1 settled 1 0 1@0:4 - - settled
 R 2 failed:f 1 settled 1 0 1@2:0 - - settled
-R 1 paused 1 terminal 0 0 - - - recover
-C 1 paused 2:failed
+R 1 completed 1 terminal 0 0 - - - resume
+C 1 terminal 1:completed
 P 10 3:0 4 1
 N order@0:0,order@0:1,order@0:3,conflict@3:0
 U 1:1
 A 10 appended
 A 11 appended
 A 12 appended
-R 3 failed:f 1 settled 1 0 1@0:4 - - settled
+R 3 failed:r 1 settled 1 0 1@0:4 - - settled
 R 2 failed:f 1 settled 1 0 1@2:0 - - settled
-R 1 paused 1 settled 0 0 1@3:2 - - recover
-C 1 paused 2:failed
+R 1 completed 1 settled 0 0 1@3:2 - - resume
+C 1 terminal 1:completed
 P 13 3:3 4 1
 N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3
 U -
@@ -10623,69 +10623,69 @@ A 13 appended
 A 14 appended
 A 15 appended
 A 16 appended
-R 3 failed:f 1 settled 1 0 1@0:4 - - settled
+R 3 failed:r 1 settled 1 0 1@0:4 - - settled
 R 2 running 1 settled 1 0 1@2:0 - - resume
-R 1 running 2 open 0 0 1@3:2 - - recover
-C 2 running 2:failed
+R 1 running 1 settled 0 0 1@3:2 - - recover
+C 2 running 1:completed
 P 17 3:7 4 1
 N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4
 U -
 A 17 appended
 A 18 appended
-R 3 failed:f 1 settled 1 0 1@0:4 - - settled
+R 3 failed:r 1 settled 1 0 1@0:4 - - settled
 R 2 running 1 settled 1 0 1@2:0 - - resume
-R 1 running 2 settled 0 0 1@3:2,2@3:9 - - recover
-C 2 running 2:failed
+R 1 running 1 settled 0 0 1@3:2 - - recover
+C 2 running 1:completed
 P 19 3:9 4 1
-N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4
+N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:9
 U -
 A 19 EVENT_OUT_OF_ORDER
-R 3 failed:f 1 settled 1 0 1@0:4 - - settled
+R 3 failed:r 1 settled 1 0 1@0:4 - - settled
 R 2 running 1 settled 1 0 1@2:0 - - resume
-R 1 running 2 settled 0 0 1@3:2,2@3:9 - - recover
-C 2 running 2:failed
+R 1 running 1 settled 0 0 1@3:2 - - recover
+C 2 running 1:completed
 P 19 3:9 4 1
-N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4
+N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:9
 U -
 A 20 appended
-R 3 failed:f 1 settled 1 0 1@0:4 - - settled
+R 3 failed:r 1 settled 1 0 1@0:4 - - settled
 R 2 running 1 settled 1 0 1@2:0 - - resume
-R 1 running 2 settled 0 0 1@3:2,2@3:9 - - recover
-C 2 running 2:failed
+R 1 running 1 settled 0 0 1@3:2 - - recover
+C 2 running 1:completed
 P 20 3:10 4 1
-N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:10
+N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:9,conflict@3:10
 U -
 A 21 appended
 O 0 0 0 0
 A 22 EVENT_OUT_OF_ORDER
 R 3 completed 1 settled 1 0 1@0:4 - - settled
 R 2 running 1 settled 1 0 1@2:0 - - resume
-R 1 running 2 settled 0 0 1@3:2,2@3:9 - - recover
+R 1 running 1 settled 0 0 1@3:2 - - recover
 C 3 terminal 3:completed
 P 21 3:11 4 1
-N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:10
+N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:9,conflict@3:10
 U -
 A 23 appended
 A 24 appended
-R 3 running 1 settled 1 0 1@0:4 - - resume
+R 3 running 2 open 1 0 1@0:4 - - resume
 R 2 running 1 settled 1 0 1@2:0 - - resume
-R 1 running 2 settled 0 0 1@3:2,2@3:9 - - recover
+R 1 running 1 settled 0 0 1@3:2 - - recover
 C 3 running 3:cancelled
 P 23 3:13 4 1
-N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:10
+N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:9,conflict@3:10
 U -
 A 25 appended
 A 26 duplicate
-R 3 running 1 settled 1 0 1@0:4 - - resume
+R 3 running 2 settled 1 0 1@0:4,2@3:14 - - resume
 R 2 running 1 settled 1 0 1@2:0 - - resume
-R 1 running 2 settled 0 0 1@3:2,2@3:9 - - recover
+R 1 running 1 settled 0 0 1@3:2 - - recover
 C 3 running 3:cancelled
 P 24 3:14 4 1
-N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:10
+N order@0:0,order@0:1,order@0:3,conflict@3:0,conflict@3:3,order@3:4,conflict@3:9,conflict@3:10
 U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
-QS skipped
+QS SETTLEMENT_CONFLICT
 QL RUN_ID_TAKEN
 QL ok
 QB refused identity-mismatch 24 3:12
@@ -10730,12 +10730,12 @@ A 18 appended
 A 19 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 20 appended
-R 3 running 1 settled 1 0 1@4:1 - - resume
+R 3 running 2 open 1 0 1@4:1 - - resume
 R 2 completed 1 settled 0 0 1@0:1 - - resume
 R 1 - 1 unadmitted 1 0 1@2:0 i0 - admit
 C 3 running 3:failed
 P 14 4:3 4 1
-N conflict@1:1,conflict@2:2,order@2:3,order@2:5,order@4:2
+N conflict@1:1,conflict@2:2,order@2:3,order@4:2
 U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
@@ -10765,7 +10765,7 @@ U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QL CHAT_RUN_LIVE
+QL NO_RUN_ADMITTED
 QL NO_RUN_ADMITTED
 QB batch 1 4 5 0:1,1:0,1:1
 QB refused identity-mismatch 5 1:2
@@ -10775,19 +10775,19 @@ T log-175
 A 0 appended
 A 1 EVENT_MUTATED
 A 2 appended
-R 1 completed 1 settled 0 0 1@0:0 - - resume
-C 1 terminal 1:completed
+R 1 failed:f 1 settled 0 0 1@0:0 - - resume
+C 1 terminal 1:failed
 P 2 0:1 1 1
 N order@0:1
 U -
 A 3 duplicate
-R 1 completed 1 settled 0 0 1@0:0 - - resume
-C 1 terminal 1:completed
+R 1 failed:f 1 settled 0 0 1@0:0 - - resume
+C 1 terminal 1:failed
 P 2 0:1 1 1
 N order@0:1
 U -
-R 1 completed 1 settled 0 0 1@0:0 - - resume
-C 1 terminal 1:completed
+R 1 failed:f 1 settled 0 0 1@0:0 - - resume
+C 1 terminal 1:failed
 P 2 0:1 1 1
 N order@0:1
 U -
@@ -10812,7 +10812,7 @@ A 6 duplicate
 A 7 EVENT_OUT_OF_ORDER
 A 8 appended
 R 1 paused 1 settled 0 0 1@0:4 - - recover
-R 3 failed:f 1 settled 0 0 1@0:1 - - resume
+R 3 failed:r 1 settled 0 0 1@0:1 - - resume
 C 3 terminal 3:failed
 P 5 0:4 1 1
 N order@0:0,order@0:3
@@ -10820,7 +10820,7 @@ U -
 A 9 appended
 A 10 appended
 R 1 paused 1 settled 0 0 1@0:4 - - recover
-R 3 failed:f 1 settled 0 0 1@0:1 - - resume
+R 3 failed:r 1 settled 0 0 1@0:1 - - resume
 R 2 - 1 unadmitted 0 0 - i2 - admit
 C 3 terminal 3:failed
 P 7 0:6 1 1
@@ -10831,7 +10831,7 @@ A 12 appended
 A 13 appended
 A 14 EVENT_OUT_OF_ORDER
 R 1 paused 1 settled 0 0 1@0:4 - - recover
-R 3 failed:f 1 settled 0 0 1@0:1 - - resume
+R 3 failed:r 1 settled 0 0 1@0:1 - - resume
 R 2 admitted 1 open 0 0 - i2 - recover
 C 2 admitted 3:failed
 P 9 0:8 1 1
@@ -10845,9 +10845,9 @@ A 18 appended
 A 19 appended
 A 20 appended
 R 1 paused 1 settled 1 0 1@0:4 - - resume
-R 3 failed:f 1 settled 0 0 1@0:1 - - resume
-R 2 paused 1 settled 1 0 1@0:10 i2 - resume
-C 2 paused 3:failed
+R 3 failed:r 1 settled 0 0 1@0:1 - - resume
+R 2 completed 1 settled 1 0 1@0:10 i2 - settled
+C 2 terminal 2:completed
 P 15 2:1 2 1
 N order@0:0,order@0:3,conflict@0:5,conflict@0:7
 U -
@@ -10859,22 +10859,22 @@ A 24 appended
 A 25 appended
 A 26 appended
 R 1 paused 1 settled 1 0 1@0:4 - - resume
-R 3 running 1 settled 1 0 1@0:1 - - resume
-R 2 paused 1 settled 1 0 1@0:10 i2 - resume
-C 3 running 3:failed
+R 3 running 2 open 1 0 1@0:1 - - resume
+R 2 completed 1 settled 1 0 1@0:10 i2 - settled
+C 3 running 2:completed
 P 20 2:6 2 1
 N order@0:0,order@0:3,conflict@0:5,conflict@0:7,conflict@2:2,conflict@2:3,conflict@2:6
 U -
 A 27 appended
 R 1 paused 1 settled 1 0 1@0:4 - - resume
-R 3 running 1 settled 1 0 1@0:1 - - resume
-R 2 paused 1 settled 1 0 1@0:10 i2 - resume
-C 3 running 3:failed
+R 3 running 2 open 1 0 1@0:1 - - resume
+R 2 completed 1 settled 1 0 1@0:10 i2 - settled
+C 3 running 2:completed
 P 21 2:7 2 1
 N order@0:0,order@0:3,conflict@0:5,conflict@0:7,conflict@2:2,conflict@2:3,conflict@2:6
 U -
-QS SETTLEMENT_CONFLICT
-QS SETTLEMENT_CONFLICT
+QS appended
+QS appended
 QS SETTLEMENT_CONFLICT
 QL RUN_ID_TAKEN
 QL RUN_ID_TAKEN
@@ -10893,8 +10893,8 @@ A 1 duplicate
 A 2 appended
 A 3 appended
 R 2 - 1 unadmitted 1 0 - - - admit
-R 1 failed:r 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 1 cancelled 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 3 1:1 2 1
 N order@1:0
 U 1:1
@@ -10903,9 +10903,9 @@ A 5 appended
 A 6 appended
 A 7 appended
 R 2 - 1 unadmitted 1 0 1@1:5 - - admit
-R 1 failed:r 1 terminal 1 0 - i1 - settled
-R 3 completed 1 terminal 0 0 - - - resume
-C 3 terminal 3:completed
+R 1 cancelled 1 terminal 1 0 - i1 - settled
+R 3 failed:f 1 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 7 1:5 2 1
 N order@1:0,order@1:2
 U 1:1,3:1
@@ -10916,10 +10916,10 @@ A 10 appended
 A 11 appended
 A 12 duplicate
 A 13 appended
-R 2 completed 1 settled 1 0 1@1:5 - - settled
-R 1 cancelled 1 terminal 1 0 - i1 - settled
+R 2 failed:f 1 settled 1 0 1@1:5 - - settled
+R 1 cancelled:u 1 terminal 1 0 - i1 - settled
 R 3 running 1 open 0 0 - - - recover
-C 3 running 2:completed
+C 3 running 2:failed
 P 11 1:9 2 1
 N order@1:0,order@1:2,order@1:8
 U 1:1
@@ -10970,10 +10970,10 @@ A 4 appended
 A 5 appended
 A 6 appended
 A 7 appended
-R 3 failed:r 1 settled 0 0 1@0:1 - - resume
+R 3 cancelled 1 settled 0 0 1@0:1 - - resume
 R 2 running 1 open 0 0 - i0 - recover
 R 1 - 1 unadmitted 1 0 - - - admit
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 7 3:0 4 1
 N order@0:0,order@2:0
 U -
@@ -10986,19 +10986,19 @@ A 13 EVENT_OUT_OF_ORDER
 A 14 duplicate
 A 15 appended
 A 16 appended
-R 3 running 2 open 0 0 1@0:1 - - recover
+R 3 running 1 settled 0 0 1@0:1 - - recover
 R 2 running 1 settled 0 0 1@3:5 i0,i2 - recover
 R 1 - 1 unadmitted 1 0 1@3:2 - - admit
-C 3 running 3:failed
+C 3 running 3:cancelled
 P 13 3:6 4 1
 N order@0:0,order@2:0
 U -
 A 17 appended
 A 18 EVENT_OUT_OF_ORDER
-R 3 running 2 open 0 0 1@0:1 i0 - recover
+R 3 running 1 settled 0 0 1@0:1 i0 - recover
 R 2 running 1 settled 0 0 1@3:5 i0,i2 - recover
 R 1 - 1 unadmitted 1 0 1@3:2 - - admit
-C 3 running 3:failed
+C 3 running 3:cancelled
 P 14 3:7 4 1
 N order@0:0,order@2:0
 U -
@@ -11017,12 +11017,12 @@ A 1 appended
 A 2 appended
 A 3 appended
 A 4 appended
-R 1 failed:r 1 terminal 0 0 - - - resume
+R 1 cancelled 1 terminal 0 0 - - - resume
 R 2 completed 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 0 0 1@0:4 - - admit
 C 2 terminal 2:completed
 P 5 0:4 1 1
-N order@0:0
+N order@0:0,order@0:1
 U 1:1,2:1
 A 5 EVENT_MUTATED
 O 0 0 0 0
@@ -11030,38 +11030,38 @@ A 6 EVENT_MUTATED
 A 7 appended
 A 8 duplicate
 A 9 EVENT_MUTATED
-R 1 failed:r 1 terminal 0 0 - - - resume
+R 1 cancelled 1 terminal 0 0 - - - resume
 R 2 completed 1 terminal 0 0 - - - resume
-R 3 paused 1 settled 0 0 1@0:4 - - recover
-C 3 paused 2:completed
+R 3 completed 1 settled 0 0 1@0:4 - - resume
+C 3 terminal 3:completed
 P 6 0:5 1 1
-N order@0:0,order@0:5
+N order@0:0,order@0:1,order@0:5
 U 1:1,2:1
 A 10 appended
 A 11 appended
-R 1 failed:r 1 settled 0 0 1@0:6 - - resume
+R 1 cancelled 1 settled 0 0 1@0:6 - - resume
 R 2 running 1 open 0 0 - - - recover
-R 3 paused 1 settled 0 0 1@0:4 - - recover
-C 2 running 2:completed
+R 3 completed 1 settled 0 0 1@0:4 - - resume
+C 2 running 3:completed
 P 8 0:7 1 1
-N order@0:0,order@0:5
+N order@0:0,order@0:1,order@0:5
 U -
 O 0 0 0 0
 A 12 appended
-R 1 failed:r 1 settled 0 0 1@0:6 - - resume
+R 1 cancelled 1 settled 0 0 1@0:6 - - resume
 R 2 running 1 open 0 0 - - - recover
 R 3 completed 1 settled 0 0 1@0:4 - - resume
 C 3 terminal 3:completed
 P 9 0:8 1 1
-N order@0:0,order@0:5
+N order@0:0,order@0:1,order@0:5
 U -
 A 13 EVENT_OUT_OF_ORDER
-R 1 failed:r 1 settled 0 0 1@0:6 - - resume
+R 1 cancelled 1 settled 0 0 1@0:6 - - resume
 R 2 running 1 open 0 0 - - - recover
 R 3 completed 1 settled 0 0 1@0:4 - - resume
 C 3 terminal 3:completed
 P 9 0:8 1 1
-N order@0:0,order@0:5
+N order@0:0,order@0:1,order@0:5
 U -
 A 14 EVENT_MUTATED
 O 0 0 0 0
@@ -11070,12 +11070,12 @@ A 16 appended
 A 17 appended
 A 18 appended
 A 19 appended
-R 1 failed:f 1 settled 0 0 1@0:6 - - resume
+R 1 failed:r 1 settled 0 0 1@0:6 - - resume
 R 2 paused 1 settled 0 0 1@2:1 i2 - recover
 R 3 running 1 settled 0 0 1@0:4 - - recover
 C 1 terminal 1:failed
 P 14 2:3 2 1
-N order@0:0,order@0:5
+N order@0:0,order@0:1,order@0:5
 U -
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
@@ -11273,8 +11273,8 @@ A 22 appended
 A 23 appended
 R 3 running 2 settled 0 0 1@0:1,2@0:6 - - recover
 R 1 running 1 settled 0 0 1@0:5 i0 - recover
-R 2 failed:r 1 settled 1 0 1@0:10 - - settled
-C 3 running 2:failed
+R 2 cancelled 1 settled 1 0 1@0:10 - - settled
+C 3 running 2:cancelled
 P 20 3:4 3 1
 N conflict@0:8,order@0:11,conflict@0:12,conflict@0:13,order@3:2,order@3:4
 U -
@@ -11302,20 +11302,20 @@ N order@0:0,order@0:1,conflict@0:3
 U -
 A 5 appended
 A 6 appended
-R 3 completed 1 terminal 0 0 - - - resume
+R 3 failed:f 1 terminal 0 0 - - - resume
 R 2 running 1 open 0 0 - i1 - recover
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 6 0:5 1 1
 N order@0:0,order@0:1,conflict@0:3
 U 3:1
 A 7 appended
-R 3 completed 1 terminal 0 0 - - - resume
+R 3 failed:f 1 terminal 0 0 - - - resume
 R 2 running 1 open 0 0 - i1 - recover
 R 1 - 1 unadmitted 0 0 1@0:2 - - admit
-C 2 running 3:completed
+C 2 running 3:failed
 P 7 0:6 1 1
-N order@0:0,order@0:1,conflict@0:3,order@0:6
+N order@0:0,order@0:1,conflict@0:3
 U 3:1
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
@@ -11368,7 +11368,7 @@ A 18 EVENT_MUTATED
 A 19 appended
 A 20 appended
 R 2 paused 1 terminal 1 0 - i1 - resume
-R 3 failed:f 1 settled 1 0 1@0:2 i0 - settled
+R 3 failed:r 1 settled 1 0 1@0:2 i0 - settled
 R 1 completed 1 settled 1 0 1@3:3 i1 - settled
 C 3 terminal 3:failed
 P 17 4:1 5 1
@@ -11377,7 +11377,7 @@ U 2:1
 A 21 appended
 A 22 appended
 R 2 paused 1 terminal 1 0 - i1 - resume
-R 3 failed:f 1 settled 1 0 1@0:2 i0 - settled
+R 3 failed:r 1 settled 1 0 1@0:2 i0 - settled
 R 1 completed 1 settled 1 0 1@3:3 i1 - settled
 C 3 terminal 3:failed
 P 19 4:3 5 1
@@ -11387,7 +11387,7 @@ QS skipped
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
 QL RUN_ID_TAKEN
-QL RUN_ID_TAKEN
+QL ok
 QB batch 19 19 19 -
 QB refused cursor-ahead 19 -
 QB batch 8 11 19 2:0,2:1,3:0
@@ -11569,7 +11569,7 @@ U 1:1
 A 1 appended
 A 2 appended
 R 1 paused 1 terminal 0 0 - - - recover
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 3 cancelled:u 1 terminal 0 0 - - - resume
 R 2 paused 1 terminal 0 0 - - - recover
 C 2 paused 3:cancelled
 P 3 1:0 2 1
@@ -11583,9 +11583,9 @@ A 7 appended
 O 0 0 0 0
 A 8 EVENT_MUTATED
 R 1 paused 1 terminal 0 0 - - - recover
-R 3 paused 1 terminal 0 0 - i1 - recover
-R 2 cancelled 1 terminal 0 0 - - - resume
-C 3 paused 2:cancelled
+R 3 completed 1 terminal 0 0 - i1 - resume
+R 2 cancelled:u 1 terminal 0 0 - - - resume
+C 3 terminal 3:completed
 P 7 1:4 2 1
 N order@0:0,order@0:1,order@1:0
 U 1:1,3:1,2:1
@@ -11623,7 +11623,7 @@ QS SETTLEMENT_CONFLICT
 QS skipped
 QL RUN_ID_TAKEN
 QL ok
-QB batch 3 7 20 1:1,1:2,1:3,1:4
+QB batch 3 6 20 1:1,1:2,1:3
 QB batch 8 12 20 1:6,1:7,1:8,1:9
 QB batch 17 18 20 1:15
 X
@@ -11640,7 +11640,7 @@ N -
 U -
 A 4 appended
 A 5 EVENT_OUT_OF_ORDER
-R 3 cancelled 1 terminal 1 0 - - - settled
+R 3 cancelled:u 1 terminal 1 0 - - - settled
 C 3 terminal 3:cancelled
 P 3 0:2 1 1
 N -
@@ -11649,7 +11649,7 @@ A 6 appended
 A 7 appended
 O 0 0 0 0
 A 8 appended
-R 3 cancelled 1 settled 1 0 1@0:3 - - settled
+R 3 cancelled:u 1 settled 1 0 1@0:3 - - settled
 R 1 - 1 unadmitted 0 0 1@3:0 - - admit
 C 3 terminal 3:cancelled
 P 6 3:1 2 1
@@ -11662,9 +11662,9 @@ A 12 appended
 A 13 appended
 A 14 EVENT_MUTATED
 A 15 duplicate
-R 3 cancelled 1 settled 1 0 1@0:3 - - settled
-R 1 running 1 settled 0 0 1@3:0 - - recover
-C 1 running 3:cancelled
+R 3 cancelled:u 1 settled 1 0 1@0:3 - - settled
+R 1 paused 1 settled 0 0 1@3:0 - - recover
+C 1 paused 3:cancelled
 P 9 3:4 2 1
 N conflict@3:1,order@3:2
 U -
@@ -11682,7 +11682,7 @@ A 25 appended
 A 26 appended
 A 27 appended
 A 28 appended
-R 3 failed:f 1 settled 1 0 1@0:3 - - settled
+R 3 failed:r 1 settled 1 0 1@0:3 - - settled
 R 1 paused 1 settled 1 0 1@3:0 - - resume
 R 2 running 1 settled 1 0 1@3:5 - - resume
 C 1 paused 3:failed
@@ -11725,9 +11725,9 @@ X
 T log-191
 A 0 appended
 A 1 appended
-R 2 failed:r 1 terminal 0 0 - - - resume
+R 2 cancelled 1 terminal 0 0 - - - resume
 R 3 - 1 unadmitted 1 0 - - - admit
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 2 1:0 2 1
 N order@0:0
 U 2:1
@@ -11738,7 +11738,7 @@ A 5 appended
 A 6 appended
 A 7 appended
 A 8 appended
-R 2 failed:r 1 terminal 1 0 - - - settled
+R 2 cancelled 1 terminal 1 0 - - - settled
 R 3 failed:f 1 terminal 1 0 - - - settled
 R 1 - 1 unadmitted 0 0 - i2 - admit
 C 3 terminal 3:failed
@@ -11746,7 +11746,7 @@ P 8 3:0 4 1
 N order@0:0,order@2:0,order@2:2
 U 2:1,3:1
 A 9 EVENT_MUTATED
-R 2 failed:r 1 terminal 1 0 - - - settled
+R 2 cancelled 1 terminal 1 0 - - - settled
 R 3 failed:f 1 terminal 1 0 - - - settled
 R 1 - 1 unadmitted 0 0 - i2 - admit
 C 3 terminal 3:failed
@@ -11757,7 +11757,7 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 duplicate
 A 12 duplicate
 A 13 appended
-R 2 failed:r 1 settled 1 0 1@3:1 - - settled
+R 2 cancelled 1 settled 1 0 1@3:1 - - settled
 R 3 failed:f 1 terminal 1 0 - - - settled
 R 1 - 1 unadmitted 0 0 - i2 - admit
 C 3 terminal 3:failed
@@ -11766,7 +11766,7 @@ N order@0:0,order@2:0,order@2:2
 U 3:1
 O 0 0 0 0
 A 14 appended
-R 2 failed:r 1 settled 1 0 1@3:1 i0 - settled
+R 2 cancelled 1 settled 1 0 1@3:1 i0 - settled
 R 3 failed:f 1 terminal 1 0 - - - settled
 R 1 - 1 unadmitted 0 0 - i2 - admit
 C 3 terminal 3:failed
@@ -11779,7 +11779,7 @@ A 17 duplicate
 A 18 duplicate
 A 19 appended
 A 20 duplicate
-R 2 failed:r 1 settled 1 0 1@3:1 i0 - settled
+R 2 cancelled 1 settled 1 0 1@3:1 i0 - settled
 R 3 completed 1 settled 1 0 1@3:4 - - settled
 R 1 running 1 open 0 0 - i2 - recover
 C 3 terminal 3:completed
@@ -11789,20 +11789,20 @@ U -
 A 21 EVENT_MUTATED
 A 22 appended
 A 23 appended
-R 2 completed 1 settled 1 0 1@3:1 i0 - settled
+R 2 failed:f 1 settled 1 0 1@3:1 i0 - settled
 R 3 completed 1 settled 1 0 1@3:4 - - settled
 R 1 running 1 open 0 0 - i2 - recover
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 15 3:7 4 1
 N order@0:0,order@2:0,order@2:2,order@3:3
 U -
 A 24 appended
 A 25 appended
 A 26 appended
-R 2 completed 1 settled 1 0 1@3:1 i0 - settled
+R 2 failed:f 1 settled 1 0 1@3:1 i0 - settled
 R 3 paused 1 settled 1 0 1@3:4 - - resume
 R 1 running 1 open 0 0 - i0,i2 - recover
-C 3 paused 2:completed
+C 3 paused 2:failed
 P 18 5:1 5 1
 N order@0:0,order@2:0,order@2:2,order@3:3,conflict@5:1
 U -
@@ -11865,22 +11865,22 @@ A 6 appended
 A 7 duplicate
 A 8 appended
 R 3 paused 1 terminal 0 0 - - - recover
-R 1 failed:r 1 settled 0 0 1@1:2 - - resume
+R 1 cancelled 1 settled 0 0 1@1:2 - - resume
 R 2 admitted 1 settled 0 0 1@1:1 - - recover
-C 2 admitted 1:failed
+C 2 admitted 1:cancelled
 P 6 1:2 2 1
 N order@0:0,order@0:1
 U 3:1
 A 9 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
-R 1 failed:r 1 settled 0 0 1@1:2 - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
+R 1 cancelled 1 settled 0 0 1@1:2 - - resume
 R 2 admitted 1 settled 0 0 1@1:1 - - recover
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 7 1:3 2 1
 N order@0:0,order@0:1
 U 3:1
 A 10 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
 R 1 completed 1 settled 0 0 1@1:2 - - resume
 R 2 admitted 1 settled 0 0 1@1:1 - - recover
 C 1 terminal 1:completed
@@ -11888,7 +11888,7 @@ P 8 1:4 2 1
 N order@0:0,order@0:1
 U 3:1
 A 11 EVENT_OUT_OF_ORDER
-R 3 failed:r 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
 R 1 completed 1 settled 0 0 1@1:2 - - resume
 R 2 admitted 1 settled 0 0 1@1:1 - - recover
 C 1 terminal 1:completed
@@ -11896,7 +11896,7 @@ P 8 1:4 2 1
 N order@0:0,order@0:1
 U 3:1
 A 12 appended
-R 3 failed:r 1 terminal 0 0 - - - resume
+R 3 cancelled 1 terminal 0 0 - - - resume
 R 1 completed 1 settled 0 0 1@1:2 - - resume
 R 2 running 1 settled 0 0 1@1:1 - - recover
 C 2 running 1:completed
@@ -11906,7 +11906,7 @@ U 3:1
 A 13 appended
 O 0 0 0 0
 A 14 EVENT_MUTATED
-R 3 failed:r 1 settled 0 0 1@2:1 - - resume
+R 3 cancelled 1 settled 0 0 1@2:1 - - resume
 R 1 completed 1 settled 0 0 1@1:2 - - resume
 R 2 running 1 settled 0 0 1@1:1 - - recover
 C 2 running 1:completed
@@ -11914,7 +11914,7 @@ P 10 2:1 3 1
 N order@0:0,order@0:1
 U -
 A 15 appended
-R 3 failed:r 1 settled 0 0 1@2:1 - - resume
+R 3 cancelled 1 settled 0 0 1@2:1 - - resume
 R 1 completed 1 settled 0 0 1@1:2 - - resume
 R 2 running 1 settled 0 0 1@1:1 - - recover
 C 2 running 1:completed
@@ -11922,7 +11922,7 @@ P 11 2:2 3 1
 N order@0:0,order@0:1,conflict@2:2
 U -
 A 16 EVENT_MUTATED
-R 3 failed:r 1 settled 0 0 1@2:1 - - resume
+R 3 cancelled 1 settled 0 0 1@2:1 - - resume
 R 1 completed 1 settled 0 0 1@1:2 - - resume
 R 2 running 1 settled 0 0 1@1:1 - - recover
 C 2 running 1:completed
@@ -11970,7 +11970,7 @@ A 12 appended
 O 0 0 0 0
 A 13 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 2 running 1 settled 1 0 1@0:1 - - resume
+R 2 paused 1 settled 1 0 1@0:1 - - resume
 R 3 admitted 1 open 1 0 - i2 - resume
 C 1 terminal 1:completed
 P 12 2:1 3 1
@@ -11989,11 +11989,11 @@ A 22 appended
 A 23 appended
 A 24 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 2 cancelled 1 settled 1 0 1@0:1 i1 - settled
+R 2 cancelled:u 2 settled 1 0 1@0:1,2@3:4 i1 - settled
 R 3 cancelled 1 terminal 1 0 - i2 - settled
 C 3 terminal 3:cancelled
 P 19 3:4 4 1
-N order@0:0,order@1:2,order@3:3,conflict@3:4
+N order@0:0,order@1:2,order@3:3
 U 1:1,3:1
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
@@ -12002,7 +12002,7 @@ QL NO_RUN_ADMITTED
 QL ok
 QB batch 17 19 19 3:3,3:4
 QB batch 17 19 19 3:3,3:4
-QB batch 14 18 19 3:0,3:1,3:2,3:3
+QB batch 14 17 19 3:0,3:1,3:2
 X
 T log-195
 A 0 appended
@@ -12010,7 +12010,7 @@ A 1 duplicate
 A 2 appended
 A 3 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 completed 1 terminal 0 0 - - - resume
+R 3 failed:f 1 terminal 0 0 - - - resume
 C 1 terminal 1:completed
 P 3 0:2 1 1
 N order@0:0,order@0:1
@@ -12022,7 +12022,7 @@ A 7 EVENT_OUT_OF_ORDER
 A 8 appended
 A 9 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 completed 1 settled 0 0 1@0:4 - - resume
+R 3 failed:f 1 settled 0 0 1@0:4 - - resume
 R 2 - 1 unadmitted 0 0 1@0:3 - - admit
 C 1 terminal 1:completed
 P 5 0:4 1 1
@@ -12032,7 +12032,7 @@ O 0 0 0 0
 A 10 appended
 A 11 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 completed 1 settled 0 0 1@0:4 - - resume
+R 3 failed:f 1 settled 0 0 1@0:4 - - resume
 R 2 - 1 unadmitted 0 0 1@0:3 - - admit
 C 1 terminal 1:completed
 P 7 0:6 1 1
@@ -12042,7 +12042,7 @@ A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_OUT_OF_ORDER
 A 14 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 completed 1 settled 0 0 1@0:4 - - resume
+R 3 failed:f 1 settled 0 0 1@0:4 - - resume
 R 2 running 1 settled 0 0 1@0:3 - - recover
 C 2 running 1:completed
 P 8 0:7 1 1
@@ -12050,14 +12050,14 @@ N order@0:0,order@0:1,conflict@0:5,conflict@0:6,order@0:7
 U 1:1
 A 15 appended
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 completed 1 settled 0 0 1@0:4 - - resume
+R 3 failed:f 1 settled 0 0 1@0:4 - - resume
 R 2 running 1 settled 0 0 1@0:3 - - recover
 C 2 running 1:completed
 P 9 0:8 1 1
 N order@0:0,order@0:1,conflict@0:5,conflict@0:6,order@0:7,conflict@0:8
 U 1:1
 R 1 completed 1 terminal 0 0 - - - resume
-R 3 completed 1 settled 0 0 1@0:4 - - resume
+R 3 failed:f 1 settled 0 0 1@0:4 - - resume
 R 2 running 1 settled 0 0 1@0:3 - - recover
 C 2 running 1:completed
 P 9 0:8 1 1
@@ -12111,10 +12111,10 @@ A 11 appended
 A 12 EVENT_MUTATED
 A 13 appended
 A 14 duplicate
-R 3 completed 1 settled 1 0 1@0:1 - - settled
+R 3 failed:f 1 settled 1 0 1@0:1 - - settled
 R 1 running 1 open 0 0 - - - recover
 R 2 - 1 unadmitted 0 0 1@1:0 i2 - admit
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 10 1:1 2 1
 N order@0:0,conflict@0:2,order@0:4
 U -
@@ -12149,7 +12149,7 @@ A 16 appended
 A 17 appended
 R 3 - 1 unadmitted 0 0 1@0:0 - - admit
 R 1 - 1 unadmitted 0 0 1@0:1 i1 - admit
-R 2 cancelled 1 settled 1 0 1@1:0 i0,i2 - settled
+R 2 cancelled:u 1 settled 1 0 1@1:0 i0,i2 - settled
 C 2 terminal 2:cancelled
 P 16 4:0 5 1
 N order@0:2,conflict@0:5,conflict@0:6,conflict@3:1,conflict@3:3
@@ -12157,10 +12157,10 @@ U -
 A 18 appended
 A 19 appended
 A 20 EVENT_OUT_OF_ORDER
-R 3 failed:r 1 settled 0 0 1@0:0 - - resume
+R 3 cancelled 1 settled 0 0 1@0:0 - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 i1 - admit
-R 2 cancelled 1 settled 1 0 1@1:0 i0,i2 - settled
-C 3 terminal 3:failed
+R 2 cancelled:u 1 settled 1 0 1@1:0 i0,i2 - settled
+C 3 terminal 3:cancelled
 P 18 4:2 5 1
 N order@0:2,conflict@0:5,conflict@0:6,conflict@3:1,conflict@3:3
 U -
@@ -12169,7 +12169,7 @@ A 22 appended
 A 23 appended
 A 24 appended
 A 25 appended
-R 3 failed:r 1 settled 0 0 1@0:0 - - resume
+R 3 cancelled 1 settled 0 0 1@0:0 - - resume
 R 1 - 1 unadmitted 0 0 1@0:1 i1 - admit
 R 2 running 2 open 1 0 1@1:0 i0,i2 - resume
 C 2 running 2:failed
@@ -12193,7 +12193,7 @@ A 3 appended
 A 4 appended
 R 2 running 1 settled 0 0 1@0:4 - - recover
 R 1 failed:f 1 terminal 0 0 - - - resume
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 C 3 terminal 3:failed
 P 5 0:4 1 1
 N order@0:0,order@0:1,order@0:3
@@ -12207,7 +12207,7 @@ A 10 appended
 A 11 EVENT_OUT_OF_ORDER
 R 2 running 1 settled 1 0 1@0:4 - - resume
 R 1 failed:f 1 terminal 1 0 - - - settled
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 3 failed:r 1 terminal 0 0 - - - resume
 C 2 running 3:failed
 P 9 1:0 2 1
 N order@0:0,order@0:1,order@0:3,order@0:6,conflict@0:7
@@ -12256,17 +12256,17 @@ A 13 EVENT_OUT_OF_ORDER
 A 14 appended
 A 15 appended
 A 16 appended
-R 3 cancelled 1 settled 0 0 1@0:4 i1 - resume
+R 3 cancelled:u 1 settled 0 0 1@0:4 i1 - resume
 R 1 - 1 unadmitted 0 0 1@0:1 i1 - admit
-R 2 failed:f 1 settled 0 0 1@0:10 - - resume
+R 2 failed:r 1 settled 0 0 1@0:10 - - resume
 C 2 terminal 2:failed
 P 13 0:12 1 1
 N order@0:2,conflict@0:5,order@0:7
 U -
 A 17 appended
-R 3 cancelled 1 settled 0 0 1@0:4 i1 - resume
+R 3 cancelled:u 1 settled 0 0 1@0:4 i1 - resume
 R 1 - 1 unadmitted 0 0 1@0:1 i1 - admit
-R 2 failed:f 1 settled 0 0 1@0:10 - - resume
+R 2 failed:r 1 settled 0 0 1@0:10 - - resume
 C 2 terminal 2:failed
 P 14 1:0 2 1
 N order@0:2,conflict@0:5,order@0:7,conflict@1:0
@@ -12285,14 +12285,14 @@ A 25 appended
 A 26 appended
 R 3 paused 1 settled 0 0 1@0:4 i1 - recover
 R 1 completed 1 settled 0 0 1@0:1 i1 - resume
-R 2 failed:f 1 settled 0 0 1@0:10 - - resume
+R 2 failed:r 1 settled 0 0 1@0:10 - - resume
 C 3 paused 2:failed
 P 20 3:2 3 1
 N order@0:2,conflict@0:5,order@0:7,conflict@1:0,order@1:1,conflict@1:3,conflict@3:1
 U -
 R 3 paused 1 settled 0 0 1@0:4 i1 - recover
 R 1 completed 1 settled 0 0 1@0:1 i1 - resume
-R 2 failed:f 1 settled 0 0 1@0:10 - - resume
+R 2 failed:r 1 settled 0 0 1@0:10 - - resume
 C 3 paused 2:failed
 P 20 3:2 3 1
 N order@0:2,conflict@0:5,order@0:7,conflict@1:0,order@1:1,conflict@1:3,conflict@3:1

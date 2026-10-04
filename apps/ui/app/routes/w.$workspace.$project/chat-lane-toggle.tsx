@@ -67,11 +67,7 @@ const LaneMark = ({ facts }: { readonly facts: SidebarFacts }): React.ReactNode 
           facts.mark === 'failed' ? 'size-3.5' : 'size-2.5',
         )}
       />
-      {/* A failed run reads in the chat card's `feature` hue, not the sidebar's red. */}
-      <StatusMark
-        facts={{ ...facts, count: undefined }}
-        className={facts.mark === 'failed' ? 'text-feature/80' : undefined}
-      />
+      <StatusMark facts={{ ...facts, count: undefined }} />
     </span>
   );
 

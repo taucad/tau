@@ -47,7 +47,7 @@ function CheckChip({ state, label }: { readonly state: CheckState; readonly labe
       className={cn(
         'inline-flex items-center gap-1.5 rounded-full border bg-background/80 px-2.5 py-1 text-xs backdrop-blur-sm',
         state === 'pass' && 'border-primary/40 text-foreground',
-        state === 'fail' && 'border-destructive/40 text-destructive',
+        state === 'fail' && 'border-feature/40 text-feature',
         state === 'pending' && 'text-muted-foreground',
       )}
     >

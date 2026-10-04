@@ -69,7 +69,7 @@ export function AttachmentFileChip({
           <a
             href={source.src}
             download={name}
-            className={cn('truncate text-sm font-medium hover:underline', isError && 'text-destructive')}
+            className={cn('truncate text-sm font-medium hover:underline', isError && 'text-feature')}
             target='_blank'
             rel='noopener noreferrer'
           >
@@ -79,7 +79,7 @@ export function AttachmentFileChip({
           <span className='truncate text-sm font-medium'>{name ?? 'File'}</span>
         )}
         {isError && source.status === 'ready' ? (
-          <span className='text-xs text-destructive'>Failed to load image. Click to download.</span>
+          <span className='text-xs text-feature'>Failed to load image. Click to download.</span>
         ) : null}
         <span className='text-xs text-muted-foreground'>
           {source.status === 'absent' ? attachmentAbsentLabel : details.join(' · ')}

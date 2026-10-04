@@ -3,14 +3,10 @@ import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/sp
 
 import type { ConfigurationDefinition } from '#configuration/configuration.js';
 import { defineMachine, defineMachineQuery } from '#machines/machine.js';
-import type {
-  MachineAlertSnapshot,
-  MachineDiscoveryRuntime,
-  MachineProviderDefinition,
-  MachineTransportTrust,
-} from '#machines/machine.js';
-import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
-import type { MachineManifest } from '#machines/machine-manifest.js';
+import type { MachineDiscoveryRuntime, MachineProviderDefinition, MachineTransportTrust } from '#machines/machine.js';
+import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
+import type { MachineAlert } from '#machines/machine-observation.js';
+import type { MachineSession } from '#machines/machine.js';
 
 type Binding = Readonly<{ logicalId: string }>;
 type Submission = Readonly<{ copies: number }>;
@@ -25,19 +21,9 @@ const definition = {
   id: 'typed-machine',
   name: 'Typed machine',
   version: '1.0.0',
-  protocolVersion: 1,
+  protocolVersion: 2,
   vendor: 'test',
-  technologies: ['fff'],
-  accepts: [
-    {
-      contract: { id: 'manufacturing.toolpath.fff', version: 1 },
-      mediaType: 'application/zip',
-      requiredMembers: ['plate.gcode'],
-      payloadSelection: 'plate',
-      technology: 'fff',
-    },
-  ],
-  manifest: machineManifestFixture,
+  manifest: machineManifestDefinitionFixture,
   bindingConfiguration,
   submissionConfiguration,
   queries: {
@@ -106,16 +92,15 @@ describe('machine authoring types', () => {
 });
 
 describe('machine observation and manifest types', () => {
-  it('should declare still capture as the only camera fact', () => {
-    expectTypeOf<MachineManifest['camera']>().toEqualTypeOf<{ stills: boolean }>();
-    // @ts-expect-error -- no live-stream contract exists, so a manifest cannot claim one.
-    const streamed: MachineManifest['camera'] = { stills: true, stream: true };
-    expectTypeOf(streamed).toEqualTypeOf<{ stills: boolean }>();
+  it('should make stop a session method every provider has, outside the gated facets', () => {
+    expectTypeOf<MachineSession['stop']>().toBeFunction();
+    expectTypeOf<MachineSession['actions']>().toHaveProperty('type');
   });
 
   it('should carry a readable alert whose severity is a closed set', () => {
-    const alert: MachineAlertSnapshot = {
+    const alert: MachineAlert = {
       code: '0C00-0300-0003-000B',
+      blocks: 'run',
       severity: 'serious',
       message: 'The first layer is not sticking to the plate.',
       reference: 'https://support.example.com/codes/0C00-0300-0003-000B',
@@ -124,7 +109,7 @@ describe('machine observation and manifest types', () => {
     expectTypeOf(alert.message).toEqualTypeOf<string | undefined>();
     expectTypeOf(alert.reference).toEqualTypeOf<string | undefined>();
     // @ts-expect-error -- a severity outside the four levels is refused.
-    const critical: MachineAlertSnapshot = { code: '0300-400C', severity: 'critical' };
-    expectTypeOf(critical).toEqualTypeOf<MachineAlertSnapshot>();
+    const critical: MachineAlert = { code: '0300-400C', severity: 'critical', blocks: 'nothing' };
+    expectTypeOf(critical).toEqualTypeOf<MachineAlert>();
   });
 });

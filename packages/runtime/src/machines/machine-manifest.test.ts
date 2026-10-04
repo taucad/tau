@@ -1,65 +1,43 @@
 import { describe, expect, it } from 'vitest';
 
 import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
-import { parseMachineManifest } from '#machines/machine-manifest.js';
+import { fffProcessOf, parseMachineManifest } from '#machines/machine-manifest.js';
+
+const [light, pause] = machineManifestFixture.actions;
+const fff = fffProcessOf(machineManifestFixture);
 
 describe('parseMachineManifest', () => {
   it('round-trips a manifest through a structured clone and freezes the result', () => {
     const parsed = parseMachineManifest(structuredClone(machineManifestFixture));
     expect(parsed).toEqual(machineManifestFixture);
     expect(Object.isFrozen(parsed)).toBe(true);
-    expect(parsed.slicing.presets.map(({ id }) => id)).toEqual(['fast', 'standard', 'fine']);
+    expect(fffProcessOf(parsed)?.slicing.presets.map(({ id }) => id)).toEqual(['fast', 'standard', 'fine']);
   });
 
   it.each([
     ['an unknown top-level key', { ...machineManifestFixture, colour: 'red' }],
-    ['an unknown nested key', { ...machineManifestFixture, camera: { stills: false, zoom: 2 } }],
-    ['a live-stream claim', { ...machineManifestFixture, camera: { stills: true, stream: true } }],
+    ['a version other than 3', { ...machineManifestFixture, version: 2 }],
+    ['an action on an unknown component', { ...machineManifestFixture, actions: [{ ...light, componentId: 'laser' }] }],
+    ['the same action twice on one component', { ...machineManifestFixture, actions: [pause, pause] }],
+    ['an action with an unknown effect', { ...machineManifestFixture, actions: [{ ...light, effects: ['magic'] }] }],
     [
-      'a zero build volume',
+      'an interlock that is not an interlock component',
+      { ...machineManifestFixture, actions: [{ ...light, safety: { ...light?.safety, interlocks: ['motion'] } }] },
+    ],
+    [
+      'a motion component moving an undeclared axis',
       {
         ...machineManifestFixture,
-        geometry: { ...machineManifestFixture.geometry, buildVolume: { x: 0, y: 200, z: 200 } },
-      },
-    ],
-    [
-      'a speed profile above 400 percent',
-      { ...machineManifestFixture, speedProfiles: [{ id: 'warp', label: 'Warp', percent: 500 }] },
-    ],
-    [
-      'an action without a qualification',
-      { ...machineManifestFixture, actions: [{ id: 'light.set', label: 'Light', effect: 'none' }] },
-    ],
-    [
-      'an action with an unknown effect class',
-      {
-        ...machineManifestFixture,
-        actions: [{ id: 'light.set', label: 'Light', effect: 'magic', qualification: 'designed' }],
+        components: machineManifestFixture.components.map((component) =>
+          component.kind === 'motion' ? { ...component, axes: ['x', 'q'] } : component,
+        ),
       },
     ],
     [
       'two slicing presets',
       {
         ...machineManifestFixture,
-        slicing: { ...machineManifestFixture.slicing, presets: machineManifestFixture.slicing.presets.slice(0, 2) },
-      },
-    ],
-    [
-      'an infill above 100 percent',
-      {
-        ...machineManifestFixture,
-        slicing: {
-          ...machineManifestFixture.slicing,
-          recommended: { ...machineManifestFixture.slicing.recommended, infillPercent: 101 },
-        },
-      },
-    ],
-    ['a version other than 2', { ...machineManifestFixture, version: 1 }],
-    [
-      'an external spool slot beyond 255',
-      {
-        ...machineManifestFixture,
-        materialSystem: { ...machineManifestFixture.materialSystem, externalSpoolSlot: 256 },
+        processes: [{ ...fff, slicing: { ...fff?.slicing, presets: fff?.slicing.presets.slice(0, 2) } }],
       },
     ],
   ])('refuses %s', (_label, candidate) => {

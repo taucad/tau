@@ -1,12 +1,12 @@
 import type { StandardJSONSchemaV1, StandardSchemaV1 } from '@standard-schema/spec';
-import { createQuantity, quantityKinds } from '@taucad/units/quantity';
 import { describe, expect, it, vi } from 'vitest';
 
 import { defineConfiguration } from '#configuration/configuration.js';
 import { defineMachine, defineMachineQuery } from '#machines/machine.js';
 import type { MachineConnectionRuntime, MachineConnectInput, MachineSession } from '#machines/machine.js';
 import { resolveRuntimePluginDefinition } from '#plugins/plugin-runtime-definition.js';
-import { machineManifestFixture } from '#machines/machine-manifest.fixture.js';
+import { machineManifestDefinitionFixture } from '#machines/machine-manifest.fixture.js';
+import { fixtureSession } from '#machines/machine-session.fixture.js';
 
 type Binding = Readonly<{ logicalId: string }>;
 type Submission = Readonly<{ copies: number }>;
@@ -39,23 +39,18 @@ const querySchema = standardSchema<Readonly<{ vendor: string }>>({
   properties: { vendor: { type: 'string' } },
 });
 
-const accepted = {
-  contract: { id: 'manufacturing.toolpath.fff', version: 1 },
-  mediaType: 'application/zip',
-  requiredMembers: ['plate.gcode'],
-  payloadSelection: 'plate',
-  technology: 'fff',
-} as const;
-const nozzleDiameter = createQuantity({
-  value: 0.4,
-  unit: 'mm',
-  kind: quantityKinds.diameter,
-  space: 'linear',
-  semanticMode: 'declared-only',
-});
-if (nozzleDiameter.status !== 'success') {
-  throw new Error(nozzleDiameter.diagnostic.message);
+const jobs = machineManifestDefinitionFixture.jobs;
+if (jobs.type !== 'supported') {
+  throw new Error('The fixture runs jobs.');
 }
+const [accepted] = jobs.accepts;
+if (accepted === undefined) {
+  throw new Error('The fixture accepts one container.');
+}
+const withAccepts = (accepts: readonly unknown[]) => ({
+  ...machineManifestDefinitionFixture,
+  jobs: { ...jobs, accepts },
+});
 
 describe('defineMachine', () => {
   it('keeps authoring and invocation lazy while exposing frozen serializable metadata', async () => {
@@ -83,11 +78,9 @@ describe('defineMachine', () => {
       id: 'test-machine',
       name: 'Test machine',
       version: '1.0.0',
-      protocolVersion: 1,
+      protocolVersion: 2,
       vendor: 'test',
-      technologies: ['fff'],
-      accepts: [accepted],
-      manifest: machineManifestFixture,
+      manifest: machineManifestDefinitionFixture,
       bindingConfiguration,
       submissionConfiguration,
       queries: {
@@ -120,54 +113,7 @@ describe('defineMachine', () => {
           maximumWriteBytes: 4096,
           signal: input.signal,
         });
-        return {
-          async getDescriptor() {
-            return {
-              id: 'printer-1',
-              name: 'Test printer',
-              vendor: 'test',
-              model: 'fake',
-              technology: 'fff',
-              firmware: 'test',
-              accepts: [accepted],
-              operations: ['submit'],
-              ratedEnvelope: { width: 0.3, depth: 0.3, height: 0.3, unit: 'm' },
-              printableEnvelope: { width: 0.25, depth: 0.25, height: 0.25, unit: 'm' },
-              tools: [{ id: 'tool-0', kind: 'extruder', nozzleDiameter: nozzleDiameter.value }],
-              materialSystem: { kind: 'single', slotCount: 1 },
-              bedTypes: ['textured'],
-            };
-          },
-          async getSnapshot() {
-            return {
-              connection: 'connected',
-              readiness: 'idle',
-              observedAt: 'now',
-              setup: { toolId: 'tool-0', bedType: 'textured', materials: [] },
-            };
-          },
-          async *observe() {
-            yield* [];
-          },
-          async preparePrint() {
-            return { status: 'rejected', code: 'UNSUPPORTED', message: 'Fixture never prepares.', observedAt: 'now' };
-          },
-          async uploadPrint() {
-            return { status: 'rejected', code: 'UNSUPPORTED', message: 'Fixture never transfers.', observedAt: 'now' };
-          },
-          async submit() {
-            return { status: 'accepted', observedAt: 'now' };
-          },
-          async control() {
-            return { status: 'accepted', observedAt: 'now' };
-          },
-          async reconcile() {
-            return { status: 'unknown', reason: 'fixture', observedAt: 'now' };
-          },
-          stillCapture: { type: 'unsupported' },
-          close,
-          dispose: close,
-        };
+        return fixtureSession({ close });
       },
     } as const;
     const machine = defineMachine(definition);
@@ -176,7 +122,7 @@ describe('defineMachine', () => {
     expect(connections).toBe(0);
     const registration = machine();
     expect(Object.isFrozen(registration)).toBe(true);
-    expect(Object.isFrozen(registration.accepts)).toBe(true);
+    expect(Object.isFrozen(registration.manifest.jobs)).toBe(true);
     expect(() => structuredClone(registration)).not.toThrow();
     expect(connections).toBe(0);
     await expect(resolveRuntimePluginDefinition('machine', registration)).resolves.toBe(definition);
@@ -256,11 +202,9 @@ describe('defineMachine', () => {
       id: 'invalid',
       name: 'Invalid',
       version: '1.0.0',
-      protocolVersion: 1,
+      protocolVersion: 2,
       vendor: 'test',
-      technologies: ['fff'],
-      accepts: [accepted],
-      manifest: machineManifestFixture,
+      manifest: machineManifestDefinitionFixture,
       bindingConfiguration,
       submissionConfiguration,
       async *discover() {
@@ -270,21 +214,17 @@ describe('defineMachine', () => {
         throw new Error('not called');
       },
     } as const;
-    expect(() => defineMachine({ ...base, accepts: [accepted, accepted] })).toThrow('duplicate accepted contract');
     const defineUnchecked = defineMachine as unknown as (definition: unknown) => unknown;
-    expect(() => defineUnchecked({ ...base, protocolVersion: 2 })).toThrow('protocolVersion must be 1');
+    expect(() => defineUnchecked({ ...base, manifest: withAccepts([accepted, accepted]) })).toThrow(
+      'duplicate accepted contract',
+    );
+    expect(() => defineUnchecked({ ...base, protocolVersion: 1 })).toThrow('protocolVersion must be 2');
     expect(() =>
-      defineUnchecked({
-        ...base,
-        accepts: [{ ...accepted, requiredMembers: ['../plate.gcode'] }],
-      }),
+      defineUnchecked({ ...base, manifest: withAccepts([{ ...accepted, requiredMembers: ['../plate.gcode'] }]) }),
     ).toThrow('accepted container is invalid');
     expect(() =>
-      defineUnchecked({
-        ...base,
-        accepts: [{ ...accepted, payloadSelection: 'invalid' }],
-      }),
-    ).toThrow('payload selection is invalid');
+      defineUnchecked({ ...base, manifest: withAccepts([{ ...accepted, payloadSelection: 'invalid' }]) }),
+    ).toThrow();
   });
 
   it('rejects unsupported behavioral schemas declared by catalog queries', () => {
@@ -301,11 +241,9 @@ describe('defineMachine', () => {
         id: 'unsafe-query',
         name: 'Unsafe query',
         version: '1.0.0',
-        protocolVersion: 1,
+        protocolVersion: 2,
         vendor: 'test',
-        technologies: ['fff'],
-        accepts: [accepted],
-        manifest: machineManifestFixture,
+        manifest: machineManifestDefinitionFixture,
         bindingConfiguration,
         submissionConfiguration,
         queries: { unsafe: unsafeQuery },

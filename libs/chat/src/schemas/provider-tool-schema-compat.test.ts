@@ -8,7 +8,11 @@ import {
   getProviderFacingToolInputSchemas,
   toProviderToolJsonSchema,
 } from '#schemas/provider-tool-schemas.js';
-import { getPrintProfilesInputSchema, requestPrintInputSchema } from '#schemas/tools/print.tool.schema.js';
+import {
+  getPrintProfilesInputSchema,
+  machineActionInputSchema,
+  requestJobInputSchema,
+} from '#schemas/tools/machine.tool.schema.js';
 
 /**
  * Keywords no provider accepts today: Vertex rejects `const`/`propertyNames`/`prefixItems`, and
@@ -123,12 +127,13 @@ describe('provider-facing tool schema compatibility', () => {
       toolName.revisions,
       toolName.updateTodos,
       toolName.askQuestions,
+      toolName.listMachines,
       toolName.getMachine,
+      toolName.machineAction,
+      toolName.stopMachine,
       toolName.getPrintProfiles,
-      toolName.requestPrint,
-      toolName.getPrintRequest,
-      toolName.listPrintRequests,
-      toolName.cancelPrint,
+      toolName.requestJob,
+      toolName.checkJob,
     ]);
     expect(toolDescriptions[toolName.arrangeWorkbench]).toBe(arrangeWorkbenchDescription);
     expect(toolDescriptions[toolName.arrangeWorkbench].length).toBeGreaterThan(0);
@@ -248,8 +253,11 @@ describe('provider-facing tool schema compatibility', () => {
   });
 
   it('should survive the Anthropic codec projection with its parameters intact', () => {
-    // Every CAD tool takes at least one input; an empty projection means Claude was offered a tool it cannot call.
+    // Every CAD tool but list_machines takes at least one input; an empty projection means Claude was offered a tool it cannot call.
     const failures = serializeProviderFacingSchemas().flatMap((entry) => {
+      if (entry.toolName === toolName.listMachines) {
+        return [];
+      }
       const projected = anthropicProjection(entry.jsonSchema);
       return Object.keys(projected.properties).length > 0 ? [] : [entry.toolName];
     });
@@ -257,8 +265,8 @@ describe('provider-facing tool schema compatibility', () => {
     expect(failures).toEqual([]);
   });
 
-  it('should offer request_print its slicer options as a plain described object slot', () => {
-    const schema = providerSchemaFor(toolName.requestPrint);
+  it('should offer request_job its slicer options as a plain described object slot', () => {
+    const schema = providerSchemaFor(toolName.requestJob);
 
     expect(Object.keys(schema.properties ?? {}).sort()).toEqual([
       'machineId',
@@ -279,14 +287,28 @@ describe('provider-facing tool schema compatibility', () => {
     });
   });
 
-  it('should bound request_print Bambu Studio settings at runtime', () => {
-    const schema = requestPrintInputSchema;
+  it('should bound request_job Bambu Studio settings at runtime', () => {
+    const schema = requestJobInputSchema;
     /* Bambu Studio's own setting keys. */
     const settings = (key: string, value: unknown) => ({ targetFile: 'main.ts', settings: { [key]: value } });
 
     expect(schema.safeParse(settings('sparse_infill_density', '20%')).success).toBe(true);
     expect(schema.safeParse(settings('wall_loops', { nested: 1 })).success).toBe(false);
     expect(schema.safeParse({ targetFile: 'main.ts', profiles: { filaments: [] } }).success).toBe(false);
+  });
+
+  it('should offer machine_action its parameters as a plain described object slot, validated at runtime', () => {
+    const schema = providerSchemaFor(toolName.machineAction);
+
+    expect(Object.keys(schema.properties ?? {}).sort()).toEqual(['action', 'componentId', 'machineId', 'parameters']);
+    expect(schema.required).toEqual(['componentId', 'action']);
+    expect(
+      machineActionInputSchema.safeParse({ componentId: 'light', action: 'switch.set', parameters: { on: true } })
+        .success,
+    ).toBe(true);
+    expect(
+      machineActionInputSchema.safeParse({ componentId: 'light', action: 'switch.set', parameters: [true] }).success,
+    ).toBe(false);
   });
 
   it('should offer get_print_profiles a machine, profiles and a bounded key filter', () => {

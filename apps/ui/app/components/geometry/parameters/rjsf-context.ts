@@ -60,8 +60,8 @@ export type ParameterCommit = Readonly<{
 }>;
 
 export type ParameterEdit =
-  /** `isLive` previews a number drag through `onChange` once per frame, before release. */
-  Readonly<{ kind: 'transient'; isLive?: boolean }> | Readonly<{ kind: 'authoritative'; commit: ParameterCommit }>;
+  | Readonly<{ kind: 'transient' }>
+  | Readonly<{ kind: 'authoritative'; commit: ParameterCommit }>;
 
 // eslint-disable-next-line @typescript-eslint/naming-convention -- RJSF uses this format for formContext
 export type RJSFContext = {

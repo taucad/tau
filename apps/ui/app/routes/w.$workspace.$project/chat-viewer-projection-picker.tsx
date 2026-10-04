@@ -1,10 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useState } from 'react';
 import { useSelector } from '@xstate/react';
 import type { ActorRefFrom } from 'xstate';
-import type { RJSFSchema } from '@rjsf/utils';
 import type { Evaluation } from '@taucad/runtime';
 import { workbenchRecords } from '@taucad/workbench';
-import { Box, Boxes, ChevronDown, RefreshCcwDot, SlidersHorizontal } from 'lucide-react';
+import { Box, Boxes, ChevronDown } from 'lucide-react';
 import { Button } from '@taucad/ui/components/button';
 import {
   DropdownMenu,
@@ -15,28 +14,15 @@ import {
   DropdownMenuShortcut,
   DropdownMenuTrigger,
 } from '@taucad/ui/components/dropdown-menu';
-import { Popover, PopoverContent, PopoverTrigger } from '@taucad/ui/components/popover';
 import { Separator } from '@taucad/ui/components/separator';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@taucad/ui/components/tooltip';
-import { compileParameterManifest, projectJsonSchemaToParameterDeclaration } from '@taucad/parameters';
-import type { ParameterManifest } from '@taucad/parameters';
-import { sha256StringSync } from '@taucad/utils/hash';
-import { Parameters } from '#components/geometry/parameters/parameters.js';
-import type { ParameterEdit } from '#components/geometry/parameters/rjsf-context.js';
-import { mergeFormDefaults } from '#components/geometry/parameters/rjsf-utils.js';
-import { useGraphicsSelector } from '#hooks/use-graphics.js';
 import { useProject } from '#hooks/use-project.js';
 import { selectCadEvaluation } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
-import { extractModifiedProperties } from '#utils/object.utils.js';
 import { setLocalInstanceChoice, useLocalInstanceChoice } from '#workbench-records/local-instance.js';
-import { getLiveViewOptions, setLiveViewOptions, useLiveViewOptions } from '#workbench-records/live-view-options.js';
-import type { LiveViewOptions } from '#workbench-records/live-view-options.js';
 import { newViewRecord } from '#workbench-records/projection.js';
 import { useWorkbenchViewCommands } from '#workbench-records/view-actions.js';
 
 type ViewOffer = Extract<Evaluation, { success: true }>['views'][number];
-type ViewOptions = NonNullable<ViewOffer['options']>;
 
 /** The bottom viewer bar's hairline (`chat-viewer-controls.tsx`). */
 const Hairline = (): React.JSX.Element => (
@@ -48,8 +34,8 @@ const menuTriggerClassName = 'w-auto max-w-40 min-w-0 gap-1 px-2 text-xs data-[s
 
 /**
  * The viewer's view bar, top left: a sibling of the bottom viewer bar holding the view menu (two or more views, or a
- * pinned view the model no longer offers), the instance menu (when the view offers instances) and the view's options
- * (when it declares any). With none of them it renders nothing. Its menus and options panel stay inside the viewer.
+ * pinned view the model no longer offers) and the instance menu (when the view offers instances). With neither it
+ * renders nothing. Its menus stay inside the viewer. A view's options are Kernel settings in Viewer settings.
  */
 export function ViewerProjectionPicker({
   viewId,
@@ -66,7 +52,6 @@ export function ViewerProjectionPicker({
   const record = viewRecords.get(viewId);
   const selected = record?.selectedKernelView;
   const localChoice = useLocalInstanceChoice(viewId);
-  const liveOptions = useLiveViewOptions(viewId);
   // The viewer frame bounds every menu and panel the bar opens.
   const [boundary, setBoundary] = useState<HTMLElement>();
   if (!evaluation?.success) {
@@ -78,7 +63,7 @@ export function ViewerProjectionPicker({
   const localForView = localChoice?.viewId === offered?.id ? localChoice : undefined;
   const selectedInstance = localForView?.instanceId ?? state?.authoredInstance ?? '';
   const showInstances = Boolean(offered?.instances?.length) || selectedInstance !== '';
-  if (!showSwitch && !showInstances && !offered?.options) {
+  if (!showSwitch && !showInstances) {
     return undefined;
   }
   const choose = (id: string): void => {
@@ -89,7 +74,7 @@ export function ViewerProjectionPicker({
   };
   const editViewState = async (
     kernelViewId: string,
-    change: { readonly options?: Record<string, unknown>; readonly authoredInstance?: string | undefined },
+    change: { readonly authoredInstance?: string | undefined },
   ): Promise<boolean> =>
     viewCommands.edit(viewId, (current) => {
       const nextRecord = current ?? newViewRecord(entryPath);
@@ -100,14 +85,6 @@ export function ViewerProjectionPicker({
         kernelViews: [...states.filter((view) => view.id !== kernelViewId), { ...prior, ...change }],
       });
     });
-  /* The record is the durable copy; the live draft keeps the viewer on what the panel shows until the record
-   * has it, and leaves a newer draft in place. */
-  const saveOptions = async (draft: LiveViewOptions): Promise<void> => {
-    await editViewState(draft.viewId, { options: draft.options });
-    if (getLiveViewOptions(viewId) === draft) {
-      setLiveViewOptions(viewId, undefined);
-    }
-  };
   const chooseInstance = (id: string): void => {
     if (!offered) {
       return;
@@ -143,20 +120,6 @@ export function ViewerProjectionPicker({
             expired={localForView && localForView.evaluationId !== evaluation.id ? localForView.instanceId : undefined}
             boundary={boundary}
             onChoose={chooseInstance}
-          />
-        </>
-      ) : null}
-      {offered?.options ? (
-        <>
-          <Hairline />
-          <ViewOptionsPanel
-            paneId={viewId}
-            viewTitle={offered.title}
-            viewKey={offered.id}
-            options={offered.options}
-            values={liveOptions?.viewId === offered.id ? liveOptions.options : (state?.options ?? {})}
-            boundary={boundary}
-            onSave={saveOptions}
           />
         </>
       ) : null}
@@ -276,213 +239,6 @@ function InstanceMenu({
         </DropdownMenuRadioGroup>
       </DropdownMenuContent>
     </DropdownMenu>
-  );
-}
-
-/** Option edits re-render the view as they happen, number drags included, before the record is saved. */
-const liveEdit: ParameterEdit = { kind: 'transient', isLive: true };
-
-/** How long option edits rest before the view record is written; closing the panel writes at once. */
-export const viewOptionsSaveDelay = 300;
-
-/** A view's compiled option form, or why it cannot be shown, for the schema it was compiled from. */
-type CompiledOptions = { readonly schema: RJSFSchema } & (
-  | { readonly manifest: ParameterManifest }
-  | { readonly reason: string }
-);
-
-/** Compile a view's option schema into the manifest the shared Parameters form reads. */
-const compileViewOptionsManifest = async (
-  viewKey: string,
-  schema: RJSFSchema,
-  defaults: Record<string, unknown>,
-): Promise<ParameterManifest> => {
-  // SAFETY: `sha256StringSync` returns the 64 lowercase hex digits a content digest carries.
-  const revision = `sha256:${sha256StringSync(JSON.stringify({ schema, defaults }))}` as ParameterManifest['revision'];
-  return compileParameterManifest({
-    declaration: projectJsonSchemaToParameterDeclaration({
-      schema,
-      defaults,
-      schemaId: `urn:taucad:view-options:${encodeURIComponent(viewKey)}`,
-      schemaName: 'ViewOptions',
-    }),
-    scope: { kind: 'provider', provider: 'view', configuration: viewKey },
-    source: { id: `view:${viewKey}`, version: revision, revision, capability: 'json-structure' },
-    dependency: revision,
-    middleware: revision,
-  });
-};
-
-/** The view's options toggle and its panel: the view's option schema in the shared Parameters form. */
-function ViewOptionsPanel({
-  paneId,
-  viewTitle,
-  viewKey,
-  options,
-  values,
-  boundary,
-  onSave,
-}: {
-  readonly paneId: string;
-  readonly viewTitle: string;
-  readonly viewKey: string;
-  readonly options: ViewOptions;
-  readonly values: Record<string, unknown>;
-  readonly boundary: HTMLElement | undefined;
-  readonly onSave: (draft: LiveViewOptions) => Promise<void>;
-}): React.JSX.Element {
-  const schema = options.schema as RJSFSchema;
-  /* Each edit reaches the viewer through the live draft at once; the record is written once edits rest, so a drag
-   * re-renders every frame without a file write per frame. */
-  const pendingSave = useRef<{
-    readonly draft: LiveViewOptions;
-    readonly save: (draft: LiveViewOptions) => Promise<void>;
-    readonly timer: ReturnType<typeof setTimeout>;
-  }>(undefined);
-  const flush = useCallback((): void => {
-    const pending = pendingSave.current;
-    if (!pending) {
-      return;
-    }
-    clearTimeout(pending.timer);
-    pendingSave.current = undefined;
-    void pending.save(pending.draft);
-  }, []);
-  useEffect(() => flush, [flush]);
-  const change = (next: Record<string, unknown>): void => {
-    const draft = { viewId: viewKey, options: next };
-    setLiveViewOptions(paneId, draft);
-    clearTimeout(pendingSave.current?.timer);
-    pendingSave.current = { draft, save: onSave, timer: setTimeout(flush, viewOptionsSaveDelay) };
-  };
-  const isModified = Object.keys(extractModifiedProperties(values, options.defaults)).length > 0;
-  const label = `${viewTitle} options`;
-  return (
-    <Popover
-      onOpenChange={(isOpen) => {
-        if (!isOpen) {
-          flush();
-        }
-      }}
-    >
-      <Tooltip>
-        <TooltipTrigger asChild>
-          <PopoverTrigger asChild>
-            <Button
-              variant='ghost'
-              size='icon-sm'
-              aria-label={isModified ? `${label} (changed)` : label}
-              className='relative data-[state=open]:bg-accent'
-            >
-              <SlidersHorizontal aria-hidden='true' className='size-4' />
-              {isModified ? (
-                <span aria-hidden='true' className='absolute top-1 right-1 size-1.5 rounded-full bg-warning' />
-              ) : null}
-            </Button>
-          </PopoverTrigger>
-        </TooltipTrigger>
-        <TooltipContent side='bottom'>{label}</TooltipContent>
-      </Tooltip>
-      <PopoverContent
-        align='start'
-        side='bottom'
-        sideOffset={6}
-        collisionBoundary={boundary}
-        collisionPadding={8}
-        aria-label={label}
-        className='flex max-h-(--radix-popover-content-available-height) w-104 max-w-(--radix-popover-content-available-width) flex-col overflow-hidden p-0'
-      >
-        <div className='flex h-10 shrink-0 items-center gap-2 border-b pr-1.5 pl-3'>
-          <h2 className='flex-1 truncate text-sm font-medium'>{label}</h2>
-          <Button
-            variant='ghost'
-            size='xs'
-            disabled={!isModified}
-            className='text-muted-foreground hover:text-foreground'
-            onClick={() => {
-              change(options.defaults);
-              flush();
-            }}
-          >
-            <RefreshCcwDot aria-hidden='true' />
-            Reset
-          </Button>
-        </div>
-        <div className='min-h-0 overflow-y-auto p-1'>
-          <ViewOptionsForm
-            viewKey={viewKey}
-            schema={schema}
-            defaults={options.defaults}
-            values={values}
-            onChange={(modified) => {
-              // Saved whole, so a kernel reads every declared value, not only the changed ones.
-              change(mergeFormDefaults(schema, options.defaults, modified));
-            }}
-          />
-        </div>
-      </PopoverContent>
-    </Popover>
-  );
-}
-
-function ViewOptionsForm({
-  viewKey,
-  schema,
-  defaults,
-  values,
-  onChange,
-}: {
-  readonly viewKey: string;
-  readonly schema: RJSFSchema;
-  readonly defaults: Record<string, unknown>;
-  readonly values: Record<string, unknown>;
-  readonly onChange: (modified: Record<string, unknown>) => void;
-}): React.JSX.Element {
-  const displaySymbol = useGraphicsSelector((snapshot) => snapshot.context.displayUnits.length.symbol);
-  const [compiled, setCompiled] = useState<CompiledOptions>();
-  useEffect(() => {
-    let isCancelled = false;
-    const compile = async (): Promise<void> => {
-      let next: CompiledOptions;
-      try {
-        next = { schema, manifest: await compileViewOptionsManifest(viewKey, schema, defaults) };
-      } catch (error) {
-        next = { schema, reason: error instanceof Error ? error.message : String(error) };
-      }
-      if (!isCancelled) {
-        setCompiled(next);
-      }
-    };
-    // async-iife: bootstrap -- the manifest derives from the offered schema; a newer offer supersedes it.
-    void compile();
-    return () => {
-      isCancelled = true;
-    };
-  }, [viewKey, schema, defaults]);
-  if (compiled?.schema !== schema) {
-    return (
-      <p role='status' aria-busy='true' className='px-2 py-3 text-xs text-muted-foreground'>
-        Preparing options…
-      </p>
-    );
-  }
-  if ('reason' in compiled) {
-    return <p className='px-2 py-3 text-xs text-muted-foreground'>These options cannot be shown: {compiled.reason}</p>;
-  }
-  return (
-    <Parameters
-      presentation='embedded'
-      enableSearch={false}
-      parameters={values}
-      defaultParameters={defaults}
-      jsonSchema={schema}
-      units={{ length: { displaySymbol } }}
-      parameterManifest={compiled.manifest}
-      parameterEdit={liveEdit}
-      emptyMessage='No options'
-      emptyDescription='This view declares no options.'
-      onParametersChange={onChange}
-    />
   );
 }
 

@@ -1,7 +1,6 @@
 import '#styles/global.css';
 import 'dockview-react/dist/styles/dockview.css';
-import { cleanup, render, screen, within } from '@testing-library/react';
-import type * as UseGraphics from '#hooks/use-graphics.js';
+import { cleanup, render, screen } from '@testing-library/react';
 import { page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { useState, useSyncExternalStore } from 'react';
@@ -60,12 +59,6 @@ vi.mock('#hooks/use-project.js', () => ({
     );
     return { geometryUnits: new Map([['main.tsx', actor]]), viewRecords: state.records };
   },
-}));
-// The fixture mounts the picker without the viewer's graphics provider; its options read only the display unit.
-vi.mock('#hooks/use-graphics.js', async (importOriginal) => ({
-  ...(await importOriginal<typeof UseGraphics>()),
-  useGraphicsSelector: (select: (snapshot: unknown) => unknown) =>
-    select({ context: { displayUnits: { length: { symbol: 'mm' } } } }),
 }));
 vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: state.edits }),
@@ -204,7 +197,7 @@ describe('viewer pane projection picker in Chromium', () => {
     expect(screen.queryByRole('menuitem', { name: /beside/i })).toBeNull();
   });
 
-  it('keeps instance and options reachable in a narrow pane without overflow', async () => {
+  it('keeps the view and instance menus reachable in a narrow pane, with options left to Viewer settings', async () => {
     state.records.set('pane-0', { ...newViewRecord('main.tsx'), selectedKernelView: 'drawing' });
     await page.viewport(360, 520);
     render(
@@ -217,12 +210,13 @@ describe('viewer pane projection picker in Chromium', () => {
     expect(frame.scrollWidth).toBeLessThanOrEqual(320);
     expect(pane.querySelector('button[aria-label="View: Drawing"]')).toBeVisible();
     expect(screen.getByRole('button', { name: 'Drawing instance: Whole view' })).toBeVisible();
-    await userEvent.click(screen.getByRole('button', { name: 'Drawing options' }));
-    const panel = await screen.findByRole('dialog', { name: 'Drawing options' });
-    expect(await within(panel).findByRole('switch')).toBeVisible();
-    // The panel opens into the viewer and never past its edges.
+    // The view's options are Kernel settings in the viewer settings menu, not a toggle in this bar.
+    expect(screen.queryByRole('button', { name: /options/ })).toBeNull();
+    // The instance menu opens into the viewer and never past its edges.
+    await userEvent.click(screen.getByRole('button', { name: 'Drawing instance: Whole view' }));
+    const menu = await screen.findByRole('menu');
     const viewer = (pane.querySelector('[data-viewer-frame]') ?? pane).getBoundingClientRect();
-    const bounds = panel.getBoundingClientRect();
+    const bounds = menu.getBoundingClientRect();
     expect(bounds.left).toBeGreaterThanOrEqual(viewer.left);
     expect(bounds.right).toBeLessThanOrEqual(viewer.right);
   });

@@ -82,6 +82,8 @@ type ViewerSettingsProps = {
   readonly side?: DropdownMenuContentProps['side'];
   /** How the menu aligns against the trigger. */
   readonly align?: DropdownMenuContentProps['align'];
+  /** The current view's kernel settings, closing the Rendering section; the viewer supplies them per pane. */
+  readonly kernelSettings?: React.ReactNode;
 };
 
 /**
@@ -157,7 +159,12 @@ function FieldOfViewRow(): React.JSX.Element {
  * All settings are per-view, read from the per-view GraphicsMachine state via GraphicsProvider
  * and the per-view CadMachine state via CadProvider.
  */
-export function ViewerSettings({ className, side = 'right', align = 'end' }: ViewerSettingsProps): React.ReactNode {
+export function ViewerSettings({
+  className,
+  side = 'right',
+  align = 'end',
+  kernelSettings,
+}: ViewerSettingsProps): React.ReactNode {
   const graphicsRef = useGraphics();
 
   const [isOpen, setIsOpen] = useState(false);
@@ -371,6 +378,7 @@ export function ViewerSettings({ className, side = 'right', align = 'end' }: Vie
           <Timer />
           Timeout
         </DropdownMenuSelectItem>
+        {kernelSettings}
       </DropdownMenuContent>
     </DropdownMenu>
   );

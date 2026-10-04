@@ -1,4 +1,4 @@
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 import type { Registry, RJSFSchema, WidgetProps } from '@rjsf/utils';
 import { describe, expect, it, vi } from 'vitest';
 import { mock } from 'vitest-mock-extended';
@@ -357,41 +357,5 @@ describe('ParametersWidget authoritative commits', () => {
     expect(onChange).not.toHaveBeenCalled();
     fireEvent.change(input, { target: { value: '4' } });
     expect(onChange).toHaveBeenCalledWith(4);
-  });
-});
-
-describe('ParametersWidget live transient drags', () => {
-  const fireSliderPointerEvent = (element: HTMLElement, type: 'pointerdown' | 'pointermove', clientX: number): void => {
-    const event = new MouseEvent(type, { bubbles: true, cancelable: true, button: 0, clientX });
-    Object.defineProperty(event, 'pointerId', { value: 1 });
-    fireEvent(element, event);
-  };
-
-  /* A live transient form (the viewer's options panel) previews a drag before release; a plain transient form
-   * still sends only the released value. */
-  it.each([
-    { parameterEdit: { kind: 'transient', isLive: true } as const, sentMidDrag: true },
-    { parameterEdit: { kind: 'transient' } as const, sentMidDrag: false },
-  ])('sends a mid-drag value only when the form is live: $parameterEdit', ({ parameterEdit, sentMidDrag }) => {
-    const frames: FrameRequestCallback[] = [];
-    vi.spyOn(globalThis, 'requestAnimationFrame').mockImplementation((callback) => frames.push(callback));
-    vi.spyOn(globalThis, 'cancelAnimationFrame').mockImplementation(() => undefined);
-    const onChange = vi.fn();
-    const props = widgetProps({ value: 10, schema: { type: 'number', minimum: 0, maximum: 20 }, onChange });
-    props.registry.formContext = { ...formContext, parameterEdit };
-    const { container } = renderWidget(props);
-    const slider = container.querySelector<HTMLElement>('[data-slot="slider-input"]')!;
-    Object.defineProperty(slider, 'offsetWidth', { configurable: true, value: 100 });
-
-    fireSliderPointerEvent(slider, 'pointerdown', 0);
-    fireSliderPointerEvent(slider, 'pointermove', 20);
-    act(() => {
-      for (const frame of frames.splice(0)) {
-        frame(0);
-      }
-    });
-
-    expect(onChange).toHaveBeenCalledTimes(sentMidDrag ? 1 : 0);
-    vi.restoreAllMocks();
   });
 });

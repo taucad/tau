@@ -40,6 +40,7 @@ import type { ViewCameraSeed } from '#services/graphics-camera-registry.js';
 import { ChatStackTrace } from '#routes/w.$workspace.$project/chat-stack-trace.js';
 import { ChatViewerStatus } from '#routes/w.$workspace.$project/chat-viewer-status.js';
 import { ChatViewerControls } from '#routes/w.$workspace.$project/chat-viewer-controls.js';
+import { ViewerKernelSettings } from '#routes/w.$workspace.$project/chat-viewer-kernel-settings.js';
 import { ViewerProjectionPicker } from '#routes/w.$workspace.$project/chat-viewer-projection-picker.js';
 import { cn } from '@taucad/ui/utils/cn';
 import { isEmptyGlb } from '#utils/inspect-glb.utils.js';
@@ -1132,7 +1133,15 @@ const ViewerContent = memo(function ({
           {profile === 'editor' ? <ChatStackTrace entryPath={entryPath} side='bottom' /> : null}
           <ArButton artifact={artifact} runtimeDocument={runtimeDocument} className='ml-auto shrink-0' />
         </div>
-        <ChatViewerControls shouldEnableCapture={profile === 'editor'} captureRendering={captureRendering} />
+        <ChatViewerControls
+          shouldEnableCapture={profile === 'editor'}
+          captureRendering={captureRendering}
+          kernelSettings={
+            profile === 'editor' && cadRef ? (
+              <ViewerKernelSettings viewId={viewId} entryPath={entryPath} cadActor={cadRef} />
+            ) : undefined
+          }
+        />
       </div>
     </div>
   );

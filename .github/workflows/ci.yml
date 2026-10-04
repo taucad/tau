@@ -256,7 +256,9 @@ jobs:
     if: ${{ !cancelled() }}
     runs-on: ubuntu-latest
     # A hung task otherwise holds the job and the concurrency slot for the 6 h default.
-    timeout-minutes: 60
+    # A change near the root of the graph runs about 58 min of serial lint, typecheck,
+    # size and pkgcheck before `test` starts, so 60 cut a healthy run short.
+    timeout-minutes: 90
     environment: ${{ github.ref == 'refs/heads/main' && github.event_name == 'push' && 'nx-cloud-write' || null }}
     permissions: # Required for nrwl/nx-set-shas to read workflow runs
       contents: 'read'
@@ -348,10 +350,13 @@ jobs:
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
       # its VM ("The runner has received a shutdown signal"). At Nx's default of three
       # this happened a few minutes in; at two it still happened once both overlapped.
+      #
+      # `--output-style=stream`: the default groups each task's output and prints it only
+      # when the task ends, so a task killed by the timeout left no trace of what hung.
       - name: Run affected tasks
         run: |
-          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1
-          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64
+          pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1 --output-style=stream
+          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64 --output-style=stream
 
       - name: Select affected Python checks
         id: benchmark-statistics
@@ -502,7 +507,7 @@ jobs:
         timeout-minutes: 80
         env:
           TAU_E2E_WEBGPU_PROFILE: software
-        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1
+        run: xvfb-run --auto-servernum pnpm nx affected -t test:e2e test:e2e:development test:e2e:browser-host test:e2e:daemon-host test:e2e:non-isolated --parallel=1 --output-style=stream
 
       # Field trace validation: every events.jsonl the suites above captured at
       # teardown is validated against ChatLog.tla, including after a failed suite.

@@ -7,6 +7,10 @@
  * workflow drifts the moment a package is added, renamed, or retired — and Nx
  * selectors fail open, so the drift is silent.
  *
+ * A shell or expression value (`"$SHARD"`, `${{ matrix.project }}`) is a
+ * selector too: the plan job computes it from the graph at run time, so it
+ * cannot drift the way a hand-written name does.
+ *
  * Two exemptions, both structural rather than convenient:
  * - `nx run <project>:<target>` is allowed when the project carries
  *   `type:tool`. The gate umbrellas (`scripts:validate`, `scripts:release-gate`)
@@ -72,7 +76,8 @@ const subcommands = new Set([
 ]);
 
 /** A value that resolves through the graph rather than naming a project. */
-const isSelector = (value: string): boolean => value.startsWith('tag:') || value.includes('*');
+const isSelector = (value: string): boolean =>
+  value.startsWith('tag:') || value.includes('*') || /^["']?\$/u.test(value);
 
 /**
  * Split a `run:` script into the shell commands it runs.

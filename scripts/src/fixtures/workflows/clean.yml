@@ -1,5 +1,6 @@
 # Every shape the rule allows: targets, tag: selectors, globs, `nx affected`,
-# `nx release`, `nx show projects`, and `nx run` against a `type:tool` project.
+# `nx release`, `nx show projects`, `nx run` against a `type:tool` project, and
+# a project list computed at run time.
 name: Clean
 on:
   push:
@@ -34,3 +35,16 @@ jobs:
         run: pnpm nx run-many -t build --projects=tag:type:package,tag:type:lib
       - name: Publish
         run: pnpm nx release publish -p tag:type:package --tag=beta
+
+  shard:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        project: ${{ fromJSON(needs.plan.outputs.projects) }}
+    steps:
+      - name: Run one computed shard
+        run: |
+          shard=$(pnpm nx show projects --affected --with-target test --json | tail -1)
+          pnpm nx run-many -t test --projects "$shard"
+      - name: Run one matrix project
+        run: pnpm nx run-many -t test --projects=${{ matrix.project }}

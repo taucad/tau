@@ -300,7 +300,7 @@ describe('plugin generator', () => {
     expect(machine).toContain("from 'zod'");
     expect(machine).toContain('input.configuration.logicalId');
     expect(machine).toContain('TODO: implement manufacturing-fixture machine connection');
-    expect(machine).toContain('const manifest: MachineManifest = {');
+    expect(machine).toContain('const manifest: MachineManifestDefinition = {');
     expect(machine).toContain('  manifest,\n  bindingConfiguration,');
 
     const readme = readText(tree, `${root}/README.md`);

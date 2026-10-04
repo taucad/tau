@@ -471,7 +471,8 @@ export const createBambuSimulator = (
         toolId: 'nozzle-0.4',
         bedType: 'textured-pei',
         materials: Object.freeze([
-          { slot: 0, state: 'loaded', materialId: 'pla', profileId: 'GFA00' },
+          // As a Bambu printer reports `tray_type`.
+          { slot: 0, state: 'loaded', materialId: 'PLA', profileId: 'GFA00' },
         ] satisfies MachineSnapshot['setup']['materials']),
       }),
       run: Object.freeze(run ? describeRun(run, at) : (finished ?? { state: 'idle' })),

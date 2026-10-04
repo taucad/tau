@@ -306,7 +306,14 @@ const identity = z
   .refine((value) => value.isWellFormed());
 const instant = z.iso.datetime({ offset: true });
 const finite = z.number().finite();
-const quantity = z.custom<Quantity>(
+/**
+ * The schema of one reported quantity, named so the report schemas' declarations can refer to it rather than
+ * spelling out the units package's internal quantity type.
+ * @internal
+ */
+// oxlint-disable-next-line typescript/consistent-type-definitions, typescript/no-empty-object-type -- An interface keeps its name in emitted declarations; an alias would not.
+export interface MachineQuantitySchema extends z.ZodCustom<Quantity, Quantity> {}
+const quantity: MachineQuantitySchema = z.custom<Quantity>(
   (value) =>
     typeof value === 'object' &&
     value !== null &&

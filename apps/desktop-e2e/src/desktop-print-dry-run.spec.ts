@@ -35,7 +35,7 @@ import {
  * desktop app, against the simulated X1C only (`bambu-simulator`). Nothing here can
  * reach real hardware: the only machine bound is the one "Add simulated X1C" makes.
  *
- * The scripted turn writes the pyramid and calls `request_print`, which pauses the
+ * The scripted turn writes the pyramid and calls `request_job`, which pauses the
  * run on its native approval interrupt (D5); the chat banner and the Print pane answer
  * the same ledger record, and accepting uploads and starts in one step (canvas ruling 1).
  * The host hands the answer to the machine ledger: an approval continues the run and
@@ -56,7 +56,7 @@ const seedTurn: readonly GatewayFixtureToolCall[] = [
 ];
 const printTurn: readonly GatewayFixtureToolCall[] = [
   { name: 'create_file', input: { targetFile: 'main.scad', content: pyramidSource } },
-  { name: 'request_print', input: { targetFile: 'main.scad' } },
+  { name: 'request_job', input: { targetFile: 'main.scad' } },
 ];
 
 let session: DesktopSession | undefined;
@@ -105,15 +105,15 @@ const offeredTools = (current: GatewayFixture): readonly string[] =>
   );
 
 /**
- * The machine ledger's print requests for the simulated X1C, read from the files the desktop writes
- * (`<userData>/config/machines/<machineId>/requests/<requestId>.json`, `{ version: 1, request }`).
+ * The machine ledger's jobs for the simulated X1C, read from the files the desktop writes
+ * (`<userData>/config/machines/<machineId>/jobs/<jobId>.json`, one whole job each).
  */
-const ledgerRequests = async (current: DesktopSession): Promise<ReadonlyArray<Readonly<Record<string, unknown>>>> => {
-  const directory = join(dirname(current.homeRoot), 'config', 'machines', 'simulated-x1c', 'requests');
+const ledgerJobs = async (current: DesktopSession): Promise<ReadonlyArray<Readonly<Record<string, unknown>>>> => {
+  const directory = join(dirname(current.homeRoot), 'config', 'machines', 'simulated-x1c', 'jobs');
   const entries = await readdir(directory);
   const names = entries.filter((name) => name.endsWith('.json') && !name.startsWith('.'));
   const records = await Promise.all(names.map(async (name) => readFile(join(directory, name), 'utf8')));
-  return records.map((text) => (JSON.parse(text) as { readonly request: Readonly<Record<string, unknown>> }).request);
+  return records.map((text) => JSON.parse(text) as Readonly<Record<string, unknown>>);
 };
 
 /** Every text a gateway request's messages carry, tool results excluded: where the approval-answer reminder rides. */
@@ -181,7 +181,7 @@ const requestPyramidPrint = async (page: Page, root: string): Promise<string> =>
   await sendPrompt(page, printPrompt);
   await expect.poll(() => fixture!.gatewayRequests.length, { timeout: 120_000 }).toBeGreaterThan(before);
   /* H-1 witness: the turn must offer the tool it is about to call. */
-  expect(offeredTools(fixture!)).toContain('request_print');
+  expect(offeredTools(fixture!)).toContain('request_job');
 
   await expect
     .poll(async () => readFile(join(root, 'main.scad'), 'utf8').catch(() => ''), { timeout: 60_000 })
@@ -303,7 +303,7 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
     ).toBe(true);
     await expectCount(chatApprovalOf(page), 0);
     /* The host handed the chat's answer to the ledger, in the chat's words. */
-    const [accepted, ...others] = await ledgerRequests(session!);
+    const [accepted, ...others] = await ledgerJobs(session!);
     expect(others).toEqual([]);
     expect(accepted).toMatchObject({ resolvedBy: { kind: 'user', label: 'Accepted in chat' } });
     /* The continued attempt was told the answer, not only that its call was aborted. */
@@ -355,16 +355,16 @@ test.each([
         (message) => message.role === 'assistant' && JSON.stringify(message.content).includes(gatewayFixtureFinalText),
       ),
     ).toHaveLength(1);
-    const [request, ...others] = await ledgerRequests(session!);
+    const [request, ...others] = await ledgerJobs(session!);
     expect(others).toEqual([]);
     expect(request).toMatchObject({
       state: 'denied',
       resolvedBy: { kind: 'user', label: 'Declined in chat' },
     });
-    /* Zero uploads: a denied request never took a transfer, an operation id or a receipt. */
-    expect(['uploadOperationId', 'startOperationId', 'transferId', 'receipt'].filter((key) => key in request!)).toEqual(
-      [],
-    );
+    /* Zero transfers: a denied job never took a transfer, an operation id or a receipt. */
+    expect(
+      ['transferOperationId', 'startOperationId', 'transferId', 'receipt'].filter((key) => key in request!),
+    ).toEqual([]);
   } catch (error) {
     await session!.capture(`print-dry-run-deny-${surface}`);
     throw error;

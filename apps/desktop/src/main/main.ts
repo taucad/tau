@@ -1059,8 +1059,8 @@ const bootstrapElectronApp = async (): Promise<void> => {
        * so it passes the same registry the kernel fork resolver uses. Refusing
        * outright rather than substituting Home: an agent host working over the
        * wrong directory is worse than no agent host. Machines need no root:
-       * printers belong to the per-user store, and a print request names its
-       * own project. */
+       * printers belong to the per-user store, and a job names its own
+       * project. */
       if (concern === 'agentHost' && !roots.isTrusted(resolved['workspaceRoot'] ?? '')) {
         log.log('error', 'services.untrusted-root', { concern, workspaceRoot: resolved['workspaceRoot'] });
         refuse('services.untrusted-root');

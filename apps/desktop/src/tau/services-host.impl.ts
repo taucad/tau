@@ -388,7 +388,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   let agentHostConfig: AgentHostConfig | undefined;
   /* One machine host per utility lifetime: opened on the first machines
    * concern or ceremony, surviving every renderer reload, closed on quiesce.
-   * A print request names its project by `tau.json` id; these are the project
+   * A job names its project by `tau.json` id; these are the project
    * roots each id was last found at. */
   let machineHost: Promise<MachineHostServices> | undefined;
   let projectRoots = new Map<string, readonly string[]>();
@@ -553,7 +553,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
   };
 
   /**
-   * Read a print request's file from the project it names: each of the
+   * Read a job's file from the project it names: each of the
    * project's roots, then its checkouts under the workspace's
    * `.tau/checkouts/<projectId>`, where a candidate turn's slice lands. Every
    * read goes through the internal authority, which refuses an unadmitted root.
@@ -710,7 +710,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
    * Bind one renderer or agent connection to the machine host over the transferred port.
    *
    * A machines connection names no project: printers belong to the store, and a
-   * print request names its own project. While another Tau app owns the store,
+   * job names its own project. While another Tau app owns the store,
    * the connection is answered `MACHINE_STORE_OWNED_ELSEWHERE`.
    *
    * @param port - The utility's leg of main's `MessageChannelMain`.
@@ -837,7 +837,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     return {
       workspaceRoot,
       /* The renderer's project id is the project's `tau.json` id: every slice
-       * `request_print` records names it, and the artifact reader finds the
+       * `request_job` records names it, and the artifact reader finds the
        * project by it. */
       projectId,
       /* Desktop projects are immediate children of their connected workspace.

@@ -40,7 +40,8 @@ import type {
   MachineTransportTrust,
 } from '@taucad/runtime/machine';
 import type { HostRouteGrant } from '@taucad/runtime/host';
-import type { NodeMachineRuntime } from '@taucad/runtime/host/node';
+import { createNodeMachineSerial } from '@taucad/runtime/host/node';
+import type { NodeMachineRuntime, NodeMachineSerialDriver } from '@taucad/runtime/host/node';
 import type { RuntimeTransportFacet } from '@taucad/runtime/transport';
 import { projectManifestMaxBytes } from '@taucad/types';
 import { z } from 'zod';
@@ -93,17 +94,20 @@ export const machineRouteGrants: readonly HostRouteGrant[] = (
     'machines.list',
     'machines.get',
     'machines.watch',
-    'machines.preparePrint',
-    'machines.uploadPrint',
-    'machines.startPrint',
     'machines.reconcileOperation',
-    'machines.controlRun',
     'machines.captureStill',
-    'machines.requestPrint',
-    'machines.listPrintRequests',
-    'machines.watchPrintRequests',
-    'machines.resolvePrintRequest',
-    'machines.withdrawPrintRequest',
+    'machines.checkJob',
+    'machines.requestJob',
+    'machines.listJobs',
+    'machines.watchJobs',
+    'machines.resolveJob',
+    'machines.withdrawJob',
+    'machines.applyAction',
+    'machines.stop',
+    'machines.beginHold',
+    'machines.renewHold',
+    'machines.endHold',
+    'machines.setTesting',
     'machines.removeBinding',
   ] as const
 ).map((operation) => ({ route: 'machines', operation }));
@@ -155,7 +159,7 @@ export const openMachineHostIdentity = async (directory: string): Promise<Machin
 
 /**
  * The `tau.json` id of the project a directory holds, read the way a machine
- * host names a print request's project: a bounded read of that one field, so
+ * host names a job's project: a bounded read of that one field, so
  * a manifest another rule would refuse still names its project.
  *
  * @param project - The project directory's files, e.g. a `NodeFsProviderClient` rooted at it.
@@ -567,6 +571,11 @@ const uploadFile = async (
 /** Options for {@link createNodeMachineRuntime}. @public */
 export type CreateNodeMachineRuntimeOptions = Readonly<{
   secrets: MachineSecretStore;
+  /**
+   * The native serial driver for USB and serial controllers (Grbl, Carvera over USB). Absent, providers see no serial
+   * access and serial machines cannot be found or connected.
+   */
+  serial?: NodeMachineSerialDriver;
   /** Told every entry a provider logs. */
   log?: (entry: MachineLogEntry) => void;
   /**
@@ -602,12 +611,17 @@ export type CreateNodeMachineRuntimeOptions = Readonly<{
 export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOptions): NodeMachineRuntime => {
   const clock = Object.freeze({ now: () => new Date().toISOString() });
   const { secrets } = options;
+  const serial = options.serial === undefined ? undefined : createNodeMachineSerial(options.serial);
   return Object.freeze({
     credentials: Object.freeze({
       has: async (reference: string) => secrets.has(reference),
       forget: async (reference: string) => secrets.forget(reference),
     }),
-    discovery: Object.freeze({ clock, listenDatagrams }),
+    discovery: Object.freeze({
+      clock,
+      listenDatagrams,
+      ...(serial === undefined ? {} : { listSerialPorts: serial.listSerialPorts }),
+    }),
     connection: (): MachineConnectionRuntime =>
       Object.freeze({
         clock,
@@ -615,6 +629,7 @@ export const createNodeMachineRuntime = (options: CreateNodeMachineRuntimeOption
           options.log?.(entry);
         },
         connectStream,
+        ...(serial === undefined ? {} : { openSerial: serial.openSerial }),
         async *readArtifact(input) {
           if (input.artifact.length > input.maximumBytes) {
             throw new Error('MACHINE_ARTIFACT_TOO_LARGE');

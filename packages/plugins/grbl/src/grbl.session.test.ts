@@ -51,7 +51,7 @@ const open: Connected[] = [];
 let operation = 0;
 
 const connect = async (program = '', options: VirtualGrblOptions = {}): Promise<Connected> => {
-  const machine = new VirtualGrbl({ speed: 20, tick: 5, ...options });
+  const machine = new VirtualGrbl({ speed: 20, tick: 5, homingSwitches: true, ...options });
   const session = await openGrblSession({
     stream: createVirtualGrblStream(machine),
     runtime: {
@@ -156,7 +156,7 @@ const start = async (connected: Connected, path: string): Promise<MachineCommand
     signal: new AbortController().signal,
   });
 
-const holdJog = async (connected: Connected): Promise<MachineProviderHold> => {
+const holdJog = async (connected: Connected, axis: 'y' | 'z' = 'y'): Promise<MachineProviderHold> => {
   const { holds } = connected.session;
   if (holds.type !== 'supported') {
     throw new Error('Holds are unsupported.');
@@ -165,7 +165,7 @@ const holdJog = async (connected: Connected): Promise<MachineProviderHold> => {
     operationId: 'hold-1',
     componentId: 'motion',
     hold: 'motion.jog',
-    parameters: { axis: 'y', direction: 1, feed: 1500 },
+    parameters: { axis, direction: 1, feed: 1500 },
     signal: new AbortController().signal,
   });
   if (!('extend' in hold)) {
@@ -366,5 +366,63 @@ describe('grbl session against the virtual controller', () => {
     expect(connected.machine.droppedBytes).toBe(0);
     const [lines] = report.run?.progress.counters ?? [];
     expect(lines?.current).toBe(lines?.total);
+  }, 30_000);
+
+  it('works from the work zero on a stock LongMill without homing switches', async () => {
+    const connected = await connect(grblDemoProgram(), { speed: 200, homingSwitches: false });
+    let report = await connected.until((current) => current.state.status === 'ready');
+    const descriptor = await connected.session.getDescriptor({ signal: new AbortController().signal });
+    expect(descriptor.capabilities.actions.map((action) => action.id)).not.toContain('motion.home');
+    expect(report.availability.map((entry) => entry.id)).not.toContain('motion.home');
+    expect(report.alerts).toEqual([]);
+    expect(motionOf(report).trust).toBe('unknown');
+    expect(report.checks.find((check) => check.id === 'position')).toMatchObject({ state: 'unknown' });
+    await accept(connected, 'controller:controller.unlock');
+
+    // Raise Z clear of the plate with a held jog, then probe the stock top.
+    const hold = await holdJog(connected, 'z');
+    for (let renewal = 0; renewal < 4; renewal += 1) {
+      // oxlint-disable-next-line eslint/no-await-in-loop -- renewals arrive one lease apart.
+      await sleep(50);
+      // oxlint-disable-next-line eslint/no-await-in-loop -- see above.
+      await hold.extend();
+    }
+    await hold.release();
+    await accept(connected, 'motion:motion.move', { frame: 'machine', position: { z: 20 } });
+    await connected.until((current) => current.state.status === 'ready' && machineAt(current).z === 20);
+    await accept(connected, 'touch-plate:probe.run', { cycle: 'z', plateThickness: 15 });
+    await answer(connected, 'continue');
+    await answer(connected, 'done');
+    report = await connected.until(
+      (current) =>
+        current.activities[0]?.state === 'succeeded' && current.state.status === 'ready' && originOf(current).z < -1,
+    );
+    // The stock top is 10 mm below where the gantry powered up.
+    expect(originOf(report).z).toBeCloseTo(-10, 1);
+    await accept(connected, 'motion:work-offset.set', { offset: 'G54', position: { x: 0, y: 0 } });
+
+    const preparation = await jobsOf(connected).prepare({
+      operationId: 'prepare-demo',
+      expectedMachineId: 'grbl-simulator',
+      artifact: artifact('jobs/demo.gcode'),
+      configuration: submission,
+      signal: new AbortController().signal,
+    });
+    if (preparation.status !== 'ready') {
+      throw new Error(`Not ready: ${preparation.status}`);
+    }
+    expect(preparation.checks.find((check) => check.id === 'travel')).toMatchObject({ state: 'unknown' });
+    expect(
+      preparation.checks.some((check) => check.remedy?.type === 'action' && check.remedy.action === 'motion.home'),
+    ).toBe(false);
+    await start(connected, 'demo.gcode');
+    await connected.until((current) => current.state.native === 'Hold:0');
+    connected.machine.press('start');
+    await connected.until((current) => current.run?.paused?.by === 'program', 10_000);
+    await answer(connected, 'continue');
+    await answer(connected, 'done');
+    report = await connected.until((current) => current.run?.state === 'completed', 20_000);
+    expect(motionOf(report).trust).toBe('unknown');
+    expect(connected.machine.droppedBytes).toBe(0);
   }, 30_000);
 });

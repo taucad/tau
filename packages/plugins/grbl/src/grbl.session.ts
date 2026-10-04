@@ -108,6 +108,8 @@ const maximumArtifactBytes = 32 * 1024 * 1024;
 const probeFeed = 75;
 const probeTravel = 50;
 const parkZ = -5;
+/** Without homing switches machine Z means nothing: park this far above the work zero, the plate plus room for a longer bit. */
+const parkWorkZ = 35;
 
 const isAborted = (run: Readonly<{ abort: AbortController }>): boolean => run.abort.signal.aborted;
 
@@ -175,6 +177,24 @@ export class GrblController {
    */
   public get scale(): number {
     return this.settings.get(13) === 1 ? 25.4 : 1;
+  }
+
+  /**
+   * Whether `$22` homing is on. A stock LongMill has no homing switches: it works from the work zero a person sets.
+   * @returns True when the controller can home.
+   */
+  public get isHomingEnabled(): boolean {
+    return this.settings.get(22) === 1;
+  }
+
+  /**
+   * The declared actions this controller has: `motion.home` only with homing on.
+   * @returns The installed actions.
+   */
+  public get actions(): GrblSessionOptions['manifest']['actions'] {
+    return this.isHomingEnabled
+      ? this.options.manifest.actions
+      : this.options.manifest.actions.filter((action) => action.id !== 'motion.home');
   }
 
   /**
@@ -366,7 +386,9 @@ export class GrblController {
       ],
     });
     await this.send('M5');
-    await this.send(`G53G0Z${String(parkZ)}`);
+    await this.send(this.isHomingEnabled ? `G53G0Z${String(parkZ)}` : `G90G0Z${String(parkWorkZ)}`);
+    // Grbl answers a move once it is planned: dwell for nothing so the person is asked only once Z has stopped.
+    await this.send('G4P0');
     this.advance(activity);
     const answer = await this.ask(
       activity,
@@ -877,6 +899,7 @@ export class GrblController {
         toolChange: submission.toolChange,
         workOffset: submission.workOffset,
         origin: isTrusted ? origin : undefined,
+        canHome: this.isHomingEnabled,
       }),
     );
     const isRunLive = this.run !== undefined && ['starting', 'running', 'paused', 'finishing'].includes(this.run.state);
@@ -1545,7 +1568,7 @@ export const openGrblSession = async (
           axes: manifest.axes,
           components: manifest.components,
           processes: manifest.processes,
-          actions: manifest.actions,
+          actions: controller.actions,
           holds: manifest.holds,
           jobs: manifest.jobs,
           stop: manifest.stop,

@@ -11,7 +11,6 @@
 import { quantity } from '@taucad/runtime/configuration/zod';
 import { defineMachineAction, machineJogHold, standardMachineAction } from '@taucad/runtime/machine';
 import type {
-  MachineAcceptedContainer,
   MachineActionDefinition,
   MachineActionQualification,
   MachineManifestDefinition,
@@ -34,11 +33,10 @@ export const longMillTravel = Object.freeze({
 export const longMillMaximumRate = 4000;
 
 /**
- * The one container a Grbl machine accepts: one G-code file. Mutable because the authored manifest's `jobs.accepts`
- * is inferred from its Zod schema.
+ * The one container a Grbl machine accepts: one G-code file.
  * @internal
  */
-export const grblAcceptedContainers = [
+export const grblAcceptedContainers: Extract<MachineManifestDefinition['jobs'], { type: 'supported' }>['accepts'] = [
   {
     contract: { id: 'tau.toolpath.gcode', version: 1 },
     mediaType: 'text/x-gcode',
@@ -46,7 +44,7 @@ export const grblAcceptedContainers = [
     requiredMembers: [],
     technology: 'subtractive.milling',
   },
-] satisfies MachineAcceptedContainer[];
+];
 
 /** The simulation qualification profile every simulated action names. @internal */
 export const grblSimulationProfile: MachineQualificationProfile = Object.freeze({

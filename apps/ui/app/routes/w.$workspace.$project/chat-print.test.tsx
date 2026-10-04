@@ -234,7 +234,7 @@ const preferencesRecord = (
   preferences: Record<string, unknown>,
   typeId: MachineSettingsRecord['typeId'] = 'bambu.x1c',
 ): MachineSettingsRecord => {
-  const { plate, ...values } = preferences;
+  const { plate, material, ...values } = preferences;
   // SAFETY: fixture values are admitted by serializeMachineSettings before use.
   return {
     version: 1,
@@ -248,12 +248,15 @@ const preferencesRecord = (
             version: slicingPreferences.manifest.source.version,
             values: values as Record<string, MachineSettingsValue>,
           },
-          ...(plate === undefined
+          ...(plate === undefined && material === undefined
             ? {}
             : {
                 [bambuSettingsConfiguration.manifest.source.id]: {
                   version: bambuSettingsConfiguration.manifest.source.version,
-                  values: { plate: plate as string },
+                  values: {
+                    ...(plate === undefined ? {} : { plate: plate as string }),
+                    ...(material === undefined ? {} : { material: material as MachineSettingsValue }),
+                  },
                 },
               }),
         },
@@ -1173,6 +1176,16 @@ describe('Print pane external spool', () => {
     profileId: 'GFG99',
     color: '#FFFFFF',
   } as const;
+
+  it('falls back to the loaded tray when the saved one is not on this printer', async () => {
+    // Another printer of this type saved A4; this one (a simulator, say) has only A1 loaded.
+    projectFiles.write(settingsPath, preferencesBytes({ material: { defaultSlot: 3 } }));
+    renderPane(createFixture().client);
+
+    const material = await screen.findByRole('group', { name: 'Material' });
+    expect(within(material).getByRole('combobox', { name: 'Material' })).toHaveTextContent('A1');
+    expect(within(material).queryByRole('button', { name: 'Reset Material' })).not.toBeInTheDocument();
+  });
 
   it('offers the external spool as Ext and sends from it with the external-spool checks', async () => {
     const fixture = createFixture({ entries: [withExternalSpool(whitePetg)] });

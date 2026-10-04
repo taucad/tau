@@ -95,7 +95,7 @@ export function ChatEditorBreadcrumbs({ filePath, children }: ChatEditorBreadcru
           <OmniScroller
             key={filePath}
             ref={attachScroller}
-            className='flex min-w-0 flex-1 [scrollbar-width:none] flex-row items-center gap-0 overscroll-x-none [&::-webkit-scrollbar]:hidden'
+            className='flex min-w-0 flex-1 scroll-shadows-x [scrollbar-width:none] flex-row items-center gap-0 overscroll-x-none [&::-webkit-scrollbar]:hidden'
           >
             {breadcrumbs.length > 0 ? (
               breadcrumbs.map((crumb) => (

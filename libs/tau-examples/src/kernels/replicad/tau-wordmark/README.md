@@ -4,12 +4,12 @@ Parametric 2D construction of the Tau wordmark: the canonical Tau symbol followe
 
 ## Construction
 
-| Region | Construction                                                                                                   |
-| ------ | -------------------------------------------------------------------------------------------------------------- |
-| Symbol | The canonical rounded Tau symbol (`r0/r24/r60` corners), scaled to the letters' height and standing on the baseline |
+| Region | Construction                                                                                                                      |
+| ------ | --------------------------------------------------------------------------------------------------------------------------------- |
+| Symbol | The canonical rounded Tau symbol (`r0/r24/r60` corners), scaled to the letters' height and standing on the baseline               |
 | t      | Stem with its top cut on the symbol's axis, asymmetric bar on the x-height, squared foot turning into a tail cut on the same axis |
-| a      | Single-storey: squared bowl ring closed by a straight right stem                                               |
-| u      | The a's bowl opened at the top, with the same right stem                                                       |
+| a      | Single-storey: squared bowl ring closed by a straight right stem                                                                  |
+| u      | The a's bowl opened at the top, with the same right stem                                                                          |
 
 Bowls are four cubic quadrants with handle factor `0.6` (a circle is `0.5523`), which squares them slightly. Bars are thinner than stems so horizontals and verticals read with the same weight. All regions are fused into one 2D drawing; the counters are cut, so the exported SVG uses the even-odd fill rule.
 

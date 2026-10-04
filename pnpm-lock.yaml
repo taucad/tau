@@ -2720,7 +2720,7 @@ importers:
         version: link:../../libs/utils
       three:
         specifier: 'catalog:'
-        version: 0.184.0(patch_hash=ff8a98e8756c08bdc9d3d6e64114451606fe42bf86270b8880f583709bdf95a9)
+        version: 0.184.0(patch_hash=81a9f225059311c8b991cabb8f09ed6b205940ea71c8862c22fde3ec25d91993)
     devDependencies:
       '@axe-core/playwright':
         specifier: 'catalog:'

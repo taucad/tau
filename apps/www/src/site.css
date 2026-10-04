@@ -302,7 +302,9 @@ main > .band:first-child::before {
   font-size: var(--small);
   color: var(--muted-foreground);
   text-decoration: none;
-  transition: color var(--fast), background-color var(--fast);
+  transition:
+    color var(--fast),
+    background-color var(--fast);
 }
 .primary-nav a:hover,
 .signin:hover,
@@ -347,7 +349,9 @@ main > .band:first-child::before {
   border-color: transparent;
   color: var(--primary-action-foreground);
   background: var(--primary-action-sheen), var(--primary-action);
-  box-shadow: inset 0 1px 0 oklch(1 0 none / 0.14), var(--shadow-xs);
+  box-shadow:
+    inset 0 1px 0 oklch(1 0 none / 0.14),
+    var(--shadow-xs);
 }
 .button.primary:hover {
   background: var(--primary-action-glint), var(--primary-action-sheen), var(--primary-action);
@@ -884,7 +888,7 @@ main > .band:first-child::before {
   stroke: var(--line-strong);
   overflow: visible;
 }
-.o-idea svg * ,
+.o-idea svg *,
 .o-devices svg * {
   vector-effect: non-scaling-stroke;
 }

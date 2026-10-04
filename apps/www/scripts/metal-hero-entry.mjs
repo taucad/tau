@@ -11,6 +11,7 @@ import {
 } from 'three';
 import { WebGPURenderer } from 'three/webgpu';
 // oxlint-disable eslint/no-restricted-imports -- Offline provenance capture compiles the original committed Tau app source; these imports never enter the website bundle.
+/* eslint-disable @nx/enforce-module-boundaries -- Same exemption: offline capture of committed app source, never bundled. */
 import {
   getMetalMorphGeometryData,
   metalMorphShapeIds,
@@ -22,6 +23,7 @@ import {
 } from '../../ui/app/components/geometry/loader/metal-morph-material.node.ts';
 import { createMetalMorphEnvironment } from '../../ui/app/components/geometry/loader/metal-morph-environment.ts';
 // oxlint-enable eslint/no-restricted-imports
+/* eslint-enable @nx/enforce-module-boundaries */
 const data = getMetalMorphGeometryData(6);
 const geometry = new BufferGeometry();
 geometry.setAttribute('position', new BufferAttribute(data.directions, 3));

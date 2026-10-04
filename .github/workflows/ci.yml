@@ -205,8 +205,14 @@ jobs:
         if: needs.plan.outputs.geospec-darwin-tests == 'true'
         env:
           GEOSPEC_NATIVE_ASSEMBLY_ROOT: ${{ github.workspace }}/out/artifacts/geospec-native-engine/ci/assembly
+        # Products restored from an earlier run carry the bindings but not the native
+        # package's tsdown output, and `ensure-delivery` only verifies them, so build the
+        # Darwin-hosted packages here (the native `build` is uncached because tsdown copies
+        # those bindings into dist). The consumer target itself never builds the native
+        # package: its .check.ts keeps native production separately assembled.
         run: |
           pnpm nx run-many -t require-geospec-delivery --parallel=1
+          pnpm nx run-many -t build --projects tag:host:darwin-arm64 --parallel=1
           pnpm nx run scripts:prepare-geospec-test-consumer
           node --input-type=module -e 'import {readFileSync,appendFileSync} from "node:fs"; const {consumerRoot}=JSON.parse(readFileSync("out/artifacts/geospec-test-consumer/receipt.json", "utf8")); appendFileSync(process.env.GITHUB_ENV, `GEOSPEC_INSTALLED_CONSUMER_ROOT=${consumerRoot}\n`);'
 

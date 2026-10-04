@@ -352,10 +352,12 @@ jobs:
       # them (or ui:build) together exhaust the 16 GB hosted runner, which then loses
       # its VM ("The runner has received a shutdown signal"). At Nx's default of three
       # this happened a few minutes in; at two it still happened once both overlapped.
+      # `test` needs the same cap: overlapping WASM suites lost the VM the same way
+      # a few minutes into `test` (tau#306 and tau#299, 2026-10-04).
       - name: Run affected tasks
         run: |
           pnpm nx affected -t lint build typecheck size pkgcheck audit-public-surface readme-quickstart --parallel=1
-          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64
+          pnpm nx affected -t test --exclude tag:scope:api,tag:host:darwin-arm64 --parallel=1
 
       - name: Select affected Python checks
         id: benchmark-statistics

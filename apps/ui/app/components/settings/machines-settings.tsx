@@ -686,7 +686,7 @@ function MachinesPanel({ client }: { readonly client: MachineClient }): React.JS
                 name='binding'
                 configuration={bambu.bindingConfiguration}
                 values={bindFields}
-                omit={['serial']}
+                omit={['serial', 'wireForm']}
                 titles={bindTitles}
                 presentation='embedded'
                 onChange={setBindFields}

@@ -20,18 +20,24 @@ const bindingConfiguration = defineConfiguration({
   ui: { version: 1, rjsf: {} },
 });
 
-/** An AMS tray (`ams_id * 4 + tray`) or the external spool, as Bambu numbers them. */
-const traySlot = z.union([z.number().int().min(0).max(15), z.literal(bambuExternalSpoolSlot)]);
+/**
+ * AMS trays (`ams_id * 4 + tray`) up to `last`, then the external spool, as Bambu numbers them.
+ * One enum rather than a range-or-constant union: the parameter compiler refuses union branches
+ * with different constraints, and the submission form would never compile.
+ * @param last - The last AMS tray the machine has.
+ * @param extra - Further values the field accepts, such as `-1` for an unmapped filament.
+ * @returns The slot enum.
+ */
+const traySlots = (last: number, ...extra: number[]) =>
+  z.literal([...Array.from({ length: last + 1 }, (_, slot) => slot), bambuExternalSpoolSlot, ...extra]);
+const traySlot = traySlots(15);
 
 /** Submission schema shared by the LAN provider and the simulator. @internal */
 export const bambuSubmissionConfiguration = defineConfiguration({
   id: 'bambu.machine.submission',
   version: '1.2.0',
   schema: z.object({
-    amsMapping: z
-      .array(z.union([traySlot, z.literal(-1)]))
-      .max(16)
-      .default([]),
+    amsMapping: z.array(traySlots(15, -1)).max(16).default([]),
     bedLeveling: z.boolean().default(true),
     expectedBedType: z.string().min(1).max(64),
     expectedFilamentDiameter: quantity({
@@ -105,14 +111,11 @@ export const bambuA1MiniMachine = defineMachine({
     version: '1.0.0',
     schema: bambuSubmissionConfiguration.schema.extend({
       expectedModel: z.literal('A1 mini'),
-      amsMapping: z
-        .array(z.union([z.number().int().min(-1).max(3), z.literal(bambuExternalSpoolSlot)]))
-        .max(4)
-        .default([]),
+      amsMapping: z.array(traySlots(3, -1)).max(4).default([]),
       expectedMaterials: z
         .array(
           z.strictObject({
-            slot: z.union([z.number().int().min(0).max(3), z.literal(bambuExternalSpoolSlot)]),
+            slot: traySlots(3),
             materialId: z.string().min(1).max(128),
           }),
         )

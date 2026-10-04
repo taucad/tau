@@ -12,6 +12,7 @@ import type { AgentLogEvent } from '@taucad/agent-host';
 import { projectAgentHostEvent, runFailureText } from '#services/agent-host-event-projection.js';
 import {
   chatProjectionLogic,
+  chunksOf,
   digestLogSegments,
   initialChatProjection,
   materializeTranscript,
@@ -107,6 +108,152 @@ const pageScan = () => {
 };
 
 describe('chatProjectionLogic (PV-S7)', () => {
+  it('should preserve external admission before its canonical user arrives', async () => {
+    const user = {
+      id: 'external-user',
+      role: 'user',
+      content: 'Which other printer?',
+    } as const;
+    const rows = [
+      {
+        ...lifecycleRow(0, 'admitted'),
+        admission: { kind: 'external', turnId: user.id, message: user },
+      },
+    ];
+    expect(await materializeTranscript(project(rows, 1), 'run_1')).toEqual([
+      expect.objectContaining({
+        id: user.id,
+        role: 'user',
+        parts: [{ type: 'text', text: user.content }],
+      }),
+    ]);
+  });
+
+  it('should keep original input and authentic steering between their assistant segments for every read chunking', async () => {
+    const user = {
+      id: 'original-user',
+      role: 'user',
+      content: 'Original prompt',
+    } as const;
+    const rows = [
+      {
+        ...lifecycleRow(0, 'admitted'),
+        admission: { kind: 'tau', turnId: user.id, message: user },
+      },
+      lifecycleRow(1, 'running'),
+      logRow(2, { type: 'message.appended', message: user }),
+      logRow(3, {
+        type: 'message.appended',
+        message: {
+          id: 'answer-before',
+          role: 'assistant',
+          content: 'Before steering',
+        },
+      }),
+      logRow(4, {
+        type: 'message.appended',
+        message: {
+          id: 'tau:approval-answer:1',
+          role: 'user',
+          content: 'Internal reminder',
+          metadata: { tauInternal: { kind: 'approval-answer' } },
+        },
+      }),
+      logRow(5, {
+        type: 'message.appended',
+        message: {
+          id: 'steer:command-1',
+          role: 'user',
+          content: 'Real steering',
+        },
+      }),
+      logRow(6, {
+        type: 'message.appended',
+        message: {
+          id: 'answer-after',
+          role: 'assistant',
+          content: 'After steering',
+        },
+      }),
+      lifecycleRow(7, 'completed'),
+    ];
+    await Promise.all(
+      Array.from({ length: rows.length }, async (_unused, index) => {
+        const result = await materializeTranscript(project(rows, index + 1));
+        expect(result.map((message) => message.id)).toEqual([
+          'original-user',
+          'run_1',
+          'steer:command-1',
+          'run_1:steer:command-1',
+        ]);
+        expect(
+          result.map((message) =>
+            message.parts
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text)
+              .join(''),
+          ),
+        ).toEqual(['Original prompt', 'Before steering', 'Real steering', 'After steering']);
+      }),
+    );
+    const replacement = {
+      id: 'steer:command-1',
+      role: 'user',
+      content: 'Edited steering',
+    } as const;
+    const rewindRows = [
+      ...rows,
+      {
+        ...lifecycleRow(8, 'admitted', 'run_2'),
+        admission: {
+          kind: 'tau',
+          turnId: replacement.id,
+          message: replacement,
+          rewind: {
+            trigger: 'edit',
+            retainedMessageIds: ['original-user', 'answer-before', 'tau:approval-answer:1'],
+          },
+        },
+      },
+      logRow(9, {
+        runId: 'run_2',
+        type: 'history.rewound',
+        trigger: 'edit',
+        retainedMessageIds: ['original-user', 'answer-before', 'tau:approval-answer:1'],
+      }),
+      lifecycleRow(10, 'running', 'run_2'),
+      logRow(11, {
+        runId: 'run_2',
+        type: 'message.appended',
+        message: replacement,
+      }),
+      logRow(12, {
+        runId: 'run_2',
+        type: 'message.appended',
+        message: {
+          id: 'replacement-answer',
+          role: 'assistant',
+          content: 'Replacement output',
+        },
+      }),
+      lifecycleRow(13, 'completed', 'run_2'),
+    ];
+    await Promise.all(
+      Array.from({ length: rewindRows.length }, async (_unused, index) => {
+        const result = await materializeTranscript(project(rewindRows, index + 1));
+        expect(result.map((message) => message.id)).toEqual(['original-user', 'run_1', 'steer:command-1', 'run_2']);
+        expect(
+          result.map((message) =>
+            message.parts
+              .filter((part) => part.type === 'text')
+              .map((part) => part.text)
+              .join(''),
+          ),
+        ).toEqual(['Original prompt', 'Before steering', 'Edited steering', 'Replacement output']);
+      }),
+    );
+  });
+
   it('keeps the admitted Tau user until canonical history replaces it once', async () => {
     const message = { id: 'u-seed', role: 'user', content: 'Make a cube' } as const;
     const admitted = {
@@ -164,10 +311,10 @@ describe('chatProjectionLogic (PV-S7)', () => {
         delta: 'Partial reply',
       },
     }).state;
-    expect(preview.live?.chunks.filter((chunk) => chunk.type === 'text-delta')).toEqual([
+    expect(chunksOf(preview.live?.chunks).filter((chunk) => chunk.type === 'text-delta')).toEqual([
       expect.objectContaining({ delta: 'Partial reply' }),
     ]);
-    expect(preview.views['run_1']?.chunks.some((chunk) => chunk.type === 'text-delta')).toBe(false);
+    expect(chunksOf(preview.views['run_1']?.chunks).some((chunk) => chunk.type === 'text-delta')).toBe(false);
 
     const completed = reduceChatProjection(preview, {
       type: 'batch',
@@ -183,12 +330,20 @@ describe('chatProjectionLogic (PV-S7)', () => {
         4,
       ),
     }).state;
-    expect(completed.live?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
-    expect(completed.views['run_1']?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
-    expect(reduceChatProjection(completed, { type: 'clear-live', runId: 'another-run' }).state.live).toBeDefined();
-    const retired = reduceChatProjection(completed, { type: 'clear-live', runId: 'run_1' }).state;
+    expect(chunksOf(completed.live?.chunks).filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+    expect(chunksOf(completed.views['run_1']?.chunks).filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+    expect(
+      reduceChatProjection(completed, {
+        type: 'clear-live',
+        runId: 'another-run',
+      }).state.live,
+    ).toBeDefined();
+    const retired = reduceChatProjection(completed, {
+      type: 'clear-live',
+      runId: 'run_1',
+    }).state;
     expect(retired.live).toBeUndefined();
-    expect(retired.views['run_1']?.chunks.filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
+    expect(chunksOf(retired.views['run_1']?.chunks).filter((chunk) => chunk.type === 'text-delta')).toHaveLength(1);
   });
   it.each(logs)('agrees with the page’s run phase and tool scans at every row of %s', (name) => {
     const rows = readLog(name);
@@ -225,7 +380,7 @@ describe('chatProjectionLogic (PV-S7)', () => {
     const rows = readLog('recorded/in-project-ping-pong-turn');
     const state = project(rows, 7);
     const { runId } = rows.find((row) => row.type === 'run.lifecycle' && row.state === 'admitted')!;
-    const chunks = state.views[runId]?.chunks ?? [];
+    const chunks = chunksOf(state.views[runId]?.chunks);
 
     expect(chunks[0]).toMatchObject({ type: 'start', messageId: runId });
     expect(chunks.some((chunk) => chunk.type === 'finish')).toBe(true);
@@ -379,16 +534,16 @@ describe('chatProjectionLogic (PV-S7)', () => {
     );
     const { runId } = rows[failedAt]!;
     const failed = project(rows.slice(0, failedAt + 1), 1).views[runId]!;
-    expect(failed.chunks.some((chunk) => chunk.type === 'error')).toBe(true);
+    expect(chunksOf(failed.chunks).some((chunk) => chunk.type === 'error')).toBe(true);
 
     const reopened = project(rows.slice(0, reopenedAt + 1), 1).views[runId]!;
-    expect(reopened.chunks.map((chunk) => chunk.type)).toEqual(['start', 'start-step']);
+    expect(chunksOf(reopened.chunks).map((chunk) => chunk.type)).toEqual(['start', 'start-step']);
     const paused = project(rows.slice(0, pausedAt + 1), 1).views[runId]!;
     const continued = project(rows.slice(0, continuedAt + 1), 1).views[runId]!;
-    expect(continued.chunks.slice(0, paused.chunks.length)).toEqual(paused.chunks);
+    expect(chunksOf(continued.chunks).slice(0, chunksOf(paused.chunks).length)).toEqual(chunksOf(paused.chunks));
 
     const completed = project(rows.slice(0, rows.findIndex((row) => row.type === 'turn.finalized') + 1), 1);
-    expect(completed.views[runId]?.chunks.some((chunk) => chunk.type === 'error')).toBe(false);
+    expect(chunksOf(completed.views[runId]?.chunks).some((chunk) => chunk.type === 'error')).toBe(false);
     const messages = await materializeTranscript(completed);
     expect(messages.some((message) => message.role === 'assistant')).toBe(true);
   });

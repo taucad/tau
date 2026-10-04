@@ -41,12 +41,93 @@ export type OpenToolCall = Readonly<{ runId: string; toolName: string }>;
 
 type Block = AgentHostLiveBlocks extends Map<string, infer Value> ? Value : never;
 
+type ChunkTree = Readonly<{
+  length: number;
+  height: number;
+  items?: readonly UIMessageChunk[];
+  left?: ChunkTree;
+  right?: ChunkTree;
+}>;
+/** Immutable balanced batches keep append and suffix delivery independent of prior chunk count. */
+export type ProjectedChunks = readonly UIMessageChunk[] | Readonly<{ length: number; trees: readonly ChunkTree[] }>;
+
+const appendChunks = (previous: ProjectedChunks, items: readonly UIMessageChunk[]): ProjectedChunks => {
+  if (items.length === 0) {
+    return previous;
+  }
+  const trees: ChunkTree[] = Array.isArray(previous)
+    ? previous.length === 0
+      ? []
+      : [{ length: previous.length, height: 0, items: previous }]
+    : [...(previous as Exclude<ProjectedChunks, readonly UIMessageChunk[]>).trees];
+  let tree: ChunkTree = { length: items.length, height: 0, items };
+  while (trees.at(-1)?.height === tree.height) {
+    const left = trees.pop()!;
+    tree = {
+      length: left.length + tree.length,
+      height: tree.height + 1,
+      left,
+      right: tree,
+    };
+  }
+  trees.push(tree);
+  return { length: previous.length + items.length, trees };
+};
+
+/** Visit only a new suffix; subtree lengths skip the already delivered prefix. */
+export function* chunksSince(chunks: ProjectedChunks, from = 0): Generator<UIMessageChunk> {
+  if (Array.isArray(chunks)) {
+    yield* chunks.slice(from);
+    return;
+  }
+  const visit = function* (tree: ChunkTree, skip: number): Generator<UIMessageChunk> {
+    if (tree.items !== undefined) {
+      yield* tree.items.slice(skip);
+    } else if (tree.left !== undefined && tree.right !== undefined) {
+      if (skip < tree.left.length) {
+        yield* visit(tree.left, skip);
+      }
+      yield* visit(tree.right, Math.max(0, skip - tree.left.length));
+    }
+  };
+  let skip = from;
+  for (const tree of (chunks as Exclude<ProjectedChunks, readonly UIMessageChunk[]>).trees) {
+    if (skip >= tree.length) {
+      skip -= tree.length;
+    } else {
+      yield* visit(tree, skip);
+      skip = 0;
+    }
+  }
+}
+
+/** Full decoding is reserved for terminal/cold materialization and assertions. */
+export const chunksOf = (chunks: ProjectedChunks | undefined): readonly UIMessageChunk[] =>
+  chunks === undefined ? [] : [...chunksSince(chunks)];
+
+/** A visible input and the assistant output before the next authentic user input. */
+export type TranscriptSegment = Readonly<{
+  user?: MyUIMessage;
+  chunks: ProjectedChunks;
+  providerIds?: readonly string[];
+}>;
+
 /** One run's durable UI stream and turn, consumed by a watch or transcript reader (PV-S11, PV-S15). @public */
 export type RunView = Readonly<{
-  chunks: readonly UIMessageChunk[];
+  chunks: ProjectedChunks;
+  /** A non-append correction requires a fresh SDK stream at this existing run owner. */
+  streamVersion?: number;
   user?: MyUIMessage;
   admittedAt: string;
   terminal?: 'completed' | 'failed' | 'cancelled';
+  /** Prior assistant segments sealed by an authentic steering input. */
+  segments?: readonly TranscriptSegment[];
+  /** The active segment's input; the admitted user stays in `user`. */
+  steering?: MyUIMessage;
+  segmentId?: string;
+  /** Provider identities resolve rewind prefixes independently from context compaction. */
+  providerIds?: readonly string[];
+  retired?: true;
 }>;
 
 /** @public */
@@ -57,11 +138,18 @@ export type ChatProjection = Readonly<{
   /** Durable chunks by run; the watch and transcript materializer share this one projection. */
   views: Readonly<Record<string, RunView>>;
   /** Other devices' segments, refolded only when their digest changes. Command selects never read these runs. */
-  remote?: Readonly<{ digest: string; views: Readonly<Record<string, RunView>> }>;
+  remote?: Readonly<{
+    digest: string;
+    views: Readonly<Record<string, RunView>>;
+  }>;
   /** Open/closed block identities, stored as a JSON-safe record rather than a live Map. */
-  blocks: Readonly<Record<string, Block>>;
+  blocks: Readonly<Record<string, Readonly<Record<string, Block>>>>;
   /** The watched run's ephemeral SDK stream. Durable views remain independent and replace it at terminal materialization. */
-  live?: Readonly<{ runId: string; chunks: readonly UIMessageChunk[]; blocks: Readonly<Record<string, Block>> }>;
+  live?: Readonly<{
+    runId: string;
+    chunks: ProjectedChunks;
+    blocks: Readonly<Record<string, Block>>;
+  }>;
   /** The log's end as the last answer stated it; the projection holds the whole log once its cursor reaches it. */
   endCursor: number;
   /** What the last `failed` row said, for the run it failed; cleared by that run's next lifecycle row. */
@@ -180,7 +268,10 @@ const attentionKeyOf = (row: unknown): RowKey | undefined => {
   return asks ? { leaderEpoch: row['leaderEpoch'], sequence: row['sequence'] } : undefined;
 };
 
-type ProjectionStep = Readonly<{ state: ChatProjection; emit?: ChatProjectionEmitted }>;
+type ProjectionStep = Readonly<{
+  state: ChatProjection;
+  emit?: ChatProjectionEmitted;
+}>;
 
 /**
  * Drop the rows of a batch this projection already holds (SC-R12): a stream that starts over replays the log from
@@ -219,18 +310,118 @@ export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =
       .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0)),
   );
 
+/** Retire visible attempts outside the explicit provider prefix, retaining run facts for revision consumers. */
+const rewindViews = (views: Record<string, RunView>, runId: string, retainedIds: readonly string[]): void => {
+  const retained = new Set(retainedIds);
+  for (const [id, view] of Object.entries(views)) {
+    if (id === runId || view.retired === true) {
+      continue;
+    }
+    if (view.providerIds?.some((messageId) => retained.has(messageId))) {
+      continue;
+    }
+    const segments =
+      view.segments?.filter((segment) => segment.providerIds?.some((messageId) => retained.has(messageId))) ?? [];
+    const tail = segments.at(-1);
+    const { steering: _steering, segmentId: _segmentId, ...prior } = view;
+    const segmentId = chunksOf(tail?.chunks).find((chunk) => chunk.type === 'start')?.messageId;
+    views[id] =
+      tail === undefined
+        ? { ...view, retired: true }
+        : {
+            ...prior,
+            chunks: tail.chunks,
+            providerIds: tail.providerIds,
+            segments: segments.slice(0, -1),
+            ...(tail.user === undefined || tail.user.id === view.user?.id ? {} : { steering: tail.user }),
+            ...(segmentId === undefined ? {} : { segmentId }),
+          };
+  }
+};
+
+/** Replace only corrected block identities; ordinary deltas keep the bounded append path. */
+const replaceBlockChunks = (
+  previous: ProjectedChunks,
+  chunks: readonly UIMessageChunk[],
+  ids: ReadonlySet<string>,
+): ProjectedChunks => {
+  const rebuilt: UIMessageChunk[] = [];
+  const replaced = new Set<string>();
+  for (const chunk of chunksSince(previous)) {
+    if ('id' in chunk && typeof chunk.id === 'string' && ids.has(chunk.id)) {
+      if (!replaced.has(chunk.id)) {
+        const { id } = chunk;
+        rebuilt.push(...chunks.filter((candidate) => 'id' in candidate && candidate.id === id));
+        replaced.add(id);
+      }
+    } else {
+      rebuilt.push(chunk);
+    }
+  }
+  for (const chunk of chunks) {
+    if (!('id' in chunk) || typeof chunk.id !== 'string' || !replaced.has(chunk.id)) {
+      rebuilt.push(chunk);
+    }
+  }
+  return rebuilt;
+};
+
 const foldRunViews = (
   rows: readonly AgentLogEvent[],
   previousViews: ChatProjection['views'],
   previousBlocks: ChatProjection['blocks'],
-): Readonly<{ views: ChatProjection['views']; blocks: ChatProjection['blocks'] }> => {
-  let views = previousViews;
+): Readonly<{
+  views: ChatProjection['views'];
+  blocks: ChatProjection['blocks'];
+}> => {
+  let views: Record<string, RunView> | undefined;
   let lastAdmittedAt = Object.values(previousViews).at(-1)?.admittedAt;
-  const blocks: AgentHostLiveBlocks = new Map(
-    Object.entries(previousBlocks).map(([key, block]) => [key, { ...block }]),
-  );
+  const blockMaps = new Map<string, AgentHostLiveBlocks>();
+  const nextBlocks = { ...previousBlocks };
   for (const row of rows) {
-    const previous = views[row.runId];
+    let blocks = blockMaps.get(row.runId);
+    if (blocks === undefined) {
+      blocks = copyBlocks(previousBlocks[row.runId] ?? {});
+      blockMaps.set(row.runId, blocks);
+    }
+    const admission =
+      row.type === 'run.lifecycle' && row.state === 'admitted' && 'admission' in row && isRecord(row.admission)
+        ? row.admission
+        : undefined;
+    const rewind = isRecord(admission?.['rewind']) ? admission['rewind'] : undefined;
+    const retainedIds = rewind?.['retainedMessageIds'];
+    if (Array.isArray(retainedIds) && retainedIds.every((id): id is string => typeof id === 'string')) {
+      views ??= { ...previousViews };
+      rewindViews(views, row.runId, retainedIds);
+    }
+    if (row.type === 'history.rewound') {
+      views ??= { ...previousViews };
+      rewindViews(views, row.runId, row.retainedMessageIds);
+    }
+    if (row.type === 'history.compacted') {
+      const evicted = new Set(row.evictedMessageIds);
+      for (const [id, view] of Object.entries(views ?? previousViews)) {
+        const active = view.providerIds?.some((messageId) => evicted.has(messageId)) === true;
+        const previousSegments = view.segments ?? [];
+        const segments = view.segments?.map((segment) =>
+          segment.providerIds?.some((messageId) => evicted.has(messageId))
+            ? {
+                ...segment,
+                providerIds: [...segment.providerIds, row.summary.id],
+              }
+            : segment,
+        );
+        if (active || segments?.some((segment, index) => segment !== previousSegments[index])) {
+          views ??= { ...previousViews };
+          views[id] = {
+            ...view,
+            ...(active ? { providerIds: [...view.providerIds, row.summary.id] } : {}),
+            ...(segments === undefined ? {} : { segments }),
+          };
+        }
+      }
+    }
+    const previous = (views ?? previousViews)[row.runId];
     const reopened = row.type === 'run.lifecycle' && row.state === 'running' && previous?.terminal !== undefined;
     if (reopened) {
       const prefix = `[${JSON.stringify(row.runId)},`;
@@ -240,8 +431,51 @@ const foldRunViews = (
         }
       }
     }
+    const message =
+      row.type === 'message.appended'
+        ? row.message
+        : row.type === 'message.envelope-replaced'
+          ? row.replacement
+          : undefined;
+    const correctedIds = new Set<string>();
+    if (message?.role === 'assistant' && Array.isArray(message.content)) {
+      for (const [index, part] of message.content.entries()) {
+        if (!isRecord(part)) {
+          continue;
+        }
+        const kind = part['type'];
+        const content = kind === 'text' ? part['text'] : kind === 'thinking' ? part['thinking'] : undefined;
+        const key = JSON.stringify([row.runId, message.id, index]);
+        const block = blocks.get(key);
+        if (typeof content === 'string' && block !== undefined && !content.startsWith(block.content)) {
+          correctedIds.add(`${message.id}:${String(kind)}:${index}`);
+          blocks.delete(key);
+        }
+      }
+    }
     const chunks = projectAgentHostEvent(row, blocks);
-    const user = projectAgentHostUserTurn(row);
+    if (
+      row.type === 'run.lifecycle' &&
+      (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled')
+    ) {
+      const prefix = `[${JSON.stringify(row.runId)},`;
+      for (const key of blocks.keys()) {
+        if (key.startsWith(prefix)) {
+          blocks.delete(key);
+        }
+      }
+    }
+    const projectedUser = projectAgentHostUserTurn(row);
+    const user =
+      projectedUser !== undefined && (previous?.user === undefined || previous.user.id === projectedUser.id)
+        ? projectedUser
+        : undefined;
+    const steering =
+      previous?.user !== undefined &&
+      projectedUser?.id.startsWith('steer:') === true &&
+      previous.user.id !== projectedUser.id
+        ? projectedUser
+        : undefined;
     const terminal =
       row.type === 'run.lifecycle' && (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled')
         ? row.state
@@ -249,44 +483,82 @@ const foldRunViews = (
     if (
       chunks.length === 0 &&
       user === undefined &&
+      steering === undefined &&
       previous !== undefined &&
       (row.type !== 'run.lifecycle' || terminal === previous.terminal)
     ) {
       continue;
     }
-    if (chunks.length === 0 && user === undefined && terminal === undefined && row.type !== 'run.lifecycle') {
+    if (
+      chunks.length === 0 &&
+      user === undefined &&
+      steering === undefined &&
+      terminal === undefined &&
+      row.type !== 'run.lifecycle'
+    ) {
       continue;
     }
-    // The merged rows already preserve each device's term order; clamp a backwards clock before sorting runs.
     const admittedAt =
       previous?.admittedAt ??
       (lastAdmittedAt !== undefined && row.recordedAt < lastAdmittedAt ? lastAdmittedAt : row.recordedAt);
     if (previous === undefined) {
       lastAdmittedAt = admittedAt;
     }
-    views = {
-      ...views,
-      [row.runId]: {
-        admittedAt,
-        chunks: [
-          ...(reopened ? previous.chunks.filter((chunk) => chunk.type === 'start') : (previous?.chunks ?? [])),
-          ...chunks,
-        ],
-        ...(previous?.user === undefined && user === undefined ? {} : { user: user ?? previous?.user }),
-        ...(row.type === 'run.lifecycle'
-          ? terminal === undefined
-            ? {}
-            : { terminal }
-          : previous?.terminal === undefined
-            ? {}
-            : { terminal: previous.terminal }),
-      },
+    const segmentId = steering === undefined ? previous?.segmentId : `${row.runId}:${steering.id}`;
+    const segments =
+      steering === undefined
+        ? user === undefined
+          ? previous?.segments
+          : previous?.segments?.map((segment, index) => (index === 0 ? { ...segment, user } : segment))
+        : [
+            ...(previous?.segments ?? []),
+            {
+              user: previous?.steering ?? previous?.user,
+              chunks: previous?.chunks ?? [],
+              providerIds: previous?.providerIds,
+            },
+          ];
+    const initialChunks =
+      steering === undefined
+        ? reopened
+          ? chunksOf(previous.chunks).filter((chunk) => chunk.type === 'start')
+          : (previous?.chunks ?? [])
+        : [{ type: 'start', messageId: segmentId } satisfies UIMessageChunk];
+    const providerId = row.type === 'message.appended' ? row.message.id : projectedUser?.id;
+    views ??= { ...previousViews };
+    const { terminal: _terminal, ...prior } = previous ?? {};
+    const finalState = row.type === 'run.lifecycle' ? terminal : previous?.terminal;
+    views[row.runId] = {
+      ...prior,
+      admittedAt,
+      chunks:
+        correctedIds.size === 0
+          ? appendChunks(initialChunks, chunks)
+          : replaceBlockChunks(initialChunks, chunks, correctedIds),
+      ...(correctedIds.size === 0 ? {} : { streamVersion: (previous?.streamVersion ?? 0) + 1 }),
+      ...(previous?.user === undefined && user === undefined ? {} : { user: user ?? previous?.user }),
+      ...(segments === undefined ? {} : { segments }),
+      ...(steering === undefined ? {} : { steering, segmentId }),
+      ...(providerId === undefined || previous?.providerIds?.includes(providerId)
+        ? {}
+        : {
+            providerIds: [...(steering === undefined ? (previous?.providerIds ?? []) : []), providerId],
+          }),
+      ...(finalState === undefined ? {} : { terminal: finalState }),
     };
   }
-  return { views, blocks: Object.fromEntries(blocks) };
+  for (const [runId, blocks] of blockMaps) {
+    if (blocks.size === 0) {
+      // oxlint-disable-next-line typescript/no-dynamic-delete -- This batch owns the outer record.
+      delete nextBlocks[runId];
+    } else {
+      nextBlocks[runId] = Object.fromEntries(blocks);
+    }
+  }
+  return { views: views ?? previousViews, blocks: nextBlocks };
 };
 
-const copyBlocks = (blocks: ChatProjection['blocks']): AgentHostLiveBlocks =>
+const copyBlocks = (blocks: Readonly<Record<string, Block>>): AgentHostLiveBlocks =>
   new Map(Object.entries(blocks).map(([key, block]) => [key, { ...block }]));
 
 /** Apply a durable row to the ephemeral watch too, deduping it against live block offsets. */
@@ -299,7 +571,11 @@ const foldLiveRow = (
   }
   const blocks = copyBlocks(live.blocks);
   const chunks = projectAgentHostEvent(row, blocks);
-  return { runId: live.runId, chunks: [...live.chunks, ...chunks], blocks: Object.fromEntries(blocks) };
+  return {
+    runId: live.runId,
+    chunks: appendChunks(live.chunks, chunks),
+    blocks: Object.fromEntries(blocks),
+  };
 };
 
 /**
@@ -329,14 +605,40 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       return { state };
     }
     const prior = state.live?.runId === runId ? state.live : undefined;
-    const blocks = copyBlocks(prior?.blocks ?? state.blocks);
+    const blocks = copyBlocks(prior?.blocks ?? state.blocks[runId] ?? {});
     const chunks = projectAgentHostLiveEvent(event.event, blocks);
+    const view = state.views[runId];
+    const previousChunks = prior?.chunks ?? view?.chunks ?? [];
+    const ending = event.event.type === 'text-end' || event.event.type === 'thinking-end' ? event.event : undefined;
+    const priorBlock =
+      ending === undefined
+        ? undefined
+        : (prior?.blocks ?? state.blocks[runId])?.[JSON.stringify([runId, ending.messageId, ending.contentIndex])];
+    const corrected =
+      ending !== undefined && priorBlock !== undefined && !ending.content.startsWith(priorBlock.content);
+    let liveChunks = appendChunks(previousChunks, chunks);
+    if (corrected) {
+      const kind = ending.type === 'text-end' ? 'text' : 'reasoning';
+      const id = `${ending.messageId}:${ending.type === 'text-end' ? 'text' : 'thinking'}:${ending.contentIndex}`;
+      liveChunks = replaceBlockChunks(
+        previousChunks,
+        [
+          { type: kind === 'text' ? 'text-start' : 'reasoning-start', id },
+          { type: kind === 'text' ? 'text-delta' : 'reasoning-delta', id, delta: ending.content },
+          ...chunks,
+        ],
+        new Set([id]),
+      );
+    }
     return {
       state: {
         ...state,
+        ...(corrected && view !== undefined
+          ? { views: { ...state.views, [runId]: { ...view, streamVersion: (view.streamVersion ?? 0) + 1 } } }
+          : {}),
         live: {
           runId,
-          chunks: [...(prior?.chunks ?? state.views[runId]?.chunks ?? []), ...chunks],
+          chunks: liveChunks,
           blocks: Object.fromEntries(blocks),
         },
       },
@@ -347,7 +649,15 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       return { state };
     }
     const { live: _live, ...durable } = state;
-    return { state: durable };
+    const view = state.views[event.runId];
+    return {
+      state: {
+        ...durable,
+        ...(view === undefined
+          ? {}
+          : { views: { ...state.views, [event.runId]: { ...view, streamVersion: (view.streamVersion ?? 0) + 1 } } }),
+      },
+    };
   }
   /* Any batch states where the log ends, even one this projection already holds or cannot fold yet. */
   const endCursor =
@@ -379,13 +689,44 @@ export const reduceChatProjection = (state: ChatProjection, event: ChatProjectio
       const rendered = foldRunViews(parsedRows, views, state.blocks);
       views = rendered.views;
       let live = parsedRows.some(
-        (row) => row.type === 'run.lifecycle' && row.state === 'admitted' && row.runId !== state.live?.runId,
+        (row) =>
+          (row.type === 'run.lifecycle' && row.state === 'admitted' && row.runId !== state.live?.runId) ||
+          (row.type === 'message.appended' && row.message.role === 'user' && row.message.id.startsWith('steer:')),
       )
         ? undefined
         : state.live;
       for (const row of parsedRows) {
         if (live !== undefined) {
-          live = foldLiveRow(live, row);
+          const currentLive = live;
+          const message =
+            row.runId === currentLive.runId
+              ? row.type === 'message.appended'
+                ? row.message
+                : row.type === 'message.envelope-replaced'
+                  ? row.replacement
+                  : undefined
+              : undefined;
+          const replaced =
+            message?.role === 'assistant' &&
+            Array.isArray(message.content) &&
+            message.content.some((part, index) => {
+              if (!isRecord(part)) {
+                return false;
+              }
+              const content =
+                part['type'] === 'text' ? part['text'] : part['type'] === 'thinking' ? part['thinking'] : undefined;
+              const block = currentLive.blocks[JSON.stringify([row.runId, message.id, index])];
+              return typeof content === 'string' && block !== undefined && !content.startsWith(block.content);
+            });
+          if (replaced) {
+            const view = views[row.runId];
+            if (view !== undefined) {
+              views = { ...views, [row.runId]: { ...view, streamVersion: (view.streamVersion ?? 0) + 1 } };
+            }
+            live = undefined;
+          } else {
+            live = foldLiveRow(live, row);
+          }
         }
       }
       return {
@@ -466,10 +807,12 @@ export const selectTranscriptSource = (
   projection: ChatProjection,
 ): ReadonlyArray<RunView & { readonly runId: string }> =>
   Object.entries({ ...projection.remote?.views, ...projection.views })
+    .filter(([, view]) => view.retired !== true)
     .map(([runId, view]) => ({ runId, ...view }))
     .toSorted((left, right) => left.admittedAt.localeCompare(right.admittedAt));
 
 const messagesByChunks = new WeakMap<RunView['chunks'], Promise<MyUIMessage | undefined>>();
+const finalizedMessages = new WeakMap<MyUIMessage, Map<NonNullable<RunView['terminal']>, MyUIMessage>>();
 
 const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> => {
   let pending = messagesByChunks.get(view.chunks);
@@ -480,7 +823,7 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
       }
       const stream = new ReadableStream<UIMessageChunk>({
         start(controller) {
-          for (const chunk of view.chunks) {
+          for (const chunk of chunksSince(view.chunks)) {
             // The ledger owns run failure; only malformed SDK reconstruction should reject this transcript.
             if (chunk.type === 'error') {
               continue;
@@ -503,7 +846,18 @@ const materializeRun = async (view: RunView): Promise<MyUIMessage | undefined> =
     return message;
   }
   const cause = view.terminal === 'completed' ? 'success' : view.terminal === 'cancelled' ? 'user_stop' : 'error';
-  return finalizeInterruptedToolParts([message], undefined, cause)[0];
+  let finalized = finalizedMessages.get(message);
+  if (finalized === undefined) {
+    finalized = new Map();
+    finalizedMessages.set(message, finalized);
+  }
+  const previous = finalized.get(view.terminal);
+  if (previous !== undefined) {
+    return previous;
+  }
+  const result = finalizeInterruptedToolParts([message], undefined, cause)[0]!;
+  finalized.set(view.terminal, result);
+  return result;
 };
 
 /** Materialize one log snapshot; the adapter versions its async result before writing to a ready SDK chat. @public */
@@ -512,11 +866,33 @@ export const materializeTranscript = async (
   watchedRunId?: string,
 ): Promise<MyUIMessage[]> => {
   const runs = selectTranscriptSource(projection);
-  const assistants = await Promise.all(runs.map(async (run) => materializeRun(run)));
-  return runs.flatMap((run, index) => [
-    ...(run.user === undefined ? [] : [run.user]),
-    ...(run.runId === watchedRunId || assistants[index] === undefined ? [] : [assistants[index]]),
-  ]);
+  const transcripts = await Promise.all(
+    runs.map(async (run) => {
+      const segments = await Promise.all(
+        (run.segments ?? []).map(async (segment) => {
+          const assistant = await materializeRun({
+            ...run,
+            chunks: segment.chunks,
+            terminal: undefined,
+          });
+          return [segment.user, assistant].filter((message): message is MyUIMessage => message !== undefined);
+        }),
+      );
+      const messages = segments.flat();
+      const user = run.steering ?? run.user;
+      if (user !== undefined) {
+        messages.push(user);
+      }
+      if (run.runId !== watchedRunId) {
+        const assistant = await materializeRun(run);
+        if (assistant !== undefined && (user !== undefined || assistant.parts.length > 0)) {
+          messages.push(assistant);
+        }
+      }
+      return messages;
+    }),
+  );
+  return transcripts.flat();
 };
 
 /** @public */
@@ -609,7 +985,10 @@ export type TurnRevisionLog = Readonly<{
   /** Attempt 1's placement of record; a run without one never settles (legacy). */
   placement?: TurnPlacement;
   /** The attempt's settlement row, and the revision it names. */
-  settlement?: Readonly<{ type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed'; revisionId?: string }>;
+  settlement?: Readonly<{
+    type: 'turn.finalized' | 'turn.conflicted' | 'turn.failed';
+    revisionId?: string;
+  }>;
 }>;
 
 const isTerminal = (lifecycle: string): lifecycle is 'completed' | 'failed' | 'cancelled' =>

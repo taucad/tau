@@ -1,4 +1,6 @@
 /* oxlint-disable typescript/no-restricted-types -- Refused record bytes may be absent (null), as the store reports them. */
+import { useObservation } from '@taucad/fs-client/react/use-observation';
+import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useSelector } from '@xstate/react';
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { workbenchPaths, workbenchRecords } from '@taucad/workbench';
@@ -69,7 +71,7 @@ function ViewSettingsSyncEntry({
     registerWorkbenchRecordProducer,
     setAppliedWorkbenchRevision,
   } = useProject();
-  const { parameterFiles, subscribeWorkbenchRecord } = useFileManager();
+  const { parameterFiles, watchRecordFile } = useFileManager();
   const root = `/projects/${projectId}`;
   const [notice, setNotice] =
     useState<
@@ -121,17 +123,29 @@ function ViewSettingsSyncEntry({
       currentGeneration: () => generation,
     };
   }, [parameterFiles, recordPath, root, setAppliedWorkbenchRevision, setViewEntryPath, setViewRecord, viewId]);
+  const observation = useMemo(
+    () =>
+      new ObservationService({
+        resource: `${root}/${workbenchPaths.view(viewId)}`,
+        watch: (invalidate, reset) =>
+          watchRecordFile(`${root}/${workbenchPaths.view(viewId)}`, (event) => {
+            if (event.type === 'reset') {
+              reset();
+            } else {
+              invalidate();
+            }
+          }),
+        invalidate: store.invalidateRead,
+        read: async () => store.read(!store.ready()),
+      }),
+    [root, store, watchRecordFile, viewId],
+  );
   useEffect(() => {
-    const unsubscribe = subscribeWorkbenchRecord(workbenchPaths.view(viewId), () => {
-      void store.read();
-    });
-    void store.read(true);
     return () => {
-      unsubscribe();
       advanceGeneration();
       setAppliedWorkbenchRevision(recordPath, undefined);
     };
-  }, [advanceGeneration, recordPath, setAppliedWorkbenchRevision, store, subscribeWorkbenchRecord, viewId]);
+  }, [advanceGeneration, observation, recordPath, setAppliedWorkbenchRevision]);
   useEffect(() => {
     storeMounts.set(store, (storeMounts.get(store) ?? 0) + 1);
     return () => {
@@ -176,7 +190,13 @@ function ViewSettingsSyncEntry({
     [currentGeneration, recordPath, setAppliedWorkbenchRevision, store],
   );
   const entryPath = record?.entryPath ?? viewEntryPaths.get(viewId);
-  const issueState = recordIssueState(notice, health);
+  const observed = useObservation(observation);
+  const sourceHealth: RecordHealth | undefined = observed.error
+    ? { ...(health ?? store.health()), read: 'unavailable', error: observed.error }
+    : observed.status === 'pending' || observed.status === 'registering'
+      ? { ...(health ?? store.health()), read: 'retrying' }
+      : health;
+  const issueState = recordIssueState(notice, sourceHealth);
   const issue = useMemo((): RecordIssue | undefined => {
     if (!issueState) {
       return undefined;
@@ -186,10 +206,16 @@ function ViewSettingsSyncEntry({
       path: recordPath,
       entry: entryPath ?? undefined,
       state: issueState,
-      message: notice?.message ?? health?.error,
+      message: notice?.message ?? sourceHealth?.error,
       bytes: notice?.bytes ?? null,
       writing: health?.writing ?? false,
-      retryRead: store.retryRead,
+      retryRead: async () => {
+        if (observed.error) {
+          observation.refresh();
+          return false;
+        }
+        return store.retryRead();
+      },
       retrySave: store.flush,
       reset: async (reviewed) =>
         store.reset(
@@ -197,7 +223,18 @@ function ViewSettingsSyncEntry({
           reviewed,
         ),
     };
-  }, [entryPath, health?.error, health?.writing, issueState, notice, record, recordPath, store]);
+  }, [
+    entryPath,
+    sourceHealth?.error,
+    health?.writing,
+    issueState,
+    notice,
+    observed.error,
+    observation,
+    record,
+    recordPath,
+    store,
+  ]);
   usePublishRecordIssue(projectId, recordPath, issue);
   const cadRef = useSelector(projectRef, (state) =>
     entryPath === null || entryPath === undefined ? undefined : state.context.geometryUnits.get(entryPath),

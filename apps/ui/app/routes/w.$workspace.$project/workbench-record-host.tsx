@@ -1,6 +1,8 @@
 /* oxlint-disable eslint/no-await-in-loop -- Restore must create required view files in order before layout adoption. */
 /* oxlint-disable react/refs -- Store callbacks and Restore read refs only after commit. */
 /* oxlint-disable typescript/no-restricted-types -- Refused record bytes may be absent (null), as the store reports them. */
+import { useObservation } from '@taucad/fs-client/react/use-observation';
+import { ObservationService } from '@taucad/fs-client/observation-service';
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Topic } from '@taucad/events';
 import { useSelector } from '@xstate/react';
@@ -43,7 +45,7 @@ const viewIdsIn = (node: ViewerNode): string[] =>
 
 /** Watches the live root and applies valid arrangements through the registered Dockview owners. */
 export function WorkbenchRecordHost(): React.JSX.Element {
-  const { parameterFiles, workbenchFiles, contentService, subscribeWorkbenchRecord } = useFileManager();
+  const { parameterFiles, workbenchFiles, watchRecordFile, contentService } = useFileManager();
   const { projectId, editorRef, registerWorkbenchRecordProducer, viewRecords, setAppliedWorkbenchRevision } =
     useProject();
   const root = `/projects/${projectId}`;
@@ -290,24 +292,6 @@ export function WorkbenchRecordHost(): React.JSX.Element {
       setAppliedWorkbenchRevision,
     ],
   );
-  const issueState = recordIssueState(refusal, health);
-  const issue = useMemo((): RecordIssue | undefined => {
-    if (!issueState) {
-      return undefined;
-    }
-    return {
-      kind: 'layout',
-      path: workbenchPaths.layout,
-      state: issueState,
-      message: refusal?.message ?? health?.error,
-      bytes: refusal?.bytes ?? null,
-      writing: health?.writing ?? false,
-      retryRead: async () => store.retryRead(),
-      retrySave: async () => store.flush(),
-      reset: async (reviewed) => store.reset(appliedRef.current ?? fallbackLayout(), reviewed),
-    };
-  }, [health?.error, health?.writing, issueState, refusal, store]);
-  usePublishRecordIssue(projectId, workbenchPaths.layout, issue);
   const firstReadRef = useRef<{ store: typeof store; promise: Promise<boolean> } | undefined>(undefined);
   const firstRead = useCallback(async (): Promise<boolean> => {
     const existing = firstReadRef.current;
@@ -340,20 +324,62 @@ export function WorkbenchRecordHost(): React.JSX.Element {
     return promise;
   }, [store]);
 
+  const observation = useMemo(
+    () =>
+      new ObservationService({
+        resource: `${root}/${workbenchPaths.layout}`,
+        watch: (invalidate, reset) =>
+          watchRecordFile(`${root}/${workbenchPaths.layout}`, (event) => {
+            if (event.type === 'reset') {
+              reset();
+            } else {
+              invalidate();
+            }
+          }),
+        invalidate: store.invalidateRead,
+        read: async () => (store.ready() ? store.read() : firstRead()),
+      }),
+    [contentService, firstRead, root, store, watchRecordFile],
+  );
   useEffect(() => {
     firstReadRef.current = undefined;
-    const unsubscribe = subscribeWorkbenchRecord(workbenchPaths.layout, () => {
-      void store.read();
-    });
-    void (contentService && store.ready() ? store.read(true) : firstRead());
     return () => {
-      unsubscribe();
       applicationRef.current.epoch++;
       applicationRef.current.viewer = false;
       applicationRef.current.workbench = false;
       setAppliedWorkbenchRevision(workbenchPaths.layout, undefined);
     };
-  }, [contentService, firstRead, setAppliedWorkbenchRevision, store, subscribeWorkbenchRecord]);
+  }, [observation, setAppliedWorkbenchRevision]);
+  const observed = useObservation(observation);
+  const sourceHealth: RecordHealth | undefined = observed.error
+    ? { ...(health ?? store.health()), read: 'unavailable', error: observed.error }
+    : observed.status === 'pending' || observed.status === 'registering'
+      ? { ...(health ?? store.health()), read: 'retrying' }
+      : health;
+  const issueState = recordIssueState(refusal, sourceHealth);
+  const issue = useMemo((): RecordIssue | undefined => {
+    if (!issueState) {
+      return undefined;
+    }
+    return {
+      kind: 'layout',
+      path: workbenchPaths.layout,
+      state: issueState,
+      message: refusal?.message ?? sourceHealth?.error,
+      bytes: refusal?.bytes ?? null,
+      writing: health?.writing ?? false,
+      retryRead: async () => {
+        if (observed.error) {
+          observation.refresh();
+          return false;
+        }
+        return store.retryRead();
+      },
+      retrySave: async () => store.flush(),
+      reset: async (reviewed) => store.reset(appliedRef.current ?? fallbackLayout(), reviewed),
+    };
+  }, [sourceHealth?.error, health?.writing, issueState, observed.error, observation, refusal, store]);
+  usePublishRecordIssue(projectId, workbenchPaths.layout, issue);
   useEffect(() => {
     storeMounts.set(store, (storeMounts.get(store) ?? 0) + 1);
     return () => {

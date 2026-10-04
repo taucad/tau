@@ -1,3 +1,4 @@
+import { ObservationService } from '@taucad/fs-client/observation-service';
 import type { ReactNode } from 'react';
 import type { PartialDeep } from 'type-fest';
 import deepmerge from 'deepmerge';
@@ -329,7 +330,6 @@ if (hotContexts) {
  * and a burst (project creation, import, an agent write pass) fires far faster
  * than a discovery rescan completes: one trailing-edge refetch per burst.
  */
-const discoveryInvalidationDebounce = 300;
 
 /** Concurrent disk-side library-state recoveries after IndexedDB eviction. */
 const libraryRecoveryConcurrency = 16;
@@ -597,6 +597,28 @@ const pendingStorageToScope = async (storage: PendingProjectStorage): Promise<St
   };
 };
 
+/** Retain actual owner I/O, whose lifetime Query cancellation cannot shorten. */
+function createMetadataReadOwner(source: ReturnType<typeof createChatFileStore>) {
+  const pending = new Set<Promise<unknown>>();
+  return {
+    async read<Value>(operation: (source: ReturnType<typeof createChatFileStore>) => Promise<Value>): Promise<Value> {
+      const promise = operation(source);
+      pending.add(promise);
+      try {
+        return await promise;
+      } finally {
+        pending.delete(promise);
+      }
+    },
+    async settle(): Promise<void> {
+      while (pending.size > 0) {
+        // oxlint-disable-next-line eslint/no-await-in-loop -- Include reads admitted while a prior non-abortable owner read is settling.
+        await Promise.allSettled(pending);
+      }
+    },
+  };
+}
+
 export function ProjectManagerProvider({ children }: { readonly children: ReactNode }): React.JSX.Element {
   const actorRef = useActorRef(projectManagerMachine);
   const fileManager = useFileManager();
@@ -622,6 +644,7 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       }),
     [fileManager.recordFiles, queryClient],
   );
+  const metadataReadOwner = useMemo(() => createMetadataReadOwner(chatStore), [chatStore]);
   const workspaceTelemetry = useWorkspaceTelemetry();
   const projectNameClient = useProjectNameClient();
   const discoveryReadinessRef = useRef<Promise<void> | undefined>(undefined);
@@ -677,31 +700,18 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
     [invalidateChatQueries],
   );
 
-  const invalidationTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const discoveryObservationRef = useRef<ObservationService<void> | undefined>(undefined);
   const scheduleProjectsListInvalidation = useCallback(() => {
     discoveryEpochRef.current++;
     discoverySnapshotRef.current = undefined;
-    clearTimeout(invalidationTimerRef.current);
-    invalidationTimerRef.current = setTimeout(invalidateProjectsList, discoveryInvalidationDebounce);
-  }, [invalidateProjectsList]);
-
-  useEffect(() => {
-    return () => {
-      clearTimeout(invalidationTimerRef.current);
-    };
+    discoveryObservationRef.current?.invalidate();
   }, []);
 
   useEffect(() => {
     const channel = fileManager.workerChangeChannel;
     if (!channel) {
-      return;
+      return undefined;
     }
-    /**
-     * Discovery-relevant change paths under the flat layout: the synthetic
-     * root event, a root-level directory (a project directory appearing or
-     * going away), and any `tau.json`. Dot-prefixed segments are workspace or
-     * project app state (`.tau/**`) and must never trigger a rescan (F1).
-     */
     const isManifestPath = (path: string): boolean => {
       const segments = path.split('/').filter(Boolean);
       if (segments.length === 0) {
@@ -712,46 +722,138 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
       }
       return segments.length === 1 || segments.at(-1) === 'tau.json';
     };
-    const projectedChatLog = (path: string): readonly [string, string] | undefined => {
-      const segments = path.split('/').filter(Boolean);
-      const projects = segments.indexOf('projects');
-      return projects !== -1 &&
-        segments[projects + 2] === '.tau' &&
-        segments[projects + 3] === 'chats' &&
-        segments[projects + 5] === 'events' &&
-        segments[projects + 6]?.endsWith('.jsonl') === true
-        ? [segments[projects + 1]!, segments[projects + 4]!]
-        : undefined;
-    };
-    const written = {
-      interestedIn: (path: string) => isManifestPath(path) || projectedChatLog(path) !== undefined,
-      handler: (event: { readonly path: string }) => {
-        const projected = projectedChatLog(event.path);
-        if (projected === undefined) {
-          scheduleProjectsListInvalidation();
+    let discoveryDirty = false;
+    const discovery = new ObservationService<void>({
+      resource: 'workspace/project-discovery',
+      watch: (invalidate, reset) =>
+        channel.watchReady({ paths: [''], recursive: true }, (event) => {
+          if (event.type === 'reset') {
+            reset();
+            return;
+          }
+          const paths = event.type === 'rename' ? [event.oldPath, event.newPath] : [event.path];
+          if (paths.some((path) => isManifestPath(path))) {
+            invalidate();
+          }
+        }),
+      invalidate: () => {
+        discoveryDirty = true;
+        discoveryEpochRef.current++;
+        discoverySnapshotRef.current = undefined;
+        void queryClient.cancelQueries({ queryKey: ['projects'] });
+      },
+      read: async ({ isCurrent }) => {
+        if (!isCurrent() || !discoveryDirty) {
           return;
         }
-        const [, chatId] = projected;
-        // The log projection owns accepted messages. A log write cannot change chat.json metadata.
-        void queryClient.invalidateQueries({ queryKey: ['chat', chatId] });
+        discoveryDirty = false;
+        const heldPass = discoveryPassRef.current;
+        if (heldPass) {
+          await heldPass;
+        }
+        if (isCurrent()) {
+          await queryClient.invalidateQueries({ queryKey: ['projects'] }, { cancelRefetch: false });
+        }
       },
-    };
-    const subscription = { interestedIn: isManifestPath, handler: scheduleProjectsListInvalidation };
-    const unsubscribers = [
-      channel.onFileWritten(written),
-      channel.onFileDeleted(subscription),
-      channel.onFileRenamed(subscription),
-      channel.onDirectoryCreated(subscription),
-      channel.onDirectoryDeleted(subscription),
-      channel.onDirectoryRenamed(subscription),
-      channel.onDirectoryChanged(subscription),
-    ];
+    });
+    discoveryObservationRef.current = discovery;
+    const resources = new Map<string, Set<string>>();
+    let membership = false;
+    const metadata = new ObservationService<void>({
+      resource: 'workspace/chat-metadata',
+      watch: (invalidate, reset) =>
+        channel.watchReady({ paths: [''], recursive: true }, (event) => {
+          if (event.type === 'reset') {
+            membership = true;
+            reset();
+            return;
+          }
+          const paths = event.type === 'rename' ? [event.oldPath, event.newPath] : [event.path];
+          let changed = false;
+          for (const path of paths) {
+            const segments = path.split('/').filter(Boolean);
+            if (segments.length <= 1) {
+              membership = true;
+              changed = true;
+              continue;
+            }
+            if (segments[0] !== 'projects') {
+              continue;
+            }
+            const projectId = segments[1]!;
+            if (segments.length === 2 || (segments[2] === '.tau' && segments.length === 3)) {
+              membership = true;
+              changed = true;
+            } else if (
+              segments[2] === '.tau' &&
+              segments[3] === 'chats' &&
+              (segments.length <= 5 || (segments[5] === 'chat.json' && segments.length === 6))
+            ) {
+              const chats = resources.get(projectId) ?? new Set<string>();
+              if (segments[4]) {
+                chats.add(segments[4]);
+              }
+              resources.set(projectId, chats);
+              changed = true;
+            }
+          }
+          if (changed) {
+            invalidate();
+          }
+        }),
+      invalidate: () => {
+        void queryClient.cancelQueries({ queryKey: ['all-chats'] });
+        if (membership) {
+          void queryClient.cancelQueries({ queryKey: ['chats'] });
+          void queryClient.cancelQueries({ queryKey: ['chat'] });
+        } else {
+          for (const [resourceId, chatIds] of resources) {
+            void queryClient.cancelQueries({ queryKey: ['chats', resourceId] });
+            for (const chatId of chatIds) {
+              void queryClient.cancelQueries({ queryKey: ['chat', chatId] });
+            }
+          }
+        }
+      },
+      read: async ({ isCurrent }) => {
+        if (!isCurrent()) {
+          return;
+        }
+        if (!membership && resources.size === 0) {
+          return;
+        }
+        await metadataReadOwner.settle();
+        if (!isCurrent()) {
+          return;
+        }
+        const pending: Array<Promise<void>> = [];
+        if (membership) {
+          membership = false;
+          pending.push(queryClient.invalidateQueries({ queryKey: ['chats'] }, { cancelRefetch: false }));
+          pending.push(queryClient.invalidateQueries({ queryKey: ['chat'] }, { cancelRefetch: false }));
+        }
+        for (const [resourceId, chatIds] of resources) {
+          pending.push(queryClient.invalidateQueries({ queryKey: ['chats', resourceId] }, { cancelRefetch: false }));
+          for (const chatId of chatIds) {
+            pending.push(queryClient.invalidateQueries({ queryKey: ['chat', chatId] }, { cancelRefetch: false }));
+          }
+        }
+        resources.clear();
+        pending.push(queryClient.invalidateQueries({ queryKey: ['all-chats'] }, { cancelRefetch: false }));
+        await Promise.all(pending);
+        await metadataReadOwner.settle();
+      },
+    });
+    const discoveryLease = discovery.acquire();
+    const metadataLease = metadata.acquire();
     return () => {
-      for (const unsubscribe of unsubscribers) {
-        unsubscribe();
+      if (discoveryObservationRef.current === discovery) {
+        discoveryObservationRef.current = undefined;
       }
+      discoveryLease.release();
+      metadataLease.release();
     };
-  }, [fileManager.workerChangeChannel, queryClient, scheduleProjectsListInvalidation]);
+  }, [fileManager.workerChangeChannel, invalidateProjectsList, metadataReadOwner, queryClient]);
 
   // Select state from the machine
   const error = useSelector(actorRef, (state) => state.context.error);
@@ -2418,34 +2520,35 @@ export function ProjectManagerProvider({ children }: { readonly children: ReactN
 
   const getChatsForResource = useCallback(
     async (resourceId: string, options?: { includeDeleted?: boolean }): Promise<Chat[]> => {
-      return chatStore.getChatsForResource(resourceId, options);
+      return metadataReadOwner.read(async (source) => source.getChatsForResource(resourceId, options));
     },
-    [chatStore],
+    [metadataReadOwner],
   );
 
   const getAllChats = useCallback(
     async (options?: { includeDeleted?: boolean }): Promise<Chat[]> => {
-      return chatStore.getAllChats(options);
+      return metadataReadOwner.read(async (source) => source.getAllChats(options));
     },
-    [chatStore],
+    [metadataReadOwner],
   );
 
   const getChatRecordsForResource = useCallback(
     async (resourceId: string, options?: { includeDeleted?: boolean }): Promise<ChatRecord[]> =>
-      chatStore.getChatRecordsForResource(resourceId, options),
-    [chatStore],
+      metadataReadOwner.read(async (source) => source.getChatRecordsForResource(resourceId, options)),
+    [metadataReadOwner],
   );
 
   const getAllChatRecords = useCallback(
-    async (options?: { includeDeleted?: boolean }): Promise<ChatRecord[]> => chatStore.getAllChatRecords(options),
-    [chatStore],
+    async (options?: { includeDeleted?: boolean }): Promise<ChatRecord[]> =>
+      metadataReadOwner.read(async (source) => source.getAllChatRecords(options)),
+    [metadataReadOwner],
   );
 
   const getChat = useCallback(
     async (chatId: string, projectId?: string): Promise<Chat | undefined> => {
-      return chatStore.getChat(chatId, projectId);
+      return metadataReadOwner.read(async (source) => source.getChat(chatId, projectId));
     },
-    [chatStore],
+    [metadataReadOwner],
   );
 
   const deleteChat = useCallback(

@@ -6,7 +6,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { join } from 'node:path';
 import { sanitizeEvent } from '#www/analytics.js';
-import { environmentHref } from '#www/environment.js';
+import { environmentHref, stagingDesktop } from '#www/environment.js';
 import { pages, renderPage } from '#www/templates.js';
 const root = fileURLToPath(new URL('../', import.meta.url));
 const eventId = '83efb3b9-a92c-444f-99ef-c67f8c9573d7';
@@ -166,4 +166,8 @@ await test('staging keeps app and docs links on staging and leaves production un
   );
   assert.equal(environmentHref('https://tau.newer.example/', 'taucad.dev'), 'https://tau.newer.example/');
   assert.equal(environmentHref('https://tau.new/projects', 'tau.new'), 'https://tau.new/projects');
+});
+await test('only staging offers the staging desktop builds', () => {
+  assert.match(stagingDesktop('taucad.dev')?.href ?? '', /releases\?q=desktop-staging/u);
+  assert.equal(stagingDesktop('tau.new'), undefined);
 });

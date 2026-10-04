@@ -25,3 +25,18 @@ export const environmentHref = (href, hostname) => {
   }
   return href;
 };
+
+/**
+ * The desktop card on a staging host, which offers the signed staging prereleases instead of the production placeholder.
+ * @param hostname - The hostname the visitor loaded the page from.
+ * @returns The staging card copy and link, or `undefined` outside staging.
+ * @type {(hostname: string) => { href: string, label: string, note: string } | undefined}
+ */
+export const stagingDesktop = (hostname) =>
+  stagingDocsOrigins.has(hostname)
+    ? {
+        href: 'https://github.com/taucad/tau/releases?q=desktop-staging&expanded=true',
+        label: 'Download a staging build',
+        note: 'Local files, native kernels such as Build123d and PicoGK, and your own coding agents. Staging builds for macOS, Windows and Linux connect to taucad.dev.',
+      }
+    : undefined;

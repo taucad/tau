@@ -149,12 +149,17 @@ function MaterialForm({
     range.min > 0 &&
     range.min <= range.max &&
     range.max <= 500;
-  const field = (
-    name: string,
-    value: string,
-    set: (value: string) => void,
-    type: 'text' | 'number' = 'text',
-  ): React.JSX.Element => (
+  const field = ({
+    name,
+    value,
+    set,
+    type = 'text',
+  }: Readonly<{
+    name: string;
+    value: string;
+    set: (value: string) => void;
+    type?: 'text' | 'number';
+  }>): React.JSX.Element => (
     <Input
       aria-label={name}
       type={type}
@@ -204,14 +209,16 @@ function MaterialForm({
           <StringColorPicker aria-label='Colour' value={color} onChange={setColor} />
         </PrintSetupRow>
         <PrintSetupRow label='Filament profile' description='The vendor preset id, such as GFA01.'>
-          {field('Filament profile', profileId, setProfileId)}
+          {field({ name: 'Filament profile', value: profileId, set: setProfileId })}
         </PrintSetupRow>
-        <PrintSetupRow label='Preset setting'>{field('Preset setting', settingId, setSettingId)}</PrintSetupRow>
+        <PrintSetupRow label='Preset setting'>
+          {field({ name: 'Preset setting', value: settingId, set: setSettingId })}
+        </PrintSetupRow>
         <PrintSetupRow label='Nozzle from (°C)'>
-          {field('Minimum nozzle temperature', minimum, setMinimum, 'number')}
+          {field({ name: 'Minimum nozzle temperature', value: minimum, set: setMinimum, type: 'number' })}
         </PrintSetupRow>
         <PrintSetupRow label='Nozzle to (°C)'>
-          {field('Maximum nozzle temperature', maximum, setMaximum, 'number')}
+          {field({ name: 'Maximum nozzle temperature', value: maximum, set: setMaximum, type: 'number' })}
         </PrintSetupRow>
       </div>
       {isValid ? null : (
@@ -573,7 +580,7 @@ export function MaterialSlots({
                     setOpened(candidate.slot);
                   }}
                 >
-                  <span className='w-7 shrink-0 font-mono text-muted-foreground'>
+                  <span className='max-w-28 min-w-7 shrink-0 truncate font-mono text-muted-foreground'>
                     {slotLabel(system, candidate.slot)}
                   </span>
                   <SlotSwatch material={candidate.material} />

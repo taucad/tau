@@ -328,6 +328,9 @@ function JogPad({
   return (
     <div className='flex min-w-0 flex-col gap-2'>
       <PrintSetupRow label='Jog'>
+        <QualificationBadge
+          descriptor={isHold ? holdDescriptor : declaredAction(control.entry, motion.id, 'motion.jog')}
+        />
         <ParameterSelect
           label='Jog step'
           value={step}
@@ -399,11 +402,8 @@ function JogPad({
         <p className='text-xs text-muted-foreground'>
           Moves only while pressed. If this window stops renewing the hold, the machine stops by itself within{' '}
           {holdDescriptor.bound} ms.
-          <QualificationBadge descriptor={holdDescriptor} />
         </p>
-      ) : (
-        <QualificationBadge descriptor={declaredAction(control.entry, motion.id, 'motion.jog')} />
-      )}
+      ) : null}
     </div>
   );
 }
@@ -683,7 +683,7 @@ function AccessoryRow({
   const check = control.check(componentId, id);
   const isDisabled = check.status !== 'available' || control.pending !== undefined;
   const description = check.status === 'unavailable' ? check.message : descriptor.consequence;
-  const components = entry.snapshot.components;
+  const { components } = entry.snapshot;
   if (id === 'switch.set') {
     return (
       <PrintSetupRow label={label} description={description}>
@@ -959,9 +959,11 @@ function ActivityCard({
   const respondOn = respondingComponent(entry, activity);
   const [answered, setAnswered] = useState<string>();
   const moment = `${activity.activityId}:${prompt?.promptId ?? awaiting?.kind ?? ''}`;
-  /* Each new question comes into view wherever the person scrolled. */
+  /* Each new question comes into view wherever the person scrolled; a moment awaiting nothing ends in ':'. */
   useEffect(() => {
-    cardRef.current?.scrollIntoView?.({ block: 'nearest' });
+    if (!moment.endsWith(':')) {
+      cardRef.current?.scrollIntoView({ block: 'nearest' });
+    }
   }, [moment]);
   const isWaiting = awaiting !== undefined;
   const isFinished = activity.state === 'succeeded' || activity.state === 'failed';

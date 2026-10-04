@@ -277,15 +277,32 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
     input: (input) => `arrange_workbench(${Object.keys(input).join(', ')})`,
     output: (output) => `-> ${output.revisions.map((revision) => revision.path).join(', ')}`,
   },
+  [toolName.listMachines]: {
+    input: () => '',
+    output: (output) => output,
+  },
   [toolName.getMachine]: {
     input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
-    output: (output) => JSON.stringify(output, null, 2),
+    output: (output) => output,
+  },
+  [toolName.machineAction]: {
+    input: (input) =>
+      joinLines(
+        input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
+        `${input.componentId}: ${input.action}`,
+        input.parameters === undefined ? undefined : JSON.stringify(input.parameters),
+      ),
+    output: (output) => `${output.status}: ${output.message}`,
+  },
+  [toolName.stopMachine]: {
+    input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
+    output: (output) => `${output.status}: ${output.message}`,
   },
   [toolName.getPrintProfiles]: {
     input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
     output: (output) => JSON.stringify(output, null, 2),
   },
-  [toolName.requestPrint]: {
+  [toolName.requestJob]: {
     input: (input) =>
       joinLines(
         `targetFile: ${input.targetFile}`,
@@ -294,22 +311,19 @@ const toolSerializers: { [Name in keyof MyTools]: ToolSerializer<Name> } = {
       ),
     output: (output) =>
       joinLines(
-        `${output.request.summary.fileName} on ${output.machineName ?? output.request.machineId}: ${output.request.state}`,
-        output.request.failure?.message,
+        `${output.job.program.name} on ${output.machineName ?? output.job.machineId}: ${output.job.state}`,
+        output.job.failure?.message,
         output.nextStep,
       ),
   },
-  [toolName.getPrintRequest]: {
-    input: (input) => `requestId: ${input.requestId}`,
-    output: (output) => `${output.request.summary.fileName}: ${output.request.state}`,
-  },
-  [toolName.listPrintRequests]: {
-    input: (input) => (input.machineId === undefined ? '' : `machineId: ${input.machineId}`),
-    output: (output) => `${String(output.total)} print request(s)`,
-  },
-  [toolName.cancelPrint]: {
-    input: (input) => JSON.stringify(input),
-    output: (output) => JSON.stringify(output, null, 2),
+  [toolName.checkJob]: {
+    input: (input) =>
+      joinLines(
+        `targetFile: ${input.targetFile}`,
+        input.machineId === undefined ? undefined : `machineId: ${input.machineId}`,
+      ),
+    output: (output) =>
+      joinLines(`${output.status}${output.program ? `: ${output.program.name}` : ''}`, output.message),
   },
   [toolName.revisions]: {
     input: (input) => `action: ${input.action}`,

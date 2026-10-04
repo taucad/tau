@@ -40,8 +40,8 @@ import {
   known,
   machineEntry,
   machineSnapshot,
-  observedQuantity,
   providerFor,
+  temperature,
   x1cManifest,
 } from '#components/print/testing/machines.fixture.js';
 import type { SlicedArtifact } from '#routes/w.$workspace.$project/chat-print-prepare.js';
@@ -363,10 +363,6 @@ export const parametersMock = (actual: typeof ParametersModule): typeof Paramete
   },
 });
 
-/** The X1C manifest every Print pane test binds; the shared v3 fixture. */
-export const manifest = x1cManifest;
-/** The Bambu container the X1C accepts. */
-export const accepted = bambuContainer;
 export const provider: MachineProvider = { ...providerFor('bambu', x1cManifest), name: 'Bambu LAN' };
 
 /** The simulator: the same printer shape, and it accepts files from any slicer (blueprint P3). */
@@ -485,13 +481,6 @@ export const emptySlot = (address: string): MaterialSlotSnapshot => {
   };
 };
 
-const reading = (id: string, label: string, value: number, target?: number) => ({
-  id,
-  label,
-  value: observedQuantity(value, 'Cel'),
-  ...(target === undefined ? {} : { target: observedQuantity(target, 'Cel') }),
-});
-
 /** A Tau run 42 layers into 125, nine minutes left, its heaters at their targets. */
 export const printingRun = {
   runId: 'provider-run-1',
@@ -509,16 +498,16 @@ export const printingRun = {
 
 export const printing = (): MachineDirectoryEntry => {
   const idle = entry();
-  let components = idle.snapshot.components;
+  let { components } = idle.snapshot;
   components = withComponent(
     components,
-    known('tool-0', 'temperature', { kind: 'readings', values: [reading('nozzle', 'Nozzle', 219.5, 220)] }),
+    known('tool-0', 'temperature', { kind: 'readings', values: [temperature('nozzle', 219.5, 220)] }),
   );
   components = withComponent(
     components,
     known('bed', 'temperature', {
       kind: 'readings',
-      values: [reading('bed', 'Bed', 55, 55), { id: 'plate', label: 'Plate', value: 'textured-pei' }],
+      values: [temperature('bed', 55, 55), { id: 'plate', label: 'Plate', value: 'textured-pei' }],
     }),
   );
   components = withComponent(components, known('part-fan', 'accessories', { kind: 'level', ratio: 1 }));
@@ -546,8 +535,8 @@ export const artifact: MachineJob['artifact'] = {
   path: `.tau/artifacts/${'b'.repeat(64)}/pyramid.gcode.3mf`,
   digest: digestOf('b'),
   length: 4,
-  mediaType: accepted.mediaType,
-  contract: accepted.contract,
+  mediaType: bambuContainer.mediaType,
+  contract: bambuContainer.contract,
   selectedMember: 'Metadata/plate_1.gcode',
 };
 
@@ -866,7 +855,7 @@ export const sliceFixture: SlicedArtifact = {
   fileName: 'main.gcode.3mf',
   digest: digestOf('d'),
   length: 4,
-  mimeType: accepted.mediaType,
+  mimeType: bambuContainer.mediaType,
   optionsKey: '{}',
   rendering: undefined,
   materialConfiguration: {},

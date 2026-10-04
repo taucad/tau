@@ -61,7 +61,7 @@ export const pendingMachineActions = (
   machineId: string,
 ): readonly PendingMachineAction[] =>
   pendingAgentHostApprovals(messages).flatMap((approval): PendingMachineAction[] => {
-    const context = approval.context;
+    const { context } = approval;
     return context?.machineId === machineId &&
       context.componentId !== undefined &&
       context.action !== undefined &&

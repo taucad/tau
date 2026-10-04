@@ -19,14 +19,14 @@ import { ToolpathParseError, parseGcode } from '@taucad/slicer/toolpath';
 import type * as Toolpath from '@taucad/slicer/toolpath';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { projectFiles } from '#components/print/testing/project-files.js';
-import { fffSlots } from '#components/print/testing/machines.fixture.js';
+import { bambuContainer, fffSlots, machineEntry, x1cManifest } from '#components/print/testing/machines.fixture.js';
+import { bambuA1MiniManifest, bambuX1cManifest } from '@taucad/bambu';
 import { fixtureGcode } from '#components/printer/testing/toolpath-fixture.js';
 import type { MachineApprovalBridge } from '#hooks/use-machines-approvals.js';
 import { summarizeGcodeContainer } from '#components/printer/printer-summary.js';
 import type { SliceSummary } from '#components/printer/printer-summary.js';
 import type * as PrintSummary from '#routes/w.$workspace.$project/chat-print-summary.js';
 import {
-  accepted,
   agentJob,
   artifact,
   bambuStudioSliceSummary,
@@ -47,7 +47,6 @@ import {
   mockProjectSend,
   mockExport,
   mockWriteFiles,
-  manifest,
   printing,
   printingRun,
   projectId,
@@ -308,7 +307,9 @@ beforeEach(() => {
 });
 
 const signalMatcher: unknown = expect.any(AbortSignal);
-const x1cBuildVolume = fffProcessOf(manifest)!.geometry.buildVolume;
+const byPerson: unknown = expect.objectContaining({ kind: 'user' });
+const anyText: unknown = expect.any(String);
+const x1cBuildVolume = fffProcessOf(x1cManifest)!.geometry.buildVolume;
 
 describe('Print pane orientation', () => {
   it('lists a restored secondary model without waking its parked CAD unit', async () => {
@@ -834,8 +835,8 @@ describe('Print pane prepare and send', () => {
       path: slicePath,
       digest: `sha256:${sliceHex}`,
       length: 4,
-      mediaType: accepted.mediaType,
-      contract: accepted.contract,
+      mediaType: bambuContainer.mediaType,
+      contract: bambuContainer.contract,
       selectedMember: 'Metadata/plate_1.gcode',
     });
 
@@ -1021,7 +1022,7 @@ describe('Print pane prepare and send', () => {
 
   it("starts the machine mapping from the provider schema's own defaults, so bed leveling and flow calibration show on", async () => {
     // Bambu declares both flags `.default(true)` in its submission schema; its declared defaults stay empty.
-    expect(submissionDefaults(provider, entry(), { manifest })).toMatchObject({
+    expect(submissionDefaults(provider, entry(), { manifest: x1cManifest })).toMatchObject({
       bedLeveling: true,
       flowCalibration: true,
       timelapse: false,
@@ -1343,7 +1344,7 @@ describe('Print pane jobs', () => {
       expect.objectContaining({
         jobId: 'job-agent-1',
         decision: 'approve',
-        resolvedBy: expect.objectContaining({ kind: 'user' }),
+        resolvedBy: byPerson,
         attestations: ['work-area-clear'],
         attended: false,
       }),
@@ -1519,8 +1520,8 @@ describe('Print pane monitor and controls', () => {
         action: 'run.pause',
         capabilityRevision: 'capabilities-1',
         expectedRunId: 'provider-run-1',
-        requestedBy: expect.objectContaining({ kind: 'user' }),
-        operationId: expect.any(String),
+        requestedBy: byPerson,
+        operationId: anyText,
       }),
     );
 
@@ -1558,7 +1559,7 @@ describe('Print pane monitor and controls', () => {
     await user.click(stop);
     await waitFor(() => {
       expect(fixture.stop).toHaveBeenCalledExactlyOnceWith(
-        expect.objectContaining({ machineId: 'machine-1', requestedBy: expect.objectContaining({ kind: 'user' }) }),
+        expect.objectContaining({ machineId: 'machine-1', requestedBy: byPerson }),
       );
     });
     expect(fixture.applyAction).not.toHaveBeenCalled();
@@ -2733,8 +2734,8 @@ describe('Saved machine profiles', () => {
           ...provider,
           id: 'mini-provider',
           manifest: {
-            ...manifest,
-            identity: { ...manifest.identity, typeId: 'bambu.a1-mini' },
+            ...x1cManifest,
+            identity: { ...x1cManifest.identity, typeId: 'bambu.a1-mini' },
           },
         },
       ],
@@ -2823,6 +2824,28 @@ describe('Print pane artifacts and history', () => {
     const region = await screen.findByRole('region', { name: jobRegionName });
     expect(within(region).getByText('From another project')).toBeInTheDocument();
     expect(within(region).queryByRole('button', { name: 'Preview' })).not.toBeInTheDocument();
+  });
+});
+
+describe('Print pane with the Bambu provider’s own manifests', () => {
+  it.each([
+    ['X1C', bambuX1cManifest],
+    ['A1 mini', bambuA1MiniManifest],
+  ])('serves the %s as the provider declares it: Monitor, Control, Prepare and Stop', async (_name, real) => {
+    const machine = machineEntry({ manifest: real, snapshot: entry().snapshot });
+    renderPane(createFixture({ entries: [machine] }).client);
+
+    await findMachine('Ready');
+    const monitor = screen.getByRole('region', { name: 'Monitor' });
+    // The plate is a fact beside the heaters, by the name the manifest gives it.
+    expect(monitor).toHaveTextContent('PlateTextured PEI plate');
+    const slots = within(monitor).getByRole('list', { name: 'Material slots' });
+    expect(within(slots).getAllByRole('listitem')).toHaveLength(5);
+    expect(screen.getByRole('button', { name: /^Control/u })).toBeInTheDocument();
+    expect(prepareActions().getByRole('button', { name: 'Slice and preview' })).toBeEnabled();
+    expect(screen.getByRole('button', { name: 'Stop' })).toHaveAccessibleDescription(
+      /^Stop: .* Not an emergency stop\.$/u,
+    );
   });
 });
 

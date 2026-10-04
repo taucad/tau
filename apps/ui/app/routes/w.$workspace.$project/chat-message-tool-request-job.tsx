@@ -14,49 +14,67 @@ import { ChatToolLabel } from '#components/chat/chat-tool-label.js';
 import { ChatToolError } from '#components/chat/chat-tool-error.js';
 import { describePrintFailure } from '#routes/w.$workspace.$project/chat-print-send.js';
 
-type RequestPrintInvocation = ToolInvocation<typeof toolName.requestPrint>;
-type PrintRequestRecord = Extract<RequestPrintInvocation, { state: 'output-available' }>['output']['request'];
-type PrintRequestState = PrintRequestRecord['state'];
+type RequestJobInvocation = ToolInvocation<typeof toolName.requestJob>;
+type JobRecord = Extract<RequestJobInvocation, { state: 'output-available' }>['output']['job'];
 
 type Presentation = {
   readonly verb: string;
   /** Color belongs to the glyph alone. */
   readonly tone?: ChatToolIconTone;
-  /** A noun-phrase verb ("Print declined") is set off from the file with a separator. */
+  /** A noun-phrase verb ("Job declined") is set off from the program with a separator. */
   readonly separated?: true;
   readonly pending?: true;
 };
 
-/** How each ledger state reads in the transcript. */
-const presentation: Record<PrintRequestState, Presentation> = {
-  preparing: { verb: 'Print requested', tone: 'warning', separated: true, pending: true },
-  'awaiting-approval': { verb: 'Print requested', tone: 'warning', separated: true, pending: true },
-  approved: { verb: 'Starting' },
-  uploading: { verb: 'Starting' },
-  starting: { verb: 'Starting' },
-  confirming: { verb: 'Starting' },
-  started: { verb: 'Printing', tone: 'success' },
-  denied: { verb: 'Print declined', separated: true },
-  withdrawn: { verb: 'Print withdrawn', separated: true },
-  rejected: { verb: 'Print failed', tone: 'destructive', separated: true },
-  failed: { verb: 'Print failed', tone: 'destructive', separated: true },
-  unknown: { verb: 'Start not confirmed', tone: 'warning', separated: true },
+/** How each job state reads in the transcript; a started job reads by what the machine does. */
+const presentation = (job: JobRecord): Presentation => {
+  switch (job.state) {
+    case 'preparing':
+    case 'awaiting-approval': {
+      return { verb: 'Job requested', tone: 'warning', separated: true, pending: true };
+    }
+    case 'awaiting-start': {
+      return { verb: 'Waiting for the start at the machine', tone: 'warning', separated: true };
+    }
+    case 'approved':
+    case 'transferring':
+    case 'starting':
+    case 'confirming': {
+      return { verb: 'Starting' };
+    }
+    case 'started': {
+      return { verb: job.program.facts?.process === 'fff' ? 'Printing' : 'Running', tone: 'success' };
+    }
+    case 'denied': {
+      return { verb: 'Job declined', separated: true };
+    }
+    case 'withdrawn': {
+      return { verb: 'Job withdrawn', separated: true };
+    }
+    case 'rejected':
+    case 'failed': {
+      return { verb: 'Job failed', tone: 'destructive', separated: true };
+    }
+    case 'unknown': {
+      return { verb: 'Start not confirmed', tone: 'warning', separated: true };
+    }
+  }
 };
 
 /** Said when the printer has not confirmed a start for minutes: whether it prints is unknown, so nothing invites a retry. */
 const unconfirmedStart =
-  "The printer hasn't confirmed the start. Check the printer's screen; Tau updates this when the printer reports the run.";
+  "The machine hasn't confirmed the start. Check the machine; Tau updates this when the machine reports the run.";
 
 /**
- * Why a request settled as it did, in the words the agent's `nextStep` and the
+ * Why a job settled as it did, in the words the agent's `nextStep` and the
  * Print pane use. A failure message that is one bare token, such as
  * `MACHINE_BUSY` or `provider-rejected`, says nothing to a person, so it
  * follows the outcome instead of standing in for it.
  *
- * @param request - The settled request.
+ * @param job - The settled job.
  * @returns The reason, or `undefined` when there is nothing to explain.
  */
-const reasonOf = ({ state, failure }: PrintRequestRecord): string | undefined => {
+const reasonOf = ({ state, failure }: JobRecord): string | undefined => {
   if (state === 'unknown') {
     return unconfirmedStart;
   }
@@ -67,22 +85,22 @@ const reasonOf = ({ state, failure }: PrintRequestRecord): string | undefined =>
   if (/\s/u.test(described)) {
     return described;
   }
-  return `${state === 'rejected' ? 'The printer rejected the start' : 'The print request failed'} (${described}).`;
+  return `${state === 'rejected' ? 'The machine rejected the start' : 'The job failed'} (${described}).`;
 };
 
 /**
- * The transcript's record of one `request_print` call: which file, on which
- * machine, and where the request stands.
+ * The transcript's record of one `request_job` call: which program, on which
+ * machine, and where the job stands.
  *
  * The decision itself belongs to the approval banner above the composer, so
  * this card never offers one. A failed or unconfirmed start opens on its
  * reason, because an uncertain physical outcome must stay visible.
  *
  * @param props - The tool part this message carries.
- * @param props.part - The `request_print` invocation, in whatever state it is in.
+ * @param props.part - The `request_job` invocation, in whatever state it is in.
  * @returns The card.
  */
-export function ChatMessageToolRequestPrint({ part }: { readonly part: RequestPrintInvocation }): React.JSX.Element {
+export function ChatMessageToolRequestJob({ part }: { readonly part: RequestJobInvocation }): React.JSX.Element {
   switch (part.state) {
     case 'input-streaming':
     case 'input-available': {
@@ -93,7 +111,7 @@ export function ChatMessageToolRequestPrint({ part }: { readonly part: RequestPr
             <ChatToolCardIcon icon={Printer} />
             <ChatToolCardTitle>
               <ChatToolLabel verb='Requesting'>
-                <ChatToolDescription>{target === undefined ? 'a print…' : `a print of ${target}`}</ChatToolDescription>
+                <ChatToolDescription>{target === undefined ? 'a job…' : `a job for ${target}`}</ChatToolDescription>
               </ChatToolLabel>
             </ChatToolCardTitle>
           </ChatToolCardHeader>
@@ -102,11 +120,11 @@ export function ChatMessageToolRequestPrint({ part }: { readonly part: RequestPr
     }
 
     case 'output-available': {
-      const { request, machineName } = part.output;
-      const { verb, tone, separated, pending } = presentation[request.state];
-      const where = `${request.summary.fileName} on ${machineName ?? request.machineId}`;
+      const { job, machineName } = part.output;
+      const { verb, tone, separated, pending } = presentation(job);
+      const where = `${job.program.name} on ${machineName ?? job.machineId}`;
       const detail = `${separated ? '· ' : ''}${where}${pending ? ' · waiting for approval in the Print pane' : ''}`;
-      const reason = reasonOf(request);
+      const reason = reasonOf(job);
       return (
         <ChatToolCard
           variant='minimal'
@@ -132,13 +150,13 @@ export function ChatMessageToolRequestPrint({ part }: { readonly part: RequestPr
     }
 
     case 'output-error': {
-      return <ChatToolError errorText={part.errorText} icon={Printer} noun='print request' />;
+      return <ChatToolError errorText={part.errorText} icon={Printer} noun='job request' />;
     }
 
     case 'approval-requested':
     case 'approval-responded':
     case 'output-denied': {
-      throw new Error(`Unexpected ${toolName.requestPrint} state: ${part.state}`);
+      throw new Error(`Unexpected ${toolName.requestJob} state: ${part.state}`);
     }
   }
 }

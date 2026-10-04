@@ -90,8 +90,14 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
   desktopHost.bambuStudio = scenario === 'studio' ? createBambuStudio() : undefined;
   const milling = scenario === 'router' ? routerManifest : scenario === 'carvera' ? carveraManifest : undefined;
   const fixture =
-    milling !== undefined
-      ? createFixture({
+    milling === undefined
+      ? scenario === 'prepare' || scenario === 'studio'
+        ? createFixture({ entries: [observedNow(entry(scenario === 'studio' ? { providerId: 'bambu' } : {}))] })
+        : createFixture({
+            entries: [observedNow(scenario === 'busy' ? printing() : entry())],
+            jobs: [agentJob()],
+          })
+      : createFixture({
           entries: [
             observedNow(
               machineEntry({
@@ -102,13 +108,7 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
               }),
             ),
           ],
-        })
-      : scenario === 'prepare' || scenario === 'studio'
-        ? createFixture({ entries: [observedNow(entry(scenario === 'studio' ? { providerId: 'bambu' } : {}))] })
-        : createFixture({
-            entries: [observedNow(scenario === 'busy' ? printing() : entry())],
-            jobs: [agentJob()],
-          });
+        });
   const { bridge } = createBridge();
   const { container } = render(
     <TooltipProvider>
@@ -140,16 +140,7 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
     });
     await page.getByRole('button', { name: 'Slice and preview' }).click();
     await screen.findByRole('group', { name: 'Slice result' });
-  } else if (milling !== undefined) {
-    // Control opens on a milling machine: the presence switch, the jog pad and the spindle.
-    await screen.findByRole('switch', { name: 'I am at the machine' });
-    await page.getByRole('switch', { name: 'I am at the machine' }).click();
-    const control = screen.getByRole('button', { name: /^Control/u });
-    if (control.getAttribute('aria-expanded') !== 'true') {
-      await page.getByRole('button', { name: /^Control/u }).click();
-    }
-    await screen.findByRole('group', { name: 'Jog pad' });
-  } else {
+  } else if (milling === undefined) {
     const name = 'Job awaiting you: pyramid.gcode.3mf';
     const region = await screen.findByRole('region', { name });
     expect(within(region).getByRole('button', { name: 'Preview' })).toBeEnabled();
@@ -159,6 +150,15 @@ const mount = async (scenario: Scenario, width: number): Promise<HTMLElement> =>
         within(region).getByText('Workshop X1C has a run in progress. Start another once it ends.'),
       ).toBeInTheDocument();
     }
+  } else {
+    // Control opens on a milling machine: the presence switch, the jog pad and the spindle.
+    await screen.findByRole('switch', { name: 'I am at the machine' });
+    await page.getByRole('switch', { name: 'I am at the machine' }).click();
+    const control = screen.getByRole('button', { name: /^Control/u });
+    if (control.getAttribute('aria-expanded') !== 'true') {
+      await page.getByRole('button', { name: /^Control/u }).click();
+    }
+    await screen.findByRole('group', { name: 'Jog pad' });
   }
   return container;
 };

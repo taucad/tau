@@ -66,8 +66,10 @@ export const materialSystemValue = (entry: MachineDirectoryEntry): MaterialSyste
  * @returns True for the same unit and slot.
  * @public
  */
-export const sameSlot = (left: MaterialSlotAddress, right: MaterialSlotAddress | null | undefined): boolean =>
-  right !== null && right !== undefined && left.unitId === right.unitId && left.slotId === right.slotId;
+export const sameSlot = (
+  left: MaterialSlotAddress,
+  right: NonNullable<MaterialSystemValue>['routes'][number]['current'] | undefined,
+): boolean => right?.unitId === left.unitId && right.slotId === left.slotId;
 
 /**
  * A slot's label as the manifest names it: "A1", "Ext".
@@ -136,7 +138,7 @@ export const bambuTrayIndex = (
   const unitIndex = feeders.findIndex((unit) => unit.id === address.unitId);
   const slotIndex = feeders[unitIndex]?.slots.findIndex((slot) => slot.id === address.slotId) ?? -1;
   // ponytail: Bambu numbers trays four per AMS; a six-slot feeder would need its own stride.
-  return unitIndex < 0 || slotIndex < 0 ? undefined : unitIndex * 4 + slotIndex;
+  return unitIndex === -1 || slotIndex === -1 ? undefined : unitIndex * 4 + slotIndex;
 };
 
 /**

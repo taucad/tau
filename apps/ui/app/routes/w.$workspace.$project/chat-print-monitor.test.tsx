@@ -2,7 +2,12 @@
 import { act, cleanup, fireEvent, render, renderHook, screen, waitFor, within } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MachineActivity, MachineClient, MachineDirectoryEntry } from '@taucad/runtime/machine';
+import type {
+  ComponentObservation,
+  MachineActivity,
+  MachineClient,
+  MachineDirectoryEntry,
+} from '@taucad/runtime/machine';
 import { useMachineControl, usePresence, presenceLease } from '#hooks/use-machine-control.js';
 import type { MachineControl } from '#hooks/use-machine-control.js';
 import { Activities, ControlStage } from '#routes/w.$workspace.$project/chat-print-controls.js';
@@ -27,6 +32,10 @@ import { createFixture, entry, printing } from '#routes/w.$workspace.$project/ch
 import type { PrintClientFixture } from '#routes/w.$workspace.$project/chat-print.fixture.js';
 
 afterEach(cleanup);
+
+const byPerson: unknown = expect.objectContaining({ kind: 'user' });
+const opaqueColour: unknown = expect.stringMatching(/^#[0-9A-F]{6}FF$/u);
+
 beforeEach(() => {
   Element.prototype.scrollIntoView = vi.fn();
   Element.prototype.hasPointerCapture = vi.fn(() => false);
@@ -48,15 +57,15 @@ const router = (overrides: Partial<Parameters<typeof machineEntry>[0]> = {}): Ma
 function Harness({
   client,
   machine,
-  attended,
+  isAttended,
   children,
 }: {
   readonly client: MachineClient;
   readonly machine: MachineDirectoryEntry;
-  readonly attended: boolean;
+  readonly isAttended: boolean;
   readonly children: (control: MachineControl) => React.ReactNode;
 }): React.JSX.Element {
-  const control = useMachineControl({ client, entry: machine, attended });
+  const control = useMachineControl({ client, entry: machine, attended: isAttended });
   return (
     <PrintStages>
       {children(control)}
@@ -73,7 +82,7 @@ const renderControl = (
   }: { attended?: boolean; fixture?: PrintClientFixture } = {},
 ) => {
   const view = render(
-    <Harness client={fixture.client} machine={machine} attended={attended}>
+    <Harness client={fixture.client} machine={machine} isAttended={attended}>
       {(control) => (
         <>
           <MachineAlerts control={control} />
@@ -160,7 +169,7 @@ describe('Control on a milling machine', () => {
         capabilityRevision: 'capabilities-1',
         expectedRunId: null,
         parameters: { axis: 'x', distance: 1, feed: 1000 },
-        requestedBy: expect.objectContaining({ kind: 'user' }),
+        requestedBy: byPerson,
         attended: true,
       }),
     );
@@ -221,10 +230,11 @@ describe('Control on a milling machine', () => {
   });
 
   it('hides a position it cannot trust', () => {
-    const lost = millingComponents(routerManifest).map((observation) =>
-      observation.componentId === 'motion' && observation.knowledge === 'known' && observation.value.kind === 'motion'
-        ? { ...observation, value: { ...observation.value, trust: 'lost' as const } }
-        : observation,
+    const lost = millingComponents(routerManifest).map(
+      (observation): ComponentObservation =>
+        observation.componentId === 'motion' && observation.knowledge === 'known' && observation.value.kind === 'motion'
+          ? { ...observation, value: { ...observation.value, trust: 'lost' } }
+          : observation,
     );
     renderControl(router({ snapshot: machineSnapshot(lost) }));
     const table = within(screen.getByRole('region', { name: 'Monitor' })).getByRole('table');
@@ -349,7 +359,12 @@ describe('Monitor and materials on a printer', () => {
       ...machine,
       snapshot: {
         ...machine.snapshot,
-        components: [known('tool-0', 'temperature', { kind: 'readings', values: [] }, '2026-09-24T02:00:10.000Z')],
+        components: [
+          {
+            ...known('tool-0', 'temperature', { kind: 'readings', values: [] }),
+            validUntil: '2026-09-24T02:00:10.000Z',
+          },
+        ],
       },
     };
     expect(isObservationStale({ entry: expiring, componentId: 'tool-0', group: 'temperature', now })).toBe(false);
@@ -384,7 +399,7 @@ describe('Monitor and materials on a printer', () => {
           slot: { unitId: 'ams-a', slotId: 'a2' },
           material: {
             materialType: 'PLA',
-            color: expect.stringMatching(/^#[0-9A-F]{6}FF$/u),
+            color: opaqueColour,
             preset: { profileId: 'GFG00', settingId: 'GFSG00' },
             nozzleTemperature: { min: 190, max: 230 },
           },

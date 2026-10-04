@@ -24,6 +24,7 @@ import type {
   MachineHoldDescriptor,
   MachineManifest,
   MachineProvider,
+  MachineReading,
   MachineSnapshot,
   MaterialSlotSnapshot,
 } from '@taucad/runtime/machine';
@@ -756,31 +757,30 @@ export const providerFor = (id: string, manifest: MachineManifest): MachineProvi
 });
 
 /**
- * One known component observation.
+ * One known component observation, fresh until replaced; spread `validUntil` onto it for one that goes stale.
  *
  * @param componentId - The component.
  * @param group - Its observation group.
  * @param value - What it reports.
- * @param validUntil - When it goes stale; fresh forever when absent.
  * @returns The observation.
  */
 export const known = (
   componentId: string,
   group: string,
   value: Extract<ComponentObservation, { knowledge: 'known' }>['value'],
-  validUntil?: string,
-): ComponentObservation => ({
-  componentId,
-  group,
-  receivedAt: observedAt,
-  ...(validUntil === undefined ? {} : { validUntil }),
-  knowledge: 'known',
-  value,
-});
+): ComponentObservation => ({ componentId, group, receivedAt: observedAt, knowledge: 'known', value });
 
-const temperature = (id: string, label: string, value: number, target?: number) => ({
+/**
+ * A heater reading in °C, labelled by its id: `nozzle` reads "Nozzle".
+ *
+ * @param id - The reading id.
+ * @param value - Degrees now.
+ * @param target - Degrees commanded, for a heater driven toward one.
+ * @returns The reading.
+ */
+export const temperature = (id: string, value: number, target?: number): MachineReading => ({
   id,
-  label,
+  label: `${id.charAt(0).toUpperCase()}${id.slice(1)}`,
   value: observedQuantity(value, 'Cel'),
   ...(target === undefined ? {} : { target: observedQuantity(target, 'Cel') }),
 });
@@ -823,9 +823,9 @@ export const fffSlots: readonly MaterialSlotSnapshot[] = [
  * @returns The component observations.
  */
 export const fffComponents = (slots: readonly MaterialSlotSnapshot[] = fffSlots): readonly ComponentObservation[] => [
-  known('tool-0', 'temperature', { kind: 'readings', values: [temperature('nozzle', 'Nozzle', 28)] }),
-  known('bed', 'temperature', { kind: 'readings', values: [temperature('bed', 'Bed', 24)] }),
-  known('chamber', 'temperature', { kind: 'readings', values: [temperature('chamber', 'Chamber', 25)] }),
+  known('tool-0', 'temperature', { kind: 'readings', values: [temperature('nozzle', 28)] }),
+  known('bed', 'temperature', { kind: 'readings', values: [temperature('bed', 24)] }),
+  known('chamber', 'temperature', { kind: 'readings', values: [temperature('chamber', 25)] }),
   known('chamber-light', 'accessories', { kind: 'switch', on: false }),
   known('part-fan', 'accessories', { kind: 'level', ratio: 0 }),
   known('filament', 'material', {

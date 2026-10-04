@@ -201,7 +201,7 @@ export function MachineAlerts({ control }: { readonly control: MachineControl })
 
 /** A heater in whole degrees, as a printer's own screen shows it: "24 °C". */
 const formatReading = (value: MachineReading['value'] | NonNullable<MachineReading['target']>): string =>
-  typeof value === 'object' && value !== null && 'unit' in value
+  typeof value === 'object'
     ? formatQuantity(
         typeof value.value === 'number'
           ? { value: Math.round(value.value), unit: typeof value.unit === 'string' ? value.unit : value.unit.code }
@@ -238,7 +238,14 @@ function TemperatureGroup({
   const isStale = observations.some(({ componentId }) =>
     isObservationStale({ entry, componentId, group: 'temperature', now }),
   );
-  const readings = observations.flatMap((observation) => observation.readings);
+  const readings = observations.flatMap(({ componentId, readings: values }) =>
+    values.map((reading) => ({ key: `${componentId}:${reading.id}`, reading })),
+  );
+  /* A heater reads as a number; anything else a heater reports, such as the installed plate, is a fact beside it. */
+  const isMeasured = ({ reading }: (typeof readings)[number]): boolean =>
+    typeof reading.value === 'number' || typeof reading.value === 'object';
+  const plates = fffProcessOf(entry.descriptor.capabilities)?.bed.plates ?? [];
+  const facts = readings.filter((candidate) => !isMeasured(candidate));
   return (
     <div className='flex min-w-0 flex-col gap-1.5'>
       <div className='flex min-w-0 items-center gap-2'>
@@ -246,20 +253,31 @@ function TemperatureGroup({
         {isStale ? <StaleBadge /> : null}
       </div>
       <dl className='grid grid-cols-3 gap-x-3 gap-y-1'>
-        {readings.map((reading) => (
-          <div key={reading.id} className='flex min-w-0 flex-col'>
-            <dt className='truncate text-xs text-muted-foreground'>{reading.label}</dt>
-            <dd className='truncate text-sm font-medium tabular-nums'>{formatReading(reading.value)}</dd>
-            {/* A target of 0 is a heater that is off, not one heating to 0 °C. */}
-            {reading.target === undefined ||
-            (typeof reading.target === 'number' ? reading.target : reading.target.value) === 0 ? null : (
-              <dd className='truncate text-xs text-muted-foreground tabular-nums'>
-                to {formatReading(reading.target)}
-              </dd>
-            )}
-          </div>
-        ))}
+        {readings
+          .filter((candidate) => isMeasured(candidate))
+          .map(({ key, reading }) => (
+            <div key={key} className='flex min-w-0 flex-col'>
+              <dt className='truncate text-xs text-muted-foreground'>{reading.label}</dt>
+              <dd className='truncate text-sm font-medium tabular-nums'>{formatReading(reading.value)}</dd>
+              {/* A target of 0 is a heater that is off, not one heating to 0 °C. */}
+              {reading.target === undefined ||
+              (typeof reading.target === 'number' ? reading.target : reading.target.value) === 0 ? null : (
+                <dd className='truncate text-xs text-muted-foreground tabular-nums'>
+                  to {formatReading(reading.target)}
+                </dd>
+              )}
+            </div>
+          ))}
       </dl>
+      {facts.length === 0 ? null : (
+        <dl className='flex flex-col gap-1'>
+          {facts.map(({ key, reading }) => (
+            <PrintRow key={key} label={reading.label}>
+              {plates.find((plate) => plate.id === reading.value)?.label ?? formatReading(reading.value)}
+            </PrintRow>
+          ))}
+        </dl>
+      )}
     </div>
   );
 }

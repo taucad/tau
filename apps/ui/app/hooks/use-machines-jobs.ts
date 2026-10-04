@@ -87,7 +87,13 @@ export const useMachinesJobs = (
         if (abort.signal.aborted) {
           return;
         }
-        setRecords((current) => initial.reduce(reduceJobs, current));
+        setRecords((current) => {
+          let next = current;
+          for (const job of initial) {
+            next = reduceJobs(next, job);
+          }
+          return next;
+        });
         for await (const job of client.watchJobs({ ...scope, signal: abort.signal })) {
           setRecords((current) => reduceJobs(current, job));
         }

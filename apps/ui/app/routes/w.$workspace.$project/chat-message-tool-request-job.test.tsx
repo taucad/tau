@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
-import type { RequestPrintOutput, ToolInvocation } from '@taucad/chat';
+import type { RequestJobOutput, ToolInvocation } from '@taucad/chat';
 import type { toolName } from '@taucad/chat/constants';
-import { ChatMessageToolRequestPrint } from '#routes/w.$workspace.$project/chat-message-tool-request-print.js';
+import { ChatMessageToolRequestJob } from '#routes/w.$workspace.$project/chat-message-tool-request-job.js';
 import { developerModeRequired } from '#routes/w.$workspace.$project/chat-print-send.js';
 
 vi.mock('#components/chat/chat-tool-error.js', () => ({
@@ -14,22 +14,19 @@ vi.mock('#components/chat/chat-tool-error.js', () => ({
   ),
 }));
 
-type RequestPrintInvocation = ToolInvocation<typeof toolName.requestPrint>;
+type RequestJobInvocation = ToolInvocation<typeof toolName.requestJob>;
 
-const settled = (
-  request: Partial<RequestPrintOutput['request']>,
-  output: Partial<RequestPrintOutput>,
-): RequestPrintInvocation => ({
-  toolCallId: 'print-1',
+const settled = (job: Partial<RequestJobOutput['job']>, output: Partial<RequestJobOutput>): RequestJobInvocation => ({
+  toolCallId: 'job-1',
   state: 'output-available',
-  input: { targetFile: 'main.scad' },
+  input: { machineId: 'workshop-x1c', targetFile: 'main.scad' },
   output: {
-    request: {
-      requestId: 'print-1',
+    job: {
+      jobId: 'job-1',
       machineId: 'workshop-x1c',
       state: 'started',
-      summary: { fileName: 'pyramid.gcode.3mf', layers: 150 },
-      ...request,
+      program: { name: 'pyramid.gcode.3mf', facts: { process: 'fff', layers: 150 } },
+      ...job,
     },
     ...output,
   },
@@ -40,10 +37,10 @@ const phraseOf = (verb: string): string | undefined => screen.getByText(verb).pa
 
 afterEach(cleanup);
 
-describe('ChatMessageToolRequestPrint', () => {
+describe('ChatMessageToolRequestJob', () => {
   it('should name the file and machine of a print the person accepted', () => {
     render(
-      <ChatMessageToolRequestPrint
+      <ChatMessageToolRequestJob
         part={settled({ state: 'started' }, { machineName: 'Workshop X1C', approval: 'approved' })}
       />,
     );
@@ -53,32 +50,45 @@ describe('ChatMessageToolRequestPrint', () => {
     expect(screen.queryByRole('button')).not.toBeInTheDocument();
   });
 
-  it('should record a declined request as a decision, naming the machine by id when no name came back', () => {
-    render(<ChatMessageToolRequestPrint part={settled({ state: 'denied' }, { approval: 'denied' })} />);
+  it('should say Running for a started job on a machine that does not print', () => {
+    render(
+      <ChatMessageToolRequestJob
+        part={settled(
+          { state: 'started', program: { name: 'sign.nc', facts: { process: 'milling' } } },
+          { machineName: 'Garage LongMill' },
+        )}
+      />,
+    );
 
-    expect(phraseOf('Print declined')).toBe('Print declined · pyramid.gcode.3mf on workshop-x1c');
+    expect(phraseOf('Running')).toBe('Running sign.nc on Garage LongMill');
+  });
+
+  it('should record a declined job as a decision, naming the machine by id when no name came back', () => {
+    render(<ChatMessageToolRequestJob part={settled({ state: 'denied' }, { approval: 'denied' })} />);
+
+    expect(phraseOf('Job declined')).toBe('Job declined · pyramid.gcode.3mf on workshop-x1c');
     expect(screen.queryByRole('alert')).not.toBeInTheDocument();
   });
 
-  it('should say where a request waits when the host returned it for the Print pane', () => {
+  it('should say where a job waits when the host returned it for the Print pane', () => {
     render(
-      <ChatMessageToolRequestPrint part={settled({ state: 'awaiting-approval' }, { machineName: 'Workshop X1C' })} />,
+      <ChatMessageToolRequestJob part={settled({ state: 'awaiting-approval' }, { machineName: 'Workshop X1C' })} />,
     );
 
-    expect(phraseOf('Print requested')).toBe(
-      'Print requested · pyramid.gcode.3mf on Workshop X1C · waiting for approval in the Print pane',
+    expect(phraseOf('Job requested')).toBe(
+      'Job requested · pyramid.gcode.3mf on Workshop X1C · waiting for approval in the Print pane',
     );
   });
 
   it('should keep an unconfirmed start open on what to do next', () => {
-    render(<ChatMessageToolRequestPrint part={settled({ state: 'unknown' }, { machineName: 'Workshop X1C' })} />);
+    render(<ChatMessageToolRequestJob part={settled({ state: 'unknown' }, { machineName: 'Workshop X1C' })} />);
 
     expect(
       screen.getByRole('button', { name: 'Start not confirmed · pyramid.gcode.3mf on Workshop X1C' }),
     ).toHaveAttribute('aria-expanded', 'true');
     expect(
       screen.getByText(
-        "The printer hasn't confirmed the start. Check the printer's screen; Tau updates this when the printer reports the run.",
+        "The machine hasn't confirmed the start. Check the machine; Tau updates this when the machine reports the run.",
       ),
     ).toBeVisible();
     /* Whether it prints is unknown, so nothing invites a second start. */
@@ -97,13 +107,13 @@ describe('ChatMessageToolRequestPrint', () => {
       scenario: 'put a bare rejection reason after the outcome',
       state: 'rejected',
       failure: { code: 'PROVIDER_REJECTED', message: 'provider-rejected' },
-      reason: 'The printer rejected the start (provider-rejected).',
+      reason: 'The machine rejected the start (provider-rejected).',
     },
     {
       scenario: 'put a bare failure code after the outcome',
       state: 'failed',
       failure: { code: 'MACHINE_UPLOAD_TRANSFER_MISMATCH', message: 'MACHINE_UPLOAD_TRANSFER_MISMATCH' },
-      reason: 'The print request failed (MACHINE_UPLOAD_TRANSFER_MISMATCH).',
+      reason: 'The job failed (MACHINE_UPLOAD_TRANSFER_MISMATCH).',
     },
     {
       scenario: "add the Print pane's fix to the printer's reason",
@@ -112,14 +122,14 @@ describe('ChatMessageToolRequestPrint', () => {
       reason: `mqtt message verify failed. ${developerModeRequired}`,
     },
   ])('should $scenario', ({ state, failure, reason }) => {
-    render(<ChatMessageToolRequestPrint part={settled({ state, failure }, { machineName: 'Workshop X1C' })} />);
+    render(<ChatMessageToolRequestJob part={settled({ state, failure }, { machineName: 'Workshop X1C' })} />);
 
     expect(screen.getByText(reason)).toBeVisible();
   });
 
-  it('should show the reason the ledger gives when a print failed', () => {
+  it('should show the reason the ledger gives when a job failed', () => {
     render(
-      <ChatMessageToolRequestPrint
+      <ChatMessageToolRequestJob
         part={settled(
           { state: 'failed', failure: { code: 'MACHINE_BUSY', message: 'The printer is already printing.' } },
           { machineName: 'Workshop X1C' },
@@ -127,7 +137,7 @@ describe('ChatMessageToolRequestPrint', () => {
       />,
     );
 
-    expect(screen.getByRole('button', { name: 'Print failed · pyramid.gcode.3mf on Workshop X1C' })).toHaveAttribute(
+    expect(screen.getByRole('button', { name: 'Job failed · pyramid.gcode.3mf on Workshop X1C' })).toHaveAttribute(
       'aria-expanded',
       'true',
     );
@@ -136,28 +146,32 @@ describe('ChatMessageToolRequestPrint', () => {
 
   it('should show the file being requested while it slices and waits', () => {
     render(
-      <ChatMessageToolRequestPrint
-        part={{ toolCallId: 'print-1', state: 'input-available', input: { targetFile: 'main.scad' } }}
+      <ChatMessageToolRequestJob
+        part={{
+          toolCallId: 'job-1',
+          state: 'input-available',
+          input: { machineId: 'workshop-x1c', targetFile: 'main.scad' },
+        }}
       />,
     );
 
-    expect(phraseOf('Requesting')).toBe('Requesting a print of main.scad');
+    expect(phraseOf('Requesting')).toBe('Requesting a job for main.scad');
   });
 
   it('should hand a failure to the shared tool error with its noun', () => {
     render(
-      <ChatMessageToolRequestPrint
+      <ChatMessageToolRequestJob
         part={{
-          toolCallId: 'print-1',
+          toolCallId: 'job-1',
           state: 'output-error',
-          input: { targetFile: 'main.scad' },
+          input: { machineId: 'workshop-x1c', targetFile: 'main.scad' },
           errorText: 'No machine is bound to this workspace; the person binds one in the Print pane.',
         }}
       />,
     );
 
     expect(screen.getByRole('alert')).toHaveTextContent(
-      'print request: No machine is bound to this workspace; the person binds one in the Print pane.',
+      'job request: No machine is bound to this workspace; the person binds one in the Print pane.',
     );
   });
 });

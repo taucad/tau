@@ -163,8 +163,8 @@ export const useMachineControl = ({
         );
       }
       return receipt.status === 'accepted';
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+    } catch (error_) {
+      setError(error_ instanceof Error ? error_.message : String(error_));
       return false;
     } finally {
       setPending(undefined);
@@ -185,9 +185,9 @@ export const useMachineControl = ({
       } else if (receipt.status === 'unknown') {
         setError(`${entry.name} did not confirm the stop. Use the machine’s own stop if it is still moving.`);
       }
-    } catch (failure) {
+    } catch (error_) {
       setError(
-        `${failure instanceof Error ? failure.message : String(failure)} Use the machine’s own stop if it is still moving.`,
+        `${error_ instanceof Error ? error_.message : String(error_)} Use the machine’s own stop if it is still moving.`,
       );
     } finally {
       setIsStopping(false);
@@ -195,7 +195,7 @@ export const useMachineControl = ({
   };
 
   const endHold = useCallback((): void => {
-    const current = holdRef.current;
+    const { current } = holdRef;
     if (current === undefined) {
       return;
     }
@@ -203,9 +203,17 @@ export const useMachineControl = ({
     holdRef.current = undefined;
     setHold(undefined);
     globalThis.clearInterval(current.timer);
-    if (current.holdId !== undefined) {
-      // async-iife: release -- the press ended; the machine stops within its bound even if this never arrives.
-      void client.endHold({ holdId: current.holdId }).catch(() => undefined);
+    const { holdId } = current;
+    if (holdId !== undefined) {
+      const release = async (): Promise<void> => {
+        try {
+          await client.endHold({ holdId });
+        } catch {
+          // The machine stops within its bound even if the release never arrives.
+        }
+      };
+      // async-iife: release -- the press ended; nothing waits on the machine's answer.
+      void release();
     }
   }, [client]);
 
@@ -247,18 +255,22 @@ export const useMachineControl = ({
         }
         current.timer = globalThis.setInterval(() => {
           const renew = async (): Promise<void> => {
-            const renewed = await client.renewHold({ holdId: granted.holdId });
-            if (renewed.status === 'ended' && holdRef.current === current) {
-              globalThis.clearInterval(current.timer);
-              holdRef.current = undefined;
-              setHold(undefined);
+            try {
+              const renewed = await client.renewHold({ holdId: granted.holdId });
+              if (renewed.status === 'ended' && holdRef.current === current) {
+                globalThis.clearInterval(current.timer);
+                holdRef.current = undefined;
+                setHold(undefined);
+              }
+            } catch {
+              // A missed renewal stops the machine within its bound; that is the design.
             }
           };
-          // async-iife: lease -- a missed renewal stops the machine within its bound; that is the design.
-          void renew().catch(() => undefined);
+          // async-iife: lease -- each renewal stands alone; the next one follows on the interval.
+          void renew();
         }, granted.lease / 2);
-      } catch (failure) {
-        setError(failure instanceof Error ? failure.message : String(failure));
+      } catch (error_) {
+        setError(error_ instanceof Error ? error_.message : String(error_));
         if (holdRef.current === current) {
           endHold();
         }

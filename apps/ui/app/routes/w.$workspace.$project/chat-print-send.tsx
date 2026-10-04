@@ -38,7 +38,7 @@ import {
   declaredAction,
   isRunOwned,
 } from '#routes/w.$workspace.$project/chat-print-controls.js';
-import { PrintNotice, PrintSteps } from '#routes/w.$workspace.$project/chat-print-section.js';
+import { PrintNotice, PrintSteps, useNow } from '#routes/w.$workspace.$project/chat-print-section.js';
 import type { PrintStep } from '#routes/w.$workspace.$project/chat-print-section.js';
 import {
   formatDuration,
@@ -240,8 +240,8 @@ function JobReview({
     setError(undefined);
     try {
       await action();
-    } catch (failure) {
-      setError(describePrintError(failure));
+    } catch (error_) {
+      setError(describePrintError(error_));
     } finally {
       setIsBusy(false);
     }
@@ -484,9 +484,15 @@ function JobProgress({
             size='sm'
             variant='outline'
             onClick={() => {
-              client.withdrawJob({ jobId: job.jobId, resolvedBy: operator }).catch((failure: unknown) => {
-                setError(describePrintError(failure));
-              });
+              const withdraw = async (): Promise<void> => {
+                try {
+                  await client.withdrawJob({ jobId: job.jobId, resolvedBy: operator });
+                } catch (error_) {
+                  setError(describePrintError(error_));
+                }
+              };
+              // async-iife: press -- the card shows a refusal itself.
+              void withdraw();
             }}
           >
             Withdraw
@@ -547,8 +553,8 @@ function UnknownCard({ client, job }: { readonly client: MachineClient; readonly
     setError(undefined);
     try {
       setReconciled(await client.reconcileOperation({ machineId: job.machineId, operationId }));
-    } catch (failure) {
-      setError(describePrintError(failure));
+    } catch (error_) {
+      setError(describePrintError(error_));
     } finally {
       setIsBusy(false);
     }
@@ -717,6 +723,7 @@ function ActionApproval({
   const { entry } = control;
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState<string>();
+  const now = useNow();
   const descriptor = declaredAction(entry, pending.componentId, pending.action);
   const check = checkMachineAction({
     entry,
@@ -724,15 +731,15 @@ function ActionApproval({
     action: pending.action,
     caller: 'agent',
     attended: false,
-    now: Date.now(),
+    now,
   });
   const answer = async (approved: boolean): Promise<void> => {
     setIsBusy(true);
     setError(undefined);
     try {
       await bridge.respond(pending.approval.approvalId, approved);
-    } catch (failure) {
-      setError(failure instanceof Error ? failure.message : String(failure));
+    } catch (error_) {
+      setError(error_ instanceof Error ? error_.message : String(error_));
     } finally {
       setIsBusy(false);
     }

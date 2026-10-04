@@ -58,10 +58,10 @@ import {
   materialSystemValue,
   observedPlate,
   observedTrays,
-  type ObservedTray,
   sameSlot,
   toolheadOf,
 } from '#components/print/machine-facts.js';
+import type { ObservedTray } from '#components/print/machine-facts.js';
 import {
   bambuStudioRequired,
   describePrintError,
@@ -568,9 +568,8 @@ export const usePrintPrepare = ({
      * gives way to the default rather than selecting nothing. */
     const isLoaded = (slot: number | undefined): slot is number =>
       slot !== undefined &&
-      (entry === undefined
-        ? false
-        : observedTrays(entry).some((tray) => tray.slot === slot && tray.state === 'loaded')) === true;
+      entry !== undefined &&
+      observedTrays(entry).some((tray) => tray.slot === slot && tray.state === 'loaded');
     const saved = filamentColors.map((color) => material?.slotsByColor?.[color.toLowerCase()]);
     const mapping =
       filamentColors.length > 1

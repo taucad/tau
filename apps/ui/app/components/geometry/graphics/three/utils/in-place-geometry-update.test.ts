@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial, GlbResources } from '@taucad/geometry-core';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Vector2 } from 'three';
 import type { BufferAttribute, InterleavedBufferAttribute, Mesh, Object3D } from 'three';

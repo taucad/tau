@@ -70,12 +70,17 @@ const fixture = (workerBody = `${ready}${keepAlive}`, requestTimeout = 5000) => 
   roots.push(root);
   const workspacePath = join(root, 'workspace');
   const artifactPath = join(root, 'artifacts');
+  // The session makes the executable's parent directory (its runtime) readable. With the
+  // executable directly in `root`, that directory was the whole temporary root. On Linux its
+  // read-only bind then covered the artifacts' writable bind, so a worker could not write them.
+  const runtimePath = join(root, 'runtime');
   mkdirSync(workspacePath);
   mkdirSync(artifactPath);
-  const executable = join(root, 'python');
-  const workerPath = join(root, 'worker.cjs');
-  const analyzerPath = join(root, 'analyzer.py');
-  const glbPath = join(root, 'glb.py');
+  mkdirSync(join(runtimePath, 'bin'), { recursive: true });
+  const executable = join(runtimePath, 'bin', 'python');
+  const workerPath = join(runtimePath, 'worker.cjs');
+  const analyzerPath = join(runtimePath, 'analyzer.py');
+  const glbPath = join(runtimePath, 'glb.py');
   const executableBody = `#!/bin/sh\nexec "${process.execPath}" "$4" "$5" "$6" "$7" "$8" "$9" "$10"\n`;
   writeFileSync(executable, executableBody);
   chmodSync(executable, 0o700);

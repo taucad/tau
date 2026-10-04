@@ -1,5 +1,7 @@
 import * as THREE from 'three';
-import { Line2, LineGeometry, LineMaterial } from 'three/addons';
+import { Line2 } from 'three/addons/lines/Line2.js';
+import { LineGeometry } from 'three/addons/lines/LineGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { Line2 as Line2WebGpu } from 'three/addons/lines/webgpu/Line2.js';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';

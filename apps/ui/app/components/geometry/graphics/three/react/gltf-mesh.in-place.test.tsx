@@ -4,7 +4,7 @@ import { cleanup, render, waitFor } from '@testing-library/react';
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Raycaster, Vector3 } from 'three';
 import type { BufferAttribute, Intersection, Mesh, Object3D } from 'three';

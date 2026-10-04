@@ -56,6 +56,14 @@ type Outcomes = Record<
   string
 >;
 const denied = ['UnauthorizedAccessException', 'IOException'];
+// On Linux the sandbox hides each read-denied root (user homes, /tmp) behind an empty tmpfs, so a
+// hidden file reads as missing rather than forbidden. A write there lands in that throwaway tmpfs,
+// and a write to the read-only root fails with an IOException. Neither reaches the host, which the
+// existsSync checks below prove. macOS denies all of these with UnauthorizedAccessException.
+const hiddenRead =
+  process.platform === 'linux' ? [...denied, 'FileNotFoundException', 'DirectoryNotFoundException'] : denied;
+const containedWrite =
+  process.platform === 'linux' ? [...denied, 'FileNotFoundException', 'DirectoryNotFoundException', 'allowed'] : denied;
 
 const literal = (value: string): string => JSON.stringify(value);
 
@@ -149,10 +157,10 @@ describe('PicoGK native sandbox', () => {
       };
       for (const phase of ['import', 'main'] as const) {
         const outcome = outcomes[phase];
-        expect(denied, `${phase} home_read ${outcome.home_read}`).toContain(outcome.home_read);
-        expect(denied, `${phase} temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
-        expect(denied, `${phase} outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
-        expect(denied, `${phase} home_write ${outcome.home_write}`).toContain(outcome.home_write);
+        expect(hiddenRead, `${phase} home_read ${outcome.home_read}`).toContain(outcome.home_read);
+        expect(hiddenRead, `${phase} temp_read ${outcome.temp_read}`).toContain(outcome.temp_read);
+        expect(containedWrite, `${phase} outside_write ${outcome.outside_write}`).toContain(outcome.outside_write);
+        expect(containedWrite, `${phase} home_write ${outcome.home_write}`).toContain(outcome.home_write);
         expect(outcome.socket, `${phase} socket`).not.toBe('allowed');
         expect(outcome.dns, `${phase} dns`).not.toBe('allowed');
         expect(outcome.subprocess, `${phase} subprocess`).not.toBe('exit:0');

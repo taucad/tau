@@ -103,7 +103,7 @@ export type MachineProgramSummary = Readonly<{
         /** Millimetres per minute. */
         maximumFeed?: number;
         workOffsets: readonly string[];
-        uses: readonly ('tool-change' | 'coolant' | 'probing' | 'program-stop' | 'inverse-time-feed')[];
+        uses: ReadonlyArray<'tool-change' | 'coolant' | 'probing' | 'program-stop' | 'inverse-time-feed'>;
       }>
     | Readonly<{ process: 'other' }>;
 }>;

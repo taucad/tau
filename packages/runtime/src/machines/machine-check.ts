@@ -35,6 +35,7 @@ export type MachineActionCheckInput = Readonly<{
   /** An action, or a hold (a control held down). */
   kind?: 'action' | 'hold';
   /** The run the caller saw; defaults to the run the entry shows. */
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run.
   expectedRunId?: string | null;
   /** Who would send it, so a control an agent may not use says so before it tries. */
   caller: 'person' | 'agent';
@@ -62,17 +63,13 @@ const statusWords: Readonly<Record<string, string>> = {
 /**
  * The installed descriptor of an action or a hold, when the machine declares it.
  * @param entry - The machine as shown.
- * @param componentId - The component.
- * @param action - The action or hold id.
- * @param kind - Which list to look in.
+ * @param target - The component, the action or hold id, and which list to look in.
  * @returns The descriptor, or undefined.
  * @public
  */
 export const machineActionOf = (
   entry: MachineDirectoryEntry,
-  componentId: string,
-  action: string,
-  kind: 'action' | 'hold' = 'action',
+  { componentId, action, kind = 'action' }: Readonly<{ componentId: string; action: string; kind?: 'action' | 'hold' }>,
 ): MachineActionDescriptor | MachineHoldDescriptor | undefined =>
   (kind === 'action' ? entry.descriptor.capabilities.actions : entry.descriptor.capabilities.holds).find(
     (descriptor) => descriptor.componentId === componentId && descriptor.id === action,
@@ -98,7 +95,7 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
         : `${entry.name} is not connected.`,
     );
   }
-  const descriptor = machineActionOf(entry, componentId, action, kind);
+  const descriptor = machineActionOf(entry, { componentId, action, kind });
   if (descriptor === undefined) {
     return unavailable('MACHINE_ACTION_UNDECLARED', `${entry.name} does not declare this control.`);
   }
@@ -154,7 +151,8 @@ export const checkMachineAction = (input: MachineActionCheckInput): MachineActio
   }
   const motion = entry.descriptor.capabilities.components.find((component) => component.kind === 'motion');
   // A machine without homing (no `motion.home` installed) only ever works from its work zero; there is nothing to gate.
-  const canHome = motion !== undefined && machineActionOf(entry, motion.id, 'motion.home') !== undefined;
+  const canHome =
+    motion !== undefined && machineActionOf(entry, { componentId: motion.id, action: 'motion.home' }) !== undefined;
   if (descriptor.effects.includes('motion') && motion !== undefined && canHome && action !== 'motion.home') {
     const trust = componentValue(snapshot.components, motion.id, 'motion')?.trust;
     if (trust === 'lost' || trust === 'unknown') {

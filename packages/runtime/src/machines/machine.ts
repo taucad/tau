@@ -305,6 +305,7 @@ export type MachineProviderActionInput = Readonly<{
   action: string;
   version: number;
   /** The run the caller saw, or null for an idle action. */
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run; absent would be no statement.
   expectedRunId: string | null;
   parameters: unknown;
   signal: AbortSignal;
@@ -439,15 +440,15 @@ export type MachineStillCaptureCapability =
 
 /** One connected provider session (ABI version 2). `stop` is not a facet: every provider has it. @public */
 export type MachineSession<SubmissionConfiguration = unknown> = Readonly<{
+  actions: MachineActionCapability;
+  holds: MachineHoldCapability;
+  jobs: MachineJobCapability<SubmissionConfiguration>;
+  stillCapture: MachineStillCaptureCapability;
   getDescriptor(input: MachineGetDescriptorInput): Promise<MachineProviderDescriptor>;
   getSnapshot(input: MachineGetSnapshotInput): Promise<MachineReport>;
   observe(input: MachineObserveInput): AsyncIterable<MachineObservation>;
   /** Stop now, ahead of anything queued. */
   stop(input: Readonly<{ operationId: string; signal: AbortSignal }>): Promise<MachineCommandReceipt>;
-  actions: MachineActionCapability;
-  holds: MachineHoldCapability;
-  jobs: MachineJobCapability<SubmissionConfiguration>;
-  stillCapture: MachineStillCaptureCapability;
   /** Read proof of a stop, a transfer or a start; never sends. */
   reconcile(input: MachineReconcileInput): Promise<MachineCommandReceipt>;
   close(): Promise<void>;

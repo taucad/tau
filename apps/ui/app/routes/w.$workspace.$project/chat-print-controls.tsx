@@ -74,7 +74,7 @@ export const declaredAction = (
   componentId: string,
   action: string,
 ): MachineActionDescriptor | undefined => {
-  const descriptor = machineActionOf(entry, componentId, action);
+  const descriptor = machineActionOf(entry, { componentId, action });
   return descriptor !== undefined && 'scope' in descriptor ? descriptor : undefined;
 };
 
@@ -311,9 +311,11 @@ function JogPad({
   readonly motion: MotionComponent;
   readonly axes: readonly MachineAxis[];
 }): React.JSX.Element {
-  const holdDescriptor = machineActionOf(control.entry, motion.id, 'motion.jog', 'hold') as
-    | MachineHoldDescriptor
-    | undefined;
+  const holdDescriptor = machineActionOf(control.entry, {
+    componentId: motion.id,
+    action: 'motion.jog',
+    kind: 'hold',
+  }) as MachineHoldDescriptor | undefined;
   const steps = jogSteps.filter((step) => step !== 'hold' || holdDescriptor !== undefined);
   const [step, setStep] = useState<JogStep>('1');
   const isHold = step === 'hold';
@@ -426,7 +428,9 @@ function MotionGroup({
     declaredAction(entry, componentId, action) !== undefined;
   const controllerId =
     entry.descriptor.capabilities.components.find((component) => component.kind === 'controller')?.id ?? 'controller';
-  const hasJog = has(motion.id, 'motion.jog') || machineActionOf(entry, motion.id, 'motion.jog', 'hold') !== undefined;
+  const hasJog =
+    has(motion.id, 'motion.jog') ||
+    machineActionOf(entry, { componentId: motion.id, action: 'motion.jog', kind: 'hold' }) !== undefined;
   const offered = [
     has(controllerId, 'controller.unlock'),
     has(controllerId, 'controller.wake'),

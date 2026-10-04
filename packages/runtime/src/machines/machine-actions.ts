@@ -200,6 +200,7 @@ const material = z.strictObject({
 /** Positions and distances keyed by axis id. Millimetres for linear axes, degrees for rotary axes. */
 const byAxis = z.record(identifier, z.number()).meta({ title: 'Per axis' });
 
+// oxlint-disable-next-line eslint/max-params -- one row per standard family below reads best positionally.
 const family = <Schema extends z.ZodType, Scope extends 'idle' | 'run' | 'any'>(
   schema: Schema,
   scope: Scope,

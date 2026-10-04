@@ -86,6 +86,7 @@ export type MachineApplyActionInput = Readonly<{
   action: string;
   version: number;
   /** The run the caller saw; `null` for an action that needs no run. */
+  // oxlint-disable-next-line typescript/no-restricted-types -- null is the caller's statement that it saw no run; absent would be no statement.
   expectedRunId: string | null;
   parameters: unknown;
   /** Who is asking. An agent never states attendance. */

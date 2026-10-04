@@ -21,6 +21,7 @@ import type {
 import type { MachineOperation } from '#machines/machine-jobs.js';
 import { machineActionSafetySchema, machineRemedySchema } from '#machines/machine-manifest.js';
 
+// oxlint-disable-next-line typescript/no-restricted-types -- JSON has null.
 type JsonValue = string | number | boolean | null | readonly JsonValue[] | { readonly [key: string]: JsonValue };
 
 /** The normalized state plus the controller's own words for it. @public */
@@ -171,6 +172,7 @@ export type MachineComponentValue =
       /** Per nozzle; absent on a machine that stores no profiles. */
       calibrations?: MachineTable<CalibrationProfile>;
       routes: ReadonlyArray<
+        // oxlint-disable-next-line typescript/no-restricted-types -- null is an empty toolhead, reported as such.
         Readonly<{ toolheadId: string; current: MaterialSlotAddress | null; target: MaterialSlotAddress | null }>
       >;
       /** Per unit: humidity index and temperature where the unit reports them. */
@@ -305,7 +307,8 @@ const identity = z
   .max(256)
   .refine((value) => value.isWellFormed());
 const instant = z.iso.datetime({ offset: true });
-const finite = z.number().finite();
+// Zod 4 numbers are finite by default.
+const finite = z.number();
 /**
  * The schema of one reported quantity, named so the report schemas' declarations can refer to it rather than
  * spelling out the units package's internal quantity type.

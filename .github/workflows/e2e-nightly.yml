@@ -3,8 +3,9 @@ name: E2E nightly
 # The browser-backed suites, out of pull request and `main` CI: every `type:e2e`
 # project's Vitest Browser matrices and development-server qualifications, the
 # real-device WebGPU qualification and the funded desktop live turn. Each night they
-# run against the newest `main` commit whose ci.yml push run passed, with that run's
-# GeoSpec engine products. A failure here is a red nightly, never a merge gate.
+# run against the head of `main`, with the GeoSpec engine products a `main` CI run
+# cached for that commit's native source closure, whether or not the rest of that
+# run passed. A failure here is a red nightly, never a merge gate.
 # `workflow_dispatch` takes an optional commit to run against instead.
 
 on:
@@ -13,7 +14,7 @@ on:
   workflow_dispatch:
     inputs:
       sha:
-        description: 'Commit on main to test; defaults to the newest commit whose main CI passed'
+        description: 'Commit to test; defaults to the head of main'
         required: false
         default: ''
 
@@ -39,31 +40,42 @@ jobs:
       actions: 'read'
     outputs:
       sha: ${{ steps.commit.outputs.sha }}
+      geospec-key: ${{ steps.geospec-key.outputs.key }}
       suites: ${{ steps.suites.outputs.suites }}
       webgpu: ${{ steps.suites.outputs.webgpu }}
     steps:
-      - name: Find the newest main commit whose CI passed
-        id: commit
-        env:
-          GH_TOKEN: ${{ github.token }}
-          SHA: ${{ inputs.sha }}
-        run: |
-          set -euo pipefail
-          if [ -z "$SHA" ]; then
-            SHA=$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=1" \
-              --jq '.workflow_runs[0].head_sha // empty')
-          fi
-          test -n "$SHA" || { echo "::error::No ci.yml push run on main has passed."; exit 1; }
-          echo "Testing $SHA"
-          echo "sha=$SHA" >> "$GITHUB_OUTPUT"
-
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          ref: ${{ steps.commit.outputs.sha }}
+          ref: ${{ inputs.sha || 'main' }}
+
+      - name: Pin the commit under test
+        id: commit
+        run: echo "sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
 
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
+
+      # The products depend only on the native source closure, so any `main` CI run
+      # whose producer built this closure cached them, even a run that went red later.
+      - name: Identify the GeoSpec engine product closure
+        id: geospec-key
+        run: echo "key=geospec-transport-v1-$(node packages/geospec-engine-native/scripts/ci-artifacts.mjs product-key)" >> "$GITHUB_OUTPUT"
+
+      - name: Look up the cached GeoSpec engine products
+        id: geospec-cache
+        uses: ./.github/actions/geospec-transport
+        with:
+          key: ${{ steps.geospec-key.outputs.key }}
+          mode: lookup
+
+      - name: Stop when no main CI run has built them
+        if: steps.geospec-cache.outputs.cache-hit != 'true'
+        env:
+          KEY: ${{ steps.geospec-key.outputs.key }}
+        run: |
+          echo "::error::No main CI run has cached $KEY yet; the nightly runs once main's GeoSpec producer has built this closure."
+          exit 1
 
       - name: List the end-to-end suites
         id: suites
@@ -87,6 +99,7 @@ jobs:
   e2e:
     name: Browser end-to-end (${{ matrix.suite.project }} ${{ matrix.suite.target }})
     runs-on: ubuntu-latest
+    timeout-minutes: 150
     needs: [plan]
     if: needs.plan.outputs.suites != '[]'
     permissions:
@@ -108,11 +121,15 @@ jobs:
         uses: ./.github/actions/setup-nx
 
       - &geospec
-        name: Take the GeoSpec products from the commit's main CI run
-        uses: ./.github/actions/geospec-artifact-from-main
+        name: Restore the GeoSpec engine products
+        uses: ./.github/actions/geospec-transport
         with:
-          sha: ${{ needs.plan.outputs.sha }}
-          github-token: ${{ github.token }}
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      - &verify-geospec
+        name: Verify GeoSpec products against this checkout
+        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
       # The ui-e2e matrix also has `firefox` and `webkit-smoke` instances, and
       # `test:e2e:non-isolated` runs PicoVoxel on Chromium and Firefox.
@@ -175,12 +192,14 @@ jobs:
           retention-days: 7
 
   # Real-device qualification. The runner label is an infrastructure contract: this
-  # lane must never silently fall back to SwiftShader.
+  # lane must never silently fall back to SwiftShader. No `tau-webgpu` runner is
+  # registered yet, so the lane waits for `TAU_WEBGPU_RUNNER_ENABLED` rather than
+  # queueing until GitHub cancels it (the benchmark lane's pattern).
   webgpu-hardware:
     name: WebGPU hardware qualification
     runs-on: [self-hosted, tau-webgpu]
     needs: [plan]
-    if: needs.plan.outputs.webgpu == 'true'
+    if: needs.plan.outputs.webgpu == 'true' && vars.TAU_WEBGPU_RUNNER_ENABLED == 'true'
     permissions:
       contents: 'read'
       actions: 'read'
@@ -188,6 +207,7 @@ jobs:
       - *checkout
       - *setup-nx
       - *geospec
+      - *verify-geospec
 
       - name: Install managed Chromium for Vitest Browser
         run: pnpm exec playwright install chromium
@@ -245,12 +265,16 @@ jobs:
         if: steps.gate.outputs.enabled == 'true'
         uses: ./.github/actions/setup-nx
 
-      - name: Take the GeoSpec products from the commit's main CI run
+      - name: Restore the GeoSpec engine products
         if: steps.gate.outputs.enabled == 'true'
-        uses: ./.github/actions/geospec-artifact-from-main
+        uses: ./.github/actions/geospec-transport
         with:
-          sha: ${{ needs.plan.outputs.sha }}
-          github-token: ${{ github.token }}
+          key: ${{ needs.plan.outputs.geospec-key }}
+          mode: restore
+
+      - name: Verify GeoSpec products against this checkout
+        if: steps.gate.outputs.enabled == 'true'
+        run: pnpm nx run-many -t require-geospec-artifacts --parallel=1
 
       - name: Prepare API env file
         if: steps.gate.outputs.enabled == 'true'

@@ -1,11 +1,18 @@
 import type { JsonObject } from '@taucad/agent-host';
-import type { RequestPrintInput } from '@taucad/chat';
+import type { RequestJobInput } from '@taucad/chat';
 import type { MachineSettingsService, MachineSettingsRecord } from '@taucad/types';
 import { readMachineConfiguration, machineSettingsPath } from '@taucad/runtime/machine/settings';
 import type { SavedSettingsValues } from '@taucad/runtime/machine/settings';
 import { slicingPreferences } from '@taucad/slicer/preferences';
 import { bambuSettingsConfiguration } from '@taucad/bambu/settings';
-import type { MachineDirectoryEntry, MachineObservedMaterial, MachineProvider } from '@taucad/runtime/machine';
+import { componentValue } from '@taucad/runtime/machine';
+import type {
+  MachineComponent,
+  MachineDirectoryEntry,
+  MachineManifest,
+  MachineProvider,
+  MaterialSlotAddress,
+} from '@taucad/runtime/machine';
 import {
   bambuPlates,
   describeBambuStudioSettings,
@@ -48,6 +55,141 @@ const bambuVendor = 'Bambu Lab';
  */
 export const isBambuProvider = (provider: MachineProvider): boolean => provider.vendor === bambuVendor;
 
+/** Bambu's tray number for the external spool. */
+const externalSpoolTray = 254;
+
+/**
+ * One material slot as a Bambu printer numbers its trays (AMS unit n, slot k: `4n + k`; the external spool: 254),
+ * the vocabulary of Bambu Studio's hints, the provider's submission configuration and the saved print intent.
+ * @internal
+ */
+export type ObservedTray = Readonly<{
+  slot: number;
+  address: MaterialSlotAddress;
+  state: 'empty' | 'loaded' | 'unknown';
+  /** The material type the slot reports, such as `PLA`. */
+  materialId?: string;
+  /** The vendor filament profile, such as `GFA00`. */
+  profileId?: string;
+  /** `#RRGGBBAA`. */
+  color?: string;
+}>;
+
+type MaterialSystem = Extract<MachineComponent, { kind: 'material-system' }>;
+
+/**
+ * The machine's material slots as Bambu tray numbers.
+ *
+ * ponytail: the numbering is Bambu's (4 trays per AMS, 254 for the external spool); another vendor's planner needs
+ * its own.
+ *
+ * @param machine - The machine as observed.
+ * @returns Every slot the material system reports, in its order; none when it reports nothing.
+ * @internal
+ */
+export const observedTrays = (machine: MachineDirectoryEntry): readonly ObservedTray[] => {
+  const declared = machine.descriptor.capabilities.components.find(
+    (component): component is MaterialSystem => component.kind === 'material-system',
+  );
+  const value = declared && componentValue(machine.snapshot.components, declared.id, 'material-system');
+  if (!declared || !value) {
+    return [];
+  }
+  const feeders = declared.units.filter((unit) => unit.kind === 'feeder');
+  return value.slots.flatMap(({ slot, state, material }) => {
+    const unit = declared.units.find(({ id }) => id === slot.unitId);
+    const index = unit?.slots.findIndex(({ id }) => id === slot.slotId) ?? -1;
+    if (unit === undefined || index < 0) {
+      return [];
+    }
+    return [
+      {
+        slot: unit.kind === 'external' ? externalSpoolTray : feeders.indexOf(unit) * 4 + index,
+        address: slot,
+        state,
+        ...(material === undefined
+          ? {}
+          : { materialId: material.materialType, profileId: material.preset.profileId, color: material.color }),
+      },
+    ];
+  });
+};
+
+/**
+ * The external spool's tray number, when the machine has one.
+ * @param manifest - The machine's manifest.
+ * @returns 254, or undefined.
+ * @internal
+ */
+export const externalSpoolSlotOf = (manifest: Pick<MachineManifest, 'components'>): number | undefined =>
+  manifest.components.some(
+    (component) => component.kind === 'material-system' && component.units.some((unit) => unit.kind === 'external'),
+  )
+    ? externalSpoolTray
+    : undefined;
+
+/**
+ * The build plate the machine reports: a `plate` reading on any component.
+ *
+ * @param machine - The machine as observed.
+ * @returns The manifest plate id, when reported.
+ * @internal
+ */
+export const observedPlate = (machine: MachineDirectoryEntry): string | undefined => {
+  for (const observation of machine.snapshot.components) {
+    if (observation.knowledge === 'known' && observation.value.kind === 'readings') {
+      const plate = observation.value.values.find(({ id }) => id === 'plate')?.value;
+      if (typeof plate === 'string') {
+        return plate;
+      }
+    }
+  }
+  return undefined;
+};
+
+/**
+ * The first nozzle of the machine's toolhead.
+ * @param manifest - The machine's manifest.
+ * @returns Its diameter in millimetres, when the manifest declares a toolhead.
+ * @internal
+ */
+export const nozzleDiameterOf = (manifest: Pick<MachineManifest, 'components'>): number | undefined => {
+  const toolhead = manifest.components.find(
+    (component): component is Extract<MachineComponent, { kind: 'toolhead' }> => component.kind === 'toolhead',
+  );
+  return toolhead?.nozzles[0]?.diameter.value;
+};
+
+/**
+ * The machine as a print from one tray sees it: the material system reports that tray only.
+ * @param machine - The machine as observed.
+ * @param slot - The tray number.
+ * @returns The same entry with the other slots left out.
+ * @internal
+ */
+export const withOnlyTray = (machine: MachineDirectoryEntry, slot: number): MachineDirectoryEntry => {
+  const address = observedTrays(machine).find((tray) => tray.slot === slot)?.address;
+  return {
+    ...machine,
+    snapshot: {
+      ...machine.snapshot,
+      components: machine.snapshot.components.map((observation) =>
+        observation.knowledge === 'known' && observation.value.kind === 'material-system'
+          ? {
+              ...observation,
+              value: {
+                ...observation.value,
+                slots: observation.value.slots.filter(
+                  ({ slot: candidate }) => candidate.unitId === address?.unitId && candidate.slotId === address.slotId,
+                ),
+              },
+            }
+          : observation,
+      ),
+    },
+  };
+};
+
 /**
  * The material a single-material print uses: the first loaded slot.
  *
@@ -55,8 +197,8 @@ export const isBambuProvider = (provider: MachineProvider): boolean => provider.
  * @returns That slot, when one is loaded with a known material.
  * @internal
  */
-export const loadedMaterial = (machine: MachineDirectoryEntry): MachineObservedMaterial | undefined =>
-  machine.snapshot.setup.materials.find((material) => material.state === 'loaded' && material.materialId !== undefined);
+export const loadedMaterial = (machine: MachineDirectoryEntry): ObservedTray | undefined =>
+  observedTrays(machine).find((material) => material.state === 'loaded' && material.materialId !== undefined);
 
 /**
  * What the printer reports, as Bambu Studio's preset defaults read it.
@@ -74,9 +216,10 @@ export const bambuHints = (
 ): BambuMachineHints => {
   const material = loadedMaterial(machine);
   const plate = bambuPlates.find(({ id }) => id === choices.plate)?.id;
+  const nozzleDiameter = nozzleDiameterOf(provider.manifest);
   return {
     model: machine.descriptor.model,
-    nozzleDiameter: provider.manifest.toolhead.nozzles[0]!.diameter.value,
+    ...(nozzleDiameter === undefined ? {} : { nozzleDiameter }),
     ...(choices.preset === undefined ? {} : { preset: choices.preset }),
     ...(plate === undefined ? {} : { plate }),
     materials:
@@ -108,9 +251,9 @@ export type ResolvedMachinePreferences = Readonly<{
 }>;
 type PrintPreferences = ResolvedMachinePreferences['preferences'];
 
-/** The slicing choices a call makes itself: `request_print`'s own arguments. @internal */
+/** The slicing choices a call makes itself: `request_job`'s own arguments. @internal */
 export type PrintChoices = Readonly<
-  Pick<RequestPrintInput, 'preset' | 'plate' | 'profiles'> & {
+  Pick<RequestJobInput, 'preset' | 'plate' | 'profiles'> & {
     options?: JsonObject | undefined;
     settings?: JsonObject | undefined;
   }
@@ -281,7 +424,7 @@ export const applyMachinePreferences = (
   const { machine, bambuStudio } = target;
   /* What the file supplies either engine: each value the call leaves unset. */
   const preset = choices.preset === undefined ? intent.preset : undefined;
-  const plate = choices.plate === undefined && machine.snapshot.setup.bedType === undefined ? intent.plate : undefined;
+  const plate = choices.plate === undefined && observedPlate(machine) === undefined ? intent.plate : undefined;
   const { supplied, merged } = bambuStudio ? bambuIntent(intent, choices, machine) : referenceIntent(intent, choices);
   return {
     choices: { ...choices, ...merged, preset: choices.preset ?? preset, plate: choices.plate ?? plate },
@@ -419,7 +562,7 @@ export const describePrintProfiles = async (
 ): Promise<JsonObject> => {
   const { provider, machine, preferences } = input;
   const { machineId } = machine;
-  const { name } = machine.descriptor;
+  const { name } = machine;
   const availableProfiles: MachineSettingsRecord['profiles'] = preferences?.record.profiles ?? {
     default: { name: 'Default', configurations: {} },
   };
@@ -443,13 +586,13 @@ export const describePrintProfiles = async (
   };
   if (!isBambuProvider(provider)) {
     return reference(
-      `${name} is not a Bambu printer: request_print slices it with Tau's reference engine, tuned through options.`,
+      `${name} is not a Bambu printer: request_job slices it with Tau's reference engine, tuned through options.`,
     );
   }
   const install = await engine.findBambuStudio();
   if (install === undefined) {
     return reference(
-      "Bambu Studio is not available on this host, so request_print slices with Tau's reference engine. A real Bambu printer refuses those prints: it needs the Tau desktop app with Bambu Studio installed. The Bambu simulator accepts them.",
+      "Bambu Studio is not available on this host, so request_job slices with Tau's reference engine. A real Bambu printer refuses those prints: it needs the Tau desktop app with Bambu Studio installed. The Bambu simulator accepts them.",
     );
   }
   const { choices, machinePreferences } = applyMachinePreferences(
@@ -461,7 +604,7 @@ export const describePrintProfiles = async (
    * default; only the project's own print intent may name one. */
   const hints = bambuHints(provider, machine, {
     preset: choices.preset,
-    plate: machine.snapshot.setup.bedType ?? choices.plate,
+    plate: observedPlate(machine) ?? choices.plate,
   });
   const catalog = await engine.loadBambuStudioCatalog(install, {
     model: hints.model,

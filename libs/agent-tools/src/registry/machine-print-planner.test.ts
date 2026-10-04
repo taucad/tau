@@ -2,7 +2,8 @@
 import { readFileSync } from 'node:fs';
 import { describe, expect, it, vi } from 'vitest';
 import type { JsonObject } from '@taucad/agent-host';
-import type { MachineDirectoryEntry, MachineProvider } from '@taucad/runtime/machine';
+import { fffProcessOf } from '@taucad/runtime/machine';
+import type { MachineDirectoryEntry } from '@taucad/runtime/machine';
 import { machineSettingsPath } from '@taucad/runtime/machine/settings';
 import { slicingPreferences } from '@taucad/slicer/preferences';
 import type { SlicingPreferences } from '@taucad/slicer/preferences';
@@ -13,6 +14,7 @@ import { sha256Bytes } from '@taucad/utils/hash';
 import { createMachinePrintPlanner, defaultFilamentSlots } from '#registry/machine-print-planner.js';
 import type { MachinePrintPlannerDependencies } from '#registry/machine-print-planner.js';
 import type { BambuStudioEngine, ResolvedMachinePreferences } from '#registry/print-profiles.js';
+import { fixtureEntry, fixtureManifest, fixtureProvider } from '#registry/machine.fixture.js';
 
 /* Three annotated layers; relative extrusion totals 5 mm. */
 const gcode = [
@@ -78,50 +80,50 @@ const catalog = {
   plates: [],
 } as const;
 
-const machine = (setup: unknown): MachineDirectoryEntry =>
-  ({
-    machineId: 'machine-1',
-    providerId: 'bambu',
-    descriptor: {
-      id: 'physical-1',
-      name: 'Workshop X1C',
-      model: 'X1C',
-      accepts: [
-        {
-          contract,
-          mediaType,
-          requiredMembers: ['Metadata/plate_1.gcode'],
-          payloadSelection: 'plate',
-          technology: 'additive.fff',
-        },
-      ],
-    },
-    snapshot: { connection: 'connected', readiness: 'idle', observedAt: '2026-09-24T00:00:00.000Z', setup },
-    freshness: 'current',
-  }) as unknown as MachineDirectoryEntry;
+type ObservedSetup = Readonly<{
+  bedType?: string;
+  materials: ReadonlyArray<
+    Readonly<{ slot: number; state: string; materialId?: string; profileId?: string; color?: string }>
+  >;
+}>;
 
-const provider = {
-  id: 'bambu',
-  name: 'Bambu Lab',
-  vendor: 'Bambu Lab',
-  manifest: {
-    identity: { typeId: 'bambu.x1c', model: 'x1c' },
-    toolhead: {
-      filamentDiameter: { value: 1.75, unit: 'mm' },
-      nozzles: [{ id: 'nozzle-0.4', diameter: { value: 0.4, unit: 'mm' } }],
-    },
-    bed: {
-      plates: [
-        { id: 'cool', label: 'Cool plate' },
-        { id: 'high-temperature', label: 'High temperature plate' },
-      ],
-    },
-    slicing: {
-      recommended: { nozzleTemperature: { value: 250, unit: 'Cel' }, bedTemperature: { value: 70, unit: 'Cel' } },
-    },
-    materialSystem: { units: 1, slotsPerUnit: 4, externalSpool: true, externalSpoolSlot: 254, drying: true },
-  },
-} as unknown as MachineProvider;
+/** Bambu's tray numbers as the material system addresses them. */
+const address = (slot: number) =>
+  slot === 254 ? { unitId: 'external', slotId: 'spool' } : { unitId: 'ams-a', slotId: `a${String(slot + 1)}` };
+
+/** The fixture X1C, idle, reporting this plate and these trays. */
+const machine = (setup: ObservedSetup): MachineDirectoryEntry =>
+  fixtureEntry({
+    run: false,
+    plate: setup.bedType ?? false,
+    trays: setup.materials.map(({ slot, state, materialId, profileId, color }) => ({
+      ...address(slot),
+      state: state as 'empty' | 'loaded' | 'unknown',
+      ...(materialId === undefined ? {} : { materialType: materialId }),
+      ...(profileId === undefined ? {} : { profileId }),
+      ...(color === undefined ? {} : { color }),
+    })),
+  });
+
+const provider = (() => {
+  const manifest = fixtureManifest();
+  const fff = fffProcessOf(manifest)!;
+  return fixtureProvider({
+    ...manifest,
+    processes: [
+      {
+        ...fff,
+        bed: {
+          ...fff.bed,
+          plates: [
+            { id: 'cool', label: 'Cool plate' },
+            { id: 'high-temperature', label: 'High temperature plate' },
+          ],
+        },
+      },
+    ],
+  });
+})();
 
 const dependencies = () => ({
   exportModel: vi.fn<MachinePrintPlannerDependencies['exportModel']>(async () => ({
@@ -257,8 +259,11 @@ describe('machine print planner', () => {
       expectedNozzleDiameter: 0.4,
       expectedFilamentDiameter: 1.75,
     });
-    expect(result.summary).toMatchObject({ layers: 3, filamentLength: 5 });
-    expect(result.summary?.estimatedDuration).toBeGreaterThan(0);
+    expect(result.program).toMatchObject({
+      name: 'pyramid.gcode.3mf',
+      facts: { process: 'fff', layers: 3, filamentLength: 5 },
+    });
+    expect(result.program.estimatedDuration).toBeGreaterThan(0);
   });
 
   it('asks for a plate the machine cannot report, and carries a named one as operator confirmed', async () => {
@@ -281,11 +286,11 @@ describe('machine print planner', () => {
     expect(deps.exportModel.mock.calls[0]![0].options).toMatchObject({ plate: 'high-temperature' });
   });
 
-  it('drops a summary it cannot derive', async () => {
+  it('names the program alone when it cannot read the toolpath', async () => {
     const garbage = Uint8Array.from([1, 2, 3, 4]);
     const deps = { ...dependencies(), readArtifact: async () => garbage };
     const result = await plan(deps);
-    expect(result.summary).toBeUndefined();
+    expect(result.program).toEqual({ name: 'pyramid.gcode.3mf' });
     expect(result.artifact).toMatchObject({ digest: `sha256:${await sha256Bytes(garbage)}`, length: 4 });
   });
 
@@ -381,10 +386,10 @@ describe('machine print planner', () => {
     });
     const deps = { ...dependencies(), readArtifact: async () => stated };
     const result = await plan(deps);
-    expect(result.summary).toMatchObject({
+    expect(result.program).toMatchObject({
       producer: { name: '@taucad/slicer reference' },
-      layers: 3,
-      estimatedDuration: 3723,
+      facts: { layers: 3 },
+      estimatedDuration: 3_723_000,
     });
   });
 
@@ -622,7 +627,7 @@ describe('machine print planner', () => {
       expect(exported(deps)[1]).toMatchObject({
         filaments: ['Bambu PETG Basic @BBL X1C', 'Bambu PLA Basic @BBL X1C'],
       });
-      expect(result.summary).toMatchObject({
+      expect(result.program).toMatchObject({
         preferences: {
           scope: 'project',
           typeId: 'bambu.x1c',

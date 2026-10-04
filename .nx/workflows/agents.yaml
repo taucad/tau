@@ -1,27 +1,28 @@
 # Nx Agents launch template for the `affected` lane of .github/workflows/ci.yml.
 # Used only when the repository variable NX_AGENTS_ENABLED is 'true'.
-# Step and image names follow https://nx.dev/ci/reference/launch-templates; check them
-# against the current reference before the first distributed run.
+# https://nx.dev/docs/kb/launch-templates
 launch-templates:
   linux-large-js:
-    resource-class: 'docker_linux_amd64/large'
-    image: 'ubuntu22.04-node20.11-v10'
+    resource-class: 'docker_linux_amd64/large' # 4 vCPU, ~16 GB: fits ui lint/typecheck (~9.5 GB)
+    image: 'ubuntu22.04-node24.14-v1'
+    no-output-timeout: '20m'
     init-steps:
       - name: Checkout
-        uses: 'nrwl/nx-cloud-workflows/v5/workflow-steps/checkout/main.yaml'
-      - name: Install Node 24
-        uses: 'nrwl/nx-cloud-workflows/v5/workflow-steps/install-node/main.yaml'
-        inputs:
-          node_version: '24'
+        uses: 'nrwl/nx-cloud-workflows/v6/workflow-steps/checkout/main.yaml'
       - name: Restore node_modules
-        uses: 'nrwl/nx-cloud-workflows/v5/workflow-steps/cache/main.yaml'
+        uses: 'nrwl/nx-cloud-workflows/v6/workflow-steps/cache/main.yaml'
         inputs:
-          key: 'pnpm-lock.yaml'
+          key: 'pnpm-lock.yaml|patches/**'
           paths: 'node_modules'
-          base_branch: 'main'
+          base-branch: 'main'
+      - name: Install Node
+        uses: 'nrwl/nx-cloud-workflows/v6/workflow-steps/install-node/main.yaml'
+      - name: Enable pnpm from packageManager
+        script: |
+          corepack enable
+          corepack install
       - name: Install dependencies
-        uses: 'nrwl/nx-cloud-workflows/v5/workflow-steps/install-node-modules/main.yaml'
-      # Native kernel tests run inside Bubblewrap, as on the GitHub-hosted lane.
+        uses: 'nrwl/nx-cloud-workflows/v6/workflow-steps/install-node-modules/main.yaml'
       - name: Install Linux sandbox prerequisites
         script: |
-          sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep
+          sudo apt-get update -qq && sudo apt-get install -y bubblewrap socat ripgrep git-lfs

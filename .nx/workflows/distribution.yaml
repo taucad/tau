@@ -1,0 +1,6 @@
+# Agent counts by changeset size for `start-ci-run --distribute-on` in .github/workflows/ci.yml.
+# The repository variable NX_AGENTS_DISTRIBUTE_ON overrides this file.
+distribute-on:
+  small-changeset: 3 linux-large-js
+  medium-changeset: 6 linux-large-js
+  large-changeset: 8 linux-large-js

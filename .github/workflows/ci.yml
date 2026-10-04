@@ -290,7 +290,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        lane: [lint, typecheck, build, test-1, test-2, test-3]
+        lane: [lint, typecheck, build, pkgcheck, test-1, test-2, test-3]
     steps:
       - name: Checkout
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -377,7 +377,17 @@ jobs:
           case "$LANE" in
             lint) pnpm nx affected -t lint --parallel=1 ;;
             typecheck) pnpm nx affected -t typecheck --parallel=1 ;;
-            build) pnpm nx affected -t build size pkgcheck audit-public-surface readme-quickstart --parallel=1 ;;
+            build) pnpm nx affected -t build size --parallel=1 ;;
+            pkgcheck)
+              # publint, attw, madge and the surface checks are light, so they run three at
+              # a time once their builds exist. The builds stay serial and land in the local
+              # cache, so the checks reuse them.
+              projects=$(pnpm nx show projects --affected --with-target pkgcheck --json | tail -1 | jq -r 'join(",")')
+              if [ -n "$projects" ]; then
+                pnpm nx run-many -t build --projects "$projects" --parallel=1
+              fi
+              pnpm nx affected -t pkgcheck audit-public-surface readme-quickstart --parallel=3
+              ;;
             test-*)
               projects=$(pnpm nx show projects --affected --with-target test --exclude tag:scope:api,tag:host:darwin-arm64 --json | tail -1)
               pnpm nx graph --file="$RUNNER_TEMP/graph.json" > /dev/null

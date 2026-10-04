@@ -164,7 +164,7 @@
     "enabled": false
   },
   "namedInputs": {
-    "sharedGlobals": [],
+    "sharedGlobals": ["{workspaceRoot}/.github/workflows/ci.yml", "{workspaceRoot}/.github/workflows/publish.yml"],
     "default": ["{projectRoot}/**/*", "sharedGlobals"],
     "production": [
       "default",

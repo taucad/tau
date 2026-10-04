@@ -280,7 +280,7 @@ const processSchema = z.union([
 const acceptedContainerSchema = z.strictObject({
   contract: z.strictObject({ id: z.string().min(1).max(256), version: z.number().int().min(1) }),
   mediaType: z.string().min(1).max(256),
-  requiredMembers: z.array(z.string().min(1).max(512)).max(128),
+  requiredMembers: z.array(z.string().min(1).max(512)).max(128).readonly(),
   payloadSelection: z.enum(['plate', 'single']),
   technology: z.string().min(1).max(256),
 });

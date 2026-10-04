@@ -299,6 +299,7 @@ beforeEach(() => {
   desktopHost.bambuStudio = undefined;
   projectFiles.clear();
   setRestoredPrintEntryPath(undefined);
+  renderGeometry();
 });
 
 const signalMatcher: unknown = expect.any(AbortSignal);
@@ -1962,6 +1963,30 @@ describe('Print pane Bambu Studio mode', () => {
       await screen.findByRole('group', { name: 'Filaments' });
       return fixture;
     };
+
+    it('reads the colours of the model before a slice and maps each to a tray of its colour', async () => {
+      await renderStudio(colourful());
+      /* A red part and a blue part, as the kernel renders them: one glTF material each. */
+      const twoParts = new TextEncoder().encode(
+        JSON.stringify({
+          nodes: [{ mesh: 0 }, { mesh: 1 }],
+          meshes: [{ primitives: [{ material: 0 }] }, { primitives: [{ material: 1 }] }],
+          materials: [
+            { pbrMetallicRoughness: { baseColorFactor: [1, 0, 0, 1] } },
+            { pbrMetallicRoughness: { baseColorFactor: [0, 0, 1, 1] } },
+          ],
+        }),
+      );
+      act(() => {
+        renderGeometry(twoParts);
+      });
+
+      await screen.findByRole('group', { name: 'Filaments' });
+      expect(screen.queryByRole('group', { name: 'Material' })).not.toBeInTheDocument();
+      expect(slot(1)).toHaveTextContent(selectedLabel('0'));
+      expect(slot(2)).toHaveTextContent(selectedLabel('1'));
+      expect(mockExport).not.toHaveBeenCalled();
+    });
 
     it('never maps a filament to the external spool, and says why it is not offered', async () => {
       const user = userEvent.setup();

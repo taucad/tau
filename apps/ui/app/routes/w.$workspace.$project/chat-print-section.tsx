@@ -92,10 +92,12 @@ export function PrintStage({
   return (
     <Collapsible asChild open={toggled ?? isDefaultOpen} onOpenChange={setToggled}>
       <section aria-label={title} className='group/stage flex min-w-0 flex-col'>
-        <div className='flex min-w-0 items-center gap-1 transition-colors hover:bg-accent/50 motion-reduce:transition-none'>
+        {/* The aside overlays the trigger's cell just before the chevron, so every stage's chevron lines up and the
+            whole row still opens the stage; the trigger keeps a gap of the aside's width for it. */}
+        <div className='grid min-w-0 items-center transition-colors hover:bg-accent/50 motion-reduce:transition-none'>
           <CollapsibleTrigger
             data-print-stage={title}
-            className='flex min-h-9 min-w-0 flex-1 cursor-action items-center gap-2 px-2.5 text-left text-xs focus-visible:focus-outline'
+            className='col-start-1 row-start-1 flex min-h-9 min-w-0 cursor-action items-center gap-2 px-2.5 text-left text-xs focus-visible:focus-outline'
           >
             <Icon aria-hidden className='size-3.5 shrink-0 text-muted-foreground' />
             {/* The title keeps its width; a long summary truncates instead. */}
@@ -103,12 +105,15 @@ export function PrintStage({
             <span className='min-w-0 flex-1 truncate text-right text-muted-foreground tabular-nums group-data-[state=open]/stage:invisible'>
               {summary}
             </span>
+            {aside === undefined ? null : <span aria-hidden className='size-4 shrink-0' />}
             <ChevronDown
               aria-hidden
               className='size-3.5 shrink-0 text-muted-foreground transition-transform duration-150 ease-out group-data-[state=open]/stage:rotate-180 motion-reduce:transition-none'
             />
           </CollapsibleTrigger>
-          {aside === undefined ? null : <div className='flex shrink-0 items-center pr-1.5'>{aside}</div>}
+          {aside === undefined ? null : (
+            <div className='relative col-start-1 row-start-1 mr-8 flex items-center justify-self-end'>{aside}</div>
+          )}
         </div>
         <CollapsibleContent className={disclosureMotion}>
           {/* Padding sits inside the animated content, so the height animation starts without a jump. */}

@@ -39,15 +39,30 @@ const computeStoreWorkerModulePath = (): string =>
   );
 
 /**
- * The machine providers `--machines` serves: the Bambu Lab X1C and its
- * socket-free simulator, the operator's dry-run device. Loaded on demand so a
- * daemon without the flag never touches the vendor package.
+ * The machine providers `--machines` serves: the Bambu Lab X1C and A1 mini, a
+ * Grbl router and a Makera Carvera, each beside its socket-free simulator. Loaded
+ * on demand so a daemon without the flag never touches the vendor packages.
  *
  * @returns The daemon's machines option.
  */
 const machineProviders = async (): Promise<NonNullable<HostDaemonAgentOptions['machines']>> => {
-  const { bambuA1MiniMachine, bambuMachine, bambuSimulatorMachine } = await import('@taucad/bambu');
-  return { providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()] };
+  const [bambu, grbl, carvera] = await Promise.all([
+    import('@taucad/bambu'),
+    import('@taucad/grbl'),
+    import('@taucad/carvera'),
+  ]);
+  return {
+    providers: [
+      bambu.bambuMachine(),
+      bambu.bambuA1MiniMachine(),
+      bambu.bambuSimulatorMachine(),
+      bambu.bambuA1MiniSimulatorMachine(),
+      grbl.grblMachine(),
+      grbl.grblSimulatorMachine(),
+      carvera.carveraMachine(),
+      carvera.carveraSimulatorMachine(),
+    ],
+  };
 };
 
 const childArguments = (options: { readonly plugin: unknown; readonly config?: string }): string[] => {
@@ -302,7 +317,7 @@ export const serveCommand = defineCommand({
     machines: {
       type: 'boolean',
       description:
-        'Serve the machines route beside the agent channel with the Bambu Lab X1C provider and its simulator (TAU_HOST_MACHINES=true)',
+        'Serve the machines route beside the agent channel with the Bambu Lab, Grbl and Carvera providers and their simulators (TAU_HOST_MACHINES=true)',
       default: process.env['TAU_HOST_MACHINES'] === 'true',
     },
   },

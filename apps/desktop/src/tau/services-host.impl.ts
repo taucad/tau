@@ -10,7 +10,7 @@
  * It hosts four concerns, one dedicated port each. Renderer filesystem,
  * runtime filesystem, agent tools, and revision preparation all derive rooted
  * clients from one internal authority channel. The machines concern serves
- * the node machine host — the real Bambu provider beside the simulator — over
+ * the node machine host — the real Bambu, Grbl and Carvera providers beside their simulators — over
  * the same broker, from the per-user machine store every Tau host on this
  * computer shares; it needs no project. The agent host is ruling C3's
  * **launcher 2**: `createProjectHost` from `@taucad/host`, the same composition the
@@ -40,7 +40,9 @@ import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import type { EmitterPort } from '@taucad/filesystem/backend/node';
 import { serveAgentChannel } from '@taucad/agent-host/launcher';
 import { createGatewayModelTransport, createTauCloudGatewayModelTransport } from '@taucad/agent-host';
-import { bambuA1MiniMachine, bambuMachine, bambuSimulatorMachine } from '@taucad/bambu';
+import { bambuA1MiniMachine, bambuA1MiniSimulatorMachine, bambuMachine, bambuSimulatorMachine } from '@taucad/bambu';
+import { carveraMachine, carveraSimulatorMachine } from '@taucad/carvera';
+import { grblMachine, grblSimulatorMachine } from '@taucad/grbl';
 import {
   completeMachineBinding,
   createMachineSecretStore,
@@ -595,7 +597,17 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
       ...(legacyMachinesDirectory === undefined ? {} : { legacyStoreRoots: [legacyMachinesDirectory] }),
       ...identity,
       admission,
-      providers: [bambuMachine(), bambuA1MiniMachine(), bambuSimulatorMachine()],
+      providers: [
+        bambuMachine(),
+        bambuA1MiniMachine(),
+        bambuSimulatorMachine(),
+        bambuA1MiniSimulatorMachine(),
+        // ponytail: no native serial driver yet, so the real Grbl provider discovers nothing; add `serialport` here.
+        grblMachine(),
+        grblSimulatorMachine(),
+        carveraMachine(),
+        carveraSimulatorMachine(),
+      ],
       runtime: createNodeMachineRuntime({
         secrets,
         /* The last scan's roots first; a miss, or roots that no longer hold

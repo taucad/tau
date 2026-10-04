@@ -1810,6 +1810,9 @@ importers:
       '@taucad/build123d':
         specifier: workspace:*
         version: link:../../packages/plugins/build123d
+      '@taucad/carvera':
+        specifier: workspace:*
+        version: link:../../packages/plugins/carvera
       '@taucad/converter':
         specifier: workspace:*
         version: link:../libs/converter
@@ -1831,6 +1834,9 @@ importers:
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../../packages/plugins/gltf
+      '@taucad/grbl':
+        specifier: workspace:*
+        version: link:../../packages/plugins/grbl
       '@taucad/host':
         specifier: workspace:*
         version: link:../../packages/host
@@ -3258,12 +3264,18 @@ importers:
       '@taucad/brep':
         specifier: workspace:*
         version: link:../plugins/brep
+      '@taucad/carvera':
+        specifier: workspace:*
+        version: link:../plugins/carvera
       '@taucad/esbuild':
         specifier: workspace:*
         version: link:../plugins/esbuild
       '@taucad/gltf':
         specifier: workspace:*
         version: link:../plugins/gltf
+      '@taucad/grbl':
+        specifier: workspace:*
+        version: link:../plugins/grbl
       '@taucad/host':
         specifier: workspace:*
         version: link:../host

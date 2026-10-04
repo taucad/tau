@@ -74,22 +74,30 @@ afterEach(async () => {
   }
 });
 
-/** The Print pane's card for one request; the chat banner above the composer is `Approval required`. */
+/** The Print pane's card for one job; the chat banner above the composer is `Approval required`. */
 const paneApprovalOf = (page: Page, fileName: string): Locator =>
-  page.getByRole('region', { name: `Print request awaiting you: ${fileName}`, exact: true });
+  page.getByRole('region', { name: `Job awaiting you: ${fileName}`, exact: true });
 
 const chatApprovalOf = (page: Page): Locator => page.getByRole('region', { name: 'Approval required', exact: true });
 
 const escapeRegExp = (text: string): string => text.replaceAll(/[$()*+.?[\\\]^{|}]/gu, String.raw`\$&`);
 
-const monitorText = async (page: Page): Promise<string> =>
-  (await page.getByRole('region', { name: 'Monitor' }).textContent()) ?? '';
+/** The header's Machine select: the machine's name and its status, `Ready` while idle. */
+const machineStatus = async (page: Page): Promise<string> =>
+  (await page.getByRole('combobox', { name: 'Machine' }).textContent()) ?? '';
 
-/** The newest ledger row in the pane's Activity disclosure, e.g. `Waiting for approval…`. */
+/** The run block above the stages: `<program> · Running · layer 3 of 125 · 12 min left`. */
+const runText = async (page: Page): Promise<string> =>
+  (await page
+    .getByRole('region', { name: 'Run' })
+    .textContent()
+    .catch(() => '')) ?? '';
+
+/** The newest job row in the pane's History stage, e.g. `Waiting for approval…`. */
 const latestRequestRow = async (page: Page): Promise<string> => {
-  const rows = page.getByRole('list', { name: 'Print requests' });
+  const rows = page.getByRole('list', { name: 'Jobs' });
   if ((await rows.count()) === 0) {
-    await page.getByRole('button', { name: /^Activity/u }).click();
+    await page.getByRole('button', { name: /^History/u }).click();
   }
   return (await rows.getByRole('listitem').first().textContent()) ?? '';
 };
@@ -207,21 +215,20 @@ const requestPyramidPrint = async (page: Page, root: string): Promise<string> =>
   /* The pane card answers the same interrupt, in the tool's own words. */
   const paneCard = paneApprovalOf(page, fileName);
   await expectVisible(paneCard, 60_000);
-  expect(await paneCard.textContent()).toMatch(
-    new RegExp(`^Tau is waiting for approval${prompt.source}Requested by Tau agent`, 'u'),
-  );
+  expect(await paneCard.textContent()).toMatch(new RegExp(`Requested by Tau agent.*${prompt.source}`, 'u'));
   await expectVisible(paneCard.getByText('Answering here also answers the chat.', { exact: true }));
   expect(await paneCard.getByRole('button', { name: 'Deny' }).isEnabled()).toBe(true);
-  expect(await paneCard.getByRole('button', { name: 'Accept' }).isEnabled()).toBe(true);
+  /* The X1C asks the person to confirm the plate is clear: Start waits for that, in the pane only. */
+  expect(await paneCard.getByRole('button', { name: 'Start print' }).isEnabled()).toBe(false);
   /* Nothing physical yet: the ledger row waits and the machine is idle. */
   expect(await latestRequestRow(page)).toMatch(
     new RegExp(`^Waiting for approval${escapeRegExp(fileName)}by Tau agent`, 'u'),
   );
-  expect(await monitorText(page)).toContain('Idle');
+  expect(await machineStatus(page)).toContain('Ready');
   return fileName;
 };
 
-test('prints the chat pyramid on the simulated X1C only after Accept', async () => {
+test('prints the chat pyramid on the simulated X1C only after Start in the pane', async () => {
   const script = { current: seedTurn };
   const { page, root } = await openPrintProject('print-dry-run', script);
   script.current = printTurn;
@@ -231,36 +238,30 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
 
     /* Preview the exact requested bytes in the printer viewer before accepting them. */
     const paneCard = paneApprovalOf(page, fileName);
-    await paneCard.getByRole('button', { name: 'Open printer preview' }).click();
+    await paneCard.getByRole('button', { name: 'Preview', exact: true }).click();
     await expectVisible(page.getByRole('region', { name: `Printer simulation: ${fileName}`, exact: true }), 120_000);
     await showPrintPane(page);
 
     /* The resumed attempt only needs to close; replaying the turn would repeat its tool calls. */
     script.current = [];
-    await paneCard.getByRole('button', { name: 'Accept' }).click();
-    const confirm = paneCard.getByRole('group', { name: 'Confirm before starting' });
-    const start = confirm.getByRole('button', { name: `Start print on ${machineName}` });
+    const start = paneCard.getByRole('button', { name: 'Start print' });
     expect(await start.isEnabled()).toBe(false);
-    for (const checkbox of await confirm.getByRole('checkbox').all()) {
-      await checkbox.click();
-    }
+    await paneCard.getByRole('checkbox', { name: 'The build plate is clear' }).click();
     await start.click();
 
     /* The simulator heats first (bed 25 → 55 °C at 0.5 °C/s at demo speed 1), then prints on the wall clock. */
-    await expect
-      .poll(async () => monitorText(page), { timeout: 180_000 })
-      .toMatch(/Printing layer \d+ of \d+ · \d+ min left/u);
+    await expect.poll(async () => runText(page), { timeout: 180_000 }).toMatch(/· layer \d+ of \d+ · \d+ min left/u);
     await expect
       .poll(async () => latestRequestRow(page), { timeout: 60_000 })
-      .toMatch(new RegExp(`^Printing${escapeRegExp(fileName)}by Tau agent`, 'u'));
+      .toMatch(new RegExp(`^(?:Started|Running)${escapeRegExp(fileName)}by Tau agent`, 'u'));
     const progress = page
-      .getByRole('region', { name: 'Monitor' })
-      .getByRole('progressbar', { name: `${machineName} print progress` });
+      .getByRole('region', { name: 'Run' })
+      .getByRole('progressbar', { name: `${machineName} run progress` });
     const firstProgress = Number(await progress.getAttribute('aria-valuenow'));
     await expect
       .poll(async () => Number(await progress.getAttribute('aria-valuenow')), { timeout: 60_000 })
       .toBeGreaterThan(firstProgress);
-    expect(await page.getByRole('button', { name: 'Urgent stop' }).isEnabled()).toBe(true);
+    expect(await page.getByRole('button', { name: 'Stop', exact: true }).isEnabled()).toBe(true);
     /* The older seed turn can be virtualized out of the DOM; both replies live in the host log. */
     await expectVisible(page.getByText(gatewayFixtureFinalText, { exact: true }).last(), 300_000);
     const eventsPath = join(root, '.tau/chats', activeChatId(page), 'events.jsonl');
@@ -302,10 +303,13 @@ test('prints the chat pyramid on the simulated X1C only after Accept', async () 
       }),
     ).toBe(true);
     await expectCount(chatApprovalOf(page), 0);
-    /* The host handed the chat's answer to the ledger, in the chat's words. */
+    /* The person started it in the pane, with the plate attestation; the chat run then found it resolved. */
     const [accepted, ...others] = await ledgerJobs(session!);
     expect(others).toEqual([]);
-    expect(accepted).toMatchObject({ resolvedBy: { kind: 'user', label: 'Accepted in chat' } });
+    expect(accepted).toMatchObject({
+      resolvedBy: { kind: 'user', label: 'You' },
+      attestations: [expect.objectContaining({ id: 'work-area-clear' })],
+    });
     /* The continued attempt was told the answer, not only that its call was aborted. */
     const continued = fixture!.gatewayRequests.slice(paused).map((request) => requestTexts(request));
     expect(continued).toContainEqual(
@@ -343,7 +347,7 @@ test.each([
     await expect
       .poll(async () => latestRequestRow(page), { timeout: 60_000 })
       .toMatch(new RegExp(`^Denied${escapeRegExp(fileName)}by Tau agent`, 'u'));
-    expect(await monitorText(page)).toContain('Idle');
+    expect(await machineStatus(page)).toContain('Ready');
     await expectCount(chatApprovalOf(page), 0);
     await expectCount(paneApprovalOf(page, fileName), 0);
     /* A denial ends the run cancelled: the model is not asked again, and no closing line follows the seed turn's. */
@@ -376,7 +380,7 @@ test('slices, previews and starts a person-initiated print on the simulated X1C'
   const { page } = await openPrintProject('print-dry-run-pane', script);
   try {
     const prepare = page.getByRole('region', { name: 'Prepare' });
-    await prepare.getByRole('button', { name: 'Slice and preview' }).click();
+    await page.getByRole('button', { name: 'Slice and preview' }).click();
     const result = prepare.getByLabel('Slice result');
     await expectVisible(result, 120_000);
     const part =
@@ -385,39 +389,33 @@ test('slices, previews and starts a person-initiated print on the simulated X1C'
       );
     /* The seed model is a 20 mm cube: the Part row is the part, not the purge line and lifts around it. */
     expect(part?.slice(1).map(Number)).toEqual([expect.closeTo(20, 0), expect.closeTo(20, 0), expect.closeTo(20, 0)]);
-    await prepare.getByRole('button', { name: 'Open printer preview' }).click();
+    await page.getByRole('button', { name: 'Preview', exact: true }).first().click();
     const viewer = page.getByRole('region', { name: 'Printer simulation: main.gcode.3mf' });
     await expectVisible(viewer, 120_000);
     await viewer.getByRole('radiogroup', { name: 'Speed' }).getByRole('radio', { name: '100×' }).click();
     await showPrintPane(page);
 
-    await prepare.getByRole('button', { name: `Send to ${machineName}` }).click();
-    const confirm = page.getByRole('group', { name: 'Confirm before starting' });
-    expect(await confirm.textContent()).toMatch(/^Artifact sha256:[\da-f]{64}Physical checks/u);
-    expect(await monitorText(page)).toContain('Idle');
-    for (const checkbox of await confirm.getByRole('checkbox').all()) {
-      await checkbox.click();
-    }
-    await confirm.getByRole('button', { name: `Start print on ${machineName}` }).click();
+    /* Review print asks the machine for a job; nothing reaches the printer until Start. */
+    await page.getByRole('button', { name: 'Review print' }).click();
+    const review = page.getByRole('region', { name: 'Job awaiting you: main.gcode.3mf', exact: true });
+    await expectVisible(review, 60_000);
+    expect(await machineStatus(page)).toContain('Ready');
+    await review.getByRole('checkbox', { name: 'The build plate is clear' }).click();
+    await review.getByRole('button', { name: 'Start print' }).click();
 
-    await expect
-      .poll(async () => monitorText(page), { timeout: 180_000 })
-      .toMatch(/Printing layer \d+ of \d+ · \d+ min left/u);
+    await expect.poll(async () => runText(page), { timeout: 180_000 }).toMatch(/· layer \d+ of \d+ · \d+ min left/u);
     await expect
       .poll(async () => latestRequestRow(page), { timeout: 60_000 })
-      .toMatch(/^Printingmain\.gcode\.3mfby You/u);
-    const urgentStop = page.getByRole('button', { name: 'Urgent stop' });
-    expect(await urgentStop.isEnabled()).toBe(true);
-    await urgentStop.click();
-    await page
-      .getByRole('alertdialog', { name: 'Confirm urgent stop' })
-      .getByRole('button', { name: 'Confirm urgent stop' })
-      .click();
-    await expect.poll(async () => monitorText(page), { timeout: 60_000 }).toMatch(/Idle/u);
-    /* The request ended at "started"; Activity reads the run it started, now stopped. */
+      .toMatch(/^(?:Started|Running)main\.gcode\.3mfby You/u);
+    /* Stop is one press, beside the machine's name, with what it does said beside it. */
+    const stop = page.getByRole('button', { name: 'Stop', exact: true });
+    expect(await stop.isEnabled()).toBe(true);
+    await stop.click();
+    await expect.poll(async () => machineStatus(page), { timeout: 60_000 }).toMatch(/Ready/u);
+    /* The job ended at "started"; History reads the run it started, now ended. */
     await expect
       .poll(async () => latestRequestRow(page), { timeout: 60_000 })
-      .toMatch(/^Stoppedmain\.gcode\.3mfby You/u);
+      .toMatch(/^(?:Started|Cancelled|Interrupted|Ended)main\.gcode\.3mfby You/u);
   } catch (error) {
     await session!.capture('print-dry-run-pane');
     throw error;

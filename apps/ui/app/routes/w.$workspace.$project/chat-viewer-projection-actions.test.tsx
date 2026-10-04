@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it, vi } from 'vitest';
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, within } from '@testing-library/react';
 import { workbenchRecords } from '@taucad/workbench';
 import type { Evaluation } from '@taucad/runtime';
 import type { ActorRefFrom } from 'xstate';
@@ -8,6 +8,7 @@ import type { cadMachine } from '#machines/cad.machine.js';
 import { setLocalInstanceChoice } from '#workbench-records/local-instance.js';
 import { viewTabTitle } from '#workbench-records/projection.js';
 import { mock } from 'vitest-mock-extended';
+import { TooltipProvider } from '@taucad/ui/components/tooltip';
 
 const mockState = vi.hoisted(() => ({
   evaluation: undefined as Evaluation | undefined,
@@ -19,12 +20,17 @@ vi.mock('@xstate/react', () => ({ useSelector: () => mockState.evaluation }));
 vi.mock('#hooks/use-project.js', () => ({
   useProject: () => ({ viewRecords: new Map(mockState.record ? [['pane-1', mockState.record]] : []) }),
 }));
+vi.mock('#hooks/use-graphics.js', () => ({
+  useGraphicsSelector: (select: (snapshot: unknown) => unknown) =>
+    select({ context: { displayUnits: { length: { symbol: 'mm' } } } }),
+}));
 vi.mock('#workbench-records/view-actions.js', () => ({
   useWorkbenchViewCommands: () => ({ edit: mockState.edit }),
 }));
 
 const { ViewerProjectionPicker } = await import('#routes/w.$workspace.$project/chat-viewer-projection-picker.js');
 const { viewerPanelTitle } = await import('#routes/w.$workspace.$project/chat-viewer-dockview.js');
+const renderPicker = (ui: React.ReactElement): ReturnType<typeof render> => render(ui, { wrapper: TooltipProvider });
 const cadActor = mock<ActorRefFrom<typeof cadMachine>>();
 const model = { id: 'model', title: '3D Model', mimeType: 'model/gltf-binary' } as const;
 const drawing = {
@@ -57,13 +63,19 @@ describe('viewer pane projection picker', () => {
   it('hides for a single offered view and opens for multiple titled offers', () => {
     mockState.record = undefined;
     mockState.evaluation = { id: 'e1', success: true, transient: false, views: [model], exports: [], issues: [] };
-    const pane = render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
-    expect(screen.queryByRole('button', { name: /Projection view/ })).not.toBeInTheDocument();
+    const pane = renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    expect(screen.queryByRole('group', { name: 'View controls' })).not.toBeInTheDocument();
+
+    mockState.evaluation = { ...mockState.evaluation, views: [{ ...model, options: drawing.options }] };
+    pane.rerender(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    expect(screen.queryByRole('button', { name: /^View:/ })).not.toBeInTheDocument();
+    expect(screen.getByRole('button', { name: '3D Model options' })).toBeInTheDocument();
 
     mockState.evaluation = { ...mockState.evaluation, views: [model, drawing] };
     pane.rerender(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
-    fireEvent.keyDown(screen.getByRole('button', { name: /Projection view/ }), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByRole('button', { name: /^View:/ }), { key: 'ArrowDown' });
     expect(screen.getByRole('menuitemradio', { name: 'Drawing' })).toBeInTheDocument();
+    expect(screen.queryByRole('menuitemradio', { name: /Default/ })).not.toBeInTheDocument();
     pane.unmount();
   });
 
@@ -78,9 +90,9 @@ describe('viewer pane projection picker', () => {
       exports: [],
       issues: [],
     };
-    render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
 
-    fireEvent.keyDown(screen.getByRole('button', { name: /Projection view/ }), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByRole('button', { name: /^View:/ }), { key: 'ArrowDown' });
     fireEvent.click(screen.getByRole('menuitemradio', { name: 'Drawing' }));
 
     expect(mockState.edit).toHaveBeenCalledWith('pane-1', expect.any(Function));
@@ -104,12 +116,12 @@ describe('viewer pane projection picker', () => {
       issues: [],
     };
     const openBeside = vi.fn();
-    render(
+    renderPicker(
       <ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} onOpenBeside={openBeside} />,
     );
 
-    fireEvent.keyDown(screen.getByRole('button', { name: /Projection view/ }), { key: 'ArrowDown' });
-    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Open beside…' }), { key: 'ArrowRight' });
+    fireEvent.keyDown(screen.getByRole('button', { name: /^View:/ }), { key: 'ArrowDown' });
+    fireEvent.keyDown(screen.getByRole('menuitem', { name: 'Open beside' }), { key: 'ArrowRight' });
     fireEvent.click(screen.getByRole('menuitem', { name: 'Drawing' }));
     expect(openBeside).toHaveBeenCalledExactlyOnceWith('drawing');
     expect(mockState.edit).not.toHaveBeenCalled();
@@ -122,14 +134,14 @@ describe('viewer pane projection picker', () => {
       selectedKernelView: 'old',
     });
     mockState.evaluation = { id: 'e3', success: true, transient: false, views: [model], exports: [], issues: [] };
-    render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
 
-    expect(screen.getByRole('button', { name: 'Projection view: old unavailable' })).toBeInTheDocument();
-    fireEvent.keyDown(screen.getByRole('button', { name: /Projection view/ }), { key: 'ArrowDown' });
+    expect(screen.getByRole('button', { name: 'View: old unavailable' })).toBeInTheDocument();
+    fireEvent.keyDown(screen.getByRole('button', { name: /^View:/ }), { key: 'ArrowDown' });
     expect(screen.getByRole('menuitemradio', { name: 'old (unavailable)' })).toBeInTheDocument();
   });
 
-  it('persists declared boolean options and stable authored instances', () => {
+  it('persists declared boolean options and stable authored instances', async () => {
     mockState.edit.mockClear();
     mockState.record = workbenchRecords.view.schema.parse({
       version: 1,
@@ -153,22 +165,25 @@ describe('viewer pane projection picker', () => {
         },
       ],
     };
-    render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
 
-    fireEvent.change(screen.getByRole('combobox', { name: 'Drawing instance' }), { target: { value: 'sheet:Power' } });
-    const instanceEdit = mockState.edit.mock.lastCall?.[1] as (
-      record: ReturnType<typeof workbenchRecords.view.schema.parse>,
-    ) => ReturnType<typeof workbenchRecords.view.schema.parse>;
-    expect(instanceEdit(mockState.record).kernelViews).toEqual([{ id: 'drawing', authoredInstance: 'sheet:Power' }]);
     fireEvent.click(screen.getByRole('button', { name: 'Drawing options' }));
-    fireEvent.click(screen.getByRole('checkbox', { name: 'Pin numbers' }));
+    const panel = await screen.findByRole('dialog', { name: 'Drawing options' });
+    fireEvent.click(await within(panel).findByRole('switch'));
     const optionsEdit = mockState.edit.mock.lastCall?.[1] as (
       record: ReturnType<typeof workbenchRecords.view.schema.parse>,
     ) => ReturnType<typeof workbenchRecords.view.schema.parse>;
     expect(optionsEdit(mockState.record).kernelViews).toEqual([{ id: 'drawing', options: { pinNumbers: true } }]);
+    fireEvent.keyDown(panel, { key: 'Escape' });
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Drawing instance: Whole view' }), { key: 'ArrowDown' });
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Power' }));
+    const instanceEdit = mockState.edit.mock.lastCall?.[1] as (
+      record: ReturnType<typeof workbenchRecords.view.schema.parse>,
+    ) => ReturnType<typeof workbenchRecords.view.schema.parse>;
+    expect(instanceEdit(mockState.record).kernelViews).toEqual([{ id: 'drawing', authoredInstance: 'sheet:Power' }]);
   });
 
-  it('keeps a saved invalid choice visible until the person restores declared defaults', () => {
+  it('keeps a saved invalid choice visible until the person resets the declared defaults', async () => {
     mockState.edit.mockClear();
     mockState.record = workbenchRecords.view.schema.parse({
       version: 1,
@@ -197,26 +212,22 @@ describe('viewer pane projection picker', () => {
         },
       ],
     };
-    render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
 
-    fireEvent.click(screen.getByRole('button', { name: 'Drawing options' }));
-    expect(screen.getByRole('spinbutton', { name: 'Scale' })).toHaveValue(-1);
+    fireEvent.click(screen.getByRole('button', { name: 'Drawing options (changed)' }));
+    const panel = await screen.findByRole('dialog', { name: 'Drawing options' });
+    expect(await within(panel).findByDisplayValue('-1')).toBeInTheDocument();
     expect(mockState.edit).not.toHaveBeenCalled();
-    fireEvent.click(screen.getByRole('button', { name: 'Restore view defaults' }));
+    fireEvent.click(within(panel).getByRole('button', { name: 'Reset' }));
     const update = mockState.edit.mock.lastCall?.[1] as (
       record: ReturnType<typeof workbenchRecords.view.schema.parse>,
     ) => ReturnType<typeof workbenchRecords.view.schema.parse>;
     expect(update(mockState.record).kernelViews).toEqual([{ id: 'drawing', options: { scale: 2 } }]);
   });
 
-  it('edits nested view options as JSON values and retains the saved value on invalid JSON', () => {
+  it('renders nested view options as form fields, not JSON, and keeps Reset off at the defaults', async () => {
     mockState.edit.mockClear();
-    mockState.record = workbenchRecords.view.schema.parse({
-      version: 1,
-      entryPath: 'main.tsx',
-      selectedKernelView: 'drawing',
-      kernelViews: [{ id: 'drawing', options: { tessellation: { tolerance: 0.1 } } }],
-    });
+    mockState.record = undefined;
     mockState.evaluation = {
       id: 'e4',
       success: true,
@@ -224,31 +235,34 @@ describe('viewer pane projection picker', () => {
       exports: [],
       issues: [],
       views: [
-        model,
         {
-          ...drawing,
+          ...model,
           options: {
-            schema: { type: 'object', properties: { tessellation: { type: 'object', title: 'Tessellation' } } },
-            defaults: { tessellation: { tolerance: 0.1 } },
+            schema: {
+              type: 'object',
+              properties: {
+                tessellation: {
+                  type: 'object',
+                  title: 'Tessellation',
+                  properties: {
+                    linearTolerance: { type: 'number', title: 'Linear tolerance', exclusiveMinimum: 0 },
+                    angularTolerance: { type: 'number', title: 'Angular tolerance', exclusiveMinimum: 0 },
+                  },
+                },
+              },
+            },
+            defaults: { tessellation: { linearTolerance: 0.02, angularTolerance: 20 } },
           },
         },
       ],
     };
-    render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
-    fireEvent.click(screen.getByRole('button', { name: 'Drawing options' }));
-    const field = screen.getByRole('textbox', { name: 'Tessellation (JSON)' });
-    fireEvent.change(field, { target: { value: '{broken' } });
-    fireEvent.blur(field);
-    expect(screen.getByRole('alert')).toHaveTextContent('Tessellation must be valid JSON');
-    expect(mockState.edit).not.toHaveBeenCalled();
-    fireEvent.change(field, { target: { value: '{"tolerance":0.2}' } });
-    fireEvent.blur(field);
-    const update = mockState.edit.mock.lastCall?.[1] as (
-      record: ReturnType<typeof workbenchRecords.view.schema.parse>,
-    ) => ReturnType<typeof workbenchRecords.view.schema.parse>;
-    expect(update(mockState.record).kernelViews).toEqual([
-      { id: 'drawing', options: { tessellation: { tolerance: 0.2 } } },
-    ]);
+    renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    fireEvent.click(screen.getByRole('button', { name: '3D Model options' }));
+    const panel = await screen.findByRole('dialog', { name: '3D Model options' });
+    expect(await within(panel).findByRole('spinbutton', { name: 'Input for Linear Tolerance' })).toHaveValue('0.02');
+    expect(within(panel).getByRole('spinbutton', { name: 'Input for Angular Tolerance' })).toHaveValue('20');
+    expect(within(panel).queryByRole('textbox', { name: /JSON/ })).not.toBeInTheDocument();
+    expect(within(panel).getByRole('button', { name: 'Reset' })).toBeDisabled();
   });
 
   it('keeps a local instance only for its evaluation and marks it expired after a rebuild', () => {
@@ -266,16 +280,20 @@ describe('viewer pane projection picker', () => {
       issues: [],
       views: [{ ...drawing, instances: [{ id: 'local:e5:unnamed', title: 'Unnamed (current evaluation)' }] }],
     };
-    const pane = render(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
-    fireEvent.change(screen.getByRole('combobox', { name: 'Drawing instance' }), {
-      target: { value: 'local:e5:unnamed' },
-    });
+    const pane = renderPicker(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
+    fireEvent.keyDown(screen.getByRole('button', { name: 'Drawing instance: Whole view' }), { key: 'ArrowDown' });
+    fireEvent.click(screen.getByRole('menuitemradio', { name: 'Unnamed (current evaluation)' }));
     expect(mockState.edit).not.toHaveBeenCalled();
-    expect(screen.getByRole('combobox', { name: 'Drawing instance' })).toHaveValue('local:e5:unnamed');
+    expect(screen.getByRole('button', { name: 'Drawing instance: Unnamed (current evaluation)' })).toBeInTheDocument();
 
     mockState.evaluation = { ...mockState.evaluation, id: 'e6', views: [{ ...drawing, instances: [] }] };
     pane.rerender(<ViewerProjectionPicker viewId='pane-1' entryPath='main.tsx' cadActor={cadActor} />);
-    expect(screen.getByRole('option', { name: 'local:e5:unnamed (expired)' })).toBeInTheDocument();
+    const trigger = screen.getByRole('button', { name: 'Drawing instance: local:e5:unnamed (expired)' });
+    fireEvent.keyDown(trigger, { key: 'ArrowDown' });
+    expect(screen.getByRole('menuitemradio', { name: 'local:e5:unnamed (expired)' })).toHaveAttribute(
+      'aria-disabled',
+      'true',
+    );
     pane.unmount();
     setLocalInstanceChoice('pane-1', undefined);
   });

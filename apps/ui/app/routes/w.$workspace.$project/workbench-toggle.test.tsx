@@ -69,6 +69,11 @@ const hover = (trigger: HTMLElement): HTMLElement => {
   return screen.getByRole('dialog');
 };
 
+/** JSDOM has no PointerEvent; a MouseEvent named pointermove carries the coordinates. */
+const moveTo = (clientX: number, clientY: number): void => {
+  fireEvent(document, new MouseEvent('pointermove', { clientX, clientY, bubbles: true }));
+};
+
 const scrollDescriptor = Object.getOwnPropertyDescriptor(Element.prototype, 'scrollIntoView');
 
 beforeEach(() => {
@@ -156,20 +161,46 @@ describe('WorkbenchToggle', () => {
     hover(trigger);
   });
 
-  it('should keep the list reachable across the portal gap and close after leaving it', () => {
+  it('should stay open across the gap, even after a pause, and close once the pointer settles elsewhere', () => {
     vi.useFakeTimers();
     const { trigger } = renderToggle({ api: createApi([createPanel('one')]).api });
     const menu = hover(trigger);
+    // The header's bottom-right corner: a 28 px button, an 8 px gap, then the list.
+    vi.spyOn(trigger, 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ x: 972, y: 4, width: 28, height: 28 }),
+    );
+    vi.spyOn(menu, 'getBoundingClientRect').mockReturnValue(
+      DOMRect.fromRect({ x: 712, y: 40, width: 288, height: 160 }),
+    );
+
+    moveTo(985, 18);
     fireEvent.pointerLeave(trigger);
+    moveTo(950, 36);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    // Heading for a far row: across the header, inside the triangle to the list's top edge.
+    moveTo(985, 18);
+    moveTo(900, 25);
+    act(() => {
+      vi.advanceTimersByTime(1000);
+    });
+    expect(screen.getByRole('dialog')).toBeInTheDocument();
+
+    moveTo(800, 60);
+    moveTo(500, 300);
     act(() => {
       vi.advanceTimersByTime(100);
     });
-    fireEvent.pointerEnter(menu);
+    moveTo(800, 60);
     act(() => {
       vi.advanceTimersByTime(150);
     });
     expect(screen.getByRole('dialog')).toBeInTheDocument();
-    fireEvent.pointerLeave(menu);
+
+    moveTo(500, 300);
     act(() => {
       vi.advanceTimersByTime(150);
     });
@@ -210,7 +241,7 @@ describe('WorkbenchToggle', () => {
     vi.useFakeTimers();
     const { trigger, view } = renderToggle({ api: createApi([createPanel('one')]).api });
     hover(trigger);
-    fireEvent.pointerLeave(trigger);
+    moveTo(500, 300);
     const clearTimer = vi.spyOn(globalThis, 'clearTimeout');
     view.unmount();
     expect(clearTimer).toHaveBeenCalled();

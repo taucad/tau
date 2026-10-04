@@ -694,7 +694,7 @@ export const createServicesHost = (options: ServicesHostOptions = {}): ServicesH
     const server = createChannelServer({
       port: wrapMessagePortMain(port),
       sessionKey: 'machines-refused',
-      hello: { server: 'machines', protocolVersion: 1 },
+      hello: { server: 'machines', protocolVersion: 2 },
       impl: {
         call: async () => {
           throw refusal();

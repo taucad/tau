@@ -95,6 +95,17 @@ jobs:
       - name: Setup Nx Environment
         uses: ./.github/actions/setup-nx
 
+      # Runs before the deploy, so a refused deploy still requests the
+      # certificate. Fails harmlessly until the custom domain resolves to
+      # Netlify; the next run retries it.
+      - name: Provision the custom domain certificate
+        continue-on-error: true
+        env:
+          SITE_ID: ${{ steps.site.outputs.site_id }}
+        run: |
+          "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" api provisionSiteTLSCertificate \
+            --data "{\"site_id\": \"$SITE_ID\"}"
+
       - name: Build and deploy with the Netlify CLI
         working-directory: apps/docs
         env:
@@ -104,16 +115,6 @@ jobs:
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
             --prod --context production \
             --site "$SITE_ID" --message "$MESSAGE"
-
-      # Fails harmlessly until the custom domain resolves to Netlify; the next
-      # deploy retries it.
-      - name: Provision the custom domain certificate
-        continue-on-error: true
-        env:
-          SITE_ID: ${{ steps.site.outputs.site_id }}
-        run: |
-          "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" api provisionSiteTLSCertificate \
-            --data "{\"site_id\": \"$SITE_ID\"}"
 
       - name: Check the site answers
         env:

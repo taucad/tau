@@ -128,6 +128,8 @@ jobs:
         env:
           SITE_ID: ${{ steps.site.outputs.site_id }}
           MESSAGE: ${{ github.workflow }} ${{ github.sha }}
+          # Only production needs its PostHog source maps to deploy.
+          TAU_SOURCEMAPS_OPTIONAL: ${{ inputs.environment != 'production' }}
         run: |
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
             --prod --context production \

@@ -1,2 +1,0 @@
-# Build output: the compiled N-API addon and (later) the NAPI-RS generated loader.
-native/

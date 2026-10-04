@@ -8,7 +8,7 @@ import {
   setToolpathAppearance,
 } from '#components/printer/printer-toolpath.js';
 import '#styles/global.css';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { act, cleanup, fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { commands, page, userEvent } from 'vitest/browser';
 import { afterEach, describe, expect, it, vi } from 'vitest';

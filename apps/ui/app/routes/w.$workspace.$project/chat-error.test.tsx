@@ -602,11 +602,32 @@ describe('ChatError', () => {
     expect(regenerate).not.toHaveBeenCalled();
   });
 
+  /* Resume everywhere: an external agent left waiting for approval when Tau closed is abandoned resumably; the card
+   * names that cause and Resume reattaches the session, where the agent asks again. */
+  it('should offer Resume for an approval Tau closed on, saying the agent asks again', async () => {
+    const user = userEvent.setup();
+    projected({
+      category: errorCategory.generic,
+      title: 'Error',
+      message: 'Tau closed while the agent waited for your approval. Resume the turn and the agent asks again.',
+      code: 'RUN_ABANDONED',
+      details: { cause: 'awaiting-approval' },
+    });
+
+    render(<ChatErrorBanner />);
+
+    expect(screen.getByText('Tau closed while the agent waited for your approval')).toBeInTheDocument();
+    expect(screen.getByText(/Resume and the agent asks for it again\./u)).toBeInTheDocument();
+    await user.click(screen.getByRole('button', { name: 'Resume' }));
+    expect(continueChat).toHaveBeenCalledTimes(1);
+    expect(regenerate).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['LEADER_VERSION_MISMATCH', 'Another version of Tau is running this chat'],
     ['RUN_UNREADABLE', 'This chat was continued in a newer version of Tau'],
     ['HISTORY_INVALID', "Tau can't read this chat's history"],
-    ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', 'Tau restarted while the agent waited for your approval'],
+    ['EXTERNAL_AGENT_RECOVERY_UNKNOWN', "Tau couldn't reopen the agent's session"],
   ] as const)('shows the approved recovery card for %s', (code, title) => {
     persisted({ category: errorCategory.generic, title: 'Error', message: 'A coded refusal', code });
 

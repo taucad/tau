@@ -175,11 +175,27 @@ function codedErrorCard({
   }
 
   if (category === 'pausedTurn') {
+    // The orphan rule records why the driver went (`orphanRows`): an agent left waiting for approval asks again.
+    const awaitingApproval = code === 'RUN_ABANDONED' && error.details?.['cause'] === 'awaiting-approval';
     return (
       <ChatErrorPausedTurn
         className={className}
-        title={code === 'RUN_ABANDONED' ? 'Chat paused' : code === 'NETWORK_ERROR' ? 'Connection lost' : undefined}
-        reason={code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR' ? undefined : error.message}
+        title={
+          awaitingApproval
+            ? 'Tau closed while the agent waited for your approval'
+            : code === 'RUN_ABANDONED'
+              ? 'Chat paused'
+              : code === 'NETWORK_ERROR'
+                ? 'Connection lost'
+                : undefined
+        }
+        reason={
+          awaitingApproval
+            ? 'Resume and the agent asks for it again.'
+            : code === 'RUN_ABANDONED' || code === 'NETWORK_ERROR'
+              ? undefined
+              : error.message
+        }
         resumable={retry === 'resume' && resumable}
         icon={error.category === errorCategory.overloaded ? WifiOff : CircleAlert}
         raw={
@@ -338,8 +354,8 @@ function codedErrorCard({
         className={className}
         tone='warning'
         icon={CircleAlert}
-        title='Tau restarted while the agent waited for your approval'
-        description="Its turn can't be resumed. Send a message to continue."
+        title="Tau couldn't reopen the agent's session"
+        description="The agent's earlier session is gone, so this turn can't continue where it stopped. Try again to run it from the start."
         actions={
           <Button variant='outline' size='xs' onClick={onRegenerate}>
             Try again

@@ -32,6 +32,9 @@ type ResourceManifest = {
 const workspaceRoot = resolve(import.meta.dirname, '../../../..');
 const targetRoot = resolve(workspaceRoot, `apps/desktop/resources/picogk/${process.platform}-${process.arch}`);
 const manifest = JSON.parse(readFileSync(resolve(targetRoot, 'tau-runtime-manifest.json'), 'utf8')) as ResourceManifest;
+// Upstream PicoGK ships no Linux voxel library, so a Linux payload carries the managed worker
+// without it and these suites run only where the native engine is present.
+const nativeEngineAvailable = manifest.resourceFiles.some(({ path }) => /^picogk\.\d/u.test(path));
 
 const runtime = defineRuntime({
   plugins: [
@@ -122,7 +125,7 @@ public static class Sandbox
 }
 `;
 
-describe('PicoGK native sandbox', () => {
+describe.runIf(nativeEngineAvailable)('PicoGK native sandbox', () => {
   it('should deny host reads, writes, network, and subprocess escapes from top-level code and Library.Go', async () => {
     const id = randomUUID();
     const paths = {

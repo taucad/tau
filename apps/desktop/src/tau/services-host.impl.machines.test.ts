@@ -136,10 +136,14 @@ const machinesHarness = async () => {
     return completions.find(([answered]) => answered === requestId)![1];
   };
 
-  const bindSimulator = async (client: MachineChannelClient, code?: string): Promise<string> => {
+  const bindSimulator = async (
+    client: MachineChannelClient,
+    code?: string,
+    providerId = 'bambu-simulator',
+  ): Promise<string> => {
     let candidate: MachineCandidate | undefined;
     for await (const event of client.discover({
-      providerId: 'bambu-simulator',
+      providerId,
       configuration: { logicalId: 'simulated-x1c' },
     })) {
       if (event.type === 'found') {
@@ -150,7 +154,10 @@ const machinesHarness = async () => {
     if (candidate === undefined) {
       throw new Error('The simulator reported no candidate');
     }
-    const outcome = await client.beginBinding({ candidate, name: 'simulated-x1c' });
+    const outcome = await client.beginBinding({
+      candidate,
+      name: providerId === 'bambu-simulator' ? 'simulated-x1c' : providerId,
+    });
     if (outcome.status === 'bound') {
       return outcome.machineId;
     }
@@ -293,6 +300,30 @@ describe('createServicesHost — machines', () => {
       await machines.cleanup();
     }
   }, 30_000);
+
+  it('should serve every simulator at an unreachable address and bind it', async () => {
+    const machines = await machinesHarness();
+    try {
+      const client = machines.connect();
+      for (const providerId of [
+        'bambu-simulator',
+        'bambu-a1-mini-simulator',
+        'grbl-simulator',
+        'makera-carvera-simulator',
+      ]) {
+        /* The binding ceremony asks no code of an RFC 6761 `.invalid` address; this harness's vault would hide that. */
+        for await (const event of client.discover({ providerId, configuration: { logicalId: providerId } })) {
+          if (event.type === 'found') {
+            expect(event.candidate.endpoint.address).toMatch(/\.invalid$/u);
+            break;
+          }
+        }
+        await expect(machines.bindSimulator(client, undefined, providerId)).resolves.toEqual(expect.any(String));
+      }
+    } finally {
+      await machines.cleanup();
+    }
+  }, 60_000);
 
   it('should answer MACHINE_STORE_OWNED_ELSEWHERE while another Tau app holds the store, and serve once it lets go', async () => {
     const machines = await machinesHarness();

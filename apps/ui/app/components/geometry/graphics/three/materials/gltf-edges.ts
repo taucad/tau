@@ -659,14 +659,16 @@ export function createGltfOccurrenceEdgeBatch({
     );
     for (let coordinate = 0; coordinate < occurrence.positions.length; coordinate += 3) {
       point.fromArray(occurrence.positions, coordinate).applyMatrix4(occurrence.localToBatch);
-      if (![point.x, point.y, point.z].every((value) => Number.isFinite(value))) {
+      if (!Number.isFinite(point.x) || !Number.isFinite(point.y) || !Number.isFinite(point.z)) {
         throw new RangeError('Occurrence edge placement is non-finite');
       }
-      point.toArray(positions, offset + coordinate);
+      positions[offset + coordinate] = point.x;
+      positions[offset + coordinate + 1] = point.y;
+      positions[offset + coordinate + 2] = point.z;
       if (
-        ![positions[offset + coordinate], positions[offset + coordinate + 1], positions[offset + coordinate + 2]].every(
-          (value) => Number.isFinite(value),
-        )
+        !Number.isFinite(positions[offset + coordinate]) ||
+        !Number.isFinite(positions[offset + coordinate + 1]) ||
+        !Number.isFinite(positions[offset + coordinate + 2])
       ) {
         throw new RangeError('Occurrence edges exceed Float32 local storage');
       }

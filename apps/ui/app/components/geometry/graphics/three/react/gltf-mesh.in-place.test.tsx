@@ -62,7 +62,10 @@ import {
   getModelComponentId,
   getModelComponentOwner,
 } from '#components/geometry/graphics/three/utils/model-component-owner.js';
-import { getGltfOccurrenceEdgeBatch } from '#components/geometry/graphics/three/materials/gltf-edges.js';
+import {
+  getGltfFatLinePositions,
+  getGltfOccurrenceEdgeBatch,
+} from '#components/geometry/graphics/three/materials/gltf-edges.js';
 import * as threeBackend from '#components/geometry/graphics/three/three-graphics-backend-context.js';
 import * as assemblyDemand from '#components/geometry/graphics/three/utils/assembly-demand-index.js';
 import * as bvhRaycast from '#components/geometry/graphics/three/utils/bvh-raycast.js';
@@ -496,6 +499,34 @@ function findSurface(scene: Object3D): Mesh {
   return found;
 }
 
+function occurrenceEdgeEndpoints(scene: Object3D): number[] {
+  const endpoints: number[] = [];
+  scene.traverse((object) => {
+    if (!getGltfOccurrenceEdgeBatch(object)) {
+      return;
+    }
+    const positions = getGltfFatLinePositions(object);
+    if (!positions) {
+      throw new Error('Expected mandatory occurrence edge positions');
+    }
+    for (let offset = 0; offset < positions.length; offset += 3) {
+      endpoints.push(new Vector3().fromArray(positions, offset).applyMatrix4(object.matrixWorld).x);
+    }
+  });
+  return endpoints.toSorted((left, right) => left - right);
+}
+
+function findOccurrenceEdgeBatch(scene: Object3D): NonNullable<ReturnType<typeof getGltfOccurrenceEdgeBatch>> {
+  let found: ReturnType<typeof getGltfOccurrenceEdgeBatch>;
+  scene.traverse((object) => {
+    found ??= getGltfOccurrenceEdgeBatch(object);
+  });
+  if (!found) {
+    throw new Error('Expected a mandatory occurrence edge batch');
+  }
+  return found;
+}
+
 const committedRevisions = (): number[] =>
   mocks.graphicsActor.send.mock.calls
     .map((call) => call[0] as { type: string; revision?: number })
@@ -831,7 +862,7 @@ describe('GltfMesh in-place updates', () => {
     camera.top = 2;
     camera.bottom = -2;
     camera.updateProjectionMatrix();
-    const display = await residentAssembly();
+    const display = await residentAssembly({ withEdges: true });
     const otherAsset = display.admitted.publication.parts['other']!.variants['default']!.glb;
     const originalOtherByteLength = otherAsset.byteLength;
     vi.spyOn(console, 'error').mockImplementation(() => undefined);
@@ -865,6 +896,20 @@ describe('GltfMesh in-place updates', () => {
         throw new Error('Expected actual presentation commit');
       }
       expect(firstCommit.manifest.nodeOrder.length).toBeGreaterThan(3);
+      const firstScene = scenes.at(-1)!;
+      const firstEdges = occurrenceEdgeEndpoints(firstScene);
+      expect(firstEdges).toEqual([0, 1]);
+      const firstEdgeBatch = findOccurrenceEdgeBatch(firstScene);
+      const edgeDispose = vi.spyOn(firstEdgeBatch.object.geometry, 'dispose');
+      const stableReadCount = vi.mocked(display.admitted.readAsset).mock.calls.length;
+      camera.position.x = 0.1;
+      camera.updateMatrixWorld();
+      act(() => mocks.frameCallback?.());
+      expect(committedRevisions()).toHaveLength(1);
+      expect(scenes.at(-1)).toBe(firstScene);
+      expect(display.admitted.readAsset).toHaveBeenCalledTimes(stableReadCount);
+      expect(occurrenceEdgeEndpoints(firstScene)).toEqual(firstEdges);
+      expect(edgeDispose).not.toHaveBeenCalled();
       camera.position.x = 5;
       camera.updateMatrixWorld();
       act(() => mocks.frameCallback?.());
@@ -872,6 +917,11 @@ describe('GltfMesh in-place updates', () => {
         expect(committedRevisions()).toHaveLength(2);
       });
       expect(findSurface(scenes.at(-1)!).geometry).toBe(original.geometry);
+      expect(occurrenceEdgeEndpoints(scenes.at(-1)!)).toEqual([5, 6]);
+      expect(findOccurrenceEdgeBatch(scenes.at(-1)!).object.geometry).not.toBe(firstEdgeBatch.object.geometry);
+      await waitFor(() => {
+        expect(edgeDispose).toHaveBeenCalledOnce();
+      });
       expect(dispose).not.toHaveBeenCalled();
       expect(parse).toHaveBeenCalledOnce();
       expect(validate).toHaveBeenCalledOnce();

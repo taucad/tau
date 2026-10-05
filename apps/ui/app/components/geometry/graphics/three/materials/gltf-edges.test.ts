@@ -179,7 +179,20 @@ describe.each(['webgl', 'webgpu'] as const)('occurrence edge batches %s', (backe
             },
           ],
         }),
-      ).toThrow(RangeError);
+      ).toThrow('Occurrence edges exceed Float32 local storage');
+      expect(() =>
+        createGltfOccurrenceEdgeBatch({
+          backend,
+          material,
+          occurrences: [
+            {
+              componentId: 'bad',
+              positions: new Float32Array([0, 0, 0, 1, 0, 0]),
+              localToBatch: new Matrix4().makeTranslation(Number.NaN, 0, 0),
+            },
+          ],
+        }),
+      ).toThrow('Occurrence edge placement is non-finite');
     } finally {
       material.dispose();
     }

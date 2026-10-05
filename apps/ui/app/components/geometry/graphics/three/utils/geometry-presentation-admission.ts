@@ -1,8 +1,11 @@
-type Presentation = { owners: number; ready: Promise<void>; resolve: () => void };
-const presentations = new WeakMap<Uint8Array<ArrayBuffer>, Presentation>();
+import type { AdmittedAssembly } from '@taucad/runtime/types';
 
-/** Hold noncritical capture while a mounted viewer prepares these immutable bytes. */
-export function holdGeometryPresentation(content: Uint8Array<ArrayBuffer>): {
+type Presentation = { owners: number; ready: Promise<void>; resolve: () => void };
+type PresentationSource = Uint8Array<ArrayBuffer> | AdmittedAssembly;
+const presentations = new WeakMap<PresentationSource, Presentation>();
+
+/** Hold noncritical capture while a mounted viewer prepares this immutable source identity. */
+export function holdGeometryPresentation(content: PresentationSource): {
   presented: () => void;
   release: () => void;
 } {
@@ -34,7 +37,7 @@ export function holdGeometryPresentation(content: Uint8Array<ArrayBuffer>): {
 }
 
 /** Wait for a foreground presentation opportunity, or proceed immediately without a viewer. */
-export async function awaitGeometryPresentation(content: Uint8Array<ArrayBuffer>, signal: AbortSignal): Promise<void> {
+export async function awaitGeometryPresentation(content: PresentationSource, signal: AbortSignal): Promise<void> {
   signal.throwIfAborted();
   const presentation = presentations.get(content);
   if (!presentation) {

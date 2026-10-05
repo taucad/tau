@@ -95,6 +95,16 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
         const display = snapshot && selectCadDisplay(snapshot);
         const assemblyDisplay = display && 'admitted' in display ? display : undefined;
         const rendering = snapshot?.context.rendering;
+        const generation = generationRef.current;
+        if (request.kind === 'automatic-thumbnail' && assemblyDisplay) {
+          await awaitGeometryPresentation(assemblyDisplay.admitted, request.signal);
+          if (
+            generation !== generationRef.current ||
+            selectCadDisplay(cadActorRef.current!.getSnapshot()) !== assemblyDisplay
+          ) {
+            throw new DOMException('Thumbnail display was superseded.', 'AbortError');
+          }
+        }
         const projection = assemblyDisplay && snapshot ? await resolveSettledCadGeometry(snapshot) : undefined;
         const artifact =
           projection?.geometry.format === 'gltf'
@@ -120,8 +130,7 @@ export function useThumbnailGenerator(): { regenerate: () => Promise<ThumbnailRe
         if (sourceHash === undefined) {
           throw new Error('source-unavailable: committed rendering identity not ready');
         }
-        const generation = generationRef.current;
-        if (request.kind === 'automatic-thumbnail' && artifact.mimeType === 'model/gltf-binary') {
+        if (request.kind === 'automatic-thumbnail' && !assemblyDisplay && artifact.mimeType === 'model/gltf-binary') {
           await awaitGeometryPresentation(artifact.content, request.signal);
           if (generation !== generationRef.current) {
             throw new DOMException('Thumbnail source was superseded.', 'AbortError');

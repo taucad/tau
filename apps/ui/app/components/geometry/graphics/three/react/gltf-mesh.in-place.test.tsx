@@ -73,6 +73,7 @@ import * as surfaceBatchOwners from '#components/geometry/graphics/three/utils/g
 import * as sectionTopology from '#components/geometry/graphics/three/utils/section-surface-topology.js';
 import { parseGltfBytes } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import { getModelEmphasisSet } from '#components/geometry/graphics/three/materials/model-emphasis-registry.js';
+import { awaitGeometryPresentation } from '#components/geometry/graphics/three/utils/geometry-presentation-admission.js';
 
 const mocks = vi.hoisted(() => {
   const detailCalibration = { value: undefined as AssemblyDetailCalibration | undefined };
@@ -868,6 +869,38 @@ describe('GltfMesh in-place updates', () => {
     expect(
       captureRequestedGltfAssemblyPreparation(root, { display, key: display.root.digest, revision: 1 }),
     ).toBeUndefined();
+  });
+
+  it('holds an admitted assembly facade before asset reads finish and releases an abandoned candidate', async () => {
+    const display = await residentAssembly();
+    const gate = Promise.withResolvers<void>();
+    const readActual = display.admitted.readAsset;
+    const read = vi.spyOn(display.admitted, 'readAsset').mockImplementationOnce(async (digest) => {
+      await gate.promise;
+      return readActual(digest);
+    });
+    const view = render(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={1}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(read).toHaveBeenCalledOnce();
+    });
+    let admitted = false;
+    const wait = (async () => {
+      await awaitGeometryPresentation(display.admitted, new AbortController().signal);
+      admitted = true;
+    })();
+    await Promise.resolve();
+    expect(admitted).toBe(false);
+    view.unmount();
+    await wait;
+    expect(admitted).toBe(true);
+    gate.resolve();
   });
 
   it('should retain the first failed asset-read phase without a completed read or stale owner after unmount', async () => {

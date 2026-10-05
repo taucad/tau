@@ -4342,8 +4342,9 @@ export function GltfMesh({
       (preparationKey !== undefined && latestAssemblyPreparationKeyRef.current !== preparationKey);
 
     const preparationAt = performance.now();
-    const presentationAdmission = gltfFile
-      ? holdGeometryPresentation(gltfFile)
+    const presentationSource = assemblyDisplay?.admitted ?? gltfFile;
+    const presentationAdmission = presentationSource
+      ? holdGeometryPresentation(presentationSource)
       : { presented: () => undefined, release: () => undefined };
     const receivedAt = (gltfFile ? geometryReceiptAt(gltfFile) : undefined) ?? preparationAt;
     const timings: GltfPresentationTimings = {

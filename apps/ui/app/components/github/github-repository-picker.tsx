@@ -559,7 +559,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
           <SvgIcon id='github' aria-hidden className='size-4' /> Connect GitHub
         </Button>
         {error === undefined ? undefined : (
-          <p role='alert' className='text-sm text-destructive'>
+          <p role='alert' className='text-sm text-feature'>
             {error}
           </p>
         )}
@@ -687,7 +687,7 @@ export const GithubRepositoryPicker = memo(function GithubRepositoryPicker({
         </p>
       )}
       {error === undefined ? undefined : (
-        <p role='alert' className='text-sm text-destructive'>
+        <p role='alert' className='text-sm text-feature'>
           {error}
         </p>
       )}

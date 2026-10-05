@@ -11,6 +11,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { promisify } from 'node:util';
 import '@taucad/geospec-engine/register/node';
+import { Engine } from '@taucad/geospec-engine-native/node';
 import { createExampleRuntimeClient } from '@taucad/tau-examples/runtime';
 import { createModelLoader } from 'geospec/model';
 import type { GeoSpecRuntimeClient } from 'geospec/model';
@@ -109,10 +110,13 @@ describe('geospec example suites (regression backbone)', () => {
     { timeout: 1_500_000 },
     async () => {
       const projectPath = resolve(repoRoot, 'libs/tau-examples/src/kernels/picogk/turbofan');
+      const engine = new Engine();
       const runner = createGeoSpecNodeRunner({
         projectPath,
         filesystem: createNodeVmFileSystem(projectPath),
+        nativeAssertions: { engine },
         modelLoader: createModelLoader({
+          engine,
           projectPath,
           runtime: async () => createExampleRuntimeClient(projectPath) as unknown as GeoSpecRuntimeClient,
         }),
@@ -123,6 +127,7 @@ describe('geospec example suites (regression backbone)', () => {
         expect(report.success).toBe(true);
       } finally {
         await runner.close();
+        engine.close();
       }
     },
   );

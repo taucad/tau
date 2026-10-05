@@ -1,6 +1,8 @@
 import type { Group, LineSegments, Object3D, Vector2 } from 'three';
 import { InterleavedBufferAttribute } from 'three';
-import { LineSegments2, LineSegmentsGeometry, LineMaterial } from 'three/addons';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { LineSegments2 as WebGpuFatLineSegments2 } from 'three/addons/lines/webgpu/LineSegments2.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import type { ResolvedGraphicsBackend } from '#constants/editor.constants.js';

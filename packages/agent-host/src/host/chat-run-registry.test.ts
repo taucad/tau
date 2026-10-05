@@ -33,6 +33,7 @@ import type { ExternalAgentPort, ExternalAgentTurn } from '#host/external-agent.
 import type { TauAgentHost } from '#host/tau-agent-host.js';
 import type { CommandAnswer } from '#wire/commands.schema.js';
 import { emptyChatLedger } from '#log/chat-ledger.js';
+import { isResumableRun } from '#log/resumable.js';
 
 /** A model call that waits until released, as a call binding at the gateway does. */
 const heldTransport = () => {
@@ -1574,7 +1575,7 @@ describe('the external slot through its driver handle (RA-S14, with W10 EA-S8)',
     await host.close();
   });
 
-  it('should resolve an orphaned external approval with a code', async () => {
+  it('should resolve an orphaned external approval and leave its run resumable', async () => {
     const file = createMemoryLogFile();
     await seedLog(file, [
       {
@@ -1602,7 +1603,7 @@ describe('the external slot through its driver handle (RA-S14, with W10 EA-S8)',
 
     await host.command({ type: 'attach', commandId: key(), payload: { chatId: 'chat-orphan-approval' } });
 
-    // L4 D-112: the request no host will answer is resolved, with the code that says why.
+    // L4 D-112: the request no host will answer is resolved; the run is abandoned resumably, so Resume asks again.
     const log = await readLog(file);
     const ending = log.slice(
       log.findIndex(
@@ -1615,11 +1616,17 @@ describe('the external slot through its driver handle (RA-S14, with W10 EA-S8)',
         type: 'interrupt.recorded',
         phase: 'resolved',
         reason: 'cancelled',
-        payload: { outcome: 'cancelled', code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' },
+        payload: { outcome: 'cancelled', code: 'RUN_ABANDONED' },
       },
-      { type: 'run.lifecycle', state: 'failed', detail: { code: 'EXTERNAL_AGENT_RECOVERY_UNKNOWN' } },
+      {
+        type: 'run.lifecycle',
+        state: 'failed',
+        detail: { code: 'RUN_ABANDONED', details: { cause: 'awaiting-approval' } },
+      },
     ]);
-    expect(await host.ledger('chat-orphan-approval')).toMatchObject({ runs: { 'run-1': { pendingInterrupts: {} } } });
+    const ledger = await host.ledger('chat-orphan-approval');
+    expect(ledger).toMatchObject({ runs: { 'run-1': { pendingInterrupts: {} } } });
+    expect(isResumableRun(ledger.runs['run-1'])).toBe(true);
     await host.close();
   });
 

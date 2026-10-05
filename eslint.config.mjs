@@ -438,11 +438,6 @@ const config = [
       // Opt-in benchmark experiments: engine-internal, unpublished, and outside
       // the package tsconfig until PE2 rebuilds what they measure.
       'packages/geospec-engine/experiments/**',
-      // Same class: the native OpenCascade benchmark/parity harnesses are
-      // opt-in CLIs run by hand against a locally built addon and the OCCT
-      // wasm bindings. They are unpublished (`files` excludes `bench/`) and
-      // outside the package tsconfig.
-      'packages/plugins/opencascade-native/bench/**',
       // Same class: the compute-reuse baseline harness (charter W0) is an
       // opt-in benchmark reaching runtime-internal seams through a loader
       // hook; `.mts` files outside the project tsconfig.

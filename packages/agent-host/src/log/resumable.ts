@@ -2,6 +2,7 @@ import { util as zodUtility } from 'zod';
 import type { RunFailureDetail } from '#log/event-types.js';
 import { externalAgentStopCodes } from '#wire/external-agent.schema.js';
 import { isResumable } from '#wire/refusals.js';
+import type { RefusalCode } from '#wire/refusals.js';
 
 /*
  * A code is resumable when its registry entry's retry class is `resume` or `reauth` (D11, D21). A model call that
@@ -46,15 +47,29 @@ const externalStopIsResumable = (failure: RunFailureDetail): boolean => {
 /**
  * Whether a failed run's terminal record can be resumed at its blocked step.
  *
- * Reads the whole record, not just its code: an external agent's stop is
- * resumable or not by the actions the agent itself reported.
+ * Reads the whole record and the run's kind, not just the code. `RUN_ABANDONED` — the host's record that the run's
+ * driver is gone: a close, a crash, a restart while an external agent waited on approval — resumes either kind. A Tau
+ * run otherwise resumes on a registry-resumable code; an external run on the agent's own resumable stop, by the actions
+ * it reported. Those are exactly the failures the ACP runner continues (`stopRecorded`), so a gateway code on an
+ * external run offers no Resume the runner would refuse. `ChatLedger.lean`'s `failRests` models this.
  *
  * @param failure - `RunFailureDetail` from the run's terminal record.
+ * @param kind - Who drove the run.
  * @returns `true` when `resume` will continue this run rather than replay it.
  * @public
  */
-export const isResumableRunFailure = (failure: RunFailureDetail | undefined): boolean =>
-  failure?.code !== undefined && (isResumable(failure.code) || externalStopIsResumable(failure));
+export const isResumableRunFailure = (
+  failure: RunFailureDetail | undefined,
+  kind: 'tau' | 'external' = 'tau',
+): boolean => {
+  if (failure?.code === undefined) {
+    return false;
+  }
+  if (failure.code === ('RUN_ABANDONED' satisfies RefusalCode)) {
+    return true;
+  }
+  return kind === 'external' ? externalStopIsResumable(failure) : isResumable(failure.code);
+};
 
 /**
  * Whether an intentional Stop retained a committed turn for continuation.
@@ -78,3 +93,19 @@ export const isUserStoppedRun = (
   run.failure?.code === 'USER_STOPPED' &&
   run.committed &&
   (run.kind === 'tau' || run.externalPrompted === true);
+
+/**
+ * Whether `continue` resumes this run rather than replaying it: a deliberate Stop that kept its committed turn, or a
+ * resumable failure.
+ *
+ * The one rule every surface asks — the host's resume gate, the ledger's reopen predicate, the turn host's admission,
+ * the composer's Resume and the error card — so no surface offers a Resume another refuses. `ChatLedger.lean`'s
+ * `rests` models it (`t4_user_stop_reopens`).
+ *
+ * @param run - The durable run ledger entry.
+ * @returns `true` when the run's last attempt ended in a state `resume` continues.
+ * @public
+ */
+export const isResumableRun = (
+  run: (Parameters<typeof isUserStoppedRun>[0] & Readonly<{ failure?: RunFailureDetail }>) | undefined,
+): boolean => isUserStoppedRun(run) || (run?.lifecycle === 'failed' && isResumableRunFailure(run.failure, run.kind));

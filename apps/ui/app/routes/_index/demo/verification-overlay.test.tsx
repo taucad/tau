@@ -9,8 +9,8 @@ import { VerificationOverlay } from '#routes/_index/demo/verification-overlay.js
 let mockBoxEdgeMetres = 0.1;
 let parsedBuffer: ArrayBuffer | undefined;
 
-vi.mock('three/addons', () => ({
-  // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the `three/addons` export name.
+vi.mock('three/addons/loaders/GLTFLoader.js', () => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- mirrors the `GLTFLoader` export name.
   GLTFLoader: class {
     public async parseAsync(buffer: ArrayBuffer): Promise<{ scene: THREE.Object3D }> {
       parsedBuffer = buffer;

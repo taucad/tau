@@ -34,8 +34,8 @@ export function WebglLimitFallback({ onRetry }: WebglLimitFallbackProps): React.
 export function WebglErrorFallback({ error, onRetry, onReload }: WebglErrorFallbackProps): React.JSX.Element {
   return (
     <div className='flex h-full flex-col items-center justify-center gap-4 p-6'>
-      <div className='flex size-12 items-center justify-center rounded-full bg-destructive/10'>
-        <AlertCircle className='size-6 text-destructive' />
+      <div className='flex size-12 items-center justify-center rounded-full bg-feature/10'>
+        <AlertCircle className='size-6 text-feature' />
       </div>
       <div className='flex max-w-xs flex-col items-center gap-1 text-center'>
         <p className='text-sm font-medium text-foreground'>3D rendering failed</p>

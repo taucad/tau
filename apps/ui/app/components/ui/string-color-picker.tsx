@@ -221,7 +221,7 @@ export function StringColorPicker({
                     <Check className='size-4' />
                   </div>
                 ) : (
-                  <div className='flex h-full w-full items-center justify-center rounded-r text-destructive'>
+                  <div className='flex h-full w-full items-center justify-center rounded-r text-feature'>
                     <X className='size-4' />
                   </div>
                 )}

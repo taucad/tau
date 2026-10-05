@@ -19,6 +19,11 @@ type Target = {
   readonly dotnetSha512: string;
   readonly dotnetUrl: string;
   readonly rid: string;
+  /**
+   * NuGet lock file name for this runtime, resolved in each restored project's directory. A lock
+   * file records one runtime identifier, so every target keeps its own.
+   */
+  readonly lockFile: string;
   /** PicoGK's native subdirectory, when upstream ships one for this target. */
   readonly nativeDirectory?: string;
 };
@@ -35,6 +40,7 @@ const targets: Readonly<Record<string, Target>> = {
       'e440e9a58d4ff7741c8342ac3e086fa9ee2dadc25e01c0449a88317a74cfbd63625b8092c3b2a131ae14b16ab3401e9cc470e578e4c65a72a0b5786bd2308cde',
     dotnetUrl: `https://builds.dotnet.microsoft.com/dotnet/Sdk/${dotnetVersion}/dotnet-sdk-${dotnetVersion}-osx-arm64.tar.gz`,
     rid: 'osx-arm64',
+    lockFile: 'packages.lock.json',
     nativeDirectory: 'osx-arm64',
   },
   // SHA512 from Microsoft's release metadata for SDK 10.0.400:
@@ -45,6 +51,7 @@ const targets: Readonly<Record<string, Target>> = {
       '1033977dd837150e0814cf0c5d5b17ceb63925fda7ba2158b47258a4bd7c048cf82eac3bc1166f3146f53124a3f5fba09db1de1260d2ce96399860303b404b48',
     dotnetUrl: `https://builds.dotnet.microsoft.com/dotnet/Sdk/${dotnetVersion}/dotnet-sdk-${dotnetVersion}-linux-x64.tar.gz`,
     rid: 'linux-x64',
+    lockFile: 'packages.linux-x64.lock.json',
     // Ponytail: upstream PicoGK ships natives for osx-arm64 and win-x64 only, so a
     // Linux payload carries the managed worker without the voxel library. That is
     // enough for CI and for regenerating the C# API corpus, which is Roslyn-only;
@@ -59,7 +66,6 @@ const cacheRoot = resolve(workspaceRoot, 'out/cache/picogk');
 const picoGkSourceRoot = resolve(cacheRoot, `PicoGK-${picoGkCommit}`);
 const dotnetProjectRoot = resolve(workspaceRoot, 'packages/plugins/picogk/dotnet');
 const workerProject = resolve(dotnetProjectRoot, 'Tau.PicoGK.Worker/Tau.PicoGK.Worker.csproj');
-const picoGkLock = resolve(dotnetProjectRoot, 'PicoGK.packages.lock.json');
 const picoGkHostedPatch = resolve(dotnetProjectRoot, 'PicoGK.hosted.patch');
 const nativeSourceRoot = resolve(dotnetProjectRoot, 'native');
 const topologySchema = resolve(workspaceRoot, 'packages/core/geometry/schema/tau-cad-topology.schema.json');
@@ -775,7 +781,7 @@ const prepareTarget = async (targetName: string): Promise<void> => {
     }),
     ensurePatchedPicoGk({ archive: picoGkArchive, patchSha256: picoGkHostedPatchSha256 }),
   ]);
-  await cp(picoGkLock, resolve(picoGkSourceRoot, 'packages.lock.json'));
+  await cp(resolve(dotnetProjectRoot, `PicoGK.${target.lockFile}`), resolve(picoGkSourceRoot, target.lockFile));
 
   const dotnet = resolve(dotnetRoot, 'dotnet');
   await chmod(dotnet, 0o755);
@@ -789,10 +795,12 @@ const prepareTarget = async (targetName: string): Promise<void> => {
   buildEnvironment['DOTNET_ROOT'] = dotnetRoot;
   buildEnvironment['NUGET_PACKAGES'] = resolve(cacheRoot, 'nuget-packages');
   const projectProperties = [`-p:PicoGKProject=${resolve(picoGkSourceRoot, 'PicoGK.csproj')}`];
-  execFileSync(dotnet, ['restore', workerProject, '--runtime', target.rid, '--locked-mode', ...projectProperties], {
-    env: buildEnvironment,
-    stdio: 'inherit',
-  });
+  const lockProperties = ['-p:RestorePackagesWithLockFile=true', `-p:NuGetLockFilePath=${target.lockFile}`];
+  execFileSync(
+    dotnet,
+    ['restore', workerProject, '--runtime', target.rid, '--locked-mode', ...projectProperties, ...lockProperties],
+    { env: buildEnvironment, stdio: 'inherit' },
+  );
   execFileSync(
     dotnet,
     [

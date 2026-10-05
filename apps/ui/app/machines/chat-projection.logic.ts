@@ -128,6 +128,8 @@ export type RunView = Readonly<{
   /** Provider identities resolve rewind prefixes independently from context compaction. */
   providerIds?: readonly string[];
   retired?: true;
+  /** Each history message the active segment appended and its chunk range, so a rewind removes exactly what it dropped. */
+  messages?: ReadonlyArray<Readonly<{ id: string; from: number; to: number; evicted?: true }>>;
 }>;
 
 /** @public */
@@ -310,20 +312,66 @@ export const digestLogSegments = (segments: readonly ChatLogSegment[]): string =
       .toSorted((left, right) => (left.deviceId < right.deviceId ? -1 : left.deviceId > right.deviceId ? 1 : 0)),
   );
 
-/** Retire visible attempts outside the explicit provider prefix, retaining run facts for revision consumers. */
+/** A terminal row's chunk: always a view's last, and superseded when the run reopens. */
+const terminalChunks: ReadonlySet<UIMessageChunk['type']> = new Set(['finish', 'error', 'abort']);
+
+/**
+ * Cut the active segment's dropped messages (the host reducer's prefix cut, at message granularity).
+ *
+ * A message is dropped when it is still in the history (not evicted by a compaction) and outside the retained prefix.
+ * Dropped messages are a suffix of the history, so a kept run is trimmed at its end; the cut is not an append, so the
+ * run's watch restarts.
+ */
+const trimDropped = (view: RunView, retained: ReadonlySet<string>): RunView => {
+  const dropped = new Set(
+    (view.messages ?? [])
+      .filter((message) => message.evicted !== true && !retained.has(message.id))
+      .map((message) => message.id),
+  );
+  if (dropped.size === 0) {
+    return view;
+  }
+  const all = chunksOf(view.chunks);
+  const chunks: UIMessageChunk[] = [];
+  const messages: Array<NonNullable<RunView['messages']>[number]> = [];
+  let at = 0;
+  for (const message of view.messages ?? []) {
+    chunks.push(...all.slice(at, message.from));
+    at = message.to;
+    if (!dropped.has(message.id)) {
+      messages.push({ ...message, from: chunks.length, to: chunks.length + message.to - message.from });
+      chunks.push(...all.slice(message.from, message.to));
+    }
+  }
+  chunks.push(...all.slice(at));
+  return {
+    ...view,
+    chunks,
+    messages,
+    streamVersion: (view.streamVersion ?? 0) + 1,
+    ...(view.providerIds === undefined ? {} : { providerIds: view.providerIds.filter((id) => !dropped.has(id)) }),
+  };
+};
+
+/**
+ * Retire visible attempts outside the explicit provider prefix, retaining run facts for revision consumers. A kept
+ * run, and always the rewinding run itself (a regenerate re-admits the very message id the rewind drops), is trimmed
+ * instead, which also retracts a resumed run's failure marker.
+ */
 const rewindViews = (views: Record<string, RunView>, runId: string, retainedIds: readonly string[]): void => {
   const retained = new Set(retainedIds);
   for (const [id, view] of Object.entries(views)) {
-    if (id === runId || view.retired === true) {
+    if (view.retired === true) {
       continue;
     }
-    if (view.providerIds?.some((messageId) => retained.has(messageId))) {
+    if (id === runId || view.providerIds?.some((messageId) => retained.has(messageId))) {
+      views[id] = trimDropped(view, retained);
       continue;
     }
     const segments =
       view.segments?.filter((segment) => segment.providerIds?.some((messageId) => retained.has(messageId))) ?? [];
     const tail = segments.at(-1);
-    const { steering: _steering, segmentId: _segmentId, ...prior } = view;
+    const { steering: _steering, segmentId: _segmentId, messages: _messages, ...prior } = view;
     const segmentId = chunksOf(tail?.chunks).find((chunk) => chunk.type === 'start')?.messageId;
     views[id] =
       tail === undefined
@@ -365,6 +413,10 @@ const replaceBlockChunks = (
   }
   return rebuilt;
 };
+
+/** The history message a row appends, if any. */
+const appendedId = (row: AgentLogEvent): string | undefined =>
+  row.type === 'message.appended' || row.type === 'turn.history-projection-committed' ? row.message.id : undefined;
 
 const foldRunViews = (
   rows: readonly AgentLogEvent[],
@@ -411,26 +463,31 @@ const foldRunViews = (
               }
             : segment,
         );
-        if (active || segments?.some((segment, index) => segment !== previousSegments[index])) {
+        // Evicted messages stay visible: a later rewind keeps them.
+        const messages = view.messages?.some((message) => evicted.has(message.id))
+          ? view.messages.map((message): NonNullable<RunView['messages']>[number] =>
+              evicted.has(message.id) ? { ...message, evicted: true } : message,
+            )
+          : undefined;
+        if (
+          active ||
+          messages !== undefined ||
+          segments?.some((segment, index) => segment !== previousSegments[index])
+        ) {
           views ??= { ...previousViews };
           views[id] = {
             ...view,
             ...(active ? { providerIds: [...view.providerIds, row.summary.id] } : {}),
             ...(segments === undefined ? {} : { segments }),
+            ...(messages === undefined ? {} : { messages }),
           };
         }
       }
     }
     const previous = (views ?? previousViews)[row.runId];
+    /* A reopen continues the run's committed transcript: only the terminal marker it supersedes goes (resume
+     * everywhere). A retracted failure marker leaves with its own `history.rewound` row. */
     const reopened = row.type === 'run.lifecycle' && row.state === 'running' && previous?.terminal !== undefined;
-    if (reopened) {
-      const prefix = `[${JSON.stringify(row.runId)},`;
-      for (const key of blocks.keys()) {
-        if (key.startsWith(prefix)) {
-          blocks.delete(key);
-        }
-      }
-    }
     const message =
       row.type === 'message.appended'
         ? row.message
@@ -458,13 +515,15 @@ const foldRunViews = (
       row.type === 'run.lifecycle' &&
       (row.state === 'completed' || row.state === 'failed' || row.state === 'cancelled')
     ) {
+      // A resumed run continues its open checkpoint blocks, so only closed ones are released.
       const prefix = `[${JSON.stringify(row.runId)},`;
-      for (const key of blocks.keys()) {
-        if (key.startsWith(prefix)) {
+      for (const [key, block] of blocks) {
+        if (key.startsWith(prefix) && block.closed) {
           blocks.delete(key);
         }
       }
     }
+    const appended = appendedId(row);
     const projectedUser = projectAgentHostUserTurn(row);
     const user =
       projectedUser !== undefined && (previous?.user === undefined || previous.user.id === projectedUser.id)
@@ -484,6 +543,7 @@ const foldRunViews = (
       chunks.length === 0 &&
       user === undefined &&
       steering === undefined &&
+      appended === undefined &&
       previous !== undefined &&
       (row.type !== 'run.lifecycle' || terminal === previous.terminal)
     ) {
@@ -521,20 +581,31 @@ const foldRunViews = (
     const initialChunks =
       steering === undefined
         ? reopened
-          ? chunksOf(previous.chunks).filter((chunk) => chunk.type === 'start')
+          ? chunksOf(previous.chunks).filter((chunk) => !terminalChunks.has(chunk.type))
           : (previous?.chunks ?? [])
         : [{ type: 'start', messageId: segmentId } satisfies UIMessageChunk];
     const providerId = row.type === 'message.appended' ? row.message.id : projectedUser?.id;
     views ??= { ...previousViews };
     const { terminal: _terminal, ...prior } = previous ?? {};
     const finalState = row.type === 'run.lifecycle' ? terminal : previous?.terminal;
+    const nextChunks =
+      correctedIds.size === 0
+        ? appendChunks(initialChunks, chunks)
+        : replaceBlockChunks(initialChunks, chunks, correctedIds);
+    // A steering input opens a new segment, whose ranges start over. ponytail: a correction is assumed to rewrite the
+    // segment's newest message, so only the last range stretches; track per-message offsets if older ones get rewritten.
+    const segmentMessages = steering === undefined ? previous?.messages : [];
+    const messages =
+      appended === undefined
+        ? correctedIds.size > 0 && segmentMessages !== undefined && segmentMessages.length > 0
+          ? [...segmentMessages.slice(0, -1), { ...segmentMessages.at(-1)!, to: nextChunks.length }]
+          : segmentMessages
+        : [...(segmentMessages ?? []), { id: appended, from: initialChunks.length, to: nextChunks.length }];
     views[row.runId] = {
       ...prior,
       admittedAt,
-      chunks:
-        correctedIds.size === 0
-          ? appendChunks(initialChunks, chunks)
-          : replaceBlockChunks(initialChunks, chunks, correctedIds),
+      chunks: nextChunks,
+      ...(messages === undefined ? {} : { messages }),
       ...(correctedIds.size === 0 ? {} : { streamVersion: (previous?.streamVersion ?? 0) + 1 }),
       ...(previous?.user === undefined && user === undefined ? {} : { user: user ?? previous?.user }),
       ...(segments === undefined ? {} : { segments }),

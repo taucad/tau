@@ -22,7 +22,7 @@ import {
   BufferAttribute,
 } from 'three';
 import type { Object3D, Material } from 'three';
-import { LineMaterial } from 'three/addons';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
 import { WebGPUBackend } from 'three/webgpu';
 import type { RendererInstance } from '#components/geometry/graphics/three/renderer.js';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';

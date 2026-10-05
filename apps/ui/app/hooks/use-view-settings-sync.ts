@@ -254,6 +254,16 @@ export function useViewSettingsSync({
       ? selectedPatch !== null && selectedPatch !== undefined && Object.hasOwn(selectedPatch, 'camera')
       : recordLocalPatch?.camera !== undefined;
     const selectedChanged = previous?.selectedKernelView !== cameraRecord.selectedKernelView;
+    const expectedOrientation = viewCameraOrientation(cameraRecord);
+    const liveView = session?.rig.actorRef.getSnapshot().context.view;
+    const externalPresetDiverged =
+      previous !== undefined &&
+      recordLocalPatch === undefined &&
+      (previous.fieldOfView !== cameraRecord.fieldOfView || previous.upDirection !== cameraRecord.upDirection) &&
+      expectedOrientation !== undefined &&
+      liveView !== undefined &&
+      (!vector3Equal(liveView.direction, expectedOrientation.direction) ||
+        !vector3Equal(liveView.up, expectedOrientation.up));
     if (previous && localCameraReceipt && !selectedChanged) {
       pendingCameraRecordRef.current = undefined;
       cameraAdoptionPendingRef.current = false;
@@ -262,7 +272,7 @@ export function useViewSettingsSync({
       Boolean(session) &&
       (!previous ||
         selectedChanged ||
-        (!localCameraReceipt && !sameRecordField(previous.camera, cameraRecord.camera)) ||
+        (!localCameraReceipt && (!sameRecordField(previous.camera, cameraRecord.camera) || externalPresetDiverged)) ||
         Boolean(pendingCameraRecordRef.current));
     if (needsCamera && (!localCameraReceipt || !previous || selectedChanged)) {
       if (session && !session.framing.initialized) {

@@ -159,7 +159,7 @@ type GridFadeRowProfile = Readonly<{
 const previewCanvasSelector =
   '[data-testid="cad-viewer-canvas-region"] canvas, [role="img"][aria-label*="3D model preview" i] canvas, canvas[role="img"][aria-label*="3D model preview" i]';
 const edgeOcclusionFixturePath = '/__e2e/example-fixture?locator=jscad.edge-occlusion-fixture';
-const birdhouseFixturePath = '/s/builtin~replicad.birdhouse';
+const birdhouseFixturePath = '/__e2e/example-fixture?locator=replicad.birdhouse';
 
 const edgeOcclusionCenterRegion: CanvasSampleRegion = {
   // Stay inside the front slab so its legitimate black perimeter is not
@@ -1589,7 +1589,7 @@ test.describe('Graphics backend regression guard', () => {
   test('no WebGPU validation errors emit during a Birdhouse preview render', async () => {
     const messageStart = await consoleMessageCount();
 
-    await target.navigate(`${birdhouseFixturePath}?graphicsBackend=webgpu`);
+    await target.navigate(`${birdhouseFixturePath}&graphicsBackend=webgpu`);
 
     await waitForGraphicsViewer();
     await waitForGraphicsTestBridge();
@@ -1602,11 +1602,52 @@ test.describe('Graphics backend regression guard', () => {
   });
 
   test('grid, axes and model shading display the same on WebGL and WebGPU, with and without post-processing', async () => {
+    await target.setViewport({ width: 1920, height: 1080 });
+    const environment = await target.evaluate(() => ({
+      userAgent: navigator.userAgent,
+      viewport: [innerWidth, innerHeight],
+      dpr: devicePixelRatio,
+      crossOriginIsolated,
+    }));
+    expect(environment.viewport).toEqual([1920, 1080]);
+    expect(environment.dpr).toBe(1);
     const samples: Record<string, OverlayBrightness> = {};
     const screenshots: Record<string, string> = {};
+    await target.navigate(`${birdhouseFixturePath}&graphicsBackend=webgl`);
+    await waitForGraphicsViewer();
+    await waitForGraphicsTestBridge();
+    const servedAssets = await target.evaluate(async () => {
+      const assets = [
+        {
+          name: 'replicad_single.wasm',
+          digest: 'sha256:9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9',
+        },
+        {
+          name: 'replicad_single.mjs',
+          digest: 'sha256:cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27',
+        },
+      ];
+      return Promise.all(
+        assets.map(async (asset) => {
+          const url = `/assets/engines/replicad/density-single-v1/${asset.name}`;
+          const response = await fetch(url);
+          if (!response.ok) {
+            throw new Error(`Delivered small-model asset unavailable: ${url}`);
+          }
+          const bytes = await response.arrayBuffer();
+          const hash = new Uint8Array(await crypto.subtle.digest('SHA-256', bytes));
+          const digest = `sha256:${[...hash].map((value) => value.toString(16).padStart(2, '0')).join('')}`;
+          if (digest !== asset.digest) {
+            throw new Error(`Delivered small-model asset identity changed: ${url}`);
+          }
+          return { ...asset, byteLength: bytes.byteLength, url: new URL(url, location.href).href };
+        }),
+      );
+    });
+
     /* oxlint-disable no-await-in-loop -- each capture must observe the backend and post-processing state set before it. */
     for (const backend of ['webgl', 'webgpu'] as const satisfies readonly GraphicsBackend[]) {
-      await target.navigate(`${birdhouseFixturePath}?graphicsBackend=${backend}`);
+      await target.navigate(`${birdhouseFixturePath}&graphicsBackend=${backend}`);
       await waitForGraphicsViewer();
       await waitForGraphicsTestBridge();
       for (const postProcessing of [false, true]) {
@@ -1646,7 +1687,25 @@ test.describe('Graphics backend regression guard', () => {
     expect(modelDifference.meanLuminanceDifference, JSON.stringify(modelDifference)).toBeLessThan(8);
     expect(modelDifference.differingPixelRatio, JSON.stringify(modelDifference)).toBeLessThan(0.15);
 
-    await target.writeArtifact('graphics-backend-parity.json', JSON.stringify({ samples, modelDifference }, null, 2));
+    await target.writeArtifact(
+      'custom-small-birdhouse-baseline-acquisition.json',
+      JSON.stringify(
+        {
+          status: 'actual new custom-pair image acquisition; immutable regression baseline requires independent review',
+          route: birdhouseFixturePath,
+          servedAssets,
+          viewport: [1920, 1080],
+          environment,
+          profile: target.currentWebGpuProfile(),
+          fullResolutionPngBase64: screenshots,
+          samples,
+          modelDifference,
+          comparison: 'existing within-run cross-backend oracle only; no historical default golden inheritance',
+        },
+        undefined,
+        2,
+      ),
+    );
     const reference = samples['webgl']!;
     // The 0.3-opacity grey grid over white bottoms out at 213 when blended in sRGB space; a
     // straight-alpha canvas drew it at 189 and WebGPU's linear blend with AO at 164.
@@ -1666,7 +1725,7 @@ test.describe('Graphics backend regression guard', () => {
   test('canvas pixel histogram detects "render went invisible" regressions', async () => {
     const messageStart = await consoleMessageCount();
 
-    await target.navigate(`${birdhouseFixturePath}?graphicsBackend=webgpu`);
+    await target.navigate(`${birdhouseFixturePath}&graphicsBackend=webgpu`);
 
     await waitForGraphicsViewer();
     await waitForGraphicsTestBridge();
@@ -1688,7 +1747,7 @@ test.describe('Graphics backend regression guard', () => {
   });
 
   test('WebGPU harness reports invalid WGSL, exact compute, and expected device loss', async () => {
-    await target.navigate(`${birdhouseFixturePath}?graphicsBackend=webgpu`);
+    await target.navigate(`${birdhouseFixturePath}&graphicsBackend=webgpu`);
     await waitForGraphicsViewer();
     await waitForGraphicsTestBridge();
     const result = await target.qualifyWebGpu();

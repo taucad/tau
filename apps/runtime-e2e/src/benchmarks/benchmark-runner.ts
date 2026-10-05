@@ -169,7 +169,7 @@ function computePercentile(sorted: number[], percentile: number): number {
   return sorted[lower]! + (sorted[upper]! - sorted[lower]!) * (index - lower);
 }
 
-function computeStats(timings: number[]): {
+export function computeStats(timings: number[]): {
   mean: number;
   median: number;
   p95: number;
@@ -374,139 +374,156 @@ export async function runBenchmarks(
       transport,
     });
 
-    client.on('telemetry', (batch) => {
-      telemetryBatches.push([...batch.entries]);
-    });
-    client.on('log', (entry) => {
-      // Surface kernel-side info/warn lines (e.g. WASM auto-selection log,
-      // OCCT parallel activation summary) to the benchmark CLI. Skip debug/trace
-      // (very chatty under per-call OC tracing) and the `info` rubber-band.
-      if (entry.level === 'info' || entry.level === 'warn' || entry.level === 'error') {
-        const stream = entry.level === 'error' ? console.error : console.log;
-        stream(`  [${entry.level.padEnd(5)}] ${entry.message}`);
-      }
-    });
-
     const mode = benchCase.mode ?? 'steady-state';
     const warmupRuns = mode === 'first-call' ? 0 : steadyStateWarmups;
     const sampleIterations = mode === 'first-call' ? 1 : iterations;
     const totalRuns = sampleIterations + warmupRuns;
-
-    let profiler: CpuProfiler | undefined;
-    if (enableCpuProfile) {
-      const cpuProfilerModule = await import('#benchmarks/cpu-profiler.js');
-      profiler = new cpuProfilerModule.CpuProfiler();
-    }
-
-    for (let iter = 0; iter < totalRuns; iter++) {
-      performance.clearMeasures();
-      performance.clearMarks();
-      telemetryBatches.length = 0;
-
-      if (iter > 0) {
-        /* Re-issue the inline source files via the transport's
-         * stage-and-render envelope on the next export call below;
-         * benchmarks no longer reach into the FS handle directly. */
-      }
-
-      if (profiler && iter === warmupRuns) {
-        globalThis.gc?.();
-        await profiler.start(cpuProfileInterval);
-      }
-
-      const start = performance.now();
-      const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
-      const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
-      let failureMessage: string | undefined;
-      const document = client.open({
-        source: { path: benchCase.mainFile },
-        parameters,
-        ...(caseOperation !== 'render' || committed === undefined
-          ? {}
-          : {
-              stage: {
-                [sidecarPath]: serializeParameterRecord(
-                  fileParameterEntrySchema.parse({
-                    activeGroup: 'default',
-                    groups: { default: { values: committed } },
-                  }),
-                ),
-              },
-            }),
-      });
-      try {
-        if (caseOperation === 'render') {
-          const view = document.view('model', {
-            content: { includeEdges },
-            ...(renderOptions === undefined ? {} : { options: renderOptions }),
-          });
-          const outcome = await view.rendering().finally(() => {
-            view.close();
-          });
-          if (outcome.superseded) {
-            failureMessage = 'render was unexpectedly superseded';
-          } else if (outcome.rendering.success) {
-            geometryHash = outcome.rendering.hash;
-            const artifact = asKnownArtifact(outcome.rendering.artifact);
-            if (artifact?.mimeType === 'model/gltf-binary') {
-              outputBytes = artifact.content;
-            }
-          } else {
-            failureMessage = outcome.rendering.issues.map((issue) => issue.message).join('; ');
-          }
-        } else {
-          const exportResult = await document.export('glb', {
-            content: { includeEdges },
-            ...(renderOptions === undefined ? {} : { options: renderOptions }),
-          });
-          if (exportResult.success) {
-            outputBytes =
-              exportResult.files.find(({ name }) => name.endsWith('.glb'))?.bytes ?? exportResult.files[0].bytes;
-          } else {
-            failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
-          }
-        }
-      } finally {
-        document.close();
-      }
-      const elapsed = performance.now() - start;
-      onIterationProgress?.({
-        caseName: benchCase.name,
-        iteration: iter + 1,
-        totalRuns,
-        warmupRuns,
-        elapsed,
-      });
-
-      if (failureMessage) {
-        throw new Error(`Benchmark "${benchCase.name}" ${caseOperation} failed (iteration ${iter}): ${failureMessage}`);
-      }
-
-      if (iter === 0) {
-        const firstEntries = telemetryBatches.flat();
-        timeToFirstRender = elapsed;
-        hostCompile = durationOf(firstEntries, ['wasm.compile']);
-        emscriptenInit = durationOf(firstEntries, ['wasm.emscripten-init']);
-        firstRender = durationOf(firstEntries, ['kernel.render', 'kernel.export', 'kernel.export-model']);
-      }
-
-      if (iter < warmupRuns) {
-        continue;
-      }
-
-      timings.push(elapsed);
-      allTelemetry.push(telemetryBatches.flat());
-    }
-
     let cpuProfileResult: CpuProfile | undefined;
     let profileAnalysis: ProfileAnalysis | undefined;
-    if (profiler) {
-      cpuProfileResult = await profiler.stop();
-      const { analyzeProfile } = await import('#benchmarks/profile-analyzer.js');
-      profileAnalysis = analyzeProfile(cpuProfileResult, allTelemetry);
-    }
+    // Observe the operation immediately, then settle the owned client independently on every exit.
+    const [operationResult] = await Promise.allSettled([
+      (async (): Promise<void> => {
+        client.on('telemetry', (batch) => {
+          telemetryBatches.push([...batch.entries]);
+        });
+        client.on('log', (entry) => {
+          // Surface kernel-side info/warn lines (e.g. WASM auto-selection log,
+          // OCCT parallel activation summary) to the benchmark CLI. Skip debug/trace
+          // (very chatty under per-call OC tracing) and the `info` rubber-band.
+          if (entry.level === 'info' || entry.level === 'warn' || entry.level === 'error') {
+            const stream = entry.level === 'error' ? console.error : console.log;
+            stream(`  [${entry.level.padEnd(5)}] ${entry.message}`);
+          }
+        });
 
-    await client.shutdown();
+        let profiler: CpuProfiler | undefined;
+        if (enableCpuProfile) {
+          const cpuProfilerModule = await import('#benchmarks/cpu-profiler.js');
+          profiler = new cpuProfilerModule.CpuProfiler();
+        }
+
+        for (let iter = 0; iter < totalRuns; iter++) {
+          performance.clearMeasures();
+          performance.clearMarks();
+          telemetryBatches.length = 0;
+
+          if (iter > 0) {
+            /* Re-issue the inline source files via the transport's
+             * stage-and-render envelope on the next export call below;
+             * benchmarks no longer reach into the FS handle directly. */
+          }
+
+          if (profiler && iter === warmupRuns) {
+            globalThis.gc?.();
+            await profiler.start(cpuProfileInterval);
+          }
+
+          const start = performance.now();
+          const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
+          const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
+          let failureMessage: string | undefined;
+          const document = client.open({
+            source: { path: benchCase.mainFile },
+            parameters,
+            ...(caseOperation !== 'render' || committed === undefined
+              ? {}
+              : {
+                  stage: {
+                    [sidecarPath]: serializeParameterRecord(
+                      fileParameterEntrySchema.parse({
+                        activeGroup: 'default',
+                        groups: { default: { values: committed } },
+                      }),
+                    ),
+                  },
+                }),
+          });
+          try {
+            if (caseOperation === 'render') {
+              const view = document.view('model', {
+                content: { includeEdges },
+                ...(renderOptions === undefined ? {} : { options: renderOptions }),
+              });
+              const outcome = await view.rendering().finally(() => {
+                view.close();
+              });
+              if (outcome.superseded) {
+                failureMessage = 'render was unexpectedly superseded';
+              } else if (outcome.rendering.success) {
+                geometryHash = outcome.rendering.hash;
+                const artifact = asKnownArtifact(outcome.rendering.artifact);
+                if (artifact?.mimeType === 'model/gltf-binary') {
+                  outputBytes = artifact.content;
+                }
+              } else {
+                failureMessage = outcome.rendering.issues.map((issue) => issue.message).join('; ');
+              }
+            } else {
+              const exportResult = await document.export('glb', {
+                content: { includeEdges },
+                ...(renderOptions === undefined ? {} : { options: renderOptions }),
+              });
+              if (exportResult.success) {
+                outputBytes =
+                  exportResult.files.find(({ name }) => name.endsWith('.glb'))?.bytes ?? exportResult.files[0].bytes;
+              } else {
+                failureMessage = exportResult.issues.map((issue) => issue.message).join('; ');
+              }
+            }
+          } finally {
+            document.close();
+          }
+          const elapsed = performance.now() - start;
+          onIterationProgress?.({
+            caseName: benchCase.name,
+            iteration: iter + 1,
+            totalRuns,
+            warmupRuns,
+            elapsed,
+          });
+
+          if (failureMessage) {
+            throw new Error(
+              `Benchmark "${benchCase.name}" ${caseOperation} failed (iteration ${iter}): ${failureMessage}`,
+            );
+          }
+
+          if (iter === 0) {
+            const firstEntries = telemetryBatches.flat();
+            timeToFirstRender = elapsed;
+            hostCompile = durationOf(firstEntries, ['wasm.compile']);
+            emscriptenInit = durationOf(firstEntries, ['wasm.emscripten-init']);
+            firstRender = durationOf(firstEntries, ['kernel.render', 'kernel.export', 'kernel.export-model']);
+          }
+
+          if (iter < warmupRuns) {
+            continue;
+          }
+
+          timings.push(elapsed);
+          allTelemetry.push(telemetryBatches.flat());
+        }
+
+        if (profiler) {
+          cpuProfileResult = await profiler.stop();
+          const { analyzeProfile } = await import('#benchmarks/profile-analyzer.js');
+          profileAnalysis = analyzeProfile(cpuProfileResult, allTelemetry);
+        }
+      })(),
+    ]);
+    const [cleanup] = await Promise.allSettled([
+      Promise.resolve().then(() => {
+        client.terminate();
+      }),
+    ]);
+    if (operationResult.status === 'rejected') {
+      const error: unknown = operationResult.reason;
+      throw error;
+    }
+    if (cleanup.status === 'rejected') {
+      const error: unknown = cleanup.reason;
+      throw error;
+    }
     globalThis.gc?.();
 
     const stats = computeStats(timings);

@@ -1,41 +1,25 @@
 import { aroundEach } from 'vitest';
 import { commands } from '#support/external-target.js';
 
-aroundEach(async (runTest, { annotate }) => {
+aroundEach(async (runTest, { task }) => {
   await commands.uiOpenTarget();
-  let failure: unknown;
-  try {
-    await runTest();
-  } catch (error) {
-    failure = error;
-    const diagnostics = await commands.uiCaptureTargetDiagnostics();
-    if (diagnostics.screenshot) {
-      await annotate('UI E2E target screenshot', {
-        body: diagnostics.screenshot,
-        bodyEncoding: 'base64',
-        contentType: 'image/png',
-      });
-    }
-    await annotate('UI E2E target diagnostics', {
-      body: `${JSON.stringify({ ...diagnostics, screenshot: undefined }, null, 2)}\n`,
-      // oxlint-disable-next-line unicorn/text-encoding-identifier-case -- Vitest's annotation API accepts this spelling.
-      bodyEncoding: 'utf-8',
-      contentType: 'application/json',
-    });
-    if (diagnostics.tracePath) {
-      await annotate('UI E2E target trace', { contentType: 'application/zip', path: diagnostics.tracePath });
-    }
+  const [body] = await Promise.allSettled([Promise.resolve().then(async () => runTest())]);
+  const [capture] = await Promise.allSettled([
+    (async (): Promise<void> => {
+      if (body.status === 'rejected' || task.result?.state === 'fail') {
+        await commands.uiCaptureTargetDiagnostics();
+      }
+    })(),
+  ]);
+  const [cleanup] = await Promise.allSettled([Promise.resolve().then(async () => commands.uiCloseTarget())]);
+  const failures: unknown[] = [body, capture, cleanup].flatMap((result): unknown[] =>
+    result.status === 'rejected' ? [result.reason] : [],
+  );
+  if (failures.length > 1) {
+    throw new AggregateError(failures, 'UI E2E test, diagnostics or cleanup failed.');
   }
-
-  try {
-    await commands.uiCloseTarget();
-  } catch (cleanupError) {
-    if (failure) {
-      throw new AggregateError([failure, cleanupError], 'UI E2E test and cleanup both failed.');
-    }
-    throw cleanupError;
-  }
-  if (failure) {
+  if (failures.length === 1) {
+    const [failure] = failures;
     if (failure instanceof Error) {
       throw failure;
     }

@@ -115,6 +115,7 @@ export const snapshotUiBuild = async (uiRoot: string): Promise<string> => {
         source,
         '--',
         'cp',
+        ...(process.platform === 'darwin' ? ['-c'] : []),
         '-R',
         source,
         resolve(snapshot, 'build'),

@@ -15,7 +15,8 @@
         "parallel": false,
         "commands": [
           "pnpm exec nx run ui:build",
-          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node"
+          "vitest run --dir apps/ui-e2e apps/ui-e2e/src/global-setup-preflight.spec.ts apps/ui-e2e/src/support/agent-host-gateway-script.test.ts apps/ui-e2e/src/support/chat-admission-log.test.ts apps/ui-e2e/src/support/headless-capture-performance.test.ts apps/ui-e2e/src/support/ui-build-snapshot.test.ts apps/ui-e2e/src/support/usage-receipt.test.ts apps/ui-e2e/src/support/webgpu-profile.test.ts apps/ui-e2e/src/support/serve-ui-build.test.ts --environment=node",
+          "vitest run --config apps/ui-e2e/vitest.config.ts --project chromium src/project-card-preview-parity.spec.ts src/user-project-thumbnail-generation.spec.ts"
         ],
         "env": {
           "TAU_E2E_UI_SNAPSHOT": "true",

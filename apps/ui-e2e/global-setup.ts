@@ -2,6 +2,9 @@
 import { spawn } from 'node:child_process';
 import type { ChildProcess } from 'node:child_process';
 import { rm } from 'node:fs/promises';
+import { readFileSync, readdirSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import type { TestProject } from 'vitest/node';
 import process from 'node:process';
 import { resolve } from 'node:path';
 // Aliased: `waitForServer` below uses the global, callback-style `setTimeout`.
@@ -14,6 +17,44 @@ import { resolveTestServerAction } from './src/support/server-readiness.ts';
 import { snapshotUiBuild } from './src/support/ui-build-snapshot.ts';
 
 const uiRoot = resolve(import.meta.dirname, '../ui');
+/** Bind the actual source-mapped exact worker to the current causal app build, never a supplied asset path. */
+function resolveMotionExactWorkerAsset(): Readonly<{ path: string; sha256: string; sourceMapSha256: string }> {
+  const assets = resolve(uiRoot, 'build/client/assets');
+  const maps = readdirSync(assets).filter((name) => /^measurement-exact\.worker-[^.]+\.js\.map$/u.test(name));
+  const matches = maps.filter((name) => {
+    const value: unknown = JSON.parse(readFileSync(resolve(assets, name), 'utf8'));
+    return (
+      value !== null &&
+      typeof value === 'object' &&
+      'sources' in value &&
+      Array.isArray(value.sources) &&
+      value.sources.some(
+        (source: unknown) => typeof source === 'string' && source.endsWith('/app/workers/measurement-exact.worker.ts'),
+      )
+    );
+  });
+  const [mapName] = matches;
+  if (matches.length !== 1 || mapName === undefined) {
+    throw new Error('The current UI build must contain one source-qualified exact measurement worker.');
+  }
+  const fileName = mapName.slice(0, -4);
+  const assetPath = `/assets/${fileName}`;
+  const referenced = readdirSync(assets)
+    .filter((name) => name.endsWith('.js') && name !== fileName)
+    .some((name) => readFileSync(resolve(assets, name), 'utf8').includes(assetPath));
+  if (!referenced) {
+    throw new Error('The current UI app does not reference the source-qualified exact worker.');
+  }
+  return {
+    path: assetPath,
+    sha256: createHash('sha256')
+      .update(readFileSync(resolve(assets, fileName)))
+      .digest('hex'),
+    sourceMapSha256: createHash('sha256')
+      .update(readFileSync(resolve(assets, mapName)))
+      .digest('hex'),
+  };
+}
 const debugProbeUrl = new URL('/__e2e/project-creation-location?fixture=health-check', testBaseURL);
 const viteClientUrl = new URL('/@vite/client', testBaseURL);
 /**
@@ -74,8 +115,23 @@ const waitForServer = async (options: {
   }
 };
 
-export const setup = async (): Promise<() => Promise<void> | void> => {
+export const setup = async (project: TestProject): Promise<() => Promise<void> | void> => {
+  // Principal-reviewed same-camera candidate; production quality remains unchanged.
+  const policy = {
+    triangleRatio: 0.5,
+    approximateRelativeError: 0.05,
+    screenSpace: { maxApproximatePixelError: 1, enterDetailRatio: 0.6 },
+  };
+  const qualityEvidenceSha256 = '7cc00f0a0a1b76a04e27493b22f56f8651bf2d2d091ce1f5288f04d075c42662';
+  project.provide('s15ReviewedCalibration', {
+    webgl: { backend: 'webgl', qualityEvidenceSha256, policy },
+    webgpu: { backend: 'webgpu', qualityEvidenceSha256, policy },
+  });
   const development = process.env['TAU_E2E_SERVER_MODE'] === 'development';
+  // Build ownership is checked at browser setup, after Nx can acquire its project graph without built assets.
+  if (!development) {
+    project.provide('motionExactWorkerAsset', resolveMotionExactWorkerAsset());
+  }
   const rootReady = await isReady();
   if (development && rootReady && !(await isDevelopmentReady())) {
     throw new Error(`Development UI E2E requires ownership of its dedicated server at ${testBaseURL}`);

@@ -1,10 +1,10 @@
 // @vitest-environment node
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname, join } from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 // oxlint-disable-next-line no-restricted-imports -- The Node-only unit target intentionally runs without browser aliases.
-import { missingSnapshotFiles } from './ui-build-snapshot.ts';
+import { missingSnapshotFiles, snapshotUiBuild } from './ui-build-snapshot.ts';
 
 const roots: string[] = [];
 
@@ -55,6 +55,31 @@ const createBuild = async (): Promise<string> => {
 };
 
 describe('UI build snapshot verification', () => {
+  it('should preserve a complete snapshot with independently writable source and copied bytes', async () => {
+    const build = await createBuild();
+    const sourceFile = join(build, 'client/assets/chunk-Dsj6hcqR.js');
+    const original = 'export const value = "original";\n';
+    const copiedEdit = 'export const value = "copied edit";\n';
+    await writeFile(sourceFile, original);
+    const snapshot = await snapshotUiBuild(dirname(build));
+    try {
+      const snapshotBuild = join(snapshot, 'build');
+      const copiedFile = join(snapshotBuild, 'client/assets/chunk-Dsj6hcqR.js');
+      expect(missingSnapshotFiles(snapshotBuild)).toEqual([]);
+      expect(await readFile(copiedFile)).toEqual(await readFile(sourceFile));
+      const [copiedStat, sourceStat] = await Promise.all([stat(copiedFile), stat(sourceFile)]);
+      expect(copiedStat.ino).not.toBe(sourceStat.ino);
+
+      await writeFile(copiedFile, copiedEdit);
+      expect(await readFile(sourceFile, 'utf8')).toBe(original);
+      await writeFile(sourceFile, 'export const value = "source edit";\n');
+      expect(await readFile(copiedFile, 'utf8')).toBe(copiedEdit);
+      expect(missingSnapshotFiles(snapshotBuild)).toEqual([]);
+    } finally {
+      await rm(snapshot, { force: true, recursive: true });
+    }
+  });
+
   it('accepts a complete build, and ignores package paths and example imports quoted inside a bundle', async () => {
     // `browser-node-builtins.mjs` and `ex-base-box.js` have "hashes" of lowercase letters and hyphens;
     // treating either as an emitted asset would reject every complete build.

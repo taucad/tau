@@ -126,7 +126,9 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/docs/scripts/verify-browser.mts',
       'apps/react-e2e/browser-command.ts',
       'apps/react-e2e/scripts/benchmark-bundler-products.mts',
+      'apps/ui-e2e/src/support/browser-trace-stream.test.ts',
       'apps/ui-e2e/src/support/open-to-frame.ts',
+      'apps/ui-e2e/src/support/parts-assemblies-motion.test.ts',
       'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
       'packages/geospec-engine-native/bindings/browser-conformance/qualify-mt-product.mjs',
       'packages/geospec-engine-native/bindings/browser-conformance/run-browser-conformance.ts',
@@ -147,7 +149,11 @@ describe('Vitest Browser test-runner ownership', () => {
     // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
     // The docs deployment gate installs Chromium on the Netlify builder unless one is supplied.
     expect(installFiles.sort()).toEqual(
-      ['.agents/skills/create-repo/templates/ci.yml', '.github/workflows/ci.yml', 'apps/docs/project.json'].sort(),
+      [
+        '.agents/skills/create-repo/templates/ci.yml',
+        '.github/workflows/e2e-nightly.yml',
+        'apps/docs/project.json',
+      ].sort(),
     );
   });
 
@@ -201,7 +207,6 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui/app/components/code/code-editor.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts',
-        'apps/ui/app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',
         'apps/ui/app/components/printer/printer.vitest.browser.config.ts',
         'apps/ui/app/routes/w.$workspace.$project/chat-history.vitest.browser.config.ts',

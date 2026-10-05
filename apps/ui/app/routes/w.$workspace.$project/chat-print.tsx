@@ -109,7 +109,7 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
     return {
       label: entry.snapshot.connection === 'unreachable' ? 'Unreachable' : 'Disconnected',
       icon: CircleAlert,
-      iconClassName: 'text-destructive',
+      iconClassName: 'text-feature',
     };
   }
   const { run } = entry.snapshot;
@@ -131,7 +131,7 @@ export const presentMachine = (entry: MachineDirectoryEntry, openRequest?: Print
     return {
       label: run.state === 'failed' ? 'Run failed' : 'Run state unknown',
       icon: CircleAlert,
-      iconClassName: 'text-destructive',
+      iconClassName: 'text-feature',
     };
   }
   if (materialChange(entry) !== undefined) {
@@ -245,7 +245,7 @@ function ObservationNotice({ entry }: { readonly entry: MachineDirectoryEntry })
   }
   if (entry.snapshot.connection !== 'connected') {
     return (
-      <PrintNotice tone='destructive' role='status'>
+      <PrintNotice tone='error' role='status'>
         {entry.name} is {entry.snapshot.connection === 'unreachable' ? 'unreachable' : 'disconnected'}. Sending and run
         controls wait until the host reconnects; slicing still works.
       </PrintNotice>
@@ -500,8 +500,8 @@ function MachinePrintPanel({
     >
       <PrintHeader entries={entries} selected={selected} openRequest={openRequest} select={select} refresh={refresh} />
       <div className='relative flex min-h-0 min-w-0 flex-1 scroll-shadows-y flex-col gap-3 overflow-y-auto p-3 [--scroll-fade-end:transparent] [--scroll-fade-size:28px]'>
-        {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
-        {requestsError ? <PrintNotice tone='destructive'>{requestsError}</PrintNotice> : null}
+        {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
+        {requestsError ? <PrintNotice tone='error'>{requestsError}</PrintNotice> : null}
         {snapshot ? null : (
           <div
             role='status'

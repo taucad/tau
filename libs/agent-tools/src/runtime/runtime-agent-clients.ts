@@ -30,7 +30,7 @@ const glbVersion = 2;
 
 /** Runtime surface required by request-scoped agent geometry operations. @public */
 export type RuntimeAgentClient = Pick<RuntimeClient, 'describe' | 'capabilities'> & {
-  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'signal'>) => Pick<
+  open: (input: Pick<Parameters<RuntimeClient['open']>[0], 'source' | 'watch' | 'signal'>) => Pick<
     ReturnType<RuntimeClient['open']>,
     'evaluation' | 'export' | 'close'
   > & {
@@ -328,7 +328,9 @@ export const createRuntimeAgentClients = (
       try {
         const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
-        document = runtime.open({ source: { path: rooted }, signal: context?.signal });
+        /* Every agent document is one request's snapshot, opened unwatched: a watched one is
+         * superseded when the watch echo of an edit made just before the call lands mid-evaluation. */
+        document = runtime.open({ source: { path: rooted }, watch: false, signal: context?.signal });
         const outcome = await document.evaluation({ signal: context?.signal });
         if (outcome.superseded) {
           throw new Error('Model evaluation was superseded');
@@ -408,7 +410,7 @@ export const createRuntimeAgentClients = (
       try {
         const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
-        document = runtime.open({ source: { path: rooted }, signal: context?.signal });
+        document = runtime.open({ source: { path: rooted }, watch: false, signal: context?.signal });
         const result = await document.export(to, {
           ...(options === undefined ? {} : { options }),
           signal: context?.signal,
@@ -442,7 +444,7 @@ export const createRuntimeAgentClients = (
       try {
         const runtime = await runtimeFor();
         context?.signal?.throwIfAborted();
-        document = runtime.open({ source: { path: targetFile }, signal: context?.signal });
+        document = runtime.open({ source: { path: targetFile }, watch: false, signal: context?.signal });
         const evaluated = await document.evaluation({ signal: context?.signal });
         if (evaluated.superseded) {
           throw new Error('Model evaluation was superseded');

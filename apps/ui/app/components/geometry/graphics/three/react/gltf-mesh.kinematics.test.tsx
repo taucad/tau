@@ -4,7 +4,7 @@ import { createActor } from 'xstate';
 import type { Actor, SnapshotFrom } from 'xstate';
 import { Matrix4 } from 'three';
 import type { Object3D } from 'three';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { writeGlb } from '@taucad/geometry-core';
 import type { GlbMaterial } from '@taucad/geometry-core';

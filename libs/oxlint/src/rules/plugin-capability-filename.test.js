@@ -26,7 +26,7 @@ describe('plugin-capability-filename', () => {
         { name: 'dotted plugin type test', filename: 'packages/plugins/image/src/image.plugin.test-d.ts', code },
         {
           name: 'hyphenated package name with a dotted role',
-          filename: 'packages/plugins/opencascade-native/src/opencascade-native.kernel.ts',
+          filename: 'packages/plugins/opencascade-wasm/src/opencascade-wasm.kernel.ts',
           code,
         },
         { name: 'non-capability dotted module', filename: 'packages/plugins/replicad/src/replicad.schemas.ts', code },

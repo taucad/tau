@@ -1,5 +1,7 @@
 import { realpathSync } from 'node:fs';
 import { homedir, tmpdir } from 'node:os';
+import { dirname, join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 import { getDefaultWritePaths, SandboxManager } from '@anthropic-ai/sandbox-runtime';
 
@@ -58,6 +60,24 @@ const deniedReadRoots = (): string[] =>
   physicalVariants([homedir(), '/Users', '/home', '/root', '/Volumes', '/mnt', '/media', '/tmp', tmpdir()]);
 
 /**
+ * Directories the sandbox runtime itself executes from inside the Linux sandbox.
+ *
+ * On Linux the runtime starts every command through its vendored `apply-seccomp` helper, and
+ * bubblewrap resolves that path inside the sandbox. A runtime installed under a denied root —
+ * any checkout or app bundle below `/home` or `/tmp` — would otherwise hide its own helper and
+ * every launch would exit 127 before the worker ran.
+ *
+ * @returns The vendored seccomp directory on Linux; nothing elsewhere.
+ */
+const sandboxRuntimeReadRoots = (): string[] => {
+  if (process.platform !== 'linux') {
+    return [];
+  }
+  const entry = fileURLToPath(import.meta.resolve('@anthropic-ai/sandbox-runtime'));
+  return [join(dirname(dirname(entry)), 'vendor', 'seccomp')];
+};
+
+/**
  * Shared roots the sandbox runtime grants every command by default, which a CAD worker must not have.
  *
  * The runtime unions {@link getDefaultWritePaths} into the emitted write allowance, so the profile
@@ -86,7 +106,7 @@ export type NativeSandboxProfile = {
  *
  * Reads are denied under user homes, removable volumes, and shared temporary storage, then
  * re-allowed only for the launch's bundled runtime, source snapshot, and private writable
- * root. Writes are allowed only inside that writable root: the sandbox runtime's own broad
+ * root, plus the sandbox runtime's own Linux helper ({@link sandboxRuntimeReadRoots}). Writes are allowed only inside that writable root: the sandbox runtime's own broad
  * default write roots are denied back off ({@link deniedWriteRoots}).
  *
  * Network egress is **proxy-mediated, not kernel-denied**. The emitted profile pins socket
@@ -106,7 +126,9 @@ export const nativeSandboxPolicy = (
   network: { allowedDomains: [], deniedDomains: ['*'], strictAllowlist: true },
   filesystem: {
     denyRead: deniedReadRoots(),
-    allowRead: launch ? physicalVariants([...launch.readablePaths, launch.writablePath]) : [],
+    allowRead: launch
+      ? physicalVariants([...launch.readablePaths, launch.writablePath, ...sandboxRuntimeReadRoots()])
+      : [],
     allowWrite: launch ? physicalVariants([launch.writablePath]) : [],
     denyWrite: deniedWriteRoots(),
   },

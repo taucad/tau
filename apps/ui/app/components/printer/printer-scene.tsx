@@ -4,7 +4,7 @@ import type { FilamentMode } from '#components/printer/printer-filament-material
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { Canvas, addAfterEffect, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import type CameraControlsImpl from 'camera-controls';
 import type { ToolpathProgram } from '@taucad/slicer/toolpath';
 import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';

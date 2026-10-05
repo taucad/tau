@@ -13,9 +13,13 @@
  * - Linux and Windows (unsigned, no installer framework): the app offers the
  *   release page; the person downloads the new archive themselves.
  *
- * Unpackaged runs and `TAU_DESKTOP_UPDATES=off` never check.
+ * Unpackaged runs, staging packages and `TAU_DESKTOP_UPDATES=off` never check:
+ * a staging build ships as a prerelease, which is never "latest", so the latest
+ * feed would only ever offer it a production build.
  */
 import { z } from 'zod';
+
+import type { DesktopChannel } from '#main/environment.js';
 
 /** The repository whose releases carry the desktop update feeds. */
 export const updateRepository = 'taucad/tau';
@@ -99,6 +103,8 @@ export type DesktopUpdaterOptions = {
   readonly arch: string;
   readonly currentVersion: string;
   readonly packaged: boolean;
+  /** The packaged channel; a `staging` package never checks. Defaults to `production`. */
+  readonly channel?: DesktopChannel;
   readonly environment: NodeJS.ProcessEnv;
   readonly autoUpdater: SquirrelUpdater;
   readonly fetchJson: (url: string) => Promise<unknown>;
@@ -122,8 +128,9 @@ export type DesktopUpdater = {
 /** Start checking for updates, or return an updater whose checks do nothing. */
 export const startDesktopUpdater = (options: DesktopUpdaterOptions): DesktopUpdater => {
   const { platform, arch, currentVersion, autoUpdater, log } = options;
-  if (!options.packaged || options.environment['TAU_DESKTOP_UPDATES'] === 'off') {
-    log('info', 'updater.disabled', { packaged: options.packaged });
+  const channel = options.channel ?? 'production';
+  if (!options.packaged || channel !== 'production' || options.environment['TAU_DESKTOP_UPDATES'] === 'off') {
+    log('info', 'updater.disabled', { packaged: options.packaged, channel });
     return { check: async () => undefined };
   }
 

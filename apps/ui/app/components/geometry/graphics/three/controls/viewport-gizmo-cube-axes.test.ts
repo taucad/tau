@@ -10,11 +10,11 @@ const { lineMaterialSpy, line2WebGlSpy, line2WebGpuSpy } = vi.hoisted(() => ({
   line2WebGpuSpy: vi.fn(),
 }));
 
-// Stub the three classes the gizmo cube axes factory pulls in from `three/addons`.
+// Stub the three classes the gizmo cube axes factory pulls in from `three/addons/lines`.
 // `LineGeometry` is a minimal data carrier (`setPositions` is the only call site), so
 // the stub only needs that single instance method. The other two are spied so the test
 // can read back what parameters reached the constructors.
-vi.mock('three/addons', () => ({
+vi.mock('three/addons/lines/LineGeometry.js', () => ({
   LineGeometry: class LineGeometryStub {
     public positions: readonly number[];
 
@@ -26,6 +26,8 @@ vi.mock('three/addons', () => ({
       this.positions = positions;
     }
   },
+}));
+vi.mock('three/addons/lines/LineMaterial.js', () => ({
   LineMaterial: class LineMaterialStub {
     public parameters: Record<string, unknown>;
 
@@ -38,6 +40,8 @@ vi.mock('three/addons', () => ({
       // No-op stub: mirrors three.js Material#dispose so the gizmo teardown path does not throw.
     }
   },
+}));
+vi.mock('three/addons/lines/Line2.js', () => ({
   Line2: class Line2Stub {
     public geometry: unknown;
 

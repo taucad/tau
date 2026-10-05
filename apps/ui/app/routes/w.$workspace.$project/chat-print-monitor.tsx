@@ -248,14 +248,14 @@ function TemperatureGroup({
   );
 }
 
-type AlertTone = 'destructive' | 'warning' | 'neutral';
+type AlertTone = 'error' | 'warning' | 'neutral';
 
 /** An alert without a severity reads as a warning, as every alert did before severities. */
 const toneOf = ({ severity }: MachineAlertSnapshot): AlertTone =>
-  severity === 'fatal' || severity === 'serious' ? 'destructive' : severity === 'info' ? 'neutral' : 'warning';
+  severity === 'fatal' || severity === 'serious' ? 'error' : severity === 'info' ? 'neutral' : 'warning';
 
 /** Each tone keeps its own glyph shape, so severity never rests on colour alone. */
-const alertGlyph = { destructive: OctagonAlert, warning: TriangleAlert, neutral: Info } as const;
+const alertGlyph = { error: OctagonAlert, warning: TriangleAlert, neutral: Info } as const;
 
 const severityLabel: Readonly<Record<NonNullable<MachineAlertSnapshot['severity']>, string>> = {
   fatal: 'Fatal',
@@ -273,14 +273,14 @@ const severityLabel: Readonly<Record<NonNullable<MachineAlertSnapshot['severity'
  */
 function AlertNotice({ alerts }: { readonly alerts: readonly MachineAlertSnapshot[] }): React.JSX.Element {
   const tones = new Set(alerts.map((alert) => toneOf(alert)));
-  const tone: AlertTone = tones.has('destructive') ? 'destructive' : tones.has('warning') ? 'warning' : 'neutral';
+  const tone: AlertTone = tones.has('error') ? 'error' : tones.has('warning') ? 'warning' : 'neutral';
   return (
     <div
       role='alert'
       aria-label={alerts.length === 1 ? 'Printer alert' : 'Printer alerts'}
       className={cn(
         'min-w-0 rounded-lg border p-2 text-xs',
-        tone === 'destructive' && 'border-destructive/30 bg-destructive/10',
+        tone === 'error' && 'border-feature/30 bg-feature/10',
         tone === 'warning' && 'border-warning/30 bg-warning/10',
         tone === 'neutral' && 'border-border/70 bg-muted/30',
       )}
@@ -295,7 +295,7 @@ function AlertNotice({ alerts }: { readonly alerts: readonly MachineAlertSnapsho
                 aria-hidden
                 className={cn(
                   'mt-0.5 size-3.5 shrink-0',
-                  alertTone === 'destructive' && 'text-destructive',
+                  alertTone === 'error' && 'text-feature',
                   alertTone === 'warning' && 'text-warning',
                   alertTone === 'neutral' && 'text-muted-foreground',
                 )}
@@ -560,7 +560,7 @@ export function ControlsSection({
           </div>
         </div>
       ) : null}
-      {error ? <PrintNotice tone='destructive'>{error}</PrintNotice> : null}
+      {error ? <PrintNotice tone='error'>{error}</PrintNotice> : null}
     </div>
   );
 }

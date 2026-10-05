@@ -48,12 +48,19 @@ type RenderEvent = {
   };
 };
 let renderingListener: ((event: RenderEvent) => void) | undefined;
-const unsubscribe = vi.fn();
+const unsubscribeRendering = vi.fn();
+const unsubscribeAssembly = vi.fn();
 const unsubscribeSnapshots = vi.fn();
 const subscribe = vi.fn(() => ({ unsubscribe: unsubscribeSnapshots }));
-const on = vi.fn((_event: string, listener: (event: RenderEvent) => void) => {
-  renderingListener = listener;
-  return { unsubscribe };
+const on = vi.fn((event: string, listener: (event: RenderEvent) => void) => {
+  if (event === 'defaultRendered') {
+    renderingListener = listener;
+    return { unsubscribe: unsubscribeRendering };
+  }
+  if (event !== 'assemblyEvaluated') {
+    throw new Error(`Unexpected CAD event ${event}`);
+  }
+  return { unsubscribe: unsubscribeAssembly };
 });
 
 vi.mock('#hooks/use-project.js', () => ({
@@ -307,7 +314,8 @@ describe('useThumbnailGenerator', () => {
 
     unmount();
 
-    expect(unsubscribe).toHaveBeenCalledOnce();
+    expect(unsubscribeRendering).toHaveBeenCalledOnce();
+    expect(unsubscribeAssembly).toHaveBeenCalledOnce();
     expect(unsubscribeSnapshots).toHaveBeenCalledOnce();
   });
 

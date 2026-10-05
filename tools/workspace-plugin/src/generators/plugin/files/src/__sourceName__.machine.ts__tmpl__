@@ -18,8 +18,14 @@ const submissionConfiguration = defineConfiguration({
 });
 
 const manifest: MachineManifest = {
-  version: 1,
-  identity: { vendor: '<%= name %>', model: '<%= name %>', displayName: '<%= alias %>Machine', qualifiedFirmware: [] },
+  version: 2,
+  identity: {
+    typeId: '<%= name %>.generic',
+    vendor: '<%= name %>',
+    model: '<%= name %>',
+    displayName: '<%= alias %>Machine',
+    qualifiedFirmware: [],
+  },
   technology: 'additive.fff',
   geometry: {
     unit: 'mm',

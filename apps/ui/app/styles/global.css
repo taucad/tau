@@ -308,7 +308,7 @@
 
   --color-fd-info: var(--color-information);
   --color-fd-warning: var(--color-warning);
-  --color-fd-error: var(--color-destructive);
+  --color-fd-error: var(--color-feature);
   --color-fd-success: var(--color-success);
   --color-fd-diff-remove: rgba(200, 10, 100, 0.12);
   --color-fd-diff-remove-symbol: rgb(230, 10, 100);

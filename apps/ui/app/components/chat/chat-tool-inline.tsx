@@ -51,8 +51,12 @@ export function ChatToolInline({
 
   return (
     <Badge
-      variant={isError ? 'destructive' : 'outline'}
-      className={cn('flex max-w-full flex-row items-center gap-2', className)}
+      variant='outline'
+      className={cn(
+        'flex max-w-full flex-row items-center gap-2',
+        isError && 'border-transparent bg-feature/10 text-feature',
+        className,
+      )}
     >
       {isLoading ? (
         <>
@@ -64,7 +68,7 @@ export function ChatToolInline({
           {image ? (
             <img src={image.src} alt={image.alt} className='size-3 shrink-0 rounded-full' />
           ) : Icon ? (
-            <Icon className={cn('size-3 shrink-0', isError ? 'text-destructive' : 'text-muted-foreground')} />
+            <Icon className={cn('size-3 shrink-0', isError ? 'text-feature' : 'text-muted-foreground')} />
           ) : undefined}
           <span className='min-w-0 truncate'>{children}</span>
         </>

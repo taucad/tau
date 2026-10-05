@@ -330,7 +330,7 @@ export function RevisionCollaborators({ projectId }: RevisionCollaboratorsProps)
 
       {alert === undefined ? undefined : (
         <p role='alert' className='flex items-center gap-2 text-sm'>
-          <AlertTriangle aria-hidden className='size-4 shrink-0 text-destructive' />
+          <AlertTriangle aria-hidden className='size-4 shrink-0 text-feature' />
           <span>{alert}</span>
         </p>
       )}

@@ -280,7 +280,7 @@ export function ViewerProjectionPicker({
                 );
               })}
               {optionError ? (
-                <p role='alert' className='text-xs text-destructive'>
+                <p role='alert' className='text-xs text-feature'>
                   {optionError}
                 </p>
               ) : null}

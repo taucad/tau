@@ -8,7 +8,7 @@
  */
 import { canonicalJson } from '#log/canonical-json.js';
 import { classifyLogRow, historyRowTypes } from '#log/event-schema.js';
-import { isResumableRunFailure, isUserStoppedRun } from '#log/resumable.js';
+import { isResumableRun } from '#log/resumable.js';
 import lifecycleTable from '#log/run-lifecycle.legality.json' with { type: 'json' };
 import operationTable from '#log/run-operation.legality.json' with { type: 'json' };
 import settlementTable from '#log/run-settlement.legality.json' with { type: 'json' };
@@ -205,9 +205,7 @@ const attemptEnded = (entry: RunEntry): boolean =>
 /** The lifecycle half of the reopen predicate: a resumable failure, or a native pause with no pending request. */
 const reopenable = (entry: RunEntry): boolean =>
   attemptEnded(entry) &&
-  ((entry.lifecycle === 'failed' && isResumableRunFailure(entry.failure)) ||
-    isUserStoppedRun(entry) ||
-    (entry.lifecycle === 'paused' && Object.keys(entry.pendingInterrupts).length === 0));
+  (isResumableRun(entry) || (entry.lifecycle === 'paused' && Object.keys(entry.pendingInterrupts).length === 0));
 
 /**
  * The one reopen predicate (I10, CL-R9): the fold, the gate and resume all call it. A `running` row opens the next

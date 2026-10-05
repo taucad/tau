@@ -113,7 +113,7 @@ export function NavUser(): React.JSX.Element {
                 <span
                   role='status'
                   aria-label='Offline'
-                  className='absolute top-1 left-5 size-1.5 rounded-full border border-sidebar bg-destructive'
+                  className='absolute top-1 left-5 size-1.5 rounded-full border border-sidebar bg-feature'
                 />
               </TooltipTrigger>
               <TooltipContent side='top'>Offline — reconnect to access online features</TooltipContent>

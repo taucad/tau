@@ -231,12 +231,12 @@ function getSeverityStyles(severity: IssueSeverity | undefined): {
 
     default: {
       return {
-        leftBorder: 'border-l-destructive',
-        background: 'bg-destructive/5',
-        text: 'text-destructive',
-        code: '[&_code]:text-destructive [&_code]:border-destructive/30',
+        leftBorder: 'border-l-feature',
+        background: 'bg-feature/5',
+        text: 'text-feature',
+        code: '[&_code]:text-feature [&_code]:border-feature/30',
         stackBorder: 'border-border',
-        buttonBorder: 'border-destructive/30 hover:border-destructive/50',
+        buttonBorder: 'border-feature/30 hover:border-feature/50',
       };
     }
   }
@@ -388,7 +388,7 @@ function IssuesSummary({ counts }: { readonly counts: IssueCounts }): React.JSX.
     parts.push({
       key: 'error',
       element: (
-        <span className='text-destructive'>
+        <span className='text-feature'>
           {counts.error} error{counts.error > 1 ? 's' : ''}
         </span>
       ),

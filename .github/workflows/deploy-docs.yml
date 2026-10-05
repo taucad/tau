@@ -1,0 +1,122 @@
+# Builds the docs site in GitHub Actions and publishes it to Netlify, the same
+# way `deploy-ui.yml` publishes the UI. The Netlify docs sites run with
+# `deploy_mode = "ci"` in tau-cloud, so Netlify's Git integration no longer
+# builds them and a branch change there never leaves a site without a deploy.
+#
+#   - staging (docs.taucad.dev): after every green `CI` push run on `main`.
+#   - production (docs.tau.new): `prod-deploy-on-merge.yml` on every push to
+#     `production` (made only by `deploy-production.yml`).
+#
+# `netlify deploy` runs `apps/docs/netlify.toml`'s build command with the
+# site's variables, as the Netlify Git build did. Each run also asks Netlify to
+# provision the custom domain's certificate, which Netlify otherwise retries
+# only from its dashboard once DNS starts resolving.
+#
+# Manual redeploy: `gh workflow run deploy-docs.yml -f environment=staging`
+# from `main`, or `--ref production -f environment=production`; add
+# `-f tag=<tag>` to deploy a specific release.
+
+name: Deploy docs to Netlify
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        required: true
+        type: string
+        description: 'staging or production'
+      tag:
+        required: false
+        type: string
+        default: ''
+        description: 'Git tag or commit to deploy; empty deploys the calling commit'
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      environment:
+        required: true
+        type: choice
+        description: 'Environment to deploy'
+        options:
+          - staging
+          - production
+      tag:
+        required: false
+        type: string
+        default: ''
+        description: 'Git tag or commit to deploy, e.g. docs@0.3.0; empty deploys the selected ref'
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    name: Deploy docs to ${{ inputs.environment || 'staging' }}
+    if: >-
+      github.event_name != 'workflow_run' ||
+      (github.event.workflow_run.event == 'push' && github.event.workflow_run.conclusion == 'success')
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    environment: ${{ inputs.environment || 'staging' }}
+    concurrency:
+      group: deploy-docs-${{ inputs.environment || 'staging' }}
+      cancel-in-progress: false
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    steps:
+      - name: Resolve the Netlify site
+        id: site
+        env:
+          ENVIRONMENT: ${{ inputs.environment || 'staging' }}
+        run: |
+          case "$ENVIRONMENT" in
+            staging) site_id=9e046bdc-82d4-4ce5-8cdd-f2fa2fb0f48c; url=https://taucad-docs-staging.netlify.app ;;
+            production) site_id=744a4000-1ed2-4fcc-9fc4-dedaea69d425; url=https://taucad-docs-prod-us.netlify.app ;;
+            *) echo "::error::Unknown environment: $ENVIRONMENT"; exit 1 ;;
+          esac
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "::error::NETLIFY_AUTH_TOKEN is not set on the $ENVIRONMENT environment."
+            exit 1
+          fi
+          echo "site_id=$site_id" >> "$GITHUB_OUTPUT"
+          echo "url=$url" >> "$GITHUB_OUTPUT"
+
+      # A workflow_run event runs on the default branch's head; deploy the exact
+      # commit CI passed instead. A dispatch may name a release tag.
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ inputs.tag || github.event.workflow_run.head_sha || github.sha }}
+          persist-credentials: false
+
+      - name: Setup Nx Environment
+        uses: ./.github/actions/setup-nx
+
+      # Runs before the deploy, so a refused deploy still requests the
+      # certificate. Fails harmlessly until the custom domain resolves to
+      # Netlify; the next run retries it.
+      - name: Provision the custom domain certificate
+        continue-on-error: true
+        env:
+          SITE_ID: ${{ steps.site.outputs.site_id }}
+        run: |
+          "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" api provisionSiteTLSCertificate \
+            --data "{\"site_id\": \"$SITE_ID\"}"
+
+      - name: Build and deploy with the Netlify CLI
+        working-directory: apps/docs
+        env:
+          SITE_ID: ${{ steps.site.outputs.site_id }}
+          MESSAGE: ${{ github.workflow }} ${{ inputs.tag || github.event.workflow_run.head_sha || github.sha }}
+        run: |
+          "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
+            --prod --context production \
+            --site "$SITE_ID" --message "$MESSAGE"
+
+      - name: Check the site answers
+        env:
+          URL: ${{ steps.site.outputs.url }}
+        run: curl --fail --silent --show-error --location --retry 5 --retry-delay 10 --output /dev/null "$URL"

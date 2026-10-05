@@ -53,6 +53,7 @@ import {
   desktopAgentGatewayBaseUrl,
   desktopAgentSystemPrompt,
   desktopEnvironment,
+  packagedChannel,
   packagedOverridesEnabled,
   stripPackagedOverrides,
 } from '#main/environment.js';
@@ -119,6 +120,9 @@ const environmentLocked = app.isPackaged && !packagedOverridesEnabled(app.getApp
 if (environmentLocked) {
   stripPackagedOverrides(process.env);
 }
+/* A staging package (`TAU_DESKTOP_CHANNEL=staging` at packaging time) defaults
+ * to taucad.dev and never follows the production update feed. */
+const desktopChannel = app.isPackaged ? packagedChannel(app.getAppPath()) : 'production';
 const isDevelopment = process.env.ELECTRON_RENDERER_URL !== undefined;
 const hideTestWindow = process.env['TAU_E2E_HIDE_WINDOW'] === '1';
 /* Packaged executable launches skip Playwright's readiness loader. Hold window
@@ -350,7 +354,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
   }
   app.dock?.setIcon(applicationIcon);
   const loginShell = await loginShellApplied;
-  const environment = desktopEnvironment(process.env, { locked: environmentLocked });
+  const environment = desktopEnvironment(process.env, { locked: environmentLocked, channel: desktopChannel });
 
   const logDirectory = join(app.getPath('userData'), 'logs');
   const build123dResourceRoot = app.isPackaged
@@ -477,6 +481,7 @@ const bootstrapElectronApp = async (): Promise<void> => {
     arch: process.arch,
     currentVersion: app.getVersion(),
     packaged: app.isPackaged,
+    channel: desktopChannel,
     environment,
     autoUpdater,
     fetchJson: async (url) => {

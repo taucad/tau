@@ -65,8 +65,9 @@
 (*   ResolveFirst       a failure message is never completion; every       *)
 (*                      unresolved attempt is resolved and its charge      *)
 (*                      recorded before a new prepared row (I16, EQ1)      *)
-(*   OrphanCoded        an external pause orphaned by a restart is         *)
-(*                      resolved EXTERNAL_AGENT_RECOVERY_UNKNOWN (W10)     *)
+(*   OrphanCoded        an external pause orphaned by a restart has its    *)
+(*                      requests resolved, then is abandoned resumably     *)
+(*                      (W10; resume everywhere revises L4 D-112)          *)
 (*                                                                         *)
 (* Features select the part a configuration explores: "external" (X),     *)
 (* "resume", "steer", "cancel", "interrupt", "extpause" (X asks for        *)
@@ -146,9 +147,8 @@ Max(S) == CHOOSE x \in S : \A y \in S : y <= x
 Min(S) == CHOOSE x \in S : \A y \in S : x <= y
 Row(t, r, a, k, p, v, e) == [t |-> t, r |-> r, a |-> a, k |-> k, p |-> p, v |-> v, e |-> e]
 
-LifeTypes == {"admitted", "running", "paused", "completed", "cancelled", "failed",
-              "abandoned", "unrecoverable"}
-Terminals == {"completed", "cancelled", "failed", "abandoned", "unrecoverable"}
+LifeTypes == {"admitted", "running", "paused", "completed", "cancelled", "failed", "abandoned"}
+Terminals == {"completed", "cancelled", "failed", "abandoned"}
 
 LifeIdx(r) == {i \in DOMAIN log : log[i].r = r /\ log[i].t \in LifeTypes}
 LastOf(r) == IF LifeIdx(r) = {} THEN None ELSE log[Max(LifeIdx(r))].t
@@ -228,9 +228,11 @@ Orphan(r) ==
     \/ Live(r) /\ r \notin drivers
     \/ OrphanCoded /\ r = X /\ LastOf(X) = "paused" /\ Pending(X) /\ X \notin drivers
 Orphans == {r \in Runs : Orphan(r)}
+\* An orphaned external pause: its requests are resolved first (never left open, D-112), then the run is abandoned
+\* RUN_ABANDONED like any orphan, so Resume reattaches the vendor session and the agent asks again.
 AbandonRows(r) ==
     IF r = X /\ LastOf(X) = "paused"
-      THEN <<H("recovered", X, Att(X), None, FALSE, 0), H("unrecoverable", X, Att(X), None, TRUE, 0)>>
+      THEN <<H("recovered", X, Att(X), None, FALSE, 0), H("abandoned", X, Att(X), None, TRUE, 0)>>
       ELSE <<H("abandoned", r, Att(r), None, Executed(r), 0)>>
 RecoveryRows ==
     IF Has("gateway") /\ ResolveFirst /\ Unresolved # {}
@@ -836,7 +838,7 @@ NoTransientTerminal ==
 
 \* I13: an abandonment is the claim or follows it, so no earlier writer appends after it.
 AbandonIsClaim ==
-    \A i, j \in DOMAIN log : (i < j /\ log[i].t \in {"abandoned", "unrecoverable"}) => log[j].e >= log[i].e
+    \A i, j \in DOMAIN log : (i < j /\ log[i].t = "abandoned") => log[j].e >= log[i].e
 
 \* L2a D12: every row of a live attempt carries the epoch the attempt started under.
 AttemptTypes == {"admitted", "running", "paused", "completed", "cancelled", "failed", "commit",

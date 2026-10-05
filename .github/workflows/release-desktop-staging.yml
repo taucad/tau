@@ -1,0 +1,118 @@
+# Staging desktop releases: a signed desktop build for taucad.dev, on demand.
+#
+# Dispatch this from `main` (GitHub or the Command Center). It creates a
+# `desktop-staging@<version>-staging.<n>` tag at the newest `main` commit whose
+# CI push run succeeded (Release build refuses any other, and main's head is
+# often still running or superseded), and a GitHub
+# prerelease for it with the tau-release-bot token, and that release starts
+# `release-build.yml`, which builds the desktop app exactly as it builds a
+# production release, packaged for the staging channel:
+#
+#   - It talks to taucad.dev and api.taucad.dev, never tau.new.
+#   - It never checks for updates, and its prerelease carries no update feeds
+#     and is never marked latest, so installed production apps never see it.
+#   - macOS is Developer ID signed and notarized from the `desktop-staging`
+#     environment, which holds the same Apple values as `desktop`; Linux and
+#     Windows are unsigned, as in production.
+#
+# `<version>` is the desktop manifest version on main and `<n>` is this
+# workflow's run number, so every dispatch makes a new prerelease. Nothing here
+# touches a `desktop@*` release, the production update feed or production.
+name: Release desktop to staging
+run-name: Release desktop to staging
+
+on:
+  workflow_dispatch:
+
+permissions: {}
+
+concurrency:
+  group: release-desktop-staging
+  cancel-in-progress: false
+
+jobs:
+  prerelease:
+    name: Create the staging desktop prerelease
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+    environment:
+      name: release-pr
+      deployment: false
+    steps:
+      - name: Find the newest main commit with green CI
+        id: target
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          STAGING_SUPPORT_SHA: cd8f118318e7720aeace25d6871c6b478f352673
+        run: |
+          set -euo pipefail
+          sha=$(gh run list --workflow ci.yml --branch main --event push --status success --limit 1 --json headSha --jq '.[0].headSha // empty')
+          if [ -z "$sha" ]; then
+            echo "::error::No ci.yml push run on main has succeeded yet."
+            exit 1
+          fi
+          # Release build runs from the tag's own commit, so it must already
+          # build staging releases: the first such main commit is #331.
+          status=$(gh api "repos/${GH_REPO}/compare/${STAGING_SUPPORT_SHA}...${sha}" --jq .status)
+          if [ "$status" != ahead ] && [ "$status" != identical ]; then
+            echo "::error::The newest main commit with green CI, $sha, predates staging release support ($STAGING_SUPPORT_SHA). Run this again once main CI is green on a newer commit."
+            exit 1
+          fi
+          echo "Releasing $sha, the newest main commit with green CI."
+          echo "sha=$sha" >> "$GITHUB_OUTPUT"
+
+      - name: Mint tau-release-bot token
+        id: bot
+        uses: actions/create-github-app-token@064492a9a1762067169d50c792a7dc02bc3d1254 # v2.0.0
+        with:
+          app-id: ${{ secrets.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: ${{ github.event.repository.name }}
+          permission-contents: write
+
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          ref: ${{ steps.target.outputs.sha }}
+          persist-credentials: false
+
+      - name: Create the tag and prerelease
+        id: release
+        env:
+          GH_TOKEN: ${{ steps.bot.outputs.token }}
+          GH_REPO: ${{ github.repository }}
+          TARGET: ${{ steps.target.outputs.sha }}
+          RUN_NUMBER: ${{ github.run_number }}
+        run: |
+          set -euo pipefail
+          version=$(jq -r .version apps/desktop/package.json)
+          if ! [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "::error::apps/desktop/package.json version $version is not MAJOR.MINOR.PATCH"
+            exit 1
+          fi
+          tag="desktop-staging@${version}-staging.${RUN_NUMBER}"
+          cat > "$RUNNER_TEMP/notes.md" <<NOTES
+          Staging build of the Tau desktop app from \`${TARGET}\` on \`main\`.
+
+          It signs in to and works against https://taucad.dev, never production, and it does not check for updates. Install a newer staging prerelease by hand.
+          NOTES
+          sed -i 's/^          //' "$RUNNER_TEMP/notes.md"
+          gh release create "$tag" --target "$TARGET" --title "Tau desktop staging ${version} (build ${RUN_NUMBER})" \
+            --notes-file "$RUNNER_TEMP/notes.md" --prerelease --latest=false
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+
+      - name: Summary
+        env:
+          TAG: ${{ steps.release.outputs.tag }}
+          REPOSITORY: ${{ github.repository }}
+        run: |
+          {
+            echo "Created the prerelease [$TAG](https://github.com/$REPOSITORY/releases/tag/$(jq -rn --arg t "$TAG" '$t | @uri'))."
+            echo "**Release build** packages it and attaches the archives once main CI is green on this commit."
+          } >> "$GITHUB_STEP_SUMMARY"

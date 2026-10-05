@@ -21,6 +21,7 @@ const pageCeilings: Readonly<Record<string, number>> = {
   // Raised 400 -> 450 on 2026-09-06 for the tscircuit kernel row (charter D11).
   'runtime/api/kernels.mdx': 450,
   'runtime/api/middleware.mdx': 500,
+  'runtime/api/published-assemblies.mdx': 450,
   'runtime/api/testing.mdx': 500,
   'runtime/api/transport.mdx': 1450,
   'runtime/api/types.mdx': 550,

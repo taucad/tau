@@ -47,6 +47,7 @@
     "api/transport",
     "api/filesystem",
     "api/types",
+    "api/published-assemblies",
     "api/configuration",
     "api/jobs",
     "api/machines",

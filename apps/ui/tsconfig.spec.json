@@ -35,6 +35,7 @@
     "tests/**/*.test.tsx",
     "server.ts",
     "server.test.ts",
+    "netlify/edge-functions/*.ts",
     "scripts/**/*.ts",
     "scripts/**/*.mts",
     "vite-environment.d.ts",

@@ -1,0 +1,19 @@
+# Separate marketing preview site only. Never apply to the UI production site.
+[build]
+# Set the Netlify UI package directory to apps/www so this file is selected.
+# Install from the repository root, where the pnpm workspace and lockfile live.
+base = "."
+command = "node apps/www/scripts/build.mjs"
+publish = "apps/www/dist"
+
+[build.environment]
+NODE_VERSION = "24"
+WWW_LAUNCH = "true"
+# Canonical, social and sitemap URLs name tau.new, where the UI site proxies these pages.
+WWW_ORIGIN = "https://tau.new"
+PNPM_FLAGS = "--filter @taucad/www... --frozen-lockfile --ignore-scripts"
+
+# Security and cache headers are emitted in dist/_headers; WWW_LAUNCH drops the preview noindex.
+# No app proxy or production domain is enabled in this preview configuration.
+
+# No functions, app build, Nx Cloud token or private runtime environment is used.

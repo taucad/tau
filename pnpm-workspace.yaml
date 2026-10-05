@@ -322,6 +322,7 @@ catalog:
   '@parcel/watcher': ^2.6.0
   cheerio: 1.2.0
   meshoptimizer: 1.1.1
+  sharp: 0.34.5
 catalogs:
   electron-vite7:
     electron-vite: 5.0.0

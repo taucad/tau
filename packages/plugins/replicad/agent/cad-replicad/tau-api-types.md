@@ -3,12 +3,12 @@
 11 top-level symbols. Signatures are verbatim typescript.
 
 // A shape with optional display and material metadata for rendering
-// Remarks: Returned from a Replicad model's `main()` function to control per-shape appearance in both GLTF preview rendering and STEP export.
+// Remarks: Returned from a Replicad model's `main()` function to control per-shape appearance in GLTF preview rendering. Native BRep shapes also support STEP; imported MeshShape geometry remains mesh-only.
 ShapeConfig: {
-    shape: AnyShape;
+    shape: AnyShape | MeshShape;
     name?: string;
     strokeType?: string;
-    /** Physical density in g/cm³ for STEP mass computation. */
+    /** Authored density in g/cm³ for physical inspection and native STEP export. */
     density?: number;
     interfaces?: InterfaceDeclarations;
 } & ({
@@ -27,13 +27,13 @@ ShapeConfig: {
     roughness?: never;
 })
 
-  shape: AnyShape
+  shape: AnyShape | MeshShape
 
   name: string
 
   strokeType: string
 
-  // Physical density in g/cm³ for STEP mass computation
+  // Authored density in g/cm³ for physical inspection and native STEP export
   density: number
 
   interfaces: InterfaceDeclarations

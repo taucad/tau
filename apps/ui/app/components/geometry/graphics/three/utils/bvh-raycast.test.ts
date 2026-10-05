@@ -4,6 +4,10 @@ import { isSectionRemoved, resolveSectionPieces } from '#components/geometry/gra
 import type { SectionCut } from '#components/geometry/graphics/section-cuts.js';
 import * as bvhCache from '#components/geometry/graphics/three/utils/bvh-cache.js';
 import { raycastFirstVisibleMeshHit } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
+import {
+  setModelComponentInstanceSlots,
+  getModelComponentHitOwner,
+} from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import type { RaycastClipState } from '#components/geometry/graphics/three/utils/bvh-raycast.js';
 
 function createTriangleMesh(z: number): THREE.Mesh {
@@ -296,5 +300,63 @@ describe('raycastFirstVisibleMeshHit', () => {
 
     expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh] })?.point.y).toBeCloseTo(0);
     expect(raycastFirstVisibleMeshHit({ raycaster, meshes: [mesh], clipping: clipOf(cutaway) })).toBeUndefined();
+  });
+});
+
+describe('real instance BVH hit oracle', () => {
+  it('should match stock Three hits, clipping and near/far distance while retaining canonical slot identity', () => {
+    const source = createDoubleTriangleMesh();
+    const batch = new THREE.InstancedMesh(source.geometry, source.material, 2);
+    batch.setMatrixAt(0, new THREE.Matrix4().makeTranslation(8, 0, 0));
+    batch.setMatrixAt(1, new THREE.Matrix4().makeTranslation(0, 0, 0));
+    setModelComponentInstanceSlots(batch, [
+      { owner: { unitId: 'u', componentId: 'far' }, sourceObject: source },
+      { owner: { unitId: 'u', componentId: 'near' }, sourceObject: source },
+    ]);
+    batch.position.set(3, 2, -5);
+    batch.scale.set(2, 0.5, 3);
+    batch.updateMatrixWorld(true);
+    const ray = new THREE.Raycaster(new THREE.Vector3(3, 2, 0), new THREE.Vector3(0, 0, -1));
+    try {
+      const stock = ray.intersectObject(batch, false)[0]!;
+      const actual = raycastFirstVisibleMeshHit({ raycaster: ray, meshes: [batch] });
+      expect(actual?.object).toBe(batch);
+      expect(actual?.instanceId).toBe(stock.instanceId);
+      expect(actual?.faceIndex).toBe(stock.faceIndex);
+      expect(actual?.point.distanceTo(stock.point)).toBeCloseTo(0);
+      expect(actual?.distance).toBeCloseTo(stock.distance);
+      expect(actual && getModelComponentHitOwner(actual)).toEqual({ unitId: 'u', componentId: 'near' });
+      ray.far = stock.distance - 0.01;
+      expect(raycastFirstVisibleMeshHit({ raycaster: ray, meshes: [batch] })).toBeUndefined();
+      ray.far = Infinity;
+      const cut: SectionCut = { id: 'cut', kind: 'plane', plane: 'xy', offset: -9, isFlipped: false };
+      const clipping = clipOf(cut);
+      const kept = ray
+        .intersectObject(batch, false)
+        .find((hit) => !isSectionRemoved([hit.point.x, hit.point.y, hit.point.z], clipping.pieces));
+      const clipped = raycastFirstVisibleMeshHit({ raycaster: ray, meshes: [batch], clipping });
+      expect(clipped?.instanceId).toBe(kept?.instanceId);
+      expect(clipped?.distance).toBeCloseTo(kept!.distance);
+      const coarse = source.geometry.clone();
+      coarse.setDrawRange(0, 3);
+      batch.geometry = coarse;
+      try {
+        const fullEvidence = raycastFirstVisibleMeshHit({ raycaster: ray, meshes: [batch], clipping });
+        expect(fullEvidence?.distance).toBeCloseTo(kept!.distance);
+        expect(fullEvidence?.faceIndex).toBe(kept!.faceIndex);
+        expect(fullEvidence && getModelComponentHitOwner(fullEvidence)?.componentId).toBe('near');
+      } finally {
+        batch.geometry = source.geometry;
+        coarse.dispose();
+      }
+      batch.dispose();
+      expect(raycastFirstVisibleMeshHit({ raycaster: ray, meshes: [batch] })).toBeUndefined();
+    } finally {
+      batch.dispose();
+      source.geometry.dispose();
+      for (const material of Array.isArray(source.material) ? source.material : [source.material]) {
+        material.dispose();
+      }
+    }
   });
 });

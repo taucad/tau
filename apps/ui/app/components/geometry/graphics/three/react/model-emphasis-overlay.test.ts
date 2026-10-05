@@ -1,3 +1,7 @@
+import {
+  setModelComponentInstanceSlots,
+  getModelComponentInstanceSlot,
+} from '#components/geometry/graphics/three/utils/model-component-owner.js';
 // @vitest-environment node
 import { describe, expect, it, vi } from 'vitest';
 import {
@@ -8,6 +12,7 @@ import {
   DoubleSide,
   Matrix4,
   Mesh,
+  InstancedMesh,
   MeshStandardMaterial,
   OneFactor,
   PerspectiveCamera,
@@ -21,6 +26,7 @@ import {
   modelEmphasisOverlayPriority,
   renderModelEmphasisMask,
   syncModelEmphasisFrame,
+  getModelEmphasisInstanceBytes,
   syncModelEmphasisProxies,
 } from '#components/geometry/graphics/three/react/model-emphasis-overlay.js';
 import { createSectionClip } from '#components/geometry/graphics/three/materials/section-clip.js';
@@ -246,4 +252,78 @@ describe('model emphasis registry', () => {
     expect(getModelEmphasisSet(root)).toBe(emptyModelEmphasisSet);
     expect(listener).not.toHaveBeenCalled();
   });
+});
+
+describe('actual batch slot emphasis lifetime', () => {
+  it.each(['webgl', 'webgpu'] as const)(
+    'should draw only the selected slots with one matrix backing array per style in %s',
+    (backend) => {
+      const resources = createModelEmphasisResources(backend, createSectionClip(backend));
+      const template = makeSource();
+      const source = new InstancedMesh(template.geometry, template.material, 1000);
+      const slots = Array.from({ length: 1000 }, (_, id) => ({
+        owner: { unitId: 'unit', componentId: `part:${id}` },
+        sourceObject: template,
+      }));
+      setModelComponentInstanceSlots(source, slots);
+      for (let id = 0; id < 1000; id += 1) {
+        source.setMatrixAt(id, new Matrix4().makeTranslation(id * 3, 0, 0));
+      }
+      source.instanceMatrix.needsUpdate = true;
+      source.position.x = 30;
+      source.updateMatrixWorld(true);
+      const selected = [3, 900];
+      const evidence = selected.map((id) => getModelComponentInstanceSlot(source, id));
+      if (!evidence[0] || !evidence[1]) {
+        throw new Error('Expected live candidate slot evidence');
+      }
+      const geometryDispose = vi.spyOn(template.geometry, 'dispose');
+      syncModelEmphasisProxies(resources, {
+        hover: [],
+        selected: [],
+        selectedInstances: [{ source, instanceIds: selected, slots: [evidence[0], evidence[1]] }],
+      });
+      const { mask, visibility, wash } = resources.proxies[0]!;
+      if (
+        !(mask instanceof InstancedMesh) ||
+        !(visibility instanceof InstancedMesh) ||
+        !(wash instanceof InstancedMesh)
+      ) {
+        throw new TypeError('Expected actual batch proxies');
+      }
+      expect(mask.count).toBe(2);
+      expect(mask.instanceMatrix).toBe(visibility.instanceMatrix);
+      expect(mask.instanceMatrix).toBe(wash.instanceMatrix);
+      expect(getModelEmphasisInstanceBytes(resources)).toEqual({ cpuBytes: 128, gpuBytesEstimate: 128, proxyCount: 3 });
+      const sampled = new Matrix4();
+      mask.getMatrixAt(1, sampled);
+      expect(sampled.elements[12]).toBe(2700);
+      syncModelEmphasisFrame(resources);
+      expect(mask.matrixWorld.elements[12]).toBe(30);
+      const { version } = mask.instanceMatrix;
+      syncModelEmphasisFrame(resources);
+      expect(mask.instanceMatrix.version).toBe(version);
+      source.setMatrixAt(900, new Matrix4().makeTranslation(2705, 0, 0));
+      source.instanceMatrix.needsUpdate = true;
+      syncModelEmphasisFrame(resources);
+      mask.getMatrixAt(1, sampled);
+      expect(sampled.elements[12]).toBe(2705);
+      expect(mask.instanceMatrix.version).toBe(version + 1);
+      source.dispose();
+      syncModelEmphasisFrame(resources);
+      expect(mask.visible).toBe(false);
+      expect(visibility.visible).toBe(false);
+      expect(wash.visible).toBe(false);
+      const disposeMask = vi.spyOn(mask, 'dispose');
+      syncModelEmphasisProxies(resources, emptyModelEmphasisSet);
+      expect(disposeMask).toHaveBeenCalledOnce();
+      expect(getModelEmphasisInstanceBytes(resources)).toEqual({ cpuBytes: 0, gpuBytesEstimate: 0, proxyCount: 0 });
+      expect(geometryDispose).not.toHaveBeenCalled();
+      resources.dispose();
+      template.geometry.dispose();
+      for (const material of Array.isArray(template.material) ? template.material : [template.material]) {
+        material.dispose();
+      }
+    },
+  );
 });

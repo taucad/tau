@@ -121,6 +121,15 @@ export function useViewSettingsSync({
   const sectionAdoptionPendingRef = useRef(false);
   const pendingCameraRecordRef = useRef<WorkbenchView | undefined>(undefined);
   const pendingSectionRecordRef = useRef<WorkbenchView | undefined>(undefined);
+  const pendingLocalSectionRef = useRef<
+    | {
+        section: PersistedSectionView;
+        writes: Array<{ section: PersistedSectionView; saved: boolean }>;
+      }
+    | undefined
+  >(undefined);
+  const observedRecordRef = useRef(record);
+  const applyingSectionRecordRef = useRef(false);
 
   // Select each persistable field individually so that each selector returns
   // a stable primitive/reference value and only triggers re-renders when it
@@ -163,8 +172,27 @@ export function useViewSettingsSync({
     if (!record) {
       return;
     }
+    observedRecordRef.current = record;
+    const localSection = pendingLocalSectionRef.current;
+    const latestSectionWrite = localSection?.writes.at(-1);
+    if (
+      localSection &&
+      latestSectionWrite?.saved &&
+      sectionViewEqual(localSection.section, latestSectionWrite.section) &&
+      sectionViewEqual(record.section, latestSectionWrite.section)
+    ) {
+      pendingLocalSectionRef.current = undefined;
+    }
+    const ownSectionEcho = pendingLocalSectionRef.current?.writes.some((write) =>
+      sectionViewEqual(write.section, record.section),
+    );
     const acknowledge = (): void => {
-      if (session && !cameraAdoptionPendingRef.current && !sectionAdoptionPendingRef.current) {
+      if (
+        session &&
+        !cameraAdoptionPendingRef.current &&
+        !sectionAdoptionPendingRef.current &&
+        !pendingLocalSectionRef.current?.writes.some((write) => sectionViewEqual(write.section, record.section))
+      ) {
         onRecordApplied?.(record);
       }
     };
@@ -246,18 +274,16 @@ export function useViewSettingsSync({
       pendingCameraRecordRef.current = cameraRecord;
       cameraAdoptionPendingRef.current = true;
     }
-    if (previous && recordLocalPatch?.section !== undefined) {
+    if (Boolean(ownSectionEcho) || (previous !== undefined && recordLocalPatch?.section !== undefined)) {
       pendingSectionRecordRef.current = undefined;
       sectionAdoptionPendingRef.current = false;
-    }
-    if (
+    } else if (
       !previous ||
-      (recordLocalPatch?.section === undefined && !sameRecordField(previous.section, record.section)) ||
-      pendingSectionRecordRef.current
+      !sameRecordField(previous.section, record.section) ||
+      Boolean(pendingSectionRecordRef.current)
     ) {
-      if (recordLocalPatch?.section === undefined || !previous) {
-        pendingSectionRecordRef.current = record;
-      }
+      pendingLocalSectionRef.current = undefined;
+      pendingSectionRecordRef.current = record;
       sectionAdoptionPendingRef.current = true;
       const apply = (): void => {
         const wait = poseSettle - (Date.now() - lastSectionEmissionRef.current);
@@ -267,10 +293,12 @@ export function useViewSettingsSync({
         }
         const latest = pendingSectionRecordRef.current;
         if (latest) {
-          graphicsRef.send({
-            type: 'adoptSectionView',
-            section: latest.section,
-          });
+          applyingSectionRecordRef.current = true;
+          try {
+            graphicsRef.send({ type: 'adoptSectionView', section: latest.section });
+          } finally {
+            applyingSectionRecordRef.current = false;
+          }
         }
         pendingSectionRecordRef.current = undefined;
         sectionAdoptionPendingRef.current = false;
@@ -433,8 +461,20 @@ export function useViewSettingsSync({
         schemaVersion: 12,
       };
 
-      // Shallow comparison to avoid unnecessary writes
-      if (previous && shallowEqual(previous, newSettings) && previousGridUnitRef.current === gridUnit) {
+      const poseToWrite =
+        includePose &&
+        !cameraAdoptionPendingRef.current &&
+        camera.cameraView !== undefined &&
+        !(adoptedPoseRef.current && cameraViewEqual(adoptedPoseRef.current, camera.cameraView)) &&
+        !(
+          firstFrameReceiptRef.current &&
+          !firstFrameReceiptRef.current.consumed &&
+          cameraViewEqual(firstFrameReceiptRef.current.view, camera.cameraView)
+        ) &&
+        !(record?.camera.kind === 'pose' && cameraViewEqual(record.camera, camera.cameraView));
+      const poseView = poseToWrite ? camera.cameraView : undefined;
+      // A FOV edit can cache the live view before its pose settles; that pose still needs a durable write.
+      if (previous && shallowEqual(previous, newSettings) && previousGridUnitRef.current === gridUnit && !poseView) {
         return;
       }
 
@@ -502,7 +542,39 @@ export function useViewSettingsSync({
               : [...(base.kernelViews ?? []), { id: selected, camera: changedCamera }]
             : base.kernelViews,
       };
-      void writeRecord(next);
+      const local = pendingLocalSectionRef.current;
+      const sectionWrite =
+        local && sectionViewEqual(local.section, next.section) ? { section: next.section, saved: false } : undefined;
+      if (sectionWrite) {
+        local?.writes.push(sectionWrite);
+      }
+      async function saveViewRecord(): Promise<void> {
+        // The record store reports write errors; failed saves must release local echo protection.
+        const saved = await writeRecord(next).catch(() => false);
+        if (!sectionWrite) {
+          return;
+        }
+        sectionWrite.saved = saved;
+        const { current } = pendingLocalSectionRef;
+        if (
+          current?.writes.at(-1) === sectionWrite &&
+          sectionViewEqual(current.section, sectionWrite.section) &&
+          (!saved ||
+            (observedRecordRef.current && sectionViewEqual(observedRecordRef.current.section, sectionWrite.section)))
+        ) {
+          pendingLocalSectionRef.current = undefined;
+          if (
+            saved &&
+            session &&
+            !cameraAdoptionPendingRef.current &&
+            !sectionAdoptionPendingRef.current &&
+            observedRecordRef.current
+          ) {
+            onRecordApplied?.(observedRecordRef.current);
+          }
+        }
+      }
+      void saveViewRecord();
     };
 
     persistRef.current = persist;
@@ -526,6 +598,7 @@ export function useViewSettingsSync({
     record,
     recordReady,
     writeRecord,
+    onRecordApplied,
     entryPath,
   ]);
 
@@ -543,14 +616,19 @@ export function useViewSettingsSync({
       lastCameraEmissionRef.current = Date.now();
       restartSettle(true);
     });
-    /* The graphics actor emits for every event it handles; only a new cut list is a change. An edit that
-     * changes no value keeps the list, so comparing references is enough. */
-    let { sectionCuts } = graphicsRef.getSnapshot().context;
+    /* The graphics actor emits for every event it handles; only a new cut list or activation changes the persisted section. */
+    let { sectionCuts, isSectionViewActive: sectionActive } = graphicsRef.getSnapshot().context;
     const sectionSubscription = graphicsRef.subscribe(({ context }) => {
-      if (context.sectionCuts === sectionCuts) {
+      if (context.sectionCuts === sectionCuts && context.isSectionViewActive === sectionActive) {
         return;
       }
-      ({ sectionCuts } = context);
+      ({ sectionCuts, isSectionViewActive: sectionActive } = context);
+      if (!applyingSectionRecordRef.current) {
+        pendingLocalSectionRef.current = {
+          section: { active: context.isSectionViewActive, cuts: sectionCuts.map((cut) => toPersistedSectionCut(cut)) },
+          writes: pendingLocalSectionRef.current?.writes ?? [],
+        };
+      }
       lastSectionEmissionRef.current = Date.now();
       restartSettle(false);
     });
@@ -559,6 +637,7 @@ export function useViewSettingsSync({
       cameraSubscription?.unsubscribe();
       sectionSubscription.unsubscribe();
       if (settleTimer === undefined) {
+        pendingLocalSectionRef.current = undefined;
         return;
       }
       /* The pane can close, the file can change or the route can leave inside the settle window.
@@ -566,6 +645,8 @@ export function useViewSettingsSync({
        * the flush. `persist` only sends when the settings actually changed. */
       clearTimeout(settleTimer);
       persistRef.current(true);
+      // Keep the durable flush, but its completion no longer owns this graphics session.
+      pendingLocalSectionRef.current = undefined;
     };
   }, [graphicsRef, session]);
 }

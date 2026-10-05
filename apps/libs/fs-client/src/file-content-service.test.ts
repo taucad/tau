@@ -1323,6 +1323,114 @@ describe('FileContentService', () => {
   });
 
   describe('readRawBytes', () => {
+    it.each([
+      { workspaceRoot: '/projects/fixture', prefix: '' },
+      { workspaceRoot: '/', prefix: 'projects/fixture/' },
+      { workspaceRoot: '/', prefix: 'checkouts/fixture/' },
+      { workspaceRoot: '/', prefix: 'previews/fixture/' },
+    ])(
+      'should read managed scene authority bytes without an event at $workspaceRoot with $prefix',
+      async ({ workspaceRoot, prefix }) => {
+        const harness = createHarness({ workspaceRoot });
+        const path = `${prefix}.tau/artifacts/reusable-parts/${'a'.repeat(64)}/scene.json`;
+        const previous = new TextEncoder().encode('{"generation":1}');
+        const current = new TextEncoder().encode('{"generation":2}');
+        vi.mocked(harness.proxy.stat).mockResolvedValue({
+          type: 'file',
+          size: previous.byteLength,
+          mtimeMs: 0,
+          contentKind: 'text',
+          lineCount: 1,
+        });
+        vi.mocked(harness.proxy.readFile).mockResolvedValue(previous);
+        try {
+          const ready = await harness.service.resolve(path);
+          expectTextContent(ready, previous);
+          vi.mocked(harness.proxy.readFile).mockResolvedValue(current);
+          expect(current.byteLength).toBe(previous.byteLength);
+          const raw = await harness.service.readRawBytes(path);
+          expect(raw).toEqual(current);
+          expect(raw).not.toBe(current);
+          expect(harness.service.peek(path)).toEqual(previous);
+          expect(harness.service.peekOutcome(path)).toBe(ready);
+          expect(harness.proxy.readFile).toHaveBeenCalledTimes(2);
+        } finally {
+          harness.service.dispose();
+          harness.disposeChannel();
+        }
+      },
+    );
+
+    it.each([
+      `node_modules/fixture/.tau/artifacts/reusable-parts/${'a'.repeat(64)}/scene.json`,
+      `other/fixture/.tau/artifacts/reusable-parts/${'a'.repeat(64)}/scene.json`,
+      `.tau/artifacts/reusable-parts/${'a'.repeat(64)}/mesh.glb`,
+      'scene.json',
+      `other/.tau/artifacts/reusable-parts/${'a'.repeat(64)}/scene.json`,
+      `.tau/artifacts/reusable-parts/${'A'.repeat(64)}/scene.json`,
+    ])('should retain ordinary cache reuse for %s', async (path) => {
+      const harness = createHarness({ workspaceRoot: '/' });
+      const bytes = new Uint8Array([0, 1, 2]);
+      vi.mocked(harness.proxy.stat).mockResolvedValue({
+        type: 'file',
+        size: bytes.byteLength,
+        mtimeMs: 0,
+        contentKind: 'binary',
+      });
+      vi.mocked(harness.proxy.readFile).mockResolvedValue(bytes);
+      try {
+        const ready = await harness.service.resolve(path);
+        const raw = await harness.service.readRawBytes(path);
+        raw[1] = 99;
+        expect(await harness.service.readRawBytes(path)).toEqual(bytes);
+        expect(harness.service.peekOutcome(path)).toBe(ready);
+        expect(harness.proxy.readFile).toHaveBeenCalledTimes(1);
+      } finally {
+        harness.service.dispose();
+        harness.disposeChannel();
+      }
+    });
+
+    it('should read the new root while worker refresh preserves the previous ready outcome', async () => {
+      const path = '.tau/assemblies/fixture/scene.json';
+      const previous = new TextEncoder().encode('{"generation":1}');
+      const current = new TextEncoder().encode('{"generation":2}');
+      vi.mocked(proxy.stat).mockResolvedValue({
+        type: 'file',
+        size: current.byteLength,
+        mtimeMs: 0,
+        contentKind: 'text',
+        lineCount: 1,
+      });
+      vi.mocked(proxy.readFile).mockResolvedValue(previous);
+      const previousOutcome = await service.resolve(path);
+      expectTextContent(previousOutcome, previous);
+      expect(service.peek(path)).toEqual(previous);
+      expect(current.byteLength).toBe(previous.byteLength);
+
+      const refresh = Promise.withResolvers<Uint8Array<ArrayBuffer>>();
+      vi.mocked(proxy.readFile).mockReturnValueOnce(refresh.promise).mockResolvedValue(current);
+      emitFileChanged(fileWritten(path));
+      await vi.waitFor(() => {
+        expect(proxy.readFile).toHaveBeenCalledTimes(2);
+      });
+
+      let raw: Uint8Array<ArrayBuffer>;
+      try {
+        expect(service.peekOutcome(path)).toBe(previousOutcome);
+        raw = await service.readRawBytes(path);
+        expect(service.peekOutcome(path)).toBe(previousOutcome);
+      } finally {
+        refresh.resolve(current);
+      }
+      await vi.waitFor(() => {
+        expectTextContent(service.peekOutcome(path), current);
+      });
+
+      expect(raw).toEqual(current);
+      expect(raw).not.toBe(current);
+    });
+
     it('should reuse classified binary bytes without another provider read and preserve copy isolation', async () => {
       const bytes = new Uint8Array(5 * 1024 * 1024);
       bytes[1] = 1;

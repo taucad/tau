@@ -125,7 +125,7 @@ export function ParametersWidget(
     }
   };
 
-  const types = Array.isArray(schema.type) ? schema.type.filter((candidate) => candidate !== 'null') : [];
+  const types = Array.isArray(schema.type) ? schema.type.filter((candidate: string) => candidate !== 'null') : [];
   if (types.includes('string') && (types.includes('number') || types.includes('integer'))) {
     return (
       <ParametersNumberOrString

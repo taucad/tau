@@ -2,6 +2,13 @@ import { useCallback, useState } from 'react';
 import type { Artifact, RuntimeDocument } from '@taucad/runtime';
 import { mimeTypes } from '@taucad/types/constants';
 import { toast } from '#components/ui/sonner.js';
+import { useSelector } from '@xstate/react';
+import type { ActorRefFrom } from 'xstate';
+import { selectCadDisplay } from '#machines/cad.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
+import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
+import { bestRouteForActiveKernel } from '#utils/export-formats.utils.js';
 
 type ArCapability = {
   readonly isQuickLookSupported: boolean;
@@ -64,22 +71,98 @@ function launchQuickLook(usdzBlobUrl: string): void {
  * and GLTF geometry is available. Call `activateAr()` from a user click handler
  * to export the model to USDZ via the runtime client and open AR Quick Look.
  */
-export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeDocument): ArCapability {
+export function useAr(
+  artifact: Artifact | undefined,
+  runtimeDocument?: RuntimeDocument,
+  cadRef?: ActorRefFrom<typeof cadMachine>,
+  graphicsRef?: ActorRefFrom<typeof graphicsMachine>,
+): ArCapability {
   const [isConverting, setIsConverting] = useState(false);
+  const kernelClient = useSelector(cadRef, (state) => state?.context.kernelClient);
+  const root = useSelector(cadRef, (state) => state?.context.publishedAssemblyRoot);
+  const assembly = useSelector(cadRef, (state) => state?.context.publishedAssembly);
+  const outcome = useSelector(cadRef, (state) => state?.context.latestRenderingOutcome);
+  const display = useSelector(cadRef, (state) => (state ? selectCadDisplay(state) : undefined));
+  const assemblyDisplay = display && 'admitted' in display ? display : undefined;
+  const currentHash = useSelector(cadRef, (state) =>
+    state?.context.rendering?.success ? state.context.rendering.hash : undefined,
+  );
+  const presentedKey = useSelector(graphicsRef, (state) => state?.context.gltfPresentation.presentedKey);
+  const kinematicsRef = useSelector(graphicsRef, (state) => state?.context.kinematicsRef);
+  const unitId = useSelector(graphicsRef, (state) => state?.context.modelInteractionUnitId);
+  const poseRevision = useSelector(kinematicsRef, (state) => state?.context.revision);
+  const asBuilt = useSelector(kinematicsRef, (state) =>
+    state
+      ? !unitId ||
+        Object.values(getKinematicsUnitState(state.context, unitId).coordinates).every((value) => value === 0)
+      : false,
+  );
 
-  const hasGltfArtifact = artifact?.mimeType === 'model/gltf-binary';
-  const canActivateAr = isQuickLookSupported && hasGltfArtifact && Boolean(runtimeDocument);
+  const selectedKey = assemblyDisplay?.root.digest ?? currentHash;
+  const matchesPresentation = graphicsRef ? presentedKey === selectedKey : assemblyDisplay === undefined;
+
+  const hasGltfGeometry = artifact?.mimeType === 'model/gltf-binary' || assemblyDisplay !== undefined;
+  const canActivateAr =
+    isQuickLookSupported &&
+    hasGltfGeometry &&
+    matchesPresentation &&
+    (!graphicsRef || asBuilt) &&
+    Boolean(runtimeDocument || assemblyDisplay?.document) &&
+    (!cadRef || (outcome === 'success' && (assemblyDisplay !== undefined || currentHash !== undefined))) &&
+    (!root || (assemblyDisplay?.root === root && outcome === 'success' && assembly !== undefined));
 
   const activateAr = useCallback(async () => {
-    if (!canActivateAr || !runtimeDocument) {
+    if (!canActivateAr || (!runtimeDocument && !assemblyDisplay)) {
       return;
     }
 
     setIsConverting(true);
     let blobUrl: string | undefined;
 
+    const assertCurrentSubject = () => {
+      if (
+        cadRef &&
+        (selectCadDisplay(cadRef.getSnapshot()) !== display ||
+          cadRef.getSnapshot().context.latestRenderingOutcome !== 'success')
+      ) {
+        throw new Error(
+          root ? 'The selected assembly changed during AR export.' : 'The selected model changed during AR export.',
+        );
+      }
+      if (graphicsRef && graphicsRef.getSnapshot().context.gltfPresentation.presentedKey !== selectedKey) {
+        throw new Error('The presented model changed during AR export.');
+      }
+      if (graphicsRef) {
+        const graphics = graphicsRef.getSnapshot().context;
+        const pose = graphics.kinematicsRef.getSnapshot().context;
+        if (
+          graphics.kinematicsRef !== kinematicsRef ||
+          graphics.modelInteractionUnitId !== unitId ||
+          pose.revision !== poseRevision ||
+          (unitId && Object.values(getKinematicsUnitState(pose, unitId).coordinates).some((value) => value !== 0))
+        ) {
+          throw new Error('The presented pose changed during AR export; USDZ supports the as-built pose only.');
+        }
+      }
+    };
     try {
-      const result = await runtimeDocument.export('usdz');
+      assertCurrentSubject();
+      const route = root && assembly && kernelClient && bestRouteForActiveKernel(kernelClient, 'usdz', assembly);
+      if (root && !route) {
+        throw new Error('This assembly has no qualified USDZ export route.');
+      }
+      const result =
+        route && assemblyDisplay
+          ? await assemblyDisplay.document.exportPublished({
+              publishedAssembly: { root: assemblyDisplay.root },
+              format: 'usdz',
+            })
+          : runtimeDocument
+            ? await runtimeDocument.export('usdz')
+            : undefined;
+      if (!result) {
+        throw new Error('The selected CAD document is unavailable');
+      }
       if (!result.success) {
         throw new Error(result.issues[0]?.message ?? 'USDZ export failed');
       }
@@ -94,6 +177,7 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
         );
       }
 
+      assertCurrentSubject();
       const file = result.files[0];
       blobUrl = URL.createObjectURL(new Blob([file.bytes], { type: file.mimeType }));
 
@@ -108,7 +192,20 @@ export function useAr(artifact: Artifact | undefined, runtimeDocument?: RuntimeD
 
       setIsConverting(false);
     }
-  }, [canActivateAr, runtimeDocument]);
+  }, [
+    canActivateAr,
+    kernelClient,
+    runtimeDocument,
+    root,
+    assembly,
+    display,
+    cadRef,
+    graphicsRef,
+    selectedKey,
+    kinematicsRef,
+    unitId,
+    poseRevision,
+  ]);
 
   return {
     isQuickLookSupported,

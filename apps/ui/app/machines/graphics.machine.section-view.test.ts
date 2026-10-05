@@ -2,7 +2,9 @@ import { createActor, createAsyncLogic } from 'xstate';
 import type { SnapshotFrom } from 'xstate';
 import { describe, expect, it } from 'vitest';
 import { maxSectionCuts } from '#components/geometry/graphics/section-cuts.js';
-import type { GraphicsInput } from '#machines/graphics.machine.js';
+import { contentDigest } from '@taucad/cache-core';
+import { createEmptyGlb } from '@taucad/geometry-core';
+import type { PaneRenderingProvenance, GraphicsInput } from '#machines/graphics.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 
 const createGraphicsActor = (input: GraphicsInput) =>
@@ -22,6 +24,59 @@ const startXzCut = () => {
   });
   return { actor, published, subscription };
 };
+
+describe('graphics pane rendering ownership', () => {
+  it('should bind only the matching pane record and clear it on generic, assembly and empty replacements', () => {
+    const actor = createGraphicsActor({});
+    actor.start();
+    try {
+      const sourceFile = 'main.ts';
+      const artifact: NonNullable<ReturnType<typeof actor.getSnapshot>['context']['artifact']> = {
+        mimeType: 'model/gltf-binary',
+        content: createEmptyGlb(),
+      };
+      const first: PaneRenderingProvenance = {
+        documentId: 'document',
+        evaluationId: 'evaluation',
+        requestId: 'pane-first',
+        hash: 'same-output',
+        sourceRevision: {
+          entry: sourceFile,
+          files: {
+            [sourceFile]: contentDigest({ value: `sha256:${'a'.repeat(64)}`, name: 'pane source' }),
+          },
+        },
+        isCurrent: () => true,
+      };
+      actor.send({ type: 'updateArtifact', artifact, hash: first.hash, sourceFile, paneRendering: first });
+      expect(actor.getSnapshot().context.paneRendering).toBe(first);
+      const second = { ...first, requestId: 'pane-second' };
+      actor.send({ type: 'updateArtifact', artifact, hash: second.hash, sourceFile, paneRendering: second });
+      expect(actor.getSnapshot().context.paneRendering).toBe(second);
+      expect(actor.getSnapshot().context.artifactKey).toBe(first.hash);
+      actor.send({ type: 'updateArtifact', artifact, hash: second.hash, sourceFile });
+      expect(actor.getSnapshot().context.paneRendering).toBeUndefined();
+      actor.send({ type: 'updateArtifact', artifact, hash: 'foreign-output', sourceFile, paneRendering: second });
+      expect(actor.getSnapshot().context.paneRendering).toBeUndefined();
+      actor.send({
+        type: 'updateArtifact',
+        artifact,
+        hash: second.hash,
+        sourceFile: 'foreign.ts',
+        paneRendering: second,
+      });
+      expect(actor.getSnapshot().context.paneRendering).toBeUndefined();
+      actor.send({ type: 'updateArtifact', artifact, hash: second.hash, sourceFile, paneRendering: second });
+      actor.send({ type: 'updateAssembly', key: 'assembly', units: { length: 'mm' }, sourceFile });
+      expect(actor.getSnapshot().context.paneRendering).toBeUndefined();
+      actor.send({ type: 'updateArtifact', artifact, hash: second.hash, sourceFile, paneRendering: second });
+      actor.send({ type: 'clearArtifact' });
+      expect(actor.getSnapshot().context.paneRendering).toBeUndefined();
+    } finally {
+      actor.stop();
+    }
+  });
+});
 
 describe('graphics machine durable section view', () => {
   it('should restore seeded cuts under new ids with the section on', () => {

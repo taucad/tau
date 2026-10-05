@@ -1,4 +1,6 @@
 import type { ExportResult, ExportRoute, RuntimeContentInput, RuntimeDocument } from '@taucad/runtime';
+import { selectPublishedExportRoute } from '@taucad/runtime/client';
+import type { PublishedAssembly } from '@taucad/runtime/types';
 import type { FileExtension } from '@taucad/types';
 import { fileExtensions, formatConfigurations } from '@taucad/types/constants';
 import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
@@ -18,10 +20,16 @@ export type AppRuntimeExportRoute = NonNullable<ReturnType<AppRuntimeClient['bes
 export function bestRouteForActiveKernel(
   client: AppRuntimeClient,
   format: FileExtension,
-  activeKernelId?: string,
+  activeKernelId?: string | PublishedAssembly,
 ): AppRuntimeExportRoute | undefined {
+  if (activeKernelId === undefined) {
+    return undefined;
+  }
+  if (typeof activeKernelId === 'object') {
+    return selectPublishedExportRoute({ publication: activeKernelId, capabilities: client.capabilities, format });
+  }
   const candidate = client.capabilities?.routes.find(
-    (route) => route.targetFormat === format && (!activeKernelId || route.kernelId === activeKernelId),
+    (route) => route.targetFormat === format && route.kernelId === activeKernelId,
   );
   return candidate ? client.bestRouteFor(candidate.targetFormat, { kernelId: candidate.kernelId }) : undefined;
 }
@@ -57,7 +65,7 @@ const isCatalogFormat = (value: string): value is FileExtension => fileExtension
  */
 export function deriveAvailableFormats(
   client: AppRuntimeClient | undefined,
-  activeKernelId: string | undefined,
+  activeKernelId: string | PublishedAssembly | undefined,
 ): FormatEntry[] {
   const manifest = client?.capabilities;
   if (!client || !manifest || !activeKernelId) {
@@ -74,7 +82,7 @@ export function deriveAvailableFormats(
   const formats: FormatEntry[] = [];
   for (const format of targetFormats) {
     const route = bestRouteForActiveKernel(client, format, activeKernelId);
-    if (!route || route.kernelId !== activeKernelId) {
+    if (!route || (typeof activeKernelId === 'string' && route.kernelId !== activeKernelId)) {
       continue;
     }
     formats.push({

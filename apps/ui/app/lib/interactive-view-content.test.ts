@@ -11,6 +11,13 @@ const capabilities: Pick<AppCapabilitiesManifest, 'renderCapabilities'> = {
         defaults: { includeEdges: false },
       },
     },
+    physical: {
+      renderOptions: { schema: {}, defaults: {} },
+      content: {
+        schema: { properties: { includePhysical: { type: 'boolean' } } },
+        defaults: { includePhysical: false },
+      },
+    },
     plain: { renderOptions: { schema: {}, defaults: {} } },
   },
 };
@@ -18,6 +25,10 @@ const capabilities: Pick<AppCapabilitiesManifest, 'renderCapabilities'> = {
 describe('interactiveViewContent', () => {
   it('requests supported GLB edges independently from their runtime default', () => {
     expect(interactiveViewContent('model/gltf-binary', 'native', capabilities)).toEqual({ includeEdges: true });
+  });
+  it('requests physical facts only for the selected supported GLB route', () => {
+    expect(interactiveViewContent('model/gltf-binary', 'physical', capabilities)).toEqual({ includePhysical: true });
+    expect(interactiveViewContent('image/svg+xml', 'physical', capabilities)).toBeUndefined();
   });
   it('preserves SVG and unsupported routes without GLB-only content', () => {
     expect(interactiveViewContent('image/svg+xml', 'native', capabilities)).toBeUndefined();

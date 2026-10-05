@@ -5,6 +5,7 @@ import { VirtuosoMockContext } from 'react-virtuoso';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentNode } from '@taucad/types';
 import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
+import { projectPartInspection } from '#components/geometry/cad/part-quantities.js';
 
 const mockViewport = { viewportHeight: 180, itemHeight: 30 };
 
@@ -101,5 +102,41 @@ describe('PartPropertiesPanel', () => {
     await userEvent.setup().click(screen.getByRole('button', { name: 'Retry preview' }));
     expect(retry).toHaveBeenCalledOnce();
     expect(screen.getByText('Housing')).toBeVisible();
+  });
+
+  it('shows authored density, native volume, and last-committed provenance during a preview', async () => {
+    const node = mock<GeometryComponentNode>({ id: 'housing', name: 'Housing', kind: 'part' });
+    const committedNode = mock<GeometryComponentNode>({
+      id: 'housing',
+      kind: 'part',
+      physical: {
+        volume: {
+          state: 'measured',
+          valueMm3: 12_480,
+          geometryDigest: `sha256:${'a'.repeat(64)}`,
+          method: 'occt-solid-volume',
+          validity: 'closed-solid',
+        },
+        density: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Unit-bearing physical field uses cm³ notation.
+          valueGPerCm3: 1.55,
+          provenance: 'authored-shape-config',
+        },
+      },
+    });
+    render(
+      <PartPropertiesPanel
+        node={node}
+        inspection={projectPartInspection({ node, committedNode, transientPreview: true })}
+      />,
+    );
+    expect(screen.getByText('Last committed physical facts; preview geometry is transient.')).toBeVisible();
+    expect(screen.getByText('1.55 g/cm³')).toBeVisible();
+    expect(screen.getByText('12.48 cm³')).toBeVisible();
+    expect(screen.getByText('19.34 g')).toBeVisible();
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Details' }));
+    expect(screen.getByText('Native solid volume (OCCT)')).toBeVisible();
+    expect(screen.getByText('Authored shape configuration')).toBeVisible();
+    expect(screen.getByText('Last committed geometry')).toBeVisible();
   });
 });

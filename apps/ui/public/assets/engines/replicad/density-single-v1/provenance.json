@@ -1,0 +1,103 @@
+{
+  "schemaVersion": 1,
+  "delivery": "Private app composition through existing custom WASM override; no default library or external release qualification",
+  "descriptorVariant": "custom",
+  "underlyingBuildVariant": "single-threaded",
+  "artifacts": [
+    {
+      "path": "replicad_single.mjs",
+      "sha256": "cfc514722fddc9295b93da66c9ceca8627edcf22edf463db5fd316d4bb155e27",
+      "byteLength": 60437
+    },
+    {
+      "path": "replicad_single.wasm",
+      "sha256": "9eecb79da12acf0c6270d36548feb6595191640d87bb7f7931e90da12262ccc9",
+      "byteLength": 23000363
+    }
+  ],
+  "acceptedReceiptSha256": "d3b3856e0ea4ea2abfcc7572ec63c4cf5cb3426fd0b4130d2280d52ef9744c41",
+  "source": {
+    "repository": "https://github.com/taucad/replicad",
+    "commit": "a0da7ebe3ce201aea367cdd96cbcb7ed3618c731",
+    "configSha256": "3a788a1caa5d4f68fd85f6c398c1ea6f33199672405c4f9cffd81318c3ce8255",
+    "wrapperInputs": [
+      {
+        "path": "build-config/wrappers/shape-hasher.cpp",
+        "sha256": "30dae58add61560281c02a20979b6ef58fa5a58747828c0487fb382548c86b98"
+      },
+      {
+        "path": "build-config/wrappers/shape-caster.cpp",
+        "sha256": "2ca6bbbb9c9626e2c4b7ce355a2a1d0a8b6c9dae6a48b80a19f65de04633c55b"
+      },
+      {
+        "path": "build-config/wrappers/mesh-extractor.cpp",
+        "sha256": "3831621434badf9b685f8f636b0aa8c8b4e0d5c0a665a32723c8dcab7d330c7d"
+      },
+      {
+        "path": "build-config/wrappers/edge-mesh-extractor.cpp",
+        "sha256": "5a557cbbf1d12da5de1eeac100b495faa6c1d9d419bef1ed728512218692381e"
+      },
+      {
+        "path": "build-config/wrappers/brep-io.cpp",
+        "sha256": "e7105ddc85c3dac96887675b8f18c7ef8ea0df72e81ed6f186b48a5c7e9c2519"
+      },
+      {
+        "path": "build-config/wrappers/geom2d-io.cpp",
+        "sha256": "6daadad179b2ca9e3b768e5d92cf6e1b79c587e0aab0779bb0ecc5350a6b7aad"
+      },
+      {
+        "path": "build-config/wrappers/step-model-tools.cpp",
+        "sha256": "9a991833581b60e631762fb4c370e1797b70aa832ad059fd7d6e02ddd80c4742"
+      },
+      {
+        "path": "build-config/wrappers/runtime-info.cpp",
+        "sha256": "f6aaf1cef94c24d43ce9667de840dc30e31a4b52f5cf6c58b1bc2a0404b0664a"
+      },
+      {
+        "path": "build-config/wrappers/prototype-mesh-extractor.cpp",
+        "sha256": "b9614e7386ce16328b5287bcc145eb263322cd719255e4800f39c5fcdf17da37"
+      },
+      {
+        "path": "build-config/wrappers/shape-identity.cpp",
+        "sha256": "32d05c129198e75378dabcfde6491457f26eed1c5481d4537ea7d0382137c853"
+      },
+      {
+        "path": "build-config/wrappers/boolean-batch.cpp",
+        "sha256": "59fa3318cd220ab8756123f6f5caa3dce3672075bf8e4392b5b06194559f30c9"
+      }
+    ],
+    "recipeSha256": "fae841bc7672a611d493e27186ba42accc5ca7e1ebe3944573ed70fe169c7895",
+    "image": "sha256:74e2918318e4e594f1a6a0edd16fa88b0a192e3a43157dd2d901c5de9340aa36",
+    "baselineManifestSha256": "489eafc230e590015a0d5fcddf2a8674023be3806707c8b918c9684e0ac89325",
+    "stepWriterObjectGuard": "sha2567449cf7d12bab66bcbba144e9acb7ac843c3805fff6c6661b25ceffc8767640b; source guard1950769\u21922a1afb05; exact1archive-member; exactly1of49archive hashes changes; member=objecthash",
+    "stepArchiveChanges": [
+      [
+        "cfb1f3f6594151f0bf156ddc5dbc4bf5da6f9f48b09a6a3086167e3b7fd3752f  build/occt-libraries/libTKDESTEP.a",
+        "b9e0c942acc01d573403d4d1ab4c4de3b09dae8d38c64953538c3e842c7639cd  build/occt-libraries/libTKDESTEP.a"
+      ]
+    ]
+  },
+  "buildMetadataDigests": {
+    "replicad_single.build-manifest.json": "14f3f9256a008ca1a1191d94fd1289883be4cc285fd135da89167a0387bb5ec0",
+    "replicad_single.provenance.json": "f6780de5a80d0daed8c56cb682832caacdcfca86df75ef6eb469f0f8729f60be"
+  },
+  "licenses": [
+    {
+      "path": "LICENSE",
+      "sha256": "20c17d8b8c48a600800dfd14f95d5cb9ff47066a9641ddeab48dc54aec96e331"
+    },
+    {
+      "path": "LICENSE.OCCT-Exception",
+      "sha256": "121ba3ff45b104d133fd1bd5072e1b821c20dbcf217c560f437b9e341b11e61d"
+    },
+    {
+      "path": "LICENSE.Replicad",
+      "sha256": "7a3c098c1cf5d8de05efa0b930e7c8398c221da2a59032b617057fb7f122cf70"
+    }
+  ],
+  "limitations": [
+    "Exact ordered artifact bytes must be checked by each host; URL/path does not establish provider compatibility.",
+    "Actual installed browser/desktop transport, physical UI, cold/warm and visual qualification remain separate from the accepted native consumer proof.",
+    "Published and Node/library auto assets remain unchanged; repaired pins require the same explicit custom override."
+  ]
+}

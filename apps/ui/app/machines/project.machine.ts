@@ -20,7 +20,7 @@ import { actorIdOf, eventSchemas, fromSafeAsync } from '#lib/xstate.lib.js';
 import { cadMachine, closeCadRuntime, disposeCadRuntime } from '#machines/cad.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { logMachine } from '#machines/logs.machine.js';
-import { modelInteractionMachine } from '#machines/model-interaction.machine.js';
+import { modelInteractionMachine, deriveModelInteractionUnitId } from '#machines/model-interaction.machine.js';
 import type { fileManagerMachine } from '#machines/file-manager.machine.js';
 
 /**
@@ -348,24 +348,37 @@ const createViewGraphics = ({ context, event }: ProjectArgs<'createViewGraphics'
   return { context: { viewGraphics } };
 };
 
-/** The project owns the shared manifest until its last presented GLB pane leaves. */
+/** The project owns the shared manifest until its last presented GLB or assembly pane leaves. */
 const reconcileViewManifest = (
   context: ProjectContext,
   enq: ProjectEnqueue,
   { unitId, excludedViewId }: Readonly<{ unitId: string; excludedViewId?: string }>,
 ): void => {
+  const requestedPins: string[] = [];
   for (const [viewId, graphics] of context.viewGraphics) {
     if (viewId === excludedViewId) {
       continue;
     }
-    const view = graphics.getSnapshot().context;
-    if (view.artifact?.mimeType === 'model/gltf-binary' && view.modelInteractionUnitId === unitId) {
+    const snapshot = graphics.getSnapshot();
+    if (snapshot.status !== 'active') {
+      continue;
+    }
+    const view = snapshot.context;
+    if (
+      view.gltfPresentation.requestedKey === view.artifactKey &&
+      view.artifactSourceFile !== undefined &&
+      deriveModelInteractionUnitId({ sourceFile: view.artifactSourceFile }) === unitId
+    ) {
+      requestedPins.push(view.artifactKey);
+    }
+    if (
+      (view.artifact?.mimeType === 'model/gltf-binary' || view.gltfPresentation.presentedKey !== undefined) &&
+      view.modelInteractionUnitId === unitId
+    ) {
       return;
     }
   }
-  enq.sendTo(context.modelInteractionRef, { type: 'clearManifest', unitId, source: 'viewer' });
-  enq.sendTo(context.modelInteractionRef, { type: 'clearSelection', unitId, source: 'viewer' });
-  enq.sendTo(context.modelInteractionRef, { type: 'clearFocus', unitId, source: 'viewer' });
+  enq.sendTo(context.modelInteractionRef, { type: 'clearManifest', unitId, requestedPins, source: 'viewer' });
 };
 
 const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphics'>, enq: ProjectEnqueue) => {
@@ -373,8 +386,11 @@ const destroyViewGraphics = ({ context, event }: ProjectArgs<'destroyViewGraphic
   if (!gfx) {
     return {};
   }
+  const view = gfx.getSnapshot().context;
+  const unitId =
+    view.modelInteractionUnitId ??
+    (view.artifactSourceFile ? deriveModelInteractionUnitId({ sourceFile: view.artifactSourceFile }) : undefined);
   enq.stop(gfx);
-  const unitId = gfx.getSnapshot().context.modelInteractionUnitId;
   if (unitId) {
     reconcileViewManifest(context, enq, { unitId, excludedViewId: event.viewId });
   }

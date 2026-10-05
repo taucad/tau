@@ -129,6 +129,67 @@ describe('glTF surface batches', () => {
     batches.dispose();
   });
 
+  it('should retain existing canonical instances with all slots and parent transforms while batching ordinary meshes', () => {
+    const { root, geometry, occurrences } = fixture(2);
+    const parent = new Group();
+    parent.position.set(3, -2, 1);
+    parent.rotation.z = 0.3;
+    parent.scale.setScalar(1.25);
+    root.add(parent);
+    const instances = [2, 3].map((count, index) => {
+      const material = occurrences[index]?.material;
+      if (!material) {
+        throw new Error('Expected qualified ordinary fixture material');
+      }
+      const source = new InstancedMesh(geometry, material, count);
+      source.position.set(index * 4 - 2, 1, 0);
+      source.rotation.z = -0.2;
+      for (let slot = 0; slot < count; slot++) {
+        const matrix = new Matrix4().makeRotationZ(slot * 0.15);
+        matrix.setPosition(slot * 2 - 1, slot + 0.5, 0);
+        source.setMatrixAt(slot, matrix);
+      }
+      parent.add(source);
+      cleanup.push(() => {
+        source.dispose();
+      });
+      return source;
+    });
+    const nativeBuffers = instances.map((source) => source.instanceMatrix);
+    const nativeMatrices = instances.map((source) => [...source.instanceMatrix.array]);
+    const nativeDisposal = instances.map((source) => vi.spyOn(source, 'dispose'));
+    for (const source of instances) {
+      expect(source.type).toBe('Mesh');
+      expect(source.isInstancedMesh).toBe(true);
+    }
+    const batches = createBatches(root, [...occurrences, ...instances]);
+    batches.sync();
+    for (const source of instances) {
+      expect(source.layers.mask).toBe(1);
+      expect(source.parent).toBe(parent);
+    }
+    const [batch] = batches.group.children;
+    if (!(batch instanceof InstancedMesh)) {
+      throw new Error('Expected the ordinary two-mesh presentation batch');
+    }
+    expect(batches.group.children).toHaveLength(1);
+    expect(batch.count).toBe(2);
+    expect(occurrences.map((source) => source.layers.mask)).toEqual([0, 0]);
+    parent.position.y += 7;
+    parent.rotation.z += 0.2;
+    batches.syncMatrices([parent]);
+    batches.sync();
+    expect(instances.map((source) => source.instanceMatrix)).toEqual(nativeBuffers);
+    expect(instances.map((source) => [...source.instanceMatrix.array])).toEqual(nativeMatrices);
+    expect(instances.map((source) => source.layers.mask)).toEqual([1, 1]);
+    expect(batch.count).toBe(2);
+    batches.dispose();
+    expect(occurrences.map((source) => source.layers.mask)).toEqual([1, 1]);
+    for (const dispose of nativeDisposal) {
+      expect(dispose).not.toHaveBeenCalled();
+    }
+  });
+
   it('should dispose owned instance buffers once and retain caller geometry and materials', () => {
     const { root, geometry, occurrences } = fixture(2);
     const geometryDispose = vi.spyOn(geometry, 'dispose');

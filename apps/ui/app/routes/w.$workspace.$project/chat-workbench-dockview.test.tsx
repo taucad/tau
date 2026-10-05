@@ -5,8 +5,10 @@ import userEvent from '@testing-library/user-event';
 import { isValidElement } from 'react';
 import { createPortal } from 'react-dom';
 import { Printer } from 'lucide-react';
+import { DockviewApi, DockviewComponent } from 'dockview-react';
+import { fromDockview, toDockview } from '#workbench-records/converters.js';
+import type { WorkbenchLaneNode } from '@taucad/workbench';
 import type {
-  DockviewApi,
   DockviewDidDropEvent,
   DockviewGroupPanel,
   DockviewPanelApi,
@@ -301,6 +303,7 @@ vi.mock('#components/files/file-selector.js', () => ({
 
 const {
   FileEditor,
+  applyWorkbenchRecordNode,
   handleWorkbenchDrop,
   handleWorkbenchPanelRemoved,
   isWorkbenchPanelFilesContext,
@@ -1128,6 +1131,164 @@ const openFile = (paneId: string, path: string) => ({
   path,
   name: path.split('/').pop() ?? path,
   lastAccessedAt: 1,
+});
+
+describe('current workbench record projection', () => {
+  const createRecordDockview = (): { api: DockviewApi; dispose: () => void } => {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const component = new DockviewComponent(element, {
+      createComponent: () => ({ element: document.createElement('div'), init: () => undefined }),
+    });
+    const api = new DockviewApi(component);
+    api.layout(800, 600);
+    api.fromJSON(
+      toDockview(
+        'workbench',
+        { kind: 'group', tabs: [{ kind: 'pane', pane: 'model' }] },
+        {
+          dimensions: { width: 800, height: 600 },
+        },
+      ),
+    );
+    return {
+      api,
+      dispose: () => {
+        component.dispose();
+        element.remove();
+      },
+    };
+  };
+
+  it('should retain the actual Open file tab and Files sidebar when the current portable lane is reapplied', () => {
+    const { api, dispose } = createRecordDockview();
+    try {
+      const node = fromDockview('workbench', api.toJSON());
+      openWorkbenchFiles({ api });
+      const placeholder = api.activePanel;
+      if (!placeholder || placeholder.id === 'workbench:model') {
+        throw new Error('Open files did not create its pane');
+      }
+      placeholder.api.updateParameters({ filesWidth: 280 });
+      const { group } = placeholder;
+      const applied = vi.fn<(projection: string) => void>();
+      const openFile = vi.fn();
+
+      applyWorkbenchRecordNode({ api, node, files: {}, openFile, applied });
+
+      expect(api.panels.find((candidate) => candidate.id === placeholder.id)).toBe(placeholder);
+      expect(placeholder.group).toBe(group);
+      expect(placeholder.params).toEqual({ mode: 'open-file', filesOpen: true, filesWidth: 280 });
+      expect(api.activePanel).toBe(placeholder);
+      expect(applied).toHaveBeenCalledExactlyOnceWith(JSON.stringify(node));
+      expect(openFile).not.toHaveBeenCalled();
+      render(
+        <WorkbenchPlaceholderPanel
+          api={placeholder.api}
+          containerApi={api}
+          params={{ mode: 'open-file', filesOpen: true, filesWidth: 280 }}
+        />,
+      );
+      expect(screen.getByRole('region', { name: 'Files for Open file' })).toHaveStyle({ width: '280px' });
+      expect(screen.getByTestId('file-tree')).toBeInTheDocument();
+
+      const next: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'pane', pane: 'export' }] };
+      const restored = vi.fn<(projection: string) => void>();
+      applyWorkbenchRecordNode({ api, node: next, files: {}, openFile, applied: restored });
+      expect(api.panels.map((candidate) => candidate.id)).toEqual(['workbench:export']);
+      expect(restored).toHaveBeenCalledExactlyOnceWith(JSON.stringify(fromDockview('workbench', api.toJSON())));
+    } finally {
+      dispose();
+    }
+  });
+
+  it('should preserve a temporary tab for equivalent split weights and restore a changed split weight', () => {
+    const { api, dispose } = createRecordDockview();
+    try {
+      const node: WorkbenchLaneNode = {
+        kind: 'split',
+        direction: 'row',
+        children: [
+          { kind: 'group', size: 1, tabs: [{ kind: 'pane', pane: 'model' }] },
+          { kind: 'group', size: 1, tabs: [{ kind: 'pane', pane: 'export' }] },
+        ],
+      };
+      api.fromJSON(toDockview('workbench', node, { dimensions: { width: 800, height: 600 } }));
+      const normalized = fromDockview('workbench', api.toJSON());
+      expect(normalized).toEqual({
+        kind: 'split',
+        direction: 'row',
+        children: [
+          { kind: 'group', size: 0.5, tabs: [{ kind: 'pane', pane: 'model' }] },
+          { kind: 'group', size: 0.5, tabs: [{ kind: 'pane', pane: 'export' }] },
+        ],
+      });
+      openWorkbenchFiles({ api });
+      const placeholder = api.activePanel;
+      if (!placeholder) {
+        throw new Error('Missing temporary file pane');
+      }
+      const { group } = placeholder;
+      const applied = vi.fn<(projection: string) => void>();
+      applyWorkbenchRecordNode({ api, node, files: {}, openFile: vi.fn(), applied });
+      expect(api.activePanel).toBe(placeholder);
+      expect(placeholder.group).toBe(group);
+      expect(applied).toHaveBeenCalledExactlyOnceWith(JSON.stringify(normalized));
+
+      const changed: WorkbenchLaneNode = {
+        kind: 'split',
+        direction: 'row',
+        children: [
+          { kind: 'group', size: 2, tabs: [{ kind: 'pane', pane: 'model' }] },
+          { kind: 'group', size: 1, tabs: [{ kind: 'pane', pane: 'export' }] },
+        ],
+      };
+      applyWorkbenchRecordNode({ api, node: changed, files: {}, openFile: vi.fn(), applied: vi.fn() });
+      expect(api.panels.map((candidate) => candidate.id)).toEqual(['workbench:model', 'workbench:export']);
+      const restored = fromDockview('workbench', api.toJSON());
+      if (restored.kind !== 'split') {
+        throw new Error('Changed split was not restored');
+      }
+      expect(restored.children[0]?.size).toBeCloseTo(2 / 3, 2);
+      expect(restored.children[1]?.size).toBeCloseTo(1 / 3, 2);
+    } finally {
+      dispose();
+    }
+  });
+
+  it('should keep a requested file pending until its editor pane identity is available before replacing the lane', () => {
+    const { api, dispose } = createRecordDockview();
+    try {
+      openWorkbenchFiles({ api });
+      const current = api.panels.map((candidate) => candidate.id);
+      const node: WorkbenchLaneNode = { kind: 'group', tabs: [{ kind: 'file', path: 'README.md', filesOpen: true }] };
+      const applied = vi.fn<(projection: string) => void>();
+      const openFile = vi.fn();
+      applyWorkbenchRecordNode({ api, node, files: {}, openFile, applied });
+      expect(openFile).toHaveBeenCalledExactlyOnceWith('README.md');
+      expect(applied).not.toHaveBeenCalled();
+      expect(api.panels.map((candidate) => candidate.id)).toEqual(current);
+
+      applyWorkbenchRecordNode({
+        api,
+        node,
+        files: { 'README.md': { paneId: 'pane-readme', filesWidth: 312 } },
+        openFile,
+        applied,
+      });
+      expect(api.panels.map((candidate) => candidate.id)).toEqual(['pane-readme']);
+      expect(api.panels[0]?.params).toEqual({
+        filePath: 'README.md',
+        paneId: 'pane-readme',
+        filesOpen: true,
+        filesWidth: 312,
+      });
+      expect(applied).toHaveBeenCalledExactlyOnceWith(JSON.stringify(fromDockview('workbench', api.toJSON())));
+      expect(openFile).toHaveBeenCalledOnce();
+    } finally {
+      dispose();
+    }
+  });
 });
 
 describe('normalizeFilePaneState', () => {

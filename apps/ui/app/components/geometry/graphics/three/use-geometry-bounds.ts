@@ -5,8 +5,77 @@ import { useFrame, useThree } from '@react-three/fiber';
 import { fromThreeRenderBounds } from '@taucad/three/spatial';
 import { useGraphics, useGraphicsSelector, useKinematicsRef, useRenderFrame } from '#hooks/use-graphics.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import type { SpatialBounds } from '@taucad/spatial';
+import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import { sceneTag } from '#components/geometry/graphics/three/utils/scene-tags.js';
 import type { KinematicsMachineContext } from '#machines/kinematics.machine.js';
+import type { CadAssemblyDisplay } from '#machines/cad.machine.js';
+import type { validateAdmittedAssemblyGlb } from '@taucad/geometry-core';
+
+const admittedAssemblyBounds = Symbol('admittedAssemblyBounds');
+
+type AssemblyBoundsDescriptor = Readonly<{
+  bounds: SpatialBounds;
+  unitId: string;
+  components: ReadonlyArray<Readonly<{ memberIds: readonly string[]; bounds: SpatialBounds }>>;
+  source?: Readonly<{ display: CadAssemblyDisplay; metadata: Awaited<ReturnType<typeof validateAdmittedAssemblyGlb>> }>;
+}>;
+
+type AssemblyBoundsObject = THREE.Object3D & { [admittedAssemblyBounds]?: AssemblyBoundsDescriptor };
+
+/** Attach full admitted bounds to the actual candidate scene, including definitions not yet resident. */
+export function setGltfAssemblyBounds(scene: THREE.Group, descriptor: AssemblyBoundsDescriptor): void {
+  (scene as AssemblyBoundsObject)[admittedAssemblyBounds] = descriptor;
+}
+
+/** Read the actual scene's admitted source; imported extras cannot manufacture this private symbol. */
+export function getGltfAssemblySource(object: THREE.Object3D): AssemblyBoundsDescriptor['source'] {
+  let current: THREE.Object3D | undefined = object;
+  while (current) {
+    const source = (current as AssemblyBoundsObject)[admittedAssemblyBounds]?.source;
+    if (source) {
+      return source;
+    }
+    current = current.parent ?? undefined;
+  }
+  return undefined;
+}
+
+/** Extend actual scene traversal with its privately admitted full bounds in the same render frame. */
+function includeAssemblyBounds(root: THREE.Group, target: THREE.Box3, context: KinematicsMachineContext): void {
+  root.traverse((object) => {
+    const descriptor = (object as AssemblyBoundsObject)[admittedAssemblyBounds];
+    if (!descriptor) {
+      return;
+    }
+    const unit = getKinematicsUnitState(context, descriptor.unitId);
+    const linkByComponent = new Map<string, string>();
+    if (unit.mechanism && unit.pose) {
+      for (const [linkId, link] of Object.entries(unit.mechanism.links)) {
+        for (const componentId of link.components) {
+          linkByComponent.set(componentId, linkId);
+        }
+      }
+    }
+    const include = (bounds: SpatialBounds, delta?: readonly number[]): void => {
+      const placement = object.matrixWorld.clone();
+      if (delta) {
+        placement.multiply(new THREE.Matrix4().fromArray(delta));
+      }
+      target.union(
+        new THREE.Box3(new THREE.Vector3(...bounds.min), new THREE.Vector3(...bounds.max)).applyMatrix4(placement),
+      );
+    };
+    if (linkByComponent.size === 0 || descriptor.components.length === 0) {
+      include(descriptor.bounds);
+      return;
+    }
+    for (const component of descriptor.components) {
+      const linkId = component.memberIds.map((id) => linkByComponent.get(id)).find((id) => id !== undefined);
+      include(component.bounds, linkId ? unit.pose?.linkTransforms[linkId] : undefined);
+    }
+  });
+}
 
 /** Retains Three's default object bounds while omitting presentation-only subtrees. */
 class GeometryBoundsBox extends THREE.Box3 {
@@ -119,6 +188,7 @@ export function useGeometryBounds(
     }
 
     _box3.setFromObject(innerRef.current);
+    includeAssemblyBounds(innerRef.current, _box3, kinematicsRef.getSnapshot().context);
 
     // Don't mark stable or update state when the bounding box is empty
     // (geometry hasn't loaded yet -- GltfMesh parses GLTF asynchronously)

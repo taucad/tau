@@ -1,4 +1,4 @@
-import { BoundedFileCache, WorkspaceMutationError } from '@taucad/filesystem';
+import { BoundedFileCache, WorkspaceMutationError, parseRoute } from '@taucad/filesystem';
 import type { ContentExportFilter } from '@taucad/filesystem/content-ops';
 import { sha256Bytes } from '@taucad/utils/hash';
 import { Topic } from '@taucad/events';
@@ -399,7 +399,13 @@ export class FileContentService {
         );
       }
 
-      const cached = this.cache.get(key);
+      // Host publication rewrites this canonical scene root before its coalesced
+      // change reaches the UI. Keep the prior ready outcome, but read authority bytes.
+      const route = this.paths.root === '/' ? parseRoute(absolutePath) : undefined;
+      const publicationKey =
+        route?.kind === 'project' || route?.kind === 'checkout' || route?.kind === 'preview' ? route.rest : key;
+      const isManagedSceneRoot = /^\.tau\/artifacts\/reusable-parts\/[a-f0-9]{64}\/scene\.json$/u.test(publicationKey);
+      const cached = isManagedSceneRoot ? undefined : this.cache.get(key);
       const data = cached ?? (await this.proxy.readFile(absolutePath));
       if (data.byteLength > limit) {
         throw new FileTooLargeError(
@@ -1303,9 +1309,11 @@ export class FileContentService {
   }
 
   private onWorkerFileWritten(relativePath: string): void {
+    const shouldRefresh = this.shouldRefreshWorkerPath(relativePath);
     this.refreshGuard.begin(relativePath);
     this.setOrphaned(relativePath, false);
-    if (this.shouldRefreshWorkerPath(relativePath)) {
+    if (shouldRefresh) {
+      this.cache.delete(relativePath);
       // async-iife: bootstrap
       // oxlint-disable-next-line promise/prefer-await-to-then -- fire-and-forget refresh
       void this.refreshOutcomeInPlace(relativePath).catch(() => undefined);

@@ -1,6 +1,6 @@
-import { Box3, BufferAttribute, BufferGeometry, Sphere, Vector3 } from 'three';
-import type { InterleavedBuffer, InterleavedBufferAttribute, Material, Object3D, Texture } from 'three';
-import { parseGltfBytes } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
+import { Box3, BufferAttribute, BufferGeometry, Matrix4, Object3D, Quaternion, Sphere, Vector3 } from 'three';
+import type { InterleavedBuffer, InterleavedBufferAttribute, Material, Texture } from 'three';
+import { parseGltfBytes, readTopologyPayload } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import type {
   GltfJson,
   GltfPrimitive,
@@ -12,7 +12,12 @@ import { deindexPositions, getFatLineSourceIndices } from '#components/geometry/
 const linesMode = 1;
 /** Component counts per glTF accessor type, for the types a Tau kernel emits. */
 /* eslint-disable @typescript-eslint/naming-convention -- glTF accessor type names are the format's own identifiers. */
-const componentsByType: Record<string, number> = { SCALAR: 1, VEC2: 2, VEC3: 3, VEC4: 4 };
+const componentsByType: Record<string, number> = {
+  SCALAR: 1,
+  VEC2: 2,
+  VEC3: 3,
+  VEC4: 4,
+};
 /* eslint-enable @typescript-eslint/naming-convention -- scope ends with the glTF constant. */
 const componentTypeFloat = 5126;
 const componentTypeUnsignedInt = 5125;
@@ -59,10 +64,15 @@ type PrimitiveTarget = {
  * presented buffers, captured once per full presentation.
  */
 export type InPlaceGeometryTargets = {
+  readonly sceneSignature: string;
   readonly materialsSignature: string;
   readonly imageBytes: ReadonlyArray<Uint8Array<ArrayBuffer>>;
-  readonly sceneSignature: string;
   readonly primitives: ReadonlyArray<readonly PrimitiveTarget[]>;
+  readonly nodes: ReadonlyArray<{
+    readonly nodeIndex: number;
+    readonly object: Object3D;
+    readonly sourceMatrix: Matrix4;
+  }>;
 };
 
 /** Input for {@link captureInPlaceGeometryTargets}. */
@@ -71,27 +81,95 @@ export type CaptureInPlaceGeometryTargetsInput = {
   /** `GLTFLoader` stores `undefined` for a cached material with no mapping of its own. */
   readonly associations: ReadonlyMap<
     Object3D | Material | Texture,
-    { meshes?: number; primitives?: number } | undefined
+    { meshes?: number; primitives?: number; nodes?: number } | undefined
   >;
   readonly bytes: Uint8Array<ArrayBuffer>;
   readonly parsed?: ParsedGltf;
 };
 
-// Admit only the same scene, ownership and primitive semantics. Accessor storage may move,
-// but transforms, skins, morph targets, extensions and node extras require the full loader.
-function sceneSignature(json: GltfJson): string {
-  return JSON.stringify(
-    Object.fromEntries(
-      Object.entries(json).filter(
-        ([key]) =>
-          !['accessors', 'bufferViews', 'buffers', 'materials', 'textures', 'samplers', 'images'].includes(key),
-      ),
-    ),
-  );
-}
-
 function materialSignature(json: GltfJson): string {
   return JSON.stringify([json.materials ?? [], json.textures ?? [], json.samplers ?? [], json.images ?? []]);
+}
+
+/** Unmapped poses, hierarchy and identity changes retain the full presentation fallback. */
+function sceneSignature({ json, bin }: ParsedGltf, movableNodes: ReadonlySet<number> = new Set()): string | undefined {
+  try {
+    const payload = readTopologyPayload(json, bin);
+    return JSON.stringify([
+      json.scene ?? 0,
+      json.scenes ?? [],
+      (json.nodes ?? []).map((node, nodeIndex) => {
+        if (!movableNodes.has(nodeIndex)) {
+          return node;
+        }
+        const structural = { ...node };
+        delete structural.matrix;
+        delete structural.translation;
+        delete structural.rotation;
+        delete structural.scale;
+        return structural;
+      }),
+      (json.meshes ?? []).map((mesh) => [mesh.name, (mesh.primitives ?? []).map((primitive) => primitive.extras)]),
+      (payload.components ?? []).map((component) => [
+        component.id,
+        component.name,
+        component.kind,
+        component.selector,
+        component.nodeIndex,
+        component.meshIndex,
+        component.parentId,
+        component.childIds,
+        component.primitiveIndices,
+        component.primitiveRefs,
+      ]),
+      payload.mechanism,
+    ]);
+  } catch {
+    return undefined;
+  }
+}
+
+function rigidNodeMatrix(node: NonNullable<GltfJson['nodes']>[number] | undefined): Matrix4 | undefined {
+  if (!node) {
+    return undefined;
+  }
+  const valid = (value: unknown, size: number): value is number[] =>
+    Array.isArray(value) &&
+    value.length === size &&
+    value.every((coordinate) => typeof coordinate === 'number' && Number.isFinite(coordinate));
+  const matrix = new Matrix4();
+  if (node.matrix === undefined) {
+    const translation = node.translation ?? [0, 0, 0];
+    const rotation = node.rotation ?? [0, 0, 0, 1];
+    const scale = node.scale ?? [1, 1, 1];
+    if (!valid(translation, 3) || !valid(rotation, 4) || !valid(scale, 3)) {
+      return undefined;
+    }
+    matrix.compose(
+      new Vector3().fromArray(translation),
+      new Quaternion().fromArray(rotation),
+      new Vector3().fromArray(scale),
+    );
+  } else if (valid(node.matrix, 16)) {
+    matrix.fromArray(node.matrix);
+  } else {
+    return undefined;
+  }
+  const { elements } = matrix;
+  const x = new Vector3().setFromMatrixColumn(matrix, 0);
+  const y = new Vector3().setFromMatrixColumn(matrix, 1);
+  const z = new Vector3().setFromMatrixColumn(matrix, 2);
+  return Math.abs(elements[3]) < 1e-6 &&
+    Math.abs(elements[7]) < 1e-6 &&
+    Math.abs(elements[11]) < 1e-6 &&
+    Math.abs(elements[15] - 1) < 1e-6 &&
+    [x, y, z].every((axis) => Math.abs(axis.length() - 1) < 1e-12) &&
+    Math.abs(x.dot(y)) < 1e-6 &&
+    Math.abs(y.dot(z)) < 1e-6 &&
+    Math.abs(z.dot(x)) < 1e-6 &&
+    x.clone().cross(y).dot(z) > 1 - 1e-6
+    ? matrix
+    : undefined;
 }
 
 function readImages({ json, bin }: ParsedGltf): Array<Uint8Array<ArrayBuffer>> | undefined {
@@ -172,7 +250,10 @@ function readAccessor(json: GltfJson, bin: Uint8Array<ArrayBuffer>, accessorInde
   const aligned =
     start % bytesPerComponent === 0
       ? { buffer: bin.buffer, offset: start }
-      : { buffer: new Uint8Array(bin.buffer, start, byteLength).slice().buffer, offset: 0 };
+      : {
+          buffer: new Uint8Array(bin.buffer, start, byteLength).slice().buffer,
+          offset: 0,
+        };
 
   switch (accessor.componentType) {
     case componentTypeFloat: {
@@ -297,10 +378,12 @@ function planLineUpdate({ json, bin, primitive, target }: PrimitiveUpdate): (() 
   }
 
   return () => {
-    (buffer.array as Float32Array).set(segmentPositions);
-    buffer.needsUpdate = true;
-    target.geometry.computeBoundingBox();
-    target.geometry.computeBoundingSphere();
+    if (!sameElements(segmentPositions, buffer.array)) {
+      (buffer.array as Float32Array).set(segmentPositions);
+      buffer.needsUpdate = true;
+      target.geometry.computeBoundingBox();
+      target.geometry.computeBoundingSphere();
+    }
   };
 }
 
@@ -326,13 +409,28 @@ export function captureInPlaceGeometryTargets({
   if (!imageBytes) {
     return undefined;
   }
-  const presented = new Set<Object3D>();
-  scene.traverse((object) => presented.add(object));
+  const presentedObjects = new Set<Object3D>();
+  scene.traverse((object) => {
+    presentedObjects.add(object);
+  });
+  const nodes: Array<{ nodeIndex: number; object: Object3D; sourceMatrix: Matrix4 }> = [];
+  for (const [object, association] of associations) {
+    if ('isObject3D' in object && presentedObjects.has(object) && association?.nodes !== undefined) {
+      const matrix = rigidNodeMatrix(json.nodes?.[association.nodes]);
+      if (matrix) {
+        nodes.push({ nodeIndex: association.nodes, object, sourceMatrix: matrix });
+      }
+    }
+  }
+  const signature = sceneSignature(parsed, new Set(nodes.map(({ nodeIndex }) => nodeIndex)));
+  if (signature === undefined) {
+    return undefined;
+  }
   const objectsByAddress = new Map<string, Object3D[]>();
   for (const [object, association] of associations) {
     if (
       !('isObject3D' in object) ||
-      !presented.has(object) ||
+      !presentedObjects.has(object) ||
       association?.meshes === undefined ||
       association.primitives === undefined
     ) {
@@ -345,19 +443,44 @@ export function captureInPlaceGeometryTargets({
   }
 
   const primitives: PrimitiveTarget[][] = [];
+  const geometryOwners = new Map<BufferGeometry, string>();
+  const storageRanges = new Map<ArrayBufferLike, Array<{ start: number; end: number; owner: string }>>();
   for (const [meshIndex, mesh] of (json.meshes ?? []).entries()) {
     for (const [primitiveIndex, primitive] of (mesh.primitives ?? []).entries()) {
-      const occurrences = objectsByAddress.get(`${meshIndex}/${primitiveIndex}`);
-      if (!occurrences?.length) {
+      const address = `${meshIndex}/${primitiveIndex}`;
+      const objects = objectsByAddress.get(address);
+      if (!objects?.length) {
         return undefined;
       }
       const targets: PrimitiveTarget[] = [];
-      const geometries = new Set<BufferGeometry>();
-      for (const object of occurrences) {
+      for (const object of objects) {
         if (!('geometry' in object) || !isBufferGeometry(object.geometry)) {
           return undefined;
         }
         const { geometry } = object;
+        const owner = geometryOwners.get(geometry);
+        if (owner === address) {
+          continue;
+        }
+        if (owner !== undefined) {
+          // One mutable geometry cannot accept different primitive data. Use the full loader path.
+          return undefined;
+        }
+        geometryOwners.set(geometry, address);
+        for (const [name, attribute] of [
+          ...Object.entries(geometry.attributes),
+          ...(geometry.index ? [['index', geometry.index] as const] : []),
+        ]) {
+          const array = 'data' in attribute ? attribute.data.array : attribute.array;
+          const ranges = storageRanges.get(array.buffer) ?? [];
+          const semantic = primitive.mode === linesMode && 'data' in attribute ? 'line-segments' : name;
+          ranges.push({
+            start: array.byteOffset,
+            end: array.byteOffset + array.byteLength,
+            owner: `${address}/${semantic}`,
+          });
+          storageRanges.set(array.buffer, ranges);
+        }
         const isLine = primitive.mode === linesMode;
         // A fat line's own index belongs to the instanced quad, never to the source segments, so the
         // de-indexed replacement is the only admissible source there.
@@ -370,16 +493,39 @@ export function captureInPlaceGeometryTargets({
         if (isLine && primitive.indices !== undefined && !sourceIndices) {
           return undefined;
         }
-        if (!geometries.has(geometry)) {
-          geometries.add(geometry);
-          targets.push({ geometry, isLine, sourceIndices, descriptor: describePrimitive(json, primitive) });
-        }
+        targets.push({
+          geometry,
+          isLine,
+          sourceIndices,
+          descriptor: describePrimitive(json, primitive),
+        });
       }
       primitives.push(targets);
     }
   }
 
-  return { materialsSignature: materialSignature(json), sceneSignature: sceneSignature(json), imageBytes, primitives };
+  // GLTFLoader can cache one accessor across material-split primitives with distinct geometries.
+  // Different primitive writes may diverge later, so overlapping mutable storage uses the full path.
+  for (const ranges of storageRanges.values()) {
+    ranges.sort((left, right) => left.start - right.start);
+    let previous: (typeof ranges)[number] | undefined;
+    for (const range of ranges) {
+      if (previous && range.start < previous.end && range.owner !== previous.owner) {
+        return undefined;
+      }
+      if (!previous || range.end > previous.end) {
+        previous = range;
+      }
+    }
+  }
+
+  return {
+    sceneSignature: signature,
+    materialsSignature: materialSignature(json),
+    imageBytes,
+    primitives,
+    nodes,
+  };
 }
 
 /**
@@ -401,8 +547,8 @@ export function applyInPlaceGeometryUpdate(
   const { json, bin } = parsed;
   const imageBytes = readImages(parsed);
   if (
+    sceneSignature(parsed, new Set(targets.nodes.map(({ nodeIndex }) => nodeIndex))) !== targets.sceneSignature ||
     materialSignature(json) !== targets.materialsSignature ||
-    sceneSignature(json) !== targets.sceneSignature ||
     !imageBytes ||
     imageBytes.length !== targets.imageBytes.length ||
     imageBytes.some((bytes, index) => !sameElements(bytes, targets.imageBytes[index]))
@@ -411,14 +557,28 @@ export function applyInPlaceGeometryUpdate(
   }
 
   const writes: Array<() => void> = [];
-  let primitiveIndex = 0;
+  for (const { nodeIndex, object, sourceMatrix } of targets.nodes) {
+    const matrix = rigidNodeMatrix(json.nodes?.[nodeIndex]);
+    if (!matrix) {
+      return false;
+    }
+    if (!matrix.equals(sourceMatrix)) {
+      writes.push(() => {
+        matrix.decompose(object.position, object.quaternion, object.scale);
+        object.updateMatrix();
+        object.updateWorldMatrix(true, true);
+        sourceMatrix.copy(matrix);
+      });
+    }
+  }
+  let primitiveCount = 0;
   for (const mesh of json.meshes ?? []) {
     for (const primitive of mesh.primitives ?? []) {
-      const occurrences = targets.primitives[primitiveIndex++];
-      if (!occurrences?.length) {
+      const primitiveTargets = targets.primitives[primitiveCount++];
+      if (!primitiveTargets) {
         return false;
       }
-      for (const target of occurrences) {
+      for (const target of primitiveTargets) {
         if (describePrimitive(json, primitive) !== target.descriptor) {
           return false;
         }
@@ -431,7 +591,7 @@ export function applyInPlaceGeometryUpdate(
       }
     }
   }
-  if (primitiveIndex !== targets.primitives.length) {
+  if (primitiveCount !== targets.primitives.length) {
     return false;
   }
 

@@ -361,6 +361,152 @@ describe('modelInteractionMachine', () => {
     actor.stop();
   });
 
+  it.each(['same pin', 'changed pin', 'removed component', 'source rekey'] as const)(
+    'should fence a revoked selection intent for %s admission',
+    (change) => {
+      const actor = createActor(modelInteractionMachine, { input: {} }).start();
+      try {
+        const manifest = createManifest();
+        actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest });
+        actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
+        actor.send({
+          type: 'setHoveredComponent',
+          unitId: mainUnitId,
+          componentId: housingComponentId,
+          source: 'viewer',
+        });
+        actor.send({ type: 'focusComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
+        expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId).selectionPin).toBe(
+          manifest.geometryHash,
+        );
+        actor.send({ type: 'clearManifest', unitId: mainUnitId, source: 'viewer' });
+        const revoked = getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId);
+        expect(revoked.manifest).toBeUndefined();
+        expect(revoked.hoveredComponentId).toBeUndefined();
+        expect(revoked.focusedComponentId).toBeUndefined();
+        expect(revoked.selectedComponentIds).toEqual([housingComponentId]);
+        actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: gearComponentId, source: 'viewer' });
+        actor.send({
+          type: 'toggleComponentSelection',
+          unitId: mainUnitId,
+          componentId: housingComponentId,
+          source: 'viewer',
+        });
+        actor.send({ type: 'focusComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
+        expect(getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId)).toBe(revoked);
+        let targetUnitId = mainUnitId;
+        let offered = manifest;
+        switch (change) {
+          case 'changed pin': {
+            offered = { ...manifest, geometryHash: 'replacement-pin' };
+            break;
+          }
+          case 'removed component': {
+            const { root, [gearComponentId]: gear } = manifest.nodesById;
+            if (!root || !gear) {
+              throw new Error('Expected actual fixture root and gear nodes.');
+            }
+            offered = {
+              ...manifest,
+              geometryHash: 'removed-component-pin',
+              nodeOrder: ['root', gearComponentId],
+              nodesById: { root: { ...root, childIds: [gearComponentId] }, [gearComponentId]: gear },
+            };
+            break;
+          }
+          case 'source rekey': {
+            actor.send({ type: 'rekeySourceUnits', oldPath: mainSourceFile, newPath: alternateSourceFile });
+            targetUnitId = alternateUnitId;
+            expect(
+              getModelInteractionUnitState(actor.getSnapshot().context, targetUnitId).selectionPin,
+            ).toBeUndefined();
+            offered = { ...manifest, sourceFile: alternateSourceFile };
+            break;
+          }
+          case 'same pin': {
+            break;
+          }
+        }
+        actor.send({ type: 'loadManifest', unitId: targetUnitId, manifest: offered });
+        const current = getModelInteractionUnitState(actor.getSnapshot().context, targetUnitId);
+        expect(current.selectedComponentIds).toEqual(change === 'same pin' ? [housingComponentId] : []);
+        expect(current.selectionPin).toBe(change === 'same pin' ? manifest.geometryHash : undefined);
+      } finally {
+        actor.stop();
+      }
+    },
+  );
+
+  it('should retain live compatible selection across hash changes without inventing a legacy pin', () => {
+    const actor = createActor(modelInteractionMachine, { input: {} }).start();
+    try {
+      const manifest = createManifest();
+      actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest });
+      actor.send({
+        type: 'toggleComponentSelection',
+        unitId: mainUnitId,
+        componentId: housingComponentId,
+        source: 'viewer',
+      });
+      actor.send({
+        type: 'loadManifest',
+        unitId: mainUnitId,
+        manifest: { ...manifest, geometryHash: 'live-replacement-pin' },
+      });
+      let unit = getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId);
+      expect(unit.selectedComponentIds).toEqual([housingComponentId]);
+      expect(unit.selectionPin).toBe('live-replacement-pin');
+      actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: { ...manifest, geometryHash: undefined } });
+      unit = getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId);
+      expect(unit.selectedComponentIds).toEqual([housingComponentId]);
+      expect(unit.selectionPin).toBeUndefined();
+      actor.send({
+        type: 'toggleComponentSelection',
+        unitId: mainUnitId,
+        componentId: housingComponentId,
+        source: 'viewer',
+      });
+      actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: gearComponentId, source: 'viewer' });
+      unit = getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId);
+      expect(unit.selectedComponentIds).toEqual([gearComponentId]);
+      expect(unit.selectionPin).toBeUndefined();
+      actor.send({ type: 'clearManifest', unitId: mainUnitId, source: 'viewer' });
+      actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: { ...manifest, geometryHash: undefined } });
+      unit = getModelInteractionUnitState(actor.getSnapshot().context, mainUnitId);
+      expect(unit.selectedComponentIds).toEqual([]);
+      expect(unit.selectionPin).toBeUndefined();
+    } finally {
+      actor.stop();
+    }
+  });
+
+  it('should revoke selection pin bindings on conflicting source merges and prune deleted source intent', () => {
+    const actor = createActor(modelInteractionMachine, { input: {} }).start();
+    try {
+      actor.send({ type: 'loadManifest', unitId: mainUnitId, manifest: createManifest() });
+      actor.send({ type: 'loadManifest', unitId: alternateUnitId, manifest: createManifest(alternateSourceFile) });
+      actor.send({ type: 'selectComponent', unitId: mainUnitId, componentId: housingComponentId, source: 'viewer' });
+      actor.send({ type: 'selectComponent', unitId: alternateUnitId, componentId: gearComponentId, source: 'viewer' });
+      actor.send({ type: 'rekeySourceUnits', oldPath: mainSourceFile, newPath: alternateSourceFile });
+      let unit = getModelInteractionUnitState(actor.getSnapshot().context, alternateUnitId);
+      expect(unit.selectedComponentIds).toEqual([housingComponentId, gearComponentId]);
+      expect(unit.selectionPin).toBeUndefined();
+      actor.send({ type: 'clearManifest', unitId: alternateUnitId, source: 'viewer' });
+      actor.send({ type: 'loadManifest', unitId: alternateUnitId, manifest: createManifest(alternateSourceFile) });
+      unit = getModelInteractionUnitState(actor.getSnapshot().context, alternateUnitId);
+      expect(unit.selectedComponentIds).toEqual([]);
+      expect(unit.selectionPin).toBeUndefined();
+      actor.send({ type: 'selectComponent', unitId: alternateUnitId, componentId: gearComponentId, source: 'viewer' });
+      actor.send({ type: 'pruneSourceUnits', path: alternateSourceFile });
+      unit = getModelInteractionUnitState(actor.getSnapshot().context, alternateUnitId);
+      expect(unit.manifest).toBeUndefined();
+      expect(unit.selectedComponentIds).toEqual([]);
+      expect(unit.selectionPin).toBeUndefined();
+    } finally {
+      actor.stop();
+    }
+  });
+
   it('should clear a manifest without clearing compatible display preferences for that unit', () => {
     const actor = createActor(modelInteractionMachine, { input: {} });
     actor.start();

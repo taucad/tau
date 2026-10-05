@@ -56,7 +56,7 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
   stageOptions,
   graphicsOptions,
 }: CadPreviewViewerProps): React.JSX.Element {
-  const { artifact, artifactHash, graphicsRef, status, error } = useCadPreview();
+  const { artifact, artifactHash, assemblyDisplay, graphicsRef, status, error } = useCadPreview();
   const enableLines = useSelector(graphicsRef, (state) => state.context.enableLines);
   const enableSurfaces = useSelector(graphicsRef, (state) => state.context.enableSurfaces);
   const enableMatcap = useSelector(graphicsRef, (state) => state.context.enableMatcap);
@@ -68,7 +68,8 @@ export const CadPreviewViewer = memo(function CadPreviewViewer({
     <ModelViewer
       artifact={artifact}
       artifactHash={artifactHash}
-      viewerState={cadPreviewStatusToViewerState(status, Boolean(artifact))}
+      assemblyDisplay={assemblyDisplay}
+      viewerState={cadPreviewStatusToViewerState(status, Boolean(artifact ?? assemblyDisplay))}
       graphicsRef={graphicsRef}
       className={className}
       enablePan={enablePan}

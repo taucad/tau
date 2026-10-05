@@ -29,16 +29,18 @@ export function CloudRootBoundary({ children }: { readonly children: ReactNode }
 
 const BillingSessionBridge = ({ children }: { readonly children: ReactNode }): React.JSX.Element => {
   const { data: session } = useSession(authClient);
+  const environment = ENV.TAU_BILLING_ENVIRONMENT;
+  const apiBaseUrl = environment === undefined ? undefined : ENV.TAU_API_URL;
   const identity =
-    ENV.TAU_BILLING_ENVIRONMENT === undefined || session?.user.id === undefined
+    environment === undefined || apiBaseUrl === undefined || session?.user.id === undefined
       ? undefined
-      : { apiBaseUrl: ENV.TAU_API_URL, environment: ENV.TAU_BILLING_ENVIRONMENT, ownerId: session.user.id };
+      : { apiBaseUrl, environment, ownerId: session.user.id };
   return (
     <FinancialSessionScope identity={identity}>
       <BillingSessionProvider
         value={{
-          apiBaseUrl: ENV.TAU_API_URL,
-          environment: ENV.TAU_BILLING_ENVIRONMENT,
+          apiBaseUrl,
+          environment,
           userId: session?.user.id,
         }}
       >

@@ -4,6 +4,9 @@ import type { Artifact, RuntimeDocument } from '@taucad/runtime';
 import { Button } from '@taucad/ui/components/button';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import { useAr } from '#components/cad/use-ar.js';
+import type { ActorRefFrom } from 'xstate';
+import type { cadMachine } from '#machines/cad.machine.js';
+import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
 
 function ArIcon({ className }: { readonly className?: string }): React.JSX.Element {
@@ -35,14 +38,18 @@ function ArIcon({ className }: { readonly className?: string }): React.JSX.Eleme
 export const ArButton = memo(function ({
   artifact,
   runtimeDocument,
+  cadRef,
+  graphicsRef,
   className,
 }: {
   readonly artifact: Artifact | undefined;
   readonly runtimeDocument?: RuntimeDocument;
+  readonly cadRef?: ActorRefFrom<typeof cadMachine>;
+  readonly graphicsRef?: ActorRefFrom<typeof graphicsMachine>;
   readonly className?: string;
 }): React.ReactNode {
   const isMobile = useIsMobile();
-  const { canActivateAr, isConverting, activateAr } = useAr(artifact, runtimeDocument);
+  const { canActivateAr, isConverting, activateAr } = useAr(artifact, runtimeDocument, cadRef, graphicsRef);
 
   if (!isMobile || !canActivateAr) {
     return undefined;

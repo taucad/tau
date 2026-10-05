@@ -8,6 +8,12 @@ import { commands, page, userEvent } from 'vitest/browser';
 import type { AllotmentHandle } from 'allotment';
 import type { DockviewApi, IDockviewPanelProps, IPaneviewPanelProps, PaneviewApi } from 'dockview-react';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@taucad/ui/components/dropdown-menu';
 import { Allotment } from '#components/panes/allotment.js';
 import { Dockview } from '#components/panes/dockview.js';
 import { Paneview } from '#components/panes/paneview.js';
@@ -160,6 +166,93 @@ describe('native pane resize boundaries', () => {
     await waitFor(() => {
       expect(sash.getAttribute('aria-valuenow')).toBe('230');
     });
+  });
+
+  it('should click an overlapping shared menu above a native section sash and retain real resizing', async () => {
+    let sectionApi: PaneviewApi | undefined;
+    render(
+      <TooltipProvider>
+        <div style={size}>
+          <Dockview
+            components={composedComponents}
+            onReady={({ api }) => {
+              api.addPanel({
+                id: 'model',
+                title: 'Model',
+                component: 'sections',
+                params: {
+                  ready: (value: PaneviewApi) => {
+                    sectionApi = value;
+                  },
+                },
+              });
+            }}
+          />
+        </div>
+      </TooltipProvider>,
+    );
+    const sash = await separator(/Resize main.py and Properties sections/);
+    if (!sectionApi) {
+      throw new Error('Expected the actual nested Model section owner.');
+    }
+    const api = sectionApi;
+    const rect = sash.getBoundingClientRect();
+    const selected = vi.fn<() => void>();
+    const menu = (
+      <DropdownMenu modal={false}>
+        <DropdownMenuTrigger asChild>
+          <button
+            type='button'
+            style={{
+              position: 'fixed',
+              left: rect.right + 16,
+              top: rect.top + rect.height / 2,
+              transform: 'translateY(-50%)',
+            }}
+          >
+            Part actions
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side='left' align='center'>
+          <DropdownMenuItem onSelect={selected}>Focus on part</DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+    render(menu);
+    await userEvent.click(screen.getByRole('button', { name: 'Part actions' }));
+    const item = await screen.findByRole('menuitem', { name: 'Focus on part' });
+    await waitFor(() => {
+      const positioned = item.getBoundingClientRect();
+      const centerY = positioned.top + positioned.height / 2;
+      expect(centerY).toBeGreaterThanOrEqual(rect.top);
+      expect(centerY).toBeLessThan(rect.bottom);
+    });
+    const positioned = item.getBoundingClientRect();
+    const point = { x: positioned.left + positioned.width / 2, y: positioned.top + positioned.height / 2 };
+    expect(point.x).toBeGreaterThan(rect.left);
+    expect(point.x).toBeLessThan(rect.right);
+    const hit = document.elementFromPoint(point.x, point.y);
+    expect(hit !== null && item.contains(hit)).toBe(true);
+    const layout = api.toJSON();
+    const value = sash.getAttribute('aria-valuenow');
+    await userEvent.click(item);
+    expect(selected).toHaveBeenCalledOnce();
+    expect(api.toJSON()).toEqual(layout);
+    expect(sash.getAttribute('aria-valuenow')).toBe(value);
+    expect(sash.dataset['resizeDragging']).toBeUndefined();
+    await waitFor(() => {
+      expect(screen.queryByRole('menuitem', { name: 'Focus on part' })).toBeNull();
+    });
+    await drag(sash);
+    const moved = Number(sash.getAttribute('aria-valuenow'));
+    sash.focus();
+    await userEvent.keyboard('{ArrowDown}');
+    await waitFor(() => {
+      expect(Number(sash.getAttribute('aria-valuenow'))).toBe(moved + 8);
+    });
+    expect(getComputedStyle(sash, '::after').opacity).toBe('1');
+    expect(sash.getAttribute('aria-disabled')).toBe('false');
+    expect(selected).toHaveBeenCalledOnce();
   });
 
   it('should resize both Dockview axes and retain sizes through native restoration', async () => {

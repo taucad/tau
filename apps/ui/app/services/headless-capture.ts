@@ -2,11 +2,12 @@ import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { asKnownArtifact } from '@taucad/runtime';
 import type { Rendering } from '@taucad/runtime';
 import { canonicalCaptureViews, captureFilesToDataUrls as encodeCaptureDataUrls } from '@taucad/agent-tools/capture';
-import type { ExportFile } from '@taucad/types';
+import { sha256Bytes } from '@taucad/utils/hash';
+import type { Geometry, ExportFile } from '@taucad/types';
 import type { CameraState } from '@taucad/camera';
 import { toNanorasterCamera } from '@taucad/image/camera';
 import { normalizeImageLabel } from '@taucad/image/label';
-import { selectCadFailureIssues } from '#machines/cad.machine.js';
+import { selectCadFailureIssues, selectCadDisplay } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
 import { getGraphicsCameraState } from '#services/graphics-camera-registry.js';
@@ -175,13 +176,11 @@ const copyCameraVector = (vector: readonly [number, number, number]): [number, n
 
 const requireSettledArtifact = (snapshot: SnapshotFrom<typeof cadMachine>, selectedRendering?: Rendering) => {
   const { context } = snapshot;
-  const failedIssues = selectedRendering
-    ? selectedRendering.success
-      ? undefined
-      : selectedRendering.issues
-    : selectCadFailureIssues(snapshot);
-  if (failedIssues) {
-    throw new Error(failedIssues.map((issue) => issue.message).join('; '));
+  if (!selectedRendering) {
+    const failedIssues = selectCadFailureIssues(snapshot);
+    if (failedIssues) {
+      throw new Error(failedIssues.map((issue) => issue.message).join('; '));
+    }
   }
   const rendering = selectedRendering ?? context.rendering;
   if (!rendering?.success || rendering.transient || !context.entryPath) {
@@ -191,7 +190,47 @@ const requireSettledArtifact = (snapshot: SnapshotFrom<typeof cadMachine>, selec
   if (!artifact) {
     throw new Error(`Unsupported CAD artifact: ${rendering.artifact.mimeType}`);
   }
-  return { artifact, rendering, entryPath: rendering.sourceRevision?.entry ?? context.entryPath };
+  return { artifact, hash: rendering.hash, entryPath: rendering.sourceRevision?.entry ?? context.entryPath };
+};
+
+/** Resolve display bytes only for an image request; assemblies remain definition-resident in the actor. */
+export const resolveSettledCadGeometry = async (
+  snapshot: SnapshotFrom<typeof cadMachine>,
+): Promise<{
+  geometry: Extract<Geometry, { format: 'gltf' | 'svg' }>;
+  entryPath: string;
+}> => {
+  const { context } = snapshot;
+  const failedIssues = selectCadFailureIssues(snapshot);
+  if (failedIssues) {
+    throw new Error(failedIssues.map((issue) => issue.message).join('; '));
+  }
+  const display = selectCadDisplay(snapshot);
+  if (!display || !context.entryPath) {
+    throw new Error('The selected CAD view has no settled geometry');
+  }
+  if (!('admitted' in display)) {
+    const { artifact, hash, entryPath } = requireSettledArtifact(snapshot);
+    return {
+      geometry:
+        artifact.mimeType === 'model/gltf-binary'
+          ? { format: 'gltf', content: artifact.content, hash }
+          : { format: 'svg', content: artifact.content, hash },
+      entryPath,
+    };
+  }
+  const result = await display.document.exportPublished({ format: 'glb', publishedAssembly: { root: display.root } });
+  if (!result.success) {
+    throw new Error(result.issues[0]?.message ?? 'Pinned assembly image projection failed');
+  }
+  const file = result.files[0];
+  if (result.files.length !== 1 || file.mimeType !== 'model/gltf-binary' || file.bytes.length === 0) {
+    throw new Error('Pinned assembly image projection expected one non-empty GLB');
+  }
+  return {
+    geometry: { format: 'gltf', content: file.bytes, hash: await sha256Bytes(file.bytes) },
+    entryPath: context.entryPath,
+  };
 };
 
 const requireImages = (
@@ -220,14 +259,28 @@ const requireImages = (
 /** Capture from an already-settled CAD snapshot through the shared image service. */
 export const captureSettledCadImages = async (options: CaptureSettledCadImagesOptions): Promise<ExportFile[]> => {
   const { cadSnapshot, cameraState, imageService, presentation, recipe } = options;
-  const { artifact, rendering, entryPath } = requireSettledArtifact(cadSnapshot, options.rendering);
+  const display = selectCadDisplay(cadSnapshot);
+  const assemblyDisplay = display && 'admitted' in display ? display : undefined;
+  const resolved = assemblyDisplay ? await resolveSettledCadGeometry(cadSnapshot) : undefined;
+  if (resolved && resolved.geometry.format !== 'gltf') {
+    throw new Error('Pinned assembly image projection expected GLB');
+  }
+  const selectedArtifact: ReturnType<typeof requireSettledArtifact> =
+    resolved?.geometry.format === 'gltf' && assemblyDisplay
+      ? {
+          artifact: { mimeType: 'model/gltf-binary', content: resolved.geometry.content },
+          hash: assemblyDisplay.root.digest,
+          entryPath: resolved.entryPath,
+        }
+      : requireSettledArtifact(cadSnapshot, options.rendering);
+  const { artifact, hash, entryPath } = selectedArtifact;
   const [width, height] = recipeSize(recipe, artifact.mimeType === 'image/svg+xml' ? undefined : cameraState);
   const annotated = recipe.purpose !== 'utility';
 
   if (artifact.mimeType === 'image/svg+xml') {
     const files = await imageService.export({
       kind: 'capture',
-      identity: `capture:${entryPath}:${rendering.hash}:${recipe.purpose}:drawing`,
+      identity: `capture:${entryPath}:${hash}:${recipe.purpose}:drawing`,
       sourceFormat: 'svg',
       sourcePath: entryPath,
       content: artifact.content,
@@ -252,7 +305,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
           primitives: listReachableGltfPrimitiveReferences(artifact.content),
           manifest: buildGltfComponentManifest(artifact.content, {
             sourceFile: entryPath,
-            geometryHash: rendering.hash,
+            geometryHash: hash,
           }),
           hiddenComponentIds: presentation.hiddenComponentIds,
           isolatedComponentIds: presentation.isolatedComponentIds,
@@ -263,7 +316,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
       ? await prepareCapturePresentation(artifact.content, {
           ...presentation.model,
           sourceFile: entryPath,
-          geometryHash: rendering.hash,
+          geometryHash: hash,
         })
       : undefined;
   const common = {
@@ -332,7 +385,7 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
     } as const;
   }
 
-  const geometryHash = prepared?.geometryHash ?? rendering.hash;
+  const geometryHash = prepared?.geometryHash ?? hash;
   const identity = `capture:${entryPath}:${geometryHash}:${recipe.purpose}:${recipe.mode}`;
   const job = {
     kind: 'capture',
@@ -356,6 +409,29 @@ export const captureSettledCadImages = async (options: CaptureSettledCadImagesOp
  */
 export const captureCadImages = async (options: CaptureCadImagesOptions): Promise<CadImageCapture> => {
   const graphicsSnapshot = options.graphicsRef?.getSnapshot();
+  const capturedPresentedKey = graphicsSnapshot?.context.gltfPresentation.presentedKey;
+  const poseContext =
+    options.recipe.mode === 'current' ? graphicsSnapshot?.context.kinematicsRef.getSnapshot().context : undefined;
+  const poseRevision = poseContext?.revision;
+  const poseUnitId = graphicsSnapshot?.context.modelInteractionUnitId;
+  if (
+    poseContext &&
+    poseUnitId &&
+    !Object.values(getKinematicsUnitState(poseContext, poseUnitId).coordinates).every((value) => value === 0)
+  ) {
+    throw new Error('Current-view capture requires the as-built pose; reset motion before capturing');
+  }
+  const poseIsCurrent = (): boolean => {
+    if (!poseContext) {
+      return true;
+    }
+    const current = options.graphicsRef?.getSnapshot().context;
+    return (
+      current?.modelInteractionUnitId === poseUnitId &&
+      current?.kinematicsRef === graphicsSnapshot?.context.kinematicsRef &&
+      current?.kinematicsRef.getSnapshot().context.revision === poseRevision
+    );
+  };
   const cameraState =
     options.recipe.mode === 'current'
       ? copyCameraState(options.cameraState ?? getGraphicsCameraState(options.graphicsRef))
@@ -365,6 +441,26 @@ export const captureCadImages = async (options: CaptureCadImagesOptions): Promis
   const rendering = options.captureRendering ? await options.captureRendering() : undefined;
   const cadSnapshot = options.captureRendering ? options.cadRef.getSnapshot() : await awaitFreshRender(options.cadRef);
   recordHeadlessImageTiming('capture.freshness', freshnessStartedAt);
+  const capturedDisplay = selectCadDisplay(cadSnapshot);
+  if (!poseIsCurrent()) {
+    throw new Error('The displayed pose changed during image capture');
+  }
+  const currentDisplayKey =
+    options.recipe.mode === 'current' && !options.captureRendering && capturedDisplay
+      ? 'admitted' in capturedDisplay
+        ? capturedDisplay.root.digest
+        : capturedDisplay.success && capturedDisplay.artifact.mimeType === 'model/gltf-binary'
+          ? capturedDisplay.hash
+          : undefined
+      : undefined;
+  if (
+    currentDisplayKey !== undefined &&
+    (capturedPresentedKey !== currentDisplayKey ||
+      options.graphicsRef?.getSnapshot().context.gltfPresentation.presentedKey !== currentDisplayKey ||
+      selectCadDisplay(options.cadRef.getSnapshot()) !== capturedDisplay)
+  ) {
+    throw new Error('The selected CAD display is still preparing its displayed scene');
+  }
   const files = await captureSettledCadImages({
     cadSnapshot,
     cameraState,
@@ -373,6 +469,18 @@ export const captureCadImages = async (options: CaptureCadImagesOptions): Promis
     recipe: options.recipe,
     rendering,
   });
+  if (!poseIsCurrent()) {
+    throw new Error('The displayed pose changed during image capture');
+  }
+  if (
+    capturedDisplay &&
+    ('admitted' in capturedDisplay || currentDisplayKey !== undefined) &&
+    (selectCadDisplay(options.cadRef.getSnapshot()) !== capturedDisplay ||
+      (currentDisplayKey !== undefined &&
+        options.graphicsRef?.getSnapshot().context.gltfPresentation.presentedKey !== currentDisplayKey))
+  ) {
+    throw new Error('The selected CAD display changed during image capture');
+  }
   const omittedSectionCutIds = (presentation?.sectionCuts ?? [])
     .filter((cut) => isOmittedFromCapture(cut))
     .map(({ id }) => id);

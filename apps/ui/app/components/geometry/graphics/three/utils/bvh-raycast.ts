@@ -4,6 +4,12 @@ import { isSectionRemoved } from '#components/geometry/graphics/section-cuts.js'
 import type { SectionPiece } from '#components/geometry/graphics/section-cuts.js';
 import { getOrBuildBvh, intersectsBvhGeometryBounds } from '#components/geometry/graphics/three/utils/bvh-cache.js';
 
+import {
+  getModelComponentInstanceSlots,
+  getModelComponentWorldMatrix,
+  getModelComponentSourceGeometry,
+} from '#components/geometry/graphics/three/utils/model-component-owner.js';
+
 const inverseMatrix = new THREE.Matrix4();
 const localRay = new THREE.Ray();
 const worldPoint = new THREE.Vector3();
@@ -54,12 +60,16 @@ const toWorldHit = ({
   hit,
   mesh,
   raycaster,
+  worldMatrix,
+  instanceId,
 }: {
   readonly hit: THREE.Intersection;
   readonly mesh: THREE.Mesh;
   readonly raycaster: THREE.Raycaster;
+  readonly worldMatrix: THREE.Matrix4;
+  readonly instanceId?: number;
 }): THREE.Intersection<THREE.Mesh> | undefined => {
-  worldPoint.copy(hit.point).applyMatrix4(mesh.matrixWorld);
+  worldPoint.copy(hit.point).applyMatrix4(worldMatrix);
   const distance = worldPoint.distanceTo(raycaster.ray.origin);
   if (distance < raycaster.near || distance > raycaster.far) {
     return undefined;
@@ -70,6 +80,7 @@ const toWorldHit = ({
     distance,
     point: worldPoint.clone(),
     object: mesh,
+    instanceId,
   };
 };
 
@@ -86,6 +97,7 @@ export function raycastFirstVisibleMeshHit({
   const isKept = createRaycastClipTest(clipping);
 
   for (const mesh of meshes) {
+    const { material } = mesh;
     const positionAttribute = mesh.geometry.getAttribute('position') as THREE.BufferAttribute | undefined;
     if (
       !isWorldVisible(mesh) ||
@@ -96,38 +108,47 @@ export function raycastFirstVisibleMeshHit({
     }
 
     mesh.updateWorldMatrix(true, false);
-    inverseMatrix.copy(mesh.matrixWorld).invert();
-    localRay.copy(raycaster.ray).applyMatrix4(inverseMatrix);
-
-    if (!intersectsBvhGeometryBounds(mesh.geometry, localRay)) {
+    const slots = getModelComponentInstanceSlots(mesh);
+    if (mesh instanceof THREE.InstancedMesh && !slots) {
       continue;
     }
+    const placement = new THREE.Matrix4();
+    for (let slot = 0; slot < (slots?.length ?? 1); slot++) {
+      const instanceId = slots ? slot : undefined;
+      const worldMatrix = getModelComponentWorldMatrix(mesh, instanceId, placement);
+      const geometry = getModelComponentSourceGeometry(mesh, instanceId);
+      if (!worldMatrix || !geometry) {
+        continue;
+      }
+      inverseMatrix.copy(worldMatrix).invert();
+      localRay.copy(raycaster.ray).applyMatrix4(inverseMatrix);
 
-    const bvh = getOrBuildBvh(mesh.geometry);
-    const firstHit = isKept ? undefined : bvh.raycastFirst(localRay, mesh.material, 0, Number.POSITIVE_INFINITY);
-    const hits = isKept
-      ? bvh.raycast(localRay, mesh.material, 0, Number.POSITIVE_INFINITY)
-      : firstHit
-        ? [firstHit]
-        : [];
-
-    for (const hit of hits) {
-      const nextNearest = toWorldHit({ hit, mesh, raycaster });
-      if (!nextNearest) {
+      if (!intersectsBvhGeometryBounds(geometry, localRay)) {
         continue;
       }
 
-      if (isKept && !isKept(nextNearest.point)) {
-        continue;
-      }
+      const bvh = getOrBuildBvh(geometry);
+      const firstHit = isKept ? undefined : bvh.raycastFirst(localRay, material, 0, Number.POSITIVE_INFINITY);
+      const hits = isKept ? bvh.raycast(localRay, material, 0, Number.POSITIVE_INFINITY) : firstHit ? [firstHit] : [];
 
-      if (nearest && nextNearest.distance >= nearest.distance) {
-        continue;
-      }
+      for (const hit of hits) {
+        const nextNearest = toWorldHit({ hit, mesh, raycaster, worldMatrix, instanceId });
+        if (!nextNearest) {
+          continue;
+        }
 
-      nearest = nextNearest;
-      if (!isKept) {
-        break;
+        if (isKept && !isKept(nextNearest.point)) {
+          continue;
+        }
+
+        if (nearest && nextNearest.distance >= nearest.distance) {
+          continue;
+        }
+
+        nearest = nextNearest;
+        if (!isKept) {
+          break;
+        }
       }
     }
   }

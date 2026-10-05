@@ -69,6 +69,9 @@ export function InfiniteGrid(properties: InfiniteGridProperties): React.JSX.Elem
   const cameraRig = useCameraRig();
   const meshRef = React.useRef<Mesh>(null);
 
+  const gridLifetime = React.useRef<
+    { handle: InfiniteGridMaterialHandle; pending: number; isDisposeRequested: boolean } | undefined
+  >(undefined);
   const gridHandle = React.useMemo((): InfiniteGridMaterialHandle => {
     return infiniteGridMaterialForBackend(backendWeb, { ...materialProperties, axes });
     // Intentionally omit `materialProperties`: zoom-driven size/colour updates use `applyVisualOverrides`
@@ -82,27 +85,52 @@ export function InfiniteGrid(properties: InfiniteGridProperties): React.JSX.Elem
     };
     const compile = renderer.compileAsync;
     const cancellation = { cancelled: false };
+    if (gridLifetime.current?.handle !== gridHandle) {
+      gridLifetime.current = { handle: gridHandle, pending: 0, isDisposeRequested: false };
+    }
+    const warmup = gridLifetime.current;
+    warmup.isDisposeRequested = false;
+    const disposeIfUnused = (): void => {
+      if (warmup.isDisposeRequested && warmup.pending === 0) {
+        warmup.isDisposeRequested = false;
+        gridHandle.material.dispose();
+      }
+    };
 
     if (mesh && typeof compile === 'function') {
+      warmup.pending++;
       // async-iife: bootstrap — layout effects cannot await finite endpoint pipeline warmup.
       void (async (): Promise<void> => {
         try {
-          await Promise.all([
-            compile.call(renderer, mesh, cameraRig.perspectiveCamera),
-            compile.call(renderer, mesh, cameraRig.orthographicCamera),
-          ]);
+          const results = await Promise.allSettled(
+            [cameraRig.perspectiveCamera, cameraRig.orthographicCamera].map(async (camera) =>
+              compile.call(renderer, mesh, camera),
+            ),
+          );
+          const rejected = results.find((result) => result.status === 'rejected');
+          if (rejected) {
+            const error: unknown = rejected.reason;
+            throw error;
+          }
           if (!cancellation.cancelled) {
             invalidate();
           }
         } catch (error) {
           console.error('Infinite-grid pipeline warm-up failed', error);
+        } finally {
+          warmup.pending--;
+          disposeIfUnused();
         }
       })();
     }
 
     return () => {
       cancellation.cancelled = true;
-      gridHandle.material.dispose();
+      warmup.isDisposeRequested = true;
+      // Effect restarts reuse this memoized material; let their setup reclaim it before disposing.
+      if (warmup.pending === 0) {
+        queueMicrotask(disposeIfUnused);
+      }
     };
   }, [cameraRig, gl, gridHandle, invalidate]);
 

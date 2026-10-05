@@ -5,6 +5,7 @@ import * as THREE from 'three';
 import { createActor, createAsyncLogic } from 'xstate';
 import { mock } from 'vitest-mock-extended';
 import type { SpatialBounds } from '@taucad/spatial';
+import * as handleOwners from '#components/geometry/graphics/three/controls/section-handles.js';
 import type { SectionPlanePicker } from '#components/geometry/graphics/three/controls/section-plane-picker.js';
 import { SectionHandles } from '#components/geometry/graphics/three/react/section-handles.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
@@ -610,11 +611,27 @@ describe('SectionHandles', () => {
   });
 
   it('should prepare only demanded handles without compiling unused projections or picker copies', () => {
+    let handles: ReturnType<typeof handleOwners.createSectionHandles> | undefined;
+    const originalCreate = handleOwners.createSectionHandles;
+    const create = vi.spyOn(handleOwners, 'createSectionHandles').mockImplementation((...args) => {
+      handles = originalCreate(...args);
+      return handles;
+    });
     harness = mountHandles({ planePicker: mock<SectionPlanePicker>() });
+    expect(create).toHaveBeenCalledOnce();
+    if (!handles) {
+      throw new Error('Expected the actual demanded handle owner.');
+    }
+    const dispose = vi.spyOn(handles, 'dispose');
     harness.send({ type: 'setSectionViewActive', payload: false });
     harness.send({ type: 'setSectionViewActive', payload: true });
     harness.send({ type: 'selectSectionCut', payload: undefined });
     harness.send({ type: 'addSectionCut', payload: { kind: 'revolution', axis: 'z' } });
     expect(harness.compileAsync).not.toHaveBeenCalled();
+    expect(dispose).not.toHaveBeenCalled();
+    cleanup();
+    expect(dispose).toHaveBeenCalledOnce();
+    cleanup();
+    expect(dispose).toHaveBeenCalledOnce();
   });
 });

@@ -10,6 +10,7 @@ import { useFrame, useThree } from '@react-three/fiber';
 import type { RootState, ThreeEvent } from '@react-three/fiber';
 import type { GeometryComponentManifest } from '@taucad/types';
 import { useKinematicsPoseComposer } from '#components/geometry/graphics/three/react/kinematics-pose-composer.js';
+import type { KinematicsSourceUpdater } from '#components/geometry/graphics/three/react/kinematics-pose-composer.js';
 import { useKinematicsDragControls } from '#components/geometry/graphics/three/react/kinematics-drag-controls.js';
 import { getModelComponentId } from '#components/geometry/graphics/three/utils/model-component-owner.js';
 import { useFeature } from '#flags/use-feature.js';
@@ -158,6 +159,7 @@ type KinematicsViewerOptions = Readonly<{
   scene: Object3D | undefined;
   manifest: GeometryComponentManifest | undefined;
   getPickableMeshes: () => readonly Mesh[];
+  onSourceUpdater?: (updater: KinematicsSourceUpdater | undefined) => void;
 }>;
 
 /**
@@ -169,6 +171,7 @@ export function useKinematicsViewer({
   scene,
   manifest,
   getPickableMeshes,
+  onSourceUpdater,
 }: KinematicsViewerOptions): (event: ThreeEvent<PointerEvent>) => void {
   const kinematicsRef = useKinematicsRef();
   const mechanism = manifest?.mechanism;
@@ -188,7 +191,7 @@ export function useKinematicsViewer({
     [kinematicsRef, unitId],
   );
 
-  useKinematicsPoseComposer(unitId, scene);
+  useKinematicsPoseComposer(unitId, scene, onSourceUpdater);
   useKinematicsPlaybackClock(unitId);
   useKinematicsTestBridge(unitId, scene);
   return useKinematicsDragControls({ unitId, scene, getPickableMeshes });

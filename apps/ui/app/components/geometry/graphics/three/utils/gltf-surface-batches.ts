@@ -314,6 +314,7 @@ export function createGltfSurfaceBatches(
       if (
         !shading ||
         source.type !== 'Mesh' ||
+        source instanceof InstancedMesh ||
         Boolean(source.morphTargetInfluences) ||
         Boolean(source.customDepthMaterial) ||
         Boolean(source.customDistanceMaterial) ||

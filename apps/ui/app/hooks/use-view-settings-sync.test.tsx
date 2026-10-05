@@ -258,6 +258,199 @@ describe('view record owner synchronization', () => {
       graphicsRef.stop();
     },
   );
+  it.each([
+    'older echo',
+    'coalesced acknowledgement',
+    'repeated value',
+    'failed write',
+    'rejected write',
+    'unmounted owner',
+    'replaced owner',
+  ])('keeps the latest local section through a deferred older own-write echo: %s', async (mode) => {
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout', 'Date'] });
+    const graphicsRef = graphics();
+    const editorRef = editor();
+    const writes: Array<{ record: WorkbenchView; resolve: (saved: boolean) => void; reject: (error: Error) => void }> =
+      [];
+    const writeRecord = vi.fn(async (record: WorkbenchView) => {
+      const cut = record.section.cuts[0];
+      if (cut?.kind !== 'plane' || (cut.offset !== 0.03 && cut.offset !== 0.018)) {
+        return true;
+      }
+      const completion = Promise.withResolvers<boolean>();
+      writes.push({ record, resolve: completion.resolve, reject: completion.reject });
+      return completion.promise;
+    });
+    const onRecordApplied = vi.fn();
+    const base =
+      mode === 'coalesced acknowledgement'
+        ? workbenchRecords.view.schema.parse({
+            ...initial(),
+            section: { active: true, cuts: [{ kind: 'plane', plane: 'yz', offset: 0.018, isFlipped: false }] },
+          })
+        : initial();
+    let activeGraphics = graphicsRef;
+    const draw = (record: WorkbenchView) => (
+      <GraphicsProvider graphicsRef={activeGraphics}>
+        <Harness
+          graphicsRef={activeGraphics}
+          editorRef={editorRef}
+          record={record}
+          writeRecord={writeRecord}
+          onRecordApplied={onRecordApplied}
+        />
+      </GraphicsProvider>
+    );
+    const view = render(draw(base));
+    try {
+      await act(async () => vi.advanceTimersByTimeAsync(300));
+      if (graphicsRef.getSnapshot().context.sectionCuts.length === 0) {
+        act(() => graphicsRef.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'yz' } }));
+      }
+      const id = graphicsRef.getSnapshot().context.sectionCuts[0]?.id;
+      if (!id) {
+        throw new Error('The actual section owner did not create the cut');
+      }
+      act(() => graphicsRef.send({ type: 'updateSectionCut', payload: { id, patch: { offset: 0.03 } } }));
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+      const older = writes.find(
+        ({ record }) => record.section.cuts[0]?.kind === 'plane' && record.section.cuts[0].offset === 0.03,
+      );
+      if (!older) {
+        throw new Error('The earlier section write was not captured');
+      }
+      act(() => graphicsRef.send({ type: 'updateSectionCut', payload: { id, patch: { offset: 0.018 } } }));
+      const olderEcho: WorkbenchView = { ...older.record, display: { ...older.record.display, grid: false } };
+      await act(async () => {
+        older.resolve(true);
+        if (mode !== 'coalesced acknowledgement') {
+          view.rerender(draw(olderEcho));
+        }
+      });
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+      expect(graphicsRef.getSnapshot().context.sectionCuts).toMatchObject([
+        { id, kind: 'plane', plane: 'yz', offset: 0.018 },
+      ]);
+      expect(graphicsRef.getSnapshot().context.isSectionViewActive).toBe(true);
+      if (mode !== 'coalesced acknowledgement') {
+        expect(onRecordApplied).not.toHaveBeenCalledWith(olderEcho);
+      }
+      if (mode !== 'coalesced acknowledgement') {
+        expect(graphicsRef.getSnapshot().context.enableGrid).toBe(false);
+      }
+      const latest = writes.findLast(
+        ({ record }) => record.section.cuts[0]?.kind === 'plane' && record.section.cuts[0].offset === 0.018,
+      );
+      if (!latest) {
+        throw new Error('The latest local section did not produce its own write');
+      }
+      let acknowledged = latest;
+      if (mode === 'repeated value') {
+        act(() => graphicsRef.send({ type: 'updateSectionCut', payload: { id, patch: { offset: 0.03 } } }));
+        await act(async () => vi.advanceTimersByTimeAsync(250));
+        const repeated = writes.findLast(
+          ({ record }) => record.section.cuts[0]?.kind === 'plane' && record.section.cuts[0].offset === 0.03,
+        );
+        if (!repeated || repeated === older) {
+          throw new Error('The repeated local value did not produce a latest write');
+        }
+        view.rerender(draw(olderEcho));
+        await act(async () => {
+          latest.resolve(true);
+          view.rerender(draw(latest.record));
+        });
+        await act(async () => vi.advanceTimersByTimeAsync(250));
+        expect(graphicsRef.getSnapshot().context.sectionCuts).toMatchObject([{ id, kind: 'plane', offset: 0.03 }]);
+        acknowledged = repeated;
+      }
+      // An echo can arrive before its exact write completion, including an unchanged original value.
+      view.rerender(draw(acknowledged.record));
+      if (mode === 'replaced owner') {
+        activeGraphics = graphics();
+        view.rerender(draw(acknowledged.record));
+        await act(async () => vi.advanceTimersByTimeAsync(300));
+        if (activeGraphics.getSnapshot().context.sectionCuts.length === 0) {
+          act(() => activeGraphics.send({ type: 'addSectionCut', payload: { kind: 'plane', plane: 'yz' } }));
+        }
+        const successorId = activeGraphics.getSnapshot().context.sectionCuts[0]?.id;
+        if (!successorId) {
+          throw new Error('The successor section owner did not create its cut');
+        }
+        act(() => {
+          activeGraphics.send({ type: 'updateSectionCut', payload: { id: successorId, patch: { offset: 0.03 } } });
+          activeGraphics.send({ type: 'updateSectionCut', payload: { id: successorId, patch: { offset: 0.018 } } });
+        });
+        onRecordApplied.mockClear();
+        await act(async () => {
+          acknowledged.resolve(true);
+        });
+        expect(onRecordApplied).not.toHaveBeenCalled();
+        expect(activeGraphics.getSnapshot().context.sectionCuts).toMatchObject([{ id: successorId, offset: 0.018 }]);
+        await act(async () => vi.advanceTimersByTimeAsync(250));
+        const successor = writes.findLast(
+          ({ record }) => record.section.cuts[0]?.kind === 'plane' && record.section.cuts[0].offset === 0.018,
+        );
+        if (!successor || successor === acknowledged) {
+          throw new Error('The successor section save was not captured');
+        }
+        view.rerender(draw(successor.record));
+        await act(async () => {
+          successor.resolve(true);
+        });
+        expect(onRecordApplied).toHaveBeenCalledWith(successor.record);
+        return;
+      }
+      if (mode === 'unmounted owner') {
+        onRecordApplied.mockClear();
+        view.unmount();
+        await act(async () => {
+          acknowledged.resolve(true);
+        });
+        expect(writeRecord).toHaveBeenCalledWith(acknowledged.record);
+        expect(onRecordApplied).not.toHaveBeenCalled();
+        return;
+      }
+      await act(async () => {
+        if (mode === 'rejected write') {
+          acknowledged.reject(new Error('The latest section save failed'));
+        } else {
+          acknowledged.resolve(mode !== 'failed write');
+        }
+      });
+      if (mode === 'failed write' || mode === 'rejected write') {
+        expect(onRecordApplied).not.toHaveBeenCalledWith(acknowledged.record);
+      } else {
+        expect(onRecordApplied).toHaveBeenCalledWith(acknowledged.record);
+      }
+      if (mode === 'coalesced acknowledgement' || mode === 'failed write' || mode === 'rejected write') {
+        view.rerender(draw(olderEcho));
+        await act(async () => vi.advanceTimersByTimeAsync(250));
+        expect(graphicsRef.getSnapshot().context.sectionCuts).toMatchObject([{ kind: 'plane', offset: 0.03 }]);
+      }
+      const foreign = workbenchRecords.view.schema.parse({
+        ...acknowledged.record,
+        camera: { kind: 'preset', preset: 'front' },
+        section: { active: true, cuts: [{ kind: 'plane', plane: 'yz', offset: 0.012, isFlipped: false }] },
+      });
+      view.rerender(draw(foreign));
+      await act(async () => vi.advanceTimersByTimeAsync(250));
+      expect(graphicsRef.getSnapshot().context.sectionCuts).toMatchObject([
+        { kind: 'plane', plane: 'yz', offset: 0.012 },
+      ]);
+      expect(graphicsRef.getSnapshot().context.isSectionViewActive).toBe(true);
+      expect(getViewCameraSession(graphicsRef)?.rig.actorRef.getSnapshot().context.view.direction).toEqual([0, -1, 0]);
+    } finally {
+      view.unmount();
+      graphicsRef.stop();
+      for (const write of writes) {
+        write.resolve(true);
+      }
+      if (activeGraphics !== graphicsRef) {
+        activeGraphics.stop();
+      }
+      vi.useRealTimers();
+    }
+  });
   it('waits for camera settle before acknowledging combined camera and section adoption', async () => {
     const graphicsRef = graphics();
     const editorRef = editor();

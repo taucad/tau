@@ -2,7 +2,7 @@ import { createAsyncLogic, setup, types } from 'xstate';
 import type { ActorRefFrom, EnqueueObject, SnapshotFrom, SystemRegistry } from 'xstate';
 import { eventSchemas } from '#lib/xstate.lib.js';
 import type { GeometryComponentManifest, GridSizes } from '@taucad/types';
-import type { KnownArtifact } from '@taucad/runtime';
+import type { KnownArtifact, SourceRevision } from '@taucad/runtime';
 import { idPrefix } from '@taucad/types/constants';
 import { getLengthUnit, metersPerLengthUnit } from '#constants/length-units.js';
 import type { LengthSymbol, UnitSystem } from '#constants/length-units.js';
@@ -37,6 +37,16 @@ import type { ModelInteractionSource, ViewerHoverSuppressionReason } from '#mach
 import { kinematicsMachine } from '#machines/kinematics.machine.js';
 import type { MeasurementAnchor, MeasurementRecord, MeasurementOperation } from '#constants/measurement.types.js';
 
+/** Actual pane subscription provenance; retains identities and source digests, never a document or artifact. */
+export type PaneRenderingProvenance = Readonly<{
+  documentId: string;
+  evaluationId: string;
+  requestId: string;
+  hash: string;
+  sourceRevision: SourceRevision;
+  isCurrent: () => boolean;
+}>;
+
 export type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
 export type KinematicsRef = ActorRefFrom<typeof kinematicsMachine>;
 
@@ -57,14 +67,116 @@ const markMeasurementsOutOfDate = (
       : measurement,
   );
 };
+/** Private renderer policy; projected error is approximate appearance deviation, not a geometry guarantee. */
+export type AssemblyDetailPolicy = Readonly<{
+  triangleRatio: number;
+  approximateRelativeError: number;
+  screenSpace?: Readonly<{ maxApproximatePixelError: number; enterDetailRatio: number }>;
+}>;
+
+export type AssemblyDetailCalibration = AssemblyDetailPolicy &
+  Readonly<{
+    screenSpace: NonNullable<AssemblyDetailPolicy['screenSpace']>;
+  }>;
+
+/** Validate the ephemeral calibration seam without accepting unbounded or non-finite settings. */
+export function isAssemblyDetailCalibration(value: unknown): value is AssemblyDetailCalibration {
+  if (
+    typeof value !== 'object' ||
+    value === null ||
+    !('triangleRatio' in value) ||
+    !('approximateRelativeError' in value) ||
+    !('screenSpace' in value)
+  ) {
+    return false;
+  }
+  const { triangleRatio, approximateRelativeError, screenSpace } = value;
+  if (
+    typeof triangleRatio !== 'number' ||
+    !Number.isFinite(triangleRatio) ||
+    triangleRatio <= 0 ||
+    triangleRatio >= 1 ||
+    typeof approximateRelativeError !== 'number' ||
+    !Number.isFinite(approximateRelativeError) ||
+    approximateRelativeError < 0 ||
+    typeof screenSpace !== 'object' ||
+    screenSpace === null ||
+    !('maxApproximatePixelError' in screenSpace) ||
+    !('enterDetailRatio' in screenSpace)
+  ) {
+    return false;
+  }
+  const { maxApproximatePixelError, enterDetailRatio } = screenSpace;
+  return (
+    typeof maxApproximatePixelError === 'number' &&
+    Number.isFinite(maxApproximatePixelError) &&
+    maxApproximatePixelError > 0 &&
+    typeof enterDetailRatio === 'number' &&
+    Number.isFinite(enterDetailRatio) &&
+    enterDetailRatio > 0 &&
+    enterDetailRatio < 1
+  );
+}
 
 export type GltfPresentationTelemetry = Readonly<{
+  /** Actual candidate scene identity; absent when preparation failed before a bundle existed. */
+  candidateSceneId?: string;
   revision: number;
   key: string;
   backend: ResolvedGraphicsBackend;
   barrier: GltfPresentationBarrier;
   outcome: 'presented' | 'failed' | 'cancelled' | 'stale';
   glbBytes: number;
+  /** Candidate-local resource accounting; GPU/image/BVH fields are estimates, not browser heap measurements. */
+  assemblyResources?: Readonly<{
+    validatedSourceBytes: number;
+    residentCompressedBytes: number;
+    geometryCpuBytes: number;
+    geometryGpuBytesEstimate: number;
+    instanceAttributeCpuBytes: number;
+    instanceAttributeGpuBytesEstimate: number;
+    instanceSlotDescriptorsSerializedBytes: number;
+    /** Exact unique resident ArrayBuffer sizes; excludes object heaps and unmeasured transients. */
+    exactResidentBufferCpuBytes: number;
+    currentAndCandidateExactBufferCpuBytes: number;
+    detailGeometryCount: number;
+    detailUploadGpuBytesEstimate: number;
+    detailDecisionSerializedBytes: number;
+    detailCalibration?: Readonly<{
+      maxProjectedApproximateErrorPixels: number;
+      projectionUnavailableCount: number;
+      selectedFullEvidenceCount: number;
+    }>;
+    edgeCpuBytes: number;
+    edgeGpuBytesEstimate: number;
+    surfaceBatchCount: number;
+    edgeBatchCount: number;
+    wrapperObjectCount: number;
+    canonicalSurfaceTriangleCount: number;
+    detailSurfaceTriangleCount: number;
+    /** Authored fat-line draw geometry index triangles times segment instances, not raster submissions. */
+    mandatoryEdgeTriangleCount: number;
+    unmeasuredInventory: readonly string[];
+    textureCpuBytesEstimate: number;
+    textureGpuBytesEstimate: number;
+    texturesWithUnknownSize: number;
+    bvhTreeCount: number;
+    bvhTreesWithUnknownSize: number;
+    /** Known-version object graph estimate; unknown tree sizes are reported separately. */
+    bvhBytesEstimate: number;
+    metadataSerializedBytes: number;
+    demandIndexCpuBytes: number;
+    demandDescriptorsSerializedBytes: number;
+    parserJsonSerializedBytes: number;
+    parsedDependencyCpuBytes: number;
+    parserObjectCount: number;
+    currentAndCandidateBytesEstimate: number;
+    definitionCount: number;
+    residentOccurrenceCount: number;
+    queuedPreparationCount: number;
+    sceneObjectCount: number;
+    materialCount: number;
+  }>;
   /** Submission is a CPU boundary; pixels require browser or GPU evidence. */
   renderBoundary?: 'submitted';
   meshCount: number;
@@ -144,13 +256,15 @@ const removeSuppressionReason = <T extends string>(reasons: readonly T[], reason
  *   `geometryCenter`, `resolvedGraphicsBackend`, `webGpuAvailable`, `hoveredSectionCutId`,
  *   `committedSectionCuts` and `sectionCertification` (what the caps last certified),
  *   `hoveredMeasurementId`, `measureSnapDistance`, every
- *   suppression and interaction flag, `pickableMeshesVersion`, `geometry`, `geometryKey` and
- *   `gltfPresentation`.
+ *   suppression and interaction flag, `pickableMeshesVersion`, `artifact`, `artifactKey`,
+ *   `artifactSourceFile` and `gltfPresentation`.
  *
  * No field here stores a copy of a value another actor owns; the camera's field of view and pose
  * belong to the view's camera session, and the render timeout to the entry's CAD actor.
  */
 export type GraphicsContext = {
+  /** Ephemeral calibration input; production default must follow actual pixel/backend calibration. */
+  assemblyDetailCalibration?: AssemblyDetailCalibration;
   /** Session-scoped (E4): human-selected display units; lengths remain stored physically in metres. */
   displayUnits: {
     length: {
@@ -258,6 +372,8 @@ export type GraphicsContext = {
   artifactKey: string;
   /** Source identity travels with the artifact through the renderer handoff. */
   artifactSourceFile?: string;
+  /** Read authority belongs to the still-current pane subscription, independently of the CAD default view. */
+  paneRendering?: PaneRenderingProvenance;
   /** Requested-versus-presented GLTF identity and bounded renderer handoff measurements. */
   gltfPresentation: GltfPresentationProjection;
 };
@@ -272,6 +388,7 @@ export type GraphicsEvent =
   | { type: 'fitView' }
   | { type: 'cameraViewChanged'; verticalSpan: number }
   // Visibility events
+  | { type: 'setAssemblyDetailCalibration'; calibration?: AssemblyDetailCalibration }
   | { type: 'setSurfaceVisibility'; payload: boolean }
   | { type: 'setLinesVisibility'; payload: boolean }
   | { type: 'setGizmoVisibility'; payload: boolean }
@@ -365,7 +482,9 @@ export type GraphicsEvent =
       artifact: KnownArtifact;
       hash: string;
       sourceFile?: string;
+      paneRendering?: PaneRenderingProvenance;
     }
+  | { type: 'updateAssembly'; key: string; units: { length: LengthSymbol }; sourceFile?: string }
   | { type: 'clearArtifact' }
   | { type: 'gltfPreparationStarted'; revision: number; key: string }
   | {
@@ -383,6 +502,7 @@ export type GraphicsEvent =
       manifest: GeometryComponentManifest;
     }
   | { type: 'gltfPresentationFailed'; revision: number; key: string }
+  | { type: 'gltfPresentationReleased'; revision: number; key: string }
   | { type: 'gltfPresentationMeasured'; telemetry: GltfPresentationTelemetry }
   // Model/component interaction events
   | {
@@ -744,6 +864,7 @@ export const graphicsMachine = setup({
   },
 }).createMachine({
   id: 'graphics',
+  version: '1',
 
   invoke: [
     {
@@ -950,6 +1071,27 @@ export const graphicsMachine = setup({
         },
 
         // Visibility events
+        setAssemblyDetailCalibration: ({ event }) => {
+          const { calibration } = event;
+          if (calibration === undefined) {
+            return { context: { assemblyDetailCalibration: undefined } };
+          }
+          if (!isAssemblyDetailCalibration(calibration)) {
+            return {};
+          }
+          return {
+            context: {
+              assemblyDetailCalibration: Object.freeze({
+                triangleRatio: calibration.triangleRatio,
+                approximateRelativeError: calibration.approximateRelativeError,
+                screenSpace: Object.freeze({
+                  maxApproximatePixelError: calibration.screenSpace.maxApproximatePixelError,
+                  enterDetailRatio: calibration.screenSpace.enterDetailRatio,
+                }),
+              }),
+            },
+          };
+        },
         setSurfaceVisibility: {
           context: ({ context, event }) => ({
             enableSurfaces: event.payload,
@@ -1034,7 +1176,12 @@ export const graphicsMachine = setup({
 
         // Artifact updates
         clearArtifact: ({ context }, enq) => {
-          if (!context.artifact && !context.modelInteractionUnitId && context.artifactKey === '') {
+          if (
+            !context.artifact &&
+            !context.modelInteractionUnitId &&
+            context.artifactKey === '' &&
+            !context.paneRendering
+          ) {
             return {};
           }
           if (context.ownsModelInteractionRef && context.modelInteractionUnitId) {
@@ -1060,6 +1207,7 @@ export const graphicsMachine = setup({
               artifact: undefined,
               artifactKey: '',
               artifactSourceFile: undefined,
+              paneRendering: undefined,
               gltfPresentation: { requestedRevision: revision, presentedRevision: revision, phase: 'idle' },
               modelInteractionUnitId: undefined,
               pickableMeshesVersion: context.pickableMeshesVersion + 1,
@@ -1088,6 +1236,11 @@ export const graphicsMachine = setup({
               artifact: event.artifact,
               artifactKey: event.hash,
               artifactSourceFile: event.sourceFile,
+              paneRendering:
+                event.paneRendering?.hash === event.hash &&
+                event.paneRendering.sourceRevision.entry === event.sourceFile
+                  ? event.paneRendering
+                  : undefined,
               gltfPresentation:
                 event.artifact.mimeType === 'model/gltf-binary'
                   ? withGltfPresentationPhase(
@@ -1118,6 +1271,23 @@ export const graphicsMachine = setup({
             },
           };
         },
+        updateAssembly: ({ context, event }) => ({
+          context: {
+            artifact: undefined,
+            artifactKey: event.key,
+            artifactSourceFile: event.sourceFile,
+            paneRendering: undefined,
+            gltfPresentation: withGltfPresentationPhase(
+              {
+                ...context.gltfPresentation,
+                requestedRevision: context.gltfPresentation.requestedRevision + 1,
+                requestedKey: event.key,
+              },
+              'preparing',
+            ),
+            cadUnits: { length: { symbol: event.units.length } },
+          },
+        }),
         gltfPreparationStarted: {
           context: ({ context, event }) => ({
             gltfPresentation: gltfRequestMatches(context, event)
@@ -1163,6 +1333,24 @@ export const graphicsMachine = setup({
             },
           };
         },
+        gltfPresentationReleased: {
+          context: ({ context, event }) => {
+            if (
+              context.gltfPresentation.presentedRevision !== event.revision ||
+              context.gltfPresentation.presentedKey !== event.key
+            ) {
+              return {};
+            }
+            return {
+              gltfPresentation: withGltfPresentationPhase(
+                { ...context.gltfPresentation, presentedKey: undefined },
+                context.gltfPresentation.requestedKey === undefined ? 'idle' : 'preparing',
+              ),
+              modelInteractionUnitId: undefined,
+              pickableMeshesVersion: context.pickableMeshesVersion + 1,
+            };
+          },
+        },
         gltfPresentationFailed: {
           context: ({ context, event }) => ({
             gltfPresentation: gltfRequestMatches(context, event)
@@ -1176,14 +1364,26 @@ export const graphicsMachine = setup({
         /* D21: the presented frame joins the worker spans that produced it, under the renderer's own
          * producer identity. The durations ride as attributes rather than as invented child spans —
          * only their total is anchored to a real clock reading, exactly as the kernels report timings. */
-        gltfPresentationMeasured: ({ event }, enq) => {
-          const { durations, ...attributes } = event.telemetry;
+        gltfPresentationMeasured: ({ event, self }, enq) => {
+          const { durations, assemblyResources, ...attributes } = event.telemetry;
+          const { detailCalibration, unmeasuredInventory, ...resourceAttributes } = assemblyResources ?? {};
+          const resourceDetails = assemblyResources
+            ? {
+                ...resourceAttributes,
+                unmeasuredInventoryJson: JSON.stringify(unmeasuredInventory),
+                ...(detailCalibration ? { detailCalibrationJson: JSON.stringify(detailCalibration) } : {}),
+              }
+            : {};
+          const viewportActorSessionId: unknown = Reflect.get(self, 'sessionId');
+          if (typeof viewportActorSessionId !== 'string') {
+            throw new TypeError('Expected actual graphics actor session ID.');
+          }
           const duration = durations.receiptToFirstFrame ?? durations.commitToFirstFrame ?? 0;
           enq(() => {
             recordRendererSpan('renderer.presentation', {
               startTime: performance.now() - duration,
               duration,
-              attributes: { ...attributes, ...durations },
+              attributes: { ...attributes, ...durations, ...resourceDetails, viewportActorSessionId },
             });
           });
           return {};

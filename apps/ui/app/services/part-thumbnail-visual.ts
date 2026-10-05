@@ -254,8 +254,10 @@ export async function canonicalPartPreviews(
   if (!parents) {
     return { visualKey, previews: parts.map(() => undefined) };
   }
-  const allRigidWrappers = nodes.flatMap((node, nodeIndex) =>
-    isOccurrenceWrapper(object(node)) && isPureRigidPose(object(node)) ? [nodeIndex] : [],
+  const allRigidWrappers = new Set(
+    nodes.flatMap((node, nodeIndex) =>
+      isOccurrenceWrapper(object(node)) && isPureRigidPose(object(node)) ? [nodeIndex] : [],
+    ),
   );
   const prepared = parts.map((primitives) => {
     const common = commonNodeChain(nodes, parents, primitives);
@@ -263,29 +265,265 @@ export async function canonicalPartPreviews(
       return undefined;
     }
     const wrappers = common.filter((nodeIndex) => isOccurrenceWrapper(object(nodes[nodeIndex])));
-    if (wrappers.length === 0 || wrappers.some((nodeIndex) => !allRigidWrappers.includes(nodeIndex))) {
+    if (wrappers.length === 0 || wrappers.some((nodeIndex) => !allRigidWrappers.has(nodeIndex))) {
       return undefined;
     }
-    return true;
+    return wrappers;
   });
   if (prepared.every((eligible) => !eligible)) {
     return { visualKey, previews: prepared.map(() => undefined) };
   }
-  let key: string;
+  const normalizedWrappers = [...new Set(prepared.flatMap((wrappers) => wrappers ?? []))];
+  // One export source serves the batch. Never normalize a selected intrinsic child
+  // or a conservative fallback row merely because another row canonicalizes it.
+  const conflicts = parts.some((primitives, partIndex) =>
+    primitives.some((primitive) => {
+      const chain = commonNodeChain(nodes, parents, [primitive]) ?? [];
+      return normalizedWrappers.some((wrapper) => chain.includes(wrapper) && !prepared[partIndex]?.includes(wrapper));
+    }),
+  );
+  if (conflicts) {
+    return { visualKey, previews: parts.map(() => undefined) };
+  }
+  let previews: ReadonlyArray<Readonly<{ key: string }> | undefined>;
   try {
-    key = await digestParsedVisual(content, parsed, allRigidWrappers);
+    previews = await selectedPartVisualKeys({
+      parsed,
+      parents,
+      parts,
+      eligible: prepared.map(Boolean),
+      rigidWrappers: normalizedWrappers,
+    });
   } catch {
     return { visualKey, previews: parts.map(() => undefined) };
+  }
+  if (previews.every((preview) => !preview)) {
+    return { visualKey, previews };
   }
   let normalized: Uint8Array<ArrayBuffer> | undefined;
   return {
     visualKey,
-    previews: prepared.map((eligible) => (eligible ? { key } : undefined)),
+    previews,
     renderContent: () => {
-      normalized ??= writeCanonicalGlb(content, parsed, allRigidWrappers);
+      normalized ??= writeCanonicalGlb(content, parsed, normalizedWrappers);
       return normalized;
     },
   };
+}
+
+/** Resolve only the selected visual closure; scene-local array indices never enter its identity. */
+async function selectedPartVisualKeys({
+  parsed: { json, bin },
+  parents,
+  parts,
+  eligible,
+  rigidWrappers,
+}: {
+  readonly parsed: ReturnType<typeof parseGltfBytes>;
+  readonly parents: ReadonlyMap<number, number>;
+  readonly parts: ReadonlyArray<readonly PartPrimitiveReference[]>;
+  readonly eligible: ReadonlyArray<boolean | undefined>;
+  readonly rigidWrappers: readonly number[];
+}): Promise<ReadonlyArray<Readonly<{ key: string }> | undefined>> {
+  const root: JsonRecord = { ...json };
+  if (!supportsCanonicalVisual(root)) {
+    return parts.map(() => undefined);
+  }
+  const stripMetadata = (raw: unknown): JsonRecord => {
+    const value = { ...object(raw) };
+    delete value['name'];
+    const extras = { ...object(value['extras']) };
+    delete extras['tauComponentId'];
+    delete value['extras'];
+    if (Object.keys(extras).length > 0) {
+      value['extras'] = extras;
+    }
+    return value;
+  };
+  const resources = new Map<string, Promise<unknown>>();
+  const resource = async (kind: string, reference: unknown): Promise<unknown> => {
+    const resourceIndex = index(reference);
+    const collection = root[kind];
+    if (resourceIndex === undefined || !Array.isArray(collection) || resourceIndex >= collection.length) {
+      throw new Error(`Part preview references an invalid ${kind} resource.`);
+    }
+    const address = `${kind}/${resourceIndex}`;
+    let resolved = resources.get(address);
+    if (resolved) {
+      return resolved;
+    }
+    const resolve = async (): Promise<unknown> => {
+      const value = stripMetadata(collection[resourceIndex]);
+      if (kind === 'bufferViews') {
+        const offset = index(value['byteOffset'] ?? 0);
+        const length = index(value['byteLength']);
+        if (offset === undefined || length === undefined || offset + length > bin.byteLength) {
+          throw new Error('Part preview buffer view exceeds embedded data.');
+        }
+        delete value['buffer'];
+        delete value['byteOffset'];
+        value['bytes'] = await digest(bin.subarray(offset, offset + length));
+      } else if (kind === 'materials') {
+        const textures = async (raw: unknown): Promise<unknown> => {
+          if (Array.isArray(raw)) {
+            return Promise.all(raw.map(async (child) => textures(child)));
+          }
+          if (typeof raw !== 'object' || raw === null) {
+            return raw;
+          }
+          const record = object(raw);
+          return Object.fromEntries(
+            await Promise.all(
+              Object.entries(record).map(async ([name, child]) => [
+                name,
+                name === 'index' ? await resource('textures', child) : await textures(child),
+              ]),
+            ),
+          );
+        };
+        return textures(value);
+      } else {
+        const references: Record<string, string> =
+          kind === 'textures'
+            ? { source: 'images', sampler: 'samplers' }
+            : kind === 'images' || kind === 'accessors'
+              ? { bufferView: 'bufferViews' }
+              : {};
+        for (const [name, target] of Object.entries(references)) {
+          if (value[name] !== undefined) {
+            // oxlint-disable-next-line no-await-in-loop -- Resolve each resource once through the shared promise map.
+            value[name] = await resource(target, value[name]);
+          }
+        }
+        if (kind === 'accessors' && value['sparse'] !== undefined) {
+          const sparse = { ...object(value['sparse']) };
+          for (const name of ['indices', 'values']) {
+            const selected = { ...object(sparse[name]) };
+            // oxlint-disable-next-line no-await-in-loop -- Sparse accessor indices and values have independent byte ownership.
+            selected['bufferView'] = await resource('bufferViews', selected['bufferView']);
+            sparse[name] = selected;
+          }
+          value['sparse'] = sparse;
+        }
+      }
+      return value;
+    };
+    resolved = resolve();
+    resources.set(address, resolved);
+    return resolved;
+  };
+  const omit = new Set(rigidWrappers);
+  return Promise.all(
+    parts.map(async (primitives, partIndex) => {
+      if (!eligible[partIndex]) {
+        return undefined;
+      }
+      const selected = await Promise.all(
+        primitives.map(async ({ nodeIndex, meshIndex, primitiveIndex }) => {
+          const node = object(json.nodes?.[nodeIndex]);
+          const { meshes } = root;
+          const mesh = Array.isArray(meshes) ? object(meshes[meshIndex]) : {};
+          const rawPrimitives = mesh['primitives'];
+          if (node['mesh'] !== meshIndex || !Array.isArray(rawPrimitives) || !rawPrimitives[primitiveIndex]) {
+            throw new Error('Part preview primitive does not belong to the selected node.');
+          }
+          const primitive = stripMetadata(rawPrimitives[primitiveIndex]);
+          const attributes = async (raw: unknown): Promise<JsonRecord> => {
+            const entries = await Promise.all(
+              Object.entries(object(raw)).map(
+                async ([name, accessor]): Promise<[string, unknown]> => [name, await resource('accessors', accessor)],
+              ),
+            );
+            return Object.fromEntries<unknown>(entries);
+          };
+          primitive['attributes'] = await attributes(primitive['attributes']);
+          if (primitive['indices'] !== undefined) {
+            primitive['indices'] = await resource('accessors', primitive['indices']);
+          }
+          if (primitive['material'] !== undefined) {
+            primitive['material'] = await resource('materials', primitive['material']);
+          }
+          if (Array.isArray(primitive['targets'])) {
+            primitive['targets'] = await Promise.all(primitive['targets'].map(async (target) => attributes(target)));
+          }
+          const chain: number[] = [];
+          let cursor: number | undefined = nodeIndex;
+          while (cursor !== undefined) {
+            chain.unshift(cursor);
+            cursor = parents.get(cursor);
+          }
+          const transform = new Matrix4();
+          for (const selectedNode of chain) {
+            const value = object(json.nodes?.[selectedNode]);
+            if (value['skin'] !== undefined) {
+              throw new Error('Skinned part previews require full source identity.');
+            }
+            if (omit.has(selectedNode)) {
+              continue;
+            }
+            const matrix = new Matrix4();
+            const raw = value['matrix'];
+            if (
+              Array.isArray(raw) &&
+              raw.length === 16 &&
+              raw.every((item) => typeof item === 'number' && Number.isFinite(item))
+            ) {
+              matrix.fromArray(raw as number[]);
+            } else {
+              const translation = value['translation'] ?? [0, 0, 0];
+              const rotation = value['rotation'] ?? [0, 0, 0, 1];
+              const scale = value['scale'] ?? [1, 1, 1];
+              if (
+                raw !== undefined ||
+                !validVector(translation, 3) ||
+                !validVector(rotation, 4) ||
+                !validVector(scale, 3)
+              ) {
+                throw new Error('Part preview has an invalid intrinsic transform.');
+              }
+              matrix.compose(new Vector3(...translation), new Quaternion(...rotation), new Vector3(...scale));
+            }
+            transform.multiply(matrix);
+          }
+          // Intrinsic child and primitive order can affect equal-depth transparent
+          // draws. Preserve it while excluding global node/mesh array addresses.
+          const lastWrapper = chain.findLastIndex((selectedNode) => omit.has(selectedNode));
+          const intrinsicPath = chain.slice(lastWrapper + 1).flatMap((selectedNode, depth) => {
+            const parentIndex = chain[lastWrapper + depth];
+            return parentIndex === undefined ? [] : [json.nodes?.[parentIndex]?.children?.indexOf(selectedNode) ?? 0];
+          });
+          return canonicalJson({
+            primitive,
+            drawOrder: [...intrinsicPath, primitiveIndex],
+            transform: transform.elements,
+            weights: node['weights'] ?? mesh['weights'],
+          });
+        }),
+      );
+      return { key: await digest(new TextEncoder().encode(canonicalJson(selected.sort()))) };
+    }),
+  );
+}
+
+function supportsCanonicalVisual(root: JsonRecord): boolean {
+  const used: unknown = root['extensionsUsed'];
+  const required: unknown = root['extensionsRequired'];
+  const usedExtensions: readonly unknown[] = Array.isArray(used) ? used : [];
+  const requiredExtensions: readonly unknown[] = Array.isArray(required) ? required : [];
+  const extensions = [...usedExtensions, ...requiredExtensions];
+  const buffers = Array.isArray(root['buffers']) ? root['buffers'] : [];
+  const images = Array.isArray(root['images']) ? root['images'] : [];
+  return (
+    Object.hasOwn(object(root['extensions']), tauCadTopologyExtension) &&
+    extensions.every(
+      (name) => name === tauCadTopologyExtension || (typeof name === 'string' && knownVisualExtensions.has(name)),
+    ) &&
+    buffers.length <= 1 &&
+    buffers.every((buffer) => object(buffer)['uri'] === undefined) &&
+    images.every(
+      (image) => typeof object(image)['uri'] !== 'string' || (object(image)['uri'] as string).startsWith('data:'),
+    )
+  );
 }
 
 /** Change only admitted occurrence poses in the JSON chunk; retain BIN and all other chunks. */
@@ -357,32 +595,12 @@ async function digestParsedVisual(
   const { json, bin } = parsed;
   const root = json as unknown as JsonRecord;
   const rootExtensions = object(root['extensions']);
-  if (!Object.hasOwn(rootExtensions, tauCadTopologyExtension)) {
+  if (!supportsCanonicalVisual(root)) {
     return digest(content);
   }
   const used = Array.isArray(root['extensionsUsed']) ? (root['extensionsUsed'] as unknown[]) : [];
   const required = Array.isArray(root['extensionsRequired']) ? (root['extensionsRequired'] as unknown[]) : [];
-  // An unknown extension may carry display bytes outside core accessor/image views.
-  if (
-    [...used, ...required].some(
-      (name) => name !== tauCadTopologyExtension && (typeof name !== 'string' || !knownVisualExtensions.has(name)),
-    )
-  ) {
-    return digest(content);
-  }
-  const buffers = Array.isArray(root['buffers']) ? (root['buffers'] as unknown[]) : [];
-  if (buffers.length > 1 || buffers.some((buffer) => object(buffer)['uri'] !== undefined)) {
-    return digest(content);
-  }
   const images = Array.isArray(root['images']) ? (root['images'] as unknown[]) : [];
-  if (
-    images.some((image) => {
-      const { uri } = object(image);
-      return typeof uri === 'string' && !uri.startsWith('data:');
-    })
-  ) {
-    return digest(content);
-  }
   const views = Array.isArray(root['bufferViews']) ? (root['bufferViews'] as unknown[]) : [];
   const referenced = new Set<number>();
   const add = (value: unknown): void => {

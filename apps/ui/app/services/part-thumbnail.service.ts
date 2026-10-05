@@ -1,3 +1,5 @@
+import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
+import { ENV } from '#environment.config.js';
 import type { ExportFile } from '@taucad/types';
 import { Topic } from '@taucad/events';
 import type { HeadlessImageJob, HeadlessImageService } from '#services/headless-image.service.js';
@@ -25,6 +27,8 @@ export type PartThumbnailRequest = Readonly<{
 export type PartThumbnailSource = Readonly<{
   sourcePath: string;
   geometryHash: string;
+  /** Whole-source visual identity for conservative, address-qualified fallback previews. */
+  visualKey?: string;
   content: Uint8Array<ArrayBuffer>;
   /** Optional preview-only normalization, evaluated only when an image is missing. */
   renderContent?: () => Uint8Array<ArrayBuffer>;
@@ -56,6 +60,8 @@ type Work = Readonly<{
 type OwnerDemand = Readonly<{
   source?: PartThumbnailSource;
   parts: readonly PartThumbnailRequest[];
+  /** Gallery imagery already accepted outside its current neighbour window. */
+  retainedReady?: readonly PartThumbnailRequest[];
 }>;
 
 /**
@@ -116,23 +122,92 @@ export class PartThumbnailService {
     parts: readonly PartThumbnailRequest[],
     options?: { readonly manualPartId?: string },
   ): void {
-    this.requestForOwner('default', source, parts, options);
+    this.requestForOwner('default', { source, parts, options });
   }
 
   /** Combine simultaneous callers for the same presented unit without replacing each other's demand. */
-  /* oxlint-disable eslint/max-params -- Owner, source, visible parts, and optional retry target are independent admission inputs. */
-  // eslint-disable-next-line max-params-no-constructor/max-params-no-constructor -- Owner, source, requested parts, and one optional retry target are independent admission inputs.
   public requestForOwner(
     owner: string,
-    source: PartThumbnailSource,
-    parts: readonly PartThumbnailRequest[],
-    options?: { readonly manualPartId?: string },
+    {
+      source,
+      parts,
+      options,
+    }: {
+      readonly source: PartThumbnailSource;
+      readonly parts: readonly PartThumbnailRequest[];
+      readonly options?: { readonly manualPartId?: string };
+    },
   ): void {
     this.validateRequest(source, parts);
-    this.ownerDemands.set(owner, { source, parts: [...parts] });
-    this.replaceRequest(source, this.partsFor(source), options);
+    const previous = this.ownerDemands.get(owner);
+    const compatible =
+      owner === 'gallery' &&
+      previous?.source?.sourcePath === source.sourcePath &&
+      previous.source.geometryHash === source.geometryHash &&
+      (previous.source.visualKey ?? previous.source.geometryHash) === (source.visualKey ?? source.geometryHash);
+    const activeIds = new Set(parts.map(({ id }) => id));
+    const retainedReady: PartThumbnailRequest[] = [];
+    if (compatible) {
+      const seen = new Set(activeIds);
+      for (const part of [...previous.parts, ...(previous.retainedReady ?? [])]) {
+        if (seen.has(part.id)) {
+          continue;
+        }
+        seen.add(part.id);
+        if (
+          this.identities.get(part.id) === this.identity(source.visualKey ?? source.geometryHash, part) &&
+          this.states.get(part.id)?.status === 'ready' &&
+          this.states.get(part.id)?.bytes
+        ) {
+          retainedReady.push(part);
+        }
+      }
+    }
+    this.ownerDemands.set(owner, {
+      source,
+      parts: [...parts],
+      ...(retainedReady.length > 0 ? { retainedReady: retainedReady.slice(0, maxRequestedParts - parts.length) } : {}),
+    });
+    this.replaceRequest(source, this.partsFor(source), { ...options, retryFailed: owner === 'default' });
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Pages alone carry the debug environment; workers and SSR must not read it.
+    if (Boolean(globalThis.window) && ENV.TAU_DEBUG) {
+      recordHeadlessImageTiming('thumbnail.service.request', performance.now(), {
+        owner,
+        sourcePath: source.sourcePath,
+        geometryHash: source.geometryHash,
+        visualKey: source.visualKey,
+        requested: parts.map((part) => ({
+          id: part.id,
+          visualKey: part.visualKey,
+          identity: this.identity(source.visualKey ?? source.geometryHash, part),
+        })),
+        demands: [...this.ownerDemands].map(([name, demand]) => ({
+          owner: name,
+          sourcePath: demand.source?.sourcePath,
+          geometryHash: demand.source?.geometryHash,
+          visualKey: demand.source?.visualKey,
+          ids: demand.parts.map(({ id }) => id),
+        })),
+        registered: this.ownerDemands.get(owner)?.parts.map(({ id }) => ({
+          id,
+          registeredIdentity: this.identities.get(id),
+          status: this.states.get(id)?.status,
+          byteLength: this.states.get(id)?.bytes?.byteLength,
+          cachePresent: this.states.has(id),
+          decoded: this.decodedById.has(id),
+        })),
+        current: this.current?.parts.map(({ id }) => ({
+          id,
+          registeredIdentity: this.identities.get(id),
+          status: this.states.get(id)?.status,
+          byteLength: this.states.get(id)?.bytes?.byteLength,
+          cachePresent: this.states.has(id),
+          decoded: this.decodedById.has(id),
+        })),
+        manualPartId: options?.manualPartId,
+      });
+    }
   }
-  /* oxlint-enable eslint/max-params */
 
   /** Drop only this caller's rows; the other caller and its last-good previews remain. */
   public releaseOwner(owner: string): void {
@@ -251,16 +326,48 @@ export class PartThumbnailService {
   private replaceRequest(
     source: PartThumbnailSource,
     parts: readonly PartThumbnailRequest[],
-    options?: { readonly manualPartId?: string },
+    options?: { readonly manualPartId?: string; readonly retryFailed?: boolean },
   ): void {
     if (this.disposed) {
       throw new Error('PartThumbnailService is disposed');
     }
+    const retryFailed = options?.retryFailed ?? false;
     const seen = this.validateRequest(source, parts);
+    const retainedIds = new Set<string>();
+    let retainedExtras = 0;
+    const gallery = this.ownerDemands.get('gallery');
+    if (
+      gallery?.source?.sourcePath === source.sourcePath &&
+      gallery.source.geometryHash === source.geometryHash &&
+      (gallery.source.visualKey ?? gallery.source.geometryHash) === (source.visualKey ?? source.geometryHash)
+    ) {
+      const retainedReady = (gallery.retainedReady ?? []).filter((part) => {
+        if (
+          (!seen.has(part.id) && retainedExtras >= maxRequestedParts - seen.size) ||
+          this.identities.get(part.id) !== this.identity(source.visualKey ?? source.geometryHash, part) ||
+          this.states.get(part.id)?.status !== 'ready' ||
+          !this.states.get(part.id)?.bytes
+        ) {
+          return false;
+        }
+        retainedIds.add(part.id);
+        if (!seen.has(part.id)) {
+          retainedExtras += 1;
+        }
+        return true;
+      });
+      this.ownerDemands.set('gallery', { ...gallery, retainedReady });
+    }
     const sameVisualWork = this.isSameVisualWork(source, parts);
+    const manualPart = parts.find((part) => part.id === options?.manualPartId);
+    const manualIdentity = manualPart ? this.identity(source.visualKey ?? source.geometryHash, manualPart) : undefined;
     const retrying = parts.some((part) => {
-      const key = this.identity(source.geometryHash, part);
-      return this.identities.get(part.id) === key && this.states.get(part.id)?.status === 'failed';
+      const key = this.identity(source.visualKey ?? source.geometryHash, part);
+      return (
+        (retryFailed || key === manualIdentity) &&
+        this.identities.get(part.id) === key &&
+        this.states.get(part.id)?.status === 'failed'
+      );
     });
     if (!sameVisualWork || retrying) {
       this.generation += 1;
@@ -277,6 +384,7 @@ export class PartThumbnailService {
     for (const id of this.states.keys()) {
       if (
         !seen.has(id) &&
+        !retainedIds.has(id) &&
         ![...this.ownerDemands.values()].some((demand) => !demand.source && demand.parts.some((part) => part.id === id))
       ) {
         this.states.delete(id);
@@ -285,8 +393,12 @@ export class PartThumbnailService {
       }
     }
     for (const part of parts) {
-      const identity = this.identity(source.geometryHash, part);
-      if (this.identities.get(part.id) === identity && this.states.get(part.id)?.status === 'ready') {
+      const identity = this.identity(source.visualKey ?? source.geometryHash, part);
+      if (
+        this.identities.get(part.id) === identity &&
+        (this.states.get(part.id)?.status === 'ready' ||
+          (!retryFailed && identity !== manualIdentity && this.states.get(part.id)?.status === 'failed'))
+      ) {
         continue;
       }
       this.identities.set(part.id, identity);
@@ -327,7 +439,7 @@ export class PartThumbnailService {
   }
 
   private identity(hash: string, part: PartThumbnailRequest): string {
-    return `${part.visualKey ?? hash}:${JSON.stringify(part.primitives)}:part-webp-${previewSize}-q${previewQuality}-v2`;
+    return `${part.visualKey ?? `${hash}:${JSON.stringify(part.primitives)}`}:part-webp-${previewSize}-q${previewQuality}-v2`;
   }
 
   private validateRequest(source: PartThumbnailSource, parts: readonly PartThumbnailRequest[]): Set<string> {
@@ -349,8 +461,10 @@ export class PartThumbnailService {
     if (current?.source.geometryHash !== source.geometryHash || current.source.sourcePath !== source.sourcePath) {
       return false;
     }
-    const currentKeys = new Set(current.parts.map((part) => this.identity(source.geometryHash, part)));
-    const requestedKeys = new Set(parts.map((part) => this.identity(source.geometryHash, part)));
+    const currentKeys = new Set(
+      current.parts.map((part) => this.identity(source.visualKey ?? source.geometryHash, part)),
+    );
+    const requestedKeys = new Set(parts.map((part) => this.identity(source.visualKey ?? source.geometryHash, part)));
     return currentKeys.size === requestedKeys.size && [...requestedKeys].every((key) => currentKeys.has(key));
   }
 
@@ -370,7 +484,7 @@ export class PartThumbnailService {
         const work = this.current;
         const pendingKeys = new Set<string>();
         const missing = work.parts.filter((part) => {
-          const key = this.identity(work.source.geometryHash, part);
+          const key = this.identity(work.source.visualKey ?? work.source.geometryHash, part);
           if (this.states.get(part.id)?.status !== 'pending' || pendingKeys.has(key)) {
             return false;
           }
@@ -380,7 +494,9 @@ export class PartThumbnailService {
         if (missing.length === 0) {
           return;
         }
-        const manualPart = missing.find((part) => part.id === work.manualPartId);
+        const manualPart = work.parts.find(
+          (part) => part.id === work.manualPartId && this.states.get(part.id)?.status === 'pending',
+        );
         const chunk = manualPart ? [manualPart] : missing.slice(0, batchSize);
         const views = chunk.map((part, index): NonNullable<BatchPreviewOptions['views']>[number] => ({
           id: `part-${index}`,
@@ -400,9 +516,10 @@ export class PartThumbnailService {
           if (content.buffer.byteLength > maxSourceBytes) {
             throw new RangeError('Part thumbnail render source exceeds 64 MiB');
           }
+          const identity = `${work.source.geometryHash}:parts:${chunk.map((part) => this.identity(work.source.geometryHash, part)).join('|')}:submission-${++this.submission}`;
           const files = await this.imageService.export({
             kind: manualPart ? 'manual-thumbnail' : 'automatic-thumbnail',
-            identity: `${work.source.geometryHash}:parts:${chunk.map((part) => this.identity(work.source.geometryHash, part)).join('|')}:submission-${++this.submission}`,
+            identity,
             signal: controller.signal,
             sourceFormat: 'glb',
             sourcePath: work.source.sourcePath,
@@ -422,13 +539,13 @@ export class PartThumbnailService {
           if (this.disposed || this.generation !== work.generation) {
             continue;
           }
-          this.accept(chunk, files);
+          this.accept(chunk, files, { identity, manualPartId: manualPart?.id });
         } catch (error) {
           // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- A caller may dispose during the await.
           if (this.disposed || this.generation !== work.generation) {
             continue;
           }
-          this.failChunk(work.source.geometryHash, chunk, error);
+          this.failChunk(work.source.visualKey ?? work.source.geometryHash, chunk, error);
         } finally {
           if (this.activeAbort === controller) {
             this.activeAbort = undefined;
@@ -453,14 +570,50 @@ export class PartThumbnailService {
     }
   }
 
-  private accept(parts: readonly PartThumbnailRequest[], files: readonly ExportFile[] | undefined): void {
+  private accept(
+    parts: readonly PartThumbnailRequest[],
+    files: readonly ExportFile[] | undefined,
+    job: Readonly<{ identity: string; manualPartId: string | undefined }>,
+  ): void {
+    // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Pages alone carry the debug environment; workers and SSR must not read it.
+    const isDebugEnabled = Boolean(globalThis.window) && ENV.TAU_DEBUG;
+    const acceptedRows:
+      | Array<
+          Readonly<{
+            id: string;
+            identity: string;
+            fileName: string | undefined;
+            outputBytes: number | undefined;
+            outputAccepted: boolean;
+            recipients: readonly string[];
+            before: ReadonlyArray<
+              Readonly<{ id: string; status: PartThumbnailState['status'] | undefined; byteLength: number | undefined }>
+            >;
+          }>
+        >
+      | undefined = isDebugEnabled ? [] : undefined;
     const byName = new Map(files?.map((file) => [file.name, file]));
     for (const [index, part] of parts.entries()) {
       const file = byName.get(`render-part-${index}.webp`);
-      const identity = this.identity(this.current!.source.geometryHash, part);
+      const identity = this.identity(this.current!.source.visualKey ?? this.current!.source.geometryHash, part);
       const recipients = this.current!.parts.filter(
-        (candidate) => this.identity(this.current!.source.geometryHash, candidate) === identity,
+        (candidate) =>
+          this.identity(this.current!.source.visualKey ?? this.current!.source.geometryHash, candidate) === identity,
       );
+      acceptedRows?.push({
+        id: part.id,
+        identity,
+        fileName: file?.name,
+        outputBytes: file?.bytes.byteLength,
+        outputAccepted:
+          file?.mimeType === 'image/webp' && file.bytes.byteLength > 0 && file.bytes.byteLength <= maxPreviewBytes,
+        recipients: recipients.map(({ id }) => id),
+        before: recipients.map(({ id }) => ({
+          id,
+          status: this.states.get(id)?.status,
+          byteLength: this.states.get(id)?.bytes?.byteLength,
+        })),
+      });
       if (file?.mimeType !== 'image/webp' || file.bytes.byteLength === 0 || file.bytes.byteLength > maxPreviewBytes) {
         for (const recipient of recipients) {
           this.states.set(recipient.id, {
@@ -477,6 +630,34 @@ export class PartThumbnailService {
       }
     }
     this.limitStoredBytes();
+    if (acceptedRows) {
+      recordHeadlessImageTiming('thumbnail.service.accept', performance.now(), {
+        jobIdentity: job.identity,
+        manualPartId: job.manualPartId,
+        sourcePath: this.current?.source.sourcePath,
+        geometryHash: this.current?.source.geometryHash,
+        visualKey: this.current?.source.visualKey,
+        currentIds: this.current?.parts.map(({ id }) => id),
+        demands: [...this.ownerDemands].map(([owner, demand]) => ({
+          owner,
+          sourcePath: demand.source?.sourcePath,
+          geometryHash: demand.source?.geometryHash,
+          visualKey: demand.source?.visualKey,
+          ids: demand.parts.map(({ id }) => id),
+        })),
+        outputs: acceptedRows.map((row) => ({
+          ...row,
+          after: row.recipients.map((id) => ({
+            id,
+            registeredIdentity: this.identities.get(id),
+            status: this.states.get(id)?.status,
+            byteLength: this.states.get(id)?.bytes?.byteLength,
+            cachePresent: this.states.has(id),
+            decoded: this.decodedById.has(id),
+          })),
+        })),
+      });
+    }
     this.emit();
   }
 

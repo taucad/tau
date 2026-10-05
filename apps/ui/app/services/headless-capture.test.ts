@@ -5,6 +5,7 @@ import { Matrix4 } from 'three';
 import { writeGlb } from '@taucad/geometry-core';
 import type { Mechanism } from '@taucad/kinematics';
 import type { ExportFile } from '@taucad/types';
+import type { PublishedAssemblyDocument } from '@taucad/runtime/client';
 import type { Artifact, Rendering } from '@taucad/runtime';
 import type { CameraState } from '@taucad/camera';
 import {
@@ -111,6 +112,190 @@ const cameraState = {
 } as const;
 
 describe('headless capture adapter', () => {
+  const assemblyCapture = () => {
+    const root = { digest: 'sha256:root-b' };
+    const publication = { root };
+    const admitted = { publication };
+    const exportProjection = vi.fn<PublishedAssemblyDocument['exportPublished']>(async () => ({
+      success: true,
+      exportId: 'glb',
+      issues: [],
+      files: [{ name: 'assembly.glb', mimeType: 'model/gltf-binary', bytes: gltf.content }],
+    }));
+    const cadSnapshot = {
+      ...snapshot(gltf),
+      context: {
+        ...snapshot(gltf).context,
+        rendering: undefined,
+        committedRendering: undefined,
+        committedAssemblyDisplay: { root, admitted, document: { exportPublished: exportProjection } },
+        publishedAssemblyRoot: root,
+        publishedAssembly: publication,
+        admittedAssembly: admitted,
+        publishedAssemblyEntryPath: '/parts/bracket.ts',
+        kernelClient: undefined,
+      },
+    } as unknown as Parameters<typeof captureSettledCadImages>[0]['cadSnapshot'];
+    const graphicsContext = {
+      gltfPresentation: { presentedKey: root.digest, phase: 'presented' },
+      modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+      modelInteractionUnitId: 'assembly-unit',
+      kinematicsRef: { getSnapshot: () => ({ context: poseContext }) },
+      committedSectionCuts: [],
+    };
+    const poseContext = { revision: 0, unitsById: {} as Record<string, { coordinates: Record<string, number> }> };
+    return {
+      root,
+      cadSnapshot,
+      exportProjection,
+      graphicsContext,
+      poseContext,
+      cadRef: { getSnapshot: () => cadSnapshot } as Parameters<typeof captureCadImages>[0]['cadRef'],
+      graphicsRef: { getSnapshot: () => ({ context: graphicsContext }) } as unknown as Parameters<
+        typeof captureCadImages
+      >[0]['graphicsRef'],
+    };
+  };
+
+  it.each(['preparing', 'failed'])(
+    'denies root B current-view capture while root A remains displayed (%s)',
+    async (phase) => {
+      const fixture = assemblyCapture();
+      fixture.graphicsContext.gltfPresentation = { presentedKey: 'sha256:root-a', phase };
+      vi.mocked(awaitFreshRender).mockResolvedValue(fixture.cadSnapshot);
+      const exportImage = vi.fn<ExportImage>();
+      await expect(
+        captureCadImages({
+          cadRef: fixture.cadRef,
+          graphicsRef: fixture.graphicsRef,
+          cameraState,
+          imageService: { export: exportImage },
+          recipe: { purpose: 'utility', mode: 'current' },
+        }),
+      ).rejects.toThrow('still preparing its displayed scene');
+      expect(fixture.exportProjection).not.toHaveBeenCalled();
+      expect(exportImage).not.toHaveBeenCalled();
+    },
+  );
+
+  it.each(['preparing', 'failed', 'missing'])(
+    'denies an ordinary source B current-view capture while source A remains displayed (%s)',
+    async (phase) => {
+      const fixture = assemblyCapture();
+      const sourceSnapshot = snapshot(gltf);
+      fixture.graphicsContext.gltfPresentation = { presentedKey: phase === 'missing' ? '' : 'source-a', phase };
+      vi.mocked(awaitFreshRender).mockResolvedValue(sourceSnapshot);
+      const exportImage = vi.fn<ExportImage>();
+      await expect(
+        captureCadImages({
+          cadRef: { getSnapshot: () => sourceSnapshot } as Parameters<typeof captureCadImages>[0]['cadRef'],
+          graphicsRef: phase === 'missing' ? undefined : fixture.graphicsRef,
+          cameraState,
+          imageService: { export: exportImage },
+          recipe: { purpose: 'utility', mode: 'current' },
+        }),
+      ).rejects.toThrow('still preparing its displayed scene');
+      expect(exportImage).not.toHaveBeenCalled();
+    },
+  );
+
+  it('rejects a committed source change while waiting for current-view freshness before exporting', async () => {
+    const fixture = assemblyCapture();
+    const selected = snapshot(gltf);
+    fixture.graphicsContext.gltfPresentation.presentedKey = gltf.hash;
+    const fresh = Promise.withResolvers<typeof selected>();
+    vi.mocked(awaitFreshRender).mockReturnValue(fresh.promise);
+    const exportImage = vi.fn<ExportImage>();
+    const capture = captureCadImages({
+      cadRef: { getSnapshot: () => selected } as Parameters<typeof captureCadImages>[0]['cadRef'],
+      graphicsRef: fixture.graphicsRef,
+      cameraState,
+      imageService: { export: exportImage },
+      recipe: { purpose: 'utility', mode: 'current' },
+    });
+    fixture.graphicsContext.gltfPresentation.presentedKey = 'source-c';
+    fresh.resolve(selected);
+    await expect(capture).rejects.toThrow('still preparing its displayed scene');
+    expect(exportImage).not.toHaveBeenCalled();
+  });
+
+  it.each(['key', 'source'] as const)('fences ordinary current-view %s changes after export', async (changed) => {
+    const fixture = assemblyCapture();
+    let selected = snapshot(gltf);
+    fixture.graphicsContext.gltfPresentation.presentedKey = gltf.hash;
+    vi.mocked(awaitFreshRender).mockResolvedValue(selected);
+    const exportImage = vi.fn<ExportImage>(async () => [png(2400, 1350)]);
+    const options = {
+      cadRef: { getSnapshot: () => selected } as Parameters<typeof captureCadImages>[0]['cadRef'],
+      graphicsRef: fixture.graphicsRef,
+      cameraState,
+      imageService: { export: exportImage },
+      recipe: { purpose: 'utility', mode: 'current' },
+    } as const;
+    await expect(captureCadImages(options)).resolves.toMatchObject({
+      files: [expect.objectContaining({ mimeType: 'image/png' })],
+    });
+    exportImage.mockImplementation(async () => {
+      if (changed === 'key') {
+        fixture.graphicsContext.gltfPresentation.presentedKey = 'source-c';
+      } else {
+        selected = snapshot({ ...gltf, hash: 'source-c' });
+      }
+      return [png(2400, 1350)];
+    });
+    await expect(captureCadImages(options)).rejects.toThrow('changed during image capture');
+  });
+
+  it('lazily projects the displayed assembly and rejects a scene change during capture', async () => {
+    const fixture = assemblyCapture();
+    vi.mocked(awaitFreshRender).mockResolvedValue(fixture.cadSnapshot);
+    const exportImage = vi.fn<ExportImage>(async () => [png(2400, 1350)]);
+    const options = {
+      cadRef: fixture.cadRef,
+      graphicsRef: fixture.graphicsRef,
+      cameraState,
+      imageService: { export: exportImage },
+      recipe: { purpose: 'utility', mode: 'current' },
+    } as const;
+    expect(fixture.exportProjection).not.toHaveBeenCalled();
+    await expect(captureCadImages(options)).resolves.toMatchObject({
+      files: [expect.objectContaining({ mimeType: 'image/png' })],
+    });
+    expect(fixture.exportProjection).toHaveBeenCalledWith({ format: 'glb', publishedAssembly: { root: fixture.root } });
+    exportImage.mockImplementation(async () => {
+      fixture.graphicsContext.gltfPresentation.presentedKey = 'sha256:root-c';
+      return [png(2400, 1350)];
+    });
+    await expect(captureCadImages(options)).rejects.toThrow('changed during image capture');
+  });
+
+  it('denies active motion and fences pose revisions for current-view capture while canonical recipes remain as-built', async () => {
+    const fixture = assemblyCapture();
+    vi.mocked(awaitFreshRender).mockResolvedValue(fixture.cadSnapshot);
+    const exportImage = vi.fn<ExportImage>(async () => [png(2400, 1350)]);
+    const options = {
+      cadRef: fixture.cadRef,
+      graphicsRef: fixture.graphicsRef,
+      cameraState,
+      imageService: { export: exportImage },
+      recipe: { purpose: 'utility', mode: 'current' },
+    } as const;
+    fixture.poseContext.unitsById['assembly-unit'] = { coordinates: { hinge: 0.5 } };
+    await expect(captureCadImages(options)).rejects.toThrow('requires the as-built pose');
+    expect(fixture.exportProjection).not.toHaveBeenCalled();
+    expect(exportImage).not.toHaveBeenCalled();
+    exportImage.mockImplementation(async () => [webp(2400, 1350)]);
+    await expect(
+      captureCadImages({ ...options, recipe: { purpose: 'chat', mode: 'isometric' } }),
+    ).resolves.toMatchObject({ files: [expect.objectContaining({ mimeType: 'image/webp' })] });
+    fixture.poseContext.unitsById['assembly-unit'] = { coordinates: { hinge: 0 } };
+    exportImage.mockImplementation(async () => {
+      fixture.poseContext.revision += 1;
+      return [png(2400, 1350)];
+    });
+    await expect(captureCadImages(options)).rejects.toThrow('pose changed during image capture');
+  });
+
   it('captures a chat image from settled GLTF without a viewer camera using bounds framing', async () => {
     vi.mocked(awaitFreshRender).mockResolvedValue(snapshot(gltf, 'other.ts'));
     const exportImage = vi.fn<ExportImage>(async () => [webp(2400, 1350)]);
@@ -346,11 +531,12 @@ describe('headless capture adapter', () => {
       committedSectionCuts: [
         { id: 'cut', kind: 'plane', plane: 'xy', offset: 1, isFlipped: true },
       ] as readonly SectionCut[],
+      gltfPresentation: { presentedKey: presentationGltf.hash },
       modelInteractionUnitId: 'unit',
+      kinematicsRef: { getSnapshot: () => ({ context: { revision: 0, unitsById: {} } }) },
       modelInteractionRef: {
         getSnapshot: () => ({ context: { unitsById: { unit: liveUnit } } }),
       },
-      kinematicsRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
     };
     const graphicsRef = {
       getSnapshot: () => ({
@@ -359,8 +545,9 @@ describe('headless capture adapter', () => {
     } as unknown as Parameters<typeof captureCadImages>[0]['graphicsRef'];
     const exportImage = vi.fn<ExportImage>(async (_job) => [webp(2400, 1350)]);
     vi.mocked(getGraphicsCameraState).mockReturnValue(liveCamera);
+    const sourceSnapshot = snapshot(presentationGltf);
     const capture = captureCadImages({
-      cadRef: {} as Parameters<typeof captureCadImages>[0]['cadRef'],
+      cadRef: { getSnapshot: () => sourceSnapshot } as Parameters<typeof captureCadImages>[0]['cadRef'],
       graphicsRef,
       imageService: { export: exportImage },
       recipe: { purpose: 'chat', mode: 'current' },
@@ -371,7 +558,7 @@ describe('headless capture adapter', () => {
     liveContext.enableSurfaces = true;
     liveContext.committedSectionCuts = [{ id: 'cut', kind: 'plane', plane: 'xy', offset: 9, isFlipped: true }];
     liveUnit.hiddenComponentIds[0] = 'component:node-1';
-    resolveFresh(snapshot(presentationGltf));
+    resolveFresh(sourceSnapshot);
     await capture;
 
     expect(exportImage.mock.calls[0]![0]).toMatchObject({
@@ -638,21 +825,20 @@ describe('headless capture of section cuts', () => {
   });
 
   /** A viewer's graphics actor with `cuts` committed, and Section on unless `isSectionViewActive` says otherwise. */
-  const graphicsWith = (cuts: readonly SectionCut[], isSectionViewActive = true) =>
-    ({
-      getSnapshot: () => ({
-        context: {
-          enableSurfaces: true,
-          enableLines: true,
-          upDirection: 'z',
-          isSectionViewActive,
-          committedSectionCuts: cuts,
-          modelInteractionUnitId: undefined,
-          modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
-          kinematicsRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
-        },
-      }),
-    }) as unknown as Parameters<typeof captureCadImages>[0]['graphicsRef'];
+  const graphicsWith = (cuts: readonly SectionCut[], isSectionViewActive = true) => {
+    const context = {
+      enableSurfaces: true,
+      enableLines: true,
+      upDirection: 'z',
+      isSectionViewActive,
+      committedSectionCuts: cuts,
+      gltfPresentation: { presentedKey: gltf.hash },
+      modelInteractionUnitId: undefined,
+      kinematicsRef: { getSnapshot: () => ({ context: { revision: 0, unitsById: {} } }) },
+      modelInteractionRef: { getSnapshot: () => ({ context: { unitsById: {} } }) },
+    };
+    return { getSnapshot: () => ({ context }) } as unknown as Parameters<typeof captureCadImages>[0]['graphicsRef'];
+  };
 
   /** A current-view capture of a viewer: the sections it asks the image for, and the cuts it reports it left out. */
   const captureSections = async (
@@ -662,11 +848,12 @@ describe('headless capture of section cuts', () => {
     sections: Sections | undefined;
     omittedSectionCutIds: readonly string[];
   }> => {
-    vi.mocked(awaitFreshRender).mockResolvedValue(snapshot(gltf));
+    const sourceSnapshot = snapshot(gltf);
+    vi.mocked(awaitFreshRender).mockResolvedValue(sourceSnapshot);
     vi.mocked(getGraphicsCameraState).mockReturnValue(cameraState);
     const exportImage = vi.fn<ExportImage>(async (_job) => [webp(2400, 1350)]);
     const { omittedSectionCutIds } = await captureCadImages({
-      cadRef: {} as Parameters<typeof captureCadImages>[0]['cadRef'],
+      cadRef: { getSnapshot: () => sourceSnapshot } as Parameters<typeof captureCadImages>[0]['cadRef'],
       graphicsRef,
       imageService: { export: exportImage },
       recipe: { purpose: 'chat', mode: 'current' },

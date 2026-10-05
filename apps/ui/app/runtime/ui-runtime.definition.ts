@@ -43,10 +43,18 @@ const createUiRuntimeOptions = (config: UiRuntimeConfig, options: UiRuntimeOptio
     replicad({
       kernels: {
         default: {
-          // 'auto' picks the pthread build only when the host is cross-origin
-          // isolated; a pinned 'multi' fails kernel binding on plain-http LAN
-          // origins where SharedArrayBuffer is unavailable.
-          wasm: 'auto',
+          // This app selects the maintained density-capable single build. The existing
+          // custom override hashes the delivered WASM and glue bytes, independent of URL.
+          wasm: {
+            wasmUrl: new URL(
+              '/assets/engines/replicad/density-single-v1/replicad_single.wasm',
+              globalThis.location.href,
+            ).href,
+            wasmBindingsUrl: new URL(
+              '/assets/engines/replicad/density-single-v1/replicad_single.mjs',
+              globalThis.location.href,
+            ).href,
+          },
           withSourceMapping: options.withSourceMapping === true,
         },
       },

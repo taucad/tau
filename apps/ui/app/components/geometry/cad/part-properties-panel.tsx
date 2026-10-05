@@ -6,8 +6,15 @@ import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/
 import { cn } from '@taucad/ui/utils/cn';
 import { PanelEmptyState } from '#components/ui/panel-empty-state.js';
 import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
-import { appearanceLabel, statusOf, volumeLabel, weightLabel } from '#components/geometry/cad/part-quantities.js';
-import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
+import {
+  appearanceLabel,
+  densityLabel,
+  projectPartInspection,
+  statusOf,
+  volumeLabel,
+  weightLabel,
+} from '#components/geometry/cad/part-quantities.js';
+import type { PartInspection } from '#components/geometry/cad/part-quantities.js';
 import { DetailsToggle, disclosureMotion } from '#components/revisions/revision-actions.js';
 import { PartPreviewFrame } from '#components/geometry/cad/part-preview-image.js';
 import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
@@ -15,7 +22,7 @@ import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
 type PartPropertiesPanelProps = {
   readonly node?: GeometryComponentNode;
   readonly entryPath?: string;
-  readonly quantity?: PartQuantity;
+  readonly inspection?: PartInspection;
   readonly preview?: PartThumbnailState;
   readonly onRetryPreview?: () => void;
   readonly onPreviewDecodeError?: () => void;
@@ -56,7 +63,7 @@ function textureLabel(
 export function PartPropertiesPanel({
   node,
   entryPath,
-  quantity = {},
+  inspection,
   preview,
   onRetryPreview,
   onPreviewDecodeError,
@@ -68,6 +75,8 @@ export function PartPropertiesPanel({
     return <PanelEmptyState icon={Box} title='No part selected' className='min-h-40' />;
   }
 
+  const facts = inspection ?? projectPartInspection({ node });
+  const { quantity, physical } = facts;
   const materials = node.appearance?.materials ?? [];
   const status = statusOf(quantity);
   return (
@@ -132,9 +141,16 @@ export function PartPropertiesPanel({
 
       <section aria-label='Physical facts'>
         <h3 className='mb-1 text-xs font-medium text-muted-foreground'>Physical facts</h3>
+        {facts.basis === 'last-committed' ? (
+          <p className='mb-1 text-xs text-muted-foreground'>
+            Last committed physical facts; preview geometry is transient.
+          </p>
+        ) : facts.basis === 'unavailable' ? (
+          <p className='mb-1 text-xs text-muted-foreground'>No matching committed physical facts for this preview.</p>
+        ) : undefined}
         <dl className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 text-xs @max-[14rem]/properties:grid-cols-1'>
           <Fact label='Material' value='Not specified' />
-          <Fact label='Density' value='Unknown' />
+          <Fact label='Density' value={densityLabel(quantity)} />
           <Fact label='Volume' value={volumeLabel(quantity)} />
           <Fact label='Weight' value={weightLabel(quantity)} />
         </dl>
@@ -154,14 +170,39 @@ export function PartPropertiesPanel({
         </div>
         <CollapsibleContent className={disclosureMotion}>
           <dl className='grid grid-cols-[auto_minmax(0,1fr)] gap-x-4 gap-y-1 pt-2 text-xs @max-[14rem]/properties:grid-cols-1'>
-            <Fact label='Volume method' value='Not measured' />
-            <Fact label='Density source' value='Not supplied; a finish is not a material' />
-            <Fact label='Basis' value='Source geometry; physical basis unverified' />
+            <Fact
+              label='Volume method'
+              value={
+                physical?.volume.state === 'measured'
+                  ? 'Native solid volume (OCCT)'
+                  : physical?.volume.state === 'derived'
+                    ? 'Placed occurrence determinant × native solid volume'
+                    : 'Not measured'
+              }
+            />
+            <Fact
+              label='Density source'
+              value={physical?.density ? 'Authored shape configuration' : 'Not supplied; a finish is not a material'}
+            />
+            <Fact
+              label='Basis'
+              value={
+                facts.basis === 'last-committed'
+                  ? 'Last committed geometry'
+                  : facts.basis === 'unavailable'
+                    ? 'No matching committed geometry'
+                    : physical?.volume.state === 'measured' || physical?.volume.state === 'derived'
+                      ? 'Current native geometry'
+                      : 'Source geometry; physical basis unverified'
+              }
+            />
             <Fact
               label='Scope'
               value={
                 node.kind === 'part'
-                  ? 'Selected part; physical scope unverified'
+                  ? physical?.volume.state === 'measured' || physical?.volume.state === 'derived'
+                    ? 'Selected part native solid'
+                    : 'Selected part; physical scope unverified'
                   : 'Selected group; physical scope unverified'
               }
             />

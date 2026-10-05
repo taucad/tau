@@ -1,7 +1,9 @@
+import { recordHeadlessImageTiming } from '#services/headless-image-debug.js';
+import { ENV } from '#environment.config.js';
 import { XIcon, Box, Eye, EyeOff, Target } from 'lucide-react';
 import { memo, useCallback, useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { useSelector } from '@xstate/react';
-import type { ActorRefFrom } from 'xstate';
+import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { PaneviewApi, PaneviewPanelApi } from 'dockview-react';
 import { Paneview } from '#components/panes/paneview.js';
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from '@taucad/ui/components/collapsible';
@@ -27,16 +29,26 @@ import {
 } from '#components/geometry/cad/model-component-action-menu.js';
 import { MaterialSwatch } from '#components/geometry/cad/material-swatch.js';
 import { PartPropertiesPanel } from '#components/geometry/cad/part-properties-panel.js';
+import {
+  knownMassLabel,
+  projectPartInspection,
+  summarizePartQuantities,
+} from '#components/geometry/cad/part-quantities.js';
+import type { PartInspection } from '#components/geometry/cad/part-quantities.js';
+import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import { PartPreviewFrame } from '#components/geometry/cad/part-preview-image.js';
 import { isPreviewablePart, useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
 import { useOptionalHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useOptionalPartThumbnailService } from '#providers/part-thumbnail-provider.js';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
 import type { PartThumbnailRequest, PartThumbnailState } from '#services/part-thumbnail.service.js';
+import { resolveSettledCadGeometry } from '#services/headless-capture.js';
 import { canonicalPartPreviews, sourceGlbDigest } from '#services/part-thumbnail-visual.js';
 import { useKeybinding } from '#hooks/use-keyboard.js';
 import { useProject } from '#hooks/use-project.js';
 import type { graphicsMachine } from '#machines/graphics.machine.js';
+import { selectCadCommittedRendering, selectCadHasTransientPreview, selectCadDisplay } from '#machines/cad.machine.js';
+import type { cadMachine } from '#machines/cad.machine.js';
 import { deriveModelInteractionUnitId, getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import type { modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { cn } from '@taucad/ui/utils/cn';
@@ -62,6 +74,12 @@ const emptyPreviewSnapshot: ReadonlyMap<string, PartThumbnailState> = new Map();
 
 type GraphicsActorRef = ActorRefFrom<typeof graphicsMachine>;
 type ModelInteractionRef = ActorRefFrom<typeof modelInteractionMachine>;
+type CadSnapshot = SnapshotFrom<typeof cadMachine>;
+
+const selectOptionalCommittedGeometry = (snapshot: CadSnapshot | undefined) =>
+  snapshot ? selectCadCommittedRendering(snapshot) : undefined;
+const selectOptionalTransientPreview = (snapshot: CadSnapshot | undefined) =>
+  snapshot ? selectCadHasTransientPreview(snapshot) : false;
 
 type ModelComponentRevealTarget = {
   readonly entryPath: string;
@@ -265,7 +283,12 @@ type ModelPaneviewPanelParams = {
   graphicsRef?: GraphicsActorRef;
   query: string;
   revealTarget?: ModelComponentRevealTarget;
-  onSelectionChange?: (unitId: string, node: GeometryComponentNode | undefined, entryPath: string) => void;
+  onSelectionChange?: (change: {
+    readonly unitId: string;
+    readonly node: GeometryComponentNode | undefined;
+    readonly entryPath: string;
+    readonly inspection: PartInspection | undefined;
+  }) => void;
   onPreviewChange?: (change: {
     readonly unitId: string;
     readonly componentId: string;
@@ -277,7 +300,7 @@ type ModelPaneviewPanelParams = {
 };
 
 type ModelPropertiesPanelParams = {
-  selected?: { readonly node: GeometryComponentNode; readonly entryPath: string };
+  selected?: { readonly node: GeometryComponentNode; readonly entryPath: string; readonly inspection: PartInspection };
   preview?: PartThumbnailState;
   onOpenPreview?: (origin: HTMLElement) => void;
   onRetryPreview?: () => void;
@@ -309,8 +332,15 @@ function ModelPaneview({
   const visibleSelection =
     selected && entries.some(([entryPath]) => entryPath === selected.entryPath) ? selected : undefined;
   const onSelectionChange = useCallback(
-    (unitId: string, node: GeometryComponentNode | undefined, entryPath: string) => {
-      setSelected((current) => (node ? { unitId, node, entryPath } : current?.unitId === unitId ? undefined : current));
+    ({
+      unitId,
+      node,
+      entryPath,
+      inspection,
+    }: Parameters<NonNullable<ModelPaneviewPanelParams['onSelectionChange']>>[0]) => {
+      setSelected((current) =>
+        node && inspection ? { unitId, node, entryPath, inspection } : current?.unitId === unitId ? undefined : current,
+      );
     },
     [],
   );
@@ -451,7 +481,11 @@ function ModelPaneview({
   return (
     <Paneview
       key={paneviewKey}
-      className={paneviewAttachedSurfaceStyleOverrides}
+      className={cn(
+        paneviewAttachedSurfaceStyleOverrides,
+        // oxlint-disable-next-line tau-lint/no-arbitrary-pixel-size -- Paneview headerSize is a physical pixel API; rem scaling overlays its 40px body.
+        '[&_[data-slot=paneview-header]]:h-[32px]! [&_[data-slot=paneview-header]]:mt-[8px]!',
+      )}
       components={paneviewComponents}
       headerComponents={paneviewHeaderComponents}
       onReady={handleReady}
@@ -518,17 +552,59 @@ function LiveComponentTree({
     () => (manifest ? getVisibleModelComponents(manifest, normalizedQuery) : []),
     [manifest, normalizedQuery],
   );
-  const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
-  const leafPartIds = useMemo(
-    () =>
-      manifest?.nodeOrder.filter((id) => {
-        const node = manifest.nodesById[id];
-        return node?.kind === 'part' && node.childIds.length === 0;
-      }) ?? [],
-    [manifest],
-  );
-  const project = useProject({ enableNoContext: true });
   const currentSelection = selectedComponentIds.at(-1);
+  const project = useProject({ enableNoContext: true });
+  const previewProjectId = useRef(project?.projectId);
+  useEffect(() => {
+    previewProjectId.current = project?.projectId;
+  }, [project?.projectId]);
+  const cadRef = project?.geometryUnits.get(params.entryPath);
+  const committedGeometry = useSelector(cadRef, selectOptionalCommittedGeometry);
+  const display = useSelector(cadRef, (snapshot) => (snapshot ? selectCadDisplay(snapshot) : undefined));
+  const assemblyDisplay = display && 'admitted' in display ? display : undefined;
+  const transientPreview = useSelector(cadRef, selectOptionalTransientPreview);
+  const committedManifest = useMemo(() => {
+    if (
+      !transientPreview ||
+      !committedGeometry?.success ||
+      committedGeometry.artifact.mimeType !== 'model/gltf-binary' ||
+      typeof committedGeometry.artifact.content === 'string'
+    ) {
+      return undefined;
+    }
+    return buildGltfComponentManifest(committedGeometry.artifact.content, { sourceFile: params.entryPath });
+  }, [committedGeometry, params.entryPath, transientPreview]);
+  const inspections = useMemo(
+    () =>
+      new Map(
+        (manifest?.nodeOrder ?? []).flatMap((id) => {
+          const node = manifest?.nodesById[id];
+          return node
+            ? [
+                [
+                  node.id,
+                  projectPartInspection({ node, committedNode: committedManifest?.nodesById[id], transientPreview }),
+                ] as const,
+              ]
+            : [];
+        }),
+      ),
+    [committedManifest, manifest, transientPreview],
+  );
+  const inspectNode = useCallback(
+    (node: GeometryComponentNode): PartInspection => inspections.get(node.id) ?? projectPartInspection({ node }),
+    [inspections],
+  );
+  const quantitySummary = useMemo(
+    () =>
+      summarizePartQuantities(
+        manifest?.nodeOrder.flatMap((id) => {
+          const node = manifest.nodesById[id];
+          return node ? [{ ...node, physical: inspectNode(node).physical }] : [];
+        }) ?? [],
+      ),
+    [inspectNode, manifest],
+  );
   const imageService = useOptionalHeadlessImageService();
   const sharedThumbnails = useOptionalPartThumbnailService(unitId);
   const [localThumbnails, setLocalThumbnails] = useState<PartThumbnailService>();
@@ -556,6 +632,7 @@ function LiveComponentTree({
     },
     [currentSelection, presentedKey],
   );
+  const [visiblePreviewIds, setVisiblePreviewIds] = useState<readonly string[]>([]);
 
   useEffect(() => {
     if (!imageService || sharedThumbnails) {
@@ -669,8 +746,12 @@ function LiveComponentTree({
       return;
     }
     thumbnails.announcePresentedSource(presentedKey);
-    if (artifact?.mimeType !== 'model/gltf-binary' || artifactKey !== presentedKey || !manifest) {
+    const sourceKey = assemblyDisplay?.root.digest ?? artifactKey;
+    if (sourceKey.length === 0 || (!assemblyDisplay && artifact?.mimeType !== 'model/gltf-binary')) {
       thumbnails.releaseOwner('explorer');
+      return;
+    }
+    if (sourceKey !== presentedKey || !manifest) {
       return;
     }
     const selected = selectedComponentIds.at(-1);
@@ -680,27 +761,52 @@ function LiveComponentTree({
       return node?.kind === 'part' && node.primitiveRefs?.length ? [{ id, primitives: node.primitiveRefs }] : [];
     });
     let active = true;
-    const { content } = artifact;
-    const requestedParts = parts.slice(0, 128);
+    const isActive = (): boolean => active;
+    let content: Uint8Array<ArrayBuffer> | undefined;
+    let sourceDigest: Promise<string> | undefined;
+    let requestedParts = parts.slice(0, 128);
+    if (requestedParts.length === 0) {
+      thumbnails.releaseOwner('explorer');
+      return;
+    }
     const pendingRetry =
       previewRetry?.sourceKey === presentedKey && previewRetry.requestId !== submittedRetryId.current
         ? previewRetry
         : undefined;
-    if (content.buffer.byteLength > 64 * 1024 * 1024) {
-      thumbnails.failPreparationForOwner(
-        'explorer',
-        requestedParts,
-        new RangeError('Part thumbnail source exceeds 64 MiB'),
-      );
-      return;
-    }
-    let sourceDigest = sourceDigests.current.get(content);
-    if (!sourceDigest) {
-      sourceDigest = sourceGlbDigest(content);
-      sourceDigests.current.set(content, sourceDigest);
-    }
+    const requestProjectId = previewProjectId.current;
     const prepare = async (): Promise<void> => {
       try {
+        const projection =
+          assemblyDisplay && cadRef ? await resolveSettledCadGeometry(cadRef.getSnapshot()) : undefined;
+        const source =
+          projection?.geometry ??
+          (artifact?.mimeType === 'model/gltf-binary' ? { format: 'gltf', content: artifact.content } : undefined);
+        if (
+          !isActive() ||
+          source?.format !== 'gltf' ||
+          (assemblyDisplay && selectCadDisplay(cadRef!.getSnapshot()) !== assemblyDisplay)
+        ) {
+          return;
+        }
+        content = source.content;
+        if (content.buffer.byteLength > 64 * 1024 * 1024) {
+          throw new RangeError('Part thumbnail source exceeds 64 MiB');
+        }
+        if (assemblyDisplay) {
+          const projected = buildGltfComponentManifest(content);
+          requestedParts = requestedParts.map((part) => {
+            const primitives = projected.nodesById[part.id]?.primitiveRefs;
+            if (!primitives?.length) {
+              throw new Error('Pinned part preview lost its canonical component selection');
+            }
+            return { ...part, primitives };
+          });
+        }
+        sourceDigest = sourceDigests.current.get(content);
+        if (!sourceDigest) {
+          sourceDigest = sourceGlbDigest(content);
+          sourceDigests.current.set(content, sourceDigest);
+        }
         const [hash, prepared] = await Promise.all([
           sourceDigest,
           canonicalPartPreviews(
@@ -708,23 +814,82 @@ function LiveComponentTree({
             requestedParts.map((part) => part.primitives),
           ),
         ]);
-        if (active) {
-          thumbnails.requestForOwner(
-            'explorer',
-            { sourcePath: params.entryPath, geometryHash: hash, content, renderContent: prepared.renderContent },
-            requestedParts.map((part, index) => ({
+        if (isActive()) {
+          // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- Snapshot work is page-only and must remain inert during SSR or outside TAU_DEBUG.
+          if (Boolean(globalThis.window) && ENV.TAU_DEBUG) {
+            const currentDisplay = cadRef && selectCadDisplay(cadRef.getSnapshot());
+            const isSourceCurrent = assemblyDisplay
+              ? currentDisplay === assemblyDisplay
+              : Boolean(currentDisplay && 'artifact' in currentDisplay && currentDisplay.hash === sourceKey);
+            const requestUnit = deriveModelInteractionUnitId({ sourceFile: params.entryPath });
+            const scrollers = [...document.querySelectorAll<HTMLElement>('[data-slot="model-unit-scroller"]')].filter(
+              (element) =>
+                [...element.querySelectorAll<HTMLElement>('[data-model-component-row]')].some(
+                  (row) => row.dataset['modelComponentUnitId'] === requestUnit,
+                ),
+            );
+            recordHeadlessImageTiming('thumbnail.explorer.request', performance.now(), {
+              projectId: requestProjectId,
+              unitId: requestUnit,
+              entryPath: params.entryPath,
+              presentedKey,
+              sourceKey,
+              root: assemblyDisplay ? { ...assemblyDisplay.root } : undefined,
+              sourceCurrent: isSourceCurrent,
+              selectedIds: [...selectedComponentIds],
+              intersectingIds: [...visiblePreviewIds],
+              sourcePath: params.entryPath,
+              geometryHash: hash,
+              visualKey: prepared.visualKey,
+              requested: requestedParts.map((part, index) => ({
+                id: part.id,
+                visualKey: prepared.previews[index]?.key,
+              })),
+              scrollerCount: scrollers.length,
+              scrollers: scrollers.slice(0, 8).map((element) => {
+                const rect = element.getBoundingClientRect();
+                return { connected: element.isConnected, x: rect.x, y: rect.y, width: rect.width, height: rect.height };
+              }),
+              rows: scrollers
+                .flatMap((element) => [...element.querySelectorAll<HTMLElement>('[data-model-component-row]')])
+                .filter((row) => row.dataset['modelComponentUnitId'] === requestUnit)
+                .slice(0, 128)
+                .map((row) => {
+                  const rect = row.getBoundingClientRect();
+                  return {
+                    id: row.dataset['modelComponentId'],
+                    unitId: row.dataset['modelComponentUnitId'],
+                    connected: row.isConnected,
+                    x: rect.x,
+                    y: rect.y,
+                    width: rect.width,
+                    height: rect.height,
+                  };
+                }),
+              manualPartId: pendingRetry?.partId,
+            });
+          }
+          thumbnails.requestForOwner('explorer', {
+            source: {
+              sourcePath: params.entryPath,
+              geometryHash: hash,
+              visualKey: prepared.visualKey,
+              content,
+              renderContent: prepared.renderContent,
+            },
+            parts: requestedParts.map((part, index) => ({
               ...part,
-              visualKey: prepared.previews[index]?.key ?? prepared.visualKey,
+              visualKey: prepared.previews[index]?.key,
             })),
-            pendingRetry ? { manualPartId: pendingRetry.partId } : undefined,
-          );
+            options: pendingRetry ? { manualPartId: pendingRetry.partId } : undefined,
+          });
           if (pendingRetry) {
             submittedRetryId.current = pendingRetry.requestId;
           }
         }
       } catch (error) {
-        if (active) {
-          if (sourceDigests.current.get(content) === sourceDigest) {
+        if (isActive()) {
+          if (content && sourceDigests.current.get(content) === sourceDigest) {
             sourceDigests.current.delete(content);
           }
           thumbnails.failPreparationForOwner('explorer', requestedParts, error);
@@ -738,6 +903,8 @@ function LiveComponentTree({
   }, [
     artifact,
     artifactKey,
+    assemblyDisplay,
+    cadRef,
     manifest,
     params.entryPath,
     presentedKey,
@@ -749,8 +916,14 @@ function LiveComponentTree({
 
   useEffect(() => {
     const selectedId = selectedComponentIds.at(-1);
-    params.onSelectionChange?.(unitId, selectedId ? manifest?.nodesById[selectedId] : undefined, params.entryPath);
-  }, [manifest, params.entryPath, params.onSelectionChange, selectedComponentIds, unitId]);
+    const node = selectedId ? manifest?.nodesById[selectedId] : undefined;
+    params.onSelectionChange?.({
+      unitId,
+      node,
+      entryPath: params.entryPath,
+      inspection: node ? inspectNode(node) : undefined,
+    });
+  }, [inspectNode, manifest, params.entryPath, params.onSelectionChange, selectedComponentIds, unitId]);
 
   useEffect(() => {
     if (currentSelection) {
@@ -785,9 +958,14 @@ function LiveComponentTree({
       footer={
         <Collapsible>
           <div className='flex min-w-0 items-center justify-between gap-2 border-t px-2 py-1 text-xs text-muted-foreground'>
-            <span className='truncate'>Weight · 0 of {leafPartIds.length} parts known</span>
-            <span className='shrink-0 font-mono'>Unknown</span>
-            {leafPartIds.length > 0 ? (
+            <span className='truncate'>
+              Weight · {quantitySummary.knownCount} of {quantitySummary.totalCount} parts known
+              {transientPreview ? ' · last committed' : ''}
+            </span>
+            <span className='shrink-0 font-mono'>
+              {quantitySummary.knownCount > 0 ? knownMassLabel(quantitySummary.knownMassG) : 'Unknown'}
+            </span>
+            {quantitySummary.unknownIds.length > 0 ? (
               <CollapsibleTrigger className='shrink-0 rounded-sm underline-offset-2 hover:underline focus-visible:focus-outline'>
                 Missing
               </CollapsibleTrigger>
@@ -796,7 +974,7 @@ function LiveComponentTree({
           <CollapsibleContent className='border-t p-1'>
             <MissingPartList
               manifest={manifest}
-              ids={leafPartIds}
+              ids={quantitySummary.unknownIds}
               graphicsRef={graphicsRef}
               unitId={unitId}
               entryPath={params.entryPath}
@@ -812,6 +990,7 @@ function LiveComponentTree({
         <ComponentRows
           ariaLabel={`Model components for ${params.entryPath}`}
           manifest={manifest}
+          inspectNode={inspectNode}
           nodes={visibleNodes}
           query={params.query}
           graphicsRef={graphicsRef}
@@ -952,6 +1131,7 @@ function ModelPropertiesPaneviewPanel({ params }: { readonly params: ModelProper
     <div className={cn('h-full overflow-y-auto! scroll-shadows-y', paneviewAttachedBodyClassName)}>
       <PartPropertiesPanel
         node={params.selected?.node}
+        inspection={params.selected?.inspection}
         entryPath={params.selected?.entryPath}
         preview={params.preview}
         onOpenPreview={params.onOpenPreview}
@@ -1056,6 +1236,7 @@ function MissingPartList({
 function ComponentRows({
   ariaLabel,
   manifest,
+  inspectNode,
   nodes,
   query,
   graphicsRef,
@@ -1075,6 +1256,7 @@ function ComponentRows({
 }: {
   readonly ariaLabel: string;
   readonly manifest: GeometryComponentManifest;
+  readonly inspectNode?: (node: GeometryComponentNode) => PartInspection;
   readonly nodes: GeometryComponentNode[];
   readonly query: string;
   readonly graphicsRef: GraphicsActorRef;
@@ -1105,6 +1287,7 @@ function ComponentRows({
       <ComponentRow
         manifest={manifest}
         node={node}
+        inspection={inspectNode?.(node)}
         query={query}
         graphicsRef={graphicsRef}
         unitId={unitId}
@@ -1125,6 +1308,7 @@ function ComponentRows({
     ),
     [
       focusedComponentId,
+      inspectNode,
       graphicsRef,
       hasOpacityOverrides,
       hidden,
@@ -1159,6 +1343,7 @@ function ComponentRows({
 
 export const ComponentRow = memo(function ComponentRow({
   manifest,
+  inspection,
   node,
   query = '',
   graphicsRef,
@@ -1180,6 +1365,7 @@ export const ComponentRow = memo(function ComponentRow({
   onPreviewDecoded,
 }: {
   readonly manifest: GeometryComponentManifest;
+  readonly inspection?: PartInspection;
   readonly node: GeometryComponentNode;
   readonly query?: string;
   readonly graphicsRef: GraphicsActorRef;
@@ -1383,6 +1569,7 @@ export const ComponentRow = memo(function ComponentRow({
           </Tooltip>
           <ModelComponentActionDropdown
             manifest={manifest}
+            inspection={inspection}
             node={node}
             graphicsRef={graphicsRef}
             unitId={unitId}
@@ -1408,6 +1595,7 @@ export const ComponentRow = memo(function ComponentRow({
       </ContextMenuTrigger>
       <ModelComponentActionContextContent
         manifest={manifest}
+        inspection={inspection}
         node={node}
         graphicsRef={graphicsRef}
         unitId={unitId}

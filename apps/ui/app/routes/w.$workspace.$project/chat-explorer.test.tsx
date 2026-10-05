@@ -5,14 +5,21 @@ import { act, fireEvent, render, screen, waitFor, within } from '@testing-librar
 import userEvent from '@testing-library/user-event';
 import { mock } from 'vitest-mock-extended';
 import type { GeometryComponentAppearance, GeometryComponentManifest, GeometryComponentNode } from '@taucad/types';
+import { tauCadTopologyExtension } from '@taucad/types/constants';
+import { writeGlb } from '@taucad/geometry-core';
 import type { ActorRefFrom } from 'xstate';
-import { createActor } from 'xstate';
+import type { Rendering } from '@taucad/runtime';
+import type { CadContext } from '#machines/cad.machine.js';
+import { createActor, createAsyncLogic } from 'xstate';
 import { StrictMode } from 'react';
-import type { graphicsMachine } from '#machines/graphics.machine.js';
+import { graphicsMachine } from '#machines/graphics.machine.js';
 import { createSourceModelInteractionUnitId, modelInteractionMachine } from '#machines/model-interaction.machine.js';
 import { TooltipProvider } from '@taucad/ui/components/tooltip';
 import { PartThumbnailService } from '#services/part-thumbnail.service.js';
+import { PartThumbnailProvider } from '#providers/part-thumbnail-provider.js';
+import { buildGltfComponentManifest } from '#components/geometry/graphics/metadata/gltf-component-manifest.js';
 import * as partThumbnailVisual from '#services/part-thumbnail-visual.js';
+import * as headlessImageDebug from '#services/headless-image-debug.js';
 import {
   ChatExplorerTree,
   ComponentRow,
@@ -26,7 +33,18 @@ const mocks = vi.hoisted(() => ({
   useProject: vi.fn(),
   imageService: undefined as undefined | { export: ReturnType<typeof vi.fn> },
   paneBodyVisible: true,
+  debugEnabled: false,
   openPartGallery: undefined as undefined | ReturnType<typeof vi.fn>,
+}));
+
+vi.mock('#environment.config.js', () => ({
+  // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the real environment facade binding under test.
+  ENV: {
+    // eslint-disable-next-line @typescript-eslint/naming-convention -- Preserve the real page debug flag under test.
+    get TAU_DEBUG(): boolean {
+      return mocks.debugEnabled;
+    },
+  },
 }));
 
 vi.mock('#components/geometry/cad/part-gallery.js', async (importOriginal) => ({
@@ -265,10 +283,12 @@ function createGraphicsRefForUnit(
     hiddenComponentIds = [],
     selectedComponentIds = [],
     previewGeometry,
+    isPresented = true,
   }: {
     readonly hiddenComponentIds?: readonly string[];
     readonly selectedComponentIds?: readonly string[];
     readonly previewGeometry?: { readonly hash: string; readonly content: Uint8Array<ArrayBuffer> };
+    readonly isPresented?: boolean;
   } = {},
 ): ActorRefFrom<typeof graphicsMachine> {
   const modelRef = createActor(modelInteractionMachine, { input: {} });
@@ -289,34 +309,46 @@ function createGraphicsRefForUnit(
     context: {
       modelInteractionRef: modelRef,
       artifact: previewGeometry && { mimeType: 'model/gltf-binary', content: previewGeometry.content },
-      artifactKey: previewGeometry?.hash,
-      gltfPresentation: { presentedKey: previewGeometry?.hash },
+      artifactKey: previewGeometry?.hash ?? '',
+      gltfPresentation: { presentedKey: isPresented ? previewGeometry?.hash : undefined },
     },
   }) as unknown as ActorRefFrom<typeof graphicsMachine>;
 }
 
 function mockProjectForExplorer({
+  projectId,
   mainEntryPath,
   viewSettings,
   viewGraphics,
   geometryUnitFiles,
+  geometryUnitActors,
   editorRef = createStaticActor({ context: { viewSettings } }),
   viewEntryPaths = new Map(Object.entries(viewSettings).map(([id, view]) => [id, view.entryPath])),
 }: {
+  readonly projectId?: string;
   readonly mainEntryPath: string;
   readonly viewSettings: Record<string, { readonly entryPath: string }>;
   readonly viewGraphics: Map<string, ActorRefFrom<typeof graphicsMachine>>;
   readonly geometryUnitFiles: readonly string[];
+  readonly geometryUnitActors?: ReadonlyMap<string, unknown>;
   readonly editorRef?: EditorTestActor;
   readonly viewEntryPaths?: ReadonlyMap<string, string>;
 }): void {
   mocks.useProject.mockReturnValue({
+    projectId,
     mainEntryPath,
     editorRef,
     viewGraphics,
     viewEntryPaths,
     viewRecords: new Map(Object.entries(viewSettings)),
-    geometryUnits: new Map(geometryUnitFiles.map((entryPath) => [entryPath, createStaticActor({})])),
+    geometryUnits:
+      geometryUnitActors ??
+      new Map(
+        geometryUnitFiles.map((entryPath) => [
+          entryPath,
+          createStaticActor({ context: { committedRendering: undefined, rendering: undefined } }),
+        ]),
+      ),
   });
 }
 
@@ -346,6 +378,7 @@ function renderComponentRow(properties: Parameters<typeof ComponentRow>[0]): Ret
 }
 
 beforeEach(() => {
+  mocks.debugEnabled = false;
   mocks.addContextReferences.mockReset();
   mocks.paneApis.clear();
   mocks.useProject.mockReset();
@@ -369,6 +402,180 @@ afterEach(() => {
 });
 
 describe('ChatExplorerTree', () => {
+  it.each(['refresh', 'unsupported', 'closed'])(
+    'should retain ready demand only across a mounted supported source refresh: %s',
+    async (transition) => {
+      const bytes = new Uint8Array([1, 2, 3]);
+      const exportImage = vi.fn(async () => [{ name: 'render-part-0.webp', mimeType: 'image/webp', bytes }]);
+      mocks.imageService = { export: exportImage };
+      const requests = vi.spyOn(PartThumbnailService.prototype, 'requestForOwner');
+      const componentId = `occ:${Array.from(
+        new TextEncoder().encode(JSON.stringify(['occurrence', 'refresh-part'])),
+        (byte) => byte.toString(16).padStart(2, '0'),
+      ).join('')}`;
+      const primitives = [
+        {
+          mode: 4,
+          positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+          material: {},
+        },
+      ];
+      const content = (translation: number) =>
+        writeGlb({
+          nodes: [
+            {
+              name: 'Refresh part',
+              extras: { tauComponentId: componentId },
+              primitives,
+              matrix: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, translation, 0, 0, 1],
+            },
+          ],
+          extensions: {
+            [tauCadTopologyExtension]: {
+              schemaVersion: 1,
+              components: [
+                {
+                  id: componentId,
+                  name: 'Refresh part',
+                  kind: 'part',
+                  selector: 'node/0',
+                  nodeIndex: 0,
+                  primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+                  capabilities: {
+                    hasPreciseTopology: false,
+                    exports: [{ fidelity: 'mesh', formats: ['glb'], available: true }],
+                  },
+                },
+              ],
+            },
+          },
+        });
+      const firstContent = content(0);
+      const nextContent = content(12);
+      const firstPart = buildGltfComponentManifest(firstContent, { sourceFile: unitId }).nodesById[componentId];
+      const nextPart = buildGltfComponentManifest(nextContent, { sourceFile: unitId }).nodesById[componentId];
+      if (!firstPart?.primitiveRefs?.length || !nextPart?.primitiveRefs?.length) {
+        throw new Error('Real topology fixture lost its declared part primitives.');
+      }
+      const firstPrepared = await partThumbnailVisual.canonicalPartPreviews(firstContent, [firstPart.primitiveRefs]);
+      const nextPrepared = await partThumbnailVisual.canonicalPartPreviews(nextContent, [nextPart.primitiveRefs]);
+      expect(firstPrepared.previews.at(0)?.key).toBeTypeOf('string');
+      expect(nextPrepared.previews.at(0)?.key).toBe(firstPrepared.previews.at(0)?.key);
+      const firstKey = await partThumbnailVisual.sourceGlbDigest(firstContent);
+      const nextKey = await partThumbnailVisual.sourceGlbDigest(nextContent);
+      expect(nextKey).not.toBe(firstKey);
+      const graphicsRef = createActor(
+        graphicsMachine.provide({
+          actors: { probeWebGpu: createAsyncLogic({ run: async () => false }) },
+        }),
+        { input: {} },
+      );
+      graphicsRef.start();
+      const modelRef = graphicsRef.getSnapshot().context.modelInteractionRef;
+      const commit = (key: string, source: Uint8Array<ArrayBuffer>): void => {
+        const manifest = buildGltfComponentManifest(source, { sourceFile: unitId });
+        const revision = graphicsRef.getSnapshot().context.gltfPresentation.requestedRevision;
+        graphicsRef.send({ type: 'gltfPresentationCommitted', revision, key, unitId: internalUnitId, manifest });
+        modelRef.send({ type: 'selectComponent', unitId: internalUnitId, componentId });
+      };
+      graphicsRef.send({
+        type: 'updateArtifact',
+        hash: firstKey,
+        artifact: { mimeType: 'model/gltf-binary', content: firstContent },
+        sourceFile: unitId,
+      });
+      commit(firstKey, firstContent);
+      mockProjectForExplorer({
+        projectId: 'refresh-project',
+        mainEntryPath: unitId,
+        geometryUnitFiles: [unitId],
+        viewSettings: { mainView: { entryPath: unitId } },
+        viewGraphics: new Map([['mainView', graphicsRef]]),
+      });
+      const tree = () => (
+        <PartThumbnailProvider>
+          <TooltipProvider>
+            <ChatExplorerTree />
+          </TooltipProvider>
+        </PartThumbnailProvider>
+      );
+      const view = render(tree());
+      try {
+        await waitFor(() => {
+          expect(new Set(requests.mock.contexts).size).toBe(1);
+          const [receiver] = requests.mock.contexts;
+          if (!(receiver instanceof PartThumbnailService)) {
+            throw new Error('Explorer request has no actual thumbnail service receiver.');
+          }
+          expect(receiver.get(componentId)).toEqual({ status: 'ready', bytes });
+        });
+        const [service] = requests.mock.contexts;
+        if (!(service instanceof PartThumbnailService)) {
+          throw new Error('Explorer did not use the real project thumbnail service.');
+        }
+        expect(exportImage).toHaveBeenCalledTimes(1);
+        const initialVisualKey = requests.mock.calls.at(-1)?.[1].parts.at(0)?.visualKey;
+        expect(initialVisualKey).toBeTypeOf('string');
+        if (transition === 'closed') {
+          view.unmount();
+          expect(service.get(componentId)).toBeUndefined();
+          return;
+        }
+        act(() => {
+          if (transition === 'unsupported') {
+            graphicsRef.send({
+              type: 'updateArtifact',
+              hash: 'svg-current',
+              artifact: { mimeType: 'image/svg+xml', content: '<svg />' },
+              sourceFile: unitId,
+            });
+          } else {
+            graphicsRef.send({
+              type: 'updateArtifact',
+              hash: nextKey,
+              artifact: { mimeType: 'model/gltf-binary', content: nextContent },
+              sourceFile: unitId,
+            });
+          }
+        });
+        view.rerender(tree());
+        if (transition === 'unsupported') {
+          expect(service.get(componentId)).toBeUndefined();
+          expect(exportImage).toHaveBeenCalledTimes(1);
+          return;
+        }
+        // The replacement is requested; the old frame still owns presentation.
+        expect(graphicsRef.getSnapshot().context.gltfPresentation.presentedKey).toBe(firstKey);
+        expect(graphicsRef.getSnapshot().context.artifactKey).toBe(nextKey);
+        expect(service.get(componentId)).toEqual({ status: 'ready', bytes });
+        expect(requests.mock.calls.some(([, request]) => request.source.content === nextContent)).toBe(false);
+        expect(exportImage).toHaveBeenCalledTimes(1);
+        act(() => {
+          const revision = graphicsRef.getSnapshot().context.gltfPresentation.presentedRevision;
+          graphicsRef.send({ type: 'gltfPresentationReleased', revision, key: firstKey });
+          modelRef.send({ type: 'clearManifest', unitId: internalUnitId, source: 'viewer' });
+        });
+        view.rerender(tree());
+        expect(graphicsRef.getSnapshot().context.gltfPresentation.presentedKey).toBeUndefined();
+        expect(service.get(componentId)).toEqual({ status: 'ready', bytes });
+        expect(exportImage).toHaveBeenCalledTimes(1);
+        act(() => {
+          commit(nextKey, nextContent);
+        });
+        view.rerender(tree());
+        await waitFor(() => {
+          expect(requests.mock.calls.some(([, request]) => request.source.content === nextContent)).toBe(true);
+        });
+        expect(requests.mock.calls.at(-1)?.[1].parts.at(0)?.visualKey).toBe(initialVisualKey);
+        expect(service.get(componentId)).toEqual({ status: 'ready', bytes });
+        expect(exportImage).toHaveBeenCalledTimes(1);
+      } finally {
+        view.unmount();
+        graphicsRef.stop();
+      }
+    },
+  );
+
   it('refuses a small GLB view backed by an oversized allocation before preview preparation', async () => {
     const digest = vi.spyOn(partThumbnailVisual, 'sourceGlbDigest');
     const prepare = vi.spyOn(partThumbnailVisual, 'canonicalPartPreviews');
@@ -402,6 +609,59 @@ describe('ChatExplorerTree', () => {
     expect(digest).not.toHaveBeenCalled();
     expect(prepare).not.toHaveBeenCalled();
   });
+
+  it.each(['empty-key', 'unpresented'])(
+    'should refuse preview preparation and admission for a %s source',
+    async (condition) => {
+      const digest = vi.spyOn(partThumbnailVisual, 'sourceGlbDigest');
+      const prepare = vi.spyOn(partThumbnailVisual, 'canonicalPartPreviews');
+      const requests = vi.spyOn(PartThumbnailService.prototype, 'requestForOwner');
+      const releases = vi.spyOn(PartThumbnailService.prototype, 'releaseOwner');
+      const announcements = vi.spyOn(PartThumbnailService.prototype, 'announcePresentedSource');
+      const exportImage = vi.fn().mockResolvedValue(undefined);
+      mocks.imageService = { export: exportImage };
+      const part = {
+        ...createNode(firstComponentId, 'Unavailable preview'),
+        primitiveRefs: [{ nodeIndex: 0, meshIndex: 0, primitiveIndex: 0 }],
+      };
+      const content = writeGlb({
+        nodes: [
+          {
+            name: part.name,
+            primitives: [{ mode: 4, positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]), material: {} }],
+          },
+        ],
+      });
+      const graphicsRef = createGraphicsRefForUnit('src/main.ts', [part], {
+        previewGeometry: { hash: condition === 'empty-key' ? '' : 'presented-glb', content },
+        isPresented: condition === 'empty-key',
+        selectedComponentIds: [firstComponentId],
+      });
+      mockProjectForExplorer({
+        mainEntryPath: 'src/main.ts',
+        geometryUnitFiles: ['src/main.ts'],
+        viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+        viewGraphics: new Map([['mainView', graphicsRef]]),
+      });
+      renderExplorerTree();
+      await waitFor(() => {
+        expect(new Set(announcements.mock.contexts).size).toBe(1);
+      });
+      const [service] = announcements.mock.contexts;
+      if (!(service instanceof PartThumbnailService)) {
+        throw new Error('Explorer did not announce its real thumbnail service.');
+      }
+      expect(service.snapshot().size).toBe(0);
+      expect(service.get(firstComponentId)).toBeUndefined();
+      if (condition === 'empty-key') {
+        expect(releases).toHaveBeenCalledWith('explorer');
+      }
+      expect(digest).not.toHaveBeenCalled();
+      expect(prepare).not.toHaveBeenCalled();
+      expect(requests).not.toHaveBeenCalled();
+      expect(exportImage).not.toHaveBeenCalled();
+    },
+  );
 
   it('submits only the presented, visible part primitives to the shared image queue', async () => {
     const exportImage = vi.fn().mockResolvedValue(undefined);
@@ -437,94 +697,157 @@ describe('ChatExplorerTree', () => {
     });
   });
 
-  it('should observe newly mounted rows and releases removed-row preview demand', async () => {
-    const demands = vi.spyOn(PartThumbnailService.prototype, 'requestForOwner');
-    const observe = vi.fn();
-    const unobserve = vi.fn();
-    const disconnect = vi.fn();
-    let intersect: IntersectionObserverCallback | undefined;
-    const observer = mock<IntersectionObserver>({ observe, unobserve, disconnect });
-    vi.stubGlobal(
-      'IntersectionObserver',
-      vi.fn(function (callback: IntersectionObserverCallback) {
-        intersect = callback;
-        return observer;
-      }),
-    );
-    const exportImage = vi.fn().mockResolvedValue(undefined);
-    mocks.imageService = { export: exportImage };
-    const parts = [firstComponentId, secondComponentId].map((id, index) => ({
-      ...createNode(id, `Part ${index + 1}`),
-      primitiveRefs: [{ nodeIndex: index, meshIndex: index, primitiveIndex: 0 }],
-    }));
-    mockProjectForExplorer({
-      mainEntryPath: 'src/main.ts',
-      geometryUnitFiles: ['src/main.ts'],
-      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
-      viewGraphics: new Map([
-        [
-          'mainView',
-          createGraphicsRefForUnit('src/main.ts', parts, {
-            previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
-          }),
-        ],
-      ]),
-    });
-    renderExplorerTree();
-    const first = screen.getByRole('button', { name: 'Part 1' }).closest<HTMLElement>('[data-model-component-row]')!;
-    const second = screen.getByRole('button', { name: 'Part 2' }).closest<HTMLElement>('[data-model-component-row]')!;
-    expect(observe).toHaveBeenCalledWith(first);
-    expect(observe).toHaveBeenCalledWith(second);
-    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
-    await waitFor(() => {
+  it.each([true, false])(
+    'should observe newly mounted rows and release removed-row preview demand with debug=%s',
+    async (debugEnabled) => {
+      mocks.debugEnabled = debugEnabled;
+      const queryRows = vi.spyOn(document, 'querySelectorAll');
+      const records = vi.spyOn(headlessImageDebug, 'recordHeadlessImageTiming');
+      const requestedServices = new Set<PartThumbnailService>();
+      const originalRequest = PartThumbnailService.prototype.requestForOwner;
+      const demands = vi.spyOn(PartThumbnailService.prototype, 'requestForOwner').mockImplementation(function (
+        this: PartThumbnailService,
+        ...args: Parameters<PartThumbnailService['requestForOwner']>
+      ) {
+        requestedServices.add(this);
+        originalRequest.apply(this, args);
+      });
+      const releases = vi.spyOn(PartThumbnailService.prototype, 'releaseOwner');
+      const observe = vi.fn();
+      const unobserve = vi.fn();
+      const disconnect = vi.fn();
+      let intersect: IntersectionObserverCallback | undefined;
+      const observer = mock<IntersectionObserver>({ observe, unobserve, disconnect });
+      vi.stubGlobal(
+        'IntersectionObserver',
+        vi.fn(function (callback: IntersectionObserverCallback) {
+          intersect = callback;
+          return observer;
+        }),
+      );
+      const exportImage = vi.fn().mockResolvedValue(undefined);
+      mocks.imageService = { export: exportImage };
+      const parts = [firstComponentId, secondComponentId].map((id, index) => ({
+        ...createNode(id, `Part ${index + 1}`),
+        primitiveRefs: [{ nodeIndex: index, meshIndex: index, primitiveIndex: 0 }],
+      }));
+      mockProjectForExplorer({
+        mainEntryPath: 'src/main.ts',
+        geometryUnitFiles: ['src/main.ts'],
+        viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+        viewGraphics: new Map([
+          [
+            'mainView',
+            createGraphicsRefForUnit('src/main.ts', parts, {
+              previewGeometry: { hash: 'presented-glb', content: new Uint8Array([1, 2, 3]) },
+            }),
+          ],
+        ]),
+      });
+      renderExplorerTree();
+      const first = screen.getByRole('button', { name: 'Part 1' }).closest<HTMLElement>('[data-model-component-row]')!;
+      const second = screen.getByRole('button', { name: 'Part 2' }).closest<HTMLElement>('[data-model-component-row]')!;
+      expect(observe).toHaveBeenCalledWith(first);
+      expect(observe).toHaveBeenCalledWith(second);
+      act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
+      await waitFor(() => {
+        expect(exportImage).toHaveBeenCalledTimes(1);
+      });
+      const firstRequest = records.mock.calls.findLast(([name]) => name === 'thumbnail.explorer.request')?.[2];
+      if (debugEnabled) {
+        expect(firstRequest).toMatchObject({
+          unitId: internalUnitId,
+          entryPath: 'src/main.ts',
+          sourcePath: 'src/main.ts',
+          presentedKey: 'presented-glb',
+          sourceKey: 'presented-glb',
+          selectedIds: [],
+          intersectingIds: [firstComponentId],
+          requested: [{ id: firstComponentId }],
+          scrollerCount: 1,
+          rows: [
+            { id: firstComponentId, unitId: internalUnitId, connected: true },
+            { id: secondComponentId, unitId: internalUnitId, connected: true },
+          ],
+        });
+      } else {
+        expect(firstRequest).toBeUndefined();
+        expect(queryRows.mock.calls.some(([selector]) => selector === '[data-slot="model-unit-scroller"]')).toBe(false);
+      }
+      expect(requestedServices.size).toBe(1);
+      const service = [...requestedServices][0]!;
+      expect(service.get(firstComponentId)).toBeDefined();
+      const requestCount = demands.mock.calls.length;
+      first.remove();
+      await waitFor(() => {
+        expect(unobserve).toHaveBeenCalledWith(first);
+        expect(service.get(firstComponentId)).toBeUndefined();
+      });
+      act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
+      expect(service.get(firstComponentId)).toBeUndefined();
+      expect(demands).toHaveBeenCalledTimes(requestCount);
+      const parent = second.parentElement!;
+      second.remove();
+      await waitFor(() => {
+        expect(unobserve).toHaveBeenCalledWith(second);
+      });
+      act(() =>
+        intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer),
+      );
       expect(exportImage).toHaveBeenCalledTimes(1);
-    });
-    first.remove();
-    await waitFor(() => {
-      expect(unobserve).toHaveBeenCalledWith(first);
-    });
-    await waitFor(() => {
-      expect(demands.mock.lastCall?.[2]).toEqual([]);
-    });
-    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: first, isIntersecting: true }], observer));
-    expect(demands.mock.lastCall?.[2]).toEqual([]);
-    const parent = second.parentElement!;
-    second.remove();
-    await waitFor(() => {
-      expect(unobserve).toHaveBeenCalledWith(second);
-    });
-    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer));
-    expect(exportImage).toHaveBeenCalledTimes(1);
-    const mounts = observe.mock.calls.length;
-    parent.append(second);
-    await waitFor(() => {
-      expect(observe.mock.calls.length).toBeGreaterThan(mounts);
-    });
-    act(() => intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer));
-    await waitFor(() => {
+      const mounts = observe.mock.calls.length;
+      parent.append(second);
+      await waitFor(() => {
+        expect(observe.mock.calls.length).toBeGreaterThan(mounts);
+      });
+      act(() =>
+        intersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer),
+      );
+      await waitFor(() => {
+        expect(exportImage).toHaveBeenCalledTimes(2);
+      });
+      expect(exportImage.mock.calls[1]?.[0].exportOptions.views).toMatchObject([
+        { visiblePrimitives: parts[1]!.primitiveRefs },
+      ]);
+      const secondRequest = records.mock.calls.findLast(([name]) => name === 'thumbnail.explorer.request')?.[2];
+      if (debugEnabled) {
+        expect(secondRequest).toMatchObject({
+          intersectingIds: [secondComponentId],
+          requested: [{ id: secondComponentId }],
+          rows: [{ id: secondComponentId, connected: true }],
+        });
+        expect(firstRequest?.['intersectingIds']).toEqual([firstComponentId]);
+        expect(JSON.stringify(secondRequest)).not.toContain('content');
+      } else {
+        expect(records).not.toHaveBeenCalled();
+      }
+      const staleIntersect = intersect;
+      const scroller = screen
+        .getByTestId('model-pane-src/main.ts')
+        .querySelector<HTMLElement>('[data-slot="model-unit-scroller"]')!;
+      scroller.scrollTop = 27;
+      const demandCountBeforeFilter = demands.mock.calls.length;
+      const releaseCountBeforeFilter = releases.mock.calls.length;
+      fireEvent.change(screen.getByRole('searchbox', { name: 'Filter parts' }), { target: { value: 'Part 1' } });
+      expect(screen.getByTestId('model-pane-src/main.ts').querySelector('[data-slot="model-unit-scroller"]')).toBe(
+        scroller,
+      );
+      expect(scroller.scrollTop).toBe(27);
+      await waitFor(() => {
+        expect(releases.mock.calls.slice(releaseCountBeforeFilter).some(([owner]) => owner === 'explorer')).toBe(true);
+        expect(service.snapshot().size).toBe(0);
+        expect(service.get(firstComponentId)).toBeUndefined();
+        expect(service.get(secondComponentId)).toBeUndefined();
+      });
+      expect(demands).toHaveBeenCalledTimes(demandCountBeforeFilter);
+      act(() =>
+        staleIntersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer),
+      );
+      expect(service.snapshot().size).toBe(0);
+      expect(demands).toHaveBeenCalledTimes(demandCountBeforeFilter);
       expect(exportImage).toHaveBeenCalledTimes(2);
-    });
-    expect(exportImage.mock.calls[1]?.[0].exportOptions.views).toMatchObject([
-      { visiblePrimitives: parts[1]!.primitiveRefs },
-    ]);
-    const staleIntersect = intersect;
-    const scroller = screen
-      .getByTestId('model-pane-src/main.ts')
-      .querySelector<HTMLElement>('[data-slot="model-unit-scroller"]')!;
-    scroller.scrollTop = 27;
-    fireEvent.change(screen.getByRole('searchbox', { name: 'Filter parts' }), { target: { value: 'Part 1' } });
-    expect(screen.getByTestId('model-pane-src/main.ts').querySelector('[data-slot="model-unit-scroller"]')).toBe(
-      scroller,
-    );
-    expect(scroller.scrollTop).toBe(27);
-    await waitFor(() => {
-      expect(demands.mock.lastCall?.[2]).toEqual([]);
-    });
-    act(() =>
-      staleIntersect?.([{ ...mock<IntersectionObserverEntry>(), target: second, isIntersecting: true }], observer),
-    );
-    expect(demands.mock.lastCall?.[2]).toEqual([]);
-  });
+    },
+  );
 
   it('observes part rows when Paneview attaches the scroller later', async () => {
     mocks.paneBodyVisible = false;
@@ -661,19 +984,19 @@ describe('ChatExplorerTree', () => {
     present('source-b', contentB);
     view.rerender(tree());
     await waitFor(() => {
-      expect(requests.mock.calls.some((call) => call[1].content === contentB)).toBe(true);
+      expect(requests.mock.calls.some((call) => call[1].source.content === contentB)).toBe(true);
     });
     const beforeReturn = requests.mock.calls.length;
     present('source-a', contentA);
     view.rerender(tree());
     await waitFor(() => {
-      expect(requests.mock.calls.slice(beforeReturn).some((call) => call[1].content === contentA)).toBe(true);
+      expect(requests.mock.calls.slice(beforeReturn).some((call) => call[1].source.content === contentA)).toBe(true);
     });
-    expect(requests.mock.calls.filter((call) => call[3]?.manualPartId === firstComponentId)).toHaveLength(0);
+    expect(requests.mock.calls.filter((call) => call[1].options?.manualPartId === firstComponentId)).toHaveLength(0);
     pending.resolve({ visualKey: 'old', previews: [{ key: 'old' }] });
     fireEvent.click(await within(properties).findByRole('button', { name: 'Retry preview' }));
     await waitFor(() => {
-      expect(requests.mock.calls.filter((call) => call[3]?.manualPartId === firstComponentId)).toHaveLength(1);
+      expect(requests.mock.calls.filter((call) => call[1].options?.manualPartId === firstComponentId)).toHaveLength(1);
     });
   });
 
@@ -813,6 +1136,160 @@ describe('ChatExplorerTree', () => {
 
     expect(filterInput).toHaveValue('');
     expect(screen.getByText('main_part')).toBeInTheDocument();
+  });
+
+  it('shows only measured leaf mass and lists genuinely unknown parts', async () => {
+    const known: GeometryComponentNode = {
+      ...createNode(firstComponentId, 'known_part'),
+      physical: {
+        volume: {
+          state: 'measured',
+          valueMm3: 12_480,
+          geometryDigest: `sha256:${'a'.repeat(64)}`,
+          method: 'occt-solid-volume',
+          validity: 'closed-solid',
+        },
+        density: {
+          // eslint-disable-next-line @typescript-eslint/naming-convention -- Unit-bearing physical field uses cm³ notation.
+          valueGPerCm3: 1.55,
+          provenance: 'authored-shape-config',
+        },
+      },
+    };
+    const missing = createNode(secondComponentId, 'missing_part');
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        ['mainView', createGraphicsRefForUnit('src/main.ts', [known, missing], { selectedComponentIds: [known.id] })],
+      ]),
+    });
+    renderExplorerTree();
+    expect(screen.getByText('Weight · 1 of 2 parts known')).toBeVisible();
+    expect(screen.getAllByText('19.34 g')).toHaveLength(2);
+    const properties = screen.getByTestId('model-pane-properties');
+    expect(properties).toHaveTextContent('1.55 g/cm³');
+    expect(properties).toHaveTextContent('12.48 cm³');
+    expect(properties).toHaveTextContent('19.34 g');
+    await userEvent.setup().click(screen.getByRole('button', { name: 'Missing' }));
+    expect(screen.getAllByRole('button', { name: 'missing_part' })).toHaveLength(2);
+    expect(screen.getAllByRole('button', { name: 'known_part' })).toHaveLength(1);
+  });
+
+  it('should retain committed physical facts while transient preview geometry is displayed', async () => {
+    const previewPart: GeometryComponentNode = {
+      ...createNode(firstComponentId, 'preview_part'),
+      physical: {
+        volume: {
+          state: 'measured',
+          valueMm3: 999_000,
+          geometryDigest: `sha256:${'b'.repeat(64)}`,
+          method: 'occt-solid-volume',
+          validity: 'closed-solid',
+        },
+      },
+    };
+    const committedBytes = writeGlb({
+      nodes: [
+        {
+          name: 'committed_part',
+          primitives: [
+            {
+              mode: 4,
+              positions: new Float32Array([0, 0, 0, 1, 0, 0, 0, 1, 0]),
+              indices: new Uint32Array([0, 1, 2]),
+              material: { pbrMetallicRoughness: { baseColorFactor: [1, 1, 1, 1] } },
+            },
+          ],
+        },
+      ],
+      extensions: {
+        [tauCadTopologyExtension]: {
+          schemaVersion: 1,
+          components: [
+            {
+              id: firstComponentId,
+              name: 'committed_part',
+              kind: 'part',
+              selector: 'node/0',
+              nodeIndex: 0,
+              physical: {
+                volume: {
+                  state: 'measured',
+                  valueMm3: 12_480,
+                  geometryDigest: `sha256:${'a'.repeat(64)}`,
+                  method: 'occt-solid-volume',
+                  validity: 'closed-solid',
+                },
+                density: {
+                  // eslint-disable-next-line @typescript-eslint/naming-convention -- Unit-bearing physical field uses cm³ notation.
+                  valueGPerCm3: 1.55,
+                  provenance: 'authored-shape-config',
+                },
+              },
+            },
+          ],
+        },
+      },
+    });
+    const committedRendering: Rendering = {
+      success: true,
+      transient: false,
+      requestId: 'committed',
+      evaluationId: 'evaluation',
+      view: 'model',
+      artifact: { mimeType: 'model/gltf-binary', content: committedBytes },
+      hash: 'committed',
+      issues: [],
+    };
+    const rendering: Rendering = {
+      ...committedRendering,
+      requestId: 'preview',
+      transient: true,
+      hash: 'preview',
+      artifact: {
+        mimeType: 'model/gltf-binary',
+        content: writeGlb({
+          nodes: [
+            {
+              name: 'preview_part',
+              primitives: [{ mode: 4, positions: new Float32Array([0, 0, 0, 2, 0, 0, 0, 2, 0]), material: {} }],
+            },
+          ],
+        }),
+      },
+    };
+    mockProjectForExplorer({
+      mainEntryPath: 'src/main.ts',
+      geometryUnitFiles: ['src/main.ts'],
+      geometryUnitActors: new Map([
+        [
+          'src/main.ts',
+          createStaticActor({
+            context: {
+              committedRendering,
+              rendering,
+            } satisfies Pick<CadContext, 'committedRendering' | 'rendering'>,
+          }),
+        ],
+      ]),
+      viewSettings: { mainView: { entryPath: 'src/main.ts' } },
+      viewGraphics: new Map([
+        [
+          'mainView',
+          createGraphicsRefForUnit('src/main.ts', [previewPart], { selectedComponentIds: [previewPart.id] }),
+        ],
+      ]),
+    });
+    renderExplorerTree();
+    expect(screen.getByText('Weight · 1 of 1 parts known · last committed')).toBeVisible();
+    expect(screen.getAllByText('19.34 g')).toHaveLength(2);
+    expect(screen.queryByText('999 cm³')).not.toBeInTheDocument();
+    const properties = screen.getByTestId('model-pane-properties');
+    expect(properties).toHaveTextContent('Last committed physical facts; preview geometry is transient.');
+    expect(properties).toHaveTextContent('12.48 cm³');
+    expect(properties).not.toHaveTextContent('999 cm³');
   });
 
   it('should reveal requested model component rows', async () => {

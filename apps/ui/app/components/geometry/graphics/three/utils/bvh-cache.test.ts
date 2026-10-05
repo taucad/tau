@@ -1,8 +1,55 @@
 import * as THREE from 'three';
 import { describe, expect, it, vi } from 'vitest';
-import { getOrBuildBvh, intersectsBvhGeometryBounds } from '#components/geometry/graphics/three/utils/bvh-cache.js';
+import {
+  getCachedBvh,
+  getOrBuildBvh,
+  intersectsBvhGeometryBounds,
+} from '#components/geometry/graphics/three/utils/bvh-cache.js';
+import { estimateMemoryInBytes } from 'three-mesh-bvh';
 
 describe('getOrBuildBvh', () => {
+  it('should read only the actual retained tree without implicitly constructing bounds or another tree', () => {
+    const geometry = new THREE.BoxGeometry();
+    const computeBounds = vi.spyOn(geometry, 'computeBoundingBox');
+    try {
+      expect(getCachedBvh(geometry)).toBeUndefined();
+      expect(geometry.boundingBox).toBeNull();
+      expect(computeBounds).not.toHaveBeenCalled();
+      const tree = getOrBuildBvh(geometry);
+      expect(getCachedBvh(geometry)).toBe(tree);
+      expect(estimateMemoryInBytes(tree)).toBeGreaterThan(0);
+      expect(getCachedBvh(geometry)).toBe(tree);
+      expect(computeBounds).toHaveBeenCalledOnce();
+    } finally {
+      geometry.dispose();
+      computeBounds.mockRestore();
+    }
+  });
+
+  it('should retire only the disposed geometry cache and rebuild only on a later explicit query', () => {
+    const geometry = new THREE.BoxGeometry();
+    const unrelated = new THREE.BoxGeometry();
+    try {
+      const first = getOrBuildBvh(geometry);
+      const other = getOrBuildBvh(unrelated);
+      geometry.getAttribute('position').needsUpdate = true;
+      const updated = getOrBuildBvh(geometry);
+      expect(updated).not.toBe(first);
+      geometry.dispose();
+      expect(getCachedBvh(geometry)).toBeUndefined();
+      expect(getCachedBvh(unrelated)).toBe(other);
+      const restored = getOrBuildBvh(geometry);
+      expect(restored).not.toBe(updated);
+      expect(getCachedBvh(geometry)).toBe(restored);
+      geometry.dispose();
+      expect(getCachedBvh(geometry)).toBeUndefined();
+      expect(getCachedBvh(unrelated)).toBe(other);
+    } finally {
+      geometry.dispose();
+      unrelated.dispose();
+    }
+  });
+
   it('returns the same MeshBVH instance when position version is unchanged', () => {
     const geometry = new THREE.BoxGeometry();
     const first = getOrBuildBvh(geometry);

@@ -110,7 +110,10 @@ function ExportGeometryDownloadSplitButton({
   const cadActor = geometryUnits.get(targetFile);
 
   const availableFormats = useSelector(cadActor, (state) =>
-    deriveAvailableFormats(state?.context.kernelClient, state?.context.activeKernelId),
+    deriveAvailableFormats(
+      state?.context.kernelClient,
+      state?.context.publishedAssembly ?? state?.context.activeKernelId,
+    ),
   );
 
   const groupedFormats = useMemo(() => groupExportFormatsByFidelity(availableFormats), [availableFormats]);

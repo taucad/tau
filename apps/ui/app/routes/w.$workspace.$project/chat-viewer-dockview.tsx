@@ -82,6 +82,16 @@ export function adoptViewerRecordNode(api: DockviewApi, node: ViewerNode): strin
   );
   const dimensions = { width: Math.max(1, api.width), height: Math.max(1, api.height) };
   const projection = toDockview('viewer', node, { dimensions });
+  let currentProjection: string | undefined;
+  try {
+    currentProjection = JSON.stringify(fromDockview('viewer', api.toJSON()));
+  } catch {
+    // An unsupported live arrangement still needs the authoritative record restore.
+  }
+  if (currentProjection === JSON.stringify(fromDockview('viewer', projection))) {
+    return [];
+  }
+
   // Dockview reuses panel instances but replaces their metadata from the serialized projection.
   for (const prior of existing) {
     if (!desired.has(prior.id)) {

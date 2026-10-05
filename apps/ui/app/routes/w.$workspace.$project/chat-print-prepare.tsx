@@ -43,7 +43,7 @@ import { useProject } from '#hooks/use-project.js';
 import { compileExportConfigurationManifest } from '#routes/w.$workspace.$project/chat-converter.js';
 import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
-import { selectCadFailureIssues } from '#machines/cad.machine.js';
+import { selectCadDisplay, selectCadFailureIssues } from '#machines/cad.machine.js';
 import {
   PrintDisclosure,
   PrintNotice,
@@ -442,7 +442,10 @@ export const usePrintPrepare = ({
   }, [entryPath, isShown, projectRef, operationTimeout]);
   const actor = useSelector(projectRef, (state) => state.context.geometryUnits.get(entryPath));
   const kernelClient = useSelector(actor, (state) => state?.context.kernelClient);
-  const activeKernelId = useSelector(actor, (state) => state?.context.activeKernelId);
+  const activeKernelId = useSelector(
+    actor,
+    (state) => state?.context.publishedAssembly ?? state?.context.activeKernelId,
+  );
   const capabilities = useSelector(actor, (state) => state?.context.capabilities);
   const rendering = useSelector(actor, (state) => state?.context.rendering);
   const artifact = useMemo(() => (rendering?.success ? asKnownArtifact(rendering.artifact) : undefined), [rendering]);
@@ -776,17 +779,31 @@ export const usePrintPrepare = ({
 
       const freshKernelClient = settled.context.kernelClient;
       const freshDocument = settled.context.document;
-      const freshKernelId = settled.context.activeKernelId;
+      const display = selectCadDisplay(settled);
+      const assemblyDisplay = display && 'admitted' in display ? display : undefined;
+      const freshKernelId = settled.context.publishedAssembly ?? settled.context.activeKernelId;
       const freshRoute = freshKernelClient
         ? bestRouteForActiveKernel(freshKernelClient, gcodeContainerFormat, freshKernelId)
         : undefined;
-      if (!freshKernelClient || !freshRoute || !freshDocument) {
+      if (!freshKernelClient || !freshRoute || (!freshDocument && !assemblyDisplay)) {
         throw new Error('The selected CAD runtime is unavailable');
       }
-      const result = await exportDocumentWithValidatedInput(freshDocument, freshRoute, {
-        options: sliceOptions,
-        signal: controller.signal,
-      });
+      const result = assemblyDisplay
+        ? await assemblyDisplay.document.exportPublished({
+            format: gcodeContainerFormat,
+            publishedAssembly: { root: assemblyDisplay.root },
+            exportOptions: sliceOptions,
+            signal: controller.signal,
+          })
+        : freshDocument
+          ? await exportDocumentWithValidatedInput(freshDocument, freshRoute, {
+              options: sliceOptions,
+              signal: controller.signal,
+            })
+          : undefined;
+      if (!result) {
+        throw new Error('The selected CAD document is unavailable');
+      }
       recordStage('export');
       if (!result.success) {
         throw new Error(result.issues.map((issue) => issue.message).join('; ') || 'Slicing failed.');

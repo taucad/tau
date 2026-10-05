@@ -326,7 +326,7 @@ describe('entry owner reconciliation', () => {
     expect(readRecordIssues('p')).toEqual([]);
     view.unmount();
   });
-  it('persists a human hide without reverting it and adopts a foreign isolation independently', async () => {
+  it('persists deferred Hide then Show without replaying the Hide echo and merges foreign fields', async () => {
     let operationTimeout = 180_000;
     let hidden: string[] = [];
     let isolated: string[] = [];
@@ -376,7 +376,13 @@ describe('entry owner reconciliation', () => {
     } as unknown as ActorRefFrom<typeof modelInteractionMachine>;
     type Entry = WorkbenchEntries['entries'][string];
     const empty: Entry = { renderTimeout: 180_000, components: { hidden: [], isolated: [], opacity: [] } };
-    const write = vi.fn(async (_path: string, _next: Entry) => true);
+    const pendingWrites: Array<(saved: boolean) => void> = [];
+    const write = vi.fn(
+      async (_path: string, _next: Entry) =>
+        new Promise<boolean>((resolve) => {
+          pendingWrites.push(resolve);
+        }),
+    );
     const draw = (entry: Entry) => (
       <EntryOwner
         path='a.ts'
@@ -388,7 +394,7 @@ describe('entry owner reconciliation', () => {
         write={write}
       />
     );
-    const view = render(draw(empty));
+    let view = render(draw(empty));
     await act(async () => undefined);
     hidden = ['part-a'];
     view.rerender(draw(empty));
@@ -406,6 +412,103 @@ describe('entry owner reconciliation', () => {
     await waitFor(() => {
       expect(isolated).toEqual(['part-b']);
     });
+    expect(hidden).toEqual(['part-a']);
+    hidden = [];
+    const foreign = { ...empty, components: { hidden: [], isolated: ['part-b'], opacity: [] } };
+    view.rerender(draw(foreign));
+    await waitFor(() => {
+      expect(write).toHaveBeenLastCalledWith(
+        'a.ts',
+        expect.objectContaining({
+          components: { hidden: [], isolated: ['part-b'], opacity: [] },
+        }),
+      );
+    });
+    await act(async () => {
+      pendingWrites.shift()?.(true);
+    });
+    const delayedHide = { ...foreign, components: { ...foreign.components, hidden: ['part-a'] } };
+    view.rerender(draw(delayedHide));
+    expect(hidden).toEqual([]);
+    expect(isolated).toEqual(['part-b']);
+    await act(async () => {
+      pendingWrites.shift()?.(true);
+    });
+    const acknowledgedShow = { ...foreign, components: { ...foreign.components, hidden: [] } };
+    view.rerender(draw(acknowledgedShow));
+    expect(hidden).toEqual([]);
+    view.rerender(
+      draw({ ...acknowledgedShow, components: { ...acknowledgedShow.components, hidden: ['foreign-part'] } }),
+    );
+    expect(hidden).toEqual(['foreign-part']);
+    expect(isolated).toEqual(['part-b']);
+
+    view.unmount();
+    await act(async () => {
+      for (const finish of pendingWrites.splice(0)) {
+        finish(true);
+      }
+    });
+    hidden = [];
+    isolated = [];
+    opacity = {};
+    view = render(draw(empty));
+    hidden = ['part-a'];
+    view.rerender(draw(empty));
+    hidden = [];
+    view.rerender(draw(empty));
+    await act(async () => {
+      for (const finish of pendingWrites.splice(0)) {
+        finish(true);
+      }
+    });
+    view.rerender(draw({ ...empty }));
+    view.rerender(draw({ ...empty, components: { hidden: ['part-a'], isolated: [], opacity: [] } }));
+    expect(hidden).toEqual(['part-a']);
+
+    view.unmount();
+    await act(async () => {
+      for (const finish of pendingWrites.splice(0)) {
+        finish(true);
+      }
+    });
+    hidden = [];
+    isolated = [];
+    opacity = {};
+    view = render(draw(empty));
+    hidden = ['part-a'];
+    view.rerender(draw(empty));
+    hidden = [];
+    view.rerender(draw(empty));
+    hidden = ['part-a'];
+    view.rerender(draw(empty));
+    expect(pendingWrites).toHaveLength(3);
+    await act(async () => {
+      pendingWrites.shift()?.(true);
+    });
+    view.rerender(draw({ ...empty, components: { hidden: ['part-a'], isolated: [], opacity: [] } }));
+    await act(async () => {
+      pendingWrites.shift()?.(true);
+    });
+    view.rerender(draw({ ...empty }));
+    expect(hidden).toEqual(['part-a']);
+    await act(async () => {
+      pendingWrites.shift()?.(true);
+    });
+    view.rerender(draw({ ...empty, components: { hidden: ['part-a'], isolated: [], opacity: [] } }));
+    view.rerender(draw({ ...empty }));
+    expect(hidden).toEqual([]);
+    hidden = ['part-a'];
+    view.rerender(draw(empty));
+    hidden = [];
+    view.rerender(draw(empty));
+    await act(async () => {
+      pendingWrites.shift()?.(true);
+    });
+    await act(async () => {
+      pendingWrites.shift()?.(false);
+    });
+    view.rerender(draw({ ...empty, components: { hidden: ['part-a'], isolated: [], opacity: [] } }));
     expect(hidden).toEqual(['part-a']);
     view.unmount();
   });

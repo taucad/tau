@@ -345,6 +345,11 @@ export class HeadlessImageService {
       } else {
         this.queue.push(queued);
       }
+      recordHeadlessImageTiming('queue.admit', queued.enqueuedAt, {
+        kind: job.kind,
+        identity: job.identity,
+        queueDepth: this.queue.length + (this.running ? 1 : 0),
+      });
       this.queue.sort(
         (left, right) =>
           Number(left.job.kind === 'automatic-thumbnail') - Number(right.job.kind === 'automatic-thumbnail'),

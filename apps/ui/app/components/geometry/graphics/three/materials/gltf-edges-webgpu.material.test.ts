@@ -6,7 +6,7 @@ import { BufferAttribute, BufferGeometry, Group, LineBasicMaterial, LineSegments
 import type { Object3D } from 'three';
 import type { GLTF } from 'three/addons/loaders/GLTFLoader.js';
 import { Line2NodeMaterial as ThreeLine2NodeMaterial } from 'three/webgpu';
-import { depth } from 'three/tsl';
+import { depth, positionView } from 'three/tsl';
 import { Line2NodeMaterial } from '#components/geometry/graphics/three/materials/line2.material.js';
 import {
   applyFatLineSegments,
@@ -84,6 +84,44 @@ function captureDepthAssign(): { restore: () => void; captured: { node: unknown 
 }
 
 describe('createWebGpuGltfFatLineMaterial TSL snapshots', () => {
+  it('should preserve Tau edge coverage and stock material state when cloned', () => {
+    const material = createWebGpuGltfFatLineMaterial(0x11_22_33);
+    material.edgePresentationLineWidth = 1.75;
+    material.edgePresentationCoverageGamma = 1.8;
+    material.linewidth = 3;
+    material.vertexColors = true;
+    material.worldUnits = true;
+    material.transparent = true;
+    material.opacity = 0.6;
+    material.depthTest = false;
+    material.lineColorNode = positionView;
+    const clone = material.clone();
+
+    try {
+      expect(clone).not.toBe(material);
+      expect(clone).toBeInstanceOf(Line2NodeMaterial);
+      expect(clone.edgePresentationCoverage).toBe(true);
+      expect(clone.edgePresentationLineWidth).toBe(1.75);
+      expect(clone.edgePresentationCoverageGamma).toBe(1.8);
+      expect(clone.useViewportSrgbBlend).toBe(false);
+      expect(clone.linewidth).toBe(3);
+      expect(clone.vertexColors).toBe(true);
+      expect(clone.worldUnits).toBe(true);
+      expect(clone.transparent).toBe(true);
+      expect(clone.opacity).toBe(0.6);
+      expect(clone.depthTest).toBe(false);
+      expect(clone.alphaToCoverage).toBe(false);
+      expect(clone.color.getHex()).toBe(0x11_22_33);
+      expect(clone.color).not.toBe(material.color);
+      clone.color.setHex(0xaa_bb_cc);
+      expect(material.color.getHex()).toBe(0x11_22_33);
+      expect(clone.lineColorNode).toBe(material.lineColorNode);
+    } finally {
+      clone.dispose();
+      material.dispose();
+    }
+  });
+
   it('keeps the line at geometric depth', () => {
     const material = createWebGpuGltfFatLineMaterial();
     expect(material).not.toHaveProperty('depthBias');

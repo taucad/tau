@@ -88,7 +88,13 @@ function createCadActor(options: {
 
   const actor = {
     getSnapshot: () => ({
-      context: { kernelClient, activeKernelId, capabilities, document: fixture.document },
+      context: {
+        kernelClient,
+        activeKernelId,
+        capabilities,
+        document: fixture.document,
+        latestRenderingOutcome: 'success',
+      },
     }),
   } as unknown as ActorRefFrom<typeof cadMachine>;
 

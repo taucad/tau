@@ -17,7 +17,8 @@ import { composeView } from '@taucad/filesystem/composed-view';
 import type { ComposedView } from '@taucad/filesystem/composed-view';
 import { tauPathPolicy } from '@taucad/filesystem/path-registry';
 import { createRuntimeAgentClients, createRuntimeParameterAgentClient } from '@taucad/agent-tools/runtime';
-import type { RuntimeAgentClient } from '@taucad/agent-tools/runtime';
+import type { PublishedPartAsset } from '@taucad/runtime/types';
+import { digestContent } from '@taucad/cache-core';
 import { createRuntimeClient } from '@taucad/runtime/client';
 import type { AnyRuntimeDefinition } from '@taucad/runtime/worker';
 import { createParameterSetActor } from '@taucad/parameters/set-machine';
@@ -355,11 +356,46 @@ const createRuntimeFsLike = (proxy: RuntimeFsSource): FsLike => {
 const createRuntimeRpcClients = (options: {
   readonly runtimeClient: AppRuntimeClient;
   readonly imageService: HeadlessImageService;
+  readonly readFile: (path: string) => Promise<Uint8Array<ArrayBuffer>>;
 }) => {
   const { runtimeClient } = options;
-  const runtime: RuntimeAgentClient = runtimeClient;
+  const assemblyRootFor = async (path: string, signal?: AbortSignal): Promise<PublishedPartAsset | undefined> => {
+    if (!path.endsWith('.json')) {
+      return undefined;
+    }
+    signal?.throwIfAborted();
+    const bytes = await options.readFile(assertRootedPath(path));
+    signal?.throwIfAborted();
+    let candidate: unknown;
+    try {
+      candidate = JSON.parse(new TextDecoder().decode(bytes));
+    } catch {
+      return undefined;
+    }
+    if (
+      candidate === null ||
+      typeof candidate !== 'object' ||
+      !Object.hasOwn(candidate, 'parts') ||
+      !Object.hasOwn(candidate, 'occurrences') ||
+      !Object.hasOwn(candidate, 'schemaVersion')
+    ) {
+      return undefined;
+    }
+    if (!Object.hasOwn(candidate, 'generation')) {
+      throw new Error(
+        'Authored assembly agent export requires a committed pinned scene; select its published scene JSON.',
+      );
+    }
+    const root = { path, digest: await digestContent({ bytes }), byteLength: bytes.byteLength };
+    signal?.throwIfAborted();
+    return root;
+  };
   return createRuntimeAgentClients({
-    runtime,
+    runtime: runtimeClient,
+    openPublishedAssembly: async ({ targetFile, signal }) => {
+      const root = await assemblyRootFor(targetFile, signal);
+      return root ? runtimeClient.openAssembly({ root, signal }) : undefined;
+    },
     exportImage: async (job) => {
       if (job.sourceFormat === 'svg') {
         return options.imageService.export(job);
@@ -579,7 +615,6 @@ const composeProjectHost = async (
         }),
   });
   opened(async () => geoSpecClient.close());
-  const runtimeRpc = createRuntimeRpcClients({ runtimeClient, imageService });
   /* RH-S12: the one parameter-actor factory, over this project's root bridge. */
   const parameterActors = new Map<string, ParameterSetActor>();
   const parameterActorFor = async (targetFile: string): Promise<ParameterSetActor> => {
@@ -626,6 +661,7 @@ const composeProjectHost = async (
       { consumer: 'agent', policy: tauPathPolicy, overlays: [systemSkillsOverlay()] },
     );
     const record = composeView({ filesystem: provider }, { consumer: 'user', policy: tauPathPolicy });
+    const runtimeRpc = createRuntimeRpcClients({ runtimeClient, imageService, readFile: view.readFile.bind(view) });
     return createChatToolRegistry({
       fileSystemFor: (signal) =>
         createProviderRpcFileSystem({ provider: view, mutations: fileSystemMutations, signal }),

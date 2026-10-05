@@ -12,6 +12,8 @@ import { revisionStatusHarness } from '#hooks/use-revision-status.test-harness.j
 let registeredItems: CommandPaletteItem[] = [];
 let isTauDebugEnabled = false;
 let geometryFormat: 'gltf' | 'svg' | undefined;
+let assemblyContext: Record<string, unknown> | undefined;
+let presentedKey: string | undefined;
 let cameraState: Record<string, unknown> | undefined;
 let cameraRegistryVersion = 0;
 let hasProjectContext = true;
@@ -29,10 +31,11 @@ const toastFailures: unknown[] = [];
 
 const cadActor = {
   getSnapshot: () => ({
-    context: {
+    context: assemblyContext ?? {
       rendering: geometryFormat
         ? {
             success: true,
+            hash: 'source-hash',
             artifact: {
               mimeType: geometryFormat === 'svg' ? 'image/svg+xml' : 'model/gltf-binary',
               content: geometryFormat === 'svg' ? '<svg xmlns="http://www.w3.org/2000/svg" />' : new Uint8Array([1]),
@@ -44,7 +47,7 @@ const cadActor = {
   on: () => ({ unsubscribe: vi.fn() }),
 };
 const graphicsActor = {
-  getSnapshot: () => ({ context: { cameraState } }),
+  getSnapshot: () => ({ context: { cameraState, gltfPresentation: { presentedKey } } }),
 };
 
 vi.mock('@xstate/react', () => ({
@@ -199,6 +202,8 @@ describe('ProjectCommandPaletteItems', () => {
     registeredItems = [];
     isTauDebugEnabled = false;
     geometryFormat = undefined;
+    assemblyContext = undefined;
+    presentedKey = 'source-hash';
     cameraState = undefined;
     cameraRegistryVersion = 0;
     hasProjectContext = true;
@@ -408,6 +413,15 @@ describe('ProjectCommandPaletteItems', () => {
     expect(openPanel).toHaveBeenCalledWith('kernel');
   });
 
+  it.each(['previous', undefined])('disables ordinary GLTF capture without its committed presentation (%s)', (key) => {
+    geometryFormat = 'gltf';
+    cameraState = { position: [1, 2, 3] };
+    presentedKey = key;
+    render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
+    expect(captureCadImages).not.toHaveBeenCalled();
+  });
+
   it.each([
     ['gltf', { position: [1, 2, 3] }],
     ['svg', undefined],
@@ -483,6 +497,39 @@ describe('ProjectCommandPaletteItems', () => {
       expect(toastFailures).toEqual(['Failed to create ZIP archive: EACCES: workspace folder is unreadable']);
     });
     expect(downloadBlob).not.toHaveBeenCalled();
+  });
+
+  it('enables assembly keyboard capture only after the matching scene commits', async () => {
+    const root = { digest: 'sha256:assembly' };
+    const publication = { root };
+    const admitted = { publication };
+    assemblyContext = {
+      committedAssemblyDisplay: { root, admitted },
+      publishedAssemblyRoot: root,
+      publishedAssembly: publication,
+      admittedAssembly: admitted,
+      publishedAssemblyEntryPath: 'main.ts',
+      entryPath: 'main.ts',
+    };
+    cameraState = { position: [1, 2, 3] };
+    presentedKey = 'sha256:previous';
+    const view = render(<ProjectCommandPaletteItems match={match} />, { wrapper });
+    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
+    presentedKey = root.digest;
+    view.rerender(<ProjectCommandPaletteItems match={match} />);
+    const download = registeredItems.find((item) => item.id === 'download-png');
+    expect(download?.disabled).toBe(false);
+    captureCadImages.mockResolvedValue({
+      files: [{ name: 'capture.png', mimeType: 'image/png', bytes: new Uint8Array([1]) }],
+      omittedSectionCutIds: [],
+    });
+    download?.action?.();
+    await vi.waitFor(() => {
+      expect(captureCadImages).toHaveBeenCalledWith(expect.objectContaining({ cadRef: cadActor }));
+    });
+    assemblyContext['admittedAssembly'] = { publication };
+    view.rerender(<ProjectCommandPaletteItems match={match} />);
+    expect(registeredItems.find((item) => item.id === 'download-png')?.disabled).toBe(true);
   });
 
   it('reacts to camera registration and unregistration for a stable graphics actor', () => {

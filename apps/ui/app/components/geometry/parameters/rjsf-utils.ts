@@ -77,11 +77,11 @@ const getLiteralValue = (schema: RJSFSchema | undefined): string | number | bool
 };
 
 export const getDiscriminatedUnionInfo = (schema: RJSFSchema): DiscriminatedUnionInfo | undefined => {
-  const definitions = schema.oneOf ?? schema.anyOf;
+  const definitions: readonly unknown[] | undefined = schema.oneOf ?? schema.anyOf;
   if (!definitions || definitions.length < 2) {
     return undefined;
   }
-  const branches = definitions.filter((definition) => isRjsfSchema(definition));
+  const branches = definitions.filter(isRjsfSchema);
   if (branches.length !== definitions.length) {
     return undefined;
   }
@@ -311,7 +311,7 @@ export function isSchemaMatchingSearch(schema: RJSFSchema, searchTerm: string, p
   }
 
   for (const branches of [schema.oneOf, schema.anyOf]) {
-    if (branches?.some((branch) => typeof branch === 'object' && isSchemaMatchingSearch(branch, searchTerm))) {
+    if (branches?.some((branch: unknown) => isRjsfSchema(branch) && isSchemaMatchingSearch(branch, searchTerm))) {
       return true;
     }
   }

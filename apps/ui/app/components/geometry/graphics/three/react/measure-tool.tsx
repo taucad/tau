@@ -15,6 +15,7 @@ import {
   getLineMeasurementFeatures,
   listMeasurementTargets,
   measureFeature,
+  getMeasurementTargetWorldMatrix,
   measureTargetPair,
 } from '#components/geometry/graphics/three/utils/measurement-features.js';
 import type {
@@ -54,19 +55,125 @@ import {
 import { resolveSectionViewRaycastClip } from '#components/geometry/graphics/three/use-section-view.js';
 import { measureInputMachine } from '#machines/measure-input.machine.js';
 import { selectPresentedGeometryKey } from '#machines/graphics.machine.js';
+import type { GraphicsContext } from '#machines/graphics.machine.js';
 import { getModelInteractionUnitState } from '#machines/model-interaction.machine.js';
 import { getKinematicsUnitState } from '#machines/kinematics.machine.js';
 import { useCad } from '#hooks/use-cad.js';
+import { useFeature } from '#flags/use-feature.js';
 import { measureExactOccurrenceDistance } from '#workers/measurement-exact.client.js';
+import { getGltfAssemblySource } from '#components/geometry/graphics/three/use-geometry-bounds.js';
+import { captureGltfAssemblyPlacements } from '#components/geometry/graphics/three/react/kinematics-pose-composer.js';
 import { generatePrefixedId } from '@taucad/utils/id';
 import { idPrefix } from '@taucad/types/constants';
+import {
+  getModelComponentHitOwner,
+  getModelComponentInstanceSlots,
+  getModelComponentInstanceSlot,
+  getModelComponentWorldMatrix,
+} from '#components/geometry/graphics/three/utils/model-component-owner.js';
 
 const measurementPickBlockingSceneTags = new Set<SceneTagKey>([
   sceneTag.measurementUi,
   sceneTag.sectionViewHelper,
   sceneTag.gltfSurfacePresentation,
 ]);
+/** Read feature evidence from the immutable definition primitive for a live draw slot. */
+function measurementSourceMesh(mesh: THREE.Object3D, instanceId: number | undefined): THREE.Mesh | undefined {
+  const source =
+    mesh instanceof THREE.InstancedMesh ? getModelComponentInstanceSlot(mesh, instanceId)?.sourceObject : mesh;
+  return source instanceof THREE.Mesh ? source : undefined;
+}
+
+/** Private mounted-owner getter; reading it never prepares geometry or changes a camera. */
+export const measurementCatalogGetterKey = 'measurementCatalogObservation';
+
+type MeasurementCatalogOwner = Readonly<{
+  sourceCurrent: boolean;
+  geometryKey: string | undefined;
+  version: number;
+  cameraMatrixWorld: readonly number[];
+  cameraProjectionMatrix: readonly number[];
+  candidateSource?: Readonly<{
+    cameraRevision: number;
+    isMeasureActive: boolean;
+    measureFilter: GraphicsContext['measureFilter'];
+    measureMode: GraphicsContext['measureMode'];
+    modelDisplayRevision: number;
+    pickableMeshesVersion: number;
+    poseRevision: number;
+  }>;
+}>;
+
+export type MeasurementCatalogObservation = Readonly<{
+  requestId: number;
+  captured: MeasurementCatalogOwner;
+  observed: MeasurementCatalogOwner;
+  prepareResult?: 'pending' | 'ready' | 'undefined' | 'error';
+  terminalBranch?:
+    | 'published'
+    | 'prepare-undefined'
+    | 'prepare-error'
+    | 'camera-changed'
+    | 'source-changed'
+    | 'version-changed'
+    | 'effect-cleanup'
+    | 'missing-canonical-source';
+  sourceResolved?: boolean;
+  worldMatrixAvailable?: boolean;
+  graphFeatureCount?: number;
+  graphBodyCount?: number;
+  catalogSize: number;
+}>;
+
+/** Read the current debug owner's copied record, without acquiring feature evidence. */
+export function readMeasurementCatalogObservation(scene: THREE.Object3D): MeasurementCatalogObservation | undefined {
+  const read = scene.userData[measurementCatalogGetterKey] as
+    | (() => MeasurementCatalogObservation | undefined)
+    | undefined;
+  return read?.();
+}
+
 const featureOrdinals = new WeakMap<MeshFeatureGraph, Map<string, number>>();
+
+/** Exact native whole-part queries require one live canonical surface primitive and one complete mesh body. */
+export function isWholePrimitiveMeasurementTarget({
+  scene,
+  componentId,
+  target,
+  mesh,
+}: {
+  scene: THREE.Object3D;
+  componentId: string | undefined;
+  target: MeasurementTarget | undefined;
+  mesh: THREE.Object3D;
+}): boolean {
+  if (!componentId || !target) {
+    return false;
+  }
+  let count = 0;
+  scene.traverse((object) => {
+    const slots = getModelComponentInstanceSlots(object);
+    if (object instanceof THREE.InstancedMesh) {
+      for (const slot of slots ?? []) {
+        const metadata = slot.measurementFeatures as { kind?: string } | undefined;
+        if (metadata?.kind === 'surface' && slot.owner.componentId === componentId) {
+          count += 1;
+        }
+      }
+      return;
+    }
+    const metadata = object.userData['measurementFeatures'] as { componentId?: string; kind?: string } | undefined;
+    if (metadata?.kind === 'surface' && metadata.componentId === componentId) {
+      count += 1;
+    }
+  });
+  if (!getMeasurementTargetWorldMatrix(target, new THREE.Matrix4())) {
+    return false;
+  }
+  const sourceMesh = measurementSourceMesh(mesh, target.instanceId);
+  const graph = sourceMesh ? getCachedMeshMeasurementFeatures(sourceMesh) : undefined;
+  return count === 1 && graph?.features.filter((feature) => feature.kind === 'body').length === 1;
+}
 
 /** Human-facing target names use build-local feature order while opaque IDs remain the selection values. */
 export function describeMeasurementTarget(
@@ -75,11 +182,16 @@ export function describeMeasurementTarget(
   manifest?: { nodesById: Record<string, { name?: string }> },
 ): string {
   const metadata = mesh.userData['measurementFeatures'] as { componentId?: string; kind?: string } | undefined;
-  const owner =
-    [metadata?.componentId ? manifest?.nodesById[metadata.componentId]?.name : undefined, mesh.name].find(Boolean) ??
-    'Model';
+  const componentId =
+    mesh instanceof THREE.InstancedMesh
+      ? getModelComponentHitOwner({ object: mesh, instanceId: target.instanceId })?.componentId
+      : metadata?.componentId;
+  const owner = [componentId ? manifest?.nodesById[componentId]?.name : undefined, mesh.name].find(Boolean) ?? 'Model';
+  const sourceMesh = measurementSourceMesh(mesh, target.instanceId);
   const graph =
-    metadata?.kind === 'line' ? getLineMeasurementFeatures(mesh) : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
+    metadata?.kind === 'line'
+      ? getLineMeasurementFeatures(mesh)
+      : sourceMesh && getCachedMeshMeasurementFeatures(sourceMesh);
   const endpoint =
     target.kind === 'endpoint'
       ? target.id.endsWith(':start')
@@ -115,16 +227,26 @@ function isSupportVisible(hit: THREE.Intersection | undefined, ray: THREE.Ray, s
   return hit.distance + tolerance >= distance;
 }
 
-function featureSupports(
-  feature: MeshFeature,
-  world: THREE.Vector3,
-  object: THREE.Object3D & { geometry: THREE.BufferGeometry },
-): THREE.Vector3[] {
+function featureSupports({
+  feature,
+  world,
+  object,
+  instanceId,
+}: {
+  feature: MeshFeature;
+  world: THREE.Vector3;
+  object: THREE.Object3D & { geometry: THREE.BufferGeometry };
+  instanceId?: number;
+}): THREE.Vector3[] {
+  const worldMatrix = getModelComponentWorldMatrix(object, instanceId, new THREE.Matrix4());
+  if (!worldMatrix) {
+    return [];
+  }
   if (feature.kind === 'body' || feature.kind === 'circle') {
     const stride = Math.max(1, Math.floor(feature.points.length / 16));
     const supports: THREE.Vector3[] = [];
     for (let index = 0; index < feature.points.length && supports.length < 16; index += stride) {
-      supports.push(feature.points[index]!.clone().applyMatrix4(object.matrixWorld));
+      supports.push(feature.points[index]!.clone().applyMatrix4(worldMatrix));
     }
     return supports;
   }
@@ -132,7 +254,7 @@ function featureSupports(
     const firstTriangle = feature.triangleIndices[0];
     const position = object.geometry.getAttribute('position');
     const index = object.geometry.getIndex()?.getX((firstTriangle ?? 0) * 3) ?? (firstTriangle ?? 0) * 3;
-    return [new THREE.Vector3().fromBufferAttribute(position, index).applyMatrix4(object.matrixWorld)];
+    return [new THREE.Vector3().fromBufferAttribute(position, index).applyMatrix4(worldMatrix)];
   }
   return [world];
 }
@@ -245,6 +367,7 @@ type MeasurePointerSnapshot = {
 
 export function MeasureTool(): React.JSX.Element {
   const { camera, gl, scene, invalidate } = useThree();
+  const isTauDebugEnabled = useFeature('tauDebug');
   useEffect(() => subscribeToMatcapLoad(invalidate), [invalidate]);
   const events = useThree((state) => state.events) as EventManager<HTMLElement>;
   // R3F binds pointer events to `eventSource` (the viewer region div), which covers the canvas.
@@ -319,12 +442,39 @@ export function MeasureTool(): React.JSX.Element {
   const handledCommitRequestRef = useRef(0);
   const handledCatalogRequestRef = useRef(measureCatalogRequest);
   const catalogVersionRef = useRef(0);
+  const catalogObservationRef = useRef<{ record: MeasurementCatalogObservation } | undefined>(undefined);
+  const catalogDebugEnabledRef = useRef(isTauDebugEnabled);
+  useEffect(() => {
+    catalogDebugEnabledRef.current = isTauDebugEnabled;
+    if (!isTauDebugEnabled) {
+      catalogObservationRef.current = undefined;
+      return undefined;
+    }
+    let live = true;
+    const read = (): MeasurementCatalogObservation | undefined => {
+      if (!live || scene.userData[measurementCatalogGetterKey] !== read) {
+        return undefined;
+      }
+      const record = catalogObservationRef.current?.record;
+      return record ? structuredClone(record) : undefined;
+    };
+    // oxlint-disable-next-line react/immutability -- This debug mount owns the external Three scene getter and revokes only its own registration on cleanup.
+    scene.userData['measurementCatalogObservation'] = read;
+    return () => {
+      live = false;
+      catalogObservationRef.current = undefined;
+      if (scene.userData[measurementCatalogGetterKey] === read) {
+        delete scene.userData['measurementCatalogObservation'];
+      }
+    };
+  }, [isTauDebugEnabled, scene]);
   const catalogScanRef = useRef<
     | {
         meshes: Array<THREE.Object3D & { geometry: THREE.BufferGeometry }>;
         meshIndex: number;
         graph?: MeshFeatureGraph;
         featureIndex: number;
+        instanceIndex: number;
         targets: MeasurementTarget[];
         targetIndex: number;
         catalog: Map<string, { target: MeasurementTarget; mesh: THREE.Object3D & { geometry: THREE.BufferGeometry } }>;
@@ -348,6 +498,9 @@ export function MeasureTool(): React.JSX.Element {
     | undefined
   >(undefined);
   const cameraMatrixRef = useRef('');
+  useLayoutEffect(() => {
+    cameraMatrixRef.current = `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`;
+  }, [camera, isMeasureActive]);
   useFrame(() => {
     if (!isMeasureActive) {
       return;
@@ -552,60 +705,80 @@ export function MeasureTool(): React.JSX.Element {
       >();
       const isKept = createRaycastClipTest(clipping);
       for (const mesh of measureSnapEnabled ? [...getCachedMeshes(), ...getCachedLines()] : []) {
-        const isVisible = (
-          world: THREE.Vector3,
-          feature: MeasurementTarget['feature'],
-          kind: MeasurementTarget['kind'],
-        ): boolean => {
-          const supportPoints =
-            kind === 'center' || kind === 'centroid' || kind === 'body'
-              ? featureSupports(feature, world, mesh)
-              : [world];
-          return supportPoints.some((support) => {
-            if (isKept && !isKept(support)) {
-              return false;
-            }
-            const projected = support.clone().project(camera);
-            if (projected.z < -1 || projected.z > 1) {
-              return false;
-            }
-            setRaycasterFromCamera(raycasterRef.current, new THREE.Vector2(projected.x, projected.y), camera);
-            const visibleHit = raycastFirstVisibleMeshHit({
-              raycaster: raycasterRef.current,
-              meshes: getCachedMeshes(),
-              clipping,
-            });
-            return isSupportVisible(visibleHit, raycasterRef.current.ray, support);
-          });
-        };
-        const graph =
-          mesh.userData['measurementFeatures']?.kind === 'line'
-            ? getLineMeasurementFeatures(mesh)
-            : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
-        if (!graph) {
-          // async-iife: bootstrap -- Pointer snapshots cannot await an off-thread graph.
-          void requestPointerGraph(mesh as THREE.Mesh, geometryKeyRef.current);
+        const slots = getModelComponentInstanceSlots(mesh);
+        if (mesh instanceof THREE.InstancedMesh && !slots) {
           continue;
         }
-        const targets = findMeasurementTargets(graph, {
-          mesh,
-          camera,
-          canvas: gl.domElement,
-          mousePos: mouseRef.current,
-          snapDistancePx: coarsePointer ? Math.max(18, snapDistance) : snapDistance,
-          activeId:
-            hoverRef.current.activeSnapPoint?.sourceMesh === mesh
-              ? hoverRef.current.activeSnapPoint.id.split(':').slice(1).join(':')
-              : undefined,
-          filter: measureMode === 'point' ? 'point' : measureFilter,
-          isKept: isKept ?? undefined,
-          surfaceHit: firstIntersection?.object === mesh ? firstIntersection.point : undefined,
-          faceIndex: firstIntersection?.object === mesh ? (firstIntersection.faceIndex ?? undefined) : undefined,
-          isVisible,
-        });
-        for (const target of targets) {
-          const id = `${mesh.uuid}:${target.id}`;
-          nextCandidates.set(id, { target: { ...target, id }, mesh });
+        for (let slot = 0; slot < (slots?.length ?? 1); slot++) {
+          const instanceId = slots ? slot : undefined;
+          const isVisible = (
+            world: THREE.Vector3,
+            feature: MeasurementTarget['feature'],
+            kind: MeasurementTarget['kind'],
+          ): boolean => {
+            const supportPoints =
+              kind === 'center' || kind === 'centroid' || kind === 'body'
+                ? featureSupports({ feature, world, object: mesh, instanceId })
+                : [world];
+            return supportPoints.some((support) => {
+              if (isKept && !isKept(support)) {
+                return false;
+              }
+              const projected = support.clone().project(camera);
+              if (projected.z < -1 || projected.z > 1) {
+                return false;
+              }
+              setRaycasterFromCamera(raycasterRef.current, new THREE.Vector2(projected.x, projected.y), camera);
+              const visibleHit = raycastFirstVisibleMeshHit({
+                raycaster: raycasterRef.current,
+                meshes: getCachedMeshes(),
+                clipping,
+              });
+              return isSupportVisible(visibleHit, raycasterRef.current.ray, support);
+            });
+          };
+          const sourceMesh = measurementSourceMesh(mesh, instanceId);
+          const graph =
+            mesh.userData['measurementFeatures']?.kind === 'line'
+              ? getLineMeasurementFeatures(mesh)
+              : sourceMesh && getCachedMeshMeasurementFeatures(sourceMesh);
+          if (!graph) {
+            // async-iife: bootstrap -- Pointer snapshots cannot await an off-thread graph.
+            if (sourceMesh) {
+              void requestPointerGraph(sourceMesh, geometryKeyRef.current);
+            }
+            continue;
+          }
+          const targets = findMeasurementTargets(graph, {
+            mesh,
+            instanceId,
+            camera,
+            canvas: gl.domElement,
+            mousePos: mouseRef.current,
+            snapDistancePx: coarsePointer ? Math.max(18, snapDistance) : snapDistance,
+            activeId:
+              hoverRef.current.activeSnapPoint?.sourceMesh === mesh
+                ? hoverRef.current.activeSnapPoint.id.split(':').slice(1).join(':')
+                : undefined,
+            filter: measureMode === 'point' ? 'point' : measureFilter,
+            isKept: isKept ?? undefined,
+            surfaceHit:
+              firstIntersection?.object === mesh && firstIntersection.instanceId === instanceId
+                ? firstIntersection.point
+                : undefined,
+            faceIndex:
+              firstIntersection?.object === mesh && firstIntersection.instanceId === instanceId
+                ? (firstIntersection.faceIndex ?? undefined)
+                : undefined,
+            isVisible,
+          });
+          for (const target of targets) {
+            const id =
+              instanceId === undefined
+                ? `${mesh.uuid}:${target.id}`
+                : `${mesh.uuid}@instance:${instanceId}:${target.id}`;
+            nextCandidates.set(id, { target: { ...target, id }, mesh });
+          }
         }
       }
       const allSnapPoints = [...nextCandidates.values()]
@@ -730,13 +903,16 @@ export function MeasureTool(): React.JSX.Element {
         label: target?.label ?? 'Surface point',
         quality: target?.evidence ?? 'mesh',
       };
-      const basisMesh = selectedTargetRef.current?.mesh ?? source?.mesh;
+      const basisSource = selectedTargetRef.current ?? source;
+      const basisMesh = basisSource?.mesh;
+      const basisMatrix =
+        basisMesh && basisSource && getMeasurementTargetWorldMatrix(basisSource.target, new THREE.Matrix4());
       const frameOrigin = fromThreeRenderPoint({ renderFrame, point: new THREE.Vector3() });
       const frameBasis =
-        measureFrame === 'selected-local' && basisMesh
+        measureFrame === 'selected-local' && basisMesh && basisMatrix
           ? ([0, 1, 2].map((axis) => {
               basisMesh.updateWorldMatrix(true, false);
-              const worldAxis = new THREE.Vector3().setFromMatrixColumn(basisMesh.matrixWorld, axis).normalize();
+              const worldAxis = new THREE.Vector3().setFromMatrixColumn(basisMatrix, axis).normalize();
               const endpoint = fromThreeRenderPoint({ renderFrame, point: worldAxis });
               const physical = new THREE.Vector3(
                 endpoint[0] - frameOrigin[0],
@@ -802,11 +978,17 @@ export function MeasureTool(): React.JSX.Element {
           )
         ) {
           source.mesh.updateWorldMatrix(true, false);
+          const sourceMatrix = getMeasurementTargetWorldMatrix(source.target, new THREE.Matrix4());
+          if (!sourceMatrix) {
+            return;
+          }
           const localAxes: [THREE.Vector3, THREE.Vector3, THREE.Vector3] | undefined =
             measureFrame === 'selected-local'
-              ? ([0, 1, 2].map((axis) =>
-                  new THREE.Vector3().setFromMatrixColumn(source.mesh.matrixWorld, axis).normalize(),
-                ) as [THREE.Vector3, THREE.Vector3, THREE.Vector3])
+              ? ([0, 1, 2].map((axis) => new THREE.Vector3().setFromMatrixColumn(sourceMatrix, axis).normalize()) as [
+                  THREE.Vector3,
+                  THREE.Vector3,
+                  THREE.Vector3,
+                ])
               : undefined;
           const featureTarget: MeasurementTarget =
             source.target.feature.kind === 'edge' && source.target.kind === 'midpoint'
@@ -882,35 +1064,55 @@ export function MeasureTool(): React.JSX.Element {
         const request = ++exactRequestRef.current;
         const pose = kinematicsRef.getSnapshot().context.revision;
         const cuts = committedCutsRef.current;
-        const componentA = (
-          selectedTargetRef.current?.mesh.userData['measurementFeatures'] as { componentId?: string } | undefined
-        )?.componentId;
-        const componentB = (source.mesh.userData['measurementFeatures'] as { componentId?: string } | undefined)
-          ?.componentId;
+        const selectedSource = selectedTargetRef.current;
+        const componentA =
+          selectedSource &&
+          (selectedSource.mesh instanceof THREE.InstancedMesh
+            ? getModelComponentHitOwner({ object: selectedSource.mesh, instanceId: selectedSource.target.instanceId })
+                ?.componentId
+            : (selectedSource.mesh.userData['measurementFeatures'] as { componentId?: string } | undefined)
+                ?.componentId);
+        const componentB =
+          source.mesh instanceof THREE.InstancedMesh
+            ? getModelComponentHitOwner({ object: source.mesh, instanceId: source.target.instanceId })?.componentId
+            : (source.mesh.userData['measurementFeatures'] as { componentId?: string } | undefined)?.componentId;
         const isWholePrimitive = (
           componentId: string | undefined,
           selected: typeof selectedTargetRef.current,
-        ): boolean => {
-          if (!componentId || !selected) {
-            return false;
-          }
-          let count = 0;
-          scene.traverse((object) => {
-            const metadata = object.userData['measurementFeatures'] as
-              | { componentId?: string; kind?: string }
-              | undefined;
-            if (metadata?.kind === 'surface' && metadata.componentId === componentId) {
-              count++;
-            }
-          });
-          const graph = getCachedMeshMeasurementFeatures(selected.mesh as THREE.Mesh);
-          return count === 1 && graph?.features.filter((feature) => feature.kind === 'body').length === 1;
-        };
+        ): boolean =>
+          selected !== undefined &&
+          isWholePrimitiveMeasurementTarget({ scene, componentId, target: selected.target, mesh: selected.mesh });
         const asBuilt = modelInteractionUnitId
           ? Object.values(
               getKinematicsUnitState(kinematicsRef.getSnapshot().context, modelInteractionUnitId).coordinates,
             ).every((value) => value === 0)
           : false;
+        const assemblySource = selectedTargetRef.current && getGltfAssemblySource(selectedTargetRef.current.mesh);
+        const secondAssemblySource = getGltfAssemblySource(source.mesh);
+        const placements =
+          assemblySource &&
+          assemblySource === secondAssemblySource &&
+          assemblySource.display.root.digest === geometryKey &&
+          modelInteractionUnitId &&
+          componentA &&
+          componentB
+            ? captureGltfAssemblyPlacements(
+                assemblySource,
+                [componentA, componentB],
+                getKinematicsUnitState(kinematicsRef.getSnapshot().context, modelInteractionUnitId),
+              )
+            : undefined;
+        const assemblyPose =
+          assemblySource && placements
+            ? {
+                root: assemblySource.display.root,
+                placements,
+                isCurrent: () =>
+                  selectPresentedGeometryKey(graphicsActor.getSnapshot()) === geometryKey &&
+                  kinematicsRef.getSnapshot().context.revision === pose,
+              }
+            : undefined;
+        const exactPoseAvailable = asBuilt || assemblyPose !== undefined;
         const id = generatePrefixedId(idPrefix.measurement);
         const record: MeasurementRecord = {
           ...createRecord(0, 'minimum-distance', 'cad', currentStartRef.current, pointMeters, firstAnchor, anchor),
@@ -922,12 +1124,12 @@ export function MeasureTool(): React.JSX.Element {
             manifest &&
             componentA &&
             componentB &&
-            asBuilt &&
+            exactPoseAvailable &&
             isWholePrimitive(componentA, selectedTargetRef.current) &&
             isWholePrimitive(componentB, source)
               ? 'pending'
               : 'unavailable',
-          unavailableReason: asBuilt
+          unavailableReason: exactPoseAvailable
             ? !cadRef || !manifest || !componentA || !componentB
               ? 'No verified CAD occurrence mapping is available.'
               : !isWholePrimitive(componentA, selectedTargetRef.current) || !isWholePrimitive(componentB, source)
@@ -950,6 +1152,7 @@ export function MeasureTool(): React.JSX.Element {
               occurrenceA: componentA,
               occurrenceB: componentB,
               signal: controller.signal,
+              assemblyPose,
             });
             const current = graphicsActor.getSnapshot();
             if (
@@ -1184,6 +1387,7 @@ export function MeasureTool(): React.JSX.Element {
         meshes: [...getCachedMeshes(), ...getCachedLines()],
         meshIndex: 0,
         featureIndex: 0,
+        instanceIndex: 0,
         targets: [],
         targetIndex: 0,
         catalog: new Map(),
@@ -1195,12 +1399,61 @@ export function MeasureTool(): React.JSX.Element {
     const isKept = createRaycastClipTest(clipping);
     const catalogRaycaster = new THREE.Raycaster();
     const cameraKey = `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`;
+    const readOwner = (): MeasurementCatalogOwner => {
+      const { current: source } = candidateSourceRef;
+      return {
+        sourceCurrent: graphSourceRef.current === graphSource,
+        geometryKey: geometryKeyRef.current,
+        version: catalogVersionRef.current,
+        cameraMatrixWorld: [...camera.matrixWorld.elements],
+        cameraProjectionMatrix: [...camera.projectionMatrix.elements],
+        candidateSource: source
+          ? {
+              cameraRevision: source.cameraRevision,
+              isMeasureActive: source.isMeasureActive,
+              measureFilter: source.measureFilter,
+              measureMode: source.measureMode,
+              modelDisplayRevision: source.modelDisplayRevision,
+              pickableMeshesVersion: source.pickableMeshesVersion,
+              poseRevision: source.poseRevision,
+            }
+          : undefined,
+      };
+    };
+    const observation: { record: MeasurementCatalogObservation } | undefined = catalogDebugEnabledRef.current
+      ? {
+          record: {
+            requestId: measureCatalogRequest,
+            captured: readOwner(),
+            observed: readOwner(),
+            catalogSize: scan.catalog.size,
+          },
+        }
+      : undefined;
+    if (observation) {
+      catalogObservationRef.current = observation;
+    }
+    const observe = (change: Partial<MeasurementCatalogObservation>): void => {
+      if (!observation || catalogObservationRef.current !== observation) {
+        return;
+      }
+      observation.record = {
+        ...observation.record,
+        ...change,
+        terminalBranch: observation.record.terminalBranch ?? change.terminalBranch,
+        observed: observation.record.terminalBranch ? observation.record.observed : readOwner(),
+        catalogSize: observation.record.terminalBranch ? observation.record.catalogSize : scan.catalog.size,
+      };
+    };
     const pageEnd = scan.catalog.size + 100;
     const featureBatchSize = 32;
     const preparingMessage = 'Preparing measurement features…';
     let cancelled = false;
     let timer: ReturnType<typeof setTimeout> | undefined;
     const publish = (hasMore: boolean): void => {
+      if (observation) {
+        observe({ terminalBranch: 'published' });
+      }
       catalogReferences.current = new Map(scan.catalog);
       candidateReferences.current = new Map(scan.catalog);
       const candidates = [...scan.catalog.values()].map(({ target, mesh }) => ({
@@ -1210,15 +1463,34 @@ export function MeasureTool(): React.JSX.Element {
       graphicsActor.send({ type: 'setMeasureCandidates', candidates, activeId: candidates[0]?.id, hasMore });
     };
     const requestCatalogGraph = async (surface: THREE.Mesh, presentedKey: string | undefined): Promise<void> => {
+      if (observation) {
+        observe({ prepareResult: 'pending', sourceResolved: true });
+      }
       graphicsActor.send({ type: 'setMeasureMessage', message: preparingMessage });
       try {
         const ready = await graphClient().prepare(surface);
+        if (observation) {
+          observe({
+            prepareResult: ready ? 'ready' : 'undefined',
+            graphFeatureCount: ready?.features.length,
+            graphBodyCount: ready?.features.filter(({ kind }) => kind === 'body').length,
+          });
+        }
         if (
           cancelled ||
           graphSourceRef.current !== graphSource ||
           version !== catalogVersionRef.current ||
           presentedKey !== geometryKeyRef.current
         ) {
+          if (observation) {
+            let terminalBranch: MeasurementCatalogObservation['terminalBranch'] = 'source-changed';
+            if (cancelled) {
+              terminalBranch = 'effect-cleanup';
+            } else if (graphSourceRef.current === graphSource) {
+              terminalBranch = version === catalogVersionRef.current ? 'source-changed' : 'version-changed';
+            }
+            observe({ terminalBranch });
+          }
           return;
         }
         if (ready) {
@@ -1228,12 +1500,27 @@ export function MeasureTool(): React.JSX.Element {
           }
           timer = setTimeout(step, 0);
         } else {
+          if (observation) {
+            observe({ terminalBranch: 'prepare-undefined' });
+          }
           if (graphicsActor.getSnapshot().context.measureMessage === preparingMessage) {
             graphicsActor.send({ type: 'setMeasureMessage' });
           }
           publish(false);
         }
       } catch {
+        if (observation) {
+          observe({
+            prepareResult: 'error',
+            terminalBranch: cancelled
+              ? 'effect-cleanup'
+              : graphSourceRef.current === graphSource
+                ? version === catalogVersionRef.current
+                  ? 'prepare-error'
+                  : 'version-changed'
+                : 'source-changed',
+          });
+        }
         if (!cancelled && graphSourceRef.current === graphSource && version === catalogVersionRef.current) {
           graphicsActor.send({
             type: 'setMeasureMessage',
@@ -1245,9 +1532,15 @@ export function MeasureTool(): React.JSX.Element {
     };
     const step = (): void => {
       if (cancelled || version !== catalogVersionRef.current) {
+        if (observation) {
+          observe({ terminalBranch: cancelled ? 'effect-cleanup' : 'version-changed' });
+        }
         return;
       }
       if (cameraKey !== `${camera.matrixWorld.elements.join(',')}:${camera.projectionMatrix.elements.join(',')}`) {
+        if (observation) {
+          observe({ terminalBranch: 'camera-changed' });
+        }
         catalogScanRef.current = undefined;
         return;
       }
@@ -1255,20 +1548,50 @@ export function MeasureTool(): React.JSX.Element {
       let checked = 0;
       while (scan.catalog.size < pageEnd && checked < 16 && performance.now() - start < 8) {
         if (scan.targetIndex >= scan.targets.length) {
-          if (!scan.graph || scan.featureIndex >= scan.graph.features.length) {
+          if (scan.graph && scan.featureIndex >= scan.graph.features.length) {
+            const mesh = scan.meshes[scan.meshIndex - 1]!;
+            const slots = getModelComponentInstanceSlots(mesh);
+            if (slots && scan.instanceIndex + 1 < slots.length) {
+              scan.instanceIndex++;
+              scan.featureIndex = 0;
+              const source = measurementSourceMesh(mesh, scan.instanceIndex);
+              const graph = source && getCachedMeshMeasurementFeatures(source);
+              if (!graph) {
+                if (source) {
+                  void requestCatalogGraph(source, geometryKeyRef.current);
+                } else if (observation) {
+                  observe({ terminalBranch: 'missing-canonical-source', sourceResolved: false });
+                }
+                return;
+              }
+              scan.graph = graph;
+            } else {
+              scan.graph = undefined;
+            }
+          }
+          if (!scan.graph) {
             if (scan.meshIndex >= scan.meshes.length) {
               publish(false);
               return;
             }
             const mesh = scan.meshes[scan.meshIndex++]!;
             scan.featureIndex = 0;
+            scan.instanceIndex = 0;
+            const sourceMesh = measurementSourceMesh(
+              mesh,
+              getModelComponentInstanceSlots(mesh) ? scan.instanceIndex : undefined,
+            );
             scan.graph =
               mesh.userData['measurementFeatures']?.kind === 'line'
                 ? getLineMeasurementFeatures(mesh)
-                : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
+                : sourceMesh && getCachedMeshMeasurementFeatures(sourceMesh);
             if (!scan.graph) {
               // async-iife: bootstrap -- The catalog's timer yields while this worker request is pending.
-              void requestCatalogGraph(mesh as THREE.Mesh, geometryKeyRef.current);
+              if (sourceMesh) {
+                void requestCatalogGraph(sourceMesh, geometryKeyRef.current);
+              } else if (observation) {
+                observe({ terminalBranch: 'missing-canonical-source', sourceResolved: false });
+              }
               return;
             }
           }
@@ -1278,12 +1601,26 @@ export function MeasureTool(): React.JSX.Element {
             { ...graph, features: graph.features.slice(scan.featureIndex, scan.featureIndex + featureBatchSize) },
             {
               mesh,
+              instanceId: getModelComponentInstanceSlots(mesh) ? scan.instanceIndex : undefined,
               camera,
               canvas: gl.domElement,
               filter: measureMode === 'point' ? 'point' : measureFilter,
               isKept: isKept ?? undefined,
             },
           );
+          if (observation && scan.featureIndex === 0) {
+            observe({
+              sourceResolved: true,
+              worldMatrixAvailable:
+                getModelComponentWorldMatrix(
+                  mesh,
+                  getModelComponentInstanceSlots(mesh) ? scan.instanceIndex : undefined,
+                  new THREE.Matrix4(),
+                ) !== undefined,
+              graphFeatureCount: graph.features.length,
+              graphBodyCount: graph.features.filter(({ kind }) => kind === 'body').length,
+            });
+          }
           scan.featureIndex += featureBatchSize;
           scan.targetIndex = 0;
           continue;
@@ -1293,7 +1630,12 @@ export function MeasureTool(): React.JSX.Element {
         checked++;
         const supportPoints =
           target.kind === 'center' || target.kind === 'centroid' || target.kind === 'body'
-            ? featureSupports(target.feature, target.position, mesh)
+            ? featureSupports({
+                feature: target.feature,
+                world: target.position,
+                object: mesh,
+                instanceId: target.instanceId,
+              })
             : [target.position];
         const visible = supportPoints.some((support) => {
           if (isKept && !isKept(support)) {
@@ -1315,7 +1657,10 @@ export function MeasureTool(): React.JSX.Element {
       if (scan.catalog.size >= pageEnd) {
         publish(
           scan.targetIndex < scan.targets.length ||
-            (scan.graph !== undefined && scan.featureIndex < scan.graph.features.length) ||
+            (scan.graph !== undefined &&
+              (scan.featureIndex < scan.graph.features.length ||
+                scan.instanceIndex + 1 <
+                  (getModelComponentInstanceSlots(scan.meshes[scan.meshIndex - 1]!)?.length ?? 1))) ||
             scan.meshIndex < scan.meshes.length,
         );
       } else {
@@ -1324,6 +1669,9 @@ export function MeasureTool(): React.JSX.Element {
     };
     timer = setTimeout(step, 0);
     return () => {
+      if (observation) {
+        observe({ terminalBranch: 'effect-cleanup' });
+      }
       cancelled = true;
       clearTimeout(timer);
       if (graphicsActor.getSnapshot().context.measureMessage === preparingMessage) {
@@ -1679,10 +2027,15 @@ function FeatureHighlight({
   const group = useMemo(() => {
     const highlighted = new THREE.Group();
     highlighted.userData = sceneTagData(sceneTag.measurementUi);
+    const sourceMesh = measurementSourceMesh(mesh, target.instanceId);
     const graph =
       mesh.userData['measurementFeatures']?.kind === 'line'
         ? getLineMeasurementFeatures(mesh)
-        : getCachedMeshMeasurementFeatures(mesh as THREE.Mesh);
+        : sourceMesh && getCachedMeshMeasurementFeatures(sourceMesh);
+    const worldMatrix = getMeasurementTargetWorldMatrix(target, new THREE.Matrix4());
+    if (!worldMatrix) {
+      return highlighted;
+    }
     const paths =
       target.feature.kind === 'edge' || target.feature.kind === 'circle'
         ? [target.feature]
@@ -1699,7 +2052,7 @@ function FeatureHighlight({
         continue;
       }
       const geometry = new THREE.BufferGeometry().setFromPoints(
-        path.points.map((point) => point.clone().applyMatrix4(mesh.matrixWorld)),
+        path.points.map((point) => point.clone().applyMatrix4(worldMatrix)),
       );
       const material = new THREE.LineBasicMaterial({
         // oxlint-disable-next-line tau-lint/no-hardcoded-color -- Viewport selection highlight follows existing measure green.
@@ -1715,15 +2068,13 @@ function FeatureHighlight({
     }
     if (target.feature.kind === 'body') {
       const helper = new THREE.Box3Helper(
-        new THREE.Box3().setFromPoints(
-          target.feature.points.map((point) => point.clone().applyMatrix4(mesh.matrixWorld)),
-        ),
+        new THREE.Box3().setFromPoints(target.feature.points.map((point) => point.clone().applyMatrix4(worldMatrix))),
         0x00_ff_00,
       );
       highlighted.add(helper);
     }
     return highlighted;
-  }, [mesh, target.feature]);
+  }, [mesh, target.feature, target.instanceId]);
   useEffect(
     () => () => {
       group.traverse((object) => {

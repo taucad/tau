@@ -8,7 +8,8 @@ import type { JSONSchema7 } from '@taucad/json-schema';
 import type { ParameterManifest } from '@taucad/parameters';
 import { fromSafeAsync } from '#lib/xstate.lib.js';
 import type { MachineActors } from '#lib/xstate.lib.js';
-import { cadMachine, disposeCadRuntime, selectCadFailureIssues } from '#machines/cad.machine.js';
+import { cadMachine, disposeCadRuntime, selectCadFailureIssues, selectCadDisplay } from '#machines/cad.machine.js';
+import type { CadAssemblyDisplay } from '#machines/cad.machine.js';
 import { cadPreviewMachine } from '#machines/cad-preview.machine.js';
 import { graphicsMachine } from '#machines/graphics.machine.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
@@ -31,6 +32,7 @@ export type CadPreviewStatus = 'idle' | 'loading' | 'ready' | 'error';
 export type CadPreviewContextValue = {
   readonly artifact: Artifact | undefined;
   readonly artifactHash: string | undefined;
+  readonly assemblyDisplay: CadAssemblyDisplay | undefined;
   readonly status: CadPreviewStatus;
   readonly error: Error | undefined;
   readonly cadRef: ActorRefFrom<typeof cadMachine>;
@@ -300,6 +302,8 @@ function CadPreviewPipeline({
   const rendering = useSelector(cadRef, (s) => s.context.rendering);
   const artifact = rendering?.success ? rendering.artifact : undefined;
   const artifactHash = rendering?.success ? rendering.hash : undefined;
+  const display = useSelector(cadRef, selectCadDisplay);
+  const assemblyDisplay = display && 'admitted' in display ? display : undefined;
   const cadStateValue = useSelector(cadRef, (state) => {
     if (state.hasTag('cad-runtime-error')) {
       return 'error';
@@ -324,9 +328,9 @@ function CadPreviewPipeline({
       deriveCadPreviewStatus({
         initError,
         cadState: cadStateValue,
-        renderingFailed: failureIssues !== undefined && artifact === undefined,
+        renderingFailed: failureIssues !== undefined && artifact === undefined && assemblyDisplay === undefined,
       }),
-    [initError, cadStateValue, failureIssues, artifact],
+    [initError, cadStateValue, failureIssues, artifact, assemblyDisplay],
   );
 
   const error = useMemo(() => {
@@ -353,6 +357,7 @@ function CadPreviewPipeline({
     () => ({
       artifact,
       artifactHash,
+      assemblyDisplay,
       status,
       error,
       cadRef,
@@ -366,6 +371,7 @@ function CadPreviewPipeline({
     [
       artifact,
       artifactHash,
+      assemblyDisplay,
       status,
       error,
       cadRef,

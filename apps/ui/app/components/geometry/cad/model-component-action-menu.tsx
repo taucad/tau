@@ -48,12 +48,14 @@ import { useProjectWorkspace } from '#routes/w.$workspace.$project/project-works
 import { MaterialSwatch, gltfDefaultBaseColorLabel } from '#components/geometry/cad/material-swatch.js';
 import {
   appearanceLabel,
+  densityLabel,
+  projectPartInspection,
   statusOf,
   summaryLabel,
   volumeLabel,
   weightLabel,
 } from '#components/geometry/cad/part-quantities.js';
-import type { PartQuantity } from '#components/geometry/cad/part-quantities.js';
+import type { PartInspection } from '#components/geometry/cad/part-quantities.js';
 import { isPreviewablePart, useOpenPartGallery } from '#components/geometry/cad/part-gallery.js';
 import type { PartThumbnailState } from '#services/part-thumbnail.service.js';
 
@@ -72,7 +74,7 @@ export type ModelComponentActionMenuData = {
   readonly hasHiddenComponents: boolean;
   readonly hasOpacityOverrides: boolean;
   readonly opacity: number;
-  readonly quantity?: PartQuantity;
+  readonly inspection?: PartInspection;
   readonly preview?: PartThumbnailState;
   readonly onRetryPreview?: () => void;
   readonly onPreviewDecodeError?: () => void;
@@ -226,7 +228,7 @@ function ModelComponentDropdownItems(data: ModelComponentActionMenuData): React.
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={DropdownMenuDisclosureItem} />
+      <ModelComponentMenuHeader node={data.node} inspection={data.inspection} Row={DropdownMenuDisclosureItem} />
       {descriptors.map((descriptor) => renderDropdownActionDescriptor(descriptor))}
     </>
   );
@@ -237,7 +239,7 @@ function ModelComponentContextMenuItems(data: ModelComponentActionMenuData): Rea
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={ContextMenuDisclosureItem} />
+      <ModelComponentMenuHeader node={data.node} inspection={data.inspection} Row={ContextMenuDisclosureItem} />
       {descriptors.map((descriptor) => renderContextActionDescriptor(descriptor))}
     </>
   );
@@ -251,7 +253,7 @@ export function ModelComponentViewerMenuItems({
 
   return (
     <>
-      <ModelComponentMenuHeader node={data.node} quantity={data.quantity} Row={MenuDisclosureItem} />
+      <ModelComponentMenuHeader node={data.node} inspection={data.inspection} Row={MenuDisclosureItem} />
       {descriptors.map((descriptor) => renderViewerActionDescriptor(descriptor, onRequestClose))}
     </>
   );
@@ -293,27 +295,29 @@ function formatMaterialValues(materials: SurfaceMaterials, factor: 'color' | 'me
  */
 function ModelComponentMenuHeader({
   node,
-  quantity,
+  inspection,
   Row,
 }: {
   readonly node: GeometryComponentNode;
-  readonly quantity?: PartQuantity;
+  readonly inspection?: PartInspection;
   readonly Row: React.ComponentType<MenuDisclosureItemProperties>;
 }): React.JSX.Element {
   const materials = node.appearance?.materials;
-  const facts = quantity ?? {};
+  const facts = inspection ?? projectPartInspection({ node });
   return (
     <>
       <Row
         label={
           <span className='flex min-w-0 flex-col'>
             <span className='truncate'>{node.name}</span>
-            <span className='truncate text-xs font-normal text-muted-foreground'>{summaryLabel(node, facts)}</span>
+            <span className='truncate text-xs font-normal text-muted-foreground'>
+              {summaryLabel(node, facts.quantity)}
+            </span>
           </span>
         }
         trailing={materials?.length ? <MaterialSwatch materials={materials} /> : undefined}
       >
-        <ModelComponentMaterialSummary node={node} quantity={facts} Row={Row} />
+        <ModelComponentMaterialSummary node={node} inspection={facts} Row={Row} />
       </Row>
       <div role='separator' className={menuSeparatorVariants()} />
     </>
@@ -322,14 +326,16 @@ function ModelComponentMenuHeader({
 
 export function ModelComponentMaterialSummary({
   node,
-  quantity = {},
+  inspection,
   Row = MenuDisclosureItem,
 }: {
   readonly node: GeometryComponentNode;
-  readonly quantity?: PartQuantity;
+  readonly inspection?: PartInspection;
   readonly Row?: React.ComponentType<MenuDisclosureItemProperties>;
 }): React.JSX.Element {
   const materials = node.appearance?.materials;
+  const facts = inspection ?? projectPartInspection({ node });
+  const { quantity } = facts;
   const status = statusOf(quantity);
 
   return (
@@ -344,6 +350,10 @@ export function ModelComponentMaterialSummary({
           <dd>Not specified</dd>
         </div>
         <div className='flex justify-between gap-4'>
+          <dt className='text-muted-foreground'>Density</dt>
+          <dd className='font-mono tabular-nums'>{densityLabel(quantity)}</dd>
+        </div>
+        <div className='flex justify-between gap-4'>
           <dt className='text-muted-foreground'>Volume</dt>
           <dd className='font-mono tabular-nums'>{volumeLabel(quantity)}</dd>
         </div>
@@ -352,6 +362,15 @@ export function ModelComponentMaterialSummary({
           <dd className='font-mono tabular-nums'>{weightLabel(quantity)}</dd>
         </div>
       </dl>
+      {facts.basis === 'last-committed' ? (
+        <p className='px-3 pb-1 pl-8.5 text-xs text-muted-foreground'>
+          Last committed physical facts; preview geometry is transient.
+        </p>
+      ) : facts.basis === 'unavailable' ? (
+        <p className='px-3 pb-1 pl-8.5 text-xs text-muted-foreground'>
+          No matching committed physical facts for this preview.
+        </p>
+      ) : undefined}
       <p
         role={status.kind === 'failed' ? 'alert' : 'status'}
         aria-label='Measurement status'

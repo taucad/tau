@@ -3,10 +3,13 @@
 import { describe, expect, it, vi } from 'vitest';
 import { createElement } from 'react';
 import { fireEvent, render, screen } from '@testing-library/react';
-import type { DockviewApi, DockviewDidDropEvent, DockviewGroupPanel } from 'dockview-react';
+import type { DockviewDidDropEvent, DockviewGroupPanel } from 'dockview-react';
 import type { CapabilitiesManifest } from '@taucad/runtime';
 import type { FileEntry, CheckedFileWriteResult } from '@taucad/types';
 import { workbenchRecords } from '@taucad/workbench';
+import type { ViewerNode } from '@taucad/workbench';
+import { DockviewApi, DockviewComponent } from 'dockview-react';
+import { fromDockview, toDockview } from '#workbench-records/converters.js';
 import { tauEditorPanelDragMime, tauFileDragMime } from '@taucad/types/constants';
 import {
   createViewerNewTab,
@@ -23,6 +26,92 @@ import { createWorkbenchViewStore } from '#workbench-records/view-store.js';
 import { deleteViewFile } from '#workbench-records/view-actions.js';
 
 describe('record-driven viewer adoption', () => {
+  it('should preserve a live Viewer launcher on equal projection and remove it for a changed authoritative lane', () => {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const component = new DockviewComponent(element, {
+      createComponent: () => ({ element: document.createElement('div'), init: () => undefined }),
+    });
+    const api = new DockviewApi(component);
+    try {
+      api.layout(800, 600);
+      api.fromJSON(
+        toDockview(
+          'viewer',
+          { kind: 'group', tabs: [{ kind: 'view', view: 'v-1234abcd' }] },
+          {
+            dimensions: { width: 800, height: 600 },
+          },
+        ),
+      );
+      const node = fromDockview('viewer', api.toJSON());
+      const priorView = api.panels[0];
+      createViewerNewTab({ api, id: 'pane-launcher' });
+      const launcher = api.panels.find((candidate) => candidate.id === 'pane-launcher');
+      if (!launcher) {
+        throw new Error('Viewer launcher was not created');
+      }
+      const { group } = launcher;
+      expect(adoptViewerRecordNode(api, node)).toEqual([]);
+      expect(api.panels.find((candidate) => candidate.id === 'pane-launcher')).toBe(launcher);
+      expect(launcher.group).toBe(group);
+      expect(api.activePanel).toBe(launcher);
+      expect(api.panels.find((candidate) => candidate.id === 'v-1234abcd')).toBe(priorView);
+
+      expect(adoptViewerRecordNode(api, { kind: 'group', tabs: [{ kind: 'view', view: 'v-8765abcd' }] })).toEqual([
+        'v-1234abcd',
+      ]);
+      expect(api.panels.map((candidate) => candidate.id)).toEqual(['v-8765abcd']);
+      expect(fromDockview('viewer', api.toJSON())).toEqual({
+        kind: 'group',
+        tabs: [{ kind: 'view', view: 'v-8765abcd' }],
+      });
+    } finally {
+      component.dispose();
+      element.remove();
+    }
+  });
+
+  it('should preserve the current launcher when incoming split weights normalize to the current viewer lane', () => {
+    const element = document.createElement('div');
+    document.body.append(element);
+    const component = new DockviewComponent(element, {
+      createComponent: () => ({ element: document.createElement('div'), init: () => undefined }),
+    });
+    const api = new DockviewApi(component);
+    try {
+      api.layout(800, 600);
+      const node = {
+        kind: 'split',
+        direction: 'row',
+        children: [
+          { kind: 'group', size: 1, tabs: [{ kind: 'view', view: 'v-1234abcd' }] },
+          { kind: 'group', size: 1, tabs: [{ kind: 'view', view: 'v-8765abcd' }] },
+        ],
+      } satisfies ViewerNode;
+      api.fromJSON(toDockview('viewer', node, { dimensions: { width: 800, height: 600 } }));
+      createViewerNewTab({ api, id: 'pane-launcher' });
+      const launcher = api.activePanel;
+      expect(adoptViewerRecordNode(api, node)).toEqual([]);
+      expect(api.activePanel).toBe(launcher);
+      expect(api.panels.map((candidate) => candidate.id)).toContain('pane-launcher');
+      const [firstChild, secondChild] = node.children;
+      if (!firstChild || !secondChild) {
+        throw new Error('Expected both authored viewer groups');
+      }
+      expect(adoptViewerRecordNode(api, { ...node, children: [{ ...firstChild, size: 2 }, secondChild] })).toEqual([]);
+      expect(api.panels.map((candidate) => candidate.id)).not.toContain('pane-launcher');
+      const restored = fromDockview('viewer', api.toJSON());
+      if (restored.kind !== 'split') {
+        throw new Error('Changed viewer split was not restored');
+      }
+      expect(restored.children[0]?.size).toBeCloseTo(2 / 3, 2);
+    } finally {
+      component.dispose();
+      element.remove();
+    }
+  });
+
   it('deletes an interim recreated view after a tool delete followed by layout close', async () => {
     const viewId = 'v-1234abcd';
     const record = workbenchRecords.view.schema.parse({ version: 1, entryPath: 'models/other.ts' });

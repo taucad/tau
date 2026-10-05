@@ -2,6 +2,7 @@
 import { waitFor } from 'xstate';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import { defaultOperationTimeout } from '#constants/editor.constants.js';
+import { selectCadDisplay } from '#machines/cad.machine.js';
 import type { cadMachine } from '#machines/cad.machine.js';
 
 /** Timeout while waiting for the CAD unit's current document and default view. */
@@ -22,9 +23,34 @@ export type AwaitFreshRenderOptions = {
   awaitTimeout?: number;
 };
 
+const isSettledAssembly = (snapshot: SnapshotFrom<typeof cadMachine>): boolean => {
+  const { entryPath, latestRenderingOutcome, lastRequestedRenderId, lastSettledRenderId, parkWhenIdle } =
+    snapshot.context;
+  if (
+    snapshot.status !== 'active' ||
+    !snapshot.matches('idle') ||
+    parkWhenIdle ||
+    !entryPath ||
+    latestRenderingOutcome !== 'success' ||
+    lastRequestedRenderId <= 0 ||
+    lastRequestedRenderId !== lastSettledRenderId
+  ) {
+    return false;
+  }
+  const display = selectCadDisplay(snapshot);
+  return Boolean(
+    display &&
+    'admitted' in display &&
+    display.document.root.path === display.root.path &&
+    display.document.root.digest === display.root.digest &&
+    display.document.root.byteLength === display.root.byteLength &&
+    display.document.admitted === display.admitted,
+  );
+};
+
 /**
- * Wait for the document's current evaluation and its default projection. The
- * document owns freshness and supersession; the actor only supplies the live
+ * Return a current settled assembly, or wait for the document's current evaluation
+ * and its default projection. The document owns freshness and supersession; the actor only supplies the live
  * document and the presentation snapshot returned to existing callers.
  */
 export async function awaitFreshRender(
@@ -43,13 +69,24 @@ export async function awaitFreshRender(
   try {
     for (;;) {
       signal.throwIfAborted();
+      if (cadActor.getSnapshot().status !== 'active') {
+        throw new Error('The current CAD owner is inactive.');
+      }
       const ready = await waitFor(
         cadActor,
-        (snapshot) => snapshot.matches('error') || Boolean(snapshot.context.document),
+        (snapshot) => snapshot.matches('error') || isSettledAssembly(snapshot) || Boolean(snapshot.context.document),
         { signal, timeout: milliseconds + 1000 },
       );
       if (ready.matches('error')) {
         return ready;
+      }
+      if (isSettledAssembly(ready)) {
+        signal.throwIfAborted();
+        const current = cadActor.getSnapshot();
+        if (isSettledAssembly(current)) {
+          return current;
+        }
+        continue;
       }
       const { document } = ready.context;
       if (!document) {

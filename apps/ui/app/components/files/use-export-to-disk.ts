@@ -3,7 +3,7 @@ import type { ActorRefFrom } from 'xstate';
 import type { FileExtension } from '@taucad/types';
 import { isRecord } from '@taucad/utils/schema';
 import { toast } from '#components/ui/sonner.js';
-import type { cadMachine } from '#machines/cad.machine.js';
+import { selectCadDisplay, type cadMachine } from '#machines/cad.machine.js';
 import { bestRouteForActiveKernel, exportDocumentWithValidatedInput } from '#utils/export-formats.utils.js';
 import { downloadExportArtifactSet } from '#utils/export-artifact-set.utils.js';
 
@@ -32,17 +32,31 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
 
   const exportToDisk = useCallback(
     async (cadActor: ActorRefFrom<typeof cadMachine>, format: FileExtension): Promise<void> => {
-      const { kernelClient, activeKernelId, document } = cadActor.getSnapshot().context;
-
-      if (!kernelClient || !activeKernelId || !document) {
+      const snapshot = cadActor.getSnapshot();
+      const {
+        kernelClient,
+        activeKernelId,
+        publishedAssembly,
+        publishedAssemblyRoot,
+        latestRenderingOutcome,
+        document,
+      } = snapshot.context;
+      const display = selectCadDisplay(snapshot);
+      const assemblyDisplay = display && 'admitted' in display ? display : undefined;
+      if (
+        !kernelClient ||
+        (!document && !assemblyDisplay) ||
+        (!activeKernelId && !publishedAssembly) ||
+        latestRenderingOutcome !== 'success'
+      ) {
         toast.error('Export failed');
         return;
       }
 
       setIsExporting(true);
       try {
-        const route = bestRouteForActiveKernel(kernelClient, format, activeKernelId);
-        if (!route || route.kernelId !== activeKernelId) {
+        const route = bestRouteForActiveKernel(kernelClient, format, publishedAssembly ?? activeKernelId);
+        if (!route || (!publishedAssembly && route.kernelId !== activeKernelId)) {
           toast.error(`Export failed: ${format.toUpperCase()} is not available for this model`);
           return;
         }
@@ -51,7 +65,27 @@ export function useExportToDisk(filenameBase: string): UseExportToDiskResult {
         const options: Record<string, unknown> = isRecord(route.exportOptions.defaults)
           ? route.exportOptions.defaults
           : {};
-        const result = await exportDocumentWithValidatedInput(document, route, { options });
+        const result = assemblyDisplay
+          ? await assemblyDisplay.document.exportPublished({
+              publishedAssembly: { root: assemblyDisplay.root },
+              format,
+              exportOptions: options,
+            })
+          : document
+            ? await exportDocumentWithValidatedInput(document, route, { options })
+            : undefined;
+        if (!result) {
+          throw new Error('The selected CAD document is unavailable');
+        }
+        if (
+          selectCadDisplay(cadActor.getSnapshot()) !== display ||
+          cadActor.getSnapshot().context.document !== document ||
+          cadActor.getSnapshot().context.publishedAssemblyRoot !== publishedAssemblyRoot ||
+          cadActor.getSnapshot().context.rendering !== snapshot.context.rendering ||
+          cadActor.getSnapshot().context.latestRenderingOutcome !== 'success'
+        ) {
+          throw new Error('The selected CAD display changed during export');
+        }
 
         if (!result.success) {
           const message = result.issues[0]?.message ?? 'Export failed';

@@ -177,6 +177,18 @@ export class Line2NodeMaterial extends ThreeLine2NodeMaterial {
     super(parameters);
   }
 
+  /** @inheritdoc */
+  public override copy(source: Line2NodeMaterial): this {
+    super.copy(source);
+    this.linewidth = source.linewidth;
+    this.color.copy(source.color);
+    this.edgePresentationCoverage = source.edgePresentationCoverage;
+    this.edgePresentationLineWidth = source.edgePresentationLineWidth;
+    this.edgePresentationCoverageGamma = source.edgePresentationCoverageGamma;
+    this.useViewportSrgbBlend = source.useViewportSrgbBlend;
+    return this;
+  }
+
   /**
    * Screen-space overlays composited in sRGB space carry their own analytic coverage in alpha.
    * Hardware alpha-to-coverage would turn that composited alpha into dropped samples, and WebGPU

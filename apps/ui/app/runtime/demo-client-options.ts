@@ -1,4 +1,5 @@
 import { fromMemoryFs } from '@taucad/runtime/filesystem';
+import { admitAssemblyDisplay } from '#runtime/assembly-display-admission.js';
 import { inProcessTransport } from '@taucad/runtime/transport/in-process';
 import { defineRuntime } from '@taucad/runtime/worker';
 import { assimp } from '@taucad/assimp';
@@ -27,6 +28,7 @@ const openScadClientOptions = {
   transport: inProcessTransport({
     runtime: openScadRuntime,
     fileSystem: fromMemoryFs(),
+    admitAssemblyDisplay,
   }),
 };
 export const heroClientOptions = openScadClientOptions;
@@ -36,6 +38,7 @@ export const gearClientOptions = {
   transport: inProcessTransport({
     runtime: gearRuntime,
     fileSystem: fromMemoryFs(),
+    admitAssemblyDisplay,
   }),
 };
 export const splashClientOptions = {
@@ -43,5 +46,6 @@ export const splashClientOptions = {
   transport: inProcessTransport({
     runtime: splashRuntime,
     fileSystem: fromMemoryFs(),
+    admitAssemblyDisplay,
   }),
 };

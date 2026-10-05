@@ -1,5 +1,16 @@
 // @vitest-environment node
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { contentDigest } from '@taucad/cache-core';
+import type {
+  AdmittedAssembly,
+  PublishedAssembly,
+  PublishedPartRecord,
+  PublishedPartExact,
+} from '@taucad/runtime/types';
+import type { GeometryComponentNode } from '@taucad/types';
+import type { PublishedAssemblyDocument } from '@taucad/runtime/client';
+import type { AppRuntimeClient } from '#types/runtime-client.alias.js';
+import type { ExactOccurrenceDistanceInput } from '#workers/measurement-exact.client.js';
 import { mock } from 'vitest-mock-extended';
 import type { ActorRefFrom, SnapshotFrom } from 'xstate';
 import type { ExportResult, Rendering, SourceRevision } from '@taucad/runtime';
@@ -147,5 +158,194 @@ describe('exact measurement document pin', () => {
     });
     expect(f.runtime.document.export).not.toHaveBeenCalled();
     expect(runExactRequest).not.toHaveBeenCalled();
+  });
+});
+
+const root = {
+  path: 'scene.json',
+  digest: contentDigest({ value: `sha256:${'0'.repeat(64)}`, name: 'measurement fixture root' }),
+  byteLength: 42,
+} as const;
+const identity = [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] as const;
+
+// Adapter controls use the actual selector and route resolver. Native admission/placement is qualified separately.
+function pinnedFixture() {
+  const client = mock<AppRuntimeClient>();
+  Object.defineProperty(client, 'capabilities', {
+    value: {
+      routes: [
+        {
+          targetFormat: 'step',
+          sourceFormat: 'step',
+          kernelId: 'replicad',
+          fidelity: 'brep',
+          exportOptions: { schema: {}, defaults: {} },
+        },
+      ],
+      renderCapabilities: {},
+      registrations: [],
+    },
+  });
+  const document = mock<PublishedAssemblyDocument>();
+  vi.mocked(bestRouteForActiveKernel).mockReturnValue(
+    mock<AppRuntimeExportRoute>({
+      kernelId: 'replicad',
+      targetFormat: 'step',
+      transcoderId: undefined,
+    }),
+  );
+  const publication = mock<PublishedAssembly>({
+    parts: {
+      part: mock<PublishedPartRecord>({
+        variants: {
+          default: {
+            source: mock(),
+            glb: mock(),
+            exact: mock<PublishedPartExact>({ kernelId: 'replicad', codecVersion: '2' }),
+          },
+        },
+      }),
+    },
+    occurrences: [{ id: 'part', part: 'part', variant: 'default', transform: identity }],
+  });
+  const admitted = mock<AdmittedAssembly>({ publication });
+  Object.assign(document, { root, admitted });
+  const display = { root, admitted, document };
+  const actor = mock<ActorRefFrom<typeof cadMachine>>();
+  vi.mocked(actor.getSnapshot).mockReturnValue(
+    mock<SnapshotFrom<typeof cadMachine>>({
+      context: {
+        kernelClient: client,
+        document: undefined,
+        rendering: undefined,
+        committedRendering: undefined,
+        publishedAssemblyRoot: root,
+        publishedAssembly: publication,
+        admittedAssembly: admitted,
+        committedAssemblyDisplay: display,
+        entryPath: 'scene.json',
+        publishedAssemblyEntryPath: 'scene.json',
+        latestRenderingOutcome: 'success',
+        lastRequestedRenderId: 3,
+        lastSettledRenderId: 3,
+      },
+    }),
+  );
+  const isCurrent = vi.fn(() => true);
+  const manifest = mock<GeometryComponentManifest>();
+  manifest.sourceFile = 'scene.json';
+  manifest.geometryHash = root.digest;
+  manifest.nodeOrder = ['canonical:a', 'canonical:b'];
+  manifest.nodesById = {
+    'canonical:a': mock<GeometryComponentNode>({ name: 'Same authored name' }),
+    'canonical:b': mock<GeometryComponentNode>({ name: 'Same authored name' }),
+  };
+  const input: ExactOccurrenceDistanceInput = {
+    cadRef: actor,
+    presentedGeometryHash: root.digest,
+    occurrenceA: 'canonical:a',
+    occurrenceB: 'canonical:b',
+    manifest,
+    assemblyPose: {
+      root,
+      placements: [
+        { componentId: 'canonical:a', worldTransform: identity },
+        { componentId: 'canonical:b', worldTransform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0.032, 0, 0, 1] },
+      ],
+      isCurrent,
+    },
+  };
+  vi.mocked(document.exportPublished).mockResolvedValue({
+    success: true,
+    exportId: 'exact-export',
+    issues: [],
+    files: [{ name: 'scene.step', mimeType: 'application/step', bytes: new Uint8Array([1]) }],
+  });
+  vi.mocked(runExactRequest).mockImplementation(async ({ id }) => ({
+    id,
+    status: 'cad-geometry',
+    source: 'ap242',
+    distanceMeters: 0.02,
+    pointAMeters: [0, 0, 0],
+    pointBMeters: [0.02, 0, 0],
+  }));
+  return { input, document, actor, isCurrent };
+}
+
+describe('pinned exact occurrence adapter', () => {
+  it('should export the captured root and placement-only pose and query canonical IDs despite duplicate authored names', async () => {
+    const { input, document } = pinnedFixture();
+    expect(await measureExactOccurrenceDistance(input)).toMatchObject({ status: 'cad-geometry', distanceMeters: 0.02 });
+    expect(document.exportPublished).toHaveBeenCalledWith({
+      format: 'step',
+      publishedAssembly: { root, placements: input.assemblyPose!.placements },
+      exportOptions: { coordinateSystem: 'y-up' },
+      signal: undefined,
+    });
+    expect(runExactRequest).toHaveBeenCalledWith(
+      expect.objectContaining({ occurrences: [{ name: 'canonical:a' }, { name: 'canonical:b' }] }),
+      undefined,
+    );
+  });
+  it('should deny an absent or mismatched committed root before export', async () => {
+    const { input, document } = pinnedFixture();
+    expect(await measureExactOccurrenceDistance({ ...input, assemblyPose: undefined })).toMatchObject({
+      status: 'unavailable',
+    });
+    expect(
+      await measureExactOccurrenceDistance({ ...input, assemblyPose: { ...input.assemblyPose!, root: { ...root } } }),
+    ).toMatchObject({ status: 'unavailable' });
+    expect(document.exportPublished).not.toHaveBeenCalled();
+    expect(runExactRequest).not.toHaveBeenCalled();
+  });
+  it('should deny a stale presented pose before export', async () => {
+    const { input, document, isCurrent } = pinnedFixture();
+    isCurrent.mockReturnValue(false);
+    expect(await measureExactOccurrenceDistance(input)).toMatchObject({ status: 'unavailable' });
+    expect(document.exportPublished).not.toHaveBeenCalled();
+  });
+  it('should preserve runtime codec denial without querying or falling back to source', async () => {
+    const { input, document } = pinnedFixture();
+    vi.mocked(document.exportPublished).mockResolvedValue({
+      success: false,
+      issues: [mock({ message: 'Codec-v1 pose is unavailable' })],
+    });
+    expect(await measureExactOccurrenceDistance(input)).toEqual({
+      status: 'unavailable',
+      reason: 'Codec-v1 pose is unavailable',
+    });
+    expect(document.exportPublished).toHaveBeenCalledOnce();
+    expect(runExactRequest).not.toHaveBeenCalled();
+  });
+  it('should deny pose changes during export before dispatching the exact query', async () => {
+    const { input, document, isCurrent } = pinnedFixture();
+    vi.mocked(document.exportPublished).mockImplementationOnce(async () => {
+      isCurrent.mockReturnValue(false);
+      return {
+        success: true,
+        issues: [],
+        files: [{ name: 'scene.step', mimeType: 'application/step', bytes: new Uint8Array([1]) }],
+      };
+    });
+    expect(await measureExactOccurrenceDistance(input)).toMatchObject({
+      status: 'unavailable',
+      reason: expect.stringContaining('during exact export'),
+    });
+    expect(runExactRequest).not.toHaveBeenCalled();
+  });
+  it('should deny a root revision change during the exact query', async () => {
+    const { input, actor } = pinnedFixture();
+    vi.mocked(runExactRequest).mockImplementationOnce(async ({ id }) => {
+      const snapshot = actor.getSnapshot();
+      vi.mocked(actor.getSnapshot).mockReturnValue({
+        ...snapshot,
+        context: { ...snapshot.context, lastRequestedRenderId: 4 },
+      });
+      return { id, status: 'unavailable', reason: 'Native result no longer current' };
+    });
+    expect(await measureExactOccurrenceDistance(input)).toMatchObject({
+      status: 'unavailable',
+      reason: expect.stringContaining('during the exact query'),
+    });
   });
 });

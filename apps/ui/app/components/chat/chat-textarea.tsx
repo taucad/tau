@@ -24,6 +24,7 @@ import { useHeadlessImageService } from '#providers/headless-image-provider.js';
 import { useChatSessionSnapshot } from '#hooks/use-chat-session.js';
 import { latestAcpSessionData } from '#services/agent-host-event-projection.js';
 import { findEntryGraphics, listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
+import { selectCadDisplay } from '#machines/cad.machine.js';
 
 /**
  * Main chat textarea: one composer on every device (C11) — a phone gets the
@@ -132,9 +133,14 @@ export const ChatTextarea = memo(function ({
   const geometryUnits = projectContext?.geometryUnits;
   const mainEntryPath = projectContext?.mainEntryPath;
   const viewRecords = projectContext?.viewRecords;
-  const mainGeometryFormat = useSelector(mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined, (state) =>
-    state?.context.rendering?.success ? state.context.rendering.artifact.mimeType : undefined,
-  );
+  const mainGeometryFormat = useSelector(mainEntryPath ? geometryUnits?.get(mainEntryPath) : undefined, (state) => {
+    const display = state ? selectCadDisplay(state) : undefined;
+    return display && 'admitted' in display
+      ? 'model/gltf-binary'
+      : state?.context.rendering?.success
+        ? state.context.rendering.artifact.mimeType
+        : undefined;
+  });
   const screenshotActionItems = useMemo((): ContextSuggestionItem[] => {
     if (!geometryUnits || !viewRecords || !logic.imageInputSupported) {
       return [];

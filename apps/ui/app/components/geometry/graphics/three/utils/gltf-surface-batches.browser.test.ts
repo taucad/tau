@@ -8,6 +8,7 @@ import {
   InstancedMesh,
   Mesh,
   MeshStandardMaterial,
+  Matrix4,
   OrthographicCamera,
   RenderTarget,
   Scene,
@@ -413,6 +414,145 @@ describe.each(['webgl', 'webgpu'] as const)('surface batching actual %s', (backe
     } finally {
       restoreRaw();
       consoleErrors.mockRestore();
+      for (const resource of resources.reverse()) {
+        resource.dispose();
+      }
+    }
+  });
+  it('should retain existing canonical instances and posed pixels while batching ordinary meshes', async () => {
+    const canvas = document.createElement('canvas');
+    canvas.width = size;
+    canvas.height = size;
+    const renderer = await createRenderer('viewport', backend, canvas);
+    const resources: Array<{ dispose(): void }> = [renderer];
+    const restore: Array<() => void> = [];
+    const scene = new Scene();
+    scene.background = new Color(0);
+    scene.add(new AmbientLight(0xff_ff_ff, 1));
+    const light = new DirectionalLight(0xff_ff_ff, 2);
+    light.position.set(0, 0, 10);
+    scene.add(light);
+    const root = new Group();
+    scene.add(root);
+    const parent = new Group();
+    parent.position.set(0.5, 1, 0);
+    parent.rotation.z = 0.3;
+    parent.scale.setScalar(1.25);
+    root.add(parent);
+    const geometry = new BoxGeometry(0.8, 0.8, 0.4);
+    const material = new MeshStandardMaterial({ color: 0x44_cc_88, roughness: 0.5 });
+    qualifyGltfSurfaceMaterial(material);
+    resources.push(geometry, material);
+    const canonical = [2, 3].map((count, index) => {
+      const source = new InstancedMesh(geometry, material, count);
+      source.position.set(index * 3 - 1.5, 0, 0);
+      source.rotation.z = -0.2;
+      for (let slot = 0; slot < count; slot++) {
+        const matrix = new Matrix4().makeRotationZ(slot * 0.15);
+        matrix.setPosition(slot * 0.9 - 0.5, slot * 0.8 - 0.5, 0);
+        source.setMatrixAt(slot, matrix);
+      }
+      parent.add(source);
+      resources.push(source);
+      return source;
+    });
+    const ordinary = [-3, 3].map((x) => {
+      const source = new Mesh(geometry, material);
+      source.position.set(x, -3, 0);
+      root.add(source);
+      return source;
+    });
+    const camera = new OrthographicCamera(-6, 6, 6, -6, 0.1, 100);
+    camera.position.set(0, 0, 20);
+    camera.updateMatrixWorld();
+    const webGlTarget = renderer instanceof WebGLRenderer ? new WebGLRenderTarget(size, size) : undefined;
+    const target = webGlTarget ?? new RenderTarget(size, size);
+    resources.push(target);
+    let indexedCount = (): number => 0;
+    try {
+      if (renderer instanceof WebGLRenderer) {
+        const gl = renderer.getContext();
+        if (!(gl instanceof WebGL2RenderingContext)) {
+          throw new TypeError('Expected WebGL2 context');
+        }
+        const direct = vi.spyOn(gl, 'drawElements');
+        const instanced = vi.spyOn(gl, 'drawElementsInstanced');
+        indexedCount = () => direct.mock.calls.length + instanced.mock.calls.length;
+        restore.push(
+          () => {
+            direct.mockRestore();
+          },
+          () => {
+            instanced.mockRestore();
+          },
+        );
+      } else {
+        nativeDevice(renderer);
+        const indexed = vi.spyOn(GPURenderPassEncoder.prototype, 'drawIndexed');
+        indexedCount = () => indexed.mock.calls.length;
+        restore.push(() => {
+          indexed.mockRestore();
+        });
+      }
+      const render = async (): Promise<Uint8Array<ArrayBuffer>> => {
+        if (renderer instanceof WebGLRenderer) {
+          if (!webGlTarget) {
+            throw new TypeError('Expected WebGL render target');
+          }
+          renderer.setRenderTarget(webGlTarget);
+        } else {
+          renderer.setRenderTarget(target);
+        }
+        renderer.render(scene, camera);
+        renderer.setRenderTarget(null);
+        if (renderer instanceof WebGLRenderer) {
+          if (!webGlTarget) {
+            throw new TypeError('Expected WebGL render target');
+          }
+          const pixels = new Uint8Array(size * size * 4);
+          renderer.readRenderTargetPixels(webGlTarget, 0, 0, size, size, pixels);
+          return pixels;
+        }
+        return new Uint8Array(await renderer.readRenderTargetPixelsAsync(target, 0, 0, size, size));
+      };
+      const before = indexedCount();
+      const baseline = await render();
+      expect(indexedCount() - before).toBe(4);
+      expect(baseline.some((value, index) => index % 4 !== 3 && value > 0)).toBe(true);
+      const owner = createGltfSurfaceBatches(root, [...ordinary, ...canonical]);
+      resources.push(owner);
+      owner.sync();
+      const batchedStart = indexedCount();
+      expect(await render()).toEqual(baseline);
+      expect(indexedCount() - batchedStart).toBe(3);
+      expect(canonical.map((source) => source.count)).toEqual([2, 3]);
+      expect(canonical.map((source) => source.layers.mask)).toEqual([1, 1]);
+      expect(ordinary.map((source) => source.layers.mask)).toEqual([0, 0]);
+      parent.position.x += 0.75;
+      parent.rotation.z += 0.25;
+      owner.syncMatrices([parent]);
+      const posedStart = indexedCount();
+      const posed = await render();
+      expect(indexedCount() - posedStart).toBe(3);
+      expect(posed).not.toEqual(baseline);
+      owner.dispose();
+      const directPosedStart = indexedCount();
+      expect(await render()).toEqual(posed);
+      expect(indexedCount() - directPosedStart).toBe(4);
+      const successor = createGltfSurfaceBatches(root, [...ordinary, ...canonical]);
+      resources.push(successor);
+      successor.sync();
+      const successorStart = indexedCount();
+      expect(await render()).toEqual(posed);
+      expect(indexedCount() - successorStart).toBe(3);
+      console.info(
+        'C6 canonical instance registration',
+        JSON.stringify({ backend, canonicalSlots: 5, directCommands: 4, batchedCommands: 3, changedParent: true }),
+      );
+    } finally {
+      for (const dispose of restore.reverse()) {
+        dispose();
+      }
       for (const resource of resources.reverse()) {
         resource.dispose();
       }

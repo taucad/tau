@@ -34,6 +34,8 @@ export type AppCapabilitiesManifest = NonNullable<AppRuntimeClient['capabilities
  */
 export type KernelOptionsFactory = (deps: {
   readonly fileSystem: RuntimeFileSystem;
+  /** Host-only scoped checked publication binding. */
+  readonly publicationFileSystem?: RuntimeFileSystem;
   readonly runtimeConfig: UiRuntimeConfigInput;
   readonly compute?: ComputeBinding;
 }) => RuntimeClientOptionsWithTransport<typeof runtime>;

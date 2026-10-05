@@ -21,27 +21,26 @@ Each kernel package exports a toolkit factory, its `plugin` alias for mechanical
 
 ## Packages
 
-| Package                      | Kernel ID            | Extensions                           | Role factory              |
-| ---------------------------- | -------------------- | ------------------------------------ | ------------------------- |
-| `@taucad/replicad`           | `replicad`           | `ts`, `js`                           | `replicadKernel`          |
-| `@taucad/opencascade`        | `opencascade`        | `ts`, `js`                           | `opencascadeKernel`       |
-| `@taucad/manifold`           | `manifold`           | `ts`, `js`                           | `manifoldKernel`          |
-| `@taucad/jscad`              | `jscad`              | `ts`, `js`                           | `jscadKernel`             |
-| `@taucad/openrscad`          | `openrscad`          | `scad`                               | `openrscadKernel`         |
-| `@taucad/zoo`                | `zoo`                | `kcl`                                | `zooKernel`               |
-| `@taucad/gltf`               | `gltf`               | `glb`, `gltf`                        | `gltfKernel`              |
-| `@taucad/brep`               | `brep`               | `step`, `stp`, `iges`, `igs`, `brep` | `brepKernel`              |
-| `@taucad/rhino`              | `rhino`              | `3dm`                                | `rhinoKernel`             |
-| `@taucad/assimp`             | `assimp`             | Explicit mesh/scene formats          | `assimpKernel`            |
-| `@taucad/opencascade-native` | `opencascade-native` | `ts`, `js`                           | `opencascadeNativeKernel` |
-| `@taucad/build123d`          | `build123d`          | `py`                                 | `build123dKernel`         |
-| `@taucad/picogk`             | `picogk`             | `cs`                                 | `picogkKernel`            |
-| `@taucad/picovoxel`          | `picovoxel`          | `ts`, `js`                           | `picovoxelKernel`         |
-| `@taucad/tscircuit`          | `tscircuit`          | `tsx`, `jsx`                         | `tscircuitKernel`         |
+| Package               | Kernel ID     | Extensions                           | Role factory        |
+| --------------------- | ------------- | ------------------------------------ | ------------------- |
+| `@taucad/replicad`    | `replicad`    | `ts`, `js`                           | `replicadKernel`    |
+| `@taucad/opencascade` | `opencascade` | `ts`, `js`                           | `opencascadeKernel` |
+| `@taucad/manifold`    | `manifold`    | `ts`, `js`                           | `manifoldKernel`    |
+| `@taucad/jscad`       | `jscad`       | `ts`, `js`                           | `jscadKernel`       |
+| `@taucad/openrscad`   | `openrscad`   | `scad`                               | `openrscadKernel`   |
+| `@taucad/zoo`         | `zoo`         | `kcl`                                | `zooKernel`         |
+| `@taucad/gltf`        | `gltf`        | `glb`, `gltf`                        | `gltfKernel`        |
+| `@taucad/brep`        | `brep`        | `step`, `stp`, `iges`, `igs`, `brep` | `brepKernel`        |
+| `@taucad/rhino`       | `rhino`       | `3dm`                                | `rhinoKernel`       |
+| `@taucad/assimp`      | `assimp`      | Explicit mesh/scene formats          | `assimpKernel`      |
+| `@taucad/build123d`   | `build123d`   | `py`                                 | `build123dKernel`   |
+| `@taucad/picogk`      | `picogk`      | `cs`                                 | `picogkKernel`      |
+| `@taucad/picovoxel`   | `picovoxel`   | `ts`, `js`                           | `picovoxelKernel`   |
+| `@taucad/tscircuit`   | `tscircuit`   | `tsx`, `jsx`                         | `tscircuitKernel`   |
 
 No first-party kernel uses `'*'`.
 
-`@taucad/opencascade-native` targets Node hosts. `@taucad/openrscad` needs no twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d additionally requires an explicit packaged interpreter/resource manifest and a host-owned project trust marker; it never falls back to system Python. tscircuit offers separate board, schematic, and PCB views; see [tscircuit](../reference/tscircuit).
+`@taucad/openrscad` needs no native twin: its engine binds the N-API addon or WebAssembly build by export condition, and `backend` says which. Build123d additionally requires an explicit packaged interpreter/resource manifest and a host-owned project trust marker; it never falls back to system Python. tscircuit offers separate board, schematic, and PCB views; see [tscircuit](../reference/tscircuit).
 
 ## Toolkit composition
 

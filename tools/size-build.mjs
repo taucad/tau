@@ -14,24 +14,20 @@ const sizeLimitRoot = join(workspaceRoot, 'node_modules', '.cache', 'size-limit'
 const mergedConfigPath = join(sizeLimitRoot, '.size-limit.json');
 
 function getProjectRoots() {
-  const output = execFileSync('pnpm', ['nx', 'show', 'projects', '--json'], {
+  // One graph read for every project root, instead of one `nx show project` per project.
+  const graphPath = join(sizeLimitRoot, 'graph.json');
+  mkdirSync(sizeLimitRoot, { recursive: true });
+  execFileSync('pnpm', ['nx', 'graph', `--file=${graphPath}`], {
     cwd: workspaceRoot,
-    encoding: 'utf8',
     stdio: ['pipe', 'pipe', 'pipe'],
   });
-  const projects = JSON.parse(output.trim().split('\n').pop());
+  const { nodes } = JSON.parse(readFileSync(graphPath, 'utf8')).graph;
   const results = [];
 
-  for (const project of projects) {
-    const info = execFileSync('pnpm', ['nx', 'show', 'project', project, '--json'], {
-      cwd: workspaceRoot,
-      encoding: 'utf8',
-      stdio: ['pipe', 'pipe', 'pipe'],
-    });
-    const { root } = JSON.parse(info);
-    const configPath = join(workspaceRoot, root, '.size-limit.json');
+  for (const [project, { data }] of Object.entries(nodes)) {
+    const configPath = join(workspaceRoot, data.root, '.size-limit.json');
     if (existsSync(configPath)) {
-      results.push({ project, root, configPath });
+      results.push({ project, root: data.root, configPath });
     }
   }
 
@@ -51,12 +47,18 @@ if (projects.length === 0) {
   throw new Error('No projects with .size-limit.json found');
 }
 
+// One Nx invocation builds them all, so shared dependencies build once and the task
+// runner orders them; `--parallel=1` keeps the hosted runner within its memory.
+console.log(`Building ${projects.map(({ project }) => project).join(', ')}...`);
+execFileSync(
+  'pnpm',
+  ['nx', 'run-many', '-t', 'build', `--projects=${projects.map(({ project }) => project).join(',')}`, '--parallel=1'],
+  { cwd: workspaceRoot, stdio: 'inherit' },
+);
+
 const merged = [];
 
 for (const { project, root, configPath } of projects) {
-  console.log(`Building ${project}...`);
-  execFileSync('pnpm', ['nx', 'build', project], { cwd: workspaceRoot, stdio: 'inherit' });
-
   const config = JSON.parse(readFileSync(configPath, 'utf8'));
 
   for (const entry of config) {

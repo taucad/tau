@@ -175,6 +175,40 @@ export const resolveRuntimePackages = async (
   };
 };
 
+/** A channel a package is assembled for, as the desktop main process reads it (src/main/environment.ts). */
+export type DesktopPackageChannel = 'production' | 'staging';
+
+/**
+ * Parse `TAU_DESKTOP_CHANNEL`; unset or blank is `production`.
+ * @param value - The variable's value.
+ * @returns The channel to package.
+ */
+export const desktopPackageChannel = (value: string | undefined): DesktopPackageChannel => {
+  const channel = value?.trim() ?? '';
+  if (channel === '' || channel === 'production') {
+    return 'production';
+  }
+  if (channel === 'staging') {
+    return 'staging';
+  }
+  throw new Error(`TAU_DESKTOP_CHANNEL must be production or staging, not ${channel}`);
+};
+
+/**
+ * The staged manifest's `tauDesktop` block, which main reads at launch; nothing when it would be empty.
+ * @param options - Whether the package honours environment overrides (ad-hoc and unsigned only) and its channel.
+ * @returns Extra manifest fields for `stageRuntimePackages`.
+ */
+export const desktopManifestFields = (
+  options: Readonly<{ environmentOverrides: boolean; channel: DesktopPackageChannel }>,
+): Readonly<Record<string, unknown>> => {
+  const tauDesktop = {
+    ...(options.environmentOverrides ? { environmentOverrides: true } : {}),
+    ...(options.channel === 'staging' ? { channel: 'staging' } : {}),
+  };
+  return Object.keys(tauDesktop).length === 0 ? {} : { tauDesktop };
+};
+
 /**
  * Stage the built main/preload bundles, every runtime package and the app manifest into `stageRoot`.
  * @param options - The desktop root, the staging directory, the resolved packages, any dependencies

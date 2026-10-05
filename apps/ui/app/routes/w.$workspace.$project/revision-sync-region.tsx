@@ -739,11 +739,7 @@ export function RevisionSyncRegion({
               : GitBranch
         : WifiOff;
   const glyphTone =
-    GlyphIcon === CircleAlert
-      ? 'text-destructive'
-      : GlyphIcon === CloudAlert
-        ? 'text-warning'
-        : 'text-muted-foreground';
+    GlyphIcon === CircleAlert ? 'text-feature' : GlyphIcon === CloudAlert ? 'text-warning' : 'text-muted-foreground';
   const glyph = <GlyphIcon aria-hidden className={cn('size-4 shrink-0', glyphTone)} />;
   const includes = [
     'Files',
@@ -1217,7 +1213,7 @@ export function RevisionSyncRegion({
 
       {connectionError === undefined ? undefined : (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
-          <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
           <span className='min-w-0 flex-1'>{connectionError}</span>
           <Button
             size='xs'
@@ -1256,7 +1252,7 @@ export function RevisionSyncRegion({
       {remote.overQuota.length > 0 ? (
         <div className='flex flex-col gap-1.5'>
           <p className='flex items-center gap-2 text-sm'>
-            <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
+            <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
             <span>
               {role === 'write' || role === 'read'
                 ? 'These files did not fit in the project owner’s plan and were not backed up:'
@@ -1283,7 +1279,7 @@ export function RevisionSyncRegion({
       */}
       {remote.phase === 'failed' && remote.error !== undefined ? (
         <div role='alert' aria-label='Backup connection error' className='flex flex-wrap items-center gap-2 text-sm'>
-          <CircleAlert aria-hidden className='size-4 shrink-0 text-destructive' />
+          <CircleAlert aria-hidden className='size-4 shrink-0 text-feature' />
           <span className='min-w-0 flex-1'>{remote.error}</span>
           {renderFailureAction(syncFailureAction(remote, remote, role) ?? 'retry', () => {
             setChangingBackup(true);

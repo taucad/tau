@@ -121,6 +121,25 @@ jobs:
           sha: ${{ github.sha }}
           github-token: ${{ github.token }}
 
+      # `ui:sourcemaps` uploads with the PostHog CLI key. The Netlify site's own
+      # copy is a secret variable, which a CLI build from Actions cannot read, so
+      # HCP also writes it to this environment (tau-cloud `stacks/repo/tau`).
+      # Only a value that is set is exported: an empty one would hide the site's.
+      - name: Hand the PostHog CLI key to the build
+        env:
+          TOKEN: ${{ secrets.POSTHOG_CLI_TOKEN }}
+          ENV_ID: ${{ vars.POSTHOG_CLI_ENV_ID }}
+        run: |
+          set -euo pipefail
+          if [ -n "$TOKEN" ] && [ -n "$ENV_ID" ]; then
+            {
+              echo "POSTHOG_CLI_TOKEN=$TOKEN"
+              echo "POSTHOG_CLI_ENV_ID=$ENV_ID"
+            } >> "$GITHUB_ENV"
+          else
+            echo "::notice::POSTHOG_CLI_TOKEN or POSTHOG_CLI_ENV_ID is not set on this environment; the build uses the site's variables."
+          fi
+
       # The CLI comes from the workspace lockfile (`scripts` owns it); its build
       # runs `apps/ui/netlify.toml`'s production command with the site's variables.
       - name: Build and deploy with the Netlify CLI
@@ -128,6 +147,8 @@ jobs:
         env:
           SITE_ID: ${{ steps.site.outputs.site_id }}
           MESSAGE: ${{ github.workflow }} ${{ github.sha }}
+          # Only production needs its PostHog source maps to deploy.
+          TAU_SOURCEMAPS_OPTIONAL: ${{ inputs.environment != 'production' }}
         run: |
           "$GITHUB_WORKSPACE/scripts/node_modules/.bin/netlify" deploy \
             --prod --context production \

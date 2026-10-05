@@ -243,7 +243,7 @@ globalThis.performance.measure = (() => stubEntry) as typeof globalThis.performa
 // Jsdom returns null from HTMLCanvasElement.getContext('2d'), which crashes
 // `three/addons` modules that call `ctx.fillStyle = …` at module load time
 // (e.g. `lottie_canvas.module.js`'s ImagePreloader). Stub a minimal 2d context
-// shape so test files importing from `three/addons` don't fail to load.
+// shape so test files importing the `three/addons` barrel don't fail to load.
 // oxlint-disable-next-line @typescript-eslint/no-unnecessary-condition -- jsdom only ships HTMLCanvasElement when canvas package is installed
 if (typeof HTMLCanvasElement !== 'undefined') {
   const originalGetContext = HTMLCanvasElement.prototype.getContext;

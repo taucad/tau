@@ -131,7 +131,7 @@ export const SharedProjectHydrator = ({
   if (state === 'error') {
     return (
       <main className='flex h-dvh items-center justify-center bg-background p-6'>
-        <p className='text-sm text-destructive'>The shared files could not be mounted in memory.</p>
+        <p className='text-sm text-feature'>The shared files could not be mounted in memory.</p>
       </main>
     );
   }

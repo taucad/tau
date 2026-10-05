@@ -334,7 +334,7 @@ export const ChatExecutionSelector = memo(function ({
                     data-slot='chat-execution-tau-host-workspace'
                     className={cn(
                       'block truncate text-xs',
-                      target.noteIsRefusal ? 'text-destructive' : 'text-muted-foreground',
+                      target.noteIsRefusal ? 'text-feature' : 'text-muted-foreground',
                     )}
                     title={target.note}
                   >

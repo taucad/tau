@@ -2,7 +2,7 @@ import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import type { RefObject } from 'react';
 import { Canvas, useFrame, useThree } from '@react-three/fiber';
 import * as THREE from 'three';
-import { GLTFLoader } from 'three/addons';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createTauR3fGlProp } from '#components/geometry/graphics/three/canvas-three-gl.js';
 import { readGraphicsBackendQueryOverride } from '#components/geometry/graphics/graphics-backend.js';
 import { PreviewLights } from '#components/geometry/splash/preview-lights.js';

@@ -9,6 +9,7 @@ import {
   clientEnvironment,
   desktopAgentGatewayBaseUrl,
   desktopEnvironment,
+  packagedChannel,
   packagedOverridesEnabled,
   stripPackagedOverrides,
 } from '#main/environment.js';
@@ -62,6 +63,20 @@ describe('desktopEnvironment', () => {
     });
   });
 
+  it('supplies staging endpoints to a locked staging package, whatever its environment says', () => {
+    expect(
+      desktopEnvironment(
+        { TAU_API_URL: 'https://attacker.example', TAU_DEBUG: 'true' },
+        { locked: true, channel: 'staging' },
+      ),
+    ).toEqual({
+      TAU_API_URL: 'https://api.taucad.dev',
+      TAU_WEBSOCKET_URL: 'wss://api.taucad.dev',
+      TAU_FRONTEND_URL: 'https://taucad.dev',
+      TAU_DEBUG: 'true',
+    });
+  });
+
   it('scrubs the locked names in place and keeps everything else', () => {
     const target: NodeJS.ProcessEnv = {
       PATH: '/usr/bin',
@@ -110,7 +125,7 @@ describe('desktopAgentGatewayBaseUrl', () => {
   });
 });
 
-describe('packagedOverridesEnabled', () => {
+describe('packaged manifest options', () => {
   const roots: string[] = [];
   afterAll(async () => {
     await Promise.all(roots.map(async (root) => rm(root, { recursive: true, force: true })));
@@ -133,5 +148,12 @@ describe('packagedOverridesEnabled', () => {
     expect(packagedOverridesEnabled(await appWith('{"tauDesktop":{"environmentOverrides":"true"}}'))).toBe(false);
     expect(packagedOverridesEnabled(await appWith('{'))).toBe(false);
     expect(packagedOverridesEnabled(await appWith(undefined))).toBe(false);
+  });
+
+  it('reads the staging channel and treats anything else as production', async () => {
+    expect(packagedChannel(await appWith('{"tauDesktop":{"channel":"staging"}}'))).toBe('staging');
+    expect(packagedChannel(await appWith('{"tauDesktop":{"channel":"beta"}}'))).toBe('production');
+    expect(packagedChannel(await appWith('{"name":"@taucad/desktop"}'))).toBe('production');
+    expect(packagedChannel(await appWith('{'))).toBe('production');
   });
 });

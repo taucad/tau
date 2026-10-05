@@ -148,9 +148,9 @@ Shared helper packages live under `packages/core/*` and publish as `@taucad/<nam
 
 ### Payload Isolation
 
-Tree shaking is not an install-boundary guarantee. A browser/WASM-safe plugin package must not hard-depend on native, Python, or daemon implementation packages even if those imports appear unreachable to bundlers. Split incompatible host payloads into explicit packages such as `@taucad/opencascade-native` or `@taucad/build123d`, then let UI, CLI, desktop, or daemon recipes opt into them deliberately.
+Tree shaking is not an install-boundary guarantee. A browser/WASM-safe plugin package must not hard-depend on native, Python, or daemon implementation packages even if those imports appear unreachable to bundlers. Split incompatible host payloads into explicit packages such as `@taucad/build123d`, then let UI, CLI, desktop, or daemon recipes opt into them deliberately.
 
-`@taucad/opencascade` is the browser/WASM-safe OpenCascade package. Native OpenCascade uses an explicit implementation package; Python-backed Build123d uses its own package and runner/daemon requirements.
+`@taucad/opencascade` is the browser/WASM-safe OpenCascade package. Python-backed Build123d uses its own package and runner/daemon requirements.
 
 ### Native-Language Process Boundary
 

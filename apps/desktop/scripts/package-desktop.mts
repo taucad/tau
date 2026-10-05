@@ -5,7 +5,8 @@
  * Why: CI publishes development builds for every desktop platform; only macOS is signed and notarized.
  * Environment: the matching host (no cross-builds): ubuntu-24.04 for linux-x64, windows-2025 for win32-x64;
  * built desktop/UI artifacts and the target's Build123d Python resource; network access for Electron Packager's
- * Electron download; optional TAU_DESKTOP_PACKAGE_OUTPUT_ROOT (default apps/desktop/package-out).
+ * Electron download; optional TAU_DESKTOP_PACKAGE_OUTPUT_ROOT (default apps/desktop/package-out); optional
+ * TAU_DESKTOP_CHANNEL (production, the default, or staging).
  * Payloads: Build123d Python ships on both targets. git ships on linux-x64 when prepare-git has built it, and
  * never on win32-x64 (prepare-git compiles kernel.org source, which is not how git ships on Windows). PicoGK
  * and the GeoSpec native engine ship on darwin-arm64 only: the desktop enables PicoGK there alone, its voxel
@@ -34,7 +35,13 @@ import {
   parseDesktopPackageArguments,
 } from './desktop-package-target.mjs';
 import { copyTree } from './runtime-closure.mjs';
-import { excludesBuildDiagnostics, resolveRuntimePackages, stageRuntimePackages } from './runtime-stage.mjs';
+import {
+  desktopManifestFields,
+  desktopPackageChannel,
+  excludesBuildDiagnostics,
+  resolveRuntimePackages,
+  stageRuntimePackages,
+} from './runtime-stage.mjs';
 /* oxlint-enable no-restricted-imports -- End operational script import exception. */
 
 const { plan, archive: writesArchive } = parseDesktopPackageArguments(
@@ -85,7 +92,15 @@ const electron = await readJson<{ readonly version: string }>(
 );
 
 await rm(outputRoot, { recursive: true, force: true });
-await stageRuntimePackages({ desktopRoot, stageRoot, packages: runtimePackages });
+await stageRuntimePackages({
+  desktopRoot,
+  stageRoot,
+  packages: runtimePackages,
+  manifestFields: desktopManifestFields({
+    environmentOverrides: false,
+    channel: desktopPackageChannel(process.env['TAU_DESKTOP_CHANNEL']),
+  }),
+});
 
 const packagePaths = await packager({
   dir: stageRoot,

@@ -61,28 +61,28 @@ X
 T log-0
 A 0 appended
 A 1 duplicate
-R 2 - 1 unadmitted 0 0 3@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 3@0:0 - - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 2 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 3@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 3@0:0 - - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 3 duplicate
 A 4 appended
-R 2 completed 1 terminal 0 0 3@0:0 - - resume
-C 2 terminal 2:completed
+R 2 failed:g t 1 terminal 0 0 3@0:0 - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:1
 A 5 EVENT_OUT_OF_ORDER
 A 6 LOG_FENCED
-R 2 completed 1 terminal 0 0 3@0:0 - - resume
-C 2 terminal 2:completed
+R 2 failed:g t 1 terminal 0 0 3@0:0 - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:1
@@ -99,18 +99,18 @@ O 1 0 0 0
 A 15 LOG_FENCED
 O 1 0 0 0
 A 16 HISTORY_INVALID
-R 2 completed 1 terminal 0 0 3@0:0 - - resume
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 failed:f 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 2 failed:g t 1 terminal 0 0 3@0:0 - - resume
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 cancelled t 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 7 0:6 1 1
 N order@0:1,order@0:3
 U 2:1,1:1
 A 17 HISTORY_INVALID
-R 2 completed 1 terminal 0 0 3@0:0 - - resume
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 failed:f 1 terminal 0 0 - - - resume
-C 1 terminal 1:failed
+R 2 failed:g t 1 terminal 0 0 3@0:0 - - resume
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 cancelled t 1 terminal 0 0 - - - resume
+C 1 terminal 1:cancelled
 P 7 0:6 1 1
 N order@0:1,order@0:3
 U 2:1,1:1
@@ -119,9 +119,9 @@ A 19 appended
 O 1 0 0 0
 A 20 EVENT_MUTATED
 A 21 appended
-R 2 completed 1 terminal 0 0 3@0:0 i0 - resume
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 failed:r 1 terminal 0 0 - - - resume
+R 2 failed:g t 1 terminal 0 0 3@0:0 i0 - resume
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 failed:a t 1 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 9 0:8 1 1
 N order@0:1,order@0:3,order@0:8
@@ -129,9 +129,9 @@ U 2:1,1:1
 O 1 0 0 0
 A 22 appended
 A 23 appended
-R 2 completed 1 terminal 0 0 3@0:0 i0 a0 resume
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 failed:r 1 terminal 0 0 - - - resume
+R 2 failed:g t 1 terminal 0 0 3@0:0 i0 a0 resume
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 failed:a t 1 terminal 0 0 - - - resume
 I a1 2 1 g 0 -
 I a0 2 1 c 0 -
 C 1 terminal 1:failed
@@ -142,30 +142,30 @@ A 24 appended
 A 25 EVENT_MUTATED
 A 26 appended
 A 27 HISTORY_INVALID
-R 2 completed 1 terminal 0 0 3@0:0 i0 a0 resume
-R 3 cancelled 1 terminal 1 0 - - - settled
-R 1 failed:r 1 terminal 0 0 - - - resume
+R 2 failed:g t 1 terminal 0 0 3@0:0 i0 a0 resume
+R 3 failed:s t 1 terminal 1 0 - - - settled
+R 1 failed:a t 1 terminal 0 0 - - - resume
 I a1 2 1 g 0 -
 I a0 2 1 c 0 -
-C 3 terminal 3:cancelled
+C 3 terminal 3:failed
 P 13 3:3 2 1
 N order@0:1,order@0:3,order@0:8,order@3:2
 U 2:1,3:1,1:1
 A 28 EVENT_OUT_OF_ORDER
 A 29 appended
-R 2 completed 1 terminal 0 0 3@0:0 i0 a0 resume
-R 3 cancelled 1 terminal 1 0 - - - settled
-R 1 failed:r 1 terminal 0 0 - - - resume
+R 2 failed:g t 1 terminal 0 0 3@0:0 i0 a0 resume
+R 3 failed:s t 1 terminal 1 0 - - - settled
+R 1 failed:a t 1 terminal 0 0 - - - resume
 I a1 2 1 g 0 -
 I a0 2 1 c 0 -
-C 3 terminal 3:cancelled
+C 3 terminal 3:failed
 P 14 3:4 2 1
 N order@0:1,order@0:3,order@0:8,order@3:2
 U 2:1,3:1,1:1
 QS appended
 QS appended
 QS SETTLEMENT_WITHOUT_RUN
-QL RUN_ID_TAKEN
+QL ok
 QL NO_RUN_ADMITTED
 QP ok
 QP ok
@@ -176,7 +176,7 @@ X
 T log-1
 A 0 HISTORY_INVALID
 A 1 appended
-R 2 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -184,8 +184,8 @@ U -
 A 2 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 3 appended
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a0 1 1 g 0 -
 C - none -
 P 2 0:1 1 1
@@ -193,8 +193,8 @@ N -
 U -
 A 4 EVENT_OUT_OF_ORDER
 A 5 LOG_FENCED
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a0 1 1 g 0 -
 C - none -
 P 2 0:1 1 1
@@ -204,21 +204,21 @@ O 0 0 0 0
 A 6 appended
 A 7 EVENT_OUT_OF_ORDER
 A 8 appended
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
+R 3 cancelled t 1 terminal 0 0 - - - resume
 I a0 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 4 0:3 1 1
 N order@0:3
 U 3:1
 A 9 appended
 A 10 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 1 0 - - a0 admit
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - a0 admit
+R 3 cancelled t 1 terminal 0 0 - - - resume
 I a0 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 5 0:4 1 1
 N order@0:3
 U 3:1
@@ -230,19 +230,19 @@ A 14 appended
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_MUTATED
 A 17 EVENT_MUTATED
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 1 0 - i0 a0 admit
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - i0 a0 admit
+R 3 cancelled t 1 terminal 0 0 - - - resume
 I a0 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 7 4:0 2 1
 N order@0:3
 U 3:1
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 1 0 - i0 a0 admit
-R 3 failed:f 1 terminal 0 0 - - - resume
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - i0 a0 admit
+R 3 cancelled t 1 terminal 0 0 - - - resume
 I a0 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 7 4:0 2 1
 N order@0:3
 U 3:1
@@ -260,42 +260,42 @@ X
 T log-2
 A 0 appended
 A 1 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 completed 3 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:f t 3 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:3
 O 0 0 0 0
 A 2 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 completed 3 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:f t 3 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:3
 A 3 LOG_FENCED
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 completed 3 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:f t 3 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:3
 O 1 0 0 0
 A 4 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 completed 3 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:f t 3 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 3 0:2 1 1
 N order@0:1
 U 2:3
 A 5 duplicate
 A 6 appended
 A 7 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 completed 3 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 0 0 - i1 - admit
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:f t 3 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - i1 - admit
+C 2 terminal 2:failed
 P 5 0:4 1 1
 N order@0:1
 U 2:3
@@ -308,19 +308,19 @@ A 13 EVENT_OUT_OF_ORDER
 A 14 duplicate
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 completed 3 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 0 0 - i1 - admit
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:f t 3 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - i1 - admit
+C 2 terminal 2:failed
 P 5 0:4 1 1
 N order@0:1
 U 2:3
 A 17 EVENT_OUT_OF_ORDER
 A 18 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 completed 3 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 0 0 - i1 - admit
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:f t 3 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - i1 - admit
+C 2 terminal 2:failed
 P 5 0:4 1 1
 N order@0:1
 U 2:3
@@ -338,7 +338,7 @@ X
 T log-3
 A 0 appended
 A 1 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - - a1 admit
+R 3 - t 1 unadmitted 0 0 - - a1 admit
 I a1 3 1 g 0 -
 C - none -
 P 1 0:0 1 1
@@ -348,7 +348,7 @@ A 2 EVENT_OUT_OF_ORDER
 A 3 duplicate
 O 0 0 0 0
 A 4 appended
-R 3 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a1 3 1 g 0 settled
 C - none -
 P 2 2:0 2 1
@@ -357,8 +357,8 @@ U -
 O 0 0 0 0
 A 5 appended
 A 6 appended
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - i1 - admit
 I a1 3 1 g 1 settled
 C - none -
 P 4 3:1 3 1
@@ -366,10 +366,10 @@ N -
 U -
 A 7 appended
 A 8 duplicate
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 cancelled 1 terminal 0 0 - i1 - resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 failed:s t 1 terminal 0 0 - i1 - resume
 I a1 3 1 g 1 settled
-C 1 terminal 1:cancelled
+C 1 terminal 1:failed
 P 5 3:2 3 1
 N order@3:2
 U 1:1
@@ -396,22 +396,22 @@ A 24 EVENT_MUTATED
 A 25 duplicate
 A 26 EVENT_MUTATED
 A 27 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 1 0 - i1 a0 admit
-R 1 cancelled 1 terminal 1 0 - i1 - settled
-R 2 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - i1 a0 admit
+R 1 failed:s x 1 terminal 1 0 - i1 - settled
+R 2 - t 1 unadmitted 0 0 - - - admit
 I a1 3 1 g 1 settled
 I a0 3 1 g 0 -
-C 1 terminal 1:cancelled
+C 1 terminal 1:failed
 P 12 5:2 4 1
 N order@3:2
 U 1:1
 A 28 EVENT_MUTATED
-R 3 - 1 unadmitted 1 0 - i1 a0 admit
-R 1 cancelled 1 terminal 1 0 - i1 - settled
-R 2 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - i1 a0 admit
+R 1 failed:s x 1 terminal 1 0 - i1 - settled
+R 2 - t 1 unadmitted 0 0 - - - admit
 I a1 3 1 g 1 settled
 I a0 3 1 g 0 -
-C 1 terminal 1:cancelled
+C 1 terminal 1:failed
 P 12 5:2 4 1
 N order@3:2
 U 1:1
@@ -430,8 +430,8 @@ T log-4
 A 0 appended
 A 1 appended
 A 2 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 - - a3 admit
-R 2 - 1 unadmitted 0 0 - i1 - admit
+R 1 - t 1 unadmitted 0 0 - - a3 admit
+R 2 - t 1 unadmitted 0 0 - i1 - admit
 I a3 1 1 c 0 -
 C - none -
 P 2 0:1 1 1
@@ -439,9 +439,9 @@ N -
 U -
 A 3 EVENT_OUT_OF_ORDER
 A 4 appended
-R 1 - 1 unadmitted 0 0 - - a3 admit
-R 2 - 1 unadmitted 0 0 - i1 - admit
-R 3 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a3 admit
+R 2 - t 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a3 1 1 c 0 -
 C - none -
 P 3 0:2 1 1
@@ -454,9 +454,9 @@ A 8 LOG_FENCED
 A 9 LOG_FENCED
 O 0 0 0 0
 A 10 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i1 - admit
-R 3 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a3 1 1 c 0 settled
 C - none -
 P 5 2:0 2 1
@@ -471,18 +471,18 @@ O 1 0 0 0
 A 14 EVENT_OUT_OF_ORDER
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i1 - admit
-R 3 - 1 unadmitted 0 0 - i0 - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 0 0 - i0 - admit
 I a3 1 1 c 0 settled
 C - none -
 P 7 2:2 2 1
 N -
 U -
 A 17 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i1 - admit
-R 3 - 1 unadmitted 0 0 - i0 - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 0 0 - i0 - admit
 I a3 1 1 c 0 settled
 C - none -
 P 7 2:2 2 1
@@ -511,16 +511,16 @@ O 1 0 0 0
 A 5 HISTORY_INVALID
 A 6 appended
 A 7 appended
-R 2 - 1 unadmitted 0 0 3@0:2 - a1 admit
-R 1 running 1 open 0 0 - - - recover
+R 2 - t 1 unadmitted 0 0 3@0:2 - a1 admit
+R 1 running t 1 open 0 0 - - - recover
 I a1 2 1 g 0 -
 C 1 running -
 P 3 0:2 1 1
 N order@0:1
 U -
 A 8 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 3@0:2 - a1 admit
-R 1 running 1 open 0 0 - - - recover
+R 2 - t 1 unadmitted 0 0 3@0:2 - a1 admit
+R 1 running t 1 open 0 0 - - - recover
 I a1 2 1 g 0 -
 C 1 running -
 P 3 0:2 1 1
@@ -550,7 +550,7 @@ A 4 EVENT_OUT_OF_ORDER
 A 5 LOG_FENCED
 O 1 0 0 1
 A 6 appended
-R 1 - 1 unadmitted 0 0 1@0:4 - - admit
+R 1 - t 1 unadmitted 0 0 1@0:4 - - admit
 C - none -
 P 2 0:4 1 1
 N order@0:3,conflict@0:3
@@ -560,8 +560,8 @@ A 7 appended
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 1@0:4 - - admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 1 - t 1 unadmitted 0 0 1@0:4 - - admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 C - none -
 P 3 0:5 1 1
 N order@0:3,conflict@0:3
@@ -584,12 +584,12 @@ A 22 appended
 A 23 appended
 A 24 appended
 A 25 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 1@0:4 - - admit
-R 2 - 1 unadmitted 0 0 - i0,i2 a2 admit
-R 3 failed:f 1 terminal 1 0 - i2 - settled
+R 1 - t 1 unadmitted 0 0 1@0:4 - - admit
+R 2 - t 1 unadmitted 0 0 - i0,i2 a2 admit
+R 3 cancelled t 1 terminal 1 0 - i2 - settled
 I a0 3 1 g 1 -
 I a2 2 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 15 0:17 1 1
 N order@0:3,conflict@0:3,order@0:15,conflict@0:17
 U 3:1
@@ -607,8 +607,8 @@ X
 T log-7
 A 0 appended
 A 1 appended
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a1 2 1 g 0 -
 I a0 1 1 g 0 -
 C - none -
@@ -619,8 +619,8 @@ A 2 appended
 A 3 appended
 A 4 appended
 A 5 appended
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a1 2 1 g 0 -
 I a0 1 1 g 0 -
 I a2 2 1 c 0 voided
@@ -648,9 +648,9 @@ A 3 EVENT_OUT_OF_ORDER
 A 4 appended
 A 5 appended
 A 6 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 1@1:0 - - admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 1@1:0 - - admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 C - none -
 P 5 1:1 2 1
 N -
@@ -713,7 +713,7 @@ O 1 0 0 1
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
 C - none -
 P 3 0:2 1 1
 N conflict@0:2
@@ -725,7 +725,7 @@ A 14 EVENT_OUT_OF_ORDER
 A 15 EVENT_OUT_OF_ORDER
 A 16 LOG_FENCED
 A 17 LOG_FENCED
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
 C - none -
 P 3 0:2 1 1
 N conflict@0:2
@@ -738,9 +738,9 @@ A 21 EVENT_OUT_OF_ORDER
 A 22 appended
 A 23 appended
 A 24 appended
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 3 - 1 unadmitted 0 0 - - a3 admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
+R 3 - t 1 unadmitted 0 0 - - a3 admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 I a2 3 1 c 0 -
 I a3 3 1 g 0 -
 C - none -
@@ -766,8 +766,8 @@ O 0 0 0 0
 A 2 appended
 A 3 appended
 A 4 appended
-R 3 running 1 open 0 0 - - a1 recover
-R 1 - 1 unadmitted 0 0 - i1 - admit
+R 3 running t 1 open 0 0 - - a1 recover
+R 1 - t 1 unadmitted 0 0 - i1 - admit
 I a1 3 1 c 0 -
 C 3 running -
 P 4 0:3 1 1
@@ -775,8 +775,8 @@ N order@0:1
 U -
 A 5 appended
 A 6 appended
-R 3 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i1 - admit
+R 3 running t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - i1 - admit
 I a1 3 1 c 0 absorbed
 C 3 running -
 P 6 0:5 1 1
@@ -802,11 +802,11 @@ A 22 EVENT_OUT_OF_ORDER
 A 23 EVENT_OUT_OF_ORDER
 A 24 EVENT_OUT_OF_ORDER
 A 25 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i1 - admit
-R 2 completed 1 terminal 0 0 - - - resume
+R 3 running t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - i1 - admit
+R 2 failed:g t 1 terminal 0 0 - - - resume
 I a1 3 1 c 0 absorbed
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 7 0:6 1 1
 N order@0:1,order@0:6
 U 2:1
@@ -814,11 +814,11 @@ A 26 EVENT_MUTATED
 A 27 EVENT_OUT_OF_ORDER
 O 0 0 0 1
 A 28 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i1 - admit
-R 2 completed 1 terminal 0 0 - - - resume
+R 3 running t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - i1 - admit
+R 2 failed:g t 1 terminal 0 0 - - - resume
 I a1 3 1 c 0 absorbed
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 8 0:7 1 1
 N order@0:1,order@0:6,conflict@0:7
 U 2:1
@@ -840,9 +840,9 @@ A 2 appended
 A 3 EVENT_OUT_OF_ORDER
 A 4 EVENT_OUT_OF_ORDER
 A 5 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i1 - admit
-R 1 - 1 unadmitted 0 0 - - a1 admit
-R 2 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - i1 - admit
+R 1 - t 1 unadmitted 0 0 - - a1 admit
+R 2 - t 1 unadmitted 0 0 - - - admit
 I a1 1 1 g 0 -
 C - none -
 P 3 0:2 1 1
@@ -859,60 +859,60 @@ A 12 appended
 A 13 EVENT_MUTATED
 A 14 appended
 A 15 appended
-R 3 - 1 unadmitted 0 0 - i1 - admit
-R 1 paused 1 terminal 0 0 - - a0 recover
-R 2 - 1 unadmitted 0 0 1@1:5 - - admit
+R 3 - t 1 unadmitted 0 0 - i1 - admit
+R 1 completed t 1 terminal 0 0 - - a0 resume
+R 2 - t 1 unadmitted 0 0 1@1:5 - - admit
 I a1 1 1 g 1 -
 I a0 1 1 g 0 -
-C 1 paused -
+C 1 terminal 1:completed
 P 10 1:6 2 1
 N conflict@1:0,order@1:6
 U 1:1
 A 16 duplicate
-R 3 - 1 unadmitted 0 0 - i1 - admit
-R 1 paused 1 terminal 0 0 - - a0 recover
-R 2 - 1 unadmitted 0 0 1@1:5 - - admit
+R 3 - t 1 unadmitted 0 0 - i1 - admit
+R 1 completed t 1 terminal 0 0 - - a0 resume
+R 2 - t 1 unadmitted 0 0 1@1:5 - - admit
 I a1 1 1 g 1 -
 I a0 1 1 g 0 -
-C 1 paused -
+C 1 terminal 1:completed
 P 10 1:6 2 1
 N conflict@1:0,order@1:6
 U 1:1
 A 17 appended
 A 18 duplicate
-R 3 - 1 unadmitted 0 0 - i1 - admit
-R 1 paused 1 terminal 0 0 - - a0 recover
-R 2 paused 1 settled 0 0 1@1:5 - - recover
+R 3 - t 1 unadmitted 0 0 - i1 - admit
+R 1 completed t 1 terminal 0 0 - - a0 resume
+R 2 completed t 1 settled 0 0 1@1:5 - - resume
 I a1 1 1 g 1 -
 I a0 1 1 g 0 -
-C 2 paused -
+C 2 terminal 2:completed
 P 11 2:0 3 1
 N conflict@1:0,order@1:6,order@2:0
 U 1:1
 A 19 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - i1 - admit
-R 1 paused 1 terminal 0 0 - - a0 recover
-R 2 paused 1 settled 0 0 1@1:5 - - recover
+R 3 - t 1 unadmitted 0 0 - i1 - admit
+R 1 completed t 1 terminal 0 0 - - a0 resume
+R 2 completed t 1 settled 0 0 1@1:5 - - resume
 I a1 1 1 g 1 -
 I a0 1 1 g 0 -
-C 2 paused -
+C 2 terminal 2:completed
 P 11 2:0 3 1
 N conflict@1:0,order@1:6,order@2:0
 U 1:1
 A 20 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i1 - admit
-R 1 paused 1 terminal 0 0 - - a0 recover
-R 2 paused 1 settled 0 0 1@1:5 - - recover
+R 3 - t 1 unadmitted 0 0 - i1 - admit
+R 1 completed t 1 terminal 0 0 - - a0 resume
+R 2 completed t 1 settled 0 0 1@1:5 - - resume
 I a1 1 1 g 1 -
 I a0 1 1 g 0 -
-C 2 paused -
+C 2 terminal 2:completed
 P 11 2:0 3 1
 N conflict@1:0,order@1:6,order@2:0
 U 1:1
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
 QS SETTLEMENT_WITHOUT_RUN
-QL ok
+QL RUN_ID_TAKEN
 QL NO_RUN_ADMITTED
 QP INVOCATION_UNRESOLVED
 QP ok
@@ -924,7 +924,7 @@ T log-13
 A 0 HISTORY_INVALID
 A 1 appended
 A 2 appended
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - x 1 unadmitted 1 0 - - - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -934,13 +934,13 @@ A 4 EVENT_OUT_OF_ORDER
 A 5 EVENT_MUTATED
 A 6 LOG_FENCED
 A 7 LOG_FENCED
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - x 1 unadmitted 1 0 - - - admit
 C - none -
 P 2 0:1 1 1
 N -
 U -
 A 8 LOG_FENCED
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - x 1 unadmitted 1 0 - - - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -958,13 +958,13 @@ QB batch 0 1 2 0:0
 X
 T log-14
 A 0 appended
-R 2 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 1 appended
-R 2 - 1 unadmitted 1 0 - - a2 admit
+R 2 - t 1 unadmitted 1 0 - - a2 admit
 I a2 2 1 c 0 -
 C - none -
 P 2 0:1 1 1
@@ -976,8 +976,8 @@ O 0 0 0 0
 A 3 appended
 A 4 EVENT_OUT_OF_ORDER
 A 5 EVENT_MUTATED
-R 2 - 1 unadmitted 1 0 - - a2 admit
-R 1 - 1 unadmitted 0 0 2@0:3 - a0 admit
+R 2 - t 1 unadmitted 1 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 2@0:3 - a0 admit
 I a2 2 1 c 0 -
 I a0 1 1 g 0 -
 C - none -
@@ -987,8 +987,8 @@ U -
 A 6 appended
 A 7 appended
 A 8 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 1 0 - - a2 admit
-R 1 - 1 unadmitted 0 0 2@0:3,1@0:4 - a1 admit
+R 2 - t 1 unadmitted 1 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 2@0:3,1@0:4 - a1 admit
 I a2 2 1 c 0 -
 I a0 1 1 g 0 -
 I a1 1 1 g 0 -
@@ -1007,9 +1007,9 @@ A 15 EVENT_OUT_OF_ORDER
 A 16 duplicate
 A 17 duplicate
 A 18 appended
-R 2 - 1 unadmitted 1 0 - - a2 admit
-R 1 - 1 unadmitted 0 0 2@0:3,1@0:4 - a1 admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 1 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 2@0:3,1@0:4 - a1 admit
+R 3 - xp 1 unadmitted 1 0 - - - admit
 I a2 2 1 c 0 -
 I a0 1 1 g 0 -
 I a1 1 1 g 0 -
@@ -1032,7 +1032,7 @@ T log-15
 O 0 0 0 0
 A 0 appended
 A 1 EVENT_MUTATED
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -1062,30 +1062,30 @@ O 0 0 0 1
 A 21 EVENT_MUTATED
 A 22 duplicate
 A 23 appended
-R 1 - 1 unadmitted 1 0 - - - admit
-R 3 paused 3 terminal 1 0 - i1 a2 resume
-R 2 running 1 open 0 0 - i2 - recover
+R 1 - t 1 unadmitted 1 0 - - - admit
+R 3 completed t 3 terminal 1 0 - i1 a2 settled
+R 2 running t 1 open 0 0 - i2 - recover
 I a2 3 3 c 0 -
-C 3 paused -
+C 3 terminal 3:completed
 P 13 4:0 3 1
 N order@1:0,order@1:1,conflict@1:6,conflict@1:7
 U 3:3
 A 24 duplicate
 A 25 appended
-R 1 - 1 unadmitted 1 0 - - - admit
-R 3 paused 3 terminal 1 0 - i1 - resume
-R 2 running 1 open 0 0 - i2 - recover
+R 1 - t 1 unadmitted 1 0 - - - admit
+R 3 completed t 3 terminal 1 0 - i1 - settled
+R 2 running t 1 open 0 0 - i2 - recover
 I a2 3 3 c 0 voided
-C 3 paused -
+C 3 terminal 3:completed
 P 14 4:1 3 1
 N order@1:0,order@1:1,conflict@1:6,conflict@1:7
 U 3:3
 A 26 LOG_FENCED
-R 1 - 1 unadmitted 1 0 - - - admit
-R 3 paused 3 terminal 1 0 - i1 - resume
-R 2 running 1 open 0 0 - i2 - recover
+R 1 - t 1 unadmitted 1 0 - - - admit
+R 3 completed t 3 terminal 1 0 - i1 - settled
+R 2 running t 1 open 0 0 - i2 - recover
 I a2 3 3 c 0 voided
-C 3 paused -
+C 3 terminal 3:completed
 P 14 4:1 3 1
 N order@1:0,order@1:1,conflict@1:6,conflict@1:7
 U 3:3
@@ -1109,8 +1109,8 @@ O 0 1 0 0
 A 4 appended
 A 5 appended
 A 6 appended
-R 3 - 1 unadmitted 1 0 1@0:4 - - admit
-R 2 - 1 unadmitted 0 0 - - a0 admit
+R 3 - xp 1 unadmitted 1 0 1@0:4 - - admit
+R 2 - t 1 unadmitted 0 0 - - a0 admit
 I a0 2 1 c 0 -
 C - none -
 P 4 2:1 2 1
@@ -1119,8 +1119,8 @@ U -
 A 7 EVENT_OUT_OF_ORDER
 A 8 appended
 A 9 HISTORY_INVALID
-R 3 - 1 unadmitted 1 0 1@0:4 - a2 admit
-R 2 - 1 unadmitted 0 0 - - a0 admit
+R 3 - xp 1 unadmitted 1 0 1@0:4 - a2 admit
+R 2 - t 1 unadmitted 0 0 - - a0 admit
 I a0 2 1 c 0 -
 I a2 3 1 g 0 -
 C - none -
@@ -1130,8 +1130,8 @@ U -
 A 10 HISTORY_INVALID
 A 11 appended
 A 12 appended
-R 3 - 1 unadmitted 1 0 1@0:4 - a2 admit
-R 2 - 1 unadmitted 0 0 - - - admit
+R 3 - xp 1 unadmitted 1 0 1@0:4 - a2 admit
+R 2 - t 1 unadmitted 0 0 - - - admit
 I a0 2 1 c 0 settled
 I a2 3 1 g 0 -
 C - none -
@@ -1144,13 +1144,13 @@ A 14 appended
 A 15 appended
 A 16 appended
 A 17 appended
-R 3 completed 1 settled 1 0 1@0:4 - a2 settled
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 3 failed:f xp 1 settled 1 0 1@0:4 - a2 settled
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a0 2 1 c 0 settled
 I a2 3 1 g 0 -
 I a3 1 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 12 4:1 4 1
 N order@0:3,conflict@3:0,order@4:0
 U -
@@ -1160,31 +1160,31 @@ A 20 appended
 A 21 LOG_FENCED
 O 1 1 0 0
 A 22 appended
-R 3 completed 1 settled 1 0 1@0:4 - a2 settled
-R 2 running 3 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 3 failed:f xp 1 settled 1 0 1@0:4 - a2 settled
+R 2 completed t 3 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a0 2 1 c 0 settled
 I a2 3 1 g 0 -
 I a3 1 1 g 0 -
-C 2 running 3:completed
+C 2 terminal 2:completed
 P 15 6:0 6 1
 N order@0:3,conflict@3:0,order@4:0,order@6:0
-U -
+U 2:3
 O 1 1 0 0
 A 23 appended
 A 24 appended
 A 25 EVENT_MUTATED
 A 26 duplicate
-R 3 completed 1 settled 1 0 1@0:4 - a2 settled
-R 2 running 3 open 0 0 - - - recover
-R 1 running 3 open 0 0 - - a3 recover
+R 3 failed:f xp 1 settled 1 0 1@0:4 - a2 settled
+R 2 completed t 3 terminal 0 0 - - - resume
+R 1 running t 3 open 0 0 - - a3 recover
 I a0 2 1 c 0 settled
 I a2 3 1 g 0 -
 I a3 1 1 g 0 -
-C 1 running 3:completed
+C 1 running 2:completed
 P 17 6:2 6 1
 N order@0:3,conflict@3:0,order@4:0,order@6:0,order@6:1
-U -
+U 2:3
 QS appended
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
@@ -1206,7 +1206,7 @@ A 4 EVENT_MUTATED
 A 5 EVENT_OUT_OF_ORDER
 A 6 HISTORY_INVALID
 A 7 EVENT_MUTATED
-R 2 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -1224,24 +1224,24 @@ QB refused cursor-ahead 2 -
 X
 T log-18
 A 0 appended
-R 2 - 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 1 appended
 A 2 appended
-R 2 - 1 unadmitted 0 0 - i2 - admit
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 3 1:1 2 1
 N -
 U -
 A 3 HISTORY_INVALID
-R 2 - 1 unadmitted 0 0 - i2 - admit
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 3 1:1 2 1
 N -
@@ -1253,17 +1253,17 @@ A 7 EVENT_OUT_OF_ORDER
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - i2 - admit
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 4 1:2 2 1
 N -
 U -
 A 11 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - i2 - admit
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 4 1:2 2 1
 N -
@@ -1285,9 +1285,9 @@ A 1 appended
 A 2 appended
 A 3 appended
 A 4 duplicate
-R 3 - 1 unadmitted 0 0 - i0 - admit
-R 2 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i0 - admit
+R 2 running t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - i2 - admit
 C 2 running -
 P 4 2:0 3 1
 N order@0:1
@@ -1306,14 +1306,14 @@ X
 T log-20
 A 0 appended
 A 1 EVENT_MUTATED
-R 3 - 1 unadmitted 0 0 - i0 - admit
+R 3 - t 1 unadmitted 0 0 - i0 - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 2 EVENT_OUT_OF_ORDER
 A 3 duplicate
-R 3 - 1 unadmitted 0 0 - i0 - admit
+R 3 - t 1 unadmitted 0 0 - i0 - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -1321,8 +1321,8 @@ U -
 A 4 HISTORY_INVALID
 A 5 appended
 A 6 appended
-R 3 failed:r 2 terminal 0 0 - i0 - resume
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 3 failed:a t 2 terminal 0 0 - i0 - resume
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a3 1 1 g 0 -
 C 3 terminal 3:failed
 P 3 1:1 2 1
@@ -1335,8 +1335,8 @@ A 9 EVENT_OUT_OF_ORDER
 A 10 appended
 O 0 0 0 0
 A 11 HISTORY_INVALID
-R 3 failed:r 2 terminal 0 0 - i0 - resume
-R 1 - 1 unadmitted 0 0 - - - admit
+R 3 failed:a t 2 terminal 0 0 - i0 - resume
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a3 1 1 g 1 -
 C 3 terminal 3:failed
 P 4 1:2 2 1
@@ -1344,25 +1344,25 @@ N order@1:0
 U 3:2
 A 12 appended
 A 13 appended
-R 3 failed:r 2 terminal 0 0 - i0 - resume
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 admitted 1 open 0 0 - - - recover
+R 3 failed:a t 2 terminal 0 0 - i0 - resume
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 running t 1 open 0 0 - - - recover
 I a3 1 1 g 1 -
-C 2 admitted 3:failed
+C 2 running 3:failed
 P 6 1:4 2 1
-N order@1:0
+N order@1:0,order@1:3
 U 3:2
 A 14 appended
 A 15 EVENT_OUT_OF_ORDER
 A 16 appended
 A 17 LOG_FENCED
-R 3 running 3 open 0 0 - i0 - recover
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 admitted 1 open 0 0 - i2 - recover
+R 3 running t 3 open 0 0 - i0 - recover
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 running t 1 open 0 0 - i2 - recover
 I a3 1 1 g 1 -
 C 3 running 3:failed
 P 8 1:6 2 1
-N order@1:0
+N order@1:0,order@1:3
 U -
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
@@ -1377,7 +1377,7 @@ QB refused identity-mismatch 8 1:2
 X
 T log-21
 A 0 appended
-R 3 admitted 1 open 0 0 - - - recover
+R 3 admitted t 1 open 0 0 - - - recover
 C 3 admitted -
 P 1 0:0 1 1
 N -
@@ -1386,8 +1386,8 @@ A 1 EVENT_OUT_OF_ORDER
 A 2 appended
 A 3 EVENT_OUT_OF_ORDER
 A 4 appended
-R 3 admitted 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 2@0:1 i0 - admit
+R 3 admitted t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 2@0:1 i0 - admit
 C 3 admitted -
 P 3 0:2 1 1
 N -
@@ -1404,9 +1404,9 @@ O 1 0 0 1
 A 13 appended
 A 14 appended
 A 15 EVENT_OUT_OF_ORDER
-R 3 admitted 1 settled 0 0 1@0:3 - - recover
-R 1 - 1 unadmitted 0 0 2@0:1 i0 - admit
-R 2 admitted 1 open 0 0 - i2 - recover
+R 3 admitted t 1 settled 0 0 1@0:3 - - recover
+R 1 - t 1 unadmitted 0 0 2@0:1 i0 - admit
+R 2 admitted t 1 open 0 0 - i2 - recover
 C 2 admitted -
 P 9 3:1 3 1
 N conflict@1:2
@@ -1427,8 +1427,8 @@ A 0 appended
 O 0 0 0 0
 A 1 appended
 A 2 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 3@0:0 - - admit
-R 2 - 1 unadmitted 0 0 1@0:1 - - admit
+R 3 - t 1 unadmitted 0 0 3@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 1@0:1 - - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -1437,8 +1437,8 @@ A 3 appended
 A 4 appended
 A 5 appended
 A 6 appended
-R 3 - 1 unadmitted 0 0 3@0:0 - - admit
-R 2 - 1 unadmitted 0 0 1@0:1 i1,i2 a3 admit
+R 3 - t 1 unadmitted 0 0 3@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 1@0:1 i1,i2 a3 admit
 I a3 2 1 c 0 -
 C - none -
 P 6 3:1 3 1
@@ -1453,11 +1453,11 @@ A 10 LOG_FENCED
 O 0 0 0 0
 A 11 appended
 A 12 appended
-R 3 - 1 unadmitted 0 0 3@0:0 - - admit
-R 2 - 1 unadmitted 0 0 1@0:1 i1,i2 a3 admit
-R 1 failed:f 1 settled 0 0 1@4:1 - - resume
+R 3 - t 1 unadmitted 0 0 3@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 1@0:1 i1,i2 a3 admit
+R 1 cancelled:u t 1 settled 0 0 1@4:1 - - resume
 I a3 2 1 c 0 -
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 9 4:1 4 1
 N conflict@2:0,order@3:2
 U -
@@ -1479,13 +1479,13 @@ A 1 HISTORY_INVALID
 A 2 LOG_FENCED
 O 0 0 0 0
 A 3 appended
-R 2 - 1 unadmitted 1 0 1@0:1 - - admit
+R 2 - t 1 unadmitted 1 0 1@0:1 - - admit
 C - none -
 P 2 0:1 1 1
 N -
 U -
 A 4 duplicate
-R 2 - 1 unadmitted 1 0 1@0:1 - - admit
+R 2 - t 1 unadmitted 1 0 1@0:1 - - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -1496,22 +1496,22 @@ A 7 LOG_FENCED
 A 8 LOG_FENCED
 O 1 0 0 0
 A 9 appended
-R 2 - 1 unadmitted 1 0 1@0:1 - - admit
+R 2 - t 1 unadmitted 1 0 1@0:1 - - admit
 C - none -
 P 3 0:2 1 1
 N -
 U -
 A 10 appended
-R 2 - 1 unadmitted 1 0 1@0:1 - - admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 1 0 1@0:1 - - admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a0 1 1 g 0 -
 C - none -
 P 4 0:3 1 1
 N -
 U -
 A 11 EVENT_MUTATED
-R 2 - 1 unadmitted 1 0 1@0:1 - - admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 1 0 1@0:1 - - admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a0 1 1 g 0 -
 C - none -
 P 4 0:3 1 1
@@ -1520,8 +1520,8 @@ U -
 O 2 0 0 0
 A 12 EVENT_OUT_OF_ORDER
 A 13 appended
-R 2 - 1 unadmitted 1 0 1@0:1 - - admit
-R 1 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 1 0 1@0:1 - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a0 1 1 g 0 absorbed
 C - none -
 P 5 0:4 1 1
@@ -1529,9 +1529,9 @@ N -
 U -
 A 14 appended
 A 15 appended
-R 2 running 1 settled 1 0 1@0:1 - - resume
-R 1 - 1 unadmitted 0 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 2 running t 1 settled 1 0 1@0:1 - - resume
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 I a0 1 1 g 0 absorbed
 C 2 running -
 P 7 0:6 1 1
@@ -1546,9 +1546,9 @@ A 21 EVENT_OUT_OF_ORDER
 A 22 EVENT_OUT_OF_ORDER
 A 23 EVENT_OUT_OF_ORDER
 A 24 EVENT_OUT_OF_ORDER
-R 2 running 1 settled 1 0 1@0:1 - - resume
-R 1 - 1 unadmitted 0 0 - i1 - admit
-R 3 - 1 unadmitted 1 0 - i2 - admit
+R 2 running t 1 settled 1 0 1@0:1 - - resume
+R 1 - t 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 1 0 - i2 - admit
 I a0 1 1 g 0 absorbed
 C 2 running -
 P 9 0:8 1 1
@@ -1560,17 +1560,17 @@ O 2 0 0 1
 A 27 HISTORY_INVALID
 A 28 LOG_FENCED
 A 29 LOG_FENCED
-R 2 running 1 settled 1 0 1@0:1 - - resume
-R 1 - 1 unadmitted 0 0 - i1 - admit
-R 3 - 1 unadmitted 1 0 - i2 - admit
+R 2 running t 1 settled 1 0 1@0:1 - - resume
+R 1 - t 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 1 0 - i2 - admit
 I a0 1 1 g 0 absorbed
 C 2 running -
 P 11 0:10 1 1
 N order@0:5,conflict@0:9,conflict@0:10
 U -
-R 2 running 1 settled 1 0 1@0:1 - - resume
-R 1 - 1 unadmitted 0 0 - i1 - admit
-R 3 - 1 unadmitted 1 0 - i2 - admit
+R 2 running t 1 settled 1 0 1@0:1 - - resume
+R 1 - t 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 1 0 - i2 - admit
 I a0 1 1 g 0 absorbed
 C 2 running -
 P 11 0:10 1 1
@@ -1590,26 +1590,26 @@ X
 T log-24
 A 0 appended
 A 1 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 2 1:0 2 1
 N -
 U -
 A 2 EVENT_MUTATED
 A 3 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 2 1:0 2 1
 N -
 U -
 A 4 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 2 1:0 2 1
 N -
 U -
 A 5 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 2 1:0 2 1
 N -
@@ -1619,12 +1619,12 @@ A 7 EVENT_OUT_OF_ORDER
 A 8 EVENT_MUTATED
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 2 1:0 2 1
 N -
 U -
-R 3 - 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 2 1:0 2 1
 N -
@@ -1662,16 +1662,16 @@ A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
 A 11 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 4 0:3 1 1
 N -
 U -
 A 12 EVENT_OUT_OF_ORDER
 A 13 duplicate
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 4 0:3 1 1
 N -
@@ -1681,8 +1681,8 @@ O 1 0 0 0
 A 15 appended
 A 16 EVENT_MUTATED
 A 17 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - a3 admit
 I a3 2 1 c 0 -
 C - none -
 P 7 0:6 1 1
@@ -1691,8 +1691,8 @@ U -
 A 18 EVENT_MUTATED
 A 19 LOG_FENCED
 A 20 LOG_FENCED
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - a3 admit
 I a3 2 1 c 0 -
 C - none -
 P 7 0:6 1 1
@@ -1701,8 +1701,8 @@ U -
 O 1 0 1 0
 A 21 EVENT_MUTATED
 A 22 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - a3 admit
 I a3 2 1 c 0 -
 C - none -
 P 7 0:6 1 1
@@ -1710,8 +1710,8 @@ N -
 U -
 A 23 EVENT_MUTATED
 A 24 duplicate
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - a3 admit
 I a3 2 1 c 0 -
 C - none -
 P 7 0:6 1 1
@@ -1720,8 +1720,8 @@ U -
 A 25 appended
 A 26 appended
 A 27 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - a3 admit
 I a3 2 1 c 0 -
 C - none -
 P 10 6:1 2 1
@@ -1730,15 +1730,15 @@ U -
 A 28 appended
 A 29 EVENT_OUT_OF_ORDER
 A 30 LOG_FENCED
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - a3 admit
 I a3 2 1 c 0 -
 C - none -
 P 11 6:2 2 1
 N -
 U -
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 1 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 1 0 - - a3 admit
 I a3 2 1 c 0 -
 C - none -
 P 11 6:2 2 1
@@ -1767,11 +1767,11 @@ A 5 appended
 A 6 HISTORY_INVALID
 A 7 duplicate
 A 8 appended
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 2 paused 3 terminal 1 0 - - - resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 2 completed t 3 terminal 1 0 - - - settled
 I a2 1 1 c 0 -
-C 2 paused -
+C 2 terminal 2:completed
 P 4 1:1 2 1
 N order@1:0
 U 2:3
@@ -1782,12 +1782,12 @@ A 12 EVENT_OUT_OF_ORDER
 A 13 duplicate
 A 14 appended
 A 15 appended
-R 3 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - - a0 admit
-R 2 running 4 settled 1 0 4@4:0 - - resume
+R 3 running t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - a0 admit
+R 2 running t 3 settled 1 0 3@4:0 - - resume
 I a2 1 1 c 0 -
 I a0 1 1 c 0 -
-C 2 running -
+C 2 running 2:completed
 P 8 4:1 3 1
 N order@1:0,order@1:2
 U -
@@ -1800,21 +1800,21 @@ A 21 duplicate
 A 22 EVENT_OUT_OF_ORDER
 A 23 EVENT_OUT_OF_ORDER
 A 24 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - - a0 admit
-R 2 running 4 settled 1 0 4@4:0 - - resume
+R 3 running t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - a0 admit
+R 2 running t 3 settled 1 0 3@4:0 - - resume
 I a2 1 1 c 0 -
 I a0 1 1 c 0 -
-C 2 running -
+C 2 running 2:completed
 P 8 4:1 3 1
 N order@1:0,order@1:2
 U -
-R 3 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - - a0 admit
-R 2 running 4 settled 1 0 4@4:0 - - resume
+R 3 running t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - a0 admit
+R 2 running t 3 settled 1 0 3@4:0 - - resume
 I a2 1 1 c 0 -
 I a0 1 1 c 0 -
-C 2 running -
+C 2 running 2:completed
 P 8 4:1 3 1
 N order@1:0,order@1:2
 U -
@@ -1849,8 +1849,8 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 EVENT_OUT_OF_ORDER
 A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 3 - 1 unadmitted 0 0 1@0:3 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 1@0:3 - - admit
 I a2 1 1 c 0 -
 C - none -
 P 4 0:3 1 1
@@ -1862,15 +1862,15 @@ A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_OUT_OF_ORDER
 A 18 EVENT_OUT_OF_ORDER
 A 19 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 3 - 1 unadmitted 0 0 1@0:3 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 1@0:3 - - admit
 I a2 1 1 c 0 -
 C - none -
 P 4 0:3 1 1
 N conflict@0:0
 U -
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 3 - 1 unadmitted 0 0 1@0:3 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 1@0:3 - - admit
 I a2 1 1 c 0 -
 C - none -
 P 4 0:3 1 1
@@ -1879,7 +1879,7 @@ U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QL ok
+QL NO_RUN_ADMITTED
 QL NO_RUN_ADMITTED
 QP ok
 QP ok
@@ -1892,7 +1892,7 @@ A 0 appended
 A 1 appended
 A 2 EVENT_MUTATED
 A 3 duplicate
-R 2 running 2 open 0 0 - i1 - recover
+R 2 running t 2 open 0 0 - i1 - recover
 C 2 running -
 P 2 0:1 1 1
 N order@0:1
@@ -1914,9 +1914,9 @@ A 17 EVENT_OUT_OF_ORDER
 A 18 EVENT_OUT_OF_ORDER
 A 19 EVENT_OUT_OF_ORDER
 A 20 EVENT_OUT_OF_ORDER
-R 2 running 2 open 1 0 - i1 a1 resume
-R 3 - 1 unadmitted 0 0 - i1 a2 admit
-R 1 running 1 settled 0 0 1@2:2 - - recover
+R 2 running x 2 open 1 0 - i1 a1 resume
+R 3 - t 1 unadmitted 0 0 - i1 a2 admit
+R 1 running t 1 settled 0 0 1@2:2 - - recover
 I a1 2 2 c 0 -
 I a2 3 1 c 0 -
 C 1 running -
@@ -1927,9 +1927,9 @@ A 21 EVENT_OUT_OF_ORDER
 A 22 EVENT_OUT_OF_ORDER
 A 23 EVENT_OUT_OF_ORDER
 A 24 EVENT_OUT_OF_ORDER
-R 2 running 2 open 1 0 - i1 a1 resume
-R 3 - 1 unadmitted 0 0 - i1 a2 admit
-R 1 running 1 settled 0 0 1@2:2 - - recover
+R 2 running x 2 open 1 0 - i1 a1 resume
+R 3 - t 1 unadmitted 0 0 - i1 a2 admit
+R 1 running t 1 settled 0 0 1@2:2 - - recover
 I a1 2 2 c 0 -
 I a2 3 1 c 0 -
 C 1 running -
@@ -1963,41 +1963,41 @@ A 9 EVENT_OUT_OF_ORDER
 A 10 LOG_FENCED
 O 0 0 0 1
 A 11 appended
-R 1 failed:r 1 terminal 1 0 - - - settled
-R 2 paused 3 terminal 0 0 - - - recover
+R 1 cancelled:u t 1 terminal 1 0 - - - settled
+R 2 completed t 3 terminal 0 0 - - - resume
 I a2 1 1 c 0 voided
-C 2 paused 1:failed
+C 2 terminal 2:completed
 P 8 1:2 2 1
 N order@1:0,conflict@1:1,order@1:2
 U 1:1,2:3
 A 12 HISTORY_INVALID
 A 13 appended
 A 14 appended
-R 1 failed:r 1 terminal 1 0 - - a0 settled
-R 2 paused 3 terminal 0 0 - - - recover
+R 1 cancelled:u t 1 terminal 1 0 - - a0 settled
+R 2 completed t 3 terminal 0 0 - - - resume
 I a2 1 1 c 0 voided
 I a0 1 1 c 0 -
-C 2 paused 1:failed
+C 2 terminal 2:completed
 P 10 1:4 2 1
 N order@1:0,conflict@1:1,order@1:2
 U 1:1,2:3
 O 0 0 0 1
 A 15 appended
-R 1 failed:r 1 terminal 1 0 - - a0 settled
-R 2 paused 3 terminal 0 0 - - - recover
-R 3 running 1 open 0 0 - - - recover
+R 1 cancelled:u t 1 terminal 1 0 - - a0 settled
+R 2 completed t 3 terminal 0 0 - - - resume
+R 3 running t 1 open 0 0 - - - recover
 I a2 1 1 c 0 voided
 I a0 1 1 c 0 -
-C 3 running 1:failed
+C 3 running 2:completed
 P 11 1:5 2 1
 N order@1:0,conflict@1:1,order@1:2,order@1:5
 U 1:1,2:3
-R 1 failed:r 1 terminal 1 0 - - a0 settled
-R 2 paused 3 terminal 0 0 - - - recover
-R 3 running 1 open 0 0 - - - recover
+R 1 cancelled:u t 1 terminal 1 0 - - a0 settled
+R 2 completed t 3 terminal 0 0 - - - resume
+R 3 running t 1 open 0 0 - - - recover
 I a2 1 1 c 0 voided
 I a0 1 1 c 0 -
-C 3 running 1:failed
+C 3 running 2:completed
 P 11 1:5 2 1
 N order@1:0,conflict@1:1,order@1:2,order@1:5
 U 1:1,2:3
@@ -2064,8 +2064,8 @@ A 5 EVENT_OUT_OF_ORDER
 A 6 EVENT_OUT_OF_ORDER
 A 7 EVENT_OUT_OF_ORDER
 A 8 EVENT_OUT_OF_ORDER
-R 3 cancelled 3 terminal 0 0 - - - resume
-C 3 terminal 3:cancelled
+R 3 failed:a t 3 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 2 0:1 1 1
 N order@0:1
 U 3:3
@@ -2078,16 +2078,16 @@ A 14 EVENT_OUT_OF_ORDER
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_OUT_OF_ORDER
-R 3 cancelled 3 terminal 0 0 - - - resume
-C 3 terminal 3:cancelled
+R 3 failed:a t 3 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 2 0:1 1 1
 N order@0:1
 U 3:3
 A 18 EVENT_OUT_OF_ORDER
 A 19 EVENT_OUT_OF_ORDER
 A 20 EVENT_OUT_OF_ORDER
-R 3 cancelled 3 terminal 0 0 - - - resume
-C 3 terminal 3:cancelled
+R 3 failed:a t 3 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 2 0:1 1 1
 N order@0:1
 U 3:3
@@ -2095,22 +2095,22 @@ A 21 HISTORY_INVALID
 A 22 EVENT_OUT_OF_ORDER
 A 23 EVENT_OUT_OF_ORDER
 A 24 HISTORY_INVALID
-R 3 cancelled 3 terminal 0 0 - - - resume
-C 3 terminal 3:cancelled
+R 3 failed:a t 3 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 2 0:1 1 1
 N order@0:1
 U 3:3
 A 25 EVENT_OUT_OF_ORDER
 A 26 EVENT_OUT_OF_ORDER
-R 3 cancelled 3 terminal 0 0 - - - resume
-C 3 terminal 3:cancelled
+R 3 failed:a t 3 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 2 0:1 1 1
 N order@0:1
 U 3:3
 O 1 0 0 1
 A 27 appended
-R 3 cancelled 3 terminal 0 0 - - - resume
-C 3 terminal 3:cancelled
+R 3 failed:a t 3 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 5 0:4 1 1
 N order@0:1,conflict@0:2
 U 3:3
@@ -2129,9 +2129,9 @@ T log-32
 A 0 appended
 A 1 appended
 A 2 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 cancelled 1 terminal 0 0 - - - resume
-C 2 terminal 2:cancelled
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:s t 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:1
@@ -2145,9 +2145,9 @@ A 9 EVENT_MUTATED
 A 10 EVENT_OUT_OF_ORDER
 A 11 EVENT_OUT_OF_ORDER
 A 12 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 cancelled 1 terminal 0 0 - - - resume
-C 2 terminal 2:cancelled
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:s t 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:1
@@ -2155,9 +2155,9 @@ A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_OUT_OF_ORDER
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 cancelled 1 terminal 0 0 - - - resume
-C 2 terminal 2:cancelled
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 failed:s t 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:1
 U 2:1
@@ -2172,44 +2172,44 @@ A 23 duplicate
 A 24 appended
 A 25 appended
 A 26 HISTORY_INVALID
-R 3 running 1 open 0 0 - i2 - recover
-R 2 cancelled 1 terminal 0 0 - - a0 resume
-R 1 - 1 unadmitted 0 0 - - a1 admit
+R 3 paused t 1 terminal 0 0 - i2 - recover
+R 2 failed:s t 1 terminal 0 0 - - a0 resume
+R 1 - t 1 unadmitted 0 0 - - a1 admit
 I a1 1 1 g 0 -
 I a3 2 1 c 0 -
 I a0 2 1 g 0 -
-C 3 running 2:cancelled
+C 3 paused 2:failed
 P 7 0:6 1 1
 N order@0:1,order@0:5
-U 2:1
+U 3:1,2:1
 A 27 appended
 A 28 EVENT_MUTATED
-R 3 running 1 open 0 0 - i2 - recover
-R 2 cancelled 1 terminal 0 0 - - a0 resume
-R 1 - 1 unadmitted 0 0 - - a1 admit
+R 3 paused t 1 terminal 0 0 - i2 - recover
+R 2 failed:s t 1 terminal 0 0 - - a0 resume
+R 1 - t 1 unadmitted 0 0 - - a1 admit
 I a1 1 1 g 0 -
 I a3 2 1 c 0 -
 I a0 2 1 g 0 -
-C 3 running 2:cancelled
+C 3 paused 2:failed
 P 8 0:7 1 1
 N order@0:1,order@0:5
-U 2:1
+U 3:1,2:1
 A 29 appended
 A 30 appended
-R 3 running 1 open 0 0 - i2 - recover
-R 2 paused 1 terminal 0 0 - - a0 recover
-R 1 - 1 unadmitted 0 0 - - a1 admit
+R 3 paused t 1 terminal 0 0 - i2 - recover
+R 2 completed t 1 terminal 0 0 - - a0 resume
+R 1 - t 1 unadmitted 0 0 - - a1 admit
 I a1 1 1 g 0 -
 I a3 2 1 c 0 -
 I a0 2 1 g 0 -
-C 2 paused 2:cancelled
+C 2 terminal 2:completed
 P 10 0:9 1 1
 N order@0:1,order@0:5
-U 2:1
+U 3:1,2:1
 QS appended
 QS appended
 QS appended
-QL CHAT_RUN_LIVE
+QL ok
 QL NO_RUN_ADMITTED
 QP ok
 QP ok
@@ -2258,7 +2258,7 @@ U -
 O 1 0 0 1
 A 21 appended
 A 22 appended
-R 2 - 1 unadmitted 1 0 - - - admit
+R 2 - xp 1 unadmitted 1 0 - - - admit
 C - none -
 P 3 0:5 1 1
 N order@0:3,conflict@0:3
@@ -2267,7 +2267,7 @@ A 23 EVENT_OUT_OF_ORDER
 O 1 0 0 1
 A 24 HISTORY_INVALID
 A 25 HISTORY_INVALID
-R 2 - 1 unadmitted 1 0 - - - admit
+R 2 - xp 1 unadmitted 1 0 - - - admit
 C - none -
 P 3 0:5 1 1
 N order@0:3,conflict@0:3
@@ -2276,7 +2276,7 @@ A 26 HISTORY_INVALID
 A 27 EVENT_MUTATED
 A 28 EVENT_OUT_OF_ORDER
 A 29 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 1 0 - - - admit
+R 2 - xp 1 unadmitted 1 0 - - - admit
 C - none -
 P 3 0:5 1 1
 N order@0:3,conflict@0:3
@@ -2297,7 +2297,7 @@ A 0 appended
 O 0 0 0 0
 A 1 LOG_FENCED
 A 2 LOG_FENCED
-R 3 - 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - - a3 admit
 I a3 3 1 c 0 -
 C - none -
 P 1 0:0 1 1
@@ -2309,7 +2309,7 @@ A 4 appended
 A 5 HISTORY_INVALID
 A 6 HISTORY_INVALID
 A 7 appended
-R 3 - 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - - a3 admit
 I a3 3 1 c 0 -
 C - none -
 P 3 0:2 1 1
@@ -2317,8 +2317,8 @@ N -
 U -
 A 8 EVENT_MUTATED
 A 9 appended
-R 3 - 1 unadmitted 0 0 - - a3 admit
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 - - a3 admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a3 3 1 c 0 -
 I a2 2 1 c 0 -
 C - none -
@@ -2328,8 +2328,8 @@ U -
 A 10 HISTORY_INVALID
 O 1 0 0 0
 A 11 appended
-R 3 failed:r 1 terminal 0 0 - - a3 resume
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 3 failed:a t 1 terminal 0 0 - - a3 resume
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a3 3 1 c 0 -
 I a2 2 1 c 0 -
 C 3 terminal 3:failed
@@ -2351,14 +2351,14 @@ T log-35
 A 0 appended
 A 1 appended
 A 2 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 2 0:1 1 1
 N -
 U -
 A 3 EVENT_OUT_OF_ORDER
 A 4 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -2366,7 +2366,7 @@ U -
 A 5 EVENT_OUT_OF_ORDER
 A 6 EVENT_MUTATED
 A 7 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -2386,17 +2386,17 @@ T log-36
 A 0 appended
 A 1 appended
 A 2 appended
-R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a0 1 1 g 0 released
 C - none -
 P 3 0:2 1 1
 N -
 U -
 A 3 appended
-R 2 - 1 unadmitted 0 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 I a0 1 1 g 0 released
 C - none -
 P 4 1:0 2 1
@@ -2406,11 +2406,11 @@ A 4 appended
 A 5 appended
 A 6 appended
 A 7 LOG_FENCED
-R 2 - 1 unadmitted 1 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - - admit
-R 3 failed:f 1 terminal 1 0 - - - settled
+R 2 - xp 1 unadmitted 1 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 3 cancelled t 1 terminal 1 0 - - - settled
 I a0 1 1 g 0 released
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 7 1:3 2 1
 N order@1:1
 U 3:1
@@ -2418,11 +2418,11 @@ O 0 1 0 0
 A 8 appended
 A 9 appended
 A 10 LOG_FENCED
-R 2 - 1 unadmitted 1 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - - admit
-R 3 failed:f 1 settled 1 0 1@3:0 - - settled
+R 2 - xp 1 unadmitted 1 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 3 cancelled t 1 settled 1 0 1@3:0 - - settled
 I a0 1 1 g 0 released
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 10 4:0 4 1
 N order@1:1,order@1:5,conflict@4:0
 U -
@@ -2433,43 +2433,43 @@ A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_MUTATED
 A 15 EVENT_MUTATED
 A 16 EVENT_MUTATED
-R 2 - 1 unadmitted 1 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 3 failed:f 1 settled 1 0 1@3:0 - - settled
+R 2 - xp 1 unadmitted 1 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 3 cancelled t 1 settled 1 0 1@3:0 - - settled
 I a0 1 1 g 0 released
 I a2 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 11 4:1 4 1
 N order@1:1,order@1:5,conflict@4:0
 U -
 A 17 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 1 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 3 failed:f 1 settled 1 0 1@3:0 - - settled
+R 2 - xp 1 unadmitted 1 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 3 cancelled t 1 settled 1 0 1@3:0 - - settled
 I a0 1 1 g 0 released
 I a2 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 11 4:1 4 1
 N order@1:1,order@1:5,conflict@4:0
 U -
 A 18 EVENT_MUTATED
 A 19 EVENT_MUTATED
-R 2 - 1 unadmitted 1 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 3 failed:f 1 settled 1 0 1@3:0 - - settled
+R 2 - xp 1 unadmitted 1 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 3 cancelled t 1 settled 1 0 1@3:0 - - settled
 I a0 1 1 g 0 released
 I a2 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 11 4:1 4 1
 N order@1:1,order@1:5,conflict@4:0
 U -
 A 20 EVENT_MUTATED
-R 2 - 1 unadmitted 1 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 3 failed:f 1 settled 1 0 1@3:0 - - settled
+R 2 - xp 1 unadmitted 1 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 3 cancelled t 1 settled 1 0 1@3:0 - - settled
 I a0 1 1 g 0 released
 I a2 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 11 4:1 4 1
 N order@1:1,order@1:5,conflict@4:0
 U -
@@ -2477,12 +2477,12 @@ A 21 EVENT_MUTATED
 A 22 EVENT_MUTATED
 O 0 2 1 0
 A 23 EVENT_MUTATED
-R 2 - 1 unadmitted 1 0 1@0:0 - - admit
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 3 failed:f 1 settled 1 0 1@3:0 - - settled
+R 2 - xp 1 unadmitted 1 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 3 cancelled t 1 settled 1 0 1@3:0 - - settled
 I a0 1 1 g 0 released
 I a2 1 1 g 0 -
-C 3 terminal 3:failed
+C 3 terminal 3:cancelled
 P 11 4:1 4 1
 N order@1:1,order@1:5,conflict@4:0
 U -
@@ -2528,8 +2528,8 @@ A 6 EVENT_MUTATED
 A 7 EVENT_OUT_OF_ORDER
 A 8 duplicate
 A 9 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - i0 a1 admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i0 a1 admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 I a1 2 1 g 0 -
 C - none -
 P 4 0:3 1 1
@@ -2539,16 +2539,16 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 LOG_FENCED
 O 1 0 0 0
 A 12 appended
-R 2 - 1 unadmitted 0 0 - i0 a1 admit
-R 3 running 1 open 1 0 - - - resume
+R 2 - t 1 unadmitted 0 0 - i0 a1 admit
+R 3 running t 1 open 1 0 - - - resume
 I a1 2 1 g 0 -
 C 3 running -
 P 6 0:5 1 1
 N order@0:5
 U -
 A 13 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - i0 a1 admit
-R 3 running 1 open 1 0 - - - resume
+R 2 - t 1 unadmitted 0 0 - i0 a1 admit
+R 3 running t 1 open 1 0 - - - resume
 I a1 2 1 g 0 -
 C 3 running -
 P 6 0:5 1 1
@@ -2570,7 +2570,7 @@ O 0 0 0 0
 A 0 appended
 A 1 EVENT_OUT_OF_ORDER
 A 2 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -2580,8 +2580,8 @@ A 4 appended
 A 5 appended
 A 6 appended
 A 7 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 3@0:3 - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 1 0 3@0:3 - a3 admit
 I a3 1 1 g 0 -
 C - none -
 P 6 0:5 1 1
@@ -2595,8 +2595,8 @@ A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_MUTATED
 A 15 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 3@0:3 - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 1 0 3@0:3 - a3 admit
 I a3 1 1 g 0 -
 C - none -
 P 6 0:5 1 1
@@ -2605,15 +2605,15 @@ U -
 A 16 EVENT_OUT_OF_ORDER
 A 17 duplicate
 A 18 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 3@0:3 - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 1 0 3@0:3 - a3 admit
 I a3 1 1 g 0 -
 C - none -
 P 6 0:5 1 1
 N -
 U -
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 3@0:3 - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 1 0 3@0:3 - a3 admit
 I a3 1 1 g 0 -
 C - none -
 P 6 0:5 1 1
@@ -2640,8 +2640,8 @@ A 5 EVENT_OUT_OF_ORDER
 A 6 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 7 appended
-R 1 running 2 open 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 - - - admit
+R 1 running t 2 open 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a2 3 1 c 0 released
 C 1 running -
 P 4 0:3 1 1
@@ -2661,26 +2661,26 @@ X
 T log-41
 A 0 appended
 A 1 appended
-R 1 paused 1 terminal 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 1@0:1 - - admit
-C 1 paused -
+R 1 completed t 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 1@0:1 - - admit
+C 1 terminal 1:completed
 P 2 0:1 1 1
 N order@0:0
 U 1:1
 A 2 appended
 A 3 EVENT_OUT_OF_ORDER
-R 1 paused 1 terminal 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 1@0:1 - - admit
-C 1 paused -
+R 1 completed t 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 1@0:1 - - admit
+C 1 terminal 1:completed
 P 3 0:2 1 1
 N order@0:0
 U 1:1
 A 4 duplicate
 A 5 appended
 A 6 HISTORY_INVALID
-R 1 paused 1 terminal 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 1@0:1 - - admit
-C 1 paused -
+R 1 completed t 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 1@0:1 - - admit
+C 1 terminal 1:completed
 P 4 0:3 1 1
 N order@0:0
 U 1:1
@@ -2704,7 +2704,7 @@ U -
 A 1 appended
 A 2 LOG_FENCED
 A 3 LOG_FENCED
-R 2 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -2723,8 +2723,8 @@ X
 T log-43
 A 0 appended
 A 1 appended
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a2 2 1 c 0 -
 C - none -
 P 2 0:1 1 1
@@ -2733,9 +2733,9 @@ U -
 A 2 EVENT_MUTATED
 O 0 0 0 0
 A 3 appended
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 2 - 1 unadmitted 0 0 - - a2 admit
-R 3 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a2 2 1 c 0 -
 C - none -
 P 3 0:2 1 1
@@ -2747,9 +2747,9 @@ A 6 appended
 A 7 EVENT_OUT_OF_ORDER
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 2 - 1 unadmitted 0 0 - - a2 admit
-R 3 running 2 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
+R 3 running t 2 open 0 0 - - - recover
 I a2 2 1 c 0 -
 C 3 running -
 P 4 0:3 1 1
@@ -2785,7 +2785,7 @@ A 9 LOG_FENCED
 O 0 0 0 0
 A 10 appended
 A 11 duplicate
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a3 1 1 g 0 -
 C - none -
 P 6 0:5 1 1
@@ -2794,7 +2794,7 @@ U -
 A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_MUTATED
 A 14 EVENT_MUTATED
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a3 1 1 g 0 -
 C - none -
 P 6 0:5 1 1
@@ -2805,9 +2805,9 @@ A 16 LOG_FENCED
 O 0 0 1 0
 A 17 appended
 A 18 appended
-R 1 - 1 unadmitted 0 0 - - a3 admit
-R 2 running 1 open 0 0 - - - recover
-R 3 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a3 admit
+R 2 running t 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 1 0 - - - admit
 I a3 1 1 g 0 -
 C 2 running -
 P 8 0:7 1 1
@@ -2823,9 +2823,9 @@ A 23 appended
 A 24 appended
 A 25 EVENT_OUT_OF_ORDER
 A 26 appended
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 running 1 open 0 0 - - - recover
-R 3 - 1 unadmitted 1 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 running t 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 1 0 - - a2 admit
 I a3 1 1 g 1 voided
 I a2 3 1 g 0 -
 C 2 running -
@@ -2835,18 +2835,18 @@ U -
 A 27 EVENT_OUT_OF_ORDER
 A 28 appended
 A 29 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 running 1 open 0 0 - - - recover
-R 3 - 1 unadmitted 1 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 running t 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 1 0 - - a2 admit
 I a3 1 1 g 1 voided
 I a2 3 1 g 0 -
 C 2 running -
 P 13 4:4 2 1
 N order@0:6
 U -
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 running 1 open 0 0 - - - recover
-R 3 - 1 unadmitted 1 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 running t 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 1 0 - - a2 admit
 I a3 1 1 g 1 voided
 I a2 3 1 g 0 -
 C 2 running -
@@ -2869,16 +2869,16 @@ A 0 appended
 A 1 appended
 A 2 LOG_FENCED
 A 3 LOG_FENCED
-R 2 running 1 open 0 0 - - - recover
-C 2 running -
+R 2 paused t 1 terminal 0 0 - - - recover
+C 2 paused -
 P 2 0:1 1 1
 N order@0:0
-U -
-R 2 running 1 open 0 0 - - - recover
-C 2 running -
+U 2:1
+R 2 paused t 1 terminal 0 0 - - - recover
+C 2 paused -
 P 2 0:1 1 1
 N order@0:0
-U -
+U 2:1
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
@@ -2892,19 +2892,19 @@ QB refused identity-mismatch 2 0:1
 X
 T log-46
 A 0 appended
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 1 HISTORY_INVALID
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 2 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -2912,7 +2912,7 @@ U -
 A 3 EVENT_OUT_OF_ORDER
 A 4 duplicate
 A 5 duplicate
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -2921,13 +2921,13 @@ A 6 EVENT_OUT_OF_ORDER
 A 7 EVENT_OUT_OF_ORDER
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 10 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -2937,7 +2937,7 @@ A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_OUT_OF_ORDER
 A 15 LOG_FENCED
-R 1 - 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -2951,16 +2951,16 @@ O 0 1 0 1
 A 20 EVENT_OUT_OF_ORDER
 A 21 EVENT_OUT_OF_ORDER
 A 22 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 - - - admit
-R 3 - 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - a1 admit
 I a1 3 1 c 0 -
 C - none -
 P 5 0:8 1 1
 N order@0:3,conflict@0:3,order@0:8,conflict@0:8
 U -
 A 23 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 - - - admit
-R 3 - 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - a1 admit
 I a1 3 1 c 0 -
 C - none -
 P 5 0:8 1 1
@@ -2968,8 +2968,8 @@ N order@0:3,conflict@0:3,order@0:8,conflict@0:8
 U -
 A 24 EVENT_OUT_OF_ORDER
 A 25 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 - - - admit
-R 3 - 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - a1 admit
 I a1 3 1 c 0 -
 C - none -
 P 5 0:8 1 1
@@ -3011,18 +3011,18 @@ U -
 A 12 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 13 appended
-R 3 - 1 unadmitted 0 0 - - a1 admit
-R 1 paused 1 terminal 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - - a1 admit
+R 1 completed t 1 terminal 0 0 - - - resume
 I a1 3 1 c 0 -
-C 1 paused -
+C 1 terminal 1:completed
 P 4 0:3 1 1
 N order@0:3
 U 1:1
 A 14 EVENT_MUTATED
-R 3 - 1 unadmitted 0 0 - - a1 admit
-R 1 paused 1 terminal 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - - a1 admit
+R 1 completed t 1 terminal 0 0 - - - resume
 I a1 3 1 c 0 -
-C 1 paused -
+C 1 terminal 1:completed
 P 4 0:3 1 1
 N order@0:3
 U 1:1
@@ -3032,30 +3032,30 @@ O 0 0 0 0
 A 16 appended
 A 17 appended
 A 18 EVENT_MUTATED
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 paused 1 terminal 0 0 - - - recover
-R 2 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 completed t 1 terminal 0 0 - - - resume
+R 2 - x 1 unadmitted 1 0 - - - admit
 I a1 3 1 c 0 voided
-C 1 paused -
+C 1 terminal 1:completed
 P 7 0:6 1 1
 N order@0:3
 U 1:1
 A 19 appended
 A 20 appended
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 paused 1 settled 0 0 1@0:7 i1 - recover
-R 2 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 completed t 1 settled 0 0 1@0:7 i1 - resume
+R 2 - x 1 unadmitted 1 0 - - - admit
 I a1 3 1 c 0 voided
-C 1 paused -
+C 1 terminal 1:completed
 P 9 0:8 1 1
 N order@0:3
 U -
 A 21 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 paused 1 settled 0 0 1@0:7 i1 - recover
-R 2 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 completed t 1 settled 0 0 1@0:7 i1 - resume
+R 2 - x 1 unadmitted 1 0 - - - admit
 I a1 3 1 c 0 voided
-C 1 paused -
+C 1 terminal 1:completed
 P 9 0:8 1 1
 N order@0:3
 U -
@@ -3080,9 +3080,9 @@ A 5 appended
 A 6 EVENT_MUTATED
 A 7 appended
 A 8 HISTORY_INVALID
-R 3 failed:r 1 terminal 0 0 - - a3 resume
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 3 failed:a t 1 terminal 0 0 - - a3 resume
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 I a3 3 1 g 0 -
 I a0 1 1 c 1 -
 C 3 terminal 3:failed
@@ -3090,9 +3090,9 @@ P 7 1:2 2 1
 N order@1:1
 U 3:1
 A 9 appended
-R 3 failed:r 1 settled 0 0 1@1:3 - a3 resume
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 3 failed:a t 1 settled 0 0 1@1:3 - a3 resume
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 I a3 3 1 g 0 -
 I a0 1 1 c 1 -
 C 3 terminal 3:failed
@@ -3101,9 +3101,9 @@ N order@1:1
 U -
 A 10 EVENT_OUT_OF_ORDER
 A 11 EVENT_OUT_OF_ORDER
-R 3 failed:r 1 settled 0 0 1@1:3 - a3 resume
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 3 failed:a t 1 settled 0 0 1@1:3 - a3 resume
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 I a3 3 1 g 0 -
 I a0 1 1 c 1 -
 C 3 terminal 3:failed
@@ -3113,9 +3113,9 @@ U -
 A 12 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 13 appended
-R 3 failed:r 1 settled 0 0 1@1:3 - a3 resume
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 3 failed:a t 1 settled 0 0 1@1:3 - a3 resume
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 I a3 3 1 g 0 -
 I a0 1 1 c 1 -
 C 3 terminal 3:failed
@@ -3124,9 +3124,9 @@ N order@1:1
 U -
 A 14 duplicate
 A 15 appended
-R 3 failed:r 1 settled 0 0 1@1:3 - a3 resume
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 3 failed:a t 1 settled 0 0 1@1:3 - a3 resume
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 I a3 3 1 g 0 -
 I a0 1 1 c 1 -
 C 3 terminal 3:failed
@@ -3147,60 +3147,60 @@ X
 T log-49
 A 0 appended
 A 1 duplicate
-R 2 completed 1 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 1 0:0 1 1
 N order@0:0
 U 2:1
 A 2 appended
-R 2 completed 1 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 2 0:1 1 1
 N order@0:0
 U 2:1
 A 3 appended
 A 4 appended
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 1 0 - - - admit
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 1 0 - - - admit
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:0
 U 2:1
 A 5 duplicate
 A 6 EVENT_OUT_OF_ORDER
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 1 0 - - - admit
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 1 0 - - - admit
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:0
 U 2:1
 A 7 EVENT_OUT_OF_ORDER
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 1 0 - - - admit
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 1 0 - - - admit
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:0
 U 2:1
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 1 0 - - - admit
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 1 0 - - - admit
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:0
 U 2:1
 A 11 EVENT_OUT_OF_ORDER
 A 12 HISTORY_INVALID
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 1 0 - - - admit
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 1 0 - - - admit
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:0
 U 2:1
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 1 0 - - - admit
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 1 0 - - - admit
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:0
 U 2:1
@@ -3224,9 +3224,9 @@ A 3 appended
 A 4 appended
 A 5 EVENT_OUT_OF_ORDER
 A 6 appended
-R 2 failed:r 1 terminal 0 0 - - a3 resume
+R 2 cancelled:u t 1 terminal 0 0 - - a3 resume
 I a3 2 1 g 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 4 0:3 1 1
 N order@0:3
 U 2:1
@@ -3234,9 +3234,9 @@ O 0 0 0 0
 A 7 EVENT_OUT_OF_ORDER
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
-R 2 failed:r 1 terminal 0 0 - - a3 resume
+R 2 cancelled:u t 1 terminal 0 0 - - a3 resume
 I a3 2 1 g 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 4 0:3 1 1
 N order@0:3
 U 2:1
@@ -3246,10 +3246,10 @@ A 11 appended
 A 12 HISTORY_INVALID
 A 13 appended
 A 14 appended
-R 2 failed:r 1 terminal 0 0 - - a3 resume
-R 3 - 1 unadmitted 0 0 1@0:6 - - admit
+R 2 cancelled:u t 1 terminal 0 0 - - a3 resume
+R 3 - t 1 unadmitted 0 0 1@0:6 - - admit
 I a3 2 1 g 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 8 0:7 1 1
 N order@0:3,conflict@0:4
 U 2:1
@@ -3298,12 +3298,12 @@ A 18 appended
 A 19 duplicate
 A 20 HISTORY_INVALID
 A 21 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 1@0:9 - a3 admit
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 3 completed 1 terminal 0 0 - i2 - resume
+R 1 - t 1 unadmitted 1 0 1@0:9 - a3 admit
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 3 failed:g t 1 terminal 0 0 - i2 - resume
 I a3 1 1 g 0 -
 I a1 2 1 c 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 10 0:9 1 1
 N conflict@0:1,conflict@0:4,conflict@0:6,order@0:8
 U 3:1
@@ -3350,7 +3350,7 @@ A 10 LOG_FENCED
 O 2 0 1 0
 A 11 EVENT_OUT_OF_ORDER
 A 12 LOG_FENCED
-R 2 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 0 0 - - a0 admit
 I a0 2 1 c 0 -
 C - none -
 P 4 1:2 2 1
@@ -3365,8 +3365,8 @@ A 17 appended
 A 18 appended
 A 19 EVENT_OUT_OF_ORDER
 A 20 appended
-R 2 - 1 unadmitted 0 0 - - a2 admit
-R 1 - 1 unadmitted 0 0 1@3:2 - a1 admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 1@3:2 - a1 admit
 I a0 2 1 c 0 -
 I a1 1 1 c 0 -
 I a2 2 1 c 0 -
@@ -3381,9 +3381,9 @@ A 24 EVENT_MUTATED
 A 25 EVENT_OUT_OF_ORDER
 A 26 EVENT_OUT_OF_ORDER
 A 27 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - - a2 admit
-R 1 - 1 unadmitted 0 0 1@3:2 - a1 admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 1@3:2 - a1 admit
+R 3 - xp 1 unadmitted 1 0 - - - admit
 I a0 2 1 c 0 -
 I a1 1 1 c 0 -
 I a2 2 1 c 0 -
@@ -3394,9 +3394,9 @@ U -
 A 28 LOG_FENCED
 O 2 0 1 0
 A 29 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - - a2 admit
-R 1 - 1 unadmitted 0 0 1@3:2 - a1 admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 1@3:2 - a1 admit
+R 3 - xp 1 unadmitted 1 0 - - - admit
 I a0 2 1 c 0 -
 I a1 1 1 c 0 -
 I a2 2 1 c 0 -
@@ -3404,9 +3404,9 @@ C - none -
 P 9 3:4 3 1
 N -
 U -
-R 2 - 1 unadmitted 0 0 - - a2 admit
-R 1 - 1 unadmitted 0 0 1@3:2 - a1 admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 1@3:2 - a1 admit
+R 3 - xp 1 unadmitted 1 0 - - - admit
 I a0 2 1 c 0 -
 I a1 1 1 c 0 -
 I a2 2 1 c 0 -
@@ -3442,14 +3442,14 @@ O 0 0 0 0
 A 12 appended
 A 13 appended
 A 14 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 1 0 - - a0 admit
-R 1 failed:r 1 terminal 0 0 - - - resume
-R 3 running 3 open 0 0 - - - recover
+R 2 - x 1 unadmitted 1 0 - - a0 admit
+R 1 failed:a t 1 terminal 0 0 - - - resume
+R 3 paused t 3 terminal 0 0 - - - recover
 I a0 2 1 g 0 -
-C 3 running 1:failed
+C 3 paused 1:failed
 P 10 0:9 1 1
 N order@0:5,order@0:6
-U 1:1
+U 1:1,3:3
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
 QS SETTLEMENT_WITHOUT_RUN
@@ -3474,9 +3474,9 @@ A 6 EVENT_MUTATED
 A 7 appended
 A 8 appended
 A 9 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 - - - admit
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - xp 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a2 1 1 c 0 absorbed
 I a3 2 1 g 0 -
 C - none -
@@ -3485,9 +3485,9 @@ N -
 U -
 A 10 EVENT_OUT_OF_ORDER
 A 11 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 - - - admit
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - xp 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a2 1 1 c 1 absorbed
 I a3 2 1 g 0 -
 C - none -
@@ -3497,9 +3497,9 @@ U -
 A 12 appended
 A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 - - - admit
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - xp 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a2 1 1 c 1 absorbed
 I a3 2 1 g 0 -
 C - none -
@@ -3509,9 +3509,9 @@ U -
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 - - - admit
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - xp 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a2 1 1 c 1 absorbed
 I a3 2 1 g 0 -
 C - none -
@@ -3521,9 +3521,9 @@ U -
 A 18 EVENT_OUT_OF_ORDER
 A 19 EVENT_OUT_OF_ORDER
 A 20 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 - - - admit
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - xp 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a2 1 1 c 1 absorbed
 I a3 2 1 g 0 -
 C - none -
@@ -3537,9 +3537,9 @@ A 24 EVENT_OUT_OF_ORDER
 O 3 0 0 1
 A 25 HISTORY_INVALID
 A 26 duplicate
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 1 - 1 unadmitted 1 0 - - - admit
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 1 - xp 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a2 1 1 c 1 absorbed
 I a3 2 1 g 0 -
 C - none -
@@ -3565,7 +3565,7 @@ A 3 EVENT_OUT_OF_ORDER
 A 4 EVENT_OUT_OF_ORDER
 A 5 EVENT_OUT_OF_ORDER
 A 6 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -3577,8 +3577,8 @@ O 0 0 0 0
 A 9 HISTORY_INVALID
 A 10 appended
 A 11 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 3 - 1 unadmitted 0 0 1@0:2 - a1 admit
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
+R 3 - t 1 unadmitted 0 0 1@0:2 - a1 admit
 I a1 3 1 c 0 -
 C - none -
 P 3 0:2 1 1
@@ -3591,8 +3591,8 @@ A 14 LOG_FENCED
 O 1 0 0 0
 A 15 appended
 A 16 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 1@0:0 - - admit
-R 3 - 1 unadmitted 0 0 1@0:2 i1 - admit
+R 1 - t 1 unadmitted 0 0 1@0:0 - - admit
+R 3 - t 1 unadmitted 0 0 1@0:2 i1 - admit
 I a1 3 1 c 0 absorbed
 C - none -
 P 5 1:1 2 1
@@ -3671,47 +3671,47 @@ A 10 LOG_FENCED
 O 0 0 0 0
 A 11 EVENT_OUT_OF_ORDER
 A 12 EVENT_OUT_OF_ORDER
-R 2 failed:f 2 settled 0 0 2@0:2 - - resume
-R 1 running 1 open 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 - - a3 admit
+R 2 cancelled t 2 settled 0 0 2@0:2 - - resume
+R 1 running t 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - - a3 admit
 I a3 3 1 c 0 -
-C 1 running 2:failed
+C 1 running 2:cancelled
 P 4 0:3 1 1
 N order@0:0,order@0:1
 U -
 A 13 EVENT_OUT_OF_ORDER
 A 14 HISTORY_INVALID
-R 2 failed:f 2 settled 0 0 2@0:2 - - resume
-R 1 running 1 open 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 - - a3 admit
+R 2 cancelled t 2 settled 0 0 2@0:2 - - resume
+R 1 running t 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - - a3 admit
 I a3 3 1 c 0 -
-C 1 running 2:failed
+C 1 running 2:cancelled
 P 4 0:3 1 1
 N order@0:0,order@0:1
 U -
 A 15 EVENT_OUT_OF_ORDER
 A 16 duplicate
 A 17 LOG_FENCED
-R 2 failed:f 2 settled 0 0 2@0:2 - - resume
-R 1 running 1 open 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 - - a3 admit
+R 2 cancelled t 2 settled 0 0 2@0:2 - - resume
+R 1 running t 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - - a3 admit
 I a3 3 1 c 0 -
-C 1 running 2:failed
+C 1 running 2:cancelled
 P 4 0:3 1 1
 N order@0:0,order@0:1
 U -
 O 0 0 0 0
 A 18 appended
 A 19 appended
-R 2 failed:f 2 settled 0 0 2@0:2 - a0 resume
-R 1 running 1 open 0 0 - - - recover
-R 3 running 3 open 0 0 - - a3 recover
+R 2 cancelled t 2 settled 0 0 2@0:2 - a0 resume
+R 1 running t 1 open 0 0 - - - recover
+R 3 paused t 3 terminal 0 0 - - a3 recover
 I a3 3 1 c 0 -
 I a0 2 2 g 0 -
-C 3 running 2:failed
+C 3 paused 2:cancelled
 P 7 0:6 1 1
 N order@0:0,order@0:1,order@0:6
-U -
+U 3:3
 QS appended
 QS appended
 QS appended
@@ -3725,7 +3725,7 @@ QB refused cursor-ahead 7 -
 X
 T log-58
 A 0 appended
-R 3 - 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 - - a2 admit
 I a2 3 1 c 0 -
 C - none -
 P 1 0:0 1 1
@@ -3735,15 +3735,15 @@ A 1 LOG_FENCED
 A 2 LOG_FENCED
 O 0 0 0 0
 A 3 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 - - a2 admit
 I a2 3 1 c 0 -
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 4 appended
-R 3 - 1 unadmitted 0 0 - - a2 admit
-R 1 - 1 unadmitted 0 0 - i0 - admit
+R 3 - t 1 unadmitted 0 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 - i0 - admit
 I a2 3 1 c 0 -
 C - none -
 P 2 0:1 1 1
@@ -3751,11 +3751,11 @@ N -
 U -
 A 5 appended
 A 6 appended
-R 3 - 1 unadmitted 0 0 - - a2 admit
-R 1 - 1 unadmitted 1 0 - i0 - admit
-R 2 failed:f 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 - - a2 admit
+R 1 - t 1 unadmitted 1 0 - i0 - admit
+R 2 cancelled:u t 1 terminal 0 0 - - - resume
 I a2 3 1 c 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 4 1:1 2 1
 N order@1:1
 U 2:1
@@ -3792,7 +3792,7 @@ A 10 EVENT_OUT_OF_ORDER
 A 11 duplicate
 A 12 EVENT_OUT_OF_ORDER
 A 13 LOG_FENCED
-R 1 - 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 0 0 - - a1 admit
 I a1 1 1 g 0 -
 C - none -
 P 3 0:2 1 1
@@ -3804,39 +3804,39 @@ A 15 appended
 A 16 duplicate
 A 17 HISTORY_INVALID
 A 18 appended
-R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 running 2 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - a1 admit
+R 3 running t 1 open 0 0 - - - recover
 I a1 1 1 g 0 -
-C 3 running -
+C 3 running 3:completed
 P 6 0:5 1 1
 N conflict@0:1,order@0:4
 U -
 A 19 appended
 A 20 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 running 2 open 0 0 - - - recover
-R 2 paused 1 terminal 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - a1 admit
+R 3 running t 1 open 0 0 - - - recover
+R 2 completed t 1 terminal 0 0 - - - resume
 I a1 1 1 g 0 -
-C 2 paused -
+C 2 terminal 2:completed
 P 7 0:6 1 1
 N conflict@0:1,order@0:4,order@0:6
 U 2:1
 A 21 EVENT_OUT_OF_ORDER
 A 22 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 running 2 open 0 0 - - - recover
-R 2 paused 1 terminal 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - a1 admit
+R 3 running t 1 open 0 0 - - - recover
+R 2 completed t 1 terminal 0 0 - - - resume
 I a1 1 1 g 0 -
-C 2 paused -
+C 2 terminal 2:completed
 P 7 0:6 1 1
 N conflict@0:1,order@0:4,order@0:6
 U 2:1
 A 23 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 running 2 open 0 0 - - - recover
-R 2 paused 1 terminal 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - a1 admit
+R 3 running t 1 open 0 0 - - - recover
+R 2 completed t 1 terminal 0 0 - - - resume
 I a1 1 1 g 0 -
-C 2 paused -
+C 2 terminal 2:completed
 P 7 0:6 1 1
 N conflict@0:1,order@0:4,order@0:6
 U 2:1
@@ -3855,7 +3855,7 @@ T log-60
 A 0 appended
 A 1 EVENT_OUT_OF_ORDER
 A 2 LOG_FENCED
-R 2 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -3871,8 +3871,8 @@ A 9 EVENT_OUT_OF_ORDER
 A 10 appended
 A 11 HISTORY_INVALID
 A 12 LOG_FENCED
-R 2 - 1 unadmitted 0 0 - - - admit
-R 3 admitted 1 open 0 0 - - a2 recover
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 3 admitted t 1 open 0 0 - - a2 recover
 I a2 3 1 g 0 -
 C 3 admitted -
 P 6 0:5 1 1
@@ -3883,9 +3883,9 @@ A 13 appended
 A 14 appended
 A 15 HISTORY_INVALID
 A 16 appended
-R 2 - 1 unadmitted 0 0 - i2 - admit
-R 3 admitted 1 open 0 0 - - a2 recover
-R 1 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
+R 3 admitted t 1 open 0 0 - - a2 recover
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a2 3 1 g 0 -
 I a1 1 1 g 0 released
 C 3 admitted -
@@ -3895,9 +3895,9 @@ U -
 A 17 appended
 A 18 EVENT_OUT_OF_ORDER
 A 19 appended
-R 2 - 1 unadmitted 0 0 - i2 - admit
-R 3 admitted 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
+R 3 admitted t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a2 3 1 g 0 voided
 I a1 1 1 g 0 released
 C 3 admitted -
@@ -3905,9 +3905,9 @@ P 11 0:10 1 1
 N order@0:9
 U -
 A 20 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - i2 - admit
-R 3 admitted 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
+R 3 admitted t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a2 3 1 g 0 voided
 I a1 1 1 g 0 released
 C 3 admitted -
@@ -3936,8 +3936,8 @@ A 2 appended
 A 3 LOG_FENCED
 O 0 0 0 0
 A 4 appended
-R 3 - 1 unadmitted 0 0 - - a1 admit
-R 1 - 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 0 0 - i1 - admit
 I a1 3 1 g 0 -
 C - none -
 P 3 0:2 1 1
@@ -3949,8 +3949,8 @@ A 7 EVENT_MUTATED
 O 0 0 1 0
 A 8 EVENT_MUTATED
 A 9 EVENT_MUTATED
-R 3 - 1 unadmitted 0 0 - - a1 admit
-R 1 - 1 unadmitted 0 0 - i1 - admit
+R 3 - t 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 0 0 - i1 - admit
 I a1 3 1 g 0 -
 C - none -
 P 3 0:2 1 1
@@ -3969,7 +3969,7 @@ QB batch 3 4 4 0:1
 X
 T log-62
 A 0 appended
-R 3 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -3984,8 +3984,8 @@ A 7 appended
 A 8 appended
 A 9 appended
 A 10 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 3@0:3 - - admit
-R 1 - 1 unadmitted 1 0 - - a0 admit
+R 3 - t 1 unadmitted 0 0 3@0:3 - - admit
+R 1 - t 1 unadmitted 1 0 - - a0 admit
 I a3 1 1 c 0 -
 I a0 1 1 g 0 -
 C - none -
@@ -3995,9 +3995,9 @@ U -
 A 11 appended
 A 12 appended
 A 13 HISTORY_INVALID
-R 3 - 1 unadmitted 1 0 3@0:3 - - admit
-R 1 - 1 unadmitted 1 0 - - a0 admit
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 1 0 3@0:3 - - admit
+R 1 - t 1 unadmitted 1 0 - - a0 admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a3 1 1 c 0 -
 I a0 1 1 g 0 -
 I a2 2 1 c 0 -
@@ -4006,9 +4006,9 @@ P 10 0:9 1 1
 N -
 U -
 A 14 appended
-R 3 - 1 unadmitted 1 0 3@0:3 - - admit
-R 1 - 1 unadmitted 1 0 - i2 a0 admit
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 1 0 3@0:3 - - admit
+R 1 - t 1 unadmitted 1 0 - i2 a0 admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a3 1 1 c 0 -
 I a0 1 1 g 0 -
 I a2 2 1 c 0 -
@@ -4020,9 +4020,9 @@ A 15 HISTORY_INVALID
 A 16 appended
 A 17 appended
 A 18 LOG_FENCED
-R 3 - 1 unadmitted 1 0 3@0:3 - - admit
-R 1 - 1 unadmitted 1 0 - i2 a0 admit
-R 2 - 1 unadmitted 0 0 1@4:0 - a2 admit
+R 3 - t 1 unadmitted 1 0 3@0:3 - - admit
+R 1 - t 1 unadmitted 1 0 - i2 a0 admit
+R 2 - t 1 unadmitted 0 0 1@4:0 - a2 admit
 I a3 1 1 c 0 -
 I a0 1 1 g 0 -
 I a2 2 1 c 0 -
@@ -4032,26 +4032,26 @@ N -
 U -
 O 0 1 0 0
 A 19 appended
-R 3 - 1 unadmitted 1 0 3@0:3 - - admit
-R 1 - 1 unadmitted 1 0 - i2 a0 admit
-R 2 cancelled 1 settled 0 0 1@4:0 - - resume
+R 3 - t 1 unadmitted 1 0 3@0:3 - - admit
+R 1 - t 1 unadmitted 1 0 - i2 a0 admit
+R 2 failed:s t 1 settled 0 0 1@4:0 - - resume
 I a3 1 1 c 0 -
 I a0 1 1 g 0 -
 I a2 2 1 c 1 -
-C 2 terminal 2:cancelled
+C 2 terminal 2:failed
 P 15 5:2 5 1
 N order@5:1,order@5:2
 U -
 A 20 appended
 A 21 HISTORY_INVALID
 A 22 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 1 0 3@0:3 - - admit
-R 1 - 1 unadmitted 1 0 - i2 a0 admit
-R 2 cancelled 1 settled 0 0 1@4:0 - - resume
+R 3 - t 1 unadmitted 1 0 3@0:3 - - admit
+R 1 - t 1 unadmitted 1 0 - i2 a0 admit
+R 2 failed:s t 1 settled 0 0 1@4:0 - - resume
 I a3 1 1 c 0 -
 I a0 1 1 g 0 -
 I a2 2 1 c 1 absorbed
-C 2 terminal 2:cancelled
+C 2 terminal 2:failed
 P 16 5:3 5 1
 N order@5:1,order@5:2
 U -
@@ -4075,7 +4075,7 @@ A 4 appended
 O 0 0 0 0
 A 5 HISTORY_INVALID
 A 6 LOG_FENCED
-R 1 - 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 0 0 - - a1 admit
 I a1 1 1 c 0 -
 C - none -
 P 2 0:1 1 1
@@ -4088,8 +4088,8 @@ O 0 0 0 0
 A 9 appended
 A 10 appended
 A 11 duplicate
-R 1 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i0 - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i0 - admit
 I a1 1 1 c 0 settled
 C - none -
 P 6 0:5 1 1
@@ -4112,9 +4112,9 @@ A 22 EVENT_MUTATED
 A 23 EVENT_OUT_OF_ORDER
 A 24 appended
 A 25 appended
-R 1 - 1 unadmitted 0 0 1@2:1 - - admit
-R 2 - 1 unadmitted 1 0 - i0 - admit
-R 3 - 1 unadmitted 0 0 - - a3 admit
+R 1 - t 1 unadmitted 0 0 1@2:1 - - admit
+R 2 - t 1 unadmitted 1 0 - i0 - admit
+R 3 - t 1 unadmitted 0 0 - - a3 admit
 I a1 1 1 c 0 settled
 I a3 3 1 c 0 -
 C - none -
@@ -4124,9 +4124,9 @@ U -
 A 26 appended
 A 27 appended
 A 28 appended
-R 1 - 1 unadmitted 0 0 1@2:1 - - admit
-R 2 - 1 unadmitted 1 0 - i0 - admit
-R 3 - 1 unadmitted 0 0 1@2:4 - a3 admit
+R 1 - t 1 unadmitted 0 0 1@2:1 - - admit
+R 2 - t 1 unadmitted 1 0 - i0 - admit
+R 3 - t 1 unadmitted 0 0 1@2:4 - a3 admit
 I a1 1 1 c 0 settled
 I a3 3 1 c 0 -
 C - none -
@@ -4146,7 +4146,7 @@ QB batch 9 10 14 2:2
 X
 T log-64
 A 0 appended
-R 1 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -4165,11 +4165,11 @@ A 10 appended
 A 11 appended
 A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_OUT_OF_ORDER
-R 1 failed:f 1 terminal 0 0 - - - resume
-R 3 - 1 unadmitted 0 0 - - a3 admit
-R 2 running 1 open 0 0 - - - recover
+R 1 cancelled:u t 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 - - a3 admit
+R 2 running t 1 open 0 0 - - - recover
 I a3 3 1 c 0 -
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 8 1:6 2 1
 N order@1:2,order@1:5
 U 1:1
@@ -4180,11 +4180,11 @@ A 17 EVENT_OUT_OF_ORDER
 A 18 appended
 O 0 0 0 0
 A 19 appended
-R 1 failed:f 1 settled 0 0 1@1:7 i1 - resume
-R 3 - 1 unadmitted 0 0 - - a3 admit
-R 2 failed:r 1 terminal 1 0 - - - settled
+R 1 cancelled:u t 1 settled 0 0 1@1:7 i1 - resume
+R 3 - t 1 unadmitted 0 0 - - a3 admit
+R 2 cancelled:u t 1 terminal 1 0 - - - settled
 I a3 3 1 c 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 12 4:0 3 1
 N order@1:2,order@1:5
 U 2:1
@@ -4207,14 +4207,14 @@ A 2 HISTORY_INVALID
 A 3 EVENT_OUT_OF_ORDER
 A 4 EVENT_OUT_OF_ORDER
 A 5 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a3 2 1 g 0 -
 C - none -
 P 1 0:0 1 1
 N -
 U -
 A 6 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a3 2 1 g 0 -
 C - none -
 P 1 0:0 1 1
@@ -4240,10 +4240,10 @@ A 4 EVENT_OUT_OF_ORDER
 A 5 appended
 A 6 EVENT_OUT_OF_ORDER
 A 7 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 1 0 - - - admit
-R 2 failed:f 1 terminal 0 0 - - - resume
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 2 cancelled t 1 terminal 0 0 - - - resume
+R 1 failed:f t 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 3 0:2 1 1
 N order@0:1,order@0:2
 U 2:1,1:1
@@ -4251,17 +4251,17 @@ A 8 HISTORY_INVALID
 A 9 EVENT_OUT_OF_ORDER
 A 10 duplicate
 A 11 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 1 0 - - - admit
-R 2 failed:f 1 terminal 0 0 - - - resume
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 2 cancelled t 1 terminal 0 0 - - - resume
+R 1 failed:f t 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 3 0:2 1 1
 N order@0:1,order@0:2
 U 2:1,1:1
-R 3 - 1 unadmitted 1 0 - - - admit
-R 2 failed:f 1 terminal 0 0 - - - resume
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 2 cancelled t 1 terminal 0 0 - - - resume
+R 1 failed:f t 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 3 0:2 1 1
 N order@0:1,order@0:2
 U 2:1,1:1
@@ -4280,7 +4280,7 @@ T log-67
 A 0 appended
 A 1 duplicate
 A 2 appended
-R 1 - 1 unadmitted 0 0 - i2 a2 admit
+R 1 - t 1 unadmitted 0 0 - i2 a2 admit
 I a2 1 1 c 0 -
 C - none -
 P 2 0:1 1 1
@@ -4291,7 +4291,7 @@ A 4 EVENT_MUTATED
 A 5 EVENT_OUT_OF_ORDER
 A 6 appended
 A 7 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - i2 a3 admit
+R 1 - t 1 unadmitted 0 0 - i2 a3 admit
 I a2 1 1 c 0 -
 I a1 1 1 g 0 -
 I a3 1 1 c 0 -
@@ -4308,7 +4308,7 @@ A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_OUT_OF_ORDER
 A 15 EVENT_OUT_OF_ORDER
 A 16 LOG_FENCED
-R 1 - 1 unadmitted 0 0 - i2 a3 admit
+R 1 - t 1 unadmitted 0 0 - i2 a3 admit
 I a2 1 1 c 0 -
 I a1 1 1 g 0 -
 I a3 1 1 c 0 -
@@ -4316,7 +4316,7 @@ C - none -
 P 4 0:3 1 1
 N -
 U -
-R 1 - 1 unadmitted 0 0 - i2 a3 admit
+R 1 - t 1 unadmitted 0 0 - i2 a3 admit
 I a2 1 1 c 0 -
 I a1 1 1 g 0 -
 I a3 1 1 c 0 -
@@ -4343,9 +4343,9 @@ O 0 0 0 0
 A 3 appended
 A 4 appended
 A 5 EVENT_MUTATED
-R 1 paused 2 terminal 0 0 1@0:0 - - recover
-R 2 - 1 unadmitted 0 0 1@0:2 - - admit
-C 1 paused -
+R 1 completed t 2 terminal 0 0 1@0:0 - - resume
+R 2 - t 1 unadmitted 0 0 1@0:2 - - admit
+C 1 terminal 1:completed
 P 4 0:3 1 1
 N order@0:3
 U 1:2
@@ -4369,7 +4369,7 @@ U -
 A 1 appended
 A 2 appended
 A 3 duplicate
-R 3 - 1 unadmitted 0 0 - i1 a2 admit
+R 3 - t 1 unadmitted 0 0 - i1 a2 admit
 I a2 3 1 g 0 -
 C - none -
 P 2 0:1 1 1
@@ -4378,7 +4378,7 @@ U -
 A 4 appended
 O 0 0 0 0
 A 5 appended
-R 3 - 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 - - a2 admit
 I a2 3 1 g 0 -
 C - none -
 P 4 0:3 1 1
@@ -4392,8 +4392,8 @@ A 9 HISTORY_INVALID
 A 10 HISTORY_INVALID
 A 11 EVENT_OUT_OF_ORDER
 A 12 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 a2 admit
-R 1 - 1 unadmitted 0 0 - - a1 admit
+R 3 - t 1 unadmitted 0 0 - i2 a2 admit
+R 1 - t 1 unadmitted 0 0 - - a1 admit
 I a2 3 1 g 0 -
 I a1 1 1 g 0 -
 C - none -
@@ -4406,8 +4406,8 @@ A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_OUT_OF_ORDER
 A 18 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - i2 a2 admit
-R 1 - 1 unadmitted 0 0 - - a1 admit
+R 3 - t 1 unadmitted 0 0 - i2 a2 admit
+R 1 - t 1 unadmitted 0 0 - - a1 admit
 I a2 3 1 g 0 -
 I a1 1 1 g 0 -
 C - none -
@@ -4430,20 +4430,20 @@ A 0 appended
 A 1 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 2 appended
-R 3 completed 1 settled 0 0 1@1:1 - - resume
-C 3 terminal 3:completed
+R 3 failed:f t 1 settled 0 0 1@1:1 - - resume
+C 3 terminal 3:failed
 P 3 1:1 2 1
 N order@0:0
 U -
 A 3 duplicate
-R 3 completed 1 settled 0 0 1@1:1 - - resume
-C 3 terminal 3:completed
+R 3 failed:f t 1 settled 0 0 1@1:1 - - resume
+C 3 terminal 3:failed
 P 3 1:1 2 1
 N order@0:0
 U -
 A 4 appended
-R 3 completed 1 settled 0 0 1@1:1 i2 - resume
-C 3 terminal 3:completed
+R 3 failed:f t 1 settled 0 0 1@1:1 i2 - resume
+C 3 terminal 3:failed
 P 4 1:2 2 1
 N order@0:0
 U -
@@ -4453,10 +4453,10 @@ A 7 appended
 O 0 0 0 0
 A 8 appended
 A 9 duplicate
-R 3 completed 1 settled 0 0 1@1:1 i2 - resume
-R 1 - 1 unadmitted 0 0 - - a1 admit
+R 3 failed:f t 1 settled 0 0 1@1:1 i2 - resume
+R 1 - t 1 unadmitted 0 0 - - a1 admit
 I a1 1 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 7 1:5 2 1
 N order@0:0,conflict@1:3
 U -
@@ -4476,9 +4476,9 @@ A 0 appended
 A 1 appended
 A 2 appended
 A 3 appended
-R 1 - 1 unadmitted 0 0 - - - admit
-R 3 paused 2 terminal 1 0 - - - resume
-C 3 paused -
+R 1 - t 1 unadmitted 0 0 - - - admit
+R 3 completed xp 2 terminal 1 0 - - - settled
+C 3 terminal 3:completed
 P 4 2:1 3 1
 N order@1:0
 U 3:2
@@ -4493,33 +4493,33 @@ A 11 HISTORY_INVALID
 A 12 HISTORY_INVALID
 A 13 EVENT_MUTATED
 A 14 HISTORY_INVALID
-R 1 running 1 open 0 0 - - - recover
-R 3 paused 2 terminal 1 0 - - a0 resume
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 1 running t 1 open 0 0 - - - recover
+R 3 completed xp 2 terminal 1 0 - - a0 settled
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a2 2 1 c 0 -
 I a0 3 2 c 0 -
-C 1 running -
+C 1 running 3:completed
 P 9 3:4 4 1
 N order@1:0,order@3:2
 U 3:2
 A 15 appended
 A 16 EVENT_OUT_OF_ORDER
-R 1 running 1 open 0 0 - i0 - recover
-R 3 paused 2 terminal 1 0 - - a0 resume
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 1 running t 1 open 0 0 - i0 - recover
+R 3 completed xp 2 terminal 1 0 - - a0 settled
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a2 2 1 c 0 -
 I a0 3 2 c 0 -
-C 1 running -
+C 1 running 3:completed
 P 10 3:5 4 1
 N order@1:0,order@3:2
 U 3:2
 A 17 HISTORY_INVALID
-R 1 running 1 open 0 0 - i0 - recover
-R 3 paused 2 terminal 1 0 - - a0 resume
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 1 running t 1 open 0 0 - i0 - recover
+R 3 completed xp 2 terminal 1 0 - - a0 settled
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a2 2 1 c 0 -
 I a0 3 2 c 0 -
-C 1 running -
+C 1 running 3:completed
 P 10 3:5 4 1
 N order@1:0,order@3:2
 U 3:2
@@ -4552,14 +4552,14 @@ O 0 0 0 0
 A 12 appended
 A 13 duplicate
 A 14 EVENT_OUT_OF_ORDER
-R 2 admitted 1 open 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 - - a3 admit
-R 1 - 1 unadmitted 0 0 1@0:6 - - admit
+R 2 running t 2 open 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - - a3 admit
+R 1 - t 1 unadmitted 0 0 1@0:6 - - admit
 I a0 2 1 g 0 absorbed
 I a3 3 1 c 0 -
-C 2 admitted -
+C 2 running -
 P 7 0:6 1 1
-N -
+N order@0:3
 U -
 QS appended
 QS appended
@@ -4574,8 +4574,8 @@ QB batch 2 4 7 0:2,0:3
 X
 T log-73
 A 0 appended
-R 2 cancelled 1 terminal 0 0 - - - resume
-C 2 terminal 2:cancelled
+R 2 failed:s t 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 1 0:0 1 1
 N order@0:0
 U 2:1
@@ -4585,32 +4585,32 @@ A 3 EVENT_OUT_OF_ORDER
 A 4 appended
 A 5 appended
 A 6 HISTORY_INVALID
-R 2 cancelled 1 terminal 0 0 - i1 - resume
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 failed:s t 1 terminal 0 0 - i1 - resume
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a3 2 1 g 0 settled
 I a0 1 1 c 0 -
-C 2 terminal 2:cancelled
+C 2 terminal 2:failed
 P 5 1:3 2 1
 N order@0:0
 U 2:1
 O 0 0 0 0
 A 7 appended
 A 8 EVENT_MUTATED
-R 2 cancelled 1 terminal 0 0 - i1 - resume
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 failed:s t 1 terminal 0 0 - i1 - resume
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a3 2 1 g 0 settled
 I a0 1 1 c 0 -
-C 2 terminal 2:cancelled
+C 2 terminal 2:failed
 P 6 1:4 2 1
 N order@0:0
 U 2:1
 A 9 appended
-R 2 cancelled 1 terminal 0 0 - i1 - resume
-R 1 - 1 unadmitted 0 0 - - a0 admit
-R 3 running 1 open 0 0 - - - recover
+R 2 failed:s t 1 terminal 0 0 - i1 - resume
+R 1 - t 1 unadmitted 0 0 - - a0 admit
+R 3 running t 1 open 0 0 - - - recover
 I a3 2 1 g 0 settled
 I a0 1 1 c 0 -
-C 3 running 2:cancelled
+C 3 running 2:failed
 P 7 1:5 2 1
 N order@0:0,order@1:5
 U 2:1
@@ -4631,8 +4631,8 @@ A 1 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 2 appended
 A 3 appended
-R 3 paused 1 terminal 0 0 - - - recover
-C 3 paused 3:failed
+R 3 completed t 1 terminal 0 0 - - - resume
+C 3 terminal 3:completed
 P 4 0:3 1 1
 N order@0:2
 U 3:1
@@ -4641,8 +4641,8 @@ A 5 EVENT_OUT_OF_ORDER
 A 6 LOG_FENCED
 O 1 0 0 0
 A 7 HISTORY_INVALID
-R 3 paused 1 terminal 0 0 - - - recover
-C 3 paused 3:failed
+R 3 completed t 1 terminal 0 0 - - - resume
+C 3 terminal 3:completed
 P 4 0:3 1 1
 N order@0:2
 U 3:1
@@ -4662,19 +4662,19 @@ A 0 appended
 A 1 EVENT_OUT_OF_ORDER
 A 2 appended
 A 3 appended
-R 3 running 2 open 0 0 - - - recover
-C 3 running -
+R 3 paused t 2 terminal 0 0 - - - recover
+C 3 paused -
 P 3 1:0 2 1
 N order@0:1
-U -
+U 3:2
 A 4 appended
 A 5 duplicate
-R 3 running 2 open 0 0 - - - recover
-R 2 - 1 unadmitted 0 0 - - - admit
-C 3 running -
+R 3 paused t 2 terminal 0 0 - - - recover
+R 2 - t 1 unadmitted 0 0 - - - admit
+C 3 paused -
 P 4 1:1 2 1
 N order@0:1
-U -
+U 3:2
 O 0 0 0 0
 A 6 duplicate
 A 7 appended
@@ -4689,26 +4689,26 @@ A 14 appended
 A 15 HISTORY_INVALID
 A 16 appended
 A 17 EVENT_OUT_OF_ORDER
-R 3 running 2 open 1 0 - - a0 resume
-R 2 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i1 - admit
+R 3 paused t 2 terminal 1 0 - - a0 resume
+R 2 completed t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - i1 - admit
 I a0 3 2 g 0 -
-C 2 running -
+C 2 terminal 2:completed
 P 11 1:8 2 1
 N order@0:1,conflict@1:5,order@1:8
-U -
+U 3:2,2:1
 A 18 appended
 A 19 appended
 A 20 EVENT_MUTATED
 A 21 HISTORY_INVALID
-R 3 running 2 open 1 0 - - a0 resume
-R 2 running 1 open 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i0,i1 - admit
+R 3 paused t 2 terminal 1 0 - - a0 resume
+R 2 running t 1 open 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - i0,i1 - admit
 I a0 3 2 g 0 -
-C 2 running -
+C 2 running 2:completed
 P 13 1:10 2 1
 N order@0:1,conflict@1:5,order@1:8
-U -
+U 3:2
 QS appended
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
@@ -4723,7 +4723,7 @@ X
 T log-76
 A 0 appended
 A 1 appended
-R 3 - 1 unadmitted 0 0 - i1 a0 admit
+R 3 - t 1 unadmitted 0 0 - i1 a0 admit
 I a0 3 1 c 0 -
 C - none -
 P 2 0:1 1 1
@@ -4737,8 +4737,8 @@ O 0 0 0 0
 A 5 duplicate
 A 6 HISTORY_INVALID
 A 7 appended
-R 3 - 1 unadmitted 0 0 - i1 - admit
-R 1 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - i1 - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 I a0 3 1 c 1 -
 C - none -
 P 5 0:4 1 1
@@ -4747,8 +4747,8 @@ U -
 A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_MUTATED
 A 10 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - i1 - admit
-R 1 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - i1 - admit
+R 1 - t 1 unadmitted 1 0 - - - admit
 I a0 3 1 c 1 -
 C - none -
 P 5 0:4 1 1
@@ -4769,8 +4769,8 @@ T log-77
 A 0 appended
 A 1 EVENT_MUTATED
 A 2 duplicate
-R 2 cancelled 1 terminal 0 0 - - - resume
-C 2 terminal 2:cancelled
+R 2 failed:s t 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 1 0:0 1 1
 N order@0:0
 U 2:1
@@ -4779,9 +4779,9 @@ O 0 0 0 0
 A 4 appended
 A 5 appended
 A 6 appended
-R 2 cancelled 1 terminal 0 0 - - - resume
-R 3 completed 1 terminal 0 0 - - - resume
-C 3 terminal 3:completed
+R 2 failed:s t 1 terminal 0 0 - - - resume
+R 3 failed:f t 1 terminal 0 0 - - - resume
+C 3 terminal 3:failed
 P 4 1:1 2 1
 N order@0:0,order@0:1
 U 2:1,3:1
@@ -4789,10 +4789,10 @@ O 0 0 0 0
 A 7 appended
 A 8 HISTORY_INVALID
 A 9 HISTORY_INVALID
-R 2 cancelled 1 terminal 0 0 - - - resume
-R 3 completed 1 terminal 0 0 - - a0 resume
+R 2 failed:s t 1 terminal 0 0 - - - resume
+R 3 failed:f t 1 terminal 0 0 - - a0 resume
 I a0 3 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 5 1:2 2 1
 N order@0:0,order@0:1
 U 2:1,3:1
@@ -4802,30 +4802,30 @@ A 12 EVENT_MUTATED
 A 13 EVENT_MUTATED
 A 14 EVENT_OUT_OF_ORDER
 A 15 duplicate
-R 2 cancelled 1 terminal 0 0 - - - resume
-R 3 completed 1 terminal 0 0 - - a0 resume
-R 1 - 1 unadmitted 0 0 - - - admit
+R 2 failed:s t 1 terminal 0 0 - - - resume
+R 3 failed:f t 1 terminal 0 0 - - a0 resume
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a0 3 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 7 1:4 2 1
 N order@0:0,order@0:1
 U 2:1,3:1
 A 16 LOG_FENCED
-R 2 cancelled 1 terminal 0 0 - - - resume
-R 3 completed 1 terminal 0 0 - - a0 resume
-R 1 - 1 unadmitted 0 0 - - - admit
+R 2 failed:s t 1 terminal 0 0 - - - resume
+R 3 failed:f t 1 terminal 0 0 - - a0 resume
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a0 3 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 7 1:4 2 1
 N order@0:0,order@0:1
 U 2:1,3:1
 A 17 LOG_FENCED
 A 18 LOG_FENCED
-R 2 cancelled 1 terminal 0 0 - - - resume
-R 3 completed 1 terminal 0 0 - - a0 resume
-R 1 - 1 unadmitted 0 0 - - - admit
+R 2 failed:s t 1 terminal 0 0 - - - resume
+R 3 failed:f t 1 terminal 0 0 - - a0 resume
+R 1 - t 1 unadmitted 0 0 - - - admit
 I a0 3 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 7 1:4 2 1
 N order@0:0,order@0:1
 U 2:1,3:1
@@ -4833,7 +4833,7 @@ QS appended
 QS SETTLEMENT_WITHOUT_RUN
 QS appended
 QL ok
-QL ok
+QL NO_RUN_ADMITTED
 QP INVOCATION_UNRESOLVED
 QP INVOCATION_UNRESOLVED
 QB batch 4 6 7 1:2,1:3
@@ -4891,7 +4891,7 @@ A 4 HISTORY_INVALID
 A 5 EVENT_OUT_OF_ORDER
 A 6 appended
 A 7 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 0 0 - i2 - admit
 C - none -
 P 3 0:2 1 1
 N -
@@ -4921,8 +4921,8 @@ A 5 EVENT_MUTATED
 A 6 HISTORY_INVALID
 A 7 appended
 A 8 EVENT_OUT_OF_ORDER
-R 1 completed 1 terminal 0 0 - - - resume
-C 1 terminal 1:completed
+R 1 failed:f t 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 2 0:1 1 1
 N order@0:1
 U 1:1
@@ -4930,17 +4930,17 @@ A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
 O 0 0 0 0
 A 11 appended
-R 1 completed 1 terminal 0 0 - - - resume
-R 2 paused 1 terminal 0 0 - - - recover
-C 2 paused 1:completed
+R 1 failed:f t 1 terminal 0 0 - - - resume
+R 2 completed t 1 terminal 0 0 - - - resume
+C 2 terminal 2:completed
 P 4 0:3 1 1
 N order@0:1,order@0:3
 U 1:1,2:1
 A 12 EVENT_OUT_OF_ORDER
 A 13 appended
-R 1 completed 1 settled 0 0 1@0:4 - - resume
-R 2 paused 1 terminal 0 0 - - - recover
-C 2 paused 1:completed
+R 1 failed:f t 1 settled 0 0 1@0:4 - - resume
+R 2 completed t 1 terminal 0 0 - - - resume
+C 2 terminal 2:completed
 P 5 0:4 1 1
 N order@0:1,order@0:3
 U 2:1
@@ -4954,17 +4954,17 @@ A 19 HISTORY_INVALID
 A 20 appended
 A 21 HISTORY_INVALID
 A 22 appended
-R 1 completed 1 settled 0 0 1@0:4 - - resume
-R 2 paused 1 terminal 0 0 - - - recover
-R 3 completed 1 settled 0 0 1@2:0 - - resume
-C 3 terminal 3:completed
+R 1 failed:f t 1 settled 0 0 1@0:4 - - resume
+R 2 completed t 1 terminal 0 0 - - - resume
+R 3 failed:g t 1 settled 0 0 1@2:0 - - resume
+C 3 terminal 3:failed
 P 11 2:3 2 1
 N order@0:1,order@0:3,order@2:2
 U 2:1
-R 1 completed 1 settled 0 0 1@0:4 - - resume
-R 2 paused 1 terminal 0 0 - - - recover
-R 3 completed 1 settled 0 0 1@2:0 - - resume
-C 3 terminal 3:completed
+R 1 failed:f t 1 settled 0 0 1@0:4 - - resume
+R 2 completed t 1 terminal 0 0 - - - resume
+R 3 failed:g t 1 settled 0 0 1@2:0 - - resume
+C 3 terminal 3:failed
 P 11 2:3 2 1
 N order@0:1,order@0:3,order@2:2
 U 2:1
@@ -4985,9 +4985,9 @@ A 1 appended
 A 2 EVENT_OUT_OF_ORDER
 A 3 EVENT_MUTATED
 A 4 LOG_FENCED
-R 1 paused 1 terminal 0 0 - - - recover
-R 3 - 1 unadmitted 0 0 - - - admit
-C 1 paused -
+R 1 completed t 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+C 1 terminal 1:completed
 P 2 0:1 1 1
 N order@0:0
 U 1:1
@@ -4998,10 +4998,10 @@ A 7 appended
 O 0 0 1 0
 A 8 appended
 A 9 EVENT_OUT_OF_ORDER
-R 1 paused 1 settled 0 0 1@0:3 - a2 recover
-R 3 - 1 unadmitted 0 0 - - - admit
+R 1 completed t 1 settled 0 0 1@0:3 - a2 resume
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a2 1 1 c 0 -
-C 1 paused -
+C 1 terminal 1:completed
 P 5 0:4 1 1
 N order@0:0
 U -
@@ -5013,11 +5013,11 @@ A 14 duplicate
 A 15 LOG_FENCED
 O 1 0 1 0
 A 16 appended
-R 1 paused 1 settled 0 0 1@0:3 - a2 recover
-R 3 - 1 unadmitted 0 0 - - - admit
-R 2 - 1 unadmitted 0 0 - i1 - admit
+R 1 completed t 1 settled 0 0 1@0:3 - a2 resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - i1 - admit
 I a2 1 1 c 0 -
-C 1 paused -
+C 1 terminal 1:completed
 P 6 0:5 1 1
 N order@0:0
 U -
@@ -5025,7 +5025,7 @@ QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_WITHOUT_RUN
 QL NO_RUN_ADMITTED
-QL ok
+QL RUN_ID_TAKEN
 QP INVOCATION_UNRESOLVED
 QP ok
 QB batch 1 5 7 0:1,0:1,0:2,0:3
@@ -5034,7 +5034,7 @@ QB batch 4 7 7 0:3,0:4,0:5
 X
 T log-82
 A 0 appended
-R 3 running 1 open 0 0 - - - recover
+R 3 running t 1 open 0 0 - - - recover
 C 3 running -
 P 1 0:0 1 1
 N order@0:0
@@ -5048,21 +5048,21 @@ A 5 appended
 A 6 appended
 A 7 EVENT_OUT_OF_ORDER
 A 8 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 - - a0 recover
-R 2 completed 1 terminal 0 0 - i0 a3 resume
+R 3 running t 1 open 0 0 - - a0 recover
+R 2 failed:g t 1 terminal 0 0 - i0 a3 resume
 I a0 3 1 c 0 -
 I a3 2 1 c 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 6 0:5 1 1
 N order@0:0,order@0:3
 U 2:1
 A 9 EVENT_OUT_OF_ORDER
 A 10 duplicate
-R 3 running 1 open 0 0 - - a0 recover
-R 2 completed 1 terminal 0 0 - i0 a3 resume
+R 3 running t 1 open 0 0 - - a0 recover
+R 2 failed:g t 1 terminal 0 0 - i0 a3 resume
 I a0 3 1 c 0 -
 I a3 2 1 c 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 6 0:5 1 1
 N order@0:0,order@0:3
 U 2:1
@@ -5070,29 +5070,29 @@ A 11 EVENT_OUT_OF_ORDER
 A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 - - a0 recover
-R 2 completed 1 terminal 0 0 - i0 a3 resume
+R 3 running t 1 open 0 0 - - a0 recover
+R 2 failed:g t 1 terminal 0 0 - i0 a3 resume
 I a0 3 1 c 0 -
 I a3 2 1 c 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 6 0:5 1 1
 N order@0:0,order@0:3
 U 2:1
 A 15 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 - - a0 recover
-R 2 completed 1 terminal 0 0 - i0 a3 resume
+R 3 running t 1 open 0 0 - - a0 recover
+R 2 failed:g t 1 terminal 0 0 - i0 a3 resume
 I a0 3 1 c 0 -
 I a3 2 1 c 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 6 0:5 1 1
 N order@0:0,order@0:3
 U 2:1
 A 16 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 - - a0 recover
-R 2 completed 1 terminal 0 0 - i0 a3 resume
+R 3 running t 1 open 0 0 - - a0 recover
+R 2 failed:g t 1 terminal 0 0 - i0 a3 resume
 I a0 3 1 c 0 -
 I a3 2 1 c 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 6 0:5 1 1
 N order@0:0,order@0:3
 U 2:1
@@ -5107,21 +5107,21 @@ A 22 appended
 O 1 1 0 0
 A 23 HISTORY_INVALID
 A 24 HISTORY_INVALID
-R 3 running 1 open 0 0 - - - recover
-R 2 completed 1 terminal 0 0 - i0 a1 resume
-R 1 - 1 unadmitted 0 0 - i0 - admit
+R 3 running t 1 open 0 0 - - - recover
+R 2 failed:g t 1 terminal 0 0 - i0 a1 resume
+R 1 - t 1 unadmitted 0 0 - i0 - admit
 I a0 3 1 c 0 released
 I a3 2 1 c 0 -
 I a1 2 1 g 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 9 0:9 1 1
 N order@0:0,order@0:3,order@0:8
 U 2:1
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QL RUN_ID_TAKEN
 QL ok
+QL NO_RUN_ADMITTED
 QP ok
 QP ok
 QB batch 0 1 9 0:0
@@ -5136,10 +5136,10 @@ O 0 0 0 0
 A 3 appended
 A 4 appended
 A 5 appended
-R 3 - 1 unadmitted 0 0 - - a0 admit
-R 1 cancelled 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 - - a0 admit
+R 1 failed:a t 1 terminal 0 0 - - - resume
 I a0 3 1 g 0 -
-C 1 terminal 1:cancelled
+C 1 terminal 1:failed
 P 4 2:1 2 1
 N order@2:1
 U 1:1
@@ -5152,12 +5152,12 @@ A 11 appended
 A 12 appended
 A 13 EVENT_OUT_OF_ORDER
 A 14 appended
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 running 1 open 0 0 - - - recover
-R 2 failed:f 1 terminal 0 0 - - a3 resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 running t 1 open 0 0 - - - recover
+R 2 cancelled t 1 terminal 0 0 - - a3 resume
 I a0 3 1 g 1 voided
 I a3 2 1 c 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 11 2:8 2 1
 N order@2:1,order@2:2,order@2:8
 U 2:1
@@ -5165,34 +5165,34 @@ A 15 HISTORY_INVALID
 A 16 duplicate
 A 17 EVENT_OUT_OF_ORDER
 A 18 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 running 1 open 0 0 - - - recover
-R 2 failed:f 1 terminal 0 0 - - a3 resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 running t 1 open 0 0 - - - recover
+R 2 cancelled t 1 terminal 0 0 - - a3 resume
 I a0 3 1 g 1 voided
 I a3 2 1 c 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 11 2:8 2 1
 N order@2:1,order@2:2,order@2:8
 U 2:1
 A 19 EVENT_OUT_OF_ORDER
 A 20 EVENT_OUT_OF_ORDER
 A 21 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 running 1 open 0 0 - - - recover
-R 2 failed:f 1 terminal 0 0 - - a3 resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 running t 1 open 0 0 - - - recover
+R 2 cancelled t 1 terminal 0 0 - - a3 resume
 I a0 3 1 g 1 voided
 I a3 2 1 c 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 11 2:8 2 1
 N order@2:1,order@2:2,order@2:8
 U 2:1
 A 22 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 running 1 open 0 0 - - - recover
-R 2 failed:f 1 terminal 0 0 - - a3 resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 running t 1 open 0 0 - - - recover
+R 2 cancelled t 1 terminal 0 0 - - a3 resume
 I a0 3 1 g 1 voided
 I a3 2 1 c 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 11 2:8 2 1
 N order@2:1,order@2:2,order@2:8
 U 2:1
@@ -5211,10 +5211,10 @@ T log-84
 A 0 appended
 A 1 appended
 A 2 appended
-R 1 - 1 unadmitted 0 0 - - a1 admit
-R 3 paused 1 terminal 0 0 - - - recover
+R 1 - t 1 unadmitted 0 0 - - a1 admit
+R 3 completed t 1 terminal 0 0 - - - resume
 I a1 1 1 g 0 -
-C 3 paused -
+C 3 terminal 3:completed
 P 3 0:2 1 1
 N order@0:2
 U 3:1
@@ -5230,80 +5230,80 @@ A 10 HISTORY_INVALID
 O 1 0 0 0
 A 11 appended
 A 12 appended
-R 1 running 1 open 0 0 - - a2 recover
-R 3 paused 1 settled 0 0 1@0:4 i2 - recover
+R 1 paused t 1 terminal 0 0 - - a2 recover
+R 3 completed t 1 settled 0 0 1@0:4 i2 - resume
 I a1 1 1 g 0 -
 I a2 1 1 c 0 -
-C 1 running 1:cancelled
+C 1 paused 1:failed
 P 9 0:8 1 1
 N order@0:2,order@0:6,order@0:8
-U -
+U 1:1
 A 13 EVENT_OUT_OF_ORDER
-R 1 running 1 open 0 0 - - a2 recover
-R 3 paused 1 settled 0 0 1@0:4 i2 - recover
+R 1 paused t 1 terminal 0 0 - - a2 recover
+R 3 completed t 1 settled 0 0 1@0:4 i2 - resume
 I a1 1 1 g 0 -
 I a2 1 1 c 0 -
-C 1 running 1:cancelled
+C 1 paused 1:failed
 P 9 0:8 1 1
 N order@0:2,order@0:6,order@0:8
-U -
+U 1:1
 O 1 0 0 0
 A 14 appended
-R 1 running 1 open 0 0 - - a2 recover
-R 3 paused 1 settled 0 0 1@0:4 i2 - recover
+R 1 paused t 1 terminal 0 0 - - a2 recover
+R 3 completed t 1 settled 0 0 1@0:4 i2 - resume
 I a1 1 1 g 0 absorbed
 I a2 1 1 c 0 -
-C 1 running 1:cancelled
+C 1 paused 1:failed
 P 10 2:0 2 1
 N order@0:2,order@0:6,order@0:8
-U -
+U 1:1
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_OUT_OF_ORDER
-R 1 running 1 open 0 0 - - a2 recover
-R 3 paused 1 settled 0 0 1@0:4 i2 - recover
+R 1 paused t 1 terminal 0 0 - - a2 recover
+R 3 completed t 1 settled 0 0 1@0:4 i2 - resume
 I a1 1 1 g 0 absorbed
 I a2 1 1 c 0 -
-C 1 running 1:cancelled
+C 1 paused 1:failed
 P 10 2:0 2 1
 N order@0:2,order@0:6,order@0:8
-U -
+U 1:1
 A 18 EVENT_OUT_OF_ORDER
-R 1 running 1 open 0 0 - - a2 recover
-R 3 paused 1 settled 0 0 1@0:4 i2 - recover
+R 1 paused t 1 terminal 0 0 - - a2 recover
+R 3 completed t 1 settled 0 0 1@0:4 i2 - resume
 I a1 1 1 g 0 absorbed
 I a2 1 1 c 0 -
-C 1 running 1:cancelled
+C 1 paused 1:failed
 P 10 2:0 2 1
 N order@0:2,order@0:6,order@0:8
-U -
+U 1:1
 A 19 EVENT_OUT_OF_ORDER
 A 20 duplicate
 A 21 EVENT_OUT_OF_ORDER
 A 22 EVENT_OUT_OF_ORDER
 A 23 EVENT_OUT_OF_ORDER
 A 24 EVENT_OUT_OF_ORDER
-R 1 running 1 open 0 0 - - a2 recover
-R 3 paused 1 settled 0 0 1@0:4 i2 - recover
+R 1 paused t 1 terminal 0 0 - - a2 recover
+R 3 completed t 1 settled 0 0 1@0:4 i2 - resume
 I a1 1 1 g 0 absorbed
 I a2 1 1 c 0 -
-C 1 running 1:cancelled
+C 1 paused 1:failed
 P 10 2:0 2 1
 N order@0:2,order@0:6,order@0:8
-U -
-R 1 running 1 open 0 0 - - a2 recover
-R 3 paused 1 settled 0 0 1@0:4 i2 - recover
+U 1:1
+R 1 paused t 1 terminal 0 0 - - a2 recover
+R 3 completed t 1 settled 0 0 1@0:4 i2 - resume
 I a1 1 1 g 0 absorbed
 I a2 1 1 c 0 -
-C 1 running 1:cancelled
+C 1 paused 1:failed
 P 10 2:0 2 1
 N order@0:2,order@0:6,order@0:8
-U -
+U 1:1
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_CONFLICT
 QS SETTLEMENT_CONFLICT
 QL NO_RUN_ADMITTED
-QL RUN_ID_TAKEN
+QL ok
 QP INVOCATION_UNRESOLVED
 QP INVOCATION_UNRESOLVED
 QB batch 6 10 10 0:6,0:7,0:8,2:0
@@ -5314,7 +5314,7 @@ T log-85
 A 0 appended
 A 1 duplicate
 A 2 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 - i1 - admit
+R 1 - t 1 unadmitted 0 0 - i1 - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -5329,24 +5329,24 @@ A 8 appended
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_MUTATED
 A 11 appended
-R 1 - 1 unadmitted 0 0 - i1 a2 admit
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 3 completed 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - i1 a2 admit
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 3 failed:f t 1 terminal 0 0 - - - resume
 I a0 2 1 g 0 -
 I a2 1 1 g 0 -
 I a1 2 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 8 3:0 3 1
 N order@0:2,conflict@0:3,order@3:0
 U 3:1
 A 12 appended
-R 1 - 1 unadmitted 0 0 - i1 a2 admit
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 3 completed 1 terminal 0 0 - i1 - resume
+R 1 - t 1 unadmitted 0 0 - i1 a2 admit
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 3 failed:f t 1 terminal 0 0 - i1 - resume
 I a0 2 1 g 0 -
 I a2 1 1 g 0 -
 I a1 2 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 9 3:1 3 1
 N order@0:2,conflict@0:3,order@3:0
 U 3:1
@@ -5354,13 +5354,13 @@ A 13 appended
 O 0 1 0 1
 A 14 appended
 A 15 EVENT_MUTATED
-R 1 - 1 unadmitted 0 0 - i1 a2 admit
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 3 completed 1 settled 0 0 1@3:2 i1 - resume
+R 1 - t 1 unadmitted 0 0 - i1 a2 admit
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 3 failed:f t 1 settled 0 0 1@3:2 i1 - resume
 I a0 2 1 g 0 -
 I a2 1 1 g 0 -
 I a1 2 1 g 0 -
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 11 3:3 3 1
 N order@0:2,conflict@0:3,order@3:0
 U -
@@ -5372,9 +5372,9 @@ A 19 EVENT_OUT_OF_ORDER
 A 20 EVENT_OUT_OF_ORDER
 A 21 EVENT_OUT_OF_ORDER
 A 22 EVENT_OUT_OF_ORDER
-R 1 completed 1 terminal 0 0 3@4:0 i1 a2 resume
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 3 completed 1 settled 0 0 1@3:2 i1 - resume
+R 1 completed t 1 terminal 0 0 3@4:0 i1 a2 resume
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 3 failed:f t 1 settled 0 0 1@3:2 i1 - resume
 I a0 2 1 g 0 -
 I a2 1 1 g 0 -
 I a1 2 1 g 0 -
@@ -5396,7 +5396,7 @@ X
 T log-86
 A 0 appended
 A 1 appended
-R 1 failed:r 3 terminal 0 0 - - - resume
+R 1 failed:a t 3 terminal 0 0 - - - resume
 C 1 terminal 1:failed
 P 2 0:1 1 1
 N order@0:1
@@ -5408,8 +5408,8 @@ A 4 appended
 A 5 appended
 A 6 appended
 A 7 appended
-R 1 failed:r 3 terminal 0 0 - - - resume
-R 2 - 1 unadmitted 1 0 1@0:6 - - admit
+R 1 failed:a t 3 terminal 0 0 - - - resume
+R 2 - t 1 unadmitted 1 0 1@0:6 - - admit
 I a0 2 1 c 1 -
 C 1 terminal 1:failed
 P 7 0:6 1 1
@@ -5420,12 +5420,12 @@ A 9 appended
 A 10 appended
 A 11 appended
 A 12 HISTORY_INVALID
-R 1 failed:r 3 terminal 0 0 - - - resume
-R 2 completed 1 settled 1 0 1@0:6 - - settled
-R 3 - 1 unadmitted 0 0 - - a1 admit
+R 1 failed:a t 3 terminal 0 0 - - - resume
+R 2 failed:f x 1 settled 1 0 1@0:6 - - settled
+R 3 - t 1 unadmitted 0 0 - - a1 admit
 I a0 2 1 c 1 -
 I a1 3 1 g 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 10 0:9 1 1
 N order@0:1,order@0:7
 U 1:3
@@ -5442,7 +5442,7 @@ QB batch 3 4 10 0:3
 X
 T log-87
 A 0 appended
-R 3 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -5455,9 +5455,9 @@ A 4 appended
 A 5 EVENT_OUT_OF_ORDER
 A 6 EVENT_OUT_OF_ORDER
 A 7 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 3@1:0 - - admit
-R 2 completed 3 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 3@1:0 - - admit
+R 2 cancelled t 3 terminal 0 0 - - - resume
+C 2 terminal 2:cancelled
 P 4 1:2 2 1
 N order@1:1
 U 2:3
@@ -5465,9 +5465,9 @@ A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
 A 11 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 3@1:0 - - admit
-R 2 completed 3 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 3 - t 1 unadmitted 0 0 3@1:0 - - admit
+R 2 cancelled t 3 terminal 0 0 - - - resume
+C 2 terminal 2:cancelled
 P 4 1:2 2 1
 N order@1:1
 U 2:3
@@ -5486,13 +5486,13 @@ A 22 appended
 A 23 HISTORY_INVALID
 A 24 appended
 A 25 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 0 0 3@1:0 - - admit
-R 2 completed 3 terminal 0 0 - - a2 resume
-R 1 - 1 unadmitted 0 0 - i0 a0 admit
+R 3 - t 1 unadmitted 0 0 3@1:0 - - admit
+R 2 cancelled t 3 terminal 0 0 - - a2 resume
+R 1 - t 1 unadmitted 0 0 - i0 a0 admit
 I a2 2 3 c 0 -
 I a3 1 1 g 0 -
 I a0 1 1 c 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:cancelled
 P 12 1:10 2 1
 N order@1:1,conflict@1:8
 U 2:3
@@ -5502,13 +5502,13 @@ O 1 0 0 0
 A 28 HISTORY_INVALID
 A 29 appended
 A 30 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 3@1:0 - - recover
-R 2 completed 3 settled 0 0 3@1:12 - a2 resume
-R 1 - 1 unadmitted 0 0 - i0 a0 admit
+R 3 running t 1 open 0 0 3@1:0 - - recover
+R 2 cancelled t 3 settled 0 0 3@1:12 - a2 resume
+R 1 - t 1 unadmitted 0 0 - i0 a0 admit
 I a2 2 3 c 0 -
 I a3 1 1 g 0 -
 I a0 1 1 c 0 -
-C 3 running 2:completed
+C 3 running 2:cancelled
 P 14 1:12 2 1
 N order@1:1,conflict@1:8,order@1:11
 U -
@@ -5527,8 +5527,8 @@ T log-88
 O 0 0 0 0
 A 0 appended
 A 1 duplicate
-R 2 completed 1 terminal 0 0 - - - resume
-C 2 terminal 2:completed
+R 2 failed:g t 1 terminal 0 0 - - - resume
+C 2 terminal 2:failed
 P 1 0:0 1 1
 N order@0:0
 U 2:1
@@ -5537,19 +5537,19 @@ A 3 EVENT_OUT_OF_ORDER
 A 4 EVENT_OUT_OF_ORDER
 A 5 EVENT_OUT_OF_ORDER
 A 6 EVENT_OUT_OF_ORDER
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 2 failed:g t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a3 1 1 g 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 2 1:0 2 1
 N order@0:0
 U 2:1
 A 7 LOG_FENCED
 A 8 LOG_FENCED
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 2 failed:g t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a3 1 1 g 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 2 1:0 2 1
 N order@0:0
 U 2:1
@@ -5561,10 +5561,10 @@ A 12 LOG_FENCED
 O 1 0 1 0
 A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_OUT_OF_ORDER
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 2 failed:g t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a3 1 1 g 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 2 1:0 2 1
 N order@0:0
 U 2:1
@@ -5602,9 +5602,9 @@ O 2 0 0 0
 A 15 appended
 A 16 EVENT_OUT_OF_ORDER
 A 17 appended
-R 1 failed:r 1 terminal 1 0 - - - settled
-R 3 running 1 open 1 0 - i1 a2 resume
-R 2 - 1 unadmitted 0 0 - i1 a0 admit
+R 1 failed:a xp 1 terminal 1 0 - - - settled
+R 3 running x 1 open 1 0 - i1 a2 resume
+R 2 - t 1 unadmitted 0 0 - i1 a0 admit
 I a2 3 1 g 0 -
 I a3 1 1 g 1 absorbed
 I a0 2 1 c 0 -
@@ -5622,25 +5622,25 @@ A 23 HISTORY_INVALID
 A 24 LOG_FENCED
 A 25 LOG_FENCED
 A 26 LOG_FENCED
-R 1 failed:r 1 terminal 1 0 - i0,i1 - settled
-R 3 running 1 open 1 0 - i1,i2 a1 resume
-R 2 completed 1 terminal 0 0 - i1 a0 resume
+R 1 failed:a xp 1 terminal 1 0 - i0,i1 - settled
+R 3 running x 1 open 1 0 - i1,i2 a1 resume
+R 2 failed:f t 1 terminal 0 0 - i1 a0 resume
 I a2 3 1 g 0 -
 I a3 1 1 g 1 absorbed
 I a0 2 1 c 0 -
 I a1 3 1 g 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 17 4:7 3 1
 N order@0:3,order@1:3,order@4:3
 U 1:1,2:1
-R 1 failed:r 1 terminal 1 0 - i0,i1 - settled
-R 3 running 1 open 1 0 - i1,i2 a1 resume
-R 2 completed 1 terminal 0 0 - i1 a0 resume
+R 1 failed:a xp 1 terminal 1 0 - i0,i1 - settled
+R 3 running x 1 open 1 0 - i1,i2 a1 resume
+R 2 failed:f t 1 terminal 0 0 - i1 a0 resume
 I a2 3 1 g 0 -
 I a3 1 1 g 1 absorbed
 I a0 2 1 c 0 -
 I a1 3 1 g 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 17 4:7 3 1
 N order@0:3,order@1:3,order@4:3
 U 1:1,2:1
@@ -5664,26 +5664,26 @@ A 4 EVENT_MUTATED
 A 5 appended
 A 6 duplicate
 A 7 LOG_FENCED
-R 1 - 1 unadmitted 1 0 - i1 - admit
-R 2 - 1 unadmitted 0 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 1 - xp 1 unadmitted 1 0 - i1 - admit
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 5 1:0 2 1
 N -
 U -
 A 8 LOG_FENCED
-R 1 - 1 unadmitted 1 0 - i1 - admit
-R 2 - 1 unadmitted 0 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 1 - xp 1 unadmitted 1 0 - i1 - admit
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 5 1:0 2 1
 N -
 U -
 O 0 0 0 0
 A 9 duplicate
-R 1 - 1 unadmitted 1 0 - i1 - admit
-R 2 - 1 unadmitted 0 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 1 - xp 1 unadmitted 1 0 - i1 - admit
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 5 1:0 2 1
 N -
@@ -5696,9 +5696,9 @@ A 13 HISTORY_INVALID
 A 14 appended
 A 15 duplicate
 A 16 HISTORY_INVALID
-R 1 - 1 unadmitted 1 0 - i1 a0 admit
-R 2 - 1 unadmitted 1 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 1 - xp 1 unadmitted 1 0 - i1 a0 admit
+R 2 - x 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 I a0 1 1 c 0 -
 C - none -
 P 8 2:2 3 1
@@ -5709,9 +5709,9 @@ A 18 LOG_FENCED
 A 19 LOG_FENCED
 O 1 0 0 0
 A 20 duplicate
-R 1 - 1 unadmitted 1 0 - i1 a0 admit
-R 2 - 1 unadmitted 1 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 1 - xp 1 unadmitted 1 0 - i1 a0 admit
+R 2 - x 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 I a0 1 1 c 0 -
 C - none -
 P 8 2:2 3 1
@@ -5719,9 +5719,9 @@ N -
 U -
 A 21 EVENT_OUT_OF_ORDER
 A 22 LOG_FENCED
-R 1 - 1 unadmitted 1 0 - i1 a0 admit
-R 2 - 1 unadmitted 1 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 1 - xp 1 unadmitted 1 0 - i1 a0 admit
+R 2 - x 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 I a0 1 1 c 0 -
 C - none -
 P 8 2:2 3 1
@@ -5730,9 +5730,9 @@ U -
 A 23 LOG_FENCED
 O 2 0 0 1
 A 24 EVENT_MUTATED
-R 1 - 1 unadmitted 1 0 - i1 a0 admit
-R 2 - 1 unadmitted 1 0 - - - admit
-R 3 - 1 unadmitted 1 0 - - - admit
+R 1 - xp 1 unadmitted 1 0 - i1 a0 admit
+R 2 - x 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 I a0 1 1 c 0 -
 C - none -
 P 9 3:0 4 1
@@ -5762,22 +5762,22 @@ A 7 EVENT_MUTATED
 A 8 LOG_FENCED
 O 2 0 0 0
 A 9 appended
-R 2 running 1 open 0 0 - - a0 recover
-R 1 - 1 unadmitted 0 0 1@0:4 - - admit
+R 2 paused t 1 terminal 0 0 - - a0 recover
+R 1 - t 1 unadmitted 0 0 1@0:4 - - admit
 I a0 2 1 c 0 -
-C 2 running -
+C 2 paused -
 P 5 0:4 1 1
 N order@0:1
-U -
+U 2:1
 A 10 appended
 A 11 HISTORY_INVALID
 A 12 appended
 A 13 appended
 A 14 appended
-R 2 running 1 settled 0 0 1@0:5 - a0 recover
-R 1 - 1 unadmitted 0 0 1@0:4 - - admit
+R 2 paused t 1 settled 0 0 1@0:5 - a0 recover
+R 1 - t 1 unadmitted 0 0 1@0:4 - - admit
 I a0 2 1 c 0 -
-C 2 running -
+C 2 paused -
 P 9 0:8 1 1
 N order@0:1
 U -
@@ -5785,17 +5785,17 @@ A 15 appended
 A 16 appended
 O 2 0 0 0
 A 17 appended
-R 2 running 1 settled 0 0 1@0:5 - a0 recover
-R 1 - 1 unadmitted 0 0 1@0:4 - - admit
-R 3 running 1 open 0 0 2@1:1 i1 - recover
+R 2 paused t 1 settled 0 0 1@0:5 - a0 recover
+R 1 - t 1 unadmitted 0 0 1@0:4 - - admit
+R 3 running t 1 open 0 0 2@1:1 i1 - recover
 I a0 2 1 c 0 -
 C 3 running -
 P 12 1:1 2 1
 N order@0:1,order@1:0
 U -
-R 2 running 1 settled 0 0 1@0:5 - a0 recover
-R 1 - 1 unadmitted 0 0 1@0:4 - - admit
-R 3 running 1 open 0 0 2@1:1 i1 - recover
+R 2 paused t 1 settled 0 0 1@0:5 - a0 recover
+R 1 - t 1 unadmitted 0 0 1@0:4 - - admit
+R 3 running t 1 open 0 0 2@1:1 i1 - recover
 I a0 2 1 c 0 -
 C 3 running -
 P 12 1:1 2 1
@@ -5823,8 +5823,8 @@ A 5 appended
 A 6 appended
 A 7 appended
 A 8 appended
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 5 0:4 1 1
 N -
@@ -5833,9 +5833,9 @@ A 9 appended
 A 10 appended
 A 11 appended
 A 12 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 2 failed:r 1 terminal 1 0 - - - settled
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 2 failed:a t 1 terminal 1 0 - - - settled
 I a2 1 1 g 0 -
 C 2 terminal 2:failed
 P 8 1:2 2 1
@@ -5846,9 +5846,9 @@ A 14 EVENT_MUTATED
 A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_OUT_OF_ORDER
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 2 failed:r 1 terminal 1 0 - - - settled
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 2 failed:a t 1 terminal 1 0 - - - settled
 I a2 1 1 g 0 -
 C 2 terminal 2:failed
 P 8 1:2 2 1
@@ -5874,8 +5874,8 @@ A 3 duplicate
 A 4 appended
 O 0 0 0 0
 A 5 appended
-R 1 running 1 open 0 0 - - - recover
-R 2 - 1 unadmitted 1 0 - - - admit
+R 1 running t 1 open 0 0 - - - recover
+R 2 - xp 1 unadmitted 1 0 - - - admit
 C 1 running -
 P 5 0:4 1 1
 N order@0:0
@@ -5888,10 +5888,10 @@ A 8 appended
 O 0 0 0 0
 A 9 appended
 A 10 LOG_FENCED
-R 1 running 1 open 0 0 - i0 - recover
-R 2 - 1 unadmitted 1 0 - - - admit
-R 3 completed 1 settled 0 0 1@1:1 - - resume
-C 3 terminal 3:completed
+R 1 running t 1 open 0 0 - i0 - recover
+R 2 - xp 1 unadmitted 1 0 - - - admit
+R 3 failed:g t 1 settled 0 0 1@1:1 - - resume
+C 3 terminal 3:failed
 P 9 1:3 2 1
 N order@0:0,order@1:3
 U -
@@ -5908,7 +5908,7 @@ QB batch 8 9 9 1:3
 X
 T log-94
 A 0 appended
-R 2 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -5916,15 +5916,15 @@ U -
 A 1 appended
 A 2 appended
 A 3 appended
-R 2 admitted 1 settled 0 0 1@0:3 - - recover
-R 3 running 1 open 0 0 - - - recover
+R 2 admitted t 1 settled 0 0 1@0:3 - - recover
+R 3 running t 1 open 0 0 - - - recover
 C 3 running -
 P 4 0:3 1 1
 N order@0:2
 U -
 A 4 appended
-R 2 admitted 1 settled 1 0 1@0:3 - - resume
-R 3 running 1 open 0 0 - - - recover
+R 2 admitted t 1 settled 1 0 1@0:3 - - resume
+R 3 running t 1 open 0 0 - - - recover
 C 3 running -
 P 5 0:4 1 1
 N order@0:2
@@ -5940,9 +5940,9 @@ A 12 EVENT_OUT_OF_ORDER
 A 13 EVENT_OUT_OF_ORDER
 A 14 EVENT_OUT_OF_ORDER
 A 15 EVENT_OUT_OF_ORDER
-R 2 admitted 1 settled 1 0 1@0:3 - - resume
-R 3 running 1 open 0 0 - - - recover
-R 1 running 1 open 0 0 - - a2 recover
+R 2 admitted t 1 settled 1 0 1@0:3 - - resume
+R 3 running t 1 open 0 0 - - - recover
+R 1 running t 1 open 0 0 - - a2 recover
 I a2 1 1 g 0 -
 C 1 running -
 P 10 0:9 1 1
@@ -5974,11 +5974,11 @@ A 5 HISTORY_INVALID
 A 6 appended
 A 7 appended
 A 8 appended
-R 3 - 1 unadmitted 0 0 - - a1 admit
-R 1 - 1 unadmitted 0 0 - i0 - admit
-R 2 failed:r 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 0 0 - i0 - admit
+R 2 cancelled:u t 1 terminal 0 0 - - - resume
 I a1 3 1 g 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 5 0:4 1 1
 N conflict@0:0,order@0:4
 U 2:1
@@ -5987,13 +5987,13 @@ A 10 appended
 A 11 appended
 A 12 appended
 A 13 appended
-R 3 - 1 unadmitted 1 0 - i0 a1 admit
-R 1 - 1 unadmitted 0 0 1@1:0 i0 - admit
-R 2 failed:r 1 terminal 0 0 - - a0 resume
+R 3 - xp 1 unadmitted 1 0 - i0 a1 admit
+R 1 - t 1 unadmitted 0 0 1@1:0 i0 - admit
+R 2 cancelled:u t 1 terminal 0 0 - - a0 resume
 I a1 3 1 g 0 -
 I a3 2 1 g 0 -
 I a0 2 1 g 0 -
-C 2 terminal 2:failed
+C 2 terminal 2:cancelled
 P 10 2:0 3 1
 N conflict@0:0,order@0:4
 U 2:1
@@ -6010,7 +6010,7 @@ QB refused identity-mismatch 10 0:4
 X
 T log-96
 A 0 appended
-R 2 - 1 unadmitted 0 0 1@0:0 - - admit
+R 2 - t 1 unadmitted 0 0 1@0:0 - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -6018,14 +6018,14 @@ U -
 A 1 HISTORY_INVALID
 O 0 0 0 0
 A 2 appended
-R 2 - 1 unadmitted 0 0 1@0:0 i0 - admit
+R 2 - t 1 unadmitted 0 0 1@0:0 i0 - admit
 C - none -
 P 2 0:1 1 1
 N -
 U -
 A 3 duplicate
 A 4 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 1@0:0 i0 - admit
+R 2 - t 1 unadmitted 0 0 1@0:0 i0 - admit
 C - none -
 P 2 0:1 1 1
 N -
@@ -6033,8 +6033,8 @@ U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QL ok
-QL ok
+QL NO_RUN_ADMITTED
+QL NO_RUN_ADMITTED
 QP ok
 QP ok
 QB batch 1 2 2 0:1
@@ -6043,7 +6043,7 @@ QB refused cursor-ahead 2 -
 X
 T log-97
 A 0 appended
-R 3 - 1 unadmitted 0 0 - - a0 admit
+R 3 - t 1 unadmitted 0 0 - - a0 admit
 I a0 3 1 c 0 -
 C - none -
 P 1 0:0 1 1
@@ -6053,26 +6053,26 @@ A 1 appended
 A 2 appended
 A 3 HISTORY_INVALID
 A 4 appended
-R 3 running 1 open 0 0 - - a0 recover
-R 2 failed:r 1 terminal 0 0 - - a2 resume
+R 3 paused t 1 terminal 0 0 - - a0 recover
+R 2 failed:a t 1 terminal 0 0 - - a2 resume
 I a0 3 1 c 0 -
 I a2 2 1 g 0 -
-C 3 running 2:failed
+C 3 paused 2:failed
 P 4 0:3 1 1
 N order@0:1,order@0:2
-U 2:1
+U 3:1,2:1
 A 5 appended
 A 6 EVENT_OUT_OF_ORDER
 A 7 EVENT_OUT_OF_ORDER
 A 8 EVENT_OUT_OF_ORDER
-R 3 running 1 open 0 0 - - a0 recover
-R 2 failed:r 1 terminal 0 0 - - a2 resume
+R 3 paused t 1 terminal 0 0 - - a0 recover
+R 2 failed:a t 1 terminal 0 0 - - a2 resume
 I a0 3 1 c 0 -
 I a2 2 1 g 0 -
-C 3 running 2:failed
+C 3 paused 2:failed
 P 5 1:0 2 1
 N order@0:1,order@0:2
-U 2:1
+U 3:1,2:1
 A 9 EVENT_OUT_OF_ORDER
 A 10 EVENT_OUT_OF_ORDER
 A 11 EVENT_OUT_OF_ORDER
@@ -6082,14 +6082,14 @@ A 14 LOG_FENCED
 A 15 LOG_FENCED
 O 0 0 0 1
 A 16 EVENT_MUTATED
-R 3 running 1 open 0 0 - - a0 recover
-R 2 failed:r 1 terminal 0 0 - - a2 resume
+R 3 paused t 1 terminal 0 0 - - a0 recover
+R 2 failed:a t 1 terminal 0 0 - - a2 resume
 I a0 3 1 c 0 -
 I a2 2 1 g 0 -
-C 3 running 2:failed
+C 3 paused 2:failed
 P 6 1:1 2 1
 N order@0:1,order@0:2,conflict@1:1
-U 2:1
+U 3:1,2:1
 A 17 EVENT_MUTATED
 A 18 EVENT_MUTATED
 A 19 EVENT_MUTATED
@@ -6097,25 +6097,25 @@ A 20 EVENT_MUTATED
 A 21 appended
 A 22 appended
 A 23 HISTORY_INVALID
-R 3 running 1 open 0 0 - - a0 recover
-R 2 failed:r 1 terminal 0 0 - i1 a2 resume
-R 1 - 1 unadmitted 0 0 - i0 - admit
+R 3 paused t 1 terminal 0 0 - - a0 recover
+R 2 failed:a t 1 terminal 0 0 - i1 a2 resume
+R 1 - t 1 unadmitted 0 0 - i0 - admit
 I a0 3 1 c 0 -
 I a2 2 1 g 0 -
-C 3 running 2:failed
+C 3 paused 2:failed
 P 8 4:1 3 1
 N order@0:1,order@0:2,conflict@1:1
-U 2:1
+U 3:1,2:1
 A 24 EVENT_MUTATED
-R 3 running 1 open 0 0 - - a0 recover
-R 2 failed:r 1 terminal 0 0 - i1 a2 resume
-R 1 - 1 unadmitted 0 0 - i0 - admit
+R 3 paused t 1 terminal 0 0 - - a0 recover
+R 2 failed:a t 1 terminal 0 0 - i1 a2 resume
+R 1 - t 1 unadmitted 0 0 - i0 - admit
 I a0 3 1 c 0 -
 I a2 2 1 g 0 -
-C 3 running 2:failed
+C 3 paused 2:failed
 P 8 4:1 3 1
 N order@0:1,order@0:2,conflict@1:1
-U 2:1
+U 3:1,2:1
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
@@ -6129,7 +6129,7 @@ QB batch 1 4 9 0:1,0:2,0:3
 X
 T log-98
 A 0 appended
-R 3 - 1 unadmitted 0 0 - i0 - admit
+R 3 - t 1 unadmitted 0 0 - i0 - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -6141,8 +6141,8 @@ A 4 appended
 A 5 LOG_FENCED
 O 1 0 0 0
 A 6 appended
-R 3 - 1 unadmitted 0 0 1@1:1 i0 - admit
-R 1 - 1 unadmitted 0 0 1@1:0 - - admit
+R 3 - t 1 unadmitted 0 0 1@1:1 i0 - admit
+R 1 - t 1 unadmitted 0 0 1@1:0 - - admit
 C - none -
 P 5 1:2 2 1
 N -
@@ -6150,7 +6150,7 @@ U -
 QS SETTLEMENT_WITHOUT_RUN
 QS skipped
 QS SETTLEMENT_WITHOUT_RUN
-QL ok
+QL NO_RUN_ADMITTED
 QL NO_RUN_ADMITTED
 QP ok
 QP ok
@@ -6206,12 +6206,12 @@ A 1 LOG_FENCED
 O 0 0 0 0
 A 2 HISTORY_INVALID
 A 3 appended
-R 1 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
 U -
-R 1 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -6229,7 +6229,7 @@ QB batch 1 1 1 -
 X
 T log-101
 A 0 appended
-R 3 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 C - none -
 P 1 0:0 1 1
 N -
@@ -6242,7 +6242,7 @@ A 3 duplicate
 A 4 appended
 A 5 EVENT_MUTATED
 A 6 appended
-R 3 - 1 unadmitted 0 0 - i0 a1 admit
+R 3 - t 1 unadmitted 0 0 - i0 a1 admit
 I a1 3 1 g 0 -
 C - none -
 P 5 1:1 2 1
@@ -6253,8 +6253,8 @@ A 8 EVENT_OUT_OF_ORDER
 O 0 0 0 1
 A 9 appended
 A 10 appended
-R 3 - 1 unadmitted 1 0 - i0 a0 admit
-R 1 - 1 unadmitted 0 0 - i1 - admit
+R 3 - xp 1 unadmitted 1 0 - i0 a0 admit
+R 1 - t 1 unadmitted 0 0 - i1 - admit
 I a1 3 1 g 0 -
 I a0 3 1 c 0 -
 C - none -
@@ -6280,7 +6280,7 @@ A 3 LOG_FENCED
 O 1 0 0 0
 A 4 EVENT_OUT_OF_ORDER
 A 5 appended
-R 3 - 1 unadmitted 0 0 - - a2 admit
+R 3 - t 1 unadmitted 0 0 - - a2 admit
 I a2 3 1 g 0 -
 C - none -
 P 2 0:1 1 1
@@ -6292,8 +6292,8 @@ A 8 EVENT_OUT_OF_ORDER
 A 9 EVENT_MUTATED
 A 10 appended
 A 11 appended
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 0 0 3@4:0 - - admit
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 0 0 3@4:0 - - admit
 I a2 3 1 g 1 -
 C - none -
 P 5 4:0 3 1
@@ -6307,18 +6307,18 @@ A 16 appended
 A 17 appended
 A 18 appended
 A 19 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 0 0 3@4:0 i1 a1 admit
-R 1 running 2 open 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 0 0 3@4:0 i1 a1 admit
+R 1 running t 2 open 0 0 - - - recover
 I a2 3 1 g 1 released
 I a1 2 1 g 0 -
 C 1 running -
 P 11 4:6 3 1
 N order@4:3
 U -
-R 3 - 1 unadmitted 0 0 - i2 - admit
-R 2 - 1 unadmitted 0 0 3@4:0 i1 a1 admit
-R 1 running 2 open 0 0 - - - recover
+R 3 - t 1 unadmitted 0 0 - i2 - admit
+R 2 - t 1 unadmitted 0 0 3@4:0 i1 a1 admit
+R 1 running t 2 open 0 0 - - - recover
 I a2 3 1 g 1 released
 I a1 2 1 g 0 -
 C 1 running -
@@ -6349,27 +6349,27 @@ U -
 A 4 appended
 A 5 appended
 A 6 EVENT_MUTATED
-R 2 completed 1 terminal 0 0 - - - resume
-R 1 running 1 open 0 0 - - - recover
-C 1 running 2:completed
+R 2 failed:g t 1 terminal 0 0 - - - resume
+R 1 running t 1 open 0 0 - - - recover
+C 1 running 2:failed
 P 3 0:2 1 1
 N order@0:1,order@0:2
 U 2:1
 A 7 appended
 A 8 appended
 A 9 appended
-R 2 completed 1 settled 1 0 1@1:0 - - settled
-R 1 running 1 open 0 0 - - - recover
-C 1 running 2:completed
+R 2 failed:g x 1 settled 1 0 1@1:0 - - settled
+R 1 running t 1 open 0 0 - - - recover
+C 1 running 2:failed
 P 6 2:0 3 1
 N order@0:1,order@0:2
 U -
 A 10 appended
 A 11 appended
-R 2 completed 1 settled 1 0 1@1:0 - - settled
-R 1 running 1 open 0 0 - - a3 recover
+R 2 failed:g x 1 settled 1 0 1@1:0 - - settled
+R 1 running t 1 open 0 0 - - a3 recover
 I a3 1 1 c 0 -
-C 1 running 2:completed
+C 1 running 2:failed
 P 8 2:2 3 1
 N order@0:1,order@0:2
 U -
@@ -6378,12 +6378,12 @@ A 13 appended
 A 14 appended
 A 15 appended
 A 16 appended
-R 2 completed 1 settled 1 0 1@1:0,2@2:6 - - settled
-R 1 failed:r 1 terminal 0 0 - - a1 resume
-R 3 running 3 open 0 0 - - - recover
+R 2 failed:g x 1 settled 1 0 1@1:0,2@2:6 - - settled
+R 1 cancelled:u t 1 terminal 0 0 - - a1 resume
+R 3 running t 3 open 0 0 - - - recover
 I a3 1 1 c 0 -
 I a1 1 1 c 0 -
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 12 2:6 3 1
 N order@0:1,order@0:2,order@2:3
 U 1:1
@@ -6394,13 +6394,13 @@ O 1 0 0 0
 A 20 EVENT_MUTATED
 A 21 EVENT_MUTATED
 A 22 EVENT_MUTATED
-R 2 completed 1 settled 1 0 1@1:0,2@2:6 i2 - settled
-R 1 failed:r 1 terminal 0 0 - - a0 resume
-R 3 running 3 open 0 0 - - - recover
+R 2 failed:g x 1 settled 1 0 1@1:0,2@2:6 i2 - settled
+R 1 cancelled:u t 1 terminal 0 0 - - a0 resume
+R 3 running t 3 open 0 0 - - - recover
 I a3 1 1 c 0 -
 I a1 1 1 c 0 -
 I a0 1 1 c 0 -
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 15 2:9 3 1
 N order@0:1,order@0:2,order@2:3,conflict@2:9
 U 1:1
@@ -6411,46 +6411,46 @@ A 25 EVENT_MUTATED
 O 1 0 0 0
 A 26 EVENT_MUTATED
 A 27 EVENT_MUTATED
-R 2 completed 1 settled 1 0 1@1:0,2@2:6 i2 - settled
-R 1 failed:r 1 terminal 0 0 - - a0 resume
-R 3 running 3 open 0 0 - - - recover
+R 2 failed:g x 1 settled 1 0 1@1:0,2@2:6 i2 - settled
+R 1 cancelled:u t 1 terminal 0 0 - - a0 resume
+R 3 running t 3 open 0 0 - - - recover
 I a3 1 1 c 0 -
 I a1 1 1 c 0 -
 I a0 1 1 c 0 -
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 15 2:9 3 1
 N order@0:1,order@0:2,order@2:3,conflict@2:9
 U 1:1
 A 28 EVENT_OUT_OF_ORDER
-R 2 completed 1 settled 1 0 1@1:0,2@2:6 i2 - settled
-R 1 failed:r 1 terminal 0 0 - - a0 resume
-R 3 running 3 open 0 0 - - - recover
+R 2 failed:g x 1 settled 1 0 1@1:0,2@2:6 i2 - settled
+R 1 cancelled:u t 1 terminal 0 0 - - a0 resume
+R 3 running t 3 open 0 0 - - - recover
 I a3 1 1 c 0 -
 I a1 1 1 c 0 -
 I a0 1 1 c 0 -
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 15 2:9 3 1
 N order@0:1,order@0:2,order@2:3,conflict@2:9
 U 1:1
 A 29 EVENT_MUTATED
 A 30 EVENT_MUTATED
-R 2 completed 1 settled 1 0 1@1:0,2@2:6 i2 - settled
-R 1 failed:r 1 terminal 0 0 - - a0 resume
-R 3 running 3 open 0 0 - - - recover
+R 2 failed:g x 1 settled 1 0 1@1:0,2@2:6 i2 - settled
+R 1 cancelled:u t 1 terminal 0 0 - - a0 resume
+R 3 running t 3 open 0 0 - - - recover
 I a3 1 1 c 0 -
 I a1 1 1 c 0 -
 I a0 1 1 c 0 -
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 15 2:9 3 1
 N order@0:1,order@0:2,order@2:3,conflict@2:9
 U 1:1
-R 2 completed 1 settled 1 0 1@1:0,2@2:6 i2 - settled
-R 1 failed:r 1 terminal 0 0 - - a0 resume
-R 3 running 3 open 0 0 - - - recover
+R 2 failed:g x 1 settled 1 0 1@1:0,2@2:6 i2 - settled
+R 1 cancelled:u t 1 terminal 0 0 - - a0 resume
+R 3 running t 3 open 0 0 - - - recover
 I a3 1 1 c 0 -
 I a1 1 1 c 0 -
 I a0 1 1 c 0 -
-C 1 terminal 1:failed
+C 1 terminal 1:cancelled
 P 15 2:9 3 1
 N order@0:1,order@0:2,order@2:3,conflict@2:9
 U 1:1
@@ -6462,7 +6462,7 @@ QL ok
 QP ok
 QP ok
 QB refused identity-mismatch 16 0:1
-QB batch 4 8 16 1:1,2:0,2:1,2:2
+QB batch 4 7 16 1:1,2:0,2:1
 QB batch 15 16 16 2:1
 X
 T log-104
@@ -6504,13 +6504,13 @@ A 22 appended
 A 23 EVENT_OUT_OF_ORDER
 A 24 appended
 A 25 HISTORY_INVALID
-R 3 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a0 3 1 c 0 voided
 C - none -
 P 6 0:8 1 1
 N order@0:3
 U -
-R 3 - 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a0 3 1 c 0 voided
 C - none -
 P 6 0:8 1 1
@@ -6540,7 +6540,7 @@ QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QL NO_RUN_ADMITTED
-QL ok
+QL NO_RUN_ADMITTED
 QP ok
 QP ok
 QB refused identity-mismatch 2 0:1
@@ -6559,35 +6559,35 @@ A 5 EVENT_OUT_OF_ORDER
 A 6 appended
 A 7 appended
 A 8 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - - - admit
-R 1 completed 1 terminal 0 0 - i0,i2 - resume
-C 1 terminal 1:completed
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 1 cancelled t 1 terminal 0 0 - i0,i2 - resume
+C 1 terminal 1:cancelled
 P 4 0:3 1 1
 N order@0:1
 U 1:1
 A 9 appended
 A 10 EVENT_MUTATED
 A 11 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 1 completed 1 terminal 0 0 - i0,i2 - resume
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 1 cancelled t 1 terminal 0 0 - i0,i2 - resume
 I a1 2 1 c 0 -
-C 1 terminal 1:completed
+C 1 terminal 1:cancelled
 P 5 0:4 1 1
 N order@0:1
 U 1:1
 A 12 appended
 A 13 HISTORY_INVALID
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 1 completed 1 settled 0 0 1@0:5 i0,i2 - resume
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 1 cancelled t 1 settled 0 0 1@0:5 i0,i2 - resume
 I a1 2 1 c 0 -
-C 1 terminal 1:completed
+C 1 terminal 1:cancelled
 P 6 0:5 1 1
 N order@0:1
 U -
-R 2 - 1 unadmitted 0 0 - - a1 admit
-R 1 completed 1 settled 0 0 1@0:5 i0,i2 - resume
+R 2 - t 1 unadmitted 0 0 - - a1 admit
+R 1 cancelled t 1 settled 0 0 1@0:5 i0,i2 - resume
 I a1 2 1 c 0 -
-C 1 terminal 1:completed
+C 1 terminal 1:cancelled
 P 6 0:5 1 1
 N order@0:1
 U -
@@ -6610,8 +6610,8 @@ A 2 appended
 A 3 duplicate
 A 4 appended
 A 5 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 3@0:2 i1 - admit
-R 3 completed 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 3@0:2 i1 - admit
+R 3 completed t 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 4 0:3 1 1
 N order@0:1
@@ -6624,23 +6624,23 @@ A 9 appended
 O 0 1 0 1
 A 10 EVENT_MUTATED
 A 11 appended
-R 1 - 1 unadmitted 0 0 3@0:2 i1 - admit
-R 3 completed 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 3@0:2 i1 - admit
+R 3 completed t 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 8 2:3 2 1
 N order@0:1,conflict@0:4,order@2:1,conflict@2:1
 U 3:1
 A 12 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 3@0:2 i1 - admit
-R 3 completed 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 3@0:2 i1 - admit
+R 3 completed t 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 8 2:3 2 1
 N order@0:1,conflict@0:4,order@2:1,conflict@2:1
 U 3:1
 A 13 HISTORY_INVALID
 A 14 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 0 0 3@0:2 i1 - admit
-R 3 completed 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 3@0:2 i1 - admit
+R 3 completed t 1 terminal 0 0 - - - resume
 C 3 terminal 3:completed
 P 8 2:3 2 1
 N order@0:1,conflict@0:4,order@2:1,conflict@2:1
@@ -6649,7 +6649,7 @@ QS SETTLEMENT_WITHOUT_RUN
 QS appended
 QS SETTLEMENT_WITHOUT_RUN
 QL NO_RUN_ADMITTED
-QL RUN_ID_TAKEN
+QL ok
 QP ok
 QP ok
 QB batch 5 8 8 2:1,2:2,2:3
@@ -6658,8 +6658,8 @@ QB batch 5 7 8 2:1,2:2
 X
 T log-108
 A 0 appended
-R 1 cancelled 1 terminal 0 0 - - - resume
-C 1 terminal 1:cancelled
+R 1 failed:s t 1 terminal 0 0 - - - resume
+C 1 terminal 1:failed
 P 1 0:0 1 1
 N order@0:0
 U 1:1
@@ -6675,10 +6675,10 @@ A 6 appended
 A 7 HISTORY_INVALID
 A 8 appended
 A 9 appended
-R 1 cancelled 1 terminal 0 0 3@0:3 - - resume
-R 2 - 1 unadmitted 0 0 - - a3 admit
+R 1 failed:s t 1 terminal 0 0 3@0:3 - - resume
+R 2 - t 1 unadmitted 0 0 - - a3 admit
 I a3 2 1 g 0 -
-C 1 terminal 1:cancelled
+C 1 terminal 1:failed
 P 4 0:3 1 1
 N order@0:0
 U 1:1
@@ -6686,10 +6686,10 @@ A 10 appended
 A 11 appended
 O 1 0 0 0
 A 12 HISTORY_INVALID
-R 1 completed 1 terminal 0 0 3@0:3 - - resume
-R 2 - 1 unadmitted 0 0 - i1 a3 admit
+R 1 failed:g t 1 terminal 0 0 3@0:3 - - resume
+R 2 - t 1 unadmitted 0 0 - i1 a3 admit
 I a3 2 1 g 0 -
-C 1 terminal 1:completed
+C 1 terminal 1:failed
 P 6 0:5 1 1
 N order@0:0
 U 1:1
@@ -6704,24 +6704,24 @@ A 18 appended
 A 19 HISTORY_INVALID
 A 20 appended
 A 21 duplicate
-R 1 completed 1 terminal 0 0 3@0:3,2@2:0 i1 a2 resume
-R 2 - 1 unadmitted 0 0 - i1 a3 admit
-R 3 cancelled 1 terminal 0 0 - i2 - resume
+R 1 failed:g t 1 terminal 0 0 3@0:3,2@2:0 i1 a2 resume
+R 2 - t 1 unadmitted 0 0 - i1 a3 admit
+R 3 failed:s t 1 terminal 0 0 - i2 - resume
 I a3 2 1 g 0 -
 I a2 1 1 c 0 -
-C 3 terminal 3:cancelled
+C 3 terminal 3:failed
 P 13 2:4 2 1
 N order@0:0,order@0:6
 U 1:1,3:1
 A 22 EVENT_OUT_OF_ORDER
 A 23 duplicate
 A 24 duplicate
-R 1 completed 1 terminal 0 0 3@0:3,2@2:0 i1 a2 resume
-R 2 - 1 unadmitted 0 0 - i1 a3 admit
-R 3 cancelled 1 terminal 0 0 - i2 - resume
+R 1 failed:g t 1 terminal 0 0 3@0:3,2@2:0 i1 a2 resume
+R 2 - t 1 unadmitted 0 0 - i1 a3 admit
+R 3 failed:s t 1 terminal 0 0 - i2 - resume
 I a3 2 1 g 0 -
 I a2 1 1 c 0 -
-C 3 terminal 3:cancelled
+C 3 terminal 3:failed
 P 13 2:4 2 1
 N order@0:0,order@0:6
 U 1:1,3:1
@@ -6778,7 +6778,7 @@ U -
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QL ok
+QL NO_RUN_ADMITTED
 QL NO_RUN_ADMITTED
 QP ok
 QP ok
@@ -6794,7 +6794,7 @@ A 3 appended
 O 0 0 0 0
 A 4 appended
 A 5 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 - i0 a3 admit
+R 1 - t 1 unadmitted 0 0 - i0 a3 admit
 I a3 1 1 g 0 -
 C - none -
 P 3 0:2 1 1
@@ -6807,8 +6807,8 @@ O 1 0 0 0
 A 9 appended
 A 10 HISTORY_INVALID
 A 11 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 - i0 a3 admit
-R 2 - 1 unadmitted 0 0 - i2 - admit
+R 1 - t 1 unadmitted 0 0 - i0 a3 admit
+R 2 - t 1 unadmitted 0 0 - i2 - admit
 I a3 1 1 g 0 -
 C - none -
 P 4 0:3 1 1
@@ -6829,33 +6829,33 @@ T log-111
 A 0 appended
 A 1 appended
 A 2 appended
-R 3 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 3 0:2 1 1
 N -
 U -
 A 3 HISTORY_INVALID
-R 3 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 3 0:2 1 1
 N -
 U -
 A 4 HISTORY_INVALID
-R 3 - 1 unadmitted 1 0 - - - admit
+R 3 - t 1 unadmitted 1 0 - - - admit
 C - none -
 P 3 0:2 1 1
 N -
 U -
 A 5 appended
 A 6 LOG_FENCED
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 admitted 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 admitted t 1 open 0 0 - - - recover
 C 1 admitted -
 P 4 0:3 1 1
 N -
 U -
-R 3 - 1 unadmitted 1 0 - - - admit
-R 1 admitted 1 open 0 0 - - - recover
+R 3 - t 1 unadmitted 1 0 - - - admit
+R 1 admitted t 1 open 0 0 - - - recover
 C 1 admitted -
 P 4 0:3 1 1
 N -
@@ -6883,8 +6883,8 @@ A 2 appended
 A 3 appended
 A 4 appended
 A 5 appended
-R 1 - 1 unadmitted 0 0 1@0:1 i1 a2 admit
-R 3 - 1 unadmitted 0 0 - - a1 admit
+R 1 - t 1 unadmitted 0 0 1@0:1 i1 a2 admit
+R 3 - t 1 unadmitted 0 0 - - a1 admit
 I a2 1 1 c 0 -
 I a1 3 1 g 0 -
 C - none -
@@ -6907,21 +6907,21 @@ A 17 EVENT_OUT_OF_ORDER
 A 18 EVENT_OUT_OF_ORDER
 O 2 1 1 0
 A 19 appended
-R 1 - 1 unadmitted 0 0 1@0:1 i1 a2 admit
-R 3 completed 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 1@0:1 i1 a2 admit
+R 3 failed:f t 1 terminal 0 0 - - - resume
 I a2 1 1 c 0 -
 I a1 3 1 g 0 absorbed
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 8 0:6 2 1
 N order@0:4,order@0:5
 U 3:1
 A 20 appended
 A 21 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 1@0:1 i1 a2 admit
-R 3 completed 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 1@0:1 i1 a2 admit
+R 3 failed:f t 1 terminal 0 0 - - - resume
 I a2 1 1 c 0 -
 I a1 3 1 g 0 absorbed
-C 3 terminal 3:completed
+C 3 terminal 3:failed
 P 9 0:7 2 1
 N order@0:4,order@0:5,conflict@0:7
 U 3:1
@@ -6956,7 +6956,7 @@ A 12 EVENT_OUT_OF_ORDER
 A 13 HISTORY_INVALID
 A 14 LOG_FENCED
 A 15 LOG_FENCED
-R 2 - 1 unadmitted 0 0 1@2:1 - a2 admit
+R 2 - t 1 unadmitted 0 0 1@2:1 - a2 admit
 I a2 2 1 g 0 -
 C - none -
 P 3 2:1 1 1
@@ -6966,7 +6966,7 @@ O 0 1 0 1
 A 16 EVENT_OUT_OF_ORDER
 O 0 1 0 1
 A 17 HISTORY_INVALID
-R 2 - 1 unadmitted 0 0 1@2:1 - a2 admit
+R 2 - t 1 unadmitted 0 0 1@2:1 - a2 admit
 I a2 2 1 g 0 -
 C - none -
 P 5 2:3 1 1
@@ -6976,14 +6976,14 @@ A 18 HISTORY_INVALID
 A 19 LOG_FENCED
 O 0 1 0 1
 A 20 HISTORY_INVALID
-R 2 - 1 unadmitted 0 0 1@2:1 - a2 admit
+R 2 - t 1 unadmitted 0 0 1@2:1 - a2 admit
 I a2 2 1 g 0 -
 C - none -
 P 5 2:3 1 1
 N order@2:0,conflict@2:2,conflict@2:3
 U -
 A 21 HISTORY_INVALID
-R 2 - 1 unadmitted 0 0 1@2:1 - a2 admit
+R 2 - t 1 unadmitted 0 0 1@2:1 - a2 admit
 I a2 2 1 g 0 -
 C - none -
 P 5 2:3 1 1
@@ -6991,16 +6991,16 @@ N order@2:0,conflict@2:2,conflict@2:3
 U -
 A 22 HISTORY_INVALID
 A 23 appended
-R 2 - 1 unadmitted 0 0 1@2:1 - a2 admit
-R 3 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 1@2:1 - a2 admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a2 2 1 g 0 -
 C - none -
 P 6 2:4 1 1
 N order@2:0,conflict@2:2,conflict@2:3
 U -
 A 24 duplicate
-R 2 - 1 unadmitted 0 0 1@2:1 - a2 admit
-R 3 - 1 unadmitted 0 0 - - - admit
+R 2 - t 1 unadmitted 0 0 1@2:1 - a2 admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a2 2 1 g 0 -
 C - none -
 P 6 2:4 1 1
@@ -7023,7 +7023,7 @@ A 1 LOG_FENCED
 O 0 0 0 0
 A 2 EVENT_OUT_OF_ORDER
 A 3 EVENT_OUT_OF_ORDER
-R 2 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 0 0 - - a0 admit
 I a0 2 1 c 0 -
 C - none -
 P 1 0:0 1 1
@@ -7032,7 +7032,7 @@ U -
 A 4 duplicate
 A 5 EVENT_OUT_OF_ORDER
 A 6 duplicate
-R 2 - 1 unadmitted 0 0 - - a0 admit
+R 2 - t 1 unadmitted 0 0 - - a0 admit
 I a0 2 1 c 0 -
 C - none -
 P 1 0:0 1 1
@@ -7054,30 +7054,30 @@ A 0 appended
 A 1 appended
 O 0 0 0 0
 A 2 appended
-R 2 paused 1 terminal 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i0 - admit
-C 2 paused -
+R 2 completed t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - i0 - admit
+C 2 terminal 2:completed
 P 3 0:2 1 1
 N order@0:0
 U 2:1
 A 3 appended
-R 2 paused 1 terminal 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i0,i2 - admit
-C 2 paused -
+R 2 completed t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - i0,i2 - admit
+C 2 terminal 2:completed
 P 4 0:3 1 1
 N order@0:0
 U 2:1
-R 2 paused 1 terminal 0 0 - - - recover
-R 1 - 1 unadmitted 0 0 - i0,i2 - admit
-C 2 paused -
+R 2 completed t 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - i0,i2 - admit
+C 2 terminal 2:completed
 P 4 0:3 1 1
 N order@0:0
 U 2:1
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
 QS SETTLEMENT_WITHOUT_RUN
-QL CHAT_RUN_LIVE
-QL CHAT_RUN_LIVE
+QL ok
+QL ok
 QP ok
 QP ok
 QB batch 2 3 4 0:2
@@ -7089,7 +7089,7 @@ A 0 appended
 O 0 0 0 0
 A 1 appended
 A 2 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 - - a3 admit
+R 1 - t 1 unadmitted 0 0 - - a3 admit
 I a1 1 1 g 0 -
 I a3 1 1 c 0 -
 C - none -
@@ -7097,7 +7097,7 @@ P 2 0:1 1 1
 N -
 U -
 A 3 appended
-R 1 - 1 unadmitted 0 0 - - a2 admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
 I a1 1 1 g 0 -
 I a3 1 1 c 0 -
 I a2 1 1 c 0 -
@@ -7111,8 +7111,8 @@ A 5 EVENT_OUT_OF_ORDER
 A 6 LOG_FENCED
 O 1 0 0 0
 A 7 appended
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 2 - 1 unadmitted 0 0 1@0:3 - - admit
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 2 - t 1 unadmitted 0 0 1@0:3 - - admit
 I a1 1 1 g 0 -
 I a3 1 1 c 0 -
 I a2 1 1 c 0 -
@@ -7127,39 +7127,39 @@ O 1 0 0 0
 A 11 appended
 A 12 appended
 A 13 HISTORY_INVALID
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 2 - 1 unadmitted 0 0 1@0:3 - - admit
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 2 - t 1 unadmitted 0 0 1@0:3 - - admit
+R 3 failed:s t 1 terminal 0 0 - - - resume
 I a1 1 1 g 0 -
 I a3 1 1 c 0 -
 I a2 1 1 c 0 -
-C 3 terminal 3:cancelled
+C 3 terminal 3:failed
 P 10 1:2 2 1
 N order@0:6,order@1:0
 U 3:1
 A 14 duplicate
 A 15 appended
 A 16 appended
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 2 - 1 unadmitted 0 0 1@0:3 - - admit
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 2 - t 1 unadmitted 0 0 1@0:3 - - admit
+R 3 failed:s t 1 terminal 0 0 - - - resume
 I a1 1 1 g 0 -
 I a3 1 1 c 1 -
 I a2 1 1 c 0 -
-C 3 terminal 3:cancelled
+C 3 terminal 3:failed
 P 12 1:4 2 1
 N order@0:6,order@1:0
 U 3:1
 A 17 HISTORY_INVALID
 A 18 duplicate
 A 19 appended
-R 1 - 1 unadmitted 0 0 - - a2 admit
-R 2 - 1 unadmitted 0 0 1@0:3 - - admit
-R 3 cancelled 1 terminal 0 0 - - - resume
+R 1 - t 1 unadmitted 0 0 - - a2 admit
+R 2 - t 1 unadmitted 0 0 1@0:3 - - admit
+R 3 failed:s t 1 terminal 0 0 - - - resume
 I a1 1 1 g 0 -
 I a3 1 1 c 1 settled
 I a2 1 1 c 0 -
-C 3 terminal 3:cancelled
+C 3 terminal 3:failed
 P 13 1:5 2 1
 N order@0:6,order@1:0
 U 3:1
@@ -7184,28 +7184,28 @@ A 5 LOG_FENCED
 A 6 LOG_FENCED
 O 1 0 0 0
 A 7 duplicate
-R 2 completed 1 terminal 0 0 - - - resume
-R 3 - 1 unadmitted 0 0 - - - admit
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:2
 U 2:1
 A 8 EVENT_OUT_OF_ORDER
 A 9 LOG_FENCED
-R 2 completed 1 terminal 0 0 - - - resume
-R 3 - 1 unadmitted 0 0 - - - admit
-C 2 terminal 2:completed
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+C 2 terminal 2:failed
 P 4 0:3 1 1
 N order@0:2
 U 2:1
 O 2 0 0 0
 A 10 appended
 A 11 appended
-R 2 completed 1 settled 0 0 1@0:4 - - resume
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 failed:f t 1 settled 0 0 1@0:4 - - resume
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a0 1 1 c 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 6 0:5 1 1
 N order@0:2
 U -
@@ -7214,12 +7214,12 @@ A 12 appended
 A 13 appended
 A 14 duplicate
 A 15 HISTORY_INVALID
-R 2 completed 1 settled 1 0 1@0:4 - a1 settled
-R 3 - 1 unadmitted 0 0 - - - admit
-R 1 - 1 unadmitted 0 0 - - a0 admit
+R 2 failed:f t 1 settled 1 0 1@0:4 - a1 settled
+R 3 - t 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a0 admit
 I a0 1 1 c 0 -
 I a1 2 1 g 0 -
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 8 0:7 1 1
 N order@0:2
 U -
@@ -7254,8 +7254,8 @@ N -
 U -
 O 0 0 0 1
 A 9 appended
-R 1 - 1 unadmitted 0 0 - - a3 admit
-R 3 - 1 unadmitted 0 0 - - - admit
+R 1 - t 1 unadmitted 0 0 - - a3 admit
+R 3 - t 1 unadmitted 0 0 - - - admit
 I a3 1 1 c 0 -
 C - none -
 P 3 0:2 1 1
@@ -7294,8 +7294,8 @@ A 15 EVENT_OUT_OF_ORDER
 A 16 EVENT_OUT_OF_ORDER
 A 17 EVENT_OUT_OF_ORDER
 A 18 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 - - a1 admit
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 1 - xp 1 unadmitted 1 0 - - a1 admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a1 1 1 g 0 -
 I a2 2 1 g 0 -
 C - none -
@@ -7304,8 +7304,8 @@ N -
 U -
 A 19 EVENT_OUT_OF_ORDER
 A 20 EVENT_OUT_OF_ORDER
-R 1 - 1 unadmitted 1 0 - - a1 admit
-R 2 - 1 unadmitted 0 0 - - a2 admit
+R 1 - xp 1 unadmitted 1 0 - - a1 admit
+R 2 - t 1 unadmitted 0 0 - - a2 admit
 I a1 1 1 g 0 -
 I a2 2 1 g 0 -
 C - none -
@@ -7320,9 +7320,9 @@ A 24 EVENT_OUT_OF_ORDER
 A 25 appended
 A 26 appended
 A 27 appended
-R 1 - 1 unadmitted 1 0 - - - admit
-R 2 - 1 unadmitted 0 0 - - - admit
-R 3 - 1 unadmitted 0 0 1@3:9 - - admit
+R 1 - xp 1 unadmitted 1 0 - - - admit
+R 2 - t 1 unadmitted 0 0 - - - admit
+R 3 - t 1 unadmitted 0 0 1@3:9 - - admit
 I a1 1 1 g 1 -
 I a2 2 1 g 0 voided
 C - none -
@@ -7331,12 +7331,12 @@ N -
 U -
 A 28 appended
 A 29 appended
-R 1 - 1 unadmitted 1 0 - - - admit
-R 2 completed 1 terminal 0 0 - - - resume
-R 3 - 1 unadmitted 0 0 1@3:9 i2 - admit
+R 1 - xp 1 unadmitted 1 0 - - - admit
+R 2 failed:f t 1 terminal 0 0 - - - resume
+R 3 - t 1 unadmitted 0 0 1@3:9 i2 - admit
 I a1 1 1 g 1 -
 I a2 2 1 g 0 voided
-C 2 terminal 2:completed
+C 2 terminal 2:failed
 P 15 5:0 4 1
 N order@5:0
 U 2:1

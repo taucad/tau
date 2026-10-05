@@ -453,6 +453,30 @@ describe('Monitor and materials on a printer', () => {
     });
   });
 
+  it('shows the speed a fan runs at beside its name, and keeps the speed chosen in the list while it spins down', async () => {
+    const user = userEvent.setup();
+    const components = fffComponents().map((observation) =>
+      observation.componentId === 'part-fan'
+        ? known('part-fan', 'accessories', { kind: 'level', ratio: 0.47 })
+        : observation,
+    );
+    const { fixture } = renderControl(entry({ testing: true, snapshot: machineSnapshot(components, { components }) }));
+    const control = openStage('Control');
+    const speed = within(control).getByRole('combobox', { name: 'Part fan' });
+    expect(within(control).getByText('47 %')).toBeInTheDocument();
+    expect(speed).toHaveTextContent('Set speed');
+
+    await user.click(speed);
+    await user.click(screen.getByRole('option', { name: '0 %' }));
+    await waitFor(() => {
+      expect(fixture.applyAction).toHaveBeenCalledWith(
+        expect.objectContaining({ componentId: 'part-fan', action: 'level.set', parameters: { ratio: 0 } }),
+      );
+    });
+    expect(speed).toHaveTextContent('0 %');
+    expect(within(control).getByText('47 %')).toBeInTheDocument();
+  });
+
   it('lists the pressure-advance table, deletes a row, and saves a value by hand', async () => {
     const user = userEvent.setup();
     const { fixture } = renderControl(entry({ testing: true }));

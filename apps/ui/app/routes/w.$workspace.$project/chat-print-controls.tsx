@@ -737,6 +737,8 @@ function AccessoryRow({
 }): React.JSX.Element {
   const { entry } = control;
   const { componentId, id, label } = descriptor;
+  // ponytail: the level last chosen here; the machine reports only the speed it runs at, not its target.
+  const [target, setTarget] = useState<number>();
   const check = control.check(componentId, id);
   const isDisabled = check.status !== 'available' || control.pending !== undefined;
   const description = check.status === 'unavailable' ? check.message : descriptor.consequence;
@@ -760,22 +762,19 @@ function AccessoryRow({
     const kind = entry.descriptor.capabilities.components.find((component) => component.id === componentId)?.kind;
     const ratio = componentValue(components, componentId, 'level')?.ratio;
     const levels: readonly number[] = kind === 'override' ? overrideLevels : fanLevels;
+    const percent = (level: number): string => `${String(Math.round(level * 100))} %`;
+    const chosen = target ?? (ratio !== undefined && levels.includes(ratio) ? ratio : undefined);
     return (
-      <PrintSetupRow label={label} description={description}>
+      <PrintSetupRow label={label} reading={ratio === undefined ? undefined : percent(ratio)} description={description}>
         <QualificationBadge descriptor={descriptor} />
         <ParameterSelect
           label={label}
-          value={ratio === undefined ? '' : String(ratio)}
-          placeholder='Not reported'
+          value={chosen === undefined ? '' : String(chosen)}
+          placeholder='Set speed'
           isDisabled={isDisabled}
-          groups={[
-            {
-              options: [...new Set([...levels, ...(ratio === undefined ? [] : [ratio])])]
-                .toSorted((left, right) => left - right)
-                .map((level) => ({ value: String(level), label: `${String(Math.round(level * 100))} %` })),
-            },
-          ]}
+          groups={[{ options: levels.map((level) => ({ value: String(level), label: percent(level) })) }]}
           onChange={(value) => {
+            setTarget(Number(value));
             void control.apply(componentId, id, { ratio: Number(value) });
           }}
         />

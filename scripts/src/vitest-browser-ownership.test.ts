@@ -147,7 +147,11 @@ describe('Vitest Browser test-runner ownership', () => {
     // The create-repo template is CI for generated repositories, not a Tau browser-driver site.
     // The docs deployment gate installs Chromium on the Netlify builder unless one is supplied.
     expect(installFiles.sort()).toEqual(
-      ['.agents/skills/create-repo/templates/ci.yml', '.github/workflows/ci.yml', 'apps/docs/project.json'].sort(),
+      [
+        '.agents/skills/create-repo/templates/ci.yml',
+        '.github/workflows/e2e-nightly.yml',
+        'apps/docs/project.json',
+      ].sort(),
     );
   });
 
@@ -199,7 +203,6 @@ describe('Vitest Browser test-runner ownership', () => {
         'apps/ui-e2e/vitest.config.ts',
         'apps/ui/app/components/chat/chat-textarea.vitest.browser.config.ts',
         'apps/ui/app/components/code/code-editor.vitest.browser.config.ts',
-        'apps/ui/app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/graphics/svg/svg-viewer.vitest.browser.config.ts',
         'apps/ui/app/components/geometry/graphics/three/utils/gltf-batches.vitest.browser.config.ts',
         'apps/ui/app/components/panes/pane-resize.vitest.browser.config.ts',

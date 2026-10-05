@@ -3926,6 +3926,11 @@ export function GltfMesh({
       modelVisualState.opacityByComponentId,
     ],
   );
+  const assemblyPreparationKey = assemblyDisplay ? `${assemblyDemandRevision}:${assemblyStyle}` : undefined;
+  const latestAssemblyPreparationKeyRef = useRef(assemblyPreparationKey);
+  useLayoutEffect(() => {
+    latestAssemblyPreparationKeyRef.current = assemblyPreparationKey;
+  }, [assemblyPreparationKey]);
   const assemblyPriorityIds = useMemo(
     () =>
       assemblyDisplay
@@ -4163,7 +4168,10 @@ export function GltfMesh({
   useEffect(() => {
     // Cleanup may cancel across any awaited loader, task yield or analysis.
     const cancellation = { cancelled: false };
-    const isCancelled = (): boolean => cancellation.cancelled;
+    const preparationKey = assemblyPreparationKey;
+    const isCancelled = (): boolean =>
+      cancellation.cancelled ||
+      (preparationKey !== undefined && latestAssemblyPreparationKeyRef.current !== preparationKey);
 
     const preparationAt = performance.now();
     const presentationAdmission = gltfFile
@@ -5129,11 +5137,10 @@ export function GltfMesh({
   }, [
     gltfFile,
     assemblyDisplay,
-    assemblyDemandRevision,
+    assemblyPreparationKey,
     assemblyDetailPolicy,
     assemblyResourceBudget.cpuBytes,
     assemblyResourceBudget.gpuBytes,
-    assemblyStyle,
     assemblyCamera,
     assemblyRenderFrame,
     assemblyPriorityIds,

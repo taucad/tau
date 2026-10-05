@@ -2586,6 +2586,21 @@ describe('actual candidate indexed demand', () => {
     const visibleSlots = surfacesOf(scenes.at(-1)!).flatMap((mesh) => getModelComponentInstanceSlots(mesh) ?? []);
     expect(visibleSlots).toHaveLength(10);
     expect(visibleSlots.some((slot) => slot.owner.componentId === hiddenId)).toBe(false);
+    mocks.modelUnit = { ...mocks.modelUnit, hiddenComponentIds: [] };
+    view.rerender(
+      <GltfMesh
+        assemblyDisplay={display}
+        geometryHash={display.root.digest}
+        presentationRevision={3}
+        enableMatcap={false}
+      />,
+    );
+    await waitFor(() => {
+      expect(committedRevisions()).toHaveLength(4);
+    });
+    const restoredSlots = surfacesOf(scenes.at(-1)!).flatMap((mesh) => getModelComponentInstanceSlots(mesh) ?? []);
+    expect(restoredSlots).toHaveLength(11);
+    expect(restoredSlots.some((slot) => slot.owner.componentId === hiddenId)).toBe(true);
     view.unmount();
     expect(geometryDispose).toHaveBeenCalledOnce();
   });

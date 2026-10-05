@@ -7,7 +7,7 @@ icon: lucide:boxes
 
 # Published Parts and Assemblies
 
-An authored assembly names source recipes and occurrences under the client's rooted project filesystem. `AuthoredAssemblySource` selects either a project path or an in-memory file map; `AuthoredPartRecipe` selects source or an already issued part reference. Each `AuthoredPartOccurrence` is a group or a leaf. Publication resolves each leaf to an explicit variant in `PublishedPartOccurrence`.
+An authored assembly lists recipes and occurrences in a rooted project filesystem. `AuthoredAssemblySource` chooses a project path or in-memory files; `AuthoredPartRecipe` chooses source or an issued part reference. `AuthoredPartOccurrence` describes groups and leaves. Publication resolves leaves to `PublishedPartOccurrence` variants.
 
 <auto-type-table path='./props/types.ts' name='AuthoredAssembly' />
 
@@ -19,7 +19,7 @@ An authored assembly names source recipes and occurrences under the client's roo
 
 <auto-type-table path='./props/types.ts' name='PublishedPartOccurrence' />
 
-`PublishedPartRecord` is the durable, versioned set of effective recipes. Each `PublishedPartVariant` pins a display GLB through `PublishedPartAsset`; `PublishedPartExact` adds optional native evidence and its producer-qualified codec. The host issues a digest-pinned `PublishedPartReference` to the record. `publishedPartRecordSchema` validates the record at wire and durable boundaries, including its asset and exact metadata.
+`PublishedPartRecord` stores versioned effective recipes. Variants pin display GLBs through `PublishedPartAsset`; optional `PublishedPartExact` identifies native evidence and its producer-qualified codec. The host issues a digest-pinned `PublishedPartReference`. `publishedPartRecordSchema` validates records, assets, and exact metadata at wire and durable boundaries.
 
 <auto-type-table path='./props/types.ts' name='PublishedPartRecord' />
 
@@ -31,9 +31,9 @@ An authored assembly names source recipes and occurrences under the client's roo
 
 <auto-type-table path='./props/types.ts' name='PublishedPartReference' />
 
-`PublishedAssembly` carries checked records and occurrences. `AssemblyDisplayProjector` is the trusted host-local admission/projection callback: admission validates the immutable closure, while projection returns flattened display bytes. `AdmittedAssembly` adds a client-local asset reader after host admission; callers do not construct its token. A `PublishedAssemblyRootSnapshot` observes the current shared root and generation, but cannot reconstruct a lost caller receipt. `PublishAssemblyOutcome` distinguishes published, superseded, cancelled, invalid, and commit-unknown outcomes; after commit-unknown, use its `readCurrent` callback before deciding what to do next.
+`PublishedAssembly` carries checked records and occurrences. The host-local `AssemblyDisplayProjector` validates the immutable closure during admission and returns flattened bytes during projection. `AdmittedAssembly` adds a client-local asset reader; callers cannot construct its token. `PublishedAssemblyRootSnapshot` observes the shared root and generation but cannot recover a lost receipt. `PublishAssemblyOutcome` distinguishes published, superseded, cancelled, invalid, and commit-unknown outcomes. After commit-unknown, use `readCurrent` before acting.
 
-The shared root file is a small generation pointer. Its digest pins an immutable manifest and ordered content chunks containing the complete logical assembly root. Publication writes and verifies every chunk and the manifest before advancing the pointer with a checked write. A source-free reader must retain and verify the entire pointer, manifest, chunk, part-record, and display-asset closure; a missing or mismatched byte invalidates admission. `readCurrent` reports the current verified generation, including after an uncertain commit, without claiming which caller wrote it.
+The shared root file is a generation pointer pinning an immutable manifest and ordered chunks of the logical root. Publication verifies chunks and manifest before a checked pointer write. Source-free readers verify the pointer, manifest, chunks, part records, and display assets; missing or mismatched bytes invalidate admission. `readCurrent` reports the verified generation after an uncertain commit without attributing its writer.
 
 <auto-type-table path='./props/types.ts' name='PublishedAssembly' />
 
@@ -45,7 +45,7 @@ The shared root file is a small generation pointer. Its digest pins an immutable
 
 <auto-type-table path='./props/types.ts' name='PublishAssemblyOutcome' />
 
-`PublishedAssemblyDocument` is the source-free session returned for an admitted root. Close it independently of an authored document. `PublishedExportInput` selects either a part reference and variant or an assembly root with optional `PublishedAssemblyComponentPlacement` values. A placement moves restored native geometry for one admitted canonical component without changing the pinned root. `ExportOutcome` carries admitted files or issues. `selectPublishedExportRoute` examines admitted metadata and declared capabilities to choose an eligible route; execution still validates immutable assets and the exact codec.
+`PublishedAssemblyDocument` is an admitted source-free session; close it independently of an authored document. `PublishedExportInput` selects a part and variant or an assembly root with optional `PublishedAssemblyComponentPlacement` values. Placements move restored native geometry for admitted components without changing the root. `ExportOutcome` carries files or issues. `selectPublishedExportRoute` uses admitted metadata and capabilities; execution still validates immutable assets and the exact codec.
 
 <auto-type-table path='./props/types.ts' name='PublishedAssemblyDocument' />
 

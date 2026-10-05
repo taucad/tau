@@ -48,6 +48,27 @@ type BenchmarkTessellation = {
   angularTolerance: number;
 };
 
+/** Diagnostic-only host boundaries on the same operation as worker telemetry. */
+export type HostRenderBoundary = {
+  caseName: string;
+  iteration: number;
+  phase:
+    | 'profile-started'
+    | 'profile-stopped'
+    | 'before-open'
+    | 'after-open'
+    | 'after-view'
+    | 'request-issued'
+    | 'await-settled'
+    | 'document-closed';
+  /** Milliseconds, the host realm's `performance.timeOrigin`. */
+  timeOrigin: number;
+  /** Milliseconds, the host realm's `performance.now()`. */
+  monotonic: number;
+  processCpu: NodeJS.CpuUsage;
+  threadCpu?: NodeJS.CpuUsage;
+};
+
 /** Stable JSON keys retained for benchmark artifact compatibility. @public */
 export const benchmarkFirstCallFields = {
   timeToFirstRender: 'timeToFirstRenderMs',
@@ -149,6 +170,8 @@ export type BenchmarkRunnerOptions = {
     warmupRuns: number;
     elapsed: number;
   }) => void;
+  /** Explicit diagnostic callback; absent from ordinary benchmark runs. */
+  onHostRenderBoundary?: (boundary: HostRenderBoundary) => void;
   /** Enable V8 CPU profiling for per-function timing breakdown. */
   cpuProfile?: boolean;
   /** CPU profiler sampling interval in microseconds (default: 100). */
@@ -327,6 +350,7 @@ export async function runBenchmarks(
     onProgress,
     onIterationStart,
     onIterationProgress,
+    onHostRenderBoundary,
     cpuProfile: enableCpuProfile = false,
     cpuProfileInterval = 100,
   } = options;
@@ -382,6 +406,19 @@ export async function runBenchmarks(
     const totalRuns = sampleIterations + warmupRuns;
     let cpuProfileResult: CpuProfile | undefined;
     let profileAnalysis: ProfileAnalysis | undefined;
+    let profiler: CpuProfiler | undefined;
+    const profilerState = { started: false };
+    const recordHostBoundary = (phase: HostRenderBoundary['phase'], iteration: number): void => {
+      onHostRenderBoundary?.({
+        caseName: benchCase.name,
+        iteration,
+        phase,
+        timeOrigin: performance.timeOrigin,
+        monotonic: performance.now(),
+        processCpu: process.cpuUsage(),
+        ...(typeof process.threadCpuUsage === 'function' ? { threadCpu: process.threadCpuUsage() } : {}),
+      });
+    };
     // Observe the operation immediately, then settle the owned client independently on every exit.
     const [operationResult] = await Promise.allSettled([
       (async (): Promise<void> => {
@@ -398,12 +435,10 @@ export async function runBenchmarks(
           }
         });
 
-        let profiler: CpuProfiler | undefined;
         if (enableCpuProfile) {
           const cpuProfilerModule = await import('#benchmarks/cpu-profiler.js');
           profiler = new cpuProfilerModule.CpuProfiler();
         }
-
         for (let iter = 0; iter < totalRuns; iter++) {
           performance.clearMeasures();
           performance.clearMarks();
@@ -418,13 +453,19 @@ export async function runBenchmarks(
           if (profiler && iter === warmupRuns) {
             globalThis.gc?.();
             await profiler.start(cpuProfileInterval);
+            profilerState.started = true;
+            recordHostBoundary('profile-started', iter + 1);
           }
 
           const start = performance.now();
           onIterationStart?.({ caseName: benchCase.name, iteration: iter + 1, totalRuns, warmupRuns });
+          const hostBoundary = (phase: HostRenderBoundary['phase']): void => {
+            recordHostBoundary(phase, iter + 1);
+          };
           const parameters = benchCase.parameterSequence?.[iter % benchCase.parameterSequence.length] ?? {};
           const committed = benchCase.stageSequence?.[iter % benchCase.stageSequence.length];
           let failureMessage: string | undefined;
+          hostBoundary('before-open');
           const document = client.open({
             source: { path: benchCase.mainFile },
             parameters,
@@ -442,14 +483,25 @@ export async function runBenchmarks(
                 }),
           });
           try {
+            hostBoundary('after-open');
             if (caseOperation === 'render') {
               const view = document.view('model', {
                 content: { includeEdges },
                 ...(renderOptions === undefined ? {} : { options: renderOptions }),
               });
-              const outcome = await view.rendering().finally(() => {
-                view.close();
-              });
+              hostBoundary('after-view');
+              const rendering = view.rendering();
+              hostBoundary('request-issued');
+              let outcome: Awaited<typeof rendering>;
+              try {
+                outcome = await rendering;
+              } finally {
+                try {
+                  hostBoundary('await-settled');
+                } finally {
+                  view.close();
+                }
+              }
               if (outcome.superseded) {
                 failureMessage = 'render was unexpectedly superseded';
               } else if (outcome.rendering.success) {
@@ -475,6 +527,7 @@ export async function runBenchmarks(
             }
           } finally {
             document.close();
+            hostBoundary('document-closed');
           }
           const elapsed = performance.now() - start;
           onIterationProgress?.({
@@ -506,14 +559,9 @@ export async function runBenchmarks(
           timings.push(elapsed);
           allTelemetry.push(telemetryBatches.flat());
         }
-
-        if (profiler) {
-          cpuProfileResult = await profiler.stop();
-          const { analyzeProfile } = await import('#benchmarks/profile-analyzer.js');
-          profileAnalysis = analyzeProfile(cpuProfileResult, allTelemetry);
-        }
       })(),
     ]);
+    const [profileStop] = profiler && profilerState.started ? await Promise.allSettled([profiler.stop()]) : [];
     const [cleanup] = await Promise.allSettled([
       Promise.resolve().then(() => {
         client.terminate();
@@ -523,9 +571,19 @@ export async function runBenchmarks(
       const error: unknown = operationResult.reason;
       throw error;
     }
+    if (profileStop?.status === 'rejected') {
+      const error: unknown = profileStop.reason;
+      throw error;
+    }
     if (cleanup.status === 'rejected') {
       const error: unknown = cleanup.reason;
       throw error;
+    }
+    if (profileStop?.status === 'fulfilled') {
+      cpuProfileResult = profileStop.value;
+      recordHostBoundary('profile-stopped', totalRuns);
+      const { analyzeProfile } = await import('#benchmarks/profile-analyzer.js');
+      profileAnalysis = analyzeProfile(cpuProfileResult, allTelemetry);
     }
     globalThis.gc?.();
 

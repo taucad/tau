@@ -247,6 +247,30 @@ describe('MonitorStage', () => {
     });
   });
 
+  it('should show heaters in whole degrees and no target while a heater is off', () => {
+    const idle = printing();
+    const temperatures = idle.snapshot.temperatures ?? {};
+    const at = (quantity: typeof temperatures.nozzle, value: number): typeof temperatures.nozzle =>
+      quantity === undefined ? undefined : { ...quantity, value, representation: 'binary64' };
+    renderMonitor({
+      ...idle,
+      snapshot: {
+        ...idle.snapshot,
+        temperatures: {
+          ...temperatures,
+          nozzle: at(temperatures.nozzle, 24.34),
+          nozzleTarget: at(temperatures.nozzleTarget, 0),
+          bed: at(temperatures.bed, 61.6),
+        },
+      },
+    });
+
+    expect(rowValue('Nozzle')).toBe('24 °C');
+    expect(rowValue('Bed')).toBe('62 °C');
+    expect(screen.queryByText('to 0 °C')).not.toBeInTheDocument();
+    expect(screen.getByText('to 55 °C')).toBeInTheDocument();
+  });
+
   describe('stage', () => {
     it.each<readonly [string, string | undefined, string | undefined]>([
       ['the phrase the provider reports', 'Heating the bed', 'Heating the bed'],

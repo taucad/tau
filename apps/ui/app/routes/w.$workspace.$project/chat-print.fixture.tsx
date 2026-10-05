@@ -139,9 +139,13 @@ export const failedCadSnapshot = (): ReturnType<typeof cadActor.getSnapshot> => 
   },
 });
 
-/** The kernel renders the model again, as after an edit. */
-export const renderGeometry = (): void => {
-  rendering = { ...rendering, requestId: `${rendering.requestId}-next` };
+/** The kernel renders the model again, as after an edit; `glb` is the model it renders, the placeholder by default. */
+export const renderGeometry = (glb?: Uint8Array<ArrayBuffer>): void => {
+  rendering = {
+    ...initialRendering,
+    ...(glb === undefined ? {} : { artifact: { mimeType: 'model/gltf-binary', content: glb } }),
+    requestId: `${rendering.requestId}-next`,
+  };
   cadState = cadSnapshot();
   cadRenders.emit();
 };

@@ -7,6 +7,7 @@ import type * as ProjectWorkspaceContext from '#routes/w.$workspace.$project/pro
 const send = vi.fn();
 const setWorkbenchOpen = vi.hoisted(() => vi.fn());
 const sidebar = vi.hoisted(() => ({ open: true }));
+const renderViewer = vi.hoisted(() => vi.fn());
 const desktopLayout = {
   chatOpen: true,
   workbenchOpen: true,
@@ -41,7 +42,10 @@ vi.mock('#routes/w.$workspace.$project/chat-pane-skeleton.js', () => ({
   ChatPaneSkeleton: () => <div data-testid='chat-skeleton' />,
 }));
 vi.mock('#routes/w.$workspace.$project/chat-viewer-dockview.js', () => ({
-  ViewerDockview: () => <div data-testid='viewer-lane' />,
+  ViewerDockview: () => {
+    renderViewer();
+    return <div data-testid='viewer-lane' />;
+  },
 }));
 vi.mock('#routes/w.$workspace.$project/chat-workbench-dockview.js', () => ({
   WorkbenchDockview: () => <div data-testid='workbench-lane' />,
@@ -127,10 +131,38 @@ describe('ChatInterfaceDesktop', () => {
     sidebar.open = true;
     vi.clearAllMocks();
     vi.stubGlobal('ResizeObserver', ResizeObserverMock);
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ width: 1400 }));
   });
 
   afterEach(() => {
     vi.unstubAllGlobals();
+    vi.restoreAllMocks();
+  });
+
+  it('should initialize the compact lanes before displaying the workspace', () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockReturnValue(DOMRect.fromRect({ width: 1119.5 }));
+    renderDesktop();
+
+    expect(screen.getByRole('button', { name: 'Toggle Workbench lane' })).toHaveAttribute('aria-pressed', 'false');
+  });
+
+  it('should rerender the workspace only when resizing crosses the compact boundary', async () => {
+    renderDesktop();
+    await screen.findByRole('button', { name: 'Toggle Workbench lane' });
+    resizeTo(1400);
+    renderViewer.mockClear();
+
+    resizeTo(1300);
+    resizeTo(1200);
+    resizeTo(compactWorkspaceWidth);
+    expect(renderViewer).not.toHaveBeenCalled();
+
+    resizeTo(compactWorkspaceWidth - 1);
+    expect(renderViewer).toHaveBeenCalledOnce();
+    expect(screen.getByRole('button', { name: 'Toggle Workbench lane' })).toHaveAttribute('aria-pressed', 'false');
+    renderViewer.mockClear();
+    resizeTo(900);
+    expect(renderViewer).not.toHaveBeenCalled();
   });
 
   it('uses the 1119/1120 workspace boundary and keeps all three pane children stable', async () => {

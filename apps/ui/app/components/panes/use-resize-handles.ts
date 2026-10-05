@@ -123,12 +123,11 @@ export function useResizeHandles(
         }
       }
 
-      const sashes = root.querySelectorAll<HTMLElement>('.sash, .dv-sash');
-      for (const sash of sashes) {
-        if (sash.closest('[data-resize-owner]') !== root) {
-          continue;
-        }
-        const handle = describeRef.current(sash);
+      // Read every owned sash before writing its accessibility attributes.
+      const handles = [...root.querySelectorAll<HTMLElement>('.sash, .dv-sash')]
+        .filter((sash) => sash.closest('[data-resize-owner]') === root)
+        .map((sash) => ({ sash, handle: describeRef.current(sash) }));
+      for (const { sash, handle } of handles) {
         const isDisabled = !handle || handle.maximum <= handle.minimum || sash.matches('.sash-disabled, .dv-disabled');
         sash.setAttribute('role', 'separator');
         sash.setAttribute('aria-disabled', String(isDisabled));
@@ -158,7 +157,36 @@ export function useResizeHandles(
     const schedule = (): void => {
       frame ??= requestAnimationFrame(refresh);
     };
-    const observer = new MutationObserver(schedule);
+    const nativeLayoutSelector =
+      '.sash, .dv-sash, .split-view-view, .split-view-container, .dv-view, .dv-view-container, .dv-split-view-container';
+    const headerSelector = '.dv-tabs-container, [data-slot=paneview-header]';
+    const isLayoutMutation = (mutation: MutationRecord): boolean => {
+      const target = mutation.target instanceof Element ? mutation.target : mutation.target.parentElement;
+      if (!target || target.closest('[data-resize-owner]') !== root) {
+        return false;
+      }
+      if (mutation.type === 'attributes') {
+        return target === root || target.matches(`${nativeLayoutSelector}, .dv-tab, [data-slot=paneview-header]`);
+      }
+      // Titles name the adjacent panes. Content text, Monaco decorations and
+      // streaming chat have no bearing on sash constraints or accessible labels.
+      if (target.closest(headerSelector)) {
+        return true;
+      }
+      if (mutation.type !== 'childList') {
+        return false;
+      }
+      return [...mutation.addedNodes, ...mutation.removedNodes].some(
+        (node) =>
+          node instanceof Element &&
+          (node.matches(nativeLayoutSelector) || node.querySelector(nativeLayoutSelector) !== null),
+      );
+    };
+    const observer = new MutationObserver((mutations) => {
+      if (mutations.some((mutation) => isLayoutMutation(mutation))) {
+        schedule();
+      }
+    });
     observer.observe(root, {
       childList: true,
       characterData: true,

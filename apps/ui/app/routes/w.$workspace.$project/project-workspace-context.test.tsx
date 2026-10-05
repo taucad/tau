@@ -51,15 +51,17 @@ vi.mock('#hooks/use-keyboard.js', async (importOriginal) => ({
   useKeybinding: keyboard.useKeybinding,
 }));
 
-const { ProjectWorkspaceProvider, resolveCompactAuxiliary, useProjectWorkspace } =
+const { ProjectWorkspaceProvider, resolveCompactAuxiliary, useFileReturn, useProjectWorkspace } =
   await import('./project-workspace-context.js');
 const keyboardActual = await vi.importActual<typeof KeyboardModule>('#hooks/use-keyboard.js');
 type Workspace = NonNullable<ReturnType<typeof useProjectWorkspace>>;
 
 let workspace: Workspace;
+let fileReturn: ReturnType<typeof useFileReturn>;
 
 function Probe(): React.JSX.Element {
   workspace = useProjectWorkspace();
+  fileReturn = useFileReturn();
   return <span hidden />;
 }
 
@@ -340,6 +342,43 @@ describe('ProjectWorkspaceProvider', () => {
       type: 'setPanelState',
       panelState: { desktopLayout: { workbenchOpen: true, compactAuxiliary: 'workbench' } },
     });
+  });
+
+  it('offers one way back to the pane a file was opened from, until another file opens', () => {
+    const opener = vi.fn();
+    render(
+      <ProjectWorkspaceProvider>
+        <Probe />
+      </ProjectWorkspaceProvider>,
+    );
+    act(() => {
+      workspace.connectWorkbench(opener);
+    });
+    const preview = '.tau/artifacts/abc/main.gcode.3mf';
+
+    act(() => {
+      fileReturn?.openFileFrom(preview, 'print');
+    });
+    expect(send).toHaveBeenCalledWith({ type: 'openFile', path: preview, source: 'user' });
+    // The preview's own open, however late Monaco reports it, keeps the way back.
+    act(() => {
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: preview, source: 'user' });
+    });
+    expect(fileReturn?.returnTo).toEqual({ path: preview, panel: 'print' });
+
+    act(() => {
+      fileReturn?.back();
+    });
+    expect(opener).toHaveBeenCalledWith('print');
+    expect(fileReturn?.returnTo).toBeUndefined();
+
+    act(() => {
+      fileReturn?.openFileFrom(preview, 'print');
+    });
+    act(() => {
+      listeners.get('fileOpened')?.({ type: 'fileOpened', path: 'main.ts', source: 'user' });
+    });
+    expect(fileReturn?.returnTo).toBeUndefined();
   });
 
   it('should leave file reveal routing to the sender-selected Workbench owner', () => {

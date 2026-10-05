@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { useProject } from '#hooks/use-project.js';
 import { useIsMobile } from '@taucad/ui/hooks/use-mobile';
 import type { MobilePanelId } from '#constants/editor.constants.js';
@@ -47,6 +47,27 @@ type ProjectWorkspaceContextValue = {
 };
 
 const ProjectWorkspaceContext = createContext<ProjectWorkspaceContextValue | undefined>(undefined);
+
+/** The pane a file was opened from, so its tab can offer one way back (the Print pane's G-code preview). */
+export type FileReturn = Readonly<{ path: string; panel: WorkbenchUtilityPanelId }>;
+
+type FileReturnContextValue = Readonly<{
+  returnTo: FileReturn | undefined;
+  /** Open a file as the user would, remembering the pane to go back to. */
+  openFileFrom: (path: string, panel: WorkbenchUtilityPanelId) => void;
+  /** Go back to that pane; the way back is spent. */
+  back: () => void;
+}>;
+
+const FileReturnContext = createContext<FileReturnContextValue | undefined>(undefined);
+
+/**
+ * The way back from a file a pane opened; separate from {@link useProjectWorkspace} so its changes
+ * re-render only the breadcrumbs that show it.
+ *
+ * @returns The way back, or undefined outside a project workspace.
+ */
+export const useFileReturn = (): FileReturnContextValue | undefined => useContext(FileReturnContext);
 
 export function resolveCompactAuxiliary(layout: PanelState['desktopLayout']): 'chat' | 'workbench' | undefined {
   if (layout[layout.compactAuxiliary === 'chat' ? 'chatOpen' : 'workbenchOpen']) {
@@ -298,8 +319,27 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     { enabled: !isMobile },
   );
 
+  const [returnTo, setReturnTo] = useState<FileReturn>();
+  const openFileFrom = useCallback(
+    (path: string, panel: WorkbenchUtilityPanelId) => {
+      editorRef.send({ type: 'openFile', path, source: 'user' });
+      setReturnTo({ path, panel });
+    },
+    [editorRef],
+  );
+  const back = useCallback(() => {
+    if (returnTo) {
+      openPanel(returnTo.panel);
+      setReturnTo(undefined);
+    }
+  }, [openPanel, returnTo]);
+  const fileReturn = useMemo(() => ({ returnTo, openFileFrom, back }), [back, openFileFrom, returnTo]);
+
   useEffect(() => {
     const subscription = editorRef.on('fileOpened', (event) => {
+      /* Another file opening ends the way back; the preview's own open may report after Monaco loads it.
+       * ponytail: reopening the same file from the tree keeps it, until back or another file. */
+      setReturnTo((current) => (current === undefined || current.path === event.path ? current : undefined));
       if (event.source !== 'user') {
         return;
       }
@@ -331,5 +371,9 @@ export function ProjectWorkspaceProvider({ children }: { readonly children: Reac
     () => ({ openPanel, setWorkbenchOpen, setChatOpen, connectWorkbench, registerLayoutController, layoutController }),
     [connectWorkbench, layoutController, openPanel, registerLayoutController, setChatOpen, setWorkbenchOpen],
   );
-  return <ProjectWorkspaceContext.Provider value={value}>{children}</ProjectWorkspaceContext.Provider>;
+  return (
+    <ProjectWorkspaceContext.Provider value={value}>
+      <FileReturnContext.Provider value={fileReturn}>{children}</FileReturnContext.Provider>
+    </ProjectWorkspaceContext.Provider>
+  );
 }

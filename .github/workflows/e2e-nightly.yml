@@ -48,6 +48,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ inputs.sha || 'main' }}
+          persist-credentials: false
 
       - name: Pin the commit under test
         id: commit
@@ -115,6 +116,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
 
       - &setup-nx
         name: Setup Nx Environment
@@ -260,6 +262,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           ref: ${{ needs.plan.outputs.sha }}
+          persist-credentials: false
 
       - name: Setup Nx Environment
         if: steps.gate.outputs.enabled == 'true'

@@ -115,6 +115,7 @@ describe('Vitest Browser test-runner ownership', () => {
       'apps/desktop-e2e/src/desktop-native-payload.spec.ts',
       'apps/desktop-e2e/src/desktop-print-dry-run.spec.ts',
       'apps/desktop-e2e/src/desktop-voice.spec.ts',
+      'apps/desktop-e2e/src/support/desktop-app.test.ts',
       'apps/desktop-e2e/src/support/desktop-app.ts',
       'apps/desktop-e2e/src/support/gateway-fixture.ts',
       'apps/desktop-e2e/src/support/revisions-pane.ts',

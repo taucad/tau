@@ -2,11 +2,12 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { NodeIO } from '@gltf-transform/core';
 import { registerTauGltfExtensions } from '@taucad/geometry-core';
-import type { TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
+import type { TauCadPhysical, TauCadTopologyPayload, TauCadTopologyRoot } from '@taucad/geometry-core';
 import { tauCadTopologyExtension } from '@taucad/runtime/types';
 import { esbuildBundler } from '@taucad/esbuild';
 import type { RuntimeClient } from '@taucad/runtime/client';
 import { defineRuntime } from '@taucad/runtime/worker';
+import { resolveRuntimePluginDefinition } from '@taucad/runtime/plugin';
 import { assertRenderingSuccess, createTestRuntimeClient, extractGltfFromResult } from '@taucad/runtime-testing';
 import { replicadKernel } from '#replicad.kernel.js';
 import { measureReplicadPhysical } from '#utils/physical-evidence.js';
@@ -17,10 +18,10 @@ afterEach(async () => {
   clients.clear();
 });
 
-const clientFor = (source: string) => {
+const clientFor = (source: string, kernel = replicadKernel({ wasm: 'single', tessellationInstancing: true })) => {
   const client = createTestRuntimeClient({
     runtime: defineRuntime({
-      kernels: [replicadKernel({ wasm: 'single', tessellationInstancing: true })],
+      kernels: [kernel],
       bundlers: [esbuildBundler()],
     }),
     files: { 'main.ts': source },
@@ -73,7 +74,11 @@ describe('requested Replicad physical evidence', () => {
     }
     const meshRender = meshRenderOutcome.rendering;
     assertRenderingSuccess(meshRender);
-    const meshPayload = await topology(extractGltfFromResult(meshRender)!);
+    const meshGltf = extractGltfFromResult(meshRender);
+    if (!meshGltf) {
+      throw new Error('Requested MeshShape GLB is missing.');
+    }
+    const meshPayload = await topology(meshGltf);
     expect(meshPayload.components[0]?.physical).toEqual({
       volume: { state: 'unavailable', reason: 'not-solid' },
       density: { valueGPerCm3: 1.55, provenance: 'authored-shape-config' },
@@ -99,13 +104,35 @@ describe('requested Replicad physical evidence', () => {
   }, 60_000);
 
   it('keeps exact geometry identity across a density-only assignment and exports requested facts', async () => {
-    const client = clientFor(`
+    const kernel = replicadKernel({ wasm: 'single', tessellationInstancing: true });
+    const definition = await resolveRuntimePluginDefinition('kernel', kernel);
+    const exportNative = definition.export;
+    if (!exportNative) {
+      throw new Error('Replicad must support native GLB export.');
+    }
+    const nativeExport = exportNative.bind(definition);
+    let measuredExport: TauCadPhysical | undefined;
+    definition.export = async (input, runtime, context) => {
+      if (input.exportId === 'glb' && input.content?.includePhysical) {
+        const entry = input.handle.shapes[0];
+        if (!entry) {
+          throw new Error('The measured native export has no shape.');
+        }
+        measuredExport = await measureReplicadPhysical(entry, context.openCascade);
+      }
+      return nativeExport(input, runtime, context);
+    };
+    const observedKernel = { ...kernel, [Symbol.for('@taucad/runtime/plugin-definition')]: () => definition };
+    const client = clientFor(
+      `
       import { makeBox } from 'replicad';
       export const defaultParams = { density: 2.7 };
       export default function main(p = defaultParams) {
         return { shape: makeBox([0,0,0], [10,8,6]), name: 'body', density: p.density };
       }
-    `);
+    `,
+      observedKernel,
+    );
     const renderAt = async (density: number) => {
       await client.update({ parameters: { density } });
       const resultOutcome = await client.view('model', { content: { includePhysical: true } }).rendering();
@@ -132,9 +159,19 @@ describe('requested Replicad physical evidence', () => {
     if (!exported.success) {
       throw new Error(JSON.stringify(exported.issues));
     }
-    const exportedPayload = await topology(new Uint8Array(exported.files[0]!.bytes));
+    const exportedPayload = await topology(new Uint8Array(exported.files[0].bytes));
     const exportedPhysical = exportedPayload.components[0]!.physical;
-    expect(exportedPhysical).toEqual(changedDensity);
+    expect(exportedPhysical).toMatchObject({
+      density: changedDensity.density,
+      volume: {
+        state: 'measured',
+        valueMm3: 480,
+        method: 'occt-solid-volume',
+        validity: 'closed-solid',
+      },
+    });
+    expect(measuredExport).toBeDefined();
+    expect(exportedPhysical).toEqual(measuredExport);
   }, 60_000);
 
   it('rejects an invalid authored density instead of inventing a mass', async () => {

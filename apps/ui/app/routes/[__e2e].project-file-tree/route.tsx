@@ -384,6 +384,17 @@ type WarehousePreparationObservation = {
   readonly failure?: Extract<PublishAssemblyOutcome, { status: 'commit-unknown' }>['failure'];
 };
 
+type WarehousePreparationDiagnostic =
+  | { readonly phase: 'transport-rejection'; readonly error: unknown; readonly evidence: unknown }
+  | {
+      readonly phase: 'pre-close-root';
+      readonly snapshot: Awaited<
+        ReturnType<Extract<PublishAssemblyOutcome, { status: 'commit-unknown' }>['readCurrent']>
+      >;
+    }
+  | { readonly phase: 'pre-close-refusal' | 'fresh-root-refusal'; readonly error: unknown; readonly evidence: unknown }
+  | { readonly phase: 'fresh-root'; readonly status: 'absent' | 'present'; readonly root?: PublishedPartAsset };
+
 /** Prepare one real complete corpus through the captured project evaluator and checked host writer. */
 export const prepareScaleCorpus = async ({
   fixture,
@@ -393,6 +404,7 @@ export const prepareScaleCorpus = async ({
   signal,
   isCurrent,
   onPhase,
+  onDiagnostic,
 }: {
   fixture: ReturnType<typeof createScaleFixture>;
   publicationPath: string;
@@ -401,6 +413,7 @@ export const prepareScaleCorpus = async ({
   signal: AbortSignal;
   isCurrent: () => boolean;
   onPhase?: (observation: WarehousePreparationObservation) => void;
+  onDiagnostic?: (diagnostic: WarehousePreparationDiagnostic) => void;
 }): Promise<CompletedScaleCorpus> => {
   const assertCurrent = (): void => {
     signal.throwIfAborted();
@@ -414,6 +427,186 @@ export const prepareScaleCorpus = async ({
   }
   let observedRoot: PublishedPartAsset | undefined;
   let observedFailure: WarehousePreparationObservation['failure'];
+  const errorEvidence = (origin: unknown): unknown => {
+    const seen = new Set<unknown>();
+    let remainingVisits = 96;
+    let remainingFields = 128;
+    let remainingCharacters = 65_536;
+    const intrinsicByteLength = (subject: unknown, prototype: unknown): number | undefined => {
+      if ((typeof prototype !== 'object' || prototype === null) && typeof prototype !== 'function') {
+        return undefined;
+      }
+      const getter = Object.getOwnPropertyDescriptor(prototype, 'byteLength')?.get;
+      if (!getter) {
+        return undefined;
+      }
+      try {
+        const length: unknown = Reflect.apply(getter, subject, []);
+        return typeof length === 'number' && Number.isSafeInteger(length) && length >= 0 ? length : undefined;
+      } catch {
+        return undefined;
+      }
+    };
+    const visit = (value: unknown, depth: number): unknown => {
+      if (remainingVisits <= 0) {
+        return { kind: 'visit-budget-exhausted' };
+      }
+      remainingVisits -= 1;
+      if (value === null || typeof value === 'number' || typeof value === 'boolean') {
+        return value;
+      }
+      if (typeof value === 'string') {
+        const retained = Math.min(value.length, remainingCharacters, 16_384);
+        remainingCharacters -= retained;
+        return retained === value.length ? value : { text: value.slice(0, retained), originalLength: value.length };
+      }
+      if (typeof value === 'bigint') {
+        return { kind: 'bigint' };
+      }
+      if (typeof value === 'symbol') {
+        return { kind: 'symbol', description: visit(value.description ?? '', depth + 1) };
+      }
+      if (typeof value !== 'object' && typeof value !== 'function') {
+        return { kind: typeof value };
+      }
+      if (seen.has(value)) {
+        return { kind: 'cycle' };
+      }
+      if (depth >= 6) {
+        return { kind: 'depth-limit' };
+      }
+      seen.add(value);
+      if (ArrayBuffer.isView(value)) {
+        const type =
+          value instanceof DataView
+            ? 'DataView'
+            : value instanceof Uint8Array
+              ? 'Uint8Array'
+              : value instanceof Int8Array
+                ? 'Int8Array'
+                : value instanceof Uint16Array
+                  ? 'Uint16Array'
+                  : value instanceof Int16Array
+                    ? 'Int16Array'
+                    : value instanceof Uint32Array
+                      ? 'Uint32Array'
+                      : value instanceof Int32Array
+                        ? 'Int32Array'
+                        : value instanceof Float32Array
+                          ? 'Float32Array'
+                          : value instanceof Float64Array
+                            ? 'Float64Array'
+                            : 'ArrayBufferView';
+        const prototype: unknown =
+          value instanceof DataView ? DataView.prototype : Object.getPrototypeOf(Uint8Array.prototype);
+        const byteLength = intrinsicByteLength(value, prototype);
+        return byteLength === undefined
+          ? { kind: 'binary-view', type, status: 'refused' }
+          : { kind: 'binary-view', type, byteLength };
+      }
+      if (value instanceof ArrayBuffer) {
+        const byteLength = intrinsicByteLength(value, ArrayBuffer.prototype);
+        return byteLength === undefined
+          ? { kind: 'array-buffer', status: 'refused' }
+          : { kind: 'array-buffer', byteLength };
+      }
+      if (typeof SharedArrayBuffer !== 'undefined' && value instanceof SharedArrayBuffer) {
+        const byteLength = intrinsicByteLength(value, SharedArrayBuffer.prototype);
+        return byteLength === undefined
+          ? { kind: 'shared-array-buffer', status: 'refused' }
+          : { kind: 'shared-array-buffer', byteLength };
+      }
+      if (Array.isArray(value)) {
+        let length: unknown;
+        try {
+          length = Object.getOwnPropertyDescriptor(value, 'length')?.value;
+        } catch {
+          return { kind: 'array', status: 'refused' };
+        }
+        if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+          return { kind: 'array', status: 'refused' };
+        }
+        const items: unknown[] = [];
+        for (let index = 0; index < length && index < 32 && remainingFields > 0; index += 1) {
+          remainingFields -= 1;
+          try {
+            const descriptor = Object.getOwnPropertyDescriptor(value, String(index));
+            items.push(
+              descriptor
+                ? 'value' in descriptor
+                  ? visit(descriptor.value, depth + 1)
+                  : { kind: 'accessor' }
+                : { kind: 'hole' },
+            );
+          } catch {
+            items.push({ kind: 'refused' });
+          }
+        }
+        return { kind: 'array', length, items, truncated: items.length < length };
+      }
+      const field = (name: string): unknown => {
+        let subject: unknown = value;
+        for (let parent = 0; parent < 4; parent += 1) {
+          if ((typeof subject !== 'object' || subject === null) && typeof subject !== 'function') {
+            return null;
+          }
+          try {
+            const descriptor = Object.getOwnPropertyDescriptor(subject, name);
+            if (descriptor) {
+              return 'value' in descriptor ? visit(descriptor.value, depth + 1) : { kind: 'accessor' };
+            }
+            const inherited: unknown = Object.getPrototypeOf(subject);
+            subject = inherited;
+          } catch {
+            return { kind: 'refused' };
+          }
+        }
+        return null;
+      };
+      try {
+        const own: Record<string, unknown> = {};
+        let truncated = false;
+        const record = (name: string): void => {
+          if (Object.hasOwn(own, name)) {
+            return;
+          }
+          if (Object.keys(own).length >= 32 || remainingFields <= 0) {
+            truncated = true;
+            return;
+          }
+          const descriptor = Object.getOwnPropertyDescriptor(value, name);
+          if (descriptor) {
+            remainingFields -= 1;
+            own[name] = 'value' in descriptor ? visit(descriptor.value, depth + 1) : { kind: 'accessor' };
+          }
+        };
+        for (const name of ['name', 'code', 'message', 'stack', 'cause', 'details', 'issues']) {
+          record(name);
+        }
+        for (const name in value) {
+          if (Object.hasOwn(value, name)) {
+            if (remainingFields <= 0 || Object.keys(own).length >= 32) {
+              truncated = true;
+              break;
+            }
+            record(name);
+          }
+        }
+        return {
+          kind: 'object',
+          name: field('name'),
+          code: field('code'),
+          message: field('message'),
+          stack: field('stack'),
+          own,
+          truncated,
+        };
+      } catch {
+        return { kind: 'uninspectable', name: field('name'), code: field('code'), message: field('message') };
+      }
+    };
+    return visit(origin, 0);
+  };
   const observe = (phase: WarehousePreparationObservation['phase']): void => {
     try {
       onPhase?.({
@@ -423,6 +616,13 @@ export const prepareScaleCorpus = async ({
       });
     } catch {
       // An observation cannot interrupt checked publication or its owned cleanup.
+    }
+  };
+  const diagnose = (diagnostic: WarehousePreparationDiagnostic): void => {
+    try {
+      onDiagnostic?.(diagnostic);
+    } catch {
+      // Private evidence cannot change checked publication or cleanup.
     }
   };
   observe('authority');
@@ -439,13 +639,108 @@ export const prepareScaleCorpus = async ({
       assertCurrent();
       return openProjectBridge('agent');
     });
-    const client = createRuntimeClient(kernelOptions({ fileSystem, publicationFileSystem: authority.fileSystem }));
+    const options = kernelOptions({ fileSystem, publicationFileSystem: authority.fileSystem });
+    const selectedTransport = options.transport;
+    const client = createRuntimeClient({
+      ...options,
+      transport: {
+        ...selectedTransport,
+        materialize: () => {
+          const selected = selectedTransport.materialize();
+          return {
+            ...selected,
+            open: async () => {
+              const ready = await selected.open();
+              return {
+                ...ready,
+                channel: new Proxy(ready.channel, {
+                  get(channel, property, receiver) {
+                    if (property !== 'call') {
+                      const inherited: unknown = Reflect.get(channel, property, receiver);
+                      return inherited;
+                    }
+                    return new Proxy(channel.call, {
+                      apply(call, _receiver, args: unknown[]) {
+                        let result: unknown;
+                        try {
+                          result = Reflect.apply(call, channel, args);
+                        } catch (error) {
+                          if (args[0] === 'publishAuthoredAssemblyRoot') {
+                            diagnose({ phase: 'transport-rejection', error, evidence: errorEvidence(error) });
+                          }
+                          throw error;
+                        }
+                        if (args[0] !== 'publishAuthoredAssemblyRoot' || !(result instanceof Promise)) {
+                          return result;
+                        }
+                        return result.catch((error: unknown) => {
+                          diagnose({ phase: 'transport-rejection', error, evidence: errorEvidence(error) });
+                          throw error;
+                        });
+                      },
+                    });
+                  },
+                }),
+              };
+            },
+          };
+        },
+      },
+    });
     let completed: CompletedScaleCorpus;
     try {
       observe('publication');
       const published = await client.publishAssembly({ authoredPath: fixture.entryPath, publicationPath, signal });
       if (published.status === 'commit-unknown') {
         observedFailure = published.failure;
+        try {
+          const current = await published.readCurrent();
+          diagnose({ phase: 'pre-close-root', snapshot: current });
+          if (current.status === 'present') {
+            observedRoot = current.root;
+          }
+        } catch (error) {
+          diagnose({ phase: 'pre-close-refusal', error, evidence: errorEvidence(error) });
+          let rootReader: ReturnType<typeof createFileSystemBridgeProxy> | undefined;
+          try {
+            rootReader = createFileSystemBridgeProxy(openProjectBridge('user'));
+            await rootReader.ready;
+            const bytes = await rootReader.readFile(publicationPath).catch((readError: unknown) => {
+              if (
+                typeof readError === 'object' &&
+                readError !== null &&
+                'code' in readError &&
+                (readError.code === 'ENOENT' || readError.code === 'ENOTDIR')
+              ) {
+                return undefined;
+              }
+              throw readError;
+            });
+            if (bytes) {
+              const root = {
+                path: publicationPath,
+                digest: await digestContent({ bytes }),
+                byteLength: bytes.byteLength,
+              };
+              const reader = createRuntimeClient(
+                kernelOptions({ fileSystem, publicationFileSystem: authority.fileSystem }),
+              );
+              try {
+                await reader.openAssembly({ root });
+                observedRoot = root;
+                diagnose({ phase: 'fresh-root', status: 'present', root });
+              } finally {
+                await reader.shutdown();
+              }
+            } else {
+              diagnose({ phase: 'fresh-root', status: 'absent' });
+            }
+          } catch (recoveryError) {
+            diagnose({ phase: 'fresh-root-refusal', error: recoveryError, evidence: errorEvidence(recoveryError) });
+          } finally {
+            rootReader?.dispose();
+          }
+        }
       }
       assertCurrent();
       if (published.status !== 'published') {
@@ -602,6 +897,25 @@ const WarehouseCorpusPreparation = ({ preparation }: { preparation: WarehousePre
   React.useEffect(() => {
     const abort = new AbortController();
     let mounted = true;
+    let rejectionObserved = false;
+    let transportRejection: unknown;
+    const rootChecks: WarehousePreparationDiagnostic[] = [];
+    const diagnosticHost = globalThis as typeof globalThis & {
+      __TAU_WAREHOUSE_PREPARATION_TEST__?: { snapshot: () => unknown };
+    };
+    const privateDiagnostic = {
+      snapshot: (): unknown => ({
+        transportRejection: rejectionObserved
+          ? { status: 'observed', error: transportRejection }
+          : { status: 'not-observed' },
+        rootChecks: rootChecks.map((diagnostic) =>
+          diagnostic.phase === 'pre-close-refusal' || diagnostic.phase === 'fresh-root-refusal'
+            ? { phase: diagnostic.phase, error: diagnostic.evidence }
+            : diagnostic,
+        ),
+      }),
+    };
+    diagnosticHost.__TAU_WAREHOUSE_PREPARATION_TEST__ = privateDiagnostic;
     const prepare = async (): Promise<void> => {
       try {
         await whenServicesReady();
@@ -642,6 +956,17 @@ const WarehouseCorpusPreparation = ({ preparation }: { preparation: WarehousePre
             signal: abort.signal,
             isCurrent,
             onPhase,
+            onDiagnostic: (diagnostic) => {
+              if (!mounted) {
+                return;
+              }
+              if (diagnostic.phase === 'transport-rejection') {
+                rejectionObserved = true;
+                transportRejection = diagnostic.evidence;
+              } else {
+                rootChecks.push(diagnostic);
+              }
+            },
             openProjectBridge: (consumer) => opener(`/projects/${preparation.projectId}`, consumer),
             kernelOptions: (deps) => options({ ...deps, compute: computeConnection?.compute }),
           });
@@ -675,6 +1000,9 @@ const WarehouseCorpusPreparation = ({ preparation }: { preparation: WarehousePre
     return () => {
       mounted = false;
       abort.abort();
+      if (diagnosticHost.__TAU_WAREHOUSE_PREPARATION_TEST__ === privateDiagnostic) {
+        delete diagnosticHost.__TAU_WAREHOUSE_PREPARATION_TEST__;
+      }
     };
   }, [fileManagerRef, preparation, whenServicesReady]);
 

@@ -374,7 +374,10 @@ describe('checked completed scale corpus handoff', () => {
         expect(write.mock.calls.some(([input]) => input.path === publicationPath)).toBe(true);
         expect(await producer.fileSystem.exists(publicationPath)).toBe(true);
         expect(onPhase.mock.calls.map(([{ phase }]) => phase)).toEqual(['authority', 'publication', 'shutdown']);
-        expect(onPhase.mock.calls.every(([{ root }]) => root === undefined)).toBe(true);
+        expect(onPhase.mock.calls.slice(0, -1).every(([{ root }]) => root === undefined)).toBe(true);
+        expect(onPhase.mock.calls.at(-1)?.[0].root).toEqual(
+          change === 'aborted' ? expect.objectContaining({ path: publicationPath }) : undefined,
+        );
         for (const dispose of disposers) {
           expect(dispose).toHaveBeenCalledOnce();
         }
@@ -601,6 +604,8 @@ it.each([
   { mode: 'timeout', failure: { name: 'OperationTimeoutError', code: 'RUNTIME_OPERATION_TIMEOUT' } },
   { mode: 'terminated', failure: { name: 'RuntimeTerminatedError', code: 'RUNTIME_TERMINATED' } },
   { mode: 'unknown', failure: { name: null, code: null } },
+  { mode: 'missing', failure: { name: null, code: null } },
+  { mode: 'refused', failure: { name: 'RuntimeTerminatedError', code: 'RUNTIME_TERMINATED' } },
 ] as const)(
   'should retain the $mode failure after checked publication and cleanup',
   async ({ mode, failure }) => {
@@ -632,8 +637,11 @@ it.each([
     const release = Promise.withResolvers<void>();
     const closed = Promise.withResolvers<RuntimeTransportCloseResult>();
     const observations: Array<Parameters<NonNullable<Parameters<typeof prepareScaleCorpus>[0]['onPhase']>>[0]> = [];
+    const diagnostics: Array<Parameters<NonNullable<Parameters<typeof prepareScaleCorpus>[0]['onDiagnostic']>>[0]> = [];
     const connections: FileSystemBridgeConnection[] = [];
     const workers: NodeWorker[] = [];
+    let transportCount = 0;
+    let reachedCheckedRoot = false;
     class TsxWorker extends NodeWorker {
       public constructor(url: string | URL) {
         super(url, { execArgv: ['--import', 'tsx'] });
@@ -642,13 +650,19 @@ it.each([
     }
     const originalWrite = producer.fileSystem.writeFileChecked.bind(producer.fileSystem);
     const write = vi.spyOn(producer.fileSystem, 'writeFileChecked').mockImplementation(async (input) => {
+      if (input.path === publicationPath && mode === 'missing') {
+        reachedCheckedRoot = true;
+        committed.resolve();
+        throw new Error('private missing checked root');
+      }
       const receipt = await originalWrite(input);
       if (input.path === publicationPath) {
+        reachedCheckedRoot = true;
         committed.resolve();
         if (mode === 'aborted') {
           controller.abort(new Error('private abort reason'));
         }
-        if (mode === 'terminated') {
+        if (mode === 'terminated' || mode === 'refused') {
           closed.resolve({ cause: 'host-exit', phase: 'session', exitCode: 7 });
         }
         if (mode === 'unknown') {
@@ -659,6 +673,13 @@ it.each([
         }
       }
       return receipt;
+    });
+    const originalRead = producer.fileSystem.readFile.bind(producer.fileSystem);
+    const read = vi.spyOn(producer.fileSystem, 'readFile').mockImplementation(async (path, encoding) => {
+      if (mode === 'refused' && reachedCheckedRoot && path === publicationPath) {
+        throw new Error('private same-authority read refusal');
+      }
+      return originalRead(path, encoding);
     });
     try {
       const pending = prepareScaleCorpus({
@@ -672,12 +693,16 @@ it.each([
             release.resolve();
           }
         },
+        onDiagnostic: (diagnostic) => {
+          diagnostics.push(diagnostic);
+        },
         openProjectBridge: () => {
           const connection = createFileSystemBridgePort(producer.fileSystem);
           connections.push(connection);
           return connection;
         },
         kernelOptions: (deps) => {
+          transportCount += 1;
           const transport = nodeWorkerTransport({
             url: new URL(
               '../../../../../packages/runtime/test/support/publication-timeout.worker.fixture.ts',
@@ -690,7 +715,7 @@ it.each([
           return {
             operationTimeout: mode === 'timeout' ? 2000 : 0,
             transport:
-              mode === 'terminated'
+              (mode === 'terminated' || mode === 'refused') && transportCount === 1
                 ? { ...transport, materialize: () => ({ ...transport.materialize(), closed: closed.promise }) }
                 : transport,
           };
@@ -698,27 +723,69 @@ it.each([
       });
       await Promise.race([
         committed.promise,
-        pending.then(() => {
-          throw new Error('Warehouse unexpectedly published before checked root.');
-        }),
+        pending.then(
+          () => {
+            if (!reachedCheckedRoot) {
+              throw new Error('Warehouse unexpectedly published before checked root.');
+            }
+          },
+          (error: unknown) => {
+            if (!reachedCheckedRoot) {
+              throw error;
+            }
+          },
+        ),
       ]);
       await expect(pending).rejects.toThrow(
         mode === 'aborted' ? 'private abort reason' : 'Completed warehouse publication is unavailable: commit-unknown',
       );
       expect(observations.map(({ phase }) => phase)).toEqual(['authority', 'publication', 'shutdown']);
-      expect(observations.at(-1)).toEqual({ phase: 'shutdown', root: undefined, failure });
-      expect(JSON.stringify(observations)).not.toContain('private');
-      expect(JSON.parse(decoder.decode(await producer.fileSystem.readFile(publicationPath)))).toMatchObject({
-        generation: 1,
+      const currentRoot = observations.at(-1)?.root;
+      if (mode === 'unknown' || mode === 'terminated' || mode === 'timeout' || mode === 'aborted') {
+        expect(currentRoot).toMatchObject({ path: publicationPath });
+      }
+      expect(observations.at(-1)).toEqual({
+        phase: 'shutdown',
+        root:
+          mode === 'unknown' || mode === 'terminated' || mode === 'timeout' || mode === 'aborted'
+            ? currentRoot
+            : undefined,
+        failure,
       });
-      expect(workers).toHaveLength(1);
-      if (mode === 'terminated') {
+      if (mode === 'unknown' || mode === 'missing') {
+        const rejection = diagnostics.find((diagnostic) => diagnostic.phase === 'transport-rejection');
+        expect(rejection).toMatchObject({ phase: 'transport-rejection' });
+        expect(rejection?.phase === 'transport-rejection' && rejection.error instanceof Error).toBe(true);
+        expect(diagnostics.findIndex((diagnostic) => diagnostic.phase === 'transport-rejection')).toBeLessThan(
+          diagnostics.findIndex((diagnostic) => diagnostic.phase === 'pre-close-root'),
+        );
+      }
+      if (mode === 'missing') {
+        expect(diagnostics).toContainEqual({ phase: 'pre-close-root', snapshot: { status: 'absent' } });
+      }
+      if (mode === 'refused') {
+        expect(diagnostics.some((diagnostic) => diagnostic.phase === 'fresh-root-refusal')).toBe(true);
+      }
+      if (mode === 'terminated' || mode === 'timeout') {
+        expect(diagnostics).toContainEqual({ phase: 'fresh-root', status: 'present', root: currentRoot });
+      }
+      expect(JSON.stringify(observations)).not.toContain('private');
+      if (mode === 'missing') {
+        await expect(producer.fileSystem.readFile(publicationPath)).rejects.toMatchObject({ code: 'ENOENT' });
+      } else {
+        expect(JSON.parse(decoder.decode(await originalRead(publicationPath)))).toMatchObject({
+          generation: 1,
+        });
+      }
+      expect(workers).toHaveLength(mode === 'terminated' || mode === 'timeout' ? 2 : 1);
+      if (mode === 'terminated' || mode === 'refused') {
         await workers[0]?.terminate();
       }
       expect(workers[0]?.threadId).toBe(-1);
     } finally {
       release.resolve();
       write.mockRestore();
+      read.mockRestore();
       for (const connection of connections) {
         connection.dispose();
       }
@@ -728,6 +795,164 @@ it.each([
   },
   25_000,
 );
+
+it('should retain a synchronous selected-channel rejection with nested private evidence and an absent checked root', async () => {
+  const authoredPath = 'scale/assembly.json';
+  const publicationPath = `.tau/artifacts/reusable-parts/${await sha256String(authoredPath)}/scene.json`;
+  const source = new TextEncoder().encode('good');
+  const authored = new TextEncoder().encode(
+    JSON.stringify({
+      schemaVersion: 1,
+      parts: { triangle: { source: { path: 'scale/triangle.shape' } } },
+      occurrences: [{ id: 'one', part: 'triangle', transform: [1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1] }],
+    }),
+  );
+  const fixture: Parameters<typeof prepareScaleCorpus>[0]['fixture'] = {
+    entryPath: authoredPath,
+    files: { 'scale/triangle.shape': { content: source }, [authoredPath]: { content: authored } },
+    denominator: {
+      definitions: 1,
+      occurrences: 1,
+      sourceBytes: source.byteLength,
+      authoredBytes: authored.byteLength,
+      expectedDefinitionTriangles: 1,
+      expectedExpandedTriangles: 1,
+    },
+  };
+  const producer = await createCurvedProject(fixture.files);
+  const nested = Object.assign(new Error('private nested origin'), {
+    code: 'PRIVATE_NESTED',
+    details: { issues: [{ code: 'PRIVATE_ISSUE', reason: 'private checked denial' }] },
+  });
+  const cycle: Record<string, unknown> = {};
+  cycle['self'] = cycle;
+  let getterReads = 0;
+  const guarded = Object.defineProperty({}, 'danger', {
+    enumerable: true,
+    get: () => {
+      getterReads += 1;
+      throw new Error('private getter must not run');
+    },
+  });
+  const binary = Object.defineProperty(new Uint8Array(1_048_576), 'byteLength', {
+    get: () => {
+      getterReads += 1;
+      throw new Error('private binary getter must not run');
+    },
+  });
+  const array = new Proxy(['private array element'], {
+    get(target, property, receiver) {
+      if (property === 'length') {
+        getterReads += 1;
+        throw new Error('private array length getter must not run');
+      }
+      const inherited: unknown = Reflect.get(target, property, receiver);
+      return inherited;
+    },
+  });
+  const origin = Object.assign(new Error('private synchronous origin', { cause: nested }), {
+    code: 'PRIVATE_SYNC',
+    details: {
+      binary,
+      array,
+      largeBigint: BigInt('9'.repeat(1000)),
+      largeSymbol: Symbol('private symbol '.repeat(10_000)),
+      cycle,
+      guarded,
+      huge: Object.fromEntries(Array.from({ length: 512 }, (_, index) => [`field${String(index)}`, index])),
+    },
+  });
+  const diagnostics: Array<Parameters<NonNullable<Parameters<typeof prepareScaleCorpus>[0]['onDiagnostic']>>[0]> = [];
+  const observations: Array<Parameters<NonNullable<Parameters<typeof prepareScaleCorpus>[0]['onPhase']>>[0]> = [];
+  const connections: FileSystemBridgeConnection[] = [];
+  try {
+    await expect(
+      prepareScaleCorpus({
+        fixture,
+        publicationPath,
+        signal: new AbortController().signal,
+        isCurrent: () => true,
+        onPhase: (observation) => observations.push(observation),
+        onDiagnostic: (diagnostic) => diagnostics.push(diagnostic),
+        openProjectBridge: () => {
+          const connection = createFileSystemBridgePort(producer.fileSystem);
+          connections.push(connection);
+          return connection;
+        },
+        kernelOptions: (deps) => {
+          const transport = inProcessTransport({
+            runtime: defineRuntime({ kernels: [jscadKernel()], bundlers: [esbuildBundler()] }),
+            ...deps,
+            admitAssemblyDisplay,
+          });
+          return {
+            transport: {
+              ...transport,
+              materialize: () => {
+                const selected = transport.materialize();
+                return {
+                  ...selected,
+                  open: async () => {
+                    const ready = await selected.open();
+                    return {
+                      ...ready,
+                      channel: new Proxy(ready.channel, {
+                        get(channel, property, receiver) {
+                          if (property !== 'call') {
+                            const inherited: unknown = Reflect.get(channel, property, receiver);
+                            return inherited;
+                          }
+                          return new Proxy(channel.call, {
+                            apply(call, _receiver, args: unknown[]) {
+                              if (args[0] === 'publishAuthoredAssemblyRoot') {
+                                throw origin;
+                              }
+                              const result: unknown = Reflect.apply(call, channel, args);
+                              return result;
+                            },
+                          });
+                        },
+                      }),
+                    };
+                  },
+                };
+              },
+            },
+          };
+        },
+      }),
+    ).rejects.toThrow('Completed warehouse publication is unavailable: commit-unknown');
+    const rejection = diagnostics.find((diagnostic) => diagnostic.phase === 'transport-rejection');
+    expect(rejection?.phase === 'transport-rejection' && rejection.error).toBe(origin);
+    const evidence = JSON.stringify(rejection?.phase === 'transport-rejection' ? rejection.evidence : undefined);
+    expect(evidence).toContain('PRIVATE_SYNC');
+    expect(evidence).toContain('PRIVATE_NESTED');
+    expect(evidence).toContain('PRIVATE_ISSUE');
+    expect(evidence).toContain('"type":"Uint8Array","byteLength":1048576');
+    expect(evidence).toContain('"kind":"bigint"');
+    expect(evidence).toContain('"kind":"symbol"');
+    expect(evidence).toContain('"originalLength":150000');
+    expect(evidence).toContain('"kind":"array","length":1');
+    expect(evidence).toContain('"kind":"cycle"');
+    expect(evidence).toContain('"kind":"accessor"');
+    expect(evidence).toContain('"truncated":true');
+    expect(evidence.length).toBeLessThan(65_536);
+    expect(getterReads).toBe(0);
+    expect(diagnostics).toContainEqual({ phase: 'pre-close-root', snapshot: { status: 'absent' } });
+    expect(observations.at(-1)).toEqual({
+      phase: 'shutdown',
+      root: undefined,
+      failure: { name: null, code: null },
+    });
+    expect(JSON.stringify(observations)).not.toContain('private');
+    await expect(producer.fileSystem.readFile(publicationPath)).rejects.toMatchObject({ code: 'ENOENT' });
+  } finally {
+    for (const connection of connections) {
+      connection.dispose();
+    }
+    producer.dispose();
+  }
+}, 25_000);
 
 it('should publish the actual scale-123 cuboid with twelve crease segments and reopen its checked closure source-free', async () => {
   const fixture = createScaleFixture('scale-123');

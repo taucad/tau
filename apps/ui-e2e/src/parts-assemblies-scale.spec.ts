@@ -1730,10 +1730,23 @@ for (const backend of ['webgl', 'webgpu'] as const) {
     } catch (error) {
       let phase: Awaited<ReturnType<typeof target.textContent>> | undefined;
       let observationError: string | undefined;
+      let privateDiagnostic: unknown;
       try {
         phase = await target.textContent(selectors.getByRole('status', { name: 'Warehouse preparation phase' }));
       } catch (phaseError) {
         observationError = String(phaseError);
+      }
+      try {
+        privateDiagnostic = await target.evaluate(() => {
+          const bridge = (
+            globalThis as typeof globalThis & {
+              __TAU_WAREHOUSE_PREPARATION_TEST__?: { snapshot: () => unknown };
+            }
+          ).__TAU_WAREHOUSE_PREPARATION_TEST__;
+          return bridge?.snapshot() ?? { status: 'unavailable' };
+        });
+      } catch (diagnosticError) {
+        privateDiagnostic = { status: 'refused', reason: String(diagnosticError) };
       }
       try {
         await target.writeArtifact(
@@ -1742,8 +1755,9 @@ for (const backend of ['webgl', 'webgpu'] as const) {
             phase,
             observationError,
             preparationAlertSha256,
+            privateDiagnostic,
             semantics:
-              'Single current owner snapshot before harness cleanup; an observed alert is terminal route failure; its hash does not identify the producer cause.',
+              'Single current owner snapshot before harness cleanup; the private fixture diagnostic captures the selected transport rejection before public classification and checks the same root authority before shutdown.',
           }),
         );
       } catch {

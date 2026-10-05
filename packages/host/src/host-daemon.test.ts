@@ -32,6 +32,7 @@ import * as agentTools from '#agent-tools.js';
 import * as agentServer from '#agent-server.js';
 import * as machineHost from '#machine-host.js';
 import * as projectHosts from '#project-host.js';
+import * as frameSplice from '#frame-splice.js';
 import type { HostJobWorkerFactory } from '#job-worker.js';
 
 /* Observe the filesystem the daemon binds to its runtime child, without changing
@@ -1556,17 +1557,33 @@ describe('startHostDaemon', () => {
     await vi.waitFor(() => {
       expect(relay.controlFrames).toContainEqual(expect.objectContaining({ type: 'ready' }));
     });
-    control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
-    await vi.waitFor(() => {
-      expect(relay.controlFrames).toContainEqual({ v: 1, type: 'accept', sessionId: 'session-1' });
-    });
+    const spliceSpy = vi.spyOn(frameSplice, 'spliceFrameSockets');
+    let agentSplice: ReturnType<typeof frameSplice.spliceFrameSockets> | undefined;
+    try {
+      control.send(JSON.stringify(agentOffer(relay.url, 'session-1')));
+      await vi.waitFor(() => {
+        expect(relay.controlFrames).toContainEqual({ v: 1, type: 'accept', sessionId: 'session-1' });
+      });
+      expect(spliceSpy).toHaveBeenCalledTimes(3);
+      agentSplice = spliceSpy.mock.results[2]?.value as ReturnType<typeof frameSplice.spliceFrameSockets> | undefined;
+    } finally {
+      spliceSpy.mockRestore();
+    }
+    if (!agentSplice) {
+      throw new Error('Expected the accepted session agent splice.');
+    }
 
-    /* The page closed its only socket. 20 ms is an order of magnitude under the
-     * 50 ms child-exit attribution grace the drain still owes, and an order of
-     * magnitude over a loopback close. */
+    /* The page closed its only socket. The daemon frees capacity when its
+     * agent splice closes, before the other routes and child grace drain. */
     const agentSocket = await relay.route(routePath('session-1', 'agent'));
     agentSocket.close(1000, 'page closed');
-    await delay(20);
+    await agentSplice.closed;
+    await new Promise<void>((resolve) => {
+      setImmediate(resolve);
+    });
+    expect(events).not.toContainEqual(
+      expect.objectContaining({ type: 'session', sessionId: 'session-1', state: 'disconnected' }),
+    );
     control.send(JSON.stringify(agentOffer(relay.url, 'session-2')));
 
     await vi.waitFor(() => {

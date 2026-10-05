@@ -4,6 +4,7 @@ import { describe, expect, it } from 'vitest';
 import { bambuA1MiniMachine, bambuMachine } from '#bambu.machine.js';
 import {
   bambuA1MiniManifest,
+  bambuA1MiniTestingProfile,
   bambuX1cHardwareProfile,
   bambuX1cManifest,
   bambuX1cTestingProfile,
@@ -133,7 +134,15 @@ describe('bambuA1MiniManifest', () => {
     expect(ids).not.toContain('chamber-light:switch.set');
     expect(ids).not.toContain('aux-fan:level.set');
     expect(bambuA1MiniManifest.components.map(({ id }) => id)).not.toContain('chamber');
-    expect(bambuA1MiniManifest.actions.every(({ qualification }) => qualification.status !== 'qualified')).toBe(true);
+    expect(
+      bambuA1MiniManifest.actions
+        .filter(({ qualification }) => qualification.status === 'qualified')
+        .map(({ componentId, id, qualification }) => [componentId, id, qualification]),
+    ).toEqual([
+      ['part-fan', 'level.set', { status: 'qualified', profileId: bambuA1MiniTestingProfile }],
+      ['motion', 'motion.jog', { status: 'qualified', profileId: bambuA1MiniTestingProfile }],
+    ]);
+    expect(bambuA1MiniManifest.qualifications.map(({ id }) => id)).toEqual([bambuA1MiniTestingProfile]);
     expect(fffProcessOf(bambuA1MiniManifest)?.geometry.bedMotion).toBe('y');
   });
 });

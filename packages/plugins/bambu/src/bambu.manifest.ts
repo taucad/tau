@@ -96,6 +96,9 @@ const proven: MachineActionQualification = { status: 'qualified', profileId: bam
 /** The profile of the controls the operator proved from the Print pane in Testing mode. @internal */
 export const bambuX1cTestingProfile = 'x1c-testing-2026-10-05';
 const provenInTesting: MachineActionQualification = { status: 'qualified', profileId: bambuX1cTestingProfile };
+/** The profile of the A1 mini controls the operator proved from the Print pane in Testing mode. @internal */
+export const bambuA1MiniTestingProfile = 'a1-mini-testing-2026-10-05';
+const provenOnMini: MachineActionQualification = { status: 'qualified', profileId: bambuA1MiniTestingProfile };
 
 const anyState: readonly MachineStatus[] = ['ready', 'active', 'held'];
 const idle: readonly MachineStatus[] = ['ready'];
@@ -204,7 +207,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
         when: anyState,
         effects: ['thermal'],
         schema: fanLevel,
-        ...(x1c ? { qualification: provenInTesting } : {}),
+        qualification: x1c ? provenInTesting : provenOnMini,
       }),
     ),
     standardMachineAction({
@@ -333,7 +336,7 @@ const actions = (model: 'X1C' | 'A1 mini'): readonly MachineActionDefinition[] =
       consequence: 'One relative move inside the printer’s soft limits.',
       confirms: 'acknowledgement',
       schema: jog,
-      ...(x1c ? { qualification: provenInTesting } : {}),
+      qualification: x1c ? provenInTesting : provenOnMini,
     }),
     defineMachineAction(
       {
@@ -560,7 +563,17 @@ const definition = (model: 'X1C' | 'A1 mini'): MachineManifestDefinition => {
               'The operator switched the chamber light, homed and jogged X, Y and Z, and set the part, auxiliary and chamber fans on the workshop X1C from the Print pane in Testing mode (2026-10-05).',
           },
         ]
-      : [],
+      : [
+          {
+            id: bambuA1MiniTestingProfile,
+            environment: 'hardware',
+            model: 'A1 mini',
+            firmware: ['01.03.30.01'],
+            attachments: ['filament', 'camera'],
+            evidence:
+              'The operator set the part fan and jogged X, Y and Z on the workshop A1 mini (no AMS lite) from the Print pane in Testing mode (2026-10-05).',
+          },
+        ],
   };
 };
 

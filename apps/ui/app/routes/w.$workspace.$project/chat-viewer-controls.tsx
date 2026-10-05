@@ -78,6 +78,8 @@ type ChatViewerControlsProps = Readonly<{
   /** Capture writes to the active chat draft and is unavailable in read-only shared sessions. */
   shouldEnableCapture?: boolean;
   captureRendering?: () => Promise<Rendering>;
+  /** The pane's kernel settings, shown in Viewer settings. */
+  kernelSettings?: React.ReactNode;
 }>;
 
 /**
@@ -92,6 +94,7 @@ type ChatViewerControlsProps = Readonly<{
 export function ChatViewerControls({
   shouldEnableCapture = true,
   captureRendering,
+  kernelSettings,
 }: ChatViewerControlsProps): React.JSX.Element {
   const graphicsRef = useGraphics();
   const barRef = useRef<HTMLDivElement>(null);
@@ -188,6 +191,7 @@ export function ChatViewerControls({
         <ViewerSettings
           side='top'
           align='end'
+          kernelSettings={kernelSettings}
           className='size-7 border-0 bg-transparent shadow-none hover:bg-accent/50 dark:hover:bg-accent/80'
         />
       </div>

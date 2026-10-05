@@ -449,9 +449,11 @@ describe('runGeoSpecModule', () => {
   });
 
   it('should surface bundle issues', async () => {
-    const result = await runModule([['spec.geospec.ts', "import 'missing-module';"]]);
+    // A missing project file fails inside the bundler; a missing bare package would go to the network first.
+    const result = await runModule([['spec.geospec.ts', "import './missing-module.js';"]]);
 
     expect(result.success).toBe(false);
+    expect(!result.success && result.issues[0]?.code).toBe('BUNDLER_FAILED');
   });
 
   it('should surface execution issues', async () => {

@@ -174,7 +174,9 @@ jobs:
           fi
           git config user.name "tau-release-bot[bot]"
           git config user.email "tau-release-bot[bot]@users.noreply.github.com"
-          git commit --quiet -m "$subject"
+          # Contributor hooks (husky's commit-msg scope check, lint-staged) do
+          # not apply to this generated commit; `release` is not a project scope.
+          git commit --quiet --no-verify -m "$subject"
           git push --force "https://x-access-token:${BOT_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" HEAD:refs/heads/release/next
 
           # Commit subjects are contributor text: a random delimiter keeps one

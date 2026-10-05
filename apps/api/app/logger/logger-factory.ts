@@ -1,4 +1,5 @@
 import type { IncomingMessage, ServerResponse } from 'node:http';
+import { createRequire } from 'node:module';
 import type { ConfigService } from '@nestjs/config';
 import type { Params } from 'nestjs-pino';
 import type { Options } from 'pino-http';
@@ -272,7 +273,8 @@ export function consoleLoggingConfig(): Options {
   return {
     messageKey: 'msg',
     transport: {
-      target: 'pino-pretty',
+      // Pino resolves a bare target from its callers (fastify, OpenTelemetry), which cannot see this app's dependencies.
+      target: createRequire(import.meta.url).resolve('pino-pretty'),
       options: {
         singleLine: false,
         colorize: true,

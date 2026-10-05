@@ -1,3 +1,4 @@
+import { ObservationService } from '#observation-service.js';
 import type {
   FileContentMetadata,
   FileEntry,
@@ -26,7 +27,7 @@ import {
   DirectoryListingFailedError,
   classifyDirectoryListingError,
 } from '#directory-listing.js';
-import type { ListedDirectoryEntry } from '#directory-listing.js';
+import type { DirectoryListing, ListedDirectoryEntry } from '#directory-listing.js';
 
 /** Milliseconds. */
 const defaultRefreshDebounce = 100;
@@ -144,6 +145,8 @@ type FileTreeServiceInit = {
  * ```
  */
 export class FileTreeService {
+  private readonly closedSignal = Promise.withResolvers<void>();
+  private readonly listingObservations = new Map<string, ObservationService<DirectoryListing>>();
   private _tree: Map<string, FileEntry>;
   private readonly proxy: ComposedViewClient;
   private readonly paths: WorkspacePathResolver;
@@ -203,7 +206,9 @@ export class FileTreeService {
     }
     this.unsubscribeChannel = [
       init.channel.onFileWritten({
-        interestedIn: (relativePath) => this.isDirectoryResolvedKey(this.paths.parentOf(relativePath)),
+        interestedIn: (relativePath) =>
+          this.isDirectoryResolvedKey(this.paths.parentOf(relativePath)) ||
+          this._inFlightDirectoryList.has(this.paths.parentOf(relativePath)),
         handler: (event) => {
           this.handleFileWrittenRelative(event.path);
         },
@@ -214,13 +219,16 @@ export class FileTreeService {
         },
       }),
       init.channel.onFileRenamed({
-        interestedIn: (relativePath) => this.isDirectoryResolvedKey(this.paths.parentOf(relativePath)),
+        interestedIn: (relativePath) =>
+          this.isDirectoryResolvedKey(this.paths.parentOf(relativePath)) ||
+          this._inFlightDirectoryList.has(this.paths.parentOf(relativePath)),
         handler: (event) => {
           this.handleFileRenamedRelative(event);
         },
       }),
       init.channel.onDirectoryChanged({
-        interestedIn: (relativeDirectory) => this.isDirectoryResolvedKey(relativeDirectory),
+        interestedIn: (relativeDirectory) =>
+          this.isDirectoryResolvedKey(relativeDirectory) || this._inFlightDirectoryList.has(relativeDirectory),
         handler: (event) => {
           this.handleDirectoryChangedRelative(event.path);
         },
@@ -240,7 +248,27 @@ export class FileTreeService {
           this.handleDirectoryRenamedRelative(event);
         },
       }),
+      init.channel.onFileCopied({
+        handler: ({ targetPath }) => {
+          this.invalidatePendingDirectory(this.paths.parentOf(targetPath));
+          this.refreshResolvedParent(targetPath);
+        },
+      }),
+      init.channel.onDirectoryCopied({
+        handler: ({ targetPath }) => {
+          this.invalidatePendingDirectory(this.paths.parentOf(targetPath));
+          for (const key of this._inFlightDirectoryList.keys()) {
+            if (key === targetPath || key.startsWith(`${targetPath}/`)) {
+              this.invalidatePendingDirectory(key);
+            }
+          }
+          this.refreshResolvedParent(targetPath);
+        },
+      }),
       init.channel.onBackendChanged(() => {
+        for (const key of this._inFlightDirectoryList.keys()) {
+          this.invalidatePendingDirectory(key);
+        }
         const resync = this.resyncResolvedDirectories();
         this._backendResync = resync;
         // async-iife: bootstrap — worker callbacks cannot await the full resolved-directory walk.
@@ -270,6 +298,11 @@ export class FileTreeService {
    * Consumers can use this to cheaply detect staleness.
    * @returns Current tree revision counter.
    */
+  /** Captured-root incarnation for selecting bindings. */
+  public get incarnation(): number {
+    return this._epoch;
+  }
+
   public get completeTreeVersion(): number {
     return this._completeTreeVersion;
   }
@@ -405,8 +438,12 @@ export class FileTreeService {
     if (this.isDirectoryResolvedKey(relativeKey)) {
       return this.entriesAtDirectoryLevel(relativeKey);
     }
+    const epoch = this._epoch;
     try {
       await this.ensureDirectoryLoadedForListing(path, relativeKey, options?.signal);
+      if (this._epoch !== epoch) {
+        throw new Error('Directory capability changed during the read.');
+      }
     } catch (error) {
       const listing = classifyDirectoryListingError(error, path);
       throw new DirectoryListingFailedError(listing);
@@ -437,6 +474,50 @@ export class FileTreeService {
       return undefined;
     }
     return this.entriesAtDirectoryLevel(relativeKey);
+  }
+
+  /**
+   * Select an existing incremental tree through the shared observation lifecycle.
+   * @param path - Captured directory key.
+   * @returns Service-owned presentation projection.
+   */
+  public observeDirectory(path: string): ObservationService<DirectoryListing> {
+    const key = this.relativeDirectoryKeyFromUserPath(path);
+    const existing = this.listingObservations.get(key);
+    if (existing) {
+      return existing;
+    }
+    const observation = new ObservationService<DirectoryListing>({
+      resource: key,
+      watch: (invalidate) => ({
+        ready: Promise.resolve(),
+        closed: this.closed,
+        dispose: this.subscribePath(key, invalidate),
+      }),
+      read: async ({ signal }) => {
+        try {
+          return { kind: 'ready', path, entries: await this.listDirectory(key, { signal }) };
+        } catch (error) {
+          return { kind: 'error', path, cause: classifyDirectoryListingError(error, path) };
+        }
+      },
+      equal: (previous, next) =>
+        previous.kind === 'ready' && next.kind === 'ready'
+          ? JSON.stringify(previous.entries) === JSON.stringify(next.entries)
+          : previous === next,
+    });
+    this.listingObservations.set(key, observation);
+    // Inactive directory projections retain no decoded entries; bound the reusable owners too.
+    for (const [oldKey, candidate] of this.listingObservations) {
+      if (this.listingObservations.size <= 500) {
+        break;
+      }
+      if (oldKey !== key && candidate.activeLeaseCount === 0) {
+        candidate.dispose();
+        this.listingObservations.delete(oldKey);
+      }
+    }
+    return observation;
   }
 
   /**
@@ -636,6 +717,12 @@ export class FileTreeService {
    */
   public reset(rootDirectory: string, initialEntries?: FileEntry[]): void {
     this._epoch++;
+    for (const observation of this.listingObservations.values()) {
+      observation.dispose();
+    }
+    this.listingObservations.clear();
+    this._inFlightDirectoryList.clear();
+    this._listingGuard.reset();
     this.paths.reset(rootDirectory);
     this._refreshAbortController?.abort();
     this._refreshAbortController = undefined;
@@ -682,7 +769,17 @@ export class FileTreeService {
   /**
    * Dispose worker subscriptions, timers, and in-flight refresh controllers.
    */
+  /** Captured observation source lifetime. */
+  public get closed(): Promise<void> {
+    return this.closedSignal.promise;
+  }
+
   public dispose(): void {
+    this.closedSignal.resolve();
+    for (const observation of this.listingObservations.values()) {
+      observation.dispose();
+    }
+    this.listingObservations.clear();
     this._epoch++;
     for (const unsubscribe of this.unsubscribeChannel) {
       unsubscribe();
@@ -750,6 +847,7 @@ export class FileTreeService {
   // === Private: Worker Event Handlers (workspace-relative paths) ===
 
   private handleFileWrittenRelative(relativePath: string): void {
+    this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
     const parentPath = this.paths.parentOf(relativePath);
     if (this.isDirectoryResolvedKey(parentPath)) {
       this.scheduleRefresh(parentPath);
@@ -757,6 +855,7 @@ export class FileTreeService {
   }
 
   private handleFileDeletedRelative(relativePath: string): void {
+    this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
     this.optimisticDelete(relativePath);
   }
 
@@ -768,6 +867,11 @@ export class FileTreeService {
    * the event settles the directory.
    */
   private handleFileRenamedRelative(event: WorkerRelativeRenameEvent): void {
+    for (const path of [event.oldPath, event.newPath]) {
+      if (path !== undefined) {
+        this.invalidatePendingDirectory(this.paths.parentOf(path));
+      }
+    }
     const oldRelative = event.oldPath;
     const newRelative = event.newPath;
     if (oldRelative !== undefined && newRelative !== undefined) {
@@ -790,12 +894,14 @@ export class FileTreeService {
   }
 
   private handleDirectoryChangedRelative(relativePath: string): void {
+    this.invalidatePendingDirectory(relativePath);
     if (this.isDirectoryResolvedKey(relativePath)) {
       this.scheduleRefresh(relativePath);
     }
   }
 
   private handleDirectoryCreatedRelative(relativePath: string): void {
+    this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
     const parent = this.paths.parentOf(relativePath);
     if (!this.isDirectoryResolvedKey(parent)) {
       return;
@@ -838,6 +944,12 @@ export class FileTreeService {
   }
 
   private dropSubtree(relativePath: string): void {
+    for (const key of this._inFlightDirectoryList.keys()) {
+      if (key === relativePath || key.startsWith(`${relativePath}/`) || relativePath === '') {
+        this.invalidatePendingDirectory(key);
+      }
+    }
+    this.invalidatePendingDirectory(this.paths.parentOf(relativePath));
     const prefix = relativePath === '' ? '' : relativePath.endsWith('/') ? relativePath : `${relativePath}/`;
     const newTree = new Map(this._tree);
     let changed = newTree.delete(relativePath);
@@ -856,6 +968,13 @@ export class FileTreeService {
   }
 
   private renameSubtree(oldPath: string, newPath: string): void {
+    for (const key of this._inFlightDirectoryList.keys()) {
+      if (key === oldPath || key.startsWith(`${oldPath}/`) || key === newPath || key.startsWith(`${newPath}/`)) {
+        this.invalidatePendingDirectory(key);
+      }
+    }
+    this.invalidatePendingDirectory(this.paths.parentOf(oldPath));
+    this.invalidatePendingDirectory(this.paths.parentOf(newPath));
     const oldPrefix = oldPath === '' ? '' : oldPath.endsWith('/') ? oldPath : `${oldPath}/`;
     const newPrefix = newPath === '' ? '' : newPath.endsWith('/') ? newPath : `${newPath}/`;
     const newTree = new Map(this._tree);
@@ -1119,6 +1238,12 @@ export class FileTreeService {
     return entry?.type === 'dir' && entry.isDirectoryResolved === true;
   }
 
+  private invalidatePendingDirectory(key: string): void {
+    if (this._inFlightDirectoryList.has(key)) {
+      this._listingGuard.begin(key);
+    }
+  }
+
   private async ensureDirectoryLoadedForListing(
     path: string,
     relativeKey: string,
@@ -1128,23 +1253,43 @@ export class FileTreeService {
       this._inFlightDirectoryList.set(
         relativeKey,
         (async () => {
-          const generation = this._listingGuard.begin(relativeKey);
+          const epoch = this._epoch;
           try {
-            signal?.throwIfAborted();
             const absolutePath = this.paths.toAbsoluteWorkspacePath(path);
-            const nodes = await this.proxy.readDirectory(absolutePath);
-            signal?.throwIfAborted();
-            if (!this._listingGuard.isCurrent(relativeKey, generation)) {
-              return;
+            for (;;) {
+              const generation = this._listingGuard.begin(relativeKey);
+              let nodes: FileTreeNode[];
+              try {
+                // oxlint-disable-next-line no-await-in-loop -- A dirty bootstrap read must finish before one authoritative catch-up starts.
+                nodes = await this.proxy.readDirectory(absolutePath);
+              } catch (error) {
+                if (this._epoch !== epoch) {
+                  return;
+                }
+                if (!this._listingGuard.isCurrent(relativeKey, generation)) {
+                  continue;
+                }
+                throw error;
+              }
+              if (this._epoch !== epoch) {
+                return;
+              }
+              if (!this._listingGuard.isCurrent(relativeKey, generation)) {
+                continue;
+              }
+              this.mergeChildren(relativeKey, nodes);
+              break;
             }
-            this.mergeChildren(relativeKey, nodes);
           } finally {
-            this._inFlightDirectoryList.delete(relativeKey);
+            if (this._epoch === epoch) {
+              this._inFlightDirectoryList.delete(relativeKey);
+            }
           }
         })(),
       );
     }
     await this._inFlightDirectoryList.get(relativeKey)!;
+    signal?.throwIfAborted();
   }
 
   private entriesAtDirectoryLevel(directoryKey: string): ListedDirectoryEntry[] {

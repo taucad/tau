@@ -9,11 +9,22 @@ const mockWriteFiles = vi.fn<(files: Record<string, { content: Uint8Array<ArrayB
 const mockExists = vi.fn<(path: string) => Promise<boolean>>();
 const mockUseSkillsCatalog = vi.fn<() => SkillMetadata[]>();
 
+const contentService = {
+  watchReady: () => ({
+    ready: Promise.resolve(),
+    closed: new Promise<void>(() => {
+      /* This watch stays open until fixture disposal. */
+    }),
+    dispose: () => undefined,
+  }),
+};
+
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     readFile: mockReadFile,
     writeFiles: mockWriteFiles,
     exists: mockExists,
+    contentService,
   }),
 }));
 
@@ -73,7 +84,7 @@ function getFirstWrite(): FileWrites {
 describe('PluginsRoute', () => {
   beforeEach(() => {
     vi.clearAllMocks();
-    mockReadFile.mockRejectedValue(new Error('manifest missing'));
+    mockReadFile.mockRejectedValue(Object.assign(new Error('manifest missing'), { code: 'ENOENT' }));
     mockWriteFiles.mockResolvedValue(undefined);
     mockExists.mockResolvedValue(false);
     mockUseSkillsCatalog.mockReturnValue([]);
@@ -85,6 +96,16 @@ describe('PluginsRoute', () => {
     expect(screen.getByRole('heading', { level: 1 })).toHaveTextContent('Plugins');
     expect(screen.queryByRole('main')).not.toBeInTheDocument();
     expect(screen.getByRole('textbox', { name: 'Search plugins' })).toBeInTheDocument();
+  });
+
+  it('reports malformed manifest bytes and prevents a default-state install write', async () => {
+    mockReadFile.mockResolvedValue(encoder.encode('{bad json'));
+    renderRoute();
+    await waitFor(() => {
+      expect(screen.getByRole('alert')).toBeInTheDocument();
+    });
+    await userEvent.click(screen.getByRole('button', { name: 'Install Woodworking' }));
+    expect(mockWriteFiles).not.toHaveBeenCalled();
   });
 
   it('should install a Tau Plugin Store skill as a visible .agents skill and update the manifest', async () => {

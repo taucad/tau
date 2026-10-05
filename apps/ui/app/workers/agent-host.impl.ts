@@ -716,7 +716,19 @@ const composeProjectHost = async (
       build: agentHostWorkerBuild,
       log:
         opfs === undefined
-          ? { kind: 'provider', fileSystem: projectRoot, durability }
+          ? {
+              kind: 'provider',
+              fileSystem: {
+                exists: async (path) => projectRoot.exists(path),
+                readFile: async (path) => projectRoot.readFile(path),
+                writeFile: async (path, bytes) => projectRoot.writeFile(path, bytes),
+                appendFile: async (path, bytes) => projectRoot.appendFile(path, bytes),
+                unlink: async (path) => projectRoot.unlink(path),
+                // The durable rooted bridge owns canonical metadata; log allocation only needs size.
+                stat: async (path, options) => projectRoot.stat(path, options),
+              },
+              durability,
+            }
           : { kind: 'opfs', directory: opfs },
       visibility: worker.visibility,
     }),

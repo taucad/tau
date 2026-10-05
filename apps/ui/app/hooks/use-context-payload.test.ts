@@ -18,10 +18,22 @@ const mockTreeService = {
   subscribeTree: mockSubscribeTree,
 };
 
+/** A ready recursive watch that never changes: each hook mount reads the catalog afresh. */
+const mockContentService = {
+  watchReady: () => ({
+    ready: Promise.resolve(),
+    closed: new Promise<never>(() => {
+      // Never closes.
+    }),
+    dispose: () => undefined,
+  }),
+};
+
 vi.mock('#hooks/use-file-manager.js', () => ({
   useFileManager: () => ({
     readFile: mockReadFile,
     treeService: mockTreeService,
+    contentService: mockContentService,
   }),
 }));
 

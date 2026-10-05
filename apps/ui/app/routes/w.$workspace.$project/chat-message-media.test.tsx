@@ -22,7 +22,9 @@ const readFile = vi.fn(async (path: string) => {
   }
   throw Object.assign(new Error(`ENOENT: ${path}`), { code: 'ENOENT' });
 });
-vi.mock('#hooks/use-file-manager.js', () => ({ useOptionalFileManager: () => ({ recordFiles: { readFile } }) }));
+// The provider memoizes its record client; attachment sources are keyed by that identity.
+const fileManager = { recordFiles: { readFile } };
+vi.mock('#hooks/use-file-manager.js', () => ({ useOptionalFileManager: () => fileManager }));
 
 const send = vi.fn();
 let project: { readonly editorRef: { readonly send: typeof send } } | undefined;

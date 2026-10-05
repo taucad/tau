@@ -5,7 +5,7 @@
  * filesystem operations (tests, scratch spaces).
  */
 
-import type { DirectoryEntry, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
+import type { DirectoryEntry, FileStatOptions, FileStat, HeadFileStat, ProviderCapabilities } from '#types.js';
 import { AbstractFileSystemProvider } from '#backend/abstract-provider.js';
 import { indexDirectoryEntries } from '#backend/directory-entries.js';
 import { fileStatFromBytes, headFileStatFromBytes } from '#content-metadata.js';
@@ -138,14 +138,17 @@ export class MemoryProvider extends AbstractFileSystemProvider {
    * @param path - Absolute path to stat.
    * @returns Type/size/mtime for the entry at `path`.
    */
-  public async stat(path: string): Promise<FileStat> {
+  public async stat(path: string): Promise<FileStat>;
+  public async stat(path: string, options: FileStatOptions): Promise<FileStat | HeadFileStat>;
+  public async stat(path: string, options?: FileStatOptions): Promise<FileStat | HeadFileStat> {
     this._assertRootedPath(path);
     if (this._dirs.has(path)) {
       return { type: 'dir', size: 0, mtimeMs: this._mtimes.get(path) ?? 0 };
     }
     const data = this._files.get(path);
     if (data) {
-      return fileStatFromBytes(data, this._mtimes.get(path) ?? Date.now());
+      const mtime = this._mtimes.get(path) ?? Date.now();
+      return options?.content === 'head' ? headFileStatFromBytes(data, mtime) : fileStatFromBytes(data, mtime);
     }
     throw this._enoent(path);
   }

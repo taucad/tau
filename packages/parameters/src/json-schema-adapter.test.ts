@@ -1,8 +1,9 @@
+import { contentDigest } from '@taucad/cache-core';
 import { describe, expect, it } from 'vitest';
 import { projectJsonSchemaToParameterDeclaration } from '#json-schema-adapter.js';
 import { ParameterAdmissionError, compileParameterManifest } from '#manifest.js';
 
-const digest = `sha256:${'0'.repeat(64)}` as const;
+const digest = contentDigest({ value: `sha256:${'0'.repeat(64)}` });
 
 const identity = {
   schemaId: 'urn:test:producer:parameters:v1',

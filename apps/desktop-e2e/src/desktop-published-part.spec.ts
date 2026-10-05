@@ -766,7 +766,17 @@ export default function main(params = defaultParams) {
       unlinkSync(join(projectRoot, path));
       expect(existsSync(join(projectRoot, path))).toBe(false);
     }
-    const consumer = await runLease({ type: 'consume', roots: [firstPin.root, second.published.root] });
+    const cachePath = join(projectRoot, '.tau/cache');
+    rmSync(cachePath, { recursive: true, force: true });
+    expect(existsSync(cachePath)).toBe(false);
+    await page.context().setOffline(true);
+    let consumer;
+    try {
+      expect(await page.evaluate(() => navigator.onLine)).toBe(false);
+      consumer = await runLease({ type: 'consume', roots: [firstPin.root, second.published.root] });
+    } finally {
+      await page.context().setOffline(false);
+    }
     if (!consumer.exports) {
       throw new Error('Fresh source-free lease returned no native exports.');
     }

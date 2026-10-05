@@ -10,12 +10,15 @@
  *
  * Commands:
  * - `plan`: print the pending release of every application as JSON.
- * - `prepare`: apply the plan, writing each manifest version and prepending its
- *   CHANGELOG.md section; prints the plan and the release commit subject.
+ * - `apps`: print the name of every application, one per line.
+ * - `prepare <project>`: apply that application's pending release, writing its
+ *   manifest version and prepending its CHANGELOG.md section; prints the plan
+ *   and the release commit subject. Each application has its own release pull
+ *   request, so a release commit versions exactly one application.
  * - `tags`: on a release commit, print the tags the commit introduces with their
  *   release notes, for the release workflow to create.
  *
- * Usage: node scripts/src/release-apps.ts plan|prepare|tags
+ * Usage: node scripts/src/release-apps.ts plan|apps|prepare <project>|tags
  * Environment: a git checkout with full history and tags (fetch-depth: 0).
  * Exit codes: 0 on success; 1 on invalid input or a git/graph failure.
  */
@@ -314,8 +317,7 @@ export const releaseApps = (): ReleaseApp[] => {
   return apps;
 };
 
-export const planReleases = (): AppRelease[] => {
-  const apps = releaseApps();
+export const planReleases = (apps: readonly ReleaseApp[] = releaseApps()): AppRelease[] => {
   return apps.flatMap((app) => {
     const previousTag = latestTag(app.name);
     const commits = previousTag === undefined ? [] : commitsSince(previousTag, app.paths);
@@ -327,10 +329,26 @@ export const planReleases = (): AppRelease[] => {
   });
 };
 
+/** The pending release of one application; throws for a name that is not an application. */
+export const selectRelease = (
+  releases: readonly AppRelease[],
+  apps: ReadonlyArray<Pick<ReleaseApp, 'name'>>,
+  project: string | undefined,
+): AppRelease[] => {
+  if (project === undefined || !apps.some(({ name }) => name === project)) {
+    throw new TypeError(
+      `"${project ?? ''}" is not an application; expected one of ${apps.map(({ name }) => name).join(', ')}`,
+    );
+  }
+
+  return releases.filter(({ name }) => name === project);
+};
+
 const today = (): string => new Date().toISOString().slice(0, 10);
 
-const prepare = (): void => {
-  const releases = planReleases();
+const prepare = (project: string | undefined): void => {
+  const apps = releaseApps();
+  const releases = selectRelease(planReleases(apps), apps, project);
   for (const release of releases) {
     const manifestPath = join(workspaceRoot, release.root, 'package.json');
     writeFileSync(manifestPath, setManifestVersion(readFileSync(manifestPath, 'utf8'), release.nextVersion));
@@ -383,14 +401,22 @@ const tags = (): void => {
   console.log(JSON.stringify(introduced, null, 2));
 };
 
-const main = (command: string | undefined): void => {
+const main = (command: string | undefined, argument: string | undefined): void => {
   switch (command) {
     case 'plan': {
       console.log(JSON.stringify(planReleases(), null, 2));
       break;
     }
+    case 'apps': {
+      console.log(
+        releaseApps()
+          .map(({ name }) => name)
+          .join('\n'),
+      );
+      break;
+    }
     case 'prepare': {
-      prepare();
+      prepare(argument);
       break;
     }
     case 'tags': {
@@ -398,14 +424,14 @@ const main = (command: string | undefined): void => {
       break;
     }
     default: {
-      throw new TypeError('Usage: node scripts/src/release-apps.ts plan|prepare|tags');
+      throw new TypeError('Usage: node scripts/src/release-apps.ts plan|apps|prepare <project>|tags');
     }
   }
 };
 
 if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
   try {
-    main(process.argv[2]);
+    main(process.argv[2], process.argv[3]);
   } catch (error) {
     console.error(error instanceof Error ? error.message : error);
     process.exitCode = 1;

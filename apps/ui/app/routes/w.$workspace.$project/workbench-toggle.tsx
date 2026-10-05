@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import type { DockviewApi, IDockviewPanel } from 'dockview-react';
 import { DockviewTabsComboBox } from '#components/panes/dockview-tab-overflow-picker.js';
 import type { DockviewTabIconRenderer } from '#components/panes/dockview-tab.js';
@@ -50,29 +50,41 @@ const isInTriangle = (point: Point, [a, b, c]: readonly [Point, Point, Point]): 
   return !((d1 < 0 || d2 < 0 || d3 < 0) && (d1 > 0 || d2 > 0 || d3 > 0));
 };
 
-/** Re-render whenever the workbench's panels, titles or active panel change. */
+/** Subscribe to tab identity, not pixel-only Dockview layout notifications. */
 const usePanels = (api: DockviewApi | undefined): readonly IDockviewPanel[] => {
-  const [, refresh] = useReducer((version: number) => version + 1, 0);
-
-  useEffect(() => {
-    if (!api) {
-      return;
-    }
-    const disposables = [
-      api.onDidAddPanel(refresh),
-      api.onDidRemovePanel(refresh),
-      api.onDidActivePanelChange(refresh),
-      api.onDidLayoutFromJSON(refresh),
-      api.onDidLayoutChange(refresh),
-    ];
-    refresh();
-    return () => {
-      for (const disposable of disposables) {
-        disposable.dispose();
+  const subscribe = useCallback(
+    (onChange: () => void) => {
+      if (!api) {
+        return () => undefined;
       }
-    };
-  }, [api]);
-
+      const disposables = [
+        api.onDidAddPanel(onChange),
+        api.onDidRemovePanel(onChange),
+        api.onDidActivePanelChange(onChange),
+        api.onDidLayoutFromJSON(onChange),
+        api.onDidLayoutChange(onChange),
+      ];
+      return () => {
+        for (const disposable of disposables) {
+          disposable.dispose();
+        }
+      };
+    },
+    [api],
+  );
+  const snapshot = useCallback(
+    () =>
+      JSON.stringify([
+        api?.activePanel?.id,
+        api?.panels.map((panel) => {
+          const filePath: unknown = panel.params?.['filePath'];
+          const entryPath: unknown = panel.params?.['entryPath'];
+          return [panel.id, panel.api.title, filePath, entryPath];
+        }),
+      ]),
+    [api],
+  );
+  useSyncExternalStore(subscribe, snapshot, snapshot);
   return api?.panels ?? [];
 };
 

@@ -41,6 +41,7 @@ import { ModifiedIndicator } from '#components/ui/modified-indicator.js';
 import { useFileManager } from '#hooks/use-file-manager.js';
 import { useProject } from '#hooks/use-project.js';
 import { compileExportConfigurationManifest } from '#routes/w.$workspace.$project/chat-converter.js';
+import { useFileReturn } from '#routes/w.$workspace.$project/project-workspace-context.js';
 import { listGeometryEntryPaths } from '#routes/w.$workspace.$project/geometry-unit.utils.js';
 import { awaitFreshRender } from '#machines/await-fresh-render.js';
 import { selectCadDisplay, selectCadFailureIssues } from '#machines/cad.machine.js';
@@ -336,8 +337,9 @@ export const useCompiledConfigurationManifest = (
         if (!cancelled) {
           setCompiled({ resolved, manifest });
         }
-      } catch {
+      } catch (error) {
         /* The form stays in its preparing state; the slice still runs on the values entered so far. */
+        console.error(`[print] Could not compile the ${configuration} form for ${provider}.`, error);
       }
     };
     // async-iife: bootstrap -- the manifest is derived from the schema; a newer schema simply supersedes this compile.
@@ -522,14 +524,20 @@ export const usePrintPrepare = ({
     const { material, plate: _plate, ...flags } = preferences ?? {};
     const fallback =
       entry && provider ? mappingOf(submissionDefaults(provider, entry, { manifest, filamentColors })) : [];
+    /* Saved slots are the machine type's; one this printer has not loaded (another X1C's A4 on the simulator)
+     * gives way to the default rather than selecting nothing. */
+    const isLoaded = (slot: number | undefined): slot is number =>
+      slot !== undefined &&
+      entry?.snapshot.setup.materials.some((tray) => tray.slot === slot && tray.state === 'loaded') === true;
+    const saved = filamentColors.map((color) => material?.slotsByColor?.[color.toLowerCase()]);
     const mapping =
       filamentColors.length > 1
-        ? material?.slotsByColor
-          ? filamentColors.map((color, index) => material.slotsByColor?.[color.toLowerCase()] ?? fallback[index] ?? -1)
+        ? saved.some((slot) => isLoaded(slot))
+          ? saved.map((slot, index) => (isLoaded(slot) ? slot : (fallback[index] ?? -1)))
           : undefined
-        : material?.defaultSlot === undefined
-          ? undefined
-          : [material.defaultSlot];
+        : isLoaded(material?.defaultSlot)
+          ? [material.defaultSlot]
+          : undefined;
     return {
       ...flags,
       ...(mapping
@@ -923,11 +931,18 @@ export const usePrintPrepare = ({
     submission,
   ]);
 
+  const fileReturn = useFileReturn();
   const openPreview = useCallback((): void => {
-    if (slice) {
+    if (!slice) {
+      return;
+    }
+    // The preview's tab offers one way back here; outside a project workspace it opens as any file does.
+    if (fileReturn) {
+      fileReturn.openFileFrom(slice.path, 'print');
+    } else {
       editorRef.send({ type: 'openFile', path: slice.path, source: 'user' });
     }
-  }, [editorRef, slice]);
+  }, [editorRef, fileReturn, slice]);
 
   const sendConfiguration = slice ? { ...effectiveSubmission, ...slice.materialConfiguration } : effectiveSubmission;
 
@@ -1850,7 +1865,8 @@ const prepareSummary = (prepare: PrintPrepare, deferred: string | undefined): st
       .filter((part) => part !== undefined)
       .join(' · ');
   }
-  return deferred ?? (slice ? 'Changed since the slice' : entryPath === '' ? undefined : modelName(entryPath));
+  // The model as its row names it ("main.cs"); "main" alone reads as a branch.
+  return deferred ?? (slice ? 'Changed since the slice' : entryPath === '' ? undefined : entryPath.split('/').pop());
 };
 
 /**
@@ -1914,7 +1930,12 @@ function AdvancedSettingsStage({
 
   return (
     <PrintStage icon={Settings2} title='Advanced settings'>
-      <fieldset disabled={machineSettings.blocked} className='contents'>
+      {/* The stage is the forms' frame, as the catalog card is in Parameters: top-level fields take no inset of
+          their own, so their labels line up with the stage's rows; fields inside a group keep the group's. */}
+      <fieldset
+        disabled={machineSettings.blocked}
+        className='contents [&_[data-slot=embedded-form-root]>[data-slot=parameter-field]]:px-0'
+      >
         <SearchInput
           aria-label='Filter settings'
           placeholder='Filter settings'
@@ -1947,7 +1968,7 @@ function AdvancedSettingsStage({
                 emptyMessage='No slicer options'
               />
             ) : (
-              <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+              <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
                 Preparing slicer options…
               </p>
             )}
@@ -1981,7 +2002,7 @@ function AdvancedSettingsStage({
                 emptyMessage='No machine mapping'
               />
             ) : (
-              <p role='status' aria-busy='true' className='p-2 text-xs text-muted-foreground'>
+              <p role='status' aria-busy='true' className='text-xs text-muted-foreground'>
                 Preparing machine mapping…
               </p>
             )}

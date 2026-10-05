@@ -735,6 +735,19 @@ describe('machine print planner', () => {
     expect(defaultFilamentSlots(['#0000FF'], trays, 'PETG')).toEqual([3]);
   });
 
+  it('takes the nearest colour when no tray holds the exact one', () => {
+    // A model's pure red and grey against the colours spools actually come in.
+    const trays = [
+      { slot: 0, state: 'loaded', materialId: 'PETG', color: '#161616FF' },
+      { slot: 1, state: 'loaded', materialId: 'PETG', color: '#8E9089FF' },
+      { slot: 3, state: 'loaded', materialId: 'PETG', color: '#C12E1FFF' },
+    ] as const;
+    expect(defaultFilamentSlots(['#FF0000'], trays, 'PETG')).toEqual([3]);
+    expect(defaultFilamentSlots(['#808080', '#FF0000'], trays, 'PETG')).toEqual([1, 3]);
+    // The closest pair is settled first, so a later filament's near match is not taken by an earlier one's far one.
+    expect(defaultFilamentSlots(['#303030', '#161616'], trays.slice(0, 2), 'PETG')).toEqual([1, 0]);
+  });
+
   it('passes on what the export warned about the slice it made', async () => {
     const warning = {
       message: "The reference engine prints one material, so the model's 2 colours (#FF0000, #0000FF) print as one.",

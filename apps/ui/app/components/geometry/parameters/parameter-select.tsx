@@ -57,7 +57,8 @@ export function ParameterSelect({
 }): React.JSX.Element {
   const item = (option: ParameterSelectOption): React.JSX.Element => (
     <SelectItem key={option.value} value={option.value} disabled={option.disabled} className={parameterFieldHeight}>
-      <span className='flex min-w-0 items-center gap-1.5'>
+      {/* Full width, so the secondary's half is half the row rather than half of its own content. */}
+      <span className='flex w-full min-w-0 items-center gap-1.5'>
         {option.swatch === undefined ? null : (
           <MaterialSwatch materials={[{ color: option.swatch, roughness: 0.35, metalness: 0 }]} />
         )}

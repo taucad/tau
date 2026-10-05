@@ -238,22 +238,22 @@ Resources: Pick<GLTF.IGLTF, 'textures' | 'samplers'> & {
 // Named face selector declaration resolved by the Tau Replicad kernel before export
 FaceDeclaration: {
     kind: 'face';
-    select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>;
+    select: (finder: FaceFinder) => FaceFinder;
 }
 
   kind: 'face'
 
-  select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>
+  select: (finder: FaceFinder) => FaceFinder
 
 // Named cylindrical or conical axis selector declaration resolved from a Replicad face
 AxisDeclaration: {
     kind: 'axis';
-    select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>;
+    select: (finder: FaceFinder) => FaceFinder;
 }
 
   kind: 'axis'
 
-  select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>
+  select: (finder: FaceFinder) => FaceFinder
 
 // Named orthonormal datum frame declaration exported as an AP242 placement
 DatumDeclaration: {

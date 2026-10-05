@@ -4,12 +4,12 @@
 
 // Declare a named face selected from a Replicad `FaceFinder`
 // face (function)
-(select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>) => FaceDeclaration
+(select: (finder: FaceFinder) => FaceFinder) => FaceDeclaration
 //   select: Selector evaluated against the live Replicad shape
 
 // Declare a named cylindrical or conical axis selected from a Replicad `FaceFinder`
 // axis (function)
-(select: Extract<SingleFace, (f: FaceFinder) => FaceFinder>) => AxisDeclaration
+(select: (finder: FaceFinder) => FaceFinder) => AxisDeclaration
 //   select: Selector evaluated against the live Replicad shape
 
 // Declare a named coordinate frame exported as AP242 supplemental geometry

@@ -1,5 +1,6 @@
 @import 'tailwindcss';
 @import '../../packages/ui/src/styles/tokens.css';
+@import '../../apps/ui/app/styles/scroll-shadows.css';
 @source '../../packages/ui/src';
 
 @font-face {
